@@ -9,6 +9,7 @@ import * as THREE from "three";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
+import { dotMaterial, edgeColor, edgeLineMaterial, ghostSurface, partColor, shadeEdges, studioSurface } from "../../../shared/viewport3d/look";
 import { tokenColor, type Viewport3D } from "../../../shared/viewport3d/viewport3d";
 import type { BodyMesh, Vec3 } from "../../mechanical/api";
 import type { Transform } from "../document/format";
@@ -38,16 +39,15 @@ export class AssemblyScene {
   /** what Insert is about to place: translucent, not pickable, not counted in the fit (setGhost) */
   private readonly ghostRoot = new THREE.Group();
   private ghostMeshes: BodyMesh[] = [];
-  private readonly ghostMaterial = new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.05, side: THREE.DoubleSide, transparent: true, opacity: 0.4, depthWrite: false });
-  private readonly ghostEdgeMaterial = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.7, depthWrite: false });
+  private readonly ghostMaterial = ghostSurface(new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, opacity: 0.36 }));
+  private readonly ghostEdgeMaterial = edgeLineMaterial({ opacity: 0.75, depthWrite: false });
   private readonly instances = new Map<string, InstanceObjects>();
   private readonly shared = new Map<BodyMesh, Shared>();
   private readonly raycaster = new THREE.Raycaster();
   private colors = { body: new THREE.Color(), edge: new THREE.Color(), hover: new THREE.Color(), select: new THREE.Color(), bad: new THREE.Color(), paper: new THREE.Color() };
   private readonly materials: THREE.MeshStandardMaterial[] = [];
-  private readonly selectedMaterial = new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0.05, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-  private readonly markedMaterial = this.selectedMaterial.clone();
-  private readonly edgeMaterial = new THREE.LineBasicMaterial();
+  private readonly markedMaterial = studioSurface(new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+  private readonly edgeMaterial = edgeLineMaterial();
   private readonly pointMaterial = new THREE.PointsMaterial({ size: 1, sizeAttenuation: false, transparent: true, opacity: 0 });
   private fat: LineMaterial[] = [];
   private hover: AssemblyPick | null = null;
@@ -60,7 +60,9 @@ export class AssemblyScene {
   constructor(readonly viewport: Viewport3D) {
     viewport.scene.add(this.root, this.highlight, this.marks, this.ghostRoot);
     this.ghostRoot.renderOrder = 5;
-    for (let i = 0; i < 5; i++) this.materials.push(new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0.05, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+    for (let i = 0; i < 10; i++) this.materials.push(studioSurface(new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })));
+    // what is hovered or selected gets a soft halo (shared/viewport3d/look.ts)
+    viewport.look.glowFrom(this.highlight);
     this.triad = new Triad(viewport);
     viewport.onTheme.push(this.readColors);
     viewport.onFrame.push(this.onFrame);
@@ -77,17 +79,17 @@ export class AssemblyScene {
   private readColors = (): void => {
     const ink = tokenColor("--ink"), paper = tokenColor("--paper"), mark = tokenColor("--mark");
     this.colors.paper.copy(paper);
-    this.colors.body.copy(paper).lerp(ink, 0.22);
-    this.colors.edge.copy(ink);
+    const dark = paper.getHSL({ h: 0, s: 0, l: 0 }).l < 0.5;
+    this.colors.body.copy(partColor(0, dark));
+    this.colors.edge.copy(edgeColor(dark));
     this.colors.select.copy(mark);
     this.colors.hover.copy(mark).lerp(this.colors.body, 0.45);
     this.colors.bad.copy(tokenColor("--err"));
-    // parts are told apart by a slightly different grey each, never by a hue: the chrome's rule holds here too
-    this.materials.forEach((m, i) => m.color.copy(paper).lerp(ink, 0.14 + 0.05 * i));
-    this.selectedMaterial.color.copy(this.colors.body).lerp(mark, 0.55);
+    // parts are told apart by a quiet colour each (the palette of shared/viewport3d/look.ts; the first is the neutral)
+    this.materials.forEach((m, i) => m.color.copy(partColor(i, dark)));
     this.markedMaterial.color.copy(this.colors.body).lerp(this.colors.bad, 0.6);
     this.edgeMaterial.color.copy(this.colors.edge);
-    this.ghostMaterial.color.copy(this.colors.body).lerp(mark, 0.6);
+    this.ghostMaterial.color.copy(this.colors.body).lerp(mark, 0.7);
     this.ghostEdgeMaterial.color.copy(mark);
     this.triad.readColors();
     this.drawHighlight(); this.drawMarks();
@@ -103,6 +105,7 @@ export class AssemblyScene {
       g.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
       g.computeBoundingBox(); g.computeBoundingSphere();
       const eg = new THREE.BufferGeometry(); eg.setAttribute("position", new THREE.BufferAttribute(mesh.edges.positions, 3)); eg.computeBoundingSphere();
+      shadeEdges(eg, mesh);   // tangent edges are drawn lighter than sharp ones
       const pg = new THREE.BufferGeometry(); pg.setAttribute("position", new THREE.BufferAttribute(mesh.vertices.positions, 3)); pg.computeBoundingSphere();
       s = { mesh: g, edges: eg, points: pg, uses: 0, shade: this.shades++ % this.materials.length };
       this.shared.set(mesh, s);
@@ -119,7 +122,8 @@ export class AssemblyScene {
   /** How many geometries are on the GPU, and how many objects draw them. */
   get stats(): { geometries: number; instances: number; pieces: number } { let pieces = 0; for (const i of this.instances.values()) pieces += i.pieces.length; return { geometries: this.shared.size, instances: this.instances.size, pieces }; }
 
-  private materialFor(id: string, shade: number): THREE.Material { return this.marked.has(id) ? this.markedMaterial : this.selection.has(id) ? this.selectedMaterial : this.materials[shade]; }
+  // a selected instance keeps its own colour: it is veiled in the selection's and haloed (drawHighlight)
+  private materialFor(id: string, shade: number): THREE.Material { return this.marked.has(id) ? this.markedMaterial : this.materials[shade]; }
 
   /** Show these instances.  One whose pieces are the same objects as before is left alone. */
   setInstances(list: readonly DrawnInstance[]): void {
@@ -137,11 +141,11 @@ export class AssemblyScene {
           const group = new THREE.Group(); group.matrixAutoUpdate = false;
           if (piece.transform) matrixOf(piece.transform, group.matrix);
           const mesh = new THREE.Mesh(s.mesh, this.materialFor(d.id, s.shade));
-          mesh.userData.fit = true; mesh.userData.shade = s.shade;
+          mesh.userData.fit = true; mesh.userData.shade = s.shade; mesh.userData.solid = true;
           const edges = new THREE.LineSegments(s.edges, this.edgeMaterial);
           const points = new THREE.Points(s.points, this.pointMaterial);
           // a ghost is drawn by something else (a board's picture); it stays in the scene for the pointer
-          if (piece.ghost) { mesh.visible = false; mesh.userData.fit = false; edges.visible = false; points.visible = false; }
+          if (piece.ghost) { mesh.visible = false; mesh.userData.fit = false; mesh.userData.solid = false; edges.visible = false; points.visible = false; }
           group.add(mesh, edges, points);
           o.group.add(group);
           o.pieces.push({ piece, group, mesh, edges, points });
@@ -151,6 +155,7 @@ export class AssemblyScene {
       o.hidden = d.hidden; o.group.visible = !d.hidden;
     }
     for (const [id, o] of Array.from(this.instances)) if (!seen.has(id)) { this.dropPieces(o); this.root.remove(o.group); this.instances.delete(id); }
+    this.viewport.look.contentChanged();
     this.drawHighlight();
     this.viewport.invalidate();
   }
@@ -166,6 +171,7 @@ export class AssemblyScene {
       matrixOf(t, o.group.matrix);
       o.group.updateMatrixWorld(true);
     }
+    this.viewport.look.contentChanged();
     this.drawHighlight();
     this.viewport.invalidate();
   }
@@ -224,7 +230,7 @@ export class AssemblyScene {
       // a ghost shows its edges while it is selected or marked: that is how a board instance looks chosen
       if (p.piece.ghost) p.edges.visible = this.selection.has(o.id) || this.marked.has(o.id);
     }
-    this.viewport.invalidate();
+    this.drawHighlight();
   }
   setSelection(ids: Iterable<string>): void { this.selection = new Set(ids); this.restyle(); }
   /** Tint instances as a problem (interference, an error): an analysis tool's result. */
@@ -240,6 +246,16 @@ export class AssemblyScene {
 
   private drawHighlight(): void {
     for (const o of this.highlight.children.slice()) { this.highlight.remove(o); const m = o as THREE.Mesh; if (m.userData.own) m.geometry.dispose(); const mat = m.material as THREE.Material; const at = this.fat.indexOf(mat as LineMaterial); if (at >= 0) this.fat.splice(at, 1); mat.dispose(); }
+    // the selected instances: a veil of the selection's colour over each, which the look turns into a halo round it
+    for (const id of this.selection) {
+      const o = this.instances.get(id); if (!o || o.hidden || this.marked.has(id)) continue;
+      for (const pc of o.pieces) {
+        if (pc.piece.ghost) continue;
+        const veil = new THREE.Mesh(pc.mesh.geometry, new THREE.MeshBasicMaterial({ color: this.colors.select, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+        veil.matrixAutoUpdate = false; veil.matrix.copy(pc.mesh.matrixWorld); veil.matrixWorld.copy(pc.mesh.matrixWorld);
+        this.highlight.add(veil);
+      }
+    }
     const p = this.hover;
     const inst = p && this.instances.get(p.instance), piece = inst && inst.pieces.find((x) => x.piece.id === p!.piece);
     if (p && piece) {
@@ -251,17 +267,17 @@ export class AssemblyScene {
           const g = new THREE.BufferGeometry();
           g.setAttribute("position", piece.mesh.geometry.getAttribute("position")); g.setIndex(piece.mesh.geometry.getIndex());
           g.setDrawRange(mesh.faces.start[i], mesh.faces.count[i]);
-          made = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+          made = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
         }
       } else if (p.kind === "edge") {
         const i = mesh.edges.names.indexOf(p.name);
         if (i >= 0 && mesh.edges.count[i] >= 2) {
           const g = new LineSegmentsGeometry(); g.setPositions(Array.from(mesh.edges.positions.subarray(mesh.edges.start[i] * 3, (mesh.edges.start[i] + mesh.edges.count[i]) * 3)));
-          made = new LineSegments2(g, this.fatMaterial(color, 4)); made.renderOrder = 10;
+          made = new LineSegments2(g, this.fatMaterial(color, 3)); made.renderOrder = 10;
         }
       } else {
         const i = mesh.vertices.names.indexOf(p.name);
-        if (i >= 0) { made = new THREE.Points(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(mesh.vertices.positions[i * 3], mesh.vertices.positions[i * 3 + 1], mesh.vertices.positions[i * 3 + 2])]), new THREE.PointsMaterial({ color, size: 9, sizeAttenuation: false, depthTest: false })); made.renderOrder = 11; }
+        if (i >= 0) { made = new THREE.Points(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(mesh.vertices.positions[i * 3], mesh.vertices.positions[i * 3 + 1], mesh.vertices.positions[i * 3 + 2])]), dotMaterial(color, 9)); made.renderOrder = 11; }
       }
       if (made) { made.userData.own = true; made.matrixAutoUpdate = false; made.matrix.copy(piece.mesh.matrixWorld); made.matrixWorld.copy(piece.mesh.matrixWorld); this.highlight.add(made); }
     }

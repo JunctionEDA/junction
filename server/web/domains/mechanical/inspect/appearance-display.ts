@@ -6,17 +6,24 @@
 // regeneration (`view.onBodies`), so ModelView stays the one place bodies are built.  Hidden parts are moved to
 // another layer as well as made invisible: the picking ray skips them.
 import * as THREE from "three";
+import { edgeColor, edgeLineMaterial, partColor, studioSurface } from "../../../shared/viewport3d/look";
+import { getViewPrefs, setViewPrefs } from "../../../shared/viewport3d/viewprefs";
 import { tokenColor } from "../../../shared/viewport3d/viewport3d";
 import { looksOf, type BodyLook } from "../document/appearance-items";
 import { materialsOf, type Material } from "../document/mass-materials";
 import type { PartStudio } from "../ui/studio";
 import { Store, perStudio } from "./store";
 
-export type ViewMode = "shaded-edges" | "shaded" | "wireframe" | "hidden-line";
+export type ViewMode = "shaded-edges" | "shaded" | "wireframe" | "hidden-line" | "translucent";
+/** The modes W goes round, in order. */
 export const VIEW_MODES: { id: ViewMode; title: string }[] = [
   { id: "shaded-edges", title: "Shaded with edges" }, { id: "shaded", title: "Shaded" },
-  { id: "wireframe", title: "Wireframe" }, { id: "hidden-line", title: "Hidden line" },
+  { id: "wireframe", title: "Wireframe" }, { id: "hidden-line", title: "Hidden edges removed" },
 ];
+/** Every mode the view menu and the Appearance panel offer: Translucent is chosen there, and W leaves it for the round. */
+export const ALL_VIEW_MODES: { id: ViewMode; title: string }[] = [...VIEW_MODES, { id: "translucent", title: "Translucent" }];
+/** how much of a part is seen in the Translucent mode */
+export const TRANSLUCENT = 0.38;
 
 export interface DisplayState {
   mode: ViewMode;
@@ -42,12 +49,15 @@ export class BodyDisplay extends Store<DisplayState> {
   private lastFeatures: unknown = null;
   private looks: { [bodyId: string]: BodyLook } = {};
   private materials: { library: { [id: string]: Material }; assign: { [bodyId: string]: string } } = { library: {}, assign: {} };
-  private theme = { body: new THREE.Color(), edge: new THREE.Color(), paper: new THREE.Color() };
+  private theme = { edge: new THREE.Color(), ink: new THREE.Color(), paper: new THREE.Color(), dark: false };
+  /** the place of each part among those nobody coloured: which colour of the palette it is told apart by */
+  private palette = new Map<string, number>();
   /** Called after the bodies were re-dressed (the section view rebuilds its caps). */
   readonly onApplied: (() => void)[] = [];
 
   constructor(readonly studio: PartStudio) {
-    super({ mode: "shaded-edges", hidden: [], isolated: null, perspective: studio.viewport.projection === "perspective", transparent: [] });
+    // the display mode is this person's, in every part studio (shared/viewport3d/viewprefs.ts)
+    super({ mode: getViewPrefs().mode, hidden: [], isolated: null, perspective: studio.viewport.projection === "perspective", transparent: [] });
     studio.viewport.renderer.localClippingEnabled = true;
     this.readTheme();
     studio.viewport.onTheme.push(() => { this.readTheme(); this.apply(); });
@@ -64,8 +74,9 @@ export class BodyDisplay extends Store<DisplayState> {
 
   private readTheme(): void {
     const ink = tokenColor("--ink"), paper = tokenColor("--paper");
-    this.theme.body.copy(paper).lerp(ink, 0.22);
-    this.theme.edge.copy(ink);
+    this.theme.dark = paper.getHSL({ h: 0, s: 0, l: 0 }).l < 0.5;
+    this.theme.edge.copy(edgeColor(this.theme.dark));
+    this.theme.ink.copy(ink);
     this.theme.paper.copy(paper);
   }
 
@@ -80,13 +91,13 @@ export class BodyDisplay extends Store<DisplayState> {
   }
 
   // ---------------------------------------------------------------- what a part looks like
-  /** The colour a part is drawn in: its own, else its material's, else the theme's. */
+  /** The colour a part is drawn in: its own, else its material's, else one of the palette's (the first part's is the neutral). */
   colorOf(bodyId: string): THREE.Color {
     const own = this.looks[bodyId]?.color;
     if (own) return new THREE.Color(own);
     const mat = this.materials.assign[bodyId] && this.materials.library[this.materials.assign[bodyId]];
     if (mat) return new THREE.Color(mat.color);
-    return this.theme.body.clone();
+    return partColor(this.palette.get(bodyId) ?? 0, this.theme.dark);
   }
   /** The colour as "#rrggbb" for an input. */
   hexOf(bodyId: string): string { return "#" + this.colorOf(bodyId).getHexString(); }
@@ -101,8 +112,10 @@ export class BodyDisplay extends Store<DisplayState> {
   }
 
   // ---------------------------------------------------------------- what the person asks for
-  setMode(mode: ViewMode): void { this.set({ mode }); this.apply(); }
+  setMode(mode: ViewMode): void { this.set({ mode }); setViewPrefs({ mode }); this.apply(); }
   cycleMode(): void { const i = VIEW_MODES.findIndex((m) => m.id === this.state.mode); this.setMode(VIEW_MODES[(i + 1) % VIEW_MODES.length].id); }
+  /** The opacity a part is drawn with in the mode in force. */
+  private modeOpacity(bodyId: string): number { const o = this.drawnOpacity(bodyId); return this.state.mode === "translucent" ? Math.min(o, TRANSLUCENT) : o; }
   setPerspective(on: boolean): void { this.studio.viewport.setProjection(on ? "perspective" : "orthographic"); this.set({ perspective: on }); }
   /** Keep the toggle in step after a named view changed the projection. */
   syncProjection(): void { this.set({ perspective: this.studio.viewport.projection === "perspective" }); }
@@ -127,19 +140,31 @@ export class BodyDisplay extends Store<DisplayState> {
   apply(): void {
     const s = this.state, view = this.studio.view;
     const live = new Set<string>();
+    // parts nobody coloured take the palette's colours in the order of the parts list; a board is not a part
+    this.palette.clear();
+    for (const b of this.studio.getState().bodies) if (!b.reference) this.palette.set(b.id, this.palette.size);
+    const lines = s.mode === "wireframe" || s.mode === "hidden-line";
+    // line work is not shaded where surfaces meet
+    this.studio.viewport.look.contact = s.mode === "hidden-line" ? 0 : 1;
     for (const b of this.studio.getState().bodies) {
       const o = view.bodyObjects(b.id); if (!o || !b.mesh) continue;
       live.add(b.id);
       const old = this.dressed.get(b.id);
       if (old) { for (const m of old.mats) m.dispose(); old.edge.dispose(); }
-      const color = this.colorOf(b.id), opacity = this.drawnOpacity(b.id), look = this.looks[b.id] || {};
+      const color = this.colorOf(b.id), opacity = this.modeOpacity(b.id), look = this.looks[b.id] || {};
       const see = opacity < 1;
       // a metal shows what is around it: in a scene with nothing around to show (no environment map) it would be drawn black, so it is drawn less of a metal
       const metal = this.studio.viewport.scene.environment ? 1 : 0.45;
       const surface = (c: THREE.Color): THREE.Material => {
         const common = { side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, transparent: see, opacity, depthWrite: !see, clippingPlanes: this.clip };
         return s.mode === "hidden-line" ? new THREE.MeshBasicMaterial({ ...common, color: this.theme.paper, transparent: false, opacity: 1, depthWrite: true })
-          : new THREE.MeshStandardMaterial({ ...common, color: c, roughness: look.roughness ?? 0.75, metalness: (look.metalness ?? 0.05) * metal });   // an appearance from the library says both (document/materials-library.ts)
+          : (() => {
+            const m = studioSurface(new THREE.MeshStandardMaterial({ ...common, color: c }));
+            // an appearance from the library says both (document/materials-library.ts)
+            if (look.roughness !== undefined) m.roughness = look.roughness;
+            if (look.metalness !== undefined) m.metalness = look.metalness * metal;
+            return m;
+          })();
       };
       // per-face colours: one material per colour, the faces' triangle ranges as geometry groups
       const g = o.mesh.geometry;
@@ -157,7 +182,8 @@ export class BodyDisplay extends Store<DisplayState> {
         }
       }
       o.mesh.material = mats.length > 1 ? mats : mats[0];
-      const edge = new THREE.LineBasicMaterial({ color: this.theme.edge, clippingPlanes: this.clip, transparent: see, opacity: see ? Math.max(0.35, opacity) : 1 });
+      // shaded parts carry dark hairlines whatever the theme; line work is drawn in the theme's ink
+      const edge = edgeLineMaterial({ color: lines ? this.theme.ink : this.theme.edge, clippingPlanes: this.clip, opacity: see ? Math.max(0.35, opacity) : 1 });
       o.edges.material = edge;
       this.dressed.set(b.id, { mats, edge });
       // the view mode
@@ -172,6 +198,7 @@ export class BodyDisplay extends Store<DisplayState> {
       for (const x of [o.mesh, o.edges, o.points]) x.layers.set(visible ? 0 : HIDDEN_LAYER);
     }
     for (const [id, d] of Array.from(this.dressed)) if (!live.has(id)) { for (const m of d.mats) m.dispose(); d.edge.dispose(); this.dressed.delete(id); }
+    this.studio.viewport.look.contentChanged();
     this.studio.viewport.invalidate();
     for (const fn of this.onApplied) fn();
   }

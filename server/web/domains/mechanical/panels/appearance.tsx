@@ -7,7 +7,7 @@ import { Select } from "../../../shared/components/Select";
 import type { CameraState } from "../../../shared/viewport3d/viewport3d";
 import { definePanel } from "../core/tool";
 import { addNamedView, namedViews, removeNamedView, resetLook, setBodyLook, setFaceColor, type CameraJson } from "../document/appearance-items";
-import { VIEW_MODES, displayOf, selectedBodies, type ViewMode } from "../inspect/appearance-display";
+import { ALL_VIEW_MODES as VIEW_MODES, displayOf, selectedBodies, type ViewMode } from "../inspect/appearance-display";
 import { useStore } from "../inspect/store";
 import { useStudio } from "../ui/hooks";
 import type { PartStudio } from "../ui/studio";

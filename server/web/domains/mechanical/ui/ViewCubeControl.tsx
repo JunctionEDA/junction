@@ -5,7 +5,9 @@
 //   the four triangles around it       turn the view 90° about the screen's horizontal or vertical axis
 //   the two curved arrows above it     roll the view 90° about the line of sight (left: counter-clockwise)
 //   the cube with ▼ below it           the view menu: the standard views, zoom, projection, display mode,
-//                                      section view, planes, named views
+//                                      section view, planes, named views, and how the scene is drawn (the
+//                                      ground shadow, the contact shading, the drift after an orbit: this
+//                                      person's, shared/viewport3d/viewprefs.ts)
 //
 // The cube is page elements turned with CSS 3D (not part of the WebGL scene), so the browser hit-tests it and
 // every region is a button: 6 faces, 12 bevelled edges and 8 corner facets, each `data-from` the direction it
@@ -16,10 +18,11 @@
 //
 // This is the cube on any Viewport3D, with the standard views, zoom to fit and the projection in its menu (an
 // assembly mounts it through api.ts); ViewCube.tsx is the part studio's, whose menu has the rest.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import * as THREE from "three";
 import { cx } from "../../../shared/util";
 import { tokenColor, type Viewport3D } from "../../../shared/viewport3d/viewport3d";
+import { getViewPrefs, setViewPrefs, subscribeViewPrefs } from "../../../shared/viewport3d/viewprefs";
 import { Glyph } from "./Glyph";
 import { tipHandlers } from "./Tip";
 import { BIG_STEP, MOD, NUMBERED_VIEWS, STEP, viewShortcut } from "./viewkeys";
@@ -203,6 +206,7 @@ export function ViewCubeControl({ viewport, fit, perspective, setPerspective, zo
   const [hinted, setHinted] = useState<Region | null>(null);
   const paintRef = useRef<() => void>(() => {});
   const [menu, setMenu] = useState(false);
+  const scenePrefs = useSyncExternalStore(subscribeViewPrefs, getViewPrefs);
   const [ownPersp, setOwnPersp] = useState(viewport.projection === "perspective");
   const persp = perspective ?? ownPersp;
   const setPersp = setPerspective ?? ((on: boolean) => { viewport.setProjection(on ? "perspective" : "orthographic"); setOwnPersp(on); });
@@ -369,6 +373,10 @@ export function ViewCubeControl({ viewport, fit, perspective, setPerspective, zo
           {row("Orthographic", !persp, () => setPersp(false))}
           {row("Perspective", persp, () => setPersp(true))}
           {more ? more(parts) : null}
+          {head("Scene")}
+          {row("Ground shadow", scenePrefs.ground, () => setViewPrefs({ ground: !scenePrefs.ground }), { attr: "scene-ground", why: viewport.look.quality.level === "low" ? "Left out on this graphics hardware" : null })}
+          {row("Contact shading", scenePrefs.ao, () => setViewPrefs({ ao: !scenePrefs.ao }), { attr: "scene-contact", why: viewport.look.quality.level === "low" ? "Left out on this graphics hardware" : null })}
+          {row("Orbit inertia", scenePrefs.inertia, () => setViewPrefs({ inertia: !scenePrefs.inertia }), { attr: "scene-inertia" })}
         </div>
       ) : null}
     </div>

@@ -2,7 +2,7 @@
 // menu, as Onshape's), whose menu adds zoom to selection, normal to, the display modes, the planes, the section
 // view and the named views.
 import { namedViews } from "../document/appearance-items";
-import { VIEW_MODES, displayOf } from "../inspect/appearance-display";
+import { ALL_VIEW_MODES, displayOf } from "../inspect/appearance-display";
 import { toggleSection } from "../inspect/section-pick";
 import { sectionOf } from "../inspect/section-view";
 import { useStore } from "../inspect/store";
@@ -31,7 +31,7 @@ export function ViewCube({ studio }: { studio: PartStudio }) {
       </>}
       more={({ row, head }) => <>
         {head("Display")}
-        {VIEW_MODES.map((m, i) => row(m.title, mode === m.id, () => display.setMode(m.id), { key: i === 0 ? "W cycles" : undefined, why: sketch ? "Finish the sketch first" : null }))}
+        {ALL_VIEW_MODES.map((m, i) => row(m.title, mode === m.id, () => display.setMode(m.id), { key: i === 0 ? "W cycles" : undefined, why: sketch ? "Finish the sketch first" : null }))}
         {head("Show")}
         {row("Planes", planes, () => studio.setPlanesVisible(!planes), { key: "P" })}
         {row("Section view", sectionOn, () => { void toggleSection(studio); }, { key: "X", why: sketch ? "Finish the sketch first" : hasBodies ? null : "Nothing to cut" })}

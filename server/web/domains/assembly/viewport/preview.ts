@@ -6,6 +6,7 @@
 // back and its frame drawn again.  A picture is kept per subject, its meshes and the theme, so pointing at a row
 // again costs nothing; the meshes are a source's own objects, so a rebuilt part is drawn anew.
 import * as THREE from "three";
+import { edgeColor, edgeLineMaterial, lightAsStudio, partColor, shadeEdges, studioSurface } from "../../../shared/viewport3d/look";
 import { tokenColor, type Viewport3D } from "../../../shared/viewport3d/viewport3d";
 import type { BodyMesh } from "../../mechanical/api";
 import type { SourcePiece } from "../sources/types";
@@ -38,9 +39,10 @@ export class PreviewPictures {
     const ink = tokenColor("--ink"), paper = tokenColor("--paper");
     const scene = new THREE.Scene();
     scene.background = paper.clone();
-    scene.add(new THREE.AmbientLight(0xffffff, 1.1));
-    const material = new THREE.MeshStandardMaterial({ color: paper.clone().lerp(ink, 0.22), roughness: 0.75, metalness: 0.05, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-    const edgeMaterial = new THREE.LineBasicMaterial({ color: ink.clone().lerp(paper, 0.15) });
+    const dark = paper.getHSL({ h: 0, s: 0, l: 0 }).l < 0.5;
+    void ink;
+    const material = studioSurface(new THREE.MeshStandardMaterial({ color: partColor(0, dark), side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+    const edgeMaterial = edgeLineMaterial({ color: edgeColor(dark) });
     const made: THREE.BufferGeometry[] = [];
     const box = new THREE.Box3(), corner = new THREE.Vector3();
     for (const p of pieces) {
@@ -50,6 +52,7 @@ export class PreviewPictures {
       g.setAttribute("normal", new THREE.BufferAttribute(m.normals, 3));
       g.setIndex(new THREE.BufferAttribute(m.indices, 1));
       const eg = new THREE.BufferGeometry(); eg.setAttribute("position", new THREE.BufferAttribute(m.edges.positions, 3));
+      shadeEdges(eg, m);
       const group = new THREE.Group(); group.matrixAutoUpdate = false; group.matrix.copy(place);
       group.add(new THREE.Mesh(g, material), new THREE.LineSegments(eg, edgeMaterial));
       scene.add(group);
@@ -70,9 +73,7 @@ export class PreviewPictures {
     const aspect = W / H, half = Math.max(halfH, halfW / aspect) * 1.15;
     const camera = new THREE.OrthographicCamera(-half * aspect, half * aspect, half, -half, -r * 10, r * 10);
     camera.up.copy(up); camera.position.copy(sphere.center).addScaledVector(dir, -r * 2); camera.lookAt(sphere.center); camera.updateProjectionMatrix();
-    const light = new THREE.DirectionalLight(0xffffff, 2.2);
-    light.position.copy(camera.position).addScaledVector(new THREE.Vector3(0.4, 0.3, 1), r); light.target.position.copy(sphere.center);
-    scene.add(light, light.target);
+    lightAsStudio(scene, renderer, camera, sphere.center, r);
 
     const target = new THREE.WebGLRenderTarget(W, H, { samples: 4, colorSpace: THREE.SRGBColorSpace });
     const pixels = new Uint8Array(W * H * 4);

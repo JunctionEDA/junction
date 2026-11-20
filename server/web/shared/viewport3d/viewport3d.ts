@@ -1,5 +1,6 @@
 // viewport3d.ts — the 3D viewport every modelling domain draws in: a WebGL canvas with an orthographic camera,
-// orbit / pan / zoom, the standard views, fit, an axis triad, and colours taken from the theme tokens.
+// orbit / pan / zoom, the standard views, fit, an axis triad, and colours taken from the theme tokens.  How it is
+// lit and what stands behind and under the model is `look` (look.ts): a studio, the same for every domain.
 //
 // It knows nothing about parts or assemblies.  A domain puts its own objects in `scene`, calls `invalidate()`
 // when they change, and asks for rays (`ray(ev)`) to do its own picking.  Model space is millimetres, Z up.
@@ -9,6 +10,13 @@
 //   keys      none here: the domain binds its own
 import * as THREE from "three";
 import { subscribeTheme as onThemeChange } from "../theme";
+import { KEY_OFFSET, StudioLook } from "./look";
+import { getViewPrefs } from "./viewprefs";
+
+/** May the view move by itself (a turn to a standard view, a fit, the drift after an orbit)? */
+const motionOk = (): boolean => matchMedia("(prefers-reduced-motion: no-preference)").matches;
+/** Fast away, soft to rest. */
+const easeOut = (t: number): number => 1 - Math.pow(1 - t, 3);
 
 export type StandardView = "top" | "bottom" | "front" | "back" | "right" | "left" | "iso";
 
@@ -64,10 +72,12 @@ export class Viewport3D {
   onTheme: (() => void)[] = [];
   /** Called before every frame. */
   onFrame: (() => void)[] = [];
-  private readonly light = new THREE.DirectionalLight(0xffffff, 2.2);
+  /** The studio the model stands in: light, backdrop, contact shading, ground shadow, the halo round highlights. */
+  readonly look: StudioLook;
   private readonly triad = new THREE.Scene();
   private readonly triadCam = new THREE.OrthographicCamera(-1.4, 1.4, 1.4, -1.4, -10, 10);
   private frame = 0;
+  private drawn = false;
   private disposed = false;
   private readonly ro: ResizeObserver;
   private readonly offTheme: () => void;
@@ -75,6 +85,15 @@ export class Viewport3D {
   private readonly showTriad: boolean;
   private drag: { mode: "orbit" | "pan"; x: number; y: number; id: number } | null = null;
   private anim: { from: THREE.Quaternion; to: THREE.Quaternion; t0: number; ms: number } | null = null;
+  /**
+   * A fit in progress.  `target` and `camera.zoom` hold where the view is going from the moment it is asked for
+   * (so `project`, `ray` and whoever reads them agree at once); only the frames drawn on the way are eased.
+   */
+  private glide: { target: THREE.Vector3; zoom: number; t0: number; ms: number } | null = null;
+  /** the turn an orbit was making when it was let go (radians per millisecond), dying away */
+  private spin: { yaw: number; pitch: number; at: number } | null = null;
+  private lastTurn = { yaw: 0, pitch: 0, at: 0 };
+  private readonly hold = { target: new THREE.Vector3(), zoom: 1 };
 
   constructor(readonly host: HTMLElement, opts: ViewportOptions = {}) {
     this.showTriad = opts.triad !== false;
@@ -87,9 +106,7 @@ export class Viewport3D {
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: false, stencil: true });
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     this.renderer.autoClear = false;
-    this.scene.add(new THREE.AmbientLight(0xffffff, 1.1));
-    this.scene.add(this.light);
-    this.scene.add(this.light.target);
+    this.look = new StudioLook(this.renderer, this.scene, () => this.invalidate());
     this.camera.up.set(0, 0, 1);
     this.lookAlong(new THREE.Vector3(...START_VIEW[0]), new THREE.Vector3(...START_VIEW[1]), false);
 
@@ -135,12 +152,13 @@ export class Viewport3D {
     cancelAnimationFrame(this.frame);
     this.ro.disconnect(); this.offTheme();
     this.scene.traverse((o) => { const m = o as THREE.Mesh; if (m.geometry) m.geometry.dispose(); });
+    this.look.dispose();
     this.renderer.dispose();
     this.canvas.remove(); this.views?.remove();
   }
 
   private themeChanged(): void {
-    this.scene.background = tokenColor("--paper");
+    this.look.setTheme(tokenColor("--paper"), tokenColor("--ink"));
     for (const o of this.triad.children) ((o as THREE.Line).material as THREE.LineBasicMaterial).color.copy(tokenColor(o.userData.token));
     for (const fn of this.onTheme) fn();
     this.invalidate();
@@ -195,30 +213,69 @@ export class Viewport3D {
   /** Go back to a `cameraState()`: turned, centred and zoomed as it was. */
   setCameraState(s: CameraState, animate = true): void {
     const q = new THREE.Quaternion(...s.quaternion).normalize();
+    const from = animate && !this.disposed && motionOk() ? { target: this.shownTarget(), zoom: this.shownZoom() } : null;
     this.target.set(...s.target);
     this.camera.zoom = Math.max(0.02, Math.min(4000, s.zoom || 1)); this.camera.updateProjectionMatrix();
     this.persp = s.projection === "perspective";
-    if (animate && !this.disposed && matchMedia("(prefers-reduced-motion: no-preference)").matches) this.anim = { from: this.camera.quaternion.clone(), to: q, t0: performance.now(), ms: 220 };
-    else { this.anim = null; this.camera.quaternion.copy(q); }
+    this.spin = null;
+    if (from) { this.anim = { from: this.camera.quaternion.clone(), to: q, t0: performance.now(), ms: 220 }; this.glide = { ...from, t0: performance.now(), ms: 260 }; }
+    else { this.anim = null; this.glide = null; this.camera.quaternion.copy(q); }
     this.invalidate();
+  }
+
+  /** Where the frame on screen is centred and how far it is zoomed: mid-way while a fit glides. */
+  private shownTarget(): THREE.Vector3 {
+    const g = this.glide; if (!g) return this.target.clone();
+    return g.target.clone().lerp(this.target, easeOut(Math.min(1, (performance.now() - g.t0) / g.ms)));
+  }
+  private shownZoom(): number {
+    const g = this.glide; if (!g) return this.camera.zoom;
+    return g.zoom * Math.pow(this.camera.zoom / g.zoom, easeOut(Math.min(1, (performance.now() - g.t0) / g.ms)));
   }
 
   private render(): void {
     if (this.disposed) return;
+    const now = performance.now();
     if (this.anim) {
-      const t = Math.min(1, (performance.now() - this.anim.t0) / this.anim.ms), e = t * t * (3 - 2 * t);
-      this.camera.quaternion.slerpQuaternions(this.anim.from, this.anim.to, e);
+      const t = Math.min(1, (now - this.anim.t0) / this.anim.ms);
+      this.camera.quaternion.slerpQuaternions(this.anim.from, this.anim.to, easeOut(t));
       if (t >= 1) this.anim = null; else this.invalidate();
     }
+    if (this.spin) {
+      // what is left of an orbit: the same turntable, slowing to nothing in about a third of a second
+      const s = this.spin, dt = Math.min(48, now - s.at); s.at = now;
+      this.turn(s.yaw * dt, s.pitch * dt);
+      const k = Math.exp(-dt / 130); s.yaw *= k; s.pitch *= k;
+      if (Math.abs(s.yaw) + Math.abs(s.pitch) < 2e-5) this.spin = null; else this.invalidate();
+    }
+    // a fit on its way: this frame is drawn part of the way there, and the view's own state is put back after it
+    const g = this.glide;
+    if (g) {
+      this.hold.target.copy(this.target); this.hold.zoom = this.camera.zoom;
+      const zoom = this.shownZoom();
+      this.target.copy(this.shownTarget()); this.camera.zoom = zoom; this.camera.updateProjectionMatrix();
+      if (now - g.t0 >= g.ms) this.glide = null; else this.invalidate();
+    }
+    try {
+      this.draw();
+    } finally {
+      if (g) { this.target.copy(this.hold.target); this.camera.zoom = this.hold.zoom; this.camera.updateProjectionMatrix(); this.place(); }
+    }
+  }
+
+  private draw(): void {
     this.place();
-    this.light.position.copy(this.camera.position).addScaledVector(new THREE.Vector3(-0.4, 0.6, 0).applyQuaternion(this.camera.quaternion), 2e4);
-    this.light.target.position.copy(this.target);
-    this.light.target.updateMatrixWorld();
+    const key = this.look.key;
+    key.position.copy(this.target).addScaledVector(new THREE.Vector3(...KEY_OFFSET).applyQuaternion(this.camera.quaternion), 2e4);
+    key.target.position.copy(this.target);
+    key.target.updateMatrixWorld();
     for (const fn of this.onFrame) fn();
     const w = this.width, h = this.height;
+    this.look.prepare({ camera: this.activeCamera, target: this.target, width: w, height: h, pixelRatio: this.renderer.getPixelRatio(), pixelSize: this.pixelSize(), navigating: !!this.drag || !!this.spin });
     this.renderer.setViewport(0, 0, w, h); this.renderer.setScissorTest(false);
     this.renderer.clear();
     this.renderer.render(this.scene, this.activeCamera);
+    this.drawn = true;
     // the axis triad, bottom left
     if (!this.showTriad) return;
     const s = 64;
@@ -234,7 +291,8 @@ export class Viewport3D {
   lookAlong(dir: THREE.Vector3, up: THREE.Vector3, animate = true): void {
     const m = new THREE.Matrix4().lookAt(new THREE.Vector3(), dir.clone().normalize(), up.clone().normalize());
     const to = new THREE.Quaternion().setFromRotationMatrix(m);
-    if (animate && !this.disposed && matchMedia("(prefers-reduced-motion: no-preference)").matches) this.anim = { from: this.camera.quaternion.clone(), to, t0: performance.now(), ms: 220 };
+    this.spin = null;
+    if (animate && !this.disposed && motionOk()) this.anim = { from: this.camera.quaternion.clone(), to, t0: performance.now(), ms: 220 };
     else { this.anim = null; this.camera.quaternion.copy(to); }
     this.invalidate();
   }
@@ -248,7 +306,8 @@ export class Viewport3D {
     const from = this.anim ? this.anim.to : this.camera.quaternion;
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(from), right = new THREE.Vector3(1, 0, 0).applyQuaternion(from), sight = new THREE.Vector3(0, 0, 1).applyQuaternion(from);
     const to = from.clone().premultiply(new THREE.Quaternion().setFromAxisAngle(up, yaw)).premultiply(new THREE.Quaternion().setFromAxisAngle(right, pitch)).premultiply(new THREE.Quaternion().setFromAxisAngle(sight, -roll)).normalize();
-    if (animate && !this.disposed && matchMedia("(prefers-reduced-motion: no-preference)").matches) this.anim = { from: this.camera.quaternion.clone(), to, t0: performance.now(), ms: 180 };
+    this.spin = null;
+    if (animate && !this.disposed && motionOk()) this.anim = { from: this.camera.quaternion.clone(), to, t0: performance.now(), ms: 180 };
     else { this.anim = null; this.camera.quaternion.copy(to); }
     this.invalidate();
   }
@@ -258,11 +317,17 @@ export class Viewport3D {
     this.lookAlong(new THREE.Vector3(...d), new THREE.Vector3(...u), animate);
   }
 
-  /** Zoom and centre so that `box` (default: everything visible in the scene) fills the view. */
-  fit(box?: THREE.Box3): void {
+  /**
+   * Zoom and centre so that `box` (default: everything visible in the scene) fills the view.  The view glides
+   * there (unless the person asked for less motion, or `animate` is false); `target` and `camera.zoom` are where
+   * it is going from the start.
+   */
+  fit(box?: THREE.Box3, animate = true): void {
     const b = box || this.contentBox();
     if (b.isEmpty()) { b.set(new THREE.Vector3(-50, -50, -50), new THREE.Vector3(50, 50, 50)); }
     const sphere = b.getBoundingSphere(new THREE.Sphere());
+    // before the first frame there is nothing to glide from
+    this.glide = animate && !this.disposed && this.drawn && motionOk() ? { target: this.shownTarget(), zoom: this.shownZoom(), t0: performance.now(), ms: 280 } : null;
     this.target.copy(sphere.center);
     const r = Math.max(sphere.radius, 1e-3);
     const fitH = (this.camera.top - this.camera.bottom) / (2 * r), fitW = (this.camera.right - this.camera.left) / (2 * r);
@@ -301,7 +366,8 @@ export class Viewport3D {
     if (ev.button !== 2 && !pan) return;
     this.drag = { mode: pan ? "pan" : "orbit", x: ev.clientX, y: ev.clientY, id: ev.pointerId };
     this.canvas.setPointerCapture(ev.pointerId);
-    this.anim = null;
+    this.anim = null; this.glide = null; this.spin = null;
+    this.lastTurn = { yaw: 0, pitch: 0, at: ev.timeStamp };
     ev.preventDefault();
   };
   private onMove = (ev: PointerEvent): void => {
@@ -312,16 +378,33 @@ export class Viewport3D {
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion), up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
       this.target.addScaledVector(right, -dx * px).addScaledVector(up, dy * px);
     } else {
-      // a turntable: left-right turns about the model's Z, up-down tilts about the screen's horizontal
-      const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -dx * 0.008);
-      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
-      const pitch = new THREE.Quaternion().setFromAxisAngle(right, -dy * 0.008);
-      this.camera.quaternion.premultiply(pitch).premultiply(yaw).normalize();
+      this.turn(-dx * 0.008, -dy * 0.008);
+      // how fast it is turning, smoothed over the last few moves: what it keeps when it is let go
+      // (by the events' own times: a busy page hands them over late and in batches)
+      const now = ev.timeStamp, dt = Math.max(4, now - this.lastTurn.at), k = Math.min(1, dt / 60);
+      this.lastTurn = { yaw: this.lastTurn.yaw * (1 - k) + ((-dx * 0.008) / dt) * k, pitch: this.lastTurn.pitch * (1 - k) + ((-dy * 0.008) / dt) * k, at: now };
     }
     this.invalidate();
   };
+  /** A turntable: `yaw` turns about the model's Z, `pitch` tilts about the screen's horizontal. */
+  private turn(yaw: number, pitch: number): void {
+    const y = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), yaw);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const p = new THREE.Quaternion().setFromAxisAngle(right, pitch);
+    this.camera.quaternion.premultiply(p).premultiply(y).normalize();
+  }
   private onUp = (ev: PointerEvent): void => {
-    if (this.drag && ev.pointerId === this.drag.id) { this.drag = null; try { this.canvas.releasePointerCapture(ev.pointerId); } catch (e) { /* not captured */ } }
+    if (!this.drag || ev.pointerId !== this.drag.id) return;
+    const orbit = this.drag.mode === "orbit";
+    this.drag = null;
+    try { this.canvas.releasePointerCapture(ev.pointerId); } catch (e) { /* not captured */ }
+    // let go while still turning, the view drifts on a little (a preference, off unless asked for)
+    const l = this.lastTurn, speed = Math.hypot(l.yaw, l.pitch);
+    if (orbit && getViewPrefs().inertia && motionOk() && ev.timeStamp - l.at < 90 && speed > 4e-4) {
+      const cap = Math.min(1, 0.012 / speed);
+      this.spin = { yaw: l.yaw * cap, pitch: l.pitch * cap, at: performance.now() };
+      this.invalidate();
+    }
   };
   private onWheel = (ev: WheelEvent): void => {
     ev.preventDefault();
@@ -329,6 +412,7 @@ export class Viewport3D {
     const k = Math.exp(-ev.deltaY * (ev.deltaMode === 1 ? 0.05 : 0.0015));
     this.camera.zoom = Math.max(0.02, Math.min(4000, this.camera.zoom * k));
     this.camera.updateProjectionMatrix();
+    this.glide = null; this.spin = null;
     // keep what was under the pointer under the pointer
     const after = this.anchor(ev);
     this.target.add(before.sub(after));

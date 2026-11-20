@@ -108,6 +108,7 @@ off.
 | `shared/itemdoc/itemdoc.ts` | JSON item documents: file format, item changes, order keys. Pure. |
 | `shared/itemdoc/sync.ts` | `ItemDocSession`: a live document over the collaboration socket, with undo. |
 | `shared/viewport3d/viewport3d.ts` | `Viewport3D`: canvas, camera, orbit/pan/zoom, standard views, theme colours. |
+| `shared/viewport3d/look.ts`, `viewprefs.ts` | How every viewport looks (`viewport.look`): the studio light, the backdrop, contact shading and outline, the ground shadow, the halo round highlights, the part palette; and what one person chose of it. See "How the viewport looks". |
 | `platform/documents/host.ts` | How the shell hands a document to a domain's editor. |
 | `platform/doctabs/`, `platform/projecthome/` | The project shell: the tab bar, the Home tab, what a PCB is (`pcbs.ts`); `room.ts` is who is on which tab. See "Document tabs and the shell". |
 | `platform/history/`, `platform/review/renderers.ts`, `platform/mcp/host.ts` | Version history, Compare, the assistant's tools: what a domain plugs into. |
@@ -1181,7 +1182,47 @@ Shift + ← →, and 15° without Shift); their tooltips say so. The cube with �
 to selection and normal to, the projection, the display modes, the planes, the section view and the named
 views. Model space is millimetres, Z up; Front looks from −Y, Right from +X, Top from +Z with +Y up.
 Colours come from the theme tokens (`tokenColor("--mark")`); do not write colour literals — but for the
-planes' Onshape blues and orange (above) and the triad's axis colours.
+planes' Onshape blues and orange (above), the triad's axis colours, and the part palette and edge hairlines of
+`shared/viewport3d/look.ts`.
+
+### How the viewport looks (`shared/viewport3d/look.ts`)
+
+Every `Viewport3D` has a `look` (a `StudioLook`), the same for a part studio, an assembly and Compare:
+
+- **Light.** A small studio (a pale dome, a key softbox above left, a fill, a rim strip) is rendered once per
+  renderer into an environment map (`studioEnvironment`) and turned with the camera each frame, with one
+  directional key: a part is lit the same from every side. Dress a part's material with `studioSurface(new
+  THREE.MeshStandardMaterial(…))`; a preview of what is not there yet with `ghostSurface` (glass with a brighter
+  rim; the assembly's insert preview). A scene drawn once off screen (a thumbnail, the insert picture) is lit the
+  same by `lightAsStudio(scene, renderer, camera, focus, radius)`.
+- **Colours.** A part nobody coloured takes `partColor(index, dark)`: the first is the neutral, the rest a quiet
+  palette, in the order of the parts list (an assembly: of the geometries it draws). A colour or a material in
+  the document wins. Shaded parts carry dark hairline edges whatever the theme (`edgeColor`); wireframe and
+  hidden-edge line work is drawn in the theme's ink.
+- **Edges.** `shadeEdges(edgeGeometry, mesh)` with `edgeLineMaterial()` draws tangent edges (the ends of a
+  fillet, a cylinder's seam) lighter than sharp ones; which is which is worked out on the page from the mesh's
+  normals, so nothing in the kernel's protocol changed.
+- **Solids.** A domain marks the meshes that are parts with `userData.solid = true` and calls
+  `look.contentChanged()` when they change. From one depth pre-pass of the solids of a frame the look draws the
+  shading where surfaces meet (screen-space ambient occlusion), a hairline round each part's silhouette, and the
+  soft shadow on the ground under the model. Translucent parts, hidden parts and a section view are left out.
+  `look.contact` (0…1) turns the first two down for a display mode that is line work.
+- **Highlights.** `look.glowFrom(group)` draws a soft halo round whatever the group holds (the hover and
+  selection highlights), hidden where a solid is in front. A selected instance of an assembly keeps its colour
+  under a veil of the selection's.
+- **Quality.** `look.quality.level` is `high` or `low`. On a software or slow GPU (SwiftShader, llvmpipe; or
+  frames that take too long while the view turns) the screen-space passes and the shadow are left out, and
+  the environment map gives way to three plain lights placed as the studio's are (`PlainRig`), so a frame costs
+  no more than a flat-lit one; the backdrop, palette and edges stay. That is what the browser tests run with.
+  `localStorage["junction.cad.quality"] = "high" | "low"` forces one. Nothing here draws unless the viewport
+  draws a frame, and the viewport draws only when asked (`invalidate`).
+- **Motion.** `fit`, the standard views, the cube and named views ease out. `viewport.target` and
+  `camera.zoom` hold where a fit is going from the moment it is asked for (so `project`, `ray` and a test agree
+  at once); only the frames on the way are eased. Nothing moves by itself under `prefers-reduced-motion`.
+- **A person's choices** (`viewprefs.ts`, `localStorage["junction.cad.view"]`): the display mode (Shaded with
+  edges, Shaded, Wireframe, Hidden edges removed, Translucent), and in the view menu's Scene section the ground
+  shadow, the contact shading and whether the view drifts on after an orbit (`scene-ground`, `scene-contact`,
+  `scene-inertia`; off by default).
 
 ## Collaboration (`mechanical/collab/`, `platform/doctabs/room.ts`)
 

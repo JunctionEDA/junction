@@ -1,12 +1,14 @@
 // thumbnail.ts — the part studio's picture for the project page, the project's card and the document tabs.
 //
 // Drawn here, from the bodies the kernel built, into a small off-screen scene of its own: an isometric view
-// framed on the part, on the paper colour, without the planes, sketches and selection the viewport shows.  It
+// framed on the part, on the paper colour, lit and coloured as the viewport's studio (shared/viewport3d/look.ts),
+// without the planes, sketches and selection the viewport shows.  It
 // uses the viewport's WebGL context (a second context per tab would be wasteful), renders into a render target
 // and leaves the viewport's own picture untouched.  Sent through web/platform/documents/thumbnail.ts, shortly
 // after the model settles; only by someone who may edit, and never while an earlier version is on screen.
 import * as THREE from "three";
 import { THUMB_LONG_SIDE, ThumbnailPusher } from "../../platform/documents/thumbnail";
+import { edgeColor, edgeLineMaterial, lightAsStudio, partColor, shadeEdges, studioSurface } from "../../shared/viewport3d/look";
 import { tokenColor } from "../../shared/viewport3d/viewport3d";
 import type { BodyResult } from "./kernel/protocol";
 import type { PartStudio } from "./ui/studio";
@@ -18,14 +20,20 @@ export function drawThumbnail(renderer: THREE.WebGLRenderer, bodies: readonly Bo
   const meshes = bodies.filter((b) => b.mesh && b.mesh.indices.length);
   if (!meshes.length) return null;
   const scene = new THREE.Scene();
-  scene.background = tokenColor("--paper");
-  scene.add(new THREE.AmbientLight(0xffffff, 1.1));
+  const paper = tokenColor("--paper"), dark = paper.getHSL({ h: 0, s: 0, l: 0 }).l < 0.5;
+  scene.background = paper;
   const dir = new THREE.Vector3(-1, 1, -1).normalize(), up = new THREE.Vector3(0, 0, 1);
-  const light = new THREE.DirectionalLight(0xffffff, 2.2);
-  const material = new THREE.MeshStandardMaterial({ color: tokenColor("--ink-3").lerp(tokenColor("--paper"), 0.55), roughness: 0.75, metalness: 0.05, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-  const edgeMaterial = new THREE.LineBasicMaterial({ color: tokenColor("--ink") });
+  // each part in the colour the viewport tells it apart by
+  const materials: THREE.Material[] = [];
+  const surface = (i: number): THREE.Material => {
+    const m = studioSurface(new THREE.MeshStandardMaterial({ color: partColor(i, dark), side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+    materials.push(m);
+    return m;
+  };
+  const edgeMaterial = edgeLineMaterial({ color: edgeColor(dark) });
   const made: THREE.BufferGeometry[] = [];
   const box = new THREE.Box3();
+  let part = 0;
   for (const b of meshes) {
     const m = b.mesh!;
     const g = new THREE.BufferGeometry();
@@ -33,7 +41,8 @@ export function drawThumbnail(renderer: THREE.WebGLRenderer, bodies: readonly Bo
     g.setAttribute("normal", new THREE.BufferAttribute(m.normals, 3));
     g.setIndex(new THREE.BufferAttribute(m.indices, 1));
     const eg = new THREE.BufferGeometry(); eg.setAttribute("position", new THREE.BufferAttribute(m.edges.positions, 3));
-    scene.add(new THREE.Mesh(g, material), new THREE.LineSegments(eg, edgeMaterial));
+    shadeEdges(eg, m);
+    scene.add(new THREE.Mesh(g, surface(b.reference ? 0 : part++)), new THREE.LineSegments(eg, edgeMaterial));
     made.push(g, eg);
     box.union(new THREE.Box3(new THREE.Vector3(m.bbox[0], m.bbox[1], m.bbox[2]), new THREE.Vector3(m.bbox[3], m.bbox[4], m.bbox[5])));
   }
@@ -48,8 +57,7 @@ export function drawThumbnail(renderer: THREE.WebGLRenderer, bodies: readonly Bo
   const aspect = W / H, half = Math.max(halfH, halfW / aspect) * 1.12;
   const camera = new THREE.OrthographicCamera(-half * aspect, half * aspect, half, -half, -r * 10, r * 10);
   camera.up.copy(up); camera.position.copy(sphere.center).addScaledVector(dir, -r * 2); camera.lookAt(sphere.center); camera.updateProjectionMatrix();
-  light.position.copy(camera.position).addScaledVector(new THREE.Vector3(0.4, 0.3, 1), r); light.target.position.copy(sphere.center);
-  scene.add(light, light.target);
+  lightAsStudio(scene, renderer, camera, sphere.center, r);
 
   const target = new THREE.WebGLRenderTarget(W, H, { samples: 4, colorSpace: THREE.SRGBColorSpace });
   const pixels = new Uint8Array(W * H * 4);
@@ -63,7 +71,8 @@ export function drawThumbnail(renderer: THREE.WebGLRenderer, bodies: readonly Bo
     renderer.readRenderTargetPixels(target, 0, 0, W, H, pixels);
   } finally {
     renderer.setRenderTarget(was.target); renderer.setViewport(was.viewport); renderer.setScissorTest(was.scissorTest);
-    target.dispose(); material.dispose(); edgeMaterial.dispose();
+    target.dispose(); edgeMaterial.dispose();
+    for (const m of materials) m.dispose();
     for (const g of made) g.dispose();
   }
   // the target's rows run bottom-up

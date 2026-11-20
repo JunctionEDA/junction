@@ -7,6 +7,7 @@ import * as THREE from "three";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
+import { dotMaterial, edgeColor, edgeLineMaterial, partColor, shadeEdges, studioSurface } from "../../../shared/viewport3d/look";
 import { tokenColor, type Viewport3D } from "../../../shared/viewport3d/viewport3d";
 import { DEFAULT_PLANES, toPlane, type DefaultPlaneId, type Frame, type Vec2, type Vec3 } from "../core/geometry";
 import type { BodyResult, DatumView, SketchView } from "../kernel/protocol";
@@ -38,8 +39,8 @@ export class ModelView {
   private readonly sketches = new Map<string, SketchObjects>();
   private readonly raycaster = new THREE.Raycaster();
   private colors = { body: new THREE.Color(), edge: new THREE.Color(), hover: new THREE.Color(), select: new THREE.Color(), held: new THREE.Color(), sketch: new THREE.Color(), plane: new THREE.Color(), dim: new THREE.Color() };
-  private bodyMaterial = new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0.05, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-  private edgeMaterial = new THREE.LineBasicMaterial();
+  private bodyMaterial = studioSurface(new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+  private edgeMaterial = edgeLineMaterial();
   private pointMaterial = new THREE.PointsMaterial({ size: 1, sizeAttenuation: false, transparent: true, opacity: 0 });
   private fat: LineMaterial[] = [];
   private hover: Pick | null = null;
@@ -92,6 +93,8 @@ export class ModelView {
   constructor(readonly viewport: Viewport3D) {
     this.planeLayer = new PlaneLayer(viewport, (c, w, o) => this.fatMaterial(c, w, o));
     viewport.scene.add(this.root, this.planeLayer.group, this.highlight, this.overlay, this.datums.group);
+    // whatever is hovered or selected gets a soft halo (shared/viewport3d/look.ts)
+    viewport.look.glowFrom(this.highlight);
     viewport.onTheme.push(() => this.readColors());
     viewport.onFrame.push(() => { for (const m of this.fat) m.resolution.set(viewport.width, viewport.height); });
     this.readColors();
@@ -113,12 +116,13 @@ export class ModelView {
 
   private readColors(): void {
     const ink = tokenColor("--ink"), paper = tokenColor("--paper");
-    this.colors.body.copy(paper).lerp(ink, 0.22);
+    const dark = paper.getHSL({ h: 0, s: 0, l: 0 }).l < 0.5;
+    this.colors.body.copy(partColor(0, dark));
     this.colors.edge.copy(ink);
     // --mark is the theme's colour for annotations on a canvas; the chrome's own selection colour is a neutral
     // that would not show on a grey solid
     this.colors.select.copy(tokenColor("--mark"));
-    this.colors.hover.copy(this.colors.select).lerp(this.colors.body, 0.45);
+    this.colors.hover.copy(this.colors.select).lerp(this.colors.body, 0.4);
     // what a dialog holds in a field that is not listening: still the selection colour, but quieter
     this.colors.held.copy(this.colors.select).lerp(this.colors.body, 0.3);
     this.colors.sketch.copy(tokenColor("--ink-2"));
@@ -127,8 +131,8 @@ export class ModelView {
     this.colors.plane.copy(tokenColor("--ink-2")).lerp(tokenColor("--teal"), 0.55);
     this.colors.dim.copy(ink).lerp(paper, 0.6);
     this.bodyMaterial.color.copy(this.colors.body);
-    this.edgeMaterial.color.copy(this.colors.edge);
-    this.planeLayer.setColors({ dark: paper.getHSL({ h: 0, s: 0, l: 0 }).l < 0.5, select: this.colors.select });
+    this.edgeMaterial.color.copy(edgeColor(dark));
+    this.planeLayer.setColors({ dark, select: this.colors.select });
     for (const s of this.sketches.values()) this.styleSketch(s);
     this.datums.group.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material & { color?: THREE.Color }; if (m && m.color) m.color.copy(this.colors.plane); });
     this.drawHighlight();
@@ -176,7 +180,9 @@ export class ModelView {
       g.computeBoundingBox(); g.computeBoundingSphere();
       const mesh = new THREE.Mesh(g, this.bodyMaterial);
       mesh.userData.fit = true;
+      mesh.userData.solid = true;   // it takes part in the contact shading, the outline and the ground shadow
       const eg = new THREE.BufferGeometry(); eg.setAttribute("position", new THREE.BufferAttribute(m.edges.positions, 3));
+      shadeEdges(eg, m);            // tangent edges are drawn lighter than sharp ones
       const edges = new THREE.LineSegments(eg, this.edgeMaterial);
       const pg = new THREE.BufferGeometry(); pg.setAttribute("position", new THREE.BufferAttribute(m.vertices.positions, 3));
       const points = new THREE.Points(pg, this.pointMaterial);
@@ -189,6 +195,7 @@ export class ModelView {
     }
     for (const [id, b] of Array.from(this.bodies)) if (!seen.has(id)) { this.removeBody(b); this.bodies.delete(id); }
     this.planeLayer.setExtent(this.bodiesBox());
+    this.viewport.look.contentChanged();
     this.drawHighlight();
     this.viewport.invalidate();
     for (const fn of this.onBodies) fn();
@@ -386,7 +393,7 @@ export class ModelView {
         const g = new THREE.BufferGeometry();
         g.setAttribute("position", triangles instanceof Float32Array ? new THREE.BufferAttribute(triangles, 3) : triangles);
         if (index) { g.setIndex(index); g.setDrawRange(start, count); }
-        const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: strong ? 0.6 : 0.4, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+        const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: strong ? 0.5 : 0.3, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
         this.highlight.add(m);
       };
       if (p.kind === "face") {
@@ -403,9 +410,9 @@ export class ModelView {
         const i = mesh ? mesh.edges.names.indexOf(p.name) : -1;
         if (i >= 0 && mesh) {
           const seg = Array.from(mesh.edges.positions.subarray(mesh.edges.start[i] * 3, (mesh.edges.start[i] + mesh.edges.count[i]) * 3));
-          this.addFat(seg, color, 4);
+          this.addFat(seg, color, 3);
           if (keep) this.held.set(key, { segments: seg });
-        } else { const h = keep ? this.held.get(key) : undefined; if (h && h.segments) this.addFat(h.segments, color, 4); }
+        } else { const h = keep ? this.held.get(key) : undefined; if (h && h.segments) this.addFat(h.segments, color, 3); }
       } else {
         const i = mesh ? mesh.vertices.names.indexOf(p.name) : -1;
         if (i >= 0 && mesh) { const at: Vec3 = [mesh.vertices.positions[i * 3], mesh.vertices.positions[i * 3 + 1], mesh.vertices.positions[i * 3 + 2]]; this.addDot(at, color); if (keep) this.held.set(key, { at }); }
@@ -435,7 +442,7 @@ export class ModelView {
     this.highlight.add(l);
   }
   private addDot(at: Vec3, color: THREE.Color): void {
-    const p = new THREE.Points(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...at)]), new THREE.PointsMaterial({ color, size: 9, sizeAttenuation: false, depthTest: false }));
+    const p = new THREE.Points(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...at)]), dotMaterial(color, 9));
     p.renderOrder = 11; p.userData.own = true;
     this.highlight.add(p);
   }
@@ -448,7 +455,7 @@ export class ModelView {
       const l = new LineSegments2(g, this.fatMaterial(this.colors.select, 2, { depthTest: false })); l.renderOrder = 12;
       this.overlay.add(l);
     }
-    for (const d of dots) { const p = new THREE.Points(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...d)]), new THREE.PointsMaterial({ color: this.colors.select, size: 8, sizeAttenuation: false, depthTest: false })); p.renderOrder = 13; this.overlay.add(p); }
+    for (const d of dots) { const p = new THREE.Points(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...d)]), dotMaterial(this.colors.select, 8)); p.renderOrder = 13; this.overlay.add(p); }
     this.viewport.invalidate();
   }
 

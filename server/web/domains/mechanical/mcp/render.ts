@@ -1,9 +1,11 @@
 // render.ts — a shaded picture of the bodies of a part studio without a browser: a small software rasteriser
-// (orthographic camera, depth buffer, flat shading, the bodies' edges drawn over the faces) and a PNG writer.
+// (orthographic camera, depth buffer, smooth shading from the mesh's own normals under a key and a fill light, the
+// bodies' edges drawn over the faces) and a PNG writer.
 //
 // The tool host runs in Node, where there is no WebGL.  An assistant needs the picture to check its own work
 // ("is the hole where I meant it"), not for beauty, so this draws what the viewport draws in its simplest form:
-// each body's triangles lit from the camera, its edges as dark lines, a small axis triad in the corner.  It is
+// each body's triangles lit as the viewport's studio lights them (a key above and to the left of the camera, a
+// fill at the right, so round faces read as round), its edges as dark lines, a small axis triad in the corner.  It is
 // drawn at twice the size asked for and averaged down, which is all the anti-aliasing it has.
 import type { BodyMesh } from "../kernel/protocol";
 import { cross, dot, normalize, sub, type Vec3 } from "../core/geometry";
@@ -64,16 +66,26 @@ export function renderMeshes(meshes: readonly BodyMesh[], o: RenderOptions = {})
   const px = (x: number) => (x - cx) / span + w / 2, py = (y: number) => h / 2 - (y - cy) / span;
   const zr = Math.max(z1 - z0, 1e-6);
 
-  const light = normalize([-d[0] + 0.35 * right[0] + 0.5 * up[0], -d[1] + 0.35 * right[1] + 0.5 * up[1], -d[2] + 0.35 * right[2] + 0.5 * up[2]]);
+  // towards the lights, in the model: the key above and left of the camera, the fill low at the right
+  const toward = (r: number, u: number, back: number): Vec3 => normalize([-d[0] * back + r * right[0] + u * up[0], -d[1] * back + r * right[1] + u * up[1], -d[2] * back + r * right[2] + u * up[2]]);
+  const key = toward(-0.35, 1, 0.6), fill = toward(0.9, 0.1, 0.5);
+  const lightOf = (n: Vec3): number => {
+    // a face seen from behind (an open surface) is lit as its other side
+    const f = dot(n, d) > 0 ? -1 : 1;
+    return Math.min(1.08, 0.4 + 0.52 * Math.max(0, f * dot(n, key)) + 0.16 * Math.max(0, f * dot(n, fill)));
+  };
   meshes.forEach((m, mi) => {
     const base = (o.colors && o.colors[mi] !== undefined ? o.colors[mi] : PALETTE[mi % PALETTE.length]);
     const br = base >> 16, bgc = (base >> 8) & 255, bb = base & 255;
-    const P = m.positions, I = m.indices;
+    const P = m.positions, I = m.indices, N = m.normals;
+    const smooth = !!N && N.length === P.length;
     for (let t = 0; t + 2 < I.length; t += 3) {
       const a: Vec3 = [P[I[t] * 3], P[I[t] * 3 + 1], P[I[t] * 3 + 2]], b: Vec3 = [P[I[t + 1] * 3], P[I[t + 1] * 3 + 1], P[I[t + 1] * 3 + 2]], c: Vec3 = [P[I[t + 2] * 3], P[I[t + 2] * 3 + 1], P[I[t + 2] * 3 + 2]];
       const n = normalize(cross(sub(b, a), sub(c, a)));
-      const lit = 0.38 + 0.62 * Math.abs(dot(n, light));
-      const r = Math.round(br * lit), g = Math.round(bgc * lit), bl = Math.round(bb * lit);
+      // the light at each corner, from the surface's own normal there: a cylinder shades round
+      const la = smooth ? lightOf([N[I[t] * 3], N[I[t] * 3 + 1], N[I[t] * 3 + 2]]) : lightOf(n);
+      const lb = smooth ? lightOf([N[I[t + 1] * 3], N[I[t + 1] * 3 + 1], N[I[t + 1] * 3 + 2]]) : la;
+      const lc = smooth ? lightOf([N[I[t + 2] * 3], N[I[t + 2] * 3 + 1], N[I[t + 2] * 3 + 2]]) : la;
       const ax = px(dot(a, right)), ay = py(dot(a, up)), az = dot(a, d), bx = px(dot(b, right)), by = py(dot(b, up)), bz = dot(b, d), cx2 = px(dot(c, right)), cy2 = py(dot(c, up)), cz = dot(c, d);
       const area = (bx - ax) * (cy2 - ay) - (cx2 - ax) * (by - ay);
       if (Math.abs(area) < 1e-9) continue;
@@ -85,7 +97,10 @@ export function renderMeshes(meshes: readonly BodyMesh[], o: RenderOptions = {})
           const w0 = ((bx - sx) * (cy2 - sy) - (cx2 - sx) * (by - sy)) / area, w1 = ((cx2 - sx) * (ay - sy) - (ax - sx) * (cy2 - sy)) / area, w2 = 1 - w0 - w1;
           if (w0 < -1e-6 || w1 < -1e-6 || w2 < -1e-6) continue;
           const z = w0 * az + w1 * bz + w2 * cz, i = y * w + x;
-          if (z < depth[i]) { depth[i] = z; color[i * 3] = r; color[i * 3 + 1] = g; color[i * 3 + 2] = bl; }
+          if (z < depth[i]) {
+            const lit = w0 * la + w1 * lb + w2 * lc;
+            depth[i] = z; color[i * 3] = Math.min(255, Math.round(br * lit)); color[i * 3 + 1] = Math.min(255, Math.round(bgc * lit)); color[i * 3 + 2] = Math.min(255, Math.round(bb * lit));
+          }
         }
       }
     }
