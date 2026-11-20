@@ -18,6 +18,9 @@
 //
 // The bar also keeps the two live things of an open project: the project's own document (shell.ts) and the
 // project room (room.ts): a dot on a tab for each person who is on it.
+//
+// All of it is the project shell, which comes with Mechanical CAD (web/shared/cad.ts): for somebody who has CAD
+// off there is no bar, no project document and no room; the page is the PCB editor on one PCB (editor/doc.ts).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { KIND_SUMMARY, PCB_ELEMENT, isCadDocType, type ElementTint } from "../../domains/registry";
 import { cadEnabled } from "../../shared/cad";
@@ -75,8 +78,8 @@ export function DocTabs() {
   const hasDoc = useApp((s) => s.document.hasDoc);
   const shell = useProjectShell();
   const { projectId, docs, elements: allElements, current, canEdit, room, ctx } = shell;
-  // a part studio or an assembly has a tab only for somebody who has Mechanical CAD on (web/shared/cad.ts); the
-  // project keeps it all the same (its place in the tab order too), and Home lists it
+  // The bar is there only for somebody who has Mechanical CAD on (web/shared/cad.ts), and so is a part studio's
+  // or an assembly's tab; the project keeps them all the same (their places in the tab order too).
   const cad = useApp(cadEnabled);
   const elements = useMemo(() => (cad ? allElements : allElements.filter((e) => !isCadDocType(e.type))), [allElements, cad]);
   const [menu, setMenu] = useState<{ at: MenuAt; items: MenuEntry[]; title?: string } | null>(null);
@@ -98,7 +101,7 @@ export function DocTabs() {
   const scroller = useRef<HTMLDivElement>(null);
   const plus = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLButtonElement>(null);
-  const open = !!projectId && view !== "home";
+  const open = !!projectId && view !== "home" && cad;
   const docsRef = useRef(docs); docsRef.current = docs;
   const suppressClick = useRef(false);
   const openTimer = useRef(0);
@@ -109,7 +112,7 @@ export function DocTabs() {
 
   // ---- the two live things of an open project: its own document and its room
   useEffect(() => {
-    if (!projectId || view === "home") return;
+    if (!projectId || view === "home" || !cad) return;
     const pid = projectId;
     const refresh = () => { void refreshProject(pid, docsRef.current).catch(() => {}); };
     const r = new ProjectRoom({ signedIn, onDocsChanged: refresh });
@@ -124,7 +127,7 @@ export function DocTabs() {
       if (window.JunctionShell === s) delete window.JunctionShell;
       setHandles({ room: null, shell: null });
     };
-  }, [projectId, view === "home", signedIn]);
+  }, [projectId, view === "home", signedIn, cad]);
   const shellDocId = useMemo(() => shellDocOf(docs)?.docId || null, [docs]);
   useEffect(() => { if (open && window.JunctionShell) window.JunctionShell.setDoc(shellDocId); }, [open, shellDocId, ctx && ctx.shell]);
   const allDocs = useApp((s) => (s.project ? s.project.allDocs || s.project.docs : null));
@@ -133,7 +136,7 @@ export function DocTabs() {
   // the server says when a document of the project is added, renamed or deleted (roomapi.ts tellDocsChanged):
   // the tabs follow, and say who did it unless it was this person
   useEffect(() => {
-    if (!projectId || view === "home") return;
+    if (!projectId || view === "home" || !cad) return;
     const heard = (ev: Event) => {
       const n = (ev as CustomEvent<DocsNotice>).detail;
       if (!n || n.projectId !== projectId) return;
@@ -143,7 +146,7 @@ export function DocTabs() {
     };
     window.addEventListener(DOCS_EVENT, heard);
     return () => window.removeEventListener(DOCS_EVENT, heard);
-  }, [projectId, view === "home", myId]);
+  }, [projectId, view === "home", myId, cad]);
 
   // ---- which tab is the open one
   // from every element: a part studio open with CAD off (its note) is not taken for the PCB beside it

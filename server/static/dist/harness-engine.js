@@ -79129,7 +79129,7 @@ function loadBundle(src) {
   }
   return p;
 }
-function cadOffNote(doc2, kind) {
+function cadOffNote(doc2, kind, toPcb) {
   const box3 = document.createElement("div");
   box3.dataset.cadOff = doc2.docId;
   box3.style.cssText = "max-width:460px;margin:72px auto;padding:0 16px;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;color:var(--ink)";
@@ -79160,10 +79160,20 @@ function cadOffNote(doc2, kind) {
     button.disabled = true;
     setCadEnabled(true);
   });
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "btn";
+  back.dataset.cadOffPcb = "";
+  back.textContent = "Open the PCB instead";
+  back.addEventListener("click", () => {
+    if (toPcb) toPcb();
+  });
   const note3 = document.createElement("p");
   note3.style.cssText = "margin:0;color:var(--ink-3);font-size:var(--fs-sm)";
   note3.textContent = "It can be turned off again in the account menu or the Junction menu.";
-  box3.append(icon2, title, text3, button, note3);
+  box3.append(icon2, title, text3, button);
+  if (toPcb) box3.append(back);
+  box3.append(note3);
   return box3;
 }
 function closeHostedDoc() {
@@ -79192,7 +79202,8 @@ async function openHostedDoc(doc2, showCad, openDocId2) {
   el4.replaceChildren();
   if (kind && kind.cad && !cadEnabled(store.get())) {
     store.slice("connection", { status: "idle", text: "Mechanical CAD is off" });
-    el4.replaceChildren(cadOffNote(doc2, kind));
+    const hasPcb = (state.project.allDocs || state.project.docs).some((d) => d.docType === "kicad_sch" || d.docType === "kicad_pcb");
+    el4.replaceChildren(cadOffNote(doc2, kind, hasPcb ? () => openDocId2("home") : null));
     return;
   }
   try {
@@ -79245,6 +79256,63 @@ var init_dochost = __esm({
   }
 });
 
+// web/shared/theme.ts
+function defaultThemeMode() {
+  let cad = false;
+  try {
+    cad = localStorage.getItem(CAD_HINT) === "1";
+  } catch (e) {
+  }
+  return cad ? "light" : "system";
+}
+function stored() {
+  let v = null;
+  try {
+    v = localStorage.getItem(KEY);
+  } catch (e) {
+  }
+  return v === "light" || v === "dark" || v === "system" ? v : defaultThemeMode();
+}
+function getThemeMode() {
+  const t = document.documentElement.dataset.theme;
+  return t === "light" || t === "dark" || t === "system" ? t : stored();
+}
+function effectiveTheme() {
+  const m = getThemeMode();
+  if (m !== "system") return m;
+  return typeof matchMedia === "function" && matchMedia(DARK_QUERY).matches ? "dark" : "light";
+}
+function apply2(mode) {
+  document.documentElement.dataset.theme = mode;
+}
+function setThemeMode(mode) {
+  try {
+    localStorage.setItem(KEY, mode);
+  } catch (e) {
+  }
+  apply2(mode);
+}
+function followCadSetting(on2) {
+  try {
+    if (on2) localStorage.setItem(CAD_HINT, "1");
+    else localStorage.removeItem(CAD_HINT);
+  } catch (e) {
+  }
+  apply2(stored());
+}
+function toggleTheme() {
+  setThemeMode(effectiveTheme() === "dark" ? "light" : "dark");
+}
+var KEY, CAD_HINT, DARK_QUERY;
+var init_theme = __esm({
+  "web/shared/theme.ts"() {
+    "use strict";
+    KEY = "kui.theme";
+    CAD_HINT = "kui.cad";
+    DARK_QUERY = "(prefers-color-scheme: dark)";
+  }
+});
+
 // web/domains/pcb/editor/home.ts
 function navigate(path2, replace) {
   if (replace) history.replaceState(null, "", path2);
@@ -79267,6 +79335,7 @@ async function loadMe() {
     state.me = null;
   }
   store.set({ me: state.me });
+  followCadSetting(cadEnabled(state));
 }
 function showView(name) {
   state.view = name;
@@ -79295,6 +79364,8 @@ var init_home = __esm({
     init_dochost();
     init_dom();
     init_util();
+    init_cad();
+    init_theme();
     window.CollabNav = { navigate, reloadMe: async () => {
       await loadMe();
       renderHome();
@@ -79956,47 +80027,6 @@ var init_net = __esm({
     init_title();
     init_roomapi();
     editsTimer = 0;
-  }
-});
-
-// web/shared/theme.ts
-function stored() {
-  let v = null;
-  try {
-    v = localStorage.getItem(KEY);
-  } catch (e) {
-  }
-  return v === "dark" || v === "system" ? v : "light";
-}
-function getThemeMode() {
-  const t = document.documentElement.dataset.theme;
-  return t === "light" || t === "dark" || t === "system" ? t : stored();
-}
-function effectiveTheme() {
-  const m = getThemeMode();
-  if (m !== "system") return m;
-  return typeof matchMedia === "function" && matchMedia(DARK_QUERY).matches ? "dark" : "light";
-}
-function apply2(mode) {
-  document.documentElement.dataset.theme = mode;
-}
-function setThemeMode(mode) {
-  try {
-    if (mode === "light") localStorage.removeItem(KEY);
-    else localStorage.setItem(KEY, mode);
-  } catch (e) {
-  }
-  apply2(mode);
-}
-function toggleTheme() {
-  setThemeMode(effectiveTheme() === "dark" ? "light" : "dark");
-}
-var KEY, DARK_QUERY;
-var init_theme = __esm({
-  "web/shared/theme.ts"() {
-    "use strict";
-    KEY = "kui.theme";
-    DARK_QUERY = "(prefers-color-scheme: dark)";
   }
 });
 
@@ -89584,6 +89614,9 @@ var init_rawfetch = __esm({
 function boundPcb() {
   return bound;
 }
+function pcbBoundBefore(projectId4) {
+  return first.get(projectId4);
+}
 function unbindPcb() {
   bound = null;
 }
@@ -90361,6 +90394,10 @@ async function openEditor(id) {
   }
   const wanted2 = new URLSearchParams(location.search).get("doc");
   if (boundPcb()) rootSchematic();
+  if (!shellOn()) {
+    await openPcbOnly(wanted2);
+    return;
+  }
   if (wanted2 === HOME_TAB) {
     await openDoc(homeDoc());
     return;
@@ -90394,6 +90431,49 @@ async function openEditor(id) {
     }
   }
   await openDoc(homeDoc());
+}
+function plainPcb(pcbs, docId3) {
+  const before = state.project ? pcbBoundBefore(state.project.projectId) : void 0;
+  return (docId3 ? pcbOfDoc(pcbs, docId3) : void 0) || pcbs.find((p) => p.key === before) || pcbs.find((p) => !p.dir) || pcbs[0];
+}
+function nothingToShow() {
+  if (state.view === "cad") showView("editor");
+  leaveDoc();
+  state.doc = null;
+  state.docId = null;
+  base.replaceChildren();
+  setDocNotice("This project has no board or schematic yet. Open it in the desktop app.");
+  setConn("err", "nothing to show");
+}
+async function openPcbOnly(wanted2) {
+  const all2 = allDocs(), pcbs = projectPcbs();
+  const hosted = wanted2 ? all2.find((d) => d.docId === wanted2 && isHostedDoc(d) && !isShellView(d.docType)) : void 0;
+  if (hosted) {
+    await openDoc(hosted);
+    return;
+  }
+  const named = wanted2 ? all2.find((d) => d.docId === wanted2) : void 0;
+  const pcb = plainPcb(pcbs, named ? named.docId : null);
+  if (pcb) {
+    const inPcb = named && pcb.docs.some((d) => d.docId === named.docId) ? named.docId : (pcb.schematic || pcb.boards[0] || pcb.pro).docId;
+    if (!enterPcb(pcb, inPcb)) return;
+    rootSchematic();
+  }
+  const doc2 = firstDoc(state.docs, state.project.docs, wanted2);
+  if (!doc2) {
+    nothingToShow();
+    return;
+  }
+  if (pcb && pcbs.length > 1) toast(`This project has ${pcbs.length} PCBs and this is "${pcb.name}". Turn on Mechanical CAD in your settings to have a tab for each.`, 6e3);
+  await openDoc(doc2);
+}
+function openPlainStart() {
+  const pcb = boundPcb() ? void 0 : plainPcb(projectPcbs(), null);
+  if (pcb && !enterPcb(pcb, (pcb.schematic || pcb.boards[0] || pcb.pro).docId)) return;
+  if (pcb) rootSchematic();
+  const doc2 = firstDoc(state.docs, state.project.docs, null);
+  if (doc2) void openDoc(doc2);
+  else nothingToShow();
 }
 async function refreshFromGithub(result) {
   const pid = state.project.projectId;
@@ -90666,7 +90746,7 @@ async function openDoc(doc2) {
   }
   setupEditorChrome();
   publishDocs();
-  const several = state.docs.length > 1 || !!(boundPcb() && boundPcb().dir) || allDocs().some((d) => isHostedDoc(d));
+  const several = state.docs.length > 1 || !!(boundPcb() && boundPcb().dir) || shellOn() && allDocs().some((d) => isHostedDoc(d));
   const url = `/p/${state.project.projectId}/edit` + (doc2.docType === "footprint" ? `?fp=${encodeURIComponent(doc2.docId)}` : several ? `?doc=${doc2.docId}` : "");
   if (location.pathname + location.search !== url) history.replaceState(null, "", url);
   setStatusBar({ message: "" });
@@ -90754,7 +90834,7 @@ async function openDoc(doc2) {
       setDocNotice(`Nothing to show yet for this ${isSch() ? "sheet" : "board"} \u2014 it appears once a desktop editor has the project open in a live session.`);
     }
   }
-  const seen = ok2 ? viewMemo.get(docId3) : void 0;
+  const seen = ok2 && shellOn() ? viewMemo.get(docId3) : void 0;
   setTimeout(() => {
     if (state.docId !== docId3) return;
     if (seen) {
@@ -90851,6 +90931,10 @@ function selectItemAction(id) {
 }
 function openDocId(id) {
   if (!state.project) return;
+  if (!shellOn() && (id === HOME_TAB || id.startsWith("bom:"))) {
+    openPlainStart();
+    return;
+  }
   if (id === HOME_TAB) {
     void openDoc(homeDoc());
     return;
@@ -90886,6 +90970,10 @@ function setProjectDocs(docs, open4) {
   if (!id || cur2 || id === HOME_TAB || id.startsWith("board:") || id.startsWith("lib:")) return;
   if (id.startsWith("bom:") && projectPcbs().some((p) => "bom:" + p.key === id)) return;
   const b = boundPcb();
+  if (!shellOn()) {
+    openPlainStart();
+    return;
+  }
   const next = b && (state.view === "editor" || !b.dir) ? firstDoc(state.docs, state.project.docs, null) : null;
   void openDoc(next || homeDoc());
 }
@@ -90909,7 +90997,7 @@ function switchEditor() {
   if (target2) openDoc(target2);
   else toast(isSch() ? "This project has no board yet" : "This project has no schematic yet");
 }
-var docNav, stopGithubWatch, GRID_CHOICES, sheetNames, sheetPages, ROOT_SHEET_NAME, hierarchyLearned, sheetHumanPaths, layerRow, remote, homeDoc, bomDoc, topsMemo, docsFetch, viewMemo;
+var docNav, stopGithubWatch, GRID_CHOICES, sheetNames, sheetPages, ROOT_SHEET_NAME, hierarchyLearned, sheetHumanPaths, layerRow, remote, shellOn, homeDoc, bomDoc, topsMemo, docsFetch, viewMemo;
 var init_doc = __esm({
   "web/domains/pcb/editor/doc.ts"() {
     "use strict";
@@ -90939,6 +91027,7 @@ var init_doc = __esm({
     init_bootpick();
     init_dochost();
     init_pcbscope();
+    init_cad();
     init_pcbs();
     init_pcbtools_loader();
     init_view();
@@ -90957,6 +91046,7 @@ var init_doc = __esm({
     if (typeof window !== "undefined") window.addEventListener("kc:constraint-msg", (ev) => {
       if (!isSch()) setStatusBar({ constraint: String(ev.detail?.msg || "") });
     });
+    shellOn = () => cadEnabled(state);
     homeDoc = () => ({ docId: HOME_TAB, path: "", docType: "@home" });
     bomDoc = (key3) => ({ docId: "bom:" + key3, path: "", docType: "@bom" });
     topsMemo = null;
@@ -101682,8 +101772,10 @@ var init_cad_setting = __esm({
   "web/domains/pcb/editor/cad-setting.ts"() {
     "use strict";
     init_registry();
+    init_theme();
     init_appstore();
     init_doc();
+    init_dochost();
     init_util();
   }
 });

@@ -49,7 +49,7 @@ function loadBundle(src: string): Promise<void> {
 }
 
 /** What a CAD document shows somebody who has Mechanical CAD turned off (web/shared/cad.ts). */
-function cadOffNote(doc: DocEntry, kind: DocumentKind): HTMLElement {
+function cadOffNote(doc: DocEntry, kind: DocumentKind, toPcb: (() => void) | null): HTMLElement {
   const box = document.createElement("div");
   box.dataset.cadOff = doc.docId;
   box.style.cssText = "max-width:460px;margin:72px auto;padding:0 16px;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;color:var(--ink)";
@@ -69,10 +69,17 @@ function cadOffNote(doc: DocEntry, kind: DocumentKind): HTMLElement {
   button.type = "button"; button.className = "btn primary"; button.dataset.cadTurnOn = "";
   button.textContent = "Turn on Mechanical CAD and open";
   button.addEventListener("click", () => { button.disabled = true; setCadEnabled(true); });
+  // without CAD there is no tab bar (web/platform/doctabs): the way on to the project's PCB is here
+  const back = document.createElement("button");
+  back.type = "button"; back.className = "btn"; back.dataset.cadOffPcb = "";
+  back.textContent = "Open the PCB instead";
+  back.addEventListener("click", () => { if (toPcb) toPcb(); });
   const note = document.createElement("p");
   note.style.cssText = "margin:0;color:var(--ink-3);font-size:var(--fs-sm)";
   note.textContent = "It can be turned off again in the account menu or the Junction menu.";
-  box.append(icon, title, text, button, note);
+  box.append(icon, title, text, button);
+  if (toPcb) box.append(back);
+  box.append(note);
   return box;
 }
 
@@ -103,7 +110,9 @@ export async function openHostedDoc(doc: DocEntry, showCad: () => void, openDocI
   // nothing of CAD is loaded (no bundle, no worker, no kernel).  Turning it on opens the document (cad-setting.ts).
   if (kind && kind.cad && !cadEnabled(store.get())) {
     store.slice("connection", { status: "idle", text: "Mechanical CAD is off" });
-    el.replaceChildren(cadOffNote(doc, kind));
+    const hasPcb = (state.project!.allDocs || state.project!.docs).some((d) => d.docType === "kicad_sch" || d.docType === "kicad_pcb");
+    // "home" without the shell is what the project opens on: its PCB (editor/doc.ts openDocId)
+    el.replaceChildren(cadOffNote(doc, kind, hasPcb ? () => openDocId("home") : null));
     return;
   }
   try {

@@ -23,8 +23,9 @@ import { releaseLayers } from "./paint";
 import { applyVariantToDoc, refreshVariantNames } from "./variant";
 import { fpEntryFor, fpParam, isFpPrivate, isFpReadOnlyLib, onFootprintOpened, privateText } from "./fpedit";
 import { editorDocs, firstDoc, rootSchematicOf, topLevelSheetsOf, type TopLevelSheet } from "./bootpick";
-import { closeHostedDoc, isHostedDoc, openHostedDoc } from "./dochost";
-import { bindPcb, boundPcb, installPathScope, unbindPcb, viewOf } from "./pcbscope";
+import { closeHostedDoc, isHostedDoc, isShellView, openHostedDoc } from "./dochost";
+import { bindPcb, boundPcb, installPathScope, pcbBoundBefore, unbindPcb, viewOf } from "./pcbscope";
+import { cadEnabled } from "../../../shared/cad";
 import { HOME_TAB, pcbOfDoc, pcbsOf, type Pcb } from "../../../platform/doctabs/pcbs";
 import { ensurePcbTools, noteBoardOpened, preloadPcbToolsWhenIdle } from "./pcbtools-loader";
 import type { Boot } from "./boot";
@@ -389,6 +390,12 @@ function applyProjectDocs(all: DocEntry[]): void {
   store.set({ project: state.project });
 }
 
+/**
+ * Whether the project shell is on: the Home tab, the tab bar, several PCBs and a PCB's BOM as tabs.  It comes with
+ * Mechanical CAD (shared/cad.ts); with it off the page is the PCB design software alone (openPcbOnly).
+ */
+const shellOn = (): boolean => cadEnabled(state);
+
 /** The pseudo-documents the shell opens like any tab: the project's Home, and a PCB's bill of materials. */
 const homeDoc = (): DocEntry => ({ docId: HOME_TAB, path: "", docType: "@home" });
 const bomDoc = (key: string): DocEntry => ({ docId: "bom:" + key, path: "", docType: "@bom" });
@@ -469,6 +476,7 @@ export async function openEditor(id: string) {
   // manager leads first; the board is one click away (and ?doc= still opens exactly what a link names).
   // Only a project with no schematic at all opens on the board.
   if (boundPcb()) rootSchematic();   // also starts reading the project file and the custom rules
+  if (!shellOn()) { await openPcbOnly(wanted); return; }
   // a link names a tab: Home, a part studio, an assembly, a PCB's bill of materials, or a sheet or board of a PCB
   if (wanted === HOME_TAB) { await openDoc(homeDoc()); return; }
   if (wanted && wanted.startsWith("bom:") && pcbs.some((p) => p.key === wanted.slice(4))) { await openDoc(bomDoc(wanted.slice(4))); return; }
@@ -489,6 +497,57 @@ export async function openEditor(id: string) {
     if (doc) { await openDoc(doc); return; }
   }
   await openDoc(homeDoc());
+}
+
+/**
+ * The PCB a page without the project shell works on (Mechanical CAD off, shared/cad.ts): the one `docId` belongs
+ * to, else the one this page worked on before, else the one at the project's root, else the first by folder.  A
+ * project with several PCBs exists only because somebody with CAD on made them; the others are reached by their
+ * links (?doc=), and turning CAD on shows them all as tabs.
+ */
+function plainPcb(pcbs: Pcb<DocEntry>[], docId: string | null): Pcb<DocEntry> | undefined {
+  const before = state.project ? pcbBoundBefore(state.project.projectId) : undefined;
+  return (docId ? pcbOfDoc(pcbs, docId) : undefined) || pcbs.find((p) => p.key === before) || pcbs.find((p) => !p.dir) || pcbs[0];
+}
+
+/** A project with nothing the schematic and board editor can show (as the PCB editor has always said it). */
+function nothingToShow(): void {
+  if (state.view === "cad") showView("editor");
+  leaveDoc(); state.doc = null; state.docId = null;
+  base.replaceChildren(); setDocNotice("This project has no board or schematic yet. Open it in the desktop app.");
+  setConn("err", "nothing to show");
+}
+
+/**
+ * Mechanical CAD off (shared/cad.ts): the project opens as the PCB design software always has, straight into the
+ * schematic and board editor, with no Home tab and no tab bar.  ?doc= opens the sheet or board a link names (a
+ * part studio or an assembly shows the note that offers to turn CAD on, dochost.ts); with none, or one naming
+ * Home or a BOM tab, the PCB's root schematic opens, or its board when it has no schematic.
+ */
+async function openPcbOnly(wanted: string | null): Promise<void> {
+  const all = allDocs(), pcbs = projectPcbs();
+  const hosted = wanted ? all.find((d) => d.docId === wanted && isHostedDoc(d) && !isShellView(d.docType)) : undefined;
+  if (hosted) { await openDoc(hosted); return; }
+  const named = wanted ? all.find((d) => d.docId === wanted) : undefined;
+  const pcb = plainPcb(pcbs, named ? named.docId : null);
+  if (pcb) {
+    const inPcb = named && pcb.docs.some((d) => d.docId === named.docId) ? named.docId : (pcb.schematic || pcb.boards[0] || pcb.pro!).docId;
+    if (!enterPcb(pcb, inPcb)) return;
+    rootSchematic();
+  }
+  const doc = firstDoc(state.docs!, state.project!.docs, wanted);
+  if (!doc) { nothingToShow(); return; }
+  if (pcb && pcbs.length > 1) toast(`This project has ${pcbs.length} PCBs and this is "${pcb.name}". Turn on Mechanical CAD in your settings to have a tab for each.`, 6000);
+  await openDoc(doc);
+}
+
+/** Without the project shell: open the PCB's first document (what a project opens on), in place of Home or a BOM tab. */
+function openPlainStart(): void {
+  const pcb = boundPcb() ? undefined : plainPcb(projectPcbs(), null);
+  if (pcb && !enterPcb(pcb, (pcb.schematic || pcb.boards[0] || pcb.pro!).docId)) return;
+  if (pcb) rootSchematic();
+  const doc = firstDoc(state.docs!, state.project!.docs, null);
+  if (doc) void openDoc(doc); else nothingToShow();
 }
 
 async function refreshFromGithub(result: GithubPullResult): Promise<void> {
@@ -692,7 +751,7 @@ export async function openDoc(doc: DocEntry) {
   if (!docNav.lock) { docNav.list.length = docNav.idx + 1; docNav.list.push(doc.docId); docNav.idx = docNav.list.length - 1; }
   setupEditorChrome(); publishDocs();
   // the address names the document whenever the project has more than one thing to open
-  const several = state.docs!.length > 1 || !!(boundPcb() && boundPcb()!.dir) || allDocs().some((d) => isHostedDoc(d));
+  const several = state.docs!.length > 1 || !!(boundPcb() && boundPcb()!.dir) || (shellOn() && allDocs().some((d) => isHostedDoc(d)));
   const url = `/p/${state.project!.projectId}/edit` + (doc.docType === "footprint" ? `?fp=${encodeURIComponent(doc.docId)}` : several ? `?doc=${doc.docId}` : "");
   if (location.pathname + location.search !== url) history.replaceState(null, "", url);
   setStatusBar({ message: "" });   // KiCad leaves the message field empty until something reports there
@@ -764,7 +823,8 @@ export async function openDoc(doc: DocEntry) {
   }
   // back where this document was left (the same thing in the middle of the stage, at the same zoom, whatever
   // the panes around it have done to its size since); a document not seen before is shown whole
-  const seen = ok ? viewMemo.get(docId) : undefined;
+  // (with the project shell, which comes with Mechanical CAD; without it every document opens fitted, as it always did)
+  const seen = ok && shellOn() ? viewMemo.get(docId) : undefined;
   setTimeout(() => {   // not rAF: a background tab would defer it indefinitely
     if (state.docId !== docId) return;
     if (seen) { E.zoom = seen.zoom; E.panX = seen.panX + (stage.clientWidth - seen.w) / 2; E.panY = seen.panY + (stage.clientHeight - seen.h) / 2; E.viewTouched = true; applyView(); requestRender(); }
@@ -850,6 +910,8 @@ export function selectItemAction(id: string) {
 /** Open a tab by its id: a document of the project, "home", or a PCB's bill of materials ("bom:<PCB key>"). */
 export function openDocId(id: string) {
   if (!state.project) return;
+  // no Home and no BOM tab without the shell (Mechanical CAD off): what the project opens on instead
+  if (!shellOn() && (id === HOME_TAB || id.startsWith("bom:"))) { openPlainStart(); return; }
   if (id === HOME_TAB) { void openDoc(homeDoc()); return; }
   if (id.startsWith("bom:")) { if (projectPcbs().some((p) => p.key === id.slice(4))) void openDoc(bomDoc(id.slice(4))); return; }
   const whole = allDocs().find((x) => x.docId === id);
@@ -882,7 +944,9 @@ export function setProjectDocs(docs: DocEntry[], open?: string) {
   if (id.startsWith("bom:") && projectPcbs().some((p) => "bom:" + p.key === id)) return;
   // what was open is gone (somebody deleted it).  A sheet or board gives way to its PCB's first document; in a
   // project whose PCB is at the root, so does anything else, as it always did; otherwise Home.
+  // Without the shell (Mechanical CAD off) there is no Home to fall back on.
   const b = boundPcb();
+  if (!shellOn()) { openPlainStart(); return; }
   const next = b && (state.view === "editor" || !b.dir) ? firstDoc(state.docs!, state.project.docs, null) : null;
   void openDoc(next || homeDoc());
 }

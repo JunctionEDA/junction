@@ -4,6 +4,8 @@ import { leaveEditor, openEditor, takeBoot } from "./doc";
 import { closeHostedDoc } from "./dochost";
 import { $$ } from "./dom";
 import { api } from "./util";
+import { cadEnabled } from "../../../shared/cad";
+import { followCadSetting } from "../../../shared/theme";
 // ---------- routing ----------
 export function navigate(path: string, replace?: boolean): void {
   if (replace) history.replaceState(null, "", path); else history.pushState(null, "", path);
@@ -22,6 +24,7 @@ export function route() {
 export async function loadMe() {
   try { state.me = await (takeBoot("me") || api("/api/me")); } catch { state.me = null; }   // the page asks as it arrives (boot.ts)
   store.set({ me: state.me });
+  followCadSetting(cadEnabled(state));   // the theme's default goes with the Mechanical CAD setting (shared/theme.ts)
 }
 
 

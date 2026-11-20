@@ -2,12 +2,15 @@
 // the store's `me` that every part of the page reads it from, and what an open tab does when it changes.  The
 // chrome asks for it with dispatch({ type: "setCad", on }) (the account menu, the app menu, a CAD document's note).
 //
-// The page follows without a reload: the tabs, "+", Home and the board editor's CAD hooks (cad-usage.ts,
-// web/domains/pcb/mech) read the setting from the store, and a part studio or an assembly that is open is drawn
-// again, as its editor or as the note that CAD is off.
+// The page follows without a reload: the project shell (the tab bar, "+", Home), the board editor's CAD hooks
+// (cad-usage.ts, web/domains/pcb/mech) and the theme's default (shared/theme.ts) read the setting, and what is
+// open is drawn again where it has to be: a part studio or an assembly as its editor or as the note that CAD is
+// off, and Home or a BOM tab, which have no place without the shell, gives way to the PCB's first document.
 import { isCadDocType } from "../../registry";
+import { followCadSetting } from "../../../shared/theme";
 import { state, store } from "./appstore";
 import { openDocId } from "./doc";
+import { isShellView } from "./dochost";
 import { api, toast } from "./util";
 
 let asked = 0;
@@ -16,7 +19,8 @@ function apply(on: boolean): void {
   if (!state.me || !!state.me.cad === on) return;
   state.me = { ...state.me, cad: on };
   store.set({ me: state.me });
-  if (state.view === "cad" && state.doc && isCadDocType(state.doc.docType)) openDocId(state.doc.docId);
+  followCadSetting(on);
+  if (state.view === "cad" && state.doc && (isCadDocType(state.doc.docType) || (!on && isShellView(state.doc.docType)))) openDocId(state.doc.docId);
 }
 
 /** Turn Mechanical CAD on or off for the signed-in person (PUT /api/me/cad). */

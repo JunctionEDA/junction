@@ -5,13 +5,14 @@
 type Mode = "system" | "light" | "dark";
 
 function stored(): Mode {
-  try { const t = localStorage.getItem("kui.theme"); return t === "dark" || t === "system" ? t : "light"; } catch (e) { return "light"; }
+  // nothing chosen: light for a person with Mechanical CAD on, else the system's (web/shared/theme.ts)
+  try { const t = localStorage.getItem("kui.theme"); return t === "light" || t === "dark" || t === "system" ? t : localStorage.getItem("kui.cad") === "1" ? "light" : "system"; } catch (e) { return "system"; }
 }
 
-function apply(mode: Mode): void {
+function apply(mode: Mode, choose = true): void {
   const root = document.documentElement;
   root.dataset.theme = mode;
-  try { if (mode === "light") localStorage.removeItem("kui.theme"); else localStorage.setItem("kui.theme", mode); } catch (e) { /* no storage */ }
+  if (choose) try { localStorage.setItem("kui.theme", mode); } catch (e) { /* no storage */ }
   document.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => {
     const on = b.dataset.mode === mode; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on));
   });
@@ -30,4 +31,4 @@ function values(): void {
 
 document.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => b.addEventListener("click", () => apply(b.dataset.mode as Mode)));
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", values);
-apply(stored());
+apply(stored(), false);
