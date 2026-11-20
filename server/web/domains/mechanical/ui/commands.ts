@@ -177,8 +177,8 @@ export function toolbarSections(studio: PartStudio): Section[] {
     out.push(ofTools("edit", tools("edit")));
     for (const sec of FEATURE_SECTIONS) {
       const slots = slotsOf(features.filter((f) => (f.toolbarSection || "solid") === sec), (f) => f.toolbarMenu, fe, (f) => f.toolbarKeep, sec);
-      // tools that put themselves among the features follow the solids
-      if (sec === "solid") slots.push(...slotsOf(tools("feature"), (t) => t.menu, te, (t) => t.keep, sec));
+      // tools that put themselves among the features follow that section's features (the solids', if they do not say)
+      slots.push(...slotsOf(tools("feature").filter((t) => (t.section || "solid") === sec), (t) => t.menu, te, (t) => t.keep, sec));
       out.push(section(sec, "feature", slots, sec === "sketch"));
     }
   }

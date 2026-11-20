@@ -26,6 +26,8 @@ export interface ToolDefinition {
   order?: number;
   /** a single key that runs the tool while the viewport has the keyboard ("l", "Escape") */
   key?: string;
+  /** a "feature" tool: the toolbar section it sits in among the features (core/feature.ts FeatureSection; "solid" when not given) */
+  section?: string;
   /** tools of one group that name the same menu share one drop-down button with that title */
   menu?: string;
   /** false hides the button (a tool reached only by its key or from a menu) */
