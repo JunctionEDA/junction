@@ -24,9 +24,11 @@ pub(crate) const ICON_V: &str = "j2";
 pub(crate) const THEME_CSS: &str = include_str!("../static/theme.css");
 
 /// The head of the small server-rendered pages (join, authorize, about): fonts, the theme, and
-/// the layout of a single centred dialog.
+/// the layout of a single centred dialog.  The script is the theme before the first paint, as every page has it
+/// (web/shared/theme.ts): the person's choice, else light with Mechanical CAD on and the system's without.
 pub(crate) const STYLE: &str = concat!(r#"
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var s=localStorage,t=s.getItem("kui.theme");if(t!=="light"&&t!=="dark"&&t!=="system")t=s.getItem("kui.cad")==="1"?"light":"system";document.documentElement.setAttribute("data-theme",t)}catch(e){document.documentElement.setAttribute("data-theme","system")}</script>
 <link rel="icon" type="image/svg+xml" href="/brand/j2/icon.svg"><link rel="icon" type="image/png" sizes="192x192" href="/brand/j2/icon-192.png"><link rel="alternate icon" href="/brand/j2/favicon.ico" sizes="any"><link rel="apple-touch-icon" href="/brand/j2/icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
@@ -617,9 +619,14 @@ pub async fn project_page(
                          esc(&d.path), esc(&d.doc_type)))
         .collect();
 
-    // the board's picture, or for a project without one the picture of a part studio or an assembly (dockind.rs)
+    // the board's picture, or for a project without one, to a person with Mechanical CAD on (web/shared/cad.ts), the
+    // picture of a part studio or an assembly (dockind.rs)
     let has_board = docs.iter().any(|d| d.doc_type == "kicad_pcb");
-    let preview = if has_board || docs.iter().any(|d| !d.doc_type.starts_with("kicad_") && crate::dockind::of(&d.doc_type).thumbnail) {
+    let cad = match &viewer {
+        Some(u) => persist::cad_enabled(&state.pool, u.id).await?,
+        None => false,
+    };
+    let preview = if has_board || (cad && docs.iter().any(|d| !d.doc_type.starts_with("kicad_") && crate::dockind::of(&d.doc_type).thumbnail)) {
         let live = if has_board { format!(r#"<p><a class="btn secondary" href="/p/{id}/live">Watch live</a></p>"#) } else { String::new() };
         format!(
             r#"<p><img style="width:100%;background:var(--sheet);border:1px solid var(--line);border-radius:var(--r-2);padding:10px"
