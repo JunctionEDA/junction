@@ -95,7 +95,7 @@ export class RegenEngine {
 
     const haveSet = new Set(have);
     const bodies: BodyResult[] = state.bodies.map((b) => {
-      const out: BodyResult = { id: b.id, name: b.name, createdBy: b.createdBy, rev: b.rev, ...(b.reference ? { reference: true as const } : {}) };
+      const out: BodyResult = { id: b.id, name: b.name, createdBy: b.createdBy, rev: b.rev, ...(b.reference ? { reference: true as const } : {}), ...(b.sheet ? { sheet: true as const } : {}) };
       if (!haveSet.has(b.rev)) out.mesh = this.k.withScope(() => tessellate(this.k, b, this.quality || qualityFor(this.k, b)));
       return out;
     });
@@ -111,18 +111,25 @@ export class RegenEngine {
     const state: ModelState = { bodies: before.bodies.slice(), sketches: { ...before.sketches }, datums };
     const owned: Deletable[] = [], temp: Deletable[] = [], notes: string[] = [];
     const t0 = Date.now();
-    const made = (body: Body) => { owned.push(body.shape); return body; };
+    // a body with no solid in it is a surface (types.ts Body.sheet): the shape says so, not the feature
+    const made = (body: Body) => {
+      owned.push(body.shape);
+      const sheet = !body.reference && !k.withScope(() => k.sub(body.shape, "solid").length);
+      if (sheet) body.sheet = true; else delete body.sheet;
+      return body;
+    };
+    const sheetLike = (shape: Shape) => !k.withScope(() => k.sub(shape, "solid").length);
     // every wrapper the helpers hand out while this feature runs lives exactly as long as its cached result
     k.scope = owned;
     const ctx: EvalContext = {
       oc: k.oc, k, feature: { id: f.id, type: f.type, name: f.name },
-      bodies: () => (state.bodies.some((b) => b.reference) ? state.bodies.filter((b) => !b.reference) : state.bodies),
+      bodies: () => (state.bodies.some((b) => b.reference || b.sheet) ? state.bodies.filter((b) => !b.reference && !b.sheet) : state.bodies),
       allBodies: () => state.bodies,
       body: (id) => state.bodies.find((b) => b.id === id),
       addBody: (shape, names, o = {}) => {
         let id = o.suffix ? `${f.id}:${o.suffix}` : f.id;
         for (let n = 2; state.bodies.some((b) => b.id === id); n++) id = `${f.id}:${o.suffix ? o.suffix + "." : ""}${n}`;
-        const body = made({ id, name: o.name || `Part ${state.bodies.length + 1}`, rev: nextRev++, shape, topo: buildTopo(k, shape, names, f.id), createdBy: f.id, ...(o.reference ? { reference: true } : {}) });
+        const body = made({ id, name: o.name || (!o.reference && sheetLike(shape) ? `Surface ${state.bodies.filter((b) => b.sheet).length + 1}` : `Part ${state.bodies.filter((b) => !b.sheet).length + 1}`), rev: nextRev++, shape, topo: buildTopo(k, shape, names, f.id), createdBy: f.id, ...(o.reference ? { reference: true } : {}) });
         state.bodies.push(body);
         return body;
       },

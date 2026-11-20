@@ -16,11 +16,14 @@ import { axisOf } from "../kernel/ops/ref-geom";
 import type { RefTarget } from "./_refs";
 import { combine, OPERATION_OPTIONS, type Operation, type Tool } from "../kernel/ops/combine";
 import { moveNamed } from "../kernel/ops/shapes";
+import { isSurface, revolveSurface, withSurfaceType } from "../kernel/ops/surface-sweeps";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export interface RevolveParams {
   [key: string]: any;
+  /** "surface": a sheet from the sketch's curves instead of a solid from its regions (kernel/ops/surface-sweeps.ts) */
+  bodyType?: "solid" | "surface";
   profile: { sketch: string; regions: string[] | null } | null;
   operation: Operation;
   /** "line": a loose line of the sketch; "x" / "y": the sketch's own axes; "edge": what `axisEdge` names */
@@ -38,8 +41,8 @@ export default defineFeature<RevolveParams>({
   title: "Revolve",
   icon: '<path class="f" d="M4 8.5c0-1.7 3.6-3 8-3s8 1.3 8 3v8c0 1.7-3.6 3-8 3s-8-1.3-8-3z"/><ellipse cx="12" cy="8.5" rx="8" ry="3"/><path d="M4 8.5v8c0 1.7 3.6 3 8 3s8-1.3 8-3v-8"/><path class="d" d="M12 1.5v21"/>',
   toolbarOrder: 22, toolbarSection: "solid", toolbarKeep: 95,
-  defaults: () => ({ profile: null, operation: "new", axisType: "line", axisEdge: null, endType: "full", angle: 180, flip: false, targets: [] }),
-  schema: [
+  defaults: () => ({ bodyType: "solid", profile: null, operation: "new", axisType: "line", axisEdge: null, endType: "full", angle: 180, flip: false, targets: [] }),
+  schema: withSurfaceType([
     { key: "profile", label: "Sketch to revolve", kind: "profile" },
     { key: "operation", label: "Result", kind: "enum", options: OPERATION_OPTIONS },
     { key: "axisType", label: "Axis", kind: "enum", options: [{ value: "line", label: "Sketch line" }, { value: "x", label: "Sketch X" }, { value: "y", label: "Sketch Y" }, { value: "edge", label: "Picked" }], hint: "Sketch line: a line drawn in the sketch that is not part of the outline. Picked: an edge, a line of any sketch or a reference axis you click." },
@@ -48,9 +51,10 @@ export default defineFeature<RevolveParams>({
     { key: "angle", label: "Angle", kind: "number", unit: "deg", min: 0.01, max: 360, step: 5, visible: (p) => p.endType !== "full" },
     { key: "flip", label: "Opposite direction", kind: "boolean", visible: (p) => p.endType === "angle" },
     { key: "targets", label: "Bodies to change", kind: "bodies", hint: "Leave empty for every body.", visible: (p) => p.operation !== "new" },
-  ],
+  ], ["operation", "targets"]),
 
   evaluate(ctx: EvalContext, p: RevolveParams) {
+    if (isSurface(p)) return revolveSurface(ctx, p);
     const k = ctx.k, oc = ctx.oc as any, id = ctx.feature.id;
     if (!p.profile || !p.profile.sketch) throw ctx.fail("Pick a sketch to revolve.");
     const full = p.endType === "full" || Number(p.angle) >= 360;

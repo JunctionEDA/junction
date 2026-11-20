@@ -6,24 +6,26 @@ import { defineFeature } from "../core/feature";
 import { ShapeIndex, type NamedResult } from "../kernel/occ";
 import type { EvalContext } from "../kernel/types";
 import { applyOperation, operationFields, type Operation } from "../kernel/ops/sweep-apply";
+import { isSurface, loftSurface, withSurfaceType } from "../kernel/ops/surface-sweeps";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export interface LoftParams { [key: string]: any; profiles: string[]; ruled: boolean; operation: Operation; targets: string[] }
+export interface LoftParams { [key: string]: any; /** "surface": a sheet through the sketches' curves (kernel/ops/surface-sweeps.ts) */ bodyType?: "solid" | "surface"; profiles: string[]; ruled: boolean; operation: Operation; targets: string[] }
 
 export default defineFeature<LoftParams>({
   type: "loft",
   title: "Loft",
   icon: '<path class="f" d="M3 17.5L8.5 6h7L21 17.5c0 1.7-4 3-9 3s-9-1.3-9-3z"/><path d="M3 17.5L8.5 6M21 17.5L15.5 6"/><ellipse cx="12" cy="17.5" rx="9" ry="3"/><ellipse cx="12" cy="6" rx="3.5" ry="1.6"/>',
   toolbarOrder: 25, toolbarSection: "solid", toolbarKeep: 78,
-  defaults: () => ({ profiles: [], ruled: false, operation: "new", targets: [] }),
-  schema: [
+  defaults: () => ({ bodyType: "solid", profiles: [], ruled: false, operation: "new", targets: [] }),
+  schema: withSurfaceType([
     { key: "profiles", label: "Profiles", kind: "features", types: ["sketch"], hint: "Two or more sketches, in the order the loft passes through them." },
     { key: "ruled", label: "Ruled", kind: "boolean", hint: "Straight between profiles, instead of one smooth surface through them." },
     ...operationFields,
-  ],
+  ], ["operation", "targets"]),
 
   evaluate(ctx: EvalContext, p: LoftParams) {
+    if (isSurface(p)) return loftSurface(ctx, p);
     const oc = ctx.oc as any, k = ctx.k, id = ctx.feature.id;
     const ids = Array.isArray(p.profiles) ? p.profiles : [];
     if (ids.length < 2) throw ctx.fail("Pick two or more sketches to loft through.");

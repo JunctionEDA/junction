@@ -102,7 +102,7 @@ export function featureEntry(studio: PartStudio, f: FeatureDefinition): Entry {
   const s = studio.getState();
   const key = Object.keys(FEATURE_KEYS).find((k) => FEATURE_KEYS[k] === f.type);
   return {
-    id: "f:" + f.type, title: f.title, hint: FEATURE_HINTS[f.type], icon: f.icon, shortcut: key ? `Shift+${key.toUpperCase()}` : undefined, keywords: KEYWORDS["f:" + f.type],
+    id: "f:" + f.type, title: f.title, hint: FEATURE_HINTS[f.type] ?? f.hint, icon: f.icon, shortcut: key ? `Shift+${key.toUpperCase()}` : undefined, keywords: KEYWORDS["f:" + f.type] ?? f.keywords,
     why: s.canEdit ? null : "View-only access", run: () => { studio.startFeature(f.type); studio.viewport.canvas.focus(); },
   };
 }
@@ -142,7 +142,7 @@ const SKETCH_PARTS: { id: string; title: string; from: number; to: number }[] = 
   { id: "sketch-draw", title: "Draw", from: 1, to: 100 }, { id: "sketch-modify", title: "Modify", from: 100, to: 200 },
   { id: "sketch-constrain", title: "Constrain", from: 200, to: 300 }, { id: "sketch-dimension", title: "Dimension", from: 300, to: 900 },
 ];
-const SECTION_TITLES: { [id: string]: string } = { edit: "Edit", sketch: "Sketch", solid: "Create", modify: "Modify", combine: "Combine", pattern: "Pattern", reference: "Reference geometry", board: "Circuit board", inspect: "Inspect", view: "View", file: "File" };
+const SECTION_TITLES: { [id: string]: string } = { edit: "Edit", sketch: "Sketch", solid: "Create", modify: "Modify", combine: "Combine", pattern: "Pattern", surface: "Surface", reference: "Reference geometry", board: "Circuit board", inspect: "Inspect", view: "View", file: "File" };
 
 /** The toolbar for the mode the studio is in. */
 export function toolbarSections(studio: PartStudio): Section[] {

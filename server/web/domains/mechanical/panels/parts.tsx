@@ -1,4 +1,5 @@
-// The Parts panel: the bodies the features up to the rollback bar make.
+// The Parts panel: the bodies the features up to the rollback bar make.  Solids are listed first; surfaces
+// (bodies with no solid in them: kernel/types.ts Body.sheet) follow under their own heading, "Surfaces".
 //
 //   click selects the part (its faces; Ctrl adds) · the pointer over a row lights the part up in the model
 //   the eye hides and shows it; right-click: Hide, Isolate, Show all, Zoom to, Appearance and material, Delete
@@ -33,7 +34,7 @@ function Parts({ studio }: { studio: PartStudio }) {
     window.addEventListener("pointerdown", close); window.addEventListener("blur", close);
     return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("blur", close); };
   }, [menu]);
-  if (!bodies.length) return <p className="note px-2 py-1 m-0" data-empty>No parts yet. A part appears when a feature makes a solid: extrude or revolve a sketch.</p>;
+  if (!bodies.length) return <p className="note px-2 py-1 m-0" data-empty>No parts yet. A part appears when a feature makes a solid: extrude or revolve a sketch. Surfaces are listed here too.</p>;
   const on = (id: string) => selection.some((p) => (p.kind === "face" || p.kind === "edge" || p.kind === "vertex") && p.body === id);
   const b = menu ? bodies.find((x) => x.id === menu.id) : undefined;
   const item = (label: string, run: () => void, danger = false) => (
@@ -41,10 +42,12 @@ function Parts({ studio }: { studio: PartStudio }) {
   );
   return (
     <div className="flex flex-col py-1 text-sm" role="listbox" aria-label="Parts" aria-multiselectable="true">
-      {bodies.map((b) => {
+      {[...bodies.filter((x) => !x.sheet), ...bodies.filter((x) => x.sheet)].map((b, i, all) => {
         const visible = display.isVisible(b.id);
-        return (
-          <div key={b.id} role="option" aria-selected={on(b.id)} data-body={b.id} data-visible={visible} className={cx("group flex items-center gap-1.5 h-6.5 pl-2 pr-1.5 cursor-default select-none", on(b.id) ? "bg-sel" : "hover:bg-sel-soft", (b.reference || !visible) && "text-ink-3")}
+        // the first surface is preceded by the heading of its group
+        const heading = b.sheet && !(i && all[i - 1].sheet) ? <div key="surfaces" data-group="surfaces" className="px-2 pt-1.5 pb-0.5 text-xs text-ink-3 select-none">Surfaces ({all.length - i})</div> : null;
+        return [heading,
+          <div key={b.id} role="option" aria-selected={on(b.id)} data-body={b.id} data-kind={b.sheet ? "surface" : b.reference ? "reference" : "part"} data-visible={visible} className={cx("group flex items-center gap-1.5 h-6.5 pl-2 pr-1.5 cursor-default select-none", on(b.id) ? "bg-sel" : "hover:bg-sel-soft", (b.reference || !visible) && "text-ink-3")}
             title={b.reference ? `${b.name}: reference geometry (not a part of this studio)` : undefined}
             onClick={(ev) => { if (busy) return; const faces = facesOf(studio, b), add = ev.ctrlKey || ev.metaKey || ev.shiftKey; studio.select(on(b.id) ? selection.filter((p) => !("body" in p && p.body === b.id)) : [...(add ? selection : []), ...faces]); }}
             onPointerEnter={() => studio.view.setFeatureHover(visible ? facesOf(studio, b) : null)} onPointerLeave={() => studio.view.setFeatureHover(null)}
@@ -52,8 +55,8 @@ function Parts({ studio }: { studio: PartStudio }) {
             <span className="flex-1 truncate">{b.name}</span>
             {b.reference ? <span className="text-xs text-ink-3">reference</span> : null}
             <Eye shown={visible} label={b.name} onToggle={() => display.toggle(b.id)} />
-          </div>
-        );
+          </div>,
+        ];
       })}
       {ds.hidden.length || ds.isolated ? <button type="button" className="btn sm ghost self-start mx-1.5 mt-0.5 h-5 min-h-0 px-1 text-xs" data-show-all onClick={() => display.showAll()}>Show all parts</button> : null}
       {menu && b ? (
@@ -62,11 +65,11 @@ function Parts({ studio }: { studio: PartStudio }) {
           {item(ds.isolated && ds.isolated.length === 1 && ds.isolated[0] === b.id ? "Show all parts" : "Isolate", () => display.isolate(ds.isolated && ds.isolated[0] === b.id ? null : [b.id]))}
           {item("Zoom to", () => { const box = studio.view.boxOf(facesOf(studio, b)); if (box) studio.viewport.fit(box); })}
           {item("Appearance and material…", () => { studio.select(facesOf(studio, b).slice(0, 1)); showPanel("appearance"); })}
-          {canEdit && !b.reference && !busy ? item("Delete part…", () => { studio.startFeature("delete-body"); studio.setDraft({ params: { bodies: [b.id] } }); }, true) : null}
+          {canEdit && !b.reference && !busy ? item(b.sheet ? "Delete surface…" : "Delete part…", () => { studio.startFeature("delete-body"); studio.setDraft({ params: { bodies: [b.id] } }); }, true) : null}
         </div>
       ) : null}
     </div>
   );
 }
 
-export default definePanel({ id: "parts", title: "Parts", side: "left", order: 20, count: (studio) => studio.getState().bodies.filter((b) => !b.reference).length || null, render: (studio) => <Parts studio={studio} /> });
+export default definePanel({ id: "parts", title: "Parts", side: "left", order: 20, count: (studio) => studio.getState().bodies.filter((b) => !b.reference && !b.sheet).length || null, render: (studio) => <Parts studio={studio} /> });

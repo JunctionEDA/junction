@@ -18,6 +18,7 @@ import { draftFaces } from "../kernel/ops/draft";
 import { trimAtBodies, trimAtPlane } from "../kernel/ops/extent";
 import { moveNamed, reachPast } from "../kernel/ops/shapes";
 import { thickWall } from "../kernel/ops/thick";
+import { extrudeSurface, isSurface, withSurfaceType } from "../kernel/ops/surface-sweeps";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -25,6 +26,8 @@ export type EndType = "blind" | "symmetric" | "through" | "upToFace" | "upToNext
 
 export interface ExtrudeParams {
   [key: string]: any;
+  /** "surface": a sheet from the sketch's curves instead of a solid from its regions (kernel/ops/surface-sweeps.ts) */
+  bodyType?: "solid" | "surface";
   /** the sketch, and which of its regions (null: all of them) */
   profile: { sketch: string; regions: string[] | null } | null;
   operation: Operation;
@@ -61,10 +64,10 @@ export default defineFeature<ExtrudeParams>({
   icon: '<path class="f" d="M3.5 12h10.5v9.5H3.5z"/><path d="M3.5 12h10.5v9.5H3.5zM3.5 12l4.5-4h10.5L14 12M18.5 8v9.5l-4.5 4"/><path d="M11 9.5V2M8.2 4.8L11 2l2.8 2.8"/>',
   toolbarOrder: 20, toolbarSection: "solid", toolbarKeep: 100,
   defaults: () => ({
-    profile: null, operation: "new", endType: "blind", depth: 10, face: null, flip: false,
+    bodyType: "solid", profile: null, operation: "new", endType: "blind", depth: 10, face: null, flip: false,
     second: false, secondType: "blind", secondDepth: 10, draft: false, draftAngle: 3, thin: false, thickness: 1, thinSide: "inside", targets: [],
   }),
-  schema: [
+  schema: withSurfaceType([
     { key: "profile", label: "Sketch to extrude", kind: "profile" },
     { key: "operation", label: "Result", kind: "enum", options: OPERATION_OPTIONS },
     { key: "endType", label: "End", kind: "enum", options: END_OPTIONS },
@@ -80,9 +83,10 @@ export default defineFeature<ExtrudeParams>({
     { key: "thickness", label: "Wall", kind: "number", unit: "mm", min: 0.001, step: 0.5, visible: (p) => !!p.thin },
     { key: "thinSide", label: "Wall side", kind: "enum", options: [{ value: "inside", label: "Inside" }, { value: "outside", label: "Outside" }, { value: "both", label: "Both" }], visible: (p) => !!p.thin },
     { key: "targets", label: "Bodies to change", kind: "bodies", hint: "Leave empty for every body.", visible: (p) => p.operation !== "new" },
-  ],
+  ], ["operation", "face", "draft", "draftAngle", "thin", "thickness", "thinSide", "targets"]),
 
   evaluate(ctx: EvalContext, p: ExtrudeParams) {
+    if (isSurface(p)) return extrudeSurface(ctx, p);
     const k = ctx.k, id = ctx.feature.id;
     const end: EndType = p.endType || "blind";
     const op: Operation = p.operation || "new";

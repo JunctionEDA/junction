@@ -32,6 +32,13 @@ export interface Body {
    * body" does not fuse with it or cut it.
    */
   reference?: boolean;
+  /**
+   * A surface: a body with no solid in it (one face, or faces sewn into a sheet).  Set by the engine from the
+   * shape, never by a feature.  It is listed under Surfaces, and `ctx.bodies()` leaves it out, so a feature
+   * that adds to or cuts "every body" works on the parts only; a feature that is given the body (Transform,
+   * Delete, the surface features) finds it with `ctx.body(id)` or among `ctx.allBodies()`.
+   */
+  sheet?: boolean;
 }
 
 /** A sketch as later features see it: where it lies and the closed regions it encloses, as kernel faces. */
@@ -80,9 +87,9 @@ export interface EvalContext {
   readonly k: Kernel;
   readonly feature: { id: string; type: string; name: string };
 
-  /** The bodies as they are now, in creation order, without reference bodies (see Body.reference). */
+  /** The solid bodies as they are now, in creation order: no reference bodies (Body.reference), no surfaces (Body.sheet). */
   bodies(): readonly Body[];
-  /** Every body, reference bodies included. */
+  /** Every body, reference bodies and surfaces included. */
   allBodies(): readonly Body[];
   body(id: string): Body | undefined;
   /**

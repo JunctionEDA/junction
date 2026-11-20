@@ -163,7 +163,7 @@ const round = (v: number, digits = 4): number => { const m = Math.pow(10, digits
 function bodiesOf(k: Kernel, engine: RegenEngine, result: RegenResult, names: boolean): any[] {
   const mass = SERVICES.find((s) => s.name === "mass-properties");
   return engine.state.bodies.map((b) => {
-    const out: any = { id: b.id, name: b.name, created_by: b.createdBy };
+    const out: any = { id: b.id, name: b.name, created_by: b.createdBy, ...(b.sheet ? { surface: true } : {}) };
     const mesh = result.bodies.find((x) => x.id === b.id)?.mesh;
     if (mesh) out.bbox_mm = { min: [0, 1, 2].map((i) => round(mesh.bbox[i])), max: [3, 4, 5].map((i) => round(mesh.bbox[i])) };
     if (mass) {
