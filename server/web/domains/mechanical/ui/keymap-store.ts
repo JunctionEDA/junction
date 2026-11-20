@@ -26,26 +26,32 @@ function store(next: Overrides): void {
   changed();
 }
 
-/** The commands that can have a key (studio.ts calls this once, with every tool and feature). */
-export function setKeyCommands(list: KeyCommand[]): void { commands = list; changed(); }
-export const keyCommands = (): readonly KeyCommand[] => commands;
-export const keyBindings = (): readonly Binding[] => bindings;
+/**
+ * Where the commands that can have a key come from (studio.ts says so once: every tool and feature).  They are
+ * asked for when a key is first looked up, not when this is called: the tool and feature registries import the
+ * part studio, so they are not there yet while its module loads.
+ */
+let source: (() => KeyCommand[]) | null = null;
+export function setKeyCommands(from: () => KeyCommand[]): void { source = from; commands = []; }
+function ready(): void { if (!commands.length && source) { commands = source(); bindings = bindingsOf(commands, overrides); } }
+export const keyCommands = (): readonly KeyCommand[] => { ready(); return commands; };
+export const keyBindings = (): readonly Binding[] => { ready(); return bindings; };
 export const keyOverrides = (): Overrides => overrides;
 export const subscribeKeymap = (fn: () => void): (() => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
 /** React: the bindings; re-renders when a key is changed. */
 export const useKeyBindings = (): readonly Binding[] => useSyncExternalStore(subscribeKeymap, keyBindings);
 
 /** Give a command a chord (null: none); the commands that had it lose it and are returned. */
-export function setKey(id: string, chord: string | null): string[] { const r = rebind(commands, overrides, id, chord); store(r.overrides); return r.taken; }
+export function setKey(id: string, chord: string | null): string[] { ready(); const r = rebind(commands, overrides, id, chord); store(r.overrides); return r.taken; }
 export function resetKey(id: string): void { store(resetBinding(overrides, id)); }
 export function resetAllKeys(): void { store({}); }
 /** Replace every override at once (a file a person saved earlier). */
-export function loadKeys(v: unknown): void { const clean = cleanOverrides(v); store(Object.fromEntries(Object.entries(clean).filter(([id]) => commands.some((c) => c.id === id)))); }
+export function loadKeys(v: unknown): void { ready(); const clean = cleanOverrides(v); store(Object.fromEntries(Object.entries(clean).filter(([id]) => commands.some((c) => c.id === id)))); }
 
 /** The key a command has now, as it is shown ("M", "Shift+E"), or undefined. */
-export const shortcutOf = (id: string): string | undefined => bindings.find((b) => b.id === id)?.chord || undefined;
+export const shortcutOf = (id: string): string | undefined => keyBindings().find((b) => b.id === id)?.chord || undefined;
 /** The command a key event starts, if any. */
 export function commandForEvent(ev: KeyboardEvent, inSketch: boolean, only?: (b: Binding) => boolean): Binding | null {
-  return commandFor(bindings, chordOf(ev), inSketch, only);
+  return commandFor(keyBindings(), chordOf(ev), inSketch, only);
 }
 export const isFeatureCommand = (b: Binding): boolean => b.id.startsWith("f:");

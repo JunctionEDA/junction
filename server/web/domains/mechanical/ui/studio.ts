@@ -950,7 +950,7 @@ export const awaitsPlane = (s: { editing: StudioState["editing"] }): boolean => 
 export const FEATURE_KEYS: { readonly [key: string]: string } = { s: "sketch", e: "extrude", w: "revolve", f: "fillet", c: "chamfer", h: "hole", p: "plane" };
 
 // every tool and feature can have a key, its own or one a person gives it (ui/keymap.ts, ui/keymap-store.ts)
-setKeyCommands([
+setKeyCommands(() => [
   ...TOOLS.map((t) => ({ id: t.id, title: t.title, context: t.group === "sketch" ? ("sketch" as const) : ("model" as const), chord: t.key || null })),
   ...FEATURES.filter((f) => f.toolbar !== false).map((f) => { const k = Object.keys(FEATURE_KEYS).find((x) => FEATURE_KEYS[x] === f.type); return { id: "f:" + f.type, title: f.title, context: "any" as const, chord: k ? `Shift+${k.toUpperCase()}` : null }; }),
 ]);
