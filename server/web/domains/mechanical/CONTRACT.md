@@ -55,34 +55,51 @@ changes it. The switch, "Mechanical CAD (part studios and assemblies)", is in th
 page (`platform/home/Home.tsx`) and in the editor's Junction menu (`shared/components/MenuBar.tsx`); it takes
 effect at once, without a reload.
 
+**The setting carries the project shell too.** Part studios and assemblies live in the shell (the Home tab, the tab
+bar with "+", several PCBs and assemblies in one project, a PCB's BOM as a tab, who is on which tab), so the shell
+comes with CAD. With CAD off, and for a signed-out visitor, Junction is the PCB design software alone, as it was
+before CAD: a project opens straight into the schematic and board editor, with no tab bar and no Home tab.
+
 Every caller asks `shared/cad.ts`: `cadEnabled()` (or `useApp(cadEnabled)` in a component), `setCadEnabled(on)`
-(which dispatches `setCad`; `pcb/editor/cad-setting.ts` sends the request, updates the store's `me` and draws an
-open CAD tab again). Which kinds are CAD is the registry's `cad: true` (`isCadDocType`, `kindAvailable`). A new
-CAD kind is marked there and nothing else changes.
+(which dispatches `setCad`; `pcb/editor/cad-setting.ts` sends the request, updates the store's `me` and draws again
+what is open: a CAD tab as its editor or its note, and with CAD off Home or a BOM tab gives way to the PCB). Which
+kinds are CAD is the registry's `cad: true` (`isCadDocType`, `kindAvailable`). A new CAD kind is marked there and
+nothing else changes. On the server, `persist::cad_enabled` is the same setting.
 
 | With CAD off | Where |
 |---|---|
-| no part studio or assembly in "+", Home's create buttons or the tab bar and tab manager | `doctabs/actions.ts creatables(…, cad)`, `DocTabs.tsx`, `ProjectHome.tsx` |
-| a dropped STEP file is stored as the 3D model it is (in `models/`), and the toast says how to open it as a part studio | `doctabs/actions.ts importFiles` |
-| Home still lists the project's CAD documents, with "Turn on Mechanical CAD in your settings to open" | `ProjectHome.tsx` |
-| opening one, from Home or by a link (`/p/<project>/edit?doc=<id>`), shows that note and a button that turns CAD on and opens it; no bundle is loaded | `pcb/editor/dochost.ts` |
+| no tab bar: no Home tab, no "+", no tab manager, no project document joined, no room (presence by tab) | `doctabs/DocTabs.tsx` (`open` needs `cad`) |
+| a project opens on its PCB's root schematic (or its board), and `?doc=` opens the sheet or board it names; `?doc=home` or a BOM tab opens what the project opens on; with no PCB at all the editor says "This project has no board or schematic yet" | `pcb/editor/doc.ts` (`shellOn`, `openPcbOnly`, `openDocId`, `setProjectDocs`) |
+| a project with several PCBs (made by somebody with CAD on): the editor works on the one a link names, else the one this page worked on before, else the one at the root, else the first by folder, and a toast says how many there are; the others open by their links | `pcb/editor/doc.ts` (`plainPcb`) |
+| the address names the document only when the PCB has more than one to open, or is in a folder; going back to a sheet fits it again (no remembered view) | `pcb/editor/doc.ts openDoc` |
+| a blank project is a schematic and a board (a `.kicad_pro`, `.kicad_sch` and `.kicad_pcb` at the root); the new-project dialog says so | `server/src/http.rs blank_template`, `platform/home/UploadDialog.tsx` |
+| the theme's default is the system's (light with CAD on); a person's own choice wins either way | `shared/theme.ts` (`followCadSetting`, the `kui.cad` hint the pages' first-paint scripts read) |
+| opening a part studio or an assembly by a link (`/p/<project>/edit?doc=<id>`) shows a note, a button that turns CAD on and opens it, and one that opens the PCB instead; no bundle is loaded | `pcb/editor/dochost.ts` |
 | Compare of a part studio says the same instead of loading its renderer | `review/renderers.ts` |
 | on a board: no "Used in" button, no board-link badge or panel, no reconciler, no height check, no enclosure in the 3D viewer, and no part studio is read | `pcb/editor/cad-usage.ts`, `pcb/mech/sync.ts` (the badge, panel and enclosure follow its state) |
-| the MCP endpoint lists no `cad_*` tool and refuses one called by name | `server/src/mcp.rs` (`listed`, `cad_on`) |
+| the MCP endpoint lists no `cad_*` tool and refuses one called by name; its instructions, the `document` argument and `get_project`'s note say nothing of part studios or several PCBs | `server/src/mcp.rs` (`listed`, `def_for`, `cad_on`) |
+| the public project page shows no picture of a part studio for a project without a board | `server/src/pages.rs project_page` |
 
-What does not change: **the project shell is everybody's** (Home, several PCBs, their views, the BOM), and no
-document is hidden or refused. The server takes CAD documents from anybody (a collaborator with CAD on adds them
-to a shared project), and the tab order keeps their places. A board driven by somebody's part studio keeps its
-driven items exactly as they are stored for a person with CAD off: locked and grouped under the part studio's
-name; their page writes nothing to them and releases nothing (a link is released only by a page with CAD on,
-when it is really gone). They can still unlock a driven item by hand as any locked item; the next page with CAD
-on puts it back.
+With CAD on, Home's create buttons, "+" and the tab manager offer part studios and assemblies, and a dropped STEP
+file becomes a part studio (`doctabs/actions.ts creatables(…, cad)`, `importFiles`); Home lists every document.
 
-A signed-out visitor has no account and so no CAD: a public project's part studios show the note.
+What does not change: **no document is hidden or refused**. The server takes CAD documents and further PCBs from
+anybody (a collaborator with CAD on adds them to a shared project), keeps the project's own document and the tab
+order with their places, and the electronics editor of a person with CAD off still keeps to one PCB of such a
+project (`pcb/editor/pcbscope.ts`), so it never mixes two PCBs' files. The assistant's electronics tools do the same
+for everybody (`pcb/mcp/host.ts scopeToPcb`; each answer names the PCB it worked on). A board driven by somebody's
+part studio keeps its driven items exactly as they are stored for a person with CAD off: locked and grouped under
+the part studio's name; their page writes nothing to them and releases nothing (a link is released only by a page
+with CAD on, when it is really gone). They can still unlock a driven item by hand as any locked item; the next page
+with CAD on puts it back.
 
-Browser scripts that work with part studios turn CAD on for their users first: `scripts/cad-setting.mjs`
-`setCad(BASE, jwt(uid, login))`, through the same request the switch sends. `scripts/cad-setting-ui.mjs` is the
-setting itself.
+A signed-out visitor has no account and so no CAD: a public project opens on its PCB, and its part studios show
+the note.
+
+Browser scripts that work with part studios or the shell turn CAD on for their users first:
+`scripts/cad-setting.mjs` `setCad(BASE, jwt(uid, login))`, through the same request the switch sends.
+`scripts/cad-setting-ui.mjs` is the setting itself, both ways; `e2e.mjs` and `home-ui.mjs` are the PCB app with it
+off.
 
 ## Where things are
 

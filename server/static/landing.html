@@ -19,7 +19,7 @@
 <meta name="twitter:image" content="{{SITE}}/icon-512.png">
 <meta name="theme-color" content="#001023">
 <link rel="icon" type="image/svg+xml" href="/brand/j2/icon.svg"><link rel="icon" type="image/png" sizes="192x192" href="/brand/j2/icon-192.png"><link rel="alternate icon" href="/brand/j2/favicon.ico" sizes="any"><link rel="apple-touch-icon" href="/brand/j2/icon-180.png">
-<script>document.documentElement.classList.add("js"); try { var t = localStorage.getItem("kui.theme"); if (t === "dark" || t === "system") document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script>document.documentElement.classList.add("js"); /* the theme before the first paint (web/shared/theme.ts) */try{var s=localStorage,t=s.getItem("kui.theme");if(t!=="light"&&t!=="dark"&&t!=="system")t=s.getItem("kui.cad")==="1"?"light":"system";document.documentElement.setAttribute("data-theme",t)}catch(e){document.documentElement.setAttribute("data-theme","system")}</script>
 <style>
 {{THEME}}
   * { box-sizing: border-box; }

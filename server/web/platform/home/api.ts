@@ -78,7 +78,7 @@ export interface Trashed { projectId: string; name: string; docCount: number; de
 export const listTrash = () => api<{ projects: Trashed[] }>("/api/trash").then((j) => j.projects);
 export const setStar = (id: string, on: boolean) => api(`/api/projects/${id}/star`, { method: on ? "PUT" : "DELETE" });
 export const transferProject = (id: string, userId: number) => api(`/api/projects/${id}/transfer`, { method: "POST", json: { userId } });
-/** A new, empty project (it opens on its Home tab; PCBs, part studios and assemblies are added there). */
+/** A new project: with Mechanical CAD on an empty one (it opens on its Home tab; PCBs, part studios and assemblies are added there), else a schematic and a board (server/src/http.rs create_blank_project decides by the person's setting). */
 export const createBlank = (name: string) => api<UploadResult>("/api/projects/blank", { method: "POST", json: { name } });
 /** A starter template (server/src/templates.rs): a finished KiCad project a new one can begin from. */
 export interface Template {

@@ -31,6 +31,9 @@ const stale = new Set<string>();
 
 export function boundPcb(): BoundPcb | null { return bound; }
 
+/** The PCB of a project this page worked on before (the key of the first one bound), if any. */
+export function pcbBoundBefore(projectId: string): string | undefined { return first.get(projectId); }
+
 /** A project is being opened: nothing is bound until a PCB of it is. */
 export function unbindPcb(): void { bound = null; }
 

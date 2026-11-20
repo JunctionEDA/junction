@@ -77,14 +77,17 @@ Apply rules (client side, in seq order): MODIFIED sets each named property
 unconditionally; ADDED with an existing UUID is an upsert-replace; REMOVED or
 MODIFIED for an unknown UUID is a no-op (delete beats a concurrent modify).
 
-**Mechanical CAD is a setting of each person** (`users.cad_enabled`, migration 0251, off by default; `GET /api/me`
+**Mechanical CAD is a setting of each person** (`users.cad_enabled`, migration 0252, off by default; `GET /api/me`
 says `cad`, `PUT /api/me/cad` changes it, and the account menu and the editor's Junction menu have the switch). It
-decides what the browser offers that person (part studios, assemblies, their tabs, the board link's panels and the
-enclosure in the 3D viewer; none of the CAD bundles is fetched with it off) and whether the MCP endpoint lists the
-`cad_*` tools. The project shell (Home, several PCBs, their views) is everybody's. The server never refuses or
-hides a CAD document because of the setting: a collaborator with CAD on may add one to a shared project, and the
-others see it listed on Home with a way to turn CAD on. See `web/domains/mechanical/CONTRACT.md`, "Mechanical CAD
-is a setting".
+decides what the browser offers that person: part studios, assemblies, the board link's panels and the enclosure in
+the 3D viewer (none of the CAD bundles is fetched with it off), and the project shell that holds them (the Home tab,
+the tab bar with "+", several PCBs and assemblies in a project, a PCB's BOM as a tab) as well as the light theme as
+the default. With it off, and signed out, Junction is the PCB design software alone: a project opens straight into
+the schematic and board editor. On the server it decides what a blank project starts as (`POST /api/projects/blank`
+below), whether the MCP endpoint lists the `cad_*` tools, and how its instructions and `document` argument speak of
+several PCBs. The server never refuses or hides a document because of the setting: a collaborator with CAD on may
+add a part studio or another PCB to a shared project, and the project keeps them as they are for everybody. See
+`web/domains/mechanical/CONTRACT.md`, "Mechanical CAD is a setting".
 
 Documents that are not KiCad's (a part studio `.jpart`, an assembly `.jasm`) are JSON item documents
 (`src/itemdoc.rs`) on the same ops: `ADDED` carries `item`, `MODIFIED` carries
@@ -120,7 +123,7 @@ The server brokers GitHub OAuth so no client secret ships in KiCad.
 | GET | `/api/users/search?q=` | share-dialog typeahead: server accounts + GitHub user search |
 | GET/POST | `/api/projects` | list my projects (owned + member, with description, member count, owner avatar, `starred`) · upload a project (multipart: a zip as `archive`, or loose `file` parts named by project-relative path; non-KiCad files are skipped and reported, a wrapping folder is stripped) |
 | GET/PATCH/DELETE | `/api/projects/{id}` | project info · rename / describe / make public (owner) · move to the Trash (owner; `?permanent=true` destroys it at once, the Trash is purged after 30 days) |
-| POST | `/api/projects/blank` | create an empty project (`name`): it holds only its own document (`project.jproj`: tab order, folders) and opens on its Home tab. `template: "pcb"` starts it with a `.kicad_pro`, a root schematic and a board at the root, as KiCad's File → New Project writes them |
+| POST | `/api/projects/blank` | create a project (`name`). `template: "pcb"` starts it with a `.kicad_pro`, a root schematic and a board at the root, as KiCad's File → New Project writes them; `template: "empty"` makes it hold only its own document (`project.jproj`: tab order, folders), and it opens on its Home tab. Without `template`, the creator's Mechanical CAD setting chooses: `"empty"` with it on, `"pcb"` with it off |
 | POST | `/api/projects/{id}/pcbs` | add a PCB (`name`): a KiCad project in a folder of its own (`<name>/<name>.kicad_pro`, `.kicad_sch`, `.kicad_pcb`). A project holds any number |
 | POST | `/api/projects/{id}/folders/move` · `/folders/delete` · `/duplicate` | rename or move a folder with everything in it (`from`, `to`; `stems` renames a PCB's own three files with it) · delete a folder (`path`) · copy a document (`docId`, `path`) or a folder (`folder`, `to`) with the edits not yet stored |
 | GET | `/api/projects/{id}/files` | every document with its size, and when and by whom it last changed (the Home tab's list) |
