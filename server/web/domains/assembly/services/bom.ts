@@ -8,6 +8,7 @@
 // pcb/parts/bom-export.ts).  A sub-assembly is one row; its contents are not expanded yet.
 import type { ElectronicBomLine } from "../../pcb/parts/bom-export";
 import type { InstanceItem } from "../document/format";
+import { supplierInfo } from "../suppliers/model";
 
 export interface BomRow {
   /** "1", "2", and "2.1", "2.2" for the parts on board 2 */
@@ -27,6 +28,8 @@ export interface BomRow {
   material?: string;
   /** the instances it counts */
   instances: string[];
+  /** the supplier's page of a part placed from a supplier (suppliers/model.ts) */
+  link?: string;
   /** why a board's parts are not listed */
   note?: string;
 }
@@ -59,15 +62,23 @@ export function combinedBom(input: BomInput): BomRow[] {
   const named = Array.from(groups.values()).map((g) => {
     const doc = docs.get(g.docId), from = doc ? stem(doc.path) : "missing document";
     const body = g.kind === "part" && g.body ? input.parts?.[g.docId]?.[g.body] : undefined;
-    const name = body ? body.name : g.kind === "part" ? baseName(g.instances[0].name) : from;
-    return { g, name, from, material: body?.material };
+    // a part placed from a supplier is known by the supplier and its part number, whatever its studio calls the body
+    const supplier = supplierInfo(g.instances[0]);
+    const several = !!supplier && Array.from(groups.values()).filter((o) => o.docId === g.docId).length > 1;
+    const name = supplier ? supplier.title + (several && body ? ` (${body.name})` : "") : body ? body.name : g.kind === "part" ? baseName(g.instances[0].name) : from;
+    return { g, name, from, material: body?.material, supplier };
   }).sort((a, b) => rank[a.g.kind] - rank[b.g.kind] || natural(a.name, b.name) || natural(a.from, b.from));
 
   const rows: BomRow[] = [];
-  named.forEach(({ g, name, from, material }, n) => {
+  named.forEach(({ g, name, from, material, supplier }, n) => {
     const item = String(n + 1), count = g.instances.length;
     const row: BomRow = { item, kind: g.kind, name, description: g.kind === "part" ? from : g.kind === "board" ? "Board" : g.kind === "assembly" ? "Sub-assembly" : "Model file", quantity: count, instances: g.instances.map((i) => i.id).sort(natural) };
     if (material) row.material = material;
+    if (supplier) {
+      if (supplier.provider !== "standard") row.vendorPart = `${supplier.name} ${supplier.partNumber}`.trim();
+      row.description = (supplier.description || from) + (supplier.equivalent ? " (generated equivalent)" : "");
+      if (supplier.url) row.link = supplier.url;
+    }
     rows.push(row);
     if (g.kind !== "board") return;
     const bom = input.boards?.[g.docId];

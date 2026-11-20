@@ -22,6 +22,8 @@ model/problem.ts       document + geometry → the solver's input → what to te
 sources/               where an instance's geometry comes from: part.ts, subassembly.ts, board.ts,
                        manager.ts (the open source documents), kernels.ts (worker pool), cache.ts (IndexedDB)
 services/, panels/     interference and the bill of materials: the logic (pure), and their panels
+suppliers/             models from suppliers: model.ts (a search row, what an instance keeps of it), api.ts (the
+                       server's search, server/src/models3d), place.ts (fetch, keep in the project, add an instance)
 viewport/scene.ts      instances drawn from shared geometry, picking, connector glyphs     triad.ts  the manipulator
 viewport/boards.ts     board instances as they look (the mechanical domain's BoardDisplay)
 ui/assembly.ts         AssemblyEditor: the object every tool and panel is handed
@@ -33,7 +35,8 @@ generated/             written by scripts/gen-cad-registry.mjs; not committed
 Tests: `static/tests/assembly-solver.test.js` (the solver and every mate, in node),
 `assembly-model.test.js` (connectors from the real kernel, edits, an assembly following a rebuilt part),
 `assembly-doc.test.js` (the format), `cad-analysis.test.js` (interference and the bill of materials),
-`scripts/cad-assembly-ui.mjs` (the real app in Chromium, two people), `scripts/cad-analysis-ui.mjs` (the
+`scripts/cad-suppliers-ui.mjs` (the Suppliers tab and the server's providers, against stand-ins),
+`models3d.test.js` (the standard parts, built by the kernel), `scripts/cad-assembly-ui.mjs` (the real app in Chromium, two people), `scripts/cad-analysis-ui.mjs` (the
 panels) and `scripts/cad-e2e.mjs` (a board fastened in a tray, a hinged lid, a clash found).
 
 ## What a person can do
@@ -42,6 +45,13 @@ panels) and `scripts/cad-e2e.mjs` (a board fastened in a tray, a hinged lid, a c
   the project's boards.  A part studio is read and built without opening its tab, with its variables applied
   and the boards of its Board features supplied (mechanical `studioInputs`), so a studio that shows a board
   offers the board's bodies too.
+- **Insert from suppliers** (the Insert dialog's Suppliers tab, `ui/SupplierSearch.tsx`): type a supplier's
+  part number or a standard size ("M5x20 socket head", "608 bearing", an LCSC number, a McMaster-Carr number),
+  and click a result. The model becomes a part studio of the project (a STEP file in `models/` imported as one
+  body, or a part studio the server drew from a standard's dimensions) and an instance of it, which carries
+  `supplier: { provider, id, name, partNumber, title, description?, url?, generated?, equivalent? }`. The
+  instance list links to the supplier's page and the bill of materials names the part by supplier and part
+  number. The server's README lists the providers and the settings each needs.
 - **Instance tree**: rename, hide, suppress, fix, group, copy in a row, replace, delete; each row says how many
   freedoms its mates leave it.
 - **Drag** an instance in the viewport, or use the manipulator on the selected one (arrows slide, arcs turn, in
@@ -164,6 +174,10 @@ The solver runs on the page's thread; it has not needed a worker.
 ## Limits
 
 - **STEP files** (`kind: "file"`) have no provider (import the file into a part studio and instance that).
+- **Supplier models** show an outline (drawn parts) or the supplier's photo before they are placed, not a 3D
+  preview: the model is fetched on the click. A drawn part has no thread, and a McMaster-Carr number is only
+  drawn as an equivalent when its size is typed with it. A supplier's STEP file comes in as one body, in the
+  supplier's own frame.
 - **A board** inserted before it has been read lands with the sheet's origin, not its middle, at the origin.
   Its part envelopes come from the footprints (courtyards), refined by the 3D models as they load.
 - **Interference** does not look inside sub-assemblies yet.

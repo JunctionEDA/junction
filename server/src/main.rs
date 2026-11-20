@@ -6,6 +6,7 @@ mod demo;
 mod downloads;
 mod kicadlib;
 mod modelgen;
+mod models3d;
 mod auth;
 mod chat;
 mod compact;
@@ -478,6 +479,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/parts/model.step", get(parts::get_model))
         .route("/api/parts/image", get(parts::get_image))
         .route("/api/parts/model-file", get(parts::get_model_file))
+        .route("/api/models3d/providers", get(models3d::list_providers))
+        .route("/api/models3d/search", get(models3d::search))
+        .route("/api/models3d/model", get(models3d::get_model))
+        .route("/api/models3d/image", get(models3d::get_image))
         .route("/api/libraries", get(parts::list_libraries).post(parts::create_library))
         .route("/api/libraries/{id}", get(parts::get_library).patch(parts::update_library).delete(parts::delete_library))
         .route("/api/libraries/{id}/items", post(parts::add_item))

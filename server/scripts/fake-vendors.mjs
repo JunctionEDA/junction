@@ -13,6 +13,9 @@
 //   JLCPCB_API_URL=http://127.0.0.1:8097 JLCSEARCH_URL=http://127.0.0.1:8097
 //   MOUSER_API_URL=http://127.0.0.1:8097 DIGIKEY_API_URL=http://127.0.0.1:8097
 //
+// The suppliers of 3D models for assemblies (McMaster-Carr, the FreeCAD and KiCad libraries, TraceParts, a library
+// of one's own) are stood in for by scripts/fake-models.mjs, on the same port; that file lists their settings.
+//
 // Test controls:  POST /__ctl/down {"easyeda":true,"jlcpcb":true,…}   take a vendor offline
 //                 GET  /__ctl/hits                                    request counts per route
 //                 POST /__ctl/reset
@@ -20,6 +23,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { models3d, resetModels } from './fake-models.mjs';
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'tests', 'fixtures', 'vendor');
 const PORT = +(process.env.FAKE_VENDORS_PORT || 8097);
@@ -92,7 +96,7 @@ const server = http.createServer(async (req, res) => {
   let j = {}; try { j = text ? JSON.parse(text) : {}; } catch { /* a form body */ }
 
   if (p === '/__ctl/down') { down = j; return send(res, 200, { ok: true }); }
-  if (p === '/__ctl/reset') { down = {}; hits = {}; return send(res, 200, { ok: true }); }
+  if (p === '/__ctl/reset') { down = {}; hits = {}; resetModels(); return send(res, 200, { ok: true }); }
   if (p === '/__ctl/hits') return send(res, 200, hits);
 
   // ---- EasyEDA: one part with its drawings
@@ -175,6 +179,8 @@ const server = http.createServer(async (req, res) => {
     m = /^\/products\/v4\/search\/(.+)\/productdetails$/.exec(p);
     if (m) { const no = decodeURIComponent(m[1]); const part = dkParts.find((x) => x.dk === no || x.mpn === no); return part ? send(res, 200, { Product: dkJson(part) }) : send(res, 404, { title: 'Not Found', status: 404, detail: `The product ${no} was not found.` }); }
   }
+  // ---- the suppliers of 3D models (fake-models.mjs): McMaster-Carr, the FreeCAD and KiCad libraries, TraceParts, a library
+  if (models3d({ req, res, url, path: p, json: j, send, hit, down })) return;
   send(res, 404, { error: 'not found', path: p });
 });
 server.listen(PORT, '127.0.0.1', () => console.log(`fake vendors on http://127.0.0.1:${PORT} — ${jlc.size} parts in the JLCPCB index, ${files.filter((f) => f.startsWith('easyeda_C')).length} with drawings, ${models.size} 3D models`));

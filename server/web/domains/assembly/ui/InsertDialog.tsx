@@ -12,6 +12,7 @@ import type { InstanceSource } from "../document/format";
 import type { SourceOffer, SourceProvider } from "../sources/types";
 import type { AssemblyEditor } from "./assembly";
 import { Glyph, ICONS, useAssembly } from "./parts";
+import { SupplierSearch, SupplierTabs, type InsertTab } from "./SupplierSearch";
 
 const offerKey = (s: InstanceSource): string => `${s.kind}:${s.docId}:${s.kind === "part" ? s.body : ""}`;
 const baseName = (path: string): string => path.replace(/^.*\//, "").replace(/\.[^.]+$/, "");
@@ -106,6 +107,8 @@ export function InsertDialog({ assembly }: { assembly: AssemblyEditor }) {
   const replaceName = useAssembly(assembly, (s) => (s.inserting?.replace ? s.instances.find((i) => i.id === s.inserting!.replace)?.name : undefined));
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [chosen, setChosen] = useState<Map<string, SourceOffer>>(new Map());
+  // the project's own parts, or models from suppliers (SupplierSearch.tsx)
+  const [tab, setTab] = useState<InsertTab>("project");
   // the preview: what the pointer is over, else what was last ticked; a studio pointed at for a moment is read too
   const [peeked, setPeeked] = useState<Subject | null>(null);
   const [last, setLast] = useState<Subject | null>(null);
@@ -151,17 +154,18 @@ export function InsertDialog({ assembly }: { assembly: AssemblyEditor }) {
   return (
     <form className="cad-dialog absolute left-2 top-2 z-[4] w-[320px] max-h-[calc(100%-16px)] flex flex-col rounded-md border border-line bg-bench shadow-panel text-sm" data-insert-dialog
       onSubmit={(ev) => { ev.preventDefault(); assembly.insert(Array.from(chosen.values())); }} onKeyDown={(ev) => { if (ev.key === "Escape") { ev.stopPropagation(); assembly.closeInsert(); } }}>
-      <header className="flex items-center h-8 px-2 border-b border-line bg-paper rounded-t-md font-semibold text-base">{replacing ? `Replace ${replaceName || "instance"}` : "Insert"}</header>
-      <div className="flex flex-col py-1 overflow-y-auto bg-paper min-h-[120px]" onMouseLeave={() => setPeeked(null)}>
+      <header className="flex items-center h-8 px-2 border-b border-line bg-paper rounded-t-md font-semibold text-base">{replacing ? `Replace ${replaceName || "instance"}` : "Insert"}{!replacing ? <SupplierTabs tab={tab} setTab={setTab} /> : null}</header>
+      {tab === "suppliers" && !replacing ? <SupplierSearch assembly={assembly} /> : null}
+      <div className={cx("flex flex-col py-1 overflow-y-auto bg-paper min-h-[120px]", tab === "suppliers" && !replacing && "hidden")} onMouseLeave={() => setPeeked(null)}>
         {docs.map((g) => g.docs.map((d) => (
           <DocRows key={g.provider.kind + d.docId} assembly={assembly} provider={g.provider} doc={d} open={open.has(d.docId)} chosen={chosen} toggle={toggle} addAll={addAll} peek={setPeeked}
             toggleOpen={() => setOpen((cur) => { const next = new Set(cur); if (next.has(d.docId)) next.delete(d.docId); else next.add(d.docId); return next; })} />
         )))}
         {!docs.length ? <p className="note px-2 m-0">This project has no part studio yet. Add one with “+” in the tabs below, draw a part, and come back.</p> : null}
       </div>
-      {docs.length ? <Preview assembly={assembly} subject={peeked || last} /> : null}
+      {docs.length && (tab === "project" || replacing) ? <Preview assembly={assembly} subject={peeked || last} /> : null}
       <footer className="flex items-center justify-end gap-1.5 p-2 border-t border-line">
-        {replacing ? <span className="flex-1 text-ink-3">Click the part to use instead.</span> : <span className="flex-1 text-ink-3">{chosen.size ? `${chosen.size} chosen` : "Tick the parts to place."}</span>}
+        {replacing ? <span className="flex-1 text-ink-3">Click the part to use instead.</span> : <span className="flex-1 text-ink-3">{chosen.size ? `${chosen.size} chosen` : tab === "suppliers" ? "Click a result to place it." : "Tick the parts to place."}</span>}
         <button type="button" className="btn sm" data-cancel onClick={() => assembly.closeInsert()}>Cancel</button>
         {!replacing ? <button type="submit" className="btn sm primary" data-accept disabled={!chosen.size}>Insert</button> : null}
       </footer>

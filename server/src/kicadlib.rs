@@ -307,6 +307,17 @@ async fn model_bytes(state: &AppState, lib: &str, name: &str) -> AppResult<Optio
     Ok(Some(bytes))
 }
 
+/// For the assemblies' supplier search (models3d): every model of KiCad's 3D library as "Library:Name".
+pub(crate) async fn model_index() -> AppResult<std::sync::Arc<Vec<String>>> { index(Kind::Model).await }
+
+/// For the assemblies' supplier search: one model's STEP file, kept as `model` keeps it.
+pub(crate) async fn model_step(state: &AppState, lib: &str, name: &str) -> AppResult<Option<Vec<u8>>> {
+    model_bytes(state, safe(lib.trim())?, safe(name.trim())?).await
+}
+
+/// Where the library is read from, and which branch: for links to a model's own page.
+pub(crate) fn library_home() -> (&'static str, &'static str) { (base(), git_ref()) }
+
 /// The replacement for a model the library does not have, remembered per name (the answer only
 /// changes when the library does).
 async fn replacement(lib: &str, name: &str) -> AppResult<Option<(String, String, String)>> {

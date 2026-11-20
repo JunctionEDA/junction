@@ -51,7 +51,7 @@ function Bom({ a }: { a: AssemblyEditor }) {
               {rows.map((r) => (
                 <tr key={r.item} data-kind={r.kind} className={cx("border-b border-line last:border-b-0", r.kind === "component" ? "text-ink-2" : "text-ink")}>
                   <td className="px-2 py-0.5 mono">{r.item}</td>
-                  <td className={cx("px-2 py-0.5", r.kind === "component" && "pl-5")}>{r.name}</td>
+                  <td className={cx("px-2 py-0.5", r.kind === "component" && "pl-5")}>{r.link ? <a href={r.link} target="_blank" rel="noopener noreferrer" className="underline decoration-line hover:decoration-current" title="Open the supplier's page" data-supplier-link>{r.name}</a> : r.name}</td>
                   <td className="px-2 py-0.5">{r.description}{r.note ? <span className="text-ink-3"> — {r.note}</span> : null}</td>
                   <td className="px-2 py-0.5 text-right mono">{r.quantity}</td>
                   <td className="px-2 py-0.5 mono">{r.refs || ""}</td>

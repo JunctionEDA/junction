@@ -1,0 +1,142 @@
+[
+  {
+    "extent": [
+      8.5,
+      8.5,
+      25.0
+    ],
+    "file": "shcs_M5_20.jpart",
+    "id": "shcs:M5:20",
+    "name": "ISO 4762 M5x20"
+  },
+  {
+    "extent": [
+      9.5,
+      9.5,
+      14.75
+    ],
+    "file": "button_M5_12.jpart",
+    "id": "button:M5:12",
+    "name": "ISO 7380 M5x12"
+  },
+  {
+    "extent": [
+      10.0,
+      10.0,
+      16.0
+    ],
+    "file": "flat_M5_16.jpart",
+    "id": "flat:M5:16",
+    "name": "ISO 10642 M5x16"
+  },
+  {
+    "extent": [
+      15.011,
+      13.0,
+      45.3
+    ],
+    "file": "hex_M8_40.jpart",
+    "id": "hex:M8:40",
+    "name": "ISO 4017 M8x40"
+  },
+  {
+    "extent": [
+      4.0,
+      4.0,
+      6.0
+    ],
+    "file": "set_M4_6.jpart",
+    "id": "set:M4:6",
+    "name": "ISO 4026 M4x6"
+  },
+  {
+    "extent": [
+      11.547,
+      10.0,
+      5.2
+    ],
+    "file": "nut_M6.jpart",
+    "id": "nut:M6",
+    "name": "ISO 4032 M6"
+  },
+  {
+    "extent": [
+      12.0,
+      12.0,
+      1.6
+    ],
+    "file": "washer_M6.jpart",
+    "id": "washer:M6",
+    "name": "ISO 7089 M6"
+  },
+  {
+    "extent": [
+      5.0,
+      5.0,
+      20.0
+    ],
+    "file": "dowel_5_20.jpart",
+    "id": "dowel:5:20",
+    "name": "ISO 2338 5x20"
+  },
+  {
+    "extent": [
+      6.351,
+      5.5,
+      10.0
+    ],
+    "file": "standoff_M3_10.jpart",
+    "id": "standoff:M3:10",
+    "name": "Standoff M3x10"
+  },
+  {
+    "extent": [
+      22.0,
+      22.0,
+      7.0
+    ],
+    "file": "bearing_608.jpart",
+    "id": "bearing:608",
+    "name": "608 bearing"
+  },
+  {
+    "extent": [
+      15.0,
+      15.0,
+      24.0
+    ],
+    "file": "linear_LM8UU.jpart",
+    "id": "linear:LM8UU",
+    "name": "LM8UU"
+  },
+  {
+    "extent": [
+      20.0,
+      20.0,
+      100.0
+    ],
+    "file": "tslot_20_100.jpart",
+    "id": "tslot:20:100",
+    "name": "T-slot 2020 x 100"
+  },
+  {
+    "extent": [
+      9.525,
+      9.525,
+      31.75
+    ],
+    "file": "shcs_1_4_1in.jpart",
+    "id": "shcs:1/4:1in",
+    "name": "ASME B18.3 SHCS 1/4-20 x 1"
+  },
+  {
+    "extent": [
+      13.487,
+      13.487,
+      25.4
+    ],
+    "file": "flat_1_4_1in.jpart",
+    "id": "flat:1/4:1in",
+    "name": "ASME B18.3 FHCS 1/4-20 x 1"
+  }
+]

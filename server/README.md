@@ -254,6 +254,38 @@ keys page; a person's own key can still be stored through `PUT /api/parts/keys/{
 None of them publishes drawings, so their parts use the LCSC drawing for the same
 manufacturer part number when there is one.
 
+### 3D models from suppliers (assemblies)
+
+With Mechanical CAD on, an assembly's Insert dialog has a **Suppliers** tab: type a supplier's part number or a
+standard size, see the models that match, and click one to place it. The model is kept in the project (a STEP
+file in `models/` imported by a part studio, or a part studio Junction drew) and placed as an ordinary instance
+that remembers its supplier, part number and page. `src/models3d/` has the providers, one per source:
+
+| Provider | What it has | Needs |
+|---|---|---|
+| Standard parts | socket head, button head, countersunk, hex head and set screws, hex nuts, washers, dowel pins, standoffs, ball and linear bearings, square T-slot extrusions, drawn by Junction's own kernel from ISO, DIN and ASME dimensions ("M5x20 socket head", "DIN 912 M5x20", "1/4-20 x 1 button head", "608 bearing", "2020 extrusion 300"); threads are not modelled | nothing, no network |
+| McMaster-Carr | McMaster's own STEP model by part number, through their [Product Information API](https://www.mcmaster.com/help/api/) only (their website is never read) | `MCMASTER_USERNAME`, `MCMASTER_PASSWORD` (an account McMaster approved for the API) and `MCMASTER_CLIENT_CERT` (the client certificate they issue, as a PEM file with its key: `openssl pkcs12 -in mcmaster.pfx -out mcmaster.pem -nodes`); `MCMASTER_API_URL` |
+| LCSC / JLCPCB | the STEP model EasyEDA publishes for an LCSC part, by number or by words (the board editor's cache) | nothing |
+| KiCad 3D library | KiCad's packages3D models, by the words of their names | nothing (`KICAD_LIBS_URL`) |
+| FreeCAD library | the STEP files of [FreeCAD-library](https://github.com/FreeCAD/FreeCAD-library) (CC BY 3.0), by the words of their paths | nothing (`FREECAD_LIBRARY_API_URL`, `FREECAD_LIBRARY_RAW_URL`) |
+| TraceParts | manufacturers' catalogues, through TraceParts' CAD-content API | `TRACEPARTS_TENANT_UID`, `TRACEPARTS_API_KEY`, `TRACEPARTS_USER_EMAIL`; `TRACEPARTS_API_URL`, `TRACEPARTS_STEP_FORMAT_ID` |
+| Your model library | a catalogue of your own: a web folder with an `index.json` (`src/models3d/sources.rs` has the format) | `MODELS3D_LIBRARY_URL`, optionally `MODELS3D_LIBRARY_TOKEN` |
+
+A provider whose settings are missing is listed in the dialog as not connected; it is not an error. Without
+McMaster's API, a number of one of their common hardware families (socket head, button head, flat head and hex
+screws, nuts, washers: the table in `src/models3d/mcmaster.rs`) typed **with its size** ("91251A431 1/4-20 x 1")
+is answered with the same standard part drawn by Junction, named after McMaster's number, linked to McMaster's
+page and marked as a generated equivalent. The size has to be typed: McMaster's dash numbers are not a public
+table. The McMaster-Carr and TraceParts providers are written from those services' documentation and have only
+been run against the stand-ins in `scripts/fake-models.mjs`, never against the live services.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/models3d/providers` | the providers, which are connected, and the settings each needs |
+| `GET` | `/api/models3d/search?q=[&provider=]` | matching models from every provider |
+| `GET` | `/api/models3d/model?provider=&id=` | one model's file: STEP, or a part studio (`X-Model-Format`) |
+| `GET` | `/api/models3d/image?provider=&id=` | the supplier's picture of the part, when it gives one |
+
 `/p/{id}/edit?parts=search|libraries|bom` and `/?parts=libraries` open the
 dialog from a link. The desktop editors' File → Vendor Parts… opens that link:
 in a session a part placed in the browser arrives in the desktop app like any
@@ -597,6 +629,11 @@ Chromium) test vendor parts against `fake-vendors.mjs`, which replays answers
 recorded from LCSC, JLCPCB and EasyEDA (`tests/fixtures/vendor/`, refreshed
 with `capture-vendor-fixtures.sh`) and stands in for Mouser, DigiKey and Farnell from
 their API documentation.
+
+`server/scripts/cad-suppliers-ui.mjs` tests the suppliers of 3D models: the providers over HTTP, then the Insert
+dialog in Chromium, against `fake-models.mjs` (mounted by `fake-vendors.mjs`), whose answers are written by hand
+from each service's documentation. It is run twice, without and with the stand-ins' credentials (its header has
+both commands). `static/tests/models3d.test.js` builds every kind of standard part with the real kernel.
 
 Against the real vendors (network, and keys for all but LCSC; a vendor without
 a key is reported as skipped):

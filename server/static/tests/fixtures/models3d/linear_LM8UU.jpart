@@ -1,0 +1,6 @@
+{"junction":"part-studio","version":1,"items":[
+{"featureType":"revolve","id":"body","name":"Bushing","order":"C","params":{"angle":360,"axisEdge":null,"axisType":"y","bodyType":"solid","endType":"full","flip":false,"operation":"new","profile":{"regions":null,"sketch":"profile"},"targets":[]},"type":"feature"},
+{"featureType":"sketch","id":"profile","name":"Bushing profile","order":"B","params":{"plane":{"kind":"plane","plane":"front"},"sketch":{"constraints":{},"entities":{"c10":{"a":"p4","b":"p5","type":"line"},"c11":{"a":"p5","b":"p6","type":"line"},"c12":{"a":"p6","b":"p1","type":"line"},"c7":{"a":"p1","b":"p2","type":"line"},"c8":{"a":"p2","b":"p3","type":"line"},"c9":{"a":"p3","b":"p4","type":"line"},"p1":{"type":"point","x":4.0,"y":0.0},"p2":{"type":"point","x":7.0,"y":0.0},"p3":{"type":"point","x":7.5,"y":0.5},"p4":{"type":"point","x":7.5,"y":23.5},"p5":{"type":"point","x":7.0,"y":24.0},"p6":{"type":"point","x":4.0,"y":24.0}},"version":1}},"type":"feature"},
+{"description":"Linear ball bushing LM8UU: shaft 8 mm, 15 × 24 mm","id":"standard-part","link":"","note":"Drawn by Junction from the standard's dimensions, as one solid: the balls and cage are not modelled.","spec":"linear:LM8UU","title":"LM8UU","type":"standard-part"},
+{"id":"studio","rollback":null,"type":"studio","units":"mm"}
+]}

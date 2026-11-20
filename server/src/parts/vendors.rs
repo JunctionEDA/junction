@@ -134,10 +134,10 @@ pub struct VendorErr {
 }
 
 impl VendorErr {
-    fn new(kind: ErrKind, message: impl Into<String>) -> Self {
+    pub(crate) fn new(kind: ErrKind, message: impl Into<String>) -> Self {
         VendorErr { kind, message: message.into() }
     }
-    fn net(what: &str, e: reqwest::Error) -> Self {
+    pub(crate) fn net(what: &str, e: reqwest::Error) -> Self {
         let why = if e.is_timeout() { "timed out" } else if e.is_connect() { "could not be reached" } else { "did not answer properly" };
         VendorErr::new(ErrKind::Unreachable, format!("{what} {why}."))
     }

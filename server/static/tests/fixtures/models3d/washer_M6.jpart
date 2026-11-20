@@ -1,0 +1,6 @@
+{"junction":"part-studio","version":1,"items":[
+{"featureType":"revolve","id":"body","name":"Washer","order":"C","params":{"angle":360,"axisEdge":null,"axisType":"y","bodyType":"solid","endType":"full","flip":false,"operation":"new","profile":{"regions":null,"sketch":"profile"},"targets":[]},"type":"feature"},
+{"featureType":"sketch","id":"profile","name":"Washer profile","order":"B","params":{"plane":{"kind":"plane","plane":"front"},"sketch":{"constraints":{},"entities":{"c5":{"a":"p1","b":"p2","type":"line"},"c6":{"a":"p2","b":"p3","type":"line"},"c7":{"a":"p3","b":"p4","type":"line"},"c8":{"a":"p4","b":"p1","type":"line"},"p1":{"type":"point","x":3.2,"y":0.0},"p2":{"type":"point","x":6.0,"y":0.0},"p3":{"type":"point","x":6.0,"y":1.6},"p4":{"type":"point","x":3.2,"y":1.6}},"version":1}},"type":"feature"},
+{"description":"Flat washer M6 (ISO 7089 / DIN 125)","id":"standard-part","link":"","note":"Drawn by Junction from the standard's dimensions.","spec":"washer:M6","title":"ISO 7089 M6","type":"standard-part"},
+{"id":"studio","rollback":null,"type":"studio","units":"mm"}
+]}

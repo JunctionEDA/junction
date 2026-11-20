@@ -800,6 +800,38 @@ pub async fn link_cad(State(state): State<AppState>, AuthUser(user): AuthUser, Q
     Ok(Json(part_view(&state, &keys, &row, src.as_ref(), &lib_nick(q.lib.as_deref()), None).await))
 }
 
+/// For the assemblies' supplier search (models3d): what a vendor says about one part, and the name of its
+/// 3D model when it (or its LCSC twin) has one.
+pub(crate) async fn model_summary(state: &AppState, user_id: i64, vendor: &str, id: &str) -> AppResult<(PartInfo, Option<String>)> {
+    let vendor = check_vendor(vendor)?;
+    let id = clean_id(vendor, id)?;
+    let keys = keys_for(state, user_id).await?;
+    let (row, _) = ensure_part(state, &keys, vendor, &id, false).await?;
+    let info = info_of(&row);
+    let src = cad_source(state, &keys, &row, &info).await?;
+    let model = src.as_ref().and_then(|s| drawings(&info, s, DEFAULT_LIB)).and_then(|d| d.conv.footprint.and_then(|f| f.model.map(|m| if m.title.is_empty() { f.name } else { m.title })));
+    Ok((info, model))
+}
+
+/// For the assemblies' supplier search: the vendor's own STEP file of a part, in the vendor's frame.
+pub(crate) async fn model_step(state: &AppState, user_id: i64, vendor: &str, id: &str) -> AppResult<(PartInfo, Vec<u8>)> {
+    let vendor = check_vendor(vendor)?;
+    let id = clean_id(vendor, id)?;
+    let keys = keys_for(state, user_id).await?;
+    let (row, _) = ensure_part(state, &keys, vendor, &id, false).await?;
+    let info = info_of(&row);
+    let src = cad_source(state, &keys, &row, &info).await?.ok_or(AppError::NotFound)?;
+    let d = drawings(&info, &src, DEFAULT_LIB).ok_or(AppError::NotFound)?;
+    let model = d.conv.footprint.as_ref().and_then(|f| f.model.clone()).ok_or(AppError::NotFound)?;
+    Ok((info, model_bytes(state, &model.uuid).await?))
+}
+
+/// For the assemblies' supplier search: a text search of one vendor with this user's keys.
+pub(crate) async fn search_vendor(state: &AppState, user_id: i64, vendor: &str, q: &str, limit: usize) -> AppResult<Vec<PartInfo>> {
+    let keys = keys_for(state, user_id).await?;
+    Ok(vendors::search(check_vendor(vendor)?, &keys, q, limit).await?)
+}
+
 /// The STEP model behind a part's footprint, fetched once and kept.
 async fn model_bytes(state: &AppState, uuid: &str) -> AppResult<Vec<u8>> {
     if let Some(bytes) = sqlx::query_scalar::<_, Vec<u8>>("SELECT step FROM part_models WHERE uuid = $1").bind(uuid).fetch_optional(&state.pool).await? {

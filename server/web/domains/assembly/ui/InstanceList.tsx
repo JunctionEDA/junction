@@ -6,6 +6,7 @@ import { cx } from "../../../shared/util";
 import type { InstanceItem } from "../document/format";
 import type { AssemblyEditor, InstanceInfo } from "./assembly";
 import { Caption, ContextMenu, Glyph, ICONS, useAssembly, type MenuItem, type MenuState } from "./parts";
+import { SupplierMark, supplierMenu } from "./SupplierSearch";
 
 function badge(i: InstanceItem, info: InstanceInfo | undefined): { text: string; title: string; tone?: "err" | "dim" } | null {
   if (i.suppressed) return { text: "suppressed", title: "Suppressed: not shown, and its mates are not applied.", tone: "dim" };
@@ -72,6 +73,7 @@ export function InstanceList({ assembly }: { assembly: AssemblyEditor }) {
       { label: "Group", run: () => assembly.group(ids), disabled: ro },
       { label: "Copy in a row…", run: () => assembly.ask({ title: "Copy in a row", acceptLabel: "Copy", fields: [{ key: "count", label: "Copies", kind: "number", value: 2 }, { key: "x", label: "Step X", kind: "number", value: 50, unit: "mm" }, { key: "y", label: "Step Y", kind: "number", value: 0, unit: "mm" }, { key: "z", label: "Step Z", kind: "number", value: 0, unit: "mm" }], accept: (v) => assembly.copyInRow(ids, Number(v.count), [Number(v.x), Number(v.y), Number(v.z)]) }), disabled: ro },
       { label: "Open its source", run: () => assembly.host.openDoc(one!.source.docId), disabled: !one },
+      ...supplierMenu(one),
       { label: "Delete", run: () => assembly.remove(ids), danger: true, disabled: ro },
     ];
     setMenu({ x: ev.clientX, y: ev.clientY, items: list });
@@ -112,6 +114,7 @@ export function InstanceList({ assembly }: { assembly: AssemblyEditor }) {
               <button type="button" className={cx("btn sm ghost px-0.5", !i.hidden && "opacity-0 group-hover:opacity-100 focus:opacity-100")} disabled={!s.canEdit} title={i.hidden ? "Show" : "Hide"} aria-label={i.hidden ? `Show ${i.name}` : `Hide ${i.name}`} data-eye
                 onClick={(ev) => { ev.stopPropagation(); assembly.setHidden([i.id], !i.hidden); }}><Glyph svg={i.hidden ? ICONS.eyeOff : ICONS.eye} size={14} /></button>
               {s.renaming === i.id ? <NameField name={i.name} done={(n) => (n === null ? assembly.startRename(null) : assembly.rename(i.id, n))} /> : <span className={cx("flex-1 truncate", i.suppressed && "line-through")}>{i.name}</span>}
+              <SupplierMark instance={i} />
               {i.fixed && !i.suppressed ? <Glyph svg={ICONS.pin} size={13} /> : null}
               {b ? <span className={cx("flex-none text-xs", b.tone === "err" ? "text-err font-semibold" : b.tone === "dim" ? "text-ink-3" : "text-ink-2")} data-badge>{b.text}</span> : null}
             </div>

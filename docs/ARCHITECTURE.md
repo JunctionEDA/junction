@@ -34,7 +34,7 @@ The Rust server is one crate and has not been split into folders. This is which 
 | Platform | Electronics-specific |
 |---|---|
 | `main`, `http`, `pages`, `ws`, `relay`, `presence_lane`, `doc_actor`, `persist`, `error`, `lenient_json`, `itemdoc` and `itemmerge` (JSON item documents and their three-way merge), `dockind` (how each document type behaves for history, merging, folding and thumbnails) | `kicadlib`, `libs`, `projectlibs` (KiCad libraries) |
-| `auth`, `oauth`, `access` (accounts, sign-in, roles) | `parts/`, `datasheet` (vendor parts, datasheets) |
+| `auth`, `oauth`, `access` (accounts, sign-in, roles) | `parts/`, `datasheet` (vendor parts, datasheets), `models3d/` (3D models from suppliers, for assemblies) |
 | `versions`, `proposals`, `github`, `github/`, `github_app` | `merge`, `compact` (KiCad s-expression merge and journal folding) |
 | `mcp` (the MCP endpoint), `admin`, `timetrack`, `exports`, `plugins`, `registry` | `ai`, `mcp_host`, `pcm`, `fonts`, `templates` |
 
