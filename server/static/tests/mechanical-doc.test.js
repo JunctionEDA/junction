@@ -209,7 +209,8 @@ test("tools: no two tools outside a sketch share a key, nor two inside one; ever
   }
   // the families a person finds under one button and its caret: variants of one thing, nothing else (Fillet,
   // Chamfer and Draft, Sweep and Loft, Boolean and Split each have a button of their own, as in Onshape)
-  assert.deepEqual(Object.fromEntries([...menus].sort()), { Board: 3, Pattern: 2, Reference: 4, Transform: 2 });
+  // (sheet metal: Make joint with Modify joint and Rip, Corner with Bend relief and Corner break)
+  assert.deepEqual(Object.fromEntries([...menus].sort()), { Board: 3, Corner: 3, "Make joint": 3, Pattern: 2, Reference: 4, Transform: 2 });
   // every tool and feature whose words the tool search knows is one that exists
   const ids = new Set();
   for (const file of fs.readdirSync(path.join(root, "tools"))) { const m = /\bid: "([^"]+)"/.exec(fs.readFileSync(path.join(root, "tools", file), "utf8")); if (m) ids.add(m[1]); }
