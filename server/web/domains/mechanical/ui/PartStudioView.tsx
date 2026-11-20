@@ -20,6 +20,7 @@ import { TipHost } from "./Tip";
 import { Toolbar } from "./Toolbar";
 import { ViewCube } from "./ViewCube";
 import { Extras } from "./Extras";
+import { Timeline } from "./Timeline";
 
 /** a button with nothing of the browser's own look */
 export const BARE = "appearance-none bg-transparent border-0 m-0 p-0 text-inherit [font-family:inherit] [font-size:inherit] cursor-pointer";
@@ -80,7 +81,7 @@ export function PartStudioView({ studio, canvasHost }: { studio: PartStudio; can
   const stage = useRef<HTMLDivElement>(null);
   useEffect(() => { stage.current?.prepend(canvasHost); return () => canvasHost.remove(); }, [canvasHost]);
   return (
-    <div className="cad-root grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] text-ink" data-doc-kind="part-studio">
+    <div className="cad-root grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto_auto] text-ink" data-doc-kind="part-studio">
       <Toolbar studio={studio} />
       <div className="flex min-h-0 min-w-0">
         <Dock studio={studio} where="left" />
@@ -92,6 +93,7 @@ export function PartStudioView({ studio, canvasHost }: { studio: PartStudio; can
         </div>
         <Dock studio={studio} where="right" />
       </div>
+      <Timeline studio={studio} />
       <StatusBar studio={studio} />
       <CommandPalette studio={studio} />
       <ContextMenu studio={studio} />
