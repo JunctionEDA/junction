@@ -1,75 +1,28 @@
-// The Parts panel: the bodies the features up to the rollback bar make.  Solids are listed first; surfaces
-// (bodies with no solid in them: kernel/types.ts Body.sheet) follow under their own heading, "Surfaces".
+// The Parts panel: the parts list (ui/PartsList.tsx) under the feature list.  What the features up to the
+// rollback bar make, in sections: Parts, Surfaces, Curves, Composite parts.  A panel is one file here; see
+// core/tool.ts.
 //
-//   click selects the part (its faces; Ctrl adds) · the pointer over a row lights the part up in the model
-//   the eye hides and shows it; right-click: Hide, Isolate, Show all, Zoom to, Appearance and material, Delete
-//
-// Hiding and isolating are this person's view (inspect/appearance-display.ts); colour and material are the
-// document's, set in the Appearance panel, which the menu opens.
-import { useEffect, useState } from "react";
-import { cx } from "../../../shared/util";
+// It also marks, in the feature list, the rows of the features that made or changed what is selected in the
+// model (a part chosen here, a face clicked in the viewport): ui/part-actions.ts crossFeatures.
 import { definePanel } from "../core/tool";
-import { displayOf } from "../inspect/appearance-display";
-import { useStore } from "../inspect/store";
-import type { BodyResult } from "../kernel/protocol";
-import type { Pick } from "../viewport/modelview";
-import { Eye } from "../ui/FeatureList";
+import { Glyph } from "../ui/Glyph";
 import { useStudio } from "../ui/hooks";
-import { showPanel } from "../ui/panels";
+import { crossFeatures } from "../ui/part-actions";
+import { PART_ICONS, PartsList } from "../ui/PartsList";
+import { addFeatureRowSlot } from "../ui/slots";
 import type { PartStudio } from "../ui/studio";
+import { tipHandlers } from "../ui/Tip";
 
-const facesOf = (studio: PartStudio, b: BodyResult): Pick[] => (studio.view.bodyObjects(b.id)?.result.mesh?.faces.names || []).map((name) => ({ kind: "face", body: b.id, name, point: [0, 0, 0] } as Pick));
-
-function Parts({ studio }: { studio: PartStudio }) {
-  const bodies = useStudio(studio, (s) => s.bodies);
-  const selection = useStudio(studio, (s) => s.selection);
-  const canEdit = useStudio(studio, (s) => s.canEdit);
-  const busy = useStudio(studio, (s) => !!s.editing || !!s.sketch);
-  const display = displayOf(studio);
-  const ds = useStore(display, (s) => s);
-  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    window.addEventListener("pointerdown", close); window.addEventListener("blur", close);
-    return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("blur", close); };
-  }, [menu]);
-  if (!bodies.length) return <p className="note px-2 py-1 m-0" data-empty>No parts yet. A part appears when a feature makes a solid: extrude or revolve a sketch. Surfaces are listed here too.</p>;
-  const on = (id: string) => selection.some((p) => (p.kind === "face" || p.kind === "edge" || p.kind === "vertex") && p.body === id);
-  const b = menu ? bodies.find((x) => x.id === menu.id) : undefined;
-  const item = (label: string, run: () => void, danger = false) => (
-    <button type="button" key={label} data-menu-item={label} className={cx("block w-full text-left px-3 h-7 hover:bg-sel-soft", danger && "text-err")} onPointerDown={(ev) => ev.stopPropagation()} onClick={() => { setMenu(null); run(); }}>{label}</button>
-  );
-  return (
-    <div className="flex flex-col py-1 text-sm" role="listbox" aria-label="Parts" aria-multiselectable="true">
-      {[...bodies.filter((x) => !x.sheet), ...bodies.filter((x) => x.sheet)].map((b, i, all) => {
-        const visible = display.isVisible(b.id);
-        // the first surface is preceded by the heading of its group
-        const heading = b.sheet && !(i && all[i - 1].sheet) ? <div key="surfaces" data-group="surfaces" className="px-2 pt-1.5 pb-0.5 text-xs text-ink-3 select-none">Surfaces ({all.length - i})</div> : null;
-        return [heading,
-          <div key={b.id} role="option" aria-selected={on(b.id)} data-body={b.id} data-kind={b.sheet ? "surface" : b.reference ? "reference" : "part"} data-visible={visible} className={cx("group flex items-center gap-1.5 h-6.5 pl-2 pr-1.5 cursor-default select-none", on(b.id) ? "bg-sel" : "hover:bg-sel-soft", (b.reference || !visible) && "text-ink-3")}
-            title={b.reference ? `${b.name}: reference geometry (not a part of this studio)` : undefined}
-            onClick={(ev) => { if (busy) return; const faces = facesOf(studio, b), add = ev.ctrlKey || ev.metaKey || ev.shiftKey; studio.select(on(b.id) ? selection.filter((p) => !("body" in p && p.body === b.id)) : [...(add ? selection : []), ...faces]); }}
-            onPointerEnter={() => studio.view.setFeatureHover(visible ? facesOf(studio, b) : null)} onPointerLeave={() => studio.view.setFeatureHover(null)}
-            onContextMenu={(ev) => { ev.preventDefault(); setMenu({ x: ev.clientX, y: ev.clientY, id: b.id }); }}>
-            <span className="flex-1 truncate">{b.name}</span>
-            {b.reference ? <span className="text-xs text-ink-3">reference</span> : null}
-            <Eye shown={visible} label={b.name} onToggle={() => display.toggle(b.id)} />
-          </div>,
-        ];
-      })}
-      {ds.hidden.length || ds.isolated ? <button type="button" className="btn sm ghost self-start mx-1.5 mt-0.5 h-5 min-h-0 px-1 text-xs" data-show-all onClick={() => display.showAll()}>Show all parts</button> : null}
-      {menu && b ? (
-        <div className="fixed z-[50] min-w-48 py-1 rounded-md border border-line bg-panel shadow-panel text-base" style={{ left: Math.min(menu.x, window.innerWidth - 210), top: Math.min(menu.y, window.innerHeight - 200) }} role="menu">
-          {item(display.isVisible(b.id) ? "Hide" : "Show", () => display.toggle(b.id))}
-          {item(ds.isolated && ds.isolated.length === 1 && ds.isolated[0] === b.id ? "Show all parts" : "Isolate", () => display.isolate(ds.isolated && ds.isolated[0] === b.id ? null : [b.id]))}
-          {item("Zoom to", () => { const box = studio.view.boxOf(facesOf(studio, b)); if (box) studio.viewport.fit(box); })}
-          {item("Appearance and material…", () => { studio.select(facesOf(studio, b).slice(0, 1)); showPanel("appearance"); })}
-          {canEdit && !b.reference && !busy ? item(b.sheet ? "Delete surface…" : "Delete part…", () => { studio.startFeature("delete-body"); studio.setDraft({ params: { bodies: [b.id] } }); }, true) : null}
-        </div>
-      ) : null}
-    </div>
-  );
+/** At the end of a feature's row: this feature made or changed what is selected. */
+function MadeSelection({ studio, featureId }: { studio: PartStudio; featureId: string }) {
+  const on = useStudio(studio, () => crossFeatures(studio).has(featureId));
+  if (!on) return null;
+  return <span className="flex-none text-accent" data-part-cross {...tipHandlers({ title: "Shaped the selection", hint: "This feature made or changed what is selected in the model." })}><Glyph svg={PART_ICONS.part} size={14} /></span>;
 }
+addFeatureRowSlot(MadeSelection);
 
-export default definePanel({ id: "parts", title: "Parts", side: "left", order: 20, count: (studio) => studio.getState().bodies.filter((b) => !b.reference && !b.sheet).length || null, render: (studio) => <Parts studio={studio} /> });
+export default definePanel({
+  id: "parts", title: "Parts", side: "left", order: 20,
+  count: (studio) => studio.getState().bodies.filter((b) => !b.reference && !b.sheet).length || null,
+  render: (studio) => <PartsList studio={studio} />,
+});

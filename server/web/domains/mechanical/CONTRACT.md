@@ -361,6 +361,22 @@ new JSON item document kind is one line there and gets history, branches, mergin
   condition that cannot be read suppresses nothing and the list says why.
 - Feature ids are UUIDs. A body's id is the id of the feature that made it (with a suffix when one feature
   made several), so body ids survive rebuilds.
+- **What people say about the parts** is one item, `parts` (`document/part-items.ts`):
+
+  ```ts
+  { id: "parts", type: "parts",
+    names: { "<entry id>": "Bracket" },                       // the name a person gave; absent: the kernel's
+    props: { "<entry id>": { description?: "…", fields?: { "Vendor": "Acme" } } } }
+  ```
+
+  An entry id is a body's id, or `curve:<feature id>` for a curve of the parts list. Both maps are keyed by
+  entry and a property's fields by their label, so two people naming or describing different parts at once both
+  win. `renamePart`, `setPartProps` and `updatePart` (a name and properties in one change) return item changes;
+  `partNamesOf`, `partPropsOf` read. **The kernel does not know these names**: a `BodyResult` carries the
+  kernel's ("Part 1"). Whatever shows a studio's bodies by name passes a regeneration's bodies through
+  `namedBodies(doc, bodies)` (exported from `api.ts`): the part studio's page does (`studio.getState().bodies`
+  are named), an assembly's part source does, and an export sends the names along (`ExportSelection.names`).
+  The assistant's host and Compare still show the kernel's names.
 
 ### The sketch (`sketch/format.ts`), stored in a sketch feature's `params`
 
@@ -1015,6 +1031,45 @@ A panel is a React component that reads the studio with `useStudio(studio, (s) =
     the right of the Features header folds the whole dock away.
   **Parts** (`panels/parts.tsx`): click selects the part, the eye hides it, the menu
   isolates, zooms, opens Appearance, deletes.
+- **The feature list** (`ui/FeatureList.tsx`) starts with the **default geometry** (Origin, Top, Front, Right:
+  rows that select and hide like any other, and that a listening plane field takes a click on), then the
+  features. The box at its top ("Filter features…") filters them by name; Ctrl and Shift select several; F2 or a second slow click renames; the eye
+  hides and shows a plane, a sketch or reference geometry (`studio.setVisible`: this person's view, kept in the
+  browser per document, never in the document); the pointer over a row lights up what the feature made and the
+  pointer over the model marks the row that made the face; the rollback bar is always there to drag and says
+  how many features are below it; the menu has Edit, Rename, Suppress, Roll back to here, Roll to end, Hide,
+  Zoom to, what it uses and what uses it, Delete (several at once); a failed feature's mark shows its message
+  and a click looks at it.
+- **The parts list** (`ui/PartsList.tsx`, mounted by `panels/parts.tsx`; what it shows and offers is worked out
+  in `ui/parts-model.ts`, pure and tested, and done by `ui/part-actions.ts`; its dialogs are
+  `ui/PartDialogs.tsx`). Sections **Parts, Surfaces, Curves, Composite parts**, each with its icon and count
+  (`[data-section=part|surface|curve|composite]`; the heading's text, "Surfaces (2)", is `[data-group=surfaces]`
+  with `data-count`); a heading folds its section (kept in the browser) and its eye hides or shows the section. A
+  row is `[data-entry=<entry id>]` (`data-body` for a body, `data-kind` part, reference, surface, composite or
+  curve, `data-visible`, `data-hover` while the pointer is on the entry in the model).
+  - A click selects the entry in the model (a body is every face of it, a curve its datum pick), Ctrl adds,
+    Shift takes the range, Ctrl+A everything, ↑ ↓ move; the model's selection marks the rows. The pointer over a
+    row lights the entry up; over a **hidden** entry's row it draws the entry's outline. While a dialog is open
+    a click on a row is given to the listening field (or to the dialog's first `bodies` field).
+  - The features that made or changed what is selected (a whole part, a face, a curve) are marked in the
+    feature list (`[data-part-cross]`, a feature row slot from `panels/parts.tsx`; `crossFeatures(studio)`).
+  - F2 or a double click renames in place; Del starts Delete part.
+  - The menu of a row, for every selected row at once (`.cad-parts-menu`, items `[data-command]`): Rename,
+    Properties…, Assign material… (the document's library, or a new material), Edit appearance… (colour,
+    opacity), Move or copy… (the Transform feature), Export… (the Export dialog on those parts), Hide / Show,
+    Hide other items, Hide all, Show all, Isolate / Exit isolate, Make transparent / Make opaque, Show / Hide
+    centre of mass (parts with a material), Add comment… (pinned to the part), Zoom to selection, Delete…
+    (the Delete part feature). What does not apply to a kind is left out (a surface has no material, a curve
+    is renamed, described, hidden, commented on and looked at); what cannot run now is greyed and says why.
+  - A heading's menu: hide, show or select its section, fold it, and **Show parts list properties** (each
+    part's material and description beside its name; kept in the browser).
+  - Names, properties, materials and colours are the document's: one undoable change each, seen by everyone.
+    Hidden, isolated and **transparent** (`displayOf(studio).setTransparent(ids, on)`: `inspect/appearance-display.ts`)
+    are this person's view and are not kept over a reload.
+  - Not there, because Junction has no such thing: releases and revision history, part numbers, revisions and
+    states (so "parts list properties" shows material and description), configurations, drawings ("Create
+    drawing"), a clipboard for parts ("Copy" to paste elsewhere), mesh bodies (no Meshes section). Isolate
+    hides the other parts; it does not grow by distance or connectivity.
 - In a script, `scripts/cad-chrome.mjs` `openPanel(page, id)` unfolds one.
 
 ### `PartStudio` (`ui/studio.ts`)
@@ -1386,6 +1441,7 @@ Tests, each runnable alone with `node static/tests/<name>.test.js`:
 | `itemdoc`, `doctabs` | file format, change rules, order keys, the session against a scripted socket; the tabs |
 | `mechanical-doc` | the `.jpart` format, every edit, sketch helpers, region finding, the toolbar's keys |
 | `cad-units`, `cad-fields` | the document's units: formatting, what is typed into a field, expressions that keep their unit; what a click means to a listening dialog field; how the tool search finds a tool by name and by synonym |
+| `cad-partslist` | the parts list: names and properties as item changes (one path each, undone, two people at once, nonsense in the file), `namedBodies`; the sections and counts, which rows a click selects, which features made a part, the menu for a part, a surface, a curve, several rows, a viewer |
 | `mechanical-kernel` | **the real kernel in node**: sketch → extrude, booleans, names across rebuilds, cache, rollback, errors |
 | `mechanical-features`, `mechanical-patterns` | every solid feature; reference geometry, patterns, sweep, loft, variables |
 | `mechanical-collab` | presence, the draft's rebase, comment anchors, the project room, the `docs` notice, sessions under concurrent edits |
@@ -1420,6 +1476,7 @@ E2E_PG_URL=postgres://user:pass@127.0.0.1:5432/db E2E_JWT_SECRET=dev E2E_BASE=ht
 | `cad-ui` | tabs, sketch, extrude, picking, two people editing, rollback, the stored file |
 | `cad-featurelist-ui` | the feature list against Onshape's "Features and Parts Lists": the count, the search box, its filter menu and every command, the error count; the rollback bar dragged, moved with the arrow keys, Roll to here, Roll to end, a viewer's own bar; a face marking its feature's row, a row filling a listening field, several rows dragged as one step; folders (make, nest, collapse, drag into, move out, rename, suppress, unpack, delete, seen by a second person); the feature menu (dynamic suppression, dependencies, copy and paste sketch, comment); pausing regeneration with its three ways out and Restore, regeneration times, the not-fully-defined mark; the separator and the dock fold (with `SHOTS`: `flist-*.png`). The logic under it is `static/tests/cad-featurelist.test.js` |
 | `cad-planes-ui` | the default planes and the view cube as Onshape's: the isometric start, names painted on the planes, the orange outline under the pointer, a corner dragged to resize a plane (undone, kept over a reload, seen by a second person), the cube's faces, edges and every visible corner clicked with the pointer where they are on screen (bevel and the face beside it), its hover hint, arrows, roll and menu; Onshape's view keys (arrows, Shift, Ctrl + ← →, Shift + 1 … 7, F, N; none in a text field) and where they are told (with `SHOTS`: planes and cube, a corner under the pointer, light and dark) |
+| `cad-partslist-ui` | the parts list: sections, icons and counts, folding, selecting with Ctrl, Shift and the arrows, the model marking the rows and the features that made the selection, hiding and a hidden part's outline, every item of the menu and its dialogs, names and properties stored, undone, seen by a second person and kept over a reload, a viewer |
 | `cad-ux-ui` | **how it feels**: light by default, planes with their names painted on them and hidden, a new sketch waiting for its plane, the toolbar following the mode, fitting 1100 px, and at 1500 and 1920 px keeping the most used tools with each specialist section one button, the tool search by name and synonym, units and typed conversions, a fillet's field that keeps adding, dialogs that stay put, the feature list, the view cube, box selection, the menus (with `SHOTS`: light and dark, 1500 and 1100 px) |
 | `cad-sketch-ui` | the sketcher: every tool, constraints, dimensions, conflicts |
 | `cad-features-ui`, `cad-patterns-ui` | the solid features; reference geometry, patterns, sweep, variables |
@@ -1562,8 +1619,9 @@ from page load to the model on screen 14.4 s and 7.0 s.
   with `viewer3d.js` and `ui.js` is not done.
 - **Windows narrower than about 1000 px:** the toolbar scrolls sideways; the docks fold by hand, not by
   themselves; nothing is laid out for phones.
-- **The part studio's interface, not done:** folders in the feature list; renaming a part (its name is the
-  kernel's); a list of curves (surfaces are listed in the Parts panel under Surfaces); undo and redo do not bring back the
+- **The part studio's interface, not done:** folders in the feature list; the assistant's tools and Compare show a part
+  under the kernel's name, not the one a person gave it (`document/part-items.ts`); the parts list's rows are
+  not filtered by the feature list's search box; undo and redo do not bring back the
   selection or an open dialog; the mouse buttons cannot be remapped; the kernel's download shows a spinner, not
   how far it is; a plane's name is drawn over the model when its corner is behind it; inference lines cannot be
   turned off (constraint marks can); a sketch dimension's expression with bare numbers, and a variable's, follow

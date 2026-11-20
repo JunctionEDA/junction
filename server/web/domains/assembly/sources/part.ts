@@ -6,7 +6,7 @@
 // by the document's content, so a rename or a reconnect costs nothing.
 import { stableJson } from "../../../shared/itemdoc/itemdoc";
 import { ItemDocSession } from "../../../shared/itemdoc/sync";
-import { BoardFeed, PART_STUDIO_KIND, studioInputs, type FeatureInput } from "../../mechanical/api";
+import { BoardFeed, PART_STUDIO_KIND, namedBodies, partNamesOf, studioInputs, type FeatureInput } from "../../mechanical/api";
 import { fingerprint, readCached, writeCached } from "./cache";
 import type { KernelPool } from "./kernels";
 import type { SourceEnv, SourceHandle, SourcePiece, SourceProvider, SourceSnapshot } from "./types";
@@ -72,7 +72,7 @@ class PartHandle implements SourceHandle {
     // a board the studio shows is still being read: build once it is here, not twice
     if (this.boards.pending) return;
     // what the kernel would see: names are left out, so renaming a feature rebuilds nothing
-    const hash = fingerprint(assetV() + "|" + rollback + "|" + stableJson(features.map((f) => ({ id: f.id, type: f.type, suppressed: f.suppressed, params: f.suppressed ? null : f.params })) as never));
+    const hash = fingerprint(assetV() + "|" + rollback + "|" + stableJson(features.map((f) => ({ id: f.id, type: f.type, suppressed: f.suppressed, params: f.suppressed ? null : f.params })) as never) + "|" + stableJson(partNamesOf(doc) as never));
     if (hash === this.builtHash) { this.wantHash = hash; return; }   // back to what is shown: drop whatever is on its way
     if (hash === this.wantHash) return;
     this.wantHash = hash;
@@ -97,7 +97,8 @@ class PartHandle implements SourceHandle {
     this.builtHash = hash;
     const old = new Map(this.snap.pieces.map((p) => [p.id, p]));
     const pieces: SourcePiece[] = [];
-    for (const b of result.bodies) {
+    // under the names people gave the parts in the studio's parts list (they are in the hash above)
+    for (const b of namedBodies(doc, result.bodies)) {
       if (!b.mesh) continue;
       const was = old.get(b.id);
       // an unchanged body keeps its piece object: nothing downstream rebuilds

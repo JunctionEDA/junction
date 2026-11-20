@@ -107,14 +107,16 @@ export async function runExport(studio: PartStudio, o: ExportOptions): Promise<E
   const t0 = performance.now();
   const name = fileName(o.name, f);
   const bodies = o.bodies.filter((id) => studio.getState().bodies.some((b) => b.id === id));
+  // the worker knows the bodies by the names the kernel gave them: the file carries the names people gave (document/part-items.ts)
+  const names = Object.fromEntries(studio.getState().bodies.map((b) => [b.id, b.name]));
   if (f.kind === "solid") {
-    const r = await studio.kernel.call<{ data: Uint8Array; bytes: number } & Record<string, never>>("export-step", { format: o.format === "brep" ? "brep" : "step", schema: o.schema, unit: o.unit, bodies } as never);
+    const r = await studio.kernel.call<{ data: Uint8Array; bytes: number } & Record<string, never>>("export-step", { format: o.format === "brep" ? "brep" : "step", schema: o.schema, unit: o.unit, bodies, names } as never);
     return { data: r.data, name, mime: f.mime, bytes: r.bytes, ms: performance.now() - t0 };
   }
   if (f.kind === "mesh") {
     const resolution = o.resolution === "custom" ? { deflection: o.deflection, angleDeg: o.angle } : o.resolution;
     const format = o.format === "stl" && o.ascii ? "stl-ascii" : o.format;
-    const r = await studio.kernel.call<{ data: Uint8Array; bytes: number; triangles: number } & Record<string, never>>("export-mesh", { format, resolution, unit: o.unit, bodies } as never);
+    const r = await studio.kernel.call<{ data: Uint8Array; bytes: number; triangles: number } & Record<string, never>>("export-mesh", { format, resolution, unit: o.unit, bodies, names } as never);
     return { data: r.data, name, mime: f.mime, bytes: r.bytes, ms: performance.now() - t0, triangles: r.triangles };
   }
   const drawing = await drawingOf(studio, o.source!);

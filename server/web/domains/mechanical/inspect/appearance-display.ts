@@ -25,7 +25,12 @@ export interface DisplayState {
   /** when set, only these parts are shown */
   isolated: string[] | null;
   perspective: boolean;
+  /** parts this person looks through (the parts list's "Make transparent"): a way of looking, not the document's opacity */
+  transparent: string[];
 }
+
+/** how much of a part made transparent in the view is still seen */
+export const SEE_THROUGH = 0.28;
 
 const HIDDEN_LAYER = 7;
 
@@ -42,7 +47,7 @@ export class BodyDisplay extends Store<DisplayState> {
   readonly onApplied: (() => void)[] = [];
 
   constructor(readonly studio: PartStudio) {
-    super({ mode: "shaded-edges", hidden: [], isolated: null, perspective: studio.viewport.projection === "perspective" });
+    super({ mode: "shaded-edges", hidden: [], isolated: null, perspective: studio.viewport.projection === "perspective", transparent: [] });
     studio.viewport.renderer.localClippingEnabled = true;
     this.readTheme();
     studio.viewport.onTheme.push(() => { this.readTheme(); this.apply(); });
@@ -86,6 +91,9 @@ export class BodyDisplay extends Store<DisplayState> {
   /** The colour as "#rrggbb" for an input. */
   hexOf(bodyId: string): string { return "#" + this.colorOf(bodyId).getHexString(); }
   opacityOf(bodyId: string): number { return this.looks[bodyId]?.opacity ?? 1; }
+  /** The opacity a part is drawn with: the document's, or less while this person looks through it. */
+  drawnOpacity(bodyId: string): number { const o = this.opacityOf(bodyId); return this.state.transparent.includes(bodyId) ? Math.min(o, SEE_THROUGH) : o; }
+  isTransparent(bodyId: string): boolean { return this.state.transparent.includes(bodyId); }
   lookOf(bodyId: string): BodyLook { return this.looks[bodyId] || {}; }
   isVisible(bodyId: string): boolean {
     const s = this.state;
@@ -107,6 +115,11 @@ export class BodyDisplay extends Store<DisplayState> {
   toggle(id: string): void { if (this.isVisible(id)) this.hide([id]); else this.show([id]); }
   isolate(ids: readonly string[] | null): void { this.set({ isolated: ids && ids.length ? ids.slice() : null, hidden: ids ? this.state.hidden.filter((h) => !ids.includes(h)) : this.state.hidden }); this.apply(); }
   showAll(): void { this.set({ hidden: [], isolated: null }); this.apply(); }
+  /** Look through these parts, or stop: this person's view only (the document's opacity is the Appearance panel's). */
+  setTransparent(ids: readonly string[], on: boolean): void {
+    const now = this.state.transparent;
+    this.set({ transparent: on ? Array.from(new Set([...now, ...ids])) : now.filter((t) => !ids.includes(t)) }); this.apply();
+  }
   /** The clipping planes every body is cut by (the section view). */
   setClip(planes: THREE.Plane[]): void { this.clip = planes; for (const d of this.dressed.values()) { for (const m of d.mats) m.clippingPlanes = planes; d.edge.clippingPlanes = planes; } this.studio.viewport.invalidate(); }
 
@@ -119,7 +132,7 @@ export class BodyDisplay extends Store<DisplayState> {
       live.add(b.id);
       const old = this.dressed.get(b.id);
       if (old) { for (const m of old.mats) m.dispose(); old.edge.dispose(); }
-      const color = this.colorOf(b.id), opacity = this.opacityOf(b.id), look = this.looks[b.id] || {};
+      const color = this.colorOf(b.id), opacity = this.drawnOpacity(b.id), look = this.looks[b.id] || {};
       const see = opacity < 1;
       const surface = (c: THREE.Color): THREE.Material => {
         const common = { side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, transparent: see, opacity, depthWrite: !see, clippingPlanes: this.clip };

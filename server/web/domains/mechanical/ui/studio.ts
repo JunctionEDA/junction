@@ -26,6 +26,7 @@ import { studioInputs, type InputFilter } from "../document/inputs";
 import { folderAt, folderKey, isFolder } from "../document/folders";
 import { DEFAULT_UNITS, setUnits as unitChanges, unitsOf, type Units } from "../document/units";
 import { planeSizesOf, setPlaneSize } from "../document/plane-sizes";
+import { namedBodies } from "../document/part-items";
 import { setMeasureUnits } from "../inspect/measure-format";
 import { ModelView, pickKey, type Pick, type PickKind } from "../viewport/modelview";
 import { DEFAULT_GEOMETRY } from "../viewport/planes";
@@ -360,8 +361,10 @@ export class PartStudio {
     if (!result || this.closed) return;
     const reports: StudioState["reports"] = {};
     for (const r of result.features) reports[r.id] = r;
-    this.set({ reports, bodies: result.bodies, sketches: result.sketches, datums: result.datums || [] });
-    this.view.setBodies(result.bodies);
+    // the bodies under the names people gave them in the parts list (document/part-items.ts)
+    const bodies = namedBodies(doc, result.bodies);
+    this.set({ reports, bodies, sketches: result.sketches, datums: result.datums || [] });
+    this.view.setBodies(bodies);
     this.view.setDatums(result.datums || []);
     this.refreshSketches();
     this.refreshMarks();
