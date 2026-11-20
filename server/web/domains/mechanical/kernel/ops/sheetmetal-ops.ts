@@ -22,7 +22,7 @@ const dirOf = (s: Side): Vec2 => unit2(sub2(s.p1, s.p0));
 const inOf = (s: Side): Vec2 => { const d = dirOf(s); return [-d[1], d[0]]; };
 const lenOf = (s: Side): number => len2(sub2(s.p1, s.p0));
 
-export function newModel(id: string, name: string, o: { thickness: number; radius: number; k: number; gap: number; relief: SMModel["relief"] }): SMModel {
+export function newModel(id: string, name: string, o: { thickness: number; radius: number; k: number; gap: number; relief: SMModel["relief"]; corner: SMModel["corner"] }): SMModel {
   return { id, name, ...o, walls: [], bends: [], forms: [], roots: {}, bodies: {}, built: {}, finished: false, seq: 0 };
 }
 /** A new wall, on its own (a root at `place`) unless `place` is null (a bend will place it). */
@@ -204,6 +204,10 @@ function meet(k: Kernel, m: SMModel, sa: Side, sb: Side): { a: Side; b: Side; an
   const up = -(oB[0] * zA[0] + oB[1] * zA[1] + oB[2] * zA[2]) > 0;
   return { a, b, angle, up, WA, WB };
 }
+/** Do two edges of two walls run beside each other in the model, the walls on different sides? */
+export function touching(k: Kernel, m: SMModel, sa: Side, sb: Side): boolean {
+  try { meet(k, m, sa, sb); return true; } catch (e) { if (e instanceof FeatureError) return false; throw e; }
+}
 const shifted = (s: Side, by: number): Side => { const n = inOf(s); return { wall: s.wall, p0: add2(s.p0, n, by), p1: add2(s.p1, n, by) }; };
 const rootOf = (m: SMModel, wall: string): string | undefined => placements(m).root.get(wall);
 
@@ -240,10 +244,10 @@ export function ripTrim(k: Kernel, m0: SMModel, sa: Side, sb: Side, gap: number,
 }
 
 /** Bend a wall along a line that crosses it: the wall becomes two, joined by a bend centred on the line. */
-export function bendAlong(k: Kernel, m: SMModel, wallId: string, u: Vec2, v: Vec2, angle: number, radius: number, kf: number, keepLeft: boolean | null, featureId: string, keep: Keep): SMModel {
+export function bendAlong(k: Kernel, m: SMModel, wallId: string, u: Vec2, v: Vec2, angle: number, radius: number, kf: number, keepLeft: boolean | null, featureId: string, keep: Keep, rip?: number): SMModel {
   const w = wallOf(m, wallId), d = unit2(sub2(v, u)), n: Vec2 = [-d[1], d[0]];
-  if (!(Math.abs(angle) > 0.5) || Math.abs(angle) > 270) throw new FeatureError("The bend angle must be between 0.5° and 270°.");
-  const half = (Math.abs(rad(angle)) * (radius + kf * m.thickness)) / 2;
+  if (rip === undefined && (!(Math.abs(angle) > 0.5) || Math.abs(angle) > 270)) throw new FeatureError("The bend angle must be between 0.5° and 270°.");
+  const half = rip !== undefined ? rip / 2 : (Math.abs(rad(angle)) * (radius + kf * m.thickness)) / 2;
   const sideOf = (sign: 1 | -1): { face: Shape; lo: Vec2; hi: Vec2 } => {
     // keep what lies on the `sign` side of the line moved `half` that way
     const o = add2(u, n, sign * half), a = add2(o, d, -BIG), b = add2(o, d, BIG);
@@ -273,12 +277,21 @@ export function bendAlong(k: Kernel, m: SMModel, wallId: string, u: Vec2, v: Vec
   const mid = (s: Side): Vec2 => add2(lerp2(s.p0, s.p1, 0.5), inOf(s), EPS);
   const move = (s: Side | null): Side | null => (s && s.wall === wallId && onMoved(mid(s)) ? { ...s, wall: movedId } : s);
   const bend: SMBend = { id: `${featureId}.b${m.seq + 2}`, a, b, angle, radius, k: kf };
-  return {
+  const out: SMModel = {
     ...m, seq: m.seq + 2,
     walls: [...m.walls.map((x) => (x.id === wallId ? { id: wallId, face: fixed.face } : x)), { id: movedId, face: moved.face }],
-    bends: [...m.bends.map((x) => ({ ...x, a: move(x.a)!, b: move(x.b) })), bend],
+    bends: [...m.bends.map((x) => ({ ...x, a: move(x.a)!, b: move(x.b) })), ...(rip === undefined ? [bend] : [])],
     forms: m.forms.map((f) => (f.wall === wallId && onMoved(f.at) ? { ...f, wall: movedId } : f)),
   };
+  if (rip === undefined) return out;
+  // a rip: both halves stay where the wall was; whichever no longer hangs from a root stands on its own
+  const was = placements(m).mat.get(wallId)!, reach = placements(out).root, roots = { ...out.roots };
+  for (const id of [wallId, movedId]) if (!reach.has(id)) roots[id] = was;
+  return { ...out, roots };
+}
+/** Cut a wall in two along a line that crosses it, leaving `gap` between the halves. */
+export function ripAlong(k: Kernel, m: SMModel, wallId: string, u: Vec2, v: Vec2, gap: number, featureId: string, keep: Keep): SMModel {
+  return bendAlong(k, m, wallId, u, v, 0, 0, 0, null, featureId, keep, Math.max(gap, 0.01));
 }
 
 /** The bends of a wall that end near a point of it, each with which of its ends that is. */

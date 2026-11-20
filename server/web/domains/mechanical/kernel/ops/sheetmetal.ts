@@ -68,6 +68,8 @@ export interface SMModel {
   id: string; name: string;
   thickness: number; radius: number; k: number; gap: number;
   relief: { type: "rectangle" | "obround" | "tear"; width: number; depth: number };
+  /** what Corner uses when it is not told otherwise */
+  corner: { type: "rectangle" | "round" | "closed"; size: number };
   walls: SMWall[]; bends: SMBend[]; forms: SMForm[];
   /** the place of one wall of each connected piece: wall id → its plane in the model */
   roots: { [wall: string]: Mat };
