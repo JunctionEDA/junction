@@ -65,7 +65,8 @@ export interface FeatureDefinition<P extends JsonObject = JsonObject> {
   /**
    * which part of the toolbar the button is in ("solid" when not given): sketch │ solid (what makes material
    * from a profile) │ modify (what changes edges and faces) │ combine (what works on whole parts) │ direct (what
-   * edits faces whatever made them) │ pattern │ surface (what makes and trims surfaces) │ reference │ board
+   * edits faces whatever made them) │ pattern │ surface (what makes and trims surfaces) │ reference │ library (the custom
+   * features: gears, joints, lattices… one drop-down, a `toolbarMenu` per family) │ board
    */
   toolbarSection?: FeatureSection;
   /**
@@ -83,9 +84,9 @@ export interface FeatureDefinition<P extends JsonObject = JsonObject> {
 
 /** The feature parts of the toolbar, in the order they are drawn. */
 export type FeatureSection = "sketch" | "solid" | "modify" | "combine" | "direct" | "pattern" | "surface" | "reference"
-  | "frame" | "sheetmetal" | "board";
+  | "frame" | "sheetmetal" | "library" | "board";
 export const FEATURE_SECTIONS: readonly FeatureSection[] = ["sketch", "solid", "modify", "combine", "direct", "pattern", "surface", "reference",
-  "frame", "sheetmetal", "board"];
+  "frame", "sheetmetal", "library", "board"];
 
 /** Typed helper: `export default defineFeature<MyParams>({ ... })`. */
 export function defineFeature<P extends JsonObject>(def: FeatureDefinition<P>): FeatureDefinition<JsonObject> {

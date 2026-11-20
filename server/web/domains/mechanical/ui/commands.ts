@@ -161,7 +161,7 @@ const SKETCH_PARTS: { id: string; title: string; from: number; to: number }[] = 
  * tool used last, the caret lists the section (its families apart, between rules).  What a part is mostly made
  * with keeps a button of its own; these are opened when they are needed.
  */
-export const GROUPS: { readonly [section: string]: string } = { direct: "Direct edit", surface: "Surface", frame: "Frames", sheetmetal: "Sheet metal" };
+export const GROUPS: { readonly [section: string]: string } = { direct: "Direct edit", surface: "Surface", frame: "Frames", sheetmetal: "Sheet metal", library: "Custom features" };
 /**
  * How long such a button keeps its place: every group alike (and the Curve ▾ family with them), after the tools
  * a part is mostly made with (Draft, Split, Transform and up) and before the single specialist buttons (Thicken,
@@ -181,7 +181,7 @@ function grouped(id: string, title: string, slots: Slot[]): Slot[] {
   if (singles.length) parts.push(singles);
   return [{ key: `${id}/${title}`, menu: title, entries: parts.flat(), keep: GROUP_KEEP, parts }];
 }
-const SECTION_TITLES: { [id: string]: string } = { edit: "Edit", sketch: "Sketch", solid: "Create", modify: "Modify", combine: "Combine", direct: "Direct editing", pattern: "Pattern", surface: "Surface", reference: "Reference geometry", board: "Circuit board", frame: "Frames", sheetmetal: "Sheet metal", inspect: "Inspect", view: "View", file: "File" };
+const SECTION_TITLES: { [id: string]: string } = { edit: "Edit", sketch: "Sketch", solid: "Create", modify: "Modify", combine: "Combine", direct: "Direct editing", pattern: "Pattern", surface: "Surface", reference: "Reference geometry", board: "Circuit board", frame: "Frames", sheetmetal: "Sheet metal", library: "Custom features", inspect: "Inspect", view: "View", file: "File" };
 
 /** The toolbar for the mode the studio is in. */
 export function toolbarSections(studio: PartStudio): Section[] {

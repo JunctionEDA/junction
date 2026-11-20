@@ -198,7 +198,7 @@ test("tools: no two tools outside a sketch share a key, nor two inside one; ever
     where.set(k, file);
   }
   assert.ok(keys.sketch.size >= 10 && keys.model.size >= 4);
-  const sections = new Set(["sketch", "solid", "modify", "combine", "direct", "pattern", "surface", "reference", "frame", "sheetmetal", "board"]);
+  const sections = new Set(["sketch", "solid", "modify", "combine", "direct", "pattern", "surface", "reference", "frame", "sheetmetal", "library", "board"]);
   const menus = new Map();
   for (const file of fs.readdirSync(path.join(root, "features"))) {
     if (file.startsWith("_") || !/\.ts$/.test(file)) continue;
