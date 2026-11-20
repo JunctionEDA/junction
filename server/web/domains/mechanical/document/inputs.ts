@@ -5,6 +5,7 @@
 //
 //   features of the document, in order            (document/format.ts featuresOf, featureInputs)
 //   numbers typed as expressions follow variables  (document/variables.ts resolveInputs)
+//   folders and conditions suppress features       (document/folders.ts suppressionOf)
 //   input filters, in order                        what a feature needs that is not in this document: the Board
 //                                                  feature's board (`$board`), read live from another document.
 //                                                  The page's is board/link.ts; everything else uses
@@ -12,7 +13,8 @@
 import type { ItemDoc } from "../../../shared/itemdoc/itemdoc";
 import type { FeatureInput } from "../kernel/protocol";
 import { featureInputs, featuresOf, rollbackIndex, type FeatureItem } from "./format";
-import { resolveInputs, variableValues, variablesOf } from "./variables";
+import { plainSuppression, suppressionOf } from "./folders";
+import { lookupOf, resolveInputs, variableValues, variablesOf } from "./variables";
 
 /** Called on the worker's input just before a regeneration; may return a changed copy.  What it adds is never stored. */
 export type InputFilter = (inputs: FeatureInput[]) => FeatureInput[];
@@ -33,6 +35,11 @@ export function studioInputs(doc: ItemDoc, o: StudioInputOptions = {}): StudioIn
   const rollback = o.features && o.rollback !== undefined ? o.rollback : rollbackIndex(doc, features);
   const vv = variableValues(variablesOf(doc));
   let inputs = resolveInputs(featureInputs(features), vv.values, vv.dims);
+  // a suppressed folder and a condition that holds suppress like the feature's own switch (document/folders.ts)
+  if (!plainSuppression(doc, features)) {
+    const why = suppressionOf(doc, features, lookupOf(vv));
+    inputs = inputs.map((f) => (!f.suppressed && why.get(f.id)?.suppressed ? { ...f, suppressed: true } : f));
+  }
   for (const filter of o.filters || []) inputs = filter(inputs);
   return { features: inputs, rollback };
 }

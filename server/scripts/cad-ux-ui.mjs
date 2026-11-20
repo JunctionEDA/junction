@@ -531,13 +531,13 @@ try {
   await page.click('.cad-features [data-feature-type=extrude]');
   await page.click('.cad-features [data-feature-type=fillet]', { button: 'right' });
   const menuItems = await page.$$eval('.cad-feature-menu [data-menu-item]', (els) => els.map((e) => e.getAttribute('data-menu-item')));
-  check('the right-click menu of a feature', ['Edit…', 'Rename', 'Suppress', 'Roll back to here', 'Roll to end', 'Zoom to', 'Show what it uses and what uses it', 'Delete'].every((m) => menuItems.includes(m)), menuItems.join(' | '));
+  check('the right-click menu of a feature', ['Edit…', 'Rename', 'Suppress', 'Roll to here', 'Roll to end', 'Zoom to', 'Show dependencies…', 'Delete'].every((m) => menuItems.includes(m)), menuItems.join(' | '));
   await page.click('.cad-feature-menu [data-menu-item="Roll to end"]');
   await settled(page, 3);
   await page.click('.cad-features [data-feature-type=extrude]', { button: 'right' });
-  await page.click('.cad-feature-menu [data-menu-item="Show what it uses and what uses it"]');
+  await page.click('.cad-feature-menu [data-menu-item="Show dependencies…"]');
   check('“used by” marks the rows on either side', (await page.getAttribute('.cad-features [data-feature-type=sketch] [data-dep]', 'data-dep')) === 'uses' && (await page.getAttribute('.cad-features [data-feature-type=fillet] [data-dep]', 'data-dep')) === 'used by');
-  await page.click('.cad-features [data-deps] button');
+  await page.click('.cad-features [data-deps] [data-close]');
   // a sketch is shown and hidden with its eye
   check('a sketch a feature uses is hidden until asked for', (await page.getAttribute('.cad-features [data-feature-type=sketch] [data-eye]', 'data-eye')) === 'hidden');
   await page.click('.cad-features [data-feature-type=sketch] [data-eye]');

@@ -238,7 +238,7 @@ try {
   await shot(alice, '10-pocket');
 
   // ---------------------------------------------------------------- rollback, error state
-  await menu(alice, '[data-feature-row][data-feature-type=extrude] >> nth=0', 'Roll back to here');
+  await menu(alice, '[data-feature-row][data-feature-type=extrude] >> nth=0', 'Roll to here');
   await bob.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.rollback === 2 && s.bodies[0]?.mesh.faces.names.length === 7 && s.reports[s.features[3].id]?.status === 'rolled-back'; }, null, { timeout: 30000 });
   check('rolling back shows the model as it was, for both', await bob.isVisible('[data-rollback]'));
   await shot(alice, '11-rolled-back');

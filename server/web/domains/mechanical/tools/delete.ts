@@ -1,7 +1,7 @@
 // Delete: what is selected in the open sketch (curves, points, constraints, dimensions), or else the feature
-// selected in the list.
+// selected in the list (a selected folder goes with what is in it).
 import { defineTool } from "../core/tool";
-import { deleteFeature } from "../document/edits";
+import { deleteItems } from "../document/folders";
 import { sketchEditor } from "../sketch/editor";
 
 export default defineTool({
@@ -18,6 +18,6 @@ export default defineTool({
     if (s.sketch) { if (!sketchEditor(studio).deleteSelection()) studio.host.toast("Select something in the sketch to delete.", 2500); return; }
     // every row selected in the feature list goes, as one step
     const ids = s.selectedFeatures.length ? s.selectedFeatures : s.selectedFeature ? [s.selectedFeature] : [];
-    if (ids.length && !s.editing && studio.doc) studio.commit(ids.flatMap((id) => deleteFeature(studio.doc!, id)));
+    if (ids.length && !s.editing && studio.doc) { const changes = deleteItems(studio.doc, ids); if (changes.length) studio.commit(changes); }
   },
 });

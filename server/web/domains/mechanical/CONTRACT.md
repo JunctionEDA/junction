@@ -325,7 +325,10 @@ new JSON item document kind is one line there and gets history, branches, mergin
 
 ```ts
 // one step of the history tree
-{ id, type: "feature", featureType: "extrude", name: "Extrude 1", order: "V", suppressed?: true, params: {…} }
+{ id, type: "feature", featureType: "extrude", name: "Extrude 1", order: "V", suppressed?: true, params: {…},
+  folder?: <folder id>, suppressIf?: "#depth < 10 mm" }
+// a folder of the feature list (document/folders.ts)
+{ id, type: "folder", name: "Mounting holes", parent?: <folder id>, suppressed?: true, suppressIf?: "…" }
 // one item, id "studio"
 { id: "studio", type: "studio", units: "mm", angleUnits?: "deg", precision?: 3, rollback: <feature id> | null,
   planeSizes?: { top?: 120, front?: 80, right?: 60 } }
@@ -341,6 +344,21 @@ new JSON item document kind is one line there and gets history, branches, mergin
   (`document/plane-sizes.ts`: `planeSizesOf`, `setPlaneSize`). Each plane is its own path, so two people
   resizing two planes both win, and a resize is undone like any edit. A plane it does not name grows with the
   model.
+- **Folders** (`document/folders.ts`). A folder has no place of its own: a feature names its innermost folder in
+  `folder`, a folder its parent in `parent`, and the list draws a folder where its features are. **The build
+  order is always the features' `order`**, so a reader that ignores folders builds the same model. The edits
+  (`addToFolder`, `moveItems`, `moveToFolder`, `unpackFolder`, `deleteItems`, `renameItem`) keep a folder's
+  features next to each other and remove a folder nothing is in any more; `edits.addFeature` and `moveFeature`
+  put a feature into the folder its two neighbours share. When a folder's features are not together all the same
+  (two people at once, a tool that knows no folders), `featureTree` shows the first run as the folder and the
+  rest outside it, where they are built: nothing is reordered. Several rows move as one change (`moveItems`).
+- **Suppression** is worked out in one place, `suppressionOf` (`document/folders.ts`), and applied by
+  `studioInputs`, so the page, an assembly, Compare, History and the assistant's host all agree. A feature is
+  not built when its own `suppressed` is set, when its `suppressIf` holds (dynamic suppression: a condition of
+  `document/conditions.ts` — two expressions of `document/variables.ts` compared with `< <= > >= == !=`, joined
+  with `&&`, `||`, `!` and brackets — evaluated with the document's variables), or when a folder around it is
+  suppressed either way. A folder is suppressed as one thing: its features keep their own `suppressed`. A
+  condition that cannot be read suppresses nothing and the list says why.
 - Feature ids are UUIDs. A body's id is the id of the feature that made it (with a suffix when one feature
   made several), so body ids survive rebuilds.
 
@@ -957,15 +975,45 @@ A panel is a React component that reads the studio with `useStudio(studio, (s) =
   current asks `usePanelOpen(studio, id)` and does nothing while folded (mass properties does).
 - Left dock: Features, Parts. Right dock: Sketch (while a sketch is open), Variables, Mass properties (folded),
   Appearance (folded), Board (unfolds itself), Collaborators, Comments (folded).
-- **The feature list** (`ui/FeatureList.tsx`) starts with the **default geometry** (Origin, Top, Front, Right:
-  rows that select and hide like any other, and that a listening plane field takes a click on), then the
-  features. The box at its top ("Filter features…") filters them by name; Ctrl and Shift select several; F2 or a second slow click renames; the eye
-  hides and shows a plane, a sketch or reference geometry (`studio.setVisible`: this person's view, kept in the
-  browser per document, never in the document); the pointer over a row lights up what the feature made and the
-  pointer over the model marks the row that made the face; the rollback bar is always there to drag and says
-  how many features are below it; the menu has Edit, Rename, Suppress, Roll back to here, Roll to end, Hide,
-  Zoom to, what it uses and what uses it, Delete (several at once); a failed feature's mark shows its message
-  and a click looks at it. **Parts** (`panels/parts.tsx`): click selects the part, the eye hides it, the menu
+- **The feature list** (`ui/FeatureList.tsx`, with `ui/featurelist/`: `Chrome.tsx` the header, banner and
+  dialogs, `model.ts` what is worked out from the studio, `filter.ts` the search, `DockSeparator.tsx` the bar
+  under it). It follows Onshape's "Features and Parts Lists":
+  - **Top.** The search box filters by a piece of a name or a type, and by a command (`:part :type :name
+    :errors :warnings :folder :variable :suppressed :hidden :shown`; the filter button lists them, a half-typed
+    one completes with Tab). The text is `getState().ui.featureFilter`; **the parts list filters by the same
+    box**: `listFilter(studio)` / `useListFilter(studio)` (`featurelist/model.ts`) answer `{ active, features,
+    bodies, folders }` (sets of ids), `setListFilter(studio, text)` types into it. Under the box: the number of
+    features, the number that failed (a click filters to them), New folder, Pause regeneration, Regeneration times.
+  - **Rows.** The **default geometry** (Origin, Top, Front, Right: rows that select and hide like any other, and
+    that a listening plane field takes a click on), then the features in build order, in their folders. Ctrl and
+    Shift select several rows (features and folders: `selectedFeatures` holds both kinds of id); F2 or a second
+    slow click renames; the eye hides and shows a plane, a sketch or reference geometry (`studio.setVisible`:
+    this person's view, kept in the browser per document, never in the document). The pointer over a row lights
+    up what the feature made, the pointer over the model marks the row that made the face, and **what is
+    selected in the model marks the rows of every feature behind it** (`data-cross`; `crossFeatures`). While a
+    dialog's field listens, a click on a sketch's or a reference plane's row fills it. A row, or every selected
+    row, is dragged to another place (between rows, or onto a folder to go inside), one undoable change. A failed
+    feature's mark shows its message and a click looks at it; a sketch that is not fully defined has a blue dot
+    that says how many degrees of freedom are left (the sketch solver, asked in idle moments).
+  - **The rollback bar** is always there: drag it, or select it and press ↑ ↓ (Home, End); "Roll to here" on a
+    feature or a folder, "Roll to end" on the bar's own menu. `studio.rollTo(featureId | null)` is what they
+    call: an edit of the document for someone who can edit; for someone who cannot, **a bar of their own**
+    (`getState().ownRollback`, until `studio.followRollback()`). A folder the bar is inside is drawn open.
+  - **The menu** of a feature: Edit, Rename, Suppress, Add / Edit / Remove dynamic suppression, Roll to here,
+    Roll to end, Hide / Show, Zoom to, Show dependencies (a dialog: parents above, children below), Add to
+    folder, Move out of folder, Move to a folder, Copy sketch, Paste sketch (a new sketch with the copied curves,
+    in another part studio too), Add comment, Delete. Of a folder: Rename, Suppress, dynamic suppression,
+    Expand, Collapse, Expand all, Collapse all, Roll to here, the folder entries, Unpack folder, Delete folder
+    and what is in it. Which folders are collapsed is this person's, kept in the browser per document.
+  - **Pausing regeneration** (`studio.pauseRegen()`, `regenerateNow()`, `resumeRegen(discard?)`,
+    `restoreDiscarded()`; `getState().pause`, `.discarded`). While paused, edits are committed as ever (stored,
+    shared, undoable) and only this person's model waits; "Discard and exit" undoes this person's edits made
+    since the last Regenerate, "Restore" redoes them. A sketch cannot be opened meanwhile. **Regeneration
+    times** lists what each feature's last build took (`FeatureReport.ms`, kept across cached rebuilds).
+  - **The separator** between the feature list and the panel under it (the parts list) is dragged to share the
+    room; each scrolls by itself; the height is kept in the browser, a double click gives it back. The button at
+    the right of the Features header folds the whole dock away.
+  **Parts** (`panels/parts.tsx`): click selects the part, the eye hides it, the menu
   isolates, zooms, opens Appearance, deletes.
 - In a script, `scripts/cad-chrome.mjs` `openPanel(page, id)` unfolds one.
 
@@ -981,6 +1029,8 @@ studio.subscribe(fn)
 studio.doc                     // the ItemDoc (read only; change it with commit)
 studio.commit(changes)         // see "How a change is committed"
 studio.undo(), studio.redo()
+studio.rollTo(featureId | null), studio.followRollback()      // the rollback bar (see "The feature list")
+studio.pauseRegen(), studio.regenerateNow(), studio.resumeRegen(discard?), studio.restoreDiscarded()
 studio.kernel.call(name, args)
 studio.view                    // ModelView: pick(ev), planePoint(ev, frame), setOverlay, setFilter, sketchFrame, pointerTool,
                                //   setMarks, boxOf(picks), normalOf(pick), picksOfFeature(id), planeLayer (halfOf(id), labelInfo())
@@ -1368,6 +1418,7 @@ E2E_PG_URL=postgres://user:pass@127.0.0.1:5432/db E2E_JWT_SECRET=dev E2E_BASE=ht
 |---|---|
 | **`cad-e2e`** | **the whole story, two people, one project**: a constrained tray, shell, fillet, patterned bosses, the board in the tray, the tray driving the board, an opening following a connector, an assembly with a hinged lid and the board, interference, the bill of materials, measure, versions compared, STEP. Run it after any change that crosses folders. |
 | `cad-ui` | tabs, sketch, extrude, picking, two people editing, rollback, the stored file |
+| `cad-featurelist-ui` | the feature list against Onshape's "Features and Parts Lists": the count, the search box, its filter menu and every command, the error count; the rollback bar dragged, moved with the arrow keys, Roll to here, Roll to end, a viewer's own bar; a face marking its feature's row, a row filling a listening field, several rows dragged as one step; folders (make, nest, collapse, drag into, move out, rename, suppress, unpack, delete, seen by a second person); the feature menu (dynamic suppression, dependencies, copy and paste sketch, comment); pausing regeneration with its three ways out and Restore, regeneration times, the not-fully-defined mark; the separator and the dock fold (with `SHOTS`: `flist-*.png`). The logic under it is `static/tests/cad-featurelist.test.js` |
 | `cad-planes-ui` | the default planes and the view cube as Onshape's: the isometric start, names painted on the planes, the orange outline under the pointer, a corner dragged to resize a plane (undone, kept over a reload, seen by a second person), the cube's faces, edges and every visible corner clicked with the pointer where they are on screen (bevel and the face beside it), its hover hint, arrows, roll and menu; Onshape's view keys (arrows, Shift, Ctrl + ← →, Shift + 1 … 7, F, N; none in a text field) and where they are told (with `SHOTS`: planes and cube, a corner under the pointer, light and dark) |
 | `cad-ux-ui` | **how it feels**: light by default, planes with their names painted on them and hidden, a new sketch waiting for its plane, the toolbar following the mode, fitting 1100 px, and at 1500 and 1920 px keeping the most used tools with each specialist section one button, the tool search by name and synonym, units and typed conversions, a fillet's field that keeps adding, dialogs that stay put, the feature list, the view cube, box selection, the menus (with `SHOTS`: light and dark, 1500 and 1100 px) |
 | `cad-sketch-ui` | the sketcher: every tool, constraints, dimensions, conflicts |
@@ -1476,6 +1527,12 @@ from page load to the model on screen 14.4 s and 7.0 s.
   sketch, the sketch's X or Y, or anything picked: an edge, a line of any sketch, a reference axis.
 - **Patterns** copy what a feature did, moved; a copy of a feature whose shape depends on where it is (a fillet
   meeting other geometry) keeps the seed's shape.
+- **Feature list.** Of Onshape's "Features and Parts Lists" page, not done because Junction has no such thing:
+  the configuration drop-down, release marks, `:partnumber` and `:revision`, part properties. A folder cannot be
+  empty (the last thing moved out removes it). Paste sketch makes a new sketch; it does not paste into the open
+  one. Regeneration times are of each feature's last build in this browser; there is no "rebuild everything to
+  time it". While regeneration is paused, edits other people make are not rebuilt either, and are not counted
+  among "yours". The yellow "missing selections" mark is the ordinary error mark: a lost reference is an error.
 - **Geometry names** have the limits listed under "Geometry names".
 - **One kernel thread per worker, no cancellation.** A long evaluation blocks the next; the page stays responsive.
 - **Meshes** are per body, not per view: a small hole on a large part with hundreds of faces is an octagon when

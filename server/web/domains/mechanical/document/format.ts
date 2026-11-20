@@ -6,6 +6,7 @@
 //             { id, type: "feature", featureType, name, order, suppressed?, params }
 //             `featureType` names a registered feature (features/*.ts), `params` is that feature's own data,
 //             `order` is an order key (itemdoc.ts orderBetween): the tree is the features sorted by it.
+//   folder    a folder of the feature list, and `folder` / `suppressIf` on a feature: document/folders.ts
 //   studio    one item, id "studio": settings of the whole document
 //             { id: "studio", type: "studio", units: "mm", rollback: <feature id> | null }
 //             `rollback` is the first feature that is NOT built (the rollback bar sits above it); null is the end.
@@ -26,6 +27,10 @@ export interface FeatureItem extends Item {
   name: string;
   order: string;
   suppressed?: boolean;
+  /** the folder of the feature list it is in (document/folders.ts); absent: none */
+  folder?: string;
+  /** dynamic suppression: the condition under which it is not built (document/conditions.ts) */
+  suppressIf?: string;
   params: JsonObject;
 }
 

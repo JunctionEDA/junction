@@ -23,6 +23,7 @@ import { FEATURES, TOOLS } from "../generated/page";
 import { KernelClient, type KernelState } from "../kernel/client";
 import type { BodyResult, DatumView, FeatureInput, FeatureReport, RegenResult, SketchView } from "../kernel/protocol";
 import { studioInputs, type InputFilter } from "../document/inputs";
+import { folderAt, folderKey, isFolder } from "../document/folders";
 import { DEFAULT_UNITS, setUnits as unitChanges, unitsOf, type Units } from "../document/units";
 import { planeSizesOf, setPlaneSize } from "../document/plane-sizes";
 import { setMeasureUnits } from "../inspect/measure-format";
@@ -77,6 +78,15 @@ export interface StudioState {
   planesVisible: boolean;
   /** set while an earlier version of the document is on screen (showPast): nothing can be edited meanwhile */
   past?: { label: string } | null;
+  /**
+   * Regeneration is paused (pauseRegen): edits go into the document as ever, but the model on screen is not
+   * rebuilt until it is asked for.  `edits` counts this person's edits the model does not show yet.
+   */
+  pause?: { edits: number } | null;
+  /** how many edits "Discard unregenerated changes" just took back: Restore brings them back */
+  discarded?: number;
+  /** the rollback bar is this person's own, not the document's (someone who cannot edit moved it: rollTo) */
+  ownRollback?: boolean;
   /** interface state that tools and panels keep for themselves (setUi), by a key of their own */
   ui?: { readonly [key: string]: unknown };
 }
@@ -189,6 +199,7 @@ export class PartStudio {
     if (this.state.sketch) this.finishSketch();
     if (this.state.editing) this.cancelFeature();
     this.pastDoc = doc;
+    this.localRollback = undefined;
     this.select([]);
     this.set({ past: doc ? { label } : null, canEdit: this.session.status.canEdit && !doc, selectedFeature: null, selectedFeatures: [] });
     this.documentChanged();
@@ -213,10 +224,68 @@ export class PartStudio {
   /** Make an edit.  The changes come from document/edits.ts (or are built the same way). */
   commit(changes: ItemChange[], o: { undoable?: boolean } = {}): boolean {
     if (this.pastDoc) { this.host.toast("This is an earlier version. Go back to the current one to edit.", 3000); return false; }
-    return this.session.commit(changes, o);
+    const ok = this.session.commit(changes, o);
+    if (ok && o.undoable !== false) this.countEdit(1, true);
+    return ok;
   }
-  undo(): void { if (!this.pastDoc && this.session.undo()) this.host.toast("Undone", 1200); }
-  redo(): void { if (!this.pastDoc && this.session.redo()) this.host.toast("Redone", 1200); }
+  undo(): void { if (!this.pastDoc && this.session.undo()) { this.countEdit(-1); this.host.toast("Undone", 1200); } }
+  redo(): void { if (!this.pastDoc && this.session.redo()) { this.countEdit(1); this.host.toast("Redone", 1200); } }
+
+  // ---------------------------------------------------------------- pausing regeneration, and a rollback of one's own
+  private countEdit(by: number, fresh = false): void {
+    const p = this.state.pause;
+    if (p) this.set({ pause: { edits: Math.max(0, p.edits + by) }, ...(fresh ? { discarded: 0 } : {}) });
+    else if (fresh && this.state.discarded) this.set({ discarded: 0 });
+  }
+  /**
+   * Stop rebuilding the model after every edit, for a batch of edits to a model that takes long to build.  The
+   * edits are made as ever (stored, shared, undoable); only this person's screen waits.  A sketch cannot be
+   * drawn in meanwhile: it needs the model as it is.
+   */
+  pauseRegen(): void {
+    if (this.state.pause) return;
+    if (this.state.sketch) { this.host.toast("Finish the sketch first: a sketch cannot be drawn while regeneration is paused.", 3500); return; }
+    this.set({ pause: { edits: 0 }, discarded: 0 });
+  }
+  /** Build the model from the document as it is now, and stay paused. */
+  regenerateNow(): void {
+    if (!this.state.pause) return;
+    this.set({ pause: { edits: 0 }, discarded: 0 });
+    this.scheduleRegen(true);
+  }
+  /**
+   * Leave paused regeneration and build the model.  `discard`: first take back this person's edits the model
+   * does not show yet (the ones made since the last "Regenerate"); `restoreDiscarded` brings them back.
+   */
+  resumeRegen(discard = false): void {
+    const p = this.state.pause; if (!p) return;
+    let taken = 0;
+    if (discard && !this.pastDoc) for (let i = 0; i < p.edits; i++) { if (!this.session.undo()) break; taken++; }
+    this.set({ pause: null, discarded: taken });
+    this.scheduleRegen();
+  }
+  /** Undo the last discard: the edits come back and regeneration is paused again. */
+  restoreDiscarded(): void {
+    const n = this.state.discarded || 0; if (!n || this.pastDoc) return;
+    let back = 0;
+    this.set({ pause: { edits: 0 } });   // paused first: bringing the edits back must not rebuild the model
+    for (let i = 0; i < n; i++) { if (!this.session.redo()) break; back++; }
+    this.set({ pause: { edits: back }, discarded: 0 });
+  }
+  private localRollback: string | null | undefined = undefined;
+  /**
+   * Put the rollback bar above a feature (null: at the end).  For someone who can edit that is an edit of the
+   * document, shared like any other.  For someone who cannot, the bar is their own from then on: it no longer
+   * follows the document's (`ownRollback`) until `followRollback()`.
+   */
+  rollTo(featureId: string | null): void {
+    if (!this.doc) return;
+    if (this.state.canEdit) { this.commit(edits.setRollback(this.doc, featureId)); return; }
+    this.localRollback = featureId;
+    this.documentChanged();
+  }
+  /** Give up a rollback bar of one's own and follow the document's again. */
+  followRollback(): void { if (this.localRollback === undefined) return; this.localRollback = undefined; this.documentChanged(); }
 
   private documentChanged(): void {
     const doc = this.doc; if (!doc) return;
@@ -225,7 +294,9 @@ export class PartStudio {
     const sizes = planeSizesOf(doc), halves: { [id: string]: number } = {};
     for (const [id, side] of Object.entries(sizes)) halves[id] = side / 2;
     this.view.planeLayer.setSizes(halves);
-    const patch: Partial<StudioState> = { loaded: true, features, rollback: rollbackIndex(doc, features), canUndo: !this.pastDoc && this.session.canUndo, canRedo: !this.pastDoc && this.session.canRedo };
+    if (this.localRollback !== undefined && this.session.status.canEdit && !this.pastDoc) this.localRollback = undefined;
+    const ownAt = this.localRollback ? features.findIndex((f) => f.id === this.localRollback) : -1;
+    const patch: Partial<StudioState> = { loaded: true, features, ownRollback: this.localRollback !== undefined, rollback: this.localRollback === undefined ? rollbackIndex(doc, features) : ownAt < 0 ? features.length : ownAt, canUndo: !this.pastDoc && this.session.canUndo, canRedo: !this.pastDoc && this.session.canRedo };
     const units = unitsOf(doc), was = this.state.units;
     if (units.length !== was.length || units.angle !== was.angle || units.places !== was.places) patch.units = units;
     setMeasureUnits(units);   // the measure readout and mass properties write their numbers in them
@@ -234,8 +305,10 @@ export class PartStudio {
     const s = this.state;
     if (s.sketch && !features.some((f) => f.id === s.sketch!.featureId)) { patch.sketch = null; this.view.pointerTool = null; this.view.setOverlay(null); }
     if (s.editing && !s.editing.isNew && !features.some((f) => f.id === s.editing!.draft.id)) patch.editing = null;
-    if (s.selectedFeature && !features.some((f) => f.id === s.selectedFeature)) patch.selectedFeature = null;
-    if (s.selectedFeatures.some((id) => !features.some((f) => f.id === id))) patch.selectedFeatures = s.selectedFeatures.filter((id) => features.some((f) => f.id === id));
+    // a row of the list is a feature or a folder (document/folders.ts)
+    const row = (id: string) => features.some((f) => f.id === id) || isFolder(doc.items.get(id));
+    if (s.selectedFeature && !row(s.selectedFeature)) patch.selectedFeature = null;
+    if (s.selectedFeatures.some((id) => !row(id))) patch.selectedFeatures = s.selectedFeatures.filter(row);
     if (s.hoverFeature && !features.some((f) => f.id === s.hoverFeature)) patch.hoverFeature = null;
     this.set(patch);
     // the planes may have a size of their own in this document: frame them as they are
@@ -261,8 +334,10 @@ export class PartStudio {
     return { features, rollback };
   }
 
-  scheduleRegen(): void {
+  scheduleRegen(force = false): void {
     clearTimeout(this.regenTimer);
+    // paused (pauseRegen): the model on screen waits until it is asked for
+    if (this.state.pause && !force) return;
     // A window nobody is looking at does not rebuild for every edit somebody else makes: it rebuilds once,
     // from the document as it is by then, when it is looked at again.
     if (document.visibilityState === "hidden") {
@@ -399,6 +474,7 @@ export class PartStudio {
   /** Open the dialog for a new feature of this type.  The selection fills what it can (a plane, a sketch). */
   startFeature(type: string): void {
     const def = featureDef(type); if (!def || !this.requireEdit()) return;
+    if (def.type === "sketch" && this.state.pause) { this.host.toast("A sketch cannot be drawn while regeneration is paused. Regenerate and exit first.", 3500); return; }
     // started from inside a sketch, a feature takes that sketch
     const fromSketch = this.state.sketch ? this.state.sketch.featureId : null;
     if (this.state.sketch) this.finishSketch();
@@ -564,7 +640,7 @@ export class PartStudio {
     const d = e.draft;
     if (awaitsPlane(this.state)) { this.host.toast("Select a plane or a planar face for the sketch first.", 2500); return; }
     const changes: ItemChange[] = e.isNew
-      ? [{ id: d.id, kind: "ADDED", typeName: "feature", item: { ...d, order: orderAt(featuresOf(this.doc), rollbackIndex(this.doc)) } }]
+      ? [{ id: d.id, kind: "ADDED", typeName: "feature", item: { ...d, order: orderAt(featuresOf(this.doc), rollbackIndex(this.doc)), ...folderKey(folderAt(this.doc, rollbackIndex(this.doc))) } }]
       : [...edits.setParams(this.doc, d.id, d.params), ...edits.renameFeature(this.doc, d.id, d.name)];
     this.set({ editing: null, selectedFeature: d.id, selectedFeatures: [d.id] });
     this.view.setFilter(null);
@@ -595,6 +671,7 @@ export class PartStudio {
    */
   openSketch(featureId: string, isNew = false): void {
     if (!this.requireEdit()) return;
+    if (this.state.pause) { this.host.toast("A sketch cannot be drawn while regeneration is paused. Regenerate and exit first.", 3500); return; }
     const f = this.state.features.find((x) => x.id === featureId) || (this.doc ? featuresOf(this.doc).find((x) => x.id === featureId) : undefined);
     this.select([]);
     this.set({ sketch: { featureId, tool: "select", isNew, before: f ? clone(f.params) : undefined }, editing: null, selectedFeature: featureId, selectedFeatures: [featureId] });

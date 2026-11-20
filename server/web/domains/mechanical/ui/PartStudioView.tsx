@@ -10,6 +10,7 @@ import { cx } from "../../../shared/util";
 import { FeatureDialog } from "./FeatureDialog";
 import { Glyph } from "./Glyph";
 import { useStudio } from "./hooks";
+import { DockSeparator, useDockSplit } from "./featurelist/DockSeparator";
 import { dockFolded, panelOpen, setDockFolded, setPanelOpen, usePanels } from "./panels";
 import type { PartStudio } from "./studio";
 import { CommandPalette, ContextMenu, Shortcuts } from "./Overlays";
@@ -33,6 +34,9 @@ function Dock({ studio, where }: { studio: PartStudio; where: "left" | "right" }
   const edge = where === "left" ? "border-r border-line" : "border-l border-line";
   const shown = panels.filter((p) => !p.visible || p.visible(studio));
   const firstOpen = shown.find((p) => panelOpen(studio, p));
+  // the bar between the feature list and the open panel under it (the parts list) is dragged to share the room
+  const below = where === "left" && firstOpen ? shown.slice(shown.indexOf(firstOpen) + 1).find((p) => panelOpen(studio, p)) : undefined;
+  const split = useDockSplit();
   return (
     <aside className={cx("cad-dock flex min-h-0 bg-bench", edge, folded ? "w-7 flex-col items-center" : "w-60 flex-col")} data-side={where} data-folded={folded || undefined}>
       {folded ? (
@@ -45,8 +49,11 @@ function Dock({ studio, where }: { studio: PartStudio; where: "left" | "right" }
       {/* every panel stays mounted whatever is folded: some keep a part of the studio alive (collaboration, the sketch palette) */}
       {panels.map((p) => {
         const visible = shown.includes(p), open = visible && panelOpen(studio, p);
+        const sized = p === below && split !== null && !folded;
         return (
-          <section key={p.id} className={cx("flex flex-col min-h-0", (folded || !visible) && "hidden", open ? (where === "left" && p === firstOpen ? "flex-[1_1_0]" : "flex-[0_1_auto] min-h-16") : "flex-none", "border-b border-line last:border-b-0")} data-panel={p.id} data-open={open || undefined}>
+          <Fragment key={p.id}>
+          {p === below && !folded ? <DockSeparator /> : null}
+          <section className={cx("flex flex-col min-h-0", (folded || !visible) && "hidden", open ? (where === "left" && p === firstOpen ? "flex-[1_1_0] min-h-16" : sized ? "flex-none min-h-16" : "flex-[0_1_auto] min-h-16") : "flex-none", "border-b border-line last:border-b-0")} style={sized ? { height: split! } : undefined} data-panel={p.id} data-open={open || undefined}>
             <header className="flex flex-none items-center h-8 text-base text-ink bg-[linear-gradient(var(--color-paper),var(--color-bench))] border-b border-line select-none">
               <button type="button" className={cx(BARE, "flex flex-1 min-w-0 items-center gap-1.5 h-full pl-1.5 pr-1 text-left font-semibold")} aria-expanded={open} data-panel-toggle={p.id} title={open ? `Fold ${p.title}` : `Unfold ${p.title}`} onClick={() => setPanelOpen(p.id, !open)}>
                 <span className={cx("flex-none text-ink-2 transition-transform", open && "rotate-90")}><Glyph svg={CHEVRON} size={14} /></span>
@@ -61,6 +68,7 @@ function Dock({ studio, where }: { studio: PartStudio; where: "left" | "right" }
             </header>
             <div className={cx("flex-1 min-h-0 overflow-y-auto bg-paper", !open && "hidden")}>{p.render(studio)}</div>
           </section>
+          </Fragment>
         );
       })}
     </aside>

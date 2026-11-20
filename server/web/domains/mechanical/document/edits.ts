@@ -6,6 +6,7 @@
 // A tool or an agent that needs an edit this file lacks builds its own changes with the same helpers.
 import { addedChange, modifiedChange, newId, removedChange, type ItemChange, type ItemDoc, type JsonObject } from "../../../shared/itemdoc/itemdoc";
 import type { FeatureDefinition } from "../core/feature";
+import { folderAt, folderKey } from "./folders";
 import { STUDIO_ITEM_ID, featuresOf, isFeature, nextName, orderAt, rollbackIndex, studioOf, type FeatureItem, type StudioItem } from "./format";
 
 /** Changes that set the rollback bar before `featureId` (null: the end). */
@@ -25,7 +26,7 @@ export function addFeature(doc: ItemDoc, def: FeatureDefinition, params: JsonObj
   const at = rollbackIndex(doc, features);
   const feature: FeatureItem = {
     id: newId(), type: "feature", featureType: def.type, name: name || nextName(features, def.title),
-    order: orderAt(features, at), params: { ...def.defaults(), ...params },
+    order: orderAt(features, at), ...folderKey(folderAt(doc, at, features)), params: { ...def.defaults(), ...params },
   };
   // the bar stays where it is: right below the new feature, so the feature is built
   return { changes: [addedChange(feature)], feature };
@@ -66,7 +67,10 @@ export function moveFeature(doc: ItemDoc, featureId: string, index: number): Ite
   const rest = features.filter((f) => f.id !== featureId);
   const to = Math.max(0, Math.min(index, rest.length));
   if (to === from) return [];
-  return [{ id: featureId, kind: "MODIFIED", typeName: "feature", props: [{ path: ["order"], value: orderAt(features, to, featureId) }] }];
+  // it joins the folder its new neighbours share, and leaves the one it was in (document/folders.ts)
+  const was = typeof features[from].folder === "string" ? features[from].folder : null, now = folderAt(doc, to >= from ? to + 1 : to, features, new Set([featureId]));
+  const folder = was === now ? [] : [now ? { path: ["folder"], value: now } : { path: ["folder"], del: true }];
+  return [{ id: featureId, kind: "MODIFIED", typeName: "feature", props: [{ path: ["order"], value: orderAt(features, to, featureId) }, ...folder] }];
 }
 
 /** Delete a feature.  A rollback bar that sat on it moves to the feature below. */
