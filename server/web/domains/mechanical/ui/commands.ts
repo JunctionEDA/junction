@@ -144,7 +144,7 @@ const SKETCH_PARTS: { id: string; title: string; from: number; to: number }[] = 
   { id: "sketch-draw", title: "Draw", from: 1, to: 100 }, { id: "sketch-modify", title: "Modify", from: 100, to: 200 },
   { id: "sketch-constrain", title: "Constrain", from: 200, to: 300 }, { id: "sketch-dimension", title: "Dimension", from: 300, to: 900 },
 ];
-const SECTION_TITLES: { [id: string]: string } = { edit: "Edit", sketch: "Sketch", solid: "Create", modify: "Modify", combine: "Combine", direct: "Direct editing", pattern: "Pattern", surface: "Surface", reference: "Reference geometry", board: "Circuit board", inspect: "Inspect", view: "View", file: "File" };
+const SECTION_TITLES: { [id: string]: string } = { edit: "Edit", sketch: "Sketch", solid: "Create", modify: "Modify", combine: "Combine", direct: "Direct editing", pattern: "Pattern", surface: "Surface", reference: "Reference geometry", board: "Circuit board", frame: "Frames", sheetmetal: "Sheet metal", inspect: "Inspect", view: "View", file: "File" };
 
 /** The toolbar for the mode the studio is in. */
 export function toolbarSections(studio: PartStudio): Section[] {

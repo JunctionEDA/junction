@@ -74,15 +74,13 @@ export interface FeatureDefinition<P extends JsonObject = JsonObject> {
    * part is mostly made of have more.
    */
   toolbarKeep?: number;
-  /** what it does, in a line: the tooltip and the tool search (ui/commands.ts has the older features' lines) */
-  hint?: string;
-  /** other words people look for it by, for the tool search (ui/search.ts has the older features' words) */
-  keywords?: string;
 }
 
 /** The feature parts of the toolbar, in the order they are drawn. */
-export type FeatureSection = "sketch" | "solid" | "modify" | "combine" | "direct" | "pattern" | "surface" | "reference" | "board";
-export const FEATURE_SECTIONS: readonly FeatureSection[] = ["sketch", "solid", "modify", "combine", "direct", "pattern", "surface", "reference", "board"];
+export type FeatureSection = "sketch" | "solid" | "modify" | "combine" | "direct" | "pattern" | "surface" | "reference"
+  | "frame" | "sheetmetal" | "board";
+export const FEATURE_SECTIONS: readonly FeatureSection[] = ["sketch", "solid", "modify", "combine", "direct", "pattern", "surface", "reference",
+  "frame", "sheetmetal", "board"];
 
 /** Typed helper: `export default defineFeature<MyParams>({ ... })`. */
 export function defineFeature<P extends JsonObject>(def: FeatureDefinition<P>): FeatureDefinition<JsonObject> {

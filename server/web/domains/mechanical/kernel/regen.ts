@@ -108,7 +108,7 @@ export class RegenEngine {
     const k = this.k;
     const def = this.defs.get(f.type);
     const datums: NonNullable<ModelState["datums"]> = { ...(before.datums || {}) };
-    const state: ModelState = { bodies: before.bodies.slice(), sketches: { ...before.sketches }, datums };
+    const state: ModelState = { bodies: before.bodies.slice(), sketches: { ...before.sketches }, datums, extras: before.extras };
     const owned: Deletable[] = [], temp: Deletable[] = [], notes: string[] = [];
     const t0 = Date.now();
     // a body with no solid in it is a surface (types.ts Body.sheet): the shape says so, not the feature
@@ -153,6 +153,8 @@ export class RegenEngine {
         return d;
       },
       setDatum: (d) => { datums[d.featureId] = d; },
+      extra: <T>(key: string) => (state.extras ? state.extras[key] as T | undefined : undefined),
+      setExtra: (key, value) => { state.extras = { ...(state.extras || {}), [key]: value }; },
       history: (id) => {
         const i = this.entries.findIndex((e) => e.report.id === id);
         return i < 0 ? null : { before: i ? this.entries[i - 1].state : EMPTY, after: this.entries[i].state, status: this.entries[i].report.status };
