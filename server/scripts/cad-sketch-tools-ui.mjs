@@ -125,11 +125,11 @@ try {
   await newSketch(1, 'top');
   await page.click('.cad-sketch-dialog [data-dialog-fold]');
   const titles = await toolTitles(page, 'sketch');
-  const want = ['Aligned rectangle', '3-point circle', 'Inscribed polygon', 'Circumscribed polygon', 'Ellipse', 'Partial ellipse', 'Conic', 'Spline', 'Control point spline', 'Bézier curve', 'Text', 'Image', 'Intersection', 'Split', 'Linear pattern', 'Circular pattern', 'Transform', 'Normal', 'Curvature', 'Pierce'];
+  const want = ['Aligned rectangle', '3-point circle', 'Inscribed polygon', 'Circumscribed polygon', 'Ellipse', 'Partial ellipse', 'Conic', 'Spline', 'Control point spline', 'Bézier curve', 'Text', 'Image', 'Intersection', 'Split', 'Sketch linear pattern', 'Sketch circular pattern', 'Sketch transform', 'Normal', 'Curvature', 'Pierce'];
   check('the sketch toolbar has every new tool', want.every((t) => titles.includes(t)), want.filter((t) => !titles.includes(t)).join(', '));
   // (what has no room in this window is under More, carets and all: ask the tools themselves)
   const menus = await studio(() => { const out = {}; for (const t of window.JunctionPartStudio.tools()) if (t.group === 'sketch' && t.menu) out[t.menu] = (out[t.menu] ? out[t.menu] + '|' : '') + t.title; return out; });
-  check('they sit under carets as Onshape groups them', /Aligned rectangle/.test(menus.Rectangle || '') && /3-point circle/.test(menus.Circle || '') && /Circumscribed polygon/.test(menus.Polygon || '') && /Partial ellipse/.test(menus.Ellipse || '') && /Bézier curve/.test(menus.Spline || '') && /Intersection/.test(menus.Use || '') && /Circular pattern/.test(menus.Pattern || ''), JSON.stringify(menus));
+  check('they sit under carets as Onshape groups them', /Aligned rectangle/.test(menus.Rectangle || '') && /3-point circle/.test(menus.Circle || '') && /Circumscribed polygon/.test(menus.Polygon || '') && /Partial ellipse/.test(menus.Ellipse || '') && /Bézier curve/.test(menus.Spline || '') && /Intersection/.test(menus.Use || '') && /Sketch circular pattern/.test(menus.Pattern || ''), JSON.stringify(menus));
   await look(-10, -20, 140, 160);
   await page.waitForTimeout(300);
 
@@ -344,7 +344,7 @@ try {
   await click(72, 10);
   check('the circle is selected', (await sk()).selection.includes(circ));
   before = await ids();
-  await tool('Linear pattern');
+  await tool('Sketch linear pattern');
   await click(70, 10); await click(76, 10);
   await settledSketch();
   got = await added(before);
@@ -352,7 +352,7 @@ try {
   await key('Escape'); await key('Escape');
   await click(72, 10);
   before = await ids();
-  await tool('Circular pattern');
+  await tool('Sketch circular pattern');
   await click(70, 20); await key('Tab'); await type('360'); await key('Enter');
   await settledSketch();
   got = await added(before);
@@ -360,7 +360,7 @@ try {
   await key('Escape'); await key('Escape');
   await click(72, 10);
   before = await ids();
-  await tool('Transform');
+  await tool('Sketch transform');
   await key('c');
   await click(70, 10); await click(70, -10);
   await settledSketch();
