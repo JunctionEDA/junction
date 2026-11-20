@@ -31,6 +31,7 @@ export const KEYWORDS: { [id: string]: string } = {
   "f:board-reference": "pcb circuit electronics",
   "f:board-cutout": "pcb cutout connector hole",
   "f:board-standoffs": "pcb posts mounting bosses",
+  variable: "parameter expression #name equation value design table",
   "sketch-line": "segment polyline",
   "sketch-rectangle": "corner box square",
   "sketch-center-rectangle": "center box square",

@@ -197,3 +197,22 @@ test("the catalog lists the tools the host has, and every one is described", () 
   }
   assert.ok(tools.find((t) => t.name === "cad_edit_features").write);
 });
+
+test("a reference field takes default planes, reference geometry and sketch curves where its dialog does", async () => {
+  const doc = apply(emptyDoc(), M.planEdits(emptyDoc(), K.FEATURES, BLOCK));
+  const plane = M.planEdits(doc, K.FEATURES, [{ op: "add", type: "plane", name: "Mid", params: { method: "offset", ref: { kind: "plane", plane: "top" }, distance: 5 } }]);
+  assert.deepEqual(plane.problems, []);
+  apply(doc, plane);
+  const { engine } = await build(doc);
+  const b = engine.state.bodies[0];
+  const sides = b.topo.faces.filter((f) => /:side:/.test(f.name)).map((f) => ({ kind: "face", body: b.id, name: f.name }));
+  const curve = M.planEdits(doc, K.FEATURES, [{ op: "add", type: "intersection-curve", params: { first: sides, second: [{ kind: "datum", feature: plane.changes[0].item.id }] } }]);
+  assert.deepEqual(curve.problems, []);
+  apply(doc, curve);
+  const r = await build(doc);
+  assert.ok(r.result.features.every((f) => f.status === "ok"), JSON.stringify(r.result.features));
+  assert.equal(r.engine.state.datums[curve.changes[0].item.id].kind, "curve");
+  // a field that takes no reference geometry says what it does take
+  const bad = M.planEdits(doc, K.FEATURES, [{ op: "add", type: "fillet", params: { edges: [{ kind: "datum", feature: "x" }] } }]);
+  assert.match(bad.problems[0], /edges must be a list of references/);
+});

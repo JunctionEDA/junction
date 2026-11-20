@@ -15,7 +15,8 @@
 // variable also rewrites the stored numbers that depend on it, in the same change, so the file stays true.
 //
 // Expressions: numbers with optional units (mm, cm, m, in, ft for lengths, all turned into millimetres; deg and
-// rad for angles, turned into degrees), + − × ÷ ^ and brackets, variables by name, the constant pi, and
+// rad for angles, turned into degrees), + − × ÷ ^ and brackets, variables by name ("width", or "#width" as
+// Onshape writes them), the constant pi, and
 // sin cos tan (of degrees), asin acos atan atan2 (in degrees), sqrt abs min max floor ceil round.
 import { addedChange, byOrder, newId, orderBetween, removedChange, type Item, type ItemChange, type ItemDoc, type JsonObject } from "../../../shared/itemdoc/itemdoc";
 import type { FeatureInput } from "../kernel/protocol";
@@ -52,7 +53,7 @@ type Token = { t: "num"; v: number } | { t: "id"; v: string } | { t: "op"; v: st
 
 function tokens(text: string): Token[] {
   const out: Token[] = [];
-  const re = /\s*(?:(\d+\.?\d*(?:[eE][-+]?\d+)?|\.\d+(?:[eE][-+]?\d+)?)|([A-Za-z_][A-Za-z0-9_]*)|(\*\*|[-+*/^(),×÷]))/y;
+  const re = /\s*(?:(\d+\.?\d*(?:[eE][-+]?\d+)?|\.\d+(?:[eE][-+]?\d+)?)|#?([A-Za-z_][A-Za-z0-9_]*)|(\*\*|[-+*/^(),×÷]))/y;
   let i = 0;
   while (i < text.length) {
     if (/^\s*$/.test(text.slice(i))) break;

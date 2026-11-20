@@ -6,8 +6,10 @@
 //
 // The modes, and what the toolbar shows in each (the order an Onshape user's hands know):
 //
-//   model    undo redo │ Sketch │ Extrude Revolve Sweep Loft │ Fillet Chamfer Draft Shell Hole │ Boolean Split
-//            Transform ▾ │ Pattern ▾ Mirror │ Plane ▾ │ Board ▾ │ Measure Section │ History │ More ▾  Search tools… S
+//   model    undo redo │ Sketch │ Extrude Revolve Sweep Loft Thicken Enclose │ Fillet ▾ Chamfer Draft Rib Shell
+//            Hole │ Boolean Split Transform ▾ Wrap Composite part │ Modify fillet Delete face Move face Replace face │
+//            Pattern ▾ Mirror │ Plane ▾ Curve ▾ Mate connector Variable │ Board ▾ │ Measure Section │ History │
+//            More ▾  Search tools… S
 //   sketch   undo redo │ Line Rectangle ▾ Circle Arc ▾ Slot Point Construction │ Fillet Offset Use Mirror Trim
 //            Extend │ the constraints │ Dimension │ Extrude Revolve │ More ▾      Search tools… S  ✓ Finish  ✗
 //   dialog   what is being edited and what a click will pick │ More ▾                 Search tools… S  ✓  ✗
@@ -142,7 +144,7 @@ const SKETCH_PARTS: { id: string; title: string; from: number; to: number }[] = 
   { id: "sketch-draw", title: "Draw", from: 1, to: 100 }, { id: "sketch-modify", title: "Modify", from: 100, to: 200 },
   { id: "sketch-constrain", title: "Constrain", from: 200, to: 300 }, { id: "sketch-dimension", title: "Dimension", from: 300, to: 900 },
 ];
-const SECTION_TITLES: { [id: string]: string } = { edit: "Edit", sketch: "Sketch", solid: "Create", modify: "Modify", combine: "Combine", pattern: "Pattern", surface: "Surface", reference: "Reference geometry", board: "Circuit board", inspect: "Inspect", view: "View", file: "File" };
+const SECTION_TITLES: { [id: string]: string } = { edit: "Edit", sketch: "Sketch", solid: "Create", modify: "Modify", combine: "Combine", direct: "Direct editing", pattern: "Pattern", surface: "Surface", reference: "Reference geometry", board: "Circuit board", inspect: "Inspect", view: "View", file: "File" };
 
 /** The toolbar for the mode the studio is in. */
 export function toolbarSections(studio: PartStudio): Section[] {
@@ -177,8 +179,8 @@ export function toolbarSections(studio: PartStudio): Section[] {
     out.push(ofTools("edit", tools("edit")));
     for (const sec of FEATURE_SECTIONS) {
       const slots = slotsOf(features.filter((f) => (f.toolbarSection || "solid") === sec), (f) => f.toolbarMenu, fe, (f) => f.toolbarKeep, sec);
-      // tools that put themselves among the features follow the solids
-      if (sec === "solid") slots.push(...slotsOf(tools("feature"), (t) => t.menu, te, (t) => t.keep, sec));
+      // tools that put themselves among the features follow that section's features (the solids', if they do not say)
+      slots.push(...slotsOf(tools("feature").filter((t) => (t.section || "solid") === sec), (t) => t.menu, te, (t) => t.keep, sec));
       out.push(section(sec, "feature", slots, sec === "sketch"));
     }
   }

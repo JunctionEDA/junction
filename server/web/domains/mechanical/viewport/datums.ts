@@ -25,9 +25,19 @@ function corners(d: DatumView): THREE.Vector3[] {
 function segmentsOf(d: DatumView): number[] {
   const out: number[] = [];
   const push = (a: THREE.Vector3, b: THREE.Vector3) => out.push(a.x, a.y, a.z, b.x, b.y, b.z);
-  if (d.kind === "plane" && d.frame) { const c = corners(d); for (let i = 0; i < 4; i++) push(c[i], c[(i + 1) % 4]); }
+  if (d.kind === "plane" && d.frame) {
+    const c = corners(d); for (let i = 0; i < 4; i++) push(c[i], c[(i + 1) % 4]);
+    if (d.mate) {
+      // a mate connector: its axes from its origin, z twice as long as x and y
+      const o = v3(d.centre || d.frame.origin), s = (d.size || 10) / 2;
+      push(o, o.clone().addScaledVector(v3(d.frame.x), s)); push(o, o.clone().addScaledVector(v3(d.frame.y), s)); push(o, o.clone().addScaledVector(v3(d.frame.normal), s * 2));
+    }
+  }
   else if (d.kind === "axis" && d.origin && d.dir) { const o = v3(d.origin), dir = v3(d.dir), h = (d.length || 50) / 2; push(o.clone().addScaledVector(dir, -h), o.clone().addScaledVector(dir, h)); }
-  else if (d.kind === "curve" && d.points) for (let i = 0; i + 5 < d.points.length; i += 3) out.push(...d.points.slice(i, i + 6));
+  else if (d.kind === "curve" && d.points) {
+    // a curve of several pieces has a NaN point between them (kernel/ops/curves.ts); null once sent as JSON
+    for (let i = 0; i + 5 < d.points.length; i += 3) { const s = d.points.slice(i, i + 6); if (s.every((v) => typeof v === "number" && Number.isFinite(v))) out.push(...s); }
+  }
   return out;
 }
 

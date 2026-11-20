@@ -422,6 +422,9 @@ test("expressions: units, operators, functions, variables, errors", () => {
   near(e("pi"), Math.PI);
   near(e("max(1, width / 2, 3)", { width: 10 }), 5);
   near(e("atan2(1, 1)"), 45);
+  // Onshape writes a variable as #name
+  near(e("#width / 2 + 1", { width: 10 }), 6);
+  assert.deepEqual(V.namesIn("#width * #depth"), ["width", "depth"]);
   for (const bad of ["", "2 +", "foo", "1 / 0", "sqrt(", "2 $ 3", "nope(2)"]) assert.throws(() => e(bad), V.ExprError, bad);
   assert.ok(V.isPlainNumber("-1.5e3") && !V.isPlainNumber("2*3"));
   assert.equal(V.nameProblem("2x"), "A name starts with a letter and has only letters, digits and _.");

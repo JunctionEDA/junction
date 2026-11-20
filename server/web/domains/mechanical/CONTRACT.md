@@ -1338,7 +1338,7 @@ start Chromium with `--use-gl=swiftshader --enable-unsafe-swiftshader` when ther
 
 ## Reference geometry, patterns and variables
 
-Features `plane`, `axis`, `point` and `helix` make **datums**: reference geometry kept in the model
+Features `plane`, `axis`, `point`, `helix`, `mate-connector` and the curve features make **datums**: reference geometry kept in the model
 (`ModelState.datums`, by feature id), sent to the page as `RegenResult.datums` (`DatumView`: a plane's frame,
 centre and size; an axis' origin, direction and length; a point; a curve as a polyline), drawn and picked by
 `viewport/datums.ts` as `Pick { kind: "datum", featureId, datum }`.
@@ -1354,6 +1354,16 @@ centre and size; an axis' origin, direction and length; a point; a curve as a po
   A straight edge's or a cylinder's direction is made canonical (its largest component positive), because the
   kernel may reverse an edge on a rebuild.
 - A `features` field stores earlier feature ids in the order picked (`types` / `exclude` filter the list).
+- **Curves** (the Curve ▾ button: `fit-spline`, `projected-curve`, `bridging-curve`, `composite-curve`,
+  `intersection-curve`, `trim-curve`, `isocline`, `routing-curve`) hand their result to `setCurve` in
+  `kernel/ops/curves.ts`: one wire when the edges join end to end, else a compound of wires, drawn as one polyline
+  with a NaN point between the pieces (`viewport/datums.ts` skips a segment that touches one). Sweep, the curve
+  pattern and the other curve features take them as `{ kind: "datum", feature }`.
+- A **mate connector** is a datum of kind "plane" with `mate: true` (drawn with its three axes); a sketch, a
+  plane field or an axis field takes it like any reference plane.
+- The **direct-editing** features (`modify-fillet`, `delete-face`, `move-face`, `replace-face`, toolbar section
+  "direct") work on the faces whatever made them: they rebuild the body from the cells its faces' surfaces cut
+  space into (`kernel/ops/cells.ts`), so a face moved or removed takes the faces around it along.
 
 **Patterns and Mirror** (`linear-pattern`, `circular-pattern`, `mirror`; `kernel/ops/pattern-core.ts`) copy
 bodies, or what earlier features did: the seed's effect on each body is read from `ctx.history` as two tools,
@@ -1399,9 +1409,11 @@ from page load to the model on screen 14.4 s and 7.0 s.
   after it in the tree: to project a board's outline, the Board feature must come first.
 - **Regions** come from the curves as drawn: a region id may change when the curves around it are redrawn, and a
   feature that listed it then says its regions are gone.
-- **Solid features.** Not done: up to face with an offset, up to a vertex or body; a fillet with a variable
-  radius or one that stops tangent propagation; hole threads (a tapped hole is its tap drill); thicken and
-  offset face. "Up to face" on a curved face stops at that face's body. Revolve's axis is a loose line of its
+- **Solid features.** Not done: up to face with an offset, up to a vertex or body; a fillet that stops tangent
+  propagation, a conic or curvature-continuous cross section, a partial fillet (the kernel's fillet builder makes
+  circular sections over whole edges only); hole threads (a tapped hole is its tap drill); offset face. Move
+  face's offset and Replace face take flat and cylindrical faces only; Trim curve works on a curve of one edge and
+  extends it straight; Isocline samples each face on a 48 × 48 grid of its parameters. "Up to face" on a curved face stops at that face's body. Revolve's axis is a loose line of its
   sketch, the sketch's X or Y, or anything picked: an edge, a line of any sketch, a reference axis.
 - **Patterns** copy what a feature did, moved; a copy of a feature whose shape depends on where it is (a fillet
   meeting other geometry) keeps the seed's shape.

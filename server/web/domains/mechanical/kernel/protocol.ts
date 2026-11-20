@@ -74,6 +74,8 @@ export interface DatumView {
   kind: "plane" | "axis" | "point" | "curve";
   /** plane: its frame (a sketch on it uses this), and the square drawn `size` wide about `centre` */
   frame?: Frame; centre?: Vec3; size?: number;
+  /** plane: a mate connector (features/mate-connector.ts): drawn with its three axes, z the longest */
+  mate?: boolean;
   /** axis: a point on it and its direction; drawn `length` long, centred on `origin` */
   origin?: Vec3; dir?: Vec3; length?: number;
   /** point */
