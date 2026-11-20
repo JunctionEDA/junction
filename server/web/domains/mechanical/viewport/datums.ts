@@ -34,7 +34,10 @@ function segmentsOf(d: DatumView): number[] {
     }
   }
   else if (d.kind === "axis" && d.origin && d.dir) { const o = v3(d.origin), dir = v3(d.dir), h = (d.length || 50) / 2; push(o.clone().addScaledVector(dir, -h), o.clone().addScaledVector(dir, h)); }
-  else if (d.kind === "curve" && d.points) for (let i = 0; i + 5 < d.points.length; i += 3) out.push(...d.points.slice(i, i + 6));
+  else if (d.kind === "curve" && d.points) {
+    // a curve of several pieces has a NaN point between them (kernel/ops/curves.ts); null once sent as JSON
+    for (let i = 0; i + 5 < d.points.length; i += 3) { const s = d.points.slice(i, i + 6); if (s.every((v) => typeof v === "number" && Number.isFinite(v))) out.push(...s); }
+  }
   return out;
 }
 

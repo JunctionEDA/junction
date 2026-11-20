@@ -2,7 +2,7 @@
 // point, or a curve.  Reference features (plane, axis, point, helix), mirror and the patterns all read their
 // references through here, so a face, an edge, a default plane and a reference feature are interchangeable
 // wherever they make sense.
-import { DEFAULT_PLANES, add, cross, dot, length, normalize, scale, sub, type Frame, type Vec3 } from "../../core/geometry";
+import { DEFAULT_PLANES, add, cross, dot, length, normalize, scale, sub, toWorld, type Frame, type Vec3 } from "../../core/geometry";
 import { isGeomRef } from "../../core/geometry";
 import type { RefTarget } from "../../features/_refs";
 import type { EvalContext, Shape } from "../types";
@@ -152,7 +152,12 @@ export function pointOf(ctx: EvalContext, t: RefTarget | null | undefined, what 
     if (d.kind === "plane" && d.frame) return d.centre || d.frame.origin;
     throw ctx.fail(`The ${what} must be ${NEED.point}.`);
   }
-  if (t.kind === "sketch") { const e = edgeInfo(ctx, sketchEdge(ctx, t.feature, t.entity)); return e.centre || e.mid; }
+  if (t.kind === "sketch") {
+    // a sketch point is where it is; a sketch curve gives its centre or middle
+    const s = ctx.sketch(t.feature), pt = s.data.entities[t.entity] as any;
+    if (pt && pt.type === "point") return toWorld(s.frame, [pt.x, pt.y]);
+    const e = edgeInfo(ctx, sketchEdge(ctx, t.feature, t.entity)); return e.centre || e.mid;
+  }
   const r = ctx.resolve(t);
   if (r.kind === "vertex") return ctx.k.vertexPoint(r.shape);
   if (r.kind === "edge") { const e = edgeInfo(ctx, r.shape); return e.centre || e.mid; }
