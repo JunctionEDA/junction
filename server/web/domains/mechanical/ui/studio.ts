@@ -24,6 +24,7 @@ import { KernelClient, type KernelState } from "../kernel/client";
 import type { BodyResult, DatumView, FeatureInput, FeatureReport, RegenResult, SketchView } from "../kernel/protocol";
 import { studioInputs, type InputFilter } from "../document/inputs";
 import { DEFAULT_UNITS, setUnits as unitChanges, unitsOf, type Units } from "../document/units";
+import { planeSizesOf, setPlaneSize } from "../document/plane-sizes";
 import { setMeasureUnits } from "../inspect/measure-format";
 import { ModelView, pickKey, type Pick, type PickKind } from "../viewport/modelview";
 import { DEFAULT_GEOMETRY } from "../viewport/planes";
@@ -128,13 +129,16 @@ export class PartStudio {
       selectedFeatures: [], hoverFeature: null, units: DEFAULT_UNITS, visibility: readVisibility(host.doc.docId),
     };
     this.state.planesVisible = DEFAULT_GEOMETRY.some((g) => g.id !== "origin" && this.state.visibility[g.id] !== false);
-    // the part studio has a view cube (ui/ViewCube.tsx) in place of the viewport's own view buttons
-    this.viewport = new Viewport3D(canvasHost, { viewButtons: false });
+    // the part studio has a view cube (ui/ViewCube.tsx), with its own triad, in place of the viewport's view buttons and triad
+    this.viewport = new Viewport3D(canvasHost, { viewButtons: false, triad: false });
     this.view = new ModelView(this.viewport);
     this.view.onHover = (p) => this.set({ hover: p });
     this.view.onPick = (p, ev) => this.onPick(p, ev);
     this.view.onBox = (picks, ev) => this.onBox(picks, ev);
     this.view.onContext = (p, ev) => this.onContext(p, ev);
+    // a default plane's corner is dragged to resize it: the size is the document's, shared and undone like an edit
+    this.view.canResizePlanes = () => this.state.canEdit && !this.pastDoc;
+    this.view.onPlaneResized = (plane, size) => { if (this.doc && this.requireEdit()) { const c = setPlaneSize(this.doc, plane, size); if (c.length) this.commit(c); } };
     this.applyVisibility();
     this.viewport.canvas.addEventListener("keydown", this.onKey);
     this.viewport.canvas.addEventListener("pointermove", this.onPointerSeen);
@@ -209,6 +213,10 @@ export class PartStudio {
   private documentChanged(): void {
     const doc = this.doc; if (!doc) return;
     const features = featuresOf(doc);
+    const first = !this.state.loaded;
+    const sizes = planeSizesOf(doc), halves: { [id: string]: number } = {};
+    for (const [id, side] of Object.entries(sizes)) halves[id] = side / 2;
+    this.view.planeLayer.setSizes(halves);
     const patch: Partial<StudioState> = { loaded: true, features, rollback: rollbackIndex(doc, features), canUndo: !this.pastDoc && this.session.canUndo, canRedo: !this.pastDoc && this.session.canRedo };
     const units = unitsOf(doc), was = this.state.units;
     if (units.length !== was.length || units.angle !== was.angle || units.places !== was.places) patch.units = units;
@@ -222,6 +230,8 @@ export class PartStudio {
     if (s.selectedFeatures.some((id) => !features.some((f) => f.id === id))) patch.selectedFeatures = s.selectedFeatures.filter((id) => features.some((f) => f.id === id));
     if (s.hoverFeature && !features.some((f) => f.id === s.hoverFeature)) patch.hoverFeature = null;
     this.set(patch);
+    // the planes may have a size of their own in this document: frame them as they are
+    if (first && !features.length) this.fit();
     this.scheduleRegen();
   }
 
@@ -686,10 +696,31 @@ export class PartStudio {
   // ---------------------------------------------------------------- the view
   /** Zoom so that everything is in view (F, a double click with the middle button). */
   fit(): void {
-    // with no part to frame, the default planes are what there is to look at, with room around them to draw in
     const box = this.viewport.contentBox();
-    if (box.isEmpty()) { const h = (Math.max(...(["top", "front", "right"] as const).flatMap((id) => this.view.planeLayer.halfOf(id))) * 4) / 3; box.set(new THREE.Vector3(-h, -h, -h), new THREE.Vector3(h, h, h)); }
+    if (box.isEmpty()) { this.fitPlanes(); return; }
     this.viewport.fit(box);
+  }
+  /**
+   * With no part to frame, the default planes are what there is to look at: centred on the origin, the three
+   * fill the middle two thirds of the view as it is turned now, with room around them to draw in (as Onshape
+   * opens a part studio).
+   */
+  private fitPlanes(): void {
+    const v = this.viewport, q = v.camera.quaternion;
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q), up = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+    let ew = 1e-3, eh = 1e-3;
+    for (const id of ["top", "front", "right"] as const) {
+      const h = this.view.planeLayer.halfOf(id)[0], f = DEFAULT_PLANES[id].frame;
+      for (const su of [-1, 1]) for (const sv of [-1, 1]) {
+        const p = new THREE.Vector3(...f.x).multiplyScalar(su * h).addScaledVector(new THREE.Vector3(...f.y), sv * h);
+        ew = Math.max(ew, Math.abs(p.dot(right))); eh = Math.max(eh, Math.abs(p.dot(up)));
+      }
+    }
+    const H = v.camera.top - v.camera.bottom, W = v.camera.right - v.camera.left, share = 2 / 3;
+    v.target.set(0, 0, 0);
+    v.camera.zoom = Math.min((H * share) / (2 * eh), (W * share) / (2 * ew));
+    v.camera.updateProjectionMatrix();
+    v.invalidate();
   }
   /** Zoom to what is selected (or to everything when nothing is). */
   zoomToSelection(): void {
