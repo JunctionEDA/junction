@@ -24,6 +24,7 @@ import { usePluginMenus } from "../../domains/pcb/plugins/PluginUi";
 import { PRODUCT_VERSION } from "../../domains/pcb/generated/product-version";
 import { ComboArrow, KIcon, MenuArrow, MenuCheck } from "./Icon";
 import { ICON_URL } from "../brand";
+import { CAD_SETTING_LABEL, CAD_SETTING_NOTE, setCadEnabled } from "../cad";
 import { behindTab, frontTabs, subscribeFront } from "../../domains/pcb/editor/pane-tabs";
 
 // ---------------------------------------------------------------- the menu tree
@@ -84,7 +85,15 @@ const isCheckable = (id: string) => MENU_CHECKS.has(id);
 /* The "Junction" title opens the application menu, like the application menu of a desktop program:
    the places outside the current editor (projects, public projects, the part libraries, plugins, GitHub, AI assistants)
    and the account.  Each entry is an editor action (web/domains/pcb/editor/actions.ts HANDLERS). */
-interface AppEntry { id: string; label: string; icon: string; key?: string; why?: string | null }
+/** The Mechanical CAD switch (web/shared/cad.ts): the person's own setting, toggled here rather than run as an action. */
+const CAD_ENTRY = "cadSetting";
+interface AppEntry {
+  id: string; label: string; icon: string; key?: string; why?: string | null;
+  /** a setting of the person's, on or off: drawn with a switch (.switch), toggled in place rather than dispatched */
+  checked?: boolean;
+  /** a line under the label saying what the entry does */
+  note?: string;
+}
 /** Who may copy the open project: the owner's setting (server/src/access.rs), which the server enforces too. */
 interface CopyRights { canCopy: boolean; guest: boolean }
 function appEntries(me: AppState["me"], project: AppState["project"], inEditor: boolean, r: CopyRights): (AppEntry | "-")[] {
@@ -112,6 +121,7 @@ function appEntries(me: AppState["me"], project: AppState["project"], inEditor: 
     { id: "github", label: inEditor && project ? "GitHub Sync for This Project..." : "GitHub Sync...", icon: "import" },
     { id: "connectAI", label: "Connect an AI Assistant...", icon: "special_tools" },
     "-",
+    ...(me ? [{ id: CAD_ENTRY, label: CAD_SETTING_LABEL, note: CAD_SETTING_NOTE, icon: "", checked: !!me.cad }, "-" as const] : []),
     { id: "about", label: "About Junction", icon: "about" });
   if (me) out.push({ id: "signOut", label: "Log Out", icon: "" });
   return out;
@@ -142,6 +152,7 @@ function AppMenu({ inEditor }: { inEditor: boolean }) {
   const close = useCallback((refocus?: boolean) => { setOpen(false); setSel(-1); if (refocus && btn.current) btn.current.focus(); }, []);
   const run = useCallback((e: AppEntry) => {
     close();
+    if (e.id === CAD_ENTRY) { setCadEnabled(!e.checked); return; }
     const app = window.CollabApp;
     if (app) app.dispatch({ type: "action", id: e.id, anchor: btn.current ? btn.current.getBoundingClientRect() : null });
   }, [close]);
@@ -178,11 +189,16 @@ function AppMenu({ inEditor }: { inEditor: boolean }) {
           {entries.map((e, i) => e === "-"
             ? <div key={"sep" + i} className="h-px bg-line my-1 mx-1" role="separator" />
             : (
-              <button type="button" key={e.id} role="menuitem" data-appmenu={e.id} aria-disabled={e.why ? "true" : undefined} title={e.why || undefined}
+              <button type="button" key={e.id} role={e.checked === undefined ? "menuitem" : "menuitemcheckbox"} aria-checked={e.checked} data-appmenu={e.id}
+                aria-disabled={e.why ? "true" : undefined} title={e.why || undefined}
                 className={cx(ROW, e.why ? "bg-transparent text-ink-3" : sel === i ? "bg-accent text-on-accent" : "bg-transparent")}
                 onMouseMove={() => setSel(e.why ? -1 : i)} onClick={() => { if (!e.why) run(e); }}>
                 <span className="w-5 h-4 mr-1.5 shrink-0 flex items-center justify-center">{e.icon ? <KIcon name={e.icon} size={16} /> : null}</span>
-                <span className="flex-1">{e.label}</span>
+                {e.note
+                  ? <span className="flex-1 flex flex-col min-w-0"><span>{e.label}</span>
+                      <span className={cx("text-xs whitespace-normal max-w-[250px] leading-snug", sel === i ? "text-on-accent opacity-80" : "text-ink-3")}>{e.note}</span></span>
+                  : <span className="flex-1">{e.label}</span>}
+                {e.checked !== undefined ? <span className={cx("switch ml-4", e.checked && "on", sel === i && "inv")} aria-hidden="true" /> : null}
               </button>
             ))}
         </div>
@@ -284,6 +300,9 @@ export function MenuBar() {
   const guest = useApp((s) => s.guest);
   const undo = useApp((s) => s.undo);
   const inEditor = view === "editor" && !!editor;
+  // a project is open, in KiCad's frame or in a domain's own editor ("cad": a part studio, an assembly), which
+  // brings its own toolbar and has no KiCad menus
+  const inProject = inEditor || view === "cad";
   const fpEdit = useApp((s) => s.document.docType === "footprint");
   const withPlugins = usePluginMenus(inEditor && editor ? (fpEdit ? FPEDIT_MENUS : MENUS[editor]) : HOME_MENUS, inEditor && editor ? editor : null);   // plugin actions, importers and exporters join KiCad's menus
   // the Footprint Editor's menus are KiCad's exactly: the board module's own commands do not join them
@@ -456,7 +475,7 @@ export function MenuBar() {
           );
         })}
       </div>
-      {inEditor && project ? (
+      {inProject && project ? (
         <>
           <span className="name ml-3.5 font-semibold min-w-0 truncate max-[700px]:hidden" id="projName" title={project.name}>{project.name}</span>
           <span className={cx("pill", role, "ml-1.5 flex-none max-[700px]:hidden")} id="roleChip">{role || "guest"}</span>
@@ -466,7 +485,7 @@ export function MenuBar() {
       ) : null}
       <div className="spacer flex-1" />
       {inEditor && project ? <ChatButton /> : null}
-      {inEditor ? (
+      {inProject ? (
         <a id="aiConnect" className="ai-connect" href="/connect" target="_blank" rel="noopener" title="Design with AI: connect any AI model or service that speaks MCP (Claude, ChatGPT, Gemini, Copilot, Cursor, your own) to this project. It edits here live, with its own cursor.">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>
           AI
@@ -477,7 +496,7 @@ export function MenuBar() {
           <>
             {me.avatarUrl ? <img className="w-5 h-5 rounded-full" src={me.avatarUrl} alt="" /> : null}
             <span className="max-[800px]:hidden">{me.name || me.login}</span>
-            {!inEditor ? <button type="button" className="btn sm" id="logoutBtn" onClick={() => window.CollabHome?.signOut()}>Log out</button> : null}
+            {!inProject ? <button type="button" className="btn sm" id="logoutBtn" onClick={() => window.CollabHome?.signOut()}>Log out</button> : null}
           </>
         ) : <a className="btn sm" id="signinBtn" href={`/auth/github/login?next=${next}`}>Sign in with GitHub</a>}
       </div>

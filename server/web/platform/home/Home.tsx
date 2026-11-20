@@ -5,6 +5,7 @@ import { Select } from "../../shared/components/Select";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as RKeyboardEvent, type CSSProperties, type MouseEvent as RMouseEvent } from "react";
 import { flushSync } from "react-dom";
 import { useApp, type User } from "../../shared/store";
+import { CAD_SETTING_LABEL, CAD_SETTING_NOTE, setCadEnabled } from "../../shared/cad";
 import * as API from "./api";
 import type { Project } from "./api";
 import { ShareDialog, type ShareTarget } from "./ShareDialog";
@@ -29,7 +30,7 @@ declare global {
 }
 const go = (path: string) => { if (window.CollabNav) window.CollabNav.navigate(path); else location.href = path; };
 const editUrl = (id: string) => `/p/${id}/edit`;
-/** A project just made opens on its schematic, where a KiCad design starts (the editor would pick the board). */
+/** A project just made from KiCad files opens on its schematic, where a KiCad design starts; a blank one has none and opens on its Home tab. */
 const newProjectUrl = (r: { projectId: string; docs?: unknown[] }) => {
   const sch = ((r.docs || []) as { docId?: string; path?: string; docType?: string }[])
     .filter((d) => d && d.docType === "kicad_sch" && d.docId && d.path)
@@ -287,7 +288,7 @@ function DetailsDialog({ p, onClose, onSaved }: { p: Project; onClose: () => voi
         <button type="button" className="btn primary" onClick={save} disabled={busy || !name.trim()}>{busy ? "Saving…" : "Save"}</button></>}>
       <label className="hp-field"><span>Name</span><input className="hp-input" data-autofocus value={name} maxLength={120} onChange={(ev) => setName(ev.target.value)} onKeyDown={(ev) => { if (ev.key === "Enter") save(); }} /></label>
       <label className="hp-field"><span>Description <small>{description.length}/2000</small></span>
-        <textarea className="hp-input" rows={4} maxLength={2000} value={description} placeholder="What is this board? Shown in the list and in Explore." onChange={(ev) => setDescription(ev.target.value)} /></label>
+        <textarea className="hp-input" rows={4} maxLength={2000} value={description} placeholder="What is this project? Shown in the list and in Explore." onChange={(ev) => setDescription(ev.target.value)} /></label>
       <p className="hp-note">Renaming here changes the name online only. Files and folders on anyone's computer keep their names.</p>
     </Modal>
   );
@@ -885,6 +886,8 @@ export function Home() {
           { id: "mcp", label: "Connect AI", icon: "link", run: () => { location.href = "/connect"; } },
           "-" as const,
         ] as MenuEntry[] : []),
+        { id: "cad", label: CAD_SETTING_LABEL, note: CAD_SETTING_NOTE, icon: "cube", checked: !!me.cad, run: () => setCadEnabled(!me.cad) },
+        "-",
         { id: "waka", label: "WakaTime settings", icon: "clock", run: () => { go("/time"); setTimeout(() => document.getElementById("wakatime")?.scrollIntoView({ block: "start" }), 300); } },
         { id: "gh", label: "GitHub profile", icon: "open", run: () => { window.open(`https://github.com/${me.login}`, "_blank", "noopener"); } },
         { id: "app", label: "Get the desktop app", icon: "desktop", run: () => { window.open(RELEASES, "_blank", "noopener"); } },

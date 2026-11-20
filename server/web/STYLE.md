@@ -17,8 +17,8 @@ file, is at `/styleguide`.
    means "go".
 4. **Colour comes from tokens.** No colour literal outside `theme.css`. Canvas drawing uses
    KiCad's own layer and schematic colours (`web/domains/pcb/canvas/colors.ts`) and is the one exception.
-5. **Light and dark are the same design.** Every surface works in both. `data-theme` on `<html>`
-   (stored as `kui.theme`) overrides the system setting.
+5. **Light and dark are the same design.** Every surface works in both. Light is the default for
+   everyone; `data-theme` on `<html>` (stored as `kui.theme`: `dark`, or `system` to follow the system) changes it.
 6. **Plain words.** Use KiCad's own label where KiCad has one. Sentence case, no exclamation
    marks, and an error says what to do next.
 
@@ -94,6 +94,7 @@ values, coordinates, paths, counts, keys). Weights 400, 500 for controls, 600 fo
 | Key | `.kbd` | |
 | Callout | `.callout`, with `.ok`, `.warn`, `.err` | A message in the flow of a page |
 | Segmented control | `.seg` with `button.on` | A row of exclusive choices |
+| Switch | `.switch`, with `.on`, `.inv` | A setting that is on or off, inside the row or button that toggles it (`role="menuitemcheckbox"`, `aria-checked`). `.inv` on an `--accent` fill |
 | Box | `.box` with `h2` and `.in` | A titled group on a page |
 | Dialog | `.kd-overlay`, `.kd-dialog`, `.kd-title`, `.kd-body`, `.kd-foot` | Title bar on `--paper`, body on `--bench`, buttons right-aligned |
 | Spinner | `.spinner` | |

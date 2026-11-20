@@ -13,7 +13,7 @@ function theme(): void {
   if (!btn) return;
   btn.addEventListener("click", () => {
     const root = document.documentElement;
-    const cur = root.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const cur = root.dataset.theme === "system" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : root.dataset.theme || "light";
     const next = cur === "dark" ? "light" : "dark";
     root.dataset.theme = next;
     // The same key the editor reads, so the choice carries over after sign-in.

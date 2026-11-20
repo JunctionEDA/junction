@@ -36,6 +36,10 @@ use crate::{persist, AppState};
 const ASSISTANT_TOOLS: &str = include_str!("../web/domains/pcb/ai/tools.json");
 const MCP_TOOLS: &str = include_str!("../web/domains/pcb/mcp/tools.json");
 const GUIDE: &str = include_str!("../web/domains/pcb/mcp/guide.md");
+/// The tools of the other domains, each from its own folder (web/domains/<id>/mcp/tools.json, the same
+/// shape as the electronics list).  They all run in the headless editor, which has the same folders'
+/// code (web/domains/pcb/mcp/host.ts takes each domain's tool table).
+const DOMAIN_TOOLS: &[(&str, &str)] = &[("mechanical", include_str!("../web/domains/mechanical/mcp/tools.json"))];
 
 const PROTOCOL_VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const DEFAULT_PROTOCOL: &str = "2025-06-18";
@@ -50,11 +54,17 @@ Read the design with the tools instead of guessing: coordinates are millimetres 
 render_view shows a sheet or the board as a picture; scope it (area, refs, nets, layers, view_of a person) to keep it small. \
 The people in the project see you as a collaborator: when you talk about a place in the design, call highlight so it is outlined on their canvas with a short note, and when they say \"this\" or \"here\", call get_selection to see what they have selected and where they are looking. When the person wants to review a change first, or you offer something they did not ask for, pass propose: true to apply_changes: they see it drawn over the design and Accept or Reject it (list_proposals gives the outcome; propose_fixes offers fixes for rule violations the same way). apply_changes edits the design at once and everyone in the project sees it live, so change only what the person asked for, use dry_run when unsure, check the result with run_checks and render_view, and take a wrong change back with undo_changes. \
 Before drawing or rearranging a schematic, laying out or routing a board, or reviewing a design, read get_design_guide once (topic \"quick\" when the job is to lay out or route a whole board: one harness call, board.design(), does it and holds the rules); its schematic drawing rules are the owner's and are not optional. Plan first, draw once: try a run_python script with dry_run: true until its result is clean, then run it once for real; never clear a sheet or board to start again, and never type coordinates for small parts.";
+/// Added to the instructions for a person who has Mechanical CAD turned on (`users.cad_enabled`), who is also
+/// the only one shown the `cad_*` tools.
+const CAD_INSTRUCTIONS: &str = " \
+A project can also hold mechanical parts: a part studio (a .jpart document, listed by get_project) is a list of features (sketches, extrudes, and so on) that the modelling kernel builds in order into solid bodies. Read one with cad_get_features, learn the feature types and their parameters with cad_feature_types, change it with cad_edit_features (which rebuilds and reports each feature's errors), measure with cad_get_bodies and look at it with cad_render_view. Lengths are millimetres, Z is up.";
 
 // ------------------------------------------------------------------ the catalog
 
 struct Tool {
     def: Value,
+    /// One of the Mechanical CAD tools: listed only to a person who has CAD turned on.
+    cad: bool,
     write: bool,
     /// Runs in the headless editor (false: answered here).
     host: bool,
@@ -89,7 +99,7 @@ fn project_prop() -> Value {
 }
 
 fn document_prop() -> Value {
-    json!({ "type": "string", "description": "Which document: its path as listed by get_project or get_design_overview (for example \"power.kicad_sch\"), or \"board\" for the board." })
+    json!({ "type": "string", "description": "Which document: its path as listed by get_project or get_design_overview (for example \"power.kicad_sch\"), or \"board\" for the board. In a project with several PCBs (each a folder, as get_project lists them) say which PCB: \"Motor driver/board\", \"Motor driver/schematic\" or the full path \"Motor driver/power.kicad_sch\"; a call that names none works on the PCB used last." })
 }
 
 fn annotations(title: &str, write: bool, destructive: bool) -> Value {
@@ -139,6 +149,7 @@ fn build_catalog() -> Vec<Tool> {
             write: false,
             host: true,
             project: takes_project,
+            cad: false,
         });
     }
 
@@ -173,6 +184,7 @@ fn build_catalog() -> Vec<Tool> {
             write: true,
             host: true,
             project: true,
+            cad: false,
         });
     }
 
@@ -189,7 +201,26 @@ fn build_catalog() -> Vec<Tool> {
             write,
             host,
             project,
+            cad: false,
         });
+    }
+
+    for (domain, list) in DOMAIN_TOOLS {
+        let tools: Vec<Value> = serde_json::from_str(list).unwrap_or_else(|e| panic!("web/domains/{domain}/mcp/tools.json is not valid JSON: {e}"));
+        for t in tools {
+            let name = t["name"].as_str().expect("tool name").to_string();
+            let title = t["title"].as_str().unwrap_or(&name).to_string();
+            let write = t["write"].as_bool().unwrap_or(false);
+            let project = t["input_schema"]["properties"].get("project").is_some();
+            out.push(Tool {
+                def: json!({ "name": name, "title": title, "description": t["description"], "inputSchema": t["input_schema"],
+                             "annotations": annotations(&title, write, t["destructive"].as_bool().unwrap_or(false)) }),
+                write,
+                host: true,
+                project,
+                cad: *domain == "mechanical",
+            });
+        }
     }
 
     // The order a model reads them in: find the project, read, look, change, then the rest.
@@ -202,6 +233,22 @@ fn build_catalog() -> Vec<Tool> {
     out.sort_by_key(|t| order.iter().position(|n| t.def["name"] == *n).unwrap_or(order.len()));
     out
 }
+
+/// What tools/list shows: an app that was allowed to read only is not shown the tools that change things, and a
+/// person who has Mechanical CAD turned off is not shown the `cad_*` tools.
+fn listed(can_write: bool, cad: bool) -> impl Iterator<Item = &'static Tool> {
+    catalog().iter().filter(move |t| (can_write || !t.write) && (cad || !t.cad))
+}
+
+/// Whether the caller has Mechanical CAD turned on (users.cad_enabled).  A failed read counts as off.
+async fn cad_on(state: &AppState, caller: &Caller) -> bool {
+    crate::persist::cad_enabled(&state.pool, caller.user.id).await.unwrap_or_else(|e| {
+        tracing::error!("mcp: reading the CAD setting: {e}");
+        false
+    })
+}
+
+const CAD_OFF: &str = "Mechanical CAD is turned off for this account. The person can turn it on in Junction (the account menu on the projects page, or the Junction menu in the editor: Mechanical CAD); the cad_ tools are listed once it is on.";
 
 fn catalog() -> &'static [Tool] {
     static CATALOG: OnceLock<Vec<Tool>> = OnceLock::new();
@@ -375,14 +422,14 @@ async fn handle(state: &AppState, caller: &Arc<Caller>, site: &str, message: Val
                         { "src": format!("{site}/brand/{v}/icon-512.png", v = crate::pages::ICON_V), "mimeType": "image/png", "sizes": ["512x512"] },
                         { "src": format!("{site}/brand/{v}/icon.svg", v = crate::pages::ICON_V), "mimeType": "image/svg+xml", "sizes": ["any"] },
                     ] },
-                "instructions": INSTRUCTIONS,
+                "instructions": if cad_on(state, caller).await { format!("{INSTRUCTIONS}{CAD_INSTRUCTIONS}") } else { INSTRUCTIONS.to_string() },
             }))
         }
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({
-            // An app that was allowed to read only is not shown the tools that change things.
-            "tools": catalog().iter().filter(|t| caller.can_write || !t.write).map(|t| t.def.clone()).collect::<Vec<_>>(),
-        })),
+        "tools/list" => {
+            let cad = cad_on(state, caller).await;
+            Ok(json!({ "tools": listed(caller.can_write, cad).map(|t| t.def.clone()).collect::<Vec<_>>() }))
+        }
         "tools/call" => {
             let name = params["name"].as_str().unwrap_or("").to_string();
             let args = match params.get("arguments") {
@@ -392,6 +439,7 @@ async fn handle(state: &AppState, caller: &Arc<Caller>, site: &str, message: Val
             };
             match catalog().iter().find(|t| t.def["name"] == name.as_str()) {
                 None => Err((-32602, format!("unknown tool {name}"))),
+                Some(tool) if tool.cad && !cad_on(state, caller).await => Ok(json!({ "content": [{ "type": "text", "text": CAD_OFF }], "isError": true })),
                 Some(tool) => Ok(match run_tool(state, caller, site, tool, &name, args).await {
                     Ok(content) => json!({ "content": content, "isError": false }),
                     Err(message) => json!({ "content": [{ "type": "text", "text": message }], "isError": true }),
@@ -558,18 +606,13 @@ async fn list_projects(state: &AppState, caller: &Caller, site: &str, args: &Val
 
 async fn get_project(state: &AppState, site: &str, p: &ProjectCtx) -> Result<Value, String> {
     let members = persist::list_members(&state.pool, p.id).await.map_err(internal)?;
-    let kind = |t: &str| match t {
-        "kicad_sch" => "schematic",
-        "kicad_pcb" => "board",
-        "kicad_pro" => "project file",
-        _ => "other",
-    };
+    let kind = |t: &str| crate::dockind::of(t).name;
     Ok(json!({
         "id": p.id, "name": p.name, "your_role": p.role, "url": format!("{site}/p/{}/edit", p.id),
         "documents": p.docs.iter().map(|d| json!({ "path": d.path, "type": kind(&d.doc_type) })).collect::<Vec<_>>(),
         "members": members.iter().map(|m| json!({ "login": m.login, "role": m.role })).collect::<Vec<_>>(),
         "scripts": script_list(state, p).await,
-        "note": "Schematic sheets and the board are what the document parameter of the other tools takes.",
+        "note": "Schematic sheets and the board are what the document parameter of the electronics tools takes; a part studio is what the cad_ tools take.",
     }))
 }
 
@@ -620,6 +663,11 @@ fn find_doc<'a>(p: &'a ProjectCtx, name: &str) -> Result<&'a persist::Document, 
         .find(|d| d.path.to_lowercase() == q)
         .or_else(|| p.docs.iter().find(|d| base(&d.path) == q))
         .or_else(|| if matches!(q.as_str(), "board" | "pcb") { p.docs.iter().find(|d| d.doc_type == "kicad_pcb") } else { None })
+        // "<PCB folder>/board": the board of that PCB, in a project that has several
+        .or_else(|| {
+            let folder = q.strip_suffix("/board").or_else(|| q.strip_suffix("/pcb"))?;
+            p.docs.iter().find(|d| d.doc_type == "kicad_pcb" && d.path.to_lowercase().starts_with(&format!("{folder}/")))
+        })
         .ok_or_else(|| format!("There is no document \"{name}\" in {}.", p.name))
 }
 
@@ -876,6 +924,10 @@ async fn call_tool(state: &AppState, caller: &Caller, site: &str, tool: &Tool, n
         content.push(text_content(&result));
         return Ok(Value::Array(content));
     }
+    // a picture the tool drew itself (a shaded view of a part)
+    if let Some(png) = reply["png"].as_str() {
+        return Ok(json!([{ "type": "image", "data": png, "mimeType": "image/png" }, text_content(&result)]));
+    }
     if let Some(svg) = reply["svg"].as_str() {
         let svg = svg.to_string();
         let png = tokio::task::spawn_blocking(move || rasterize(&svg, width_px)).await.map_err(internal)??;
@@ -1033,6 +1085,21 @@ mod tests {
             }
             assert_eq!(t.def["annotations"]["readOnlyHint"], !t.write, "{name}");
         }
+    }
+
+    #[test]
+    fn cad_tools_are_listed_only_with_cad_on() {
+        let names = |write: bool, cad: bool| listed(write, cad).map(|t| t.def["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let (off, on) = (names(true, false), names(true, true));
+        assert!(on.iter().any(|n| n == "cad_get_features") && on.iter().any(|n| n == "cad_edit_features"), "{on:?}");
+        assert!(!off.iter().any(|n| n.starts_with("cad_")), "{off:?}");
+        // nothing else changes with the setting
+        assert_eq!(off, on.iter().filter(|n| !n.starts_with("cad_")).cloned().collect::<Vec<_>>());
+        assert!(!names(false, true).contains(&"cad_edit_features".to_string()), "a read-only app is not shown a CAD edit");
+        for t in catalog() {
+            assert_eq!(t.cad, t.def["name"].as_str().unwrap().starts_with("cad_"), "{}", t.def["name"]);
+        }
+        assert!(!INSTRUCTIONS.contains("cad_") && CAD_INSTRUCTIONS.contains("cad_get_features"));
     }
 
     #[test]
