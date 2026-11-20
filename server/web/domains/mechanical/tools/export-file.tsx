@@ -2,6 +2,7 @@
 // flat face as DXF or SVG, downloaded.  The heavy work runs in the modelling worker (services/export-*.ts); the
 // dialog shows how long it is taking and what came out.
 import { cx } from "../../../shared/util";
+import { Select } from "../../../shared/components/Select";
 import { defineTool } from "../core/tool";
 import type { PartStudio } from "../ui/studio";
 import { download, formatBytes, openDialog, type DialogHandle } from "./_dialog";
@@ -22,9 +23,8 @@ function ExportForm({ studio, o, status, set }: { studio: PartStudio; o: ExportO
   return (
     <div className="flex flex-col gap-1.5 text-sm" data-export-dialog>
       <label className={row}><span className="text-ink-2">Format</span>
-        <select className="input w-full" value={o.format} data-param="format" onChange={(ev) => set({ format: ev.target.value as FormatId })}>
-          {FORMATS.map((x) => <option key={x.id} value={x.id}>{x.label} ({x.ext})</option>)}
-        </select>
+        <Select className="input w-full" value={o.format} data={{ param: "format" }} onChange={(v) => set({ format: v as FormatId })}
+          options={FORMATS.map((x) => ({ value: x.id, label: `${x.label} (${x.ext})` }))} />
       </label>
       <p className="note m-0 pl-[118px] text-ink-3 text-xs">{f.hint}</p>
       <label className={row}><span className="text-ink-2">File name</span>
@@ -32,12 +32,10 @@ function ExportForm({ studio, o, status, set }: { studio: PartStudio; o: ExportO
       </label>
       {f.kind === "flat" ? (
         <label className={row}><span className="text-ink-2">Drawing of</span>
-          <select className="input w-full" data-param="source" value={o.source ? (o.source.kind === "sketch" ? o.source.featureId : "face") : ""}
-            onChange={(ev) => set({ source: ev.target.value === "face" ? faceSource : ev.target.value ? { kind: "sketch", featureId: ev.target.value } : null })}>
-            <option value="">{sketches.length || faceSource ? "Choose a sketch" : "Draw a sketch or select a flat face first"}</option>
-            {faceSource ? <option value="face">The selected face</option> : null}
-            {sketches.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-          </select>
+          <Select className="input w-full" data={{ param: "source" }} value={o.source ? (o.source.kind === "sketch" ? o.source.featureId : "face") : ""}
+            onChange={(v) => set({ source: v === "face" ? faceSource : v ? { kind: "sketch", featureId: v } : null })}
+            options={[{ value: "", label: sketches.length || faceSource ? "Choose a sketch" : "Draw a sketch or select a flat face first" },
+              ...(faceSource ? [{ value: "face", label: "The selected face" }] : []), ...sketches.map((x) => ({ value: x.id, label: x.name }))]} />
         </label>
       ) : (
         <div className={row + " items-start"}><span className="text-ink-2 pt-1">Parts</span>

@@ -1,6 +1,7 @@
 // The style guide page (/styleguide, static/styleguide.html).  It only reads the theme: each
 // swatch shows the value its token has right now, and the switch sets the same `kui.theme`
 // the editor and the home page use, so the guide is always a picture of the live theme.
+import "../../shared/components/kselect";   // <k-select>, the themed drop-down the page shows in place of <select>
 
 type Mode = "system" | "light" | "dark";
 

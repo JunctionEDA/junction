@@ -4,6 +4,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { newId, type ItemChange, type JsonObject } from "../../../shared/itemdoc/itemdoc";
 import { cx } from "../../../shared/util";
+import { Select } from "../../../shared/components/Select";
 import { DEFAULT_PLANES, type GeomRef, type PlaneRef } from "../core/geometry";
 import { useStudio } from "../ui/hooks";
 import type { PartStudio } from "../ui/studio";
@@ -183,7 +184,7 @@ export function BoardLinkPanel({ studio }: { studio: PartStudio }) {
       <div className="px-2 pt-1.5 text-2xs uppercase tracking-wide text-ink-3 mono border-t border-line">Driven by this model</div>
       <div className="flex items-center gap-1.5 px-2 py-1.5">
         {boards.length > 1
-          ? <select className="input flex-1 min-w-0" value={boardId} aria-label="Board" onChange={(ev) => setBoardId(ev.target.value)}>{boards.map((b) => <option key={b.docId} value={b.docId}>{baseName(b.path)}</option>)}</select>
+          ? <Select className="input flex-1 min-w-0" value={boardId} label="Board" onChange={(v) => setBoardId(v)} options={boards.map((b) => ({ value: b.docId, label: baseName(b.path) }))} />
           : <span className="flex-1 truncate font-semibold">{baseName(boards[0].path)}</span>}
         <button type="button" className="btn sm" data-act="open-board" title="Open the board" onClick={openBoard}>Open</button>
       </div>

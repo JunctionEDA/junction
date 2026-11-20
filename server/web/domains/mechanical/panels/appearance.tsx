@@ -3,6 +3,7 @@
 // document (document/appearance-items.ts) and seen by everyone; hide, show and isolate are this person's own.
 import { useEffect, useRef, useState } from "react";
 import { cx } from "../../../shared/util";
+import { Select } from "../../../shared/components/Select";
 import type { CameraState } from "../../../shared/viewport3d/viewport3d";
 import { definePanel } from "../core/tool";
 import { addNamedView, namedViews, removeNamedView, resetLook, setBodyLook, setFaceColor, type CameraJson } from "../document/appearance-items";
@@ -50,9 +51,8 @@ function Appearance({ studio }: { studio: PartStudio }) {
       <div className="flex flex-col gap-1">
         <label className="flex items-center gap-1.5 text-xs text-ink-2">
           <span className="w-14">Display</span>
-          <select className="input h-6 text-xs flex-1 min-w-0" value={ds.mode} aria-label="View mode" onChange={(e) => display.setMode(e.target.value as ViewMode)}>
-            {VIEW_MODES.map((m) => <option key={m.id} value={m.id}>{m.title}</option>)}
-          </select>
+          <Select className="input h-6 text-xs flex-1 min-w-0" value={ds.mode} label="View mode" onChange={(v) => display.setMode(v as ViewMode)}
+            options={VIEW_MODES.map((m) => ({ value: m.id, label: m.title }))} />
         </label>
         <label className="flex items-center gap-1.5 text-xs text-ink-2"><input type="checkbox" checked={ds.perspective} onChange={(e) => display.setPerspective(e.target.checked)} />Perspective</label>
       </div>

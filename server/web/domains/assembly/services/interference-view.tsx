@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import * as THREE from "three";
 import { tokenColor } from "../../../shared/viewport3d/viewport3d";
 import { cx } from "../../../shared/util";
+import { Select } from "../../../shared/components/Select";
 import type { AssemblyEditor } from "../ui/assembly";
 import { checkInterference, clashTitle, clearance, type Clash } from "./interference";
 import { PartSources } from "./interference-sources";
@@ -132,10 +133,8 @@ function Interference({ a, close }: { a: AssemblyEditor; close(): void }) {
         <div className="flex flex-col gap-1 border-t border-line pt-1.5">
           <div className="text-xs font-semibold text-ink">Clearance</div>
           {(["First instance", "Second instance"] as const).map((label, k) => (
-            <select key={label} className="input h-6 text-xs" aria-label={label} value={pair[k]} onChange={(e) => { const p: [string, string] = [...pair]; p[k] = e.target.value; setPair(p); setGap(null); }}>
-              <option value="">{label}</option>
-              {parts.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-            </select>
+            <Select key={label} className="input h-6 text-xs" label={label} value={pair[k]} onChange={(v) => { const p: [string, string] = [...pair]; p[k] = v; setPair(p); setGap(null); }}
+              options={[{ value: "", label }, ...parts.map((i) => ({ value: i.id, label: i.name }))]} />
           ))}
           <div className="flex items-center gap-2">
             <button type="button" className={cx("btn sm h-6")} disabled={measuring || !pair[0] || !pair[1] || pair[0] === pair[1]} onClick={() => void measure()}>Clearance</button>

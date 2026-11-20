@@ -22,6 +22,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { setCad } from './cad-setting.mjs';
+import { pickOption } from './kselect-pick.mjs';   // the app's drop-downs are <k-select>, not <select>
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -356,7 +357,7 @@ try {
   check('the selected component is marked, with the height the rib allows', await pcb.evaluate(() => window.KiCadViewer3D.current.viewer.extraCount === 3));
   await pcb.waitForTimeout(800);
   await shot(pcb, '06-viewer3d-see-through');
-  await pcb.selectOption('.v3d-enclosure select', 'section');
+  await pickOption(pcb, '.v3d-enclosure k-select', 'section');
   await pcb.evaluate(() => { const w = window.KiCadViewer3D.current; w.viewer.view('front'); });
   await pcb.waitForTimeout(1200);
   await shot(pcb, '07-viewer3d-section');
@@ -370,7 +371,7 @@ try {
     return Math.abs(low - (-1.6 - 11)) < 0.01;
   }, drawsBefore, { timeout: 60000 });
   check('a deeper tray in the part studio is a deeper tray in the board\'s 3D viewer', true);
-  await pcb.selectOption('.v3d-enclosure select', 'see-through');
+  await pickOption(pcb, '.v3d-enclosure k-select', 'see-through');
   await pcb.evaluate(() => window.KiCadViewer3D.current.close());
 
   // ================================================================ a lost reference; break link

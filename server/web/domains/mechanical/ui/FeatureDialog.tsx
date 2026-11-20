@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { JsonObject } from "../../../shared/itemdoc/itemdoc";
 import { cx } from "../../../shared/util";
+import { Select } from "../../../shared/components/Select";
 import type { ParamField } from "../core/feature";
 import { DEFAULT_PLANES, type DefaultPlaneId } from "../core/geometry";
 import { fieldFactor, fieldText, fieldUnit, num, parseField, quantityOf, type Units } from "../document/units";
@@ -143,7 +144,7 @@ function Field({ studio, field, params }: { studio: PartStudio; field: ParamFiel
     case "enum":
       control = field.options.length <= 4
         ? <span className="seg" data-param={field.key}>{field.options.map((o) => <button key={o.value} type="button" className={cx(value === o.value && "on")} onClick={() => set(o.value)}>{o.label}</button>)}</span>
-        : <select className="input w-full" value={String(value ?? "")} data-param={field.key} onChange={(ev) => set(ev.target.value)}>{field.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>;
+        : <Select className="input w-full" value={String(value ?? "")} data={{ param: field.key }} label={field.label} onChange={(v) => set(v)} options={field.options.map((o) => ({ value: o.value, label: o.label }))} />;
       break;
     case "profile": {
       const me = features.findIndex((f) => f.id === draftId);
@@ -155,12 +156,10 @@ function Field({ studio, field, params }: { studio: PartStudio; field: ParamFiel
       const used = chosen ? chosen.length : all;
       control = (
         <span className="flex flex-col gap-1 min-w-0">
-          <span className={cx("flex rounded-sm", armed && "outline outline-1 outline-blue")}>
-            <select className="input w-full" value={cur} data-param={field.key} aria-label={field.label} onFocus={() => { if (!armed) studio.setField(field.key); }}
-              onChange={(ev) => set(ev.target.value ? { sketch: ev.target.value, regions: null } : null)}>
-              <option value="">{sketches.length ? "Click a sketch" : "Draw a sketch first"}</option>
-              {sketches.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-            </select>
+          <span className={cx("flex rounded-sm", armed && "outline outline-1 outline-blue")} onFocus={() => { if (!armed) studio.setField(field.key); }}>
+            <Select className="input w-full" value={cur} data={{ param: field.key }} label={field.label}
+              onChange={(v) => set(v ? { sketch: v, regions: null } : null)}
+              options={[{ value: "", label: sketches.length ? "Click a sketch" : "Draw a sketch first" }, ...sketches.map((f) => ({ value: f.id, label: f.name }))]} />
           </span>
           {cur && all > 1 ? (
             <span className="flex items-center gap-1.5 text-xs text-ink-2" data-regions={chosen ? chosen.join(" ") : "all"}>
@@ -224,10 +223,8 @@ function Field({ studio, field, params }: { studio: PartStudio; field: ParamFiel
       const docs = studio.host.docs.filter((d) => field.docTypes.includes(d.docType));
       const title = (path: string) => (path.split("/").pop() || path).replace(/\.[^.]+$/, "");
       control = (
-        <select className="input w-full" value={typeof value === "string" ? value : ""} data-param={field.key} aria-label={field.label} onChange={(ev) => set(ev.target.value || null)}>
-          <option value="">{docs.length ? "Choose…" : "The project has none"}</option>
-          {docs.map((d) => <option key={d.docId} value={d.docId}>{title(d.path)}</option>)}
-        </select>
+        <Select className="input w-full" value={typeof value === "string" ? value : ""} data={{ param: field.key }} label={field.label} onChange={(v) => set(v || null)}
+          options={[{ value: "", label: docs.length ? "Choose…" : "The project has none" }, ...docs.map((d) => ({ value: d.docId, label: title(d.path) }))]} />
       );
       break;
     }

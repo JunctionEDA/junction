@@ -22,6 +22,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { setCad } from './cad-setting.mjs';
+import { pickOption } from './kselect-pick.mjs';   // the app's drop-downs are <k-select>, not <select>
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -370,10 +371,10 @@ try {
   rows = await rowNames(alice);
   const at = (list, n) => list.indexOf('e:' + n);
   check('sorted by name, the assembly comes before the PCBs', at(byName, 'Assembly 1') > at(byName, 'Amp copy') && at(byName, 'Assembly 1') < at(byName, 'PCB 1'), byName.join(' '));
-  await alice.selectOption('[data-home-sort]', 'kind');
+  await pickOption(alice, '[data-home-sort]', 'kind');
   rows = await rowNames(alice);
   check('sorted by kind, the PCBs come together, then the part studios, then the assemblies', at(rows, 'Sensor') < at(rows, 'Part Studio 1 copy') && at(rows, 'PCB 1') < at(rows, 'Part Studio 1 copy') && at(rows, 'Part Studio 1 copy') < at(rows, 'Assembly 1'), rows.join(' '));
-  await alice.selectOption('[data-home-sort]', 'name');
+  await pickOption(alice, '[data-home-sort]', 'name');
   // drag a row onto the folder
   {
     const from = await alice.locator('[data-row-name="Part Studio 1 copy"]').boundingBox(), to = await alice.locator('[data-row-name="Enclosure"]').boundingBox();

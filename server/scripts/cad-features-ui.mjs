@@ -16,6 +16,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { setCad } from './cad-setting.mjs';
+import { pickOption } from './kselect-pick.mjs';   // the app's drop-downs are <k-select>, not <select>
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -155,13 +156,13 @@ try {
   await page.waitForSelector('.cad-dialog[data-feature=extrude]');
   await page.fill('.cad-dialog input[data-param=depth]', '25');
   // the end conditions show their own fields
-  await page.selectOption('.cad-dialog select[data-param=endType]', 'upToFace');
+  await pickOption(page, '.cad-dialog k-select[data-param=endType]', 'upToFace');
   check('Up to face asks for the face', await page.isVisible('.cad-dialog [data-param=face]') && !(await page.isVisible('.cad-dialog input[data-param=depth]')));
   await page.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.kernel.state === 'ready' && s.reports[s.editing.draft.id]?.status === 'error'; }, null, { timeout: 30000 }).catch(() => {});
   const why = await S(page, () => { const s = window.JunctionPartStudio.getState(); return s.reports[s.editing.draft.id]; });
   check('without a face the dialog says what to do', why.status === 'error' && /Pick the face/.test(why.message) && /Pick the face/.test(await page.textContent('.cad-dialog [role=status]')), JSON.stringify(why));
   await shot(page, '01-extrude-up-to-face-empty');
-  await page.selectOption('.cad-dialog select[data-param=endType]', 'blind');
+  await pickOption(page, '.cad-dialog k-select[data-param=endType]', 'blind');
   await page.check('.cad-dialog input[data-param=thin]');
   check('Thin shows its wall fields', await page.isVisible('.cad-dialog input[data-param=thickness]'));
   await page.uncheck('.cad-dialog input[data-param=thin]');
@@ -282,7 +283,7 @@ try {
   await page.click("[data-tool='Finish sketch']");
   await page.click('[data-tool=Hole]');
   await page.waitForSelector('.cad-dialog[data-feature=hole]');
-  await page.selectOption('.cad-dialog select[data-param=standard]', 'M3');
+  await pickOption(page, '.cad-dialog k-select[data-param=standard]', 'M3');
   await page.click('.cad-dialog [data-param=fit] >> text=Tapped');
   await page.click('.cad-dialog [data-param=endType] >> text=Depth');
   await page.fill('.cad-dialog input[data-param=depth]', '10');

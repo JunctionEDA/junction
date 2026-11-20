@@ -19,6 +19,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { setCad } from './cad-setting.mjs';
+import { pickOption } from './kselect-pick.mjs';   // the app's drop-downs are <k-select>, not <select>
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -313,12 +314,28 @@ try {
 
   // ---------------------------------------------------------------- mass properties
   await S(page, () => window.JunctionPartStudio.select([]));
-  await page.selectOption('[data-panel=mass-properties] select[aria-label="Material of Part 1"]', 'steel');
+  await pickOption(page, '[data-panel=mass-properties] k-select[aria-label="Material of Part 1"]', 'steel');
   await page.waitForFunction(() => [...document.querySelectorAll('[data-panel=mass-properties] tr[data-key=Mass]')].length > 0 || true);
   await page.waitForFunction(() => { const el = document.querySelector('[data-mass]'); return el && el.dataset.mass === 'ready' && el.textContent.includes('Give'); }, null, { timeout: 30000 });
   check('with one of two parts given a material, the total has no mass yet', true);
-  await page.selectOption('[data-panel=mass-properties] select[aria-label="Material of Part 2"]', 'aluminium');
+  // the material picker is the app's own drop-down, not the operating system's: its list is a .ksel-pop on <body>,
+  // whole on screen (no panel clips it), with a check mark on the entry chosen now
+  const picker = '[data-panel=mass-properties] k-select[aria-label="Material of Part 2"]';
+  check('the material picker is an in-app drop-down', await page.locator(`[data-panel=mass-properties] select`).count() === 0 && await page.locator(picker).count() === 1);
+  await page.click(picker);
+  await page.waitForSelector('.ksel-pop', { timeout: 5000 });
+  const pop = await page.evaluate(() => {
+    const p = document.querySelector('.ksel-pop'), r = p.getBoundingClientRect(), rows = [...p.querySelectorAll('.ksel-opt')];
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height - 4, 12));
+    return { onBody: p.parentElement === document.body, inView: r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth, onTop: !!top && p.contains(top),
+      chosen: p.querySelector('.ksel-opt.on')?.textContent, labels: rows.map((e) => e.textContent) };
+  });
+  check('opening it shows the in-app list (.ksel-pop), on top and unclipped', pop.onBody && pop.inView && pop.onTop, JSON.stringify(pop));
+  check('the list has every material, and marks "No material" as the current choice', pop.chosen === 'No material' && pop.labels.includes('Aluminium 6061 (2.7 g/cm³)') && pop.labels.includes('Steel (7.85 g/cm³)'), JSON.stringify(pop.labels));
+  await page.click('.ksel-pop .ksel-opt:text-is("Aluminium 6061 (2.7 g/cm³)")');
+  await page.waitForSelector('.ksel-pop', { state: 'detached', timeout: 5000 });
   await page.waitForFunction(() => !!document.querySelector('[data-panel=mass-properties] tr[data-key=Mass]'), null, { timeout: 30000 });
+  check('picking "Aluminium 6061" in the list sets the material and the mass appears', await page.locator(picker).evaluate((el) => el.value) === 'aluminium');
   const doc1 = await S(page, () => { const d = window.JunctionPartStudio.doc; return JSON.parse(JSON.stringify(d.items.get('materials') || null)); });
   check('materials are stored in the document, library included', doc1 && doc1.assign.Plate === 'steel' && doc1.assign.Block === 'aluminium' && doc1.library.steel.density === 7.85, JSON.stringify(doc1 && doc1.assign));
   const volumes = await S(page, async () => { const st = window.JunctionPartStudio; const r = await st.kernel.call('mass-properties', { bodies: null, density: { Plate: 7.85, Block: 2.7 } }); return r; });
@@ -367,7 +384,7 @@ try {
 
   // view modes
   for (const mode of ['shaded', 'wireframe', 'hidden-line', 'shaded-edges']) {
-    await page.selectOption('[data-panel=appearance] select[aria-label="View mode"]', mode);
+    await pickOption(page, '[data-panel=appearance] k-select[aria-label="View mode"]', mode);
     await page.waitForTimeout(200);
     const st = await S(page, () => { const o = window.JunctionPartStudio.view.bodyObjects('Plate'); return { mesh: o.mesh.visible, edges: o.edges.visible }; });
     const want = { 'shaded': { mesh: true, edges: false }, 'wireframe': { mesh: false, edges: true }, 'hidden-line': { mesh: true, edges: true }, 'shaded-edges': { mesh: true, edges: true } }[mode];
@@ -461,8 +478,8 @@ try {
   check('the check ran in the editor\'s own workers: no part studio was opened or built a second time', (await S(page, () => window.JunctionAssembly.sources.kernels.workers)) === 2, 'one worker for the part studio, one for the board');
   await shot(page, '14-interference');
   // clearance between the bracket and the block
-  await page.selectOption('.asm-interference select[aria-label="First instance"]', 'i1');
-  await page.selectOption('.asm-interference select[aria-label="Second instance"]', 'i3');
+  await pickOption(page, '.asm-interference k-select[aria-label="First instance"]', 'i1');
+  await pickOption(page, '.asm-interference k-select[aria-label="Second instance"]', 'i3');
   await page.click('.asm-interference button:has-text("Clearance")');
   await page.waitForSelector('.asm-interference [data-clearance]', { timeout: 60000 });
   const gap = Number(await page.getAttribute('.asm-interference [data-clearance]', 'data-clearance'));
