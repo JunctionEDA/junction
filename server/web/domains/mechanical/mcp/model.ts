@@ -27,7 +27,14 @@ function fieldDoc(f: ParamField): JsonObject {
     case "enum": out.stores = "one of the options"; out.options = f.options.map((o) => o.value); break;
     case "profile": out.stores = "{ sketch: <id of an earlier sketch feature>, regions: null (all closed regions) or [region ids] }; the sketch's name, id or $ref alone is accepted too"; break;
     case "plane": out.stores = "{ kind: \"plane\", plane: \"top\" | \"front\" | \"right\" } or { kind: \"face\", ref: { kind: \"face\", body, name } }; \"top\", \"front\" or \"right\" alone is accepted too"; break;
-    case "refs": out.stores = (f.single ? "one" : "a list of") + ` { kind: ${f.of.map((k) => `"${k}"`).join(" | ")}, body, name } (names from cad_get_bodies)`; break;
+    case "refs": {
+      const forms = f.of.length ? [`{ kind: ${f.of.map((k) => `"${k}"`).join(" | ")}, body, name } (names from cad_get_bodies)`] : [];
+      if (f.planes) forms.push(`{ kind: "plane", plane: "top" | "front" | "right" }`);
+      if (f.datums && f.datums.length) forms.push(`{ kind: "datum", feature: <id of a ${f.datums.join(" / ")} feature> }`);
+      if (f.sketch) forms.push(`{ kind: "sketch", feature: <sketch id>, entity: <curve or point id> }`);
+      out.stores = (f.single ? "one of " : "a list of ") + forms.join(" or ");
+      break;
+    }
     case "bodies": out.stores = "a list of body ids; empty means every body"; break;
   }
   return out;
@@ -168,7 +175,12 @@ function validate(def: FeatureDefinition, params: JsonObject, features: FeatureI
       if (!ok) problems.push(`${f.key} must be "top", "front", "right" or { kind: "face", ref: { kind: "face", body, name } }`);
     } else if (f.kind === "refs") {
       const list = f.single ? [v] : v;
-      if (!Array.isArray(list) || !list.every((r) => isObject(r) && typeof r.name === "string" && f.of.includes(r.kind as never))) problems.push(`${f.key} must be ${f.single ? "a reference" : "a list of references"} { kind: ${f.of.join(" | ")}, body, name }`);
+      // besides faces, edges and vertices, a field may take a default plane, reference geometry or a sketch curve
+      const ok = (r: unknown) => isObject(r) && ((typeof r.name === "string" && f.of.includes(r.kind as never))
+        || (!!f.planes && r.kind === "plane" && ["top", "front", "right"].includes(r.plane as string))
+        || (!!f.datums && f.datums.length > 0 && r.kind === "datum" && typeof r.feature === "string")
+        || (!!f.sketch && r.kind === "sketch" && typeof r.feature === "string" && typeof r.entity === "string"));
+      if (!Array.isArray(list) || !list.every(ok)) problems.push(`${f.key} must be ${f.single ? "a reference" : "a list of references"}: ${fieldDoc(f).stores}`);
     } else if (f.kind === "bodies") { if (!Array.isArray(v) || !v.every((b) => typeof b === "string")) problems.push(`${f.key} must be a list of body ids`); }
   }
   if (def.type === "sketch") {
