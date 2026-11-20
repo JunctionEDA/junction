@@ -9,7 +9,7 @@ import type { SketchData } from "./format";
 import type { Ref } from "./model";
 import { resolveEntity, type Resolved } from "./refs";
 
-export type ConstraintKind = "coincident" | "horizontal" | "vertical" | "parallel" | "perpendicular" | "tangent" | "equal" | "midpoint" | "concentric" | "collinear" | "symmetric" | "fix";
+export type ConstraintKind = "coincident" | "horizontal" | "vertical" | "parallel" | "perpendicular" | "tangent" | "equal" | "midpoint" | "concentric" | "collinear" | "symmetric" | "fix" | "normal" | "curvature";
 
 /** What each kind asks for, as shown in the hint line while its tool is in hand. */
 export const NEEDS: Record<ConstraintKind, string> = {
@@ -18,13 +18,15 @@ export const NEEDS: Record<ConstraintKind, string> = {
   vertical: "Click a line, or two points to put one above the other.",
   parallel: "Click two lines.",
   perpendicular: "Click two lines.",
-  tangent: "Click a line and a circle or arc, or two circles or arcs.",
+  tangent: "Click two curves that touch: a line, circle, arc, ellipse or a spline where it ends.",
   equal: "Click two lines, or two circles or arcs.",
   midpoint: "Click a point and a line.",
   concentric: "Click two circles or arcs.",
   collinear: "Click two lines.",
   symmetric: "Click two points, then the line (or point) they mirror about.",
   fix: "Click what to pin where it is.",
+  normal: "Click a line and a curve: the line is square to it (through a circle's centre, or square to a curve where it ends on it).",
+  curvature: "Click a spline, Bézier curve or conic and the line or Bézier curve it ends on, to join them with matching curvature.",
 };
 
 export type Plan = { add: { type: string; refs: Ref[] }[] } | "more" | { error: string };
@@ -33,6 +35,7 @@ export type Plan = { add: { type: string; refs: Ref[] }[] } | "more" | { error: 
 export function plan(kind: ConstraintKind, data: SketchData, selection: readonly string[]): Plan {
   const r = selection.map((id) => resolveEntity(data, id)).filter((x): x is Resolved => !!x);
   const points = r.filter((x) => x.kind === "point"), lines = r.filter((x) => x.kind === "line"), rounds = r.filter((x) => x.kind === "circle" || x.kind === "arc");
+  const free = r.filter((x) => x.kind === "curve");   // ellipses, splines, conics (sketch/curves.ts)
   const n = r.length;
   const one = (type: string, ...refs: Ref[]): Plan => ({ add: [{ type, refs }] });
   const pairs = (type: string, list: Resolved[]): Plan => ({ add: list.slice(1).map((x) => ({ type, refs: [list[0].id, x.id] })) });
@@ -63,7 +66,18 @@ export function plan(kind: ConstraintKind, data: SketchData, selection: readonly
       if (points.length) return wrong;
       if (n === 1) return "more";
       if (n !== 2 || lines.length === 2) return wrong;
+      if (free.length) return one("tangent", r[0].id, r[1].id);
       return one("tangent", lines.length ? lines[0].id : rounds[0].id, lines.length ? rounds[0].id : rounds[1].id);
+    case "normal":
+      if (points.length) return wrong;
+      if (n === 1) return "more";
+      if (n !== 2 || !lines.length) return wrong;
+      return one("normal", lines[0].id, r.find((x) => x !== lines[0])!.id);
+    case "curvature":
+      if (points.length || rounds.length) return wrong;
+      if (n === 1) return free.length ? "more" : wrong;
+      if (n !== 2 || !free.length) return wrong;
+      return one("curvature", r[0].id, r[1].id);
     case "concentric":
       if (rounds.length !== n) return wrong;
       return n === 1 ? "more" : n === 2 ? one("concentric", rounds[0].id, rounds[1].id) : wrong;

@@ -304,6 +304,13 @@ function translate(data: SketchData, id: string, c: SketchConstraint, have: Set<
       return null;
     }
     case "tangent": return r.length === 2 ? tangent(a, b) : null;
+    case "pierce": {
+      // a point held where a curve of the model crosses the sketch plane (`x`, `y`: worked out by the
+      // sketch-pierce service when the constraint was made; `from` names the curve)
+      const x = Number(c.x), y = Number(c.y);
+      if (r.length !== 1 || a.kind !== "point" || a.id === ORIGIN || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+      return [{ type: "coordinate_x", p_id: a.id, x }, { type: "coordinate_y", p_id: a.id, y }];
+    }
     case "fix": {
       const out: any[] = [];
       for (const x of r) {

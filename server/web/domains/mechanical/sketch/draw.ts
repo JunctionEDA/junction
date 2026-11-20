@@ -20,7 +20,7 @@ import type { Draft } from "./model";
 import { dist } from "./refs";
 
 /** A measure of the shape being drawn, shown at the pointer; typing a value fixes it. */
-export interface Field { key: string; label: string; unit: "mm" | "deg"; value: number }
+export interface Field { key: string; label: string; unit: "mm" | "deg" | "n"; value: number }   // n: a plain number (a count, a ratio)
 export type Typed = { [key: string]: number };
 
 export interface ShapeSpec {
@@ -46,6 +46,14 @@ export interface ShapeSpec {
   build(draft: Draft, pts: Snap[], typed: Typed, chain: string | null): { next?: Snap[]; chain?: string } | false;
   /** the tool was reset (a shape was finished or abandoned) */
   reset?(): void;
+  /**
+   * A shape of any number of clicks (a spline): `clicks` is the most it takes, Enter builds it from `min` or more,
+   * and `done` says when a click finishes it at once (a click back on its first point).
+   */
+  min?: number;
+  done?(pts: Snap[]): boolean;
+  /** A key of the tool's own (an option it toggles); true when taken.  The hint is shown again. */
+  key?(ev: KeyboardEvent, pts: Snap[]): boolean;
 }
 
 
@@ -90,7 +98,8 @@ export function startDrawTool(studio: PartStudio, spec: ShapeSpec): void {
       const el = document.createElement("span");
       const typing = i === field && buffer !== "", fixed = f.key in typed;
       el.dataset.field = f.key;
-      el.textContent = `${f.label} ${typing ? buffer : (f.unit === "deg" ? angText : lenText)(fixed ? typed[f.key] : f.value)}`;
+      const v = fixed ? typed[f.key] : f.value;
+      el.textContent = `${f.label} ${typing ? buffer : f.unit === "n" ? String(Math.round(v * 1000) / 1000) : (f.unit === "deg" ? angText : lenText)(v)}`;
       el.style.cssText = typing ? "outline:1px solid var(--blue);outline-offset:1px;border-radius:2px" : fixed ? "font-weight:600" : i === field ? "" : "color:var(--ink-3)";
       return el;
     }));
@@ -102,7 +111,11 @@ export function startDrawTool(studio: PartStudio, spec: ShapeSpec): void {
     const ok = spec.accept ? spec.accept(pts, s, ed.getState().data) : true;
     if (ok !== true) { studio.host.toast(ok, 3000); return false; }
     pts = [...pts, s];
-    if (pts.length < spec.clicks) { buffer = ""; field = 0; typed = {}; ed.setHint(spec.hint(pts.length)); return true; }
+    if (pts.length < spec.clicks && !spec.done?.(pts)) { buffer = ""; field = 0; typed = {}; ed.setHint(spec.hint(pts.length)); return true; }
+    return finish();
+  };
+  /** Build the shape from the points down. */
+  const finish = (): boolean => {
     let made: { next?: Snap[]; chain?: string } | false = false;
     const done = ed.edit((d) => { made = spec.build(d, pts, typed, chain); return made ? undefined : false; });
     const m = made as { next?: Snap[]; chain?: string } | false;
@@ -115,6 +128,12 @@ export function startDrawTool(studio: PartStudio, spec: ShapeSpec): void {
   const takeBuffer = (): boolean => {
     if (buffer === "") return true;
     const fs = fields(), f = fs[field]; if (!f) { buffer = ""; return true; }
+    if (f.unit === "n") {
+      const n = Number(buffer);
+      if (!(n > 0) || !Number.isFinite(n)) { studio.host.toast("Type a number above zero.", 2500); return false; }
+      typed = { ...typed, [f.key]: n }; buffer = "";
+      return true;
+    }
     const v = tryEvaluate(buffer, f.unit === "deg" ? "angle" : "length", typedFactor(f.unit === "deg"));
     if (!v || (f.unit === "mm" && !(v.value > 0))) { studio.host.toast(f.unit === "mm" ? "Type a length, like 25 or 1.5 in." : "Type an angle in degrees.", 2500); return false; }
     typed = { ...typed, [f.key]: v.value }; buffer = "";
@@ -147,11 +166,13 @@ export function startDrawTool(studio: PartStudio, spec: ShapeSpec): void {
       }
       if (ev.key === "Enter") {
         if (!pts.length) return false;
+        if (spec.min && pts.length >= spec.min && buffer === "") { finish(); refresh(); return true; }
         if (!takeBuffer()) return true;
         if (Object.keys(typed).length && last) { const s = at(last); if (s) { cursor = s; place(s); } refresh(); return true; }
         reset(); refresh();   // Enter with nothing typed ends a chain
         return true;
       }
+      if (buffer === "" && spec.key && spec.key(ev, pts)) { ed.setHint(spec.hint(pts.length)); refresh(); return true; }
       if (!fs.length) return false;
       if (ev.key === "Tab") { if (takeBuffer()) field = (field + (ev.shiftKey ? fs.length - 1 : 1)) % fs.length; refresh(); return true; }
       if (ev.key === "Backspace") { if (buffer === "") return pts.length > 0; buffer = buffer.slice(0, -1); refresh(); return true; }

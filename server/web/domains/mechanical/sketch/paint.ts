@@ -15,7 +15,7 @@ import type { SketchConstraint, SketchData } from "./format";
 import type { Hint } from "./infer";
 import type { Regions } from "./profiles";
 import { pieceAt, samplePiece } from "./curves";
-import { arcSweep, isDimension, mid, pointsOf, resolve, resolveEntity, type Resolved } from "./refs";
+import { arcSweep, isDimension, mid, pointAt, pointsOf, resolve, resolveEntity, type Resolved } from "./refs";
 
 export type EntityState = "defined" | "under" | "conflict";
 
@@ -107,6 +107,23 @@ export class SketchPainter {
     this.boxes = [];
     g.lineCap = "round"; g.lineJoin = "round";
     const px = this.viewport.pixelSize();
+
+    // ---- reference images (sketch image), under everything else
+    for (const [id, e] of Object.entries(s.data.entities)) {
+      if (e.type !== "image") continue;
+      const box = imageBox(s.data, id); if (!box) continue;
+      const img = this.image(String(e.src || ""));
+      const [x0, y0, x1, y1] = box;
+      g.save();
+      g.transform(this.ux.x, this.ux.y, this.uy.x, this.uy.y, this.o.x, this.o.y);
+      g.translate(x0, y1); g.scale(1, -1);
+      if (img && img.complete && img.naturalWidth) { g.globalAlpha = 0.85; g.drawImage(img, 0, 0, x1 - x0, y1 - y0); g.globalAlpha = 1; }
+      g.restore();
+      const on = s.selection.has(id) || s.hover === id;
+      const a = this.screen([x0, y0]), b = this.screen([x1, y0]), cc = this.screen([x1, y1]), d = this.screen([x0, y1]);
+      g.strokeStyle = on ? c.mark : c.ink3; g.lineWidth = on ? 2 : 1; g.setLineDash(on ? [] : [3, 3]);
+      g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.lineTo(cc.x, cc.y); g.lineTo(d.x, d.y); g.closePath(); g.stroke(); g.setLineDash([]);
+    }
 
     // ---- closed regions, lightly filled
     if (s.regions) {
@@ -205,6 +222,15 @@ export class SketchPainter {
     }
   }
 
+  private images = new Map<string, HTMLImageElement>();
+  /** The picture of a sketch image (loaded once; the view is drawn again when it arrives). */
+  private image(src: string): HTMLImageElement | null {
+    if (!src) return null;
+    let img = this.images.get(src);
+    if (!img) { img = new Image(); img.onload = () => this.viewport.invalidate(); img.src = src; this.images.set(src, img); }
+    return img;
+  }
+
   /** Trace a curve as the current path. */
   private path(r: Resolved): void {
     const g = this.ctx;
@@ -299,6 +325,9 @@ export function glyph(g: CanvasRenderingContext2D, type: string, x: number, y: n
     case "collinear": line(-5, 0, -1.5, 0); line(1.5, 0, 5, 0); dot(-5, 0, 1.1); dot(5, 0, 1.1); break;
     case "symmetric": line(0, -5, 0, 5); line(-4.5, 0, -1.8, 0); line(4.5, 0, 1.8, 0); line(-3.2, -1.6, -1.8, 0, -3.2, 1.6); line(3.2, -1.6, 1.8, 0, 3.2, 1.6); break;
     case "fix": line(-3.5, 4.5, 3.5, 4.5); line(0, 4.5, 0, -1); g.beginPath(); g.arc(0, -2.6, 1.8, 0, 7); g.stroke(); line(-3, 1, 3, 1); break;
+    case "normal": g.beginPath(); g.arc(0, 4.5, 5, Math.PI * 1.05, Math.PI * 1.95); g.stroke(); line(0, -0.5, 0, -5); break;
+    case "curvature": g.beginPath(); g.arc(-1.5, 5, 6, Math.PI * 1.1, Math.PI * 1.5); g.stroke(); g.beginPath(); g.arc(1.5, 5, 6, Math.PI * 1.5, Math.PI * 1.9); g.stroke(); dot(0, -1, 1.3); break;
+    case "pierce": g.beginPath(); g.arc(0, 0, 4.6, 0, 7); g.stroke(); line(-5.5, 5.5, 5.5, -5.5); dot(0, 0, 1.8); break;
     default: g.font = "9px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("?", 0, 0.5);
   }
   g.restore();
@@ -309,4 +338,12 @@ export function relatedEntities(data: SketchData, k: SketchConstraint): string[]
   const out: string[] = [];
   for (const ref of k.refs || []) { const r = resolve(data, ref); if (r) out.push(r.id); }
   return out.concat(out.flatMap((id) => (data.entities[id] && data.entities[id].type !== "point" ? [] : pointsOf(data.entities[id]))));
+}
+
+/** The rectangle a sketch image covers, [x0, y0, x1, y1] in sketch coordinates, or null. */
+export function imageBox(data: SketchData, id: string): [number, number, number, number] | null {
+  const e = data.entities[id]; if (!e || e.type !== "image") return null;
+  const a = pointAt(data, e.a), b = pointAt(data, e.b); if (!a || !b) return null;
+  const box: [number, number, number, number] = [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
+  return box[2] - box[0] > 1e-9 && box[3] - box[1] > 1e-9 ? box : null;
 }

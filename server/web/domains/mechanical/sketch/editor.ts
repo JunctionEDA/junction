@@ -19,7 +19,7 @@ import { angleSuffix } from "../document/units";
 import type { SketchData } from "./format";
 import { nearestOn } from "./infer";
 import { Draft, normalise, sketchChange } from "./model";
-import { SketchPainter, relatedEntities, type Box, type Preview, type Scene } from "./paint";
+import { SketchPainter, imageBox, relatedEntities, type Box, type Preview, type Scene } from "./paint";
 import { findRegions } from "./planar";
 import type { Regions } from "./profiles";
 import { ORIGIN, entitiesOf, isDimension, measure, pointAt, pointsOf, resolveEntity } from "./refs";
@@ -357,6 +357,11 @@ export class SketchEditor {
         if (n && n.d < best) { best = n.d; id = cid; }
       }
       if (id) return { id, kind: "curve", p };
+      // a reference image is picked anywhere inside it, last of all
+      for (const iid of Object.keys(data.entities)) {
+        const b = !o.skip?.has(iid) && imageBox(data, iid);
+        if (b && p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3]) return { id: iid, kind: "curve", p };
+      }
     }
     return null;
   }
@@ -513,7 +518,7 @@ function selectTool(ed: SketchEditor): ToolHandlers {
       }
       if (t.kind !== "curve") return;
       const e = data.entities[t.id]; if (!e) return;
-      if (e.type === "line") ed.dragSoon([e.a, e.b].filter((pid) => down!.origin[pid]).map((pid) => ({ point: pid, to: [down!.origin[pid][0] + p[0] - down!.start[0], down!.origin[pid][1] + p[1] - down!.start[1]] as Vec2 })));
+      if (e.type !== "circle" && e.type !== "arc") ed.dragSoon(Object.keys(down.origin).filter((pid) => down!.origin[pid]).map((pid) => ({ point: pid, to: [down!.origin[pid][0] + p[0] - down!.start[0], down!.origin[pid][1] + p[1] - down!.start[1]] as Vec2 })));
       else if (e.type === "circle" || e.type === "arc") { const c = down.origin[e.center]; if (c) ed.dragSoon([{ curve: t.id, radius: Math.max(1e-3, Math.hypot(p[0] - c[0], p[1] - c[1])) }]); }
     },
     up(ev) {
