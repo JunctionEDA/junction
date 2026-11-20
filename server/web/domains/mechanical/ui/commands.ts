@@ -6,8 +6,10 @@
 //
 // The modes, and what the toolbar shows in each (the order an Onshape user's hands know):
 //
-//   model    undo redo │ Sketch │ Extrude Revolve Sweep Loft │ Fillet Chamfer Draft Shell Hole │ Boolean Split
-//            Transform ▾ │ Pattern ▾ Mirror │ Plane ▾ │ Board ▾ │ Measure Section │ History │ More ▾  Search tools… S
+//   model    undo redo │ Sketch │ Extrude Revolve Sweep Loft Thicken Enclose │ Fillet ▾ Chamfer Draft Rib Shell
+//            Hole │ Boolean Split Transform ▾ Wrap Composite part │ Modify fillet Delete face Move face Replace face │
+//            Pattern ▾ Mirror │ Plane ▾ Curve ▾ Mate connector Variable │ Board ▾ │ Measure Section │ History │
+//            More ▾  Search tools… S
 //   sketch   undo redo │ Line Rectangle ▾ Circle Arc ▾ Slot Point Construction │ Fillet Offset Use Mirror Trim
 //            Extend │ the constraints │ Dimension │ Extrude Revolve │ More ▾      Search tools… S  ✓ Finish  ✗
 //   dialog   what is being edited and what a click will pick │ More ▾                 Search tools… S  ✓  ✗
