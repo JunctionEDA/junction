@@ -13,8 +13,8 @@
 //   solver.solve(data, { drag: [{ point, to }] })   // pull points towards the pointer, constraints permitting
 import type { Vec2 } from "../../core/geometry";
 import type { SketchConstraint, SketchData, SketchEntity } from "../format";
-import { curvaturePoint, directionPoint, eccentric, endsOf, nearestOnPiece, pieceAt, pieceTangent } from "../curves";
-import { ORIGIN, angleFrame, arcSweep, dist, pointAt, pointsOf, resolve, type Resolved } from "../refs";
+import { curvaturePoint, directionPoint, eccentric, endsOf, knotsAndMults, nearestOnPiece, pieceAt, pieceTangent } from "../curves";
+import { ORIGIN, angleFrame, arcSweep, dist, pointAt, pointsOf, resolve, resolveEntity, type Resolved } from "../refs";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -76,13 +76,16 @@ export class SketchSolver {
     let status = 2, dof = 0, conflicting: string[] = [], redundant: string[] = [];
     try {
       g.clear_data();
+      for (const p of prims.params) g.push_sketch_param(p.name, p.value, false);
       g.push_primitives_and_params(prims);
       // FreeCAD's own order of attack: DogLeg, then Levenberg-Marquardt, then BFGS
       for (const algo of [this.gcs.Algorithm.DogLeg, this.gcs.Algorithm.LevenbergMarquardt, this.gcs.Algorithm.BFGS]) {
         status = g.solve(algo);
         if (status === 0 || status === 1) break;
       }
-      dof = g.gcs.dof();
+      // a B-spline a constraint uses carries a start and an end point of the glue's own (four unknowns) that
+      // nothing ties down: they are not freedoms of the sketch
+      dof = g.gcs.dof() - 4 * new Set(prims.filter((p: any) => p.type === "point_on_bspline").map((p: any) => p.b_id)).size;
       conflicting = unique((g.get_gcs_conflicting_constraints() as string[]).filter(Boolean).map(owner));
       redundant = unique((g.get_gcs_redundant_constraints() as string[]).filter(Boolean).map(owner)).filter((id) => !conflicting.includes(id));
     } catch (err) {
@@ -166,8 +169,11 @@ const unique = (a: string[]): string[] => Array.from(new Set(a));
 // ---------------------------------------------------------------- the translation
 
 /** The solver's input for a sketch: points first, then curves, then constraints. */
-function primitives(data: SketchData, opts: SolveOptions, skipped: string[]): any[] {
-  const out: any[] = [{ id: ORIGIN, type: "point", x: 0, y: 0, fixed: true }];
+/** The solver's primitives for a sketch, and the unknowns of its own they use (pushed first, not fixed). */
+function primitives(data: SketchData, opts: SolveOptions, skipped: string[]): any[] & { params: { name: string; value: number }[] } {
+  const params: { name: string; value: number }[] = [];
+  const out: any[] & { params?: typeof params } = [{ id: ORIGIN, type: "point", x: 0, y: 0, fixed: true }];
+  out.params = params;
   const ids = Object.keys(data.entities).sort();
   const have = new Set<string>([ORIGIN]);
   for (const id of ids) {
@@ -205,8 +211,17 @@ function primitives(data: SketchData, opts: SolveOptions, skipped: string[]): an
       out.push({ id: id + "$n", type: "point", x: 2 * c[0] - m[0], y: 2 * c[1] - m[1], fixed: false });
       rules.push({ id: id + "#major", type: "internal_alignment_ellipse_major_diameter", e_id: id, p1_id: e.major, p2_id: id + "$n" });
       have.add(id);
+    } else if (e.type === "bspline" && pointsOf(e).length >= 2 && pointsOf(e).every((p) => have.has(p))) {
+      // a control-point spline or Bézier curve is PlaneGCS's own B-spline on its control points (so a point can
+      // lie on it); the curve is the same clamped NURBS sketch/curves.ts builds
+      const r = resolveEntity(data, id);
+      if (r && r.kind === "curve" && r.pieces.length === 1) {
+        const n = r.pieces[0].nurbs, km = knotsAndMults(n);
+        out.push({ id, type: "bspline", pole_ids: pointsOf(e), weights: n.weights || n.poles.map(() => 1), knots: km.knots, mult: km.mults, degree: n.degree, periodic: false });
+      }
+      have.add(id);
     } else if (e.type !== "point" && e.type !== "line" && e.type !== "circle" && e.type !== "arc" && pointsOf(e).every((p) => have.has(p))) {
-      // splines, conics, text, images: their points are the solver's unknowns; the curve itself is not a primitive
+      // splines through points, conics, text, images: their points are the solver's unknowns; the curve itself is not a primitive
       have.add(id);
     }
   }
@@ -220,6 +235,7 @@ function primitives(data: SketchData, opts: SolveOptions, skipped: string[]): an
     let i = 0;
     for (const m of made) {
       if (m.type === "$point") out.push({ id: m.pid, type: "point", x: m.x, y: m.y, fixed: false });   // a point of the solver's own
+      else if (m.type === "$param") params.push({ name: m.name, value: m.value });                      // an unknown of the solver's own
       else { out.push({ ...m, id: i ? `${id}#${i + 1}` : id }); i++; }
     }
   }
@@ -235,7 +251,7 @@ function primitives(data: SketchData, opts: SolveOptions, skipped: string[]): an
       if (e.type === "arc") out.push({ id: `$drag#${n++}`, type: "arc_radius", a_id: d.curve, radius: d.radius, temporary: true });
     }
   }
-  return out;
+  return out as any[] & { params: typeof params };
 }
 
 type Line = Extract<Resolved, { kind: "line" }>;
@@ -264,6 +280,12 @@ function translate(data: SketchData, id: string, c: SketchConstraint, have: Set<
       if (on.kind === "circle") return [{ type: "point_on_circle", p_id: p.id, c_id: on.id }];
       if (on.kind === "arc") return [{ type: "point_on_arc", p_id: p.id, a_id: on.id }];
       if (on.kind === "curve" && isEllipse(on)) return [{ type: "point_on_ellipse", p_id: p.id, e_id: on.id }];
+      const bs = on as Resolved;
+      if (bs.kind === "curve" && bs.e.type === "bspline" && bs.pieces.length === 1) {
+        // where along the curve the point is: an unknown of its own, so the point can slide
+        const t = nearestOnPiece(bs.pieces[0], p.p).t;
+        return [{ type: "$param", name: id + "$t", value: t }, { type: "point_on_bspline", p_id: p.id, b_id: bs.id, pointparam: id + "$t" }];
+      }
       return null;
     }
     case "normal": return r.length === 2 ? normal(a, b) : null;

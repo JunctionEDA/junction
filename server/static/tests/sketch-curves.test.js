@@ -206,6 +206,18 @@ test("split, linear and circular copies, and moving keep the geometry and its ow
   assert.ok(r.ok); assert.deepEqual(P(r, "r1"), [5, 1]);
 });
 
+test("a point on a Bézier curve: PlaneGCS's B-spline holds it there and lets it slide", async () => {
+  const s = await L.loadSolver();
+  const ents = { a: pt(0, 0), b: pt(10, 20), c: pt(20, 20), e: pt(30, 0), z: { type: "bspline", poles: ["a", "b", "c", "e"], degree: 3 }, p: pt(14, 18) };
+  const on = { k: { type: "coincident", refs: [{ entity: "p" }, { entity: "z" }] } };
+  let r = s.solve(sketch(ents, { f: { type: "fix", refs: [{ entity: "z" }] }, ...on }));
+  assert.ok(r.ok); assert.equal(r.dof, 1, "the point slides along the curve");
+  const [pc] = C.freeformPieces(r.data, "z");
+  near(C.nearestOnPiece(pc, P(r, "p")).d, 0, 1e-7);
+  r = s.solve(sketch(ents, on));
+  assert.ok(r.ok); assert.equal(r.dof, 9);   // four control points and the point, less one
+});
+
 test("normal and pierce in the solver", async () => {
   const s = await L.loadSolver();
   let r = s.solve(sketch({ o: pt(0, 0), c: { type: "circle", center: "o", r: 5 }, a: pt(3, 7), b: pt(9, 2), l: { type: "line", a: "a", b: "b" } }, { f: { type: "fix", refs: [{ entity: "c" }] }, fa: { type: "fix", refs: [{ entity: "a" }] }, n: { type: "normal", refs: [{ entity: "l" }, { entity: "c" }] } }));
