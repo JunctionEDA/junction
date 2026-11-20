@@ -17,11 +17,11 @@
 //! to its price, its picture and its CAD files.  The API has no search by words: a part is found
 //! by its number.
 //!
-//! Without credentials the provider still knows what kind of hardware some of McMaster's commonest
-//! part number families are (the table below).  A number of such a family typed with its size
-//! ("91251A431 1/4-20 x 1") is answered with the same standard part drawn by Junction, named after
-//! McMaster's number, linked to McMaster's page and marked as a generated equivalent.  The size is
-//! not looked up: McMaster's dash numbers are not a public table, so it has to be typed.
+//! Without credentials nothing is fetched and nothing is drawn in the part's place: a number is
+//! answered with one row that links to McMaster's page of the part and asks the person to download
+//! the STEP file there themselves ("3-D STEP" among the page's CAD downloads) and hand it over
+//! (`upload`).  The browser then keeps that file in the project as the part.  A McMaster-Carr number
+//! only ever places McMaster's own model.
 
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -29,7 +29,6 @@ use std::time::{Duration, Instant};
 use futures_util::future::BoxFuture;
 use serde_json::{json, Value};
 
-use super::standard::{self, Kind};
 use super::{check_step, enc, env_opt, env_url, mcmaster_number, Cx, MResult, Model, ModelHit, Provider};
 use crate::parts::vendors::{ErrKind, VendorErr};
 
@@ -165,85 +164,20 @@ fn hit_from_product(number: &str, p: &Value) -> ModelHit {
     }
 }
 
-// ------------------------------------------------------------------ equivalents, without the API
-
-/// A family of McMaster part numbers (the number up to its letter) that is one kind of standard hardware.
-struct Family {
-    prefix: &'static str,
-    kind: Kind,
-    inch: bool,
-    what: &'static str,
-}
-
-static FAMILIES: &[Family] = &[
-    Family { prefix: "91251A", kind: Kind::Shcs, inch: true, what: "Black-oxide alloy steel socket head screw" },
-    Family { prefix: "92196A", kind: Kind::Shcs, inch: true, what: "18-8 stainless steel socket head screw" },
-    Family { prefix: "91290A", kind: Kind::Shcs, inch: false, what: "Black-oxide alloy steel socket head screw" },
-    Family { prefix: "91292A", kind: Kind::Shcs, inch: false, what: "18-8 stainless steel socket head screw" },
-    Family { prefix: "91255A", kind: Kind::Button, inch: true, what: "Black-oxide alloy steel button head hex drive screw" },
-    Family { prefix: "92949A", kind: Kind::Button, inch: true, what: "18-8 stainless steel button head hex drive screw" },
-    Family { prefix: "91239A", kind: Kind::Button, inch: false, what: "Black-oxide alloy steel button head hex drive screw" },
-    Family { prefix: "92095A", kind: Kind::Button, inch: false, what: "18-8 stainless steel button head hex drive screw" },
-    Family { prefix: "91253A", kind: Kind::Flat, inch: true, what: "Black-oxide alloy steel hex drive flat head screw" },
-    Family { prefix: "92210A", kind: Kind::Flat, inch: true, what: "18-8 stainless steel hex drive flat head screw" },
-    Family { prefix: "91294A", kind: Kind::Flat, inch: false, what: "Black-oxide alloy steel hex drive flat head screw" },
-    Family { prefix: "92125A", kind: Kind::Flat, inch: false, what: "18-8 stainless steel hex drive flat head screw" },
-    Family { prefix: "92240A", kind: Kind::Hex, inch: true, what: "18-8 stainless steel hex head screw" },
-    Family { prefix: "90480A", kind: Kind::Nut, inch: true, what: "Zinc-plated steel hex nut" },
-    Family { prefix: "91841A", kind: Kind::Nut, inch: true, what: "18-8 stainless steel hex nut" },
-    Family { prefix: "90591A", kind: Kind::Nut, inch: false, what: "Zinc-plated steel hex nut" },
-    Family { prefix: "91828A", kind: Kind::Nut, inch: false, what: "18-8 stainless steel hex nut" },
-    Family { prefix: "90126A", kind: Kind::Washer, inch: true, what: "Zinc-plated steel washer" },
-    Family { prefix: "92141A", kind: Kind::Washer, inch: true, what: "18-8 stainless steel washer" },
-    Family { prefix: "91166A", kind: Kind::Washer, inch: false, what: "Zinc-plated steel washer" },
-    Family { prefix: "93475A", kind: Kind::Washer, inch: false, what: "18-8 stainless steel washer" },
-];
-
-fn family(number: &str) -> Option<&'static Family> { FAMILIES.iter().find(|f| number.starts_with(f.prefix)) }
-
-/// The size to type after a number of this family, as an example.
-fn example(f: &Family) -> &'static str {
-    match (f.kind, f.inch) {
-        (Kind::Nut | Kind::Washer, true) => "1/4-20",
-        (Kind::Nut | Kind::Washer, false) => "M5",
-        (Kind::Flat, false) => "M5 x 16",
-        (_, true) => "1/4-20 x 1",
-        (_, false) => "M5 x 20",
-    }
-}
-
-/// What can be said of a number without asking McMaster.
-fn offline_hit(number: &str, q: &str) -> ModelHit {
-    let base = ModelHit { provider: "mcmaster".into(), supplier: NAME.into(), part_number: number.to_string(), title: format!("{NAME} {number}"), url: page(number), ..Default::default() };
-    let Some(f) = family(number) else {
-        return ModelHit {
-            id: number.to_string(),
-            description: "McMaster-Carr part".into(),
-            note: "McMaster's own model of this part comes through their API, which this server is not connected to.".into(),
-            ..base
-        };
-    };
-    // the size, typed beside the number: the same thread system as the family, or it is not this part
-    let spec = standard::exact(f.kind, q).filter(|s| s.is_inch() == f.inch);
-    match spec {
-        Some(s) => ModelHit {
-            id: format!("eq|{number}|{}", s.id()),
-            description: format!("{}, {}", f.what, s.description()),
-            format: "jpart".into(),
-            thumb: Some(standard::thumbnail(&s)),
-            size: Some(standard::extent(&s)),
-            generated: true,
-            equivalent: true,
-            note: format!("A generated equivalent ({}): not McMaster-Carr's own model, and the size is the one you typed, not looked up. {}", s.part_number(), s.note()),
-            ..base
-        },
-        None => ModelHit {
-            id: number.to_string(),
-            description: format!("{} ({} sizes)", f.what, if f.inch { "inch" } else { "metric" }),
-            note: format!("Type its size after the number to place a generated equivalent, for example “{number} {}”. McMaster's own model comes through their API, which this server is not connected to.", example(f)),
-            hint: format!("{number} {}", example(f)),
-            ..base
-        },
+/// What a number is answered with when the API is not connected: where McMaster's model is, and
+/// that the person can bring it.  Nothing stands in for it.
+fn offline_hit(number: &str) -> ModelHit {
+    ModelHit {
+        provider: "mcmaster".into(),
+        supplier: NAME.into(),
+        id: number.to_string(),
+        part_number: number.to_string(),
+        title: format!("{NAME} {number}"),
+        description: "McMaster-Carr part".into(),
+        url: page(number),
+        upload: true,
+        note: "Open McMaster-Carr's page of this part, download its CAD model as “3-D STEP”, and drop the file here. It is placed as this part.".into(),
+        ..Default::default()
     }
 }
 
@@ -252,7 +186,7 @@ pub struct McMaster;
 impl Provider for McMaster {
     fn id(&self) -> &'static str { "mcmaster" }
     fn name(&self) -> &'static str { NAME }
-    fn note(&self) -> &'static str { "McMaster-Carr's own CAD models by part number, through their Product Information API (an approved account and its client certificate). Without it, common hardware numbers typed with their size get a generated equivalent." }
+    fn note(&self) -> &'static str { "McMaster-Carr's own CAD models by part number, through their Product Information API (an approved account and its client certificate). Without it, a part number links to McMaster's page, and the STEP file you download there is placed as the part." }
     fn needs(&self) -> &'static [&'static str] { &["MCMASTER_USERNAME", "MCMASTER_PASSWORD", "MCMASTER_CLIENT_CERT"] }
     fn signup(&self) -> &'static str { "https://www.mcmaster.com/help/api/" }
     fn configured(&self) -> bool { cfg().user.is_some() && cfg().password.is_some() }
@@ -262,7 +196,7 @@ impl Provider for McMaster {
         Box::pin(async move {
             // the API has no search by words: only a part number finds a part
             let Some(number) = mcmaster_number(q) else { return Ok(Vec::new()) };
-            if !self.configured() { return Ok(vec![offline_hit(&number, q)]); }
+            if !self.configured() { return Ok(vec![offline_hit(&number)]); }
             match product(&number).await {
                 Ok(p) => Ok(vec![hit_from_product(&number, &p)]),
                 Err(e) if e.kind == ErrKind::NotFound => Ok(Vec::new()),
@@ -273,13 +207,6 @@ impl Provider for McMaster {
 
     fn fetch<'a>(&'a self, _cx: &'a Cx<'a>, id: &'a str) -> BoxFuture<'a, MResult<Model>> {
         Box::pin(async move {
-            if let Some(rest) = id.strip_prefix("eq|") {
-                let (number, spec) = rest.split_once('|').ok_or_else(|| VendorErr::new(ErrKind::NotFound, "There is no such model."))?;
-                let number = mcmaster_number(number).filter(|n| n == number).ok_or_else(|| VendorErr::new(ErrKind::NotFound, "That is not a McMaster-Carr part number."))?;
-                let spec = standard::Spec::from_id(spec).ok_or_else(|| VendorErr::new(ErrKind::NotFound, "There is no such standard part."))?;
-                let title = format!("{NAME} {number}");
-                return Ok(Model { format: "jpart", bytes: standard::part_studio(&spec, &title, &page(&number)).into_bytes(), name: title });
-            }
             let number = mcmaster_number(id).filter(|n| n == id).ok_or_else(|| VendorErr::new(ErrKind::NotFound, "That is not a McMaster-Carr part number."))?;
             let p = product(&number).await?;
             let link = step_link(&p).ok_or_else(|| VendorErr::new(ErrKind::NotFound, format!("McMaster-Carr lists no STEP model for {number}.")))?;
@@ -313,30 +240,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn equivalents_without_the_api() {
-        // the user's example: a socket head screw family, the size typed beside it
-        let h = offline_hit("91251A431", "91251A431 1/4-20 x 1");
-        assert_eq!(h.title, "McMaster-Carr 91251A431");
-        assert_eq!(h.id, "eq|91251A431|shcs:1/4:1in");
-        assert_eq!(h.format, "jpart");
-        assert!(h.generated && h.equivalent);
-        assert_eq!(h.url, "https://www.mcmaster.com/91251A431/");
-        assert!(h.description.starts_with("Black-oxide alloy steel socket head screw, Socket head cap screw 1/4\"-20 × 1\""), "{}", h.description);
-        assert!(h.note.contains("generated equivalent") && h.note.contains("not McMaster-Carr's own model"));
-        // the number alone: what it is, and what to type; nothing to place
-        let h = offline_hit("91251A431", "91251A431");
-        assert_eq!(h.format, "");
-        assert_eq!(h.hint, "91251A431 1/4-20 x 1");
-        assert!(h.description.contains("socket head screw") && h.note.contains("Type its size"));
-        // a metric size for an inch family is not this part
-        assert_eq!(offline_hit("91251A431", "91251A431 M5x20").format, "");
-        assert_eq!(offline_hit("91290A115", "91290A115 M3x10").id, "eq|91290A115|shcs:M3:10");
-        assert_eq!(offline_hit("90591A250", "90591A250 M5").id, "eq|90591A250|nut:M5");
-        assert_eq!(offline_hit("92141A029", "92141A029 1/4-20").id, "eq|92141A029|washer:1/4");
-        // a family that is not in the table: the link, and why there is no model
-        let h = offline_hit("6384K365", "6384K365");
-        assert_eq!((h.format.as_str(), h.url.as_str()), ("", "https://www.mcmaster.com/6384K365/"));
-        assert!(h.note.contains("API"));
+    fn without_the_api_a_number_asks_for_mcmasters_own_file() {
+        // whatever family the number is of: one row, a link, and nothing drawn in the part's place
+        for number in ["91251A431", "90591A250", "92141A029", "6384K365"] {
+            let h = offline_hit(number);
+            assert_eq!(h.title, format!("McMaster-Carr {number}"));
+            assert_eq!((h.id.as_str(), h.part_number.as_str()), (number, number));
+            assert_eq!(h.url, format!("https://www.mcmaster.com/{number}/"));
+            assert_eq!(h.format, "", "nothing to place by a click");
+            assert!(h.upload && !h.generated && h.thumb.is_none() && h.size.is_none() && h.hint.is_empty());
+            assert!(h.note.contains("3-D STEP") && h.note.contains("drop the file"), "{}", h.note);
+        }
     }
 
     #[test]
@@ -353,7 +267,7 @@ mod tests {
         let h = hit_from_product("91251A431", &p);
         assert_eq!((h.format.as_str(), h.title.as_str()), ("step", "McMaster-Carr 91251A431"));
         assert_eq!(h.description, "Black-Oxide Alloy Steel Socket Head Screw, 1/4\"-20 Thread Size, 1\" Long");
-        assert!(!h.generated && !h.equivalent);
+        assert!(!h.generated && !h.upload);
         // a product without a STEP file is listed and cannot be placed
         let none = json!({ "PartNumber": "1234K5", "Links": [{ "Key": "Price", "Value": "/v1/products/1234K5/price" }] });
         assert_eq!(hit_from_product("1234K5", &none).format, "");

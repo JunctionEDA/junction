@@ -9,7 +9,7 @@
 //   V=http://127.0.0.1:8097
 //
 //   # run 1 — no supplier credentials: standard parts, LCSC, the KiCad and FreeCAD libraries, and McMaster-Carr
-//   #         numbers answered with a generated equivalent
+//   #         numbers answered with a link to McMaster's page and placed from the STEP file a person drops
 //   DATABASE_URL=postgres://… JWT_SECRET=testsecret PUBLIC_URL=http://127.0.0.1:8099 PORT=8099 KC_DEV_LOGIN=1 \
 //   EASYEDA_API_URL=$V EASYEDA_MODELS_URL=$V JLCPCB_API_URL=$V JLCSEARCH_URL=$V KICAD_LIBS_URL=$V \
 //   FREECAD_LIBRARY_API_URL=$V FREECAD_LIBRARY_RAW_URL=$V MCMASTER_API_URL=$V TRACEPARTS_API_URL=$V cargo run
@@ -30,6 +30,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { setCad } from './cad-setting.mjs';
+import { stepBox } from './fake-models.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -99,7 +100,7 @@ console.log('\n== standard parts ==');
 {
   const r = await search('M5x20 socket head');
   const h = r.results[0];
-  check('"M5x20 socket head" is the ISO 4762 screw, drawn by Junction', h && h.provider === 'standard' && h.id === 'shcs:M5:20' && h.title === 'ISO 4762 M5x20' && h.format === 'jpart' && h.generated && !h.equivalent, JSON.stringify(h && [h.id, h.title, h.format]));
+  check('"M5x20 socket head" is the ISO 4762 screw, drawn by Junction', h && h.provider === 'standard' && h.id === 'shcs:M5:20' && h.title === 'ISO 4762 M5x20' && h.format === 'jpart' && h.generated && !h.upload && !('equivalent' in h), JSON.stringify(h && [h.id, h.title, h.format]));
   check('with its size and an outline for the row', h && JSON.stringify(h.size) === '[8.5,8.5,25]' && h.thumb && h.thumb.d.startsWith('M') && h.thumb.box.length === 4, JSON.stringify(h && h.size));
   check('"DIN 912 M5x20" is the same part', (await search('DIN 912 M5x20')).results[0]?.id === 'shcs:M5:20');
   check('an inch size reads too', (await search('1/4-20 x 1 button head')).results[0]?.id === 'button:1/4:1in');
@@ -138,15 +139,15 @@ console.log('\n== LCSC, the KiCad library, the FreeCAD library ==');
 console.log('\n== McMaster-Carr ==');
 if (!WITH) {
   const alone = (await search('91251A431')).results;
-  check('a number alone, without the API: what it is, its page, and what to type', alone.length === 1 && alone[0].provider === 'mcmaster' && alone[0].format === '' && alone[0].url === 'https://www.mcmaster.com/91251A431/' && /socket head screw/.test(alone[0].description) && alone[0].hint === '91251A431 1/4-20 x 1', JSON.stringify(alone));
-  const eq = (await search('91251A431 1/4-20 x 1')).results;
-  check('with its size: one row, the generated equivalent, said to be one', eq.length === 1 && eq[0].title === 'McMaster-Carr 91251A431' && eq[0].format === 'jpart' && eq[0].generated && eq[0].equivalent && /not McMaster-Carr's own model/.test(eq[0].note) && eq[0].url === 'https://www.mcmaster.com/91251A431/', JSON.stringify(eq.map((x) => [x.title, x.format, x.equivalent])));
-  const m = await model('mcmaster', eq[0]?.id || '');
-  const doc = m.format === 'jpart' ? JSON.parse(m.bytes.toString('utf8')) : null;
-  const said = doc && doc.items.find((i) => i.id === 'standard-part');
-  check('its part studio names McMaster\'s number and links to McMaster\'s page', !!said && said.title === 'McMaster-Carr 91251A431' && said.link === 'https://www.mcmaster.com/91251A431/' && said.spec === 'shcs:1/4:1in');
-  check('a metric size for an inch family is not offered as that part', (await search('91251A431 M5x20')).results[0]?.format === '');
-  check('a number of a family Junction does not know is linked and not drawn', (await search('6384K365')).results[0]?.format === '' && (await search('6384K365')).results[0]?.url === 'https://www.mcmaster.com/6384K365/');
+  check('a number, without the API: one row, McMaster\'s name and number, its page, and nothing to place by a click', alone.length === 1 && alone[0].provider === 'mcmaster' && alone[0].title === 'McMaster-Carr 91251A431' && alone[0].format === '' && alone[0].url === 'https://www.mcmaster.com/91251A431/' && alone[0].upload === true, JSON.stringify(alone));
+  check('the row says what to do: download the STEP file from McMaster\'s page and drop it', /3-D STEP/.test(alone[0]?.note || '') && /drop the file/.test(alone[0]?.note || '') && !alone[0]?.hint, alone[0]?.note);
+  check('nothing is drawn in its place: no generated model, no outline, no size', !alone[0]?.generated && !alone[0]?.thumb && !alone[0]?.size && !('equivalent' in (alone[0] || {})));
+  for (const q of ['91251A431 1/4-20 x 1', '91251A431 M5x20', '90591A250 M5', '6384K365', 'https://www.mcmaster.com/92196A537/']) {
+    const r = (await search(q)).results;
+    check(`"${q}": the same one row, whatever is typed beside the number`, r.length === 1 && r[0].provider === 'mcmaster' && r[0].format === '' && r[0].upload === true && !r[0].generated && r.every((x) => x.provider !== 'standard'), JSON.stringify(r.map((x) => [x.provider, x.title, x.format])));
+  }
+  const old = await model('mcmaster', 'eq|91251A431|shcs:1/4:1in');
+  check('the id of a generated equivalent no longer fetches anything', old.status !== 200 && old.format !== 'jpart', `${old.status} ${old.format}`);
   const real = await model('mcmaster', '91251A431');
   check('McMaster\'s own model is not fetched without the API, and its website is never asked', real.status === 409 && real.j.error === 'vendor_not_configured' && !(await ctl('hits')).mcmaster, `${real.status} ${JSON.stringify(await ctl('hits'))}`);
   check('"not connected" is a state of the provider, not an error of the search', (await search('91251A431')).errors.length === 0);
@@ -222,7 +223,7 @@ try {
     await page.waitForSelector('[data-supplier-query]');
   };
   const type = async (q) => { await page.fill('[data-supplier-query]', q); await page.waitForSelector('[data-supplier-search][data-state=done]', { timeout: 30000 }); await page.waitForFunction((q) => document.querySelector('[data-supplier-query]').value === q, q); };
-  const rows = () => page.$$eval('[data-supplier-search] [data-model]', (els) => els.map((e) => ({ title: e.getAttribute('data-model'), provider: e.getAttribute('data-provider'), format: e.getAttribute('data-format'), kind: e.querySelector('[data-kind]')?.textContent || '', thumb: e.querySelector('[data-thumb]')?.getAttribute('data-thumb'), link: e.querySelector('a[data-supplier-link]')?.getAttribute('href') || '', text: e.textContent })));
+  const rows = () => page.$$eval('[data-supplier-search] [data-model]', (els) => els.map((e) => ({ title: e.getAttribute('data-model'), provider: e.getAttribute('data-provider'), format: e.getAttribute('data-format'), kind: e.querySelector('[data-kind]')?.textContent || '', upload: e.hasAttribute('data-upload'), own: e.hasAttribute('data-own'), thumb: e.querySelector('[data-thumb]')?.getAttribute('data-thumb'), link: e.querySelector('a[data-supplier-link]')?.getAttribute('href') || '', text: e.textContent })));
 
   // ---------------------------------------------------------------- the tab, and a standard part
   await page.click('[data-tool=Insert]');
@@ -276,31 +277,73 @@ try {
 
   // ---------------------------------------------------------------- a McMaster-Carr number
   await openSuppliers();
+  const MC = '[data-supplier-search] [data-model="McMaster-Carr 91251A431"]';
+  /** A file as the browser hands it over on a drop. */
+  const carried = (name, text) => page.evaluateHandle(({ name, text }) => { const d = new DataTransfer(); d.items.add(new File([text], name)); return d; }, { name, text });
+  let docs2;
   if (!WITH) {
     await type('91251A431');
     list = await rows();
-    check('a McMaster-Carr number without the API: the row says what it is and what to type, and cannot be placed', list.length === 1 && list[0].title === 'McMaster-Carr 91251A431' && list[0].format === '' && /Type its size/.test(list[0].text) && list[0].link === 'https://www.mcmaster.com/91251A431/', JSON.stringify(list));
+    check('a McMaster-Carr number without the API: one row, McMaster\'s name and number, linked to its page', list.length === 1 && list[0].title === 'McMaster-Carr 91251A431' && list[0].format === '' && list[0].upload && !list[0].own && list[0].link === 'https://www.mcmaster.com/91251A431/', JSON.stringify(list));
+    check('it says how to bring McMaster\'s own model: open the page, download "3-D STEP", drop the file or choose it', /Open McMaster-Carr's page of 91251A431/.test(list[0]?.text) && /3-D STEP/.test(list[0]?.text) && /Drop the file here/.test(list[0]?.text) && await page.isVisible(`${MC} [data-choose-file]`)
+      && await page.$eval(`${MC} a[data-open-page]`, (a) => a.getAttribute('href') === 'https://www.mcmaster.com/91251A431/' && a.target === '_blank' && /noopener/.test(a.rel)), list[0]?.text);
+    check('nothing generated is offered: no format badge, no outline, no "equivalent"', list[0]?.kind === '' && list[0]?.thumb === 'none' && !/equivalent|generated/i.test(list[0]?.text || ''), JSON.stringify(list[0]));
     await shot(page, '04-mcmaster-number');
-    await page.click('[data-supplier-search] [data-model="McMaster-Carr 91251A431"]');
-    await page.waitForFunction(() => document.querySelector('[data-supplier-query]').value === '91251A431 1/4-20 x 1');
-    await page.waitForSelector('[data-supplier-search] [data-model][data-format=jpart]', { timeout: 30000 });
+    await type('91251A431 1/4-20 x 1');
     list = await rows();
-    check('clicking it fills in an example size, and the row becomes a generated equivalent, said to be one', list.length === 1 && list[0].kind === 'Generated equivalent' && /Not McMaster-Carr's own model/.test(list[0].text) && list[0].link === 'https://www.mcmaster.com/91251A431/', JSON.stringify(list));
-    await shot(page, '05-mcmaster-equivalent');
+    check('typing a size beside the number changes nothing: still that one row, and no drawn screw', list.length === 1 && list[0].title === 'McMaster-Carr 91251A431' && list[0].upload && list[0].format === '', JSON.stringify(list.map((r) => [r.title, r.provider, r.format])));
+    await type('91251A431');
+    await page.click(`${MC} [data-title]`);
+    await page.waitForTimeout(500);
+    check('a click on the row places nothing', (await page.evaluate(() => window.JunctionAssembly.getState().instances.length)) === 2 && !(await page.$('[data-supplier-search] [data-placing]')) && await page.isVisible('[data-insert-dialog]'));
+
+    // a file that is not a STEP file (the page saved instead of the model), named as if it were one
+    const before = await docsOf();
+    await page.setInputFiles(`${MC} input[data-supplier-file]`, { name: '91251A431.step', mimeType: 'application/octet-stream', buffer: Buffer.from('<!DOCTYPE html><html><title>McMaster-Carr</title></html>') });
+    await page.waitForSelector('[data-supplier-search] [data-place-error]', { timeout: 10000 });
+    const said = await page.$eval('[data-supplier-search] [data-place-error]', (e) => e.textContent);
+    check('a file that is not a STEP file is refused in plain words, and nothing is stored or placed', /“91251A431\.step” is not a STEP file/.test(said) && /3-D STEP/.test(said) && (await page.evaluate(() => window.JunctionAssembly.getState().instances.length)) === 2 && (await docsOf()).join() === before.join(), said);
+    await shot(page, '05-mcmaster-not-step');
+
+    // McMaster's STEP file, dragged over the tab and dropped
+    const step = stepBox('McMaster-Carr 91251A431', [9.5, 9.5, 31.75]).toString('utf8');
+    const dt = await carried('91251A431_Black-Oxide Alloy Steel Socket Head Screw.STEP', step);
+    await page.dispatchEvent('[data-supplier-search]', 'dragover', { dataTransfer: dt });
+    await page.waitForSelector(`${MC}[data-drop-over]`, { timeout: 5000 });
+    check('a file dragged over the tab lights the row it will be placed as', /Drop the STEP file to place it as McMaster-Carr 91251A431/.test(await page.$eval(MC, (e) => e.textContent)));
+    await shot(page, '05b-mcmaster-drag-over');
+    await page.dispatchEvent('[data-supplier-search]', 'drop', { dataTransfer: dt });
+    await settled(3);
+    docs2 = await docsOf();
+    const mc0 = await inst('McMaster-Carr 91251A431');
+    check('dropping the STEP file places it at once as that part: McMaster\'s file, kept in the project and imported by a part studio', !!mc0 && mc0.status === 'ready' && sized(mc0.size, [9.5, 9.5, 31.75]) && docs2.includes('McMaster-Carr 91251A431.jpart') && docs2.includes('models/McMaster-Carr 91251A431.step') && docs2.length === before.length + 2, JSON.stringify([mc0, docs2]));
+    check('the instance is McMaster\'s part by number and page, not a generated one', mc0?.supplier?.provider === 'mcmaster' && mc0.supplier.partNumber === '91251A431' && mc0.supplier.name === 'McMaster-Carr' && mc0.supplier.title === 'McMaster-Carr 91251A431' && mc0.supplier.url === 'https://www.mcmaster.com/91251A431/' && !mc0.supplier.generated && !('equivalent' in mc0.supplier), JSON.stringify(mc0?.supplier));
+    const studio = await page.evaluate(async (docId) => { const r = await fetch(`/api/docs/${docId}/snapshots/0`); return r.ok ? r.text() : `${r.status}`; }, mc0.source.docId).catch((e) => String(e));
+    check('its part studio imports that file and holds no drawn standard part', /"featureType":\s*"import"/.test(studio) && /models\/McMaster-Carr 91251A431\.step/.test(studio) && /"split":\s*"one"/.test(studio) && /supplier-part/.test(studio) && !/standard-part/.test(studio), `${studio.length} characters`);
+    check('the dialog closes on the model', !(await page.isVisible('[data-insert-dialog]')));
+    await shot(page, '05c-mcmaster-placed');
+
+    // the same number again: the project has it
+    await openSuppliers();
+    await type('91251A431');
+    await page.waitForSelector(`${MC}[data-own]`, { timeout: 10000 });
+    list = await rows();
+    check('searching the number again offers it as "In this project", placed by a click', list.length === 1 && list[0].own && !list[0].upload && list[0].kind === 'In this project' && !(await page.$(`${MC} [data-choose-file]`)), JSON.stringify(list));
+    await shot(page, '05d-mcmaster-in-project');
+    await page.click('[data-insert-dialog] [data-cancel]');
+    await openSuppliers();
   } else {
     await type('91251A431');
     list = await rows();
-    check('a McMaster-Carr number through the API: McMaster\'s own STEP model, with their picture', list.length === 1 && list[0].title === 'McMaster-Carr 91251A431' && list[0].kind === 'STEP' && list[0].thumb === 'photo' && list[0].link === 'https://www.mcmaster.com/91251A431/', JSON.stringify(list));
+    check('a McMaster-Carr number through the API: McMaster\'s own STEP model, with their picture', list.length === 1 && list[0].title === 'McMaster-Carr 91251A431' && list[0].kind === 'STEP' && !list[0].upload && list[0].thumb === 'photo' && list[0].link === 'https://www.mcmaster.com/91251A431/', JSON.stringify(list));
     await shot(page, '04-mcmaster-api');
+    await page.click(MC);
+    await settled(3);
+    docs2 = await docsOf();
   }
-  await page.click('[data-supplier-search] [data-model="McMaster-Carr 91251A431"]');
-  await settled(3);
   const mc = await inst('McMaster-Carr 91251A431');
-  const docs2 = await docsOf();
-  if (!WITH) {
-    check('it is placed under McMaster\'s name and number, marked as an equivalent', !!mc && mc.status === 'ready' && mc.supplier.title === 'McMaster-Carr 91251A431' && mc.supplier.equivalent === true && mc.supplier.url === 'https://www.mcmaster.com/91251A431/' && sized(mc.size, [9.525, 9.525, 31.75]) && docs2.includes('McMaster-Carr 91251A431.jpart'), JSON.stringify(mc));
-  } else {
-    check('it is placed from McMaster\'s STEP file, kept in the project and imported by a part studio', !!mc && mc.status === 'ready' && mc.supplier.title === 'McMaster-Carr 91251A431' && !mc.supplier.equivalent && !mc.supplier.generated && sized(mc.size, [9.5, 9.5, 31.75]) && docs2.includes('McMaster-Carr 91251A431.jpart') && docs2.includes('models/McMaster-Carr 91251A431.step'), JSON.stringify([mc, docs2]));
+  if (WITH) {
+    check('it is placed from McMaster\'s STEP file, kept in the project and imported by a part studio', !!mc && mc.status === 'ready' && mc.supplier.title === 'McMaster-Carr 91251A431' && !mc.supplier.generated && sized(mc.size, [9.5, 9.5, 31.75]) && docs2.includes('McMaster-Carr 91251A431.jpart') && docs2.includes('models/McMaster-Carr 91251A431.step'), JSON.stringify([mc, docs2]));
   }
   check('a model new to the assembly is set down beside what is there, not on top of it', !!mc && mc.x > second.x + 5, String(mc && mc.x));
   const link = await page.$eval('[data-instance="McMaster-Carr 91251A431"] a[data-supplier-link]', (a) => [a.getAttribute('href'), a.getAttribute('target'), a.getAttribute('rel')]).catch(() => null);
@@ -330,7 +373,7 @@ try {
   const bom = await page.$$eval('.asm-bom tbody tr', (trs) => trs.map((tr) => ({ cells: Array.from(tr.children).map((td) => td.textContent), link: tr.querySelector('a[data-supplier-link]')?.getAttribute('href') || '' })));
   const row = (name) => bom.find((r) => r.cells[1] === name);
   check('the bill of materials names each by supplier and part number, with quantities', row('ISO 4762 M5x20')?.cells[3] === '2' && row('McMaster-Carr 91251A431')?.cells[3] === '1' && row('LCSC C25804')?.cells[3] === '1', JSON.stringify(bom.map((r) => r.cells.slice(1, 4))));
-  check('and links to the supplier\'s page, with the supplier\'s number in the part column', row('McMaster-Carr 91251A431')?.link === 'https://www.mcmaster.com/91251A431/' && row('McMaster-Carr 91251A431')?.cells[6] === 'McMaster-Carr 91251A431' && (WITH || /generated equivalent/.test(row('McMaster-Carr 91251A431')?.cells[2])), JSON.stringify(row('McMaster-Carr 91251A431')));
+  check('and links to the supplier\'s page, with the supplier\'s number in the part column', row('McMaster-Carr 91251A431')?.link === 'https://www.mcmaster.com/91251A431/' && row('McMaster-Carr 91251A431')?.cells[6] === 'McMaster-Carr 91251A431' && !/generated|equivalent/i.test(row('McMaster-Carr 91251A431')?.cells[2] || ''), JSON.stringify(row('McMaster-Carr 91251A431')));
   await shot(page, '06-placed-and-bom');
 
   // ---------------------------------------------------------------- undo, reload
@@ -349,6 +392,18 @@ try {
   const listed = await page.$$eval('[data-insert-dialog] [data-source-doc]', (els) => els.map((e) => e.getAttribute('data-source-doc')));
   check('the placed models are part studios of the project: the Project tab lists them', listed.includes('ISO 4762 M5x20') && listed.includes('McMaster-Carr 91251A431') && listed.includes('LCSC C25804'), listed.join(', '));
   await page.click('[data-insert-dialog] [data-cancel]');
+  if (!WITH) {
+    // the file dropped before is the project's model of the number from now on: a click places another
+    const docsBefore = await docsOf();
+    await openSuppliers();
+    await type('91251A431');
+    await page.waitForSelector(`${MC}[data-own]`, { timeout: 10000 });
+    await page.click(MC);
+    await settled(4);
+    const two = await inst('McMaster-Carr 91251A431 2');
+    check('after a reload the number is still "In this project": a click adds an instance of the same part studio, with nothing fetched or stored', !!two && two.status === 'ready' && two.source.docId === again.source.docId && two.supplier.provider === 'mcmaster' && !two.supplier.generated && sized(two.size, [9.5, 9.5, 31.75]) && (await docsOf()).join() === docsBefore.join(), JSON.stringify(two));
+    check('McMaster-Carr was never asked for anything, by API or by its website', !(await ctl('hits')).mcmaster && !(await ctl('hits'))['mcmaster-login'], JSON.stringify(await ctl('hits')));
+  }
   await page.evaluate(() => window.JunctionAssembly.fit());
   await shot(page, '07-after-reload');
   check('no page errors', errors.length === 0, errors.slice(0, 5).join(' | '));

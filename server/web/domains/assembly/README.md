@@ -49,9 +49,14 @@ panels) and `scripts/cad-e2e.mjs` (a board fastened in a tray, a hinged lid, a c
   part number or a standard size ("M5x20 socket head", "608 bearing", an LCSC number, a McMaster-Carr number),
   and click a result. The model becomes a part studio of the project (a STEP file in `models/` imported as one
   body, or a part studio the server drew from a standard's dimensions) and an instance of it, which carries
-  `supplier: { provider, id, name, partNumber, title, description?, url?, generated?, equivalent? }`. The
+  `supplier: { provider, id, name, partNumber, title, description?, url?, generated? }`. The
   instance list links to the supplier's page and the bill of materials names the part by supplier and part
   number. The server's README lists the providers and the settings each needs.
+  A **McMaster-Carr number** only ever places McMaster's own model. On a server without McMaster's API its row
+  cannot be clicked: it links to McMaster's page and takes the STEP file the person downloads there ("3-D STEP"),
+  dropped on the row or the tab or chosen with "Choose file…". The file is checked to be a STEP file, kept in
+  `models/` and placed as that part (`suppliers/place.ts`, `placeModel(…, file)`); the next search for the number
+  in that project offers it as "In this project". Nothing is drawn in such a part's place.
 - **Instance tree**: rename, hide, suppress, fix, group, copy in a row, replace, delete; each row says how many
   freedoms its mates leave it.
 - **Drag** an instance in the viewport, or use the manipulator on the selected one (arrows slide, arcs turn, in
@@ -175,9 +180,9 @@ The solver runs on the page's thread; it has not needed a worker.
 
 - **STEP files** (`kind: "file"`) have no provider (import the file into a part studio and instance that).
 - **Supplier models** show an outline (drawn parts) or the supplier's photo before they are placed, not a 3D
-  preview: the model is fetched on the click. A drawn part has no thread, and a McMaster-Carr number is only
-  drawn as an equivalent when its size is typed with it. A supplier's STEP file comes in as one body, in the
-  supplier's own frame.
+  preview: the model is fetched on the click. A drawn part has no thread. Without McMaster's API a McMaster-Carr
+  model is not fetched: the person downloads the STEP file from McMaster's page and drops it on the row. A
+  supplier's STEP file comes in as one body, in the supplier's own frame.
 - **A board** inserted before it has been read lands with the sheet's origin, not its middle, at the origin.
   Its part envelopes come from the footprints (courtyards), refined by the 3D models as they load.
 - **Interference** does not look inside sub-assemblies yet.

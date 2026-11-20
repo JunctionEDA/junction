@@ -9,6 +9,10 @@
 // The instance is then an ordinary one of that studio's body, so it mates, fixes, hides and counts in the bill
 // of materials like any part, and it carries `supplier` (model.ts) so its name and link survive.  A model the
 // project already has (placed before, by anybody) is not fetched again: another instance of it is added.
+//
+// A model the server cannot fetch (`hit.upload`: a McMaster-Carr number without McMaster's API) is placed from the
+// file the person downloaded from the supplier's page and handed over: the same path from "a STEP file" on, with
+// their file in place of the fetched one.  Nothing is drawn in such a part's place.
 import { fetchDocs, freeFilePath, uploadFile } from "../../../platform/doctabs/api";
 import { rawFetch } from "../../../platform/documents/rawfetch";
 import { modifiedChange, newId, newItemDoc, serializeItemDoc, type Item, type ItemChange } from "../../../shared/itemdoc/itemdoc";
@@ -16,9 +20,31 @@ import { isInstance, type Transform } from "../document/format";
 import type { SourceOffer } from "../sources/types";
 import type { AssemblyEditor } from "../ui/assembly";
 import { fetchModel } from "./api";
-import { existingStudio, fileStem, supplierOf, type ModelHit } from "./model";
+import { existingStep, existingStudio, fileStem, stepFileProblem, supplierOf, type ModelHit } from "./model";
 
 const HOLDER = "supplier";
+/** The project's documents as they are now: somebody else may have placed the model since the editor opened. */
+export async function refreshDocs(assembly: AssemblyEditor): Promise<void> {
+  const known = new Set(assembly.host.docs.map((d) => d.docId));
+  for (const d of await fetchDocs(assembly.host.project.projectId)) if (!known.has(d.docId)) assembly.host.docs.push({ docId: d.docId, path: d.path, docType: d.docType });
+}
+
+/**
+ * The part studio the project has of a model only the person can bring (`hit.upload`), with the supplier's file
+ * it imports: the model is in the project, and is placed by a click like any other.
+ */
+export function ownModel(assembly: AssemblyEditor, hit: ModelHit): string {
+  const studio = existingStudio(assembly.host.docs, hit);
+  return studio && existingStep(assembly.host.docs, hit) ? studio.docId : "";
+}
+
+/** Why `file` cannot be the model of `hit`, or "". */
+async function fileProblem(file: File, hit: ModelHit): Promise<string> {
+  let head = new Uint8Array(0);
+  try { head = new Uint8Array(await file.slice(0, 64).arrayBuffer()); } catch (e) { return `“${file.name}” could not be read.`; }
+  return stepFileProblem(file, head, hit);
+}
+
 /** The standard part a generated model is ("shcs:M5:20"), out of the row's id. */
 const specOf = (hit: ModelHit): string => (hit.generated ? hit.id.split("|").pop() || "" : "");
 
@@ -29,10 +55,10 @@ async function post(path: string, init: RequestInit): Promise<unknown> {
 }
 
 /** Keep the model in the project; returns the part studio that shows it. */
-async function store(assembly: AssemblyEditor, hit: ModelHit, say: (text: string) => void): Promise<string> {
+async function store(assembly: AssemblyEditor, hit: ModelHit, say: (text: string) => void, file?: File): Promise<string> {
   const projectId = assembly.host.project.projectId;
-  say(hit.format === "jpart" ? `Drawing ${hit.title}…` : `Fetching ${hit.title} from ${hit.supplier}…`);
-  const got = await fetchModel(hit);
+  if (!file) say(hit.format === "jpart" ? `Drawing ${hit.title}…` : `Fetching ${hit.title} from ${hit.supplier}…`);
+  const got: { format: "step" | "jpart"; data: Blob } = file ? { format: "step", data: file } : await fetchModel(hit);
   const stem = fileStem(hit);
   const newDoc = async (text: string): Promise<string> => {
     const docs = await fetchDocs(projectId);
@@ -97,19 +123,32 @@ function beside(assembly: AssemblyEditor, docId: string): Transform | undefined 
 /**
  * Fetch `hit`, keep it in the project and add an instance of it.  `say` hears what is going on.  Resolves with the
  * new instances' ids; rejects with what to tell the person.
+ *
+ * `file` is the supplier's STEP file of the part, from the person (`hit.upload`).  Without it such a part is
+ * placed only when the project already has its model (ownModel).
  */
-export async function placeModel(assembly: AssemblyEditor, hit: ModelHit, say: (text: string) => void = () => {}): Promise<string[]> {
+export async function placeModel(assembly: AssemblyEditor, hit: ModelHit, say: (text: string) => void = () => {}, file?: File): Promise<string[]> {
   if (!assembly.getState().canEdit) throw new Error("You have view-only access to this assembly.");
-  if (!hit.format) throw new Error(hit.note || "There is no model of this part to place.");
-  let docId = existingStudio(assembly.host.docs, hit)?.docId || "";
+  let docId: string;
+  if (hit.upload && !hit.format) {
+    if (file) { const problem = await fileProblem(file, hit); if (problem) throw new Error(problem); }
+    await refreshDocs(assembly).catch(() => {});
+    docId = ownModel(assembly, hit);
+    if (!docId && !file) throw new Error(hit.note || "There is no model of this part to place.");
+    // a part studio of this name that is not the supplier's file: never placed as the supplier's part
+    if (!docId && existingStudio(assembly.host.docs, hit)) throw new Error(`This project already has a part studio named “${fileStem(hit)}” that was not made from ${hit.supplier}'s file. Rename or delete it, then drop the file again.`);
+  } else {
+    if (!hit.format) throw new Error(hit.note || "There is no model of this part to place.");
+    docId = existingStudio(assembly.host.docs, hit)?.docId || "";
+  }
   let held = "";
   try {
     for (let attempt = 0; ; attempt++) {
-      if (!docId) docId = await store(assembly, hit, say);
+      if (!docId) docId = await store(assembly, hit, say, file);
       assembly.sources.hold("part", docId, HOLDER); held = docId;
       say(`Building ${hit.title}…`);
       const offers = await built(assembly, docId, 180000);
-      // a drawn part of the same name and another size (the size of a supplier's number was typed again): not this one
+      // a drawn part of the same name and another size: not this one
       const said = assembly.sources.handle("part", docId)?.doc?.()?.items.get("standard-part") as { spec?: string } | undefined;
       if (attempt === 0 && specOf(hit) && said && typeof said.spec === "string" && said.spec !== specOf(hit)) { assembly.sources.release("part", docId, HOLDER); held = ""; docId = ""; continue; }
       // a model new to the assembly is set down beside what is there, not on top of it (one placed before goes beside its like: insert())

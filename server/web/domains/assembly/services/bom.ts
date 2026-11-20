@@ -76,7 +76,7 @@ export function combinedBom(input: BomInput): BomRow[] {
     if (material) row.material = material;
     if (supplier) {
       if (supplier.provider !== "standard") row.vendorPart = `${supplier.name} ${supplier.partNumber}`.trim();
-      row.description = (supplier.description || from) + (supplier.equivalent ? " (generated equivalent)" : "");
+      row.description = supplier.description || from;
       if (supplier.url) row.link = supplier.url;
     }
     rows.push(row);

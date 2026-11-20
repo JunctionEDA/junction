@@ -264,19 +264,26 @@ that remembers its supplier, part number and page. `src/models3d/` has the provi
 | Provider | What it has | Needs |
 |---|---|---|
 | Standard parts | socket head, button head, countersunk, hex head and set screws, hex nuts, washers, dowel pins, standoffs, ball and linear bearings, square T-slot extrusions, drawn by Junction's own kernel from ISO, DIN and ASME dimensions ("M5x20 socket head", "DIN 912 M5x20", "1/4-20 x 1 button head", "608 bearing", "2020 extrusion 300"); threads are not modelled | nothing, no network |
-| McMaster-Carr | McMaster's own STEP model by part number, through their [Product Information API](https://www.mcmaster.com/help/api/) only (their website is never read) | `MCMASTER_USERNAME`, `MCMASTER_PASSWORD` (an account McMaster approved for the API) and `MCMASTER_CLIENT_CERT` (the client certificate they issue, as a PEM file with its key: `openssl pkcs12 -in mcmaster.pfx -out mcmaster.pem -nodes`); `MCMASTER_API_URL` |
+| McMaster-Carr | McMaster's own STEP model by part number, through their [Product Information API](https://www.mcmaster.com/help/api/) only (their website is never read); without the API, the STEP file a person downloads from McMaster's page and drops on the row | `MCMASTER_USERNAME`, `MCMASTER_PASSWORD` (an account McMaster approved for the API) and `MCMASTER_CLIENT_CERT` (the client certificate they issue, as a PEM file with its key: `openssl pkcs12 -in mcmaster.pfx -out mcmaster.pem -nodes`); `MCMASTER_API_URL` |
 | LCSC / JLCPCB | the STEP model EasyEDA publishes for an LCSC part, by number or by words (the board editor's cache) | nothing |
 | KiCad 3D library | KiCad's packages3D models, by the words of their names | nothing (`KICAD_LIBS_URL`) |
 | FreeCAD library | the STEP files of [FreeCAD-library](https://github.com/FreeCAD/FreeCAD-library) (CC BY 3.0), by the words of their paths | nothing (`FREECAD_LIBRARY_API_URL`, `FREECAD_LIBRARY_RAW_URL`) |
 | TraceParts | manufacturers' catalogues, through TraceParts' CAD-content API | `TRACEPARTS_TENANT_UID`, `TRACEPARTS_API_KEY`, `TRACEPARTS_USER_EMAIL`; `TRACEPARTS_API_URL`, `TRACEPARTS_STEP_FORMAT_ID` |
 | Your model library | a catalogue of your own: a web folder with an `index.json` (`src/models3d/sources.rs` has the format) | `MODELS3D_LIBRARY_URL`, optionally `MODELS3D_LIBRARY_TOKEN` |
 
-A provider whose settings are missing is listed in the dialog as not connected; it is not an error. Without
-McMaster's API, a number of one of their common hardware families (socket head, button head, flat head and hex
-screws, nuts, washers: the table in `src/models3d/mcmaster.rs`) typed **with its size** ("91251A431 1/4-20 x 1")
-is answered with the same standard part drawn by Junction, named after McMaster's number, linked to McMaster's
-page and marked as a generated equivalent. The size has to be typed: McMaster's dash numbers are not a public
-table. The McMaster-Carr and TraceParts providers are written from those services' documentation and have only
+A provider whose settings are missing is listed in the dialog as not connected; it is not an error.
+
+A McMaster-Carr part number only ever places McMaster's own model; Junction never draws a part in its place.
+Without McMaster's API the server fetches nothing (McMaster's terms do not allow reading their website by
+program, and it is never asked). The number is answered with one row, "McMaster-Carr 91251A431", that links to
+`https://www.mcmaster.com/91251A431/` and cannot be placed by a click. The person opens that page, downloads
+the part's CAD model as **3-D STEP**, and drops the file on the row (or picks it with "Choose file…"). The
+browser checks that it is a STEP file, keeps it in the project's `models/` folder, imports it in a part studio
+named "McMaster-Carr 91251A431" and places it, with the supplier, part number and page on the instance. The
+next search for that number in the same project offers the part as "In this project", placed by a click.
+Hardware typed by its size ("M5x20 socket head") is the Standard parts provider's and is unchanged.
+
+The McMaster-Carr and TraceParts providers are written from those services' documentation and have only
 been run against the stand-ins in `scripts/fake-models.mjs`, never against the live services.
 
 | Method | Path | Purpose |

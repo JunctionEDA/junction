@@ -9,8 +9,8 @@
 //!                 network, no credentials: screws, nuts, washers, pins, bearings, extrusions.
 //!   mcmaster    — McMaster-Carr, through their Product Information API, which needs an approved
 //!                 account and a client certificate (mcmaster.rs).  Their website is not read.
-//!                 Without credentials a part number of a known hardware family, typed with its
-//!                 size, is answered with the generated equivalent and says so.
+//!                 Without credentials a part number is answered with the link to their page and
+//!                 takes the STEP file the person downloads there; nothing is drawn in its place.
 //!   lcsc        — LCSC / JLCPCB electronic parts: the STEP model EasyEDA publishes for the part,
 //!                 through `parts` (the same cache the board editor uses).
 //!   kicad       — KiCad's packages3D library, through `kicadlib`.
@@ -87,8 +87,10 @@ pub struct ModelHit {
     pub size: Option<[f64; 3]>,
     /// drawn by Junction from a standard's dimensions, not the supplier's own file
     pub generated: bool,
-    /// stands in for a supplier's part: the same standard part, not their model
-    pub equivalent: bool,
+    /// nothing can be fetched, and the supplier's own file is taken from the person: they
+    /// download it from `url` and hand it to the browser, which keeps it in the project
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub upload: bool,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub note: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -234,7 +236,7 @@ impl Provider for Standard {
     fn note(&self) -> &'static str { "Screws, nuts, washers, pins, bearings and T-slot extrusions drawn from their ISO, DIN and ASME dimensions. No network needed." }
     fn search<'a>(&'a self, _cx: &'a Cx<'a>, q: &'a str, limit: usize) -> BoxFuture<'a, MResult<Vec<ModelHit>>> {
         Box::pin(async move {
-            // a supplier's number with a size is that supplier's row, not a second one here
+            // a supplier's number is that supplier's row and its own model: nothing drawn is offered beside it
             if mcmaster_number(q).is_some() { return Ok(Vec::new()); }
             Ok(standard::search(q, limit).iter().map(standard_hit).collect())
         })
@@ -242,7 +244,7 @@ impl Provider for Standard {
     fn fetch<'a>(&'a self, _cx: &'a Cx<'a>, id: &'a str) -> BoxFuture<'a, MResult<Model>> {
         Box::pin(async move {
             let spec = standard::Spec::from_id(id).ok_or_else(|| VendorErr::new(ErrKind::NotFound, "There is no such standard part."))?;
-            Ok(Model { format: "jpart", bytes: standard::part_studio(&spec, "", "").into_bytes(), name: spec.part_number() })
+            Ok(Model { format: "jpart", bytes: standard::part_studio(&spec).into_bytes(), name: spec.part_number() })
         })
     }
 }

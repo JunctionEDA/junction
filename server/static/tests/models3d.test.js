@@ -104,8 +104,11 @@ test("names: what a supplier's model is called in the project and in a bill of m
   assert.equal(S.fileStem({ title: "ASME B18.3 SHCS 1/4-20 x 1-3/4" }), "ASME B18.3 SHCS 1_4-20 x 1-3_4");
   assert.equal(S.fileStem({ title: "  ..weird:name?*  " }), "weird_name_");
   assert.equal(S.fileStem({ title: "" }), "Model");
-  const hit = { provider: "mcmaster", supplier: "McMaster-Carr", id: "eq|91251A431|shcs:1/4:1in", part_number: "91251A431", title: "McMaster-Carr 91251A431", description: "Socket head", format: "jpart", url: "https://www.mcmaster.com/91251A431/", generated: true, equivalent: true };
-  assert.deepEqual(S.supplierOf(hit), { provider: "mcmaster", id: "eq|91251A431|shcs:1/4:1in", name: "McMaster-Carr", partNumber: "91251A431", title: "McMaster-Carr 91251A431", description: "Socket head", url: "https://www.mcmaster.com/91251A431/", generated: true, equivalent: true });
+  // a McMaster-Carr number on a server without McMaster's API: the row that takes McMaster's own file from the person
+  const hit = { provider: "mcmaster", supplier: "McMaster-Carr", id: "91251A431", part_number: "91251A431", title: "McMaster-Carr 91251A431", description: "McMaster-Carr part", format: "", url: "https://www.mcmaster.com/91251A431/", generated: false, upload: true };
+  // what the instance keeps: McMaster's part, not a drawn one
+  assert.deepEqual(S.supplierOf(hit), { provider: "mcmaster", id: "91251A431", name: "McMaster-Carr", partNumber: "91251A431", title: "McMaster-Carr 91251A431", description: "McMaster-Carr part", url: "https://www.mcmaster.com/91251A431/" });
+  assert.deepEqual(S.supplierOf({ ...hit, provider: "standard", generated: true }).generated, true);
   // only a web address is kept as a link
   assert.equal(S.supplierOf({ ...hit, url: "javascript:alert(1)" }).url, undefined);
   assert.equal(S.supplierInfo({ supplier: S.supplierOf(hit) }).title, "McMaster-Carr 91251A431");
@@ -115,4 +118,30 @@ test("names: what a supplier's model is called in the project and in a bill of m
   const docs = [{ docId: "a", path: "McMaster-Carr 91251A431.jpart", docType: "part_studio" }, { docId: "b", path: "models/McMaster-Carr 91251A431.step", docType: "model3d" }, { docId: "c", path: "Other.jpart", docType: "part_studio" }];
   assert.equal(S.existingStudio(docs, hit).docId, "a");
   assert.equal(S.existingStudio(docs, { ...hit, title: "McMaster-Carr 92196A537" }), undefined);
+  // and the supplier's own file it imports: with it the project has the supplier's model, not just a studio of that name
+  assert.equal(S.existingStep(docs, hit).docId, "b");
+  assert.equal(S.existingStep([docs[0], docs[2]], hit), undefined, "a part studio of that name alone is not the supplier's model");
+  assert.equal(S.existingStep([{ path: "models/mcmaster-carr 91251a431 2.STP" }], hit).path, "models/mcmaster-carr 91251a431 2.STP", "a second file of the name, and .stp");
+  for (const no of ["McMaster-Carr 91251A431.step", "models/McMaster-Carr 91251A4310.step", "models/McMaster-Carr 91251A431 old.step", "models/McMaster-Carr 91251A431.jpart", "models/x/McMaster-Carr 91251A431.step"]) {
+    assert.equal(S.existingStep([{ path: no }], hit), undefined, no);
+  }
+});
+
+test("a file a person hands over as a supplier's model is a STEP file, or they are told why not", () => {
+  const bytes = (text) => new TextEncoder().encode(text);
+  const hit = { supplier: "McMaster-Carr" };
+  assert.ok(S.looksLikeStep(bytes("ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('STEP AP214'),'1');")));
+  assert.ok(S.looksLikeStep(new Uint8Array([0xef, 0xbb, 0xbf, ...bytes("\r\n ISO-10303-21;")])), "a byte-order mark and blank lines first");
+  for (const no of ["", "ISO-10303", "<!DOCTYPE html><html>", "PK\u0003\u0004", "solid ascii stl", "%PDF-1.7", "iso-10303-21;"]) assert.equal(S.looksLikeStep(bytes(no)), false, no);
+  assert.equal(S.stepFileProblem({ name: "91251A431.STEP", size: 5000 }, bytes("ISO-10303-21;\nHEADER;"), hit), "");
+  // the page saved instead of the model, a drawing, the wrong CAD format: said plainly, with what to download
+  const wrong = S.stepFileProblem({ name: "91251A431.html", size: 5000 }, bytes("<!DOCTYPE html>"), hit);
+  assert.match(wrong, /“91251A431\.html” is not a STEP file/);
+  assert.match(wrong, /McMaster-Carr's page/);
+  assert.match(wrong, /3-D STEP/);
+  // a file named .step that is not one is still refused: the header decides, not the name
+  assert.match(S.stepFileProblem({ name: "91251A431.step", size: 12 }, bytes("SLDPRT bytes"), hit), /is not a STEP file/);
+  assert.match(S.stepFileProblem({ name: "empty.step", size: 0 }, bytes(""), hit), /is empty/);
+  assert.match(S.stepFileProblem({ name: "huge.step", size: S.MAX_STEP_BYTES + 1 }, bytes("ISO-10303-21;"), hit), /too large to place \(40 MB; the limit is 40 MB\)/);
+  assert.match(S.stepFileProblem({ name: "x.bin", size: 9 }, bytes("nope"), { supplier: "" }), /the supplier's page/);
 });

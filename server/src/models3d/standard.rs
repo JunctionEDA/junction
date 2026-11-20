@@ -217,9 +217,6 @@ fn inch_text(mm: f64) -> String {
 }
 
 impl Spec {
-    /// An inch size (the part studio is then worked in inches).
-    pub fn is_inch(&self) -> bool { self.thread.is_some_and(|t| t.inch()) }
-
     fn len_text(&self) -> String { if self.inch_len { inch_text(self.length) } else { fnum(self.length) } }
 
     /// "shcs:M5:20", "shcs:1/4-20:1.75in", "nut:M5", "bearing:608", "tslot:20:300", "dowel:5:20"
@@ -531,19 +528,6 @@ pub fn search(q: &str, limit: usize) -> Vec<Spec> {
     out
 }
 
-/// The one part a query names when it gives a kind and a full size ("socket head 1/4-20 x 1"), for
-/// a supplier's part number typed with its size.
-pub fn exact(kind: Kind, q: &str) -> Option<Spec> {
-    let a = read(q);
-    let (t, tpi) = a.thread.as_ref()?;
-    let mut spec = Spec { kind, thread: Some(t), tpi: tpi.clone(), length: 0.0, inch_len: false, size: 0.0, name: String::new() };
-    if kind.has_length() {
-        let v = inch_value(a.lengths.last()?)?;
-        (spec.length, spec.inch_len) = if t.inch() { (v * 25.4, true) } else { (v, false) };
-    }
-    spec.valid().then_some(spec)
-}
-
 // ------------------------------------------------------------------ drawing
 
 type P = [f64; 2];
@@ -803,15 +787,14 @@ fn sorted(v: &Value, out: &mut String) {
     }
 }
 
-/// The part as a part studio (the text of a `.jpart`).  `title` and `link` say whose part number it
-/// stands for when it is drawn in place of a supplier's own model.
-pub fn part_studio(spec: &Spec, title: &str, link: &str) -> String {
+/// The part as a part studio (the text of a `.jpart`).
+pub fn part_studio(spec: &Spec) -> String {
     let drawn = draw(spec);
     let mut items: Vec<Value> = drawn.studio.features;
     items.push(json!({ "id": "studio", "type": "studio", "units": if spec.thread.is_some_and(|t| t.inch()) { "in" } else { "mm" }, "rollback": null }));
     items.push(json!({
-        "id": "standard-part", "type": "standard-part", "spec": spec.id(), "title": if title.is_empty() { spec.part_number() } else { title.to_string() },
-        "description": spec.description(), "link": link,
+        "id": "standard-part", "type": "standard-part", "spec": spec.id(), "title": spec.part_number(),
+        "description": spec.description(), "link": "",
         "note": spec.note(),
     }));
     items.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
@@ -958,7 +941,7 @@ mod tests {
     #[test]
     fn writes_a_part_studio() {
         let s = Spec::from_id("shcs:M5:20").unwrap();
-        let text = part_studio(&s, "", "");
+        let text = part_studio(&s);
         let v: Value = serde_json::from_str(&text).expect("the part studio is JSON");
         assert_eq!(v["junction"], "part-studio");
         let items = v["items"].as_array().unwrap();
@@ -979,7 +962,7 @@ mod tests {
         // every kind draws
         for id in ["button:M5:12", "flat:M5:16", "hex:M8:40", "set:M4:6", "nut:M6", "washer:M6", "dowel:5:20", "standoff:M3:10", "bearing:608", "linear:LM8UU", "tslot:20:100", "shcs:#8:0.5in", "flat:1/4:1in"] {
             let s = Spec::from_id(id).unwrap_or_else(|| panic!("{id}"));
-            let text = part_studio(&s, "", "");
+            let text = part_studio(&s);
             assert!(serde_json::from_str::<Value>(&text).is_ok(), "{id}");
             assert!(!thumbnail(&s)["d"].as_str().unwrap().is_empty());
         }
@@ -996,7 +979,7 @@ mod tests {
         for id in cases {
             let s = Spec::from_id(id).unwrap();
             let file = format!("{}.jpart", id.replace([':', '/', '#'], "_"));
-            let text = part_studio(&s, "", "");
+            let text = part_studio(&s);
             index.push(json!({ "id": id, "file": file, "extent": extent(&s), "name": s.part_number() }));
             let path = dir.join(&file);
             if std::env::var("MODELS3D_WRITE_FIXTURES").is_ok() { std::fs::create_dir_all(&dir).unwrap(); std::fs::write(&path, &text).unwrap(); }
