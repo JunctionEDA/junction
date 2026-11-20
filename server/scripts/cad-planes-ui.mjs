@@ -49,6 +49,9 @@ try {
   check('a new part studio opens in the isometric view (from +X −Y +Z)', near(iso[0], -0.577, 0.01) && near(iso[1], 0.577, 0.01) && near(iso[2], -0.577, 0.01), iso.join());
   const shown = await S(alice, () => window.JunctionPartStudio.view.planeLayer.labelInfo().filter((l) => l.shown && l.opacity > 0.5).map((l) => l.text).sort().join());
   check('Top, Front and Right carry their names', shown === 'Front,Right,Top', shown);
+  // in the isometric view all three read plainly (along +X, +X and +Y), at Top's left corner, Front's top left and Right's top right
+  const lay = await S(alice, () => Object.fromEntries(window.JunctionPartStudio.view.planeLayer.labelInfo().map((l) => [l.text, { right: l.right.map((n) => Math.round(n)), at: l.at.map((n) => Math.sign(Math.round(n))) }])));
+  check('… reading plainly, each at its corner', lay.Top.right.join() === '1,0,0' && lay.Front.right.join() === '1,0,0' && lay.Right.right.join() === '0,1,0' && lay.Top.at.slice(0, 2).join() === '-1,-1' && lay.Front.at.join() === '-1,0,1' && lay.Right.at.join() === '0,1,1', JSON.stringify(lay));
   // the three fill the middle of the view: the box of their corners on screen against the canvas
   const fill = await S(alice, () => {
     const st = window.JunctionPartStudio, h = st.view.planeLayer.halfOf('top')[0], pts = [];

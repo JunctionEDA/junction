@@ -24,10 +24,10 @@ import { Glyph } from "./Glyph";
 import { tipHandlers } from "./Tip";
 
 /** The whole control, the cube's edge, how deep its bevels are (CSS pixels), and where its middle is in the control. */
-const BOX = 184, SIZE = 76, BEVEL = 9, MID: [number, number] = [BOX / 2, BOX / 2 + 4];
+const BOX = 184, SIZE = 82, BEVEL = 10, MID: [number, number] = [BOX / 2, BOX / 2 + 4];
 const H = SIZE / 2, F = H - BEVEL;
 /** How far the triad's arrows reach past the cube. */
-const REACH = 10;
+const REACH = 6;
 
 type V = [number, number, number];
 const add = (a: V, b: V, k = 1): V => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
@@ -215,7 +215,7 @@ export function ViewCubeControl({ viewport, fit, perspective, setPerspective, zo
     return (
       <button key={r.key} type="button" tabIndex={-1} aria-label={label} data-from={r.from.join(",")} data-region={r.kind}
         data-view={f ? f.view : undefined} data-face={f ? f.view : undefined}
-        className={cx("absolute left-0 top-0 appearance-none border-0 m-0 p-0 cursor-pointer [backface-visibility:hidden] [transform-origin:0_0] [font-family:inherit] flex items-center justify-center", f && "text-[15px] font-medium leading-none tracking-[0.01em]")}
+        className={cx("absolute left-0 top-0 appearance-none border-0 m-0 p-0 cursor-pointer [backface-visibility:hidden] [transform-origin:0_0] [font-family:inherit] flex items-center justify-center", f && "text-[18px] font-medium leading-none tracking-[0.01em]")}
         style={{ width: l.width, height: l.height, transform: l.transform, clipPath: r.kind === "face" ? undefined : l.clip }}
         ref={(e) => { if (e) els.current.set(r.key, e); else els.current.delete(r.key); }}
         onPointerEnter={() => hover(r.key)} onPointerLeave={() => { if (hovered.current === r.key) hover(null); }}

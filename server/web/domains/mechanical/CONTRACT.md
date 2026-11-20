@@ -961,8 +961,8 @@ with `{ kind, body, name }`. A plane or reference geometry a person has hidden i
   or a selection box as before.
 - **A plane's name is painted on the plane**, as Onshape does: text on its surface at a corner, in the scene, so
   it turns and foreshortens with the plane and seen from behind reads mirrored. "Top" sits at the corner of
-  −X −Y reading along +X, "Front" at −X +Z along +X, "Right" at +Y +Z along −Y (so in the isometric view Top is
-  at the left corner, Front at the top left, and Right at the top right, mirrored, as in Onshape). Its height
+  −X −Y reading along +X, "Front" at −X +Z along +X, "Right" ending at +Y +Z along +Y (so in the isometric view,
+  reading plainly, Top is at the left corner, Front at the top left, and Right at the top right). Its height
   follows the plane's size, and it fades out as the plane turns edge-on. Reference planes carry their feature's
   name the same way, in their own frame (`planeLayer.setLabel`). `planeLayer.labelInfo()` says how each name is
   drawn in the current view (its axes in the model, its opacity), for tests.

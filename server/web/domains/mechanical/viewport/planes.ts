@@ -10,9 +10,10 @@
 //     front they blend in the right order — where one plane is behind another the tint is deeper.  The plane
 //     under the pointer gets an orange outline and nothing else; a selected one the selection's colour.
 //   • A plane's name is text drawn ON the plane, at one corner of it, as Onshape does: it foreshortens and turns
-//     with the plane, and seen from behind it reads mirrored.  "Top" lies at the corner of −X −Y reading along
-//     +X, "Front" at −X +Z reading along +X, and "Right" at +Y +Z reading along −Y (so it is mirrored in the
-//     isometric view, as in Onshape).  A reference plane's name sits the same way in its own frame.  Its height
+//     with the plane, and seen from behind it reads mirrored.  "Top" lies at the corner of −X −Y, "Front" at
+//     −X +Z, both reading along +X, and "Right" at +Y +Z reading along +Y, ending at that corner: in the
+//     isometric view all three read plainly, at Top's left corner, Front's top left and Right's top right.  A
+//     reference plane's name sits at the top left in its own frame.  Its height
 //     follows the size of the plane (kept readable, and no larger than a heading, at any zoom), and it fades away
 //     as the plane turns edge-on.
 //   • The origin is a small circle with a dot, the same size on screen at any zoom, drawn over everything.
@@ -54,11 +55,11 @@ const ORIGIN_PX = 13, HANDLE_PX = 11;
 
 /**
  * How each default plane's name lies, as in Onshape: the direction the text runs (`x` of the plane's frame, or
- * its reverse; its up is always `y`) and the corner it sits in as the text reads, top left or bottom left.  In
- * the isometric view that puts "Top" at the plane's left corner, "Front" at its top left and "Right" (written
- * along −Y, so mirrored from +X) at its top right.
+ * its reverse; its up is always `y`), the corner it sits in as the text reads (bottom or top, left or right).
+ * In the isometric view that puts "Top" at the plane's left corner, "Front" at its top left and "Right" at its
+ * top right, all three reading plainly.
  */
-const LABEL_LAY: Record<DefaultPlaneId, { run: 1 | -1; low: boolean }> = { top: { run: 1, low: true }, front: { run: 1, low: false }, right: { run: -1, low: false } };
+const LABEL_LAY: Record<DefaultPlaneId, { run: 1 | -1; low: boolean; end: boolean }> = { top: { run: 1, low: true, end: false }, front: { run: 1, low: false, end: false }, right: { run: 1, low: false, end: true } };
 
 /** The planes' colours for a light and a dark theme. */
 const PALETTE = {
@@ -83,8 +84,8 @@ interface Label {
   key: string; text: string; mesh: THREE.Mesh; material: THREE.MeshBasicMaterial; texture: THREE.CanvasTexture; aspect: number;
   /** the rectangle it names: its middle, its two axes (unit) and half sizes, its normal */
   centre: THREE.Vector3; x: THREE.Vector3; y: THREE.Vector3; hx: number; hy: number; normal: THREE.Vector3;
-  /** the text runs along +x (1) or −x (−1); it sits in the corner at the bottom (`low`) or the top as it reads */
-  run: 1 | -1; low: boolean;
+  /** the text runs along +x (1) or −x (−1); it sits in the corner at the bottom (`low`) or the top, and at the right (`end`) or the left, as it reads */
+  run: 1 | -1; low: boolean; end: boolean;
   visible: boolean; opacity: number;
 }
 /** What a test, or anything else, may ask about a name on a plane. */
@@ -236,7 +237,8 @@ export class PlaneLayer {
       for (let i = 0; i < 4; i++) { const a = pts[i], b = pts[(i + 1) % 4]; seg.push(a.x, a.y, a.z, b.x, b.y, b.z); }
       p.border.geometry.dispose();
       p.border.geometry = new LineSegmentsGeometry().setPositions(seg);
-      this.setLabel("plane:" + p.id, DEFAULT_PLANES[p.id].title, pts, v3(f.normal), LABEL_LAY[p.id].run, LABEL_LAY[p.id].low);
+      const lay = LABEL_LAY[p.id];
+      this.setLabel("plane:" + p.id, DEFAULT_PLANES[p.id].title, pts, v3(f.normal), lay.run, lay.low, lay.end);
     }
     if (this.handleAt) this.showHandle(this.handleAt);
     this.apply();
@@ -275,9 +277,9 @@ export class PlaneLayer {
   /**
    * A name for a rectangle in the scene (a default plane, a reference plane), given its four corners in order
    * round the rectangle, starting where both of its own axes are least.  `run` −1 writes it along −x; `low` puts it
-   * in the bottom left corner instead of the top left.
+   * in a bottom corner instead of a top one, `end` in a right one (as the text reads) instead of a left one.
    */
-  setLabel(key: string, text: string, corners: readonly THREE.Vector3[], normal: THREE.Vector3, run: 1 | -1 = 1, low = false): void {
+  setLabel(key: string, text: string, corners: readonly THREE.Vector3[], normal: THREE.Vector3, run: 1 | -1 = 1, low = false, end = false): void {
     let l = this.labels.get(key);
     if (!l) {
       const canvas = document.createElement("canvas");
@@ -288,10 +290,10 @@ export class PlaneLayer {
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
       mesh.matrixAutoUpdate = false; mesh.renderOrder = 1; mesh.userData.planeLabel = key;
       this.group.add(mesh);
-      l = { key, text: "", mesh, material, texture, aspect: 1, centre: new THREE.Vector3(), x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), hx: 1, hy: 1, normal: new THREE.Vector3(0, 0, 1), run, low, visible: true, opacity: 0 };
+      l = { key, text: "", mesh, material, texture, aspect: 1, centre: new THREE.Vector3(), x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), hx: 1, hy: 1, normal: new THREE.Vector3(0, 0, 1), run, low, end, visible: true, opacity: 0 };
       this.labels.set(key, l);
     }
-    l.run = run; l.low = low;
+    l.run = run; l.low = low; l.end = end;
     if (l.text !== text) { l.text = text; this.paint(l); }
     const ex = corners[1].clone().sub(corners[0]), ey = corners[3].clone().sub(corners[0]);
     l.hx = ex.length() / 2; l.hy = ey.length() / 2;
@@ -406,8 +408,8 @@ export class PlaneLayer {
       const side2 = Math.min(l.hx, l.hy) * 2;
       const height = Math.min(side2 * LABEL_MOST, Math.max(LABEL_MIN_PX * px, Math.min(LABEL_MAX_PX * px, side2 * LABEL_SHARE)));
       const h = height * 1.3, w = h * l.aspect, inset = height * LABEL_INSET;
-      // inside the corner that is at the top left (or bottom left) as the text reads
-      at.copy(l.centre).addScaledVector(right, -l.hx + inset + w / 2).addScaledVector(up, l.low ? -l.hy + inset + h / 2 : l.hy - inset - h / 2);
+      // inside the corner it sits in, as the text reads
+      at.copy(l.centre).addScaledVector(right, l.end ? l.hx - inset - w / 2 : -l.hx + inset + w / 2).addScaledVector(up, l.low ? -l.hy + inset + h / 2 : l.hy - inset - h / 2);
       l.mesh.matrix.makeBasis(right.clone().multiplyScalar(w), up.clone().multiplyScalar(h), n).setPosition(at);
       l.mesh.matrixWorldNeedsUpdate = true;
       l.mesh.visible = true;

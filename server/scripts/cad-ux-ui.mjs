@@ -101,10 +101,8 @@ try {
   // the names lie flat in their planes, as text in the scene, not as page text floating at a corner
   const lying = await labelsLie();
   check('a plane\'s name lies in its plane: the text\'s normal is the plane\'s', lying.length === 3 && lying.every((l) => l.inPlane) && await page.locator('.cad-plane-label').count() === 0, JSON.stringify(lying));
-  // as Onshape writes them: Top and Front read plainly in the isometric view; Right is written to be read from
-  // the other side of its plane, so here it is mirrored — text painted on the plane, never turned to the camera
-  const plain = Object.fromEntries(lying.map((l) => [l.key, l.notMirrored && l.upright]));
-  check("… Top and Front read the right way round, Right mirrored, as in Onshape", plain['plane:top'] && plain['plane:front'] && !plain['plane:right'] && lying.every((l) => l.upright), JSON.stringify(lying));
+  // as Onshape writes them, all three read plainly in the isometric view: text painted on the plane, never turned to the camera
+  check("… the right way round and the right way up", lying.every((l) => l.notMirrored && l.upright), JSON.stringify(lying));
   const half = await S(page, () => window.JunctionPartStudio.view.planeLayer.halfOf('top'));
   check('… and as tall as suits its plane', lying.every((l) => l.height / (2 * Math.min(half[0], half[1])) > 0.03 && l.height / (2 * Math.min(half[0], half[1])) < 0.08), `${lying[0].height} of ${2 * half[0]}`);
   await page.mouse.move(280, 620);
