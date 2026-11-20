@@ -75,7 +75,7 @@ export function plan(kind: ConstraintKind, data: SketchData, selection: readonly
       return one("normal", lines[0].id, r.find((x) => x !== lines[0])!.id);
     case "curvature":
       if (points.length || rounds.length) return wrong;
-      if (n === 1) return free.length ? "more" : wrong;
+      if (n === 1) return free.length || lines.length ? "more" : wrong;
       if (n !== 2 || !free.length) return wrong;
       return one("curvature", r[0].id, r[1].id);
     case "concentric":
