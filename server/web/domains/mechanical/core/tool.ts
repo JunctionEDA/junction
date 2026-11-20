@@ -22,6 +22,8 @@ export interface ToolDefinition {
   /** inline SVG markup for a 24×24 glyph (ui/Glyph.tsx says how it is drawn) */
   icon?: string;
   group: ToolGroup;
+  /** for a tool in the "feature" group: the feature section of the toolbar it sits in ("solid" when not given) */
+  section?: string;
   /** lower first inside the group; ties in title order */
   order?: number;
   /** a single key that runs the tool while the viewport has the keyboard ("l", "Escape") */

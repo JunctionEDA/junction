@@ -60,6 +60,11 @@ export interface ModelState {
   sketches: { [featureId: string]: SketchGeometry };
   /** reference geometry by the id of the feature that made it */
   datums?: { [featureId: string]: Datum };
+  /**
+   * What a family of features keeps about the model besides its bodies (a sheet metal model's walls and bends,
+   * which members of a frame a body is), by a key the family owns.  Treated as immutable, like the rest.
+   */
+  extras?: { [key: string]: unknown };
 }
 
 /** An error a person can act on.  Anything else a feature throws is reported as an internal error. */
@@ -101,6 +106,9 @@ export interface EvalContext {
   /** The reference geometry an earlier feature made, or a FeatureError that says why there is none. */
   datum(featureId: string): Datum;
   setDatum(datum: Datum): void;
+  /** What a family of features keeps about the model under its own key (ModelState.extras); set a new object, never change one. */
+  extra<T>(key: string): T | undefined;
+  setExtra(key: string, value: unknown): void;
   /**
    * The model just before and just after an earlier feature ran, or null when it is not earlier in the tree.
    * What patterns and mirrors read to find what a feature added and removed.
