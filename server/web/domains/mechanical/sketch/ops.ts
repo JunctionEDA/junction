@@ -6,11 +6,11 @@ import type { Vec2 } from "../core/geometry";
 import type { SketchData, SketchEntity } from "./format";
 import { curvesAt, nearestOn } from "./infer";
 import type { Draft } from "./model";
-import { arcSweep, dist, lineMeet, pointAt, pointsOf, resolveEntity, type Resolved } from "./refs";
+import { arcSweep, dist, lineMeet, mapPoints, pointAt, pointsOf, resolveEntity, type Resolved } from "./refs";
 
 const TOL = 1e-7;
 const TAU = Math.PI * 2;
-type Curve = Exclude<Resolved, { kind: "point" }>;
+type Curve = Exclude<Resolved, { kind: "point" | "curve" }>;
 
 const sub = (a: Vec2, b: Vec2): Vec2 => [a[0] - b[0], a[1] - b[1]];
 const unit = (v: Vec2): Vec2 => { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1] / l]; };
@@ -69,7 +69,7 @@ function cuts(data: SketchData, id: string, k: Curve, carrier = false): Cut[] {
   const out: Cut[] = [];
   for (const other of Object.keys(data.entities)) {
     if (other === id) continue;
-    const o = resolveEntity(data, other); if (!o || o.kind === "point") continue;
+    const o = resolveEntity(data, other); if (!o || o.kind === "point" || o.kind === "curve") continue;
     for (const p of carriersMeet(k, o)) {
       if (!within(o, paramOf(o, p))) continue;
       const t = paramOf(k, p);
@@ -99,6 +99,7 @@ function dropIfLoose(d: Draft, point: string): void {
 export function trim(d: Draft, id: string, click: Vec2): string | null {
   const k = resolveEntity(d.data, id);
   if (!k || k.kind === "point") return "Click a curve to trim.";
+  if (k.kind === "curve") return "Trim works on lines, arcs and circles.";
   const e = d.data.entities[id];
   const [lo, hi] = extent(k), tc = paramOf(k, click);
   const eps = TOL * 10 / (k.kind === "line" ? dist(k.a, k.b) || 1 : k.r);
@@ -136,7 +137,7 @@ export function trim(d: Draft, id: string, click: Vec2): string | null {
 /** Lengthen the end of a line or arc nearest `click` to the next curve it would meet. */
 export function extend(d: Draft, id: string, click: Vec2): string | null {
   const k = resolveEntity(d.data, id);
-  if (!k || k.kind === "point" || k.kind === "circle") return "Click near the end of a line or an arc to extend it.";
+  if (!k || k.kind === "point" || k.kind === "circle" || k.kind === "curve") return "Click near the end of a line or an arc to extend it.";
   const e = d.data.entities[id] as unknown as { [key: string]: string };
   const [lo, hi] = extent(k);
   const atEnd = k.kind === "line" ? dist(click, k.b) < dist(click, k.a) : dist(click, k.en) < dist(click, k.s);
@@ -248,6 +249,7 @@ export function offset(d: Draft, ids: readonly string[], distance: number, towar
     }
     const chain = chainOf(data, id, among);
     for (const c of chain) done.add(c.id);
+    if (chain.some((c) => { const k = resolveEntity(data, c.id); return !k || k.kind === "curve"; })) return "Offset works on lines, arcs and circles.";
     // the side: left or right of the chain's direction, judged at the curve nearest `toward`
     let best = Infinity, left = true;
     for (const c of chain) {
@@ -326,6 +328,8 @@ export function mirror(d: Draft, ids: readonly string[], axis: string): string |
     if (e.type === "line") d.line(twinOf(e.a), twinOf(e.b), !!e.construction);
     else if (e.type === "circle") { const c = d.circle(twinOf(e.center), e.r, !!e.construction); d.constrain("equal", [id, c]); }
     else if (e.type === "arc") d.arc(twinOf(e.center), twinOf(e.end), twinOf(e.start), !!e.construction);   // a mirror turns the arc the other way round
+    else if (e.type === "ellipticalArc") d.set(d.id("e"), { ...e, center: twinOf(e.center), major: twinOf(e.major), start: twinOf(e.end), end: twinOf(e.start) });
+    else d.set(d.id(e.type === "image" ? "i" : e.type === "text" ? "t" : "e"), mapPoints(e, twinOf));
     made++;
   }
   return made ? null : "Select what to mirror, then click the line to mirror about.";

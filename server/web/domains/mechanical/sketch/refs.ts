@@ -20,7 +20,8 @@
 //     and is held by a "fix" constraint.  It is a copy: it does not follow the model.
 //   • "fix" pins what it refers to at the coordinates stored in the sketch.
 import type { Vec2 } from "../core/geometry";
-import type { SketchArc, SketchCircle, SketchConstraint, SketchData, SketchEntity, SketchLine, SketchRef } from "./format";
+import { endsOf, piecesOf, type Piece } from "./curves";
+import type { SketchArc, SketchCircle, SketchConstraint, SketchData, SketchEntity, SketchFreeform, SketchLine, SketchRef } from "./format";
 
 export const ORIGIN = "$origin";
 
@@ -29,7 +30,9 @@ export type Resolved =
   | { kind: "point"; id: string; p: Vec2 }
   | { kind: "line"; id: string; e: SketchLine; a: Vec2; b: Vec2 }
   | { kind: "circle"; id: string; e: SketchCircle; c: Vec2; r: number }
-  | { kind: "arc"; id: string; e: SketchArc; c: Vec2; s: Vec2; en: Vec2; r: number };
+  | { kind: "arc"; id: string; e: SketchArc; c: Vec2; s: Vec2; en: Vec2; r: number }
+  /** an ellipse, a spline, a conic, text: geometry from sketch/curves.ts */
+  | { kind: "curve"; id: string; e: SketchFreeform; pieces: Piece[] };
 
 export function pointAt(data: SketchData, id: string): Vec2 | null {
   if (id === ORIGIN) return [0, 0];
@@ -43,7 +46,41 @@ export function pointsOf(e: SketchEntity | undefined): string[] {
   if (e.type === "line") return [e.a, e.b];
   if (e.type === "circle") return [e.center];
   if (e.type === "arc") return [e.center, e.start, e.end];
+  // the free-form curves (sketch/curves.ts), text and images
+  const s = (v: unknown): v is string => typeof v === "string";
+  switch (e.type) {
+    case "ellipse": return [e.center, e.major].filter(s);
+    case "ellipticalArc": return [e.center, e.major, e.start, e.end].filter(s);
+    case "spline": return [...(Array.isArray(e.points) ? e.points : []), e.startHandle, e.endHandle].filter(s);
+    case "bspline": return (Array.isArray(e.poles) ? e.poles : []).filter(s);
+    case "conic": return [e.start, e.apex, e.end].filter(s);
+    case "text": case "image": return [e.a, e.b].filter(s);
+  }
   return [];
+}
+
+/** The entity with every point id it is built on passed through `f` (a copy, a merge). */
+export function mapPoints<E extends SketchEntity>(e: E, f: (id: string) => string): E {
+  const r = (v: unknown) => (typeof v === "string" ? f(v) : v);
+  const x = e as SketchEntity;
+  switch (x.type) {
+    case "point": return e;
+    case "line": return { ...x, a: f(x.a), b: f(x.b) } as E;
+    case "circle": return { ...x, center: f(x.center) } as E;
+    case "arc": return { ...x, center: f(x.center), start: f(x.start), end: f(x.end) } as E;
+    case "ellipse": return { ...x, center: f(x.center), major: f(x.major) } as E;
+    case "ellipticalArc": return { ...x, center: f(x.center), major: f(x.major), start: f(x.start), end: f(x.end) } as E;
+    case "spline": {
+      const out = { ...x, points: (x.points || []).map(f) };
+      if (x.startHandle) out.startHandle = r(x.startHandle) as string;
+      if (x.endHandle) out.endHandle = r(x.endHandle) as string;
+      return out as E;
+    }
+    case "bspline": return { ...x, poles: (x.poles || []).map(f) } as E;
+    case "conic": return { ...x, start: f(x.start), apex: f(x.apex), end: f(x.end) } as E;
+    case "text": case "image": return { ...x, a: f(x.a), b: f(x.b) } as E;
+  }
+  return e;
 }
 
 export function resolveEntity(data: SketchData, id: string): Resolved | null {
@@ -56,7 +93,8 @@ export function resolveEntity(data: SketchData, id: string): Resolved | null {
     const c = pointAt(data, e.center), s = pointAt(data, e.start), en = pointAt(data, e.end);
     return c && s && en ? { kind: "arc", id, e, c, s, en, r: Math.hypot(s[0] - c[0], s[1] - c[1]) } : null;
   }
-  return null;
+  const pieces = piecesOf(data, e);
+  return pieces && pieces.length ? { kind: "curve", id, e: e as SketchFreeform, pieces } : null;
 }
 
 /** What a reference names.  `at` picks a point of a curve; without it the whole entity is meant. */
@@ -69,6 +107,8 @@ export function resolve(data: SketchData, ref: SketchRef): Resolved | null {
   else if (e.type === "circle") id = ref.at === "center" ? e.center : undefined;
   else if (e.type === "arc") id = ref.at === "start" ? e.start : ref.at === "end" ? e.end : e.center;
   else if (e.type === "point") id = ref.entity;
+  else if (ref.at === "center" && (e.type === "ellipse" || e.type === "ellipticalArc")) id = e.center;
+  else { const ends = endsOf(e); id = ends ? (ref.at === "start" ? ends[0] : ref.at === "end" ? ends[1] : undefined) : undefined; }
   if (!id) return null;
   const p = pointAt(data, id);
   return p ? { kind: "point", id, p } : null;

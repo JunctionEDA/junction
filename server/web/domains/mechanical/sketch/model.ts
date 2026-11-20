@@ -4,7 +4,7 @@
 import type { ItemChange, Json, JsonObject } from "../../../shared/itemdoc/itemdoc";
 import type { Vec2 } from "../core/geometry";
 import { SKETCH_VERSION, type SketchConstraint, type SketchData, type SketchEntity, type SketchRef } from "./format";
-import { ORIGIN, pointsOf } from "./refs";
+import { ORIGIN, mapPoints, pointsOf } from "./refs";
 
 /** A sketch read from a document, with the maps a reader may rely on. */
 export function normalise(data: SketchData | undefined | null): SketchData {
@@ -109,11 +109,7 @@ export class Draft {
   merge(from: string, to: string): void {
     if (from === to) return;
     const d = this.data;
-    for (const [id, e] of Object.entries(d.entities)) {
-      if (e.type === "line" && (e.a === from || e.b === from)) d.entities[id] = { ...e, a: e.a === from ? to : e.a, b: e.b === from ? to : e.b };
-      else if (e.type === "circle" && e.center === from) d.entities[id] = { ...e, center: to };
-      else if (e.type === "arc" && (e.center === from || e.start === from || e.end === from)) d.entities[id] = { ...e, center: e.center === from ? to : e.center, start: e.start === from ? to : e.start, end: e.end === from ? to : e.end };
-    }
+    for (const [id, e] of Object.entries(d.entities)) if (e.type !== "point" && pointsOf(e).includes(from)) d.entities[id] = mapPoints(e, (p) => (p === from ? to : p));
     for (const [id, c] of Object.entries(d.constraints)) if ((c.refs || []).some((r) => r.entity === from)) d.constraints[id] = { ...c, refs: c.refs.map((r) => (r.entity === from ? { ...r, entity: to } : r)) };
     delete d.entities[from];
   }

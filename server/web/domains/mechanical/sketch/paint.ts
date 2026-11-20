@@ -14,6 +14,7 @@ import { drawDimension, type DimensionDrawing } from "./dims";
 import type { SketchConstraint, SketchData } from "./format";
 import type { Hint } from "./infer";
 import type { Regions } from "./profiles";
+import { pieceAt, samplePiece } from "./curves";
 import { arcSweep, isDimension, mid, pointsOf, resolve, resolveEntity, type Resolved } from "./refs";
 
 export type EntityState = "defined" | "under" | "conflict";
@@ -210,6 +211,10 @@ export class SketchPainter {
     g.beginPath();
     if (r.kind === "line") { const a = this.screen(r.a), b = this.screen(r.b); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); return; }
     if (r.kind === "point") return;
+    if (r.kind === "curve") {
+      for (const pc of r.pieces) samplePiece(pc).forEach((v, i) => { const q = this.screen(v); if (i) g.lineTo(q.x, q.y); else g.moveTo(q.x, q.y); });
+      return;
+    }
     const sweep = r.kind === "circle" ? { a0: 0, a1: Math.PI * 2 } : arcSweep(r.c, r.s, r.en);
     this.arc(r.c, r.r, sweep.a0, sweep.a1);
   }
@@ -246,14 +251,14 @@ export class SketchPainter {
 /** Where a constraint's glyph sits: a point of the sketch and the side to step off to (in glyph steps, screen axes). */
 export function glyphAnchor(data: SketchData, k: SketchConstraint): { at: Vec2; dx: number; dy: number; /** the size of what it sits on, mm */ room: number } | null {
   const a = anchorOf(data, k); if (!a) return null;
-  const sizes = (k.refs || []).map((ref) => resolve(data, ref)).map((x) => (!x || x.kind === "point" ? Infinity : x.kind === "line" ? Math.hypot(x.b[0] - x.a[0], x.b[1] - x.a[1]) : x.r * 2));
+  const sizes = (k.refs || []).map((ref) => resolve(data, ref)).map((x) => (!x || x.kind === "point" ? Infinity : x.kind === "line" ? Math.hypot(x.b[0] - x.a[0], x.b[1] - x.a[1]) : x.kind === "curve" ? curveSize(x) : x.r * 2));
   return { ...a, room: Math.min(...sizes) };
 }
 function anchorOf(data: SketchData, k: SketchConstraint): { at: Vec2; dx: number; dy: number } | null {
   const r = (k.refs || []).map((ref) => resolve(data, ref));
   if (!r.length || r.some((x) => !x)) return null;
   const first = r[0] as Resolved;
-  const centre = (x: Resolved): Vec2 => (x.kind === "point" ? x.p : x.kind === "line" ? mid(x.a, x.b) : x.kind === "circle" ? [x.c[0] + x.r * Math.SQRT1_2, x.c[1] + x.r * Math.SQRT1_2] : arcMid(x));
+  const centre = (x: Resolved): Vec2 => (x.kind === "point" ? x.p : x.kind === "line" ? mid(x.a, x.b) : x.kind === "circle" ? [x.c[0] + x.r * Math.SQRT1_2, x.c[1] + x.r * Math.SQRT1_2] : x.kind === "curve" ? pieceAt(x.pieces[0], (x.pieces[0].t0 + x.pieces[0].t1) / 2) : arcMid(x));
   // a relation between a point and something sits at the point; one between curves sits on the first curve
   const point = (r as Resolved[]).find((x) => x.kind === "point");
   if (k.type === "symmetric") { const axis = (r as Resolved[]).find((x) => x.kind === "line") || (r[2] as Resolved); return { at: centre(axis), dx: 1, dy: 1 }; }
@@ -267,6 +272,11 @@ function anchorOf(data: SketchData, k: SketchConstraint): { at: Vec2; dx: number
     return { at: [first.a[0] + dx * second, first.a[1] + dy * second], dx: nx, dy: -ny };
   }
   return { at: centre(first), dx: 0.7, dy: -0.7 };
+}
+function curveSize(x: Extract<Resolved, { kind: "curve" }>): number {
+  let lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+  for (const pc of x.pieces) for (const p of pc.nurbs.poles) { lo = [Math.min(lo[0], p[0]), Math.min(lo[1], p[1])]; hi = [Math.max(hi[0], p[0]), Math.max(hi[1], p[1])]; }
+  return Math.hypot(hi[0] - lo[0], hi[1] - lo[1]);
 }
 function arcMid(x: Extract<Resolved, { kind: "arc" }>): Vec2 { const { a0, a1 } = arcSweep(x.c, x.s, x.en), t = (a0 + a1) / 2; return [x.c[0] + x.r * Math.cos(t), x.c[1] + x.r * Math.sin(t)]; }
 
