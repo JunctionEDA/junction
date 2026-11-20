@@ -17,10 +17,12 @@ export default defineTool({
     const { changes, variable } = addVariable(doc, freeName(doc), "10 mm");
     studio.commit(changes);
     showPanel("variables");
-    // the new row's name, selected, to type over
-    requestAnimationFrame(() => {
+    // the new row's name, selected, to type over, once the panel has drawn it
+    let tries = 0;
+    const focus = () => {
       const input = document.querySelector<HTMLInputElement>(`[data-variable="${variable.name}"] input`);
-      if (input) { input.focus(); input.select(); }
-    });
+      if (input) { input.focus(); input.select(); } else if (++tries < 30) requestAnimationFrame(focus);
+    };
+    setTimeout(focus, 0);
   },
 });
