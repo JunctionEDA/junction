@@ -31,6 +31,7 @@
 
   /* ---- text ---- */
   --ink: #111113;        /* primary */
+  --glyph-face: #BCD3F0; /* the face of a CAD icon (ui/Glyph.tsx) */
   --ink-2: #52525B;      /* secondary */
   --ink-3: #71717A;      /* tertiary: captions, mono meta, placeholders */
 
@@ -110,7 +111,7 @@
   :root[data-theme="system"] {
     --bench: #111113; --paper: #18181B; --panel: #0B0B0C; --line: #27272A; --line-2: #3F3F46;
     --ink: #FAFAFA; --ink-2: #A1A1AA; --ink-3: #85858E;
-    --accent: #FAFAFA; --accent-2: #D4D4D8; --on-accent: #0B0B0C; --blue: #D4D4D8;
+    --accent: #FAFAFA; --accent-2: #D4D4D8; --on-accent: #0B0B0C; --blue: #D4D4D8; --glyph-face: #2E5584;
     --copper: #E05555; --copper-2: #C83434; --teal: #4FBDBD; --wire: #45C245;
     --warn: #E5A800; --err: #F0464A; --err-2: #D2383C; --warn-row: #706020;
     --shadow: 0 6px 20px #00000080; --shadow-dialog: 0 18px 48px #000000A6; --scrim: #00000080;
@@ -122,7 +123,7 @@
 :root[data-theme="dark"] {
   --bench: #111113; --paper: #18181B; --panel: #0B0B0C; --line: #27272A; --line-2: #3F3F46;
   --ink: #FAFAFA; --ink-2: #A1A1AA; --ink-3: #85858E;
-  --accent: #FAFAFA; --accent-2: #D4D4D8; --on-accent: #0B0B0C; --blue: #D4D4D8;
+  --accent: #FAFAFA; --accent-2: #D4D4D8; --on-accent: #0B0B0C; --blue: #D4D4D8; --glyph-face: #2E5584;
   --copper: #E05555; --copper-2: #C83434; --teal: #4FBDBD; --wire: #45C245;
   --warn: #E5A800; --err: #F0464A; --err-2: #D2383C; --warn-row: #706020;
   --shadow: 0 6px 20px #00000080; --shadow-dialog: 0 18px 48px #000000A6; --scrim: #00000080;
