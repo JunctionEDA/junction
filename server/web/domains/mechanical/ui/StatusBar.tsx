@@ -14,7 +14,8 @@ import { describeKinds } from "./fields";
 import { useStudio } from "./hooks";
 import { awaitsPlane, type PartStudio } from "./studio";
 import { tipHandlers } from "./Tip";
-import { usePref } from "./prefs";
+import { setPrefs, usePref } from "./prefs";
+import { setDualUnit } from "../document/dual-units";
 import { setHistoryView } from "./Timeline";
 import { SelectionControl } from "./SelectionControl";
 
@@ -59,6 +60,7 @@ function UnitsControl({ studio }: { studio: PartStudio }) {
     return () => { document.removeEventListener("pointerdown", away); document.removeEventListener("keydown", key, true); };
   }, [open]);
   const example = (1).toFixed(u.places);
+  const dual = usePref("dualUnit");
   return (
     <div className="relative flex-none" onPointerDown={(ev) => ev.stopPropagation()}>
       <button type="button" className={cx("btn sm ghost h-6 min-h-0 px-2 gap-1.5 mono text-sm", open && "on")} aria-haspopup="dialog" aria-expanded={open} aria-label={`Units: ${u.length}, ${u.angle}, ${u.places} decimal places. Change`} data-units={`${u.length} ${u.angle} ${u.places}`}
@@ -78,6 +80,9 @@ function UnitsControl({ studio }: { studio: PartStudio }) {
             <button type="button" className="btn sm w-6 p-0 justify-center" disabled={!canEdit || u.places <= 0} aria-label="Fewer decimal places" data-unit-places="less" onClick={() => studio.setUnits({ places: u.places - 1 })}>−</button>
             <span className="mono w-16 text-center" data-unit-places-shown={u.places}>{example}</span>
             <button type="button" className="btn sm w-6 p-0 justify-center" disabled={!canEdit || u.places >= MAX_PLACES} aria-label="More decimal places" data-unit-places="more" onClick={() => studio.setUnits({ places: u.places + 1 })}>+</button>
+          </div>
+          <div className="flex items-center gap-2 border-t border-line pt-2"><span className="w-16 text-ink-2" title="Only for you: a second unit in brackets after sketch dimensions and measurements">Also in</span>
+            <span className="seg">{[{ id: "", title: "No second unit" }, ...LENGTH_UNITS.filter((x) => x.id !== u.length)].map((x) => <button key={x.id || "none"} type="button" className={cx(dual === x.id && "on")} title={x.title} data-unit-dual={x.id || "none"} onClick={() => { setPrefs({ dualUnit: x.id }); setDualUnit(x.id); studio.setUi({ dualUnit: x.id }); const s = studio.getState(); if (!s.sketch && !s.editing && s.selection.length) studio.select(s.selection.slice());   /* what is measured is written again */ }}>{x.id || "none"}</button>)}</span>
           </div>
           <p className="note m-0 text-xs">{canEdit ? "For everybody working on this document. Nothing in the model changes size: only how numbers are shown and what a bare number typed into a field means." : "You can look at this document but not change its units."}</p>
         </div>

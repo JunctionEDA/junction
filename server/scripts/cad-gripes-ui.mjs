@@ -17,6 +17,7 @@
 //               a click dresses what is selected; stored as colour, metalness and roughness
 //   selection   the selection filter (a click takes only the kinds chosen), a selection kept by name and had
 //               again after the model changed, "Select other" for the face behind
+//   dual        a second unit in brackets after measurements (the units control's "Also in")
 //   history     the History of edits panel: every step in words, a click goes back to it and forward again
 //   progress    a rebuild says which feature it is on, of how many
 //   offline     the connection drops: a banner, edits go on and the model follows, they are kept in the browser
@@ -443,6 +444,24 @@ try {
     await alice.click('.cad-select-other [data-other="1"]');
     check('… and a click selects the one behind', (await sel()).length === 1 && /:start:/.test((await sel())[0]) && (await count('.cad-select-other')) === 0, (await sel()).join(' '));
     await key('Escape');
+  }
+
+  // ================================================================ a second unit
+  if (part('dual')) {
+    await key('Escape'); await key('Escape');
+    await click(alice, await edgeOnScreen(alice, [ids.e1, ':end:']));
+    await alice.waitForTimeout(400);
+    const readout = () => alice.evaluate(() => document.querySelector('.cad-stage')?.innerText || '');
+    check('a measurement is in the document\'s unit', / mm/.test(await readout()) && !/\[[\d.]+ in\]/.test(await readout()));
+    await alice.click('.cad-status [data-units]');
+    await alice.click('.cad-units [data-unit-dual=in]');
+    await alice.waitForTimeout(300);
+    check('with "Also in: in" every length says both', /\d mm \[[\d.]+ in\]/.test(await readout()), (await readout()).replace(/\s+/g, ' ').slice(0, 300));
+    await shot('dual', alice, { x: 900, y: 480, width: 600, height: 420 });
+    await alice.click('.cad-units [data-unit-dual=none]');
+    await alice.waitForTimeout(300);
+    check('… and "none" takes the second unit away', !/\[[\d.]+ in\]/.test(await readout()));
+    await key('Escape'); await key('Escape');
   }
 
   // ================================================================ the history of edits

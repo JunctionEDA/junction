@@ -35,7 +35,8 @@ export function dimensionText(data: SketchData, c: SketchConstraint): string {
   const driven = c.driving === false;
   const v = driven || typeof c.value !== "number" ? measure(data, c) : c.value;
   if (v === null) return "?";
-  const body = c.type === "radius" ? `R ${lenNum(v)}` : c.type === "diameter" ? `Ø ${lenNum(v)}` : c.type === "angle" ? angText(v) : lenNum(v);
+  // with a second unit chosen (document/dual-units.ts) a length says both: 25.4 [1 in]
+  const body = c.type === "angle" ? angText(v) : `${c.type === "radius" ? "R " : c.type === "diameter" ? "Ø " : ""}${lenNum(v)}${dualSuffix(v, shown)}`;
   return driven ? `(${body})` : body;
 }
 
@@ -149,3 +150,6 @@ export function drawDimension(data: SketchData, c: SketchConstraint, px: number)
   out.arrows.push({ at: p2, dir: [-fwd[0], -fwd[1]] }, { at: q2, dir: fwd });
   return out;
 }
+
+// (a second unit after a dimension: document/dual-units.ts)
+import { dualSuffix } from "../document/dual-units";

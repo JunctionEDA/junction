@@ -352,6 +352,24 @@ test("selection: sets kept by name follow the model, and a filter that cannot se
   assert.equal(SS.filterLabel(null), "All"); assert.equal(SS.filterLabel(["face", "edge"]), "Faces, Edges"); assert.equal(SS.filterLabel(["face", "edge", "vertex"]), "3 kinds");
 });
 
+// ---------------------------------------------------------------- a second unit
+const DU = load("domains/mechanical/document/dual-units.ts");
+test("dual dimensions: a length in a second unit, as fine as the first", () => {
+  const mm = { length: "mm", angle: "deg", places: 3 }, inch = { length: "in", angle: "deg", places: 3 };
+  assert.equal(DU.dualSuffix(25.4, mm, "in"), " [1 in]");
+  assert.equal(DU.dualSuffix(10, mm, "in"), " [0.3937 in]");
+  assert.equal(DU.dualSuffix(25.4, inch, "mm"), " [25.4 mm]");
+  assert.equal(DU.dualSuffix(1, inch, "mm"), " [1 mm]", "thousandths of an inch are hundredths of a millimetre");
+  assert.equal(DU.dualSuffix(1.234, inch, "mm"), " [1.23 mm]");
+  assert.equal(DU.dualSuffix(25.4, mm, "mm"), "", "the document's own unit is not said twice");
+  assert.equal(DU.dualSuffix(25.4, mm, ""), "");
+  assert.equal(DU.dualSuffix(NaN, mm, "in"), "");
+  assert.equal(DU.dualPlaces(mm, "in"), 5); assert.equal(DU.dualPlaces(inch, "mm"), 2); assert.equal(DU.dualPlaces({ ...mm, places: 0 }, "m"), 3);
+  assert.equal(DU.dualUnit(), "", "none until a person chooses one");
+  DU.setDualUnit("in"); assert.equal(DU.dualUnit(), "in"); assert.equal(DU.dualSuffix(50.8, mm), " [2 in]");
+  DU.setDualUnit("furlong"); assert.equal(DU.dualUnit(), "");
+});
+
 // ---------------------------------------------------------------- the history of edits
 const UL = load("domains/mechanical/ui/undo-labels.ts");
 const ID = load("shared/itemdoc/itemdoc.ts");

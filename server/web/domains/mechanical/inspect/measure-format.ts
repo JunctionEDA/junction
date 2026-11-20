@@ -39,7 +39,7 @@ export function setMeasureUnits(u: Units): void { U = u; }
 export const measureUnits = (): Units => U;
 
 /** A length, an area, a volume (given in mm, mm², mm³) and an angle (degrees) in the units on screen. */
-export const mm = (v: number) => formatLength(v, U);
+export const mm = (v: number) => `${formatLength(v, U)}${dualSuffix(v, U)}`;   // and in the second unit, when a person chose one
 export const mm2 = (v: number) => formatArea(v, U);
 export const mm3 = (v: number) => formatVolume(v, U);
 export const deg = (v: number) => formatAngle(v, U);
@@ -112,3 +112,6 @@ export function readout(r: MeasureResult | null): { title: string; rows: Row[] }
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+// (a second unit after a length: document/dual-units.ts)
+import { dualSuffix } from "../document/dual-units";
