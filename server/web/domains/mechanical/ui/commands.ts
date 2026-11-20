@@ -7,9 +7,9 @@
 // The modes, and what the toolbar shows in each (the order an Onshape user's hands know):
 //
 //   model    undo redo │ Sketch │ Extrude Revolve Sweep Loft Thicken Enclose │ Fillet ▾ Chamfer Draft Rib Shell
-//            Hole │ Boolean Split Transform ▾ Wrap Composite part │ Modify fillet Delete face Move face Replace face │
-//            Pattern ▾ Mirror │ Plane ▾ Curve ▾ Mate connector Variable │ Board ▾ │ Measure Section │ History │
-//            More ▾  Search tools… S
+//            Hole │ Boolean Split Transform ▾ Wrap Composite part │ Direct edit ▾ │ Pattern ▾ Mirror │ Surface ▾ │
+//            Plane ▾ Curve ▾ Mate connector Variable │ Frames ▾ │ Sheet metal ▾ │ Board ▾ │ Measure Section │
+//            History │ More ▾  Search tools… S
 //   sketch   undo redo │ Line Rectangle ▾ Circle Arc ▾ Slot Point Construction │ Fillet Offset Use Mirror Trim
 //            Extend │ the constraints │ Dimension │ Extrude Revolve │ More ▾      Search tools… S  ✓ Finish  ✗
 //   dialog   what is being edited and what a click will pick │ More ▾                 Search tools… S  ✓  ✗
@@ -21,7 +21,9 @@ import { FEATURE_SECTIONS, type FeatureDefinition } from "../core/feature";
 import type { ToolDefinition } from "../core/tool";
 import { getPrefs, setPrefs } from "./prefs";
 import { KEYWORDS, RESULT_WORDS } from "./search";
+import type { StandardView } from "../../../shared/viewport3d/viewport3d";
 import { FEATURE_KEYS, awaitsPlane, type PartStudio } from "./studio";
+import { BIG_STEP, MOD, NUMBERED_VIEWS, STEP, viewShortcut } from "./viewkeys";
 
 export interface Entry {
   id: string; title: string;
@@ -32,6 +34,8 @@ export interface Entry {
   shortcut?: string;
   /** other words people look for it by, for the tool search: "cut pocket" */
   keywords?: string;
+  /** words that are what it is (a feature's result: "cut"), found first by the tool search (search.ts) */
+  meaning?: string;
   /** drawn pressed */
   on?: boolean;
   /** why it cannot run just now (null: it can) */
@@ -46,6 +50,8 @@ export interface Slot {
   entries: Entry[];
   /** how long it keeps its place when the bar is too narrow (higher: longer); 0: it is always under More */
   keep: number;
+  /** a section folded into one button (GROUPS): its drop-down in parts, a rule between two */
+  parts?: Entry[][];
 }
 export interface Section {
   id: string; group: string;
@@ -119,11 +125,17 @@ function presetEntries(studio: PartStudio, f: FeatureDefinition): Entry[] {
   const usual = (f.defaults() as { operation?: string }).operation;
   const base = featureEntry(studio, f);
   return field.options.filter((o) => o.value !== usual && RESULT_WORDS[o.value]).map((o) => ({
-    ...base, id: `${base.id}:${o.value}`, title: `${f.title}: ${o.label.toLowerCase()}`, shortcut: undefined, keywords: RESULT_WORDS[o.value],
+    ...base, id: `${base.id}:${o.value}`, title: `${f.title}: ${o.label.toLowerCase()}`, shortcut: undefined, keywords: RESULT_WORDS[o.value], meaning: CUTS.has(o.value) ? RESULT_WORDS[o.value] : undefined,
     hint: `${f.title} with its result set to ${o.label.toLowerCase()}.`,
     run: () => { studio.startFeature(f.type); if (studio.getState().editing?.draft.featureType === f.type) studio.setDraft({ params: { operation: o.value } }); studio.viewport.canvas.focus(); },
   }));
 }
+
+/**
+ * The results that take material away.  Elsewhere a cut is a feature of its own (Cut-Extrude), so "cut" and
+ * "pocket" typed whole find these first, before a tool that only has the word in its name (Cut list).
+ */
+const CUTS = new Set(["remove", "subtract"]);
 
 const DEFAULT_KEEP = 50;
 function slotsOf<T>(list: T[], menuOf: (x: T) => string | undefined, entry: (x: T) => Entry, keepOf: (x: T) => number | undefined, prefix: string): Slot[] {
@@ -144,6 +156,31 @@ const SKETCH_PARTS: { id: string; title: string; from: number; to: number }[] = 
   { id: "sketch-draw", title: "Draw", from: 1, to: 100 }, { id: "sketch-modify", title: "Modify", from: 100, to: 200 },
   { id: "sketch-constrain", title: "Constrain", from: 200, to: 300 }, { id: "sketch-dimension", title: "Dimension", from: 300, to: 900 },
 ];
+/**
+ * The specialist sections, each one button and a caret on the bar, as Onshape groups them: the face runs the
+ * tool used last, the caret lists the section (its families apart, between rules).  What a part is mostly made
+ * with keeps a button of its own; these are opened when they are needed.
+ */
+export const GROUPS: { readonly [section: string]: string } = { direct: "Direct edit", surface: "Surface", frame: "Frames", sheetmetal: "Sheet metal" };
+/**
+ * How long such a button keeps its place: every group alike (and the Curve ▾ family with them), after the tools
+ * a part is mostly made with (Draft, Split, Transform and up) and before the single specialist buttons (Thicken,
+ * Rib, Wrap, Mate connector, …), so that a narrower window loses those first and the groups together.
+ */
+export const GROUP_KEEP = 55;
+/** One section as one button: its slots' entries in one drop-down, its families kept together between rules. */
+function grouped(id: string, title: string, slots: Slot[]): Slot[] {
+  if (slots.length < 2 && !(slots[0] && slots[0].menu === title)) return slots;
+  const parts: Entry[][] = [];
+  let singles: Entry[] = [];
+  for (const sl of slots) {
+    if (sl.menu === null) { singles.push(...sl.entries); continue; }
+    if (singles.length) { parts.push(singles); singles = []; }
+    parts.push(sl.entries);
+  }
+  if (singles.length) parts.push(singles);
+  return [{ key: `${id}/${title}`, menu: title, entries: parts.flat(), keep: GROUP_KEEP, parts }];
+}
 const SECTION_TITLES: { [id: string]: string } = { edit: "Edit", sketch: "Sketch", solid: "Create", modify: "Modify", combine: "Combine", direct: "Direct editing", pattern: "Pattern", surface: "Surface", reference: "Reference geometry", board: "Circuit board", frame: "Frames", sheetmetal: "Sheet metal", inspect: "Inspect", view: "View", file: "File" };
 
 /** The toolbar for the mode the studio is in. */
@@ -181,7 +218,7 @@ export function toolbarSections(studio: PartStudio): Section[] {
       const slots = slotsOf(features.filter((f) => (f.toolbarSection || "solid") === sec), (f) => f.toolbarMenu, fe, (f) => f.toolbarKeep, sec);
       // tools that put themselves among the features follow that section's features (the solids', if they do not say)
       slots.push(...slotsOf(tools("feature").filter((t) => (t.section || "solid") === sec), (t) => t.menu, te, (t) => t.keep, sec));
-      out.push(section(sec, "feature", slots, sec === "sketch"));
+      out.push(section(sec, "feature", GROUPS[sec] ? grouped(sec, GROUPS[sec], slots) : slots, sec === "sketch"));
     }
   }
   out.push(ofTools("inspect", tools("inspect")));
@@ -194,10 +231,11 @@ export function allCommands(studio: PartStudio): Entry[] {
   const s = studio.getState(), sketch = !!s.sketch;
   const tools = studio.tools().slice().sort(byOrder((t) => t.order));
   const out: Entry[] = [];
-  if (sketch) out.push(...tools.filter((t) => t.group === "sketch").map((t) => toolEntry(studio, t)));
+  // in a sketch the sketch tools come first, and the other words for one are what it is there ("cut" is Trim)
+  if (sketch) out.push(...tools.filter((t) => t.group === "sketch").map((t) => { const e = toolEntry(studio, t); return { ...e, meaning: e.keywords }; }));
   // the features in the order the toolbar has them: section by section
   const place = (f: FeatureDefinition) => FEATURE_SECTIONS.indexOf(f.toolbarSection || "solid") * 1e4 + (f.toolbarOrder ?? 9999);
-  for (const f of studio.definitions().filter((x) => x.toolbar !== false).slice().sort(byOrder(place))) out.push(featureEntry(studio, f), ...presetEntries(studio, f));
+  for (const f of studio.definitions().filter((x) => x.toolbar !== false).slice().sort(byOrder(place))) out.push(featureEntry(studio, f), ...presetEntries(studio, f).map((e) => (sketch ? { ...e, meaning: undefined } : e)));   // in a sketch, a cut is Trim
   out.push(...tools.filter((t) => t.group !== "sketch").map((t) => toolEntry(studio, t)));
   out.push(...viewCommands(studio));
   return out;
@@ -206,12 +244,16 @@ export function allCommands(studio: PartStudio): Entry[] {
 /** What has no tool file of its own: the views and the ways of looking the keys and the view cube also reach. */
 export function viewCommands(studio: PartStudio): Entry[] {
   const v = (id: string, title: string, shortcut: string | undefined, hint: string, run: () => void): Entry => ({ id: "view:" + id, title, shortcut, hint, run: () => { run(); studio.viewport.canvas.focus(); } });
-  const view = (name: "front" | "back" | "left" | "right" | "top" | "bottom" | "iso", n: number) => v(name, name === "iso" ? "Isometric view" : `${name[0].toUpperCase()}${name.slice(1)} view`, `Shift+${n}`, "Turn the view.", () => studio.viewport.setView(name));
+  const view = (name: StandardView) => v(name, name === "iso" ? "Isometric view" : `${name[0].toUpperCase()}${name.slice(1)} view`, viewShortcut(name), "Turn the view.", () => studio.viewport.setView(name));
+  const turn = (way: string, arrow: string, yaw: number, pitch: number): Entry => ({ ...v("turn-" + way, `Turn view ${way}`, arrow, `Turn the view ${STEP}°; with Shift, ${BIG_STEP}°.`, () => studio.viewport.rotateBy((yaw * STEP * Math.PI) / 180, (pitch * STEP * Math.PI) / 180)), keywords: "rotate orbit spin" });
+  const roll = (way: string, sign: number): Entry => ({ ...v("roll-" + way, `Roll view ${way}`, `${MOD}+${sign > 0 ? "←" : "→"}`, `Roll the view ${STEP}° ${sign > 0 ? "counter-clockwise" : "clockwise"} about the line of sight; with Shift, ${BIG_STEP}°.`, () => studio.viewport.rotateBy(0, 0, true, (sign * STEP * Math.PI) / 180)), keywords: "rotate twist spin" });
   return [
     v("fit", "Zoom to fit", "F", "Everything in view. Also a double click with the middle button.", () => studio.fit()),
     v("zoom-selection", "Zoom to selection", "Z", "Bring what is selected into view.", () => studio.zoomToSelection()),
     v("normal", "View normal to", "N", "Look straight at the selected flat face or plane, or at the open sketch.", () => studio.normalTo()),
-    view("front", 1), view("back", 2), view("left", 3), view("right", 4), view("top", 5), view("bottom", 6), view("iso", 7),
+    ...NUMBERED_VIEWS.map(view),
+    turn("left", "←", -1, 0), turn("right", "→", 1, 0), turn("up", "↑", 0, -1), turn("down", "↓", 0, 1),
+    roll("left", 1), roll("right", -1),
     v("shortcuts", "Keyboard shortcuts", "?", "Every key the part studio answers to.", () => studio.setUi({ help: true })),
   ];
 }

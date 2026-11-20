@@ -1,13 +1,15 @@
 // Toolbar.tsx — the part studio's toolbar.  It shows the tools of the mode the studio is in and nothing else
 // (ui/commands.ts builds the list from the registries; nothing is listed here by hand):
 //
-//   modelling   undo redo │ Sketch │ Extrude Revolve Sweep Loft │ Fillet Chamfer Draft Shell Hole │ Boolean Split
-//               Transform ▾ │ Pattern ▾ Mirror │ Plane ▾ │ Board ▾ │ Measure Section │ History │ More ▾   Search tools… S
+//   modelling   undo redo │ Sketch │ Extrude Revolve Sweep Loft … │ Fillet ▾ Chamfer Draft … Shell Hole │ Boolean Split
+//               Transform ▾ … │ Direct edit ▾ │ Pattern ▾ Mirror │ Surface ▾ │ Plane ▾ Curve ▾ … │ Frames ▾ │ Sheet metal ▾ │
+//               Board ▾ │ Measure Section │ History │ More ▾   Search tools… S
 //   in a sketch undo redo │ draw │ modify │ constraints │ Dimension │ Extrude Revolve │ More ▾   Search tools… S  ✓  ✗
 //   in a dialog what is being edited, what a click will pick │ More ▾                         Search tools… S  ✓  ✗
 //
 // One button is one tool, drawn as its icon.  A tool with variants is one button and a caret: the face runs the
-// variant used last (remembered in this browser), the caret opens the list.  Every button has a tooltip with its
+// variant used last (remembered in this browser), the caret opens the list.  So is a specialist section (direct
+// editing, surfacing, frames, sheet metal: commands.ts GROUPS), its families apart between rules in the list.  Every button has a tooltip with its
 // name, its key and a line on what it does (Tip.tsx).
 //
 // The bar never scrolls and never crams.  When the window is too narrow for every button, the ones that keep
@@ -33,7 +35,7 @@ const MORE = "More";
 /** the icon of a button on the bar, in pixels */
 const ICON = 22;
 /** what a section costs besides its buttons (its padding and its rule), and the gap between two buttons */
-const SECTION_PAD = 13, GAP = 2;
+const SECTION_PAD = 9, GAP = 2;
 
 function Button({ e, label, variant }: { e: Entry; label: boolean; variant?: boolean }) {
   return (
@@ -97,6 +99,8 @@ export function Toolbar({ studio }: { studio: PartStudio }) {
   const widths = useRef(new Map<string, number>());
   const [moved, setMoved] = useState<{ sig: string; keys: ReadonlySet<string> }>({ sig: "", keys: new Set() });
   const [narrow, setNarrow] = useState(false);
+  // the search field gives up some of its width before a tool gives up its button
+  const [wide, setWide] = useState(true);
   const sig = mode + ":" + sections.map((s) => s.id + ":" + s.slots.map((x) => x.key).join(",")).join(";");
   const fitRef = useRef<() => void>(() => undefined);
   fitRef.current = () => {
@@ -119,8 +123,9 @@ export function Toolbar({ studio }: { studio: PartStudio }) {
     for (const x of order) { if (need() <= room) break; out.add(x.s.key); }
     const keys = Array.from(out).sort().join("|");
     if (moved.sig !== sig || Array.from(moved.keys).sort().join("|") !== keys) setMoved({ sig, keys: out });
-    const tight = el.clientWidth < 1240;
+    const tight = el.clientWidth < 1240, roomy = el.clientWidth >= 1700;
     if (tight !== narrow) setNarrow(tight);
+    if (roomy !== wide) setWide(roomy);
   };
   useLayoutEffect(() => {
     const el = bar.current; if (!el) return;
@@ -151,7 +156,7 @@ export function Toolbar({ studio }: { studio: PartStudio }) {
   const slotView = (sec: Section, slot: Slot) => {
     if (slot.menu === null) return <span key={slot.key} className="flex flex-none" data-slot={slot.key}><Button e={slot.entries[0]} label={!!sec.labelled} /></span>;
     const open = !!menu && menu.key === slot.key;
-    if (open) shown = { key: slot.key, title: slot.menu, groups: [{ title: null, group: sec.group, entries: slot.entries }], remember: true };
+    if (open) shown = { key: slot.key, title: slot.menu, groups: (slot.parts || [slot.entries]).map((entries) => ({ title: null, group: sec.group, entries })), remember: true };
     const face = lastUsed(slot.key, slot.entries);
     return (
       <span key={slot.key} className="flex flex-none items-center rounded-sm hover:bg-paper" data-slot={slot.key} data-split>
@@ -161,7 +166,7 @@ export function Toolbar({ studio }: { studio: PartStudio }) {
     );
   };
   const groups = sections.filter((sec) => sec.slots.some(onBar)).map((sec) => (
-    <div key={sec.id} className="flex flex-none items-center gap-0.5 px-1.5 border-r border-line h-6" data-group={sec.group} data-section={sec.id}>{sec.slots.filter(onBar).map((slot) => slotView(sec, slot))}</div>
+    <div key={sec.id} className="flex flex-none items-center gap-0.5 px-1 border-r border-line h-6" data-group={sec.group} data-section={sec.id}>{sec.slots.filter(onBar).map((slot) => slotView(sec, slot))}</div>
   ));
 
   // ---- More: what is used less, and what the window has no room for
@@ -187,7 +192,7 @@ export function Toolbar({ studio }: { studio: PartStudio }) {
   );
   const search = (
     <div className="flex flex-none items-center px-2" data-fixed>
-      <button type="button" className={cx("cad-tool-search appearance-none m-0 [font-family:inherit] flex items-center gap-2 h-8 pl-2.5 pr-1.5 rounded-sm border border-line bg-panel text-base text-ink-2 cursor-text hover:border-line-2", narrow ? "w-40" : "w-52")} aria-label="Search tools" aria-haspopup="dialog" data-tool-search
+      <button type="button" className={cx("cad-tool-search appearance-none m-0 [font-family:inherit] flex items-center gap-2 h-8 pl-2.5 pr-1.5 rounded-sm border border-line bg-panel text-base text-ink-2 cursor-text hover:border-line-2", narrow ? "w-40" : wide ? "w-52" : "w-44")} aria-label="Search tools" aria-haspopup="dialog" data-tool-search
         {...tipHandlers({ title: "Search tools", shortcut: "S", hint: "Find any tool or feature by its name, or by another word for it: cut, round, pocket. Also Ctrl+K." })}
         onClick={(ev) => { hideTip(); const r = ev.currentTarget.getBoundingClientRect(); studio.setUi({ palette: { x: null, y: null, under: { left: r.left, top: r.top, width: r.width, right: r.right } } }); }}>
         <Glyph svg={SEARCH} size={16} /><span className="flex-1 text-left truncate">Search tools…</span><span className="kbd">S</span>

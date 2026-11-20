@@ -15,6 +15,7 @@ import { ItemDocSession, type SessionStatus } from "../../../shared/itemdoc/sync
 import type { DocumentHostContext } from "../../../platform/documents/host";
 import { Viewport3D } from "../../../shared/viewport3d/viewport3d";
 import type { BodyMesh, GeomRef, Vec3 } from "../../mechanical/api";
+import { viewKey } from "../../mechanical/api-ui";
 import { connectorOf } from "../connectors/infer";
 import { multiply } from "../core/transform";
 import type { MateDefinition } from "../core/mate";
@@ -682,6 +683,8 @@ export class AssemblyEditor {
     if (ev.key === "Enter" && s.mating) { this.acceptMate(); done(); return; }
     if (mod && ev.key.toLowerCase() === "z") { if (ev.shiftKey) this.redo(); else this.undo(); done(); return; }
     if (mod && ev.key.toLowerCase() === "y") { this.redo(); done(); return; }
+    // the part studio's view keys (Onshape's): the arrows turn the view, Ctrl/Cmd + ← → rolls it, Shift + 1 … 7
+    if (viewKey(this.viewport, ev)) { done(); return; }
     if (s.mating || mod || ev.altKey) return;
     if ((ev.key === "Delete" || ev.key === "Backspace") && s.canEdit && s.selection.length) { this.remove(); done(); return; }
     if (ev.key === "F2" && s.selection.length === 1) { this.startRename(s.selection[0]); done(); return; }

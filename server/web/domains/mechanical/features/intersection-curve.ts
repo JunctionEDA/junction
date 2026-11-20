@@ -32,7 +32,7 @@ export default defineFeature<IntersectionCurveParams>({
   hint: "The curve where two sets of faces or planes cross.",
   keywords: "intersect section cross curve faces planes meet",
   icon: '<path class="f" d="M3 8l10-4 8 4-10 4z"/><path class="t" d="M3 8l10-4 8 4-10 4z"/><path class="t" d="M12 2v18"/><path d="M8 6l4 1.8 4-1.8"/><path class="t" d="M12 20l-2-8"/>',
-  toolbarOrder: 64.5, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 31,
+  toolbarOrder: 64.5, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 55,
   defaults: () => ({ first: [], second: [] }),
   schema: [
     { key: "first", label: "First faces", ...SIDE, hint: "Faces or planes." },

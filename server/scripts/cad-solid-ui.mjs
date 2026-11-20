@@ -133,9 +133,11 @@ try {
   check('Curve ▾ holds the eight curve tools', (menus.Curve || []).length === 8 && menus.Curve[0] === 'Fit spline', JSON.stringify(menus.Curve));
   const order = await S(page, () => Array.from(document.querySelectorAll('.cad-toolbar [data-group] [data-tool]:not([data-variant]), .cad-toolbar [data-group] [data-menu]')).map((b) => b.getAttribute('data-menu') || b.getAttribute('data-tool')));
   const at = (t) => order.indexOf(t);
-  check('the toolbar runs in Onshape\'s order: … Loft, Thicken, Enclose │ Fillet ▾ … Rib, Shell │ … │ Modify fillet … Replace face │ Pattern ▾ │ Plane ▾, Curve ▾ …',
-    at('Loft') < at('Thicken') && at('Thicken') < at('Enclose') && at('Enclose') < at('Fillet') && at('Draft') < at('Rib') && at('Rib') < at('Shell') && at('Modify fillet') < at('Delete face') && at('Delete face') < at('Move face') && at('Move face') < at('Replace face') && at('Replace face') < at('Pattern') && at('Reference') < at('Curve'),
+  check('the toolbar runs in Onshape\'s order: … Loft, Thicken, Enclose │ Fillet ▾ … Rib, Shell │ … │ Direct edit ▾ │ Pattern ▾ │ Plane ▾, Curve ▾ …',
+    at('Loft') < at('Thicken') && at('Thicken') < at('Enclose') && at('Enclose') < at('Fillet') && at('Draft') < at('Rib') && at('Rib') < at('Shell') && at('Composite part') < at('Direct edit') && at('Direct edit') < at('Pattern') && at('Reference') < at('Curve'),
     order.join(' '));
+  // the direct editing tools are a section of their own, one button and a caret as Onshape groups them
+  check('Direct edit ▾ holds Modify fillet, Delete face, Move face and Replace face', JSON.stringify(menus['Direct edit']) === JSON.stringify(['Modify fillet', 'Delete face', 'Move face', 'Replace face']) && !order.includes('Delete face'), JSON.stringify(menus['Direct edit']));
   // a tooltip
   await page.hover('.cad-toolbar [data-tool=Thicken]');
   await page.waitForTimeout(900);
@@ -231,6 +233,8 @@ try {
   // ---------------------------------------------------------------- Variable: #v1 = 10 mm
   await tool(page, 'Variable');
   await page.waitForSelector('[data-variable=v1]');
+  // the name takes the keyboard once the panel has drawn the row (a frame or two after it is there)
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Variable name', null, { timeout: 2000 }).catch(() => {});
   check('Variable adds v1 in the Variables panel, its name ready to type', await S(page, () => document.activeElement?.getAttribute('aria-label') === 'Variable name'));
   await page.fill('[data-variable=v1] input[aria-label="Value of v1"]', '10 mm');
   await page.keyboard.press('Enter');

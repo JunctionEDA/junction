@@ -20,7 +20,7 @@ export default defineFeature<FitSplineParams>({
   hint: "A smooth 3D curve through picked points, open or closed.",
   keywords: "spline 3d curve through points interpolate path bspline",
   icon: '<path d="M3 17c3-9 6-9 9-5s6 4 9-6"/><circle class="s" cx="3" cy="17" r="2"/><circle class="s" cx="10.2" cy="10.4" r="2"/><circle class="s" cx="16" cy="14.3" r="2"/><circle class="s" cx="21" cy="6" r="2"/>',
-  toolbarOrder: 64.1, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 31,
+  toolbarOrder: 64.1, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 55,
   defaults: () => ({ points: [], closed: false, startDir: null, endDir: null, flipStart: false, flipEnd: false }),
   schema: [
     { key: "points", label: "Points", kind: "refs", of: ["vertex", "edge"], datums: ["point"], sketch: true, hint: "Vertices, sketch points or reference points, in the order the curve passes them (a round edge gives its centre)." },

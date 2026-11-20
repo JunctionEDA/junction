@@ -17,7 +17,7 @@ export default defineFeature<CompositeCurveParams>({
   hint: "Join edges and curves that meet end to end into one curve.",
   keywords: "join chain edges curves path wire combine",
   icon: '<path d="M3 18l5-9"/><path d="M8 9c3-5 7-5 9 0"/><path d="M17 9l4 8"/><circle class="s" cx="8" cy="9" r="1.8"/><circle class="s" cx="17" cy="9" r="1.8"/>',
-  toolbarOrder: 64.4, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 31,
+  toolbarOrder: 64.4, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 55,
   defaults: () => ({ curves: [] }),
   schema: [
     { key: "curves", label: "Edges and curves", kind: "refs", of: ["edge"], datums: ["curve"], sketch: true, hint: "They must join end to end, in any order." },

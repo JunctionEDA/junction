@@ -17,6 +17,7 @@ import { Glyph } from "./Glyph";
 import { useStudio } from "./hooks";
 import { FEATURE_KEYS, featureDef, type PartStudio } from "./studio";
 import { SEARCH } from "./Toolbar";
+import { VIEW_KEYS } from "./viewkeys";
 
 const BARE = "appearance-none bg-transparent border-0 m-0 text-inherit [font-family:inherit] [font-size:inherit]";
 
@@ -150,7 +151,7 @@ export function Shortcuts({ studio }: { studio: PartStudio }) {
   const k = (key: string) => (key.length === 1 ? key.toUpperCase() : key === "Delete" ? "Del" : key);
   const groups: { title: string; rows: [string, string][] }[] = [
     { title: "Mouse", rows: MOUSE },
-    { title: "View", rows: [["F", "Zoom to fit"], ["Z", "Zoom to selection"], ["N", "View normal to the selected face, plane or sketch"], ["Shift+1 … 6", "Front, back, left, right, top, bottom"], ["Shift+7", "Isometric"], ["← ↑ → ↓", "Turn 15° (Shift: 90°)"], ...tools.filter((t) => t.group === "view").map((t): [string, string] => [k(t.key!), t.title])] },
+    { title: "View", rows: [["F", "Zoom to fit"], ["Z", "Zoom to selection"], ["N", "View normal to the selected face, plane or sketch"], ...VIEW_KEYS, ...tools.filter((t) => t.group === "view").map((t): [string, string] => [k(t.key!), t.title])] },
     { title: "Part studio", rows: [["S", "Search tools, at the pointer"], ["Ctrl+K", "Search tools"], ...Object.keys(FEATURE_KEYS).filter((key) => featureDef(FEATURE_KEYS[key])).map((key): [string, string] => [`Shift+${key.toUpperCase()}`, featureDef(FEATURE_KEYS[key])!.title]), ...tools.filter((t) => t.group === "inspect" || t.group === "edit").map((t): [string, string] => [k(t.key!), t.title]), ["F2", "Rename the selected feature"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["?", "This sheet"]] },
     { title: "In a dialog", rows: [["Click", "Add to the field that is listening; click again to take out"], ["Tab", "The next field that takes geometry"], ["Esc", "Stop the field listening; again: cancel"], ["Enter", "Accept"], ["↑ ↓ in a number", "One step (Shift: ten)"]] },
     { title: "In a sketch", rows: [...tools.filter((t) => t.group === "sketch").map((t): [string, string] => [k(t.key!), t.title]), ["Esc", "Put the tool down, then clear the selection"], ["Del", "Delete what is selected"], ["Double click a dimension", "Type its value"]] },

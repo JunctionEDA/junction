@@ -8,6 +8,7 @@
 //   await toolTitles(page)               every feature and tool the toolbar offers, drop-downs included
 //   await openPanel(page, 'comments')    unfold a docked panel (and its dock) if it is folded
 //   await viewFrom(page, 'top')          a face of the view cube; 'iso' and 'fit' are the buttons under it
+//   await cubeClick(page, [1, -1, 1])    click a zone of the view cube with the pointer, where it is on screen
 
 /** Click a toolbar button by its title: a sketch tool while a sketch is open, a feature or a tool otherwise. */
 export async function tool(page, title) {
@@ -68,6 +69,40 @@ export async function viewFrom(page, view) {
   if (view === 'iso' || view === 'fit') { await viewMenu(page, view === 'iso' ? 'std-iso' : 'fit'); return; }
   // a face that is turned away cannot be clicked: the studio's own view call is what its click does
   await page.evaluate((view) => window.JunctionPartStudio.viewport.setView(view), view);
+}
+
+/**
+ * Where a zone of the view cube is on screen, for a real pointer: `from` is a face's name ('top') or the direction
+ * the zone looks from ([1, -1, 1]: the front right top corner).  The point is the zone's middle (a face's, an
+ * edge's bevel, a corner's bevel), or with `on` ('top') the part of an edge's or corner's zone that lies on that
+ * face, `inset` pixels from the face's border (the generous part of the zone, away from its bevel).
+ */
+export async function cubeAt(page, from, o = {}) {
+  return page.evaluate(([from, on, inset]) => {
+    const cube = document.querySelector('.cad-viewcube [data-cube]');
+    const H = Number(cube.dataset.size) / 2, F = H - Number(cube.dataset.bevel), Z = Number(cube.dataset.zone);
+    const FACE = { top: [0, 0, 1], bottom: [0, 0, -1], front: [0, -1, 0], back: [0, 1, 0], right: [1, 0, 0], left: [-1, 0, 0] };
+    const d = typeof from === 'string' ? FACE[from] : from, count = d.filter((v) => v).length;
+    let q;
+    if (on) {
+      const n = FACE[on], k = inset == null ? Z / 2 : inset;
+      q = n.map((v, i) => (v ? v * H : d[i] * (F - k)));
+    } else if (count === 1) q = d.map((v) => v * H);
+    else if (count === 2) q = d.map((v) => v * (H + F) / 2);
+    else q = d.map((v) => v * (H + 2 * F) / 3);
+    const m = new DOMMatrix(getComputedStyle(cube).transform), o = cube.parentElement.getBoundingClientRect();
+    const r = m.transformPoint(new DOMPoint(q[0], q[1], q[2])), persp = parseFloat(getComputedStyle(cube.parentElement).perspective) || 0;
+    const k = persp ? persp / (persp - r.z) : 1;
+    return { x: o.left + r.x * k, y: o.top + r.y * k };
+  }, [from, o.on || null, o.inset ?? null]);
+}
+
+/** Click a zone of the view cube with the pointer, where it is on screen (see cubeAt). */
+export async function cubeClick(page, from, o = {}) {
+  const at = await cubeAt(page, from, o);
+  await page.mouse.move(at.x, at.y, { steps: 2 });
+  await page.mouse.click(at.x, at.y);
+  return at;
 }
 
 /** Run an item of the view cube's menu, by its `data-view-item` ('std-iso', 'fit', 'Perspective', …). */

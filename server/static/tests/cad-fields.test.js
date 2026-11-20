@@ -200,6 +200,10 @@ test("the tool search: best first, in the list's own order among equals, with th
   assert.equal(first("zzz"), undefined);
   assert.equal(first("ortcu"), "Keyboard shortcuts", "letters in the middle of a name find it when nothing better does");
   assert.ok(!Q.searchCommands(all, "cut").some((x) => x.entry.title === "Keyboard shortcuts"), "… and not when something better does");
+  // a result that cuts is what "cut" means: it comes before a tool that only has the word in its name
+  const cuts = [{ title: "Extrude", keywords: Q.KEYWORDS["f:extrude"] }, { title: "Extrude: remove", keywords: Q.RESULT_WORDS.remove, meaning: Q.RESULT_WORDS.remove }, { title: "Cut list" }];
+  assert.deepEqual(Q.searchCommands(cuts, "cut").map((x) => [x.entry.title, x.by]), [["Extrude: remove", "cut"], ["Cut list", null]]);
+  assert.equal(Q.searchCommands(cuts, "cut l")[0].entry.title, "Cut list");
   assert.equal(Q.searchCommands(all, "").length, all.length, "nothing typed lists everything, in order");
   // every tool and feature that has other words has them under the id the registries give it
   for (const id of Object.keys(Q.KEYWORDS)) assert.ok(/^(f:)?[a-z0-9-]+$/.test(id) && Q.KEYWORDS[id].trim().length > 0, id);

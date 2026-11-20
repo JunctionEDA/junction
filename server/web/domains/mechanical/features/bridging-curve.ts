@@ -33,7 +33,7 @@ export default defineFeature<BridgingCurveParams>({
   hint: "A curve across the gap between two curves, meeting them in position, tangency or curvature.",
   keywords: "bridge connect join gap blend curve tangent curvature g1 g2",
   icon: '<path class="t" d="M2 18c2-1 4-2 5-5"/><path class="t" d="M22 18c-2-1-4-2-5-5"/><path d="M7 13c1.5-6 8.5-6 10 0"/><circle class="s" cx="7" cy="13" r="1.8"/><circle class="s" cx="17" cy="13" r="1.8"/>',
-  toolbarOrder: 64.3, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 31,
+  toolbarOrder: 64.3, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 55,
   defaults: () => ({ start: null, end: null, match: "tangency", startMagnitude: 1, endMagnitude: 1, flipStart: false, flipEnd: false }),
   schema: [
     { key: "start", label: "Start", ...SIDE, hint: "A curve (its end nearer the other side is used) or a point." },

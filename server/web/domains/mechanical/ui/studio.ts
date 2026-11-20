@@ -30,6 +30,7 @@ import { ModelView, pickKey, type Pick, type PickKind } from "../viewport/modelv
 import { DEFAULT_GEOMETRY } from "../viewport/planes";
 import { fillFromSelection, heldPicks, holdsOne, neighbourField, nextEmptyField, pickKindsFor, takesPicks, valueAfterPick } from "./fields";
 import { getPrefs, readVisibility, writeVisibility, type Visibility } from "./prefs";
+import { viewKey } from "./viewkeys";
 
 export interface EditingFeature {
   /** the feature as the dialog shows it; the document is not changed until the dialog is accepted */
@@ -775,6 +776,8 @@ export class PartStudio {
     if (t !== document.body && !(root && root.contains(t))) return;
     if (t.closest("button, a, summary") && (ev.key === "Enter" || ev.key === " ")) return;
     if (ev.key === "Tab" && t.closest("form, [role=menu], [role=dialog], [role=listbox]")) return;
+    // the arrows move through a menu or a list that has them
+    if (ev.key.startsWith("Arrow") && t.closest("[role=menu], [role=slider]")) return;
     this.onKey(ev);
     if (ev.defaultPrevented) canvas.focus();
   };
@@ -790,6 +793,8 @@ export class PartStudio {
     if (mod && !ev.shiftKey && ev.key.toLowerCase() === "z") { this.undo(); used(); return; }
     if (mod && (ev.key.toLowerCase() === "y" || (ev.shiftKey && ev.key.toLowerCase() === "z"))) { this.redo(); used(); return; }
     if (mod && ev.key.toLowerCase() === "k") { this.setUi({ palette: { x: null, y: null } }); used(); return; }
+    // Onshape's view keys: the arrows turn the view (Shift: 90°), Ctrl/Cmd + ← → rolls it, Shift + 1 … 7 the standard views
+    if (viewKey(this.viewport, ev)) { used(); return; }
     if (mod || ev.altKey) return;
     if (ev.key === "Escape") {
       if (this.planeTaker) this.pickSketchPlane(false);
@@ -805,21 +810,11 @@ export class PartStudio {
       if (def) this.setField(neighbourField(def.schema, s.editing.draft.params, s.editing.field, ev.shiftKey));
       used(); return;
     }
-    // Shift + a digit: the standard views, numbered as an Onshape user's fingers know them
-    if (ev.shiftKey && /^Digit[1-7]$/.test(ev.code)) {
-      this.viewport.setView((["front", "back", "left", "right", "top", "bottom", "iso"] as const)[Number(ev.code.slice(5)) - 1]);
-      used(); return;
-    }
     if (ev.shiftKey && ev.key.length === 1) {
       const type = FEATURE_KEYS[ev.key.toLowerCase()];
       if (type && featureDef(type)) { this.startFeature(type); used(); return; }
     }
     if (ev.key === "?") { this.setUi({ help: true }); used(); return; }
-    if (ev.key.startsWith("Arrow") && !s.sketch) {
-      const step = ((ev.shiftKey ? 90 : 15) * Math.PI) / 180;
-      this.viewport.rotateBy(ev.key === "ArrowLeft" ? -step : ev.key === "ArrowRight" ? step : 0, ev.key === "ArrowUp" ? -step : ev.key === "ArrowDown" ? step : 0);
-      used(); return;
-    }
     const k = ev.key.toLowerCase();
     if (!ev.shiftKey) {
       if (k === "s") { this.setUi({ palette: { x: this.lastPointer.x, y: this.lastPointer.y } }); used(); return; }

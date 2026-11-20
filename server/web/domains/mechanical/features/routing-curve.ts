@@ -19,7 +19,7 @@ export default defineFeature<RoutingCurveParams>({
   hint: "A 3D route of straight runs through points, with bends of a radius at the corners: pipes, cables.",
   keywords: "route pipe tube cable wire harness path polyline bend radius 3d",
   icon: '<path d="M3 20v-6a3 3 0 0 1 3-3h6a3 3 0 0 0 3-3V4h6"/><circle class="s" cx="3" cy="20" r="1.8"/><circle class="s" cx="21" cy="4" r="1.8"/><path class="d t" d="M3 11h3M15 4v4"/>',
-  toolbarOrder: 64.8, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 31,
+  toolbarOrder: 64.8, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 55,
   defaults: () => ({ points: [], radius: 0, closed: false }),
   schema: [
     { key: "points", label: "Points", kind: "refs", of: ["vertex", "edge"], datums: ["point"], sketch: true, hint: "The route's points in order: vertices, sketch points or reference points." },

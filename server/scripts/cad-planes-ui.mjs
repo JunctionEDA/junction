@@ -5,18 +5,24 @@
 //              outline and nothing else; a corner of a plane, near enough, is a handle: dragging it resizes the
 //              plane about the origin; the size is the document's (undone and redone like an edit, kept over a
 //              reload, seen by a second person) and a resized plane no longer grows with the model
-//   view cube  a face, an edge and a corner turn the view to look from there; the triangles turn it 90°, the
-//              curved arrows roll it 90°; the ▼ menu has the standard views, zoom to fit and the projection; the
-//              region under the pointer lights up; the triad is drawn over the cube
+//   view cube  a face, an edge and a corner turn the view to look from there, clicked where they are on screen
+//              with the pointer; a corner is a zone (its bevel and the square of each face beside it) and an edge
+//              one too (its bevel and a strip of each face), so that all eight corners are easy to hit; the zone
+//              under the pointer lights up and a hint under the cube names it; the triangles turn the view 90°,
+//              the curved arrows roll it 90°; the ▼ menu has the standard views with their keys, zoom to fit
+//              and the projection; the triad is drawn over the cube
+//   keys       Onshape's: ← → ↑ ↓ turn the view 15°, with Shift 90°; Ctrl + ← → roll it 15°, with Shift 90°;
+//              Shift + 1 … 7 the standard views; F fits; N looks straight at the selected plane; none of them
+//              while a text field has the keyboard; the sheet of keys, the view menu and the arrows' tooltips say so
 //
 // Setup as the other cad-*-ui.mjs scripts (see cad-ui.mjs): a server with KC_DEV_LOGIN=1, Playwright, psql.
 //
 //   E2E_PG_URL=postgres://… E2E_JWT_SECRET=dev [E2E_BASE=http://127.0.0.1:8099] [SHOTS=/some/dir] node scripts/cad-planes-ui.mjs
 //
-// With SHOTS it saves planes-default, planes-hover, planes-resized, viewcube-light and viewcube-dark (and the
-// same in dark) there.
+// With SHOTS it saves planes-default, planes-hover, planes-resized, viewcube-light, viewcube-corner-hover and
+// viewcube-dark (and the same in dark) there.
 import fs from 'node:fs';
-import { viewFrom, viewMenu } from './cad-chrome.mjs';
+import { cubeAt, cubeClick, viewFrom, viewMenu } from './cad-chrome.mjs';
 import { BASE, S, focusViewport, launch, newPartStudio, screenOf, signedIn, user, viewDir, viewStill } from './cad-ux-lib.mjs';
 
 const SHOTS = process.env.SHOTS || '';
@@ -155,26 +161,71 @@ try {
   const cube = await cubeBox(alice), canvas = await alice.$eval('.cad-stage canvas', (c) => { const r = c.getBoundingClientRect(); return { right: r.right, top: r.top }; });
   check('the view cube is in the top right corner, about 180 px square', near(cube.x + cube.width, canvas.right, 12) && near(cube.y, canvas.top, 12) && near(cube.width, 184, 20) && near(cube.height, 184, 20), JSON.stringify(cube));
   check('it has 6 faces, 12 edges and 8 corners, and a triad', await alice.locator('.cad-viewcube [data-region=face]').count() === 6 && await alice.locator('.cad-viewcube [data-region=edge]').count() === 12 && await alice.locator('.cad-viewcube [data-region=corner]').count() === 8 && await alice.locator('.cad-viewcube [data-triad] text').count() === 3);
-  // the region under the pointer lights up
-  const frontFace = alice.locator('.cad-viewcube [data-face=front]');
-  const bg = () => frontFace.evaluate((e) => e.style.background);
-  const before = await bg();
-  await frontFace.hover();
-  check('the face under the pointer lights up', (await bg()) !== before, `${before} → ${await bg()}`);
+  // every zone is a real target for the pointer: what is clicked below is where the zone is on screen
+  const hint = () => alice.getAttribute('.cad-viewcube [data-cube-hint]', 'data-cube-hint').catch(() => null);
+  const tone = (key) => S(alice, (key) => Array.from(document.querySelectorAll(`.cad-viewcube [data-region] [data-piece]`)).filter((e) => e.parentElement.getAttribute('data-from') === key).map((e) => e.style.background).join('|'), key);
+  const toIso = () => S(alice, () => window.JunctionPartStudio.viewport.setView('iso', false));
+  const lookingFrom = async (from) => { const d = await viewDir(alice), l = Math.hypot(...from); return from.every((v, i) => near(d[i], -v / l, 0.01)); };
+  // the region under the pointer lights up, and a hint under the cube says what a click will do
+  const before = await tone('0,-1,0');
+  let at = await cubeAt(alice, 'front');
+  await alice.mouse.move(at.x, at.y, { steps: 3 });
+  check('the face under the pointer lights up', (await tone('0,-1,0')) !== before, `${before} → ${await tone('0,-1,0')}`);
+  check('… and the hint under the cube names it, with its key', (await hint()) === 'front' && /Front view\s*Shift\+1/.test(await alice.textContent('.cad-viewcube [data-cube-hint]')), await alice.textContent('.cad-viewcube [data-cube-hint]').catch(() => 'no hint'));
   await alice.mouse.move(cube.x - 100, cube.y + 300);
+  check('the hint goes when the pointer leaves the cube', (await hint()) === null);
   await shot('viewcube-light', alice, { x: cube.x - 16, y: cube.y - 8, width: cube.width + 24, height: cube.height + 24 });
-  await frontFace.click(); await viewStill(alice);
+  await cubeClick(alice, 'front'); await viewStill(alice);
   check('a click on Front looks from the front (−Y), Z up', (await viewDir(alice)).join() === '0,1,0' && (await upDir(alice)).join() === '0,0,1', (await viewDir(alice)).join());
-  await viewFrom(alice, 'iso'); await viewStill(alice);
-  // an edge and a corner that face the camera in the isometric view
-  await alice.click('.cad-viewcube [data-from="1,0,1"]'); await viewStill(alice);
-  const e = await viewDir(alice);
-  check('a click on an edge looks from between its two faces', near(e[0], -0.707, 0.01) && near(e[1], 0, 0.01) && near(e[2], -0.707, 0.01), e.join());
-  await alice.click('.cad-viewcube [data-from="1,-1,1"]'); await viewStill(alice);
-  const c = await viewDir(alice);
-  check('a click on a corner looks from that corner: the isometric view', near(c[0], -0.577, 0.01) && near(c[1], 0.577, 0.01) && near(c[2], -0.577, 0.01), c.join());
+  await toIso(); await viewStill(alice);
+  // a corner is easy to hit: its bevel, and the square of each face next to it, light up together and are one target
+  const fRT = [1, -1, 1];
+  const cBefore = await tone('1,-1,1');
+  at = await cubeAt(alice, fRT);
+  await alice.mouse.move(at.x, at.y, { steps: 3 });
+  check('the pointer on a corner lights up the corner, and the hint names it', (await hint()) === 'c1,-1,1' && (await tone('1,-1,1')) !== cBefore && /Front Right Top\s*corner/.test(await alice.textContent('.cad-viewcube [data-cube-hint]')), `${await hint()} ${await alice.textContent('.cad-viewcube [data-cube-hint]').catch(() => '')}`);
+  // how much of the screen a corner takes: the pieces of its zone, as drawn
+  const span = await S(alice, () => { const rs = Array.from(document.querySelectorAll('.cad-viewcube [data-region=corner][data-from="1,-1,1"] [data-piece]')).map((e) => e.getBoundingClientRect()); return Math.min(Math.max(...rs.map((r) => r.right)) - Math.min(...rs.map((r) => r.left)), Math.max(...rs.map((r) => r.bottom)) - Math.min(...rs.map((r) => r.top))); });
+  check('a corner is a target about 30 px across or more, not a sliver', span >= 28, `${Math.round(span)} px`);
+  if (SHOTS) await shot('viewcube-corner-hover', alice, { x: cube.x - 60, y: cube.y - 8, width: cube.width + 70, height: cube.height + 44 });
+  // the corners: each of the seven the isometric view shows, clicked on its bevel and, away from it, on a face next to it
+  const visible = [[1, -1, 1], [1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, 1], [1, 1, -1], [-1, -1, -1]];
+  const missed = [];
+  for (const s of visible) {
+    // the bevel of the corner in the middle faces the camera; those on the cube's outline are turned away, but a
+    // face next to each is not (the top, else the front, else the right)
+    const ways = s.join() === '1,-1,1' ? [{}, { on: 'top', inset: 4 }, { on: 'front', inset: 4 }, { on: 'right', inset: 4 }] : [{ on: s[2] > 0 ? 'top' : s[1] < 0 ? 'front' : 'right', inset: 4 }];
+    for (const o of ways) {
+      await toIso(); await viewStill(alice);
+      await cubeClick(alice, s, o); await viewStill(alice);
+      if (!(await lookingFrom(s))) missed.push(`${s.join()} ${o.on ? 'on ' + o.on : 'by its bevel'}: ${(await viewDir(alice)).join()}`);
+    }
+  }
+  check('a click on a corner, on its bevel or on a face 4 px from its border, looks from that corner', missed.length === 0, missed.join('; ') || `${visible.length} corners`);
+  await toIso(); await viewStill(alice);
+  check('… the front right top corner is the isometric view', near((await viewDir(alice))[0], -0.577, 0.01));
+  // an edge: its bevel, and a strip of each face beside it
+  const edgeMiss = [];
+  for (const [e, on] of [[[1, 0, 1], null], [[0, -1, 1], 'top'], [[0, -1, 1], 'front'], [[1, -1, 0], 'right'], [[1, 1, 0], 'right'], [[-1, 0, 1], 'top']]) {
+    await toIso(); await viewStill(alice);
+    await cubeClick(alice, e, on ? { on, inset: 5 } : {}); await viewStill(alice);
+    if (!(await lookingFrom(e))) edgeMiss.push(`${e.join()}${on ? ' on ' + on : ''}: ${(await viewDir(alice)).join()}`);
+  }
+  check('a click on an edge, on its bevel or on a face beside it, looks from between its two faces', edgeMiss.length === 0, edgeMiss.join('; '));
+  // the faces keep a large middle of their own
+  const faceMiss = [];
+  for (const [f, from] of [['top', [0, 0, 1]], ['front', [0, -1, 0]], ['right', [1, 0, 0]]]) {
+    for (const off of [[0, 0], [12, 0], [-12, 0], [0, -9], [0, 9]]) {
+      await toIso(); await viewStill(alice);
+      const c0 = await cubeAt(alice, f);
+      await alice.mouse.move(c0.x + off[0], c0.y + off[1], { steps: 2 }); await alice.mouse.click(c0.x + off[0], c0.y + off[1]); await viewStill(alice);
+      if (!(await lookingFrom(from))) faceMiss.push(`${f} ${off.join(',')}: ${(await viewDir(alice)).join()}`);
+    }
+  }
+  check('a face is easy to hit too: its middle, 12 px to either side and 9 px above and below', faceMiss.length === 0, faceMiss.join('; '));
+  await toIso(); await viewStill(alice);
   // the arrows: 90° at a time
-  await alice.click('.cad-viewcube [data-face=front]'); await viewStill(alice);
+  await cubeClick(alice, 'front'); await viewStill(alice);
   await alice.click('.cad-viewcube [data-turn="Turn up"]'); await viewStill(alice);
   const up = await viewDir(alice);
   check('from the front, the triangle above the cube turns the view 90° to look from the top', up.join() === '0,0,-1', up.join());
@@ -205,6 +256,70 @@ try {
   await S(alice, () => { const v = window.JunctionPartStudio.viewport; v.camera.zoom *= 3; v.camera.updateProjectionMatrix(); v.invalidate(); });
   await viewMenu(alice, 'fit');
   check('Zoom to fit from the menu', near(await S(alice, () => window.JunctionPartStudio.viewport.camera.zoom), zoom0, zoom0 * 0.05));
+  // ================================================================ Onshape's keys: the view without a mouse
+  const press = async (k) => { await focusViewport(alice); await alice.keyboard.press(k); await viewStill(alice); };
+  const front = async () => { await S(alice, () => window.JunctionPartStudio.viewport.setView('front', false)); await viewStill(alice); };
+  await front();
+  await press('ArrowLeft');
+  const l15 = await viewDir(alice);
+  check('← turns the view 15° about the vertical', near(angle(l15, [0, 1, 0]), 15, 0.5) && near(l15[2], 0, 0.01) && (await upDir(alice)).join() === '0,0,1', l15.join());
+  await press('ArrowRight');
+  check('→ turns it back', (await viewDir(alice)).join() === '0,1,0', (await viewDir(alice)).join());
+  await press('ArrowUp');
+  check('↑ turns it 15° about the horizontal', near(angle(await viewDir(alice), [0, 1, 0]), 15, 0.5) && near((await viewDir(alice))[0], 0, 0.01), (await viewDir(alice)).join());
+  await front();
+  await press('Shift+ArrowUp');
+  check('Shift+↑ turns it 90°: from the front to the top', (await viewDir(alice)).join() === '0,0,-1', (await viewDir(alice)).join());
+  await front();
+  await press('Shift+ArrowRight');
+  check('Shift+→ turns it 90° about the vertical', near(angle(await viewDir(alice), [0, 1, 0]), 90, 0.5), (await viewDir(alice)).join());
+  await front();
+  await press('Control+ArrowLeft');
+  const r15 = await upDir(alice);
+  check('Ctrl+← rolls the view 15° counter-clockwise about the line of sight', (await viewDir(alice)).join() === '0,1,0' && near(angle(r15, [0, 0, 1]), 15, 0.5) && r15[0] > 0, r15.join());
+  await press('Control+ArrowRight');
+  check('Ctrl+→ rolls it back', (await upDir(alice)).join() === '0,0,1', (await upDir(alice)).join());
+  await press('Control+Shift+ArrowLeft');
+  check('Ctrl+Shift+← rolls it 90°, as the curved arrow does: +X is up', (await upDir(alice)).join() === '1,0,0', (await upDir(alice)).join());
+  await press('Control+Shift+ArrowRight');
+  check('Ctrl+Shift+→ rolls it back', (await upDir(alice)).join() === '0,0,1', (await upDir(alice)).join());
+  const numbered = { 1: [0, 1, 0], 2: [0, -1, 0], 3: [1, 0, 0], 4: [-1, 0, 0], 5: [0, 0, -1], 6: [0, 0, 1], 7: [-0.577, 0.577, -0.577] };
+  const wrong = [];
+  for (const [n, want] of Object.entries(numbered)) { await press(`Shift+Digit${n}`); const d = await viewDir(alice); if (!want.every((v, i) => near(d[i], v, 0.01))) wrong.push(`Shift+${n}: ${d.join()}`); }
+  check('Shift+1 … 7: front, back, left, right, top, bottom, isometric', wrong.length === 0, wrong.join('; '));
+  const z0 = await S(alice, () => window.JunctionPartStudio.viewport.camera.zoom);
+  await S(alice, () => { const v = window.JunctionPartStudio.viewport; v.camera.zoom *= 4; v.camera.updateProjectionMatrix(); v.invalidate(); });
+  await press('f');
+  check('F zooms to fit', near(await S(alice, () => window.JunctionPartStudio.viewport.camera.zoom), z0, z0 * 0.05));
+  await press('Escape'); await press('Escape');
+  await press('n');
+  check('N with nothing selected leaves the view as it is', near((await viewDir(alice))[0], -0.577, 0.01), (await viewDir(alice)).join());
+  await alice.click('.cad-features [data-default-geometry=right]');
+  await press('n');
+  check('N with a plane selected looks straight at it', (await viewDir(alice)).join() === '-1,0,0', (await viewDir(alice)).join());
+  await press('Escape');
+  // typing is typing: in a field the keys are the field's
+  await press('Shift+Digit7');
+  await alice.click('.cad-features [data-feature-filter]');
+  for (const k of ['ArrowLeft', 'Shift+ArrowUp', 'Control+ArrowLeft', 'Shift+Digit1']) await alice.keyboard.press(k);
+  await viewStill(alice);
+  check('in a text field the arrows and Shift+1 do not turn the view', near((await viewDir(alice))[0], -0.577, 0.01) && (await upDir(alice))[2] > 0.5, (await viewDir(alice)).join());
+  await alice.fill('.cad-features [data-feature-filter]', '');
+  // where the keys are told: the sheet of keys, the view menu, the arrows' tooltips
+  await focusViewport(alice); await alice.keyboard.press('?');
+  await alice.waitForSelector('[data-shortcuts]');
+  const sheet = await alice.textContent('[data-shortcuts]');
+  check('the sheet of keys (?) lists the turns, the rolls and the views', ['Turn the view 15°', 'Turn the view 90°', 'Roll the view 15°', 'Roll the view 90°', 'Shift+7', 'Isometric'].every((t) => sheet.includes(t)) && /Ctrl\+Shift\+← →|Cmd\+Shift\+← →/.test(sheet), sheet.slice(0, 400));
+  await alice.keyboard.press('Escape');
+  await alice.click('.cad-viewcube [data-view-menu]');
+  const frontRow = await alice.textContent('.cad-view-menu [data-view-item=std-front]'), isoRow = await alice.textContent('.cad-view-menu [data-view-item=std-iso]');
+  check('the view menu shows each view\'s key (Front Shift+1, Isometric Shift+7)', /Front\s*Shift\+1/.test(frontRow) && /Isometric\s*Shift\+7/.test(isoRow), `${frontRow} / ${isoRow}`);
+  await alice.keyboard.press('Escape');
+  await alice.hover('.cad-viewcube [data-turn="Turn left"]');
+  await alice.waitForTimeout(600);
+  const tipNow = await S(alice, () => Array.from(document.querySelectorAll('[role=tooltip], .cad-tip')).map((e) => e.textContent).join(' | '));
+  check('an arrow beside the cube tells its key', /Shift\+←/.test(tipNow) && /15°/.test(tipNow), tipNow);
+  await alice.mouse.move(cube.x - 100, cube.y + 300);
   check('no script errors', alice.errors.length === 0, alice.errors.join(' | '));
 
   // ================================================================ dark

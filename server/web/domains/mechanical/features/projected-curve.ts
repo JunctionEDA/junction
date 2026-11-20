@@ -31,7 +31,7 @@ export default defineFeature<ProjectedCurveParams>({
   hint: "Project sketch curves onto faces, or find the 3D curve two sketches on different planes both show.",
   keywords: "project sketch onto face wrap curve to curve 3d two views",
   icon: '<path class="f" d="M3 15l9-4 9 4-9 4z"/><path class="t" d="M3 15l9-4 9 4-9 4z"/><path class="d t" d="M7 4v10M17 4v10"/><path d="M5 4h14"/><path d="M7 15.3c3 1.8 7 1.8 10-1.4"/>',
-  toolbarOrder: 64.2, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 31,
+  toolbarOrder: 64.2, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 55,
   defaults: () => ({ method: "face", curves: [], faces: [], direction: null, curves2: [] }),
   schema: [
     { key: "method", label: "Method", kind: "enum", options: [{ value: "face", label: "Sketch to face" }, { value: "curves", label: "Curve to curve" }] },

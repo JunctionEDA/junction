@@ -143,9 +143,20 @@ try {
   check('the toolbar has every sheet metal tool', SM.every((t) => titles.includes(t)), SM.filter((t) => !titles.includes(t)).join(', '));
   check('the toolbar has every frame tool', FR.every((t) => titles.includes(t)), FR.filter((t) => !titles.includes(t)).join(', '));
   const menus = await S(page, () => Array.from(document.querySelectorAll('.cad-toolbar [data-menu]')).map((m) => m.getAttribute('data-items')));
-  check('the joints and the corners are each one button with a caret', menus.some((m) => m === 'Make joint|Modify joint|Rip') && menus.some((m) => m === 'Corner|Bend relief|Corner break'), menus.join(' / '));
-  const tip = await page.getAttribute('.cad-toolbar [data-tool=Flange]', 'aria-description').catch(() => null);
-  check('a sheet metal button has a tooltip', !!tip && /bend/i.test(tip), String(tip));
+  // each section is one button and a caret, as Onshape groups them: the tools in Onshape's order, the joints and the corners together
+  check('the sheet metal tools are one Sheet metal ▾ button, in order, the joints and the corners together', menus.some((m) => m === SM.join('|')), menus.join(' / '));
+  check('the frame tools are one Frames ▾ button', menus.some((m) => m === FR.join('|')), menus.join(' / '));
+  await page.click('.cad-toolbar [data-menu="Sheet metal"]');
+  const parts = await S(page, () => Array.from(document.querySelectorAll('.cad-tb-menu[data-menu-of="Sheet metal"] [role=group]')).map((g) => Array.from(g.querySelectorAll('[data-tool]')).map((b) => b.getAttribute('data-tool')).join('|')));
+  check('… its drop-down keeps each family apart, between rules', parts.includes('Make joint|Modify joint|Rip') && parts.includes('Corner|Bend relief|Corner break'), parts.join(' / '));
+  await page.keyboard.press('Escape');
+  // a tool in the drop-down has its tooltip as a button on the bar has
+  await page.click('.cad-toolbar [data-menu="Sheet metal"]');
+  await page.hover('.cad-tb-menu[data-menu-of="Sheet metal"] [data-tool=Flange]');
+  await page.waitForTimeout(500);
+  const tip = await S(page, () => document.querySelector('.cad-tip')?.textContent || null);
+  await page.keyboard.press('Escape');
+  check('a sheet metal tool has a tooltip', !!tip && /bend/i.test(tip), String(tip));
   await page.setViewportSize({ width: 1500, height: 900 });
   await page.waitForTimeout(300);
 
@@ -303,10 +314,10 @@ try {
   const flatBob = await S(bob, () => window.JunctionPartStudio.kernel.call('sm-flat-pattern', {}));
   check('and the same flat pattern', Math.abs(flatBob.models[0].pieces[0].area - flat1.models[0].pieces[0].area) < 1e-6);
 
-  // the toolbar, for the screenshot: the sheet metal and frame sections, the corner variants open
+  // the toolbar, for the screenshot: the sheet metal and frame sections, the sheet metal drop-down open
   await page.setViewportSize({ width: 2600, height: 900 });
   await page.waitForTimeout(400);
-  await page.click('.cad-toolbar [data-menu="Corner"]').catch(() => {});
+  await page.click('.cad-toolbar [data-menu="Sheet metal"]').catch(() => {});
   await page.waitForTimeout(300);
   if (SHOTS) {
     // the frame and sheet metal sections, with the open drop-down under them

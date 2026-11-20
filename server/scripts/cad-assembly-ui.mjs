@@ -182,6 +182,21 @@ try {
   await alice.keyboard.press('Escape');
   await shot(alice, '06-hinged');
 
+  // ---------------------------------------------------------------- the part studio's view keys (Onshape's)
+  {
+    const dir = () => alice.evaluate(() => { const v = window.JunctionAssembly.viewport, d = v.target.clone().set(0, 0, -1).applyQuaternion(v.camera.quaternion); return [d.x, d.y, d.z].map((n) => Math.round(n * 1000) / 1000); });
+    const still = () => alice.waitForFunction(() => !window.JunctionAssembly.viewport.anim, null, { timeout: 10000 });
+    const press = async (k) => { await alice.evaluate(() => window.JunctionAssembly.viewport.canvas.focus()); await alice.keyboard.press(k); await alice.waitForTimeout(50); await still(); };
+    await press('Shift+Digit1');
+    const f = await dir();
+    await press('Shift+ArrowUp');
+    const t = await dir();
+    await press('ArrowLeft');
+    const l = await dir();
+    const ang = Math.acos(Math.max(-1, Math.min(1, l[0] * t[0] + l[1] * t[1] + l[2] * t[2]))) * 180 / Math.PI;
+    check('in an assembly the view keys work too: Shift+1 front, Shift+↑ 90° to the top, ← 15°', f.join() === '0,1,0' && t.join() === '0,0,-1' && Math.abs(ang - 15) < 0.5, `${f} / ${t} / ${ang.toFixed(1)}°`);
+  }
+
   // ---------------------------------------------------------------- drag the lid within its limits
   await alice.evaluate(() => { const a = window.JunctionAssembly, v = a.viewport; v.setView('iso', false); a.fit(); });
   await alice.waitForTimeout(300);

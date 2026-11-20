@@ -5,3 +5,6 @@
 // tooltip host its buttons use: ui/ViewCubeControl.tsx.  Make the viewport with { viewButtons: false, triad: false }.
 export { ViewCubeControl, type ViewCubeOptions, type ViewMenuParts } from "./ui/ViewCubeControl";
 export { TipHost } from "./ui/Tip";
+// Onshape's keys for turning the view of any Viewport3D (arrows, Shift + arrows, Ctrl/Cmd + ← → roll, Shift + 1 … 7):
+// ui/viewkeys.ts.  The assembly takes them as the part studio does.
+export { VIEW_KEYS, viewKey, viewShortcut } from "./ui/viewkeys";

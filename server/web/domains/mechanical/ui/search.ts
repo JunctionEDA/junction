@@ -3,7 +3,15 @@
 // itself is in Overlays.tsx and the list it searches comes from commands.ts.
 
 /** What can be searched: anything with a name and, perhaps, other words for it. */
-export interface Searchable { title: string; keywords?: string }
+export interface Searchable {
+  title: string; keywords?: string;
+  /**
+   * Words that are what this entry is, not only near it: a feature's result ("cut" and "pocket" are Extrude:
+   * remove).  Typed whole, one counts as much as the start of the name, so "cut" finds Extrude: remove before a
+   * tool that only has the word in its name (Cut list).
+   */
+  meaning?: string;
+}
 
 /** The other words people look for a feature or a tool by (the tool search), by its id. */
 export const KEYWORDS: { [id: string]: string } = {
@@ -104,10 +112,10 @@ export const RESULT_WORDS: { [value: string]: string } = { add: "boss pad join",
  * then the start of a word of it), then the other words it is known by ("cut" finds Extrude: remove), then
  * those letters anywhere in the name, then the first letters of its words.
  */
-export function matchScore(title: string, q: string, keywords = ""): number {
+export function matchScore(title: string, q: string, keywords = "", meaning = ""): number {
   const t = title.toLowerCase(), s = q.trim().toLowerCase();
   if (!s) return 0;
-  if (t.startsWith(s)) return 0;
+  if (t.startsWith(s) || meaning.toLowerCase().split(/\s+/).includes(s)) return 0;
   const word = t.split(/[\s:-]+/).findIndex((w) => w.startsWith(s));
   if (word >= 0) return 1 + word;
   const known = keywords.toLowerCase().split(/\s+/).filter(Boolean);
@@ -124,8 +132,10 @@ export function matchScore(title: string, q: string, keywords = ""): number {
  */
 export function searchCommands<E extends Searchable>(all: readonly E[], q: string, limit = 12): { entry: E; by: string | null }[] {
   const s = q.trim().toLowerCase();
-  let found = all.map((entry, i) => ({ entry, i, score: matchScore(entry.title, q, entry.keywords) })).filter((x) => x.score >= 0);
+  let found = all.map((entry, i) => ({ entry, i, score: matchScore(entry.title, q, entry.keywords, entry.meaning) })).filter((x) => x.score >= 0);
   if (s && found.some((x) => x.score < 10)) found = found.filter((x) => x.score < 10);
+  // the word that found it, when its name did not
+  const named = (title: string) => title.toLowerCase().startsWith(s) || title.toLowerCase().split(/[\s:-]+/).some((w) => w.startsWith(s));
   return found.sort((a, b) => a.score - b.score || a.i - b.i).slice(0, s ? limit : 80)
-    .map((x) => ({ entry: x.entry, by: s && (x.score === 5 || x.score === 7) ? (x.entry.keywords || "").split(/\s+/).find((w) => w.toLowerCase().startsWith(s)) || null : null }));
+    .map((x) => ({ entry: x.entry, by: s && x.score < 10 && !named(x.entry.title) ? `${x.entry.meaning || ""} ${x.entry.keywords || ""}`.split(/\s+/).find((w) => w && w.toLowerCase().startsWith(s)) || null : null }));
 }

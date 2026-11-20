@@ -808,7 +808,7 @@ Drawn from the registries; nothing is listed by hand. It shows the tools of the 
 (`data-mode` on `.cad-toolbar`), in the order an Onshape user's hands know, the most used first:
 
 ```
-model    undo redo │ Sketch │ Extrude Revolve Sweep Loft │ Fillet Chamfer Draft Shell Hole │ Boolean Split Transform▾ │ Pattern▾ Mirror │ Surface▾ │ Plane▾ │ Board▾ │ Measure Section │ History │ More▾   [Search tools… S]
+model    undo redo │ Sketch │ Extrude Revolve Sweep Loft Thicken Enclose │ Fillet▾ Chamfer Draft Rib Shell Hole │ Boolean Split Transform▾ Wrap Composite part │ Direct edit▾ │ Pattern▾ Mirror │ Surface▾ │ Plane▾ Curve▾ Mate connector Variable │ Frames▾ │ Sheet metal▾ │ Board▾ │ Measure Section │ History │ More▾   [Search tools… S]
 sketch   undo redo │ Line Rectangle▾ Circle Arc▾ Slot Point Construction │ Sketch fillet Offset Use edge Mirror Trim Extend │ the twelve constraints │ Dimension │ Extrude Revolve │ More▾   [Search tools… S]  ✓ Finish sketch  ✗
 dialog   <icon> <name>  <what the listening field wants> │ More▾                                              [Search tools… S]  ✓  ✗
 view     (no edit rights) Measure Section │ History │ More▾                                                    [Search tools… S]
@@ -825,6 +825,12 @@ view     (no edit rights) Measure Section │ History │ More▾               
   that are not variants of each other (Fillet, Chamfer, Draft; Sweep, Loft; Boolean, Split) have a button each.
   In the DOM the face is `[data-tool][data-variant]`, the caret `[data-menu][data-items]`, the open list
   `.cad-tb-menu[data-menu-of]`.
+- **A specialist section is one button and a caret**, as Onshape groups them (`commands.ts GROUPS`): Direct edit ▾
+  (Modify fillet, Delete face, Move face, Replace face), Surface ▾, Frames ▾ (Frame, Trim, Gusset, End cap, Cut
+  list) and Sheet metal ▾ (every sheet metal feature and Flat pattern, its families — Make joint, Corner — kept
+  together between rules in the drop-down). Its face runs the tool used last, like a family's. A feature only says
+  its `toolbarSection`; the section decides. A family keeps its own `toolbarMenu` (the joints, the corners), which
+  matters where the section is not grouped. Curve ▾ (in Reference) is a family of eight and works the same way.
 - A **tool** (`core/tool.ts`) names its group (`edit`, `sketch`, `feature`, `inspect`, `view`, `file`). Tools in
   `sketch` are the sketch toolbar, in the parts their `order` puts them in (draw below 100, modify below 200,
   constraints below 300, dimension from 300). A tool with `button: false` has no button (Select, Hide, Isolate)
@@ -833,10 +839,16 @@ view     (no edit rights) Measure Section │ History │ More▾               
   (`[data-menu=More]`, with `data-items` and, beside it, each item's group in `data-item-groups`). Every button
   says how long it keeps its place (`toolbarKeep` on a feature, `keep` on a tool; 50 when absent, 100 never
   leaves): when the window is too narrow, the buttons with the lowest number go under More first, and come
-  back when there is room. `keep: 0` is always under More: the `view` group (Planes, Display, Perspective —
+  back when there is room. The tools a part is mostly made with keep their buttons longest (Sketch, Extrude,
+  Revolve, Fillet … 75 and up, Measure 80, Section 79, History 77), then Transform, Draft and Split, then the
+  grouped sections and Curve ▾ alike (`GROUP_KEEP`, 55; Board 60), then the single specialist buttons (Thicken,
+  Enclose, Rib, Wrap, Composite part, Mate connector, Variable). So at 1500 px the bar has everything but those
+  single specialist buttons (they are under More), every group button included, and at 1920 px everything; the
+  search field narrows below 1700 px before a tool leaves. `keep: 0` is always under More: the `view` group (Planes, Display, Perspective —
   the view cube's menu has them too), the `file` group unless a tool gives itself a `keep` (History does: its
   button shows that its drawer is open; Import and Export do not), Comment and Delete. At
-  1100 px the part studio keeps everything up to Plane ▾ on the bar; a sketch keeps the draw and modify tools,
+  1100 px the part studio keeps Sketch, Extrude, Revolve, Sweep, Loft, Fillet ▾, Chamfer, Shell, Hole, Boolean,
+  Transform ▾, Pattern ▾, Mirror, Plane ▾, Measure, Section and History on the bar; a sketch keeps the draw and modify tools,
   Coincident, Horizontal, Vertical and Dimension. More lists what it holds under the sections' names.
 - **The tool search** is a field at the right end of the bar (`[data-tool-search]`, showing its key): a click
   opens the search in the field's place; **S** opens it at the pointer, **Ctrl/Cmd+K** in the middle
@@ -883,14 +895,17 @@ among the `sketch` tools, so a letter may mean one thing in a sketch and another
 | F / Z | Zoom to fit / to the selection | Sketch fillet / — |
 | W, P, N, S, ? | Display mode, planes on and off, view normal to, tool search, the sheet of keys | the same |
 | Shift+1 … 7 | Front, back, left, right, top, bottom, isometric | the same |
-| ← ↑ → ↓ | Turn the view 15° (Shift: 90°) | — |
+| ← ↑ → ↓ | Turn the view 15° (Shift: 90°) | the same |
+| Ctrl/Cmd + ← → | Roll the view 15° about the line of sight (Shift: 90°) | the same |
 | Shift+S E W F C H P | Sketch, Extrude, Revolve, Fillet, Chamfer, Hole, Plane (`studio.ts FEATURE_KEYS`) | the same, but Sketch; Extrude and Revolve take the open sketch |
 | L R C A, Q, T O U, V B E D | — | Line, Rectangle, Circle, Arc; Construction; Trim, Offset, Use edge; Vertical, Parallel, Equal, Dimension |
 | Del, Esc, Enter, Tab, F2, Ctrl+Z / Y, Ctrl+K | delete the selected features; step back (field → dialog → selection); accept the dialog; the next field; rename; undo / redo; tool search | delete; put the tool down, then clear the selection; accept a typed value; —; —; undo / redo; tool search |
 
-Do not give a tool outside the `sketch` group a letter another such tool has (`static/tests/mechanical-doc.test.js`
+The view keys (arrows, Ctrl/Cmd + ← →, Shift + 1 … 7) are Onshape's and live in `ui/viewkeys.ts` (`viewKey`, and
+`VIEW_KEYS` for the sheet of keys), which the assembly takes too (`api.ts`); they are not taken while a text field,
+a menu or a slider has the keyboard. Do not give a tool outside the `sketch` group a letter another such tool has (`static/tests/mechanical-doc.test.js`
 checks it), nor one of the letters `studio.ts` takes itself (F, Z, N, S). The assembly's keys are its own
-(I Insert, F Fix, E Explode).
+(I Insert, F Fix, E Explode), with the view keys above.
 
 A tool that takes over the pointer sets `studio.view.pointerTool = { down, move, up }` and `studio.keyHandler`,
 and draws its rubber band with `studio.view.setOverlay(segments, dots)`.
@@ -1015,12 +1030,19 @@ the pointer, a double click with the middle button or F fits. The **view cube** 
 about 180 px with its controls; the element is also `.v3-views`; the cube itself is `ui/ViewCubeControl.tsx`,
 which an assembly mounts too, through `api-ui.ts`) is laid out as Onshape's: a grey-white cube
 with bevelled edges, turning with the camera, its faces named in plain ink so the names foreshorten with them.
-Its 6 faces, 12 edges and 8 corners are each a button (`data-region`, `data-from`: the direction it looks
-from; a face also `data-face` and `data-view`) that turns the view to look from there, and the one under the
-pointer lights up in `--mark`. The axis triad (X red, Y green, Z blue, with letters) is drawn over it from its
+Its 6 faces, 12 edges and 8 corners are each a target (`data-region`, `data-from`: the direction it looks
+from; a face also `data-face` and `data-view`) that turns the view to look from there. **A corner or an edge is a
+zone, not only its bevel**: a corner is its bevel, the ends of its three edges and a square of each of its three
+faces (`ZONE` px), an edge its bevel and a strip of each face beside it, and a face keeps the middle of itself, as
+the ViewCube of other CAD programs has it; so every corner is about 30 px across on screen. Each zone is pieces in
+their planes (`[data-piece]`, hit-tested by the browser in 3D), so what is in front wins. The zone under the
+pointer lights up in `--mark` and a hint under the cube names it (`data-cube-hint`: "Front Right Top corner",
+with Shift+7 for the isometric one; "Front view Shift+1"). In a script, `cad-chrome.mjs cubeAt(page, from, { on })`
+says where a zone is on screen and `cubeClick` clicks it with the pointer. The axis triad (X red, Y green, Z blue, with letters) is drawn over it from its
 back bottom left corner; the viewport's own corner triad is off in a part studio. Around it the four triangles
-turn the view 90° about the screen's axes (`data-turn`: Turn up, down, left, right; the arrow keys still turn
-15°) and the two curved arrows roll it 90° (Roll left, Roll right). The cube with ▼ below it opens the view menu
+turn the view 90° about the screen's axes (`data-turn`: Turn up, down, left, right; Shift + the arrow keys do
+the same, the arrow keys alone turn 15°) and the two curved arrows roll it 90° (Roll left, Roll right; Ctrl/Cmd +
+Shift + ← →, and 15° without Shift); their tooltips say so. The cube with ▼ below it opens the view menu
 (`data-view-menu`; items `data-view-item`): the standard views (`std-iso`, `std-front`, …), zoom to fit (`fit`),
 to selection and normal to, the projection, the display modes, the planes, the section view and the named
 views. Model space is millimetres, Z up; Front looks from −Y, Right from +X, Top from +Z with +Y up.
@@ -1320,8 +1342,8 @@ E2E_PG_URL=postgres://user:pass@127.0.0.1:5432/db E2E_JWT_SECRET=dev E2E_BASE=ht
 |---|---|
 | **`cad-e2e`** | **the whole story, two people, one project**: a constrained tray, shell, fillet, patterned bosses, the board in the tray, the tray driving the board, an opening following a connector, an assembly with a hinged lid and the board, interference, the bill of materials, measure, versions compared, STEP. Run it after any change that crosses folders. |
 | `cad-ui` | tabs, sketch, extrude, picking, two people editing, rollback, the stored file |
-| `cad-planes-ui` | the default planes and the view cube as Onshape's: the isometric start, names painted on the planes, the orange outline under the pointer, a corner dragged to resize a plane (undone, kept over a reload, seen by a second person), the cube's faces, edges, corners, arrows, roll and menu (with `SHOTS`: planes and cube, light and dark) |
-| `cad-ux-ui` | **how it feels**: light by default, planes with their names painted on them and hidden, a new sketch waiting for its plane, the toolbar following the mode and fitting 1100 px, the tool search by name and synonym, units and typed conversions, a fillet's field that keeps adding, dialogs that stay put, the feature list, the view cube, box selection, the menus (with `SHOTS`: light and dark, 1500 and 1100 px) |
+| `cad-planes-ui` | the default planes and the view cube as Onshape's: the isometric start, names painted on the planes, the orange outline under the pointer, a corner dragged to resize a plane (undone, kept over a reload, seen by a second person), the cube's faces, edges and every visible corner clicked with the pointer where they are on screen (bevel and the face beside it), its hover hint, arrows, roll and menu; Onshape's view keys (arrows, Shift, Ctrl + ← →, Shift + 1 … 7, F, N; none in a text field) and where they are told (with `SHOTS`: planes and cube, a corner under the pointer, light and dark) |
+| `cad-ux-ui` | **how it feels**: light by default, planes with their names painted on them and hidden, a new sketch waiting for its plane, the toolbar following the mode, fitting 1100 px, and at 1500 and 1920 px keeping the most used tools with each specialist section one button, the tool search by name and synonym, units and typed conversions, a fillet's field that keeps adding, dialogs that stay put, the feature list, the view cube, box selection, the menus (with `SHOTS`: light and dark, 1500 and 1100 px) |
 | `cad-sketch-ui` | the sketcher: every tool, constraints, dimensions, conflicts |
 | `cad-features-ui`, `cad-patterns-ui` | the solid features; reference geometry, patterns, sweep, variables |
 | `cad-collab-ui` | presence, Follow, two people in one dialog, the live tab list, comments (`ONLY=tabs,comments`) |

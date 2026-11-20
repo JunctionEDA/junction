@@ -98,7 +98,7 @@ export default defineFeature<IsoclineParams>({
   hint: "Curves on faces where the surface is at an angle to a direction: silhouettes, parting lines, draft checks.",
   keywords: "parting line silhouette draft angle curve on face direction",
   icon: '<path class="f" d="M5 6c0-2 14-2 14 0v12c0 2-14 2-14 0z"/><path class="t" d="M5 6c0 2 14 2 14 0M5 6v12c0 2 14 2 14 0V6"/><path d="M12 8v12"/><path class="d t" d="M2 13h4M18 13h4"/>',
-  toolbarOrder: 64.7, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 31,
+  toolbarOrder: 64.7, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 55,
   defaults: () => ({ faces: [], direction: null, angle: 0 }),
   schema: [
     { key: "faces", label: "Faces", kind: "refs", of: ["face"] },

@@ -26,7 +26,7 @@
 //
 // With SHOTS it also saves screenshots, light and dark, 1500 and 1100 pixels wide.
 import fs from 'node:fs';
-import { openPanel, sketchOn, tool, toolTitles, toolbarMode, viewFrom, viewMenu } from './cad-chrome.mjs';
+import { cubeClick, openPanel, sketchOn, tool, toolTitles, toolbarMode, viewFrom, viewMenu } from './cad-chrome.mjs';
 import { S, click, edgeOnScreen, faceOnScreen, focusViewport, jwt, launch, newPartStudio, previewed, screenOf, settled, signedIn, sketchPoint, state, user, viewDir, viewStill } from './cad-ux-lib.mjs';
 
 const SHOTS = process.env.SHOTS || '';
@@ -151,6 +151,28 @@ try {
   check('… a tool with variants is one button and a caret', await page.locator('.cad-toolbar [data-split]').count() >= 3 && await page.locator('.cad-toolbar [data-split] [data-menu=Pattern]').count() === 1 && (await page.getAttribute('.cad-toolbar [data-menu=Reference]', 'data-items')) === 'Plane|Axis|Point|Helix');
   const wide = await barFit();
   check('… what is used less is under More, and the tool search is at the right end', !wide.scrolls && wide.inside && wide.search && ['Display', 'Planes', 'Perspective', 'Import', 'Export', 'Comment', 'Delete'].every((t) => wide.more.includes(t)) && modelBar.includes('History'), JSON.stringify(wide));
+  // at the widths most screens have, the tools a part is mostly made with keep their buttons, and each specialist
+  // section (direct editing, surfacing, curves, frames, sheet metal) is one button and a caret, as Onshape groups them
+  const MOST_USED = ['Sketch', 'Extrude', 'Revolve', 'Sweep', 'Loft', 'Fillet', 'Chamfer', 'Shell', 'Hole', 'Boolean', 'Linear pattern', 'Mirror', 'Plane', 'Measure', 'Section', 'History'];
+  const GROUPS = { 'Direct edit': ['Modify fillet', 'Delete face', 'Move face', 'Replace face'], Surface: ['Offset surface', 'Boundary surface', 'Fill', 'Move boundary', 'Ruled surface', 'Mutual trim', 'Constrained surface'], Curve: ['Fit spline', 'Projected curve'], Frames: ['Frame', 'Trim', 'Gusset', 'End cap', 'Cut list'], 'Sheet metal': ['Sheet metal model', 'Flange', 'Hem', 'Tab', 'Bend', 'Form', 'Make joint', 'Modify joint', 'Rip', 'Corner', 'Bend relief', 'Corner break', 'Finish sheet metal', 'Flat pattern'] };
+  const layoutAt = async (width) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.waitForTimeout(300);
+    return S(page, () => ({
+      bar: Array.from(document.querySelectorAll('.cad-toolbar [data-group]:not([data-group=more]) [data-tool]:not([data-variant]), .cad-toolbar [data-group]:not([data-group=more]) [data-menu]')).flatMap((b) => (b.getAttribute('data-items') || b.getAttribute('data-tool')).split('|')),
+      carets: Object.fromEntries(Array.from(document.querySelectorAll('.cad-toolbar [data-group]:not([data-group=more]) [data-menu]')).map((m) => [m.getAttribute('data-menu'), (m.getAttribute('data-items') || '').split('|')])),
+      singles: Array.from(document.querySelectorAll('.cad-toolbar [data-group]:not([data-group=more]) [data-tool]:not([data-variant])')).map((b) => b.getAttribute('data-tool')),
+      fit: (() => { const t = document.querySelector('.cad-toolbar'); return t.scrollWidth <= t.clientWidth + 1; })(),
+    }));
+  };
+  for (const width of [1500, 1920]) {
+    const l = await layoutAt(width);
+    check(`at ${width} px the most used tools are on the bar`, l.fit && MOST_USED.every((t) => l.bar.includes(t)), MOST_USED.filter((t) => !l.bar.includes(t)).join(', ') || l.bar.join(' '));
+    const groupsOk = Object.entries(GROUPS).every(([g, items]) => !l.carets[g] || items.every((t) => l.carets[g].includes(t))) && Object.values(GROUPS).flat().every((t) => !l.singles.includes(t));
+    check(`at ${width} px each specialist section is one button and a caret, never a row of buttons`, groupsOk && (width < 1920 || Object.keys(GROUPS).every((g) => l.carets[g])), JSON.stringify(Object.fromEntries(Object.keys(GROUPS).map((g) => [g, l.carets[g] ? l.carets[g].length : 0]))) + ' singles: ' + l.singles.join(' '));
+    if (width === 1920) await shot('01d-toolbar-1920');
+  }
+  await layoutAt(1500);
   // every icon is drawn: none is the placeholder square, and no two are alike
   const icons = await page.$$eval('.cad-toolbar [data-group] [data-tool] svg', (els) => els.map((e) => e.innerHTML));
   check('every button has an icon of its own', icons.length > 15 && new Set(icons).size === icons.length && icons.every((i) => i.length > 30));
@@ -557,7 +579,7 @@ try {
   await shot('10-reference-plane');
 
   // ================================================================ 6. the viewport
-  await page.click('.cad-viewcube [data-face=top]');
+  await cubeClick(page, 'top');
   await viewStill(page);
   check('a face of the view cube turns the view', (await viewDir(page)).join() === '0,0,-1', (await viewDir(page)).join());
   await key('Shift+7');

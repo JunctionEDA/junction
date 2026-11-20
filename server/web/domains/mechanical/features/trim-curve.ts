@@ -73,7 +73,7 @@ export default defineFeature<TrimCurveParams>({
   hint: "Shorten or lengthen a curve at one end, by a distance or up to a point, plane or face.",
   keywords: "trim extend shorten lengthen curve end cut bound",
   icon: '<path d="M3 18c4-1 7-5 9-10"/><path class="d t" d="M12 8c1-2 2-3.5 3.5-5"/><path d="M8 5l8 6"/><circle class="s" cx="12" cy="8" r="1.8"/>',
-  toolbarOrder: 64.6, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 31,
+  toolbarOrder: 64.6, toolbarSection: "reference", toolbarMenu: "Curve", toolbarKeep: 55,
   defaults: () => ({ curve: null, end: "end", by: "distance", distance: -5, bound: null }),
   schema: [
     { key: "curve", label: "Curve", kind: "refs", of: ["edge"], single: true, datums: ["curve"], sketch: true },
