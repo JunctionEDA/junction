@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { viewFrom } from './cad-chrome.mjs';
 import { setCad } from './cad-setting.mjs';
 
 const require = createRequire(import.meta.url);
@@ -167,7 +168,7 @@ try {
   await page.uncheck('.cad-dialog input[data-param=thin]');
   await page.click('.cad-dialog [data-accept]');
   await settled(page, 2);
-  await page.click('.v3-views [data-view=fit]');
+  await viewFrom(page, 'fit');
   await page.waitForTimeout(300);
   check('the box is built', (await statuses(page)) === 'sketch:ok extrude:ok', await statuses(page));
   await shot(page, '02-box');
@@ -295,14 +296,14 @@ try {
   const holes = await S(page, () => window.JunctionPartStudio.getState().bodies[0].mesh.faces.names.filter((n) => n.endsWith(':wall')).length);
   check('four hole walls, named', holes === 4, `${holes}`);
   const mass1 = await S(page, () => window.JunctionPartStudio.kernel.call('mass-properties', { body: window.JunctionPartStudio.getState().bodies[0].id }));
-  await page.click('.v3-views [data-view=iso]');
+  await viewFrom(page, 'iso');
   await page.waitForTimeout(500);
   await shot(page, '08-enclosure');
   // look into it from above
   await page.click('.v3-views [data-view=top]');
   await page.waitForTimeout(500);
   await shot(page, '09-enclosure-top');
-  await page.click('.v3-views [data-view=iso]');
+  await viewFrom(page, 'iso');
 
   // ---------------------------------------------------------------- edit the box: every later feature follows
   await page.dblclick('[data-feature-row][data-feature-type=extrude] >> nth=0');
@@ -342,7 +343,7 @@ try {
   await page.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.kernel.state === 'ready' && s.reports[s.editing.draft.id]?.status === 'ok' && s.bodies.length === 1; }, null, { timeout: 30000 });
   await page.click('.cad-dialog [data-accept]');
   await settled(page, 2);
-  await page.click('.v3-views [data-view=fit]');
+  await viewFrom(page, 'fit');
   await page.waitForTimeout(300);
   const tube = await S(page, () => window.JunctionPartStudio.kernel.call('mass-properties', { body: window.JunctionPartStudio.getState().bodies[0].id }));
   check('Revolve about the sketch\'s vertical axis makes a tube', Math.abs(tube.volume - Math.PI * (225 - 25) * 20) < 1, `${Math.round(tube.volume)} mm³`);
@@ -385,7 +386,7 @@ try {
   await page.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.kernel.state === 'ready' && s.bodies.length === 2; }, null, { timeout: 30000 });
   await page.click('.cad-dialog [data-accept]');
   await settled(page, 4);
-  await page.click('.v3-views [data-view=fit]');
+  await viewFrom(page, 'fit');
   await page.waitForTimeout(400);
   check('Transform copies the body', (await S(page, () => window.JunctionPartStudio.getState().bodies.map((b) => b.name).join())) === 'Part 1,Part 1 copy');
   await shot(page, '12-revolve-chamfer-copy');

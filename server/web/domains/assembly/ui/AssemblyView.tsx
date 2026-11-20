@@ -8,6 +8,7 @@ import { InstanceList } from "./InstanceList";
 import { MateDialog } from "./MateDialog";
 import { MateList } from "./MateList";
 import { Caption, Glyph, useAssembly } from "./parts";
+import { TipHost, ViewCubeControl } from "../../mechanical/api-ui";
 
 function Toolbar({ assembly }: { assembly: AssemblyEditor }) {
   const s = useAssembly(assembly, (x) => x);
@@ -142,11 +143,13 @@ export function AssemblyView({ assembly, canvasHost }: { assembly: AssemblyEdito
             {form ? <FormDialog key={form.title} assembly={assembly} form={form} /> : null}
             <ExplodeBar assembly={assembly} />
             <StatusNote assembly={assembly} />
+            <ViewCubeControl viewport={assembly.viewport} fit={() => assembly.fit()} />
           </div>
           {bottom.length ? <aside className="cad-dock flex flex-col min-h-0 h-[38%] flex-none bg-bench border-t border-line" data-side="bottom">{bottom.map((p) => <Panel key={p.id} assembly={assembly} panel={p} />)}</aside> : null}
         </div>
         {right.length ? <aside className="cad-dock flex flex-col min-h-0 w-72 flex-none bg-bench border-l border-line">{right.map((p) => <Panel key={p.id} assembly={assembly} panel={p} />)}</aside> : null}
       </div>
+      <TipHost />
     </div>
   );
 }

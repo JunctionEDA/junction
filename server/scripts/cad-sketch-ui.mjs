@@ -97,6 +97,10 @@ const newSketch = async (n) => {
   await page.click('.cad-features [data-default-geometry=top]');
   await page.waitForFunction((n) => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.features.length === n && window.JunctionSketch && window.JunctionSketch.getState().ready && window.JunctionSketch.frame; }, n, { timeout: 90000 });
   await page.waitForTimeout(700);   // the camera turns to face the plane
+  // room to draw: the drawings reach about 60 mm from the origin, and a new part studio frames its 60 mm planes
+  // closely (the view cube in the top right corner would be under the far corner of the plate)
+  await page.evaluate(() => { const v = window.JunctionPartStudio.viewport; v.target.set(0, 0, 0); v.camera.zoom = (v.camera.top - v.camera.bottom) / 180; v.camera.updateProjectionMatrix(); v.invalidate(); });
+  await page.waitForTimeout(100);
 };
 
 try {

@@ -11,7 +11,7 @@ import { tokenColor, type Viewport3D } from "../../../shared/viewport3d/viewport
 import { DEFAULT_PLANES, toPlane, type DefaultPlaneId, type Frame, type Vec2, type Vec3 } from "../core/geometry";
 import type { BodyResult, DatumView, SketchView } from "../kernel/protocol";
 import { DatumLayer } from "./datums";
-import { PlaneLayer } from "./planes";
+import { PlaneLayer, type PlaneCorner } from "./planes";
 
 /** Something in the viewport that can be hovered or selected. */
 export type Pick =
@@ -79,6 +79,13 @@ export class ModelView {
   /** While set, a face, edge or vertex hit at a point it rejects is not picked (the part a section view cuts away). */
   pickClip: ((point: Vec3) => boolean) | null = null;
   private downAt: { x: number; y: number; boxing: boolean } | null = null;
+  /** the corner of a default plane under the pointer, and the one being dragged */
+  private corner: PlaneCorner | null = null;
+  private resizing: { corner: PlaneCorner; id: number; moved: boolean } | null = null;
+  /** May the person resize the default planes (they can edit, nothing else has the pointer)?  The studio says. */
+  canResizePlanes: () => boolean = () => false;
+  /** A corner drag ended: the plane's new side (mm), for the studio to keep in the document. */
+  onPlaneResized: (plane: DefaultPlaneId, size: number) => void = () => {};
   private rightAt: { x: number; y: number } | null = null;
   private readonly datums = new DatumLayer((c, w, o) => this.fatMaterial(c, w, o));
 
@@ -92,7 +99,7 @@ export class ModelView {
     c.addEventListener("pointermove", this.onMove);
     c.addEventListener("pointerdown", this.onDown);
     c.addEventListener("pointerup", this.onUp);
-    c.addEventListener("pointerleave", () => this.setHover(null, true));
+    c.addEventListener("pointerleave", () => { if (this.resizing) return; this.setCorner(null); this.setHover(null, true); });
     c.addEventListener("pointerdown", this.onRightDown);
     c.addEventListener("pointerup", this.onRightUp);
   }
@@ -121,7 +128,7 @@ export class ModelView {
     this.colors.dim.copy(ink).lerp(paper, 0.6);
     this.bodyMaterial.color.copy(this.colors.body);
     this.edgeMaterial.color.copy(this.colors.edge);
-    this.planeLayer.setColors({ tint: this.colors.plane, label: this.colors.plane.clone().lerp(ink, 0.25), select: this.colors.select, ink });
+    this.planeLayer.setColors({ dark: paper.getHSL({ h: 0, s: 0, l: 0 }).l < 0.5, select: this.colors.select });
     for (const s of this.sketches.values()) this.styleSketch(s);
     this.datums.group.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material & { color?: THREE.Color }; if (m && m.color) m.color.copy(this.colors.plane); });
     this.drawHighlight();
@@ -355,7 +362,8 @@ export class ModelView {
     const draw = (p: Pick, color: THREE.Color, strong: boolean, keep = false) => {
       if (p.kind === "plane") {
         const quad = this.planeLayer.quadOf(p.plane);
-        if (quad) { const m = new THREE.Mesh(quad.geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: strong ? 0.3 : 0.18, side: THREE.DoubleSide, depthWrite: false })); this.highlight.add(m); }
+        // the plane under the pointer only changes its outline (planes.ts); a chosen one is tinted too
+        if (quad && strong) { const m = new THREE.Mesh(quad.geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: strong ? 0.3 : 0.18, side: THREE.DoubleSide, depthWrite: false })); this.highlight.add(m); }
         return;
       }
       if (p.kind === "datum") { for (const o of this.datums.highlight(p.featureId, color, strong)) this.highlight.add(o); return; }
@@ -559,8 +567,9 @@ export class ModelView {
   }
 
   private onMove = (ev: PointerEvent): void => {
+    if (this.resizing) { this.dragCorner(ev); return; }
     if (this.viewport.navigating) return;
-    if (this.pointerTool) { this.pointerTool.move?.(ev); return; }
+    if (this.pointerTool) { this.setCorner(null); this.pointerTool.move?.(ev); return; }
     const d = this.downAt;
     if (d && (d.boxing || Math.hypot(ev.clientX - d.x, ev.clientY - d.y) >= 5)) {
       // a drag with the left button draws a selection box: solid from left to right (inside), dashed the other way (touching)
@@ -569,17 +578,68 @@ export class ModelView {
       this.showBand(d.x, d.y, ev.clientX, ev.clientY);
       return;
     }
+    // a plane's corner, near enough, is a handle to resize the plane by
+    const c = this.cornerUnder(ev);
+    this.setCorner(c);
+    if (c) { this.setHover({ kind: "plane", plane: c.plane, point: arrOf(this.planeLayer.cornerPoint(c)) }, true); return; }
     this.setHover(this.pick(ev), true);
   };
+  private cornerUnder(ev: { clientX: number; clientY: number }): PlaneCorner | null {
+    if (!this.canResizePlanes() || (this.filter && !this.filter.has("plane"))) return null;
+    const r = this.viewport.canvas.getBoundingClientRect();
+    return this.planeLayer.cornerAt(ev.clientX - r.left, ev.clientY - r.top);
+  }
+  /** Show the handle on a corner, and the resize cursor, or neither. */
+  private setCorner(c: PlaneCorner | null): void {
+    const was = this.corner;
+    if ((was ? `${was.plane}${was.su}${was.sv}` : "") === (c ? `${c.plane}${c.su}${c.sv}` : "")) return;
+    this.corner = c;
+    this.planeLayer.showHandle(c);
+    let cursor = "";
+    if (c) {
+      // which diagonal the corner lies on, as seen: the cursor's arrows point along it
+      const o = this.viewport.project(new THREE.Vector3()), at = this.viewport.project(this.planeLayer.cornerPoint(c));
+      cursor = (at.x - o.x) * (at.y - o.y) > 0 ? "nwse-resize" : "nesw-resize";
+    }
+    this.viewport.canvas.style.cursor = cursor;
+    this.viewport.canvas.dataset.planeCorner = c ? `${c.plane}:${c.su}:${c.sv}` : "";
+  }
+  /** Follow the pointer with the corner being dragged: the square stays centred on the origin. */
+  private dragCorner(ev: PointerEvent): void {
+    const r = this.resizing; if (!r || ev.pointerId !== r.id) return;
+    const p = this.planePoint(ev, DEFAULT_PLANES[r.corner.plane].frame); if (!p) return;
+    r.moved = true;
+    this.planeLayer.setDragSize(r.corner.plane, Math.max(Math.abs(p[0]), Math.abs(p[1])));
+    this.planeLayer.showHandle(r.corner);
+  }
   private onDown = (ev: PointerEvent): void => {
     if (ev.button !== 0) return;
     this.viewport.canvas.focus();
     if (this.pointerTool) { this.pointerTool.down?.(ev); return; }
+    const c = this.cornerUnder(ev);
+    if (c) {
+      this.resizing = { corner: c, id: ev.pointerId, moved: false };
+      this.setCorner(c);
+      try { this.viewport.canvas.setPointerCapture(ev.pointerId); } catch (e) { /* a synthetic event */ }
+      return;
+    }
     this.downAt = { x: ev.clientX, y: ev.clientY, boxing: false };
     try { this.viewport.canvas.setPointerCapture(ev.pointerId); } catch (e) { /* a synthetic event */ }
   };
   private onUp = (ev: PointerEvent): void => {
     if (ev.button !== 0) return;
+    const r = this.resizing;
+    if (r) {
+      this.resizing = null;
+      try { this.viewport.canvas.releasePointerCapture(ev.pointerId); } catch (e) { /* not captured */ }
+      const size = this.planeLayer.halfOf(r.corner.plane)[0] * 2;
+      // the document's size takes over from the drag's when the commit comes back; a click that did not move
+      // leaves a plane that grows with the model as it is
+      if (r.moved) this.onPlaneResized(r.corner.plane, size);
+      this.planeLayer.setDragSize(null);
+      this.setCorner(null); this.setCorner(this.cornerUnder(ev));
+      return;
+    }
     if (this.pointerTool) { this.pointerTool.up?.(ev); return; }
     const d = this.downAt; this.downAt = null;
     try { this.viewport.canvas.releasePointerCapture(ev.pointerId); } catch (e) { /* not captured */ }
@@ -693,6 +753,7 @@ export class ModelView {
 }
 
 // ---------------------------------------------------------------- small geometry helpers
+const arrOf = (v: THREE.Vector3): Vec3 => [v.x, v.y, v.z];
 function pairs(a: Float32Array): Vec2[] { const out: Vec2[] = []; for (let i = 0; i + 1 < a.length; i += 2) out.push([a[i], a[i + 1]]); return out; }
 function* polylineSegments(p: Float32Array): Generator<number> { for (let i = 0; i + 5 < p.length; i += 3) { yield p[i]; yield p[i + 1]; yield p[i + 2]; yield p[i + 3]; yield p[i + 4]; yield p[i + 5]; } }
 function worldOf(f: Frame, p: Vec2): Vec3 { return [f.origin[0] + p[0] * f.x[0] + p[1] * f.y[0], f.origin[1] + p[0] * f.x[1] + p[1] * f.y[1], f.origin[2] + p[0] * f.x[2] + p[1] * f.y[2]]; }

@@ -1,18 +1,24 @@
 // planes.ts — the default geometry of a part studio in the viewport: the origin and the Top, Front and Right
 // planes, and the names of every plane in the scene (the default ones and reference planes).
 //
-//   • A plane is as large as the model needs: its rectangle reaches a little past the model's box on its two
-//     axes (never smaller than `MIN_HALF`), and grows and shrinks as the model does.
-//   • A plane is a translucent sheet with a border.  The three cut each other along the axes, so each is drawn
-//     as its four quarters: no two quarters cross, and drawn from the back to the front they blend in the right
-//     order — where one plane is behind another the tint is deeper, and it never comes out as one flat blob.
-//     The side of a plane that faces the camera is tinted a little more than its back, and each plane has a tint
-//     of its own within one family of colour, so three sheets seen from a corner are three sheets.
-//   • A plane's name lies IN the plane, as text on its surface near a corner: it foreshortens and turns with the
-//     plane.  It is never mirrored and never upside down: seen from behind, or from below, it is turned over
-//     and moves to the corner that is then at the top left.  Its height follows the size of the plane (kept
-//     readable, and no larger than a heading, at any zoom), and it fades away as the plane turns edge-on.
-//   • Each of the four can be hidden on its own (the feature list's eye); a hidden plane is not picked.
+//   • A default plane is a square centred on the origin.  Its size is the document's when a person has dragged
+//     one of its corners (`setSizes`, from the studio item: document/plane-sizes.ts); otherwise it starts at
+//     `DEFAULT_HALF` and grows to reach a little past the model on its two axes.  A corner drag shows the new
+//     size at once (`setDragSize`) and the studio commits it when the button comes up.
+//   • A plane is a pale translucent sheet with a thin outline, the three alike.  The three cut each other along
+//     the axes, so each is drawn as its four quarters: no two quarters cross, and drawn from the back to the
+//     front they blend in the right order — where one plane is behind another the tint is deeper.  The plane
+//     under the pointer gets an orange outline and nothing else; a selected one the selection's colour.
+//   • A plane's name is text drawn ON the plane, at one corner of it, as Onshape does: it foreshortens and turns
+//     with the plane, and seen from behind it reads mirrored.  "Top" lies at the corner of −X −Y, "Front" at
+//     −X +Z, both reading along +X, and "Right" at +Y +Z reading along +Y, ending at that corner: in the
+//     isometric view all three read plainly, at Top's left corner, Front's top left and Right's top right.  A
+//     reference plane's name sits at the top left in its own frame.  Its height
+//     follows the size of the plane (kept readable, and no larger than a heading, at any zoom), and it fades away
+//     as the plane turns edge-on.
+//   • The origin is a small circle with a dot, the same size on screen at any zoom, drawn over everything.
+//   • Each of the four can be hidden on its own (the feature list's eye); a hidden plane is neither drawn, picked
+//     nor resized.
 //
 // ModelView (modelview.ts) owns one PlaneLayer; it holds no document state.
 import * as THREE from "three";
@@ -28,29 +34,48 @@ export const DEFAULT_GEOMETRY: readonly { id: DefaultGeometryId; title: string }
   { id: "origin", title: "Origin" }, { id: "top", title: "Top" }, { id: "front", title: "Front" }, { id: "right", title: "Right" },
 ];
 
-const MIN_HALF = 30;
+/** Half the side of a default plane nobody has resized, with no model (mm). */
+export const DEFAULT_HALF = 30;
+/** The smallest half side a corner drag leaves a plane with (mm). */
+export const MIN_HALF = 1;
 const GROW = 1.2;
-/** How strongly a plane is tinted, seen from its front and from its back. */
-const FILL_FRONT = 0.15, FILL_BACK = 0.09;
-/** A name's letters are this tall, as a share of the shorter side of its plane; and this far in from the corner, in letter heights. */
-const LABEL_SHARE = 0.07, LABEL_INSET = 0.55;
+/** A name's letters are this tall, as a share of the side of its plane; and this far in from the corner, in letter heights. */
+const LABEL_SHARE = 0.05, LABEL_INSET = 0.5;
 /**
  * … but on screen never smaller than a person can read nor larger than a heading, whatever the zoom (pixels,
  * for a plane seen face-on), and never more than this share of its plane.
  */
-const LABEL_MIN_PX = 13, LABEL_MAX_PX = 30, LABEL_MOST = 0.22;
+const LABEL_MIN_PX = 12, LABEL_MAX_PX = 20, LABEL_MOST = 0.22;
 /** The canvas a name is drawn on: the letter height in pixels (the text is then scaled down by the scene, so it stays sharp). */
 const LABEL_PX = 72;
-/** How each default plane's tint differs from the family's: a small turn of hue, nothing loud. */
-const HUE_SHIFT: Record<DefaultPlaneId, number> = { top: 0, front: 0.07, right: -0.09 };
+/** How near (CSS pixels) the pointer must be to a corner to take hold of it. */
+export const CORNER_REACH = 9;
+/** The origin's mark, and a corner's handle, on screen (CSS pixels). */
+const ORIGIN_PX = 13, HANDLE_PX = 11;
+
+/**
+ * How each default plane's name lies, as in Onshape: the direction the text runs (`x` of the plane's frame, or
+ * its reverse; its up is always `y`), the corner it sits in as the text reads (bottom or top, left or right).
+ * In the isometric view that puts "Top" at the plane's left corner, "Front" at its top left and "Right" at its
+ * top right, all three reading plainly.
+ */
+const LABEL_LAY: Record<DefaultPlaneId, { run: 1 | -1; low: boolean; end: boolean }> = { top: { run: 1, low: true, end: false }, front: { run: 1, low: false, end: false }, right: { run: 1, low: false, end: true } };
+
+/** The planes' colours for a light and a dark theme. */
+const PALETTE = {
+  light: { fill: "#91a9d0", fillOpacity: 0.12, line: "#a9bcdc", label: "#3a5fb0", hover: "#f0b97a", origin: "#1b1d21", handle: "#f0a04b" },
+  dark: { fill: "#7d9ad0", fillOpacity: 0.1, line: "#5d77a6", label: "#93b3ee", hover: "#e9a25e", origin: "#e8eaee", handle: "#f0a04b" },
+};
 
 type Fat = (color: THREE.Color, width: number, o?: Partial<{ dashed: boolean; depthTest: boolean }>) => LineMaterial;
 
 interface PlaneObjects {
-  id: DefaultPlaneId; frame: Frame; half: [number, number];
+  id: DefaultPlaneId; frame: Frame;
+  /** half the side of the square, as drawn */
+  half: number;
   /** the four quarters that are drawn */
   quarters: THREE.Mesh[]; fill: THREE.MeshBasicMaterial;
-  /** the whole rectangle, never drawn: what the pointer hits and what a highlight is drawn with */
+  /** the whole square, never drawn: what the pointer hits and what a highlight is drawn with */
   hit: THREE.Mesh;
   border: LineSegments2; line: LineMaterial;
   shown: boolean;
@@ -59,9 +84,9 @@ interface Label {
   key: string; text: string; mesh: THREE.Mesh; material: THREE.MeshBasicMaterial; texture: THREE.CanvasTexture; aspect: number;
   /** the rectangle it names: its middle, its two axes (unit) and half sizes, its normal */
   centre: THREE.Vector3; x: THREE.Vector3; y: THREE.Vector3; hx: number; hy: number; normal: THREE.Vector3;
-  visible: boolean;
-  /** which way it was last laid: +1 or -1 along each axis, kept until another way is clearly better */
-  sx: number; sy: number; opacity: number;
+  /** the text runs along +x (1) or −x (−1); it sits in the corner at the bottom (`low`) or the top, and at the right (`end`) or the left, as it reads */
+  run: 1 | -1; low: boolean; end: boolean;
+  visible: boolean; opacity: number;
 }
 /** What a test, or anything else, may ask about a name on a plane. */
 export interface PlaneLabelInfo {
@@ -72,25 +97,51 @@ export interface PlaneLabelInfo {
   right: Vec3; up: Vec3; normal: Vec3;
   /** the letter height in model units */
   height: number;
+  /** the middle of the text, in the model */
+  at: Vec3;
 }
+/** A corner of a default plane: its plane and its signs along the plane's two axes. */
+export interface PlaneCorner { plane: DefaultPlaneId; su: 1 | -1; sv: 1 | -1 }
 
 const v3 = (p: Vec3) => new THREE.Vector3(p[0], p[1], p[2]);
 const arr = (v: THREE.Vector3): Vec3 => [v.x, v.y, v.z];
 const corner = (f: Frame, u: number, v: number) => v3(f.origin).addScaledVector(v3(f.x), u).addScaledVector(v3(f.y), v);
 
+/** A round mark on a canvas, white on nothing (the material's colour is its colour): a ring with a dot, or a disc with a ring. */
+function markTexture(kind: "origin" | "handle"): THREE.CanvasTexture {
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const g = c.getContext("2d");
+  if (g) {
+    g.fillStyle = "#fff"; g.strokeStyle = "#fff";
+    if (kind === "origin") {
+      g.lineWidth = 7; g.beginPath(); g.arc(32, 32, 26, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.arc(32, 32, 9, 0, Math.PI * 2); g.fill();
+    } else { g.beginPath(); g.arc(32, 32, 28, 0, Math.PI * 2); g.fill(); }
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 export class PlaneLayer {
   readonly group = new THREE.Group();
   private planes: PlaneObjects[] = [];
   private origin: THREE.Points;
+  private handle: THREE.Points;
+  private handleAt: PlaneCorner | null = null;
   private labels = new Map<string, Label>();
   private hidden = new Set<string>();
   private strong = new Set<string>();
   private soft = new Set<string>();
-  private colors = { line: new THREE.Color(), label: new THREE.Color(), strong: new THREE.Color(), ink: new THREE.Color() };
+  /** the sizes the document gives (half sides), and the one a corner drag is showing */
+  private sizes: Partial<Record<DefaultPlaneId, number>> = {};
+  private drag: { id: DefaultPlaneId; half: number } | null = null;
+  private box: THREE.Box3 | null = null;
+  private colors = { line: new THREE.Color(), label: new THREE.Color(), strong: new THREE.Color(), hover: new THREE.Color() };
+  private fillOpacity = PALETTE.light.fillOpacity;
 
   constructor(private readonly viewport: Viewport3D, fat: Fat) {
     for (const id of Object.keys(DEFAULT_PLANES) as DefaultPlaneId[]) {
-      const fill = new THREE.MeshBasicMaterial({ transparent: true, opacity: FILL_FRONT, side: THREE.DoubleSide, depthWrite: false });
+      const fill = new THREE.MeshBasicMaterial({ transparent: true, opacity: this.fillOpacity, side: THREE.DoubleSide, depthWrite: false });
       const quarters: THREE.Mesh[] = [];
       for (let i = 0; i < 4; i++) {
         const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3)); g.setIndex([0, 1, 2, 0, 2, 3]);
@@ -105,12 +156,17 @@ export class PlaneLayer {
       const border = new LineSegments2(new LineSegmentsGeometry(), line);
       border.renderOrder = 2;
       this.group.add(...quarters, hit, border);
-      this.planes.push({ id, frame: DEFAULT_PLANES[id].frame, half: [0, 0], quarters, fill, hit, border, line, shown: true });
+      this.planes.push({ id, frame: DEFAULT_PLANES[id].frame, half: 0, quarters, fill, hit, border, line, shown: true });
     }
-    this.origin = new THREE.Points(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3()]), new THREE.PointsMaterial({ size: 7, sizeAttenuation: false, depthTest: false }));
-    this.origin.renderOrder = 6;
-    this.group.add(this.origin);
-    this.setExtent(null);
+    const mark = (kind: "origin" | "handle", order: number) => {
+      const p = new THREE.Points(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3()]), new THREE.PointsMaterial({ map: markTexture(kind), size: 1, sizeAttenuation: false, depthTest: false, depthWrite: false, transparent: true, alphaTest: 0.05 }));
+      p.renderOrder = order; p.frustumCulled = false;
+      this.group.add(p);
+      return p;
+    };
+    this.origin = mark("origin", 6);
+    this.handle = mark("handle", 7); this.handle.visible = false;
+    this.resize();
     viewport.onFrame.push(this.place);
     // the names are drawn with the page's own type: once it has arrived, draw them again
     const fonts = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts;
@@ -124,32 +180,48 @@ export class PlaneLayer {
   }
 
   /**
-   * The theme's colours: `tint` is the family every plane is tinted in (each default plane a little apart from
-   * it), `label` the names, `select` what is selected, `ink` the name of a plane under the pointer.
+   * The theme's colours.  The planes keep Onshape's pale blue whatever the theme's accent: `dark` picks the
+   * set made for a dark background; `select` is what is selected.
    */
-  setColors(c: { tint: THREE.Color; label: THREE.Color; select: THREE.Color; ink: THREE.Color }): void {
-    this.colors.line.copy(c.tint); this.colors.label.copy(c.label); this.colors.strong.copy(c.select); this.colors.ink.copy(c.ink);
-    for (const p of this.planes) p.fill.color.copy(c.tint).offsetHSL(HUE_SHIFT[p.id], 0, 0);
-    (this.origin.material as THREE.PointsMaterial).color.copy(c.label);
+  setColors(c: { dark: boolean; select: THREE.Color }): void {
+    const p = c.dark ? PALETTE.dark : PALETTE.light;
+    this.colors.line.set(p.line); this.colors.label.set(p.label); this.colors.strong.copy(c.select); this.colors.hover.set(p.hover);
+    this.fillOpacity = p.fillOpacity;
+    for (const pl of this.planes) { pl.fill.color.set(p.fill); pl.fill.opacity = p.fillOpacity; }
+    (this.origin.material as THREE.PointsMaterial).color.set(p.origin);
+    (this.handle.material as THREE.PointsMaterial).color.set(p.handle);
     this.restyle();
   }
-  /** The border colour of a default plane: its tint, darker. */
-  private lineOf(p: PlaneObjects): THREE.Color { return this.colors.line.clone().offsetHSL(HUE_SHIFT[p.id], 0, 0); }
 
-  /** Size the planes for a model that fills `box` (null: no model yet). */
-  setExtent(box: THREE.Box3 | null): void {
-    const reach = (axis: THREE.Vector3): number => {
-      if (!box || box.isEmpty()) return MIN_HALF;
-      const lo = box.min.dot(axis), hi = box.max.dot(axis);
-      return Math.max(MIN_HALF, Math.max(Math.abs(lo), Math.abs(hi)) * GROW);
-    };
+  // ---------------------------------------------------------------- size
+  /** Size the planes nobody resized for a model that fills `box` (null: no model yet). */
+  setExtent(box: THREE.Box3 | null): void { this.box = box && !box.isEmpty() ? box.clone() : null; this.resize(); }
+  /** The sizes the document stores, as half sides (mm), by plane; a plane left out grows with the model. */
+  setSizes(sizes: Partial<Record<DefaultPlaneId, number>>): void { this.sizes = { ...sizes }; this.resize(); }
+  /** Show a plane at this half side while its corner is dragged (null: the drag is over). */
+  setDragSize(id: DefaultPlaneId | null, half = 0): void { this.drag = id ? { id, half: Math.max(MIN_HALF, half) } : null; this.resize(); }
+  /** Has a person set this plane's size (it no longer grows with the model)? */
+  isSized(id: DefaultPlaneId): boolean { return typeof this.sizes[id] === "number"; }
+
+  /** The half side a plane nobody resized takes: a little past the model on both of its axes, never under the default. */
+  private autoHalf(f: Frame): number {
+    const box = this.box;
+    if (!box) return DEFAULT_HALF;
+    let reach = 0;
+    for (const axis of [f.x, f.y]) {
+      const a = new THREE.Vector3(Math.abs(axis[0]), Math.abs(axis[1]), Math.abs(axis[2]));
+      reach = Math.max(reach, Math.abs(box.min.dot(a)), Math.abs(box.max.dot(a)));
+    }
+    return Math.max(DEFAULT_HALF, reach * GROW);
+  }
+
+  private resize(): void {
     for (const p of this.planes) {
       const f = p.frame;
-      // the frames' axes are world axes, so the box's reach along one is the dot with its corners' extremes
-      const hx = reach(v3(f.x).set(Math.abs(f.x[0]), Math.abs(f.x[1]), Math.abs(f.x[2]))), hy = reach(v3(f.y).set(Math.abs(f.y[0]), Math.abs(f.y[1]), Math.abs(f.y[2])));
-      if (p.half[0] === hx && p.half[1] === hy) continue;
-      p.half = [hx, hy];
-      const pts = [corner(f, -hx, -hy), corner(f, hx, -hy), corner(f, hx, hy), corner(f, -hx, hy)];
+      const h = this.drag && this.drag.id === p.id ? this.drag.half : this.sizes[p.id] ?? this.autoHalf(f);
+      if (p.half === h) continue;
+      p.half = h;
+      const pts = [corner(f, -h, -h), corner(f, h, -h), corner(f, h, h), corner(f, -h, h)];
       const ha = p.hit.geometry.getAttribute("position") as THREE.BufferAttribute;
       pts.forEach((q, i) => ha.setXYZ(i, q.x, q.y, q.z));
       ha.needsUpdate = true; p.hit.geometry.computeBoundingSphere(); p.hit.geometry.computeBoundingBox();
@@ -157,27 +229,57 @@ export class PlaneLayer {
       const x = v3(f.x), y = v3(f.y);
       [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([su, sv], i) => {
         const q = p.quarters[i], a = q.geometry.getAttribute("position") as THREE.BufferAttribute;
-        q.position.copy(corner(f, (su * hx) / 2, (sv * hy) / 2));
-        [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([u, v], k) => { const c = x.clone().multiplyScalar((u * hx) / 2).addScaledVector(y, (v * hy) / 2); a.setXYZ(k, c.x, c.y, c.z); });
+        q.position.copy(corner(f, (su * h) / 2, (sv * h) / 2));
+        [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([u, v], k) => { const c = x.clone().multiplyScalar((u * h) / 2).addScaledVector(y, (v * h) / 2); a.setXYZ(k, c.x, c.y, c.z); });
         a.needsUpdate = true; q.geometry.computeBoundingSphere(); q.geometry.computeBoundingBox();
       });
       const seg: number[] = [];
       for (let i = 0; i < 4; i++) { const a = pts[i], b = pts[(i + 1) % 4]; seg.push(a.x, a.y, a.z, b.x, b.y, b.z); }
       p.border.geometry.dispose();
       p.border.geometry = new LineSegmentsGeometry().setPositions(seg);
-      this.setLabel("plane:" + p.id, DEFAULT_PLANES[p.id].title, pts, v3(f.normal));
+      const lay = LABEL_LAY[p.id];
+      this.setLabel("plane:" + p.id, DEFAULT_PLANES[p.id].title, pts, v3(f.normal), lay.run, lay.low, lay.end);
     }
+    if (this.handleAt) this.showHandle(this.handleAt);
     this.apply();
   }
   /** How far a default plane reaches from the origin along its two axes. */
-  halfOf(id: DefaultPlaneId): [number, number] { return this.planes.find((p) => p.id === id)?.half || [MIN_HALF, MIN_HALF]; }
+  halfOf(id: DefaultPlaneId): [number, number] { const h = this.planes.find((p) => p.id === id)?.half || DEFAULT_HALF; return [h, h]; }
+
+  // ---------------------------------------------------------------- corners
+  /** The corner of a shown default plane within `reach` CSS pixels of a point on the canvas, the nearest. */
+  cornerAt(x: number, y: number, reach = CORNER_REACH): PlaneCorner | null {
+    let best: { c: PlaneCorner; d: number } | null = null;
+    const to = new THREE.Vector3(), o = new THREE.Vector3();
+    for (const p of this.planes) {
+      if (!p.shown) continue;
+      // a plane seen edge-on has no corner to take hold of
+      if (Math.abs(this.toCamera(o.set(0, 0, 0), to).dot(v3(p.frame.normal))) < 0.15) continue;
+      for (const su of [-1, 1] as const) for (const sv of [-1, 1] as const) {
+        const s = this.viewport.project(corner(p.frame, su * p.half, sv * p.half));
+        const d = Math.hypot(s.x - x, s.y - y);
+        if (d <= reach && (!best || d < best.d)) best = { c: { plane: p.id, su, sv }, d };
+      }
+    }
+    return best ? best.c : null;
+  }
+  /** Where a corner is, in the model. */
+  cornerPoint(c: PlaneCorner): THREE.Vector3 { const p = this.planes.find((x) => x.id === c.plane)!; return corner(p.frame, c.su * p.half, c.sv * p.half); }
+  /** Draw the handle on a corner (null: none). */
+  showHandle(c: PlaneCorner | null): void {
+    this.handleAt = c;
+    this.handle.visible = !!c;
+    if (c) { const at = this.cornerPoint(c); this.handle.position.copy(at); this.handle.updateMatrixWorld(); }
+    this.viewport.invalidate();
+  }
 
   // ---------------------------------------------------------------- names
   /**
    * A name for a rectangle in the scene (a default plane, a reference plane), given its four corners in order
-   * round the rectangle, starting where both of its own axes are least.
+   * round the rectangle, starting where both of its own axes are least.  `run` −1 writes it along −x; `low` puts it
+   * in a bottom corner instead of a top one, `end` in a right one (as the text reads) instead of a left one.
    */
-  setLabel(key: string, text: string, corners: readonly THREE.Vector3[], normal: THREE.Vector3): void {
+  setLabel(key: string, text: string, corners: readonly THREE.Vector3[], normal: THREE.Vector3, run: 1 | -1 = 1, low = false, end = false): void {
     let l = this.labels.get(key);
     if (!l) {
       const canvas = document.createElement("canvas");
@@ -188,9 +290,10 @@ export class PlaneLayer {
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
       mesh.matrixAutoUpdate = false; mesh.renderOrder = 1; mesh.userData.planeLabel = key;
       this.group.add(mesh);
-      l = { key, text: "", mesh, material, texture, aspect: 1, centre: new THREE.Vector3(), x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), hx: 1, hy: 1, normal: new THREE.Vector3(0, 0, 1), visible: true, sx: 1, sy: 1, opacity: 0 };
+      l = { key, text: "", mesh, material, texture, aspect: 1, centre: new THREE.Vector3(), x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), hx: 1, hy: 1, normal: new THREE.Vector3(0, 0, 1), run, low, end, visible: true, opacity: 0 };
       this.labels.set(key, l);
     }
+    l.run = run; l.low = low; l.end = end;
     if (l.text !== text) { l.text = text; this.paint(l); }
     const ex = corners[1].clone().sub(corners[0]), ey = corners[3].clone().sub(corners[0]);
     l.hx = ex.length() / 2; l.hy = ey.length() / 2;
@@ -226,20 +329,25 @@ export class PlaneLayer {
   setLabelVisible(key: string, on: boolean): void { const l = this.labels.get(key); if (l && l.visible !== on) { l.visible = on; this.viewport.invalidate(); } }
   /**
    * Draw these planes strongly, by their label keys ("plane:top", "datum:<feature id>"): `strong` the selected
-   * ones and those a dialog holds, `soft` the one under the pointer.
+   * ones and those a dialog holds, `soft` the one under the pointer (an orange outline, nothing else).
    */
   setMarked(strong: ReadonlySet<string>, soft: ReadonlySet<string> = new Set()): void {
     this.strong = new Set(strong); this.soft = new Set(soft);
     this.restyle();
   }
+  /** The outline of a default plane as it is drawn now: its colour as "#rrggbb" and its width in pixels (for tests). */
+  outlineOf(id: DefaultPlaneId): { color: string; width: number } {
+    const p = this.planes.find((x) => x.id === id)!;
+    return { color: "#" + p.line.color.getHexString(), width: p.line.linewidth };
+  }
   private restyle(): void {
     for (const p of this.planes) {
       const key = "plane:" + p.id, on = this.strong.has(key), over = this.soft.has(key);
-      p.line.color.copy(on ? this.colors.strong : this.lineOf(p));
-      p.line.linewidth = on ? 2.5 : over ? 2 : 1.5;
-      p.line.opacity = on || over ? 1 : 0.8;
+      p.line.color.copy(on ? this.colors.strong : over ? this.colors.hover : this.colors.line);
+      p.line.linewidth = on ? 2.5 : over ? 2.5 : 1.5;
+      p.line.opacity = 1;
     }
-    for (const l of this.labels.values()) l.material.color.copy(this.strong.has(l.key) || this.soft.has(l.key) ? this.colors.ink : this.colors.label);
+    for (const l of this.labels.values()) l.material.color.copy(this.colors.label);
     this.viewport.invalidate();
   }
   /** The names as they are drawn in this frame's view: for tests, and for anything that wants to know where they are. */
@@ -249,7 +357,7 @@ export class PlaneLayer {
       const m = l.mesh.matrix.elements;
       const right = new THREE.Vector3(m[0], m[1], m[2]), up = new THREE.Vector3(m[4], m[5], m[6]), normal = new THREE.Vector3(m[8], m[9], m[10]);
       const height = up.length() / 1.3;
-      return { key: l.key, text: l.text, shown: l.mesh.visible, opacity: l.mesh.visible ? l.opacity : 0, marked: this.strong.has(l.key) || this.soft.has(l.key), right: arr(right.normalize()), up: arr(up.normalize()), normal: arr(normal.normalize()), height };
+      return { key: l.key, text: l.text, shown: l.mesh.visible, opacity: l.mesh.visible ? l.opacity : 0, marked: this.strong.has(l.key) || this.soft.has(l.key), right: arr(right.normalize()), up: arr(up.normalize()), normal: arr(normal.normalize()), height, at: [m[12], m[13], m[14]] };
     });
   }
 
@@ -264,13 +372,14 @@ export class PlaneLayer {
       p.border.visible = p.shown;
       this.setLabelVisible("plane:" + p.id, p.shown);
     }
+    if (this.handleAt && this.hidden.has(this.handleAt.plane)) this.showHandle(null);
     this.origin.visible = !this.hidden.has("origin");
     this.viewport.invalidate();
   }
 
-  /** The default plane's rectangle, for the highlight (null when it is hidden). */
+  /** The default plane's square, for the highlight (null when it is hidden). */
   quadOf(id: DefaultPlaneId): THREE.Mesh | null { const p = this.planes.find((x) => x.id === id); return p && p.shown ? p.hit : null; }
-  /** The rectangles the pointer can hit. */
+  /** The squares the pointer can hit. */
   pickable(): THREE.Object3D[] { return this.planes.filter((p) => p.shown).map((p) => p.hit); }
 
   // ---------------------------------------------------------------- every frame
@@ -280,19 +389,13 @@ export class PlaneLayer {
     if (this.viewport.projection === "perspective") return out.copy(cam.position).sub(at).normalize();
     return out.set(0, 0, 1).applyQuaternion(cam.quaternion);
   }
-  /** Tint each plane for the side that is seen, and lay every name the right way round for this view.  Called before each frame. */
+  /** Lay every name on its plane for this view, and size the marks for the screen.  Called before each frame. */
   private place = (): void => {
-    const cam = this.viewport.activeCamera;
-    const to = new THREE.Vector3(), o = new THREE.Vector3();
-    for (const p of this.planes) {
-      if (!p.shown) continue;
-      const front = this.toCamera(o.set(...p.frame.origin), to).dot(o.set(...p.frame.normal)) >= 0;
-      const key = "plane:" + p.id, more = this.strong.has(key) ? 0.05 : this.soft.has(key) ? 0.03 : 0;
-      p.fill.opacity = (front ? FILL_FRONT : FILL_BACK) + more;
-    }
+    const ratio = this.viewport.renderer.getPixelRatio();
+    (this.origin.material as THREE.PointsMaterial).size = ORIGIN_PX * ratio;
+    (this.handle.material as THREE.PointsMaterial).size = HANDLE_PX * ratio;
     if (!this.labels.size) return;
-    const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion), camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
-    const right = new THREE.Vector3(), up = new THREE.Vector3(), n = new THREE.Vector3(), at = new THREE.Vector3();
+    const to = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(), n = new THREE.Vector3(), at = new THREE.Vector3();
     const px = this.viewport.pixelSize();
     for (const l of this.labels.values()) {
       this.toCamera(l.centre, to);
@@ -300,26 +403,17 @@ export class PlaneLayer {
       // edge-on, the rectangle is a sliver and its name a smear
       const alpha = l.visible ? Math.max(0, Math.min(1, (facing - 0.12) / 0.22)) : 0;
       if (alpha <= 0.01) { l.mesh.visible = false; l.opacity = 0; continue; }
-      // Seen from the side its own normal (x × y) points to, the text runs along +x with +y up, or along -x with
-      // -y up; from the other side, along +x with -y up or along -x with +y up: never mirrored.  Of the two, the
-      // one that is upright on screen — and it stays as it is until the other is clearly the better.
-      const side = n.crossVectors(l.x, l.y).dot(to) >= 0 ? 1 : -1;
-      const score = (sx: number) => { const sy = sx * side; const u = l.y.dot(camUp) * sy, r = l.x.dot(camRight) * sx; return u * 2 + r; };
-      let sx = l.sx * l.sy === side ? l.sx : 0;
-      if (sx === 0) sx = score(1) >= score(-1) ? 1 : -1;
-      else if (score(-sx) > score(sx) + 0.25) sx = -sx;
-      const sy = sx * side;
-      l.sx = sx; l.sy = sy;
-      right.copy(l.x).multiplyScalar(sx); up.copy(l.y).multiplyScalar(sy); n.crossVectors(right, up);
+      // the text lies on the plane as written: from behind it reads mirrored, as a name painted on glass does
+      right.copy(l.x).multiplyScalar(l.run); up.copy(l.y); n.crossVectors(right, up);
       const side2 = Math.min(l.hx, l.hy) * 2;
       const height = Math.min(side2 * LABEL_MOST, Math.max(LABEL_MIN_PX * px, Math.min(LABEL_MAX_PX * px, side2 * LABEL_SHARE)));
       const h = height * 1.3, w = h * l.aspect, inset = height * LABEL_INSET;
-      // inside the corner that is at the top left as the text reads
-      at.copy(l.centre).addScaledVector(right, -l.hx + inset + w / 2).addScaledVector(up, l.hy - inset - h / 2);
+      // inside the corner it sits in, as the text reads
+      at.copy(l.centre).addScaledVector(right, l.end ? l.hx - inset - w / 2 : -l.hx + inset + w / 2).addScaledVector(up, l.low ? -l.hy + inset + h / 2 : l.hy - inset - h / 2);
       l.mesh.matrix.makeBasis(right.clone().multiplyScalar(w), up.clone().multiplyScalar(h), n).setPosition(at);
       l.mesh.matrixWorldNeedsUpdate = true;
       l.mesh.visible = true;
-      l.opacity = Math.round(alpha * (this.strong.has(l.key) || this.soft.has(l.key) ? 1 : 0.9) * 100) / 100;
+      l.opacity = Math.round(alpha * 100) / 100;
       l.material.opacity = l.opacity;
     }
   };

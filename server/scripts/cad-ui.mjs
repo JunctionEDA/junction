@@ -16,6 +16,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { viewFrom } from './cad-chrome.mjs';
 import { setCad } from './cad-setting.mjs';
 
 const require = createRequire(import.meta.url);
@@ -97,6 +98,10 @@ try {
   await alice.click('.cad-features [data-default-geometry=top]');
   await alice.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.features.length === 1 && s.kernel.state === 'ready'; }, null, { timeout: 90000 });
   await alice.waitForTimeout(700);   // the camera turns to face the plane
+  // the drawing below is laid out in pixels for a view about 163 mm tall (a new part studio frames its 60 mm
+  // planes more closely, as Onshape does)
+  await alice.evaluate(() => { const v = window.JunctionPartStudio.viewport; v.target.set(0, 0, 0); v.camera.zoom = (v.camera.top - v.camera.bottom) / 163; v.camera.updateProjectionMatrix(); v.invalidate(); });
+  await alice.waitForTimeout(100);
   check('choosing the plane opens the sketch with its tools', await alice.isVisible('[data-group=sketch] [data-tool=Rectangle]'));
   const canvas = await alice.$eval('.cad-stage canvas', (c) => { const r = c.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
   await alice.click('[data-tool=Rectangle]');
@@ -201,7 +206,7 @@ try {
 
   // ---------------------------------------------------------------- a sketch on a face, Remove
   await settled(alice, 2);
-  await alice.click('.v3-views [data-view=fit]');
+  await viewFrom(alice, 'fit');
   const top = await studio(alice, () => { const st = window.JunctionPartStudio, b = st.getState().bodies[0]; const name = b.mesh.faces.names.find((n) => n.includes(':end:')); st.select([{ kind: 'face', body: b.id, name, point: [0, 0, 0] }]); return name; });
   // with a flat face selected, Sketch needs to ask nothing: drawing starts on that face
   await alice.click('[data-tool=Sketch]');
