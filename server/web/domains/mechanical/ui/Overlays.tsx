@@ -20,6 +20,7 @@ import { shortcutOf, useKeyBindings } from "./keymap-store";
 import { SEARCH } from "./Toolbar";
 import { VIEW_KEYS } from "./viewkeys";
 import { markingPlace } from "./marking";
+import { openSelectOther } from "./SelectionControl";
 import { exportDrawing } from "../tools/export-all";
 import { getPrefs, setPrefs, usePref } from "./prefs";
 
@@ -123,6 +124,7 @@ export function ContextMenu({ studio }: { studio: PartStudio }) {
     if (bodies.length) { add(bodies.length === 1 ? "Hide this part" : "Hide these parts", () => { display.hide(bodies); studio.select([]); }, "H"); add("Isolate", () => display.isolate(bodies), "I"); }
     if (display.getState().hidden.length || display.getState().isolated) add("Show all parts", () => display.showAll());
     items.push(null);
+    if (p) add("Select other…", () => { openSelectOther(studio, at); });
     if (s.selection.length) add("Clear the selection", () => studio.select([]), "Esc");
     add("Search tools…", () => studio.setUi({ palette: { x: at.x, y: at.y } }), "S");
   }

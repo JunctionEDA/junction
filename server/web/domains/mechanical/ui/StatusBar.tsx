@@ -16,6 +16,7 @@ import { awaitsPlane, type PartStudio } from "./studio";
 import { tipHandlers } from "./Tip";
 import { usePref } from "./prefs";
 import { setHistoryView } from "./Timeline";
+import { SelectionControl } from "./SelectionControl";
 
 /** How the sketch stands, in a few words, and the tone that says it. */
 export function standing(s: EditorState): { text: string; detail: string; tone: "ok" | "free" | "bad" | "wait" } {
@@ -126,6 +127,7 @@ export function StatusBar({ studio }: { studio: PartStudio }) {
       {kinds ? <span className="flex items-center gap-1 whitespace-nowrap" data-pick-filter={kinds.join(" ")}><span className="pill info">picks</span>{describeKinds(kinds)}</span> : null}
       <span className="flex-1" />
       {!sketch && selected ? <span className="whitespace-nowrap mono" data-selected-count={selected}>{selected} selected</span> : null}
+      <SelectionControl studio={studio} />
       <button type="button" className={cx("btn sm ghost h-6 min-h-0 px-1.5 text-sm flex-none", timeline && "on")} aria-pressed={timeline} aria-label="Timeline" data-timeline-toggle {...tipHandlers({ title: "Timeline", hint: "The features as a strip along the bottom, with a marker to drag for the rollback. It can stand beside the feature list or in its place." })} onClick={() => setHistoryView(studio, timeline ? "list" : "both")}>Timeline</button>
       <UnitsControl studio={studio} />
       <button type="button" className="btn sm ghost h-6 min-h-0 w-6 p-0 justify-center mono text-sm text-ink flex-none" aria-label="Keyboard shortcuts" data-shortcuts-open {...tipHandlers({ title: "Keyboard shortcuts", shortcut: "?" })} onClick={() => studio.setUi({ help: true })}>?</button>

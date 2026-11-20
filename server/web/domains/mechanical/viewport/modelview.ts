@@ -453,6 +453,30 @@ export class ModelView {
   }
 
   // ---------------------------------------------------------------- picking
+  /**
+   * Everything under the pointer, front to back: what `pick` answers first (the edge or vertex right under the
+   * pointer), then every face the line of sight goes through, on every part, then the planes behind them.  For
+   * "Select other": a face behind another can be had without turning the model.  The filter holds here too.
+   */
+  pickAll(ev: { clientX: number; clientY: number }): Pick[] {
+    const out: Pick[] = [], seen = new Set<string>();
+    const add = (p: Pick | null) => { if (p && !seen.has(pickKey(p))) { seen.add(pickKey(p)); out.push(p); } };
+    add(this.pick(ev));
+    const want = (k: PickKind) => !this.filter || this.filter.has(k);
+    const rc = this.raycaster; rc.ray.copy(this.viewport.ray(ev)); rc.near = 0; rc.far = Infinity;
+    const hits: { pick: Pick; d: number }[] = [];
+    if (want("face")) for (const [id, b] of this.bodies) {
+      const mesh = b.result.mesh; if (!mesh || !b.group.visible) continue;
+      for (const hit of rc.intersectObject(b.mesh, false)) {
+        if (hit.faceIndex == null || (this.pickClip && !this.pickClip([hit.point.x, hit.point.y, hit.point.z]))) continue;
+        const i = rangeOf(mesh.faces.start, mesh.faces.count, hit.faceIndex * 3);
+        if (i >= 0) hits.push({ pick: { kind: "face", body: id, name: mesh.faces.names[i], point: [hit.point.x, hit.point.y, hit.point.z] }, d: hit.distance });
+      }
+    }
+    hits.sort((p, q) => p.d - q.d);
+    for (const h of hits) add(h.pick);
+    return out;
+  }
   /** What is under the pointer: a vertex before an edge before a face, a body before a sketch before a plane. */
   pick(ev: { clientX: number; clientY: number }): Pick | null {
     const ray = this.viewport.ray(ev), px = this.viewport.pixelSize();

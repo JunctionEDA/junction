@@ -4,6 +4,7 @@ import type { PartStudio } from "./studio";
 import { KeymapDialog } from "./KeymapDialog";
 import { MarkingMenu } from "./MarkingMenu";
 import { ParametersTable } from "./ParametersTable";
+import { SelectOther } from "./SelectionControl";
 import { ExportAll } from "../tools/export-all";
 
 export function Extras({ studio }: { studio: PartStudio }) {
@@ -12,6 +13,7 @@ export function Extras({ studio }: { studio: PartStudio }) {
       <KeymapDialog studio={studio} />
       <MarkingMenu studio={studio} />
       <ParametersTable studio={studio} />
+      <SelectOther studio={studio} />
       <ExportAll studio={studio} />
     </>
   );

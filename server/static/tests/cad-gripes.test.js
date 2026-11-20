@@ -313,6 +313,45 @@ test("appearance library: standard looks, stored as colour, metalness and roughn
   assert.deepEqual(AI.looksOf(doc).b9, { color: "#112233", metalness: 1 });
 });
 
+// ---------------------------------------------------------------- selection sets and the selection filter
+const SS = load("domains/mechanical/document/selection-sets.ts");
+test("selection: sets kept by name follow the model, and a filter that cannot select nothing", () => {
+  const ID4 = load("shared/itemdoc/itemdoc.ts");
+  const doc = ID4.newItemDoc("part-studio", []);
+  const picks = [{ kind: "face", body: "b1", name: "f1", point: [1, 2, 3] }, { kind: "edge", body: "b1", name: "e1" }, { kind: "face", body: "b1", name: "f1" }, { kind: "plane", plane: "top" }, { kind: "datum", featureId: "ax", datum: "axis" }, { kind: "sketch", featureId: "s1", region: "r" }, { kind: "vertex", body: "b2", name: "v1" }];
+  assert.deepEqual(SS.packPicks(picks), [["f", "b1", "f1"], ["e", "b1", "e1"], ["p", "top"], ["d", "ax", "axis"], ["v", "b2", "v1"]], "once each, and no sketch regions");
+  let r = SS.saveSelectionSet(doc, " Seal ", picks);
+  assert.deepEqual([r.kept, r.left, r.changes[0].kind], [5, 2, "ADDED"]);
+  ID4.applyChanges(doc, r.changes);
+  assert.deepEqual(SS.selectionSets(doc).map((s) => [s.name, s.picks.length]), [["Seal", 5]]);
+  // the same name again replaces the set, in its place
+  r = SS.saveSelectionSet(doc, "seal", picks.slice(0, 2));
+  assert.equal(r.changes[0].kind, "MODIFIED"); ID4.applyChanges(doc, r.changes);
+  assert.deepEqual(SS.selectionSets(doc).map((s) => [s.name, s.picks.length]), [["seal", 2]]);
+  ID4.applyChanges(doc, SS.saveSelectionSet(doc, "", picks.slice(3, 5)).changes);
+  assert.deepEqual(SS.selectionSets(doc).map((s) => s.name), ["seal", "Selection 1"], "no name: the next free one, at the end");
+  assert.equal(SS.nextSetName(doc), "Selection 2");
+  assert.deepEqual(SS.saveSelectionSet(doc, "x", [{ kind: "sketch", featureId: "s1", region: "r" }]).changes, [], "nothing a set can keep: no set");
+  // selecting a set: what is gone is left out and counted
+  const model = { has: (k, b, n) => b === "b1" && n === "f1" && k === "face", hasPlane: (p) => p === "top", hasDatum: () => false };
+  assert.deepEqual(SS.unpackPicks([["f", "b1", "f1"], ["e", "b1", "e1"], ["p", "top"], ["d", "ax", "axis"], ["x", 1], "junk"], model), { picks: [{ kind: "face", body: "b1", name: "f1" }, { kind: "plane", plane: "top" }], missing: 4 });
+  const id = SS.selectionSets(doc)[0].id;
+  ID4.applyChanges(doc, SS.renameSelectionSet(doc, id, "Gasket"));
+  assert.equal(SS.selectionSets(doc)[0].name, "Gasket");
+  assert.deepEqual(SS.renameSelectionSet(doc, id, " "), []);
+  ID4.applyChanges(doc, SS.removeSelectionSet(doc, id));
+  assert.deepEqual(SS.selectionSets(doc).map((s) => s.name), ["Selection 1"]);
+  assert.deepEqual(SS.removeSelectionSet(doc, "nope"), []);
+  // the filter
+  assert.equal(SS.cleanFilter(null), null); assert.equal(SS.cleanFilter("face"), null); assert.equal(SS.cleanFilter([]), null);
+  assert.deepEqual(SS.cleanFilter(["edge", "face", "bogus"]), ["face", "edge"]);
+  assert.equal(SS.cleanFilter(SS.SELECT_KINDS.map((k) => k.id)), null, "every kind is no filter");
+  assert.deepEqual(SS.toggleKind(null, "face"), ["edge", "vertex", "sketch", "plane", "datum"]);
+  assert.deepEqual(SS.toggleKind(["face"], "edge"), ["face", "edge"]);
+  assert.equal(SS.toggleKind(["face"], "face"), null, "taking the last kind away gives everything back");
+  assert.equal(SS.filterLabel(null), "All"); assert.equal(SS.filterLabel(["face", "edge"]), "Faces, Edges"); assert.equal(SS.filterLabel(["face", "edge", "vertex"]), "3 kinds");
+});
+
 // ---------------------------------------------------------------- the history of edits
 const UL = load("domains/mechanical/ui/undo-labels.ts");
 const ID = load("shared/itemdoc/itemdoc.ts");

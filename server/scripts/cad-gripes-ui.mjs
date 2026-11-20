@@ -15,6 +15,8 @@
 //               as DXF or SVG straight from the right-click menu and the feature list's menu
 //   appearance  the appearance library: a swatch dragged onto a part dresses the part, with Shift one face;
 //               a click dresses what is selected; stored as colour, metalness and roughness
+//   selection   the selection filter (a click takes only the kinds chosen), a selection kept by name and had
+//               again after the model changed, "Select other" for the face behind
 //   history     the History of edits panel: every step in words, a click goes back to it and forward again
 //   progress    a rebuild says which feature it is on, of how many
 //   offline     the connection drops: a banner, edits go on and the model follows, they are kept in the browser
@@ -90,6 +92,8 @@ try {
   await S(alice, () => window.JunctionPartStudio.fit());
   await alice.mouse.move(900, 860);
   check('the model is built', (await st()).bodies === 2);
+
+  const setDepthEarly = (id, v) => S(alice, ([id, v]) => window.JunctionPartStudio.commit([{ id, kind: 'MODIFIED', typeName: 'feature', props: [{ path: ['params', 'depth'], value: v }] }]), [id, v]);
 
   // ================================================================ keys
   if (part('keys')) {
@@ -389,6 +393,56 @@ try {
     await shot('appearance', alice);
     await S(alice, () => { const s = window.JunctionPartStudio; s.undo(); s.undo(); s.undo(); }); await alice.waitForTimeout(300);
     check('each was one undoable edit', (await look(b1.body)) === null && (await look(b2.body)) === null && (await drawn(b1.body)).metalness < 0.1);
+  }
+
+  // ================================================================ selection: the filter, sets, select other
+  if (part('selection')) {
+    await key('Escape'); await key('Escape');
+    const top = await faceOnScreen(alice, [ids.e1, ':end:']);
+    const sel = () => S(alice, () => window.JunctionPartStudio.getState().selection.map((p) => `${p.kind}:${p.name || p.plane || ''}`));
+    await alice.click('[data-selection-control]');
+    await alice.click('.cad-selection [data-filter-kind=face]');
+    check('the filter says what a click selects', (await attr('[data-selection-control]', 'data-selection-filter')) === 'edge vertex sketch plane datum');
+    await key('Escape');
+    await click(alice, top);
+    check('a click on a face selects no face while faces are filtered out', !(await sel()).some((x) => x.startsWith('face:')), (await sel()).join(' '));
+    await key('Escape');
+    await click(alice, await edgeOnScreen(alice, [ids.e1, ':end:']));
+    check('… and an edge is still selected', (await sel()).length === 1 && (await sel())[0].startsWith('edge:'));
+    await alice.click('[data-selection-control]');
+    await alice.click('.cad-selection [data-filter-all]');
+    check('"Everything" takes the filter away', (await attr('[data-selection-control]', 'data-selection-filter')) === 'all');
+    await key('Escape'); await key('Escape');
+    // a set
+    await click(alice, top);
+    await click(alice, await edgeOnScreen(alice, [ids.e2, ':end:']), { shift: true });
+    const kept = await sel();
+    await alice.click('[data-selection-control]');
+    await alice.fill('.cad-selection [data-set-name]', 'Lid seat');
+    await shot('selection', alice, { x: 900, y: 500, width: 600, height: 400 });
+    await alice.click('.cad-selection [data-set-save]');
+    const stored = await S(alice, () => Array.from(window.JunctionPartStudio.doc.items.values()).filter((i) => i.type === 'selection-set').map((i) => ({ name: i.name, n: i.picks.length })));
+    check('a selection is kept by name, in the document', kept.length === 2 && stored.length === 1 && stored[0].name === 'Lid seat' && stored[0].n === 2 && (await attr('.cad-selection [data-selection-set="Lid seat"]', 'data-set-count')) === '2', JSON.stringify(stored));
+    await key('Escape'); await key('Escape');
+    await setDepthEarly(ids.e1, 26); await calm();
+    check('nothing is selected, and the model has changed', (await sel()).length === 0);
+    await alice.click('[data-selection-control]');
+    await alice.click('.cad-selection [data-selection-set="Lid seat"] [data-set-select]');
+    check('a click on the set selects the same things again, after the rebuild', (await sel()).slice().sort().join() === kept.slice().sort().join(), (await sel()).join(' '));
+    await alice.click('.cad-selection [data-selection-set="Lid seat"] [data-set-delete]');
+    check('a set can be deleted', (await count('.cad-selection [data-selection-set]')) === 0);
+    await key('Escape'); await key('Escape');
+    await S(alice, () => { const s = window.JunctionPartStudio; s.undo(); s.undo(); s.undo(); }); await calm();
+    // select other
+    const t2 = await faceOnScreen(alice, [ids.e1, ':end:']);
+    await alice.mouse.click(t2.x, t2.y, { button: 'right' });
+    await alice.click('.cad-context-menu [data-menu-item="Select other…"]');
+    await alice.waitForSelector('.cad-select-other');
+    const others = await alice.$$eval('.cad-select-other [data-other]', (els) => els.map((e) => e.getAttribute('data-other-label')));
+    check('"Select other" lists what is under the pointer, front to back', others.length >= 2 && others.every((x) => /^Face of Part 1/.test(x)), others.join(' | '));
+    await alice.click('.cad-select-other [data-other="1"]');
+    check('… and a click selects the one behind', (await sel()).length === 1 && /:start:/.test((await sel())[0]) && (await count('.cad-select-other')) === 0, (await sel()).join(' '));
+    await key('Escape');
   }
 
   // ================================================================ the history of edits
