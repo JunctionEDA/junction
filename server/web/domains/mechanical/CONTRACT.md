@@ -1699,6 +1699,105 @@ several seconds, as does adding a gear to a body, because each flank is cut by t
 intersection; springs take about a second (the wire is swept along a spline); a bearing is rings and shields
 without balls; the timing belt profiles are drawn from the published tooth dimensions, not from a maker's
 pulley drawings.
+## Custom features: threads, fasteners, enclosures and hardware (`features/cf-hw-*.ts`)
+
+Twenty-six features in the toolbar's Custom features ▾ drop-down (`toolbarSection: "library"`), in two families
+(`toolbarMenu`): **Threads & fasteners** and **Enclosures & hardware**. They are ordinary feature files; nothing
+else knows about them. Tests: `static/tests/cad-cf-hw.test.js` (every feature with its defaults and in one other
+case, measured against the real kernel); in the browser, `scripts/cad-cf-hw-ui.mjs`.
+
+| Type | Title | What it does |
+|---|---|---|
+| `cf-hw-thread` | Thread | a modelled helical thread on a shaft: ISO metric coarse and fine, UNC, UNF, or any pitch; chamfered start, run-out, left hand, several starts, allowance |
+| `cf-hw-thread-internal` | Internal thread | the same in a hole (fitted to the tap drill, or opened up to the size picked); countersunk mouth, fades out at the bottom of a blind hole |
+| `cf-hw-pipe-thread` | Pipe thread | a tapered pipe thread, NPT or BSPT, on a pipe's end or in a hole; it vanishes into the pipe's surface |
+| `cf-hw-thread-cosmetic` | Cosmetic thread | a helix curve of the thread's pitch and length on the face (a reference curve), no faces |
+| `cf-hw-bolt` | Bolt | hex, socket cap, button or countersunk screw, M2 to M24 by length; plain shank or modelled thread |
+| `cf-hw-nut` | Nut | hex, self-locking, square or wing nut; plain hole or modelled thread |
+| `cf-hw-washer` | Washer | plain (ISO 7089), large (ISO 7093), spring (DIN 127) by size, or any ring |
+| `cf-hw-standoff` | Standoff | hex or round spacer, female-female or male-female; plain or modelled threads |
+| `cf-hw-fastener-holes` | Fastener holes | one screw's holes through a stack of parts: head seat in the first, clearance between, tapped or insert hole in the last |
+| `cf-hw-nut-pocket` | Nut pocket | a hexagon or square recess for a captive nut, or a side slot the nut slides into, with the bolt hole |
+| `cf-hw-knurl` | Knurl | a diamond or straight knurl in place of a round face |
+| `cf-hw-enclosure` | Enclosure | a box in two bodies, Base and Lid: wall, corner radius, locating lip, screw bosses |
+| `cf-hw-lip-groove` | Lip and groove | a lip along the rim of one half of a housing and its groove in the other |
+| `cf-hw-pcb-mounts` | PCB mounts | posts in a board's hole pattern (Raspberry Pi, Arduino, any rectangle): screw hole, insert hole or pin |
+| `cf-hw-oring-groove` | O-ring groove | the gland for an AS568 / ISO 3601-1 ring round a shaft, in a bore or in a flat face; static or dynamic |
+| `cf-hw-oring` | O-ring | the ring as a body, by dash number or dimensions, free or stretched |
+| `cf-hw-gasket` | Gasket | a flat gasket in the shape of a face, holes and all, optionally drawn back from the edge |
+| `cf-hw-bearing-pocket` | Bearing pocket | the seat for a ball bearing by designation (608, 6204 …) with its shoulder |
+| `cf-hw-magnet-pocket` | Magnet pocket | a press-fit pocket with crush ribs for a disc or block magnet |
+| `cf-hw-mount-pattern` | Mount pattern | NEMA 8 to 34 motor faces and VESA 75 to 400 display mounts; slots for belt tension |
+| `cf-hw-vents` | Vents | a field of slots, slanted louvres, round holes or a hexagon honeycomb, as one cut |
+| `cf-hw-cable-gland` | Cable gland hole | the hole for a PG or metric cable gland (clearance or tapped, D flat, seat), or a grommet with its body |
+| `cf-hw-feet` | Feet | four feet at the corners of a rectangle, or recesses for stick-on bumpers |
+| `cf-hw-din-clip` | DIN rail clip | a clip that snaps onto 35 mm top-hat rail, with screw holes |
+| `cf-hw-hinge` | Hinge | a butt hinge: two leaves with interleaved knuckles and a pin, three bodies, drawn at any opening |
+| `cf-hw-knob` | Knob | a lobed, knurled or round hand knob with a stem and a bore for a nut, a bolt head, a D shaft or an insert |
+
+**Where one goes.** The features that stand on something share three fields (`features/_cf-hw.ts whereFields`,
+`kernel/ops/cf-hw.ts spots`): *Locations* (sketch points, vertices, round edges for their centres, reference
+points; one copy at each), *Plane or face* (what it stands on; sketch points bring their sketch's plane), and
+*Turn* / *Opposite side*. With no location it goes to the middle of the picked face, or the plane's origin. The
+features that work on a cylinder (the threads, Knurl, a radial O-ring groove) take its face instead and find
+out for themselves whether it is a shaft or a hole.
+
+**Names.** `kernel/ops/cf-hw.ts` builds solids from outlines (`extruded`, `revolved`) and names each face after
+the piece of outline that swept it: `<id>:<role>`, with `<id>:<location>:<role>` when locations are picked
+(the location is the sketch point's id or the picked geometry's name, so a name survives other locations being
+added or removed). Faces with the same role are numbered by the engine (`~2`, `~3`, geometric order). Each
+feature file lists its names at its top.
+
+**The tables** are in `features/_cf-hw.ts`, with their sources: thread sizes (ISO 261/262, ASME B1.1, ASME
+B1.20.1, ISO 7-1), fastener, nut and washer dimensions M2 to M24 (the holes for M2 to M12 are the Hole feature's
+own table, `kernel/ops/holes.ts`), AS568 O-rings by dash number (generated from the standard's rule, -001 to
+-050, -102 to -178, -201 to -278, -309 to -381, -425 to -460) with Parker's industrial gland dimensions, ball
+bearings (ISO 15), NEMA and VESA patterns, cable gland threads, and the hole patterns of a few circuit boards.
+
+**The modelled thread** (`kernel/ops/cf-hw-thread.ts`) is not a sweep and not a boolean with a helix: both are
+slow in this kernel (seconds for a few turns) and fragile. The thread's surface is written down directly. Its
+axial profile is a trapezoid (root flat, flank, crest flat, flank; ISO 68-1's flats of P/4 and P/8 and depth of
+5/8 H for the 60° forms); each of the four pieces, wound round the axis, is a surface of its own, sampled every
+12° and fitted with a cubic B-spline surface through the samples (`surfaceThrough`: an interpolation with even
+parameters, so that two neighbouring pieces get the very same curve where they meet). The result is within a
+tenth of a micrometre of the true helicoid at M8, and a rod threaded this way has the profile's exact section
+(tested: its volume to 2 parts in 10 000, and the number of turns a bar along the axis crosses). Because the
+surface is a formula, taper, the chamfered start, the run-out and a pipe thread vanishing into its pipe are the
+same code: `clip` says how much of the profile's height exists at each place along the axis.
+
+Putting it on a body (`threadInto`, and `boreStock` + `graft`, which Knurl also uses): the stock the thread lies
+in is removed with a plain tube (an ordinary cut), which leaves a round wall and a circle on each end face; the
+wall is thrown away, each circle is replaced by the thread's own end curve, and the thread's faces are sewn in.
+No boolean ever sees the thread. If the end faces are not what a tube leaves, it falls back to joining a
+threaded sleeve with a boolean (slow, and not met in the tests).
+
+Limits of the hardware features, honestly:
+
+- **Thread forms.** The 60° forms are the basic profile: flat crests and roots, no root radius, no tolerance
+  class (`Allowance` moves the whole profile). BSPT's rounded crests and roots are modelled as flats of P/6 at
+  the right height and flank angle. No trapezoidal (Tr, Acme) or buttress forms yet, though `threadSurface`
+  would take them (they are a depth and two flats).
+- **A thread's faces are B-spline surfaces**, not cylinders: a crest cannot be picked as a cylinder (for an
+  axis, a concentric mate). The rest of the body keeps its faces and names.
+- **Where a thread ends against the shaft's own surface** (part-length threads, a pipe thread) it stops 0.02 mm
+  (or 3 % of its depth) short of that surface, leaving a ring that narrow, so that no face is degenerate.
+- **Speed.** A thread costs about 25 ms a turn plus 150 ms (M8 × 16: 0.4 to 0.6 s); a diamond knurl about 1 ms
+  a facet (Ø20 × 10 at 2 mm pitch: 750 facets, 0.8 s); the default Enclosure about 1 s (fifteen booleans).
+  Everything else is well under half a second. Modelled threads on a Bolt, a Nut or a Standoff are opt-in
+  for that reason; the default is a plain cylinder of the major (or minor) diameter.
+- **Knurl** needs a plain round face ending in flat faces, chamfers or steps; its facets are flat. It replaces
+  the whole face (no partial length).
+- **Fastener tables** stop at M24 and are nominal sizes; the wing nut follows DIN 315's proportions, not its
+  table; the heat-set insert holes are typical brass inserts (check the maker's sheet). Unified (inch) sizes
+  are in the thread features only, not in Bolt, Nut or Fastener holes.
+- **O-ring glands** are Parker's for the five AS568 cross-sections; other sections are scaled from the nearest.
+  ISO 3601's metric-only sizes (class B) are not in the table: give the two dimensions.
+- **Cosmetic thread** is a reference curve; it does not mark the face as threaded for a drawing or an export.
+- **Enclosure** is a rectangular box with four corner bosses. Lip and groove follows the outside edge of one
+  flat face (not a split line that steps or curves out of plane). Vents with a louvre angle cut slanted slots;
+  they do not form a raised hood.
+- **DIN rail clip** is rigid plastic with a ramped latch: it relies on the material's give, there is no
+  separate spring arm.
 
 ## Limits, in one place
 
