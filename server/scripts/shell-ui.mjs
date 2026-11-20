@@ -257,7 +257,7 @@ try {
   const ampBoard = await text('Amp/Amp.kicad_pcb'), pcb2Board = await text('PCB 2/PCB 2.kicad_pcb'), pcb1Board = await text('PCB 1/PCB 1.kicad_pcb');
   check('on the server: Amp\'s board has the footprint, PCB 1\'s and PCB 2\'s have none', /R_test/.test(ampBoard) && !/R_test|footprint/.test(pcb2Board.replace(/allow_soldermask_bridges_in_footprints/g, '')) && !/R_test/.test(pcb1Board));
   await alice.click(tab('Amp'));
-  await until(alice, () => { const s = window.appState(); return !!s.project.pcb && s.project.pcb.name === 'Amp' && s.document.hasDoc; }, null, 40000);
+  await until(alice, () => { const s = window.appState(); return !!s.project && !!s.project.pcb && s.project.pcb.name === 'Amp' && s.document.hasDoc; }, null, 40000);
   await view(alice, 'Amp', 'board'); await drawn(alice, 'kicad_pcb');
   check('back in Amp: its board still has R1', (await refs(alice)).join() === 'R1', `${await refs(alice)}`);
 
@@ -344,7 +344,7 @@ try {
   await alice.keyboard.type('sens');
   check('typing narrows it', (await alice.$$eval('[data-tab-list] [data-list-tab]', (els) => els.map((e) => e.textContent))).length === 1);
   await alice.keyboard.press('Enter');
-  check('Enter opens the tab found', await until(alice, () => { const s = window.appState(); return !!s.project.pcb && s.project.pcb.name === 'Sensor' && s.document.hasDoc; }, null, 40000) && !(await alice.$('[data-tab-list]')), `${await tabs(alice)}`);
+  check('Enter opens the tab found', await until(alice, () => { const s = window.appState(); return !!s.project && !!s.project.pcb && s.project.pcb.name === 'Sensor' && s.document.hasDoc; }, null, 40000) && !(await alice.$('[data-tab-list]')), `${await tabs(alice)}`);
   // the keyboard
   const before = (await tabs(alice)).findIndex((t) => t.startsWith('>'));
   await alice.keyboard.press('Alt+PageDown');
@@ -424,11 +424,11 @@ try {
   await view(legacy, 'Old_amp', 'board');
   check('Board is one click away, in the same page', await drawn(legacy, 'kicad_pcb') && (await views(legacy, 'Old_amp')).join() === 'Schematic,>Board,BOM');
   await legacy.click('[data-doc-add]'); await legacy.click('[data-add=pcb]');
-  await until(legacy, () => { const s = window.appState(); return !!s.project.pcb && s.project.pcb.name === 'PCB 1' && s.document.hasDoc; }, null, 40000);
+  await until(legacy, () => { const s = window.appState(); return !!s.project && !!s.project.pcb && s.project.pcb.name === 'PCB 1' && s.document.hasDoc; }, null, 40000);
   s = await app(legacy);
   check('a second PCB can be added to it: the new one in its folder, the old one untouched at the root', s.all.some((d) => d.path === 'PCB 1/PCB 1.kicad_pcb') && s.all.some((d) => d.path === 'Old_amp.kicad_pcb') && s.docs.join() === 'PCB 1.kicad_pcb,PCB 1.kicad_pro,PCB 1.kicad_sch', JSON.stringify(s.docs));
   await legacy.click(tab('Old_amp'));
-  await until(legacy, () => { const s = window.appState(); return !!s.project.pcb && s.project.pcb.dir === '' && s.document.hasDoc; }, null, 40000);
+  await until(legacy, () => { const s = window.appState(); return !!s.project && !!s.project.pcb && s.project.pcb.dir === '' && s.document.hasDoc; }, null, 40000);
   s = await app(legacy);
   check('and the old PCB\'s editor does not see the new one\'s files', !s.docs.some((p) => /PCB 1/.test(p)) && s.docs.includes('Old_amp.kicad_sch'), JSON.stringify(s.docs));
   await legacy.close();

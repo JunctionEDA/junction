@@ -7,12 +7,16 @@
 // and says so; an edit to Beta's schematic lands in Beta's file and leaves Alpha's as it was; and a project with
 // KiCad's files at its root answers as it always did.
 //
+// The project shell (several PCBs in a project) comes with Mechanical CAD (web/shared/cad.ts), so Ada has it on;
+// with it off, the tool list speaks of one PCB per project and the tools still keep to one PCB of such a project.
+//
 // Setup as the *-ui.mjs scripts (no browser needed): a local server with KC_DEV_LOGIN=1 on a throwaway database,
 // node on the server's PATH (it runs the tool host), and psql here (it makes the test user):
 //
 //   E2E_PG_URL=postgres://… E2E_JWT_SECRET=testsecret [E2E_BASE=http://127.0.0.1:8099] node scripts/shell-mcp.mjs
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { setCad } from './cad-setting.mjs';
 
 const BASE = (process.env.E2E_BASE || 'http://127.0.0.1:8099').replace(/\/$/, '');
 const SECRET = process.env.E2E_JWT_SECRET, PG_URL = process.env.E2E_PG_URL;
@@ -29,6 +33,7 @@ function jwt(sub, login) {
 const sql = (text) => execFileSync('psql', [PG_URL, '-Atc', text], { encoding: 'utf8' }).trim();
 sql(`INSERT INTO users (github_id, login, name) VALUES (978201, 'shell-mcp-ada', 'Ada Lovelace') ON CONFLICT (github_id) DO NOTHING`);
 const ada = jwt(Number(sql(`SELECT id FROM users WHERE github_id = 978201`)), 'shell-mcp-ada');
+await setCad(BASE, ada);
 
 async function api(method, path, body, raw) {
   const r = await fetch(BASE + path, { method, headers: { authorization: `Bearer ${ada}`, 'content-type': raw ? 'application/octet-stream' : 'application/json' }, body: body === undefined ? undefined : raw ? body : JSON.stringify(body) });
@@ -69,6 +74,7 @@ const alphaSch = `(kicad_sch (version 20250114) (generator "eeschema") (generato
 `;
 
 let rpcId = 0, key = '';
+const paths0 = (r) => (r.data && r.data.documents || []).map((d) => d.path);
 async function call(name, args) {
   const r = await fetch(`${BASE}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${key}`, 'mcp-protocol-version': '2025-06-18' },
     body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/call', params: { name, arguments: args } }) });
@@ -78,6 +84,13 @@ async function call(name, args) {
   return { isError: !!j.result.isError, text, data };
 }
 const refsOf = (r) => JSON.stringify(r.data || r.text).match(/"R\d+"/g) || [];
+/** What tools/list says the `document` argument of list_components is. */
+async function documentArg() {
+  const r = await fetch(`${BASE}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${key}`, 'mcp-protocol-version': '2025-06-18' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/list', params: {} }) });
+  const tool = (await r.json()).result.tools.find((t) => t.name === 'list_components');
+  return tool.inputSchema.properties.document.description;
+}
 
 try {
   // ---- the project: two PCBs.  Beta is made by the shell's route; Alpha's schematic comes with a part in it.
@@ -94,6 +107,13 @@ try {
 
   key = (await api('POST', '/api/mcp/keys', { name: 'shell-mcp test', write: true })).key;
   check('an access key that may write', /^kcm_at_/.test(key || ''));
+  check('with CAD on, the document argument says how to name a PCB in a project with several', /several PCBs/.test(await documentArg()));
+  await setCad(BASE, ada, false);
+  const plain = await documentArg();
+  check('with CAD off, it is described as the PCB editor alone has it', /^Which document/.test(plain) && !/PCB/.test(plain), plain);
+  const offList = await call('get_project', { project: name });
+  check('… and get_project still lists every document of both PCBs (nothing is hidden), its note naming no cad_ tool', ['Alpha/Alpha.kicad_pcb', 'Beta/Beta.kicad_pcb'].every((p) => paths0(offList).includes(p)) && !/cad_/.test(offList.data.note || ''), offList.text.slice(0, 300));
+  await setCad(BASE, ada);
 
   const listed = await call('get_project', { project: name });
   const paths = (listed.data && listed.data.documents || []).map((d) => d.path);

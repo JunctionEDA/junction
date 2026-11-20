@@ -183,7 +183,7 @@ try {
   check('phone: the import page fits the screen width', await fits(phone));
   await shot(phone, '09-phone-import');
 
-  // ---- dark theme: the editor's saved choice (kui.theme) applies; the OS preference only when "system" was chosen
+  // ---- dark theme: the editor's saved choice (kui.theme) applies; with none, the OS preference (light with CAD on)
   const lum = (pg) => pg.evaluate(() => {
     const rgb = (el) => getComputedStyle(el).backgroundColor.match(/\d+/g).slice(0, 3).map(Number).reduce((a, b) => a + b, 0) / 3;
     return { page: rgb(document.body), box: rgb(document.querySelector('.box')), ink: getComputedStyle(document.body).color.match(/\d+/g).slice(0, 3).map(Number).reduce((a, b) => a + b, 0) / 3 };
@@ -205,8 +205,14 @@ try {
   const dp = await osDark.newPage();
   await dp.goto(`${BASE}/auth/dev?jwt=${jwt}&next=/p/${pid}/github`);
   await dp.waitForSelector('table.files');
+  // nothing chosen: the system's theme with Mechanical CAD off (this person's), light with it on (web/shared/theme.ts)
+  const os = await lum(dp);
+  check('an OS in dark mode gets the dark theme without choosing (Mechanical CAD off)', os.page < 60 && os.ink > 180, JSON.stringify(os));
+  await dp.evaluate(() => localStorage.setItem('kui.cad', '1'));
+  await dp.reload();
+  await dp.waitForSelector('table.files');
   const ol = await lum(dp);
-  check('light is the default, also where the OS is in dark mode', ol.page > 200 && ol.ink < 80, JSON.stringify(ol));
+  check('with Mechanical CAD on, light is the default, also where the OS is in dark mode', ol.page > 200 && ol.ink < 80, JSON.stringify(ol));
   await dp.evaluate(() => localStorage.setItem('kui.theme', 'system'));
   await dp.reload();
   await dp.waitForSelector('table.files');

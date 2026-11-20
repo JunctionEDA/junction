@@ -332,22 +332,33 @@ const starredA = (await (await fetch(`${BASE}/api/projects`, { headers: authA })
 check('a star is per person', star.status === 200 && starredB?.starred === true && starredA?.starred === false);
 await fetch(`${BASE}/api/projects/${project.projectId}/star`, { method: 'DELETE', headers: authB });
 
+// Mechanical CAD is off for this person (a new account's default; web/shared/cad.ts): a blank project is the PCB
+// editor's, the three files KiCad's File > New Project writes.  With CAD on it is the project shell's empty one.
+await fetch(`${BASE}/api/me/cad`, { method: 'PUT', headers: jsonA, body: JSON.stringify({ enabled: false }) });
 const blankRes = await fetch(`${BASE}/api/projects/blank`, { method: 'POST', headers: jsonA, body: JSON.stringify({ name: 'E2E blank: one/two' }) });
 const blank = await blankRes.json();
-check('blank project: empty, with only the project\'s own document (no schematic, no board)', blankRes.status === 200 && blank.docs?.length === 1
-  && blank.docs[0].docType === 'project_shell' && blank.docs[0].path === 'project.jproj', JSON.stringify(blank.docs?.map(d => d.path)));
-const kicadRes = await fetch(`${BASE}/api/projects/blank`, { method: 'POST', headers: jsonA, body: JSON.stringify({ name: 'E2E blank: one/two', template: 'pcb' }) });
-const kicad = await kicadRes.json();
-check('blank project with template "pcb": a project file, a schematic and a board with a safe file name', kicadRes.status === 200 && kicad.docs?.length === 3
-  && kicad.docs.every(d => !/[\/:]/.test(d.path.replace(/\.kicad_\w+$/, ''))), JSON.stringify(kicad.docs?.map(d => d.path)));
+check('blank project: a project file, a schematic and a board with a safe file name', blankRes.status === 200 && blank.docs?.length === 3
+  && blank.docs.every(d => !/[\/:]/.test(d.path.replace(/\.kicad_\w+$/, ''))), JSON.stringify(blank.docs?.map(d => d.path)));
+const emptyRes = await fetch(`${BASE}/api/projects/blank`, { method: 'POST', headers: jsonA, body: JSON.stringify({ name: 'E2E blank: one/two', template: 'empty' }) });
+const empty = await emptyRes.json();
+check('blank project with template "empty": only the project\'s own document (no schematic, no board)', emptyRes.status === 200 && empty.docs?.length === 1
+  && empty.docs[0].docType === 'project_shell' && empty.docs[0].path === 'project.jproj', JSON.stringify(empty.docs?.map(d => d.path)));
 {
-  const pcb = await fetch(`${BASE}/api/projects/${blank.projectId}/pcbs`, { method: 'POST', headers: jsonA, body: JSON.stringify({ name: 'Main: board/one' }) });
+  await fetch(`${BASE}/api/me/cad`, { method: 'PUT', headers: jsonA, body: JSON.stringify({ enabled: true }) });
+  const r = await fetch(`${BASE}/api/projects/blank`, { method: 'POST', headers: jsonA, body: JSON.stringify({ name: 'E2E blank with CAD' }) });
+  const withCad = await r.json();
+  await fetch(`${BASE}/api/me/cad`, { method: 'PUT', headers: jsonA, body: JSON.stringify({ enabled: false }) });
+  check('with Mechanical CAD on, a blank project is the empty one that opens on its Home tab', r.status === 200 && withCad.docs?.length === 1 && withCad.docs[0].docType === 'project_shell', JSON.stringify(withCad.docs?.map(d => d.path)));
+  if (withCad.projectId) await fetch(`${BASE}/api/projects/${withCad.projectId}`, { method: 'DELETE', headers: authA });
+}
+{
+  const pcb = await fetch(`${BASE}/api/projects/${empty.projectId}/pcbs`, { method: 'POST', headers: jsonA, body: JSON.stringify({ name: 'Main: board/one' }) });
   const made = await pcb.json();
   check('a PCB added to a project is a KiCad project in its own folder, named safely', pcb.status === 200 && made.dir === 'Main_ board_one' && made.docs?.length === 3
     && made.docs.every(d => d.path.startsWith('Main_ board_one/Main_ board_one.kicad_')), JSON.stringify(made));
-  const again = await (await fetch(`${BASE}/api/projects/${blank.projectId}/pcbs`, { method: 'POST', headers: jsonA, body: JSON.stringify({ name: 'main_ BOARD_one' }) })).json();
+  const again = await (await fetch(`${BASE}/api/projects/${empty.projectId}/pcbs`, { method: 'POST', headers: jsonA, body: JSON.stringify({ name: 'main_ BOARD_one' }) })).json();
   check('a second PCB of the same name gets a folder of its own', again.dir === 'main_ BOARD_one 2', JSON.stringify(again.dir));
-  await fetch(`${BASE}/api/projects/${kicad.projectId}`, { method: 'DELETE', headers: authA });
+  await fetch(`${BASE}/api/projects/${empty.projectId}`, { method: 'DELETE', headers: authA });
 }
 for (const bad of ['', '   ', '..', 'x'.repeat(121)]) {
   const r = await fetch(`${BASE}/api/projects/blank`, { method: 'POST', headers: jsonA, body: JSON.stringify({ name: bad }) });
