@@ -45,7 +45,7 @@ export default defineFeature<RuledSurfaceParams>({
   type: "ruled-surface",
   title: "Ruled surface",
   icon: '<path class="f" d="M3.500 17.500c4-4 8.500-4 13-1.500l4-10.500c-3-1.500-6-1.500-9 .5z"/><path d="M3.500 17.500c4-4 8.500-4 13-1.500"/><path class="t" d="M11.500 6c3-2 6-2 9-.5M3.500 17.500l8-11.500M7 15l6.500-10M10.500 14.500l5.300-9.700M13.700 14.900l4.500-9.800M16.500 16l4-10.500"/>',
-  toolbarOrder: 50, toolbarSection: "surface", toolbarKeep: 34,
+  toolbarOrder: 50, toolbarSection: "surface", toolbarMenu: "Surface", toolbarKeep: 60,
   hint: "A strip of straight lines from edges or curves: square to the surface, along it, or along a direction.",
   keywords: "surface flange strip parting normal tangent rule extend edge",
   defaults: () => ({ edges: [], ruledType: "normal", distance: 10, direction: null, angle: 30, face: null, flip: false }),

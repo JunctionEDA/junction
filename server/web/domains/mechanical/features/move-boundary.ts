@@ -24,7 +24,7 @@ export default defineFeature<MoveBoundaryParams>({
   type: "move-boundary",
   title: "Move boundary",
   icon: '<path class="f" d="M3 7.500c3-2 6-2 9-.5v11c-3-1.500-6-1.500-9 .5z"/><path d="M12 7v11M3 7.500c3-2 6-2 9-.5M3 18.500c3-2 6-2 9-.5M3 7.500v11"/><path class="d" d="M12 7c3 1 6 1 9-.500v11c-3 1.500-6 1.500-9 .500"/><path d="M13.500 12.500h5M16.500 10.500l2 2-2 2"/>',
-  toolbarOrder: 40, toolbarSection: "surface", toolbarKeep: 35,
+  toolbarOrder: 40, toolbarSection: "surface", toolbarMenu: "Surface", toolbarKeep: 60,
   hint: "Move the open edges of a surface outwards to extend it, or inwards to trim it.",
   keywords: "surface extend trim edge lengthen shorten untrim",
   defaults: () => ({ edges: [], moveType: "extend", distance: 5 }),

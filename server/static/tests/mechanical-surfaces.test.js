@@ -69,10 +69,10 @@ const blockDoc = () => [sketch("s1", rect(0, 0, 40, 20, "r")), extrude("e1", "s1
 /** a flat 20 × 10 sheet standing on the X axis, in the XZ plane */
 const sheetDoc = () => [sketch("s1", polyline([[0, 0], [20, 0]], "l")), extrude("x1", "s1", { bodyType: "surface", depth: 10 })];
 
-test("the surface features are in the registry, in the toolbar's surface section, in Onshape's order", () => {
+test("the surface features are in the registry, under the toolbar's Surface button, in Onshape's order", () => {
   const surface = K.FEATURES.filter((f) => f.toolbarSection === "surface").sort((a, b) => a.toolbarOrder - b.toolbarOrder);
   assert.deepEqual(surface.map((f) => f.title), ["Offset surface", "Boundary surface", "Fill", "Move boundary", "Ruled surface", "Mutual trim", "Constrained surface"]);
-  for (const f of surface) { assert.ok(f.icon && f.hint && f.keywords, f.type); assert.equal(f.toolbarMenu, undefined); }
+  for (const f of surface) { assert.ok(f.icon && f.hint && f.keywords, f.type); assert.equal(f.toolbarMenu, "Surface"); }
   for (const t of ["extrude", "revolve", "sweep", "loft"]) {
     const f = K.FEATURES.find((x) => x.type === t);
     assert.deepEqual(f.schema[0].options.map((o) => o.label), ["Solid", "Surface"], t);

@@ -81,7 +81,7 @@ export default defineFeature<ConstrainedSurfaceParams>({
   type: "constrained-surface",
   title: "Constrained surface",
   icon: '<path class="f" d="M2.500 12c3-6 6.500-7 9.500-4s6 1 9.500-3.500v8c-3.500 4.500-6.500 6.500-9.500 3.500s-6.500-2-9.500 4z"/><path d="M2.500 12c3-6 6.500-7 9.500-4s6 1 9.500-3.500v8c-3.500 4.500-6.500 6.500-9.500 3.500s-6.500-2-9.500 4z"/><circle class="s" cx="6.500" cy="11.500" r="1.500"/><circle class="s" cx="12" cy="12" r="1.500"/><circle class="s" cx="17.500" cy="9.500" r="1.500"/>',
-  toolbarOrder: 70, toolbarSection: "surface", toolbarKeep: 32,
+  toolbarOrder: 70, toolbarSection: "surface", toolbarMenu: "Surface", toolbarKeep: 60,
   hint: "One smooth surface through a selection of points, within a tolerance.",
   keywords: "surface points fit cloud scan through freeform",
   defaults: () => ({ points: [], sketches: [], tolerance: 0.01, margin: 0 }),

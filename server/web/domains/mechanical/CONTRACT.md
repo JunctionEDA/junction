@@ -428,7 +428,7 @@ export interface FeatureDefinition<P> {
   evaluate(ctx: EvalContext, params: P): void | Promise<void>;   // runs in the worker
   toolbar?: boolean;            // false: no toolbar button
   toolbarOrder?: number;
-  toolbarSection?: "sketch" | "solid" | "modify" | "combine" | "pattern" | "reference" | "board";   // which part of the toolbar ("solid")
+  toolbarSection?: "sketch" | "solid" | "modify" | "combine" | "pattern" | "surface" | "reference" | "board";   // which part of the toolbar ("solid")
   toolbarMenu?: string;         // variants of one thing share one button and its caret ("Pattern")
   toolbarKeep?: number;         // how long it stays on the bar in a narrow window (50; 0: always under More)
 }
@@ -479,7 +479,7 @@ module level**, and `evaluate` must use only its context.
 ctx.oc                         // the raw OpenCascade bindings (typed: OpenCascadeInstance)
 ctx.k                          // helpers: sub(), list(), prism(), boolean(), carryNames(), faceFrame(), volume(), …
 ctx.feature                    // { id, type, name }
-ctx.bodies(), ctx.body(id)     // bodies() leaves out reference bodies (a Board feature's board); body(id) finds any
+ctx.bodies(), ctx.body(id)     // bodies() leaves out reference bodies (a Board feature's board) and surfaces; body(id) finds any
 ctx.allBodies()
 ctx.addBody(shape, names, { suffix?, name?, reference? })   // names: (face, index) => string | null
 ctx.datum(id), ctx.setDatum(d) // reference planes, axes, points, curves
@@ -576,6 +576,18 @@ before relying on them: the example has not been run.)
 - A body may be a **reference body** (`Body.reference`, `BodyResult.reference`): there to be referred to and
   drawn, not a part. Features that act on "every body" leave it alone, mass properties leave it out by default,
   the Parts panel marks it, and the board editor's enclosure does not draw it.
+
+- A body may be a **surface** (`Body.sheet`, `BodyResult.sheet`): a body with no solid in it, one face or faces
+  sewn into a sheet. The engine sets the flag from the shape each time a body is added or replaced; a feature
+  never sets it. `ctx.bodies()` leaves surfaces out, so Add, Remove and "every body" act on parts only; a
+  feature that is given a surface finds it with `ctx.body(id)`. The Parts panel lists surfaces after the parts
+  under "Surfaces" and names them Surface 1, 2, …; they are drawn, picked, hidden, transformed, deleted and
+  exported (STEP as shells) like parts, and their volume is zero. Extrude, Revolve, Sweep and Loft make them
+  with **Creates: Surface** (`bodyType`, `kernel/ops/surface-sweeps.ts`), from a sketch's curves, open or
+  closed. The surface features (`toolbarSection: "surface"`: Offset surface, Boundary surface, Fill, Move
+  boundary, Ruled surface, Mutual trim, Constrained surface) share `kernel/ops/surface.ts` and one button, Surface ▾. A feature may give
+  its own tooltip line and search words (`hint`, `keywords`) instead of adding to `ui/commands.ts` and
+  `ui/search.ts`.
 
 ### Building a part studio outside its page (`document/inputs.ts`)
 
@@ -763,17 +775,18 @@ Drawn from the registries; nothing is listed by hand. It shows the tools of the 
 (`data-mode` on `.cad-toolbar`), in the order an Onshape user's hands know, the most used first:
 
 ```
-model    undo redo │ Sketch │ Extrude Revolve Sweep Loft │ Fillet Chamfer Draft Shell Hole │ Boolean Split Transform▾ │ Pattern▾ Mirror │ Plane▾ │ Board▾ │ Measure Section │ History │ More▾   [Search tools… S]
+model    undo redo │ Sketch │ Extrude Revolve Sweep Loft │ Fillet Chamfer Draft Shell Hole │ Boolean Split Transform▾ │ Pattern▾ Mirror │ Surface▾ │ Plane▾ │ Board▾ │ Measure Section │ History │ More▾   [Search tools… S]
 sketch   undo redo │ Line Rectangle▾ Circle Arc▾ Slot Point Construction │ Sketch fillet Offset Use edge Mirror Trim Extend │ the twelve constraints │ Dimension │ Extrude Revolve │ More▾   [Search tools… S]  ✓ Finish sketch  ✗
 dialog   <icon> <name>  <what the listening field wants> │ More▾                                              [Search tools… S]  ✓  ✗
 view     (no edit rights) Measure Section │ History │ More▾                                                    [Search tools… S]
 ```
 
 - **One button is one tool, drawn as its icon** (22 px; only Sketch carries its name). A **feature** says which
-  section it is in (`toolbarSection`: sketch │ solid │ modify │ combine │ pattern │ reference │ board; "solid"
+  section it is in (`toolbarSection`: sketch │ solid │ modify │ combine │ pattern │ surface │ reference │ board; "solid"
   when absent) and where in it (`toolbarOrder`).
 - **A tool with variants is one button and a caret** (`toolbarMenu`, a tool's `menu`): Transform ▾ holds
-  Transform and Delete body; Pattern ▾ Linear and Circular pattern; Reference ▾ Plane, Axis, Point and Helix;
+  Transform and Delete body; Pattern ▾ Linear and Circular pattern; Surface ▾ Offset surface,
+  Boundary surface, Fill, Move boundary, Ruled surface, Mutual trim and Constrained surface; Reference ▾ Plane, Axis, Point and Helix;
   Board ▾ Board, Opening and Standoffs; in a sketch Rectangle ▾ and Arc ▾. The face runs the variant used last
   (kept in the browser, `ui/prefs.ts`), the caret opens the list. A family of one is a plain button. Things
   that are not variants of each other (Fillet, Chamfer, Draft; Sweep, Loft; Boolean, Split) have a button each.
@@ -1380,7 +1393,7 @@ from page load to the model on screen 14.4 s and 7.0 s.
 - **Windows narrower than about 1000 px:** the toolbar scrolls sideways; the docks fold by hand, not by
   themselves; nothing is laid out for phones.
 - **The part studio's interface, not done:** folders in the feature list; renaming a part (its name is the
-  kernel's); lists of surfaces and curves (there are no surface bodies); undo and redo do not bring back the
+  kernel's); a list of curves (surfaces are listed in the Parts panel under Surfaces); undo and redo do not bring back the
   selection or an open dialog; the mouse buttons cannot be remapped; the kernel's download shows a spinner, not
   how far it is; a plane's name is drawn over the model when its corner is behind it; inference lines cannot be
   turned off (constraint marks can); a sketch dimension's expression with bare numbers, and a variable's, follow

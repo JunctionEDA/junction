@@ -57,7 +57,7 @@ export default defineFeature<MutualTrimParams>({
   type: "mutual-trim",
   title: "Mutual trim",
   icon: '<path class="f" d="M2.5 14l7-4h6l-7 4zM8.500 8l7-4v6l-7 4z"/><path d="M8.500 14h-6l7-4M8.500 14V8l7-4v6h-6M8.500 14l7-4"/><path class="d" d="M15.500 10h6l-7 4h-6M8.500 14v6l7-4v-6"/>',
-  toolbarOrder: 60, toolbarSection: "surface", toolbarKeep: 33,
+  toolbarOrder: 60, toolbarSection: "surface", toolbarMenu: "Surface", toolbarKeep: 60,
   hint: "Cut two crossing surfaces along each other and keep one side of each.",
   keywords: "surface trim intersect cut knit cross",
   defaults: () => ({ surfaces: [], flipFirst: false, flipSecond: false, merge: true }),

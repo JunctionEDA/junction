@@ -28,7 +28,7 @@ export default defineFeature<FillParams>({
   type: "fill",
   title: "Fill",
   icon: '<path class="f" d="M4.500 8.500c3-4.500 9-5.500 14.500-2.500 1.500 4.500.5 9-3.500 12.500-5 1-9.500-.5-12-4.500z"/><path d="M4.500 8.500c3-4.500 9-5.500 14.500-2.500 1.500 4.500.5 9-3.500 12.500-5 1-9.500-.5-12-4.500z"/><path class="t" d="M8 6.500c2 4 1.500 8.500-.5 11M13.500 5c2 4.500 1.500 9.500-1.500 13.500M4 11.500c5-1.500 10.500-1 15.500.5"/>',
-  toolbarOrder: 30, toolbarSection: "surface", toolbarKeep: 36,
+  toolbarOrder: 30, toolbarSection: "surface", toolbarMenu: "Surface", toolbarKeep: 60,
   hint: "Close a loop of edges or curves with a surface: flat when the loop is, a smooth patch otherwise.",
   keywords: "surface patch cap close hole planar boundary n-sided",
   defaults: () => ({ edges: [], continuity: "position", guides: [], merge: false }),

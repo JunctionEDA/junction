@@ -27,7 +27,7 @@ export default defineFeature<OffsetSurfaceParams>({
   type: "offset-surface",
   title: "Offset surface",
   icon: '<path class="d" d="M3 19.5c4-3.5 8-3.5 11.5-1.5l6.500-5"/><path class="f" d="M3 12c4-3.5 8-3.5 11.5-1.500L21 5.500v-2.500l-6.500 5c-3.500-2-7.500-2-11.500 1.500z"/><path d="M3 12c4-3.500 8-3.500 11.500-1.500L21 5.500"/><path d="M9 17.500v-5M7 14.300l2-2 2 2"/>',
-  toolbarOrder: 10, toolbarSection: "surface", toolbarKeep: 38,
+  toolbarOrder: 10, toolbarSection: "surface", toolbarMenu: "Surface", toolbarKeep: 60,
   hint: "A new surface at a distance from faces, a surface or sketch regions. Zero copies them in place.",
   keywords: "surface copy face sheet parallel skin",
   defaults: () => ({ faces: [], profile: null, distance: 5, flip: false }),

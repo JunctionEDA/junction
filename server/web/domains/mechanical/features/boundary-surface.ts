@@ -33,7 +33,7 @@ export default defineFeature<BoundarySurfaceParams>({
   type: "boundary-surface",
   title: "Boundary surface",
   icon: '<path class="f" d="M3.500 8c5-3.500 10-3.500 15-1.500l2 10c-5-2-10-2-15 1.500z"/><path d="M3.500 8c5-3.500 10-3.500 15-1.500M5.500 18c5-3.500 10-3.500 15-1.500"/><path class="t" d="M3.500 8l2 10M18.500 6.500l2 10M8.500 5.700l2 10M13.500 5.300l2 10M4.500 13c5-3.500 10-3.500 15-1.500"/>',
-  toolbarOrder: 20, toolbarSection: "surface", toolbarKeep: 37,
+  toolbarOrder: 20, toolbarSection: "surface", toolbarMenu: "Surface", toolbarKeep: 60,
   hint: "A surface through sets of curves: the U profiles it passes through and, optionally, the V profiles across them.",
   keywords: "surface loft curves network patch blend four sided",
   defaults: () => ({ u: [], v: [] }),
