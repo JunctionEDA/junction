@@ -240,3 +240,35 @@ test("bend relief and corner break on a flange kept back from the edge's ends", 
   allOk(res.r);
   near(res.k.volume(bodies(res.engine)[0].shape), v0 - (25 - Math.PI * 25 / 4), 1e-6);
 });
+
+// ---------------------------------------------------------------- frames
+
+const frameDefaults = (o) => ({ ...K.FEATURES.find((f) => f.type === "frame").defaults(), ...o });
+const box200 = () => [sketch("fs", rect(0, 0, 200, 100, "f"), top), feature("fr", "frame", frameDefaults({ path: [{ kind: "sketch", feature: "fs", entity: "fa" }] }))];
+const frameItems = (engine) => state(engine).extras.frame;
+
+test("frame: a square tube around a rectangle, mitred", async () => {
+  const { k, engine, r } = await run(box200());
+  allOk(r);
+  const bs = bodies(engine);
+  assert.equal(bs.length, 4);
+  near(bs.reduce((v, b) => v + k.volume(b.shape), 0), 144 * 600, 1e-6);
+  const items = Object.values(frameItems(engine));
+  assert.deepEqual(items.map((i) => Math.round(i.length)).sort((a, b) => a - b), [120, 120, 220, 220]);
+  for (const it of items) { near(it.angles[0], 45, 1e-6); near(it.angles[1], 45, 1e-6); }
+  assert.ok(bs[0].topo.faces.some((f) => f.name.endsWith(":start")));
+});
+
+test("frame: butt corners, every profile family", async () => {
+  let { k, engine, r } = await run([sketch("fs", rect(0, 0, 200, 100, "f"), top), feature("fr", "frame", frameDefaults({ path: [{ kind: "sketch", feature: "fs", entity: "fa" }], corner: "butt" }))]);
+  allOk(r);
+  near(bodies(engine).reduce((v, b) => v + k.volume(b.shape), 0), 144 * 600, 1e-6);
+  const lens = Object.values(frameItems(engine)).map((i) => Math.round(i.length)).sort((a, b) => a - b);
+  assert.deepEqual(lens, [80, 100, 200, 220]);
+  for (const [family, size] of [["rect-tube", "40x20x2"], ["round-tube", "33.7x3.2"], ["angle", "30x30x3"], ["channel", "UPN80"], ["i-beam", "IPE100"], ["t-slot", "30"]]) {
+    ({ k, engine, r } = await run([sketch("fs", polyline([[0, 0], [300, 0], [300, 200]], "f"), top), feature("fr", "frame", frameDefaults({ path: [{ kind: "sketch", feature: "fs", entity: "fl1" }], family, [`size_${family.replace(/-/g, "_")}`]: size }))]));
+    allOk(r);
+    assert.equal(bodies(engine).length, 2, family);
+    for (const b of bodies(engine)) assert.equal(k.solids(b.shape).length, 1, family);
+  }
+});
