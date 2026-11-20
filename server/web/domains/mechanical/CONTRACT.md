@@ -1569,6 +1569,60 @@ not download the file. Measured on the 4.4 MB, 22-part demo STEP in Chromium (so
 `scripts/cad-exchange-ui.mjs` prints it): the Import feature 7.6 s reading the file, 0.5 s from the kept B-rep;
 from page load to the model on screen 14.4 s and 7.0 s.
 
+## Custom features: fabrication (`features/cf-fab-*.ts`)
+
+Twenty-five features for laser cutting, CNC routing, woodworking joints and 3D printing, in the Custom features
+part of the toolbar (`toolbarSection: "library"`, under More) as two families, "Laser & CNC" and "3D printing".
+They are ordinary feature files; what they share is `kernel/ops/cf-fab.ts` (solids drawn from an outline or a
+half profile in a frame with every face named, finger spacing, a body read as a plate, an edge face read as a
+rectangle, one boolean for many tools, offsetting a face's outline) and `features/_cf-fab.ts` (the two menus,
+the clearance and kerf fields, the finger joint). Tested by `static/tests/cad-cf-fab.test.js` (each with its
+defaults and with other values, measured) and in the browser by `scripts/cad-cf-fab-ui.mjs`.
+
+Conventions they keep:
+
+- **Fit.** `clearance` opens a joint and `kerf` closes it by what the cutter removes; a joint's openings grow by
+  clearance − kerf. Plates that are to be jointed are modelled running through each other (each as long as the
+  outside of the corner); the feature shares the overlap out.
+- **Where a detail goes.** Joints on a board's end take that face (`refs`, one face) and read it as a rectangle:
+  long side, short side, outward normal. Printed details take a sketch's points as Hole does (loose points and
+  circle centres) and grow out of the sketch's plane, or into it for holes.
+- **Names.** `<id>:<what><n>:<role>` (`<id>:tab2:end`, `<id>:h1:pilot`), `<id>:<sketch point>:<role>` for what
+  stands on a sketch point; the faces a body had keep their names.
+
+| Type | Title | What it does |
+|---|---|---|
+| `cf-fab-laser-joint` | Laser joint | Finger joints wherever flat plates overlap (every pair), fingers as near a width as an odd count allows; a plate that carries on past the joint keeps the ends. |
+| `cf-fab-box-joint` | Box joint | A counted row of fingers between two boards at a corner, with a glue gap. |
+| `cf-fab-tab-slot` | Tab and slot | Tabs on a plate's edge face, the slots for them in the plates against it. |
+| `cf-fab-tslot` | T-slot joint | The captive nut joint: a T through the plate for bolt and nut (ISO 4032 sizes M2–M8), a clearance hole in the plate against the edge. |
+| `cf-fab-dogbone` | Dogbone | Dogbone or T-bone relief of the cutter's diameter in every inside corner along the cutter. |
+| `cf-fab-kerf` | Kerf compensation | Moves every cut edge of a flat plate into the waste by half the kerf (outline out, holes in), names kept. |
+| `cf-fab-living-hinge` | Living hinge | Rows of staggered slits through a plate across a band. |
+| `cf-fab-nest` | Auto layout | Lays flat parts on sheets in rows by their rectangles, with spacing, margin and grain lock; copies or moves; the sheets are reference bodies. Not true-shape nesting. |
+| `cf-fab-box` | Box generator | A finger-jointed box, one body a panel, from inside or outside sizes; lid none, jointed or lift-off. |
+| `cf-fab-fit-comb` | Press-fit test comb | A strip of slots a step apart round the material's thickness. |
+| `cf-fab-puzzle` | Puzzle joint | Splits a plate along a seam of jigsaw knobs that point to alternate sides. |
+| `cf-fab-mortise-tenon` | Mortise and tenon | A tenon on a board's end, the mortise (clearance, glue gap, round ends) in the board it meets. |
+| `cf-fab-dovetail` | Dovetail joint | Through dovetails between two boards at a right-angled corner: tails by count, slope and pin width. |
+| `cf-fab-dowel` | Dowel / biscuit holes | Matching dowel holes, or the slots of a 100 mm plate joiner for #0, #10, #20 biscuits, in both boards. |
+| `cf-fab-pocket-hole` | Pocket hole | The stepped hole of a pocket-hole jig, at 15° through the middle of a board's end. |
+| `cf-fab-snap-hook` | Snap-fit hook | A cantilever hook with lead-in and return angles and a root fillet; warns when the root strain 1.5·t·y/L² passes a limit. |
+| `cf-fab-snap-annular` | Annular snap fit | A round plug with a bead (hollow, slit), or the socket with its groove; the same numbers make a pair. |
+| `cf-fab-heat-insert` | Heat-set insert hole | The hole for a brass insert from a table M2–M8, deeper than the insert, with a lead-in and an optional screw hole below. |
+| `cf-fab-screw-boss` | Screw boss | A boss for a thread-forming screw, pilot and boss diameters from the screw and the plastic, with relief, draft and gussets. |
+| `cf-fab-pip-hinge` | Print-in-place hinge | Two leaves with interleaved knuckles on 45° cone pivots, printed flat and assembled. |
+| `cf-fab-split-pins` | Split with pins | Splits a part with a plane and adds pins and sockets (or holes for loose pins) at sketch points or automatically. |
+| `cf-fab-teardrop` | Teardrop hole | A horizontal hole with a 45° roof, pointed or flat, for a given print direction. |
+| `cf-fab-elephant-foot` | Elephant-foot chamfer | A chamfer (inset × height) round the outline, and the holes, of the face on the print bed. |
+| `cf-fab-lattice` | Lattice infill | Replaces a part's inside with struts (cubic, body-diagonal or both; square or round), with an optional skin. |
+| `cf-fab-honeycomb` | Honeycomb pockets | Hexagonal pockets in a flat face, a border in from its outline and holes; whole cells, or trimmed to the border. |
+
+Limits: the joints want plates that meet square (Laser joint also takes other angles; Dovetail refuses them).
+Kerf compensation and the plate features need a flat part of one thickness with square edges. Auto layout packs
+bounding rectangles. Lattice infill is bounded (150 struts along the axes, 64 diagonals) and has no gyroid; its
+skin needs a part the kernel can offset inward. Split with pins handles a cut that leaves two pieces.
+
 ## Limits, in one place
 
 - **Sketcher.** No ellipse, spline or text. Use edge takes straight and circular edges, and what it draws does
