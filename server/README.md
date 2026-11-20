@@ -77,6 +77,20 @@ Apply rules (client side, in seq order): MODIFIED sets each named property
 unconditionally; ADDED with an existing UUID is an upsert-replace; REMOVED or
 MODIFIED for an unknown UUID is a no-op (delete beats a concurrent modify).
 
+**Mechanical CAD is a setting of each person** (`users.cad_enabled`, migration 0251, off by default; `GET /api/me`
+says `cad`, `PUT /api/me/cad` changes it, and the account menu and the editor's Junction menu have the switch). It
+decides what the browser offers that person (part studios, assemblies, their tabs, the board link's panels and the
+enclosure in the 3D viewer; none of the CAD bundles is fetched with it off) and whether the MCP endpoint lists the
+`cad_*` tools. The project shell (Home, several PCBs, their views) is everybody's. The server never refuses or
+hides a CAD document because of the setting: a collaborator with CAD on may add one to a shared project, and the
+others see it listed on Home with a way to turn CAD on. See `web/domains/mechanical/CONTRACT.md`, "Mechanical CAD
+is a setting".
+
+Documents that are not KiCad's (a part studio `.jpart`, an assembly `.jasm`) are JSON item documents
+(`src/itemdoc.rs`) on the same ops: `ADDED` carries `item`, `MODIFIED` carries
+`props: [{ path: [...], value } | { path, del: true }]`, last writer wins per path. The server can apply these
+itself, so it folds their journal into a snapshot with no editor present (`src/compact.rs`).
+
 ## Auth
 
 The server brokers GitHub OAuth so no client secret ships in KiCad.
@@ -101,11 +115,16 @@ The server brokers GitHub OAuth so no client secret ships in KiCad.
 | GET | `/auth/github/login`, `/auth/github/callback` | web sign-in |
 | POST | `/auth/logout` | web sign-out (clears the session cookie) |
 | GET/POST | `/auth/desktop/{authorize,confirm,token}` | KiCad sign-in |
-| GET | `/api/me` | current user |
+| GET | `/api/me` | current user; `cad`: whether they have Mechanical CAD turned on (below) |
+| PUT | `/api/me/cad` | `{ "enabled": bool }`: turn Mechanical CAD on or off for the signed-in person; answers as `/api/me` |
 | GET | `/api/users/search?q=` | share-dialog typeahead: server accounts + GitHub user search |
 | GET/POST | `/api/projects` | list my projects (owned + member, with description, member count, owner avatar, `starred`) · upload a project (multipart: a zip as `archive`, or loose `file` parts named by project-relative path; non-KiCad files are skipped and reported, a wrapping folder is stripped) |
 | GET/PATCH/DELETE | `/api/projects/{id}` | project info · rename / describe / make public (owner) · move to the Trash (owner; `?permanent=true` destroys it at once, the Trash is purged after 30 days) |
-| POST | `/api/projects/blank` | create an empty project (`name`): a `.kicad_pro`, a root schematic and a board, as KiCad's File → New Project writes them |
+| POST | `/api/projects/blank` | create an empty project (`name`): it holds only its own document (`project.jproj`: tab order, folders) and opens on its Home tab. `template: "pcb"` starts it with a `.kicad_pro`, a root schematic and a board at the root, as KiCad's File → New Project writes them |
+| POST | `/api/projects/{id}/pcbs` | add a PCB (`name`): a KiCad project in a folder of its own (`<name>/<name>.kicad_pro`, `.kicad_sch`, `.kicad_pcb`). A project holds any number |
+| POST | `/api/projects/{id}/folders/move` · `/folders/delete` · `/duplicate` | rename or move a folder with everything in it (`from`, `to`; `stems` renames a PCB's own three files with it) · delete a folder (`path`) · copy a document (`docId`, `path`) or a folder (`folder`, `to`) with the edits not yet stored |
+| GET | `/api/projects/{id}/files` | every document with its size, and when and by whom it last changed (the Home tab's list) |
+| POST | `/api/projects/{id}/shell` | the project's own document, made if the project has none |
 | GET | `/api/trash` | the caller's trashed projects, with `deletedAt` and `purgeAt` |
 | POST | `/api/projects/{id}/undelete` | take a project back out of the Trash (owner) |
 | PUT/DELETE | `/api/projects/{id}/star` | star · unstar a project for the caller only |
@@ -469,6 +488,7 @@ How it is built:
 | `list_checkpoints`, `create_checkpoint` | named versions |
 | `get_geometry` | every part with its pins' positions and nets, and the wires or outline: what scripts plan from |
 | `get_design_guide` | the drawing, layout, routing and review standards and the Python API, for the model to read |
+| `cad_feature_types`, `cad_get_features`, `cad_get_bodies`, `cad_edit_features`, `cad_render_view`, `cad_create_part_studio` | part studios (`web/domains/mechanical/mcp`); listed only to a person who has Mechanical CAD on, and refused by name to anybody else |
 
 Prompts `review_design`, `tidy_schematic` and `design_board` appear as slash commands in clients that show them.
 

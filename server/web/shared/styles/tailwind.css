@@ -23,6 +23,11 @@
 @source "../../domains/pcb/ai/**/*.tsx";
 @source "../../domains/pcb/plugins/**/*.tsx";
 @source "../../platform/review/**/*.tsx";
+@source "../../platform/doctabs/**/*.tsx";
+@source "../../platform/projecthome/**/*.tsx";
+@source "../../platform/history/**/*.tsx";
+@source "../../domains/mechanical/**/*.tsx";
+@source "../../domains/assembly/**/*.tsx";
 @source "../*.ts";
 @source "../../domains/pcb/*.ts";
 @source not "../../domains/pcb/generated";
@@ -123,10 +128,10 @@
 @custom-variant resolved (&.resolved);
 @custom-variant primary (&.primary);
 @custom-variant long (&.long);
-/* app.html sets [data-theme] on <html>; system dark is the media query without an explicit light. */
+/* app.html sets [data-theme] on <html>: light (also when absent), dark, or system (the media query). */
 @custom-variant dark {
   &:where(:root[data-theme="dark"] *) { @slot; }
-  @media (prefers-color-scheme: dark) { &:where(:root:not([data-theme="light"]) *) { @slot; } }
+  @media (prefers-color-scheme: dark) { &:where(:root[data-theme="system"] *) { @slot; } }
 }
 
 /* ---- utilities Tailwind lacks ---- */

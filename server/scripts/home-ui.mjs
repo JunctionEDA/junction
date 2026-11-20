@@ -332,7 +332,10 @@ await step('blank project', async () => {
   await a.click('.hp-modal-f .btn.primary'); await a.waitForURL(/\/edit/); await a.waitForTimeout(2500);
   const id = a.url().match(/\/p\/([0-9a-f-]+)/)[1];
   const info = (await api(ids.ta, `/api/projects/${id}`)).body;
-  check('a blank project has a project file, a schematic and a board', info.name === 'Fresh idea' && ['kicad_pro', 'kicad_sch', 'kicad_pcb'].every((t) => info.docs.some((d) => d.docType === t)), info.docs.map((d) => d.path).join(', '));
+  check('a blank project is empty: no schematic and no board, only the project\'s own document', info.name === 'Fresh idea' && info.docs.length === 1 && info.docs[0].docType === 'project_shell', info.docs.map((d) => d.path).join(', '));
+  // Mechanical CAD is off for a new account (web/shared/cad.ts): a PCB only (cad-setting-ui.mjs has CAD on)
+  check('…and it opens on its Home tab, which offers a PCB', await a.locator('[data-project-home] [data-home-create=cards] [data-create]').count() === 1
+    && await a.locator('[data-project-home] [data-home-create=cards] [data-create=pcb]').count() === 1 && /doc=home/.test(a.url()), a.url());
   await a.screenshot({ path: `${out}/17b-blank-editor.png` });
   check('…and it opens in the editor without errors', errors.length === 0, errors.join(' | '));
   await a.goBack(); await a.waitForSelector('.hp-item-name:has-text("Fresh idea")'); check('…and is in the list on the way back', true);
@@ -526,7 +529,7 @@ await step('share dialog: answers out of order, files dropped on it', async () =
 await step('a project built in the browser gets a picture', async () => {
   // Nothing but ops on top of a blank first file: the stored file stays empty, so the picture can only
   // come from the editor that has the real document (web/domains/pcb/editor/thumbpush.ts).
-  const made = (await api(ids.ta, '/api/projects/blank', { method: 'POST', json: { name: 'Browser built' } })).body;
+  const made = (await api(ids.ta, '/api/projects/blank', { method: 'POST', json: { name: 'Browser built', template: 'pcb' } })).body;
   const sch = made.docs.find((d) => d.docType === 'kicad_sch');
   const ws = new WebSocket(BASE.replace(/^http/, 'ws') + '/ws');
   const got = []; ws.onmessage = (e) => got.push(JSON.parse(e.data));

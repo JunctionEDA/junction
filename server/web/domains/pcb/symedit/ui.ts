@@ -36,7 +36,7 @@ export const CSS = `
 .se-ic{width:22px;height:22px;display:block}
 .se-ic .dk{display:none}
 :root[data-theme="dark"] .se-ic .lt{display:none} :root[data-theme="dark"] .se-ic .dk{display:inline}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .se-ic .lt{display:none} :root:not([data-theme="light"]) .se-ic .dk{display:inline}}
+@media (prefers-color-scheme: dark){:root[data-theme="system"] .se-ic .lt{display:none} :root[data-theme="system"] .se-ic .dk{display:inline}}
 .se-info{display:none;align-items:center;gap:10px;padding:5px 10px;background:color-mix(in srgb,var(--warn) 18%,var(--panel));border-bottom:1px solid var(--line)}
 .se-info.show{display:flex}
 .se-info a{color:var(--blue);cursor:pointer;text-decoration:underline}

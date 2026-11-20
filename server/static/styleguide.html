@@ -6,7 +6,7 @@
 <title>Style guide — Junction</title>
 <link rel="icon" type="image/svg+xml" href="/brand/j2/icon.svg"><link rel="icon" type="image/png" sizes="192x192" href="/brand/j2/icon-192.png"><link rel="alternate icon" href="/brand/j2/favicon.ico" sizes="any"><link rel="apple-touch-icon" href="/brand/j2/icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<script>try { var t = localStorage.getItem("kui.theme"); if (t === "dark" || t === "light") document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script>try { var t = localStorage.getItem("kui.theme"); if (t === "dark" || t === "system") document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <style>
 {{THEME}}
   /* Everything above is static/theme.css, as every page gets it.  Below is only this page's layout. */
@@ -210,6 +210,7 @@
       <div class="demo"><label class="row"><input type="checkbox" checked> Place vias</label><label class="row"><input type="checkbox"> Override locks</label></div>
       <div class="demo"><label class="row"><input type="radio" name="r" checked> Schematic</label><label class="row"><input type="radio" name="r"> Board</label></div>
       <div class="demo"><div class="seg"><button class="on">All</button><button>Owned by me</button><button>Shared with me</button></div></div>
+      <div class="demo"><label class="row"><span class="switch on"></span> Mechanical CAD</label><label class="row"><span class="switch"></span> Off</label></div>
       <div class="demo"><span class="pill owner">Owner</span><span class="pill editor">Editor</span><span class="pill">Viewer</span><span class="pill info">Public</span><span class="pill ok">Synced</span><span class="pill warn">Conflict</span><span class="pill err">Failed</span></div>
       <div class="demo"><span class="kbd">Ctrl</span><span class="kbd">S</span> <span class="kbd">R</span> <span class="kbd">Del</span> <span class="spinner"></span> <span class="muted">Comparing…</span></div>
     </div>

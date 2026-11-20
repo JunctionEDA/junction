@@ -4,7 +4,7 @@ import { setGroupCurrent, setToggle, setToggles, state, store } from "./appstore
 import { commentOnAction, openThreadAction, openThreadOnDoc } from "./comments";
 import { chatAction, openChat, startCursorChat } from "./chat";
 import { saveVersionDialog, versionsCommand } from "./versions";
-import { enterSheet, navigateDocs, openDoc, openDocId, rootSchematic, selectItemAction, setActiveLayer, setGridPitch, setLayerVisible, switchEditor, updateGridStatus } from "./doc";
+import { enterSheet, navigateDocs, openDoc, openDocId, rootSchematic, setProjectDocs, selectItemAction, setActiveLayer, setGridPitch, setLayerVisible, switchEditor, updateGridStatus } from "./doc";
 import { loadHistory, restoreCheckpoint } from "./history";
 import { navigate } from "./home";
 import { chooseTrackWidth, chooseViaSize, chooseViaStack } from "./pcbrouting";
@@ -29,6 +29,7 @@ import { openPlotSchematic } from "../dialogs/plot-schematic";
 import { printDialog } from "./print";
 import { importNonKicad } from "./import-nonkicad";
 import { openCalculator } from "../calculator";
+import { setCad } from "./cad-setting";
 import type { AppAction } from "../../../shared/store";
 import type { ActionAnchor, ActionHandler } from "./types";
 // ---- actions (the home menu's entries and the collab items of the editor menus) ----
@@ -188,6 +189,7 @@ export function dispatchAction(a: AppAction) {
       case "setGroupCurrent": setGroupCurrent(a.group, a.id); return;
       case "showPane": showPane(a.pane, a.show); return;
       case "openDoc": openDocId(a.docId); return;
+      case "projectDocs": setProjectDocs(a.docs, a.open); return;
       case "enterSheet": enterSheet(a.file); return;
       case "setLayerVisible": setLayerVisible(a.key, a.visible); return;
       case "setActiveLayer": setActiveLayer(a.layer); return;
@@ -209,6 +211,7 @@ export function dispatchAction(a: AppAction) {
       case "restore": restoreCheckpoint(a.name); return;
       case "versions": versionsCommand(a); return;
       case "popover": store.set({ popover: a.popover || null }); return;
+      case "setCad": void setCad(!!a.on); return;
       case "contextMenu": contextMenuAction(a); return;
       case "toastDone": return;
       default: console.warn("unknown chrome action", a);
