@@ -15,7 +15,8 @@ import { allCommands, type Entry } from "./commands";
 import { searchCommands } from "./search";
 import { Glyph } from "./Glyph";
 import { useStudio } from "./hooks";
-import { FEATURE_KEYS, featureDef, type PartStudio } from "./studio";
+import { featureDef, type PartStudio } from "./studio";
+import { shortcutOf, useKeyBindings } from "./keymap-store";
 import { SEARCH } from "./Toolbar";
 import { VIEW_KEYS } from "./viewkeys";
 
@@ -92,8 +93,8 @@ export function ContextMenu({ studio }: { studio: PartStudio }) {
     items.push(null);
     if (sel) { add(`Delete ${sel} selected`, () => ed.deleteSelection(), "Del"); add("Construction on or off", () => ed.toggleConstruction(), "Q"); items.push(null); }
     add("View normal to the sketch", () => studio.normalTo(), "N");
-    add("Extrude this sketch", () => studio.startFeature("extrude"), "Shift+E");
-    add("Revolve this sketch", () => studio.startFeature("revolve"), "Shift+W");
+    add("Extrude this sketch", () => studio.startFeature("extrude"), shortcutOf("f:extrude"));
+    add("Revolve this sketch", () => studio.startFeature("revolve"), shortcutOf("f:revolve"));
   } else if (s.editing) {
     add("Accept", () => studio.acceptFeature(), "Enter");
     add("Cancel", () => studio.cancelFeature(), "Esc");
@@ -102,10 +103,10 @@ export function ContextMenu({ studio }: { studio: PartStudio }) {
     const p = at.pick, bodies = selectedBodies(studio), display = displayOf(studio);
     const flat = p ? !!studio.view.normalOf(p) : false;
     const owner = p ? studio.view.featureOf(p, s.features.map((f) => f.id)) : null;
-    if (s.canEdit && flat) add(p && p.kind === "sketch" ? "New sketch on this plane" : "New sketch here", () => studio.startFeature("sketch"), "Shift+S");
-    if (s.canEdit && p && p.kind === "sketch") { add("Edit this sketch", () => studio.editFeature(p.featureId)); add("Extrude this sketch", () => studio.startFeature("extrude"), "Shift+E"); }
+    if (s.canEdit && flat) add(p && p.kind === "sketch" ? "New sketch on this plane" : "New sketch here", () => studio.startFeature("sketch"), shortcutOf("f:sketch"));
+    if (s.canEdit && p && p.kind === "sketch") { add("Edit this sketch", () => studio.editFeature(p.featureId)); add("Extrude this sketch", () => studio.startFeature("extrude"), shortcutOf("f:extrude")); }
     if (owner && !(p && p.kind === "sketch")) add(`Edit ${s.features.find((f) => f.id === owner)?.name || "the feature"}…`, () => studio.editFeature(owner));
-    if (s.canEdit && p && p.kind === "edge") { add("Fillet", () => studio.startFeature("fillet"), "Shift+F"); add("Chamfer", () => studio.startFeature("chamfer"), "Shift+C"); }
+    if (s.canEdit && p && p.kind === "edge") { add("Fillet", () => studio.startFeature("fillet"), shortcutOf("f:fillet")); add("Chamfer", () => studio.startFeature("chamfer"), shortcutOf("f:chamfer")); }
     if (items.length) items.push(null);
     if (flat) add("View normal to", () => studio.normalTo(), "N");
     if (s.selection.length) add("Zoom to selection", () => studio.zoomToSelection(), "Z");
@@ -146,20 +147,23 @@ export function Shortcuts({ studio }: { studio: PartStudio }) {
     document.addEventListener("keydown", key, true);
     return () => document.removeEventListener("keydown", key, true);
   }, [open]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const keys = useKeyBindings();
   if (!open) return null;
-  const tools = studio.tools().filter((t) => t.key).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  const k = (key: string) => (key.length === 1 ? key.toUpperCase() : key === "Delete" ? "Del" : key);
+  // the keys as they are now: a person may have changed them (ui/keymap.ts)
+  const tools = studio.tools().map((t) => ({ ...t, key: shortcutOf(t.id) })).filter((t) => t.key).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const k = (key: string) => key;
+  const featureKeys = keys.filter((b) => b.id.startsWith("f:") && b.chord && featureDef(b.id.slice(2)));
   const groups: { title: string; rows: [string, string][] }[] = [
     { title: "Mouse", rows: MOUSE },
     { title: "View", rows: [["F", "Zoom to fit"], ["Z", "Zoom to selection"], ["N", "View normal to the selected face, plane or sketch"], ...VIEW_KEYS, ...tools.filter((t) => t.group === "view").map((t): [string, string] => [k(t.key!), t.title])] },
-    { title: "Part studio", rows: [["S", "Search tools, at the pointer"], ["Ctrl+K", "Search tools"], ...Object.keys(FEATURE_KEYS).filter((key) => featureDef(FEATURE_KEYS[key])).map((key): [string, string] => [`Shift+${key.toUpperCase()}`, featureDef(FEATURE_KEYS[key])!.title]), ...tools.filter((t) => t.group === "inspect" || t.group === "edit").map((t): [string, string] => [k(t.key!), t.title]), ["F2", "Rename the selected feature"], ["↑ ↓ on the rollback bar", "Roll back and forward one feature (Home, End: to the ends)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["?", "This sheet"]] },
+    { title: "Part studio", rows: [["S", "Search tools, at the pointer"], ["Ctrl+K", "Search tools"], ...featureKeys.map((b): [string, string] => [b.chord!, b.title]), ...tools.filter((t) => t.group !== "sketch" && t.group !== "view").map((t): [string, string] => [k(t.key!), t.title]), ["F2", "Rename the selected feature"], ["↑ ↓ on the rollback bar", "Roll back and forward one feature (Home, End: to the ends)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["?", "This sheet"]] },
     { title: "In a dialog", rows: [["Click", "Add to the field that is listening; click again to take out"], ["Tab", "The next field that takes geometry"], ["Esc", "Stop the field listening; again: cancel"], ["Enter", "Accept"], ["↑ ↓ in a number", "One step (Shift: ten)"]] },
     { title: "In a sketch", rows: [...tools.filter((t) => t.group === "sketch").map((t): [string, string] => [k(t.key!), t.title]), ["Esc", "Put the tool down, then clear the selection"], ["Del", "Delete what is selected"], ["Double click a dimension", "Type its value"]] },
   ];
   return (
     <div className="fixed inset-0 z-[65] grid place-items-center bg-[var(--scrim)]" onPointerDown={close} data-shortcuts>
       <div className="cad-shortcuts w-[min(880px,94vw)] max-h-[86vh] flex flex-col rounded-md border border-line bg-bench shadow-panel text-sm text-ink" role="dialog" aria-label="Keyboard shortcuts" onPointerDown={(ev) => ev.stopPropagation()}>
-        <header className="flex items-center h-9 px-3 border-b border-line bg-paper rounded-t-md"><span className="flex-1 font-semibold text-base">Keys and mouse</span><button type="button" className="btn sm ghost" onClick={close}>Close</button></header>
+        <header className="flex items-center h-9 px-3 border-b border-line bg-paper rounded-t-md"><span className="flex-1 font-semibold text-base">Keys and mouse</span><button type="button" className="btn sm mr-1" data-keymap-open onClick={() => { close(); studio.setUi({ keymap: true }); }}>Change keys…</button><button type="button" className="btn sm ghost" onClick={close}>Close</button></header>
         <div className="overflow-y-auto p-3 columns-1 sm:columns-2 lg:columns-3 gap-5">
           {groups.map((g) => (
             <section key={g.title} className="break-inside-avoid mb-3">

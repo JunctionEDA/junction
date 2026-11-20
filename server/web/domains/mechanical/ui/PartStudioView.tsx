@@ -19,6 +19,7 @@ import { StatusBar } from "./StatusBar";
 import { TipHost } from "./Tip";
 import { Toolbar } from "./Toolbar";
 import { ViewCube } from "./ViewCube";
+import { Extras } from "./Extras";
 
 /** a button with nothing of the browser's own look */
 export const BARE = "appearance-none bg-transparent border-0 m-0 p-0 text-inherit [font-family:inherit] [font-size:inherit] cursor-pointer";
@@ -95,6 +96,7 @@ export function PartStudioView({ studio, canvasHost }: { studio: PartStudio; can
       <CommandPalette studio={studio} />
       <ContextMenu studio={studio} />
       <Shortcuts studio={studio} />
+      <Extras studio={studio} />
       <TipHost />
     </div>
   );

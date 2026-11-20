@@ -34,6 +34,8 @@ import { fillFromSelection, heldPicks, holdsOne, neighbourField, nextEmptyField,
 import { profileEmpty, profileFaces, profileSketch, makeProfile } from "../features/_profile";
 import { getPrefs, readVisibility, writeVisibility, type Visibility } from "./prefs";
 import { viewKey } from "./viewkeys";
+import { commandForEvent, isFeatureCommand, setKeyCommands } from "./keymap-store";
+import type { Binding } from "./keymap";
 
 export interface EditingFeature {
   /** the feature as the dialog shows it; the document is not changed until the dialog is accepted */
@@ -889,8 +891,8 @@ export class PartStudio {
   };
   private onKey = (ev: KeyboardEvent): void => {
     // Shift + letter starts a feature wherever the keyboard is; in a sketch it comes before the sketch's own keys
-    if (ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey && ev.key.length === 1 && this.state.sketch && !this.state.editing) {
-      const type = FEATURE_KEYS[ev.key.toLowerCase()];
+    if ((ev.shiftKey || ev.ctrlKey || ev.metaKey || ev.altKey) && this.state.sketch && !this.state.editing) {
+      const b = commandForEvent(ev, true, isFeatureCommand), type = b ? b.id.slice(2) : "";
       if (type && type !== "sketch" && featureDef(type)) { this.startFeature(type); ev.preventDefault(); ev.stopPropagation(); return; }
     }
     if (this.keyHandler && this.keyHandler(ev)) { ev.preventDefault(); ev.stopPropagation(); return; }
@@ -901,7 +903,8 @@ export class PartStudio {
     if (mod && ev.key.toLowerCase() === "k") { this.setUi({ palette: { x: null, y: null } }); used(); return; }
     // Onshape's view keys: the arrows turn the view (Shift: 90°), Ctrl/Cmd + ← → rolls it, Shift + 1 … 7 the standard views
     if (viewKey(this.viewport, ev)) { used(); return; }
-    if (mod || ev.altKey) return;
+    // a key a person gave a tool with Ctrl or Alt (ui/keymap.ts)
+    if (mod || ev.altKey) { const b = commandForEvent(ev, !!s.sketch); if (b && this.runKeyCommand(b)) used(); return; }
     if (ev.key === "Escape") {
       if (this.planeTaker) this.pickSketchPlane(false);
       else if (s.editing) { if (s.editing.field && !(s.editing.isNew && s.editing.draft.featureType === "sketch")) this.setField(null); else this.cancelFeature(); }
@@ -916,10 +919,7 @@ export class PartStudio {
       if (def) this.setField(neighbourField(def.schema, s.editing.draft.params, s.editing.field, ev.shiftKey));
       used(); return;
     }
-    if (ev.shiftKey && ev.key.length === 1) {
-      const type = FEATURE_KEYS[ev.key.toLowerCase()];
-      if (type && featureDef(type)) { this.startFeature(type); used(); return; }
-    }
+    if (ev.shiftKey) { const b = commandForEvent(ev, !!s.sketch); if (b && this.runKeyCommand(b)) { used(); return; } }
     if (ev.key === "?") { this.setUi({ help: true }); used(); return; }
     const k = ev.key.toLowerCase();
     if (!ev.shiftKey) {
@@ -930,13 +930,17 @@ export class PartStudio {
       if (k === "f2" && s.selectedFeature) { this.setUi({ renaming: s.selectedFeature }); used(); return; }
     }
     if (ev.shiftKey) return;
-    for (const t of TOOLS) {
-      if (!t.key || t.key.toLowerCase() !== k) continue;
-      if (t.group === "sketch" && !s.sketch) continue;
-      if (t.disabled && t.disabled(this)) continue;
-      t.run(this); used(); return;
-    }
+    // every other key is a tool's or a feature's: its own, or the one a person gave it (ui/keymap.ts)
+    const b = commandForEvent(ev, !!s.sketch);
+    if (b && this.runKeyCommand(b)) used();
   };
+  /** Start what a key stands for; false when it cannot run just now. */
+  private runKeyCommand(b: Binding): boolean {
+    if (isFeatureCommand(b)) { const type = b.id.slice(2); if (!featureDef(type)) return false; this.startFeature(type); return true; }
+    const t = TOOLS.find((x) => x.id === b.id);
+    if (!t || (t.group === "sketch" && !this.state.sketch) || (t.disabled && t.disabled(this))) return false;
+    t.run(this); return true;
+  }
 }
 
 /** True while a new sketch's dialog is open and waiting for its plane: nothing is in the document yet. */
@@ -944,3 +948,9 @@ export const awaitsPlane = (s: { editing: StudioState["editing"] }): boolean => 
 
 /** Shift + letter starts these features, in a sketch too (where the feature takes that sketch). */
 export const FEATURE_KEYS: { readonly [key: string]: string } = { s: "sketch", e: "extrude", w: "revolve", f: "fillet", c: "chamfer", h: "hole", p: "plane" };
+
+// every tool and feature can have a key, its own or one a person gives it (ui/keymap.ts, ui/keymap-store.ts)
+setKeyCommands([
+  ...TOOLS.map((t) => ({ id: t.id, title: t.title, context: t.group === "sketch" ? ("sketch" as const) : ("model" as const), chord: t.key || null })),
+  ...FEATURES.filter((f) => f.toolbar !== false).map((f) => { const k = Object.keys(FEATURE_KEYS).find((x) => FEATURE_KEYS[x] === f.type); return { id: "f:" + f.type, title: f.title, context: "any" as const, chord: k ? `Shift+${k.toUpperCase()}` : null }; }),
+]);

@@ -10,6 +10,7 @@
 //
 // The part studio (ui/studio.ts) knows none of this.  It says which sketch is open and which tool id is in
 // hand; the editor follows by subscribing, and reaches the document only through `studio.commit`.
+import { commandForEvent } from "../ui/keymap-store";
 import { DEFAULT_PLANES, type Frame, type PlaneRef, type Vec2 } from "../core/geometry";
 import { getPrefs, subscribePrefs } from "../ui/prefs";
 import type { PartStudio } from "../ui/studio";
@@ -315,7 +316,8 @@ export class SketchEditor {
     if (ev.key === "Delete" || ev.key === "Backspace") { this.deleteSelection(); return true; }
     if (ev.key === "Tab") return true;   // Tab moves between typed measures; it never takes the keyboard away from the sketch
     // a sketch tool's key wins over any other tool's while a sketch is open (M is Mirror here, whatever it is outside)
-    const tool = ev.key.length === 1 ? this.studio.tools().find((t) => t.group === "sketch" && !!t.key && t.key.toLowerCase() === ev.key.toLowerCase()) : undefined;
+    const bound = commandForEvent(ev, true, (b) => b.context === "sketch");
+    const tool = bound ? this.studio.tools().find((t) => t.id === bound.id) : undefined;
     if (tool && !(tool.disabled && tool.disabled(this.studio))) { tool.run(this.studio); return true; }
     return false;
   };

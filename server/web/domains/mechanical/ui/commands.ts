@@ -22,7 +22,8 @@ import type { ToolDefinition } from "../core/tool";
 import { getPrefs, setPrefs } from "./prefs";
 import { KEYWORDS, RESULT_WORDS } from "./search";
 import type { StandardView } from "../../../shared/viewport3d/viewport3d";
-import { FEATURE_KEYS, awaitsPlane, type PartStudio } from "./studio";
+import { awaitsPlane, type PartStudio } from "./studio";
+import { shortcutOf } from "./keymap-store";
 import { BIG_STEP, MOD, NUMBERED_VIEWS, STEP, viewShortcut } from "./viewkeys";
 
 export interface Entry {
@@ -96,21 +97,19 @@ const FEATURE_HINTS: { [type: string]: string } = {
   "board-standoffs": "Posts under the board's mounting holes.",
 };
 
-const keyText = (key: string | undefined): string | undefined => (!key ? undefined : key.length === 1 ? key.toUpperCase() : key === "Delete" ? "Del" : key);
 const byOrder = <T extends { title: string }>(order: (x: T) => number | undefined) => (a: T, b: T) => (order(a) ?? 1e6) - (order(b) ?? 1e6) || a.title.localeCompare(b.title);
 
 export function toolEntry(studio: PartStudio, t: ToolDefinition): Entry {
   return {
-    id: t.id, title: t.title, hint: t.hint, icon: t.icon, shortcut: keyText(t.key), keywords: KEYWORDS[t.id],
+    id: t.id, title: t.title, hint: t.hint, icon: t.icon, shortcut: shortcutOf(t.id), keywords: KEYWORDS[t.id],
     on: t.active ? t.active(studio) : false, why: t.disabled ? t.disabled(studio) : null,
     run: () => { t.run(studio); studio.viewport.canvas.focus(); },
   };
 }
 export function featureEntry(studio: PartStudio, f: FeatureDefinition): Entry {
   const s = studio.getState();
-  const key = Object.keys(FEATURE_KEYS).find((k) => FEATURE_KEYS[k] === f.type);
   return {
-    id: "f:" + f.type, title: f.title, hint: FEATURE_HINTS[f.type] ?? f.hint, icon: f.icon, shortcut: key ? `Shift+${key.toUpperCase()}` : undefined, keywords: KEYWORDS["f:" + f.type] ?? f.keywords,
+    id: "f:" + f.type, title: f.title, hint: FEATURE_HINTS[f.type] ?? f.hint, icon: f.icon, shortcut: shortcutOf("f:" + f.type), keywords: KEYWORDS["f:" + f.type] ?? f.keywords,
     why: s.canEdit ? null : "View-only access", run: () => { studio.startFeature(f.type); studio.viewport.canvas.focus(); },
   };
 }
