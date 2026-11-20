@@ -18,6 +18,7 @@ export const KEYWORDS: { [id: string]: string } = {
   parameters: "change parameters table dimensions values variables expressions equations",
   "press-pull": "push pull offset face drag extrude fillet smart",
   "keyboard-shortcuts": "hotkeys keybindings rebind customise customize shortcuts keymap",
+  "export-all": "batch export all parts each separate files zip stl step 3mf print",
   timeline: "history strip bottom rollback marker",
   "save-copy": "backup download local file offline export jpart",
   "project-backup": "download zip archive export everything offline",

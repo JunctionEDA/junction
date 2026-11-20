@@ -232,6 +232,44 @@ test("parameters: one table of variables, feature values and sketch dimensions, 
   assert.deepEqual(PM.setParamNote(ID2.newItemDoc("part-studio", []), "x", { comment: "" }), [], "no item is made to hold nothing");
 });
 
+// ---------------------------------------------------------------- export every part
+const BT = load("domains/mechanical/tools/_batch.ts");
+test("export every part: names from a template, never two the same, and a .zip that reads back", () => {
+  const parts = [{ name: "Lid" }, { name: "Base/Tray" }, { name: "Lid" }];
+  assert.deepEqual(BT.batchNames("{document} - {part}", "Box", parts, ".step"), ["Box - Lid.step", "Box - Base_Tray.step", "Box - Lid (2).step"]);
+  assert.deepEqual(BT.batchNames("{n} {part}", "Box", parts, ".stl"), ["1 Lid.stl", "2 Base_Tray.stl", "3 Lid.stl"]);
+  assert.deepEqual(BT.batchNames("{document}", "Box", parts, ".3mf"), ["Box.3mf", "Box (2).3mf", "Box (3).3mf"], "a template that names no part still gives each a file");
+  assert.deepEqual(BT.batchNames("  ", "Box", parts.slice(0, 1), ".step"), ["Box - Lid.step"], "an empty template is the default");
+  assert.equal(BT.batchNames("{n}", "B", Array.from({ length: 12 }, () => ({ name: "p" })), ".stl")[0], "01.stl", "numbers are padded so the files sort");
+  assert.equal(BT.expandTemplate("{DATE} {part} {count} {what}", { document: "d", part: "P", index: 0, count: 3, date: "2026-03-09" }), "2026-03-09 P 3 {what}");
+  assert.deepEqual(BT.unknownWords("{part} {parts} {x} {parts}"), ["{parts}", "{x}"]);
+  assert.equal(BT.cleanName('a<b>:c?"d|e*. '), "a_b_c_d_e_");
+  assert.equal(BT.cleanName("..."), "part");
+  assert.equal(BT.isoDate(new Date(2026, 2, 9)), "2026-03-09");
+  assert.equal(BT.crc32(new TextEncoder().encode("123456789")), 0xcbf43926);
+  // the .zip: read back with the format's own rules
+  const files = [{ name: "Box - Lid.step", data: "ISO-10303-21;" }, { name: "Bäse.stl", data: new Uint8Array([1, 2, 3, 4, 5]) }];
+  const zip = BT.zipStore(files, new Date(2026, 2, 9, 10, 30, 0));
+  const v = new DataView(zip.buffer), end = zip.length - 22;
+  assert.equal(v.getUint32(end, true), 0x06054b50);
+  assert.equal(v.getUint16(end + 10, true), 2);
+  let at = v.getUint32(end + 16, true);
+  const dec = new TextDecoder();
+  for (const f of files) {
+    assert.equal(v.getUint32(at, true), 0x02014b50);
+    const size = v.getUint32(at + 24, true), nameLen = v.getUint16(at + 28, true), local = v.getUint32(at + 42, true);
+    assert.equal(dec.decode(zip.subarray(at + 46, at + 46 + nameLen)), f.name);
+    assert.equal(v.getUint32(local, true), 0x04034b50);
+    const data = zip.subarray(local + 30 + v.getUint16(local + 26, true), local + 30 + v.getUint16(local + 26, true) + size);
+    const want = typeof f.data === "string" ? new TextEncoder().encode(f.data) : f.data;
+    assert.deepEqual(Array.from(data), Array.from(want));
+    assert.equal(v.getUint32(at + 16, true), BT.crc32(want));
+    at += 46 + nameLen;
+  }
+  assert.equal(at, end, "the directory ends where the end record begins");
+  assert.equal(BT.zipStore([]).length, 22);
+});
+
 // ---------------------------------------------------------------- the history of edits
 const UL = load("domains/mechanical/ui/undo-labels.ts");
 const ID = load("shared/itemdoc/itemdoc.ts");

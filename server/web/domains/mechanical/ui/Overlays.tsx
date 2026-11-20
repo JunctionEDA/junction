@@ -20,6 +20,7 @@ import { shortcutOf, useKeyBindings } from "./keymap-store";
 import { SEARCH } from "./Toolbar";
 import { VIEW_KEYS } from "./viewkeys";
 import { markingPlace } from "./marking";
+import { exportDrawing } from "../tools/export-all";
 import { getPrefs, setPrefs, usePref } from "./prefs";
 
 const BARE = "appearance-none bg-transparent border-0 m-0 text-inherit [font-family:inherit] [font-size:inherit]";
@@ -110,6 +111,9 @@ export function ContextMenu({ studio }: { studio: PartStudio }) {
     if (s.canEdit && p && p.kind === "sketch") { add("Edit this sketch", () => studio.editFeature(p.featureId)); add("Extrude this sketch", () => studio.startFeature("extrude"), shortcutOf("f:extrude")); }
     if (owner && !(p && p.kind === "sketch")) add(`Edit ${s.features.find((f) => f.id === owner)?.name || "the feature"}…`, () => studio.editFeature(owner));
     if (s.canEdit && p && p.kind === "edge") { add("Fillet", () => studio.startFeature("fillet"), shortcutOf("f:fillet")); add("Chamfer", () => studio.startFeature("chamfer"), shortcutOf("f:chamfer")); }
+    // a drawing of a sketch or a flat face at once, with no dialog: the file is in the downloads
+    if (p && p.kind === "sketch") { const f = s.features.find((x) => x.id === p.featureId); for (const fmt of ["dxf", "svg"] as const) add(`Export this sketch as ${fmt.toUpperCase()}`, () => { void exportDrawing(studio, { kind: "sketch", featureId: p.featureId }, fmt, f?.name || "sketch"); }); }
+    if (p && p.kind === "face" && flat) for (const fmt of ["dxf", "svg"] as const) add(`Export this face as ${fmt.toUpperCase()}`, () => { void exportDrawing(studio, { kind: "face", ref: { kind: "face", body: p.body, name: p.name } }, fmt, `${s.bodies.find((b) => b.id === p.body)?.name || "part"} face`); });
     if (items.length) items.push(null);
     if (flat) add("View normal to", () => studio.normalTo(), "N");
     if (s.selection.length) add("Zoom to selection", () => studio.zoomToSelection(), "Z");

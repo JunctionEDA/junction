@@ -29,6 +29,7 @@ import { useStudio } from "./hooks";
 import { FEATURE_ROW_SLOTS } from "./slots";
 import { featureDef, type PartStudio } from "./studio";
 import { tipHandlers } from "./Tip";
+import { exportDrawing } from "../tools/export-all";
 
 interface Menu { x: number; y: number; id: string; kind: "feature" | "folder" | "bar" }
 /** One row on screen: a feature, or a folder's header.  `first` … `last` are the features it stands for. */
@@ -441,6 +442,8 @@ export function FeatureList({ studio }: { studio: PartStudio }) {
           {canEdit ? sep("s2") : null}
           {folderEntries()}
           {!many && mf.featureType === "sketch" ? item("Copy sketch", () => copySketch(studio, mf.id)) : null}
+          {!many && mf.featureType === "sketch" ? item("Export as DXF", () => { void exportDrawing(studio, { kind: "sketch", featureId: mf.id }, "dxf", mf.name); }) : null}
+          {!many && mf.featureType === "sketch" ? item("Export as SVG", () => { void exportDrawing(studio, { kind: "sketch", featureId: mf.id }, "svg", mf.name); }) : null}
           {canEdit && copiedSketch() ? item("Paste sketch", () => pasteSketch(studio)) : null}
           {!many && commentTool && !(commentTool.disabled && commentTool.disabled(studio)) ? item("Add comment…", () => { studio.select([]); studio.selectFeature(mf.id); commentTool.run(studio); }) : null}
           {canEdit ? sep("s3") : null}

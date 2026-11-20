@@ -11,6 +11,8 @@
 //   parameters  one table of every variable, feature value and sketch dimension: an expression typed into a
 //               feature's value, a sketch dimension changed (the sketch is solved), a variable changed, a
 //               comment, a star, the search, what cannot be is refused
+//   export      Export every part: a file per part named by a template, as one .zip; a sketch or a flat face
+//               as DXF or SVG straight from the right-click menu and the feature list's menu
 //   history     the History of edits panel: every step in words, a click goes back to it and forward again
 //   progress    a rebuild says which feature it is on, of how many
 //   offline     the connection drops: a banner, edits go on and the model follows, they are kept in the browser
@@ -20,6 +22,7 @@
 //
 //   E2E_PG_URL=postgres://… E2E_JWT_SECRET=dev [E2E_BASE=http://127.0.0.1:8099] [SHOTS=/some/dir] node scripts/cad-gripes-ui.mjs
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { setCad } from './cad-setting.mjs';
 import { openPanel, tool } from './cad-chrome.mjs';
 import { BASE, S, click, edgeOnScreen, faceOnScreen, focusViewport, jwt, launch, newPartStudio, user } from './cad-ux-lib.mjs';
@@ -308,6 +311,42 @@ try {
     await S(alice, (n) => { const s = window.JunctionPartStudio; while (s.session.history().done.length > n) s.undo(); }, stepsBefore);
     await calm();
     check('every change in the table was an undoable edit', (await item(ids.e2)).params.depth === 10 && (await item(ids.s1)).params.sketch.constraints.d1.value === 40 && !(await item('parameter-notes')), JSON.stringify((await item(ids.e2)).params));
+  }
+
+  // ================================================================ export every part, and drawings from the menus
+  if (part('export')) {
+    await S(alice, () => { const s = window.JunctionPartStudio; s.select([]); s.setUi({ exportAll: true }); });
+    await alice.waitForSelector('.cad-export-all');
+    const names = () => alice.$$eval('.cad-export-all [data-batch-file]', (els) => els.map((e) => e.getAttribute('data-batch-file')));
+    check('every part gets a file, named by the template', (await names()).join(' | ') === 'Part Studio 1 - Part 1.step | Part Studio 1 - Part 2.step', (await names()).join(' | '));
+    await alice.fill('.cad-export-all [data-batch-template]', '{n} of {count} {part} {oops}');
+    await alice.click('.cad-export-all [data-batch=format] [data-value=stl]');
+    check('the template\'s words are filled in, and a word it does not know is pointed at', (await names()).join(' | ') === '1 of 2 Part 1 {oops}.stl | 2 of 2 Part 2 {oops}.stl' && /\{oops\}/.test(await alice.textContent('.cad-export-all [data-batch-unknown]')), (await names()).join(' | '));
+    await alice.fill('.cad-export-all [data-batch-template]', '{document} {n} {part}');
+    await shot('export-all', alice);
+    const [zip] = await Promise.all([alice.waitForEvent('download'), alice.click('.cad-export-all [data-batch-run]')]);
+    const zipPath = await zip.path();
+    const listing = execFileSync('python3', ['-c', 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print("|".join(f"{i.filename}:{i.file_size}" for i in z.infolist()))', zipPath], { encoding: 'utf8' }).trim().split('|');
+    check('the files come as one .zip that opens', /2 STL files\.zip$/.test(zip.suggestedFilename()) && listing.length === 2 && listing[0].startsWith('Part Studio 1 1 Part 1.stl:') && Number(listing[0].split(':')[1]) > 84 && listing[1].startsWith('Part Studio 1 2 Part 2.stl:'), listing.join(' '));
+    await alice.waitForSelector('.cad-export-all [data-batch-status=done]');
+    await alice.click('.cad-export-all [data-sheet-close]');
+    // only the selected part
+    await click(alice, await faceOnScreen(alice, [ids.e2, ':end:']));
+    await S(alice, () => window.JunctionPartStudio.setUi({ exportAll: true }));
+    check('with parts selected only those are exported', (await attr('.cad-export-all', 'data-parts')) === '1' && /Part 2/.test((await names())[0]));
+    await alice.click('.cad-export-all [data-sheet-close]');
+    // a face as a drawing, from the right-click menu
+    const top = await faceOnScreen(alice, [ids.e1, ':end:']);
+    await alice.mouse.click(top.x, top.y, { button: 'right' });
+    const [dxf] = await Promise.all([alice.waitForEvent('download'), alice.click('.cad-context-menu [data-menu-item="Export this face as DXF"]')]);
+    const dxfText = fs.readFileSync(await dxf.path(), 'utf8');
+    check('a flat face is exported as DXF straight from the right-click menu', /\.dxf$/.test(dxf.suggestedFilename()) && /SECTION/.test(dxfText) && /LINE|LWPOLYLINE/.test(dxfText), dxf.suggestedFilename());
+    await key('Escape');
+    // a sketch, from the feature list's menu
+    await alice.click('.cad-features [data-feature-row]:has([data-row-name]:text-is("Sketch 1"))', { button: 'right' });
+    const [svg] = await Promise.all([alice.waitForEvent('download'), alice.click('.cad-feature-menu [data-menu-item="Export as SVG"]')]);
+    const svgText = fs.readFileSync(await svg.path(), 'utf8');
+    check('a sketch is exported as SVG from the feature list\'s menu', svg.suggestedFilename() === 'Sketch 1.svg' && /<svg/.test(svgText), svg.suggestedFilename());
   }
 
   // ================================================================ the history of edits
