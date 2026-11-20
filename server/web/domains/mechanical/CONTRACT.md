@@ -1022,7 +1022,8 @@ with `{ kind, body, name }`. A plane or reference geometry a person has hidden i
   follows the plane's size, and it fades out as the plane turns edge-on. Reference planes carry their feature's
   name the same way, in their own frame (`planeLayer.setLabel`). `planeLayer.labelInfo()` says how each name is
   drawn in the current view (its axes in the model, its opacity), for tests.
-- **A view with nothing built** is the isometric view with the three planes filling the middle two thirds of
+- **A view with nothing built** is the start view (`viewport3d.ts START_VIEW`: from the front right top, turned towards
+  the front and lower than isometric, so the planes read as three planes rather than a star) with the three planes filling the middle two thirds of
   it (`studio.fit()`), as a new Onshape part studio opens.
 
 Viewport navigation: right-drag turns, middle-drag or Shift / Ctrl + right-drag slides, the wheel zooms about

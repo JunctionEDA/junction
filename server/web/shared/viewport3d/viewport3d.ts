@@ -19,6 +19,12 @@ const VIEWS: Record<StandardView, [THREE.Vector3Tuple, THREE.Vector3Tuple]> = {
   right: [[-1, 0, 0], [0, 0, 1]], left: [[1, 0, 0], [0, 0, 1]],
   iso: [[-1, 1, -1], [0, 0, 1]],
 };
+/**
+ * The view a new viewport opens in: a trimetric view from the front right top, turned a little towards the front
+ * and lower than the isometric one, so the three default planes read as three distinct planes instead of the
+ * isometric view's six-pointed star (Shift+7 still gives the true isometric view).
+ */
+export const START_VIEW: [THREE.Vector3Tuple, THREE.Vector3Tuple] = [[-1, 1.6, -1.1], [0, 0, 1]];
 
 /** A theme token as a three.js colour.  Any CSS colour syntax works: the browser resolves it. */
 let probe: CanvasRenderingContext2D | null = null;
@@ -85,7 +91,7 @@ export class Viewport3D {
     this.scene.add(this.light);
     this.scene.add(this.light.target);
     this.camera.up.set(0, 0, 1);
-    this.setView("iso", false);
+    this.lookAlong(new THREE.Vector3(...START_VIEW[0]), new THREE.Vector3(...START_VIEW[1]), false);
 
     const axis = (dir: THREE.Vector3Tuple, token: string) => {
       const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(...dir)]);

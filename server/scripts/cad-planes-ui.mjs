@@ -1,6 +1,6 @@
 // Browser test of the default planes and the view cube of a part studio, as Onshape has them:
 //
-//   planes     a new part studio opens in the isometric view with Top, Front and Right filling the middle of the
+//   planes     a new part studio opens in a trimetric start view with Top, Front and Right filling the middle of the
 //              viewport; each carries its name painted on it; the plane under the pointer gets an orange
 //              outline and nothing else; a corner of a plane, near enough, is a handle: dragging it resizes the
 //              plane about the origin; the size is the document's (undone and redone like an edit, kept over a
@@ -52,7 +52,9 @@ try {
   await alice.mouse.move(5, SIZE.height - 5);
   await alice.waitForTimeout(300);
   const iso = await viewDir(alice);
-  check('a new part studio opens in the isometric view (from +X −Y +Z)', near(iso[0], -0.577, 0.01) && near(iso[1], 0.577, 0.01) && near(iso[2], -0.577, 0.01), iso.join());
+  // the start view (viewport3d START_VIEW): from the front right top, turned towards the front, so the planes read apart
+  const len = Math.hypot(1, 1.6, 1.1);
+  check('a new part studio opens in the start view (from +X −Y +Z, towards the front)', near(iso[0], -1 / len, 0.01) && near(iso[1], 1.6 / len, 0.01) && near(iso[2], -1.1 / len, 0.01), iso.join());
   const shown = await S(alice, () => window.JunctionPartStudio.view.planeLayer.labelInfo().filter((l) => l.shown && l.opacity > 0.5).map((l) => l.text).sort().join());
   check('Top, Front and Right carry their names', shown === 'Front,Right,Top', shown);
   // in the isometric view all three read plainly (along +X, +X and +Y), at Top's left corner, Front's top left and Right's top right
