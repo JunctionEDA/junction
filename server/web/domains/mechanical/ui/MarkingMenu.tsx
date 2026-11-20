@@ -95,12 +95,13 @@ studioExtensions.push((studio) => {
   // right drag turns it): it is put back.
   const canvas = studio.viewport.canvas;
   let from: { x: number; y: number; t: number; travelled: number; px: number; py: number; camera: ReturnType<typeof studio.viewport.cameraState> } | null = null;
-  const down = (ev: PointerEvent) => { from = ev.button === 2 && getPrefs().flick && !ev.shiftKey && !ev.ctrlKey ? { x: ev.clientX, y: ev.clientY, px: ev.clientX, py: ev.clientY, t: performance.now(), travelled: 0, camera: studio.viewport.cameraState() } : null; };
+  const down = (ev: PointerEvent) => { from = ev.button === 2 && getPrefs().flick && !ev.shiftKey && !ev.ctrlKey ? { x: ev.clientX, y: ev.clientY, px: ev.clientX, py: ev.clientY, t: ev.timeStamp, travelled: 0, camera: studio.viewport.cameraState() } : null; };
   const move = (ev: PointerEvent) => { if (from) { from.travelled += Math.hypot(ev.clientX - from.px, ev.clientY - from.py); from.px = ev.clientX; from.py = ev.clientY; } };
   const up = (ev: PointerEvent) => {
     const f = from; from = null;
     if (!f || ev.button !== 2) return;
-    const i = flickWedge(ev.clientX - f.x, ev.clientY - f.y, performance.now() - f.t, f.travelled || undefined);
+    // by the events' own times, not by when the page got round to them: a page busy drawing does not turn a flick into a drag
+    const i = flickWedge(ev.clientX - f.x, ev.clientY - f.y, ev.timeStamp - f.t, f.travelled || undefined);
     if (i < 0) return;
     if (studio.getState().sketch && sketchEditor(studio).getState().tool !== "select") return;   // a right click there puts the tool down
     const e = markingEntries(studio, null)[i];

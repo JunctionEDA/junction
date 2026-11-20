@@ -6,6 +6,7 @@
 // trailing zeros dropped ("12.5 mm"), and copies the number alone, in those units, at full working precision
 // ("12.5"), so a pasted value is the value.
 import type { Vec3 } from "../core/geometry";
+import { dualSuffix } from "../document/dual-units";
 import { DEFAULT_UNITS, angleFactor, formatAngle, formatArea, formatLength, formatVolume, lengthFactor, type Units } from "../document/units";
 import type { EntityInfo, PairInfo } from "../services/_measure-kernel";
 import type { MeasureResult } from "../services/measure-entities";
@@ -112,6 +113,3 @@ export function readout(r: MeasureResult | null): { title: string; rows: Row[] }
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
-// (a second unit after a length: document/dual-units.ts)
-import { dualSuffix } from "../document/dual-units";

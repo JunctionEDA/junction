@@ -209,12 +209,20 @@ try {
     // a flick
     await key('Escape');
     const blank = { x: 420, y: 760 };
-    const before = await S(alice, () => window.JunctionPartStudio.viewport.camera.quaternion.toArray());
+    let before = await S(alice, () => window.JunctionPartStudio.viewport.camera.quaternion.toArray());
     await alice.mouse.click(blank.x, blank.y, { button: 'right' });
     await alice.click('.cad-context-menu [data-menu-item="Turn flick gestures on"]');
     const n0 = (await st()).n;
     await S(alice, () => { const s = window.JunctionPartStudio; s.select([]); });
-    await alice.mouse.move(blank.x, blank.y); await alice.mouse.down({ button: 'right' }); await alice.mouse.move(blank.x + 70, blank.y - 70); await alice.mouse.up({ button: 'right' });
+    // a flick is a matter of time (260 ms from button down to button up, by the events' own times): the three
+    // events are sent with their times said, so a busy machine does not make the test a slow drag
+    before = await S(alice, () => window.JunctionPartStudio.viewport.camera.quaternion.toArray());
+    const cdp = await alice.context().newCDPSession(alice), t0 = Date.now() / 1000;
+    await alice.mouse.move(blank.x, blank.y);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: blank.x, y: blank.y, button: 'right', buttons: 2, clickCount: 1, timestamp: t0 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: blank.x + 70, y: blank.y - 70, button: 'right', buttons: 2, timestamp: t0 + 0.06 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: blank.x + 70, y: blank.y - 70, button: 'right', buttons: 0, clickCount: 1, timestamp: t0 + 0.12 });
+    await cdp.detach();
     await alice.waitForTimeout(250);
     const after = await S(alice, () => window.JunctionPartStudio.viewport.camera.quaternion.toArray());
     check('a flick up and to the right starts a sketch without the menu', (await st()).editing?.type === 'sketch' && (await count('[data-marking]')) === 0, JSON.stringify(await st()));
@@ -526,7 +534,7 @@ try {
     check('"Save a copy" writes the part studio, unsent edit and all, to a file', /\(unsent \d{4}-\d\d-\d\d\)\.jpart$/.test(download.suggestedFilename()) && saved.junction === 'part-studio' && saved.items.find((i) => i.id === ids.e1).params.depth === 33, download.suggestedFilename());
     // the connection comes back
     await ctx.setOffline(false);
-    await alice.click('[data-offline-retry]');
+    await alice.click('[data-offline-retry]', { timeout: 3000 }).catch(() => {});   // unless the session's own next try was quicker
     await alice.waitForSelector('[data-offline=sent]', { timeout: 20000 });
     check('back online the edit is sent, and the banner says so', /1 edit made offline was sent/.test(await alice.textContent('[data-offline]')) && (await journal()) === 0 && (await S(alice, () => window.JunctionPartStudio.session.unsaved)) === 0);
     const stored = async () => { const r = await alice.evaluate(async (docId) => { const x = await fetch(`/api/docs/${docId}/file`); return x.ok ? x.text() : ''; }, docId); try { return JSON.parse(r).items.find((i) => i.id === ids.e1).params.depth; } catch { return null; } };
@@ -539,8 +547,9 @@ try {
     await alice.goto(url);
     await alice.waitForFunction(() => window.JunctionPartStudio && window.JunctionPartStudio.getState().loaded, null, { timeout: 30000 });
     await alice.waitForSelector('[data-offline=restored]', { timeout: 20000 });
+    const said = await alice.textContent('[data-offline]');   // the banner goes again after a few seconds
     await calm();
-    check('edits made offline outlive a closed tab: the next visit has them and sends them', (await depthOf(ids.e1)) === 44 && (await depthOf(ids.e2)) === 15 && /2 edits from your last visit/.test(await alice.textContent('[data-offline]')) && (await journal()) === 0, `${await depthOf(ids.e1)} ${await depthOf(ids.e2)} ${await journal()}`);
+    check('edits made offline outlive a closed tab: the next visit has them and sends them', (await depthOf(ids.e1)) === 44 && (await depthOf(ids.e2)) === 15 && /2 edits from your last visit/.test(said) && (await journal()) === 0, `${await depthOf(ids.e1)} ${await depthOf(ids.e2)} ${await journal()}`);
     // somebody else opening the document now gets them from the server
     const bob = await ctx.newPage();
     await bob.goto(url);

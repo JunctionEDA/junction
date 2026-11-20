@@ -1,6 +1,7 @@
 // dims.ts — how a dimension is drawn: its witness lines, its dimension line or arc, its arrows and where its
 // text sits, all in sketch coordinates.  Pure, so the painter, the picking and the tests agree.
 import type { Vec2 } from "../core/geometry";
+import { dualSuffix } from "../document/dual-units";
 import { DEFAULT_UNITS, angleFactor, angleSuffix, lengthFactor, num, type Units } from "../document/units";
 import type { SketchConstraint, SketchData } from "./format";
 import { angleFrame, dist, measure, mid, resolve, type Resolved } from "./refs";
@@ -150,6 +151,3 @@ export function drawDimension(data: SketchData, c: SketchConstraint, px: number)
   out.arrows.push({ at: p2, dir: [-fwd[0], -fwd[1]] }, { at: q2, dir: fwd });
   return out;
 }
-
-// (a second unit after a dimension: document/dual-units.ts)
-import { dualSuffix } from "../document/dual-units";
