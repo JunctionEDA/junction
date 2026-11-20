@@ -541,3 +541,14 @@ test("routing curve: runs between points with rounded bends", async () => {
   x = await run([...block(), feature("rc", "routing-curve", { points: pts, radius: 8, closed: false })]);
   failed(x.r, "rc", /too large/);
 });
+
+test("fillet by width: a right-angled edge rounded 2√2 across has a radius of 2", async () => {
+  const byR = await run([...block(), feature("f", "fillet", { edges: [edge("e", TOP, SIDE("a"))], measure: "radius", radius: 2, width: 0 })]);
+  const byW = await run([...block(), feature("f", "fillet", { edges: [edge("e", TOP, SIDE("a"))], measure: "width", radius: 0, width: 2 * Math.SQRT2 })]);
+  allOk(byR.r); allOk(byW.r);
+  near(vol(byW.k, byW.engine), vol(byR.k, byR.engine), 1e-6);
+  near(BLOCK - vol(byR.k, byR.engine), (4 - Math.PI) * 40, 1e-6);
+  // an old fillet with no measurement is by radius
+  const old = await run([...block(), feature("f", "fillet", { edges: [edge("e", TOP, SIDE("a"))], radius: 2 })]);
+  near(vol(old.k, old.engine), vol(byR.k, byR.engine), 1e-9);
+});
