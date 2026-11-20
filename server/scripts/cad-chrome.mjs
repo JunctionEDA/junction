@@ -64,9 +64,16 @@ export async function openPanel(page, id) {
 
 /** Turn the view with the view cube: 'top', 'front', 'right', 'back', 'left', 'bottom', or 'iso' / 'fit'. */
 export async function viewFrom(page, view) {
+  // the isometric view and zoom to fit are in the view cube's menu
+  if (view === 'iso' || view === 'fit') { await viewMenu(page, view === 'iso' ? 'std-iso' : 'fit'); return; }
   // a face that is turned away cannot be clicked: the studio's own view call is what its click does
-  if (view === 'iso' || view === 'fit') { await page.click(`.cad-viewcube [data-view=${view}]`); return; }
   await page.evaluate((view) => window.JunctionPartStudio.viewport.setView(view), view);
+}
+
+/** Run an item of the view cube's menu, by its `data-view-item` ('std-iso', 'fit', 'Perspective', …). */
+export async function viewMenu(page, item) {
+  if (!(await page.locator('.cad-view-menu').count())) await page.click('.cad-viewcube [data-view-menu]');
+  await page.click(`.cad-view-menu [data-view-item="${item}"]`);
 }
 
 /**

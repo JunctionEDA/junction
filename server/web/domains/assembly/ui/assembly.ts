@@ -138,7 +138,8 @@ export class AssemblyEditor {
   private refreshQueued = false;
 
   constructor(readonly host: DocumentHostContext, canvasHost: HTMLElement) {
-    this.viewport = new Viewport3D(canvasHost);
+    // the view cube (AssemblyView, the part studio's ViewCubeControl), with its own triad, in place of the viewport's view buttons and triad
+    this.viewport = new Viewport3D(canvasHost, { viewButtons: false, triad: false });
     this.viewport.fit();
     this.scene = new AssemblyScene(this.viewport);
     this.sources = new SourceManager(host.doc.docId, host.signedIn, () => this.queueRefresh());

@@ -22,3 +22,5 @@ export * from "./boardlink/api";
 export { mountViewportCollab, type ViewportCollabOptions } from "./collab/attach";
 export type { Collab, CollabHost, CollabState, LocalPresence } from "./collab/collab";
 export type { CadPresence, Collaborator, SelRef } from "./collab/presence";
+// The view cube, for another 3D editor's React frame, is in api-ui.ts (kept apart so that importing this file pulls
+// in no React).

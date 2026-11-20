@@ -25,7 +25,8 @@ services/, panels/     interference and the bill of materials: the logic (pure),
 viewport/scene.ts      instances drawn from shared geometry, picking, connector glyphs     triad.ts  the manipulator
 viewport/boards.ts     board instances as they look (the mechanical domain's BoardDisplay)
 ui/assembly.ts         AssemblyEditor: the object every tool and panel is handed
-ui/*.tsx               the frame, the instance tree, the mates list, the mate and Insert dialogs
+ui/*.tsx               the frame, the instance tree, the mates list, the mate and Insert dialogs; the view cube is the
+                       part studio's (ViewCubeControl from mechanical/api-ui.ts), with standard views, fit and projection
 generated/             written by scripts/gen-cad-registry.mjs; not committed
 ```
 

@@ -20,7 +20,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { tool } from './cad-chrome.mjs';   // Comment is under More
+import { tool, viewFrom } from './cad-chrome.mjs';   // Comment is under More
 import { setCad } from './cad-setting.mjs';
 
 const require = createRequire(import.meta.url);
@@ -155,14 +155,14 @@ try {
     return { s1, e1, s2, e2 };
   });
   await settled(alice, 4);
-  await alice.click('.v3-views [data-view=fit]');
+  await viewFrom(alice, 'fit');
   check('the model is built: two bodies', (await alice.evaluate(() => window.JunctionPartStudio.getState().bodies.length)) === 2);
   const url = alice.url(), docId = new URL(url).searchParams.get('doc');
   check('alone, the panel says so', /No one else is here/.test(await alice.textContent('#cadPeers')));
   const bob = await open(bobId, 'collab-bob');
   await bob.goto(url);
   await settled(bob, 4);
-  await bob.click('.v3-views [data-view=fit]');
+  await viewFrom(bob, 'fit');
   await until(alice, () => !!document.querySelector('#cadPeers [data-peer=collab-bob]'));
   const ac = await center(alice), bc = await center(bob);
   let carol = null;
@@ -223,7 +223,7 @@ try {
     await alice.uncheck('#cadPeers input[type=checkbox]');
     check('the view rectangles can be switched off', await until(alice, () => { const c = window.JunctionCadCollab.collab, p = c.getState().people[0]; return !c.overlay.people.get(p.cid).view.visible; }));
     await alice.check('#cadPeers input[type=checkbox]');
-    await bob.click('.v3-views [data-view=iso]'); await bob.click('.v3-views [data-view=fit]');
+    await viewFrom(bob, 'iso'); await viewFrom(bob, 'fit');
     await bob.waitForTimeout(400);
 
     // the feature list
@@ -265,8 +265,8 @@ try {
     await shot(alice, '03-following-bob');
     await alice.mouse.move(ac.x, ac.y); await alice.mouse.wheel(0, 200);
     check('moving her own view stops it', await until(alice, () => !document.querySelector('[data-following]')));
-    await bob.click('.v3-views [data-view=iso]'); await bob.click('.v3-views [data-view=fit]');
-    await alice.click('.v3-views [data-view=iso]'); await alice.click('.v3-views [data-view=fit]');
+    await viewFrom(bob, 'iso'); await viewFrom(bob, 'fit');
+    await viewFrom(alice, 'iso'); await viewFrom(alice, 'fit');
     await alice.waitForTimeout(400);
   });
 
@@ -467,7 +467,7 @@ try {
     await withCarol();
     if (!(await carol.evaluate(() => !!window.JunctionPartStudio))) { await carol.click('#doctabs [role=tab][data-doc-type=part_studio]'); await settled(carol, 4); }
     check('three people in one part studio: each sees the other two', (await Promise.all([alice, bob, carol].map((p) => until(p, () => document.querySelectorAll('#cadPeers [data-peer]').length === 2)))).every(Boolean));
-    await carol.click('.v3-views [data-view=fit]');
+    await viewFrom(carol, 'fit');
     const cc = await center(carol);
     await carol.mouse.move(cc.x + 150, cc.y - 20, { steps: 5 });
     await click(carol, cc.x + 150, cc.y - 20);
@@ -491,7 +491,7 @@ try {
 
   // ================================================================ comments
   await section('comments', async () => {
-    await alice.click('.v3-views [data-view=iso]'); await alice.click('.v3-views [data-view=fit]');
+    await viewFrom(alice, 'iso'); await viewFrom(alice, 'fit');
     await alice.waitForTimeout(400);
     const topFace = await alice.evaluate((e1) => {
       const st = window.JunctionPartStudio, b = st.getState().bodies.find((x) => x.createdBy === e1) || st.getState().bodies[0];
@@ -509,7 +509,7 @@ try {
     const stored = await alice.evaluate(async (docId) => (await (await fetch(`/api/docs/${docId}/comments`)).json()).comments[0], docId);
     check('it is a platform comment, anchored to the face by its stable name', stored.anchor && stored.anchor.kind === 'item' && stored.anchor.id === 'face:' + topFace.name && stored.anchor.item === topFace.body, JSON.stringify(stored.anchor));
     const pinAt = (page) => page.evaluate(() => { const el = document.querySelector('.cad-pins [data-pin]'), m = /translate\(([-\d.]+)px, ?([-\d.]+)px\)/.exec(el.style.transform); return [Number(m[1]), Number(m[2])]; });
-    await bob.click('.v3-views [data-view=iso]'); await bob.click('.v3-views [data-view=fit]');
+    await viewFrom(bob, 'iso'); await viewFrom(bob, 'fit');
     await bob.waitForTimeout(400);
     const before = await pinAt(bob);
     await bob.click('.cad-pins [data-pin]');

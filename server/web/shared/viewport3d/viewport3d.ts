@@ -34,6 +34,8 @@ export function tokenColor(name: string, fallback = "#888"): THREE.Color {
 export interface ViewportOptions {
   /** the standard-view buttons in the corner (default true) */
   viewButtons?: boolean;
+  /** the axis triad in the bottom left corner (default true; a domain with its own, on a view cube, turns it off) */
+  triad?: boolean;
 }
 
 export type Projection = "orthographic" | "perspective";
@@ -64,10 +66,12 @@ export class Viewport3D {
   private readonly ro: ResizeObserver;
   private readonly offTheme: () => void;
   private readonly views: HTMLElement | null = null;
+  private readonly showTriad: boolean;
   private drag: { mode: "orbit" | "pan"; x: number; y: number; id: number } | null = null;
   private anim: { from: THREE.Quaternion; to: THREE.Quaternion; t0: number; ms: number } | null = null;
 
   constructor(readonly host: HTMLElement, opts: ViewportOptions = {}) {
+    this.showTriad = opts.triad !== false;
     host.style.position = host.style.position || "relative";
     this.canvas = document.createElement("canvas");
     this.canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block;outline:none;touch-action:none";
@@ -210,6 +214,7 @@ export class Viewport3D {
     this.renderer.clear();
     this.renderer.render(this.scene, this.activeCamera);
     // the axis triad, bottom left
+    if (!this.showTriad) return;
     const s = 64;
     this.triadCam.quaternion.copy(this.camera.quaternion);
     this.triadCam.position.set(0, 0, 0);
@@ -230,12 +235,13 @@ export class Viewport3D {
 
   /**
    * Turn the view by these angles (radians) about the screen's vertical and horizontal axes: the arrows beside a
-   * view cube, the arrow keys.
+   * view cube, the arrow keys.  `roll` turns it about the line of sight (positive: the picture turns
+   * counter-clockwise).
    */
-  rotateBy(yaw: number, pitch: number, animate = true): void {
+  rotateBy(yaw: number, pitch: number, animate = true, roll = 0): void {
     const from = this.anim ? this.anim.to : this.camera.quaternion;
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(from), right = new THREE.Vector3(1, 0, 0).applyQuaternion(from);
-    const to = from.clone().premultiply(new THREE.Quaternion().setFromAxisAngle(up, yaw)).premultiply(new THREE.Quaternion().setFromAxisAngle(right, pitch)).normalize();
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(from), right = new THREE.Vector3(1, 0, 0).applyQuaternion(from), sight = new THREE.Vector3(0, 0, 1).applyQuaternion(from);
+    const to = from.clone().premultiply(new THREE.Quaternion().setFromAxisAngle(up, yaw)).premultiply(new THREE.Quaternion().setFromAxisAngle(right, pitch)).premultiply(new THREE.Quaternion().setFromAxisAngle(sight, -roll)).normalize();
     if (animate && !this.disposed && matchMedia("(prefers-reduced-motion: no-preference)").matches) this.anim = { from: this.camera.quaternion.clone(), to, t0: performance.now(), ms: 180 };
     else { this.anim = null; this.camera.quaternion.copy(to); }
     this.invalidate();

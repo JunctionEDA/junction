@@ -96,21 +96,21 @@ setting itself.
 | `platform/history/`, `platform/review/renderers.ts`, `platform/mcp/host.ts` | Version history, Compare, the assistant's tools: what a domain plugs into. |
 | `domains/registry.ts` | Which document kinds exist, which bundle opens them, what a new one contains. |
 | `domains/mechanical/core/` | Contracts: `feature.ts`, `tool.ts`, `geometry.ts`. |
-| `domains/mechanical/document/` | The `.jpart` format (`format.ts`), every edit as item changes (`edits.ts`), the document's units (`units.ts`), variables, materials, appearance, and **`inputs.ts`: a document as the worker's input**. |
+| `domains/mechanical/document/` | The `.jpart` format (`format.ts`), every edit as item changes (`edits.ts`), the document's units (`units.ts`), the default planes' sizes (`plane-sizes.ts`), variables, materials, appearance, and **`inputs.ts`: a document as the worker's input**. |
 | `domains/mechanical/sketch/` | The sketcher: format, the solver (PlaneGCS), tools, dimensions, painting, regions. |
 | `domains/mechanical/kernel/` | Worker side: OpenCascade helpers (`occ.ts`, `ops/`), regeneration, tessellation, protocol, the page's client. |
 | `domains/mechanical/features/` | **One file per feature type.** |
 | `domains/mechanical/tools/` | **One file per toolbar tool.** |
 | `domains/mechanical/panels/` | **One file per docked panel.** |
 | `domains/mechanical/services/` | **One file per worker service.** |
-| `domains/mechanical/viewport/` | Bodies, the default planes and the names lying on every plane (`planes.ts`), sketches, reference geometry, highlighting, picking and box selection. |
+| `domains/mechanical/viewport/` | Bodies, the default planes with their corner handles and the names painted on every plane (`planes.ts`), sketches, reference geometry, highlighting, picking and box selection. |
 | `domains/mechanical/ui/` | The part studio controller (`studio.ts`) and its React frame: the toolbar and everything that can be started (`commands.ts`), the dialogs (`DialogShell`, `FeatureDialog`, `SketchDialog`; `fields.ts` is what a click means to a field), the feature list, the view cube, the status bar, the tool search and menus (`Overlays.tsx`; `search.ts` is how a tool is found), the docks (`panels.ts`), a person's preferences (`prefs.ts`), how an icon is drawn (`Glyph.tsx`). |
 | `domains/mechanical/collab/` | Presence, Follow, two people in one feature, comments pinned to geometry. |
 | `domains/mechanical/inspect/` | Measure, section view, mass properties, appearance and display modes. |
 | `domains/mechanical/board/` | A board in a part studio: reading it live, its picture, its solids, `BoardFeed`. |
 | `domains/mechanical/boardlink/` | The link item with which a part studio drives a board. |
 | `domains/mechanical/history/`, `compare/`, `mcp/`, `thumbnail.ts` | The part studio's side of the platform's history, Compare, assistant tools and thumbnails. |
-| `domains/mechanical/api.ts` | What other domains may import from this one. |
+| `domains/mechanical/api.ts`, `api-ui.ts` | What other domains may import from this one (`api-ui.ts`: React pieces, the view cube). |
 | `domains/assembly/` | The assembly editor: see its README. |
 | `domains/pcb/mech/` | The board editor's side of the board link. |
 | `domains/pcb/exports/` | What the electronics domain offers the others (the board as geometry, as 3D pieces). |
@@ -310,7 +310,8 @@ new JSON item document kind is one line there and gets history, branches, mergin
 // one step of the history tree
 { id, type: "feature", featureType: "extrude", name: "Extrude 1", order: "V", suppressed?: true, params: {…} }
 // one item, id "studio"
-{ id: "studio", type: "studio", units: "mm", angleUnits?: "deg", precision?: 3, rollback: <feature id> | null }
+{ id: "studio", type: "studio", units: "mm", angleUnits?: "deg", precision?: 3, rollback: <feature id> | null,
+  planeSizes?: { top?: 120, front?: 80, right?: 60 } }
 ```
 
 - The tree is the feature items sorted by `order`.
@@ -319,6 +320,10 @@ new JSON item document kind is one line there and gets history, branches, mergin
   document, so it is shared and stored. A bar on a feature that no longer exists reads as the end.
 - Lengths are millimetres and angles degrees, whatever the units say. `units` (mm, cm, m, in, ft), `angleUnits`
   (deg, rad) and `precision` (decimal places) say how the document is read and written: see "Units".
+- `planeSizes` is the side (mm) of a default plane a person resized by dragging its corner
+  (`document/plane-sizes.ts`: `planeSizesOf`, `setPlaneSize`). Each plane is its own path, so two people
+  resizing two planes both win, and a resize is undone like any edit. A plane it does not name grows with the
+  model.
 - Feature ids are UUIDs. A body's id is the id of the feature that made it (with a suffix when one feature
   made several), so body ids survive rebuilds.
 
@@ -941,26 +946,45 @@ with `{ kind, body, name }`. A plane or reference geometry a person has hidden i
   adds only.
 - **A right click that did not turn the view** (`view.onContext`) opens the menu for what is under it
   (`ui/Overlays.tsx ContextMenu`); in a sketch it first puts the tool down.
-- **The default planes** (`viewport/planes.ts`) are translucent sheets with a border that reach a little past
-  the model on their two axes and grow with it. Each is drawn as its four quarters, so the three, which cut
-  each other along the axes, blend from the back to the front and read as layered sheets; the side that faces
-  the camera is tinted a little more than the back; each has a tint of its own within one family (the theme's
-  reference colour taken towards its secondary ink: `ModelView.readColors`). The plane under the pointer and
-  the selected ones have a heavier border, a deeper tint and their name in ink.
-- **A plane's name lies in the plane**: text drawn on its surface inside a corner, in the scene, so it turns
-  and foreshortens with the plane (there is no page text over the viewport). It is never mirrored and never
-  upside down — seen from behind or from below it is turned over and moves to the corner then at the top left —
-  its height follows the plane's size, and it fades out as the plane turns edge-on. Reference planes carry
-  their feature's name the same way (`planeLayer.setLabel`). `planeLayer.labelInfo()` says how each name is
+- **The default planes** (`viewport/planes.ts`) look as Onshape's: three squares centred on the origin, the same
+  pale blue translucent sheet with a thin blue outline. Each is drawn as its four quarters, so the three, which
+  cut each other along the axes, blend from the back to the front and are a little deeper where they overlap.
+  The plane under the pointer gets an orange outline and nothing else; a selected one the selection's colour
+  (`--mark`) and a tint. The origin is a small circle with a dot, the same size at any zoom, drawn over
+  everything. The planes' blues and the hover orange are Onshape's, kept in `planes.ts` (one set for a light
+  page, one for a dark one) — the theme has no blue; everything else takes the theme's tokens.
+- **A plane's size**: a plane nobody resized starts at 60 mm and grows to reach a little past the model on its
+  two axes. **A corner is a handle**: within a few pixels of a corner of a shown plane the pointer shows a
+  resize cursor and a dot, and a drag resizes the square about the origin (`planeLayer.cornerAt`,
+  `setDragSize`); letting go commits the side to the document (`planeSizes`, above), after which the plane no
+  longer grows with the model. Only someone who can edit can resize; a drag on the rest of a plane is a click
+  or a selection box as before.
+- **A plane's name is painted on the plane**, as Onshape does: text on its surface at a corner, in the scene, so
+  it turns and foreshortens with the plane and seen from behind reads mirrored. "Top" sits at the corner of
+  −X −Y reading along +X, "Front" at −X +Z along +X, "Right" at +Y +Z along −Y (so in the isometric view Top is
+  at the left corner, Front at the top left, and Right at the top right, mirrored, as in Onshape). Its height
+  follows the plane's size, and it fades out as the plane turns edge-on. Reference planes carry their feature's
+  name the same way, in their own frame (`planeLayer.setLabel`). `planeLayer.labelInfo()` says how each name is
   drawn in the current view (its axes in the model, its opacity), for tests.
-- **A view with nothing built** frames the default planes (`studio.fit()`).
+- **A view with nothing built** is the isometric view with the three planes filling the middle two thirds of
+  it (`studio.fit()`), as a new Onshape part studio opens.
 
 Viewport navigation: right-drag turns, middle-drag or Shift / Ctrl + right-drag slides, the wheel zooms about
-the pointer, a double click with the middle button or F fits. The **view cube** (`ui/ViewCube.tsx`, top right;
-the element is also `.v3-views`, and its faces and the two buttons under it carry `data-view`) turns the view
-from a face, an edge or a corner, by 15° with its arrows, and its menu has the projection, the display modes,
-the section view, the planes, zoom and the named views. Model space is millimetres, Z up.
-Colours come from the theme tokens (`tokenColor("--mark")`); do not write colour literals.
+the pointer, a double click with the middle button or F fits. The **view cube** (`ui/ViewCube.tsx`, top right,
+about 180 px with its controls; the element is also `.v3-views`; the cube itself is `ui/ViewCubeControl.tsx`,
+which an assembly mounts too, through `api-ui.ts`) is laid out as Onshape's: a grey-white cube
+with bevelled edges, turning with the camera, its faces named in plain ink so the names foreshorten with them.
+Its 6 faces, 12 edges and 8 corners are each a button (`data-region`, `data-from`: the direction it looks
+from; a face also `data-face` and `data-view`) that turns the view to look from there, and the one under the
+pointer lights up in `--mark`. The axis triad (X red, Y green, Z blue, with letters) is drawn over it from its
+back bottom left corner; the viewport's own corner triad is off in a part studio. Around it the four triangles
+turn the view 90° about the screen's axes (`data-turn`: Turn up, down, left, right; the arrow keys still turn
+15°) and the two curved arrows roll it 90° (Roll left, Roll right). The cube with ▼ below it opens the view menu
+(`data-view-menu`; items `data-view-item`): the standard views (`std-iso`, `std-front`, …), zoom to fit (`fit`),
+to selection and normal to, the projection, the display modes, the planes, the section view and the named
+views. Model space is millimetres, Z up; Front looks from −Y, Right from +X, Top from +Z with +Y up.
+Colours come from the theme tokens (`tokenColor("--mark")`); do not write colour literals — but for the
+planes' Onshape blues and orange (above) and the triad's axis colours.
 
 ## Collaboration (`mechanical/collab/`, `platform/doctabs/room.ts`)
 
@@ -1255,7 +1279,8 @@ E2E_PG_URL=postgres://user:pass@127.0.0.1:5432/db E2E_JWT_SECRET=dev E2E_BASE=ht
 |---|---|
 | **`cad-e2e`** | **the whole story, two people, one project**: a constrained tray, shell, fillet, patterned bosses, the board in the tray, the tray driving the board, an opening following a connector, an assembly with a hinged lid and the board, interference, the bill of materials, measure, versions compared, STEP. Run it after any change that crosses folders. |
 | `cad-ui` | tabs, sketch, extrude, picking, two people editing, rollback, the stored file |
-| `cad-ux-ui` | **how it feels**: light by default, planes with their names lying in them and hidden, a new sketch waiting for its plane, the toolbar following the mode and fitting 1100 px, the tool search by name and synonym, units and typed conversions, a fillet's field that keeps adding, dialogs that stay put, the feature list, the view cube, box selection, the menus (with `SHOTS`: light and dark, 1500 and 1100 px) |
+| `cad-planes-ui` | the default planes and the view cube as Onshape's: the isometric start, names painted on the planes, the orange outline under the pointer, a corner dragged to resize a plane (undone, kept over a reload, seen by a second person), the cube's faces, edges, corners, arrows, roll and menu (with `SHOTS`: planes and cube, light and dark) |
+| `cad-ux-ui` | **how it feels**: light by default, planes with their names painted on them and hidden, a new sketch waiting for its plane, the toolbar following the mode and fitting 1100 px, the tool search by name and synonym, units and typed conversions, a fillet's field that keeps adding, dialogs that stay put, the feature list, the view cube, box selection, the menus (with `SHOTS`: light and dark, 1500 and 1100 px) |
 | `cad-sketch-ui` | the sketcher: every tool, constraints, dimensions, conflicts |
 | `cad-features-ui`, `cad-patterns-ui` | the solid features; reference geometry, patterns, sweep, variables |
 | `cad-collab-ui` | presence, Follow, two people in one dialog, the live tab list, comments (`ONLY=tabs,comments`) |

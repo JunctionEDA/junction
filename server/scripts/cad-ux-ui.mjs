@@ -3,7 +3,7 @@
 //
 //   theme        light unless a person chose dark, whatever the system says
 //   planes       the default geometry is in the feature list, each plane carries its name lying flat in it
-//                (never mirrored, fading edge-on), hides and shows on its own (and all at once with P), grows
+//                (painted on it as Onshape does, fading edge-on), hides and shows on its own (and all at once with P), grows
 //                with the model; a reference plane carries its feature's name
 //   toolbar      a sketch replaces the feature tools by the sketch tools and a ✓ / ✗ pair; a dialog by what it
 //                is waiting for; drop-downs remember the variant used last; tooltips; it fits a 1100 px window
@@ -26,7 +26,7 @@
 //
 // With SHOTS it also saves screenshots, light and dark, 1500 and 1100 pixels wide.
 import fs from 'node:fs';
-import { openPanel, sketchOn, tool, toolTitles, toolbarMode } from './cad-chrome.mjs';
+import { openPanel, sketchOn, tool, toolTitles, toolbarMode, viewFrom, viewMenu } from './cad-chrome.mjs';
 import { S, click, edgeOnScreen, faceOnScreen, focusViewport, jwt, launch, newPartStudio, previewed, screenOf, settled, signedIn, sketchPoint, state, user, viewDir, viewStill } from './cad-ux-lib.mjs';
 
 const SHOTS = process.env.SHOTS || '';
@@ -101,16 +101,20 @@ try {
   // the names lie flat in their planes, as text in the scene, not as page text floating at a corner
   const lying = await labelsLie();
   check('a plane\'s name lies in its plane: the text\'s normal is the plane\'s', lying.length === 3 && lying.every((l) => l.inPlane) && await page.locator('.cad-plane-label').count() === 0, JSON.stringify(lying));
-  check("… the right way round and the right way up", lying.every((l) => l.notMirrored && l.upright), JSON.stringify(lying));
+  // as Onshape writes them: Top and Front read plainly in the isometric view; Right is written to be read from
+  // the other side of its plane, so here it is mirrored — text painted on the plane, never turned to the camera
+  const plain = Object.fromEntries(lying.map((l) => [l.key, l.notMirrored && l.upright]));
+  check("… Top and Front read the right way round, Right mirrored, as in Onshape", plain['plane:top'] && plain['plane:front'] && !plain['plane:right'] && lying.every((l) => l.upright), JSON.stringify(lying));
   const half = await S(page, () => window.JunctionPartStudio.view.planeLayer.halfOf('top'));
   check('… and as tall as suits its plane', lying.every((l) => l.height / (2 * Math.min(half[0], half[1])) > 0.03 && l.height / (2 * Math.min(half[0], half[1])) < 0.08), `${lying[0].height} of ${2 * half[0]}`);
   await page.mouse.move(280, 620);
   await shot('01-empty-studio-planes');
-  // from behind and from below the names are turned over, never mirrored
+  // from behind and from below a name stays as it is painted on its plane: it does not turn to face the camera
+  const isoAxes = Object.fromEntries((await labelInfo()).map((l) => [l.key, l.right.concat(l.up).join()]));
   for (const view of ['back', 'left', 'bottom']) {
     await S(page, (view) => window.JunctionPartStudio.viewport.setView(view), view); await viewStill(page);
-    const seen = (await labelsLie()).filter((l) => l.opacity > 0.5);
-    check(`seen from the ${view}, the name is in its plane and not mirrored`, seen.length === 1 && seen[0].inPlane && seen[0].notMirrored && seen[0].upright, JSON.stringify(seen));
+    const seen = (await labelInfo()).filter((l) => l.shown && l.opacity > 0.5);
+    check(`seen from the ${view}, the name is in its plane, painted on it as it was`, seen.length === 1 && (await labelsLie()).find((l) => l.key === seen[0].key).inPlane && seen[0].right.concat(seen[0].up).join() === isoAxes[seen[0].key], JSON.stringify(seen));
   }
   // a little off straight above: Top's name is plain, the two planes seen edge-on have none
   await S(page, () => window.JunctionPartStudio.viewport.setView('top')); await viewStill(page);
@@ -332,7 +336,7 @@ try {
   await shot('05-extrude-dialog');
   await page.click('.cad-dialog [data-accept]');
   await settled(page, 2);
-  await page.click('.cad-viewcube [data-view=fit]');
+  await viewFrom(page, 'fit');
 
   check('the units are always in the status bar', (await page.getAttribute('.cad-status [data-units]', 'data-units')) === 'mm deg 3');
   await page.click('.cad-status [data-units]');
@@ -551,11 +555,11 @@ try {
   await page.waitForTimeout(120);
   check('… and hides with its eye, name and all', !(await labels()).includes('Plane 1'));
   await page.click('.cad-features [data-feature-type=plane] [data-eye]');
-  await page.click('.cad-viewcube [data-view=fit]');
+  await viewFrom(page, 'fit');
   await shot('10-reference-plane');
 
   // ================================================================ 6. the viewport
-  await page.click('.cad-viewcube [data-face=top] [data-view=top]');
+  await page.click('.cad-viewcube [data-face=top]');
   await viewStill(page);
   check('a face of the view cube turns the view', (await viewDir(page)).join() === '0,0,-1', (await viewDir(page)).join());
   await key('Shift+7');
@@ -565,7 +569,7 @@ try {
   await page.click('.cad-viewcube [data-turn="Turn right"]');
   await viewStill(page);
   const turned = await viewDir(page);
-  check('an arrow beside the cube turns the view 15°', near(Math.acos(Math.min(1, turned[0] * iso[0] + turned[1] * iso[1] + turned[2] * iso[2])) * 180 / Math.PI, 15, 2.5) || near(turned[2], iso[2], 0.05), turned.join());
+  check('an arrow beside the cube turns the view 90°', near(Math.acos(Math.min(1, turned[0] * iso[0] + turned[1] * iso[1] + turned[2] * iso[2])) * 180 / Math.PI, 90, 2.5), turned.join());
   await key('Shift+7'); await viewStill(page);
   const extrudeId = (await st()).features[1].id;
   // a flat side of the block that faces the camera (not the wall of the hole, which is a side too)
@@ -621,14 +625,11 @@ try {
   check('? opens the sheet of keys', (await page.textContent('.cad-shortcuts')).includes('Zoom to fit') && (await page.textContent('.cad-shortcuts')).includes('Right drag'));
   await shot('12-shortcuts');
   await page.keyboard.press('Escape');
-  await page.click('.cad-viewcube [data-view-menu]');
-  await page.waitForSelector('.cad-view-menu');
-  await page.click('.cad-view-menu [data-view-item=Perspective]');
+  await viewMenu(page, 'Perspective');
   check('the view cube\'s menu sets the projection', (await page.getAttribute('.cad-viewcube', 'data-projection')) === 'perspective');
-  await page.click('.cad-viewcube [data-view-menu]');
-  await page.click('.cad-view-menu [data-view-item=Orthographic]');
+  await viewMenu(page, 'Orthographic');
   await key('Shift+7'); await viewStill(page);
-  await page.click('.cad-viewcube [data-view=fit]');
+  await viewFrom(page, 'fit');
   await page.mouse.move(box.cx, box.b);
   await shot('13-bracket');
   await openPanel(page, 'mass-properties');
@@ -642,7 +643,7 @@ try {
       await p.goto(`${process.env.E2E_BASE || 'http://127.0.0.1:8099'}/p/${pid}/edit?doc=${did}`);
       await p.waitForFunction(() => { const s = window.JunctionPartStudio && window.JunctionPartStudio.getState(); return s && s.loaded && s.kernel.state === 'ready' && s.bodies.length === 1; }, null, { timeout: 90000 });
       await p.waitForTimeout(400);
-      await p.click('.cad-viewcube [data-view=fit]');
+      await viewFrom(p, 'fit');
       if (name === '15-dark-1100') {
         await p.dblclick('.cad-features [data-feature-type=sketch]');
         await p.waitForFunction(() => window.JunctionSketch && window.JunctionSketch.getState().ready);
