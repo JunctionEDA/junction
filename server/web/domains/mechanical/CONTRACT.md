@@ -1650,6 +1650,55 @@ one place. All of it is the part studio's (the assembly editor has none of it ye
 Already there before, and so not built again: numbers typed while drawing with Tab between them (`sketch/draw.ts`),
 constraint marks and the count of freedoms left, a unit typed with any number, named views, the export dialog's
 resolution for meshes, pinned measurements.
+## Custom features: power transmission (`features/cf-drive-*.ts`)
+
+Gears, belt and chain drives, mechanisms, shaft details and springs, each an ordinary feature file in the Custom
+features part of the toolbar (`toolbarSection: "library"`, `toolbarMenu` "Gears" or "Power transmission",
+`toolbarKeep: 0`), found in the tool search by the names people know. Shared code: `features/_cf-drive.ts`
+(placement, the involute tooth, a wheel's bore, keyway and hub, features on a cylindrical face),
+`_cf-drive-data.ts` (the standards' tables), `_cf-drive-path.ts` (the path round two wheels, belt teeth),
+`_cf-drive-spring.ts`, and `kernel/ops/cf-drive.ts` (outlines of lines, arcs and splines built in a `Space`;
+extruded, twisted, turned, stacked or sewn into solids with every face named). Tested by
+`static/tests/cad-cf-drive.test.js` and, in the browser, `scripts/cad-cf-drive-ui.mjs`.
+
+A part stands on a plane (`plane`, `x`, `y`, `angle`; its axis is the normal). Features on a shaft take its
+cylindrical face (`face`) and measure from the end the axis leaves from (`flip`: the other).
+
+| Type | What it makes |
+|---|---|
+| `cf-spur-gear` | Involute spur gear by module or diametral pitch: profile shift, backlash, root fillet, bore, DIN 6885 keyway, hub |
+| `cf-helical-gear` | Helical gear (normal module, helix angle, hand); the flanks are involute helicoids |
+| `cf-herringbone-gear` | Double helical gear, the two hands meeting mid-face |
+| `cf-internal-gear` | Ring gear with involute teeth inside |
+| `cf-rack` | Straight rack for a gear of the same module; its pitch line is the plane's x axis |
+| `cf-bevel-gear` | Straight bevel gear (Tredgold's tooth, tapering to the apex) from two tooth counts and a shaft angle; optionally its mate, in mesh |
+| `cf-worm` | ZA worm, its wheel (a helical gear at the lead angle, not throated), or both in mesh |
+| `cf-planetary` | Sun, planets and ring as bodies, in mesh; refuses sets that cannot be assembled |
+| `cf-cycloidal` | Cycloidal reducer disc from its pin ring and eccentricity, output holes, optionally the pins |
+| `cf-timing-pulley` | Timing pulley: GT2, GT3, HTD 3M/5M/8M, T2.5/T5/T10; flanges, bore, keyway, hub |
+| `cf-timing-belt` | Closed toothed belt round two pulleys, by belt teeth or centre distance (the body's name gives the centres) |
+| `cf-v-pulley` | V-belt sheave, Z/A/B/C and SPZ…SPC grooves by ISO 4183, one or several |
+| `cf-sprocket` | Roller chain sprocket, ANSI 25…100 and ISO 04B…20B, ISO 606 tooth form |
+| `cf-chain` | Closed roller chain round two sprockets, link by link (one body of many solids) |
+| `cf-ratchet` | Ratchet wheel and its pawl |
+| `cf-geneva` | Geneva wheel and its crank with pin and locking disc |
+| `cf-cam` | Plate cam from rise, dwell and fall with a motion law, or a table of lifts; knife or roller follower |
+| `cf-spline` | Involute (DIN 5480 proportions) or straight-sided (ISO 14) spline: a shaft, or with Remove a hub's bore |
+| `cf-keyway` | Keyseat in a shaft or keyway in a bore, DIN 6885 by the picked face's diameter |
+| `cf-stepped-shaft` | Shaft from a table of steps ("20 x 30, 25 x 50"), end chamfers, shoulder fillets, hole through |
+| `cf-d-cut` | Flat on a shaft, or a double D |
+| `cf-bearing-seat` | Housing bore and shoulder for a ball bearing by its number, and a stand-in for the bearing |
+| `cf-ring-groove` | Retaining ring groove, DIN 471 on a shaft or DIN 472 in a bore, by the picked face's diameter |
+| `cf-compression-spring` | Compression spring: open, closed or closed and ground ends, to a free length |
+| `cf-extension-spring` | Close-wound extension spring with machine hooks |
+| `cf-torsion-spring` | Torsion spring with tangent legs |
+
+Not done, honestly: no throated (enveloping) worm wheel; the chain's free strands lie on the tangents, not
+seat to seat; bevel gears have no root fillet and no keyway; an involute spline cut from a body (Remove) takes
+several seconds, as does adding a gear to a body, because each flank is cut by the kernel's general
+intersection; springs take about a second (the wire is swept along a spline); a bearing is rings and shields
+without balls; the timing belt profiles are drawn from the published tooth dimensions, not from a maker's
+pulley drawings.
 
 ## Limits, in one place
 
