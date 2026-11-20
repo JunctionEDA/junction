@@ -251,6 +251,25 @@ export function isStraight(ctx: EvalContext, edge: Shape): boolean {
   return ad.GetType() === oc.GeomAbs_CurveType.GeomAbs_Line;
 }
 
+/**
+ * Points that are on a face, inside its edges: a grid over its parameter range, less the points a trimmed face
+ * (one with a hole, a frame) does not reach.  Its centre may be in a hole; these are not.
+ */
+export function pointsInFace(ctx: EvalContext, face: Shape, n = 6): Vec3[] {
+  const oc = ctx.oc as Any, k = ctx.k;
+  const f = oc.TopoDS.Face(face);
+  const b = oc.BRepTools.UVBounds(f, 0, 0, 0, 0);
+  const gf = ctx.tmp(new oc.BRepGProp_Face(f, false));
+  const at = ctx.tmp(new oc.gp_Pnt(0, 0, 0)), nv = ctx.tmp(new oc.gp_Vec(0, 0, 0));
+  const out: Vec3[] = [];
+  for (let i = 1; i < n; i++) for (let j = 1; j < n; j++) {
+    gf.Normal(b.UMin + ((b.UMax - b.UMin) * i) / n, b.VMin + ((b.VMax - b.VMin) * j) / n, at, nv);
+    const p = k.xyz(at);
+    if (distanceTo(ctx, p, face) < 1e-5) out.push(p);
+  }
+  return out;
+}
+
 /** The shortest distance from a point to a shape. */
 export function distanceTo(ctx: EvalContext, p: Vec3, shape: Shape): number {
   const oc = ctx.oc as Any, k = ctx.k;

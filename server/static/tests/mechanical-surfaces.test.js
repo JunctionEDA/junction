@@ -324,6 +324,17 @@ test("Mutual trim: two crossing surfaces cut along each other, one side of each 
   assert.deepEqual(apart.engine.state.bodies.map((b) => [b.id, b.name, b.topo.faces.length]), [["x1", "Surface 1", 1], ["x2", "Surface 2", 1]]);
   near(area(apart.k, apart.body("x1").shape), 100);
 
+  // an open box and a sheet across it: the sheet is cut into the inside of the box and a frame round it, whose
+  // centre is in its hole; the side of each piece is found from points on it, so only one of the two is kept
+  const frame = [sketch("s1", rect(-20, -10, 20, 10, "r")), extrude("x1", "s1", { bodyType: "surface", depth: 10 }),
+    sketch("s2", polyline([[-30, 5], [30, 5]], "l"), "front"), extrude("x2", "s2", { bodyType: "surface", depth: 30, second: true, secondDepth: 30 })];
+  for (const flip of [false, true]) {
+    const f = await build([...frame, t({ flipSecond: flip })]);
+    ok(f);
+    assert.equal(f.engine.state.bodies.length, 1, `flipSecond ${flip}`);
+    assert.equal(f.body("x1").topo.faces.length, 5);
+  }
+
   const miss = await build([sketch("s1", polyline([[-10, 0], [10, 0]], "l")), extrude("x1", "s1", { bodyType: "surface" }), sketch("s2", polyline([[20, -10], [20, 10]], "p")), extrude("x2", "s2", { bodyType: "surface" }), t({})]);
   assert.match(miss.status[4], /error: The surfaces do not cross/);
   const part = await build([...blockDoc(), ...cross.map((f) => ({ ...f, id: f.id + "b", params: f.type === "extrude" ? { ...f.params, profile: { sketch: "s1b", regions: null } } : f.params })), feature("t1", "mutual-trim", { surfaces: ["e1", "x1b"], merge: true })]);

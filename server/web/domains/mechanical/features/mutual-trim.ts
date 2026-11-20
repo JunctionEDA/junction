@@ -8,8 +8,8 @@
 // Faces keep their names; a face cut in several kept pieces gets `~2`, … in a fixed order.
 import { defineFeature } from "../core/feature";
 import { dot, sub, type Vec3 } from "../core/geometry";
-import type { Body, EvalContext, NamedShape } from "../kernel/types";
-import { normalNear, sewNamed, sheetBody } from "../kernel/ops/surface";
+import type { Body, EvalContext, NamedShape, Shape } from "../kernel/types";
+import { normalNear, pointsInFace, sewNamed, sheetBody } from "../kernel/ops/surface";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -76,7 +76,14 @@ export default defineFeature<MutualTrimParams>({
     if (a === b) throw ctx.fail("Pick two different surfaces.");
     const ca = cutBy(ctx, a, b), cb = cutBy(ctx, b, a);
     if (!ca.cut && !cb.cut) throw ctx.fail("The surfaces do not cross, so there is nothing to trim.");
-    const keep = (pieces: NamedShape[], other: Body, flip: boolean) => pieces.filter((f) => { const s = sideOf(ctx, other, k.centre(f.shape, "face")); return flip ? s < 0 : s > 0; });
+    // which side a piece is on, from the point of it farthest from the other surface: a piece's centre can be off
+    // it (in the hole of a frame), and a point near the cut says little
+    const side = (piece: Shape, other: Body) => {
+      let best = 0;
+      for (const q of pointsInFace(ctx, piece)) { const s = sideOf(ctx, other, q); if (Math.abs(s) > Math.abs(best)) best = s; }
+      return best || sideOf(ctx, other, k.centre(piece, "face"));
+    };
+    const keep = (pieces: NamedShape[], other: Body, flip: boolean) => pieces.filter((f) => { const s = side(f.shape, other); return flip ? s < 0 : s > 0; });
     const ka = keep(ca.pieces, b, !!p.flipFirst), kb = keep(cb.pieces, a, !!p.flipSecond);
     if (!ka.length || !kb.length) throw ctx.fail("Nothing of a surface is left on that side. Keep its other side.");
     if (p.merge) {
