@@ -2,16 +2,20 @@
 // default).  Two people share a project: Ada has CAD on and made a part studio that drives the board's outline and
 // a mounting hole, a second part studio and an assembly; Bob has CAD off.
 //
-//   Off:  a new account has CAD off · Bob's tabs, "+", the tab manager and Home's create buttons offer no part
-//         studio or assembly · Home lists Ada's CAD documents with the note "Turn on Mechanical CAD in your
-//         settings to open", and opening one shows the note with a button · so does a deep link to one · on the
-//         board, no "Used in" button, no board-link badge, and the driven items are there, locked and grouped
-//         under the part studio's name, and Bob's page writes nothing · no CAD bundle, worker or kernel is
-//         fetched, no part studio is read · the MCP endpoint lists no cad_ tool and refuses one by name.
-//   On:   from the account menu on the projects page, then into the project without a reload: the tabs, "+" and
-//         a part studio open · off from the editor's app menu inside a part studio: the note takes its place ·
-//         "Turn on Mechanical CAD and open" opens it again · on the board the badge and "Used in" come and go
-//         with the app menu's switch · off again from the account menu · the MCP list follows each time.
+//   Off:  a new account has CAD off · Bob's blank project is a schematic and a board · the project shell is not
+//         there: ?doc=home opens the PCB editor on the root schematic, with no tab bar, no Home tab and no project
+//         room, and the theme's default is the system's · in a project with two PCBs the page works on one (the
+//         root's, or the one a link names) and says there are two · a deep link to a part studio shows the note
+//         "Turn on Mechanical CAD in your settings to open" with a button, and "Open the PCB instead" goes back ·
+//         on the board, no "Used in" button, no board-link badge, and the driven items are there, locked and
+//         grouped under the part studio's name, and Bob's page writes nothing · no CAD bundle, worker or kernel
+//         is fetched, no part studio is read · the MCP endpoint lists no cad_ tool and refuses one by name.
+//   On:   from the account menu on the projects page, then into the project without a reload: the tabs, Home,
+//         "+" and a part studio open, the theme's default is light, a blank project is the empty one · off from
+//         the editor's app menu inside a part studio: the note takes its place and the tab bar goes · "Turn on
+//         Mechanical CAD and open" opens it again · off on the Home tab: the PCB's schematic takes its place · on
+//         the board the badge and "Used in" come and go with the app menu's switch · off again from the account
+//         menu · the MCP list follows each time.
 //
 // Setup as the other *-ui.mjs scripts (KC_DEV_LOGIN=1, Playwright, psql):
 //
@@ -159,47 +163,53 @@ try {
 
   // ================================================================ Bob, with CAD off
   check('Bob has CAD off', (await api(bob, 'GET', '/api/me')).cad === false);
+  {
+    const mine = await api(bob, 'POST', '/api/projects/blank', { name: 'Bob blank' });
+    check('Bob\'s blank project is the PCB editor\'s: a project file, a schematic and a board', ['kicad_pro', 'kicad_sch', 'kicad_pcb'].every((t) => mine.docs.some((d) => d.docType === t)) && mine.docs.length === 3, mine.docs.map((d) => d.path).join(', '));
+    await api(bob, 'DELETE', `/api/projects/${mine.projectId}`);
+  }
+  const schId = docs.find((d) => d.docType === 'kicad_sch').docId;
   const page = await open(bobId, 'cadset-bob');
   await page.goto(`${BASE}/p/${pid}/edit?doc=home`);
-  await page.waitForSelector('[data-project-home] [data-row-type=part_studio]', { timeout: 30000 });
+  await page.waitForFunction(() => { const s = window.CollabApp.getState(); return s.view === 'editor' && s.document.hasDoc; }, null, { timeout: 45000 });
+  await page.waitForTimeout(1500);   // anything of the shell that would come has had its time
   check('the page knows CAD is off', (await meCad(page)) === false);
-  check('no part studio or assembly tab', (await count(page, '#doctabs [data-doc-type=part_studio], #doctabs [data-doc-type=assembly]')) === 0 && (await count(page, '#doctabs [data-doc-type=pcb]')) === 1);
-  check('Home lists Ada\'s part studios and the assembly, each with the note',
-    (await count(page, '[data-row-type=part_studio] [data-cad-off-note]')) === 2 && (await count(page, '[data-row-type=assembly] [data-cad-off-note]')) === 1
-      && (await page.textContent('[data-row-type=assembly] [data-cad-off-note]')) === 'Turn on Mechanical CAD in your settings to open');
-  check('Home offers a new PCB and no part studio or assembly', (await count(page, '[data-create=pcb]')) >= 1 && (await count(page, '[data-create=part_studio], [data-create=assembly]')) === 0);
-  check('Home counts the tabs Bob has: the PCB', /^1 tab ·/.test(await page.textContent('[data-home-summary]')), await page.textContent('[data-home-summary]'));
-  await shot(page, 'off-home');
-  await page.click('[data-doc-add]');
-  await page.waitForSelector('[data-add=pcb]');
-  check('"+" offers a PCB and no part studio or assembly', (await count(page, '[data-add=part_studio], [data-add=assembly]')) === 0);
-  await page.keyboard.press('Escape');
-  await page.click('[data-tab-manager]');
-  await page.waitForSelector('[data-tab-list] [data-list-tab=home]');
-  check('the tab manager lists no part studio or assembly', (await count(page, `[data-tab-list] [data-list-tab="${studioId}"], [data-tab-list] [data-list-tab="${asmId}"]`)) === 0);
-  await page.keyboard.press('Escape');
-  // a STEP file brought in with CAD off is kept as the 3D model it is, not made a part studio
-  {
-    const chooser = page.waitForEvent('filechooser');
-    await page.click('[data-home-import]');
-    await (await chooser).setFiles({ name: 'bracket.step', mimeType: 'application/octet-stream', buffer: Buffer.from('ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n') });
-    let all = [];
-    for (let i = 0; i < 40 && !all.some((d) => /bracket\.step$/.test(d.path)); i++) { await page.waitForTimeout(250); all = (await api(bob, 'GET', `/api/projects/${pid}/info`)).docs; }
-    await page.waitForTimeout(500);   // a part studio, were one made, comes right after the file
-    all = (await api(bob, 'GET', `/api/projects/${pid}/info`)).docs;
-    check('a STEP file imported with CAD off is stored as a 3D model, and no part studio is made',
-      all.some((d) => d.path === 'models/bracket.step') && all.filter((d) => d.docType === 'part_studio').length === 2, all.map((d) => `${d.path}:${d.docType}`).join(', '));
-  }
-  await page.click(`[data-row-type=assembly] [data-row-open]`);
-  await page.waitForSelector(`[data-cad-off="${asmId}"] [data-cad-turn-on]`, { timeout: 15000 });
-  check('opening the assembly from Home shows the note with the button', /Box is an assembly/.test(await page.textContent(`[data-cad-off="${asmId}"]`)));
+  check('?doc=home opens the PCB editor on the root schematic', (await app(page, () => window.CollabApp.getState().document.docId)) === schId && (await app(page, () => window.CollabApp.getState().document.docType)) === 'kicad_sch');
+  check('… and the address names the schematic, not Home', page.url().includes(`doc=${schId}`) && !/doc=home/.test(page.url()), page.url());
+  check('no tab bar, no Home tab, no "+"', (await count(page, '#doctabs:not([hidden])')) === 0 && (await count(page, '[data-doc-tab], [data-doc-add], [data-project-home]')) === 0);
+  check('no project room or project document is joined', (await app(page, () => !window.JunctionRoom && !window.JunctionShell)) === true);
+  check('the theme\'s default is the system\'s: nothing stored, and none forced light', (await app(page, () => [document.documentElement.dataset.theme, localStorage.getItem('kui.theme'), localStorage.getItem('kui.cad')].join())) === 'system,,');
+  await shot(page, 'off-doc-home');
+  await app(page, () => window.CollabApp.dispatch({ type: 'openDoc', docId: 'home' }));
+  await page.waitForTimeout(800);
+  check('asking for Home opens what the project opens on, the schematic', (await app(page, () => window.CollabApp.getState().view)) === 'editor' && (await app(page, () => window.CollabApp.getState().document.docId)) === schId && (await count(page, '[data-project-home]')) === 0);
 
   await page.goto(`${BASE}/p/${pid}/edit?doc=${studioId}`);
   await page.waitForSelector(`[data-cad-off="${studioId}"]`, { timeout: 30000 });
   const note = await page.textContent(`[data-cad-off="${studioId}"]`);
   check('a link to a part studio shows the note and the button instead of the editor',
     /Enclosure is a part studio/.test(note) && note.includes('Turn on Mechanical CAD in your settings to open') && (await count(page, '[data-cad-turn-on]')) === 1 && (await count(page, '.cad-root')) === 0, note);
+  check('… and a way to the PCB, there being no tab bar', (await count(page, '[data-cad-off-pcb]')) === 1 && (await count(page, '#doctabs:not([hidden])')) === 0);
   await shot(page, 'off-deeplink');
+  await page.click('[data-cad-off-pcb]');
+  await page.waitForFunction(() => { const s = window.CollabApp.getState(); return s.view === 'editor' && s.document.hasDoc; }, null, { timeout: 30000 });
+  check('"Open the PCB instead" opens the root schematic', (await app(page, () => window.CollabApp.getState().document.docId)) === schId);
+
+  // a project of two PCBs (Ada has CAD on, so she can make one): Bob's page works on one at a time
+  {
+    const second = await api(ada, 'POST', `/api/projects/${pid}/pcbs`, { name: 'Second' });
+    const secondSch = second.docs.find((d) => d.docType === 'kicad_sch').docId;
+    await page.goto(`${BASE}/p/${pid}/edit`);
+    await page.waitForFunction(() => { const s = window.CollabApp.getState(); return s.view === 'editor' && s.document.hasDoc; }, null, { timeout: 45000 });
+    const toastText = await page.locator('text=/This project has 2 PCBs/').first().textContent({ timeout: 5000 }).catch(() => '');
+    check('a project with two PCBs opens on the root one\'s schematic, and says there are two', (await app(page, () => window.CollabApp.getState().document.docId)) === schId && /Turn on Mechanical CAD/.test(toastText), toastText);
+    check('… and the editor sees that PCB\'s files only', (await app(page, () => (window.CollabApp.getState().project.docs || []).some((d) => d.path.startsWith('Second/')))) === false);
+    await page.goto(`${BASE}/p/${pid}/edit?doc=${secondSch}`);
+    await page.waitForFunction((id) => { const s = window.CollabApp.getState(); return s.view === 'editor' && s.document.hasDoc && s.document.docId === id; }, secondSch, { timeout: 45000 });
+    check('a link to the other PCB\'s schematic opens that PCB, alone', (await app(page, () => window.CollabApp.getState().project.pcb && window.CollabApp.getState().project.pcb.name)) === 'Second'
+      && (await app(page, () => window.CollabApp.getState().project.docs.filter((d) => d.docType === 'kicad_pro').map((d) => d.path).join())) === 'Second.kicad_pro' && (await count(page, '#doctabs:not([hidden])')) === 0);
+    await shot(page, 'off-second-pcb');
+  }
 
   await page.goto(`${BASE}/p/${pid}/edit?doc=${pcbId}`);
   await onBoard(page);
@@ -233,6 +243,12 @@ try {
   await page.click('[data-menu-id=cad]');
   await page.waitForFunction(() => window.CollabApp.getState().me.cad === true);
   check('turning it on is stored', (await api(bob, 'GET', '/api/me')).cad === true);
+  check('the theme\'s default is light now (nothing chosen), at once', (await app(page, () => [document.documentElement.dataset.theme, localStorage.getItem('kui.theme'), localStorage.getItem('kui.cad')].join())) === 'light,,1');
+  {
+    const mine = await api(bob, 'POST', '/api/projects/blank', { name: 'Bob blank with CAD' });
+    check('with CAD on, Bob\'s blank project is the empty one of the project shell', mine.docs.length === 1 && mine.docs[0].docType === 'project_shell', mine.docs.map((d) => d.path).join(', '));
+    await api(bob, 'DELETE', `/api/projects/${mine.projectId}`);
+  }
   check('the MCP list now has the cad_ tools', (await cadTools(bob)).includes('cad_edit_features'));
   await page.click(`a.hp-item-link[href*="${pid}"]`);
   await page.waitForSelector('#doctabs [data-doc-type=pcb]', { timeout: 30000 });
@@ -257,10 +273,25 @@ try {
   await shot(page, 'on-app-menu');
   await page.click('#appMenu [data-appmenu=cadSetting]');
   await page.waitForSelector(`[data-cad-off="${bracketId}"]`, { timeout: 15000 });
-  check('off: the part studio gives way to the note, and its tabs go', (await count(page, '.cad-root')) === 0 && (await count(page, '#doctabs [data-doc-type=part_studio]')) === 0 && (await meCad(page)) === false);
+  check('off: the part studio gives way to the note, and the tab bar goes', (await count(page, '.cad-root')) === 0 && (await count(page, '#doctabs:not([hidden])')) === 0 && (await count(page, '[data-doc-tab]')) === 0 && (await meCad(page)) === false);
   await page.click('[data-cad-turn-on]');
   await page.waitForFunction(() => window.JunctionPartStudio && window.JunctionPartStudio.getState().loaded && document.querySelector('.cad-root'), null, { timeout: 60000 });
   check('"Turn on Mechanical CAD and open" turns it on and opens the part studio', (await meCad(page)) === true && (await api(bob, 'GET', '/api/me')).cad === true);
+
+  // ================================================================ off on the Home tab: the PCB takes its place
+  await page.evaluate(() => window.CollabApp.dispatch({ type: 'openDoc', docId: 'home' }));
+  await page.waitForSelector('[data-project-home]', { timeout: 20000 });
+  await appMenu(page, 'cadSetting');
+  await page.click('#appMenu [data-appmenu=cadSetting]');
+  await page.waitForFunction(() => { const s = window.CollabApp.getState(); return !s.me.cad && s.view === 'editor' && s.document.hasDoc && s.document.docType === 'kicad_sch'; }, null, { timeout: 30000 });
+  check('off on the Home tab: the root schematic opens in its place, with no tab bar, in the same page', (await count(page, '[data-project-home]')) === 0 && (await count(page, '#doctabs:not([hidden])')) === 0
+    && (await page.evaluate(() => window.__sameLoad)) === 'yes' && !/doc=home/.test(page.url()), page.url());
+  check('… and the theme\'s default is the system\'s again', (await app(page, () => document.documentElement.dataset.theme)) === 'system');
+  await shot(page, 'off-from-home');
+  await appMenu(page, 'cadSetting');
+  await page.click('#appMenu [data-appmenu=cadSetting]');
+  await page.waitForSelector('#doctabs [data-doc-tab=home]', { timeout: 20000 });
+  check('on again: the tab bar is back', (await meCad(page)) === true && (await count(page, '#doctabs [data-doc-type=part_studio]')) === 2);
 
   // ================================================================ the board's CAD hooks follow the switch
   await page.evaluate((id) => window.CollabApp.dispatch({ type: 'openDoc', docId: id }), pcbId);
