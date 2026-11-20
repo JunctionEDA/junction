@@ -8,6 +8,7 @@
 import type { Vec2, Vec3 } from "../../core/geometry";
 import type { Kernel, Keep } from "../occ";
 import { FeatureError, type EvalContext, type Shape } from "../types";
+import { distance } from "./shapes";
 import { bool, circleFace, mframe, minv, mpt, poly2, xform, type Mat } from "./sheetmetal";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -305,3 +306,27 @@ export function edgeLength(k: Kernel, e: Shape): number {
 }
 /** A point's coordinates in a frame (for names that do not depend on where the member is). */
 export const localOf = (F: Mat, p: Vec3): Vec3 => mpt(minv(F), p);
+
+/** Names for the faces of a shape cut from a named one: a face on the surface of an old face keeps its name. */
+export function keptNames(k: Kernel, old: { name: string; shape: Shape }[], fallback: string): (f: Shape) => string {
+  return (f: Shape) => {
+    const fr = k.faceFrame(f as any), c = k.centre(f, "face");
+    for (const o of old) {
+      const of = k.faceFrame(o.shape as any);
+      if (!!fr !== !!of) continue;
+      if (fr && of) {
+        if (Math.abs(fr.normal[0] * of.normal[0] + fr.normal[1] * of.normal[1] + fr.normal[2] * of.normal[2]) < 1 - 1e-6) continue;
+        if (Math.abs(dot3(sub3(c, of.origin), of.normal)) > 1e-5) continue;
+        return o.name;
+      }
+      if (distance(k, f, o.shape) < 1e-6 && Math.hypot(...sub3(c, k.centre(o.shape, "face"))) < 1e-3) return o.name;
+    }
+    return fallback;
+  };
+}
+/** The largest solid of a shape (or the smallest). */
+export function pickSolid(k: Kernel, shape: Shape, smallest = false): Shape {
+  const all = k.solids(shape);
+  if (!all.length) throw new FeatureError("Nothing of the member would be left.");
+  return all.map((s) => ({ s, v: k.volume(s) })).sort((a, b) => (smallest ? a.v - b.v : b.v - a.v))[0].s;
+}

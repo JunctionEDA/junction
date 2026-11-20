@@ -272,3 +272,35 @@ test("frame: butt corners, every profile family", async () => {
     for (const b of bodies(engine)) assert.equal(k.solids(b.shape).length, 1, family);
   }
 });
+
+test("trim, gusset, end cap and the cut list", async () => {
+  const d = (t) => K.FEATURES.find((f) => f.type === t).defaults();
+  const L = [sketch("fs", polyline([[0, 0], [300, 0], [300, 200]], "f"), top), feature("fr", "frame", frameDefaults({ path: [{ kind: "sketch", feature: "fs", entity: "fl1" }] }))];
+  let { k, engine, r } = await run(L);
+  allOk(r);
+  const ids = bodies(engine).map((b) => b.id);
+  const startOf = (id) => bodies(engine).find((b) => b.id === id).topo.faces.find((f) => f.name.endsWith(":start"));
+  const free = ids.map((id) => ({ id, f: startOf(id) || bodies(engine).find((b) => b.id === id).topo.faces.find((f) => f.name.endsWith(":end")) }));
+  // a block over the far end of the y member trims it back to y = 150
+  const feats = [
+    ...L,
+    feature("gu", "frame-gusset", { ...d("frame-gusset"), members: ids }),
+    feature("ec", "frame-end-cap", { ...d("frame-end-cap"), faces: free.filter((x) => x.f).slice(0, 1).map((x) => ({ kind: "face", body: x.id, name: x.f.name })) }),
+    sketch("blk", rect(280, 150, 320, 260, "k"), top), extrude("cutter", "blk", { depth: 30, endType: "symmetric" }),
+    feature("tr", "frame-trim", { ...d("frame-trim"), members: ids, tools: ["cutter"] }),
+    feature("cl", "frame-cut-list", { frames: [] }),
+  ];
+  ({ k, engine, r } = await run(feats));
+  allOk(r);
+  const after = frameItems(engine);
+  const lens = Object.values(after).filter((i) => i.kind === "member").map((i) => Math.round(i.length)).sort((a, b) => a - b);
+  assert.deepEqual(lens, [160, 310]);   // the y member, 210 long point to long point, trimmed back to y = 150
+  const gusset = bodies(engine).find((b) => b.id === "gu");
+  near(k.volume(gusset.shape), (40 * 40 / 2 - 5 * 5 / 2) * 5, 1e-6);
+  const out = await service(k, engine, "frame-cut-list", { csv: true });
+  assert.equal(out.tables.length, 1);
+  const rows = out.tables[0].rows;
+  assert.deepEqual(rows.map((x) => x.kind), ["member", "member", "gusset", "end cap"]);
+  assert.match(out.tables[0].csv, /^Item,Qty,Description,Type,Length \(mm\)/);
+  assert.match(out.tables[0].csv, /Square tube 20×20×2/);
+});
