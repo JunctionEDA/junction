@@ -33,7 +33,7 @@ export const CROSS = '<path d="M6 6l12 12M18 6L6 18"/>';
 export const SEARCH = '<circle cx="10.5" cy="10.5" r="6"/><path d="M20 20l-5-5"/>';
 const MORE = "More";
 /** the icon of a button on the bar, in pixels */
-const ICON = 22;
+const ICON = 24;
 /** what a section costs besides its buttons (its padding and its rule), and the gap between two buttons */
 const SECTION_PAD = 9, GAP = 2;
 
