@@ -53,7 +53,8 @@ export default defineService({
       try {
         const g = bin.add(new oc.GProp_GProps());
         oc.BRepGProp.VolumeProperties(body.shape, g, true, false, false);
-        const volume = g.Mass();
+        // a surface encloses nothing: whatever the integral over an open sheet comes to is not a volume
+        const volume = body.sheet ? 0 : g.Mass();
         const c = bin.add(g.CentreOfMass()), centre: Vec3 = [c.X(), c.Y(), c.Z()];
         const s = bin.add(new oc.GProp_GProps());
         oc.BRepGProp.SurfaceProperties(body.shape, s, false, false);

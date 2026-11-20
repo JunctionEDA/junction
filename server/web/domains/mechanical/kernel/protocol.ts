@@ -50,6 +50,8 @@ export interface BodyResult {
   mesh?: BodyMesh;
   /** a body that is there to be referred to, not a part (the Board feature's board): kernel/types.ts Body.reference */
   reference?: true;
+  /** a surface: a body with no solid in it (kernel/types.ts Body.sheet); listed under Surfaces, not Parts */
+  sheet?: true;
 }
 
 /** A sketch, ready to draw: its plane and every curve as a polyline in model space. */
