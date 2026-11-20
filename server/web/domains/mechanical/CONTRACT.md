@@ -358,12 +358,18 @@ Rules that are fixed:
 - `construction: true` on an entity keeps it out of profiles. `from: GeomRef` on an entity says which edge of
   the model it was projected from (Use edge).
 - Constraint type names: `coincident`, `horizontal`, `vertical`, `parallel`, `perpendicular`, `tangent`,
-  `equal`, `midpoint`, `concentric`, `collinear`, `symmetric`, `fix`, `distance`, `radius`, `diameter`, `angle`.
-  `sketch/refs.ts` says what their references mean.
+  `equal`, `midpoint`, `concentric`, `collinear`, `symmetric`, `fix`, `normal`, `curvature`, `pierce`,
+  `distance`, `radius`, `diameter`, `angle`. `sketch/refs.ts` says what their references mean; `pierce` also
+  stores the place (`x`, `y`) and the model edge (`from`) it was worked out from, like Use edge a copy.
 - A sketch edit is one `MODIFIED` change on the feature item with one prop per entity or constraint that
   changed (`sketch/model.ts` `Draft`; the editor's `edit((draft) => …)` is the one way a tool changes a sketch).
-- New entity kinds (ellipse, spline, text) are new `type` values; `sketch/format.ts curvePoints`,
-  `features/sketch.ts edgeFor` and the solver's translation are the places that must learn them.
+- The free-form curves are `ellipse`, `ellipticalArc`, `spline` (through points, optional end handles),
+  `bspline` (control points; a Bézier curve when degree = poles − 1), `conic` and `text` (outlines in a font,
+  `scripts/gen-sketch-font.mjs`); `image` is a reference picture with no geometry. `sketch/curves.ts` turns each
+  into NURBS pieces that drawing, regions (`sketch/planar.ts`), the solver (PlaneGCS holds ellipses; a
+  spline's points are its unknowns) and the kernel (`kernel/ops/sketch-curves.ts`, one edge per knot span)
+  all share. A new kind is a new `type`: `sketch/refs.ts pointsOf/mapPoints`, `sketch/curves.ts` and the
+  solver's translation are the places that must learn it.
 
 Sketch planes: `top` is XY (normal +Z), `front` is XZ (normal −Y), `right` is YZ (normal +X). The ids are
 stored; never rename them. On a face, the frame comes from `Kernel.faceFrame`: the normal points out of the
@@ -400,10 +406,15 @@ undoable step (`studio.cancelSketch`).
 - **Features from inside a sketch.** Extrude and Revolve are in the sketch toolbar, and Shift+E / Shift+W work in
   a sketch: the feature takes that sketch (`studio.startFeature` finishes the sketch and uses it as the profile).
 
-- Drawing tools (`sketch/shapes.ts`, engine `sketch/draw.ts`): line, rectangle, centre rectangle, circle, three
-  kinds of arc, slot, point; inference while drawing (`sketch/infer.ts`); a measure typed while drawing becomes
+- Drawing tools (`sketch/shapes.ts` and `sketch/curve-shapes.ts`, engine `sketch/draw.ts`): line, rectangle,
+  centre rectangle, aligned rectangle, circle, 3-point circle, three kinds of arc, inscribed and circumscribed
+  polygon, ellipse, partial ellipse, conic, spline, control point spline, Bézier curve, slot, point; text and
+  image (`sketch/insert.ts`); inference while drawing (`sketch/infer.ts`); a measure typed while drawing becomes
   a dimension.
-- Modify (`sketch/ops.ts`): fillet, trim, extend, offset, mirror, construction, and **Use edge**
+- Arrange (`sketch/arrange.ts`): linear pattern, circular pattern and transform (translate, rotate, copy) of a
+  selection; a copy keeps the constraints wholly inside it.
+- Modify (`sketch/ops.ts`): fillet, trim, extend, split, offset, mirror, construction, **Intersection** (the
+  `sketch-intersect` service: the curves where the sketch plane cuts a face or a part, pinned), and **Use edge**
   (`sketch/modify.ts`, the `sketch-project` service): an edge or a corner of the model drawn in the sketch,
   projected onto its plane and fixed there. Any edge of the model as it is at that point of the tree can be
   used, including a Board feature's outline and hole rims when the Board feature comes before the sketch (its

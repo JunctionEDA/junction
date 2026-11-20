@@ -134,3 +134,100 @@ test("two Bézier curves joined with curvature continuity agree in first and sec
   near(Pp[0] - A1[0], B1[0] - Pp[0], 1e-6); near(Pp[1] - A1[1], B1[1] - Pp[1], 1e-6);
   near(Pp[0] - 2 * A1[0] + A2[0], Pp[0] - 2 * B1[0] + B2[0], 1e-6); near(Pp[1] - 2 * A1[1] + A2[1], Pp[1] - 2 * B1[1] + B2[1], 1e-6);
 });
+
+const SH = load("domains/mechanical/sketch/curve-shapes.ts");
+const M = load("domains/mechanical/sketch/model.ts");
+const OPS = load("domains/mechanical/sketch/ops.ts");
+const AR = load("domains/mechanical/sketch/arrange.ts");
+const snapAt = (x, y) => ({ p: [x, y], hints: [], guides: [] });
+const build = (spec, clicks, typed = {}, data = sketch({})) => { const d = new M.Draft(data); const r = spec.build(d, clicks.map(([x, y]) => snapAt(x, y)), typed, null); assert.ok(r, `${spec.id} builds`); return d.data; };
+
+test("the new drawing tools build what they say, constrained as a person means it", async () => {
+  const s = await L.loadSolver();
+  // a hexagon stays regular: four freedoms (centre, size, turn)
+  let r = s.solve(build(SH.polygon(false), [[0, 0], [10, 0]]));
+  assert.ok(r.ok); assert.equal(r.dof, 4);
+  const lines = Object.values(r.data.entities).filter((e) => e.type === "line" && !e.construction);
+  assert.equal(lines.length, 6);
+  const len = (l) => Math.hypot(r.data.entities[l.a].x - r.data.entities[l.b].x, r.data.entities[l.a].y - r.data.entities[l.b].y);
+  for (const l of lines) near(len(l), 10, 1e-6);
+  // circumscribed: the sides touch a circle of the clicked radius
+  r = s.solve(build(SH.polygon(true), [[0, 0], [0, 10]], { diameter: 20 }));
+  assert.ok(r.ok); assert.equal(r.dof, 3);
+  near(PL.findRegions(r.data).regions[0].outer.area, 6 * 10 * 10 * Math.tan(Math.PI / 6), 1e-3);
+  // an aligned rectangle at 30°: five freedoms, square corners
+  r = s.solve(build(SH.alignedRectangle, [[0, 0], [Math.cos(Math.PI / 6) * 20, 10], [0, 30]]));
+  assert.ok(r.ok); assert.equal(r.dof, 5);
+  near(PL.findRegions(r.data).regions[0].outer.area, 20 * Math.abs(30 * Math.cos(Math.PI / 6)), 1e-3);
+  // three-point circle through its points; ellipse; partial ellipse; conic; spline; Bézier
+  r = s.solve(build(SH.circle3, [[0, 0], [10, 0], [5, 5]]));
+  assert.ok(r.ok); near(Object.values(r.data.entities).find((e) => e.type === "circle").r, 5, 1e-9);
+  const el = build(SH.ellipse, [[0, 0], [20, 0], [3, 8]]);
+  const e = Object.values(el).length && Object.values(el.entities).find((x) => x.type === "ellipse");
+  near(e.minor, 8, 1e-9);
+  const pe = SH.partialEllipse();
+  pe.preview([snapAt(0, 0), snapAt(20, 0), snapAt(0, 8), snapAt(20, 0.1)], snapAt(0, 9), sketch({}));   // swept counter-clockwise a quarter
+  const pd = build(pe, [[0, 0], [20, 0], [0, 8], [20, 0.1], [-0.1, 9]]);
+  assert.equal(PL.findRegions(pd).regions.length, 0);
+  assert.ok(Object.values(pd.entities).some((x) => x.type === "ellipticalArc"));
+  const cd = build(SH.conic, [[0, 0], [30, 0], [15, 20]]);
+  assert.ok(Object.values(cd.entities).some((x) => x.type === "conic" && x.rho === 0.5));
+  const sd = build(SH.spline, [[0, 0], [10, 10], [20, 0], [10, -10], [0, 0.01]]);
+  const sp = Object.values(sd.entities).find((x) => x.type === "spline");
+  assert.ok(sp.closed, "a click back on the first point closes it"); assert.equal(sp.points.length, 4);
+  assert.equal(PL.findRegions(sd).regions.length, 1);
+  const bd = build(SH.bezier, [[0, 0], [10, 20], [20, 20], [30, 0]]);
+  assert.ok(Object.values(bd.entities).some((x) => x.type === "bspline" && x.degree === 3));
+  assert.equal(Object.values(bd.entities).filter((x) => x.type === "line" && x.construction).length, 3, "the control polygon");
+});
+
+test("split, linear and circular copies, and moving keep the geometry and its own constraints", async () => {
+  const s = await L.loadSolver();
+  let d = new M.Draft(sketch({ a: pt(0, 0), b: pt(10, 0), l: { type: "line", a: "a", b: "b" }, q: pt(10, 5), m: { type: "line", a: "b", b: "q" } }, { k: { type: "horizontal", refs: [{ entity: "l" }] } }));
+  assert.equal(OPS.split(d, "l", [4, 0]), null);
+  assert.equal(Object.values(d.data.entities).filter((e) => e.type === "line").length, 3);
+  assert.ok(s.solve(d.data).ok);
+  // a rectangle copied in a row three times and round a centre: rectangles each
+  const rect = { r1: pt(0, 0), r2: pt(4, 0), r3: pt(4, 2), r4: pt(0, 2), la: { type: "line", a: "r1", b: "r2" }, lb: { type: "line", a: "r2", b: "r3" }, lc: { type: "line", a: "r3", b: "r4" }, ld: { type: "line", a: "r4", b: "r1" } };
+  const cons = { h1: { type: "horizontal", refs: [{ entity: "la" }] }, h2: { type: "horizontal", refs: [{ entity: "lc" }] }, v1: { type: "vertical", refs: [{ entity: "lb" }] }, v2: { type: "vertical", refs: [{ entity: "ld" }] }, f: { type: "fix", refs: [{ entity: "r1" }] } };
+  d = new M.Draft(sketch(rect, cons));
+  for (let i = 1; i < 3; i++) AR.copyEntities(d, ["la", "lb", "lc", "ld"], (p) => [p[0] + 10 * i, p[1]]);
+  let r = s.solve(d.data);
+  assert.ok(r.ok);
+  assert.equal(PL.findRegions(r.data).regions.length, 3);
+  assert.equal(Object.values(r.data.constraints).filter((c) => c.type === "horizontal").length, 6, "each copy keeps its own constraints");
+  assert.equal(Object.values(r.data.constraints).filter((c) => c.type === "fix").length, 1, "what pins it to the sketch stays with the original");
+  d = new M.Draft(sketch(rect));
+  AR.copyEntities(d, ["la", "lb", "lc", "ld"], (p) => [-p[1], p[0]]);
+  assert.equal(PL.findRegions(d.data).regions.length, 2);
+  d = new M.Draft(sketch(rect, cons));
+  AR.moveEntities(d, ["la", "lb", "lc", "ld"], (p) => [p[0] + 5, p[1] + 1]);
+  r = s.solve(d.data);
+  assert.ok(r.ok); assert.deepEqual(P(r, "r1"), [5, 1]);
+});
+
+test("normal and pierce in the solver", async () => {
+  const s = await L.loadSolver();
+  let r = s.solve(sketch({ o: pt(0, 0), c: { type: "circle", center: "o", r: 5 }, a: pt(3, 7), b: pt(9, 2), l: { type: "line", a: "a", b: "b" } }, { f: { type: "fix", refs: [{ entity: "c" }] }, fa: { type: "fix", refs: [{ entity: "a" }] }, n: { type: "normal", refs: [{ entity: "l" }, { entity: "c" }] } }));
+  assert.ok(r.ok);
+  const [bx, by] = P(r, "b");
+  near(3 * by - 7 * bx, 0, 1e-6);   // the line runs through the centre
+  r = s.solve(sketch({ p: pt(1, 1) }, { k: { type: "pierce", refs: [{ entity: "p" }], x: 4, y: -2, from: { kind: "edge", body: "b", name: "x" } } }));
+  assert.ok(r.ok); assert.deepEqual(P(r, "p"), [4, -2]); assert.equal(r.dof, 0);
+});
+
+test("the MCP shorthand shapes include the new curves", () => {
+  const MM = load("domains/mechanical/mcp/model.ts");
+  const { entities, problems } = MM.shapesToEntities([
+    { type: "ellipse", cx: 0, cy: 0, rx: 10, ry: 20 },
+    { type: "regular_polygon", cx: 50, cy: 0, r: 10, sides: 6 },
+    { type: "spline", points: [[100, 0], [110, 10], [120, 0], [110, -10]], closed: true },
+    { type: "bezier", points: [[0, 50], [10, 70], [20, 50]] },
+    { type: "text", x: 0, y: 100, height: 10, text: "O" },
+  ]);
+  assert.deepEqual(problems, []);
+  const r = PL.findRegions(sketch(entities));
+  assert.equal(r.regions.length, 4);   // ellipse, hexagon, closed spline, the O (with its hole)
+  assert.ok(r.regions.some((g) => g.holes.length === 1));
+  near(Object.values(entities).find((e) => e.type === "ellipse").minor, 10);
+});
