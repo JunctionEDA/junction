@@ -1448,7 +1448,8 @@ pub async fn transfer_project(
 #[derive(Deserialize)]
 pub struct BlankProjectRequest {
     pub name: String,
-    /// "pcb": start with a KiCad project at the root.  Absent: an empty project.
+    /// "pcb": start with a KiCad project at the root.  "empty": an empty project (the project shell's).  Absent:
+    /// as the creator's Mechanical CAD setting says (`blank_template`).
     #[serde(default)]
     pub template: Option<String>,
 }
@@ -1507,11 +1508,20 @@ pub(crate) fn pcb_stub_files(stem: &str) -> Vec<(String, Vec<u8>)> {
     ]
 }
 
-/// POST /api/projects/blank {name, template?}: start a project online.  It is empty: it opens on its Home tab,
-/// where a PCB, a part studio or an assembly is one click (web/platform/projecthome).  Its one document is the
-/// project's own (`project.jproj`, shell.rs): the order of the tabs, the folders, and the room everybody in the
-/// project meets in.  `template: "pcb"` gives what this route used to: a KiCad project at the root (a project
-/// file, a schematic and a board), which is what an assistant's `create_project` asks for.
+/// Which template a blank project with none named starts from.  The project shell (a Home tab, several PCBs, part
+/// studios and assemblies) comes with Mechanical CAD (web/shared/cad.ts): a person who has it on gets an empty
+/// project, which opens on its Home tab; anybody else gets what the PCB editor has always made, a KiCad project at
+/// the root.
+pub(crate) fn blank_template(cad: bool) -> &'static str {
+    if cad { "empty" } else { "pcb" }
+}
+
+/// POST /api/projects/blank {name, template?}: start a project online.  `template: "pcb"` is a KiCad project at
+/// the root (a project file, a schematic and a board), which is also what an assistant's `create_project` asks
+/// for.  `template: "empty"` is an empty project that opens on its Home tab, where a PCB, a part studio or an
+/// assembly is one click (web/platform/projecthome); its one document is the project's own (`project.jproj`,
+/// shell.rs): the order of the tabs, the folders, and the room everybody in the project meets in.  With no
+/// template, the creator's Mechanical CAD setting chooses (`blank_template`).
 pub async fn create_blank_project(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -1522,10 +1532,14 @@ pub async fn create_blank_project(
         return Err(AppError::BadRequest("give the project a name".into()));
     }
     checked_name(name)?;
-    let files = match req.template.as_deref() {
-        None | Some("") | Some("empty") => vec![(crate::shell::SHELL_PATH.to_string(), crate::shell::SHELL_TEXT.as_bytes().to_vec())],
-        Some("pcb") => pcb_stub_files(&file_stem_for(name)),
-        Some(other) => return Err(AppError::BadRequest(format!("unknown template: {other}"))),
+    let template = match req.template.as_deref() {
+        None | Some("") => blank_template(persist::cad_enabled(&state.pool, user.id).await?),
+        Some(other) => other,
+    };
+    let files = match template {
+        "empty" => vec![(crate::shell::SHELL_PATH.to_string(), crate::shell::SHELL_TEXT.as_bytes().to_vec())],
+        "pcb" => pcb_stub_files(&file_stem_for(name)),
+        other => return Err(AppError::BadRequest(format!("unknown template: {other}"))),
     };
     let project = persist::create_project(&state.pool, user.id, name).await?;
     let mut docs = Vec::new();
@@ -2638,6 +2652,9 @@ mod tests {
         assert_eq!(doc_type_for("cad/Product.JASM"), "assembly");
         assert!(allowed_file("Enclosure.jpart") && allowed_file("Product.jasm"));
         assert!(doc_is_movable("part_studio") && doc_is_movable("assembly") && !doc_is_movable("kicad_pcb"));
+        // a blank project: the PCB editor's three files, or with Mechanical CAD on the project shell's empty one
+        assert_eq!(blank_template(false), "pcb");
+        assert_eq!(blank_template(true), "empty");
     }
 
     /// The extraction loop must bound the decoder, not trust the header's

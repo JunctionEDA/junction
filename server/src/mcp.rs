@@ -98,8 +98,27 @@ fn project_prop() -> Value {
     json!({ "type": "string", "description": "Project id or exact name, as listed by list_projects." })
 }
 
+/// What the `document` argument is, as everybody is told it.
+const DOCUMENT_DESC: &str = "Which document: its path as listed by get_project or get_design_overview (for example \"power.kicad_sch\"), or \"board\" for the board.";
+/// Added for a person who has Mechanical CAD on, whose projects may hold several PCBs (the project shell comes
+/// with CAD: web/shared/cad.ts).  A project of somebody else's that has several still works for anybody: each
+/// call's answer says which PCB it worked on (web/domains/pcb/mcp/host.ts scopeToPcb).
+const DOCUMENT_DESC_PCBS: &str = " In a project with several PCBs (each a folder, as get_project lists them) say which PCB: \"Motor driver/board\", \"Motor driver/schematic\" or the full path \"Motor driver/power.kicad_sch\"; a call that names none works on the PCB used last.";
+
 fn document_prop() -> Value {
-    json!({ "type": "string", "description": "Which document: its path as listed by get_project or get_design_overview (for example \"power.kicad_sch\"), or \"board\" for the board. In a project with several PCBs (each a folder, as get_project lists them) say which PCB: \"Motor driver/board\", \"Motor driver/schematic\" or the full path \"Motor driver/power.kicad_sch\"; a call that names none works on the PCB used last." })
+    json!({ "type": "string", "description": format!("{DOCUMENT_DESC}{DOCUMENT_DESC_PCBS}") })
+}
+
+/// A tool as tools/list shows it to a person with Mechanical CAD on or off: off, the `document` argument is
+/// described as the PCB editor alone has it (one PCB per project).
+fn def_for(t: &Tool, cad: bool) -> Value {
+    let mut def = t.def.clone();
+    if !cad {
+        if let Some(doc) = def.pointer_mut("/inputSchema/properties/document") {
+            doc["description"] = json!(DOCUMENT_DESC);
+        }
+    }
+    def
 }
 
 fn annotations(title: &str, write: bool, destructive: bool) -> Value {
@@ -428,7 +447,7 @@ async fn handle(state: &AppState, caller: &Arc<Caller>, site: &str, message: Val
         "ping" => Ok(json!({})),
         "tools/list" => {
             let cad = cad_on(state, caller).await;
-            Ok(json!({ "tools": listed(caller.can_write, cad).map(|t| t.def.clone()).collect::<Vec<_>>() }))
+            Ok(json!({ "tools": listed(caller.can_write, cad).map(|t| def_for(t, cad)).collect::<Vec<_>>() }))
         }
         "tools/call" => {
             let name = params["name"].as_str().unwrap_or("").to_string();
@@ -604,7 +623,8 @@ async fn list_projects(state: &AppState, caller: &Caller, site: &str, args: &Val
     }))
 }
 
-async fn get_project(state: &AppState, site: &str, p: &ProjectCtx) -> Result<Value, String> {
+/// `cad`: the caller has Mechanical CAD on (the note then speaks of the cad_ tools too).
+async fn get_project(state: &AppState, site: &str, p: &ProjectCtx, cad: bool) -> Result<Value, String> {
     let members = persist::list_members(&state.pool, p.id).await.map_err(internal)?;
     let kind = |t: &str| crate::dockind::of(t).name;
     Ok(json!({
@@ -612,7 +632,11 @@ async fn get_project(state: &AppState, site: &str, p: &ProjectCtx) -> Result<Val
         "documents": p.docs.iter().map(|d| json!({ "path": d.path, "type": kind(&d.doc_type) })).collect::<Vec<_>>(),
         "members": members.iter().map(|m| json!({ "login": m.login, "role": m.role })).collect::<Vec<_>>(),
         "scripts": script_list(state, p).await,
-        "note": "Schematic sheets and the board are what the document parameter of the electronics tools takes; a part studio is what the cad_ tools take.",
+        "note": if cad {
+            "Schematic sheets and the board are what the document parameter of the electronics tools takes; a part studio is what the cad_ tools take."
+        } else {
+            "Schematic sheets and the board are what the document parameter of the other tools takes."
+        },
     }))
 }
 
@@ -772,7 +796,10 @@ async fn call_tool(state: &AppState, caller: &Caller, site: &str, tool: &Tool, n
 
     match name {
         "list_projects" => return Ok(json!([text_content(&list_projects(state, caller, site, &args).await?)])),
-        "get_project" => return Ok(json!([text_content(&get_project(state, site, project.as_ref().expect("project")).await?)])),
+        "get_project" => {
+            let cad = cad_on(state, caller).await;
+            return Ok(json!([text_content(&get_project(state, site, project.as_ref().expect("project"), cad).await?)]));
+        }
         "list_changes" => return Ok(json!([text_content(&list_changes(state, caller, project.as_ref().expect("project"), &args).await?)])),
         "get_design_guide" => return Ok(json!([{ "type": "text", "text": guide(args["topic"].as_str().unwrap_or(""))? }])),
         "view_datasheet" => {
@@ -1100,6 +1127,10 @@ mod tests {
             assert_eq!(t.cad, t.def["name"].as_str().unwrap().starts_with("cad_"), "{}", t.def["name"]);
         }
         assert!(!INSTRUCTIONS.contains("cad_") && CAD_INSTRUCTIONS.contains("cad_get_features"));
+        // the document argument speaks of several PCBs only to a person with CAD on (the project shell comes with it)
+        let doc_desc = |cad: bool| listed(true, cad).find(|t| t.def["name"] == "get_component").map(|t| def_for(t, cad)).unwrap()["inputSchema"]["properties"]["document"]["description"].as_str().unwrap().to_string();
+        assert_eq!(doc_desc(false), DOCUMENT_DESC);
+        assert!(doc_desc(true).starts_with(DOCUMENT_DESC) && doc_desc(true).contains("several PCBs"));
     }
 
     #[test]
