@@ -40,6 +40,10 @@ export interface FeatureDefinition<P extends JsonObject = JsonObject> {
   title: string;
   /** inline SVG markup for a 24×24 glyph, for the toolbar and the feature list (ui/Glyph.tsx says how it is drawn) */
   icon?: string;
+  /** one line on what it does, for the button's tooltip and the tool search (when ui/commands.ts FEATURE_HINTS has none) */
+  hint?: string;
+  /** other words people look for it by, for the tool search (when ui/search.ts KEYWORDS has none) */
+  keywords?: string;
   /** Parameters of a new feature.  Called once per new feature; return a fresh object. */
   defaults(): P;
   /** The fields of the property dialog, in order.  A feature with its own editor (a sketch) may leave it empty. */
@@ -55,8 +59,8 @@ export interface FeatureDefinition<P extends JsonObject = JsonObject> {
   toolbarOrder?: number;
   /**
    * which part of the toolbar the button is in ("solid" when not given): sketch │ solid (what makes material
-   * from a profile) │ modify (what changes edges and faces) │ combine (what works on whole parts) │ pattern │
-   * reference │ board
+   * from a profile) │ modify (what changes edges and faces) │ combine (what works on whole parts) │ direct (what
+   * edits faces whatever made them) │ pattern │ reference │ board
    */
   toolbarSection?: FeatureSection;
   /**
@@ -73,8 +77,8 @@ export interface FeatureDefinition<P extends JsonObject = JsonObject> {
 }
 
 /** The feature parts of the toolbar, in the order they are drawn. */
-export type FeatureSection = "sketch" | "solid" | "modify" | "combine" | "pattern" | "reference" | "board";
-export const FEATURE_SECTIONS: readonly FeatureSection[] = ["sketch", "solid", "modify", "combine", "pattern", "reference", "board"];
+export type FeatureSection = "sketch" | "solid" | "modify" | "combine" | "direct" | "pattern" | "reference" | "board";
+export const FEATURE_SECTIONS: readonly FeatureSection[] = ["sketch", "solid", "modify", "combine", "direct", "pattern", "reference", "board"];
 
 /** Typed helper: `export default defineFeature<MyParams>({ ... })`. */
 export function defineFeature<P extends JsonObject>(def: FeatureDefinition<P>): FeatureDefinition<JsonObject> {
