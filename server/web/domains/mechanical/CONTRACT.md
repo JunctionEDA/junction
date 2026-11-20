@@ -1798,6 +1798,78 @@ Limits of the hardware features, honestly:
   they do not form a raised hood.
 - **DIN rail clip** is rigid plastic with a ramped latch: it relies on the material's give, there is no
   separate spring arm.
+## Custom features: patterns, texture, geometry and utilities (`cf-geo-*`)
+
+Twenty-six features of the Custom features drop-down (`toolbarSection: "library"`), in two families:
+`toolbarMenu: "Patterns & texture"` and `"Geometry & utilities"`. They are ordinary feature files,
+`features/cf-geo-<name>.ts`; what they share is in `features/_cf-geo*.ts` (pure: lattices, Voronoi cells, seeded
+random numbers, an expression reader, NACA sections, the catenary, QR and Data Matrix encoders, a PNG reader, a
+convex hull) and `kernel/ops/cf-geo*.ts` (a flat face as a region of its plane, text as faces, pipes, many tools
+into a body in one boolean). Tests: `static/tests/cad-cf-geo.test.js` (the real kernel; every feature with its
+defaults and another setting); in the app: `scripts/cad-cf-geo-ui.mjs`.
+
+**Patterns & texture**
+
+| Type | What it makes |
+|---|---|
+| `cf-geo-attractor-pattern` | a grid of copies whose size and turn follow their distance from a point or curve |
+| `cf-geo-fill-pattern` | copies on a grid, hex or staggered lattice wherever it lies on a flat face, a margin from its edges |
+| `cf-geo-scatter-pattern` | copies at seeded random places on a flat face, kept apart, optionally turned and sized at random |
+| `cf-geo-phyllotaxis-pattern` | copies on the sunflower spiral: place n at spacing·√n and n golden angles |
+| `cf-geo-surface-pattern` | copies spread over a face in its own two directions, each standing on the surface |
+| `cf-geo-voronoi` | a flat face cut into Voronoi cells with walls of one width, through or to a depth |
+| `cf-geo-halftone` | holes over a flat face whose sizes follow a gradient or a picture a sketch holds |
+| `cf-geo-texture` | domes, dimples, hex studs, pyramids or ribs over a flat face; all but ribs round a whole cylinder |
+| `cf-geo-text` | lettering raised from or cut into a flat face, laid round a cylinder, or projected onto another face |
+| `cf-geo-text-on-curve` | lettering whose baseline follows a path, extruded as a body, added or cut |
+| `cf-geo-qr-code` | a QR code (versions 1 to 10) or Data Matrix (to 48 × 48) of a text, raised, cut, or as a tile |
+| `cf-geo-lithophane` | a plate whose thickness follows a picture, or an equation z(x, y): one smooth surface, not facets |
+
+**Geometry & utilities**
+
+| Type | What it makes |
+|---|---|
+| `cf-geo-equation-curve` | a reference curve from x(t), y(t), z(t) (or r, θ, z); radians |
+| `cf-geo-point-curve` | a reference curve through x y z points pasted from a table, smooth or straight |
+| `cf-geo-airfoil` | a wing lofted between NACA four-digit sections or pasted coordinates: taper, sweep, dihedral, twist |
+| `cf-geo-tube` | a round tube or bar along a path, with one bend radius at the corners of straight runs |
+| `cf-geo-cable` | a cable hung between points as a catenary, by slack or by sag; a body or its centre line |
+| `cf-geo-spiral` | a flat (Archimedean), conical or logarithmic spiral: a curve, or a coil of wire |
+| `cf-geo-stock` | the block or round bar round bodies, with an allowance, rounded up to stock sizes |
+| `cf-geo-centre-of-mass` | a reference point, or a mate connector, at the bodies' centre of mass |
+| `cf-geo-measure` | a distance, angle, length, area, volume or extent, written into a variable for later features |
+| `cf-geo-convex-hull` | the convex hull of bodies: exact for flat faces, facets within an accuracy of round ones |
+| `cf-geo-hollow` | a solid hollowed to a wall, drain holes through its low side, optionally split along a plane |
+| `cf-geo-auto-fillet` | every edge of a body that passes a filter (outside or inside corner, sharpness) rounded or bevelled |
+| `cf-geo-slice` | sections of bodies on parallel planes, as flat surfaces (profiles for Extrude) or as curves |
+| `cf-geo-scale` | bodies scaled evenly, or by a factor each along X, Y and Z |
+
+What is particular to them:
+
+- **Copies with a size** (`copySites`, `kernel/ops/cf-geo.ts`). The attractor, scatter and Fibonacci patterns
+  size their copies. A seed that is a straight extrusion square to the pattern (a hole through a plate, a
+  pocket, a boss) is sized across the pattern only: the copy is the seed's cross-section, sized, pushed through
+  the seed's own height, so a hole stays through. Any other seed is sized evenly in every direction. Names are
+  the patterns' own, `<id>:<key>:<seed face name>`, the key a place (`i3.2`, `g-1.4`, `f17`) or, for a scatter,
+  an order (`r5`).
+- **Tools on a face** are named `<id>:<tag>:<n>`: the tag a lattice place, a cell, a letter's index, a module of
+  a code; n counts the tool's own faces. Raised shapes start 0.01 mm inside the face and cut ones 0.01 mm above
+  it (`OVERLAP`), so that nothing ends exactly on the face; all of a feature's tools go into one boolean.
+- **Pictures** (`_cf-geo-image.ts`) are ones a sketch holds (the sketcher's Image tool), named by a `features`
+  field of type `sketch`, and are read where the sketch shows them. PNG is decoded in the worker and in node
+  alike; JPEG by the browser's decoder, which node has not.
+- **Measure to variable** has a page half, `tools/cf-geo-measure-sync.ts`: the feature leaves
+  `measure: { name, value, unit }` on its datum, and after each regeneration the page writes the values into the
+  document's variables (`features/_cf-geo-measured.ts`; added if missing, rewritten if changed, not undoable,
+  never from a dialog's draft, an open sketch or an earlier version). Features below that use the variable are
+  rebuilt in the regeneration that follows. Outside the page (an assembly, the assistant's host) the variable has
+  the value the page last wrote.
+- **Limits.** Uneven scaling refuses a body with a face that goes all the way round (a plain hole, a shaft):
+  such a face does not come back sound (flat, blended and free-form bodies are stretched; even scaling takes
+  anything). A texture or text on a cylinder costs about 50 ms a shape or letter in the kernel's boolean. A
+  wing's skin is one face per span of its outline, and a height map's relief many knots in one face, because the
+  kernel's mass properties are poor across a curve's inner knots. Slices are surfaces or curves, not sketches:
+  the profile field lists Sketch features only, and takes a slice as a flat face.
 
 ## Limits, in one place
 
