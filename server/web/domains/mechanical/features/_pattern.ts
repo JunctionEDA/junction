@@ -6,7 +6,7 @@ import { patternBodies, patternFeatures, type Instance } from "../kernel/ops/pat
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /** Feature types that make no material, so there is nothing of them to copy. */
-export const NOT_COPYABLE = ["sketch", "plane", "axis", "point", "helix"];
+export const NOT_COPYABLE = ["sketch", "plane", "axis", "point", "helix", "mate-connector", "fit-spline", "projected-curve", "bridging-curve", "composite-curve", "intersection-curve", "trim-curve", "isocline", "routing-curve"];
 
 export interface CopyParams { of: "features" | "bodies"; features: string[]; bodies: string[]; merge: boolean }
 
