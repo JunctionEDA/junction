@@ -26,8 +26,12 @@ export function newModel(id: string, name: string, o: { thickness: number; radiu
   return { id, name, ...o, walls: [], bends: [], forms: [], roots: {}, bodies: {}, built: {}, finished: false, seq: 0 };
 }
 /** A new wall, on its own (a root at `place`) unless `place` is null (a bend will place it). */
-export function addWall(k: Kernel, m: SMModel, face0: Shape, featureId: string, place: Mat | null, keep: Keep): { model: SMModel; wall: SMWall } {
+export function addWall(k: Kernel, m: SMModel, shape: Shape, featureId: string, place: Mat | null, keep: Keep): { model: SMModel; wall: SMWall } {
   // every wall's face looks up (+z), so faces of different walls fuse into one in the flat pattern
+  const faces = k.sub(shape, "face");
+  if (faces.length !== 1) throw new FeatureError("A wall must be one flat face.");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const face0: Shape = keep((k.oc as any).TopoDS.Face(faces[0]));
   const fr = k.faceFrame(face0 as never);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const face: Shape = fr && fr.normal[2] < 0 ? keep((k.oc as any).TopoDS.Face(keep(face0.Reversed()))) : face0;

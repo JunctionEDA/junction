@@ -77,6 +77,8 @@ export interface SMModel {
   bodies: { [wall: string]: string };
   built: { [body: string]: Shape };
   finished: boolean;
+  /** corners already relieved by default, `<wall>@<x>,<y>` (in hundredths), so a later flange does not do them twice */
+  cornersDone?: string[];
   /** counts the walls, bends and forms made, for their ids */
   seq: number;
 }
