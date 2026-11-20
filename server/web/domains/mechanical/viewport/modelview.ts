@@ -270,6 +270,11 @@ export class ModelView {
   // ---------------------------------------------------------------- hover and selection
   /** Restrict picking to these kinds (null: everything). */
   setFilter(kinds: readonly PickKind[] | null): void { this.filter = kinds ? new Set(kinds) : null; }
+  /**
+   * A sketch lying on a face is picked before the face (a dialog whose profile takes both: the region drawn on
+   * a face is what a click on it means, the face around it is still the face).  Off, a body wins over a sketch.
+   */
+  sketchFirst: (() => boolean) | null = null;
   setSelection(picks: readonly Pick[]): void { this.selection = picks.slice(); this.drawHighlight(); }
   /**
    * What the open dialog's fields hold, kept drawn while the dialog is open: `active` (the field that is
@@ -499,7 +504,8 @@ export class ModelView {
       const hp = faceD < Infinity ? this.datums.pick(ray, px, rc, (k) => k === "plane", true) : null;
       if (hp && Math.abs(hp.d - faceD) <= slack) offer({ kind: "datum", featureId: hp.featureId, datum: hp.datum, point: hp.point }, hp.d, 5e3);
     }
-    if (best) return (best as { pick: Pick }).pick;
+    const sketchOn = !!this.sketchFirst && this.sketchFirst() && !!best && (best as { pick: Pick }).pick.kind === "face";
+    if (best && !sketchOn) return (best as { pick: Pick }).pick;
 
     if (want("sketch")) {
       let found: { pick: Pick; d: number } | null = null;
@@ -513,8 +519,10 @@ export class ModelView {
         if (!entity) for (const r of s.view.regions) if (inside(p2, r.outer) && !r.holes.some((h) => inside(p2, h))) region = r.id;
         if (entity || region) { const d = ray.origin.distanceTo(w); if (!found || d < found.d) found = { pick: { kind: "sketch", featureId: id, entity, region, point: at(w) }, d }; }
       }
-      if (found) return (found as { pick: Pick }).pick;
+      // with a face under the pointer too (sketchFirst), the sketch wins only when it is on that face or before it
+      if (found && (!sketchOn || (found as { d: number }).d <= faceD + slack)) return (found as { pick: Pick }).pick;
     }
+    if (best) return (best as { pick: Pick }).pick;
     if (want("datum")) {
       const h = this.datums.pick(ray, px, rc, (k) => k === "plane", true);
       if (h) return { kind: "datum", featureId: h.featureId, datum: h.datum, point: h.point };

@@ -6,6 +6,7 @@
 // what the result is; the node test (static/tests/cad-history.test.js) drives this file directly.
 import { applyChanges, invertChange, newId, type ItemChange, type ItemDoc, type Json, type JsonObject } from "../../../shared/itemdoc/itemdoc";
 import type { FeatureDefinition, ParamField } from "../core/feature";
+import { profileFaces } from "../features/_profile";
 import * as edits from "../document/edits";
 import { featuresOf, nextName, orderAt, rollbackIndex, studioOf, type FeatureItem } from "../document/format";
 import type { FeatureReport } from "../kernel/protocol";
@@ -25,7 +26,10 @@ function fieldDoc(f: ParamField): JsonObject {
     case "boolean": out.stores = "true or false"; break;
     case "text": out.stores = "a string"; break;
     case "enum": out.stores = "one of the options"; out.options = f.options.map((o) => o.value); break;
-    case "profile": out.stores = "{ sketch: <id of an earlier sketch feature>, regions: null (all closed regions) or [region ids] }; the sketch's name, id or $ref alone is accepted too"; break;
+    case "profile":
+      out.stores = "{ sketch: <id of an earlier sketch feature>, regions: null (all closed regions) or [region ids] }; the sketch's name, id or $ref alone is accepted too";
+      if (f.faces) out.stores += ". Flat faces of bodies can be the profile too, alone or beside a sketch: { sketch: null, faces: [{ kind: \"face\", body, name }] } (names from cad_get_bodies); each face is used with its holes, along its own normal (out of the solid for new and add, into it for remove and intersect). A single face reference, or a list of them, is accepted too";
+      break;
     case "plane": out.stores = "{ kind: \"plane\", plane: \"top\" | \"front\" | \"right\" } or { kind: \"face\", ref: { kind: \"face\", body, name } }; \"top\", \"front\" or \"right\" alone is accepted too"; break;
     case "refs": {
       const forms = f.of.length ? [`{ kind: ${f.of.map((k) => `"${k}"`).join(" | ")}, body, name } (names from cad_get_bodies)`] : [];
@@ -194,7 +198,14 @@ function validate(def: FeatureDefinition, params: JsonObject, features: FeatureI
     else if (f.kind === "profile") {
       const id = isObject(v) ? v.sketch : null;
       const at = features.findIndex((x) => x.id === id);
-      if (at < 0 || features[at].featureType !== "sketch") problems.push(`${f.key}.sketch must be the id of a sketch feature`);
+      // a field that takes faces may hold faces alone (sketch: null), or faces beside a sketch
+      const given = isObject(v) && v.faces !== undefined && v.faces !== null;
+      const faces = isObject(v) && Array.isArray(v.faces) ? v.faces : [];
+      if (given && !f.faces) problems.push(`${f.key}.faces: this feature takes a sketch only`);
+      else if (given && !(Array.isArray((v as JsonObject).faces) && faces.length === profileFaces(v).length)) problems.push(`${f.key}.faces must be a list of { kind: "face", body, name }`);
+      const facesOnly = !!f.faces && faces.length > 0 && (id === null || id === undefined);
+      if (facesOnly) { /* nothing more to check: the kernel says when a face is gone or not flat */ }
+      else if (at < 0 || features[at].featureType !== "sketch") problems.push(`${f.key}.sketch must be the id of a sketch feature` + (f.faces ? `, or give flat faces of a body instead: { sketch: null, faces: [{ kind: "face", body, name }] }` : ""));
       else if (selfIndex >= 0 && at >= selfIndex) problems.push(`${f.key}: the sketch "${features[at].name}" comes after this feature in the tree; a feature can only use what is above it`);
       if (isObject(v) && v.regions !== null && v.regions !== undefined && !(Array.isArray(v.regions) && v.regions.every((r) => typeof r === "string"))) problems.push(`${f.key}.regions must be null or a list of region ids`);
     } else if (f.kind === "plane") {
@@ -266,10 +277,13 @@ export function planEdits(doc: ItemDoc, defs: Defs, list: unknown): Plan {
           if (typeof pv === "string") params[f.key] = { kind: "plane", plane: pv.toLowerCase() };
         }
         const v = params[f.key];
-        if (f.kind === "profile" && (typeof v === "string" || (isObject(v) && typeof v.sketch === "string"))) {
+        // a face reference alone, or a list of them, is a profile of faces
+        const asFaces = f.kind === "profile" && f.faces ? (Array.isArray(v) ? v : isObject(v) && v.kind === "face" ? [v] : null) : null;
+        if (asFaces) params[f.key] = { sketch: null, regions: null, faces: asFaces };
+        else if (f.kind === "profile" && (typeof v === "string" || (isObject(v) && typeof v.sketch === "string"))) {
           const key = typeof v === "string" ? v : (v.sketch as string);
           const hit = features.find((x) => x.id === key) || features.find((x) => x.name === key) || features.find((x) => x.name.toLowerCase() === key.toLowerCase());
-          params[f.key] = { sketch: hit ? hit.id : key, regions: isObject(v) && Array.isArray(v.regions) ? v.regions : null };
+          params[f.key] = { sketch: hit ? hit.id : key, regions: isObject(v) && Array.isArray(v.regions) ? v.regions : null, ...(isObject(v) && v.faces !== undefined && v.faces !== null ? { faces: v.faces } : {}) };
         }
       }
       if (def.type === "sketch") {

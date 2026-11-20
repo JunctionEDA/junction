@@ -15,8 +15,13 @@ export type ParamField = { key: string; label: string; hint?: string; visible?: 
   | { kind: "boolean" }
   | { kind: "text" }
   | { kind: "enum"; options: { value: string; label: string }[] }
-  /** a sketch made earlier in the tree: stores `{ sketch: <feature id>, regions: null | string[] }` */
-  | { kind: "profile" }
+  /**
+   * a sketch made earlier in the tree: stores `{ sketch: <feature id>, regions: null | string[] }`.  With
+   * `faces` it also takes flat faces of bodies, alone or beside the sketch, and stores them as
+   * `faces: GeomRef[]` in the same object (`sketch: null` when there are only faces); features/_profile.ts
+   * has the shape and kernel/ops/profile.ts turns it into regions.
+   */
+  | { kind: "profile"; faces?: boolean }
   /** a sketch plane: stores a PlaneRef (a default plane, or a planar face picked in the viewport) */
   | { kind: "plane" }
   /**

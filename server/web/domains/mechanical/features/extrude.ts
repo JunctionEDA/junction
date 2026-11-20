@@ -1,6 +1,10 @@
 // extrude.ts — the Extrude feature: sweep the closed regions of a sketch along the sketch's normal, as new
 // bodies, added to the bodies they touch, removed from them, or intersected with them.
 //
+// The profile may also be flat faces of the bodies already there (kernel/ops/profile.ts), alone or beside a
+// sketch: each face is swept along its own normal, out of its solid for New and Add and into it for Remove and
+// Intersect ("Opposite direction" turns either round), with the same end conditions, draft and thin wall.
+//
 // End conditions: a depth ("blind"), a depth split evenly about the sketch ("symmetric"), through everything,
 // up to a face, up to the next body in the way; an optional second direction, a draft angle, and a thin wall
 // instead of a solid region.
@@ -12,6 +16,8 @@
 import { defineFeature } from "../core/feature";
 import { scale, type GeomRef, type Vec3 } from "../core/geometry";
 import type { EvalContext, SketchRegion } from "../kernel/types";
+import { resolveProfile } from "../kernel/ops/profile";
+import type { ProfileValue } from "./_profile";
 import type { NamedResult } from "../kernel/occ";
 import { combine, OPERATION_OPTIONS, scoped, type Operation, type Tool } from "../kernel/ops/combine";
 import { draftFaces } from "../kernel/ops/draft";
@@ -28,8 +34,8 @@ export interface ExtrudeParams {
   [key: string]: any;
   /** "surface": a sheet from the sketch's curves instead of a solid from its regions (kernel/ops/surface-sweeps.ts) */
   bodyType?: "solid" | "surface";
-  /** the sketch, and which of its regions (null: all of them) */
-  profile: { sketch: string; regions: string[] | null } | null;
+  /** the sketch and which of its regions (null: all of them), and / or flat faces of bodies (features/_profile.ts) */
+  profile: ProfileValue | null;
   operation: Operation;
   /** how far the extrusion goes */
   endType: EndType;
@@ -68,7 +74,7 @@ export default defineFeature<ExtrudeParams>({
     second: false, secondType: "blind", secondDepth: 10, draft: false, draftAngle: 3, thin: false, thickness: 1, thinSide: "inside", targets: [],
   }),
   schema: withSurfaceType([
-    { key: "profile", label: "Sketch to extrude", kind: "profile" },
+    { key: "profile", label: "Sketch or faces", kind: "profile", faces: true, hint: "A sketch (then its regions), or flat faces of a part: each is extruded along its own normal." },
     { key: "operation", label: "Result", kind: "enum", options: OPERATION_OPTIONS },
     { key: "endType", label: "End", kind: "enum", options: END_OPTIONS },
     { key: "depth", label: "Depth", kind: "number", unit: "mm", min: 0.001, step: 1, visible: (p) => p.endType === "blind" || p.endType === "symmetric" || !p.endType },
@@ -90,7 +96,6 @@ export default defineFeature<ExtrudeParams>({
     const k = ctx.k, id = ctx.feature.id;
     const end: EndType = p.endType || "blind";
     const op: Operation = p.operation || "new";
-    if (!p.profile || !p.profile.sketch) throw ctx.fail("Pick a sketch to extrude.");
     if ((end === "blind" || end === "symmetric") && !(p.depth > 0)) throw ctx.fail("The depth must be more than zero.");
     if (end === "through" && (op === "new" || op === "add")) throw ctx.fail("Through all removes or intersects. To make material, use a depth or Up to face.");
     if (end === "upToFace" && (!p.face || !p.face.name)) throw ctx.fail("Pick the face to extrude up to.");
@@ -99,21 +104,20 @@ export default defineFeature<ExtrudeParams>({
     if (p.thin && !(Number(p.thickness) > 0)) throw ctx.fail("The wall must be thicker than zero.");
     if (p.draft && !(Math.abs(Number(p.draftAngle)) > 0 && Math.abs(Number(p.draftAngle)) < 89)) throw ctx.fail("The draft angle must be between 0° and 89°.");
 
-    const sketch = ctx.sketch(p.profile.sketch);
-    const wanted = p.profile.regions;
-    const regions = sketch.regions.filter((r) => !wanted || wanted.includes(r.id));
-    if (!regions.length) throw ctx.fail(sketch.regions.length ? "The regions this feature used are gone from the sketch. Edit the feature and pick the sketch again." : "The sketch has no closed region to extrude. Close its outline first.");
-    const n: Vec3 = scale(sketch.frame.normal, p.flip && end !== "symmetric" ? -1 : 1);
-    const far = reachPast(k, ctx.bodies().map((b) => b.shape), sketch.frame.origin);
+    const regions = resolveProfile(ctx, p.profile, "extrude").regions;
     const upFace = end === "upToFace" ? ctx.resolve(p.face as GeomRef) : null;
     if (upFace && upFace.kind !== "face") throw ctx.fail("Up to face needs a face.");
 
-    // how far forward (along n) and back the extrusion reaches before any trimming
-    const fwd = end === "blind" ? p.depth : end === "symmetric" ? p.depth / 2 : far;
-    const back = end === "symmetric" ? p.depth / 2 : second ? (p.secondType === "through" ? far : Number(p.secondDepth)) : 0;
-
     const tools: Tool[] = [];
+    const solids = ctx.bodies().map((b) => b.shape);
     for (const region of regions) {
+      // a sketch goes along its normal; a face out of its solid to make material and into it to take it away
+      const into = !!region.from && (op === "remove" || op === "intersect");
+      const n: Vec3 = scale(region.frame.normal, (p.flip && end !== "symmetric" ? -1 : 1) * (into ? -1 : 1));
+      const far = reachPast(k, solids, region.frame.origin);
+      // how far forward (along n) and back the extrusion reaches before any trimming
+      const fwd = end === "blind" ? p.depth : end === "symmetric" ? p.depth / 2 : far;
+      const back = end === "symmetric" ? p.depth / 2 : second ? (p.secondType === "through" ? far : Number(p.secondDepth)) : 0;
       let t: NamedResult = p.thin
         ? thinPrism(ctx, region, Number(p.thickness), p.thinSide || "inside", scale(n, fwd + back))
         : k.prism(region.face, scale(n, fwd + back), id, region.id, region.edges, ctx.own);
@@ -121,8 +125,8 @@ export default defineFeature<ExtrudeParams>({
       if (p.draft) {
         const named = k.namedFaces(t.shape, t.names, id);
         const sides = named.filter((f) => !f.name.startsWith(`${id}:start:`) && !f.name.startsWith(`${id}:end:`)).map((f) => f.shape);
-        // the neutral plane is the sketch; a positive angle narrows the extrusion away from it
-        t = draftFaces(k, t.shape, named, sides, n, Number(p.draftAngle), { origin: sketch.frame.origin, normal: sketch.frame.normal }, id, ctx.own);
+        // the neutral plane is the sketch (or the face); a positive angle narrows the extrusion away from it
+        t = draftFaces(k, t.shape, named, sides, n, Number(p.draftAngle), { origin: region.frame.origin, normal: region.frame.normal }, id, ctx.own);
       }
       const endName = `${id}:end:${region.id}`;
       if (end === "upToFace" && upFace) {

@@ -20,6 +20,7 @@ import { DEFAULT_PLANES, type DefaultPlaneId } from "../core/geometry";
 import { fieldFactor, fieldText, fieldUnit, num, parseField, quantityOf, type Units } from "../document/units";
 import { EXPR_KEY, UNIT_KEY, exprUnitsOf, exprsOf, lookupOf, variableValues, variablesOf } from "../document/variables";
 import { targetsIn } from "../features/_refs";
+import { makeProfile, profileFaces } from "../features/_profile";
 import type { Pick } from "../viewport/modelview";
 import { DialogShell } from "./DialogShell";
 import { describeKinds, heldItems, nextEmptyField, pickKindsFor, type HeldItem } from "./fields";
@@ -154,17 +155,24 @@ function Field({ studio, field, params }: { studio: PartStudio; field: ParamFiel
       const chosen = (value as { regions?: string[] | null } | null)?.regions || null;
       const all = cur ? (studio.getState().sketches.find((v) => v.featureId === cur)?.regions.length ?? 0) : 0;
       const used = chosen ? chosen.length : all;
+      // a field that takes faces lists them under the sketch, each with a ×, as a refs field does
+      const faces = field.faces ? profileFaces(value) : [];
+      const faceItems = field.faces ? heldItems(field, value, names) : [];
       control = (
         <span className="flex flex-col gap-1 min-w-0">
           <span className={cx("flex rounded-sm", armed && "outline outline-1 outline-blue")} onFocus={() => { if (!armed) studio.setField(field.key); }}>
             <Select className="input w-full" value={cur} data={{ param: field.key }} label={field.label}
-              onChange={(v) => set(v ? { sketch: v, regions: null } : null)}
-              options={[{ value: "", label: sketches.length ? "Click a sketch" : "Draw a sketch first" }, ...sketches.map((f) => ({ value: f.id, label: f.name }))]} />
+              onChange={(v) => set(makeProfile(v || null, null, faces))}
+              options={[{ value: "", label: field.faces ? (faces.length ? "No sketch" : sketches.length ? "Click a sketch or a face" : "Click a flat face") : sketches.length ? "Click a sketch" : "Draw a sketch first" }, ...sketches.map((f) => ({ value: f.id, label: f.name }))]} />
           </span>
+          {field.faces && (faceItems.length || armed) ? (
+            <PickList studio={studio} param={`${field.key}.faces`} armed={armed} items={faceItems} empty="Or click flat faces in the model" onArm={arm}
+              onClear={() => set(makeProfile(cur || null, chosen, []))} onRemove={(i) => studio.clearField(field.key, i)} />
+          ) : null}
           {cur && all > 1 ? (
             <span className="flex items-center gap-1.5 text-xs text-ink-2" data-regions={chosen ? chosen.join(" ") : "all"}>
               <span className="flex-1">{chosen ? `${used} of ${all} regions` : `All ${all} regions`}{armed ? ": click a region to choose" : ""}</span>
-              {chosen ? <button type="button" className="btn sm ghost h-5 px-1" data-act="all-regions" onClick={() => set({ sketch: cur, regions: null })}>All</button>
+              {chosen ? <button type="button" className="btn sm ghost h-5 px-1" data-act="all-regions" onClick={() => set(makeProfile(cur, null, faces))}>All</button>
                 : !armed ? <button type="button" className="btn sm ghost h-5 px-1" data-act="pick-regions" onClick={() => studio.setField(field.key)}>Choose</button> : null}
             </span>
           ) : null}

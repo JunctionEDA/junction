@@ -29,6 +29,7 @@ import { setMeasureUnits } from "../inspect/measure-format";
 import { ModelView, pickKey, type Pick, type PickKind } from "../viewport/modelview";
 import { DEFAULT_GEOMETRY } from "../viewport/planes";
 import { fillFromSelection, heldPicks, holdsOne, neighbourField, nextEmptyField, pickKindsFor, takesPicks, valueAfterPick } from "./fields";
+import { profileEmpty, profileFaces, profileSketch, makeProfile } from "../features/_profile";
 import { getPrefs, readVisibility, writeVisibility, type Visibility } from "./prefs";
 import { viewKey } from "./viewkeys";
 
@@ -135,6 +136,12 @@ export class PartStudio {
     this.view = new ModelView(this.viewport);
     this.view.onHover = (p) => this.set({ hover: p });
     this.view.onPick = (p, ev) => this.onPick(p, ev);
+    // a dialog whose profile takes sketches and faces: the region drawn on a face is picked before the face
+    this.view.sketchFirst = () => {
+      const e = this.state.editing; if (!e) return false;
+      const f = featureDef(e.draft.featureType)?.schema.find((x) => x.kind === "profile" && x.faces);
+      return !!f && (!e.field || e.field === f.key);
+    };
     this.view.onBox = (picks, ev) => this.onBox(picks, ev);
     this.view.onContext = (p, ev) => this.onContext(p, ev);
     // a default plane's corner is dragged to resize it: the size is the document's, shared and undone like an edit
@@ -361,7 +368,7 @@ export class PartStudio {
       const key = s.editing.field; if (!key) return;
       const field = featureDef(s.editing.draft.featureType)?.schema.find((f) => f.key === key); if (!field) return;
       let value = s.editing.draft.params[key], changed = false;
-      for (const p of picks) { const v = valueAfterPick(field, value, p, { addOnly: true }); if (v !== undefined) { value = v; changed = true; } }
+      for (const p of picks) { const v = this.fieldTakes(field, p) ? valueAfterPick(field, value, p, { addOnly: true }) : undefined; if (v !== undefined) { value = v; changed = true; } }
       if (changed) this.setDraft({ params: { [key]: value } });
       return;
     }
@@ -380,8 +387,12 @@ export class PartStudio {
   private fieldFor(p: Pick): string | null {
     const e = this.state.editing, def = e ? featureDef(e.draft.featureType) : undefined;
     if (!e || !def) return null;
-    for (const f of def.schema) { if (f.visible && !f.visible(e.draft.params)) continue; if (takesPicks(f) && valueAfterPick(f, e.draft.params[f.key], p, { addOnly: true }) !== undefined) return f.key; }
+    for (const f of def.schema) { if (f.visible && !f.visible(e.draft.params)) continue; if (takesPicks(f) && this.fieldTakes(f, p) && valueAfterPick(f, e.draft.params[f.key], p, { addOnly: true }) !== undefined) return f.key; }
     return null;
+  }
+  /** What the pure rules (ui/fields.ts) cannot see: a profile takes a face only when it is flat. */
+  private fieldTakes(field: ParamField, p: Pick): boolean {
+    return !(field.kind === "profile" && p.kind === "face" && !this.view.normalOf(p));
   }
 
   // ---------------------------------------------------------------- features
@@ -394,18 +405,22 @@ export class PartStudio {
     if (this.state.editing) this.cancelFeature();
     const s = this.state;
     const params = def.defaults() as JsonObject;
-    const picked = fillFromSelection(def.schema, params, s.selection);
+    const picked = fillFromSelection(def.schema, params, s.selection, (f, p) => this.fieldTakes(f, p as Pick));
     Object.assign(params, picked);
     // a new sketch is never put on a plane the person did not choose: its plane field starts empty
     const sketchPlaneKey = def.type === "sketch" ? def.schema.find((f) => f.kind === "plane")?.key : undefined;
     if (sketchPlaneKey && picked[sketchPlaneKey] === undefined) params[sketchPlaneKey] = null;
+    let guessed: { key: string; json: string } | null = null;
     for (const field of def.schema) {
       if (field.kind !== "profile" || params[field.key]) continue;
       // the sketch just left, or else the newest sketch that nothing uses yet, is what an extrude is usually for
       const free = fromSketch ? s.features.find((f) => f.id === fromSketch) : s.features.slice(0, s.rollback).filter((f, i) => f.featureType === "sketch" && !s.features.slice(i + 1).some((l) => JSON.stringify(l.params).includes(f.id))).pop();
       if (free) params[field.key] = { sketch: free.id, regions: null };
+      // a sketch nobody chose gives way to the first face clicked (fillField); the sketch just left was chosen
+      if (free && !fromSketch) guessed = { key: field.key, json: JSON.stringify(params[field.key]) };
     }
     const draft: FeatureItem = { id: crypto.randomUUID(), type: "feature", featureType: def.type, name: nextName(s.features, def.title), order: orderAt(s.features, s.rollback), params };
+    this.guessedProfile = guessed ? { draft: draft.id, ...guessed } : null;
     this.select([]);
     // A sketch needs nothing but its plane: with one selected, drawing starts at once; without, the sketch's
     // dialog opens with its plane field empty and listening, and drawing starts when a plane, a flat face or a
@@ -487,6 +502,8 @@ export class PartStudio {
       }
     }, () => { /* the highlight is a nicety: the dialog works without it */ });
   }
+  /** the profile a new feature was given without being asked (the newest unused sketch), until the person changes it */
+  private guessedProfile: { draft: string; key: string; json: string } | null = null;
   private heldFor: string | null = null;
   private heldAsked = new Set<string>();
   private applyFieldFilter(): void {
@@ -498,7 +515,7 @@ export class PartStudio {
   private firstEmptyField(def: FeatureDefinition, params: JsonObject): string | null {
     for (const f of def.schema) {
       if (f.visible && !f.visible(params)) continue;   // a field the dialog does not show cannot listen
-      if (f.kind === "profile" && !params[f.key]) return f.key;
+      if (f.kind === "profile" && profileEmpty(params[f.key])) return f.key;
       if (f.kind === "refs" && (!params[f.key] || (Array.isArray(params[f.key]) && !(params[f.key] as unknown[]).length))) return f.key;
     }
     return null;
@@ -514,7 +531,12 @@ export class PartStudio {
   fillField(key: string, p: Pick): void {
     const e = this.state.editing; if (!e) return;
     const def = featureDef(e.draft.featureType), field = def && def.schema.find((f) => f.key === key); if (!def || !field) return;
-    const v = valueAfterPick(field, e.draft.params[key], p);
+    if (!this.fieldTakes(field, p)) { this.host.toast("A profile needs a flat face. Pick a planar face, or a sketch.", 2500); return; }
+    // the sketch a new feature guessed gives way to the first face the person clicks
+    const g = this.guessedProfile;
+    const guess = !!g && g.draft === e.draft.id && g.key === key && p.kind === "face" && JSON.stringify(e.draft.params[key]) === g.json;
+    if (g && g.draft === e.draft.id && g.key === key) this.guessedProfile = null;
+    const v = valueAfterPick(field, guess ? null : e.draft.params[key], p);
     if (v === undefined) return;
     this.setDraft({ params: { [key]: v } });
     // a new sketch needs only its plane: with it chosen, drawing starts
@@ -529,7 +551,11 @@ export class PartStudio {
     const value = e.draft.params[key];
     if (field.kind === "refs") this.setDraft({ params: { [key]: field.single ? null : index === null ? [] : (Array.isArray(value) ? value : []).filter((_x, i) => i !== index) } });
     else if (field.kind === "bodies") this.setDraft({ params: { [key]: index === null ? [] : (Array.isArray(value) ? value : []).filter((_x, i) => i !== index) } });
-    else if (field.kind === "profile") this.setDraft({ params: { [key]: null } });
+    else if (field.kind === "profile") {
+      // index: one of its faces; null: everything
+      const cur = value as { regions?: string[] | null } | null;
+      this.setDraft({ params: { [key]: index === null ? null : makeProfile(profileSketch(value), cur && Array.isArray(cur.regions) ? cur.regions : null, profileFaces(value).filter((_x, i) => i !== index)) } });
+    }
   }
 
   /** Accept the dialog: the draft becomes (or replaces) the feature in the document, as one undoable step. */

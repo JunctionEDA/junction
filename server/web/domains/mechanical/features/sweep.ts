@@ -10,6 +10,8 @@ import { sweepRegion } from "../kernel/ops/sweep-pipe";
 import { applyOperation, operationFields, type Operation } from "../kernel/ops/sweep-apply";
 import { isSurface, sweepSurface, withSurfaceType } from "../kernel/ops/surface-sweeps";
 import type { RefTarget } from "./_refs";
+import type { ProfileValue } from "./_profile";
+import { resolveProfile } from "../kernel/ops/profile";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -17,7 +19,8 @@ export interface SweepParams {
   [key: string]: any;
   /** "surface": a sheet from the sketch's curves instead of a solid from its regions (kernel/ops/surface-sweeps.ts) */
   bodyType?: "solid" | "surface";
-  profile: { sketch: string; regions: string[] | null } | null;
+  /** the sketch and its regions, and / or flat faces of bodies (features/_profile.ts) */
+  profile: ProfileValue | null;
   path: RefTarget[];
   corners: "round" | "sharp";
   operation: Operation;
@@ -31,7 +34,7 @@ export default defineFeature<SweepParams>({
   toolbarOrder: 24, toolbarSection: "solid", toolbarKeep: 80,
   defaults: () => ({ bodyType: "solid", profile: null, path: [], corners: "round", operation: "new", targets: [] }),
   schema: withSurfaceType([
-    { key: "profile", label: "Profile", kind: "profile" },
+    { key: "profile", label: "Profile", kind: "profile", faces: true, hint: "A sketch (then its regions), or flat faces of a part." },
     { key: "path", label: "Path", kind: "refs", of: ["edge"], datums: ["curve"], sketch: true, hint: "A sketch curve (the curves joined to it come too), edges, or a curve." },
     { key: "corners", label: "Corners", kind: "enum", options: [{ value: "round", label: "Round" }, { value: "sharp", label: "Sharp" }], hint: "How the profile turns where the path has a sharp corner." },
     ...operationFields,
@@ -39,13 +42,9 @@ export default defineFeature<SweepParams>({
 
   evaluate(ctx: EvalContext, p: SweepParams) {
     if (isSurface(p)) return sweepSurface(ctx, p);
-    if (!p.profile || !p.profile.sketch) throw ctx.fail("Pick the sketch to sweep.");
     const path = Array.isArray(p.path) ? p.path : [];
-    if (path.some((t) => t.kind === "sketch" && t.feature === p.profile!.sketch)) throw ctx.fail("The path must be in a different sketch from the profile.");
-    const sketch = ctx.sketch(p.profile.sketch);
-    const wanted = p.profile.regions;
-    const regions = sketch.regions.filter((r) => !wanted || wanted.includes(r.id));
-    if (!regions.length) throw ctx.fail("The profile sketch has no closed region to sweep.");
+    const { regions, sketchId } = resolveProfile(ctx, p.profile, "sweep");
+    if (sketchId && path.some((t) => t.kind === "sketch" && t.feature === sketchId)) throw ctx.fail("The path must be in a different sketch from the profile.");
     const spine = pathWire(ctx, path);
     const tools = regions.map((r) => sweepRegion(ctx, spine, r, p.corners === "sharp" ? "sharp" : "round"));
     applyOperation(ctx, tools, p.operation, p.targets, regions.map((r) => (regions.length > 1 ? r.id : undefined)));

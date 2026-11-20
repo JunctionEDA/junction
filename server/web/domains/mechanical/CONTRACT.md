@@ -404,6 +404,29 @@ across a rectangle splits it. A region's id is made from the curves on its bound
 click on a sketch takes all of it; clicks inside its regions then choose among them (from "all", a click leaves
 just that region, further clicks add and take away, "All" puts every region back).
 
+**A face as a profile** (`features/_profile.ts` for the stored shape, `kernel/ops/profile.ts` for the kernel
+side). A `profile` field that says `faces: true` also takes flat faces of the bodies already there, as Onshape's
+Extrude does: the value gains `faces: GeomRef[]` (ordinary face references, so the feature survives edits
+upstream), and `sketch` is `null` when there are only faces. A value with a sketch alone is stored exactly as
+before. Extrude, Revolve and Sweep take faces; the other features with a `profile` field are a sketch's alone.
+`resolveProfile(ctx, params.profile, "extrude")` gives a feature its regions whatever they came from: each is a
+`SketchRegion` with the `frame` of its plane, so a feature loops over regions and never asks which kind it has.
+
+- A face is one region, holes and all. Its frame is `Kernel.faceFrame`: the normal points out of the solid.
+- **Direction.** A sketch region goes along the sketch's normal. A face goes out of its solid for New and Add
+  and into it for Remove and Intersect, so a face picked with Remove cuts without flipping anything;
+  "Opposite direction" turns either round. Revolve by an angle starts the same way.
+- Several faces, and a sketch with faces, may be in one feature; each region goes along its own normal.
+- Revolve: a face has no sketch line, so the axis is Picked (an edge of the face itself will do) or the X or Y
+  of the face's plane. With Surface, the edges round the face are what is swept.
+- **In the dialog**: while the profile listens the viewport offers sketches and faces; a click on a face adds
+  it, a click on one it holds takes it out, and a face that is not flat is refused with a toast. Faces selected
+  before the tool is started (Shift+E) are the profile. The sketch a new feature only guessed (the newest one
+  nothing uses) gives way to the first face clicked; a sketch the person chose stays and the face joins it.
+  While such a dialog is open a sketch lying on a face is picked before the face under it
+  (`view.sketchFirst`), so regions drawn on a face can still be chosen.
+- A face that is gone fails with "no longer exists", a curved one with "must be flat".
+
 **The sketcher** (`sketch/editor.ts`, one `SketchEditor` per studio, `window.JunctionSketch` while a sketch is
 open) owns the pointer and the keys while a sketch is open and draws the sketch itself on a 2D canvas over the
 viewport. Its tools are the toolbar while a sketch is open (see "The toolbar"); the sketch has a dialog of its
@@ -475,7 +498,7 @@ export interface FeatureDefinition<P> {
 | `boolean` | a boolean | a checkbox |
 | `text` | a string | a text field |
 | `enum` (`options`) | a string | a segmented control, or a select above four options |
-| `profile` | `{ sketch: <feature id>, regions: null \| string[] }` | a list of earlier sketches; click one in the viewport, then its regions to choose among them |
+| `profile` (`faces?`) | `{ sketch: <feature id> \| null, regions: null \| string[], faces?: GeomRef[] }` | a list of earlier sketches; click one in the viewport, then its regions to choose among them. With `faces: true` (Extrude, Revolve, Sweep) flat faces of parts too, alone or beside the sketch, listed under it each with a × |
 | `plane` | a `PlaneRef` | Top / Front / Right (buttons, their rows in the feature list, or the planes in the model), or click a planar face or a reference plane |
 | `refs` (`of: GeomKind[]`, `single?`, `datums?`, `planes?`, `sketch?`) | `GeomRef[]` (or one); a `RefTarget` (`features/_refs.ts`) for a default plane, reference geometry or a sketch curve | a list that listens: click faces, edges or vertices in the viewport to add, again to take out; with the options, reference geometry, the default planes (also buttons) and sketch curves |
 | `features` (`types?`, `exclude?`) | `string[]` of earlier feature ids, in the order picked | a list of the earlier features |
@@ -678,6 +701,7 @@ How names are made:
 | A face generated from a named input (a fillet from an edge) | `<feature id>:from(<that name>)` |
 | A face with no history | `<feature id>:new#<n>` |
 | A face an extrusion stops on (up to face, up to next) | its end cap, `<feature id>:end:<region id>` |
+| Made from a face used as a profile | as from a sketch region, with `faceRegionId(ref)` (`face.<hash of body and name>`) for the region id and `faceEdgeId(<edge name>)` (`edge.<hash>`) for the sketch entity (`features/_profile.ts`): `<feature id>:end:face.1x2y3z`, `<feature id>:side:edge.4a5b6c` |
 | Thin extrude wall offset from a side | `<feature id>:side:<entity>:inner` / `:outer` |
 | Revolve | as Extrude: `:side:<entity>`, and `:start:` / `:end:<region>` when not a full turn |
 | Shell or thin wall face | `<feature id>:from(<the face it is offset from>)`; an opening's rim keeps the removed face's name |
@@ -991,7 +1015,8 @@ type Pick =
 ```
 
 A vertex wins over an edge wins over a face when the pointer is within a few pixels; a body wins over a sketch
-wins over a plane. A body that is drawn in another way (`view.bodyStyle` returns `faces: false`: a Board
+wins over a plane (but for a sketch lying on the face under the pointer while `view.sketchFirst()` says so: a
+dialog whose profile takes sketches and faces). A body that is drawn in another way (`view.bodyStyle` returns `faces: false`: a Board
 feature's solids under the board's picture) is still found by the pointer; anything that sets a body's
 visibility (display modes do) must ask `bodyStyle` first. Hover and selection are highlighted from the same picks. Turn a pick into a stored reference
 with `{ kind, body, name }`. A plane or reference geometry a person has hidden is neither drawn nor picked.

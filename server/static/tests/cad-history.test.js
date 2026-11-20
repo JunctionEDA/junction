@@ -92,7 +92,7 @@ test("a profile reads as the sketch's name, and a feature type the registry lack
     { id: "x1", type: "feature", featureType: "from-the-future", name: "Warp 1", order: "z", params: { amount: 3, how: { mode: "soft" } } }]);
   const b = edit(a, [modified("e1", { path: ["params", "profile", "sketch"], value: "s2" }), modified("x1", { path: ["params", "amount"], value: 4 }, { path: ["params", "how", "mode"], value: "hard" })]);
   const d = D.diffStudios(a, b, K.FEATURES);
-  assert.deepEqual(d.changes.find((c) => c.id === "e1").props, [{ name: "Sketch to extrude", before: "Sketch 1", after: "Other" }]);
+  assert.deepEqual(d.changes.find((c) => c.id === "e1").props, [{ name: "Sketch or faces", before: "Sketch 1", after: "Other" }]);
   assert.deepEqual(d.changes.find((c) => c.id === "x1").props, [{ name: "amount", before: "3", after: "4" }, { name: "how", before: '{"mode":"soft"}', after: '{"mode":"hard"}' }]);
 });
 

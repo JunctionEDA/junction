@@ -12,6 +12,7 @@ import type { JsonObject } from "../../../shared/itemdoc/itemdoc";
 import type { ParamField } from "../core/feature";
 import type { PlaneRef } from "../core/geometry";
 import { pickKindsOf, sameTarget, targetOf, targetsIn, type PickLike, type RefTarget } from "../features/_refs";
+import { makeProfile, profileEmpty, profileFaces, profileSketch } from "../features/_profile";
 
 type Value = JsonObject[string];
 /** A pick as these functions need it; the viewport's Pick (viewport/modelview.ts) is one. */
@@ -25,7 +26,7 @@ export function pickKindsFor(field: ParamField | undefined): string[] | null {
   if (!field) return null;
   if (field.kind === "refs") return pickKindsOf(field);
   if (field.kind === "plane") return ["plane", "face", "datum"];
-  if (field.kind === "profile") return ["sketch"];
+  if (field.kind === "profile") return field.faces ? ["sketch", "face"] : ["sketch"];
   if (field.kind === "bodies") return ["face"];
   return null;
 }
@@ -40,7 +41,7 @@ export function describeKinds(kinds: readonly string[] | null): string {
 /** True when the field holds nothing yet. */
 export function isEmpty(field: ParamField, value: Value | undefined): boolean {
   if (field.kind === "refs") return !targetsIn(value).length;
-  if (field.kind === "profile") return !value || !(value as { sketch?: string }).sketch;
+  if (field.kind === "profile") return field.faces ? profileEmpty(value) : !profileSketch(value);
   return false;   // a plane always has one; no bodies means every body
 }
 
@@ -65,12 +66,22 @@ export function valueAfterPick(field: ParamField, value: Value | undefined, pick
   if (field.kind === "profile") {
     // The first click on a sketch takes all of it.  Clicks inside its regions then choose among them: from
     // "all", a click leaves just that region; further clicks add and take away; none left is all again.
+    // A field that takes faces toggles a flat face of a body like any face pick; the sketch beside it stays.
+    const faces = field.faces ? profileFaces(value) : [];
+    if (pick.kind === "face") {
+      if (!field.faces) return undefined;
+      const cur = value as { regions?: string[] | null } | null | undefined;
+      const has = faces.some((f) => f.body === pick.body && f.name === pick.name);
+      if (has && o.addOnly) return undefined;
+      const next = has ? faces.filter((f) => !(f.body === pick.body && f.name === pick.name)) : [...faces, { kind: "face" as const, body: pick.body, name: pick.name }];
+      return makeProfile(profileSketch(value), (cur && Array.isArray(cur.regions) ? cur.regions : null), next);
+    }
     if (pick.kind !== "sketch") return undefined;
-    const cur = value as { sketch?: string; regions?: string[] | null } | null | undefined;
-    if (!cur || cur.sketch !== pick.featureId || !pick.region) return { sketch: pick.featureId, regions: null };
+    const cur = value as { sketch?: string | null; regions?: string[] | null } | null | undefined;
+    if (!cur || cur.sketch !== pick.featureId || !pick.region) return makeProfile(pick.featureId, null, faces);
     const now = Array.isArray(cur.regions) ? cur.regions : [];
     const next = now.includes(pick.region) ? (o.addOnly ? now : now.filter((r) => r !== pick.region)) : [...now, pick.region];
-    return { sketch: pick.featureId, regions: next.length ? next : null };
+    return makeProfile(pick.featureId, next.length ? next : null, faces);
   }
   if (field.kind === "plane") {
     if (pick.kind === "plane") return { kind: "plane", plane: pick.plane } as unknown as Value;
@@ -109,9 +120,10 @@ export function neighbourField(schema: readonly ParamField[], params: JsonObject
 
 /**
  * What the selection made before a tool was started fills: each pick goes to the first field that takes it, and
- * to no other.  Returns the parameters to lay over the defaults.
+ * to no other.  Returns the parameters to lay over the defaults.  `accepts` may turn a pick away from a field
+ * (a face that is not flat from a profile); it then goes to the next field that takes it.
  */
-export function fillFromSelection(schema: readonly ParamField[], params: JsonObject, picks: readonly FieldPick[]): JsonObject {
+export function fillFromSelection(schema: readonly ParamField[], params: JsonObject, picks: readonly FieldPick[], accepts?: (field: ParamField, pick: FieldPick) => boolean): JsonObject {
   const out: JsonObject = {};
   const left = picks.slice();
   for (const field of schema) {
@@ -119,10 +131,12 @@ export function fillFromSelection(schema: readonly ParamField[], params: JsonObj
     if (field.visible && !field.visible({ ...params, ...out })) continue;
     let value: Value | undefined;
     for (let i = 0; i < left.length; ) {
-      const v = valueAfterPick(field, value, left[i], { addOnly: true });
+      const v = accepts && !accepts(field, left[i]) ? undefined : valueAfterPick(field, value, left[i], { addOnly: true });
       if (v === undefined) { i++; continue; }
+      const took = left[i];
       value = v; left.splice(i, 1);
-      if (holdsOne(field) || field.kind === "profile") break;
+      // a profile takes one sketch, or every flat face that was selected
+      if (holdsOne(field) || (field.kind === "profile" && took.kind === "sketch")) break;
     }
     if (value !== undefined) out[field.key] = value;
   }
@@ -147,6 +161,14 @@ export function heldItems(field: ParamField, value: Value | undefined, names: { 
     });
   }
   if (field.kind === "bodies") return (Array.isArray(value) ? (value as string[]) : []).map((id) => ({ key: `body:${id}`, label: names.body(id) || "Missing part", pick: null }));
+  if (field.kind === "profile") {
+    // the faces a profile holds, like a refs field's; its sketch is shown by the sketch itself
+    if (!field.faces) return [];
+    return profileFaces(value).map((t, i) => {
+      const body = names.body(t.body);
+      return { key: `face:${t.body}:${t.name}:${i}`, label: `Face ${i + 1}${body ? ` of ${body}` : ""}`, pick: { kind: "face", body: t.body, name: t.name } as FieldPick, target: t };
+    });
+  }
   if (field.kind === "plane") {
     const ref = value as unknown as PlaneRef | undefined;
     if (!ref) return [];

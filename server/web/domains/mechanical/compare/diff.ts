@@ -49,7 +49,9 @@ export function valueText(v: Json | undefined, field: ParamField | undefined, do
     if (field.kind === "profile" && isObject(v)) {
       const f = doc.items.get(String(v.sketch)) as FeatureItem | undefined;
       const regions = Array.isArray(v.regions) ? `, ${v.regions.length} region${v.regions.length === 1 ? "" : "s"}` : "";
-      return (f ? f.name : "a sketch that is gone") + regions;
+      const faces = Array.isArray(v.faces) && v.faces.length ? `${v.faces.length} face${v.faces.length === 1 ? "" : "s"}` : "";
+      if (!v.sketch && faces) return faces;
+      return (f ? f.name : "a sketch that is gone") + regions + (faces ? `, ${faces}` : "");
     }
     if (field.kind === "plane" && isObject(v)) return v.kind === "plane" ? `${String(v.plane)[0].toUpperCase()}${String(v.plane).slice(1)} plane` : "a face";
     if (field.kind === "refs") { const n = Array.isArray(v) ? v.length : 1; return `${n} ${field.of.join(" or ")}${n === 1 ? "" : "s"}`; }

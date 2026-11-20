@@ -6,10 +6,15 @@
 // `<id>:side:<sketch entity>` for what each curve swept.  The result is always new surface bodies (one per
 // connected sheet); the solid choices that make no sense for a sheet (Add, Remove, draft, thin wall, up to
 // face) are hidden.
+//
+// A profile that holds flat faces of bodies (features/_profile.ts) gives the edges round each face, pulled
+// along that face's normal: the walls of the solid the face would have made.
 import type { ParamField } from "../../core/feature";
-import { cross, dot, length, scale, sub, type GeomRef, type Vec3 } from "../../core/geometry";
+import { cross, dot, length, scale, sub, type Frame, type GeomRef, type Vec3 } from "../../core/geometry";
 import { isGeomRef } from "../../core/geometry";
 import type { RefTarget } from "../../features/_refs";
+import { profileFaces, profileSketch } from "../../features/_profile";
+import { faceCurves } from "./profile";
 import { ShapeIndex, type NamedResult } from "../occ";
 import type { EvalContext, FaceNamer, NamedShape, Shape, SketchGeometry } from "../types";
 import { edgeAxis, sketchLineAxis, type Axis } from "./axis";
@@ -69,71 +74,91 @@ function finish(ctx: EvalContext, shape: Shape, history: { Generated(s: Shape): 
   addSheets(ctx, sewNamed(ctx, faces));
 }
 
-const profileOf = (ctx: EvalContext, p: Any, verb: string): { sketch: SketchGeometry; id: string } => {
-  if (!p.profile || !p.profile.sketch) throw ctx.fail(`Pick a sketch to ${verb}.`);
-  return { sketch: ctx.sketch(p.profile.sketch), id: p.profile.sketch };
-};
+/** One plane's worth of a profile's curves: the sketch's, or the edges round one face. */
+interface CurveGroup { frame: Frame; curves: Curve[]; sketch: SketchGeometry | null; id: string | null }
+
+/** The curves a profile gives a surface, plane by plane: the sketch's first, then each face's edges. */
+function profileGroups(ctx: EvalContext, p: Any, verb: string, skipOf?: (sketch: SketchGeometry, id: string) => string[]): CurveGroup[] {
+  const sid = profileSketch(p.profile), faces = profileFaces(p.profile);
+  if (!sid && !faces.length) throw ctx.fail(`Pick a sketch or a flat face to ${verb}.`);
+  const out: CurveGroup[] = [];
+  if (sid) {
+    const sketch = ctx.sketch(sid);
+    const curves = sketchCurves(ctx, sid, p.profile.regions, skipOf ? skipOf(sketch, sid) : []);
+    if (!curves.length) throw ctx.fail(skipOf ? `The sketch has no curve to ${verb} besides the axis.` : `The sketch has no curve to ${verb}.`);
+    out.push({ frame: sketch.frame, curves, sketch, id: sid });
+  }
+  for (const ref of faces) { const f = faceCurves(ctx, ref, verb); out.push({ frame: f.frame, curves: f.curves, sketch: null, id: null }); }
+  return out;
+}
 
 /** Extrude: the sketch's curves pulled along its normal, by a depth, symmetric about the sketch, or two ways. */
 export function extrudeSurface(ctx: EvalContext, p: Any): void {
   const oc = ctx.oc as Any, k = ctx.k;
-  const { sketch, id: sid } = profileOf(ctx, p, "extrude");
   const end = p.endType || "blind";
   if (end !== "blind" && end !== "symmetric") throw ctx.fail("A surface is extruded by a depth. Choose Depth or Symmetric.");
   if (!(p.depth > 0)) throw ctx.fail("The depth must be more than zero.");
   const second = !!p.second && end !== "symmetric";
   if (second && !(Number(p.secondDepth) > 0)) throw ctx.fail("The second depth must be more than zero.");
-  const curves = sketchCurves(ctx, sid, p.profile.regions);
-  if (!curves.length) throw ctx.fail("The sketch has no curve to extrude.");
-  const n: Vec3 = scale(sketch.frame.normal, p.flip && end !== "symmetric" ? -1 : 1);
   const fwd = end === "symmetric" ? p.depth / 2 : p.depth;
   const back = end === "symmetric" ? p.depth / 2 : second ? Number(p.secondDepth) : 0;
-  const mk = ctx.own(new oc.BRepPrimAPI_MakePrism(compound(k, curves.map((c) => c.edge), ctx.own), ctx.tmp(k.vec(scale(n, fwd + back))), false, true));
-  mk.Build(ctx.tmp(new oc.Message_ProgressRange()));
-  if (!mk.IsDone()) throw ctx.fail("The curves could not be extruded.");
-  finish(ctx, ctx.own(mk.Shape()), mk, curves, back ? (r) => moveNamed(k, r.shape, r.names, { translate: scale(n, -back) }, ctx.own) : undefined);
+  for (const g of profileGroups(ctx, p, "extrude")) {
+    const curves = g.curves;
+    const n: Vec3 = scale(g.frame.normal, p.flip && end !== "symmetric" ? -1 : 1);
+    const mk = ctx.own(new oc.BRepPrimAPI_MakePrism(compound(k, curves.map((c) => c.edge), ctx.own), ctx.tmp(k.vec(scale(n, fwd + back))), false, true));
+    mk.Build(ctx.tmp(new oc.Message_ProgressRange()));
+    if (!mk.IsDone()) throw ctx.fail("The curves could not be extruded.");
+    finish(ctx, ctx.own(mk.Shape()), mk, curves, back ? (r) => moveNamed(k, r.shape, r.names, { translate: scale(n, -back) }, ctx.own) : undefined);
+  }
 }
 
 /** Revolve: the sketch's curves turned about the axis. */
 export function revolveSurface(ctx: EvalContext, p: Any): void {
   const oc = ctx.oc as Any, k = ctx.k;
-  const { sketch, id: sid } = profileOf(ctx, p, "revolve");
+  const sid = profileSketch(p.profile), faces = profileFaces(p.profile);
+  if (!sid && !faces.length) throw ctx.fail("Pick a sketch or a flat face to revolve.");
+  const sketch = sid ? ctx.sketch(sid) : null;
+  // the sketch's own axes, or those of the first face's plane when there is no sketch
+  const frame = sketch ? sketch.frame : faceCurves(ctx, faces[0], "revolve").frame;
   const full = p.endType === "full" || Number(p.angle) >= 360;
   if (!full && !(Number(p.angle) > 0 && Number(p.angle) <= 360)) throw ctx.fail("The angle must be more than 0° and at most 360°.");
   let axis: Axis, skip: string[] = [];
   if (p.axisType === "edge") axis = !p.axisEdge || isGeomRef(p.axisEdge) ? edgeAxis(ctx, p.axisEdge as GeomRef | null) : axisOf(ctx, p.axisEdge as RefTarget, "axis");
-  else if (p.axisType === "x") axis = { origin: sketch.frame.origin, dir: sketch.frame.x };
-  else if (p.axisType === "y") axis = { origin: sketch.frame.origin, dir: sketch.frame.y };
+  else if (p.axisType === "x") axis = { origin: frame.origin, dir: frame.x };
+  else if (p.axisType === "y") axis = { origin: frame.origin, dir: frame.y };
+  else if (!sketch) throw ctx.fail("A face has no sketch line to turn about. Choose Picked for the axis and click an edge, a sketch line or a reference axis.");
   else { const a = sketchLineAxis(ctx, sketch); axis = a.axis; skip = [a.entity]; }
   // a line of this very sketch picked as the axis is not part of the profile either
   const picked = p.axisEdge as Any;
   if (p.axisType === "edge" && picked && picked.kind === "sketch" && picked.feature === sid) skip = [picked.entity];
   if (p.flip && p.endType === "angle") axis = { origin: axis.origin, dir: scale(axis.dir, -1) };
-  if (Math.abs(dot(axis.dir, sketch.frame.normal)) > 1 - 1e-9) throw ctx.fail("The axis is square to the sketch; pick an axis that lies in the sketch's plane.");
-  const curves = sketchCurves(ctx, sid, p.profile.regions, skip);
-  if (!curves.length) throw ctx.fail("The sketch has no curve to revolve besides the axis.");
-  // the curves must lie on one side of the axis, or the surface would pass through itself
-  const side = cross(axis.dir, sketch.frame.normal);
-  let lo = 0, hi = 0;
-  for (const c of curves) for (const v of k.sub(c.edge, "vertex")) { const d = dot(sub(k.vertexPoint(v), axis.origin), side); lo = Math.min(lo, d); hi = Math.max(hi, d); }
-  if (lo < -1e-6 && hi > 1e-6) throw ctx.fail("The curves cross the axis. Keep them on one side of it.");
   const ax = ctx.tmp(new oc.gp_Ax1(ctx.tmp(k.pnt(axis.origin)), ctx.tmp(k.dir(axis.dir))));
   const angle = full ? 360 : Number(p.angle);
-  const profile = compound(k, curves.map((c) => c.edge), ctx.own);
-  const mk = ctx.own(full ? new oc.BRepPrimAPI_MakeRevol(profile, ax, true) : new oc.BRepPrimAPI_MakeRevol(profile, ax, (angle * Math.PI) / 180, true));
-  mk.Build(ctx.tmp(new oc.Message_ProgressRange()));
-  if (!mk.IsDone()) throw ctx.fail("The curves could not be revolved.");
-  finish(ctx, ctx.own(mk.Shape()), mk, curves, p.endType === "symmetric" && !full ? (r) => moveNamed(k, r.shape, r.names, { axis, angle: -angle / 2 }, ctx.own) : undefined);
+  for (const g of profileGroups(ctx, p, "revolve", () => skip)) {
+    if (Math.abs(dot(axis.dir, g.frame.normal)) > 1 - 1e-9) throw ctx.fail(g.sketch ? "The axis is square to the sketch; pick an axis that lies in the sketch's plane." : "The axis is square to the face; pick an axis that lies in the face's plane.");
+    // an edge of a face that lies along the axis sweeps nothing
+    const curves = g.sketch ? g.curves : g.curves.filter((c) => k.sub(c.edge, "vertex").some((v) => { const d = sub(k.vertexPoint(v), axis.origin); return length(cross(d, axis.dir)) > 1e-6; }));
+    if (!curves.length) throw ctx.fail("The face has no edge to revolve besides the axis.");
+    // the curves must lie on one side of the axis, or the surface would pass through itself
+    const side = cross(axis.dir, g.frame.normal);
+    let lo = 0, hi = 0;
+    for (const c of curves) for (const v of k.sub(c.edge, "vertex")) { const d = dot(sub(k.vertexPoint(v), axis.origin), side); lo = Math.min(lo, d); hi = Math.max(hi, d); }
+    if (lo < -1e-6 && hi > 1e-6) throw ctx.fail("The curves cross the axis. Keep them on one side of it.");
+    const profile = compound(k, curves.map((c) => c.edge), ctx.own);
+    const mk = ctx.own(full ? new oc.BRepPrimAPI_MakeRevol(profile, ax, true) : new oc.BRepPrimAPI_MakeRevol(profile, ax, (angle * Math.PI) / 180, true));
+    mk.Build(ctx.tmp(new oc.Message_ProgressRange()));
+    if (!mk.IsDone()) throw ctx.fail("The curves could not be revolved.");
+    finish(ctx, ctx.own(mk.Shape()), mk, curves, p.endType === "symmetric" && !full ? (r) => moveNamed(k, r.shape, r.names, { axis, angle: -angle / 2 }, ctx.own) : undefined);
+  }
 }
 
 /** Sweep: the sketch's curves carried along the path. */
 export function sweepSurface(ctx: EvalContext, p: Any): void {
   const oc = ctx.oc as Any, k = ctx.k;
-  const { id: sid } = profileOf(ctx, p, "sweep");
+  const sid = profileSketch(p.profile);
   const path: RefTarget[] = Array.isArray(p.path) ? p.path : [];
-  if (path.some((t) => t.kind === "sketch" && t.feature === sid)) throw ctx.fail("The path must be in a different sketch from the profile.");
-  const curves = sketchCurves(ctx, sid, p.profile.regions);
-  if (!curves.length) throw ctx.fail("The profile sketch has no curve to sweep.");
+  if (sid && path.some((t) => t.kind === "sketch" && t.feature === sid)) throw ctx.fail("The path must be in a different sketch from the profile.");
+  const curves = profileGroups(ctx, p, "sweep").flatMap((g) => g.curves);
   const spine = pathWire(ctx, path);
   // a smooth path: each curve is carried along it on its own, so its faces are known by the curve
   const id = ctx.feature.id;
