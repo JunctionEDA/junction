@@ -167,7 +167,7 @@ tests run it first. So:
 A change to one of these touches everybody. If you must change one, make the change additive (a new optional
 field, a new method) and say so in your pull request.
 
-- `shared/itemdoc/itemdoc.ts`, `shared/itemdoc/sync.ts` and their mirror `server/src/itemdoc.rs`
+- `shared/itemdoc/itemdoc.ts`, `shared/itemdoc/sync.ts` (and `journal.ts`, what a session's journal is) and their mirror `server/src/itemdoc.rs`
 - `shared/viewport3d/viewport3d.ts`
 - `platform/documents/host.ts`, `platform/doctabs/*`, `domains/registry.ts`, `shared/cad.ts`
 - `mechanical/core/*`, `mechanical/kernel/{types,protocol,regen,occ,tessellate,worker,client,load,wasm}.ts`
@@ -941,13 +941,15 @@ export default defineTool({
 });
 ```
 
-**Keys.** `key` runs the tool wherever the keyboard is in the part studio except in a field being typed into
+**Keys.** A person can give any tool or feature another key, or none (`ui/keymap.ts`; see "What people miss in
+browser CAD"): what follows are the defaults. `key` runs the tool wherever the keyboard is in the part studio except in a field being typed into
 (`studio.ts onKey`, `onKeyElsewhere`). While a sketch is open the sketcher gets every key first and looks only
 among the `sketch` tools, so a letter may mean one thing in a sketch and another outside it. Taken today:
 
 | | Outside a sketch | In a sketch |
 |---|---|---|
 | M | Measure | Mirror |
+| Q | Press/Pull | Construction |
 | X | Section view | Extend |
 | H / I | Hide / Isolate the selected parts | Horizontal / Coincident |
 | F / Z | Zoom to fit / to the selection | Sketch fillet / — |
@@ -989,8 +991,9 @@ A panel is a React component that reads the studio with `useStudio(studio, (s) =
 - **A folded panel stays mounted**: some panels keep a part of the studio alive (the Collaborators panel the
   collaboration layer, the Sketch panel the sketch editor). A panel whose content costs something to keep
   current asks `usePanelOpen(studio, id)` and does nothing while folded (mass properties does).
-- Left dock: Features, Parts. Right dock: Sketch (while a sketch is open), Variables, Mass properties (folded),
-  Appearance (folded), Board (unfolds itself), Collaborators, Comments (folded).
+- Left dock: Features (not while the timeline stands in for it), Parts. Right dock: Sketch (while a sketch is
+  open), Variables, Mass properties (folded), Appearance (folded), Appearance library (folded), Board (unfolds
+  itself), Collaborators, History of edits (folded), Comments (folded). Over the viewport: the offline banner.
 - **The feature list** (`ui/FeatureList.tsx`, with `ui/featurelist/`: `Chrome.tsx` the header, banner and
   dialogs, `model.ts` what is worked out from the studio, `filter.ts` the search, `DockSeparator.tsx` the bar
   under it). It follows Onshape's "Features and Parts Lists":
@@ -1442,6 +1445,7 @@ Tests, each runnable alone with `node static/tests/<name>.test.js`:
 | `mechanical-doc` | the `.jpart` format, every edit, sketch helpers, region finding, the toolbar's keys |
 | `cad-units`, `cad-fields` | the document's units: formatting, what is typed into a field, expressions that keep their unit; what a click means to a listening dialog field; how the tool search finds a tool by name and by synonym |
 | `cad-partslist` | the parts list: names and properties as item changes (one path each, undone, two people at once, nonsense in the file), `namedBodies`; the sections and counts, which rows a click selects, which features made a part, the menu for a part, a surface, a curve, several rows, a viewer |
+| `cad-gripes` | a person's keys (chords, contexts, conflicts, what is refused), Press/Pull, the marking menu's directions, flick and placement, the timeline's layout, the parameters table (every kind of row read and changed), export names and the .zip, the appearance library, selection sets and the filter, a second unit, the words of the history of edits, the offline journal and banner |
 | `mechanical-kernel` | **the real kernel in node**: sketch → extrude, booleans, names across rebuilds, cache, rollback, errors |
 | `mechanical-features`, `mechanical-patterns` | every solid feature; reference geometry, patterns, sweep, loft, variables |
 | `mechanical-collab` | presence, the draft's rebase, comment anchors, the project room, the `docs` notice, sessions under concurrent edits |
@@ -1477,6 +1481,7 @@ E2E_PG_URL=postgres://user:pass@127.0.0.1:5432/db E2E_JWT_SECRET=dev E2E_BASE=ht
 | `cad-featurelist-ui` | the feature list against Onshape's "Features and Parts Lists": the count, the search box, its filter menu and every command, the error count; the rollback bar dragged, moved with the arrow keys, Roll to here, Roll to end, a viewer's own bar; a face marking its feature's row, a row filling a listening field, several rows dragged as one step; folders (make, nest, collapse, drag into, move out, rename, suppress, unpack, delete, seen by a second person); the feature menu (dynamic suppression, dependencies, copy and paste sketch, comment); pausing regeneration with its three ways out and Restore, regeneration times, the not-fully-defined mark; the separator and the dock fold (with `SHOTS`: `flist-*.png`). The logic under it is `static/tests/cad-featurelist.test.js` |
 | `cad-planes-ui` | the default planes and the view cube as Onshape's: the isometric start, names painted on the planes, the orange outline under the pointer, a corner dragged to resize a plane (undone, kept over a reload, seen by a second person), the cube's faces, edges and every visible corner clicked with the pointer where they are on screen (bevel and the face beside it), its hover hint, arrows, roll and menu; Onshape's view keys (arrows, Shift, Ctrl + ← →, Shift + 1 … 7, F, N; none in a text field) and where they are told (with `SHOTS`: planes and cube, a corner under the pointer, light and dark) |
 | `cad-partslist-ui` | the parts list: sections, icons and counts, folding, selecting with Ctrl, Shift and the arrows, the model marking the rows and the features that made the selection, hiding and a hidden part's outline, every item of the menu and its dialogs, names and properties stored, undone, seen by a second person and kept over a reload, a viewer |
+| `cad-gripes-ui` | what people miss in browser CAD (`ONLY=keys,presspull,marking,timeline,parameters,export,appearance,selection,dual,history,progress,offline`): keys changed, refused, taken, reset and kept over a reload; Press/Pull on a face and an edge; the marking menu, a click in a direction, a flick; the timeline's marker dragged and stepped, a folder folded; the parameters table changing a feature, a variable and a sketch dimension; every part exported into a .zip that opens, a face as DXF and a sketch as SVG from the menus; a swatch dragged onto a part and, with Shift, a face; the selection filter, a set had again after a rebuild, Select other; a second unit; the history of edits clicked back and forward; the rebuild's progress; the connection dropped, edits kept over a closed tab and sent, Save a copy (with `SHOTS`: `gripes-*.png`) |
 | `cad-ux-ui` | **how it feels**: light by default, planes with their names painted on them and hidden, a new sketch waiting for its plane, the toolbar following the mode, fitting 1100 px, and at 1500 and 1920 px keeping the most used tools with each specialist section one button, the tool search by name and synonym, units and typed conversions, a fillet's field that keeps adding, dialogs that stay put, the feature list, the view cube, box selection, the menus (with `SHOTS`: light and dark, 1500 and 1100 px) |
 | `cad-sketch-ui` | the sketcher: every tool, constraints, dimensions, conflicts |
 | `cad-features-ui`, `cad-patterns-ui` | the solid features; reference geometry, patterns, sweep, variables |
@@ -1622,6 +1627,29 @@ Limits: the joints want plates that meet square (Laser joint also takes other an
 Kerf compensation and the plate features need a flat part of one thickness with square edges. Auto layout packs
 bounding rectangles. Lattice infill is bounded (150 struts along the axes, 64 diagonals) and has no gyroid; its
 skin needs a part the kernel can offset inward. Split with pins handles a cut that leaves two pieces.
+## What people miss in browser CAD, and where it is here
+
+The complaints people most often have about browser CAD, and the things they miss from desktop CAD, each have
+one place. All of it is the part studio's (the assembly editor has none of it yet).
+
+| What | Where | How it works |
+|---|---|---|
+| **Keys a person can change** | `ui/keymap.ts` (pure), `ui/keymap-store.ts`, `ui/KeymapDialog.tsx` | Every tool (by its id) and feature (`f:<type>`) is a command with a default chord (`key`, Shift + letter). A person's overrides, `{ <id>: "<chord>" \| null }`, are kept in the browser (`junction.cad.keymap`) and can be saved to and loaded from a file. `studio.ts onKey` and the sketcher ask `commandForEvent(ev, inSketch)`; the toolbar, the tool search and the sheet of keys show `shortcutOf(id)`. A chord may mean one thing in a sketch and another outside (contexts `sketch`, `model`, `any`); two commands that hear a chord at once are a conflict, shown in the dialog; taking a chord another command has is offered, not done silently; the part studio's own keys (`RESERVED`) and the browser's are refused. Opened from the sheet of keys (**?** › Change keys…) or the tool search. |
+| **Press/Pull (Q)** | `ui/press-pull.ts` (pure), `tools/press-pull.ts` | One tool: a flat face or a sketch region starts Extrude with it, a curved face Move face (offset), an edge (or several) Fillet, with the distance field focused. With nothing selected it waits for the next click (`ui.pressPull`; Esc puts it down). |
+| **Marking menu** | `ui/marking.ts` (pure), `ui/MarkingMenu.tsx` | A right click puts eight tools round the pointer (`[data-marking]`, items `[data-marking-item=N\|NE\|…]`), chosen by the mode (`markingSlots`): up is the tool started last, again; left is undo; down ends the mode. The ordinary menu hangs clear of it (`markingPlace`). A click in a direction runs that direction's tool. **Flick**: with the preference on, a right drag shorter than 260 ms, between 44 and 420 px and straight runs the tool in that direction and puts the view back; a slower drag turns the view as ever. Both are preferences (`prefs.markingMenu`, on; `prefs.flick`, off), changed from the menu itself. |
+| **Timeline** | `ui/timeline-model.ts` (pure), `ui/Timeline.tsx`, `tools/timeline.ts` | The features as a strip along the bottom (`[data-timeline]`): a cell per feature in build order, a folder as a bracket that folds into one cell, a marker that is the rollback bar (drag, the step buttons, ← → Home End; all through `studio.rollTo`). Click selects, double click edits, the pointer over a cell lights up what it made. List / Both / Timeline (`setHistoryView`; `prefs.timeline`, `prefs.featureList`); the button is in the status bar. |
+| **Parameters table** | `document/parameters.ts` (pure), `ui/ParametersTable.tsx`, `tools/parameters.ts` | Every variable, every visible number field of every feature and every driving sketch dimension as rows of one window: the expression (edited in place, stored exactly as the feature's own dialog stores it: the number, `$expr`, `$unit`), the value, a comment and a star. A sketch dimension is solved with the new value before it is stored (`applyParameter`). Comments and stars are one item, `{ id: "parameter-notes", type: "parameter-notes", comments: { <row key>: "…" }, favourites: { <row key>: true } }`; a row key is `v:<variable id>`, `f:<feature id>:<param>` or `d:<feature id>:<constraint id>`. |
+| **Working offline** | `shared/itemdoc/journal.ts`, `ui/offline.ts` (pure), `panels/offline.tsx`, `tools/save-copy.ts`, `tools/project-backup.ts` | The model is built in the browser and an edit is applied at once, so work goes on when the connection drops; the session already replayed unacknowledged edits after a reconnect. Now they also outlive the tab: `SessionOptions.journal` (a `SessionJournal`; the part studio passes `storedJournal(docId)`, `localStorage` key `junction.itemdoc.pending.<docId>`, 2 MB) is written on every change of the pending list and read by the next session on the document, which sends what was left (`session.restored`). A banner (`[data-offline=offline\|sent\|restored]`) says how many edits wait and when they were sent; **Try now** is `session.reconnectNow()`, also called when the browser says the network is back. **Save a copy** writes the document as it is here to a `.jpart`; **Back up the project** downloads the server's archive. |
+| **History of edits** | `ui/undo-labels.ts` (pure), `panels/undo-history.tsx` | `session.history()` is the undo stack (`done`) and what was undone (`undone`); the panel (right dock, folded) lists the steps in words and a click goes to just after one (`goToStep`: so many undos or redos). The words come from the changes alone, with the present document for names. |
+| **A rebuild that says how far it is** | `studio.regenProgress`, `ui/StatusBar.tsx` | The worker's `progress` messages reach the status bar: "Rebuilding 5 of 20: Fillet 2" and a bar (`[data-regen-progress]`). A store of its own, so a step redraws the status bar only. |
+| **Selection filter, sets, Select other** | `document/selection-sets.ts` (pure), `ui/SelectionControl.tsx`, `ModelView.pickAll` | "Select: All ▾" in the status bar: which kinds a click and a box take (`ui.selectionFilter`, this person's, for the tab's life; a listening dialog field still decides for itself), and selections kept by name: `{ id, type: "selection-set", name, order, picks: [["f"\|"e"\|"v", body, name], ["p", plane], ["d", feature, datum]] }`, by geometry name, so a set follows rebuilds; what is gone is left out and counted. **Select other…** in the right-click menu lists everything on the line of sight, front to back (`pickAll`). |
+| **Appearance library** | `document/materials-library.ts` (pure), `panels/appearance-library.tsx` | Thirty-odd standard looks (metals, plastics, others). A swatch dragged onto a part dresses the part, with Shift the face under the pointer; a click dresses what is selected. Stored on the body's look as `color`, `metalness`, `roughness`, optional `opacity`, and `appearance` (the library id): `setBodyAppearance` in `appearance-items.ts`. `appearance-display.ts` hands `metalness` and `roughness` to the material (metalness scaled down while the scene has no environment map, or a metal would be drawn black). |
+| **Export every part** | `tools/_batch.ts` (pure), `tools/export-all.tsx` | Each part (or each selected part) to a file of its own, STEP, STL or 3MF, named by a template (`{document} {part} {n} {count} {date}`; equal names get " (2)"), as one stored `.zip` or separate downloads. **A sketch or a flat face as DXF or SVG** straight from the right-click menu and the feature list's menu (`exportDrawing`). |
+| **A second unit** | `document/dual-units.ts` | "Also in" in the units control: a second unit in brackets after sketch dimensions and measurements (`25.4 mm [1 in]`), as fine as the first. A person's preference (`prefs.dualUnit`), not the document's. |
+
+Already there before, and so not built again: numbers typed while drawing with Tab between them (`sketch/draw.ts`),
+constraint marks and the count of freedoms left, a unit typed with any number, named views, the export dialog's
+resolution for meshes, pinned measurements.
 
 ## Limits, in one place
 
@@ -1671,6 +1699,16 @@ skin needs a part the kernel can offset inward. Split with pins handles a cut th
 - **The assistant's picture** (`cad_render_view`) is a software render: flat shading, no sketches or planes.
 - **Bundles:** `mechanical.js` and `assembly.js` each bundle three.js and React, loaded on demand. Sharing them
   with `viewer3d.js` and `ui.js` is not done.
+- **What people miss in browser CAD.** A person's keys, the marking menu, flick and the timeline are kept per
+  browser, not per account (Save… and Load… carry the keys); the assembly editor has none of them. A flick is a
+  matter of timing (260 ms). The timeline has no menu of its own and does not reorder features. The parameters
+  table lists number fields only (no checkboxes or choices), and a sketch dimension is solved by the page (the
+  solver must load). The offline journal holds 2 MB per document, is per browser, and an edit whose
+  acknowledgement was lost is sent again by the next visit: the server drops an edit it knows by id only while it
+  remembers it. A page cannot be opened without the connection: only a page that is already open goes on
+  working. A face dressed from the appearance library gets the colour only. Selection sets keep no sketch
+  regions; a selection filter lasts for the tab. There is no paint selection, no saved section views, no
+  curvature or draft analysis, and no direct-edit mode without history.
 - **Windows narrower than about 1000 px:** the toolbar scrolls sideways; the docks fold by hand, not by
   themselves; nothing is laid out for phones.
 - **The part studio's interface, not done:** folders in the feature list; the assistant's tools and Compare show a part
