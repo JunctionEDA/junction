@@ -44,7 +44,7 @@ function CutList({ studio }: { studio: PartStudio }) {
               {t.rows.map((r) => (
                 <tr key={r.item} data-cut-row={r.item} title={r.bodies.join(", ")}>
                   <td>{r.item}</td><td className="text-right mono" data-qty>{r.qty}</td><td className="truncate max-w-[9rem]">{r.description}</td>
-                  <td className="text-right mono" data-length>{mm(r.length)}</td><td className="text-right mono">{deg(r.angle1)} / {deg(r.angle2)}</td>
+                  <td className="text-right mono whitespace-nowrap" data-length>{mm(r.length)}</td><td className="text-right mono whitespace-nowrap">{deg(r.angle1)}/{deg(r.angle2)}</td>
                 </tr>
               ))}
             </tbody>

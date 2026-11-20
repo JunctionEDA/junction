@@ -31,8 +31,8 @@ function FlatView({ piece }: { piece: Piece }) {
     return <polyline key={i} points={c.points.map((p) => `${p[0]},${Y(p[1])}`).join(" ")} />;
   });
   return (
-    <svg className="w-full bg-canvas rounded-sm border border-line" style={{ maxHeight: 220 }} viewBox={`${x0 - pad} ${y0 - pad} ${w + 2 * pad} ${h + 2 * pad}`} data-flat-view={piece.root} role="img" aria-label="Flat pattern">
-      <g fill="none" stroke="currentColor" strokeWidth={sw} className="text-ink">{path}</g>
+    <svg className="w-full bg-panel rounded-sm border border-line" style={{ maxHeight: 220 }} viewBox={`${x0 - pad} ${y0 - pad} ${w + 2 * pad} ${h + 2 * pad}`} data-flat-view={piece.root} role="img" aria-label="Flat pattern">
+      <g fill="none" stroke="var(--color-ink, #222)" strokeWidth={sw} data-flat-outline>{path}</g>
       <g fill="none" strokeWidth={sw} strokeDasharray={`${sw * 6} ${sw * 4}`}>
         {piece.bends.map((b) => <line key={b.id} x1={b.a[0]} y1={Y(b.a[1])} x2={b.b[0]} y2={Y(b.b[1])} stroke={b.up ? "#2a7de1" : "#d9534f"} data-bend-line={b.up ? "up" : "down"} />)}
       </g>
@@ -69,7 +69,7 @@ function FlatPattern({ studio }: { studio: PartStudio }) {
           <FlatView piece={p} />
           <p className="note m-0 text-xs text-ink-2" data-flat-size>{mm(p.bbox[2] - p.bbox[0])} × {mm(p.bbox[3] - p.bbox[1])} · thickness {mm(m.thickness)} · K {num(m.k, 3)}</p>
           {p.bends.length ? (
-            <table className="w-full border-collapse text-xs" aria-label="Bend table" data-bend-table>
+            <table className="w-full border-collapse text-xs whitespace-nowrap" aria-label="Bend table" data-bend-table>
               <thead><tr className="text-ink-2 text-left"><th>#</th><th>Dir</th><th className="text-right">Angle</th><th className="text-right">Radius</th><th className="text-right">K</th><th className="text-right">Allowance</th><th className="text-right">Length</th></tr></thead>
               <tbody>
                 {p.bends.map((b, i) => (
