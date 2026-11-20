@@ -270,6 +270,49 @@ test("export every part: names from a template, never two the same, and a .zip t
   assert.equal(BT.zipStore([]).length, 22);
 });
 
+// ---------------------------------------------------------------- the appearance library
+const ML = load("domains/mechanical/document/materials-library.ts");
+const AI = load("domains/mechanical/document/appearance-items.ts");
+test("appearance library: standard looks, stored as colour, metalness and roughness", () => {
+  const ID3 = load("shared/itemdoc/itemdoc.ts");
+  assert.ok(ML.APPEARANCES.length >= 24);
+  assert.equal(new Set(ML.APPEARANCES.map((a) => a.id)).size, ML.APPEARANCES.length, "ids are unique");
+  for (const a of ML.APPEARANCES) {
+    assert.ok(AI.isColor(a.color) && /^[a-z0-9-]+$/.test(a.id) && a.name, a.id);
+    assert.ok(a.metalness >= 0 && a.metalness <= 1 && a.roughness >= 0 && a.roughness <= 1 && (a.opacity === undefined || (a.opacity > 0 && a.opacity < 1)), a.id);
+  }
+  assert.deepEqual(ML.APPEARANCE_GROUPS, ["Metal", "Plastic", "Other"]);
+  assert.ok(ML.findAppearances("alumin brush").some((a) => a.id === "aluminium-brushed"));
+  assert.ok(ML.findAppearances("metal").every((a) => a.group === "Metal"));
+  assert.equal(ML.findAppearances("").length, ML.APPEARANCES.length);
+  const doc = ID3.newItemDoc("part-studio", []);
+  const put = (targets, id) => { const c = ML.applyAppearance(doc, targets, id); ID3.applyChanges(doc, c); return c; };
+  // a whole part
+  assert.equal(put([{ kind: "body", body: "b1" }], "aluminium-brushed").length, 1);
+  assert.deepEqual(AI.looksOf(doc).b1, { color: "#c8ccd0", metalness: 1, roughness: 0.38, appearance: "aluminium-brushed" });
+  assert.equal(ML.appearanceOfBody(doc, "b1").id, "aluminium-brushed");
+  // one face of another part: a face has a colour only
+  put([{ kind: "face", body: "b2", name: "f:top" }], "brass");
+  assert.deepEqual(AI.looksOf(doc).b2, { faces: { "f:top": "#c9a44c" } });
+  // a see-through one, and a part with a face in one change
+  const c = put([{ kind: "body", body: "b2" }, { kind: "face", body: "b1", name: "f:side" }, { kind: "face", body: "b2", name: "f:x" }], "acrylic-clear");
+  assert.equal(c.length, 1, "one change: undone as one step");
+  assert.deepEqual(AI.looksOf(doc).b2, { color: "#f2f8fa", opacity: 0.3, metalness: 0, roughness: 0.04, appearance: "acrylic-clear" }, "the part's own face colours give way");
+  assert.deepEqual(AI.looksOf(doc).b1.faces, { "f:side": "#f2f8fa" });
+  // an opaque appearance over a see-through one is opaque again
+  put([{ kind: "body", body: "b2" }], "steel");
+  assert.equal(AI.looksOf(doc).b2.opacity, undefined);
+  // a colour mixed by hand afterwards: no longer the library's, the finish stays
+  ID3.applyChanges(doc, AI.setBodyLook(doc, ["b2"], { color: "#ff0000" }));
+  assert.deepEqual(AI.looksOf(doc).b2, { color: "#ff0000", metalness: 1, roughness: 0.42 });
+  assert.equal(ML.appearanceOfBody(doc, "b2"), undefined);
+  assert.deepEqual(ML.applyAppearance(doc, [{ kind: "body", body: "b1" }], "no-such"), []);
+  assert.deepEqual(ML.applyAppearance(doc, [], "steel"), []);
+  // nonsense in the file is dropped on the way in
+  doc.items.get("appearance").bodies.b9 = { color: "#112233", metalness: 7, roughness: "x", appearance: 5 };
+  assert.deepEqual(AI.looksOf(doc).b9, { color: "#112233", metalness: 1 });
+});
+
 // ---------------------------------------------------------------- the history of edits
 const UL = load("domains/mechanical/ui/undo-labels.ts");
 const ID = load("shared/itemdoc/itemdoc.ts");

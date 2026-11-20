@@ -134,10 +134,12 @@ export class BodyDisplay extends Store<DisplayState> {
       if (old) { for (const m of old.mats) m.dispose(); old.edge.dispose(); }
       const color = this.colorOf(b.id), opacity = this.drawnOpacity(b.id), look = this.looks[b.id] || {};
       const see = opacity < 1;
+      // a metal shows what is around it: in a scene with nothing around to show (no environment map) it would be drawn black, so it is drawn less of a metal
+      const metal = this.studio.viewport.scene.environment ? 1 : 0.45;
       const surface = (c: THREE.Color): THREE.Material => {
         const common = { side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, transparent: see, opacity, depthWrite: !see, clippingPlanes: this.clip };
         return s.mode === "hidden-line" ? new THREE.MeshBasicMaterial({ ...common, color: this.theme.paper, transparent: false, opacity: 1, depthWrite: true })
-          : new THREE.MeshStandardMaterial({ ...common, color: c, roughness: 0.75, metalness: 0.05 });
+          : new THREE.MeshStandardMaterial({ ...common, color: c, roughness: look.roughness ?? 0.75, metalness: (look.metalness ?? 0.05) * metal });   // an appearance from the library says both (document/materials-library.ts)
       };
       // per-face colours: one material per colour, the faces' triangle ranges as geometry groups
       const g = o.mesh.geometry;

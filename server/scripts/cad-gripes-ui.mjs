@@ -13,6 +13,8 @@
 //               comment, a star, the search, what cannot be is refused
 //   export      Export every part: a file per part named by a template, as one .zip; a sketch or a flat face
 //               as DXF or SVG straight from the right-click menu and the feature list's menu
+//   appearance  the appearance library: a swatch dragged onto a part dresses the part, with Shift one face;
+//               a click dresses what is selected; stored as colour, metalness and roughness
 //   history     the History of edits panel: every step in words, a click goes back to it and forward again
 //   progress    a rebuild says which feature it is on, of how many
 //   offline     the connection drops: a banner, edits go on and the model follows, they are kept in the browser
@@ -347,6 +349,46 @@ try {
     const [svg] = await Promise.all([alice.waitForEvent('download'), alice.click('.cad-feature-menu [data-menu-item="Export as SVG"]')]);
     const svgText = fs.readFileSync(await svg.path(), 'utf8');
     check('a sketch is exported as SVG from the feature list\'s menu', svg.suggestedFilename() === 'Sketch 1.svg' && /<svg/.test(svgText), svg.suggestedFilename());
+  }
+
+  // ================================================================ the appearance library
+  if (part('appearance')) {
+    await key('Escape'); await key('Escape');
+    await openPanel(alice, 'appearance-library');
+    const look = (id) => S(alice, (id) => { const it = window.JunctionPartStudio.doc.items.get('appearance'); return it && it.bodies[id] ? JSON.parse(JSON.stringify(it.bodies[id])) : null; }, id);
+    const drawn = (id) => S(alice, (id) => { const m = window.JunctionPartStudio.view.bodyObjects(id).mesh.material; const x = Array.isArray(m) ? m[0] : m; return { metalness: x.metalness, roughness: x.roughness, color: '#' + x.color.getHexString() }; }, id);
+    const b1 = (await faceOnScreen(alice, [ids.e1, ':end:'])), b2 = (await faceOnScreen(alice, [ids.e2, ':end:']));
+    const canvasBox = await alice.locator('.cad-stage canvas').first().boundingBox();
+    check('the library has metals and plastics', (await count('.cad-appearance-library [data-appearance]')) >= 24 && (await count('.cad-appearance-library section[aria-label=Metal] [data-appearance]')) >= 8);
+    await alice.locator('[data-appearance=aluminium-brushed]').dragTo(alice.locator('.cad-stage canvas').first(), { targetPosition: { x: b1.x - canvasBox.x, y: b1.y - canvasBox.y } });
+    await alice.waitForTimeout(300);
+    let l = await look(b1.body);
+    check('a swatch dragged onto a part dresses the whole part', l && l.appearance === 'aluminium-brushed' && l.metalness === 1 && l.roughness === 0.38 && l.color === '#c8ccd0', JSON.stringify(l));
+    let d = await drawn(b1.body);
+    check('… and the part is drawn with it', d.metalness >= 0.4 && Math.abs(d.roughness - 0.38) < 1e-6 && d.color === '#c8ccd0', JSON.stringify(d));
+    check('… the other part is as it was', (await look(b2.body)) === null);
+    // Shift: one face
+    const sw = await alice.locator('[data-appearance=pla-red]').boundingBox();
+    await alice.mouse.move(sw.x + sw.width / 2, sw.y + sw.height / 2); await alice.mouse.down();
+    await alice.keyboard.down('Shift');
+    await alice.mouse.move(b2.x + 20, b2.y + 10, { steps: 4 }); await alice.mouse.move(b2.x, b2.y, { steps: 2 });
+    await alice.mouse.up(); await alice.keyboard.up('Shift');
+    await alice.waitForTimeout(300);
+    l = await look(b2.body);
+    check('with Shift only the face under the pointer is dressed', l && !l.color && l.faces && l.faces[b2.name] === '#c8372d', JSON.stringify(l));
+    // a click dresses what is selected
+    await alice.click(`.cad-parts [data-entry="${b2.body}"]`);
+    await alice.fill('.cad-appearance-library [data-appearance-search]', 'acrylic');
+    check('the search narrows the library', (await attr('.cad-appearance-library', 'data-appearance-count')) === '1');
+    await alice.click('[data-appearance=acrylic-clear]'); await alice.waitForTimeout(300);
+    l = await look(b2.body);
+    check('a click on a swatch dresses the selected part, see-through and all', l && l.appearance === 'acrylic-clear' && l.opacity === 0.3 && !l.faces, JSON.stringify(l));
+    check('… and the swatch shows as the part\'s', (await attr('[data-appearance=acrylic-clear]', 'aria-pressed')) === 'true');
+    await alice.fill('.cad-appearance-library [data-appearance-search]', '');
+    await key('Escape');
+    await shot('appearance', alice);
+    await S(alice, () => { const s = window.JunctionPartStudio; s.undo(); s.undo(); s.undo(); }); await alice.waitForTimeout(300);
+    check('each was one undoable edit', (await look(b1.body)) === null && (await look(b2.body)) === null && (await drawn(b1.body)).metalness < 0.1);
   }
 
   // ================================================================ the history of edits

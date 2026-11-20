@@ -14,7 +14,13 @@ import { addedChange, byOrder, clone, modifiedChange, newId, orderBetween, remov
 
 export const APPEARANCE_ITEM_ID = "appearance";
 
-export interface BodyLook extends JsonObject { color?: string; opacity?: number; faces?: { [faceName: string]: string } }
+export interface BodyLook extends JsonObject {
+  color?: string; opacity?: number; faces?: { [faceName: string]: string };
+  /** the surface as a physically based renderer takes it: 0 a dielectric … 1 a metal; 0 a mirror … 1 chalk (absent: the part studio's plain look) */
+  metalness?: number; roughness?: number;
+  /** the library appearance these came from (document/materials-library.ts), for a reader that knows the library */
+  appearance?: string;
+}
 export interface AppearanceItem extends Item { type: "appearance"; bodies: { [bodyId: string]: BodyLook } }
 
 export interface CameraJson extends JsonObject { quaternion: number[]; target: number[]; zoom: number; projection: string }
@@ -22,6 +28,7 @@ export interface NamedViewItem extends Item { type: "named-view"; name: string; 
 
 export const isColor = (c: unknown): c is string => typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c);
 const clampOpacity = (o: number) => Math.max(0.05, Math.min(1, o));
+const unit = (v: number) => Math.max(0, Math.min(1, v));
 
 /** Every body's look as stored, cleaned: bad colours and opacities are dropped. */
 export function looksOf(doc: ItemDoc | null): { [bodyId: string]: BodyLook } {
@@ -33,6 +40,9 @@ export function looksOf(doc: ItemDoc | null): { [bodyId: string]: BodyLook } {
     const look: BodyLook = {};
     if (isColor(raw.color)) look.color = raw.color.toLowerCase();
     if (typeof raw.opacity === "number" && Number.isFinite(raw.opacity)) look.opacity = clampOpacity(raw.opacity);
+    if (typeof raw.metalness === "number" && Number.isFinite(raw.metalness)) look.metalness = unit(raw.metalness);
+    if (typeof raw.roughness === "number" && Number.isFinite(raw.roughness)) look.roughness = unit(raw.roughness);
+    if (typeof raw.appearance === "string" && raw.appearance.length <= 80) look.appearance = raw.appearance;
     if (raw.faces && typeof raw.faces === "object") {
       const faces: { [n: string]: string } = {};
       for (const [n, c] of Object.entries(raw.faces)) if (isColor(c)) faces[n] = c.toLowerCase();
@@ -63,8 +73,33 @@ export function setBodyLook(doc: ItemDoc, bodyIds: readonly string[], patch: { c
     for (const id of bodyIds) {
       const look: BodyLook = { ...(bodies[id] || {}) };
       if (patch.color === null) delete look.color; else if (isColor(patch.color)) look.color = patch.color.toLowerCase();
+      // a colour mixed by hand is no longer the library's appearance (the finish, metal or not, stays)
+      if (patch.color !== undefined && look.color !== bodies[id]?.color) delete look.appearance;
       if (patch.opacity === null || patch.opacity === 1) delete look.opacity; else if (typeof patch.opacity === "number") look.opacity = clampOpacity(patch.opacity);
       bodies[id] = look;
+    }
+  });
+}
+
+/**
+ * Give whole bodies a finished appearance: colour, metalness, roughness, opacity (null: opaque) and the library
+ * id it came from.  It replaces what the body had, its faces' own colours included (a part dressed in brushed
+ * aluminium is that all over); `faces` then colours faces of other bodies in the same change.
+ */
+export function setBodyAppearance(doc: ItemDoc, bodyIds: readonly string[], a: { color: string; metalness: number; roughness: number; opacity?: number | null; appearance?: string }, faces: readonly { body: string; name: string; color: string }[] = []): ItemChange[] {
+  if (!isColor(a.color)) return [];
+  return edit(doc, (bodies) => {
+    for (const id of bodyIds) {
+      const look: BodyLook = { color: a.color.toLowerCase(), metalness: unit(a.metalness), roughness: unit(a.roughness) };
+      if (typeof a.opacity === "number" && a.opacity < 1) look.opacity = clampOpacity(a.opacity);
+      if (a.appearance) look.appearance = a.appearance;
+      bodies[id] = look;
+    }
+    for (const f of faces) {
+      if (!isColor(f.color) || bodyIds.includes(f.body)) continue;
+      const look: BodyLook = { ...(bodies[f.body] || {}) };
+      look.faces = { ...(look.faces || {}), [f.name]: f.color.toLowerCase() };
+      bodies[f.body] = look;
     }
   });
 }
