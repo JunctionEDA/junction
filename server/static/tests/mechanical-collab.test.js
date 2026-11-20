@@ -218,6 +218,13 @@ test("the room's documents and tabs: the same few for everybody, a sheet counts 
   const ada = { key: "1:room-a", color: "#e05d44" }, bob = { key: "2:room-b", color: "#e05d44" }, cy = { key: "3:room-c", color: "#4477ee" };
   assert.equal(RA.pickColor(ada, [bob, cy]), "#e05d44"); assert.equal(RA.pickColor(bob, [ada, cy]), "#22aa66"); assert.equal(RA.pickColor(cy, [ada, bob]), "#4477ee");
   assert.equal(RA.pickColor(bob, [ada, ...RA.ROOM_COLORS.map((color, i) => ({ key: "9:" + i, color }))]), "#e05d44", "every colour taken: keep one's own");
+  // the dots on a tab: an initial each, and the names in the tooltip
+  assert.equal(RA.initialOf({ name: "ada Lovelace", login: "ada" }), "A");
+  assert.equal(RA.initialOf({ name: "", login: "bob" }), "B");
+  assert.equal(RA.initialOf({ name: "  ", login: "" }), "?");
+  assert.equal(RA.namesOf([{ name: "Ada" }]), "Ada");
+  assert.equal(RA.namesOf([{ name: "Ada" }, { name: "Bob" }]), "Ada and Bob");
+  assert.equal(RA.namesOf([{ name: "Ada" }, { name: "Bob" }, { name: "Cy" }]), "Ada, Bob and Cy");
 });
 
 class FakeSocket {

@@ -125,5 +125,17 @@ export function tabOf(member: RoomMember, docs: readonly Pick<DocEntry, "docId" 
   return doc && doc.docType === "kicad_sch" && rootDocId && tabIds.includes(rootDocId) ? rootDocId : null;
 }
 
+/** The letter a person's dot carries: the first of their name, or of their login. */
+export function initialOf(m: Pick<RoomMember, "name" | "login">): string {
+  const ch = Array.from((m.name || m.login || "?").trim())[0] || "?";
+  return ch.toLocaleUpperCase();
+}
+
+/** "Ada", "Ada and Bob", "Ada, Bob and Carol": the names in a tab's tooltip. */
+export function namesOf(people: readonly Pick<RoomMember, "name">[]): string {
+  const n = people.map((m) => m.name);
+  return n.length < 2 ? n.join("") : `${n.slice(0, -1).join(", ")} and ${n[n.length - 1]}`;
+}
+
 /** "Ada added Part Studio 2", for the toast the others get. */
 export function noteText(who: string, note: DocsNote): string { return `${who} ${note.what} ${note.name}`; }

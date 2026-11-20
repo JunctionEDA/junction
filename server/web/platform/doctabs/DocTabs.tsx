@@ -34,7 +34,7 @@ import { ensureShellDoc } from "./api";
 import { FOLDER_ICON, HOME_ICON, elementOfTab, foldersOf, moveTabChanges, nameProblem, pcbViewOf, type ProjectElement } from "./elements";
 import { HOME_TAB, baseOf, bomTabId, relativePath } from "./pcbs";
 import { ProjectRoom } from "./room";
-import { DOCS_EVENT, noteText, type DocsNotice, type RoomMember } from "./roomapi";
+import { DOCS_EVENT, initialOf, namesOf, noteText, type DocsNotice, type RoomMember } from "./roomapi";
 import { ProjectShell } from "./shell";
 import { refreshProject, setHandles, shellDocOf, useProjectShell } from "./useshell";
 
@@ -46,13 +46,24 @@ export function Glyph({ svg, size = 15, className }: { svg: string; size?: numbe
   return <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" className={cx("flex-none fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round]", className)} strokeWidth={1.7} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
-/** The people on a tab: a dot each (three at most, then a count), named in the tooltip. */
-export function TabPeople({ people }: { people: RoomMember[] }) {
+/** How many dots a tab shows before the rest become a count. */
+export const TAB_PEOPLE_MAX = 3;
+
+/**
+ * The people on a tab: a dot each in their colour (three at most, then "+N"), named in the tooltip.  On a tab of
+ * the bar (`edge`) the dots carry the person's initial and sit on the tab's bottom edge, as Onshape shows who is
+ * in which tab; elsewhere (a PCB's views, the tab list, the Home tab's files) they are plain dots in the row.
+ */
+export function TabPeople({ people, edge }: { people: RoomMember[]; edge?: boolean }) {
   if (!people.length) return null;
+  const shown = people.slice(0, TAB_PEOPLE_MAX), more = people.length - shown.length;
+  const title = namesOf(people) + (people.length === 1 ? " is here" : " are here");
   return (
-    <span className="flex flex-none items-center -space-x-0.5" data-tab-people={people.map((m) => m.login).join(" ")} title={people.map((m) => m.name).join(", ") + (people.length === 1 ? " is here" : " are here")}>
-      {people.slice(0, 3).map((m) => <i key={m.key} className="block w-2 h-2 rounded-full ring-1 ring-bench" style={{ background: m.color }} />)}
-      {people.length > 3 ? <span className="pl-1 text-2xs text-ink-3 font-mono">+{people.length - 3}</span> : null}
+    <span className={cx("flex flex-none items-center", edge ? "self-end mb-[3px] gap-0.5" : "-space-x-0.5")} data-tab-people={people.map((m) => m.login).join(" ")} title={title}>
+      {shown.map((m) => edge
+        ? <i key={m.key} data-tab-person={m.login} className="not-italic w-3 h-3 rounded-full ring-1 ring-bench grid place-items-center text-[8px] leading-none font-semibold text-white" style={{ background: m.color }}>{initialOf(m)}</i>
+        : <i key={m.key} data-tab-person={m.login} className="block w-2 h-2 rounded-full ring-1 ring-bench" style={{ background: m.color }} />)}
+      {more > 0 ? <span className={cx("text-ink-3 font-mono", edge ? "pl-1.5 text-[9px] leading-3" : "pl-1 text-2xs")}>+{more}</span> : null}
     </span>
   );
 }
@@ -153,8 +164,10 @@ export function DocTabs() {
   const activeEl = elementOfTab(allElements, current);
   const onHome = current === HOME_TAB;
   const pcbCount = elements.filter((e) => e.pcb).length;
-  const peopleOn = (ids: (string | null)[]): RoomMember[] => room.members.filter((m) => ids.includes(m.tab));
-  const peopleOnElement = (e: El): RoomMember[] => room.members.filter((m) => m.tab && elementOfTab([e], m.tab) === e);
+  // everybody else: another window of one's own is not somebody else
+  const others = room.members.filter((m) => !myId || m.userId !== myId);
+  const peopleOn = (ids: (string | null)[]): RoomMember[] => others.filter((m) => ids.includes(m.tab));
+  const peopleOnElement = (e: El): RoomMember[] => others.filter((m) => m.tab && elementOfTab([e], m.tab) === e);
 
   // a view of a PCB that is asked for with an action to run once it is on screen (3D viewer, fabrication outputs)
   useEffect(() => {
@@ -389,7 +402,7 @@ export function DocTabs() {
                 onBlur={(ev) => rename(e, ev.target.value)}
                 onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === "Enter") (ev.target as HTMLInputElement).blur(); if (ev.key === "Escape") setRenaming(null); }} />
             : <span className={cx("truncate", on && "font-medium")} data-tab-label>{e.name}</span>}
-          {expanded ? pcbViews(e) : <TabPeople people={peopleOnElement(e)} />}
+          {expanded ? pcbViews(e) : <TabPeople people={peopleOnElement(e)} edge />}
         </div>
       </div>
     );
@@ -424,7 +437,7 @@ export function DocTabs() {
         onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); dispatch({ type: "openDoc", docId: HOME_TAB }); } }}>
         <Glyph svg={HOME_ICON} />
         <span className={cx("truncate", onHome && "font-medium")}>Home</span>
-        <TabPeople people={peopleOn([HOME_TAB])} />
+        <TabPeople people={peopleOn([HOME_TAB])} edge />
       </div>
       {arrow(-1, overflow.left)}
       <div ref={scroller} className="flex items-stretch min-w-0 overflow-x-auto [scrollbar-width:none]" onScroll={measure} data-tab-strip>
