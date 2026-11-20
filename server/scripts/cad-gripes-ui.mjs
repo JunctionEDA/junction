@@ -8,13 +8,17 @@
 //               tool; it can be hidden; a flick runs a tool without the menu
 //   timeline    the features as a strip along the bottom: select, edit, the marker dragged and stepped is the
 //               rollback bar, a folder folds into one cell, List / Both / Timeline
+//   history     the History of edits panel: every step in words, a click goes back to it and forward again
+//   progress    a rebuild says which feature it is on, of how many
+//   offline     the connection drops: a banner, edits go on and the model follows, they are kept in the browser
+//               over a closed tab and sent when the connection is back; Save a copy
 //
 // Setup as the other cad-*-ui.mjs scripts (see cad-ui.mjs): a server with KC_DEV_LOGIN=1, Playwright, psql.
 //
 //   E2E_PG_URL=postgres://… E2E_JWT_SECRET=dev [E2E_BASE=http://127.0.0.1:8099] [SHOTS=/some/dir] node scripts/cad-gripes-ui.mjs
 import fs from 'node:fs';
 import { setCad } from './cad-setting.mjs';
-import { tool } from './cad-chrome.mjs';
+import { openPanel, tool } from './cad-chrome.mjs';
 import { BASE, S, click, edgeOnScreen, faceOnScreen, focusViewport, jwt, launch, newPartStudio, user } from './cad-ux-lib.mjs';
 
 const SHOTS = process.env.SHOTS || '';
@@ -255,6 +259,94 @@ try {
     check('"Timeline" puts the feature list away', (await count('[data-panel=features].hidden')) === 1 && (await attr('[data-timeline]', 'data-view')) === 'timeline');
     await alice.click('[data-history-view=list]');
     check('"List" puts the timeline away and the list back', (await count('[data-timeline]')) === 0 && (await count('[data-panel=features].hidden')) === 0);
+  }
+
+  // ================================================================ the history of edits
+  const depthOf = (id) => S(alice, (id) => window.JunctionPartStudio.doc.items.get(id).params.depth, id);
+  const setDepth = (id, v) => S(alice, ([id, v]) => window.JunctionPartStudio.commit([{ id, kind: 'MODIFIED', typeName: 'feature', props: [{ path: ['params', 'depth'], value: v }] }]), [id, v]);
+  if (part('history')) {
+    await alice.reload();
+    await alice.waitForFunction(() => window.JunctionPartStudio && window.JunctionPartStudio.getState().loaded, null, { timeout: 30000 });
+    await calm();
+    await openPanel(alice, 'undo-history');
+    check('the history of edits starts empty', (await attr('.cad-undo-history', 'data-undo-steps')) === '0');
+    await setDepth(ids.e2, 14); await calm();
+    await S(alice, (id) => window.JunctionPartStudio.commit([{ id, kind: 'MODIFIED', typeName: 'feature', props: [{ path: ['name'], value: 'Plate' }] }]), ids.e2);
+    await S(alice, () => window.JunctionPartStudio.commit([{ id: 'v2', kind: 'ADDED', typeName: 'variable', item: { id: 'v2', type: 'variable', name: 'wall', expr: '2 mm', order: 'W' } }]));
+    await S(alice, (id) => window.JunctionPartStudio.commit([{ id, kind: 'MODIFIED', typeName: 'feature', props: [{ path: ['suppressed'], value: true }] }]), ids.e2);
+    await calm();
+    const labels = () => alice.$$eval('.cad-undo-history [data-undo-step] [data-undo-label]', (els) => els.map((e) => e.textContent));
+    check('every edit is a step, in words (a thing is called what it is called now)', (await labels()).join(' | ') === 'Edit Plate | Rename to Plate | Add variable wall | Suppress Plate', (await labels()).join(' | '));
+    check('the last step is where the document is', (await attr('.cad-undo-history', 'data-undo-at')) === '3' && (await attr('[data-panel=undo-history] [data-panel-count]', 'data-panel-count')) === '4');
+    await shot('history', alice, { x: 1200, y: 60, width: 300, height: 560 });
+    await alice.click('.cad-undo-history [data-undo-step="0"]'); await calm();
+    let doc = await S(alice, (id) => { const d = window.JunctionPartStudio.doc, f = d.items.get(id); return { name: f.name, depth: f.params.depth, sup: !!f.suppressed, v2: d.items.has('v2') }; }, ids.e2);
+    check('a click on a step goes back to just after it', doc.name === 'Extrude 2' && doc.depth === 14 && !doc.sup && !doc.v2 && (await attr('.cad-undo-history', 'data-undo-at')) === '0' && (await count('.cad-undo-history [data-undone]')) === 3, JSON.stringify(doc));
+    await alice.click('.cad-undo-history [data-undo-step="2"]'); await calm();
+    doc = await S(alice, (id) => { const d = window.JunctionPartStudio.doc, f = d.items.get(id); return { name: f.name, depth: f.params.depth, sup: !!f.suppressed, v2: d.items.has('v2') }; }, ids.e2);
+    check('… and on a later one forward again', doc.name === 'Plate' && doc.v2 && !doc.sup && (await attr('.cad-undo-history', 'data-undo-at')) === '2');
+    await alice.click('.cad-undo-history [data-undo-step="-1"]'); await calm();
+    check('"As opened" takes every step back', (await depthOf(ids.e2)) === 10 && (await attr('.cad-undo-history', 'data-undo-at')) === '-1');
+    await setDepth(ids.e2, 12); await calm();
+    check('a new edit throws the undone steps away', (await labels()).join(' | ') === 'Edit Extrude 2');
+    await S(alice, () => window.JunctionPartStudio.undo()); await calm();
+  }
+
+  // ================================================================ the rebuild says how far it is
+  if (part('progress')) {
+    await S(alice, () => { const s = window.JunctionPartStudio; window.__seen = []; window.__bar = 0; s.regenProgress.subscribe(() => { const p = s.regenProgress.getState(); window.__seen.push(`${p.index}/${p.total}`); if (document.querySelector('[data-regen-progress]')) window.__bar++; }); new MutationObserver(() => { if (document.querySelector('[data-regen-progress]')) window.__bar++; const t = document.querySelector('.cad-status .cad-note')?.textContent || ''; if (/Rebuilding \d+ of \d+: /.test(t)) window.__said = t; }).observe(document.querySelector('.cad-status'), { subtree: true, childList: true, characterData: true }); });
+    await S(alice, (id) => window.JunctionPartStudio.commit([{ id, kind: 'MODIFIED', typeName: 'feature', props: [{ path: ['params', 'sketch', 'entities', 'p1', 'x'], value: -42 }, { path: ['params', 'sketch', 'entities', 'p4', 'x'], value: -42 }] }]), ids.s1);
+    await calm();
+    const seen = await S(alice, () => ({ seen: window.__seen, bar: window.__bar, said: window.__said || '' }));
+    check('a rebuild reports each feature it is on, of how many', seen.seen.includes('0/4') && seen.seen.includes('3/4'), seen.seen.join(' '));
+    check('… and the status bar says so, with a bar', seen.bar > 0 && /Rebuilding \d of 4: (Sketch|Extrude) \d/.test(seen.said), JSON.stringify(seen));
+    check('… and is quiet again afterwards', (await count('[data-regen-progress]')) === 0);
+    await S(alice, () => window.JunctionPartStudio.undo()); await calm();
+  }
+
+  // ================================================================ offline
+  if (part('offline')) {
+    const ctx = alice.context(), docId = await S(alice, () => window.JunctionPartStudio.host.doc.docId), url = alice.url();
+    const journal = () => alice.evaluate((docId) => JSON.parse(localStorage.getItem('junction.itemdoc.pending.' + docId) || '{"ops":[]}').ops.length, docId);
+    const drop = async () => { await ctx.setOffline(true); await S(alice, () => window.JunctionPartStudio.session.ws && window.JunctionPartStudio.session.ws.close()); await alice.waitForSelector('[data-offline=offline]', { timeout: 15000 }); };
+    check('online, there is no banner and nothing waits', (await count('[data-offline]')) === 0 && (await journal()) === 0);
+    await drop();
+    check('when the connection drops a banner says so', /Offline/.test(await alice.textContent('[data-offline]')) && /Keep working/.test(await alice.textContent('[data-offline]')));
+    const z = () => S(alice, () => Math.max(...window.JunctionPartStudio.getState().bodies.map((b) => (window.JunctionPartStudio.view.bodyObjects(b.id)?.result.mesh || b.mesh).bbox[5])));
+    await setDepth(ids.e1, 33); await calm();
+    check('work goes on offline: the edit is made and the model follows', (await depthOf(ids.e1)) === 33 && Math.abs((await z()) - 33) < 1e-6 && (await st()).canUndo);
+    check('… the banner counts what waits', (await attr('[data-offline]', 'data-unsaved')) === '1' && /1 edit waiting/.test(await alice.textContent('[data-offline]')));
+    check('… and the edit is kept in the browser', (await journal()) === 1);
+    await shot('offline', alice);
+    const [download] = await Promise.all([alice.waitForEvent('download'), alice.click('[data-offline-save]')]);
+    const saved = JSON.parse(fs.readFileSync(await download.path(), 'utf8'));
+    check('"Save a copy" writes the part studio, unsent edit and all, to a file', /\(unsent \d{4}-\d\d-\d\d\)\.jpart$/.test(download.suggestedFilename()) && saved.junction === 'part-studio' && saved.items.find((i) => i.id === ids.e1).params.depth === 33, download.suggestedFilename());
+    // the connection comes back
+    await ctx.setOffline(false);
+    await alice.click('[data-offline-retry]');
+    await alice.waitForSelector('[data-offline=sent]', { timeout: 20000 });
+    check('back online the edit is sent, and the banner says so', /1 edit made offline was sent/.test(await alice.textContent('[data-offline]')) && (await journal()) === 0 && (await S(alice, () => window.JunctionPartStudio.session.unsaved)) === 0);
+    const stored = async () => { const r = await alice.evaluate(async (docId) => { const x = await fetch(`/api/docs/${docId}/file`); return x.ok ? x.text() : ''; }, docId); try { return JSON.parse(r).items.find((i) => i.id === ids.e1).params.depth; } catch { return null; } };
+    // a tab closed while offline: the edits wait in the browser and are sent by the next visit
+    await drop();
+    await setDepth(ids.e1, 44); await setDepth(ids.e2, 15); await calm();
+    check('two more edits wait', (await journal()) === 2);
+    await alice.goto('about:blank').catch(() => {});
+    await ctx.setOffline(false);
+    await alice.goto(url);
+    await alice.waitForFunction(() => window.JunctionPartStudio && window.JunctionPartStudio.getState().loaded, null, { timeout: 30000 });
+    await alice.waitForSelector('[data-offline=restored]', { timeout: 20000 });
+    await calm();
+    check('edits made offline outlive a closed tab: the next visit has them and sends them', (await depthOf(ids.e1)) === 44 && (await depthOf(ids.e2)) === 15 && /2 edits from your last visit/.test(await alice.textContent('[data-offline]')) && (await journal()) === 0, `${await depthOf(ids.e1)} ${await depthOf(ids.e2)} ${await journal()}`);
+    // somebody else opening the document now gets them from the server
+    const bob = await ctx.newPage();
+    await bob.goto(url);
+    await bob.waitForFunction(() => window.JunctionPartStudio && window.JunctionPartStudio.getState().loaded, null, { timeout: 30000 });
+    check('… and the server has them', (await S(bob, (id) => window.JunctionPartStudio.doc.items.get(id).params.depth, ids.e1)) === 44 && (await bob.evaluate((docId) => localStorage.getItem('junction.itemdoc.pending.' + docId), docId)) === null);
+    await bob.close();
+    void stored;
+    await setDepth(ids.e1, 20); await setDepth(ids.e2, 10); await calm();
+    await S(alice, () => window.JunctionPartStudio.fit());
   }
 
   check('no page errors', alice.errors.length === 0, alice.errors.join(' | '));

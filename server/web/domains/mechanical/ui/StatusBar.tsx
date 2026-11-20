@@ -96,12 +96,20 @@ export function StatusBar({ studio }: { studio: PartStudio }) {
   const selected = useStudio(studio, (s) => s.selection.length);
   const past = useStudio(studio, (s) => s.past?.label);
   const waiting = useStudio(studio, (s) => awaitsPlane(s));
+  const progress = useSyncExternalStore(studio.regenProgress.subscribe, studio.regenProgress.getState);
+  const features = useStudio(studio, (s) => s.features);
+  const editingName = useStudio(studio, (s) => s.editing?.draft.name || null);
+  const share = kernel.state === "working" && progress.total > 1 ? Math.min(1, (progress.index + 1) / progress.total) : null;
   const timeline = usePref("timeline");
   let text = "", busy = false;
   if (!loaded) { text = status.state === "error" ? status.text : "Opening the part studio…"; busy = status.state !== "error"; }
   else if (kernel.state === "loading") { text = "Starting the modelling kernel (once per visit). You can look around and read the feature list meanwhile."; busy = true; }
   else if (kernel.state === "failed") text = kernel.message || "The modelling kernel stopped.";
-  else if (kernel.state === "working") { text = "Rebuilding…"; busy = true; }
+  else if (kernel.state === "working") {
+    // which feature the rebuild is on, of how many: a long rebuild is not a spinner that says nothing
+    const name = progress.featureId ? features.find((f) => f.id === progress.featureId)?.name || editingName : null;
+    text = progress.total > 1 && name ? `Rebuilding ${Math.min(progress.index + 1, progress.total)} of ${progress.total}: ${name}` : "Rebuilding…"; busy = true;
+  }
   else if (past !== undefined) text = "An earlier version: nothing can be edited.";
   else if (waiting) text = "Select a plane or a planar face for the new sketch.";
   else if (empty) text = "Choose Sketch to start a part.";
@@ -111,6 +119,7 @@ export function StatusBar({ studio }: { studio: PartStudio }) {
       {text ? (
         <span className={cx("cad-note flex items-center gap-1.5 min-w-0", kernel.state === "failed" && "text-err")} role="status" data-kernel={kernel.state}>
           {busy ? <span className="spinner flex-none" style={{ width: 10, height: 10 }} aria-hidden="true" /> : null}<span className="truncate">{text}</span>
+          {share !== null ? <span className="flex-none w-24 h-1.5 rounded-full bg-line overflow-hidden" role="progressbar" aria-label="Rebuild" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.index + 1} data-regen-progress={`${progress.index + 1}/${progress.total}`}><span className="block h-full bg-[var(--mark)]" style={{ width: `${Math.round(share * 100)}%` }} /></span> : null}
         </span>
       ) : <span className="cad-note hidden" role="status" data-kernel={kernel.state} />}
       {sketch ? <SketchStanding studio={studio} /> : null}

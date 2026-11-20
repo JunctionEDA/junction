@@ -13,6 +13,7 @@
 // on top of whatever arrives before its ack, and a gap in the sequence asks for a fresh copy.  An op the server
 // stored just before the connection dropped (its ack was lost) is recognised when it comes back in the catch-up,
 // so it is not put on top of what others did after it.
+import type { SessionJournal } from "./journal";
 import { applyChanges, invertChange, parseItemDoc, stableJson, type ItemChange, type ItemDoc, type Json } from "./itemdoc";
 
 export type SessionState = "connecting" | "live" | "offline" | "error";
@@ -38,12 +39,18 @@ export interface SessionOptions {
   onPeers?(peers: SessionPeer[]): void;
   /** somebody (or the server) said something a person should read */
   onNotice?(text: string): void;
+  /**
+   * Where the unacknowledged edits are kept beyond this page's life (journal.ts).  Given one, the session
+   * starts with what the session before it left unsent and sends it once the document has arrived.
+   */
+  journal?: SessionJournal;
   /** test seams */
   socketUrl?: string; fetchTicket?: () => Promise<string>; WebSocketImpl?: typeof WebSocket;
 }
 
 interface Pending { clientOpId: string; changes: ItemChange[] }
-interface UndoEntry { undo: ItemChange[]; redo: ItemChange[] }
+/** One step of the undo history: what it did (`redo`), how to take it back (`undo`), and when it was made. */
+export interface UndoEntry { undo: ItemChange[]; redo: ItemChange[]; at?: number }
 
 export class ItemDocSession {
   doc: ItemDoc | null = null;
@@ -72,7 +79,22 @@ export class ItemDocSession {
    */
   readonly taps = new Set<(msg: Record<string, unknown>) => void>();
 
-  constructor(private readonly opts: SessionOptions) {}
+  /** how many edits this session took over from the journal of the one before it (made offline, never sent) */
+  restored = 0;
+
+  constructor(private readonly opts: SessionOptions) {
+    if (opts.journal) { this.pending = opts.journal.load(); this.restored = this.pending.length; }
+  }
+  private keep(): void { this.opts.journal?.save(this.pending); }
+
+  /** The undo history, oldest first, and what was undone and can be done again (the next redo last). */
+  history(): { done: readonly UndoEntry[]; undone: readonly UndoEntry[] } { return { done: this.undoStack, undone: this.redoStack }; }
+  /** Do not wait for the next try: connect now (the browser says the network is back). */
+  reconnectNow(): void {
+    if (this.closed || this.ws || this.status.state !== "offline") return;
+    clearTimeout(this.retryTimer); this.retries = 0;
+    void this.connect();
+  }
 
   get canUndo(): boolean { return this.undoStack.length > 0; }
   get canRedo(): boolean { return this.redoStack.length > 0; }
@@ -118,9 +140,10 @@ export class ItemDocSession {
       if (applyChanges(doc, [c]).size) { touched.add(c.id); done.push(c); if (inv) inverse.unshift(inv); }
     }
     if (!done.length) return false;
-    if (undo === "push") { this.undoStack.push({ undo: inverse, redo: done }); if (this.undoStack.length > 200) this.undoStack.shift(); this.redoStack.length = 0; }
+    if (undo === "push") { this.undoStack.push({ undo: inverse, redo: done, at: Date.now() }); if (this.undoStack.length > 200) this.undoStack.shift(); this.redoStack.length = 0; }
     const op: Pending = { clientOpId: `web:${Date.now().toString(36)}:${++this.opN}`, changes: done };
     this.pending.push(op);       // journal first, send second: a dropped socket replays it
+    this.keep();
     this.send(op);
     for (const tap of Array.from(this.taps)) { try { tap({ type: "local_op", changes: done, origin }); } catch (e) { console.warn(e); } }
     this.opts.onChange(touched, origin);
@@ -227,7 +250,7 @@ export class ItemDocSession {
       case "ack": {
         const i = this.pending.findIndex((p) => p.clientOpId === msg.clientOpId), seq = Number(msg.seq) || 0;
         if (i >= 0) {
-          this.pending.splice(i, 1);
+          this.pending.splice(i, 1); this.keep();
           // The op was sequenced before something we already hold: it was stored just before the connection
           // dropped, its ack was lost, and since the reconnect it has sat on top of what others did after it.
           // Only a fresh copy puts it back in its place.  (An op of ours that came by in the catch-up was
@@ -265,7 +288,7 @@ export class ItemDocSession {
     if (seq) this.lastSeq = seq;
     // Ours: it has its place in the sequence now, so it is no longer "on top".  Our ops are stored in the order
     // we sent them, so it is the oldest one waiting (checked by content; if it is not, the ack sorts it out).
-    if (author && this.clientId && author === this.clientId && this.pending.length && stableJson(this.pending[0].changes as unknown as Json) === stableJson(changes as unknown as Json)) this.pending.shift();
+    if (author && this.clientId && author === this.clientId && this.pending.length && stableJson(this.pending[0].changes as unknown as Json) === stableJson(changes as unknown as Json)) { this.pending.shift(); this.keep(); }
     const touched = applyChanges(this.doc, changes);
     // ours that are not acknowledged come after this one in the server's order: they stay on top
     for (const op of this.pending) for (const c of op.changes) if (touched.has(c.id)) applyChanges(this.doc, [c]);
@@ -288,7 +311,7 @@ export class ItemDocSession {
     if (typeof msg.clientOpId === "string") {
       // that one edit was refused: forget it and take the server's document back
       const i = this.pending.findIndex((p) => p.clientOpId === msg.clientOpId);
-      if (i >= 0) this.pending.splice(i, 1);
+      if (i >= 0) { this.pending.splice(i, 1); this.keep(); }
       if (code === "permission_denied" && typeof msg.role === "string") this.setStatus("live", "live · view-only", msg.role);
       this.opts.onNotice?.(code === "permission_denied" ? "That edit was not saved: you have view-only access." : "The server refused an edit; the document was reloaded.");
       this.resync(sock, true);

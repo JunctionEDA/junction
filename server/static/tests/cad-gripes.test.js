@@ -91,3 +91,155 @@ test("keys: what is stored is checked on the way in", () => {
   assert.deepEqual(K.cleanOverrides("nonsense"), {});
   assert.deepEqual(K.cleanOverrides([1, 2]), {});
 });
+
+// ---------------------------------------------------------------- Press/Pull
+const PP = load("domains/mechanical/ui/press-pull.ts");
+test("press/pull: what a pick calls for", () => {
+  assert.equal(PP.pullFor({ kind: "face" }, true).feature, "extrude");
+  assert.deepEqual([PP.pullFor({ kind: "face" }, false).feature, PP.pullFor({ kind: "face" }, false).params], ["move-face", { type: "offset" }]);
+  assert.ok(PP.pullFor({ kind: "face" }, false, () => false).why, "a build without Move face says so");
+  assert.equal(PP.pullFor({ kind: "edge" }, false).feature, "fillet");
+  assert.equal(PP.pullFor({ kind: "sketch", region: "r1", entity: null }, true).feature, "extrude");
+  assert.equal(PP.pullFor({ kind: "sketch", region: null, entity: null }, true).feature, "extrude", "a whole sketch");
+  assert.ok(PP.pullFor({ kind: "sketch", region: null, entity: "l1" }, true).why, "a curve of a sketch is not a region");
+  assert.ok(PP.pullFor({ kind: "vertex" }, false).why);
+  assert.ok(PP.pullFor({ kind: "plane" }, true).why);
+});
+
+// ---------------------------------------------------------------- the marking menu
+const MK = load("domains/mechanical/ui/marking.ts");
+test("marking menu: eight directions, a dead middle, up first and clockwise", () => {
+  assert.equal(MK.wedgeAt(0, -50), 0);    // N
+  assert.equal(MK.wedgeAt(40, -40), 1);   // NE
+  assert.equal(MK.wedgeAt(50, 0), 2);     // E
+  assert.equal(MK.wedgeAt(0, 50), 4);     // S
+  assert.equal(MK.wedgeAt(-50, 2), 6);    // W
+  assert.equal(MK.wedgeAt(-40, -40), 7);  // NW
+  assert.equal(MK.wedgeAt(5, 5), -1, "the middle chooses nothing");
+  for (let i = 0; i < 8; i++) { const p = MK.wedgePlace(i); assert.equal(MK.wedgeAt(p.x / 1.18, p.y), i, `a label is in its own wedge (${i})`); }
+});
+test("marking menu: a flick is short, quick and straight", () => {
+  assert.equal(MK.flickWedge(80, 0, 120), 2);
+  assert.equal(MK.flickWedge(60, -60, 200), 1);
+  assert.equal(MK.flickWedge(80, 0, 400), -1, "slow: that is turning the view");
+  assert.equal(MK.flickWedge(20, 0, 80), -1, "too short to have a direction");
+  assert.equal(MK.flickWedge(600, 0, 80), -1, "too long");
+  assert.equal(MK.flickWedge(80, 0, 120, 200), -1, "a wiggle");
+});
+test("marking menu: the tools follow the mode, and the ring and its list stay on screen", () => {
+  const model = MK.markingSlots("model"), sketch = MK.markingSlots("sketch"), dialog = MK.markingSlots("dialog");
+  assert.equal(model.length, 8); assert.equal(sketch.length, 8); assert.equal(dialog.length, 8);
+  assert.equal(model[6], "undo"); assert.equal(sketch[6], "undo");
+  assert.equal(model[0], MK.REPEAT); assert.equal(sketch[4], MK.FINISH); assert.equal(dialog[0], MK.ACCEPT); assert.equal(dialog[4], MK.CANCEL);
+  assert.equal(MK.markingSlots("model", { edge: true })[5], "f:chamfer");
+  for (const [x, y] of [[5, 5], [1495, 895], [700, 400], [700, 880], [1490, 10]]) {
+    const p = MK.markingPlace(x, y, 1500, 900, 400);
+    assert.ok(p.cx >= 150 && p.cx <= 1350 && p.cy >= 100 && p.cy <= 800, `the ring is on screen for ${x},${y}`);
+    assert.ok(p.listTop >= 6 && p.listTop + 400 <= 900 && p.listLeft >= 6 && p.listLeft + 220 <= 1500, `the list is on screen for ${x},${y}`);
+    const clearY = p.listTop >= p.cy + 96 || p.listTop + 400 <= p.cy - 96, clearX = p.listLeft >= p.cx + 113 || p.listLeft + 220 <= p.cx - 113;
+    assert.ok(clearY || clearX, `the list is clear of the ring for ${x},${y}`);
+  }
+});
+
+// ---------------------------------------------------------------- the timeline
+const TL = load("domains/mechanical/ui/timeline-model.ts");
+const FO = load("domains/mechanical/document/folders.ts");
+test("timeline: cells in build order, folders as brackets or one cell, the marker and what a drag means", () => {
+  const f = (id, order, folder) => ({ id, type: "feature", featureType: "extrude", name: id, order, params: {}, ...(folder ? { folder } : {}) });
+  const features = [f("a", "A"), f("b", "B", "g"), f("c", "C", "g"), f("d", "D", "h"), f("e", "E")];
+  const folders = new Map([["g", { id: "g", type: "folder", name: "G" }], ["h", { id: "h", type: "folder", name: "H", parent: "g" }]]);
+  const tree = FO.featureTree(features, folders);
+  let t = TL.timelineOf(tree);
+  assert.deepEqual(t.cells.map((c) => c.id), ["a", "b", "c", "d", "e"]);
+  assert.deepEqual(t.spans.map((s) => [s.id, s.from, s.to, s.depth]).sort(), [["g", 1, 3, 0], ["h", 3, 3, 1]]);
+  assert.deepEqual(TL.markerSlot(t.cells, 5), { slot: 5, inside: false });
+  assert.deepEqual(TL.markerSlot(t.cells, 2), { slot: 2, inside: false });
+  assert.deepEqual(TL.markerSlot(t.cells, 0), { slot: 0, inside: false });
+  assert.equal(TL.rollbackAt(t.cells, 3, 5), 3); assert.equal(TL.rollbackAt(t.cells, 5, 5), 5); assert.equal(TL.rollbackAt(t.cells, 99, 5), 5);
+  // folded: one cell for the folder and everything in it
+  t = TL.timelineOf(tree, new Set(["g"]));
+  assert.deepEqual(t.cells.map((c) => [c.kind, c.id]), [["feature", "a"], ["folder", "g"], ["feature", "e"]]);
+  assert.equal(t.cells[1].count, 3);
+  assert.deepEqual(TL.markerSlot(t.cells, 2), { slot: 1, inside: true }, "a bar inside a folded folder stands before it");
+  assert.equal(TL.cellBuilt(t.cells[1], 2), "part"); assert.equal(TL.cellBuilt(t.cells[1], 4), "yes"); assert.equal(TL.cellBuilt(t.cells[2], 4), "no");
+  assert.equal(TL.rollbackAt(t.cells, 2, 5), 4, "the gap after a folded folder is after its last feature");
+  assert.equal(TL.rollbackAt(t.cells, 1, 5), 1);
+  assert.equal(TL.slotAt(44, 0, 30, 5), 1); assert.equal(TL.slotAt(46, 0, 30, 5), 2); assert.equal(TL.slotAt(-9, 0, 30, 5), 0); assert.equal(TL.slotAt(999, 0, 30, 5), 5);
+  assert.deepEqual(TL.timelineOf(FO.featureTree([], new Map())), { cells: [], spans: [] });
+});
+
+// ---------------------------------------------------------------- the history of edits
+const UL = load("domains/mechanical/ui/undo-labels.ts");
+const ID = load("shared/itemdoc/itemdoc.ts");
+test("history of edits: a step in words", () => {
+  const feat = (id, name, extra = {}) => ({ id, type: "feature", featureType: "extrude", name, order: "V", params: { depth: 5 }, ...extra });
+  const doc = ID.newItemDoc("part-studio", [{ id: "studio", type: "studio", units: "mm", rollback: null }, feat("e1", "Extrude 1"), { id: "v1", type: "variable", name: "wall", expr: "2", order: "V" }]);
+  const step = (redo) => { const undo = redo.map((c) => ID.invertChange(doc, c)).filter(Boolean).reverse(); return { redo, undo }; };
+  const mod = (id, typeName, path, value) => ({ id, kind: "MODIFIED", typeName, props: [value === undefined ? { path, del: true } : { path, value }] });
+  assert.equal(UL.describeStep(step([ID.addedChange(feat("f2", "Fillet 1"))]), doc), "Add Fillet 1");
+  assert.equal(UL.describeStep(step([ID.addedChange(feat("f2", "Fillet 1")), mod("studio", "studio", ["rollback"], null)]), doc), "Add Fillet 1", "what came with it is not the step");
+  assert.equal(UL.describeStep(step([ID.removedChange(doc.items.get("e1"))]), doc), "Delete Extrude 1", "the name comes from what takes the step back");
+  assert.equal(UL.describeStep(step([mod("e1", "feature", ["params", "depth"], 9)]), doc), "Edit Extrude 1");
+  assert.equal(UL.describeStep(step([mod("e1", "feature", ["name"], "Boss")]), doc), "Rename to Boss");
+  assert.equal(UL.describeStep(step([mod("e1", "feature", ["suppressed"], true)]), doc), "Suppress Extrude 1");
+  assert.equal(UL.describeStep(step([mod("e1", "feature", ["suppressed"])]), doc), "Unsuppress Extrude 1");
+  assert.equal(UL.describeStep(step([mod("e1", "feature", ["order"], "X")]), doc), "Move Extrude 1");
+  assert.equal(UL.describeStep(step([mod("studio", "studio", ["rollback"], "e1")]), doc), "Move the rollback bar");
+  assert.equal(UL.describeStep(step([mod("studio", "studio", ["units"], "in")]), doc), "Change the units");
+  assert.equal(UL.describeStep(step([mod("v1", "variable", ["expr"], "3"), mod("e1", "feature", ["params", "depth"], 3)]), doc), "Change variable wall");
+  assert.equal(UL.describeStep(step([ID.addedChange({ id: "v2", type: "variable", name: "gap", expr: "1", order: "W" })]), doc), "Add variable gap");
+  assert.equal(UL.describeStep(step([ID.addedChange(feat("a", "A")), ID.addedChange(feat("b", "B"))]), doc), "Add 2 features");
+  assert.equal(UL.describeStep(step([mod("parts", "parts", ["names", "b1"], "Lid")]), doc), "Rename a part");
+  assert.equal(UL.describeStep({ redo: [], undo: [] }, doc), "Nothing");
+  assert.equal(UL.describeStep(step([mod("gone", "widget", ["x"], 1)]), null), "Change a widget", "something this does not know is still a step");
+  assert.equal(UL.stepsTo(4, 3), 0); assert.equal(UL.stepsTo(4, 0), 3); assert.equal(UL.stepsTo(4, -1), 4); assert.equal(UL.stepsTo(2, 4), -3);
+  assert.equal(UL.ago(1000, 4000), "just now"); assert.equal(UL.ago(0, 4000), ""); assert.equal(UL.ago(1000, 1000 + 125000), "2 min ago");
+});
+
+// ---------------------------------------------------------------- offline
+const J = load("shared/itemdoc/journal.ts");
+const OFF = load("domains/mechanical/ui/offline.ts");
+test("offline: unsent edits are kept in the browser and read back checked", () => {
+  const mem = { data: {}, getItem(k) { return k in this.data ? this.data[k] : null; }, setItem(k, v) { this.data[k] = v; }, removeItem(k) { delete this.data[k]; } };
+  const j = J.storedJournal("doc1", mem);
+  assert.deepEqual(j.load(), []);
+  const ops = [{ clientOpId: "web:1", changes: [{ id: "e1", kind: "MODIFIED", typeName: "feature", props: [{ path: ["params", "depth"], value: 9 }] }] }, { clientOpId: "web:2", changes: [{ id: "x", kind: "REMOVED" }] }];
+  j.save(ops);
+  assert.equal(J.journalled("doc1", mem), 2);
+  assert.deepEqual(J.storedJournal("doc1", mem).load(), ops, "the next session on the document reads them back");
+  assert.deepEqual(J.storedJournal("doc2", mem).load(), [], "a journal is one document's");
+  j.save([ops[1]]); assert.equal(J.journalled("doc1", mem), 1);
+  j.save([]); assert.equal(mem.getItem(J.journalKey("doc1")), null, "nothing waiting, nothing kept");
+  // what is in storage is not trusted
+  assert.deepEqual(J.parseJournal("not json"), []);
+  assert.deepEqual(J.parseJournal(JSON.stringify({ ops: "x" })), []);
+  const dirty = { ops: [ops[0], { clientOpId: 7, changes: [] }, { clientOpId: "a", changes: [{ id: "q", kind: "EXPLODE" }] }, { clientOpId: "b", changes: [{ id: "q", kind: "ADDED", item: { id: "other", type: "t" } }] }, ops[0], { clientOpId: "c", changes: [] }] };
+  assert.deepEqual(J.parseJournal(JSON.stringify(dirty)), [ops[0]]);
+  // more than the browser will keep: said once, and nothing thrown
+  let full = 0;
+  const big = J.storedJournal("doc3", mem, () => full++);
+  const huge = [{ clientOpId: "h", changes: [{ id: "t", kind: "MODIFIED", props: [{ path: ["x"], value: "y".repeat(J.JOURNAL_LIMIT) }] }] }];
+  big.save(huge); big.save(huge);
+  assert.equal(full, 1);
+  // storage that throws (a private window): the session carries on
+  const broken = { getItem() { throw new Error("no"); }, setItem() { throw new Error("no"); }, removeItem() { throw new Error("no"); } };
+  assert.deepEqual(J.storedJournal("d", broken).load(), []);
+  J.storedJournal("d", broken).save(ops);
+  assert.deepEqual(J.storedJournal("d", null).load(), []);
+});
+test("offline: what the banner says, and when it says nothing", () => {
+  const base = { state: "live", loaded: true, unsaved: 0, cameBack: null, restored: 0, canEdit: true };
+  assert.equal(OFF.offlineNotice(base), null);
+  assert.equal(OFF.offlineNotice({ ...base, loaded: false, state: "connecting" }), null, "the first load is not being offline");
+  assert.equal(OFF.offlineNotice({ ...base, state: "error" }), null, "an error is the status bar's to tell");
+  let n = OFF.offlineNotice({ ...base, state: "offline" });
+  assert.equal(n.kind, "offline"); assert.equal(n.text, "Offline"); assert.match(n.detail, /Keep working/);
+  n = OFF.offlineNotice({ ...base, state: "connecting", unsaved: 3 });
+  assert.equal(n.text, "Offline: 3 edits waiting"); assert.match(n.detail, /even if you close the tab/);
+  assert.equal(OFF.offlineNotice({ ...base, state: "offline", unsaved: 1 }).text, "Offline: 1 edit waiting");
+  assert.match(OFF.offlineNotice({ ...base, state: "offline", canEdit: false }).detail, /looking/);
+  assert.equal(OFF.offlineNotice({ ...base, cameBack: 2, unsaved: 1 }), null, "not until everything is sent");
+  assert.match(OFF.offlineNotice({ ...base, cameBack: 2 }).detail, /2 edits made offline were sent/);
+  assert.equal(OFF.offlineNotice({ ...base, cameBack: 0 }), null, "nothing was waiting: nothing to say");
+  assert.match(OFF.offlineNotice({ ...base, restored: 1 }).detail, /1 edit from your last visit was still waiting/);
+});

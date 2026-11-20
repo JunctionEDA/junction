@@ -34,6 +34,7 @@ import { fillFromSelection, heldPicks, holdsOne, neighbourField, nextEmptyField,
 import { profileEmpty, profileFaces, profileSketch, makeProfile } from "../features/_profile";
 import { getPrefs, readVisibility, writeVisibility, type Visibility } from "./prefs";
 import { viewKey } from "./viewkeys";
+import { storedJournal } from "../../../shared/itemdoc/journal";
 import { commandForEvent, isFeatureCommand, setKeyCommands } from "./keymap-store";
 import type { Binding } from "./keymap";
 
@@ -94,6 +95,16 @@ export interface StudioState {
   ui?: { readonly [key: string]: unknown };
 }
 
+/** Where a rebuild stands; a store of its own, so a step of it redraws the status bar and nothing else. */
+export interface RegenProgress { index: number; total: number; featureId: string | null }
+class Progress {
+  private listeners = new Set<() => void>();
+  constructor(private state: RegenProgress) {}
+  getState = (): RegenProgress => this.state;
+  subscribe = (fn: () => void): (() => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
+  put(p: RegenProgress): void { const s = this.state; if (s.index === p.index && s.total === p.total && s.featureId === p.featureId) return; this.state = p; for (const fn of Array.from(this.listeners)) fn(); }
+}
+
 export const featureDef = (type: string): FeatureDefinition | undefined => FEATURES.find((f) => f.type === type);
 
 /**
@@ -135,6 +146,8 @@ export class PartStudio {
   /** Called after every regeneration whose result was shown. */
   readonly onRegen: ((result: RegenResult) => void)[] = [];
   private extensionClosers: (() => void)[] = [];
+  /** how far the rebuild that is running has come: the feature being built, of how many (the status bar shows it) */
+  readonly regenProgress = new Progress({ index: 0, total: 0, featureId: null });
 
   constructor(readonly host: DocumentHostContext, canvasHost: HTMLElement) {
     this.state = {
@@ -167,7 +180,8 @@ export class PartStudio {
     window.addEventListener("keydown", this.onKeyElsewhere);
     this.fit();   // nothing is built yet: the default planes fill the view
     this.kernel = new KernelClient({
-      onState: (s, message) => { if (!this.closed) this.set({ kernel: { state: s, message: message || "", working: s === "working" || s === "loading" } }); },
+      onState: (s, message) => { if (!this.closed) { if (s !== "working") this.regenProgress.put({ index: 0, total: 0, featureId: null }); this.set({ kernel: { state: s, message: message || "", working: s === "working" || s === "loading" } }); } },
+      onProgress: (index, total, featureId) => { if (!this.closed) this.regenProgress.put({ index, total, featureId }); },
     });
     this.session = new ItemDocSession({
       docId: host.doc.docId, signedIn: host.signedIn, expectKind: PART_STUDIO_KIND,
@@ -175,6 +189,8 @@ export class PartStudio {
       onStatus: (status) => { host.setConnection(status.state === "live" ? "live" : status.state === "error" ? "error" : "offline", status.text); this.set({ status, canEdit: status.canEdit && !this.pastDoc }); },
       onPeers: (peers) => this.set({ peers }),
       onNotice: (text) => host.toast(text, 4000),
+      // edits made while the connection is down outlive a closed tab (shared/itemdoc/journal.ts)
+      journal: host.signedIn ? storedJournal(host.doc.docId, undefined, () => host.toast("There are more unsent edits than this browser can keep. Stay on this page until the connection is back.", 8000)) : undefined,
     });
     this.session.start();
     for (const ext of studioExtensions) { const stop = ext(this); if (stop) this.extensionClosers.push(stop); }
