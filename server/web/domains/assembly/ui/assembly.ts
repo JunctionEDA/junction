@@ -32,6 +32,7 @@ import { solve } from "../solver/solver";
 import type { DragGoal, MateFrame } from "../solver/types";
 import { SourceManager } from "../sources/manager";
 import { BoardPictures } from "../viewport/boards";
+import { PreviewPictures } from "../viewport/preview";
 import type { SourceOffer } from "../sources/types";
 import { AssemblyScene, type AssemblyPick, type ConnectorMark } from "../viewport/scene";
 import type { TriadHandle } from "../viewport/triad";
@@ -121,6 +122,8 @@ export class AssemblyEditor {
   readonly scene: AssemblyScene;
   /** board instances as they look (viewport/boards.ts) */
   readonly boards: BoardPictures;
+  /** the Insert dialog's pictures of what it offers (viewport/preview.ts) */
+  readonly previews: PreviewPictures;
   readonly sources: SourceManager;
   private state: AssemblyState = EMPTY;
   private listeners = new Set<() => void>();
@@ -145,6 +148,7 @@ export class AssemblyEditor {
     this.scene = new AssemblyScene(this.viewport);
     this.sources = new SourceManager(host.doc.docId, host.signedIn, () => this.queueRefresh());
     this.boards = new BoardPictures(this.viewport, this.sources);
+    this.previews = new PreviewPictures(this.viewport);
     this.session = new ItemDocSession({
       docId: host.doc.docId, signedIn: host.signedIn, expectKind: ASSEMBLY_KIND,
       onChange: () => { this.state = { ...this.state, loaded: true }; this.refresh(); },
@@ -164,7 +168,13 @@ export class AssemblyEditor {
 
   getState = (): AssemblyState => this.state;
   subscribe = (fn: () => void): (() => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
-  private set(patch: Partial<AssemblyState>): void { if (this.closed) return; this.state = { ...this.state, ...patch }; for (const fn of Array.from(this.listeners)) fn(); }
+  private set(patch: Partial<AssemblyState>): void {
+    if (this.closed) return;
+    // whatever closes Insert (a mate started, Escape, Insert itself) takes its preview away
+    if ("inserting" in patch && !patch.inserting && this.insertPreview.length) { this.insertPreview = []; this.scene.setGhost([]); }
+    this.state = { ...this.state, ...patch };
+    for (const fn of Array.from(this.listeners)) fn();
+  }
 
   get doc(): ItemDoc | null { return this.session.doc; }
   mateTypes(): readonly MateDefinition[] { return MATES; }
@@ -269,6 +279,7 @@ export class AssemblyEditor {
     for (const c of connectors) ids.add(c.id);
     const activity = this.sources.activity;
     this.draw(instances);
+    if (this.insertPreview.length) this.drawInsertPreview();
     this.set({
       instances, mates, groups, positions, connectors, instanceInfo, mateInfo, dof: solved.result.dof, solveMs: solved.result.ms,
       selection: this.state.selection.filter((id) => ids.has(id)), building: activity.building, kernelFailure: activity.failure,
@@ -411,15 +422,14 @@ export class AssemblyEditor {
   }
 
   // ---------------------------------------------------------------- insert and replace
-  openInsert(replace: string | null = null): void { if (this.state.mating) this.cancelMate(); this.set({ inserting: { replace } }); }
+  openInsert(replace: string | null = null): void { if (this.state.mating) this.cancelMate(); this.setInsertPreview([]); this.set({ inserting: { replace } }); }
   closeInsert(): void { this.set({ inserting: null }); }
-  /** Add instances.  Parts keep the place their studio gave them; one that is already there is set beside it. */
-  insert(offers: SourceOffer[]): void {
-    const doc = this.session.doc; if (!doc || !offers.length) return;
+  /** Where these offers would be placed.  Parts keep the place their studio gave them; one that is already there is set beside it. */
+  private placements(doc: ItemDoc, offers: readonly SourceOffer[]): { source: InstanceSource; name: string; transform: Transform }[] {
     const same = (a: InstanceSource, b: InstanceSource) => a.kind === b.kind && a.docId === b.docId && (a.kind !== "part" || (b.kind === "part" && a.body === b.body));
     const counts = new Map<SourceOffer, number>();
     const existing = instancesOf(doc);
-    const list = offers.map((o) => {
+    return offers.map((o) => {
       const n = existing.filter((i) => same(i.source, o.source)).length + offers.filter((x) => counts.has(x) && same(x.source, o.source)).length;
       counts.set(o, n);
       const t: Transform = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0];
@@ -429,16 +439,34 @@ export class AssemblyEditor {
       const at = o.transform || (snapNow && prov ? prov.offers(o.source.docId, o.name, snapNow).find((x) => same(x.source, o.source))?.transform : undefined);
       if (at) for (let k = 0; k < 12; k++) t[k] = at[k];
       if (n) {
-        const snap = this.sources.snapshot(o.source.kind, o.source.docId), p = this.sources.provider(o.source.kind);
         let width = 0;
-        for (const piece of snap && p ? p.select(o.source, snap) : []) width = Math.max(width, piece.mesh.bbox[3] - piece.mesh.bbox[0]);
+        for (const piece of snapNow && prov ? prov.select(o.source, snapNow) : []) width = Math.max(width, piece.mesh.bbox[3] - piece.mesh.bbox[0]);
         t[3] += n * (width * 1.15 + 5);
       }
       return { source: o.source, name: o.name, transform: t };
     });
-    const made = insertInstances(doc, list);
+  }
+  /** Add instances where `placements` puts them. */
+  insert(offers: SourceOffer[]): void {
+    const doc = this.session.doc; if (!doc || !offers.length) return;
+    const made = insertInstances(doc, this.placements(doc, offers));
     if (this.commit(made.changes)) { this.fitted = false; this.select(made.items.map((i) => i.id)); }
     this.set({ inserting: null });
+  }
+  /** What the Insert dialog has chosen: shown as a translucent ghost where Insert would put it, until it is inserted or cancelled. */
+  private insertPreview: readonly SourceOffer[] = [];
+  /** an empty assembly turns to the ghost (once per choice), so what is about to be placed is in view */
+  private ghostFitted = false;
+  setInsertPreview(offers: readonly SourceOffer[]): void { this.insertPreview = offers.slice(); this.ghostFitted = false; this.drawInsertPreview(); }
+  private drawInsertPreview(): void {
+    const doc = this.session.doc;
+    if (!doc || !this.insertPreview.length) { if (this.scene.ghostCount) this.scene.setGhost([]); return; }
+    const list = this.placements(doc, this.insertPreview).map((p) => {
+      const snap = this.sources.snapshot(p.source.kind, p.source.docId), prov = this.sources.provider(p.source.kind);
+      return { pieces: snap && prov ? prov.select(p.source, snap) : [], transform: p.transform };
+    }).filter((g) => g.pieces.length);
+    this.scene.setGhost(list);
+    if (!this.ghostFitted && list.length && this.scene.box().isEmpty()) { const box = this.scene.ghostBox(); if (!box.isEmpty()) { this.viewport.fit(box); this.ghostFitted = true; } }
   }
   replace(id: string, source: InstanceSource): void { this.edit((doc) => replaceSource(doc, id, source)); this.set({ inserting: null }); }
 
@@ -792,6 +820,6 @@ export class AssemblyEditor {
     const c = this.viewport.canvas;
     c.removeEventListener("pointerdown", this.onDown); c.removeEventListener("pointermove", this.onMove); c.removeEventListener("pointerup", this.onUp);
     c.removeEventListener("pointercancel", this.onUp); c.removeEventListener("pointerleave", this.onLeave); c.removeEventListener("dblclick", this.onDouble); c.removeEventListener("keydown", this.onKey);
-    this.session.close(); this.boards.dispose(); this.sources.dispose(); this.scene.dispose(); this.viewport.dispose(); this.listeners.clear();
+    this.session.close(); this.boards.dispose(); this.previews.dispose(); this.sources.dispose(); this.scene.dispose(); this.viewport.dispose(); this.listeners.clear();
   }
 }

@@ -123,6 +123,20 @@ try {
   await alice.waitForSelector('[data-insert-dialog] [data-offer]', { timeout: 90000 });   // the first studio is opened and built: the kernel starts here
   const firstOpen = await alice.$$eval('[data-insert-dialog] [data-offer]', (els) => els.map((e) => e.getAttribute('data-offer')));
   check('Insert lists the parts of a part studio that was never opened in a tab', firstOpen.length >= 1, firstOpen.join());
+  // the preview: a picture of the part under the pointer, and a ghost in the model of what is ticked, gone on Cancel
+  await alice.hover(`[data-insert-dialog] [data-offer='${firstOpen[0]}']`);
+  await alice.waitForSelector(`[data-insert-dialog] [data-insert-preview='${firstOpen[0]}']`, { timeout: 30000 });
+  const inked = await alice.$eval('[data-insert-preview] canvas', (c) => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - d[0]) + Math.abs(d[i + 1] - d[1]) + Math.abs(d[i + 2] - d[2]) > 30) n++; return n / (d.length / 4); });
+  check('the Insert dialog previews the part under the pointer', inked > 0.02, `${(inked * 100).toFixed(1)}% of the picture is the part`);
+  await alice.click(`[data-insert-dialog] [data-offer='${firstOpen[0]}']`);
+  await alice.waitForFunction(() => window.JunctionAssembly.scene.ghostCount > 0, null, { timeout: 10000 });
+  check('a ticked part is shown as a ghost where it will land, and nothing is stored yet', (await asm(alice, () => window.JunctionAssembly.getState().instances.length)) === 0);
+  await shot(alice, '02-insert-preview');
+  await alice.click('[data-insert-dialog] [data-cancel]');
+  await alice.waitForSelector('[data-insert-dialog]', { state: 'detached' });
+  check('Cancel takes the ghost away', (await asm(alice, () => window.JunctionAssembly.scene.ghostCount)) === 0 && (await asm(alice, () => window.JunctionAssembly.getState().instances.length)) === 0);
+  await alice.click('[data-tool=Insert]');
+  await alice.waitForSelector('[data-insert-dialog] [data-offer]', { timeout: 90000 });
   for (const name of ['Enclosure', 'Cover']) if (!(await alice.$(`[data-source-doc=${name}][data-open]`))) await alice.click(`[data-source-doc=${name}] >> text=${name}`);
   await alice.waitForSelector('[data-source-doc=Enclosure] [data-offer=Enclosure]', { timeout: 90000 });
   await alice.waitForSelector("[data-source-doc=Cover] [data-offer='Part 2']", { timeout: 90000 });

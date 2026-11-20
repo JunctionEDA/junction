@@ -35,6 +35,11 @@ export class AssemblyScene {
   private readonly root = new THREE.Group();
   private readonly highlight = new THREE.Group();
   private readonly marks = new THREE.Group();
+  /** what Insert is about to place: translucent, not pickable, not counted in the fit (setGhost) */
+  private readonly ghostRoot = new THREE.Group();
+  private ghostMeshes: BodyMesh[] = [];
+  private readonly ghostMaterial = new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.05, side: THREE.DoubleSide, transparent: true, opacity: 0.4, depthWrite: false });
+  private readonly ghostEdgeMaterial = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.7, depthWrite: false });
   private readonly instances = new Map<string, InstanceObjects>();
   private readonly shared = new Map<BodyMesh, Shared>();
   private readonly raycaster = new THREE.Raycaster();
@@ -53,7 +58,8 @@ export class AssemblyScene {
   readonly triad: Triad;
 
   constructor(readonly viewport: Viewport3D) {
-    viewport.scene.add(this.root, this.highlight, this.marks);
+    viewport.scene.add(this.root, this.highlight, this.marks, this.ghostRoot);
+    this.ghostRoot.renderOrder = 5;
     for (let i = 0; i < 5; i++) this.materials.push(new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0.05, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
     this.triad = new Triad(viewport);
     viewport.onTheme.push(this.readColors);
@@ -81,6 +87,8 @@ export class AssemblyScene {
     this.selectedMaterial.color.copy(this.colors.body).lerp(mark, 0.55);
     this.markedMaterial.color.copy(this.colors.body).lerp(this.colors.bad, 0.6);
     this.edgeMaterial.color.copy(this.colors.edge);
+    this.ghostMaterial.color.copy(this.colors.body).lerp(mark, 0.6);
+    this.ghostEdgeMaterial.color.copy(mark);
     this.triad.readColors();
     this.drawHighlight(); this.drawMarks();
   };
@@ -175,6 +183,39 @@ export class AssemblyScene {
   }
   /** The box of everything that is shown. */
   box(): THREE.Box3 { const box = new THREE.Box3(); for (const [id, o] of this.instances) if (!o.hidden) { const b = this.boxOf(id); if (b) box.union(b); } return box; }
+
+  // ---------------------------------------------------------------- the insert preview
+  /**
+   * Show what Insert would place, where it would land: each entry is pieces under one placement.  Translucent in
+   * the selection colour, with its edges; a board's solids are drawn too (its picture belongs to an instance).
+   * An empty list takes it away.  Geometry is shared with the instances (one upload per mesh).
+   */
+  setGhost(list: readonly { pieces: readonly SourcePiece[]; transform: Transform }[]): void {
+    const fresh: BodyMesh[] = [];
+    const objects: THREE.Object3D[] = [];
+    for (const g of list) {
+      const outer = new THREE.Group(); outer.matrixAutoUpdate = false; matrixOf(g.transform, outer.matrix);
+      for (const piece of g.pieces) {
+        const s = this.share(piece.mesh); fresh.push(piece.mesh);
+        const inner = new THREE.Group(); inner.matrixAutoUpdate = false;
+        if (piece.transform) matrixOf(piece.transform, inner.matrix);
+        const mesh = new THREE.Mesh(s.mesh, this.ghostMaterial); mesh.renderOrder = 5;
+        const edges = new THREE.LineSegments(s.edges, this.ghostEdgeMaterial); edges.renderOrder = 6;
+        inner.add(mesh, edges); outer.add(inner);
+      }
+      objects.push(outer);
+    }
+    for (const o of this.ghostRoot.children.slice()) this.ghostRoot.remove(o);
+    for (const m of this.ghostMeshes) this.unshare(m);
+    this.ghostMeshes = fresh;
+    if (objects.length) this.ghostRoot.add(...objects);
+    this.ghostRoot.updateMatrixWorld(true);
+    this.viewport.invalidate();
+  }
+  /** The box of the insert preview in assembly space. */
+  ghostBox(): THREE.Box3 { this.ghostRoot.updateMatrixWorld(true); return new THREE.Box3().setFromObject(this.ghostRoot); }
+  /** How many pieces the insert preview shows (tests). */
+  get ghostCount(): number { return this.ghostMeshes.length; }
 
   // ---------------------------------------------------------------- selection, marks, hover
   private restyle(): void {
@@ -293,7 +334,9 @@ export class AssemblyScene {
   dispose(): void {
     this.triad.dispose();
     for (const o of this.instances.values()) this.dropPieces(o);
-    this.viewport.scene.remove(this.root, this.highlight, this.marks);
+    this.setGhost([]);
+    this.ghostMaterial.dispose(); this.ghostEdgeMaterial.dispose();
+    this.viewport.scene.remove(this.root, this.highlight, this.marks, this.ghostRoot);
   }
 }
 
