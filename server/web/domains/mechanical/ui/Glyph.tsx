@@ -2,7 +2,7 @@
 // text around it.
 //
 // How the part studio's icons are drawn, so that they read at a glance at 20 to 24 pixels:
-//   • a 24×24 box; outlines 1.4 wide with round ends and joins — the stroke is the same on every icon;
+//   • a 24×24 box; outlines 1.15 wide with round ends and joins — the stroke is the same on every icon;
 //   • a shape with class "f" is filled with the opaque face colour (--glyph-face in theme.css): the body of a solid, the face a tool
 //     acts on.  The tinted mass is what tells Extrude from a rectangle and a Fillet from an arc;
 //   • a shape with class "s" is solid: a point, an arrow head, the thing a tool adds;
@@ -12,7 +12,7 @@
 export function Glyph({ svg, size = 18 }: { svg?: string; size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true"
-      className="cad-glyph flex-none fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round] [&_.f]:[fill:var(--glyph-face)] [&_.s]:fill-current [&_.s]:stroke-none [&_.d]:[stroke-dasharray:2.4_2.6] [&_.t]:[stroke-width:1.1] [shape-rendering:geometricPrecision]"
-      strokeWidth={1.4} dangerouslySetInnerHTML={{ __html: svg || '<rect x="5" y="5" width="14" height="14" rx="2"/>' }} />
+      className="cad-glyph flex-none fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round] [&_.f]:[fill:var(--glyph-face)] [&_.s]:fill-current [&_.s]:stroke-none [&_.d]:[stroke-dasharray:2.4_2.6] [&_.t]:[stroke-width:0.9] [shape-rendering:geometricPrecision]"
+      strokeWidth={1.15} dangerouslySetInnerHTML={{ __html: svg || '<rect x="5" y="5" width="14" height="14" rx="2"/>' }} />
   );
 }
