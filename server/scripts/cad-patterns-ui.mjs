@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { setCad } from './cad-setting.mjs';
+import { pickOption } from './kselect-pick.mjs';   // the app's drop-downs are <k-select>, not <select>
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -278,7 +279,7 @@ try {
 
   await tool(page, 'Plane');
   await page.waitForSelector('.cad-dialog[data-feature=plane]');
-  await page.selectOption('.cad-dialog select[data-param=method]', 'midplane');
+  await pickOption(page, '.cad-dialog k-select[data-param=method]', 'midplane');
   await arm(page, 'faces');
   const turn = (d) => S(page, (d) => { const vp = window.JunctionPartStudio.viewport, v = vp.camera.position.clone(); vp.lookAlong(v.clone().set(d[0], d[1], d[2]), v.clone().set(0, 0, 1), false); vp.fit(); }, d);
   const turned = async (d) => { await turn(d); await page.waitForTimeout(600); };   // fit() eases the camera in
@@ -347,7 +348,7 @@ try {
 
   await tool(page, 'Plane');
   await page.waitForSelector('.cad-dialog[data-feature=plane]');
-  await page.selectOption('.cad-dialog select[data-param=method]', 'normal');
+  await pickOption(page, '.cad-dialog k-select[data-param=method]', 'normal');
   await arm(page, 'curve');
   const onPath = await findOnScreen(page, { kind: 'sketch', feature: pathSketch, entity: firstLine });
   check('the path\'s first line is picked in the viewport', !!onPath, JSON.stringify(onPath?.hit));
@@ -375,7 +376,7 @@ try {
 
   await tool(page, 'Sweep');
   await page.waitForSelector('.cad-dialog[data-feature=sweep]');
-  await page.selectOption('.cad-dialog select[data-param=profile]', profileId);
+  await pickOption(page, '.cad-dialog k-select[data-param=profile]', profileId);
   await arm(page, 'path');
   await click(page, await findOnScreen(page, { kind: 'sketch', feature: pathSketch, entity: firstLine }));
   await page.click('.cad-dialog [data-param=operation] >> text=Add');

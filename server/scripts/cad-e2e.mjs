@@ -31,6 +31,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { setCad } from './cad-setting.mjs';
+import { pickOption } from './kselect-pick.mjs';   // the app's drop-downs are <k-select>, not <select>
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -381,8 +382,8 @@ try {
   begin(4, 'the project\'s board as a Board feature');
   await tool(alice, 'Board');
   await alice.waitForSelector('.cad-dialog[data-feature=board-reference]');
-  const boards = await alice.$$eval('.cad-dialog select[data-param=board] option', (els) => els.map((e) => e.value).filter(Boolean));
-  await alice.selectOption('.cad-dialog select[data-param=board]', boards[0]);
+  const boards = await alice.$$eval('.cad-dialog k-select[data-param=board] option', (els) => els.map((e) => e.value).filter(Boolean));
+  await pickOption(alice, '.cad-dialog k-select[data-param=board]', boards[0]);
   await alice.fill('.cad-dialog input[data-param=z]', '6');
   await alice.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.kernel.state === 'ready' && s.editing && Array.isArray(s.editing.draft.params.origin) && s.bodies.some((b) => b.id.endsWith(':board') && b.mesh); }, null, { timeout: 120000 });
   // where the middle of the outline-to-be (sheet 134, 84) must be: the middle of the tray (35, 25)
@@ -695,7 +696,7 @@ try {
   await S(alice, (b) => { const st = window.JunctionPartStudio; st.select([{ kind: 'face', body: b.id, name: b.face, point: [0, 0, 0] }]); }, { id: trayNow.id, face: trayNow.faces[0].name });
   await tool(alice, 'Export');
   await alice.waitForSelector('[data-export-dialog]');
-  await alice.selectOption('[data-param=format]', 'step');
+  await pickOption(alice, '[data-param=format]', 'step');
   const ticked = await alice.$$eval('[data-param=bodies] [data-body] input:checked', (els) => els.length);
   await shot(alice, '10-export');
   const [dl] = await Promise.all([alice.waitForEvent('download', { timeout: 180000 }), alice.click('.kd-dialog .kd-foot button.primary')]);

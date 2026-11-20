@@ -4,6 +4,7 @@
 import { useEffect } from "react";
 import { usePanelOpen } from "../ui/panels";
 import { cx } from "../../../shared/util";
+import { Select } from "../../../shared/components/Select";
 import { definePanel } from "../core/tool";
 import { assignMaterial, materialsOf } from "../document/mass-materials";
 import { massOf } from "../inspect/mass-session";
@@ -43,10 +44,8 @@ function MassProperties({ studio }: { studio: PartStudio }) {
         {bodies.map((b) => (
           <label key={b.id} role="listitem" className="flex items-center gap-1.5 text-xs" data-body={b.id}>
             <span className={cx("flex-1 truncate", s.bodies.includes(b.id) ? "text-ink" : "text-ink-3")}>{b.name}</span>
-            <select className="input h-6 text-xs w-32" value={assign[b.id] || ""} disabled={!canEdit} aria-label={`Material of ${b.name}`} onChange={(e) => setMaterial([b.id], e.target.value)}>
-              <option value="">No material</option>
-              {names.map(([id, m]) => <option key={id} value={id}>{m.name} ({m.density} g/cm³)</option>)}
-            </select>
+            <Select className="input h-6 text-xs w-32" value={assign[b.id] || ""} disabled={!canEdit} label={`Material of ${b.name}`} onChange={(v) => setMaterial([b.id], v)}
+              options={[{ value: "", label: "No material" }, ...names.map(([id, m]) => ({ value: id, label: `${m.name} (${m.density} g/cm³)` }))]} />
           </label>
         ))}
         {!bodies.length ? <p className="note m-0 text-xs">No parts yet.</p> : null}

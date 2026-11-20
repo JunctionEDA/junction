@@ -23,6 +23,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { setCad } from './cad-setting.mjs';
+import { pickOption } from './kselect-pick.mjs';   // the app's drop-downs are <k-select>, not <select>
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -89,8 +90,8 @@ async function newPartStudio(page) {
 async function addBoard(page, z, minHole) {
   await tool(page, 'Board');
   await page.waitForSelector('.cad-dialog[data-feature=board-reference]');
-  const boards = await page.$$eval('.cad-dialog select[data-param=board] option', (els) => els.map((e) => e.value).filter(Boolean));
-  await page.selectOption('.cad-dialog select[data-param=board]', boards[0]);
+  const boards = await page.$$eval('.cad-dialog k-select[data-param=board] option', (els) => els.map((e) => e.value).filter(Boolean));
+  await pickOption(page, '.cad-dialog k-select[data-param=board]', boards[0]);
   await page.fill('.cad-dialog input[data-param=z]', String(z));
   if (minHole !== undefined) await page.fill('.cad-dialog input[data-param=minHole]', String(minHole));
   // the preview: the board has been read and built while the dialog is still open

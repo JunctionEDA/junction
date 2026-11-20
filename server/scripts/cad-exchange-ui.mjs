@@ -17,6 +17,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { tool } from './cad-chrome.mjs';   // Import and Export are under More
 import { setCad } from './cad-setting.mjs';
+import { pickOption } from './kselect-pick.mjs';   // the app's drop-downs are <k-select>, not <select>
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -112,7 +113,7 @@ try {
 
   // ---------------------------------------------------------------- Export: STEP, with names
   const step = await exportFile(alice, async () => {
-    await alice.selectOption('[data-param=format]', 'step');
+    await pickOption(alice, '[data-param=format]', 'step');
     await alice.click('[data-param=schema] >> text=AP242');
   }, '03-export-step-dialog');
   const stepText = step.data.toString('latin1');
@@ -125,7 +126,7 @@ try {
   let checked = -1;
   const stl = await exportFile(alice, async () => {
     checked = await alice.$$eval('[data-param=bodies] [data-body] input:checked', (els) => els.length);
-    await alice.selectOption('[data-param=format]', 'stl');
+    await pickOption(alice, '[data-param=format]', 'stl');
     await alice.click('[data-param=resolution] >> text=Coarse');
     await alice.click('[data-param=encoding] >> text=Binary');
   }, '04-export-stl-dialog');
@@ -134,15 +135,15 @@ try {
   check('the dialog starts from the selection: the two selected parts are the ones ticked', checked === 2, `${checked} ticked`);
   await studio(alice, () => window.JunctionPartStudio.select([]));
   const fine = await exportFile(alice, async () => {
-    await alice.selectOption('[data-param=format]', 'stl');
+    await pickOption(alice, '[data-param=format]', 'stl');
     await alice.click('[data-param=resolution] >> text=Custom');
     await alice.fill('[data-param=deflection]', '0.01');
     await alice.fill('[data-param=angle]', '5');
   });
   check('a finer resolution gives more triangles (all parts)', fine.data.readUInt32LE(80) > tris, `${fine.data.readUInt32LE(80)} > ${tris}`);
-  const mf = await exportFile(alice, async () => { await alice.selectOption('[data-param=format]', '3mf'); await alice.click('[data-param=resolution] >> text=Medium'); });
+  const mf = await exportFile(alice, async () => { await pickOption(alice, '[data-param=format]', '3mf'); await alice.click('[data-param=resolution] >> text=Medium'); });
   check('Export › 3MF downloads a ZIP package', mf.name.endsWith('.3mf') && mf.data.subarray(0, 2).toString() === 'PK' && mf.data.includes(Buffer.from('3D/3dmodel.model')), `${mf.data.length} bytes`);
-  const glb = await exportFile(alice, async () => { await alice.selectOption('[data-param=format]', 'glb'); });
+  const glb = await exportFile(alice, async () => { await pickOption(alice, '[data-param=format]', 'glb'); });
   const json = glb.data.length > 20 ? JSON.parse(glb.data.subarray(20, 20 + glb.data.readUInt32LE(12)).toString()) : null;
   check('Export › glTF downloads a GLB with a mesh per part', glb.data.readUInt32LE(0) === 0x46546c67 && json && json.meshes.length === 22, `${glb.data.length} bytes`);
 
@@ -173,9 +174,9 @@ try {
   await settled(alice, 2);
   const sketchSize = await studio(alice, () => { const s = window.JunctionPartStudio.getState(); return s.bodies[0].mesh.bbox; });
   const dxf = await exportFile(alice, async () => {
-    await alice.selectOption('[data-param=format]', 'dxf');
+    await pickOption(alice, '[data-param=format]', 'dxf');
     const sk = await studio(alice, () => window.JunctionPartStudio.getState().features[0].id);
-    await alice.selectOption('[data-param=source]', sk);
+    await pickOption(alice, '[data-param=source]', sk);
   }, '05-export-dxf-dialog');
   const dxfText = dxf.data.toString();
   check('Export › DXF of the sketch: four lines and a circle', dxf.name.endsWith('.dxf') && (dxfText.match(/\n0\nLINE\n/g) || []).length === 4 && (dxfText.match(/\n0\nCIRCLE\n/g) || []).length === 1 && /\n0\nEOF\n$/.test(dxfText), dxf.name);
@@ -185,7 +186,7 @@ try {
   const svg = await exportFile(alice, async () => {
     const src = await alice.$eval('[data-param=source]', (e) => e.value);
     if (src !== 'face') throw new Error(`the dialog did not start from the selected face (${src})`);
-    await alice.selectOption('[data-param=format]', 'svg');
+    await pickOption(alice, '[data-param=format]', 'svg');
   }, '06-export-svg-face');
   const svgText = svg.data.toString();
   const w = Number((/width="([\d.]+)mm"/.exec(svgText) || [])[1]);

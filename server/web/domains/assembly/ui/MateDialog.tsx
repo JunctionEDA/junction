@@ -3,6 +3,7 @@
 // Nothing is in the document until Done; the model shows the draft solved.
 import type { JsonObject } from "../../../shared/itemdoc/itemdoc";
 import { cx } from "../../../shared/util";
+import { Select } from "../../../shared/components/Select";
 import type { ParamField } from "../../mechanical/api";
 import type { MateConnector } from "../document/format";
 import { mateDef, type AssemblyEditor } from "./assembly";
@@ -59,10 +60,8 @@ export function MateDialog({ assembly }: { assembly: AssemblyEditor }) {
       <div className="flex flex-col gap-1.5 p-2 overflow-y-auto">
         <label className={row}>
           <span className="text-ink-2">Type</span>
-          <select className="input w-full" value={d.mateType} aria-label="Mate type" data-param="mateType" onChange={(ev) => { const next = mateDef(ev.target.value); if (next) assembly.setMateDraft({ mateType: next.type, params: { ...next.defaults(), ...d.params } }, true); }}>
-            {assembly.mateTypes().slice().sort((p, q) => (p.order ?? 1e6) - (q.order ?? 1e6)).map((m) => <option key={m.type} value={m.type}>{m.title}</option>)}
-            {!def ? <option value={d.mateType}>{d.mateType}</option> : null}
-          </select>
+          <Select className="input w-full" value={d.mateType} label="Mate type" data={{ param: "mateType" }} onChange={(v) => { const next = mateDef(v); if (next) assembly.setMateDraft({ mateType: next.type, params: { ...next.defaults(), ...d.params } }, true); }}
+            options={[...assembly.mateTypes().slice().sort((p, q) => (p.order ?? 1e6) - (q.order ?? 1e6)).map((m) => ({ value: m.type, label: m.title })), ...(!def ? [{ value: d.mateType, label: d.mateType }] : [])]} />
         </label>
         <ConnectorBox assembly={assembly} side="a" end={d.a} armed={d.field === "a"} label="First connector" />
         <ConnectorBox assembly={assembly} side="b" end={d.b} armed={d.field === "b"} label="Second connector" />

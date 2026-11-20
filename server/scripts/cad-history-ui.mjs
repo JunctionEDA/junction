@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { setCad } from './cad-setting.mjs';
+import { pickOption } from './kselect-pick.mjs';   // the app's drop-downs are <k-select>, not <select>
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -210,8 +211,8 @@ try {
   await commit(alice, [setDepth('ex2', 45), setDepth('ex1', 30), { id: 'ex2', kind: 'MODIFIED', typeName: 'feature', props: [{ path: ['name'], value: 'Tall boss' }] }]);
   await settled(alice, 4);
   await alice.click('[data-tool="History"]');
-  await alice.waitForSelector('[data-history-branches] select');
-  check('the drawer says which branch is open, with Merge and Update', await alice.locator('[data-history-branches] select').inputValue() === branchPid && await alice.locator('[data-history-merge="into_main"]').count() === 1);
+  await alice.waitForSelector('[data-history-branches] k-select');
+  check('the drawer says which branch is open, with Merge and Update', await alice.locator('[data-history-branches] k-select').evaluate((el) => el.value) === branchPid && await alice.locator('[data-history-merge="into_main"]').count() === 1);
 
   // meanwhile on main: the plate is made thicker too (the same parameter), and the hole wider (another one)
   const main = await open(aliceId, 'cad-hist-alice');
@@ -252,7 +253,7 @@ try {
   check('the branch now reads as main: main\'s plate and hole, its own boss', synced.plate === 28 && synced.boss === 45 && synced.hole === 4, JSON.stringify(synced));
   check('both lines build the same solid', Math.abs(await volume(alice) - await volume(main)) < 1e-3);
   // back to main from the drawer
-  await Promise.all([alice.waitForURL((u) => u.pathname.includes(pid), { timeout: 30000 }), alice.selectOption('[data-history-branches] select', pid)]);
+  await Promise.all([alice.waitForURL((u) => u.pathname.includes(pid), { timeout: 30000 }), pickOption(alice, '[data-history-branches] k-select', pid)]);
   await settled(alice, 4);
   check('the branch selector goes back to main', new URL(alice.url()).searchParams.get('doc') === docId);
 
@@ -301,7 +302,7 @@ try {
   await main.waitForFunction(() => window.JunctionAssembly && window.JunctionAssembly.getState().loaded, null, { timeout: 30000 });
   await main.click('[data-doc-kind="assembly"] [role=toolbar] button:has-text("History")');
   await row(main, 'Plate, first cut').waitFor({ timeout: 15000 });
-  check('the assembly has the same History drawer: the project\'s versions, Save, branches', await main.locator('[data-history-save]').count() === 1 && await main.locator('[data-history-branches] select').count() === 1);
+  check('the assembly has the same History drawer: the project\'s versions, Save, branches', await main.locator('[data-history-save]').count() === 1 && await main.locator('[data-history-branches] k-select').count() === 1);
   await main.click('[data-history-save]');
   await main.fill('[data-history-form="save"] input', 'With an assembly');
   await main.click('[data-history-form="save"] button[type=submit]');

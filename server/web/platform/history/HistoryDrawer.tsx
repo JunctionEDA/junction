@@ -9,6 +9,7 @@
 //
 // The host is the domain's editor; this file knows nothing about what a document holds.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Select } from "../../shared/components/Select";
 import * as api from "./api";
 import type { Branch, Branches, DocRef, Entry, MergeConflict, MergePlan, Side, Timeline } from "./api";
 
@@ -137,10 +138,8 @@ export function HistoryDrawer({ host }: { host: HistoryHost }) {
       {branches ? (
         <div className="flex flex-none flex-wrap items-center gap-1.5 px-2 py-1.5 border-b border-line bg-bench" data-history-branches>
           <label className="flex items-center gap-1.5 min-w-0 flex-1"><span className="text-ink-2 flex-none">Branch</span>
-            <select className="input h-6 min-w-0 flex-1" aria-label="Branch" value={host.projectId} onChange={(ev) => switchTo(ev.target.value)}>
-              <option value={branches.main.projectId}>main</option>
-              {branches.branches.map((b) => <option key={b.projectId} value={b.projectId}>{b.name}{b.ahead ? ` · ${b.ahead} ahead` : ""}{b.behind ? ` · ${b.behind} behind` : ""}</option>)}
-            </select>
+            <Select className="input h-6 min-w-0 flex-1" label="Branch" value={host.projectId} onChange={(v) => switchTo(v)}
+              options={[{ value: branches.main.projectId, label: "main" }, ...branches.branches.map((b) => ({ value: b.projectId, label: `${b.name}${b.ahead ? ` · ${b.ahead} ahead` : ""}${b.behind ? ` · ${b.behind} behind` : ""}` }))]} />
           </label>
           {host.canEdit && !onBranch ? <button type="button" className="btn sm" data-history-new-branch disabled={busy} onClick={() => openForm({ kind: "branch" })}>New branch…</button> : null}
           {onBranch && here ? (

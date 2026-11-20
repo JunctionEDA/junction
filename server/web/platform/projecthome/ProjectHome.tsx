@@ -16,6 +16,7 @@ import { createRoot } from "react-dom/client";
 import { KIND_SUMMARY, PCB_ELEMENT, documentKind, isCadDocType, type ElementTint } from "../../domains/registry";
 import { CAD_OFF_NOTE, cadEnabled } from "../../shared/cad";
 import { askConfirm } from "../../shared/components/msgbox";
+import { Select } from "../../shared/components/Select";
 import { dispatch, useApp, type DocEntry } from "../../shared/store";
 import { cx } from "../../shared/util";
 import { registerDocumentEditor } from "../documents/host";
@@ -268,9 +269,8 @@ export function ProjectHome() {
       <span className="flex-1" />
       <input className="input" style={{ width: 220 }} type="search" placeholder="Search this project" aria-label="Search this project" value={q} onChange={(ev) => setQ(ev.target.value)} data-home-search />
       <label className="flex items-center gap-1.5 text-ink-2">Sort
-        <select className="input" style={{ width: "auto" }} aria-label="Sort by" value={sort} onChange={(ev) => { const s = ev.target.value as Sort; setSort(s); setDesc(false); }} data-home-sort>
-          <option value="name">Name</option><option value="kind">Kind</option><option value="modified">Last modified</option>
-        </select>
+        <Select className="input" style={{ width: "auto" }} label="Sort by" value={sort} onChange={(v) => { const s = v as Sort; setSort(s); setDesc(false); }} data={{ "home-sort": "" }}
+          options={[{ value: "name", label: "Name" }, { value: "kind", label: "Kind" }, { value: "modified", label: "Last modified" }]} />
       </label>
       <button type="button" className="btn" aria-label={desc ? "Reversed order" : "Usual order"} aria-pressed={desc} title="Reverse the order" onClick={() => setDesc(!desc)}>
         <Glyph svg={desc ? '<path d="M12 5v14M7 14l5 5 5-5"/>' : '<path d="M12 19V5M7 10l5-5 5 5"/>'} />

@@ -47964,9 +47964,9 @@ var require_pcb_tools = __commonJS({
         customElements.define(KSELECT_TAG2, KSelect);
         document.addEventListener("click", (ev) => {
           const l = ev.target instanceof Element ? ev.target.closest("label") : null;
-          if (!l || !l.htmlFor) return;
-          const t = l.getRootNode().getElementById?.(l.htmlFor) || document.getElementById(l.htmlFor);
-          if (t && t.tagName === "K-SELECT" && !t.disabled) {
+          if (!l) return;
+          const t = l.htmlFor ? l.getRootNode().getElementById?.(l.htmlFor) || document.getElementById(l.htmlFor) : !l.control ? l.querySelector(KSELECT_TAG2) : null;
+          if (t && t.tagName === "K-SELECT" && !t.contains(ev.target) && !t.disabled) {
             ev.preventDefault();
             t.focus();
           }
@@ -58398,9 +58398,9 @@ function defineKSelect() {
   customElements.define(KSELECT_TAG, KSelect);
   document.addEventListener("click", (ev) => {
     const l = ev.target instanceof Element ? ev.target.closest("label") : null;
-    if (!l || !l.htmlFor) return;
-    const t = l.getRootNode().getElementById?.(l.htmlFor) || document.getElementById(l.htmlFor);
-    if (t && t.tagName === "K-SELECT" && !t.disabled) {
+    if (!l) return;
+    const t = l.htmlFor ? l.getRootNode().getElementById?.(l.htmlFor) || document.getElementById(l.htmlFor) : !l.control ? l.querySelector(KSELECT_TAG) : null;
+    if (t && t.tagName === "K-SELECT" && !t.contains(ev.target) && !t.disabled) {
       ev.preventDefault();
       t.focus();
     }
@@ -112426,9 +112426,9 @@ root.KiCadCanvas = api;
     customElements.define(KSELECT_TAG2, KSelect);
     document.addEventListener("click", (ev) => {
       const l = ev.target instanceof Element ? ev.target.closest("label") : null;
-      if (!l || !l.htmlFor) return;
-      const t = l.getRootNode().getElementById?.(l.htmlFor) || document.getElementById(l.htmlFor);
-      if (t && t.tagName === "K-SELECT" && !t.disabled) {
+      if (!l) return;
+      const t = l.htmlFor ? l.getRootNode().getElementById?.(l.htmlFor) || document.getElementById(l.htmlFor) : !l.control ? l.querySelector(KSELECT_TAG2) : null;
+      if (t && t.tagName === "K-SELECT" && !t.contains(ev.target) && !t.disabled) {
         ev.preventDefault();
         t.focus();
       }

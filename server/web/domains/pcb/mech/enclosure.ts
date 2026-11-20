@@ -9,6 +9,7 @@
 // kernel are fetched only when the 3D viewer is opened on a board that has a link and the enclosure is not
 // hidden, and are dropped when the viewer closes.  An edit in the part studio arrives over its session and
 // re-evaluates only the features it touches (the worker's cache), so the enclosure follows within a rebuild.
+import { createSelect } from "../../../shared/components/kselect";
 import { store } from "../editor/appstore";
 import { E } from "../editor/state";
 import { BoardFeed, KernelClient, directionToBoard3D, modelToBoard3D, placementOf, studioInputs, type BodyResult, type Placement } from "../../mechanical/api";
@@ -93,7 +94,7 @@ class Enclosure {
   setMode(mode: EnclosureMode): void {
     this.mode = mode;
     try { localStorage.setItem(MODE_KEY, mode); } catch (e) { /* storage blocked */ }
-    if (this.control) { const sel = this.control.querySelector("select"); if (sel) (sel as HTMLSelectElement).value = mode; }
+    if (this.control) { const sel = this.control.querySelector("k-select"); if (sel) sel.value = mode; }
     this.schedule();
   }
 
@@ -103,7 +104,7 @@ class Enclosure {
     box.className = "v3d-enclosure";
     box.style.cssText = "position:absolute;left:8px;top:8px;z-index:3;display:none;align-items:center;gap:6px;padding:3px 6px;border:1px solid var(--line);border-radius:var(--r-2);background:var(--panel);color:var(--ink);font-size:var(--fs-sm)";
     const text = document.createElement("span"); text.textContent = "Enclosure";
-    const sel = document.createElement("select"); sel.className = "input"; sel.setAttribute("aria-label", "Enclosure");
+    const sel = createSelect(); sel.className = "input"; sel.setAttribute("aria-label", "Enclosure");
     for (const m of MODES) { const o = document.createElement("option"); o.value = m.id; o.textContent = m.label; sel.appendChild(o); }
     sel.value = this.mode;
     sel.addEventListener("change", () => this.setMode(sel.value as EnclosureMode));
