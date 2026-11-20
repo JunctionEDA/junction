@@ -364,10 +364,11 @@ try {
   const n = m.features.length;
   await page.click('.cad-toolbar [data-tool=Undo]');
   await settled(page, n - 1);
-  check('Undo takes the composite part away', parts(await model(page)).length === before);
+  const partsAre = (k) => page.waitForFunction((k) => window.JunctionPartStudio.getState().bodies.filter((b) => b.mesh && !b.reference).length === k, k, { timeout: 30000 }).then(() => true, () => false);
+  check('Undo takes the composite part away', await partsAre(before));
   await page.click('.cad-toolbar [data-tool=Redo]');
   await settled(page, n);
-  check('Redo puts it back', parts(await model(page)).length === before - 1);
+  check('Redo puts it back', await partsAre(before - 1));
   const sig = (mm) => JSON.stringify({ f: mm.features.map((f) => `${f.type}:${f.status}`), b: mm.bodies.map((b) => [b.faces.length, Math.round(b.volume)]).sort(), d: mm.datums.map((d) => [d.kind, Math.round(d.length)]).sort() });
   const was = sig(await model(page));
   await page.reload();

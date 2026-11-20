@@ -21,7 +21,7 @@ export default defineFeature<ModifyFilletParams>({
   hint: "Change the radius of a rounding, or remove it, whatever made it.",
   keywords: "round radius change remove fillet edit direct imported",
   icon: '<path class="f" d="M3.5 20.5v-5a11.5 11.5 0 0 1 11.5-11.5h5.5v16.5z"/><path d="M3.5 20.5v-5a11.5 11.5 0 0 1 11.5-11.5h5.5"/><path class="d t" d="M3.5 12v-3a5 5 0 0 1 5-5h4"/><path class="t" d="M9 15l-4-4M5 14v-3h3"/>',
-  toolbarOrder: 50, toolbarSection: "direct", toolbarKeep: 36,
+  toolbarOrder: 50, toolbarSection: "direct", toolbarKeep: 34,
   defaults: () => ({ faces: [], mode: "radius", radius: 2 }),
   schema: [
     { key: "faces", label: "Rounded faces", kind: "refs", of: ["face"], hint: "The faces of the rounding to change." },

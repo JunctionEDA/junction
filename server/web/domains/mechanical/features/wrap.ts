@@ -21,7 +21,7 @@ export default defineFeature<WrapParams>({
   hint: "Lay a flat sketch round a cylinder, raised from it or cut into it.",
   keywords: "emboss deboss engrave label cylinder roll text around",
   icon: '<ellipse cx="12" cy="5.5" rx="6.5" ry="2.5"/><path d="M5.5 5.5v13c0 1.4 2.9 2.5 6.5 2.5s6.5-1.1 6.5-2.5v-13"/><path class="f" d="M5.5 10.5c2.5 1.6 5.5 1.9 9 1.2v5c-3.5.7-6.5.4-9-1.2z"/><path d="M5.5 10.5c2.5 1.6 5.5 1.9 9 1.2v5c-3.5.7-6.5.4-9-1.2"/>',
-  toolbarOrder: 46, toolbarSection: "combine", toolbarKeep: 38,
+  toolbarOrder: 46, toolbarSection: "combine", toolbarKeep: 34,
   defaults: () => ({ profile: null, face: null, result: "emboss", depth: 1 }),
   schema: [
     { key: "result", label: "Result", kind: "enum", options: [{ value: "emboss", label: "Emboss" }, { value: "deboss", label: "Deboss" }, { value: "new", label: "New" }] },

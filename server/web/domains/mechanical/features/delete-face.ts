@@ -54,7 +54,7 @@ export default defineFeature<DeleteFaceParams>({
   hint: "Take faces off a part and close the gap: fill a hole, remove a boss or a rounding.",
   keywords: "remove face defeature heal fill hole cap direct edit",
   icon: '<path class="f" d="M3.5 8.5l8.5-4.5 8.5 4.5v8l-8.5 4.5-8.5-4.5z"/><path d="M3.5 8.5l8.5-4.5 8.5 4.5v8l-8.5 4.5-8.5-4.5zM3.5 8.5l8.5 4.5 8.5-4.5M12 13v8"/><path class="t" d="M9.5 7l5 3M14.5 7l-5 3"/>',
-  toolbarOrder: 51, toolbarSection: "direct", toolbarKeep: 35,
+  toolbarOrder: 51, toolbarSection: "direct", toolbarKeep: 33,
   defaults: () => ({ faces: [], mode: "heal" }),
   schema: [
     { key: "faces", label: "Faces to delete", kind: "refs", of: ["face"] },

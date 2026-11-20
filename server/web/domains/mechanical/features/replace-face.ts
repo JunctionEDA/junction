@@ -24,7 +24,7 @@ export default defineFeature<ReplaceFaceParams>({
   hint: "Put faces on another surface; the part is trimmed or grown to it.",
   keywords: "swap surface trim extend face to plane direct edit",
   icon: '<path class="f" d="M4 20.5v-9h16v9z"/><path d="M4 11.5v9h16v-9"/><path class="d t" d="M4 11.5h16"/><path d="M2.5 8.5c4-5 8 2 11.5-1.5s5-2.5 7.5-1.5"/><path class="t" d="M8 10.5v-2.5M16 10.5v-4"/>',
-  toolbarOrder: 53, toolbarSection: "direct", toolbarKeep: 33,
+  toolbarOrder: 53, toolbarSection: "direct", toolbarKeep: 31,
   defaults: () => ({ faces: [], target: null, offset: 0, flip: false }),
   schema: [
     { key: "faces", label: "Faces to replace", kind: "refs", of: ["face"] },

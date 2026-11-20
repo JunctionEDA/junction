@@ -43,7 +43,7 @@ export default defineFeature<MoveFaceParams>({
   hint: "Translate, rotate or offset faces of a part; the faces around follow.",
   keywords: "push pull offset translate rotate face direct edit resize",
   icon: '<path class="d t" d="M3.5 9.5l6-3.5h8l-6 3.5z"/><path class="f" d="M3.5 13.5l6-3.5h8v7l-6 3.5h-8z"/><path d="M3.5 13.5l6-3.5h8v7l-6 3.5h-8zM3.5 13.5h8v7M11.5 13.5l6-3.5"/><path d="M20.5 9v-6M18.5 5l2-2 2 2"/>',
-  toolbarOrder: 52, toolbarSection: "direct", toolbarKeep: 34,
+  toolbarOrder: 52, toolbarSection: "direct", toolbarKeep: 32,
   defaults: () => ({ faces: [], type: "translate", direction: null, distance: 5, flip: false, axis: null, angle: 10 }),
   schema: [
     { key: "faces", label: "Faces to move", kind: "refs", of: ["face"] },

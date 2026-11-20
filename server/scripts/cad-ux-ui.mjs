@@ -166,7 +166,7 @@ try {
   await key('w'); await key('w'); await key('w');   // round to shaded with edges again
   await page.setViewportSize({ width: 1500, height: 900 });
   await page.waitForTimeout(250);
-  check('wide again, the buttons are back on the bar', (await barFit()).moved === 0 && (await toolTitles(page, '', true)).includes('Section'));
+  check('wide again, the buttons are back on the bar', (await barFit()).moved === wide.moved && (await toolTitles(page, '', true)).includes('Section'));
 
   // the tool search: a field at the right of the bar; it finds a tool by its name or by another word for it
   check('the toolbar has a search field that shows its key', (await page.textContent('.cad-toolbar [data-tool-search]')).includes('Search tools') && (await page.textContent('.cad-toolbar [data-tool-search] .kbd')) === 'S');
