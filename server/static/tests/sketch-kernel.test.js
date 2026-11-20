@@ -116,11 +116,77 @@ test("sketch-project: the model's edges and corners on a sketch plane", async ()
   assert.deepEqual(a.curves.map((c) => c.type), ["line", "line"]);
   assert.deepEqual([a.curves[0].a, a.curves[0].b].sort((p, q) => p[1] - q[1]), [[40, 0], [40, 10]]);
   assert.deepEqual([a.curves[1].a, a.curves[1].b].sort((p, q) => p[0] - q[0]), [[7, 10], [13, 10]]);
-  // an edge straight towards the viewer is a point; a tilted circle is refused with a reason
+  // an edge straight towards the viewer is a point; a tilted circle is an ellipse; a name that is gone is refused
   a = call([edge(upright)], top);
   assert.deepEqual(a.curves, [{ type: "point", p: [40, 0], from: edge(upright) }]);
   const s = Math.SQRT1_2;
   a = call([edge("edge(e1:end:ra|e1:side:hole)"), edge("nope")], { origin: [0, 0, 0], x: [1, 0, 0], y: [0, s, s], normal: [0, -s, s] });
-  assert.equal(a.curves.length, 0);
-  assert.match(a.skipped[0].why, /ellipse/); assert.match(a.skipped[1].why, /no longer exists/);
+  assert.deepEqual(a.curves.map((c) => c.type), ["ellipse"]);
+  near(a.curves[0].minor, 3 * s, 1e-6); near(Math.hypot(a.curves[0].m[0] - a.curves[0].c[0], a.curves[0].m[1] - a.curves[0].c[1]), 3, 1e-6);
+  assert.equal(a.skipped.length, 1); assert.match(a.skipped[0].why, /no longer exists/);
+});
+
+test("free-form curves extrude and revolve: an ellipse, a closed spline, a conic over a line, text", async () => {
+  const k = await boot(), engine = new K.RegenEngine(k, K.FEATURES);
+  const revolve = (id, sk, o = {}) => ({ id, type: "revolve", name: id, suppressed: false, params: { profile: { sketch: sk, regions: null }, operation: "new", axisType: "y", axisEdge: null, endType: "full", angle: 360, flip: false, targets: [], ...o } });
+  const r = await engine.regenerate([
+    sketch("s1", { c: pt(0, 0), m: pt(20, 0), e: { type: "ellipse", center: "c", major: "m", minor: 8 } }),
+    extrude("e1", "s1"),
+    // a partial ellipse closed by its chord, cut by a line across it
+    sketch("s2", { c: pt(100, 0), m: pt(120, 0), s: pt(120, 0), n: pt(80, 0), e: { type: "ellipticalArc", center: "c", major: "m", minor: 10, start: "s", end: "n" }, l: { type: "line", a: "n", b: "s" }, x0: pt(100, -5), x1: pt(100, 20), x: { type: "line", a: "x0", b: "x1" } }),
+    extrude("e2", "s2"),
+    sketch("s3", { a: pt(0, 50), b: pt(30, 50), x: pt(15, 70), l: { type: "line", a: "a", b: "b" }, q: { type: "conic", start: "b", apex: "x", end: "a", rho: 0.5 } }),
+    extrude("e3", "s3"),
+    sketch("s4", { a: pt(0, 100), b: pt(0, 110), t: { type: "text", a: "a", b: "b", text: "Hi8" } }),
+    extrude("e4", "s4", { depth: 2 }),
+    sketch("s5", { a: pt(30, 0), b: pt(40, -5), c: pt(45, 5), d: pt(35, 10), k: { type: "spline", points: ["a", "b", "c", "d"], closed: true } }, { kind: "plane", plane: "front" }),
+    revolve("v5", "s5"),
+  ], 10);
+  assert.deepEqual(r.features.map((f) => f.status), Array(10).fill("ok"), r.features.map((f) => f.message).join());
+  // (exact: the sketch builds one edge per knot span, which OpenCascade's integration needs)
+  const vol = (id) => engine.state.bodies.filter((b) => b.id === id || b.id.startsWith(id + ":") || b.id.startsWith(id + "~")).reduce((s, b) => s + k.volume(b.shape), 0);
+  near(vol("e1"), Math.PI * 20 * 8 * 10, 1e-6);
+  near(vol("e2"), Math.PI * 20 * 10 / 2 * 10, 1e-6);
+  assert.equal(engine.state.bodies.filter((b) => b.id.startsWith("e2")).length, 2, "the line across the half ellipse splits it");
+  near(vol("e3"), (2 / 3) * 30 * 10 * 10, 1e-6);
+  assert.ok(engine.state.bodies.filter((b) => b.id.startsWith("e4")).length >= 3, "a solid per letter");
+  assert.ok(vol("e4") > 2 * 10 * 2, `text has some volume: ${vol("e4")}`);
+  assert.ok(vol("v5") > 1000, `the revolved spline: ${vol("v5")}`);
+});
+
+test("sketch-intersect, sketch-pierce, and Use edge on a tilted circle", async () => {
+  const k = await boot(), engine = new K.RegenEngine(k, K.FEATURES);
+  // a cylinder of radius 5, 20 tall, standing on the top plane
+  const r = await engine.regenerate([sketch("s1", { c: pt(0, 0), k: { type: "circle", center: "c", r: 5 } }), extrude("e1", "s1", { depth: 20 })], 2);
+  assert.deepEqual(r.features.map((f) => f.status), ["ok", "ok"]);
+  const svc = (name) => { const s = K.SERVICES.find((x) => x.name === name); return (args) => s.run({ oc: k.oc, k, state: engine.state, fail: (m) => new Error(m) }, args); };
+  const body = engine.state.bodies[0];
+  const side = body.topo.faces.find((f) => /side:k/.test(f.name)).name;
+  // the front plane (XZ) through the axis cuts the side face in two straight lines
+  const front = { origin: [0, 0, 0], x: [1, 0, 0], y: [0, 0, 1], normal: [0, -1, 0] };
+  let a = svc("sketch-intersect")({ refs: [{ kind: "face", body: "e1", name: side }], frame: front });
+  assert.equal(a.curves.length, 2, JSON.stringify(a));
+  assert.ok(a.curves.every((c) => c.type === "line"));
+  assert.deepEqual(a.curves.map((c) => Math.abs(c.a[0])).sort(), [5, 5]);
+  // a slanted plane through the whole part: an ellipse (and the lines where it leaves through the ends, if any)
+  const s = Math.SQRT1_2, slant = { origin: [0, 0, 10], x: [s, 0, s], y: [0, 1, 0], normal: [-s, 0, s] };
+  a = svc("sketch-intersect")({ bodies: ["e1"], frame: slant });
+  const el = a.curves.find((c) => c.type === "ellipse");
+  assert.ok(el, JSON.stringify(a.curves.map((c) => c.type)));
+  near(el.minor, 5, 1e-6); near(Math.hypot(el.m[0] - el.c[0], el.m[1] - el.c[1]), 5 * Math.SQRT2, 1e-6);
+  // the circular rim of the top, used in the slanted sketch: an ellipse too
+  const rim = body.topo.edges.find((e) => /end:k/.test(e.name) && /side:k/.test(e.name) && !/start/.test(e.name)).name;
+  a = svc("sketch-project")({ refs: [{ kind: "edge", body: "e1", name: rim }], frame: slant });
+  assert.equal(a.skipped.length, 0, JSON.stringify(a.skipped));
+  assert.equal(a.curves[0].type, "ellipse");
+  near(a.curves[0].minor, 5 * s, 1e-6);
+  // the cylinder's seam pierces a plane 7 up at one point, 5 from its axis
+  const seam = body.topo.edges.find((e) => (e.name.match(/side:k/g) || []).length === 2);
+  const mid = { origin: [0, 0, 7], x: [1, 0, 0], y: [0, 1, 0], normal: [0, 0, 1] };
+  if (seam) {
+    a = svc("sketch-pierce")({ ref: { kind: "edge", body: "e1", name: seam.name }, frame: mid });
+    assert.equal(a.points.length, 1); near(Math.hypot(a.points[0][0], a.points[0][1]), 5, 1e-6);
+  }
+  a = svc("sketch-pierce")({ ref: { kind: "edge", body: "e1", name: rim }, frame: mid });
+  assert.equal(a.points.length, 0); assert.match(a.why, /does not pass/);
 });

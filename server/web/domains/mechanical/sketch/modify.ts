@@ -9,9 +9,10 @@ import { tryEvaluate } from "./expr";
 import { curvePoints, type SketchData } from "./format";
 import { gridStep, nearestOn } from "./infer";
 import { Draft } from "./model";
-import { chainOf, extend, fillet, mirror, offset, trim } from "./ops";
-import { resolveEntity } from "./refs";
+import { chainOf, extend, fillet, mirror, offset, split, trim } from "./ops";
+import { pointAt, resolveEntity } from "./refs";
 import type { Projected } from "../services/sketch-project";
+import type { SketchEntity } from "./format";
 
 /** Run an operation as one edit; a sentence back from it is shown and nothing changes. */
 function apply(ed: SketchEditor, op: (d: Draft) => string | null): boolean {
@@ -62,6 +63,16 @@ export function runExtend(studio: PartStudio, toolId: string): void {
     down(ev) { const t = ed.hit(ev, { boxes: false, points: false }); if (t) apply(ed, (d) => extend(d, t.id, t.p)); },
     stop() { ed.setHover(null); },
   }, "Click near the end of a line or an arc to lengthen it to the next curve.");
+}
+
+export function runSplit(studio: PartStudio, toolId: string): void {
+  const ed = sketchEditor(studio);
+  ed.select([]);
+  ed.useTool(toolId, {
+    move(ev) { const t = ed.hit(ev, { boxes: false, points: false }); ed.setHover(t ? t.id : null); },
+    down(ev) { const t = ed.hit(ev, { boxes: false, points: false }); if (t) { ed.setHover(null); apply(ed, (d) => split(d, t.id, t.p)); } },
+    stop() { ed.setHover(null); },
+  }, "Click a line or an arc where it should be split in two.");
 }
 
 // ---------------------------------------------------------------- fillet
@@ -190,19 +201,113 @@ export function runUse(studio: PartStudio, toolId: string): void {
         const a = answer as unknown as { curves: Projected[]; skipped: { why: string }[] };
         if (a.skipped.length) studio.host.toast(a.skipped[0].why, 4500);
         if (!a.curves.length || !ed.getState().open) return;
-        ed.edit((d) => {
-          for (const c of a.curves) {
-            let id: string;
-            if (c.type === "point") id = d.point(c.p);
-            else if (c.type === "line") id = d.line(d.point(c.a), d.point(c.b));
-            else if (c.type === "circle") id = d.circle(d.point(c.c), c.r);
-            else id = d.arc(d.point(c.c), d.point(c.s), d.point(c.e));
-            d.set(id, { ...d.data.entities[id], from: c.from });
-            d.constrain("fix", [id]);
-          }
-        });
+        ed.edit((d) => { drawCurves(d, a.curves); });
       }, (err) => { busy = false; studio.host.toast(String((err && (err as Error).message) || err), 4500); });
     },
     stop() { view.setSelection([]); },
   }, "Click an edge or a corner of the model to draw it in the sketch.");
+}
+
+/** Add curves the kernel worked out (Use edge, Intersection) to a sketch, each pinned where it is. */
+export function drawCurves(d: Draft, curves: readonly Projected[]): string[] {
+  const out: string[] = [];
+  for (const c of curves) {
+    let id: string;
+    if (c.type === "point") id = d.point(c.p);
+    else if (c.type === "line") id = d.line(d.point(c.a), d.point(c.b));
+    else if (c.type === "circle") id = d.circle(d.point(c.c), c.r);
+    else if (c.type === "arc") id = d.arc(d.point(c.c), d.point(c.s), d.point(c.e));
+    else if (c.type === "ellipse") { id = d.id("e"); d.set(id, { type: "ellipse", center: d.point(c.c), major: d.point(c.m), minor: c.minor } as SketchEntity); }
+    else if (c.type === "ellipticalArc") { id = d.id("e"); d.set(id, { type: "ellipticalArc", center: d.point(c.c), major: d.point(c.m), minor: c.minor, start: d.point(c.s), end: d.point(c.e) } as SketchEntity); }
+    else { id = d.id("s"); d.set(id, { type: "spline", points: c.points.map((p) => d.point(p)), ...(c.closed ? { closed: true } : {}) } as SketchEntity); }
+    d.set(id, { ...d.data.entities[id], from: c.from });
+    d.constrain("fix", [id]);
+    out.push(id);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- intersection
+/**
+ * Intersection: click a face of the model and the curves where the sketch plane cuts it are drawn in the
+ * sketch, pinned; Shift and a click takes the whole part.  As with Use edge, the curves are a copy.
+ */
+export function runIntersection(studio: PartStudio, toolId: string): void {
+  const ed = sketchEditor(studio);
+  const view = studio.view;
+  const pickAt = (ev: PointerEvent): Extract<Pick, { body: string }> | null => {
+    view.setFilter(["face"]);
+    const p = view.pick(ev);
+    view.setFilter(["sketch"]);
+    return p && p.kind === "face" ? p : null;
+  };
+  let busy = false;
+  ed.select([]);
+  ed.useTool(toolId, {
+    move(ev) { const p = pickAt(ev); view.setSelection(p ? [p] : []); },
+    down(ev) {
+      const p = pickAt(ev), frame = ed.frame;
+      if (!p || !frame || busy) { if (!p) studio.host.toast("Click a face of the model where the sketch plane cuts it.", 2500); return; }
+      const args = ev.shiftKey ? { bodies: [p.body], frame } : { refs: [{ kind: "face", body: p.body, name: p.name }], frame };
+      busy = true;
+      void studio.kernel.call("sketch-intersect", args as never).then((answer) => {
+        busy = false;
+        const a = answer as unknown as { curves: Projected[]; skipped: { why: string }[] };
+        if (!a.curves.length) { studio.host.toast(a.skipped.length ? a.skipped[0].why : "The sketch plane does not cut that.", 4000); return; }
+        if (ed.getState().open) ed.edit((d) => { drawCurves(d, a.curves); });
+      }, (err) => { busy = false; studio.host.toast(String((err && (err as Error).message) || err), 4500); });
+    },
+    stop() { view.setSelection([]); },
+  }, "Click a face to draw where the sketch plane cuts it (Shift: the whole part).");
+}
+
+// ---------------------------------------------------------------- pierce
+/**
+ * Pierce: a point of the sketch where an edge of the model (a path, an edge of a part) passes through the
+ * sketch plane.  Click the point (or select it first), then the edge.  Like Use edge, the place is worked out
+ * when the constraint is made and kept.
+ */
+export function runPierce(studio: PartStudio, toolId: string): void {
+  const ed = sketchEditor(studio);
+  const view = studio.view;
+  const pre = ed.getState().selection.filter((id) => ed.getState().data.entities[id]?.type === "point");
+  let point: string | null = pre[0] || null;
+  const hint = () => ed.setHint(point ? "Click the edge of the model that pierces the sketch plane." : "Click a point of the sketch, then an edge of the model that passes through the sketch plane.");
+  const pickEdge = (ev: PointerEvent): Extract<Pick, { body: string }> | null => {
+    view.setFilter(["edge"]);
+    const p = view.pick(ev);
+    view.setFilter(["sketch"]);
+    return p && p.kind === "edge" ? p : null;
+  };
+  let busy = false;
+  ed.select(point ? [point] : []);
+  ed.useTool(toolId, {
+    move(ev) {
+      if (!point) { const t = ed.hit(ev, { boxes: false, curves: false }); ed.setHover(t ? t.id : null); return; }
+      const p = pickEdge(ev); view.setSelection(p ? [p] : []);
+    },
+    down(ev) {
+      if (!point) {
+        const t = ed.hit(ev, { boxes: false, curves: false });
+        if (t && t.id !== "$origin") { point = t.id; ed.setHover(null); ed.select([point]); hint(); }
+        return;
+      }
+      const p = pickEdge(ev), frame = ed.frame;
+      if (!p || !frame || busy) { if (!p) studio.host.toast("Click an edge of the model.", 2500); return; }
+      const ref: GeomRef = { kind: "edge", body: p.body, name: p.name };
+      busy = true;
+      const target = point;
+      void studio.kernel.call("sketch-pierce", { ref, frame } as never).then((answer) => {
+        busy = false;
+        const a = answer as unknown as { points: Vec2[]; why?: string };
+        if (!a.points.length) { studio.host.toast(a.why || "That edge does not pass through the sketch plane.", 4000); return; }
+        const at = pointAt(ed.getState().data, target) || [0, 0];
+        const best = a.points.reduce((x, y) => (Math.hypot(y[0] - at[0], y[1] - at[1]) < Math.hypot(x[0] - at[0], x[1] - at[1]) ? y : x));
+        if (ed.edit((d) => { d.constrain("pierce", [target], { x: best[0], y: best[1], from: ref } as never); })) { point = null; ed.select([]); view.setSelection([]); hint(); }
+      }, (err) => { busy = false; studio.host.toast(String((err && (err as Error).message) || err), 4500); });
+    },
+    key(ev) { if (ev.key === "Escape" && point && !pre.length) { point = null; ed.select([]); hint(); return true; } return false; },
+    stop() { view.setSelection([]); ed.setHover(null); },
+  });
+  hint();
 }

@@ -22,16 +22,23 @@
 import type { Vec2 } from "../core/geometry";
 import type { SketchData } from "./format";
 import { pointInPolygon, type Loop, type LoopEdge, type Region, type Regions } from "./profiles";
+import { freeformPieces, isFreeform, nearestOnPiece, pieceAt, pieceCurvature, pieceTangent, samplePiece, type Piece } from "./curves";
 import { arcSweep, pointAt } from "./refs";
 
-/** One curve of a loop; `span` is set when the loop uses only part of the curve. */
-export interface SpanEdge extends LoopEdge { span?: [number, number] }
+/**
+ * One curve of a loop; `span` is set when the loop uses only part of the curve.  `part` is which piece of a
+ * free-form entity it is (text has one piece per stroke of a glyph's outline; sketch/curves.ts), and a free-form
+ * curve's span is in its NURBS parameter.
+ */
+export interface SpanEdge extends LoopEdge { span?: [number, number]; part?: number }
 
 const TOL = 1e-6;
 const TAU = Math.PI * 2;
 
 interface Curve {
   entity: string; circular: boolean; closed: boolean;
+  // a free-form curve (an ellipse, a spline, a stroke of text): a NURBS piece, t its parameter in [a0, a1]
+  free?: Piece; part?: number; poly?: Vec2[]; box?: [number, number, number, number];
   // a line from a to b, t in [0, 1]
   a: Vec2; b: Vec2;
   // a circle or arc about c, t the angle in [a0, a1]
@@ -41,10 +48,14 @@ interface Curve {
 interface Edge { curve: Curve; t0: number; t1: number; v0: number; v1: number; alive: boolean }
 interface Half { edge: Edge; forward: boolean; from: number; to: number; angle: number; bend: number; next: Half | null; used: boolean }
 
-const at = (k: Curve, t: number): Vec2 => (k.circular ? [k.c[0] + k.r * Math.cos(t), k.c[1] + k.r * Math.sin(t)] : [k.a[0] + (k.b[0] - k.a[0]) * t, k.a[1] + (k.b[1] - k.a[1]) * t]);
+const at = (k: Curve, t: number): Vec2 => (k.free ? pieceAt(k.free, t) : k.circular ? [k.c[0] + k.r * Math.cos(t), k.c[1] + k.r * Math.sin(t)] : [k.a[0] + (k.b[0] - k.a[0]) * t, k.a[1] + (k.b[1] - k.a[1]) * t]);
+
+/** The period of a closed curve's parameter. */
+const period = (k: Curve): number => (k.free ? k.a1 - k.a0 : TAU);
 
 /** The parameter of a point known to lie on the curve's carrier, or null when it is off the curve's extent. */
 function paramOf(k: Curve, p: Vec2): number | null {
+  if (k.free) { const n = nearestOnPiece(k.free, p); return n.d <= TOL * 4 ? n.t : null; }
   if (!k.circular) {
     const dx = k.b[0] - k.a[0], dy = k.b[1] - k.a[1], l2 = dx * dx + dy * dy;
     const t = ((p[0] - k.a[0]) * dx + (p[1] - k.a[1]) * dy) / l2, slack = TOL / Math.sqrt(l2);
@@ -60,6 +71,7 @@ function paramOf(k: Curve, p: Vec2): number | null {
 
 /** The points where the carriers of two curves meet (the infinite line, the whole circle). */
 function meet(p: Curve, q: Curve): Vec2[] {
+  if (p.free || q.free) return meetFree(p, q);
   if (!p.circular && !q.circular) {
     const d1x = p.b[0] - p.a[0], d1y = p.b[1] - p.a[1], d2x = q.b[0] - q.a[0], d2y = q.b[1] - q.a[1];
     const den = d1x * d2y - d1y * d2x;
@@ -111,6 +123,61 @@ function curvesOf(sketch: SketchData): Curve[] {
       const r = Math.hypot(s[0] - c[0], s[1] - c[1]); if (!(r > TOL)) continue;
       const { a0, a1 } = arcSweep(c, s, en);
       out.push({ entity: id, circular: true, closed: false, a: zero, b: zero, c, r, a0, a1, cuts: [a0, a1] });
+    } else if (isFreeform(e)) {
+      const pieces = freeformPieces(sketch, id);
+      (pieces || []).forEach((pc, part) => {
+        const poly = samplePiece(pc);
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (const v of poly) { x0 = Math.min(x0, v[0]); y0 = Math.min(y0, v[1]); x1 = Math.max(x1, v[0]); y1 = Math.max(y1, v[1]); }
+        if (Math.max(x1 - x0, y1 - y0) < TOL) return;
+        out.push({ entity: id, circular: false, closed: pc.closed, a: zero, b: zero, c: zero, r: 0, a0: pc.t0, a1: pc.t1, cuts: pc.closed ? [] : [pc.t0, pc.t1], free: pc, part: pieces!.length > 1 ? part : undefined, poly, box: [x0 - TOL, y0 - TOL, x1 + TOL, y1 + TOL] });
+      });
+    }
+  }
+  return out;
+}
+
+/** A curve as a polyline and the parameter at each of its points, for crossing tests. */
+function polyOf(k: Curve): { pts: Vec2[]; ts: number[] } {
+  if (k.free) { const n = k.poly!.length - 1; return { pts: k.poly!, ts: k.poly!.map((_, i) => k.a0 + ((k.a1 - k.a0) * i) / n) }; }
+  if (!k.circular) return { pts: [k.a, k.b], ts: [0, 1] };
+  const t1 = k.closed ? k.a0 + TAU : k.a1, n = Math.max(8, Math.ceil(((t1 - k.a0) / TAU) * 96)), ts: number[] = [];
+  for (let i = 0; i <= n; i++) ts.push(k.a0 + ((t1 - k.a0) * i) / n);
+  return { pts: ts.map((t) => at(k, t)), ts };
+}
+const tangentOf = (k: Curve, t: number): Vec2 => (k.free ? pieceTangent(k.free, t) : k.circular ? [-k.r * Math.sin(t), k.r * Math.cos(t)] : [k.b[0] - k.a[0], k.b[1] - k.a[1]]);
+const boxOf = (k: Curve): [number, number, number, number] => k.box || (k.circular ? [k.c[0] - k.r - TOL, k.c[1] - k.r - TOL, k.c[0] + k.r + TOL, k.c[1] + k.r + TOL] : [Math.min(k.a[0], k.b[0]) - TOL, Math.min(k.a[1], k.b[1]) - TOL, Math.max(k.a[0], k.b[0]) + TOL, Math.max(k.a[1], k.b[1]) + TOL]);
+
+/**
+ * Where two curves cross when one is free-form: the crossings of their polylines, each then made exact by
+ * Newton's method on the curves themselves.
+ */
+function meetFree(p: Curve, q: Curve): Vec2[] {
+  const bp = boxOf(p), bq = boxOf(q);
+  if (bp[0] > bq[2] || bq[0] > bp[2] || bp[1] > bq[3] || bq[1] > bp[3]) return [];
+  const A = polyOf(p), B = polyOf(q), out: Vec2[] = [];
+  for (let i = 0; i + 1 < A.pts.length; i++) {
+    const a0 = A.pts[i], a1 = A.pts[i + 1];
+    const ax0 = Math.min(a0[0], a1[0]), ax1 = Math.max(a0[0], a1[0]), ay0 = Math.min(a0[1], a1[1]), ay1 = Math.max(a0[1], a1[1]);
+    if (ax0 > bq[2] || ax1 < bq[0] || ay0 > bq[3] || ay1 < bq[1]) continue;
+    for (let j = 0; j + 1 < B.pts.length; j++) {
+      const b0 = B.pts[j], b1 = B.pts[j + 1];
+      if (Math.max(b0[0], b1[0]) < ax0 - TOL || Math.min(b0[0], b1[0]) > ax1 + TOL || Math.max(b0[1], b1[1]) < ay0 - TOL || Math.min(b0[1], b1[1]) > ay1 + TOL) continue;
+      const dx = a1[0] - a0[0], dy = a1[1] - a0[1], ex = b1[0] - b0[0], ey = b1[1] - b0[1], den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-18) continue;
+      const u = ((b0[0] - a0[0]) * ey - (b0[1] - a0[1]) * ex) / den, v = ((b0[0] - a0[0]) * dy - (b0[1] - a0[1]) * dx) / den;
+      if (u < -0.02 || u > 1.02 || v < -0.02 || v > 1.02) continue;
+      let s = A.ts[i] + (A.ts[i + 1] - A.ts[i]) * u, t = B.ts[j] + (B.ts[j + 1] - B.ts[j]) * v;
+      // Newton on p(s) = q(t)
+      for (let it = 0; it < 12; it++) {
+        const ps = at(p, s), qt = at(q, t), fx = ps[0] - qt[0], fy = ps[1] - qt[1];
+        if (Math.hypot(fx, fy) < 1e-13) break;
+        const dp = tangentOf(p, s), dq = tangentOf(q, t), det = -dp[0] * dq[1] + dp[1] * dq[0];
+        if (Math.abs(det) < 1e-18) break;
+        s -= (-dq[1] * fx + dq[0] * fy) / det; t -= (-dp[1] * fx + dp[0] * fy) / det;
+      }
+      const x = at(p, s);
+      if (Math.hypot(x[0] - at(q, t)[0], x[1] - at(q, t)[1]) < TOL && !out.some((o) => Math.hypot(o[0] - x[0], o[1] - x[1]) < TOL * 4)) out.push(x);
     }
   }
   return out;
@@ -118,6 +185,7 @@ function curvesOf(sketch: SketchData): Curve[] {
 
 /** Points along a stretch of a curve, both ends included. */
 function sample(k: Curve, t0: number, t1: number): Vec2[] {
+  if (k.free) return samplePiece(k.free, t0, t1);
   if (!k.circular) return [at(k, t0), at(k, t1)];
   const n = Math.max(2, Math.ceil((Math.abs(t1 - t0) / TAU) * 64));
   const out: Vec2[] = [];
@@ -139,6 +207,8 @@ export function findRegions(sketch: SketchData): Regions {
   // ---- cut every curve where it meets another
   for (let i = 0; i < curves.length; i++) for (let j = i + 1; j < curves.length; j++) {
     const p = curves[i], q = curves[j];
+    const bp = boxOf(p), bq = boxOf(q);
+    if (bp[0] > bq[2] + TOL || bq[0] > bp[2] + TOL || bp[1] > bq[3] + TOL || bq[1] > bp[3] + TOL) continue;
     const pts = meet(p, q);
     // ends that touch the other curve without the carriers crossing cleanly there (a T-junction a hair short)
     for (const k of [p, q]) if (!k.closed) pts.push(at(k, k.a0), at(k, k.a1));
@@ -164,14 +234,14 @@ export function findRegions(sketch: SketchData): Regions {
   const edges: Edge[] = [];
   const lone: Curve[] = [];   // whole circles nothing touches
   for (const k of curves) {
-    const eps = k.circular ? TOL / k.r : TOL / Math.hypot(k.b[0] - k.a[0], k.b[1] - k.a[1]);
+    const eps = k.free ? (k.a1 - k.a0) * 1e-9 : k.circular ? TOL / k.r : TOL / Math.hypot(k.b[0] - k.a[0], k.b[1] - k.a[1]);
     const cuts = k.cuts.slice().sort((a, b) => a - b).filter((t, i, a) => i === 0 || t - a[i - 1] > eps);
     if (k.closed) {
       // angles wrap: a cut at 0 and one at 2π are the same place
-      while (cuts.length > 1 && cuts[cuts.length - 1] - cuts[0] > TAU - eps) cuts.pop();
+      while (cuts.length > 1 && cuts[cuts.length - 1] - cuts[0] > period(k) - eps) cuts.pop();
       if (!cuts.length) { lone.push(k); continue; }
       for (let i = 0; i < cuts.length; i++) {
-        const t0 = cuts[i], t1 = i + 1 < cuts.length ? cuts[i + 1] : cuts[0] + TAU;
+        const t0 = cuts[i], t1 = i + 1 < cuts.length ? cuts[i + 1] : cuts[0] + period(k);
         edges.push({ curve: k, t0, t1, v0: vertex(at(k, t0)), v1: vertex(at(k, t1)), alive: true });
       }
     } else for (let i = 0; i + 1 < cuts.length; i++) edges.push({ curve: k, t0: cuts[i], t1: cuts[i + 1], v0: vertex(at(k, cuts[i])), v1: vertex(at(k, cuts[i + 1])), alive: true });
@@ -200,7 +270,8 @@ export function findRegions(sketch: SketchData): Regions {
     for (const forward of [true, false]) {
       const k = e.curve, t = forward ? e.t0 : e.t1;
       let dir: Vec2, bend = 0;
-      if (k.circular) { dir = forward ? [-Math.sin(t), Math.cos(t)] : [Math.sin(t), -Math.cos(t)]; bend = (forward ? 1 : -1) / k.r; }
+      if (k.free) { const d = tangentOf(k, t); dir = forward ? d : [-d[0], -d[1]]; bend = (forward ? 1 : -1) * pieceCurvature(k.free, t); }
+      else if (k.circular) { dir = forward ? [-Math.sin(t), Math.cos(t)] : [Math.sin(t), -Math.cos(t)]; bend = (forward ? 1 : -1) / k.r; }
       else dir = forward ? [k.b[0] - k.a[0], k.b[1] - k.a[1]] : [k.a[0] - k.b[0], k.a[1] - k.b[1]];
       let angle = Math.atan2(dir[1], dir[0]);
       if (angle < -Math.PI + 1e-7) angle = Math.PI;   // -π and +π are one direction
@@ -236,8 +307,9 @@ export function findRegions(sketch: SketchData): Regions {
   }
   let nextGroup = vx.length;
   for (const k of lone) {
-    const polygon = sample(k, 0, TAU).slice(0, -1);
-    const e: Edge = { curve: k, t0: 0, t1: TAU, v0: -1, v1: -1, alive: true };
+    const t0 = k.free ? k.a0 : 0, t1 = t0 + period(k);
+    const polygon = sample(k, t0, t1).slice(0, -1);
+    const e: Edge = { curve: k, t0, t1, v0: -1, v1: -1, alive: true };
     const component = nextGroup++;
     const mk = (forward: boolean): Half => ({ edge: e, forward, from: -1, to: -1, angle: 0, bend: 0, next: null, used: true });
     cycles.push({ halves: [mk(true)], polygon, area: signedArea(polygon), component });
@@ -266,8 +338,10 @@ export function findRegions(sketch: SketchData): Regions {
 
   const loopOf = (c: Cycle, reverse: boolean): Loop => {
     let edgesOut: SpanEdge[] = c.halves.map((h) => {
-      const k = h.edge.curve, whole = k.closed ? h.edge.t1 - h.edge.t0 >= TAU - 1e-9 && h.edge.v0 === -1 : Math.abs(h.edge.t0 - k.a0) < 1e-7 && Math.abs(h.edge.t1 - k.a1) < 1e-7;
+      const k = h.edge.curve, tol = k.free ? (k.a1 - k.a0) * 1e-9 : 1e-7;
+      const whole = k.closed ? h.edge.t1 - h.edge.t0 >= period(k) - tol && h.edge.v0 === -1 : Math.abs(h.edge.t0 - k.a0) < tol && Math.abs(h.edge.t1 - k.a1) < tol;
       const edge: SpanEdge = { entity: k.entity, reversed: !h.forward };
+      if (k.part !== undefined) edge.part = k.part;
       if (!whole) edge.span = [h.edge.t0, h.edge.t1];
       return edge;
     });
@@ -308,6 +382,7 @@ export function findRegions(sketch: SketchData): Regions {
 
 /** The parameter of `p` on the curve when it lies on it (within tolerance), else null. */
 function onCurve(k: Curve, p: Vec2): number | null {
+  if (k.free) { const b = boxOf(k); if (p[0] < b[0] - TOL * 4 || p[0] > b[2] + TOL * 4 || p[1] < b[1] - TOL * 4 || p[1] > b[3] + TOL * 4) return null; return paramOf(k, p); }
   if (k.circular) { if (Math.abs(Math.hypot(p[0] - k.c[0], p[1] - k.c[1]) - k.r) > TOL * 4) return null; }
   else {
     const dx = k.b[0] - k.a[0], dy = k.b[1] - k.a[1], l = Math.hypot(dx, dy);

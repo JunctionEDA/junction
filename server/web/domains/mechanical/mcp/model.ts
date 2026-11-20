@@ -40,7 +40,7 @@ function fieldDoc(f: ParamField): JsonObject {
   return out;
 }
 
-const SKETCH_NOTE = "A sketch stores solved 2D geometry in its plane (x, y in millimetres; top is the XY plane, front is XZ, right is YZ): params.sketch.entities is a map of points { type: \"point\", x, y } and curves that name points by id: { type: \"line\", a, b }, { type: \"circle\", center, r }, { type: \"arc\", center, start, end } (counter-clockwise). Curves that share a point id are joined; a closed loop of lines and arcs, or a circle, is a region an extrude can use, and a loop inside another is a hole. In cad_edit_features give `shapes` instead of writing entities by hand: { type: \"rectangle\", x1, y1, x2, y2 }, { type: \"circle\", cx, cy, r }, { type: \"polygon\", points: [[x, y], ...] } (closed), { type: \"line\", x1, y1, x2, y2 }.";
+const SKETCH_NOTE = "A sketch stores solved 2D geometry in its plane (x, y in millimetres; top is the XY plane, front is XZ, right is YZ): params.sketch.entities is a map of points { type: \"point\", x, y } and curves that name points by id: { type: \"line\", a, b }, { type: \"circle\", center, r }, { type: \"arc\", center, start, end } (counter-clockwise), { type: \"ellipse\", center, major, minor } (major: a point at the end of the major axis; minor: the other radius), { type: \"ellipticalArc\", center, major, minor, start, end }, { type: \"spline\", points: [ids], closed? } (through the points), { type: \"bspline\", poles: [ids], degree } (control points; degree = poles - 1 is a Bezier curve), { type: \"conic\", start, apex, end, rho }, { type: \"text\", a, b, text, bold?, italic? } (baseline start a; b above it by the height of a capital). Curves that share a point id are joined; a closed loop of lines and arcs, or a circle, is a region an extrude can use, and a loop inside another is a hole. In cad_edit_features give `shapes` instead of writing entities by hand: { type: \"rectangle\", x1, y1, x2, y2 }, { type: \"circle\", cx, cy, r }, { type: \"polygon\", points: [[x, y], ...] } (closed), { type: \"line\", x1, y1, x2, y2 }, { type: \"ellipse\", cx, cy, rx, ry, angle? }, { type: \"regular_polygon\", cx, cy, r, sides, circumscribed? }, { type: \"spline\", points: [[x, y], ...], closed? }, { type: \"bezier\", points: [[x, y], ...] }, { type: \"text\", x, y, height, text, bold?, italic? } (closed letters are regions).";
 
 /** Every registered feature type with its defaults and the parameters its dialog has. */
 export function featureTypes(defs: Defs): Json {
@@ -115,7 +115,29 @@ export function shapesToEntities(shapes: unknown, into: { [id: string]: SketchEn
     } else if (s.type === "line") {
       if (![s.x1, s.y1, s.x2, s.y2].every(num)) { problems.push(`${where}: a line needs x1, y1, x2, y2`); return; }
       out[id("l")] = { type: "line", a: point(s.x1 as number, s.y1 as number), b: point(s.x2 as number, s.y2 as number) };
-    } else problems.push(`${where}: unknown shape type "${s.type}" (rectangle, circle, polygon, line)`);
+    } else if (s.type === "ellipse") {
+      if (![s.cx, s.cy, s.rx, s.ry].every(num) || !((s.rx as number) > 0) || !((s.ry as number) > 0)) { problems.push(`${where}: an ellipse needs cx, cy and radii rx, ry above zero (angle: degrees, optional)`); return; }
+      const big = Math.max(s.rx as number, s.ry as number), small = Math.min(s.rx as number, s.ry as number);
+      const t = ((num(s.angle) ? (s.angle as number) : 0) * Math.PI) / 180 + ((s.ry as number) > (s.rx as number) ? Math.PI / 2 : 0);
+      const cx = s.cx as number, cy = s.cy as number;
+      out[id("e")] = { type: "ellipse", center: point(cx, cy), major: point(cx + big * Math.cos(t), cy + big * Math.sin(t)), minor: small };
+    } else if (s.type === "regular_polygon") {
+      const n = Math.round(Number(s.sides));
+      if (![s.cx, s.cy, s.r].every(num) || !((s.r as number) > 0) || !(n >= 3 && n <= 64)) { problems.push(`${where}: a regular_polygon needs cx, cy, r above zero and sides from 3 to 64 (circumscribed: true puts its sides on the circle)`); return; }
+      const R = s.circumscribed ? (s.r as number) / Math.cos(Math.PI / n) : (s.r as number), a0 = s.circumscribed ? Math.PI / n : 0;
+      const ids: string[] = [];
+      for (let i = 0; i < n; i++) ids.push(point((s.cx as number) + R * Math.cos(a0 + (2 * Math.PI * i) / n), (s.cy as number) + R * Math.sin(a0 + (2 * Math.PI * i) / n)));
+      for (let i = 0; i < n; i++) out[id("l")] = { type: "line", a: ids[i], b: ids[(i + 1) % n] };
+    } else if (s.type === "spline" || s.type === "bezier") {
+      const pts = s.points, min = s.type === "bezier" ? 3 : 2;
+      if (!Array.isArray(pts) || pts.length < min || !pts.every((p) => Array.isArray(p) && p.length === 2 && num(p[0]) && num(p[1]))) { problems.push(`${where}: a ${s.type} needs points: [[x, y], ...] with at least ${min}`); return; }
+      const ids = (pts as number[][]).map((p) => point(p[0], p[1]));
+      if (s.type === "spline") out[id("s")] = s.closed && ids.length >= 3 ? { type: "spline", points: ids, closed: true } : { type: "spline", points: ids };
+      else out[id("z")] = { type: "bspline", poles: ids, degree: ids.length - 1 };
+    } else if (s.type === "text") {
+      if (![s.x, s.y, s.height].every(num) || !((s.height as number) > 0) || typeof s.text !== "string" || !s.text.trim()) { problems.push(`${where}: text needs x, y (the start of its baseline), height (of a capital, mm) and text`); return; }
+      out[id("t")] = { type: "text", a: point(s.x as number, s.y as number), b: point(s.x as number, (s.y as number) + (s.height as number)), text: s.text, ...(s.bold ? { bold: true } : {}), ...(s.italic ? { italic: true } : {}) };
+    } else problems.push(`${where}: unknown shape type "${s.type}" (rectangle, circle, polygon, line, ellipse, regular_polygon, spline, bezier, text)`);
   });
   return { entities: out, problems };
 }
@@ -131,6 +153,11 @@ function checkEntities(entities: unknown): string[] {
     else if (e.type === "line") { if (!isPoint(e.a) || !isPoint(e.b)) problems.push(`line ${id}: a and b must be ids of points in the sketch`); }
     else if (e.type === "circle") { if (!isPoint(e.center) || !num(e.r) || !(e.r > 0)) problems.push(`circle ${id}: center must be a point id and r above zero`); }
     else if (e.type === "arc") { if (!isPoint(e.center) || !isPoint(e.start) || !isPoint(e.end)) problems.push(`arc ${id}: center, start and end must be point ids`); }
+    else if (e.type === "ellipse" || e.type === "ellipticalArc") { if (!isPoint(e.center) || !isPoint(e.major) || !num(e.minor) || !(e.minor > 0) || (e.type === "ellipticalArc" && (!isPoint(e.start) || !isPoint(e.end)))) problems.push(`${e.type} ${id}: center and major must be point ids${e.type === "ellipticalArc" ? ", start and end too" : ""}, and minor above zero`); }
+    else if (e.type === "spline") { if (!Array.isArray(e.points) || e.points.length < 2 || !e.points.every(isPoint)) problems.push(`spline ${id}: points must be a list of two or more point ids`); }
+    else if (e.type === "bspline") { if (!Array.isArray(e.poles) || e.poles.length < 2 || !e.poles.every(isPoint)) problems.push(`bspline ${id}: poles must be a list of two or more point ids`); }
+    else if (e.type === "conic") { if (!isPoint(e.start) || !isPoint(e.apex) || !isPoint(e.end) || !num(e.rho) || !(e.rho > 0 && e.rho < 1)) problems.push(`conic ${id}: start, apex and end must be point ids and rho between 0 and 1`); }
+    else if (e.type === "text") { if (!isPoint(e.a) || !isPoint(e.b) || typeof e.text !== "string") problems.push(`text ${id}: a and b must be point ids (the baseline start, and a capital's height above it) and text a string`); }
   }
   return problems;
 }

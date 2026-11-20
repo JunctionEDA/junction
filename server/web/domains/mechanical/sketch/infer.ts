@@ -7,6 +7,7 @@
 // or in line with the line before it in a chain, or touching a circle (tangent).  Each is reported as a hint
 // so it can be drawn before the click.  Pure: the editor supplies the sketch and the size of a pixel.
 import type { Vec2 } from "../core/geometry";
+import { nearestOnPiece } from "./curves";
 import type { SketchData } from "./format";
 import type { Draft } from "./model";
 import { ORIGIN, arcSweep, dist, mid, pointAt, resolveEntity, type Resolved } from "./refs";
@@ -64,6 +65,11 @@ export function nearestOn(r: Resolved, p: Vec2): { p: Vec2; d: number } | null {
       if (t > a1) q = dist(p, r.s) < dist(p, r.en) ? r.s : r.en;
     }
     return { p: q, d: dist(p, q) };
+  }
+  if (r.kind === "curve") {
+    let best: { p: Vec2; d: number } | null = null;
+    for (const pc of r.pieces) { const n = nearestOnPiece(pc, p); if (!best || n.d < best.d) best = { p: n.q, d: n.d }; }
+    return best;
   }
   return null;
 }

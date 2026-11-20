@@ -4,7 +4,9 @@
 import { toWorld, length, sub, type Vec3 } from "../../core/geometry";
 import { isGeomRef } from "../../core/geometry";
 import type { RefTarget } from "../../features/_refs";
+import { isFreeform } from "../../sketch/curves";
 import { curvePoints, pointOf, type SketchData } from "../../sketch/format";
+import { freeformEdges } from "./sketch-curves";
 import type { EvalContext, Shape } from "../types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -47,6 +49,13 @@ export function sketchEdge(ctx: EvalContext, sketchId: string, entity: string): 
     const a0 = Math.atan2(start![1] - c[1], start![0] - c[0]); let a1 = Math.atan2(end![1] - c[1], end![0] - c[0]);
     if (a1 <= a0) a1 += Math.PI * 2;
     return ctx.own(ctx.tmp(new oc.BRepBuilderAPI_MakeEdge(circ, a0, a1)).Edge());
+  }
+  if (isFreeform(e) && e.type !== "text") {
+    // an ellipse, a spline, a conic: its NURBS, as a wire of its knot spans
+    const mw = ctx.tmp(new oc.BRepBuilderAPI_MakeWire());
+    for (const edge of freeformEdges(ctx, frame, data, entity)) mw.Add(edge);
+    if (!mw.IsDone()) throw ctx.fail("A sketch curve this feature uses cannot be built.");
+    return ctx.own(mw.Wire());
   }
   // a kind this version does not build exactly: follow its drawn polyline
   const pts = curvePoints(data, e);

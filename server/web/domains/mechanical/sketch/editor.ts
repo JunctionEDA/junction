@@ -19,7 +19,7 @@ import { angleSuffix } from "../document/units";
 import type { SketchData } from "./format";
 import { nearestOn } from "./infer";
 import { Draft, normalise, sketchChange } from "./model";
-import { SketchPainter, relatedEntities, type Box, type Preview, type Scene } from "./paint";
+import { SketchPainter, imageBox, relatedEntities, type Box, type Preview, type Scene } from "./paint";
 import { findRegions } from "./planar";
 import type { Regions } from "./profiles";
 import { ORIGIN, entitiesOf, isDimension, measure, pointAt, pointsOf, resolveEntity } from "./refs";
@@ -327,6 +327,8 @@ export class SketchEditor {
   // ---------------------------------------------------------------- the pointer
   /** The pointer in sketch coordinates. */
   planePoint(ev: { clientX: number; clientY: number }): Vec2 | null { const f = this.frame; return f ? this.studio.view.planePoint(ev, f) : null; }
+  /** A sketch point in canvas pixels (as last drawn). */
+  screenOf(p: Vec2): { x: number; y: number } { return this.painter ? this.painter.screen(p) : { x: 0, y: 0 }; }
   /** The pointer in canvas pixels. */
   canvasPoint(ev: { clientX: number; clientY: number }): { x: number; y: number } { const r = this.studio.viewport.canvas.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; }
 
@@ -357,6 +359,11 @@ export class SketchEditor {
         if (n && n.d < best) { best = n.d; id = cid; }
       }
       if (id) return { id, kind: "curve", p };
+      // a reference image is picked anywhere inside it, last of all
+      for (const iid of Object.keys(data.entities)) {
+        const b = !o.skip?.has(iid) && imageBox(data, iid);
+        if (b && p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3]) return { id: iid, kind: "curve", p };
+      }
     }
     return null;
   }
@@ -479,6 +486,9 @@ export class SketchEditor {
 
 function tryValue(text: string, angle: boolean): boolean { try { evaluate(text, angle ? "angle" : "length", typedFactor(angle)); return true; } catch { return false; } }
 
+/** What a double click on an entity of a type opens (sketch text's own editor, sketch/insert.ts). */
+export const ENTITY_EDITORS: { [type: string]: (ed: SketchEditor, id: string) => void } = {};
+
 // ---------------------------------------------------------------- the tool when no tool is in hand
 /**
  * Select: click picks (Shift or Ctrl adds), a drag on empty space boxes, a drag on geometry moves it as far as
@@ -513,7 +523,7 @@ function selectTool(ed: SketchEditor): ToolHandlers {
       }
       if (t.kind !== "curve") return;
       const e = data.entities[t.id]; if (!e) return;
-      if (e.type === "line") ed.dragSoon([e.a, e.b].filter((pid) => down!.origin[pid]).map((pid) => ({ point: pid, to: [down!.origin[pid][0] + p[0] - down!.start[0], down!.origin[pid][1] + p[1] - down!.start[1]] as Vec2 })));
+      if (e.type !== "circle" && e.type !== "arc") ed.dragSoon(Object.keys(down.origin).filter((pid) => down!.origin[pid]).map((pid) => ({ point: pid, to: [down!.origin[pid][0] + p[0] - down!.start[0], down!.origin[pid][1] + p[1] - down!.start[1]] as Vec2 })));
       else if (e.type === "circle" || e.type === "arc") { const c = down.origin[e.center]; if (c) ed.dragSoon([{ curve: t.id, radius: Math.max(1e-3, Math.hypot(p[0] - c[0], p[1] - c[1])) }]); }
     },
     up(ev) {
@@ -544,6 +554,8 @@ function selectTool(ed: SketchEditor): ToolHandlers {
       if (!t) { if (!d.many) ed.select([]); return; }
       const now = performance.now();
       if (t.kind === "dimension" && lastClick.id === t.id && now - lastClick.t < 450) { lastClick = { id: "", t: 0 }; ed.select([t.id]); ed.editDimension(t.id); return; }
+      const opener = t.kind === "curve" ? ENTITY_EDITORS[ed.getState().data.entities[t.id]?.type || ""] : undefined;
+      if (opener && lastClick.id === t.id && now - lastClick.t < 450) { lastClick = { id: "", t: 0 }; ed.select([t.id]); opener(ed, t.id); return; }
       lastClick = { id: t.id, t: now };
       const sel = ed.getState().selection;
       if (d.many) ed.toggle(t.id);

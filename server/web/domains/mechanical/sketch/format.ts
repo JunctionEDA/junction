@@ -9,6 +9,7 @@
 //   line    { type: "line", a, b }                  a and b are point ids
 //   circle  { type: "circle", center, r }           center is a point id
 //   arc     { type: "arc", center, start, end }     point ids; drawn counter-clockwise from start to end
+//   ellipse, ellipticalArc, spline, bspline, conic, text, image: sketch/curves.ts
 // Every curve refers to points by id.  Two curves that share a point id are joined there: that is how a
 // rectangle is four lines and four points, and it is what a constraint solver wants (a point is two unknowns).
 // `construction: true` marks geometry that guides the sketch and makes no profile.
@@ -23,6 +24,8 @@
 // geometry from the entities alone.  A reader that does not know a constraint type keeps it and ignores it.
 import type { JsonObject } from "../../../shared/itemdoc/itemdoc";
 import type { Vec2 } from "../core/geometry";
+import { freeformPolylines, isFreeform } from "./curves";
+import { pointsOf } from "./refs";
 
 export const SKETCH_VERSION = 1;
 
@@ -30,7 +33,16 @@ export interface SketchPoint extends JsonObject { type: "point"; x: number; y: n
 export interface SketchLine extends JsonObject { type: "line"; a: string; b: string; construction?: boolean }
 export interface SketchCircle extends JsonObject { type: "circle"; center: string; r: number; construction?: boolean }
 export interface SketchArc extends JsonObject { type: "arc"; center: string; start: string; end: string; construction?: boolean }
-export type SketchEntity = SketchPoint | SketchLine | SketchCircle | SketchArc;
+/** The free-form curves (sketch/curves.ts says what each key means). */
+export interface SketchEllipse extends JsonObject { type: "ellipse"; center: string; major: string; minor: number; construction?: boolean }
+export interface SketchEllipticalArc extends JsonObject { type: "ellipticalArc"; center: string; major: string; minor: number; start: string; end: string; construction?: boolean }
+export interface SketchSpline extends JsonObject { type: "spline"; points: string[]; closed?: boolean; startHandle?: string; endHandle?: string; construction?: boolean }
+export interface SketchBSpline extends JsonObject { type: "bspline"; poles: string[]; degree: number; weights?: number[]; construction?: boolean }
+export interface SketchConic extends JsonObject { type: "conic"; start: string; apex: string; end: string; rho: number; construction?: boolean }
+export interface SketchText extends JsonObject { type: "text"; a: string; b: string; text: string; font?: string; bold?: boolean; italic?: boolean; construction?: boolean }
+export interface SketchImage extends JsonObject { type: "image"; a: string; b: string; src: string; construction?: boolean }
+export type SketchFreeform = SketchEllipse | SketchEllipticalArc | SketchSpline | SketchBSpline | SketchConic | SketchText;
+export type SketchEntity = SketchPoint | SketchLine | SketchCircle | SketchArc | SketchFreeform | SketchImage;
 export type SketchCurve = SketchLine | SketchCircle | SketchArc;
 
 /** What a constraint points at: a whole entity, or a named point of a curve. */
@@ -107,8 +119,16 @@ export function circleEntities(sketch: SketchData, center: Vec2, r: number): { [
   return out;
 }
 
+/** Polylines along an entity, for drawing: one for a curve, one per outline stroke for text, none for a point. */
+export function curvePolylines(sketch: SketchData, e: SketchEntity): Vec2[][] {
+  if (isFreeform(e)) return freeformPolylines(sketch, e);
+  const p = curvePoints(sketch, e);
+  return p.length >= 2 ? [p] : [];
+}
+
 /** Points along a curve, for drawing and for inside/outside tests.  A line gives its two ends. */
 export function curvePoints(sketch: SketchData, e: SketchEntity, segmentsPerTurn = 64): Vec2[] {
+  if (isFreeform(e)) { const polys = freeformPolylines(sketch, e); return polys.length === 1 ? polys[0] : []; }
   if (e.type === "line") { const a = pointOf(sketch, e.a), b = pointOf(sketch, e.b); return a && b ? [a, b] : []; }
   if (e.type === "circle") {
     const c = pointOf(sketch, e.center); if (!c || !(e.r > 0)) return [];
@@ -133,21 +153,10 @@ export function curvePoints(sketch: SketchData, e: SketchEntity, segmentsPerTurn
 /** The ids to delete when these entities go: the entities themselves and the points nothing else uses any more. */
 export function withOrphanPoints(sketch: SketchData, ids: readonly string[]): string[] {
   const gone = new Set(ids);
-  // deleting a point deletes the curves that end on it
-  for (const [id, e] of Object.entries(sketch.entities)) {
-    if (e.type === "line" && (gone.has(e.a) || gone.has(e.b))) gone.add(id);
-    if (e.type === "circle" && gone.has(e.center)) gone.add(id);
-    if (e.type === "arc" && (gone.has(e.center) || gone.has(e.start) || gone.has(e.end))) gone.add(id);
-  }
-  const used = new Set<string>();
-  for (const [id, e] of Object.entries(sketch.entities)) {
-    if (gone.has(id)) continue;
-    if (e.type === "line") { used.add(e.a); used.add(e.b); }
-    if (e.type === "circle") used.add(e.center);
-    if (e.type === "arc") { used.add(e.center); used.add(e.start); used.add(e.end); }
-  }
-  const wasUsed = new Set<string>();
-  for (const id of gone) { const e = sketch.entities[id]; if (!e) continue; if (e.type === "line") { wasUsed.add(e.a); wasUsed.add(e.b); } if (e.type === "circle") wasUsed.add(e.center); if (e.type === "arc") { wasUsed.add(e.center); wasUsed.add(e.start); wasUsed.add(e.end); } }
+  // deleting a point deletes the curves that are built on it
+  for (const [id, e] of Object.entries(sketch.entities)) if (e.type !== "point" && pointsOf(e).some((p) => gone.has(p))) gone.add(id);
+  const used = new Set<string>(), wasUsed = new Set<string>();
+  for (const [id, e] of Object.entries(sketch.entities)) for (const p of pointsOf(e)) (gone.has(id) ? wasUsed : used).add(p);
   for (const p of wasUsed) if (!used.has(p)) gone.add(p);
   return Array.from(gone).filter((id) => id in sketch.entities);
 }
