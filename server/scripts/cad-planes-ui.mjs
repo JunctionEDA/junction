@@ -186,7 +186,7 @@ try {
   check('the pointer on a corner lights up the corner, and the hint names it', (await hint()) === 'c1,-1,1' && (await tone('1,-1,1')) !== cBefore && /Front Right Top\s*corner/.test(await alice.textContent('.cad-viewcube [data-cube-hint]')), `${await hint()} ${await alice.textContent('.cad-viewcube [data-cube-hint]').catch(() => '')}`);
   // how much of the screen a corner takes: the pieces of its zone, as drawn
   const span = await S(alice, () => { const rs = Array.from(document.querySelectorAll('.cad-viewcube [data-region=corner][data-from="1,-1,1"] [data-piece]')).map((e) => e.getBoundingClientRect()); return Math.min(Math.max(...rs.map((r) => r.right)) - Math.min(...rs.map((r) => r.left)), Math.max(...rs.map((r) => r.bottom)) - Math.min(...rs.map((r) => r.top))); });
-  check('a corner is a target about 30 px across or more, not a sliver', span >= 28, `${Math.round(span)} px`);
+  check('a corner is a target about 40 px across or more, not a sliver', span >= 36, `${Math.round(span)} px`);
   if (SHOTS) await shot('viewcube-corner-hover', alice, { x: cube.x - 60, y: cube.y - 8, width: cube.width + 70, height: cube.height + 44 });
   // the corners: each of the seven the isometric view shows, clicked on its bevel and, away from it, on a face next to it
   const visible = [[1, -1, 1], [1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, 1], [1, 1, -1], [-1, -1, -1]];
@@ -194,21 +194,21 @@ try {
   for (const s of visible) {
     // the bevel of the corner in the middle faces the camera; those on the cube's outline are turned away, but a
     // face next to each is not (the top, else the front, else the right)
-    const ways = s.join() === '1,-1,1' ? [{}, { on: 'top', inset: 4 }, { on: 'front', inset: 4 }, { on: 'right', inset: 4 }] : [{ on: s[2] > 0 ? 'top' : s[1] < 0 ? 'front' : 'right', inset: 4 }];
+    const ways = s.join() === '1,-1,1' ? [{}, { on: 'top', inset: 10 }, { on: 'front', inset: 10 }, { on: 'right', inset: 10 }, { on: 'top', inset: 13 }, { on: 'right', inset: 2 }] : [{ on: s[2] > 0 ? 'top' : s[1] < 0 ? 'front' : 'right', inset: 10 }];
     for (const o of ways) {
       await toIso(); await viewStill(alice);
       await cubeClick(alice, s, o); await viewStill(alice);
       if (!(await lookingFrom(s))) missed.push(`${s.join()} ${o.on ? 'on ' + o.on : 'by its bevel'}: ${(await viewDir(alice)).join()}`);
     }
   }
-  check('a click on a corner, on its bevel or on a face 4 px from its border, looks from that corner', missed.length === 0, missed.join('; ') || `${visible.length} corners`);
+  check('a click on a corner, on its bevel or on a face 10 px in from its border, looks from that corner', missed.length === 0, missed.join('; ') || `${visible.length} corners`);
   await toIso(); await viewStill(alice);
   check('… the front right top corner is the isometric view', near((await viewDir(alice))[0], -0.577, 0.01));
   // an edge: its bevel, and a strip of each face beside it
   const edgeMiss = [];
   for (const [e, on] of [[[1, 0, 1], null], [[0, -1, 1], 'top'], [[0, -1, 1], 'front'], [[1, -1, 0], 'right'], [[1, 1, 0], 'right'], [[-1, 0, 1], 'top']]) {
     await toIso(); await viewStill(alice);
-    await cubeClick(alice, e, on ? { on, inset: 5 } : {}); await viewStill(alice);
+    await cubeClick(alice, e, on ? { on, inset: 10 } : {}); await viewStill(alice);
     if (!(await lookingFrom(e))) edgeMiss.push(`${e.join()}${on ? ' on ' + on : ''}: ${(await viewDir(alice)).join()}`);
   }
   check('a click on an edge, on its bevel or on a face beside it, looks from between its two faces', edgeMiss.length === 0, edgeMiss.join('; '));

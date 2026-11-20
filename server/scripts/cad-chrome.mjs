@@ -75,7 +75,8 @@ export async function viewFrom(page, view) {
  * Where a zone of the view cube is on screen, for a real pointer: `from` is a face's name ('top') or the direction
  * the zone looks from ([1, -1, 1]: the front right top corner).  The point is the zone's middle (a face's, an
  * edge's bevel, a corner's bevel), or with `on` ('top') the part of an edge's or corner's zone that lies on that
- * face, `inset` pixels from the face's border (the generous part of the zone, away from its bevel).
+ * face, `inset` pixels in from the border of the face's flat part (where its bevel starts; the cube's own border is
+ * `data-bevel` pixels further out), by default the middle of the zone's part on that face.
  */
 export async function cubeAt(page, from, o = {}) {
   return page.evaluate(([from, on, inset]) => {

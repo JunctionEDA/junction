@@ -25,15 +25,17 @@ import { tipHandlers } from "./Tip";
 import { BIG_STEP, MOD, NUMBERED_VIEWS, STEP, viewShortcut } from "./viewkeys";
 
 /** The whole control, the cube's edge, how deep its bevels are (CSS pixels), and where its middle is in the control. */
-const BOX = 192, SIZE = 88, BEVEL = 9, MID: [number, number] = [BOX / 2, BOX / 2 + 4];
+const BOX = 192, SIZE = 92, BEVEL = 10, MID: [number, number] = [BOX / 2, BOX / 2 + 4];
 const H = SIZE / 2, F = H - BEVEL;
 /**
  * How far a corner's or an edge's zone reaches into each face it touches (pixels from the face's border): a
  * corner is not only its little bevel but the square of each of its three faces next to it, and an edge is its
- * bevel and a strip of each of its two faces, so the eight corners are as easy to hit as the faces.  What is
- * left of a face, its middle, is the face's own (2 × (F − ZONE) square).
+ * bevel and a strip of each of its two faces, so the eight corners are as easy to hit as the faces.  With the bevel,
+ * a corner's zone reaches BEVEL + ZONE = 25 px into each face from the cube's border (over a quarter of the face's
+ * edge), an edge's strip as deep; what is left of a face, its middle, is the face's own (a 2 × (F − ZONE) = 42 px
+ * square, nearly half the face).
  */
-const ZONE = 12, G = F - ZONE;
+const ZONE = 15, G = F - ZONE;
 /** How far the triad's arrows reach past the cube. */
 const REACH = 6;
 
@@ -163,7 +165,7 @@ function lookFrom(viewport: Viewport3D, from: V): void {
  */
 function palette() {
   const panel = tokenColor("--panel"), ink = tokenColor("--ink"), dark = panel.getHSL({ h: 0, s: 0, l: 0 }).l < 0.5;
-  const base = panel.clone().lerp(ink, dark ? 0.32 : 0.035), hover = tokenColor("--mark").lerp(base, 0.4);
+  const base = panel.clone().lerp(ink, dark ? 0.32 : 0.035), hover = tokenColor("--mark").lerp(base, 0.22);
   const rgb = (c: THREE.Color) => { const t = { r: 0, g: 0, b: 0 }; c.getRGB(t, THREE.SRGBColorSpace); return [t.r, t.g, t.b].map((v) => Math.round(v * 255)); };
   return { base: rgb(base), hover: rgb(hover), text: "#" + ink.getHexString(THREE.SRGBColorSpace), edgeLine: dark ? "rgba(0,0,0,.4)" : "rgba(0,0,0,.16)" };
 }
