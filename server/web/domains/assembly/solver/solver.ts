@@ -33,6 +33,7 @@ export const TOLERANCE = 1e-6;
 export const FAILED = 1e-4;
 const H = 1e-5;                 // the step of the central differences
 const DRAG_WEIGHT = 0.05;       // a pointer goal against a mate: the mate wins
+const HOLD_WEIGHT = 0.08;       // keeping a dragged body's orientation against following the pointer: the pointer wins
 const ANALYZE_MAX = 480;        // unknowns in one component above which freedoms are not counted
 const CONFLICT_MAX = 120;       // mates above which conflicts are named by residual only
 
@@ -289,6 +290,7 @@ class Core {
           rows.push(row);
         }
         if (goal.rotation) for (let i = 0; i < 3; i++) { const row = [0, 0, 0, 0, 0, 0]; row[3 + i] = w * reach; rows.push(row); }
+        else if (goal.hold) for (let i = 0; i < 3; i++) { const row = [0, 0, 0, 0, 0, 0]; row[3 + i] = w * HOLD_WEIGHT * reach; rows.push(row); }
         rows.forEach((row, ri) => {
           for (let p = 0; p < 6; p++) {
             g[goalVar * 6 + p] += row[p] * res[ri];
@@ -330,6 +332,7 @@ class Core {
     const e = sub(applyPose(pose, goal.point), goal.target);
     const out = [w * e[0], w * e[1], w * e[2]];
     if (goal.rotation) { const r = qlog(qmul(pose.q, qconj(goal.rotation))); out.push(w * this.reach * r[0], w * this.reach * r[1], w * this.reach * r[2]); }
+    else if (goal.hold) { const r = qlog(qmul(pose.q, qconj(goal.hold))), h = w * HOLD_WEIGHT * this.reach; out.push(h * r[0], h * r[1], h * r[2]); }
     return out;
   }
 

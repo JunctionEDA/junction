@@ -745,7 +745,9 @@ export class AssemblyEditor {
       const ray = this.viewport.ray(e), den = ray.direction.dot(n);
       if (Math.abs(den) < 1e-9) return null;
       const t = ((p0[0] - ray.origin.x) * n.x + (p0[1] - ray.origin.y) * n.y + (p0[2] - ray.origin.z) * n.z) / den;
-      return { body: pick.instance, point: local, target: [ray.origin.x + ray.direction.x * t, ray.origin.y + ray.direction.y * t, ray.origin.z + ray.direction.z * t] };
+      // it keeps the way it faces unless a mate turns it: a free part slides under the pointer, it does not swing round
+      const now = (this.live || this.display).get(pick.instance) || pose;
+      return { body: pick.instance, point: local, target: [ray.origin.x + ray.direction.x * t, ray.origin.y + ray.direction.y * t, ray.origin.z + ray.direction.z * t], hold: now.q };
     };
     if (this.beginDrag(pick.instance, goal, null, () => null, ev)) { this.drag!.pending = ev; this.dragStep(); }
   }

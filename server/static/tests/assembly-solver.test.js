@@ -267,3 +267,24 @@ test("speed: a few hundred instances solve at interactive rates", () => {
   assert.equal(full.dof, 100);
   console.log(`    100 hinged lids, full solve with freedoms counted: ${full.ms.toFixed(1)} ms`);
 });
+
+test("a dragged part that is free slides under the pointer and keeps the way it faces; on a hinge it still turns", () => {
+  // nothing holds it: grabbed at a corner far from its own origin and pulled sideways
+  const start = scrambled();
+  const grab = [80, -30, 20], at = M.applyPose(start, grab), target = [at[0] + 60, at[1] - 25, at[2] + 40];
+  let r = S.solve([body("part", start)], [], { drag: { body: "part", point: grab, target, hold: start.q }, maxIterations: 16 });
+  assert.equal(r.ok, true);
+  const end = r.poses.get("part");
+  nearV(M.applyPose(end, grab), target, 1e-3, "the grabbed point is under the pointer");
+  near(Math.abs(end.q[0] * start.q[0] + end.q[1] * start.q[1] + end.q[2] * start.q[2] + end.q[3] * start.q[3]), 1, 1e-6, "it has not turned:");
+  // without the wish to keep facing the same way it would have swung round as well (what a drag used to do)
+  r = S.solve([body("part", start)], [], { drag: { body: "part", point: grab, target }, maxIterations: 16 });
+  const loose = r.poses.get("part");
+  assert.ok(Math.abs(loose.q[0] * start.q[0] + loose.q[1] * start.q[1] + loose.q[2] * start.q[2] + loose.q[3] * start.q[3]) < 1 - 1e-4, "the plain point goal turns the part");
+  // a lid on a hinge can only turn, and does, all the way
+  const hingeBox = frame([50, 60, 40], [1, 0, 0]), hingeLid = frame([50, 60, 0], [1, 0, 0]);
+  const m = mk("hinge", "revolute", "box", hingeBox, "lid", hingeLid);
+  let state = pose([0, 0, 40]);
+  for (const t of [[50, 20, 75], [50, 45, 95], [50, 60, 100]]) { r = S.solve([body("box", pose(), true), { id: "lid", pose: state, fixed: false }], [m], { drag: { body: "lid", point: [50, 0, 0], target: t, hold: state.q }, maxIterations: 16 }); state = r.poses.get("lid"); }
+  near(r.mates.get("hinge").values.angle, -90, 1.5, "the front edge straight above the hinge");
+});

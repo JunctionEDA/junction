@@ -69,6 +69,11 @@ export interface DragGoal {
   target: Vec3;
   /** also turn the body to this orientation (the rotation rings of the manipulator) */
   rotation?: Quat;
+  /**
+   * The orientation the body would rather keep while its point follows the pointer: a part that is free to slide
+   * slides and does not swing round, and one that can only turn (on a hinge) still turns.  Far weaker than the point.
+   */
+  hold?: Quat;
 }
 
 export interface SolveOptions {
