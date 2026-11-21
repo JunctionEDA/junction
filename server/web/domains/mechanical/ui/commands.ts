@@ -53,6 +53,8 @@ export interface Slot {
   keep: number;
   /** a section folded into one button (GROUPS): its drop-down in parts, a rule between two */
   parts?: Entry[][];
+  /** the parts' headings, where the families have names of their own (Custom features) */
+  partTitles?: (string | null)[];
 }
 export interface Section {
   id: string; group: string;
@@ -170,15 +172,17 @@ export const GROUP_KEEP = 55;
 /** One section as one button: its slots' entries in one drop-down, its families kept together between rules. */
 function grouped(id: string, title: string, slots: Slot[]): Slot[] {
   if (slots.length < 2 && !(slots[0] && slots[0].menu === title)) return slots;
-  const parts: Entry[][] = [];
+  const parts: Entry[][] = [], titles: (string | null)[] = [];
   let singles: Entry[] = [];
   for (const sl of slots) {
     if (sl.menu === null) { singles.push(...sl.entries); continue; }
-    if (singles.length) { parts.push(singles); singles = []; }
-    parts.push(sl.entries);
+    if (singles.length) { parts.push(singles); titles.push(null); singles = []; }
+    parts.push(sl.entries); titles.push(sl.menu);
   }
-  if (singles.length) parts.push(singles);
-  return [{ key: `${id}/${title}`, menu: title, entries: parts.flat(), keep: GROUP_KEEP, parts }];
+  if (singles.length) { parts.push(singles); titles.push(null); }
+  // the library is a hundred features in families: its button is the last to leave the bar, and its drop-down is headed
+  const library = id === "library";
+  return [{ key: `${id}/${title}`, menu: title, entries: parts.flat(), keep: library ? 99 : GROUP_KEEP, parts, partTitles: library ? titles : undefined }];
 }
 const SECTION_TITLES: { [id: string]: string } = { edit: "Edit", sketch: "Sketch", solid: "Create", modify: "Modify", combine: "Combine", direct: "Direct editing", pattern: "Pattern", surface: "Surface", reference: "Reference geometry", board: "Circuit board", frame: "Frames", sheetmetal: "Sheet metal", library: "Custom features", inspect: "Inspect", view: "View", file: "File" };
 

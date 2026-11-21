@@ -110,6 +110,21 @@ export class Kernel {
     return this.sub(shape, "solid");
   }
 
+  /**
+   * Whether a shape is one a part can be: every face on its surface inside its own outline, every edge on both
+   * of its faces, each solid's skin closed and the right way out.  A fillet too big for its corner, a shell
+   * thicker than the wall or an offset through itself can come back from the kernel as a "result" that is none
+   * of these, and drawn it is a part with holes torn in it.
+   */
+  sound(shape: Shape): boolean {
+    if (shape.IsNull()) return false;
+    const a = new this.o.BRepCheck_Analyzer(shape, true, false, false);
+    const ok = a.IsValid(shape);
+    a.delete();
+    if (!ok) return false;
+    return this.withScope(() => this.sub(shape, "solid").every((s) => this.volume(s) > 0));
+  }
+
   volume(shape: Shape): number {
     const g = new this.o.GProp_GProps();
     this.o.BRepGProp.VolumeProperties(shape, g, true, false, false);

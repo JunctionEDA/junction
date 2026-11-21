@@ -156,7 +156,7 @@ export function Toolbar({ studio }: { studio: PartStudio }) {
   const slotView = (sec: Section, slot: Slot) => {
     if (slot.menu === null) return <span key={slot.key} className="flex flex-none" data-slot={slot.key}><Button e={slot.entries[0]} label={!!sec.labelled} /></span>;
     const open = !!menu && menu.key === slot.key;
-    if (open) shown = { key: slot.key, title: slot.menu, groups: (slot.parts || [slot.entries]).map((entries) => ({ title: null, group: sec.group, entries })), remember: true };
+    if (open) shown = { key: slot.key, title: slot.menu, groups: (slot.parts || [slot.entries]).map((entries, i) => ({ title: slot.partTitles?.[i] ?? null, group: sec.group, entries })), remember: true };
     const face = lastUsed(slot.key, slot.entries);
     return (
       <span key={slot.key} className="flex flex-none items-center rounded-sm hover:bg-paper" data-slot={slot.key} data-split>
@@ -185,6 +185,9 @@ export function Toolbar({ studio }: { studio: PartStudio }) {
   ) : null;
 
   const list = shown as { key: string; title: string; groups: MenuGroup[]; remember: boolean } | null;
+  // a long list (the library's families) is laid out in columns, as many as keep it on the page
+  const rows = list ? list.groups.reduce((n, g) => n + g.entries.length + (g.title ? 1 : 0), 0) : 0;
+  const cols = list && list.key !== MORE && rows > 24 ? Math.max(1, Math.min(Math.floor((window.innerWidth - 16) / 232), Math.ceil((rows * 32) / (window.innerHeight * 0.66)))) : 1;
   const confirm = (title: string, icon: string, primary: boolean, run: () => void, o: { shortcut?: string; hint?: string; label?: string; why?: string | null } = {}) => (
     <button type="button" className={cx("btn sm flex flex-none items-center gap-1 h-8 min-h-0", primary ? "primary px-2.5" : "ghost p-0 w-8 justify-center text-ink", o.label && "text-base font-medium", o.why && "opacity-40")} aria-label={title} aria-disabled={o.why ? true : undefined} data-tool={title} {...tipHandlers({ title, shortcut: o.shortcut, hint: o.hint, why: o.why })} onClick={() => { hideTip(); if (o.why) return; run(); studio.viewport.canvas.focus(); }}>
       <Glyph svg={icon} size={18} />{o.label ? <span>{o.label}</span> : null}
@@ -218,10 +221,10 @@ export function Toolbar({ studio }: { studio: PartStudio }) {
         </div>
       ) : null}
       {menu && list ? (
-        <div className="cad-tb-menu fixed z-[50] min-w-56 max-h-[78vh] overflow-y-auto py-1 rounded-md border border-line bg-panel shadow-panel text-base text-ink" role="menu" aria-label={list.title} data-menu-of={list.title} onPointerDown={(ev) => ev.stopPropagation()}
-          style={{ left: Math.max(4, Math.min(menu.at.left, window.innerWidth - 240)), top: menu.at.bottom + 4 }}>
+        <div className="cad-tb-menu fixed z-[50] min-w-56 max-h-[78vh] overflow-y-auto py-1 rounded-md border border-line bg-panel shadow-panel text-base text-ink" role="menu" aria-label={list.title} data-menu-of={list.title} data-columns={cols} onPointerDown={(ev) => ev.stopPropagation()}
+          style={{ left: Math.max(4, Math.min(menu.at.left, window.innerWidth - (cols > 1 ? cols * 232 + 12 : 240))), top: menu.at.bottom + 4, ...(cols > 1 ? { columnCount: cols, columnGap: 0, width: cols * 232 } : null) }}>
           {list.groups.map((g, gi) => (
-            <div key={g.title || gi} role="group" aria-label={g.title || undefined} className={cx(gi > 0 && "mt-1 pt-1 border-t border-line")}>
+            <div key={g.title || gi} role="group" aria-label={g.title || undefined} className={cx(gi > 0 && cols === 1 && "mt-1 pt-1 border-t border-line", cols > 1 && "pb-2")}>
               {g.title ? <div className="px-3 pt-1 pb-0.5 text-2xs uppercase tracking-wider text-ink-3 mono">{g.title}</div> : null}
               {g.entries.map((e) => (
                 <button key={e.id} type="button" role={e.on ? "menuitemcheckbox" : "menuitem"} aria-checked={e.on ? true : undefined} className={cx("appearance-none bg-transparent border-0 m-0 text-inherit [font-family:inherit] [font-size:inherit] flex w-full items-center gap-2.5 px-3 h-8 text-left cursor-pointer hover:bg-sel-soft", e.on && "font-semibold bg-sel-soft", e.why && "opacity-40")} aria-disabled={e.why ? true : undefined}

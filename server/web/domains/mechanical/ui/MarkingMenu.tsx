@@ -105,7 +105,7 @@ studioExtensions.push((studio) => {
     if (i < 0) return;
     if (studio.getState().sketch && sketchEditor(studio).getState().tool !== "select") return;   // a right click there puts the tool down
     const e = markingEntries(studio, null)[i];
-    studio.viewport.setCameraState(f.camera);
+    studio.viewport.setCameraState(f.camera, false);   // at once: nothing glides back from a turn nobody meant
     if (!e) return;
     if (e.why) { studio.host.toast(`${e.title}: ${e.why}`, 2000); return; }
     studio.setUi({ flicked: { id: e.id, title: e.title, direction: DIRECTIONS[i], n: ((studio.getState().ui?.flicked as { n?: number } | undefined)?.n || 0) + 1 } });

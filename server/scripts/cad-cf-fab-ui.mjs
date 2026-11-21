@@ -101,9 +101,9 @@ try {
     return { text: box.textContent, tools: Array.from(box.querySelectorAll('[data-tool]')).map((b) => b.getAttribute('data-tool')), groups: Array.from(box.querySelectorAll('[role=group]')).map((g) => Array.from(g.querySelectorAll('[data-tool]')).map((b) => b.getAttribute('data-tool'))), icons: Array.from(box.querySelectorAll('[data-tool] svg')).length };
   }, menu);
   check('the drop-down lists all 25, each with its icon', [...LASER, ...PRINT].every((t) => listed.tools.includes(t)) && listed.icons >= 25, `${listed.tools.length} tools, ${listed.icons} icons`);
-  // the custom features are one part of the list, the Laser & CNC family before the 3D printing one
-  const mine = listed.groups.find((g) => g.includes('Laser joint')) || [];
-  check('the custom features are one part of the list, a family after the other', [...LASER, ...PRINT].every((t) => mine.includes(t)) && Math.max(...LASER.map((t) => mine.indexOf(t))) < Math.min(...PRINT.map((t) => mine.indexOf(t))), mine.join(' | '));
+  // each family is a part of the list under its own heading, Laser & CNC before 3D printing
+  const laserAt = listed.groups.findIndex((g) => g.includes('Laser joint')), printAt = listed.groups.findIndex((g) => g.includes('Snap-fit hook'));
+  check('each family is a part of the list of its own, Laser & CNC before 3D printing', laserAt >= 0 && printAt > laserAt && LASER.every((t) => listed.groups[laserAt].includes(t)) && PRINT.every((t) => listed.groups[printAt].includes(t)), `${laserAt}, ${printAt}`);
   await S(page, (menu) => document.querySelector(`.cad-tb-menu[data-menu-of="${menu}"] [data-tool="Dogbone"]`).scrollIntoView({ block: 'start' }), menu);
   await shot(page, 'menu');
   await S(page, (menu) => document.querySelector(`.cad-tb-menu[data-menu-of="${menu}"] [data-tool="Honeycomb pockets"]`).scrollIntoView({ block: 'end' }), menu);

@@ -96,7 +96,7 @@ try {
   await page.waitForSelector(`.cad-tb-menu[data-menu-of="${menu}"] [data-tool="Spur gear"]`);
   await page.locator(`.cad-tb-menu[data-menu-of="${menu}"] [data-tool="Torsion spring"]`).scrollIntoViewIfNeeded();
   const heads = await S(page, (menu) => document.querySelector(`.cad-tb-menu[data-menu-of="${menu}"]`).textContent, menu);
-  check('they are under Custom features', (menu === 'Custom features' || menu === 'More') && /custom features/i.test(heads), String(menu));
+  check('they are under Custom features', menu === 'Custom features' || (menu === 'More' && /custom features/i.test(heads)), String(menu));
   const icons = await S(page, (menu) => Array.from(document.querySelectorAll(`.cad-tb-menu[data-menu-of="${menu}"] [data-tool]`)).filter((b) => b.querySelector('svg.cad-glyph')).length, menu);
   check('every item of the drop-down has its icon', icons >= mine.length, String(icons));
   await shot(page, 'menu');

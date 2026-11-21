@@ -18,6 +18,9 @@ import { FeatureError, type Body, type BodyTopo, type Datum, type EvalContext, t
 interface Deletable { delete(): void }
 interface Entry { json: string; state: ModelState; owned: Deletable[]; report: FeatureReport }
 
+/** Features that bring geometry in as it is: a file from elsewhere is shown as it came, sound or not. */
+const UNCHECKED = new Set(["import"]);
+const BROKEN = "This would not make a sound part: its faces would cross each other or leave it open. Try a smaller size, or fewer edges or faces at once.";
 const EMPTY: ModelState = { bodies: [], sketches: {}, datums: {} };
 let nextRev = 1;
 
@@ -171,6 +174,11 @@ export class RegenEngine {
     try {
       if (!def) throw new FeatureError(`This Junction does not know the feature type "${f.type}". Reload the page to update.`);
       await def.evaluate(ctx, f.params);
+      // a result the kernel handed back broken is no result: the feature fails and the model stays as it was
+      if (!UNCHECKED.has(f.type)) for (const b of state.bodies) {
+        if (b.reference || before.bodies.includes(b)) continue;
+        if (!k.sound(b.shape)) throw new FeatureError(BROKEN);
+      }
       report = notes.length ? { id: f.id, status: "warning", message: notes.join(" ") } : { id: f.id, status: "ok" };
     } catch (e) {
       // the model stays as the feature found it; what it had made so far is released
