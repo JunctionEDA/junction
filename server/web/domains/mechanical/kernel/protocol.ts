@@ -26,7 +26,16 @@ export interface FeatureReport {
   ms?: number;
   /** true when the result came from the cache (nothing before it, nor it, changed) */
   cached?: boolean;
+  /** numbers of the feature a person can drag in the model while its dialog is open (ui/DragHandles.tsx) */
+  handles?: DragHandle[];
 }
+
+/**
+ * A number that is a distance in the model (`value`, as the feature was built): an arrow stands at `origin + dir × value / scale` and dragging it
+ * along `dir` changes the field `key`.  Dragged back through the origin it turns the boolean field `flip` over,
+ * where the feature has one.
+ */
+export interface DragHandle { key: string; value: number; origin: [number, number, number]; dir: [number, number, number]; scale: number; flip?: string }
 
 /**
  * A body, tessellated.  Faces, edges and vertices are ranges of the buffers, in the same order as their

@@ -14,6 +14,7 @@ import { DockSeparator, useDockSplit } from "./featurelist/DockSeparator";
 import { dockFolded, panelOpen, setDockFolded, setPanelOpen, usePanels } from "./panels";
 import type { PartStudio } from "./studio";
 import { CommandPalette, ContextMenu, Shortcuts } from "./Overlays";
+import { DragHandles } from "./DragHandles";
 import { SketchDialog } from "./SketchDialog";
 import { StatusBar } from "./StatusBar";
 import { TipHost } from "./Tip";
@@ -86,6 +87,7 @@ export function PartStudioView({ studio, canvasHost }: { studio: PartStudio; can
       <div className="flex min-h-0 min-w-0">
         <Dock studio={studio} where="left" />
         <div ref={stage} className="cad-stage relative flex-1 min-w-0 min-h-0 overflow-hidden">
+          <DragHandles studio={studio} />
           <FeatureDialog studio={studio} />
           <SketchDialog studio={studio} />
           <ViewCube studio={studio} />

@@ -113,6 +113,7 @@ export class RegenEngine {
     const datums: NonNullable<ModelState["datums"]> = { ...(before.datums || {}) };
     const state: ModelState = { bodies: before.bodies.slice(), sketches: { ...before.sketches }, datums, extras: before.extras };
     const owned: Deletable[] = [], temp: Deletable[] = [], notes: string[] = [];
+    const handles: NonNullable<FeatureReport["handles"]> = [];
     const t0 = Date.now();
     // a body with no solid in it is a surface (types.ts Body.sheet): the shape says so, not the feature
     const made = (body: Body) => {
@@ -168,6 +169,7 @@ export class RegenEngine {
       tmp: (o) => { temp.push(o); return o; },
       fail: (m) => new FeatureError(m),
       warn: (m) => { notes.push(m); },
+      handle: (h) => { handles.push(h); },
     };
     let report: FeatureReport;
     let result = state;
@@ -188,6 +190,7 @@ export class RegenEngine {
     }
     k.scope = null;
     for (const o of temp.reverse()) { try { o.delete(); } catch (x) { /* already gone */ } }
+    if (handles.length) report.handles = handles;
     report.ms = Date.now() - t0;
     return { json, state: result, owned, report };
   }

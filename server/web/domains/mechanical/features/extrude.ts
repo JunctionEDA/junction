@@ -114,6 +114,8 @@ export default defineFeature<ExtrudeParams>({
       // a sketch goes along its normal; a face out of its solid to make material and into it to take it away
       const into = !!region.from && (op === "remove" || op === "intersect");
       const n: Vec3 = scale(region.frame.normal, (p.flip && end !== "symmetric" ? -1 : 1) * (into ? -1 : 1));
+      // the depth can be dragged: an arrow at the middle of the first region, where the extrusion ends
+      if (region === regions[0] && (end === "blind" || end === "symmetric")) ctx.handle({ key: "depth", value: Number(p.depth), origin: k.centre(region.face, "face"), dir: n, scale: end === "symmetric" ? 2 : 1, ...(end === "blind" ? { flip: "flip" } : {}) });
       const far = reachPast(k, solids, region.frame.origin);
       // how far forward (along n) and back the extrusion reaches before any trimming
       const fwd = end === "blind" ? p.depth : end === "symmetric" ? p.depth / 2 : far;
