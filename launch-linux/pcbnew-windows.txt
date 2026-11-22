@@ -1,0 +1,4 @@
+     0x200130 "Junction Setup": ("pcbnew" "pcbnew")  630x445+485+277  +485+277
+     0x20011f "PCB Editor": ("org.kicad.pcbnew" "org.kicad.pcbnew")  1280x720+0+0  +0+0
+     0x200003 "pcbnew": ("pcbnew" "pcbnew")  200x200+0+0  +0+0
+     0x200001 "pcbnew": ("pcbnew" "Pcbnew")  10x10+10+10  +10+10

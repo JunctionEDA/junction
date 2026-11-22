@@ -1,0 +1,6 @@
+
+ProcessName     MainWindowTitle
+-----------     ---------------
+junction        Junction Setup
+WindowsTerminal C:\ProgramData\GitHub\HostedComputeAgent\hosted-compute-agent
+
