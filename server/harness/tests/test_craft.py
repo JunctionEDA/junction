@@ -102,5 +102,44 @@ class Craft(Boards):
         self.assertNotIn("passed", got)
 
 
+class ChipFrame(unittest.TestCase):
+    """escape_chips' frame of a fine-pitch chip: its four pin rows and pitch, whatever its rotation (no engine needed)."""
+
+    @staticmethod
+    def qfn(rotation, pitch=0.4, per_side=14, twice=False):
+        import math
+        pads, n = [], 0
+        a = math.radians(-rotation)
+        for side in range(4):
+            nx, ny = math.cos(a + side * math.pi / 2), math.sin(a + side * math.pi / 2)
+            for i in range(per_side):
+                s = (i - (per_side - 1) / 2) * pitch
+                n += 1
+                pad = [str(n), round(nx * 3.5 - ny * s, 4), round(ny * 3.5 + nx * s, 4), f"N{n}", 0.25, 0.9]
+                pads.append(pad)
+                if twice and i == 0:
+                    pads.append(list(pad))      # a pad drawn twice on one spot, as some footprints have
+        pads.append(["57", 0.0, 0.0, "GND", 4.0, 4.0])      # the exposed pad
+        return {"ref": "U1", "x": 0.0, "y": 0.0, "rotation": rotation, "pads": pads}
+
+    def test_rows_and_pitch_of_a_turned_chip(self):
+        for rot in (0, -45, 90, -135):
+            c, normals, rows, pitch = craft._chip_frame(self.qfn(rot, twice=True))
+            self.assertEqual(len(rows), 4)
+            self.assertEqual(sorted(len({q[0] for q in r}) for r in rows.values()), [14, 14, 14, 14])
+            self.assertAlmostEqual(pitch, 0.4, places=3)
+            self.assertFalse(any(q[0] == "57" for r in rows.values() for q in r))
+
+    def test_coarse_or_small_parts_are_not_chips(self):
+        self.assertIsNone(craft._chip_frame(self.qfn(0, pitch=1.0)))
+        self.assertIsNone(craft._chip_frame(self.qfn(0, per_side=4)))
+
+    def test_crystal_and_antenna_nets_are_never_fanned(self):
+        for net in ("/HXIN", "/LXOUT", "/RF", "Net-(AE1-ANT)", "/XTAL_IN"):
+            self.assertTrue(craft._NO_FAN.search(net), net)
+        for net in ("/GPIO9", "/SWDIO", "/ICM_MOSI", "/RESET"):
+            self.assertFalse(craft._NO_FAN.search(net), net)
+
+
 if __name__ == "__main__":
     unittest.main()
