@@ -2847,8 +2847,19 @@ class Board(_Doc):
         per mm off the planned layer, "vias": True lets a connection the plan sends through a via change layer at once,
         "open": mm, "steer": "moved" | "all" | "none", "order": False, "rip": False} tune it.  The result's `plan` gives
         the overflow before and after negotiation, how many connections it moved and fought over, and how many steered
-        routes stayed inside their corridors.  Off by default: it made no board of the benchmark better (Ledify lost
-        connections).
+        routes stayed inside their corridors.  Off by default here (design() turns it on).
+        Your own plan for a crowded chip (read it first with board.channels("U4")):
+            plan={"paths": {"GPIO20": [[121.0, 40.5, "F.Cu"], [123.0, 40.5, "B.Cu"], [130.0, 45.0, "B.Cu"]]},
+                  "order": ["SWDIO", "GPIO20"], "escapes": {"U4:S": "via stagger", "U4.31": "via 1.2 E"}, "ring": 0.5}
+        paths: per net, the points one connection runs through ([x, y, layer]: the track leaves the point on that
+        layer, so two points on different layers put a via at the second; the pads at the ends are joined on), or a
+        list of such lists for a net with several connections (each goes to the connection whose ends are nearest).
+        Each path holds its tiles in the plan, everything else is negotiated round it, and the router lays it first,
+        searching inside its corridor (the path's tiles and `ring` mm round them) before anywhere else.  order: nets laid
+        before everything else (the path nets follow it).  escapes: board.escape(spec), laid before routing (which way
+        each pin leaves: a via, a stub out, a 45-degree leg).  The result's `plan.given` / `given_inside` say how many
+        paths were used and how many routes stayed inside them, `plan.given_missed` which could not be matched, and
+        `escapes` what was laid and what was skipped.
         ripup="mincut" changes what the repair after the routing passes takes up to lay a connection left open: the
         cheapest set of routes whose removal opens a way (a minimum cut, after Copper's repair stage), each route priced
         by what laying it again costs (4 mm, more for a wide or critical one), instead of everything the cheapest way
@@ -2871,6 +2882,17 @@ class Board(_Doc):
         house = "" if keep_rules else self._house_vias()
         self.flush()
         fix = self._net
+        escaped = None
+        if isinstance(plan, dict) and (plan.get("escapes") or plan.get("order") or plan.get("paths")):
+            # the routing AI's own plan: its escapes laid first, its crowded nets first in its order, its paths to the engine
+            from .craft import _escape, _plan_for_engine
+            if plan.get("escapes"):
+                escaped = _escape(self, plan["escapes"])
+                if nets and escaped.get("moved"):      # what an escape took up is laid again with the nets asked for
+                    nets = list(nets) + [n for n in escaped["moved"] if n not in nets]
+            first = list(plan.get("order") or []) + [n for n in (plan.get("paths") or {}) if n not in (plan.get("order") or [])]
+            order = first + [n for n in (order or []) if n not in first]
+            plan = _plan_for_engine(self, plan)
         e: dict = {"op": "autoroute"}
         if nets:
             e["nets"] = [fix(n) for n in nets]
@@ -2937,6 +2959,8 @@ class Board(_Doc):
             except HarnessError:
                 pre = None
         out = self._autoroute(e)
+        if escaped is not None:
+            out["escapes"] = escaped
         if pre and pre.get("vias"):
             out["ground_vias_first"] = pre["vias"]
         if fill:

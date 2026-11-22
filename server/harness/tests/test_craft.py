@@ -140,6 +140,48 @@ class ChipFrame(unittest.TestCase):
         for net in ("/GPIO9", "/SWDIO", "/ICM_MOSI", "/RESET"):
             self.assertFalse(craft._NO_FAN.search(net), net)
 
+    def test_unbox_and_escapes_leave_ground_supplies_and_pairs_alone(self):
+        for net in ("GND", "+3.3V", "/USB_DP", "/DN", "/HXIN", ""):
+            self.assertTrue(craft._kept_net(net), net)
+        for net in ("/GPIO9", "/SWCLK", "/SPI_MOSI"):
+            self.assertFalse(craft._kept_net(net), net)
 
-if __name__ == "__main__":
-    unittest.main()
+
+class RoutingPlan(Boards):
+    """The routing AI's own plan for a crowded chip: board.channels() reads the problem, board.escape() lays the escapes
+    it chose, and board.route(plan={"paths", "order", "escapes"}) routes inside its corridors."""
+
+    def board(self):
+        # a 0.5 mm pitch chip with 10 pads down each side, every pad on the west side wired to a header pad far west
+        nets = {str(i + 1): f"S{i + 1}" for i in range(10)}
+        far = [part(f"J{i + 1}", (2, 4 + i * 2.2), [("1", 0, 0, 1.0, 1.0, f"S{i + 1}")]) for i in range(10)]
+        return self.open(edge(BOX), chip("U1", (20, 15), nets, pitch=0.5, n=10), *far)
+
+    def test_channels_name_the_pins_the_free_tracks_and_the_open_connections(self):
+        b = self.board()
+        got = b.channels("U1", depths=[0.5, 2])
+        self.assertIn("W", got["sides"], got)
+        w = got["sides"]["W"]
+        self.assertIn("1 S1*", w["pins"])
+        self.assertEqual(sorted(w["free_tracks"]), ["B.Cu", "F.Cu"])
+        self.assertTrue(w["free_tracks"]["B.Cu"].startswith("0.5mm "), w)
+        self.assertEqual(len(got["open"]), 10)
+        self.assertTrue(all(" plan " in o for o in got["open"]), got["open"][:2])
+        self.assertEqual(b.info()["unrouted_connections"], 10, "nothing was laid")
+
+    def test_escapes_and_paths_are_laid_as_written(self):
+        b = self.board()
+        esc = b.escape({"U1.3": "via 0.6", "U1.6": "out 0.5", "U1.9": "via 1.0 N"})
+        self.assertEqual(esc["laid"], 3, esc)
+        self.assertEqual(b.info().get("vias"), 2)
+        # S1's path: west on F.Cu along its own row, then the router lays it inside that corridor
+        res = b.route(nets=["S1", "S2"], fill=False, time_s=20, plan={"paths": {"S1": [[17.0, 12.75, "F.Cu"], [4.0, 12.75, "F.Cu"]]}, "order": ["S2"]})
+        self.assertEqual(res["plan"]["given"], 1, res.get("plan"))
+        self.assertEqual(res["left_of_asked"], {}, res)
+
+    def test_unbox_leaves_a_board_without_a_fine_pitch_chip_as_it_was(self):
+        b = self.board()        # ten pins a side: not a chip unbox works on
+        got = b.unbox(budget_s=30)
+        self.assertEqual((got["before"], got["after"], got["tried"]), (10, 10, []), got)
+        self.assertEqual(b.info()["unrouted_connections"], 10)
+

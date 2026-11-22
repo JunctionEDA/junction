@@ -43,14 +43,24 @@ export interface PlanInput {
   book?: [number, number, number, number, number][];
   /** Coarse paths of connections that are not planned again: they hold their capacity and are never moved. */
   fixed?: { conn: PlanConn; path: number[] }[];
+  /** Paths someone wrote (the routing AI, a person): per connection, the points it runs through in order, as
+   *  [x, y, layer] in mm (the track leaves a point on its layer; two points on different layers put a via at the
+   *  second).  The connection's ends are joined to the first and last point.  Each holds its tiles' capacity like a
+   *  fixed path, so everything else is negotiated round it, and gets a corridor of `ring` mm (default 0.5) round its
+   *  tiles, marked `given`, which the detailed router searches first. */
+  given?: { conn: PlanConn; pts: [number, number, number][]; ring?: number }[];
 }
 /** A connection's corridor: per tile 1 when the detailed route may run there, and the layer the plan put it on (-1: any).
  *  moved: the negotiation took it off its direct path (only then is it steered); contest: how many rounds of the
  *  negotiation laid it again because it sat on an overflowing border, via column or forced crossing. */
-export interface Corridor { tiles: Uint8Array; layer: Int8Array; vias: number; overflow: number; path: number[]; moved: boolean; contest: number }
+export interface Corridor { tiles: Uint8Array; layer: Int8Array; vias: number; overflow: number; path: number[]; moved: boolean; contest: number; given?: boolean }
+/** An overflowing tile border (side 0: the tile's east border, 1: its north one) or via column (side -1) after the
+ *  negotiation: by how much (mm; vias for a column), and the nets the plan put across it. */
+export interface Hot { l: number; tx: number; ty: number; side: number; over: number; nets: string[] }
 export interface PlanResult {
   k: number; T: number; nx: number; ny: number; corridors: Map<number, Corridor>;
   iterations: number; overflowFirst: number; overflow: number; crossings: number; relayered: number; moved: number; contested: number; ms: number;
+  hot: Hot[];   // what still overflows, worst first
 }
 
 const WALL = 8, WALL_VIA = 2;      // extra cost factor of a border without capacity / a column without a via site (soft)
@@ -58,7 +68,8 @@ const DIR_BIAS = 0.3;              // a step against its layer's direction costs
 const MAX_ITERS = 16, BOX_MARGIN = 8;
 const MAX_DP_VIAS = 6, TURN_AT_TRAFFIC = 1;
 const MAX_NODES = 60000;           // tiles x layers (Copper's choose_tile_mm)
-const MOVED_MM = 1;                // a connection counts as moved when its path leaves its direct path by more than this
+const MOVED_MM = 1;
+const GIVEN_CONTEST = 99;          // a written path counts as the most fought over: it goes first in its tier                // a connection counts as moved when its path leaves its direct path by more than this
 const INF = Infinity;
 
 /** Copper's tile size: 0.5 mm on a board with a pad pitch of 0.5 mm or finer, 1 mm otherwise, doubled until the
@@ -142,8 +153,8 @@ export function plan(inp: PlanInput, conns: PlanConn[]): PlanResult {
   // for that connection (no capacity used, none missing): it is leaving its own pad there
   const freeOf = new Map<number, Set<number>>();
   const nd = inp.need ?? p / 2, cx = (x: number) => (x - G.ox) / g + 0.5, cy = (y: number) => (y - G.oy) / g + 0.5;   // in cells from the low edge of cell 0
-  const fixed = inp.fixed || [];
-  for (const c of conns.concat(fixed.map((f) => f.conn))) {
+  const fixed = (inp.fixed || []).slice(); const given = inp.given || [];
+  for (const c of conns.concat(fixed.map((f) => f.conn), given.map((q) => q.conn))) {
     const set = new Set<number>();
     for (const e of [c.a, c.b]) {
       if (!e.box) continue; const x0 = cx(e.box[0] - nd), y0 = cy(e.box[1] - nd), x1 = cx(e.box[2] + nd), y1 = cy(e.box[3] + nd); const ls = layersOf(e.layers);
@@ -157,6 +168,33 @@ export function plan(inp: PlanInput, conns: PlanConn[]): PlanResult {
   const histE = new Float64Array(N), histN = new Float64Array(N), histV = new Float64Array(GT), histX = new Float64Array(N);
   const hT = new Float64Array(N), vT = new Float64Array(N);   // straight-through traffic per node, east-west / north-south (mm)
   const shared = new Map<number, Map<string, { n: number; d: number }>>();   // border -> net -> how many of its paths cross it (a net pays once)
+  // a written path on the tile graph: from the connection's first end through its points to the other end, one
+  // 4-neighbour step at a time, a via wherever the layer changes (and at an end whose pad is not on the layer)
+  const tileOf0 = (x: number, y: number): [number, number] => [Math.min(nx - 1, Math.max(0, Math.floor((x - G.ox) / g / k))), Math.min(ny - 1, Math.max(0, Math.floor((y - G.oy) / g / k)))];
+  const okLayer = (l: number) => l >= 0 && l < L && rt[l];
+  const written = (c: PlanConn, pts0: [number, number, number][]): number[] => {
+    // orient the points so the first lies nearer end a
+    const d2 = (p: Pt, q: [number, number, number]) => (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2;
+    let pts = pts0.filter((q) => okLayer(q[2])); if (!pts.length) return [];
+    if (d2(c.a.p, pts[0]) + d2(c.b.p, pts[pts.length - 1]) > d2(c.a.p, pts[pts.length - 1]) + d2(c.b.p, pts[0])) pts = pts.slice().reverse();
+    const out: number[] = []; let cx0 = -1, cy0 = -1, cl = -1;
+    const put = (tx: number, ty: number, l: number) => {
+      if (cl < 0) { out.push(l * GT + ty * nx + tx); cx0 = tx; cy0 = ty; cl = l; return; }
+      if (l !== cl) { out.push(l * GT + cy0 * nx + cx0); cl = l; }   // a via where the path is
+      while (cx0 !== tx || cy0 !== ty) { if (cx0 !== tx && (cy0 === ty || Math.abs(tx - cx0) >= Math.abs(ty - cy0))) cx0 += Math.sign(tx - cx0); else cy0 += Math.sign(ty - cy0); out.push(l * GT + cy0 * nx + cx0); }
+    };
+    const line = (p: Pt, q: Pt, l: number) => { const n = Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / (T / 4))); for (let i = 0; i <= n; i++) { const [tx, ty] = tileOf0(p[0] + (q[0] - p[0]) * i / n, p[1] + (q[1] - p[1]) * i / n); put(tx, ty, l); } };
+    const la = layersOf(c.a.layers), lb = layersOf(c.b.layers); const first = pts[0][2], last = pts[pts.length - 1][2];
+    const [ax, ay] = tileOf0(c.a.p[0], c.a.p[1]); put(ax, ay, la.includes(first) ? first : la[0]);
+    line(c.a.p, [pts[0][0], pts[0][1]], first);
+    for (let i = 0; i + 1 < pts.length; i++) line([pts[i][0], pts[i][1]], [pts[i + 1][0], pts[i + 1][1]], pts[i][2]);
+    line([pts[pts.length - 1][0], pts[pts.length - 1][1]], c.b.p, last);
+    if (!lb.includes(last)) { const [bx, by] = tileOf0(c.b.p[0], c.b.p[1]); put(bx, by, lb[0]); }
+    return out;
+  };
+  const givenPath = new Map<number, { path: number[]; ring: number }>();
+  for (const q of given) { const path = written(q.conn, q.pts); if (path.length) { givenPath.set(q.conn.id, { path, ring: q.ring ?? 0.5 }); fixed.push({ conn: q.conn, path }); } }
+  conns = conns.filter((c) => !givenPath.has(c.id));   // planned as written, never moved
   const paths = new Map<number, number[]>(); const byId = new Map(conns.concat(fixed.map((f) => f.conn)).map((c) => [c.id, c]));
   let anyX = false, pres = 0, margin = BOX_MARGIN;
   const tileOf = (q: Pt): number => { const tx = Math.min(nx - 1, Math.max(0, Math.floor((q[0] - G.ox) / g / k))), ty = Math.min(ny - 1, Math.max(0, Math.floor((q[1] - G.oy) / g / k))); return ty * nx + tx; };
@@ -351,5 +389,23 @@ export function plan(inp: PlanInput, conns: PlanConn[]): PlanResult {
     if (moved) nMoved++; if (fought) nContested++;
     corridors.set(c.id, { tiles, layer, vias, overflow: over, path: q, moved, contest: fought });
   }
-  return { k, T, nx, ny, corridors, iterations: its, overflowFirst: first, overflow: ov.tot, crossings: ov.xruns.length, relayered, moved: nMoved, contested: nContested, ms: Date.now() - t0 };
+  // the written paths: a corridor of their own ring round their tiles, steered and laid first by the detailed router
+  for (const [id, { path: q, ring }] of givenPath) {
+    if (mine.has(id)) continue; const Rg = Math.max(0, Math.ceil(ring / T - 1e-9));
+    const tiles = new Uint8Array(GT), layer = new Int8Array(GT).fill(-2); let vias = 0;
+    for (let i = 0; i < q.length; i++) {
+      const r = q[i] % GT, l = (q[i] / GT) | 0; const tx = r % nx, ty = (r / nx) | 0;
+      for (let y = Math.max(0, ty - Rg); y <= Math.min(ny - 1, ty + Rg); y++) tiles.fill(1, y * nx + Math.max(0, tx - Rg), y * nx + Math.min(nx - 1, tx + Rg) + 1);
+      if (i > 0 && q[i - 1] % GT === r) vias++;
+      layer[r] = layer[r] === -2 || layer[r] === l ? l : -1;
+    }
+    for (let r = 0; r < GT; r++) if (layer[r] === -2) layer[r] = -1;
+    corridors.set(id, { tiles, layer, vias, overflow: (overOf.get(id) || 0) + overAt(q), path: q, moved: true, contest: GIVEN_CONTEST, given: true });
+  }
+  // what still overflows, for a reader (the routing AI): borders and via columns, worst first
+  const hot: Hot[] = [];
+  for (const [o, code] of ov.edges) { const s0 = code >> 1, side = code & 1, l = (s0 / GT) | 0, r = s0 % GT; const m = shared.get(code); hot.push({ l, tx: r % nx, ty: (r / nx) | 0, side, over: o, nets: m ? Array.from(m.keys()) : [] }); }
+  for (const [o, r] of ov.cols) hot.push({ l: -1, tx: r % nx, ty: (r / nx) | 0, side: -1, over: o, nets: [] });
+  hot.sort((a, b) => b.over - a.over);
+  return { hot, k, T, nx, ny, corridors, iterations: its, overflowFirst: first, overflow: ov.tot, crossings: ov.xruns.length, relayered, moved: nMoved, contested: nContested, ms: Date.now() - t0 };
 }

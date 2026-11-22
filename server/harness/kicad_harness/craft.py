@@ -45,7 +45,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             order: list | None = None, widths: dict | None = None, kinds: dict | None = None, time_s: float | None = None, max_vias: int = 2,
             stitch: float | None = 2.0, name: str | bool | None = None, rev: str | None = None, silk: bool = True, place: bool = True, route: bool = True,
             accept: list | None = None, reroute: bool = False, explain: bool = False, fanout: bool = False,
-            free_pins: bool = True, chip_escapes: bool = False, keep_rules: bool = False, gate: bool = True, keepouts: list | None = None, escapes=None, plan=None, ripup: str | None = None) -> dict:
+            free_pins: bool = True, chip_escapes: bool = False, unbox: bool = False, keep_rules: bool = False, gate: bool = True, keepouts: list | None = None, escapes=None, plan=None, ripup: str | None = None) -> dict:
     """Lay the whole board out in one call and say how it came out.
 
     gate=True (the default): every repair stage after the routing (clean-up, ground pads, last route, finish again,
@@ -76,6 +76,10 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     dogbone ring with its neighbours, then a bus with staggered vias at the lane ends, the moved nets routed again,
     each try kept only when fewer connections are open (Ember 11 -> 9, Cyberboard 6 -> 5 open on the benchmark routed copies).  It stops
     starting new tries after twice time_s (at least ten minutes).  Better: call board.escape_chips(refs=[...]) yourself on the chip that is still open.
+
+    unbox=True (off by default: minutes per chip): what fine-pitch chips still leave open at the end gets board.unbox(),
+    the routing AI's staggered dogbone trios with the copper in their way cleared, keep-best (Cyberboard 6 -> 2 open,
+    score 75 -> 90, in nine minutes on the benchmark's routed copy).  Better: call board.unbox(refs=["U4"]) yourself.
 
     fanout=True escapes every fine-pitch chip (20 pins or more, 0.65 mm pitch or finer) to a staggered ring of vias
     before routing (board.fanout): for a dense QFN whose pins are left open because neighbouring tracks box them in.
@@ -375,6 +379,23 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             if ce and ce.get("tried"):
                 out["routed"]["chip_escapes"] = {"open": f"{ce['before']} -> {ce['after']}", "kept": ce["kept"]}
                 if ce["after"] < ce["before"]:
+                    gated("finish again", self.finish)
+                    step("thermals again", self.fix_thermals)
+                    gated("corners again", self.fix_corners)
+                out["routed"]["left"] = step("unrouted", self.unrouted) or {}
+        # the routing AI's dogbone trios on what fine-pitch chips still leave open (board.unbox), keep-best
+        if (out.get("routed") or {}).get("left") and unbox:
+            def _unbox():
+                try:
+                    return self.unbox(budget_s=max(600, 2 * (time_s or 60)), layers=None if auto_layers else route_layers)
+                except HarnessError:
+                    raise
+                except Exception as e:      # noqa: BLE001  every try is taken back
+                    raise HarnessError(f"unbox: {type(e).__name__}: {e}") from e
+            ub = step("unbox", _unbox)
+            if ub and ub.get("tried"):
+                out["routed"]["unbox"] = {"open": f"{ub['before']} -> {ub['after']}", "tries": len(ub["tried"])}
+                if ub["after"] < ub["before"]:
                     gated("finish again", self.finish)
                     step("thermals again", self.fix_thermals)
                     gated("corners again", self.fix_corners)
@@ -1201,6 +1222,384 @@ def _dogbones(self, chip: dict, c, n, tng, pins: list, half: float, band: float,
     return out
 
 
+# ---------------------------------------------------------------- the routing AI's own plan for a crowded chip
+
+def _channels(self, ref: str | None = None, box=None, depths=None, plan=None, margin: float = 4.0, layers: list | None = None) -> dict:
+    """Read the routing problem round a chip before writing a plan for it (nothing is laid; a few seconds).
+
+    For each pin row (side N, E, S, W, or NE, SE, SW, NW on a chip turned 45 degrees) of `ref`: its pins ("12 GPIO20*": pad, net, * where a connection from it is open,
+    - for no net); per routing layer, at each depth past the pads (0.3, 1, 2, 3 mm by default), how many tracks of
+    the board's usual width still cross a line parallel to the row ("1mm 4": four fit; the gaps are the router's own
+    free cells) and whose copper lies on that line ("GPIO21 2" crosses it twice; "U4 pads" are the chip's own pads);
+    and how many vias still fit in front of the row.  Then every open connection with an end within `margin` mm of
+    the chip, with the global plan's coarse path for it (corners and layer changes: "F(120.25,40.75) B(...)") and the
+    plan's overflow on it, and the tile borders the plan still overflows there ("hot": layer, where, by how many mm,
+    the nets on it).  box=[x0, y0, x1, y1] looks at an area instead of a chip.
+
+    plan={"paths": {...}} previews a plan you wrote (as board.route(plan=...) takes it): the plan is negotiated round
+    your paths and the open list and "hot" show what is left, so a plan can be tried in seconds before the route
+    that takes minutes.  Use it to find the side whose channel is full (0 tracks at 1 mm while pins there are open)
+    and the nets in it, then write paths that send the crowded nets out where there is room."""
+    self.flush()
+    view: dict = {}
+    if ref:
+        view["ref"] = ref
+    if box:
+        view["box"] = [float(v) for v in box]
+    if depths:
+        view["depths"] = [float(d) for d in depths]
+    if margin is not None:
+        view["margin"] = float(margin)
+    e: dict = {"op": "autoroute", "view": view, "time_s": 5}
+    if layers:
+        e["layers"] = list(layers)
+    p = _plan_for_engine(self, plan if isinstance(plan, dict) else {}) if plan is not False else None
+    e["plan"] = p if p else True
+    self._edit(e)
+    try:
+        res = self.flush() or {}
+    except HarnessError as err:
+        raise HarnessError(f"channels: {str(err).split('(autoroute): ')[-1][:300]}") from err
+    d = next((x["autoroute"] for x in res.get("details") or [] if "autoroute" in x), {})
+    v = d.get("view") or {}
+    out: dict = {}
+    if ref:
+        out["chip"] = ref
+    out["box"] = v.get("box")
+    sides = {}
+    for sd in v.get("sides") or []:
+        pins = " ".join(f"{p[0]} {p[1] or '-'}{'*' if p[2] else ''}" for p in sd.get("pins") or [])
+        free = {}
+        for layer, rows in (sd.get("channels") or {}).items():
+            parts = []
+            for dep, tracks, _mm, nets in rows:
+                who = ", ".join(f"{n} {c}" if c > 1 else n for n, c in sorted(nets.items(), key=lambda kv: -kv[1])[:6])
+                parts.append(f"{dep:g}mm {tracks}" + (f" ({who})" if who else ""))
+            free[layer] = "; ".join(parts)
+        key = sd["side"] if sd["side"] not in sides else sd["side"] + "2"
+        sides[key] = {"layer": sd.get("layer"), "pitch": sd.get("pitch"), "pins": pins, "free_tracks": free, "via_sites": sd.get("viaSites")}
+    if sides:
+        out["sides"] = sides
+    short = lambda l: (l or "")[:1] if l in ("F.Cu", "B.Cu") else (l or "").replace(".Cu", "")      # noqa: E731
+    out["open"] = [f"{o['net']}: {o['from']} -> {o['to']} {o['mm']}mm" + (" plan " + " ".join(f"{short(q[2])}({q[0]:g},{q[1]:g})" for q in o["plan"]) if o.get("plan") else "")
+                   + (f" over {o['over']}mm" if o.get("over") else "") for o in v.get("open") or []]
+    if v.get("hot"):      # the overflowing borders, one line per layer and set of nets (a run of tiles is one line)
+        groups: dict = {}
+        for h in v["hot"]:
+            g = groups.setdefault((h["layer"], ",".join(h["nets"][:5])), [0.0, []])
+            g[0] = max(g[0], h["over"])
+            g[1].append(h["at"])
+        out["hot"] = [f"{layer} {nets or '(vias)'} +{over}mm at " + (f"({pts[0][0]:g},{pts[0][1]:g})" if len(pts) == 1 else
+                      f"({min(q[0] for q in pts):g}..{max(q[0] for q in pts):g}, {min(q[1] for q in pts):g}..{max(q[1] for q in pts):g})")
+                      for (layer, nets), (over, pts) in groups.items()]
+    out["plan_overflow_mm"] = v.get("overflow")
+    pl = d.get("plan") or {}
+    if pl.get("given") or pl.get("given_missed"):
+        out["your_paths"] = {"used": pl.get("given") or 0, **({"not_used": pl["given_missed"]} if pl.get("given_missed") else {})}
+    return out
+
+
+def _plan_for_engine(self, plan: dict) -> dict:
+    """board.route()'s plan dict as the engine takes it: net names fixed, points as [x, y, layer]; "order" and
+    "escapes" are the harness's and are taken out by the caller."""
+    p = {k: v for k, v in plan.items() if k not in ("order", "escapes")}
+    if p.get("paths"):
+        paths = {}
+        for net, lists in p["paths"].items():
+            if lists and isinstance(lists[0], (list, tuple)) and lists[0] and not isinstance(lists[0][0], (list, tuple)):
+                lists = [lists]      # one path given bare
+            paths[self._net(net)] = [[[float(q[0]), float(q[1]), str(q[2]) if len(q) > 2 else "F.Cu"] for q in pts] for pts in lists]
+        p["paths"] = paths
+    return p
+
+
+_D = math.sqrt(0.5)
+_COMPASS = {"N": (0.0, -1.0), "S": (0.0, 1.0), "E": (1.0, 0.0), "W": (-1.0, 0.0), "NE": (_D, -_D), "SE": (_D, _D), "SW": (-_D, _D), "NW": (-_D, -_D)}
+
+
+def _side_of(n) -> str:
+    """The way a pin row faces (y down), one of eight as board.channels names it: a chip turned 45 degrees has NE,
+    SE, SW and NW sides."""
+    return ["E", "SE", "S", "SW", "W", "NW", "N", "NE"][round(math.atan2(n[1], n[0]) / (math.pi / 4)) % 8]
+
+
+def _escape(self, spec: dict, width: float | None = None) -> dict:
+    """Lay the escapes you chose for a chip's pins before routing: which way each pin leaves.
+
+    spec: {"U4.12": "via 1.2", "U4.13": "via 0.6", "U4.14": "out 0.8", "U4.15": "via 1.0 E", "U4:S": "via stagger"}
+    - "via D": a stub straight out of the pad to a via D mm past the pad's end (default 0.6), or where that is blocked a
+      45-degree leg either way to the via (a dogbone); the net then goes on from the via on any layer;
+    - "thin" after either: straight out only, on a 0.1 mm stub (what passes beside a neighbour's via at 0.4 mm pitch),
+      as a side rule lays each pin;
+    - "clear" after either: where no spot is free, the one with the fewest tracks and vias of other nets in the way is
+      taken and those come up (their nets are listed in "moved" and board.route(plan=...) lays them again);
+    - "out D": a stub straight out on the chip's layer, D mm past the pad (default 0.5), no via;
+    - a compass direction (N, E, S, W, NE, SE, SW, NW) across the pad after either bends the stub 45 degrees that way after the pad (a dogbone leg);
+    - {"to": [x, y], "via": true}: a stub from the pad to that point (a via there with "via");
+    - "U4:S" (a whole side, named as board.channels names it): "via stagger" gives every pin of that side whose net leaves the chip area and is
+      still open a via, in two staggered rows (0.5 and 1.1 mm past the pads; "via stagger3" adds a row at 1.7), the
+      person's dogbone ring; "out" a stub each.
+    Each escape is checked against the rules first (board.fits); a spot that does not fit is moved out 0.15 mm at a
+    time (up to 1 mm), and a pin with no legal spot is skipped and named with what is in the way.  Ground and supply
+    pins are never escaped by a side rule.  Returns {"laid": n, "skipped": {pin: why}, "moved": [nets taken up]}.  Lay them after taking up the
+    copper round the chip (board.unroute(near="U4", attached=True)) and before board.route; board.route(plan=
+    {"escapes": spec, ...}) does both in one call."""
+    rules = (self.project.transport.call("get_board_info", {}).get("design_rules") or {})
+    nc = (rules.get("net_classes") or {}).get("Default") or {}
+    tw = width or min(0.15, float(nc.get("track_width") or 0.2))
+    parts = {p["ref"]: p for p in self.geometry()["parts"]}
+    open_nets = set(self.unrouted())
+    jobs = []      # (ref, pad, n, kind, depth, turn, to)
+    clear = set()      # pins whose escape may take up the tracks and vias in its way (their nets go in out["moved"])
+    for key, val in spec.items():
+        if ":" in key:
+            ref, side = key.split(":", 1)
+            part = parts.get(ref)
+            fr = _chip_frame(part) if part else None
+            if not fr:
+                raise HarnessError(f"escape: {ref} is not a fine-pitch chip (20 pins or more, 0.65 mm pitch or finer)")
+            c, normals, rows, pitch = fr
+            words = str(val).split()
+            for k, row in rows.items():
+                if _side_of(normals[k]) != side.upper():
+                    continue
+                srt = sorted(row, key=lambda q: (q[1] - c[0]) * -normals[k][1] + (q[2] - c[1]) * normals[k][0])
+                deps = [0.5, 1.1, 1.7] if "stagger3" in words else [0.5, 1.1]
+                j = 0
+                for q in srt:
+                    net = q[3]
+                    if not net or net.startswith("unconnected-") or _GROUNDISH.match(net) or _sup_name(net) or _NO_FAN.search(net) or net not in open_nets:
+                        j += 1
+                        continue
+                    kind = "out" if words and words[0] == "out" else "via"
+                    dep = deps[j % len(deps)] if "stagger" in str(val) else (float(words[1]) if len(words) > 1 and _isnum(words[1]) else (0.6 if kind == "via" else 0.5))
+                    jobs.append((ref, q, normals[k], kind, dep, "thin", None))
+                    j += 1
+            continue
+        ref, _, num = key.partition(".")
+        part = parts.get(ref)
+        if not part:
+            raise HarnessError(f"escape: there is no part {ref}")
+        q = next((q for q in part["pads"] if str(q[0]) == num), None)
+        if not q:
+            raise HarnessError(f"escape: {ref} has no pad {num}")
+        fr = _chip_frame(part)
+        if fr:
+            c, normals, rows, _ = fr
+            n = next((normals[k] for k, row in rows.items() if any(r[0] == q[0] for r in row)), None)
+        else:
+            n = None
+        if n is None:      # not a fine-pitch chip: out along the pad's long side, away from the part's middle
+            dx, dy = q[1] - float(part["x"]), q[2] - float(part["y"])
+            if len(q) > 5 and q[4] and abs(q[4] - q[5]) > 1e-6:
+                a = math.radians(-(float(q[6]) if len(q) > 6 and q[6] else 0.0)) + (0.0 if q[4] > q[5] else math.pi / 2)
+                ax = (math.cos(a), math.sin(a))
+                sg = 1.0 if dx * ax[0] + dy * ax[1] >= 0 else -1.0
+                n = (sg * ax[0], sg * ax[1])
+            else:
+                L = math.hypot(dx, dy) or 1.0
+                n = (dx / L, dy / L)
+        if isinstance(val, dict):
+            jobs.append((ref, q, n, "via" if val.get("via") else "out", 0.0, None, val.get("to")))
+            continue
+        words = str(val).split()
+        kind = words[0] if words and words[0] in ("via", "out") else "via"
+        dep = next((float(w) for w in words[1:] if _isnum(w)), 0.6 if kind == "via" else 0.5)
+        turn = next((w.upper() for w in words[1:] if w.upper() in _COMPASS), "thin" if "thin" in words else None)
+        if "clear" in words:
+            clear.add(f"{ref}.{q[0]}")
+        jobs.append((ref, q, n, kind, dep, turn, None))
+    out = {"laid": 0, "skipped": {}, "moved": []}
+    thin = max(0.1, float(rules.get("min_track_width") or 0))
+    before = {it["id"] for it in self._all_items(["segment", "arc", "via"])} if clear else set()      # "clear" never takes up an escape of this call
+    for ref, q, n, kind, dep, turn, to in jobs:
+        w_ = min(tw, thin) if turn == "thin" else tw      # a stub that runs beside a staggered via at 0.4 mm pitch: 0.1 mm where the rules allow (0.12 falls 0.01 mm short of a 0.2 mm drill hole clearance)
+        side_job = turn == "thin"
+        turn = None if side_job else turn
+        layer = "F.Cu" if parts[ref].get("side", "front") == "front" else "B.Cu"
+        p = (q[1], q[2]); net = q[3]
+        half = (max(q[4], q[5]) / 2) if len(q) > 5 and q[4] else 0.4
+        pin = f"{ref}.{q[0]}"
+        if not net:
+            out["skipped"][pin] = "no net"
+            continue
+        tries = []
+        if to is not None:
+            tries.append([p, (float(to[0]), float(to[1]))])
+        else:
+            for extra in (0.0, 0.15, 0.3, 0.45, 0.6, 0.8, 1.0):
+                d = dep + extra
+                if turn:
+                    u = _COMPASS[turn]
+                    exit_ = (p[0] + n[0] * (half + 0.15), p[1] + n[1] * (half + 0.15))
+                    L = max(0.1, d - 0.15)
+                    tries.append([p, exit_, (exit_[0] + (n[0] + u[0]) * L, exit_[1] + (n[1] + u[1]) * L)] if abs(n[0] * u[0] + n[1] * u[1]) < 0.5 else [p, (p[0] + n[0] * (half + d), p[1] + n[1] * (half + d))])
+                else:      # straight out first; where that is blocked, a 45-degree leg either way (a dogbone), one depth at a time
+                    tries.append([p, (p[0] + n[0] * (half + d), p[1] + n[1] * (half + d))])
+                    if kind == "via" and not side_job:      # a side rule keeps every pin on its own lane: no leg across a neighbour
+                        exit_ = (p[0] + n[0] * (half + 0.15), p[1] + n[1] * (half + 0.15)); L = max(0.1, d - 0.15)
+                        for sg in (1, -1):
+                            tries.append([p, exit_, (exit_[0] + (n[0] - sg * n[1]) * L, exit_[1] + (n[1] + sg * n[0]) * L)])
+        why = None; cheapest = None
+        for i_, pts in enumerate(tries):
+            pts = [(round(x, 4), round(y, 4)) for x, y in pts]
+            try:
+                ft = self.fits(net, track=list(pts), layer=layer, width=w_)
+                fv = self.fits(net, via=pts[-1]) if kind == "via" else {"fits": True}
+            except HarnessError as e:
+                why = str(e)[:120]
+                continue
+            if ft.get("fits") and fv.get("fits"):
+                self.track(net, [list(x) for x in pts], layer=layer, width=w_)
+                if kind == "via":
+                    self.via(net, list(pts[-1]))
+                self.flush()
+                out["laid"] += 1
+                why = None
+                break
+            blk = (ft.get("blocked_by") or []) + (fv.get("blocked_by") or [])
+            why = "blocked by " + ", ".join(sorted({(b.get("ref") or b.get("net") or b.get("kind") or "?") for b in blk})[:4])
+            if pin in clear and blk and all(b.get("kind") in ("segment", "arc", "via") and b.get("net") != net and b.get("id") in before and not _kept_net(b.get("net") or "") for b in blk):
+                ids = {b["id"]: b.get("net") for b in blk}
+                cost = len(ids) + 0.1 * i_
+                if cheapest is None or cost < cheapest[0]:
+                    cheapest = (cost, pts, ids)
+        if why and cheapest is not None:      # "clear": the spot with the fewest tracks and vias in the way; those come up
+            _, pts, ids = cheapest
+            for i_, nt in ids.items():
+                with contextlib.suppress(HarnessError):
+                    self._edit({"op": "remove", "id": i_})
+                if nt and nt not in out["moved"]:
+                    out["moved"].append(nt)
+            self.flush()
+            self.track(net, [list(x) for x in pts], layer=layer, width=w_)
+            if kind == "via":
+                self.via(net, list(pts[-1]))
+            self.flush()
+            out["laid"] += 1
+            why = None
+        if why:
+            out["skipped"][pin] = why
+    self._geom = None
+    return out
+
+
+_PAIR = re.compile(r"(^|[/_(-])(D[PN]|D[+-]|USB_?D[PN+-]|[A-Z0-9]+_[PN])\)?$", re.I)
+
+
+def _kept_net(net: str) -> bool:
+    """Copper an escape never takes up: ground, supplies (they join on their own layer before dropping to a plane),
+    differential pairs, crystal and antenna lines."""
+    return not net or bool(_GROUNDISH.match(net)) or _sup_name(net) or bool(_PAIR.search(net)) or bool(_NO_FAN.search(net))
+
+
+def _isnum(w: str) -> bool:
+    try:
+        float(w)
+        return True
+    except ValueError:
+        return False
+
+
+def _unbox(self, refs: list | None = None, budget_s: float = 900, time_s: float = 40, sideways: int = 3, layers: list | None = None,
+           keep_rules: bool = True, log=None) -> dict:
+    """Free the pins of fine-pitch chips that routing left boxed in, with dogbones the way the routing AI lays them
+    by hand (keep-best).  For each open pin of a chip (20 connected pins or more, 0.65 mm pitch or finer), in turn:
+    - a dogbone trio: the pin to a via 0.5 mm past its pad and its two neighbours to vias 1.1 mm out, staggered, on
+      0.1 mm stubs straight out (what passes beside a via at 0.4 mm pitch), the tracks and vias in the way taken up;
+    - the same the other way round (the pin out at 1.1, its neighbours at 0.5);
+    - the pin alone, to a via 0.6 then 1.0 mm out (straight, or a 45-degree leg), clearing its way;
+    - when the open gap lies away from the pin (between two pieces of the net's copper), the net taken up whole and
+      laid again from a trio;
+    then every open net and every net that was taken up is routed again (board.route(plan={"escapes": ..., "order":
+    [the pin's net first]}, ripup="ladder")).  A try stays when fewer connections are open (at the same count, fewer
+    rules errors); up to `sideways` tries that leave as many open, no more than two errors more, and a set of open
+    nets never seen before also stay, so the next try can work on the pin the blockage moved to.  Neighbours on ground,
+    a supply, a differential pair, a crystal or an antenna line are left alone, and so is their copper.
+    Measured on the benchmark's routed Cyberboard (U4, STM32WB QFN-68 at 0.4 mm, turned 45 degrees): 6 -> 3 open in
+    12 tries, 7.5 minutes.  Returns {"before", "after", "tried": [one line per try], "kept": [...]}."""
+    import time as _t
+    t0 = _t.time()
+    start = best = _standing(self)
+    seen = {frozenset(self.unrouted())}
+    tried, kept, done = [], [], set()
+    parts = {p["ref"]: p for p in self.geometry()["parts"]}
+    chips = {}
+    for ref, part in parts.items():
+        if refs and ref not in refs:
+            continue
+        fr = _chip_frame(part)
+        if not fr:
+            continue
+        c, normals, rows, _ = fr
+        for k, row in rows.items():
+            srt = sorted(row, key=lambda q: (q[1] - c[0]) * -normals[k][1] + (q[2] - c[1]) * normals[k][0])
+            for i, q in enumerate(srt):
+                chips.setdefault(ref, {})[q[0]] = (i, srt)
+    say = log or (lambda s: None)
+    while chips and _t.time() - t0 < budget_s:
+        left = set(self.unrouted())
+        cands = []
+        for v in self._call("run_checks").get("violations", []):
+            if v.get("code") != "unconnected_items":
+                continue
+            m = re.search(r"net '((?:[^'\\]|\\.)*)'", v.get("message", ""))
+            if not m or _kept_net(m.group(1)):
+                continue
+            # the chip pins of the open net, whether the gap is at the pin or between two pieces of its copper
+            for r in chips:
+                for num, (i, srt) in chips[r].items():
+                    if srt[i][3] != m.group(1):
+                        continue
+                    net = srt[i][3]
+                    nb = [srt[j] for j in (i - 1, i + 1) if 0 <= j < len(srt) and srt[j][3] and not _kept_net(srt[j][3]) and not srt[j][3].startswith("unconnected-")]
+                    for mid, side in ((0.5, 1.1), (1.1, 0.5)):
+                        if nb:
+                            cands.append(({f"{r}.{num}": f"via {mid} thin clear", **{f"{r}.{q[0]}": f"via {side} thin clear" for q in nb}}, [net] + [q[3] for q in nb]))
+                    for d in (0.6, 1.0):
+                        cands.append(({f"{r}.{num}": f"via {d} clear"}, [net]))
+                    if not (set(v.get("refs") or []) & {r}) and nb:      # the gap is away from the pin: the net comes up whole and leaves by a trio
+                        cands.append(({f"{r}.{num}": "via 0.5 thin clear", **{f"{r}.{q[0]}": "via 1.1 thin clear" for q in nb}, "take up": net}, [net] + [q[3] for q in nb]))
+        shape0 = frozenset(left)
+        cands = [cd for cd in cands if (shape0, tuple(sorted(cd[0].items()))) not in done]
+        if not cands:
+            break
+        moved = False
+        for esc, order in cands:
+            if _t.time() - t0 > budget_s:
+                tried.append("budget spent")
+                break
+            done.add((shape0, tuple(sorted(esc.items()))))
+            t1 = _t.time()
+            try:
+                with self.trial() as tr:
+                    esc_ = {k: v for k, v in esc.items() if k != "take up"}
+                    if esc.get("take up"):
+                        self.unroute(esc["take up"])
+                    with contextlib.suppress(HarnessError):
+                        self.route(nets=sorted(self.unrouted()), fill=False, keep_rules=keep_rules, layers=layers, ground_vias=False, time_s=time_s,
+                                   ripup="ladder", plan={"escapes": esc_, "order": order})
+                    now = _standing(self); shape = frozenset(self.unrouted())
+                    tr.keep = now[0] < best[0] or (now[0] == best[0] and now[1] < best[1])
+                    side = not tr.keep and sideways > 0 and now[0] == best[0] and now[1] <= best[1] + 2 and shape not in seen
+                    if side:
+                        tr.keep = True; sideways -= 1
+                    tried.append(f"{', '.join(f'{k} {v}' for k, v in esc.items())}: open {best[0]} -> {now[0]}, errors {best[1]} -> {now[1]}"
+                                 + (" (sideways)" if side else "") + f" ({round(_t.time() - t1)} s)")
+                    say(tried[-1])
+            except Exception as e:      # noqa: BLE001  a try that fails is taken back by the trial
+                tried.append(f"{esc}: failed, taken back ({type(e).__name__}: {str(e)[:120]})")
+                say(tried[-1])
+                continue
+            if tr.keep:
+                kept.append(tried[-1]); best = now; seen.add(shape); moved = True
+                break
+        if not moved:
+            break
+    self.project.note(f"board: unboxed fine-pitch chip pins, open connections {start[0]} -> {best[0]}")
+    return {"before": start[0], "after": best[0], "tried": tried, "kept": kept}
+
+
 def _sup_name(net: str) -> bool:
     from .rules import _SUPPLY
     return bool(_SUPPLY.match(net) or _SUPPLY.match(net.lstrip("/")))
@@ -1211,3 +1610,6 @@ def install(Board) -> None:
     Board.brief = _brief
     Board.fanout = _fanout
     Board.escape_chips = _escape_chips
+    Board.channels = _channels
+    Board.escape = _escape
+    Board.unbox = _unbox

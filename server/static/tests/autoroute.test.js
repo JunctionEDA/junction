@@ -562,3 +562,49 @@ test("ripup ladder: the rescue rung lays a connection with one via over the limi
   assert.equal(lad2.routed, 3, JSON.stringify(lad2.connections.map((c) => [c.net, c.routed, c.length, c.vias])));
   apply(doc2, lad2); assert.deepEqual(errors(doc2, null), []); assert.equal(P.ratsnest(doc2).length, 0);
 });
+
+test("plan paths: a path the routing AI wrote holds its tiles, is laid inside its corridor, and the rest is planned round it", () => {
+  // the wall of the plan test above, with its one-track gap at x = 118.  Shortest first A takes the gap; the AI writes
+  // B's path through the gap (and nothing for A): B is laid there, and A goes round the far end of the wall.
+  const make = () => board(smd(115, 48, "A"), smd(121, 62, "A"), smd(105, 44, "B"), smd(105, 66, "B"), smd(95, 63, "C"), smd(100, 63, "C"));
+  const keepouts = [{ box: [89, 52, 117.8, 58] }, { box: [118.2, 52, 124, 58] }];
+  const len = (res, net) => res.connections.filter((c) => c.net === net).reduce((s, c) => s + c.length, 0);
+  const doc = make();
+  const paths = { B: [[[110, 46, "F.Cu"], [118, 50, "F.Cu"], [118, 60, "F.Cu"], [110, 64, "F.Cu"]]] };
+  const res = R.route(K, P, doc, null, { layers: ["F.Cu"], keepouts, plan: { paths } });
+  assert.equal(res.routed, 3, JSON.stringify(res.connections.map((c) => [c.net, c.routed, c.length])));
+  assert.ok(len(res, "B") < 45 && len(res, "A") > 20, "B takes the gap it was given: " + JSON.stringify(res.connections.map((c) => [c.net, c.length])));
+  assert.equal(res.plan.given, 1); assert.equal(res.plan.givenInside, 1, JSON.stringify(res.plan)); assert.equal(res.plan.givenMissed, undefined);
+  apply(doc, res); assert.deepEqual(errors(doc, null), []); assert.equal(P.ratsnest(doc).length, 0);
+  // a path for a net with no open connection, or on no routing layer, is named and not used
+  const bad = R.route(K, P, make(), null, { layers: ["F.Cu"], keepouts, plan: { paths: { Z: [[[100, 50, "F.Cu"]]], C: [[[96, 63, "B.Cu"]]] } } });
+  assert.equal(bad.plan.given, 0); assert.equal(bad.plan.givenMissed.length, 2, JSON.stringify(bad.plan));
+});
+
+test("plan paths: a written path through a via is laid with it, on the layers it names", () => {
+  // two nets cross: H runs left to right, V top to bottom.  The AI sends V under H on B.Cu; H stays on F.Cu
+  const doc = board(smd(100, 55, "H"), smd(120, 55, "H"), smd(110, 45, "V"), smd(110, 65, "V"));
+  const res = R.route(K, P, doc, null, { order: ["H"], plan: { paths: { V: [[[110, 48, "B.Cu"], [110, 62, "F.Cu"]]] } } });
+  assert.equal(res.routed, 2);
+  const v = res.connections.find((c) => c.net === "V"), h = res.connections.find((c) => c.net === "H");
+  assert.equal(h.vias, 0); assert.deepEqual(h.layers, ["F.Cu"]); assert.equal(v.vias, 2); assert.ok(v.layers.includes("B.Cu"));
+  assert.equal(res.plan.given, 1);
+  apply(doc, res); assert.deepEqual(errors(doc, null), []); assert.equal(P.ratsnest(doc).length, 0);
+});
+
+test("view: the router looks at a chip's rows instead of routing: pins, free tracks per layer and depth, open connections with their plan", () => {
+  // a row of eight 0.25 x 1 mm pads at 0.5 mm pitch (a fine-pitch row, pads pointing south), each net going to a pad below
+  // (and a second row of eight without nets 3 mm north, the other side of the chip)
+  const pads = []; for (let i = 0; i < 8; i++) pads.push(`(pad "${i + 1}" smd rect (at ${i * 0.5 - 1.75} 0) (size 0.25 1) (layers "F.Cu" "F.Mask") (net "N${i}") (uuid "u${i}"))`, `(pad "${i + 9}" smd rect (at ${i * 0.5 - 1.75} -3) (size 0.25 1) (layers "F.Cu" "F.Mask") (uuid "v${i}"))`);
+  const chip = `(footprint "T:Q" (layer "F.Cu") (uuid "chip") (at 110 50) (property "Reference" "U1" (at 0 0) (layer "F.SilkS") (uuid "r1"))\n    ${pads.join("\n    ")})`;
+  const far = []; for (let i = 0; i < 8; i++) far.push(smd(100 + i * 3, 64, `N${i}`));
+  const doc = board(chip, ...far); const before = doc.items.size;
+  const res = R.route(K, P, doc, null, { plan: true, view: { ref: "U1", depths: [0.5, 2] } });
+  assert.equal(res.items.length, 0, "nothing is laid"); assert.equal(doc.items.size, before);
+  const v = res.view; assert.ok(v, "a view comes back"); assert.deepEqual(v.sides.map((q) => q.side).sort(), ["N", "S"], JSON.stringify(v.sides));
+  const s = v.sides.find((q) => q.side === "S"); assert.equal(s.pins.length, 8); assert.deepEqual(s.pins.find((q) => q[0] === "1"), ["1", "N0", "open"]);
+  assert.ok(v.sides.find((q) => q.side === "N").pins.every((q) => q[1] === "" && q[2] === ""), "the other row has no nets");
+  assert.ok(Math.abs(s.pitch - 0.5) < 1e-6);
+  const f = s.channels["F.Cu"]; assert.equal(f.length, 2); assert.ok(f[1][1] >= 8, "an empty board has room for every pin at 2 mm: " + JSON.stringify(f));
+  assert.equal(v.open.length, 8); assert.ok(v.open.every((o) => (o.from.startsWith("U1.") || o.to.startsWith("U1.")) && o.plan.length >= 2), JSON.stringify(v.open[0]));
+});
