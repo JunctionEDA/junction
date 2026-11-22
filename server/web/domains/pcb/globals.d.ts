@@ -120,6 +120,9 @@ interface KiCadCanvasApi {
   str(v: unknown): string;
   uuidOf(node: SNode): string;
   resolveLib(doc: KDoc, name: string, depth?: number): SNode | null;
+  /** a glyph's advance in units of the glyph width ('?' for missing glyphs; web/domains/pcb/canvas/stroke-font.ts) */
+  strokeAdvance(ch: string): number;
+  parseMarkup(s: string): { text: string; bars: [number, number][] | null };
   PCB_HIDDEN_DEFAULT: Set<string>;
   PCB_COLORS: Record<string, string>;
   SCH: Record<string, string>;
@@ -244,7 +247,9 @@ interface SchToolModule extends ToolModule {
   moveDrag(ctx: ToolCtx, mm: [number, number]): void;
   endDrag(ctx: ToolCtx, apply: boolean): void;
   cancelDrag?(ctx: ToolCtx): void;
-  setDragMode(ctx: ToolCtx, mode: string): void;
+  setDragMode(ctx: ToolCtx, mode: string, once?: boolean): void;
+  /** the mouse-drag preference (drag or move); G / M set their own drag only */
+  setMouseDragMode?(ctx: ToolCtx, mode: string): void;
   setLineMode(ctx: ToolCtx, mode: string): void;
   cycleLineMode(ctx: ToolCtx): void;
   modeText(): string;

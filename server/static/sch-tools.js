@@ -520,10 +520,10 @@
     return +(+deg.toPrecision(10)).toString();
   }
   function ellipseFromBox(a, b) {
-    const IU2 = 1e4, iu = (v) => Math.round(v * IU2), tdiv = (x, y) => Math.trunc(x / y);
+    const IU3 = 1e4, iu = (v) => Math.round(v * IU3), tdiv = (x, y) => Math.trunc(x / y);
     const x1 = iu(a[0]), y1 = iu(a[1]), x2 = iu(b[0]), y2 = iu(b[1]);
     const cx = tdiv(x1 + x2, 2), cy = tdiv(y1 + y2, 2), hw = tdiv(Math.abs(x2 - x1), 2), hh = tdiv(Math.abs(y2 - y1), 2), wide = hw >= hh;
-    return { cx: cx / IU2, cy: cy / IU2, major: Math.max(wide ? hw : hh, 1) / IU2, minor: Math.max(wide ? hh : hw, 1) / IU2, rotation: wide ? 0 : 90, start: 0, end: 360 };
+    return { cx: cx / IU3, cy: cy / IU3, major: Math.max(wide ? hw : hh, 1) / IU3, minor: Math.max(wide ? hh : hw, 1) / IU3, rotation: wide ? 0 : 90, start: 0, end: 360 };
   }
   function ellipseAngle(e, p) {
     const a = Math.max(1e-4, e.major), b = Math.max(1e-4, e.minor), r = e.rotation * Math.PI / 180, dx = p[0] - e.cx, dy = p[1] - e.cy;
@@ -616,13 +616,13 @@
   }
   var DEFAULT_TEXT_SIZE = 1.27;
   function drawTableSize(origin, cur, grid, textSize = DEFAULT_TEXT_SIZE) {
-    const IU2 = 1e4, iu = (v) => Math.round(v * IU2), g = iu(grid > 0 ? grid : 1.27), fs = Math.max(1, iu(textSize > 0 ? textSize : DEFAULT_TEXT_SIZE));
+    const IU3 = 1e4, iu = (v) => Math.round(v * IU3), g = iu(grid > 0 ? grid : 1.27), fs = Math.max(1, iu(textSize > 0 ? textSize : DEFAULT_TEXT_SIZE));
     const dx = iu(cur[0]) - iu(origin[0]), dy = iu(cur[1]) - iu(origin[1]);
     const cols = Math.max(1, Math.trunc(dx / (fs * 15))), rows = Math.max(1, Math.trunc(dy / (fs * 2)));
     let cw = Math.max(g * 5, Math.trunc(dx / cols)), ch = Math.max(g * 2, Math.trunc(dy / rows));
     cw = Math.round(cw / g) * g;
     ch = Math.round(ch / g) * g;
-    return { rows, cols, cw: r4(cw / IU2), ch: r4(ch / IU2) };
+    return { rows, cols, cw: r4(cw / IU3), ch: r4(ch / IU3) };
   }
   function drawTableNode(origin, cur, grid, textSize = DEFAULT_TEXT_SIZE) {
     const z = drawTableSize(origin, cur, grid, textSize);
@@ -956,14 +956,14 @@
     setSpinOfNode(kind, out, spin);
     return out;
   }
-  function autoRotateChanges(doc, changes, IU2) {
+  function autoRotateChanges(doc, changes, IU3) {
     const want = changes.filter((c) => c.kind === "MODIFIED" && autoRotateOf(c.id) && supportsAutoRotate((doc.items.get(c.id) || { kind: "" }).kind));
     if (!want.length) return changes;
     const saved = /* @__PURE__ */ new Map();
     for (const c of changes) if (!saved.has(c.id)) saved.set(c.id, doc.items.get(c.id) || null);
     const swap = /* @__PURE__ */ new Map();
     try {
-      for (const c of changes) K.applyChange(doc, c, IU2);
+      for (const c of changes) K.applyChange(doc, c, IU3);
       for (const c of want) {
         const it = doc.items.get(c.id);
         if (!it) continue;
@@ -1325,7 +1325,7 @@
     }
     return pts.filter((p) => analyzePoint(doc, p, false, extra, skip).allows);
   }
-  function editTxn(doc, IU2) {
+  function editTxn(doc, IU3) {
     const saved = /* @__PURE__ */ new Map(), out = /* @__PURE__ */ new Map();
     const keep = (id, obj) => {
       if (!saved.has(id)) saved.set(id, obj || null);
@@ -1343,7 +1343,7 @@
         let c = modChange(doc, item, node);
         if (prev && prev.kind === "ADDED") c = Object.assign({}, c, { kind: "ADDED" });
         out.set(item.id, c);
-        K.applyChange(doc, c, IU2 || 1e4);
+        K.applyChange(doc, c, IU3 || 1e4);
         return doc.items.get(item.id);
       },
       remove(item) {
@@ -2812,6 +2812,20 @@
       const end = selEndOf(it.id);
       for (let k = 0; k < (times || 1) && ok; k++) ok = transformNode(it.kind, n, op, C, items.length === 1, end) !== false;
       if (!ok) continue;
+      if (it.kind === "symbol") {
+        if (op === "x" || op === "y") dropKid(n, "fields_autoplaced");
+        else if (apPrefs().enable && autoplaceAlgo({ node: n })) {
+          try {
+            const a = autoplaceNode(doc, Object.assign({}, it, { node: n }), autoplaceAlgo({ node: n, id: it.id }));
+            if (a) {
+              n.length = 0;
+              n.push(...a);
+            }
+          } catch (e) {
+            console.warn(e);
+          }
+        }
+      }
       for (const p of connPoints(doc, it)) touched.push(p);
       for (const p of connPoints(doc, { kind: it.kind, node: n, id: it.id })) touched.push(p);
       out.push(modChange(doc, it, n));
@@ -3223,14 +3237,17 @@
         const k = r4(p[0]) + "," + r4(p[1]);
         if (seen.has(k)) continue;
         seen.add(k);
-        if (!junctionAt(doc, p[0], p[1]) && (needsJunction(doc, p[0], p[1], "wire") || needsJunction(doc, p[0], p[1], "bus"))) extra.push(addNode(doc, junctionNode(p)).change);
+        if (!junctionAt(doc, p[0], p[1]) && (needsJunction(doc, p[0], p[1], "wire") || needsJunction(doc, p[0], p[1], "bus"))) {
+          breakInto(doc, p, saved, new Set(changes.map((c) => c.id)), extra, ctx.IU || 1e4);
+          extra.push(addNode(doc, junctionNode(p)).change);
+        }
       }
     } finally {
       for (const [id, obj] of saved) {
         if (obj) doc.items.set(id, obj);
         else doc.items.delete(id);
       }
-      for (const c of extra) doc.items.delete(c.id);
+      for (const c of extra) if (c.kind === "ADDED") doc.items.delete(c.id);
     }
     for (const id of added) doc.items.delete(id);
     const keepSel = d.anchors.flatMap((a) => a.ends.map((e) => e.item.id));
@@ -3489,7 +3506,11 @@ ${body}
         seen.add(key);
         if (junctionAt(doc, p[0], p[1])) continue;
         const need = line ? needsJunction(doc, p[0], p[1], it.kind) : needsJunction(doc, p[0], p[1], "wire") || needsJunction(doc, p[0], p[1], "bus");
-        if (need) out.push(addNode(doc, junctionNode(p)).change);
+        if (need) {
+          if (line) out.push(...breakLinesAt(doc, p, it.kind).filter((c) => !items.some((n) => n.id === c.id)));
+          else for (const kd of ["wire", "bus"]) out.push(...breakLinesAt(doc, p, kd).filter((c) => !items.some((n) => n.id === c.id)));
+          out.push(addNode(doc, junctionNode(p)).change);
+        }
       }
     }
     return out;
@@ -4561,7 +4582,7 @@ ${body}
       }
     }
     const symId = K.hitTest(doc, mm[0], mm[1], tol), sym = symId ? doc.items.get(symId) : null;
-    if (sym && sym.kind === "symbol" && isPowerSymbol(doc, str((kid(sym.node, "lib_id") || [])[1]))) {
+    if (sym && sym.kind === "symbol" && symbolIsPower(doc, sym)) {
       const sp = symbolPins(doc, sym);
       if (sp.length === 1) return { item: sym, at: [sp[0].x, sp[0].y], pin: sp[0].number };
     }
@@ -5249,7 +5270,7 @@ ${body}
       }
     }
     if (!labels.length) return null;
-    const IU2 = 1e4, iu = (mm2) => Math.round(mm2 * IU2), mm = (v) => r4(v / IU2);
+    const IU3 = 1e4, iu = (mm2) => Math.round(mm2 * IU3), mm = (v) => r4(v / IU3);
     const grid = iu(1.27), ts = iu(textSize);
     let pitch = Math.max(Math.round(ts * 2), iu(2.54));
     pitch = Math.round(pitch / grid) * grid;
@@ -8581,7 +8602,8 @@ Link '${target}' to this file?`)) return null;
       // Y is Mirror Vertically: (mirror x)
       case "d":
       case "D":
-        return duplicateSelected(ctx);
+        return showDatasheet(ctx);
+      // ACTIONS::showDatasheet (Duplicate is Ctrl+D)
       case "Insert":
         return repeatLast(ctx);
       case "o":
@@ -8601,8 +8623,10 @@ Link '${target}' to this file?`)) return null;
       case "G":
       case "m":
       case "M": {
-        setDragMode(ctx, lower2 === "m" ? "move" : "drag");
-        if (S.drag) return true;
+        if (S.drag) {
+          setDragMode(ctx, lower2 === "m" ? "move" : "drag");
+          return true;
+        }
         if (!S.cursor) return false;
         let it = S.sel ? ctx.doc.items.get(S.sel) : null;
         if (!it && !ctx.selected && !ctx.selection?.size) {
@@ -8610,7 +8634,15 @@ Link '${target}' to this file?`)) return null;
           if (hovered?.kind === "no_connect") it = hovered;
         }
         if (!it) return false;
-        return !!beginDrag(ctx, it, S.cursor, false);
+        const back = S.mouseDragMode || "drag";
+        setDragMode(ctx, lower2 === "m" ? "move" : "drag", true);
+        const d = beginDrag(ctx, it, S.cursor, false);
+        if (d) d.restoreMode = back;
+        else {
+          S.dragMode = back;
+          announceModes(ctx);
+        }
+        return !!d;
       }
       case " ":
         if (ev && ev.shiftKey) {
@@ -9269,7 +9301,8 @@ Link '${target}' to this file?`)) return null;
     return str((kid(node, "lib_id") || [])[1]);
   }
   function symbolIsPower(doc, item) {
-    return isPowerSymbol(doc, symbolLibId(item.node));
+    const ln = kid(item.node, "lib_name");
+    return !!ln && isPowerSymbol(doc, str(ln[1])) || isPowerSymbol(doc, symbolLibId(item.node));
   }
   function globalPowerPin(doc, item, pin) {
     if (pin.type !== "power_in") return false;
@@ -9278,96 +9311,179 @@ Link '${target}' to this file?`)) return null;
     if (pw) return true;
     return !!pin.hidden;
   }
-  var AP_HPADDING = 0.635;
-  var AP_VPADDING = 0.381;
-  var AP_GRID = 1.27;
-  var AP_WIRE_V = 2.54;
+  var IU2 = 1e4;
+  var HPAD = 6350;
+  var VPAD = 3810;
+  var GRID50 = 12700;
+  var WIRE_V = 25400;
   var SIDES = { right: [1, 0], top: [0, -1], left: [-1, 0], bottom: [0, 1] };
-  function roundN(v, n, up) {
-    const q = v / n, r = Math.round(q);
-    if (Math.abs(q - r) < 1e-6) return r4(r * n);
-    return r4((up ? Math.ceil(q) : Math.floor(q)) * n);
-  }
+  var kiround = (v) => v < 0 ? -Math.round(-v) : Math.round(v);
+  var toIU = (mm) => kiround(mm * IU2);
+  var idiv = (a, b) => Math.trunc(a / b);
+  var mmOf = (v) => r4(v / IU2);
+  var roundIU = (v, n, up) => v % n ? n * (idiv(v, n) + (up ? 1 : 0)) : v;
   function fieldHidden(p) {
     const h = kid(p, "hide");
     if (h) return str(h[1]) !== "no";
     const ef = kid(p, "effects");
     return !!(ef && (ef.includes("hide") || kid(ef, "hide") && str(kid(ef, "hide")[1]) !== "no"));
   }
-  function fieldFont(p) {
+  var yesFlag = (n, key) => !!n && (n.includes(key) || !!kid(n, key) && str(kid(n, key)[1]) !== "no");
+  function textPenIU(p) {
     const ef = kid(p, "effects"), f = ef && kid(ef, "font"), s = f && kid(f, "size"), th = f && kid(f, "thickness");
-    const size = s ? num(s[2], num(s[1], 1.27)) : 1.27;
-    const bold2 = !!(f && (f.includes("bold") || kid(f, "bold") && str(kid(f, "bold")[1]) !== "no"));
-    const thick = th && num(th[1]) > 1e-3 ? num(th[1]) : Math.min(bold2 ? size / 5 : size / 8, size / 4);
-    return { size, thick, bold: bold2 };
+    const h = toIU(s ? num(s[1], 1.27) : 1.27), w = toIU(s ? num(s[2], num(s[1], 1.27)) : 1.27), bold2 = yesFlag(f, "bold");
+    let pen = th ? toIU(num(th[1])) : 0;
+    if (pen <= 1) pen = bold2 ? kiround(w / 5) : kiround(w / 8);
+    else if (bold2) pen = kiround(pen * 1.6);
+    return Math.min(pen, kiround(Math.min(Math.abs(w), Math.abs(h)) * 0.25));
+  }
+  function textBoxIU(p, text) {
+    const ef = kid(p, "effects"), f = ef && kid(ef, "font"), s = f && kid(f, "size");
+    const h = toIU(s ? num(s[1], 1.27) : 1.27), w = toIU(s ? num(s[2], num(s[1], 1.27)) : 1.27), pen = textPenIU(p);
+    const t = K.parseMarkup(text != null ? text : str(p[2])).text, adv = K.strokeAdvance;
+    let cur = 0;
+    for (const ch of t) {
+      if (ch === "	") continue;
+      cur += kiround((ch === " " ? adv(" ") : adv(ch)) * w);
+    }
+    const grow = 2 * kiround(pen * 1.5), ex = Math.abs(cur - kiround(w * 0.2)) + grow, ey = h + grow;
+    return { w: ex, h: ey + kiround(ey * 0.17) + ((text != null ? text : str(p[2])).includes("~{") ? idiv(ey, 6) : 0) };
   }
   function fieldExtent(p) {
-    const { size, thick } = fieldFont(p), text = str(p[2]);
-    const lines = text.split("\n"), w = Math.max(...lines.map((l) => K.textWidth(l, size, 0))) + 3 * thick;
-    return { w: r4(w), h: r4((size + 3 * thick) * 1.17 + (lines.length - 1) * size * 1.61) };
+    const b = textBoxIU(p);
+    return { w: mmOf(b.w), h: mmOf(b.h) };
   }
-  function bodyBox(doc, item) {
+  var merge = (b, x0, y0, x1, y1) => b ? [Math.min(b[0], x0), Math.min(b[1], y0), Math.max(b[2], x1), Math.max(b[3], y1)] : [x0, y0, x1, y1];
+  function drawnSubs(lib, n, allUnits) {
+    const unit = kid(n, "unit") ? num(kid(n, "unit")[1], 1) : 1, styleN = kid(n, "body_style") || kid(n, "convert"), style = styleN ? num(styleN[1], 1) : 1;
+    return kids(lib, "symbol").filter((sub) => {
+      const m = str(sub[1]).match(/_(\d+)_(\d+)$/);
+      const u = m ? +m[1] : 0, s = m ? +m[2] : 1;
+      return allUnits || !(u !== 0 && u !== unit || m && s !== 0 && s !== style);
+    });
+  }
+  function bodyBoxIU(doc, item) {
     const n = item.node, libId = str((kid(n, "lib_name") || kid(n, "lib_id") || [])[1]);
     const lib = K.resolveLib(doc, libId) || K.resolveLib(doc, symbolLibId(n));
     const [ax, ay, rot] = atOf(n), mN = kid(n, "mirror"), T = K.symbolTransform(rot, mN ? str(mN[1]) : "");
-    const tf = (lx, ly) => [ax + T[0] * lx + T[1] * ly, ay + T[2] * lx + T[3] * ly];
     let b = null;
-    const take = (p) => {
-      b = b ? [Math.min(b[0], p[0]), Math.min(b[1], p[1]), Math.max(b[2], p[0]), Math.max(b[3], p[1])] : [p[0], p[1], p[0], p[1]];
+    const pt = (x, y) => [toIU(x), -toIU(y)];
+    const take = (pts, grow) => {
+      for (const [x, y] of pts) b = merge(b, x - grow, y - grow, x + grow, y + grow);
     };
-    if (lib) {
-      const unit = kid(n, "unit") ? num(kid(n, "unit")[1], 1) : 1, styleN = kid(n, "body_style") || kid(n, "convert"), style = styleN ? num(styleN[1], 1) : 1;
-      for (const sub of kids(lib, "symbol")) {
-        const m = str(sub[1]).match(/_(\d+)_(\d+)$/);
-        const u = m ? +m[1] : 0, s = m ? +m[2] : 1;
-        if (u !== 0 && u !== unit || m && s !== 0 && s !== style) continue;
-        for (const g of sub.slice(2)) {
-          if (!Array.isArray(g)) continue;
-          const gk = g[0];
-          if (gk === "rectangle") {
-            const a = kid(g, "start"), e = kid(g, "end");
-            take(tf(num(a[1]), num(a[2])));
-            take(tf(num(e[1]), num(e[2])));
-          } else if (gk === "circle") {
-            const c = kid(g, "center"), r = num((kid(g, "radius") || [])[1]);
-            for (const [dx, dy] of [[-r, -r], [r, r], [-r, r], [r, -r]]) take(tf(num(c[1]) + dx, num(c[2]) + dy));
-          } else if (gk === "arc") {
-            for (const key of ["start", "mid", "end"]) {
-              const k = kid(g, key);
-              if (k) take(tf(num(k[1]), num(k[2])));
-            }
-          } else if (gk === "polyline" || gk === "bezier") {
-            for (const [x, y] of ptsOf(g)) take(tf(x, y));
-          } else if (gk === "text") {
-            const [tx, ty] = atOf(g), ef = K.effectsOf(g);
-            if (!ef.hide) {
-              const w = K.textWidth(str(g[1]), ef.size, 0) / 2;
-              take(tf(tx - w, ty - ef.size / 2));
-              take(tf(tx + w, ty + ef.size / 2));
-            }
-          }
+    const half = (g) => {
+      const st = kid(g, "stroke"), w = st && kid(st, "width");
+      return idiv(Math.max(0, w ? toIU(num(w[1])) : 0), 2);
+    };
+    if (lib) for (const sub of drawnSubs(lib, n, false)) for (const g of sub.slice(2)) {
+      if (!Array.isArray(g) || yesFlag(g, "private")) continue;
+      const gk = g[0];
+      if (gk === "rectangle") {
+        const a = kid(g, "start"), e = kid(g, "end");
+        if (a && e) take([pt(num(a[1]), num(a[2])), pt(num(e[1]), num(e[2]))], half(g));
+      } else if (gk === "circle") {
+        const c = kid(g, "center"), r = toIU(num((kid(g, "radius") || [])[1]));
+        if (c) {
+          const [x, y] = pt(num(c[1]), num(c[2]));
+          take([[x - r, y - r], [x + r, y + r]], half(g));
         }
+      } else if (gk === "arc") {
+        const s0 = kid(g, "start"), m0 = kid(g, "mid"), e0 = kid(g, "end");
+        if (!s0 || !e0) continue;
+        const P = [s0, m0 || s0, e0].map((k) => pt(num(k[1]), num(k[2])));
+        const pts = [P[0], P[2]];
+        const arc = m0 && K.arcFrom3 ? K.arcFrom3(P[0], P[1], P[2]) : null;
+        if (arc && isFinite(arc.r)) {
+          const ang = (q) => Math.atan2(q[1] - arc.y, q[0] - arc.x), norm = (a) => (a % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+          const a0 = ang(P[0]), am = norm(ang(P[1]) - a0), ae = norm(ang(P[2]) - a0), ccw = am <= ae, sweep = ccw ? ae : 2 * Math.PI - ae;
+          for (let q = 0; q < 4; q++) {
+            const a = q * Math.PI / 2, d = ccw ? norm(a - a0) : norm(a0 - a);
+            if (d > 0 && d < sweep) pts.push([kiround(arc.x + arc.r * Math.cos(a)), kiround(arc.y + arc.r * Math.sin(a))]);
+          }
+        } else pts.push(P[1]);
+        take(pts, half(g));
+      } else if (gk === "polyline") take(ptsOf(g).map(([x, y]) => pt(x, y)), half(g));
+      else if (gk === "bezier") {
+        const c = ptsOf(g);
+        const curve = c.length >= 3 ? K.bezierPts(c) : c;
+        take(curve.map(([x, y]) => pt(x, y)), half(g));
+      } else if (gk === "text" || gk === "text_box") {
+        const [tx, ty] = atOf(g);
+        if (fieldHidden(g)) continue;
+        if (gk === "text_box") {
+          const sz = kid(g, "size");
+          if (sz) take([pt(tx, ty), pt(tx + num(sz[1]), ty + num(sz[2]))], 0);
+          continue;
+        }
+        const tb = textBoxIU(g, str(g[1])), [x, y] = pt(tx, ty), vert = Math.round(num(atOf(g)[2])) % 180 !== 0;
+        const hw = idiv(vert ? tb.h : tb.w, 2), hh = idiv(vert ? tb.w : tb.h, 2);
+        take([[x - hw, y - hh], [x + hw, y + hh]], 0);
+      } else if (gk === "pin") {
+        if (yesFlag(g, "hide")) continue;
+        const [px, py, pr] = atOf(g), lenN = kid(g, "length"), len2 = lenN ? num(lenN[1]) : 2.54;
+        const dir = (Math.round(pr) % 360 + 360) % 360, d = dir === 0 ? [1, 0] : dir === 90 ? [0, 1] : dir === 180 ? [-1, 0] : [0, -1];
+        const [x, y] = pt(px, py), L = toIU(len2);
+        take([[x + d[0] * L, y - d[1] * L]], 0);
       }
     }
-    for (const pin of symbolPins(doc, item)) if (!pin.hidden) take(pin.root);
-    return (b || [ax, ay, ax, ay]).map(r4);
+    const ox = toIU(ax), oy = toIU(ay);
+    if (!b) return [ox, oy, ox, oy];
+    const Ti = [T[0], -T[1], T[2], -T[3]];
+    const tc = (x, y) => [Ti[0] * x + Ti[1] * y, Ti[2] * x + Ti[3] * y];
+    const [p0, p1] = [tc(b[0], b[1]), tc(b[2], b[3])];
+    return [Math.min(p0[0], p1[0]) + ox, Math.min(p0[1], p1[1]) + oy, Math.max(p0[0], p1[0]) + ox, Math.max(p0[1], p1[1]) + oy];
   }
-  var boxW = (b) => b[2] - b[0];
-  var boxH = (b) => b[3] - b[1];
-  function boxesIntersect(a, b) {
-    return a && b && a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
+  function bodyBox(doc, item) {
+    return bodyBoxIU(doc, item).map(mmOf);
+  }
+  function allPinsIU(doc, n) {
+    const lib = K.resolveLib(doc, str((kid(n, "lib_name") || kid(n, "lib_id") || [])[1])) || K.resolveLib(doc, symbolLibId(n));
+    if (!lib) return [];
+    const [ax, ay, rot] = atOf(n), mN = kid(n, "mirror"), T = K.symbolTransform(rot, mN ? str(mN[1]) : ""), ox = toIU(ax), oy = toIU(ay);
+    const tf = (x, y) => [ox + T[0] * x + T[1] * y, oy + T[2] * x + T[3] * y];
+    const out = [];
+    for (const sub of drawnSubs(lib, n, true)) for (const g of kids(sub, "pin")) {
+      const [px, py, pr] = atOf(g), lenN = kid(g, "length"), L = toIU(lenN ? num(lenN[1]) : 2.54);
+      const dir = (Math.round(pr) % 360 + 360) % 360, d = dir === 0 ? [1, 0] : dir === 90 ? [0, 1] : dir === 180 ? [-1, 0] : [0, -1];
+      const x = toIU(px), y = toIU(py), pos = tf(x, y), root2 = tf(x + d[0] * L, y + d[1] * L);
+      const v = [T[0] * d[0] + T[1] * d[1], T[2] * d[0] + T[3] * d[1]];
+      const side = v[0] > 0 ? "left" : v[0] < 0 ? "right" : v[1] > 0 ? "top" : "bottom";
+      out.push({ side, hidden: yesFlag(g, "hide"), pos, root: root2 });
+    }
+    return out;
+  }
+  var MANDATORY2 = ["Reference", "Value", "Footprint", "Datasheet", "Description"];
+  function autoplaceFields(node) {
+    const all = kids(node, "property").filter((p) => !fieldHidden(p) && !str(p[1]).startsWith("ki_") && str(p[2]) !== "");
+    const ord = (p) => {
+      const i = MANDATORY2.indexOf(str(p[1]));
+      return i >= 0 ? i : MANDATORY2.length;
+    };
+    return all.map((p, i) => ({ p, i })).sort((a, b) => ord(a.p) - ord(b.p) || a.i - b.i).map((e) => e.p);
+  }
+  var manualAutoplaced = /* @__PURE__ */ new Set();
+  function autoplaceAlgo(item) {
+    const fa = kid(item.node, "fields_autoplaced");
+    if (!fa || str(fa[1]) === "no") return null;
+    return { manual: !!item.id && manualAutoplaced.has(item.id) };
+  }
+  function apPrefs() {
+    const a = S.autoplace;
+    return { enable: !a || a.enable !== false, justify: !a || a.justify !== false, align: !a || a.align !== false };
   }
   function autoplaceNode(doc, item, opts) {
     opts = opts || {};
-    const node = deep(item.node), power = symbolIsPower(doc, item), pins = symbolPins(doc, item).filter((p) => !p.hidden || power);
-    const fields = kids(node, "property").filter((p) => !fieldHidden(p) && !str(p[1]).startsWith("ki_") && str(p[2]) !== "");
+    const manual = opts.manual === void 0 ? !!item.id && manualAutoplaced.has(item.id) : opts.manual !== false, prefs = apPrefs();
+    const node = deep(item.node), power = symbolIsPower(doc, item);
+    const fields = autoplaceFields(node).filter((p) => !yesFlag(p, "do_not_autoplace"));
     if (!fields.length) return null;
     const [, , rot] = atOf(node), mN = kid(node, "mirror"), mirror = mN ? str(mN[1]) : "", T = K.symbolTransform(rot, mirror);
     const fieldRot = T[1] !== 0 ? 90 : 0;
     const flipStored = (T[1] !== 0 ? T[1] : T[0]) < 0;
-    const body = bodyBox(doc, item), symW = boxW(body), symH = boxH(body);
-    const ext = fields.map(fieldExtent);
-    let fbox = { w: Math.max(...ext.map((e) => e.w)), h: ext.reduce((t, e) => t + roundN(e.h, AP_GRID, true), 0) };
+    const body = bodyBoxIU(doc, { node }), symW = body[2] - body[0], symH = body[3] - body[1];
+    const ext = fields.map((p) => textBoxIU(p));
+    const pins = allPinsIU(doc, node).filter((p) => !p.hidden || power);
+    let fbox = { w: Math.max(...ext.map((e) => e.w)), h: ext.reduce((t, e) => t + (prefs.align ? roundIU(e.h, GRID50, true) : e.h + VPAD), 0) };
     const pinsOn = (side2) => pins.filter((p) => p.side === side2).length;
     let sides = ["right", "top", "left", "bottom"].map((s) => ({ side: s, pins: pinsOn(s) }));
     const swap = (i, j) => {
@@ -9375,56 +9491,62 @@ Link '${target}' to this file?`)) return null;
       sides[i] = sides[j];
       sides[j] = t;
     };
+    const orient = (Math.round(rot) % 360 + 360) % 360;
     if (power) {
-      if (rot === 0) {
+      if (orient === 0) {
         swap(0, 1);
         swap(1, 3);
-      } else if (rot === 90) {
+      } else if (orient === 90) {
         swap(0, 2);
         swap(1, 2);
-      } else if (rot === 180) swap(0, 3);
-      else if (rot === 270) swap(1, 2);
+      } else if (orient === 180) swap(0, 3);
+      else if (orient === 270) swap(1, 2);
     } else {
-      if (mirror === "x" && (rot === 0 || rot === 180)) swap(0, 2);
-      if (symH > 0 && symW / symH > 3) {
+      if (mirror === "x" && (orient === 0 || orient === 180)) swap(0, 2);
+      if (symW / symH > 3) {
         swap(0, 1);
         swap(1, 3);
       }
     }
     const place = (sp, size) => {
-      const [sx2, sy2] = SIDES[sp.side], cx = (body[0] + body[2]) / 2, cy = (body[1] + body[3]) / 2;
-      let ox = (symW + size.w) / 2, oy = (symH + size.h) / 2;
-      if (sx2) ox += AP_HPADDING;
-      else if (sy2) oy += AP_VPADDING;
-      let x = cx + sx2 * ox - size.w / 2, y = cy + sy2 * oy - size.h / 2;
+      const [sx2, sy2] = SIDES[sp.side], cx = body[0] + idiv(symW, 2), cy = body[1] + idiv(symH, 2);
+      let ox = idiv(symW + size.w, 2), oy = idiv(symH + size.h, 2);
+      if (sx2) ox += HPAD;
+      else if (sy2) oy += VPAD;
+      let x = cx + sx2 * ox - idiv(size.w, 2), y = cy + sy2 * oy - idiv(size.h, 2);
       if (sp.pins > 0) {
         let pb = null;
-        for (const p of pins) if (p.side === sp.side) for (const q of [[p.x, p.y], p.root]) pb = pb ? [Math.min(pb[0], q[0]), Math.min(pb[1], q[1]), Math.max(pb[2], q[0]), Math.max(pb[3], q[1])] : [q[0], q[1], q[0], q[1]];
+        for (const p of pins) if (p.side === sp.side) for (const q of [p.pos, p.root]) pb = merge(pb, q[0], q[1], q[0], q[1]);
         if (pb) {
-          if (sy2) x = pb[2] + 2 * AP_HPADDING;
-          else y = pb[1] - (size.h + 2 * AP_VPADDING);
+          if (sy2) x = pb[2] + 2 * HPAD;
+          else y = pb[1] - (size.h + 2 * VPAD);
         }
       }
       return [x, y];
     };
     const others = Array.from(doc.items.values()).filter((it) => it !== item && it.id !== item.id && it.bbox);
+    const ibox = (it) => it.bbox.map(toIU);
+    const hits = (box) => others.filter((it) => {
+      const b = ibox(it);
+      return b[0] <= box[2] && b[2] >= box[0] && b[1] <= box[3] && b[3] >= box[1];
+    });
     const collision = (sp) => {
       const [x, y] = place(sp, fbox), box = [x, y, x + fbox.w, y + fbox.h];
       let coll = "none";
-      for (const it of others) {
-        if (!boxesIntersect(it.bbox, box)) continue;
-        if (isNetLine(it.kind) && !SIDES[sp.side][0] && ptsOf(it.node).every((p) => Math.abs(p[1] - ptsOf(it.node)[0][1]) < 1e-6) && coll !== "objects") coll = "hwires";
+      for (const it of hits(box)) {
+        const pts = ptsOf(it.node);
+        if (isNetLine(it.kind) && !SIDES[sp.side][0]) coll = pts.length > 1 && pts[0][1] === pts[pts.length - 1][1] && coll !== "objects" ? "hwires" : "objects";
         else coll = "objects";
       }
       return coll;
     };
     sides.reverse();
     let side = { side: "right", pins: Infinity };
-    if (opts.manual !== false) {
+    if (manual) {
       const colliding = /* @__PURE__ */ new Map();
-      for (const sp of sides) {
-        const c = collision(sp);
-        if (c !== "none") colliding.set(sp.side, c);
+      for (const s of ["right", "top", "left", "bottom"]) {
+        const c = collision({ side: s, pins: pinsOn(s) });
+        if (c !== "none") colliding.set(s, c);
       }
       for (const kind of ["objects", "hwires"]) sides = sides.filter((sp) => {
         if (colliding.get(sp.side) !== kind) return true;
@@ -9444,42 +9566,55 @@ Link '${target}' to this file?`)) return null;
     let [bx, by] = place(chosen, fbox);
     const [sx, sy] = SIDES[chosen.side];
     let wireSpacing = false;
-    if (opts.manual !== false && sy) {
-      const box = [bx, by, bx + fbox.w, by + fbox.h], hits = others.filter((it) => boxesIntersect(it.bbox, box));
-      if (hits.length && hits.every((it) => isNetLine(it.kind) && ptsOf(it.node).length > 1 && Math.abs(ptsOf(it.node)[0][1] - ptsOf(it.node)[1][1]) < 1e-6)) {
-        const offs = new Set(hits.map((it) => r4(1.5 * AP_WIRE_V - ptsOf(it.node)[0][1] % AP_WIRE_V)));
+    if (manual && sy) {
+      const found = hits([bx, by, bx + fbox.w, by + fbox.h]);
+      if (found.length && found.every((it) => isNetLine(it.kind) && ptsOf(it.node).length > 1 && toIU(ptsOf(it.node)[0][1]) === toIU(ptsOf(it.node)[ptsOf(it.node).length - 1][1]))) {
+        const offs = new Set(found.map((it) => 3 * WIRE_V / 2 - toIU(ptsOf(it.node)[0][1]) % WIRE_V));
         if (offs.size === 1) {
           wireSpacing = true;
-          fbox = { w: fbox.w, h: fields.length * AP_WIRE_V };
-          by = roundN(by, AP_WIRE_V, chosen.side === "bottom");
+          fbox = { w: fbox.w, h: fields.length * WIRE_V };
+          by = roundIU(by, WIRE_V, chosen.side === "bottom");
         }
       }
     }
     let lastY = by;
     fields.forEach((p, i) => {
-      let hj = sx ? sx > 0 ? "left" : "right" : "center";
-      if (chosen.pins > 0) hj = sy ? "left" : "center";
-      let x = hj === "left" ? bx : hj === "right" ? bx + fbox.w : bx + fbox.w / 2;
-      const fh = wireSpacing ? AP_WIRE_V / 2 : ext[i].h, pad = wireSpacing ? AP_WIRE_V / 2 : roundN(fh, AP_GRID, true) - fh;
-      let y = lastY + pad / 2 + fh / 2;
-      lastY += pad + fh;
-      if (sx) x = roundN(x, AP_GRID, sx >= 0);
-      if (sy) y = roundN(y, AP_GRID, sy >= 0);
-      const a = kid(p, "at");
-      const keep = a ? a.slice(4) : [];
-      replaceKid(p, ["at", r4(x), r4(y), fieldRot, ...keep]);
-      const stored = flipStored ? hj === "left" ? "right" : hj === "right" ? "left" : "center" : hj;
       let ef = kid(p, "effects");
       if (!ef) {
         ef = ["effects", fontNode(1.27)];
         p.push(ef);
       }
-      if (stored === "center") dropKid(ef, "justify");
-      else replaceKid(ef, ["justify", stored]);
+      const cur = kid(ef, "justify"), curH = cur ? cur.includes("left") ? "left" : cur.includes("right") ? "right" : "center" : "center";
+      let hj;
+      if (prefs.justify) {
+        hj = sx ? sx > 0 ? "left" : "right" : "center";
+        if (chosen.pins > 0) hj = sy ? "left" : "center";
+      } else hj = flipStored ? curH === "left" ? "right" : curH === "right" ? "left" : "center" : curH;
+      let x = hj === "left" ? bx : hj === "right" ? bx + fbox.w : bx + idiv(fbox.w, 2);
+      const fh = wireSpacing ? WIRE_V / 2 : ext[i].h, pad = wireSpacing ? WIRE_V / 2 : prefs.align ? roundIU(fh, GRID50, true) - fh : VPAD;
+      let y = lastY + idiv(pad, 2) + idiv(fh, 2);
+      lastY += pad + fh;
+      if (prefs.align) {
+        if (sx) x = roundIU(x, GRID50, sx >= 0);
+        if (sy) y = roundIU(y, GRID50, sy >= 0);
+      }
+      const a = kid(p, "at");
+      const keep = a ? a.slice(4) : [];
+      replaceKid(p, ["at", mmOf(x), mmOf(y), fieldRot, ...keep]);
+      if (prefs.justify) {
+        const stored = flipStored ? hj === "left" ? "right" : hj === "right" ? "left" : "center" : hj;
+        const rest = cur ? cur.slice(1).filter((t) => t === "mirror") : [];
+        if (stored === "center" && !rest.length) dropKid(ef, "justify");
+        else replaceKid(ef, ["justify", ...stored === "center" ? [] : [stored], ...rest]);
+      }
     });
     dropKid(node, "fields_autoplaced");
     const ui = node.findIndex((c) => Array.isArray(c) && c[0] === "uuid");
     node.splice(ui >= 0 ? ui : node.length, 0, ["fields_autoplaced", "yes"]);
+    if (item.id) {
+      if (manual) manualAutoplaced.add(item.id);
+      else manualAutoplaced.delete(item.id);
+    }
     return node;
   }
   function autoplaceSelection(ctx, opts) {
@@ -9487,7 +9622,7 @@ Link '${target}' to this file?`)) return null;
     const changes = [];
     for (const it of selectedItems(ctx)) {
       if (it.kind !== "symbol" || isLockedNode(it.node)) continue;
-      const n = autoplaceNode(ctx.doc, it, opts);
+      const n = autoplaceNode(ctx.doc, it, opts || { manual: true });
       if (n) changes.push(modChange(ctx.doc, it, n));
     }
     if (!changes.length) return false;
@@ -9497,6 +9632,7 @@ Link '${target}' to this file?`)) return null;
 
   // web/domains/pcb/tools/sch-tools/drag.ts
   S.dragMode = "drag";
+  S.mouseDragMode = "drag";
   S.lineMode = "90";
   var LINE_MODES = ["90", "45", "free"];
   var LINE_MODE_LABEL = { "90": "90\xB0", "45": "45\xB0", free: "free" };
@@ -9559,8 +9695,17 @@ Link '${target}' to this file?`)) return null;
   function cycleLineMode(ctx) {
     return setLineMode(ctx, LINE_MODES[(LINE_MODES.indexOf(S.lineMode) + 1) % LINE_MODES.length]);
   }
-  function setDragMode(ctx, mode2) {
+  function setMouseDragMode(ctx, mode2) {
+    S.mouseDragMode = mode2 === "move" ? "move" : "drag";
+    if (!S.drag) {
+      S.dragMode = S.mouseDragMode;
+      announceModes(ctx);
+    }
+    return S.mouseDragMode;
+  }
+  function setDragMode(ctx, mode2, once) {
     S.dragMode = mode2 === "move" ? "move" : "drag";
+    if (!S.drag && !once) S.mouseDragMode = S.dragMode;
     announceModes(ctx);
     if (S.drag) {
       applyDrag(ctx.doc, S.drag, S.drag.last[0], S.drag.last[1]);
@@ -9701,6 +9846,7 @@ Link '${target}' to this file?`)) return null;
     }
     if (!list.length && !partial.length) return null;
     if (S.drag) endDrag(ctx, false);
+    if (byPointer) S.dragMode = S.mouseDragMode || "drag";
     const item = list[0] || partial[0].item, anchor0 = list.length ? anchorOf(item.kind, item.node) : partial[0].orig[partial[0].index].slice();
     const d = {
       items: list.map((it) => ({ item: it, kind: it.kind, orig: deep(it.node) })),
@@ -10010,10 +10156,10 @@ Link '${target}' to this file?`)) return null;
     for (const c of out.values()) if (c.kind === "ADDED") doc.items.delete(c.id);
     return autoRotateChanges(doc, Array.from(out.values()), ctx.IU || 1e4);
   }
-  function cleanupAt(doc, changes, touched, keep, IU2) {
+  function cleanupAt(doc, changes, touched, keep, IU3) {
     const saved = /* @__PURE__ */ new Map();
     for (const c of changes) if (!saved.has(c.id)) saved.set(c.id, doc.items.get(c.id) || null);
-    for (const c of changes) K.applyChange(doc, c, IU2);
+    for (const c of changes) K.applyChange(doc, c, IU3);
     const out = [], seen = /* @__PURE__ */ new Set();
     try {
       for (const p of touched) {
@@ -10024,7 +10170,10 @@ Link '${target}' to this file?`)) return null;
         const needed = needsJunction(doc, p[0], p[1], "wire") || needsJunction(doc, p[0], p[1], "bus");
         const dropJ = j && !needed && !keep.has(j.id);
         if (dropJ) out.push(K.removeChange(j));
-        else if (!j && needed) out.push(addNode(doc, junctionNode(p)).change);
+        else if (!j && needed) {
+          breakInto(doc, p, saved, new Set(changes.map((c) => c.id)), out, IU3);
+          out.push(addNode(doc, junctionNode(p)).change);
+        }
         if ((!j || dropJ) && !needed) for (const kd of ["wire", "bus"]) {
           const m = mergeAt(doc, p, kd);
           if (m) {
@@ -10040,6 +10189,16 @@ Link '${target}' to this file?`)) return null;
       }
     }
     return out;
+  }
+  function breakInto(doc, p, saved, inFlight, out, IU3) {
+    for (const kd of ["wire", "bus"]) for (const c of breakLinesAt(doc, p, kd)) {
+      if (inFlight.has(c.id)) continue;
+      if (!saved.has(c.id)) saved.set(c.id, doc.items.get(c.id) || null);
+      K.applyChange(doc, c, IU3);
+      const i = out.findIndex((o) => o.id === c.id);
+      if (i < 0) out.push(c);
+      else out[i] = out[i].kind === "ADDED" ? Object.assign({}, c, { kind: "ADDED" }) : c;
+    }
   }
   function mergeAt(doc, p, kind) {
     const ends = lineEndsAt(doc, p[0], p[1], kind);
@@ -11029,6 +11188,7 @@ Link '${target}' to this file?`)) return null;
     endDrag,
     cancelDrag,
     setDragMode,
+    setMouseDragMode,
     setLineMode,
     cycleLineMode,
     modeText,

@@ -25,7 +25,7 @@ export function selectedSet() { const s = new Set<string>(E.selection); if (E.se
 
    // a selected symbol / footprint field {id, name} and its drag {id, name, startMm, orig, moved}
 export function clearSelection() {
-  E.selection.clear(); E.selected = null; E.selField = null; E.selPins = []; for (const f of clearHooks) f();   // a table cell selection too
+  E.selection.clear(); E.selected = null; E.selField = null; E.selFields = []; E.selPins = []; for (const f of clearHooks) f();   // a table cell selection too
   if (CollabTools.sch && CollabTools.sch.select) CollabTools.sch.select(null);
   const pcb = CollabTools.pcb && CollabTools.pcb.state; if (pcb && pcb.sel) pcb.sel.clear(); if (pcb) pcb.padSel = null;   // the board module's own picks (tracks, vias, graphics) clear with everything else
 }
@@ -39,6 +39,32 @@ export function fieldLocalDelta(item: KItem, dx: number, dy: number) {
   return [(dx * c - dy * sn) / sx, (dx * sn + dy * c) / sy];
 }
 
+/** Every schematic field selected on its own: E.selField and the ones Shift / Ctrl+click added (SCH_FIELD items in a SELECTION). */
+export function selectedFields(): { id: string; name: string }[] {
+  const f = E.selField as { id: string; name: string } | null; if (!f) return [];
+  const out = [f];
+  for (const g of (E.selFields || []) as { id: string; name: string }[]) if (!out.some((h) => h.id === g.id && h.name === g.name) && (!E.kdoc || E.kdoc.items.has(g.id))) out.push(g);
+  return out;
+}
+/** selectPoint for a field with Shift (add), Ctrl (toggle) or Ctrl+Shift (remove) while only fields are selected. */
+export function pickField(f: { id: string; name: string }, mode: "add" | "toggle" | "remove"): void {
+  const all = selectedFields(), i = all.findIndex((g) => g.id === f.id && g.name === f.name);
+  let next = all;
+  if (mode === "add") { if (i < 0) next = [...all, f]; }
+  else if (mode === "remove") { if (i >= 0) next = all.filter((_g, j) => j !== i); }
+  else next = i >= 0 ? all.filter((_g, j) => j !== i) : [...all, f];
+  E.selField = next.length ? next[next.length - 1] : null; E.selFields = next.slice(0, -1);
+}
+/** The other selected fields a field drag carries along: their positions before the drag. */
+export function fieldDragMore(main: { id: string; name: string }): { id: string; name: string; orig: number[]; origAt: SNode }[] {
+  const out: { id: string; name: string; orig: number[]; origAt: SNode }[] = []; if (!E.kdoc) return out;
+  for (const f of selectedFields()) {
+    if (f.id === main.id && f.name === main.name) continue;
+    const it = E.kdoc.items.get(f.id), pn = it && fieldOf(it, f.name), at = pn && KiCadCanvas.kid(pn, "at");
+    if (at) out.push({ id: f.id, name: f.name, orig: [KiCadCanvas.num(at[1]), KiCadCanvas.num(at[2])], origAt: at.slice() as SNode });
+  }
+  return out;
+}
 export function fieldOf(item: Pick<KItem, "node">, name: string) { return window.KDialogs && KDialogs!._ ? (KDialogs!._.fieldNode as (node: SNode, name: string) => SNode | null)(item.node, name) : null; }
 
 // KiCad's selection filter categories for an item kind.

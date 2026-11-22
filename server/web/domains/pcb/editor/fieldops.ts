@@ -2,7 +2,7 @@
 // SCH_FIELD hides it (SetVisible( false )), one "Delete" step.  A board footprint field's Delete is the board module's
 // (EDIT_TOOL::DeleteItems, pcb-tools/field-edit.ts); Move / Drag of a field is gestures.ts startFieldMove.
 import { E } from "./state";
-import { fieldOf, drawSelection, renderProps } from "./selection";
+import { fieldOf, drawSelection, renderProps, selectedFields } from "./selection";
 import { commitChanges } from "./tools";
 import { isSch, requestRender } from "./view";
 import { toast } from "./util";
@@ -19,12 +19,19 @@ export function hiddenFieldNode(node: SNode, name: string, k: FieldKit, find: (n
 
 /** Delete with a field selected: hide it.  True when the key was ours. */
 export function deleteSelectedField(): boolean {
-  const f = E.selField; if (!f || !E.kdoc || !isSch()) return false;
+  const all = selectedFields(); if (!all.length || !E.kdoc || !isSch()) return false;
   if (E.viewOnly) { toast("View-only access"); return true; }
-  const it = E.kdoc.items.get(f.id), k = kit(); if (!it || !k) return true;
-  const node = hiddenFieldNode(it.node, f.name, k, (n, nm) => fieldOf({ node: n }, nm));
-  if (!node) return true;
-  commitChanges([KiCadCanvas.replaceChange(E.kdoc, Object.assign({}, it, { node, geom: [], bbox: null }))], "Delete");
-  E.selField = null; drawSelection(); renderProps(); requestRender();
+  const k = kit(); if (!k) return true;
+  // one change per symbol, every selected field of it hidden
+  const nodes = new Map<string, SNode>();
+  for (const f of all) {
+    const it = E.kdoc.items.get(f.id); if (!it) continue;
+    const node = hiddenFieldNode(nodes.get(f.id) || it.node, f.name, k, (n, nm) => fieldOf({ node: n }, nm));
+    if (node) nodes.set(f.id, node);
+  }
+  const changes = [];
+  for (const [id, node] of nodes) { const it = E.kdoc.items.get(id); if (it) changes.push(KiCadCanvas.replaceChange(E.kdoc, Object.assign({}, it, { node, geom: [], bbox: null }))); }
+  if (changes.length) commitChanges(changes, "Delete");
+  E.selField = null; E.selFields = []; drawSelection(); renderProps(); requestRender();
   return true;
 }

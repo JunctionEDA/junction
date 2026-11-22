@@ -1,6 +1,6 @@
 import type { SchCtx, Pt, Mods, PtrEvent } from "./types";
 import { root } from "../root";
-import { editFieldPrompt } from "./annotate";
+import { editFieldPrompt, showDatasheet } from "./annotate";
 import { autoplaceSelection } from "./autoplace";
 import { dropCarry, placeCarry, singleClickPlace, startCarry } from "./carry";
 import { closePicker, closePrompt, curTool, installDom, openPicker, openPowerPicker, promptClassLabel, promptFor } from "./dom";
@@ -11,7 +11,7 @@ import { openImagePicker } from "./images";
 import { finishWire } from "./junction";
 import { busEntryNode, junctionNode, noConnectNode } from "./nodes";
 import { repeatLast } from "./repeat";
-import { deleteAt, deleteSelected, duplicateSelected, orientSelected } from "./selection-edits";
+import { deleteAt, deleteSelected, orientSelected } from "./selection-edits";
 import { finishSchArc, showSchArcMode, schArcBackup, schArcDrawMode, schArcMove, schArcPosture, switchSchArcMode } from "./arcs";
 import { cancelDraw, drawClick, drawPoint, finishDraw, undoDrawPoint } from "./shapes";
 import { movePinPlace, sheetAt, sheetPinClick } from "./sheets";
@@ -213,15 +213,14 @@ export function onKey(key: string, ev: Mods | null | undefined, ctx: SchCtx) {
   case "R": return orientSelected(ctx, ev && ev.shiftKey ? "cw" : "ccw");
   case "x": case "X": return orientSelected(ctx, "y");     // KiCad's X is Mirror Horizontally: (mirror y)
   case "y": case "Y": return orientSelected(ctx, "x");     // Y is Mirror Vertically: (mirror x)
-  case "d": case "D": return duplicateSelected(ctx);
+  case "d": case "D": return showDatasheet(ctx);         // ACTIONS::showDatasheet (Duplicate is Ctrl+D)
   case "Insert": return repeatLast(ctx);
   case "o": case "O": return autoplaceSelection(ctx);
   case "u": case "U": return editFieldPrompt(ctx, "Reference", "Reference", true);
   case "v": case "V": return editFieldPrompt(ctx, "Value", "Value", true);
   case "~": if (!S.highlight && !(S.netHL && S.netHL.active())) return false; clearHighlight(ctx); return true;
   case "g": case "G": case "m": case "M": {
-    setDragMode(ctx, lower === "m" ? "move" : "drag");
-    if (S.drag) return true;                                // switched mid-drag: the preview re-resolved
+    if (S.drag) { setDragMode(ctx, lower === "m" ? "move" : "drag"); return true; }   // switched mid-drag: the preview re-resolved
     if (!S.cursor) return false;
     let it = S.sel ? ctx.doc.items.get(S.sel) : null;
     if (!it && !ctx.selected && !ctx.selection?.size) {
@@ -229,7 +228,11 @@ export function onKey(key: string, ev: Mods | null | undefined, ctx: SchCtx) {
       if (hovered?.kind === "no_connect") it = hovered;
     }
     if (!it) return false;
-    return !!beginDrag(ctx, it, S.cursor, false);
+    // this drag only: the mouse-drag preference comes back when it ends
+    const back = S.mouseDragMode || "drag"; setDragMode(ctx, lower === "m" ? "move" : "drag", true);
+    const d = beginDrag(ctx, it, S.cursor, false);
+    if (d) d.restoreMode = back; else { S.dragMode = back; announceModes(ctx); }
+    return !!d;
   }
   case " ": if (ev && ev.shiftKey) { cycleLineMode(ctx); return true; } return false;
   case "Delete": case "Backspace": return deleteSelected(ctx);

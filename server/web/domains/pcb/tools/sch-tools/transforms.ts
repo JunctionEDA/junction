@@ -1,10 +1,10 @@
 import type { Anchor, BreakCut, BreakJob, SchCtx, SchDrag, Pt, Box } from "./types";
 import { root } from "../root";
-import { symbolLibId } from "./autoplace";
+import { apPrefs, autoplaceAlgo, autoplaceNode, symbolLibId } from "./autoplace";
 import { canFollow } from "./clipboard";
 import { cursorOf, editable, selectedItems, setSelectionIds, snapCursor } from "./commands";
 import { junctionAt, needsJunction } from "./connect";
-import { DRAG_KINDS, LABEL_KINDS, announceModes, applyDrag, cleanupAt, connPoints, endDrag, isNetLine, restoreNode } from "./drag";
+import { DRAG_KINDS, LABEL_KINDS, announceModes, applyDrag, breakInto, cleanupAt, connPoints, endDrag, isNetLine, restoreNode } from "./drag";
 import { hitNonSymbol, rectOf } from "./hit";
 import { PIN_SIDE, SHEET_FILE_OFF, SHEET_NAME_OFF, corners, flagFieldAt, fontNode, junctionNode, lineNode } from "./nodes";
 import { SCREEN_OP, anchorOf, mirrorNode, orientSymbol, setTextRot, shiftAt, shiftNode, symOrient } from "./orient";
@@ -173,6 +173,13 @@ export function transformChanges(ctx: SchCtx, items: KItem[], op: string, C: Pt,
     const end = selEndOf(it.id);
     for (let k = 0; k < (times || 1) && ok; k++) ok = transformNode(it.kind, n, op, C, items.length === 1, end) !== false;
     if (!ok) continue;
+    if (it.kind === "symbol") {
+      if (op === "x" || op === "y") dropKid(n, "fields_autoplaced");   // SCH_EDIT_TOOL::Mirror: SetFieldsAutoplaced( AUTOPLACE_NONE )
+      else if (apPrefs().enable && autoplaceAlgo({ node: n })) {
+        // SCH_EDIT_TOOL::Rotate: once everything has turned, AutoplaceFields with the symbol's own algorithm
+        try { const a = autoplaceNode(doc, Object.assign({}, it, { node: n }), autoplaceAlgo({ node: n, id: it.id })); if (a) { n.length = 0; n.push(...a); } } catch (e) { console.warn(e); }
+      }
+    }
     for (const p of connPoints(doc, it)) touched.push(p);
     for (const p of connPoints(doc, { kind: it.kind, node: n, id: it.id })) touched.push(p);
     out.push(modChange(doc, it, n)); keep.add(it.id);
@@ -461,9 +468,12 @@ export function endBreak(ctx: SchCtx, d: SchDrag, commit: boolean) {
     const seen = new Set<string>();
     for (const p of touched) {
       const k = r4(p[0]) + "," + r4(p[1]); if (seen.has(k)) continue; seen.add(k);
-      if (!junctionAt(doc, p[0], p[1]) && (needsJunction(doc, p[0], p[1], "wire") || needsJunction(doc, p[0], p[1], "bus"))) extra.push(addNode(doc, junctionNode(p)).change);
+      if (!junctionAt(doc, p[0], p[1]) && (needsJunction(doc, p[0], p[1], "wire") || needsJunction(doc, p[0], p[1], "bus"))) {
+        breakInto(doc, p, saved, new Set(changes.map((c) => c.id)), extra, ctx.IU || 1e4);   // AddJunction's BreakSegments
+        extra.push(addNode(doc, junctionNode(p)).change);
+      }
     }
-  } finally { for (const [id, obj] of saved) { if (obj) doc.items.set(id, obj); else doc.items.delete(id); } for (const c of extra) doc.items.delete(c.id); }
+  } finally { for (const [id, obj] of saved) { if (obj) doc.items.set(id, obj); else doc.items.delete(id); } for (const c of extra) if (c.kind === "ADDED") doc.items.delete(c.id); }
   for (const id of added) doc.items.delete(id);
   const keepSel = d.anchors.flatMap((a) => a.ends.map((e) => e.item.id));
   ctx.commit(changes.concat(extra), brk.label);

@@ -9,7 +9,7 @@ import { $, NS } from "./dom";
 import { drawHover } from "./gestures";
 import { pcbTools } from "./panels/core";
 import { anchorMm, breakFollow, followAction, peerName, sendPresence } from "./peers";
-import { drawSelection, selectedSet } from "./selection";
+import { drawSelection, selectedFields, selectedSet } from "./selection";
 import { E } from "./state";
 import { paintConfig, paintDocument, settledFrame, stats as paintStats } from "./paint";
 import { variantView } from "./variant";
@@ -81,7 +81,7 @@ export function canvasSelection(): Set<string> | null {
     const S = CollabTools.sch && (CollabTools.sch.state as unknown as { sel?: string | null; drag?: { items?: { item?: { id?: string } }[] } | null });
     const extra: string[] = []; if (S && S.sel) extra.push(S.sel);
     // a field or pins selected on their own: that part of the symbol alone ("id#field:Name", "id#pin:N")
-    if (E.selField) extra.push(E.selField.id + "#field:" + E.selField.name);
+    for (const f of selectedFields()) extra.push(f.id + "#field:" + f.name);
     for (const p of (E.selPins || []) as { id: string; number: string }[]) extra.push(p.id + "#pin:" + p.number);
     if (S && S.drag && S.drag.items) for (const e of S.drag.items) if (e && e.item && e.item.id) extra.push(e.item.id);
     if (!extra.length && !base) return base;

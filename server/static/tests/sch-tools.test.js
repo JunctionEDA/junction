@@ -311,11 +311,11 @@ test("place symbol (A): node from the library with R?/Value/pins, junctions at p
   assert.strictEqual(lastCommit(ctx).changes.filter((x) => x.typeName === "SCH_JUNCTION").length, 1);
 });
 
-test("duplicate (D): fresh uuids, no instance data, offset 2.54 and carried until the click", () => {
+test("duplicate: fresh uuids, no instance data, offset 2.54 and carried until the click", () => {
   sch.onActivate("select", ctx);
   ctx.selected = { id: "s1" };
   const s1 = doc.items.get("s1"), refOff = atOf(kids(s1.node, "property")[0]).slice(0, 2).map((v, i) => v - atOf(s1.node)[i]);
-  assert.ok(sch.onKey("d", {}, ctx));
+  assert.ok((sch.duplicateSelected || _.duplicateSelected)(ctx));   // D is Show Datasheet; this is the carried duplicate
   const cr = sch.state.carry; assert.ok(cr && cr.kind === "symbol"); assert.strictEqual(sch.state.tool, "place");
   assert.notStrictEqual(K.uuidOf(cr.node), "s1"); assert.ok(kids(cr.node, "pin").every((p) => !["p1", "p2"].includes(K.uuidOf(p))));
   assert.strictEqual(kid(cr.node, "instances"), null);
@@ -1125,35 +1125,35 @@ test("type conversions: label ↔ global ↔ hierarchical ↔ text ↔ text box 
 
 test("autoplace fields (O): AUTOPLACER's side choice, 50 mil rounding and justification; (fields_autoplaced yes) lands before the uuid", () => {
   const { d, c } = fresh();
-  assert.deepStrictEqual(_.bodyBox(d, d.items.get("s1")), [24.384, 97.79, 26.416, 102.87], "the R body, pins excluded (their roots are inside it)");
+  assert.deepStrictEqual(_.bodyBox(d, d.items.get("s1")), [24.257, 97.663, 26.543, 102.997], "the R body with half its 10 mil outline (SCH_SHAPE::GetBoundingBox), pins excluded (their roots are inside it)");
   assert.deepStrictEqual(_.symbolPins(d, d.items.get("s1")).map((p) => [p.number, p.side, p.type, p.x, p.y]), [["1", "top", "passive", 25.4, 96.52], ["2", "bottom", "passive", 25.4, 104.14]]);
   const ext = _.fieldExtent(["property", "Reference", "R1", ["effects", ["font", ["size", 1.27, 1.27]]]]); assert.ok(ext.h > 1.27 && ext.h <= 2.54, "a 50 mil field takes one 100 mil row: " + ext.h);
   c.selected = { id: "s1" };
   assert.ok(sch.onKey("o", {}, c));
   const cm = lastCommit(c); assert.strictEqual(cm.label, "autoplace fields"); assert.strictEqual(cm.changes[0].kind, "MODIFIED");
   const n = fragItem(cm.changes[0]), props = kids(n, "property");
-  assert.deepStrictEqual(atOf(props[0]), [27.94, 99.06, 0], "Reference: right of the body (no pins there), rounded up to the 50 mil grid, top row");
-  assert.deepStrictEqual(atOf(props[1]), [27.94, 101.6, 0], "Value on the next row");
+  assert.deepStrictEqual(atOf(props[0]), [27.94, 99.0599, 0], "Reference: right of the body (no pins there), x rounded up to the 50 mil grid, top row (fieldVPlacement's integer halves of an odd field height lose 1 IU)");
+  assert.deepStrictEqual(atOf(props[1]), [27.94, 101.5999, 0], "Value on the next row");
   assert.deepStrictEqual(kid(kid(props[0], "effects"), "justify"), ["justify", "left"]); assert.deepStrictEqual(kid(kid(props[1], "effects"), "justify"), ["justify", "left"]);
   assert.deepStrictEqual(atOf(props[2]).slice(0, 2), [23.622, 100.33], "hidden fields stay put");
   const ui = n.findIndex((x) => Array.isArray(x) && x[0] === "uuid"); assert.deepStrictEqual(n[ui - 1], ["fields_autoplaced", "yes"]);
   assert.strictEqual(fragItem(cm.changes[0])[0], "symbol");
   // a symbol turned 90° stores vertical field angles (they display horizontally); a Y-mirrored one stores the flipped justify
-  const r90 = K.createItem(d, _.symbolNode(d, "Device:R", [76.2, 25.4], 90, "")), m = _.autoplaceNode(d, r90);
+  const r90 = K.createItem(d, _.symbolNode(d, "Device:R", [76.2, 25.4], 90, "")), m = _.autoplaceNode(d, r90, { manual: true });
   assert.strictEqual(atOf(kids(m, "property")[0])[2], 90); assert.ok(atOf(kids(m, "property")[0])[1] < 25.4 - 1.5, "fields above a horizontal resistor (top side has no pins)");
-  const my = K.createItem(d, _.symbolNode(d, "Device:R", [101.6, 25.4], 0, "y")), mn = _.autoplaceNode(d, my);
+  const my = K.createItem(d, _.symbolNode(d, "Device:R", [101.6, 25.4], 0, "y")), mn = _.autoplaceNode(d, my, { manual: true });
   assert.deepStrictEqual(kid(kid(kids(mn, "property")[0], "effects"), "justify"), ["justify", "right"], "stored right so the mirrored symbol renders it left-justified");
-  assert.deepStrictEqual(atOf(kids(mn, "property")[0]).slice(0, 2), [104.14, 24.13]);
+  assert.deepStrictEqual(atOf(kids(mn, "property")[0]).slice(0, 2), [104.14, 24.1299]);
   // power symbols: the hidden pin counts, so GND (pin above its bars) gets its value below and VCC (pin below its bar) above, centred; a wire in the way pushes fields to another side
   d.lib.set("power:GND", K.parse(LIB_SYM("power:GND", "#PWR", "(power)")));
   d.lib.set("power:VCC", K.parse(LIB_SYM("power:VCC", "#PWR", "(power)").replace("(xy 0 0) (xy 0 -1.27) (xy 1.27 -1.27) (xy 0 -2.54) (xy -1.27 -1.27) (xy 0 -1.27)", "(xy 0 0) (xy 0 1.27) (xy 1.27 1.27) (xy 0 2.54) (xy -1.27 1.27) (xy 0 1.27)").replace("(at 0 0 270)", "(at 0 0 90)")));
-  const g = K.createItem(d, _.symbolNode(d, "power:GND", [127, 50.8], 0, "")), gn = _.autoplaceNode(d, g);
+  const g = K.createItem(d, _.symbolNode(d, "power:GND", [127, 50.8], 0, "")), gn = _.autoplaceNode(d, g, { manual: true });
   assert.deepStrictEqual(atOf(kids(gn, "property")[1]), [127, 55.88, 0], "GND's value sits below the bars (body bottom 53.34 + 15 mil, first row, rounded up)");
   assert.deepStrictEqual(kid(kid(kids(gn, "property")[1], "effects"), "justify"), null, "centred (no justify token)");
-  const v = K.createItem(d, _.symbolNode(d, "power:VCC", [139.7, 50.8], 0, "")), vn = _.autoplaceNode(d, v);
+  const v = K.createItem(d, _.symbolNode(d, "power:VCC", [139.7, 50.8], 0, "")), vn = _.autoplaceNode(d, v, { manual: true });
   assert.deepStrictEqual(atOf(kids(vn, "property")[1]), [139.7, 45.72, 0], "VCC's value sits above its bar (body top 48.26 - 15 mil, rounded down)");
   K.createItem(d, _.lineNode("wire", [27.94, 96.52], [40.64, 96.52])); K.createItem(d, _.lineNode("wire", [27.94, 101.6], [40.64, 101.6]));
-  const blocked = _.autoplaceNode(d, d.items.get("s1"));
+  const blocked = _.autoplaceNode(d, d.items.get("s1"), { manual: true });
   assert.ok(atOf(kids(blocked, "property")[0])[0] < 24.384, "wires on the right: the fields go left, right-justified: " + atOf(kids(blocked, "property")[0]));
   assert.deepStrictEqual(kid(kid(kids(blocked, "property")[0], "effects"), "justify"), ["justify", "right"]);
   c.selected = null; c.selection = new Set(["w1"]); assert.strictEqual(sch.runAction("autoplace", c), false);

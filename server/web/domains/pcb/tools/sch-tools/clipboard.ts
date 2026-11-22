@@ -1,7 +1,7 @@
 import type { SchCtx, Pt } from "./types";
 import { root } from "../root";
 import { PASTE_KINDS, clipRead, clipWrite, cursorOf, editable, selectedItems, setSelectionIds, snapCursor } from "./commands";
-import { junctionAt, needsJunction } from "./connect";
+import { breakLinesAt, junctionAt, needsJunction } from "./connect";
 import { beginDrag, connPoints, isNetLine } from "./drag";
 import { junctionNode } from "./nodes";
 import { anchorOf, cloneNode, shiftNode } from "./orient";
@@ -119,7 +119,11 @@ export function junctionsForNew(doc: KDoc, items: KItem[]) {
       const key = r4(p[0]) + "," + r4(p[1]); if (seen.has(key)) continue; seen.add(key);
       if (junctionAt(doc, p[0], p[1])) continue;
       const need = line ? needsJunction(doc, p[0], p[1], it.kind) : needsJunction(doc, p[0], p[1], "wire") || needsJunction(doc, p[0], p[1], "bus");
-      if (need) out.push(addNode(doc, junctionNode(p)).change);
+      if (need) {   // AddJunction's BreakSegments: a line running through the point splits there
+        if (line) out.push(...breakLinesAt(doc, p, it.kind).filter((c) => !items.some((n) => n.id === c.id)));
+        else for (const kd of ["wire", "bus"]) out.push(...breakLinesAt(doc, p, kd).filter((c) => !items.some((n) => n.id === c.id)));
+        out.push(addNode(doc, junctionNode(p)).change);
+      }
     }
   }
   return out;

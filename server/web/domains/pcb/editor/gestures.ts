@@ -21,7 +21,7 @@ import { placeCrosshair } from "./crosshair";
 import { renderObjects, snapMm, syncItemsFromDoc } from "./doc";
 import { sendOp } from "./net";
 import { breakFollow, sendPresence } from "./peers";
-import { HIT_PX, clearSelection, drawSelection, filterAllows, nearestFootprint, renderProps, selFilter } from "./selection";
+import { HIT_PX, clearSelection, drawSelection, fieldDragMore, filterAllows, nearestFootprint, renderProps, selFilter } from "./selection";
 import { E } from "./state";
 import { activeModule, moveOp as moveOpRaw, runModuleAction, setTool, toolCtx as toolCtxRaw, unlockedForEdit } from "./tools";
 import { applyView, canvas as canvasRaw, dragG as dragGRaw, isSch, pxPerMm, requestRender, requestRepaint, requestZoomEnd, stage as stageRaw, worldMm as worldMmRaw, zoomBy as zoomByRaw, zoomLimits } from "./view";
@@ -325,7 +325,7 @@ export function startFieldMove(mm: Mm): boolean {
   // a schematic field's (at) is in sheet coordinates: the text's own position
   const g = isSch() ? null : (it.geom as { t: string; field?: string; textPos?: number[] }[]).find((q) => q.t === "text" && q.field === sf.name && q.textPos);
   const pos = isSch() ? [KiCadCanvas.num(at[1]), KiCadCanvas.num(at[2])] : g && g.textPos ? [g.textPos[0], g.textPos[1]] : [mm[0], mm[1]];
-  E.fdrag = { id: it.id, name: sf.name, startMm: [mm[0], mm[1]], orig: [KiCadCanvas.num(at[1]), KiCadCanvas.num(at[2])], origAt: at.slice(), moved: false, sticky: true, origin: pos };
+  E.fdrag = { id: it.id, name: sf.name, startMm: [mm[0], mm[1]], orig: [KiCadCanvas.num(at[1]), KiCadCanvas.num(at[2])], origAt: at.slice(), moved: false, sticky: true, origin: pos, more: isSch() ? fieldDragMore(sf) : [] };
   return true;
 }
 
@@ -354,6 +354,10 @@ function revertFieldDrag(): void {
   const K = window.KDialogs as (KDialogsApi & { _: { fieldNode?(node: SNode, name: string): SNode | null } }) | undefined;
   const pn = it && K && K._.fieldNode ? K._.fieldNode(it.node, fd.name) : null, at = pn && KiCadCanvas.kid(pn, "at");
   if (d && it && at && fd.moved) { if (fd.origAt) at.splice(0, at.length, ...fd.origAt); else { at[1] = fd.orig[0]; at[2] = fd.orig[1]; } KiCadCanvas.replaceChange(d, it); }
+  if (d && fd.moved) for (const m of (fd.more || []) as { id: string; name: string; origAt: SNode }[]) {
+    const it2 = d.items.get(m.id), p2 = it2 && K && K._.fieldNode ? K._.fieldNode(it2.node, m.name) : null, a2 = p2 && KiCadCanvas.kid(p2, "at");
+    if (it2 && a2) { a2.splice(0, a2.length, ...m.origAt); KiCadCanvas.replaceChange(d, it2); }
+  }
 }
 
 /**
@@ -403,7 +407,14 @@ export function startMove(mode: "move" | "drag"): boolean {
   if (isSch()) {
     const m = CollabTools.sch; if (!m) return false;
     const items = selectionItems(); if (!items.length) return false;
-    try { m.setDragMode(toolCtx(), mode); return !!m.beginDrag(toolCtx(), items.length === 1 ? items[0] : items, mm, false); } catch (e) { console.warn(e); return false; }
+    // the mode is this drag's only (SCH_ACTIONS::move / ::drag): the mouse-drag preference comes back when it ends
+    const back = String((m.state as { mouseDragMode?: string }).mouseDragMode || "drag");
+    try {
+      m.setDragMode(toolCtx(), mode, true);
+      const dr = m.beginDrag(toolCtx(), items.length === 1 ? items[0] : items, mm, false) as { restoreMode?: string } | null;
+      if (dr) dr.restoreMode = back; else m.setDragMode(toolCtx(), back);
+      return !!dr;
+    } catch (e) { console.warn(e); m.setDragMode(toolCtx(), back); return false; }
   }
   // board: a footprint field selected on its own moves alone (EDIT_TOOL::Move on a PCB_FIELD), its umbilical line showing
   if (E.selField && !selectionIds().length && mode === "move") return startFieldMove(mm);

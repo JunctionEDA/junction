@@ -47,7 +47,7 @@ import { arcFrom3, atOf, bezierPts, boxOf, cloneNode, cornersInSequence, effects
 import { DEFAULT_DRAWING_SHEET, PRODUCT_NAME, TB_TOKENS, WS_TOKENS, alphabeticFromIndex, buildDrawingSheet, defaultDrawingSheet, documentDrawingSheet, hitTestDrawingSheet, expandTextVars, incrementLabel, indexFromAlphabetic, parseDrawingSheet, sheetTextPen, sheetTextVars, varResolver } from "./sheet";
 import { IMAGE_CACHE, base64Bytes, imageInfo, shiftTable, tableCellShownText, cellAddr, parseCellAddress } from "./tables-images";
 import { SCH_PEN, TEXT_INTERLINE, isUrlText, lineOffsets, parseMarkup, setSchPen, textWidth, unescapeText, urlRunAt, urlRunBox, urlRuns } from "./text";
-import { drawStrokeText, linebreakText, parseStrokeMarkup, strokeGlyph, strokeLine, strokeLineWidth, strokeOrigin } from "./stroke-font";
+import { drawStrokeText, linebreakText, parseStrokeMarkup, strokeAdvance, strokeGlyph, strokeLine, strokeLineWidth, strokeOrigin } from "./stroke-font";
 import { displayNetName, netCode } from "./geom-pcb";
 import { unitLetter } from "./geom-sch";
 import { GRID_MIN_SPACING, GRID_TICK, MIN_TEXT_PX, allFontData, drawOutlineText, drawTextStroke, faceAvailable, fontChanged, fontData, setFontData, textMode, wantFace } from "./render";
@@ -112,7 +112,7 @@ export const api = {
   renderSvg, renderPng, SvgPath, createCanvas: defaultCreateCanvas, pointInPoly,
   // KiCad's stroke font (web/domains/pcb/canvas/stroke-font.ts): glyphs, markup, line layout, word wrap and the painter.
   // textMode: undefined = stroke font wherever Path2D exists, canvas fonts otherwise; "stroke" / "native" force one
-  textMode: undefined, currentTextMode: textMode, strokeGlyph, strokeLine, strokeLineWidth, strokeOrigin, parseStrokeMarkup, linebreakText, drawStrokeText, drawTextStroke,
+  textMode: undefined, currentTextMode: textMode, strokeGlyph, strokeAdvance, strokeLine, strokeLineWidth, strokeOrigin, parseStrokeMarkup, linebreakText, drawStrokeText, drawTextStroke,
   unescapeText, displayNetName, netCode, unitLetter, GRID_MIN_SPACING, GRID_TICK, MIN_TEXT_PX,
   // the board editor's track / via sizes, netclass resolution and routing layer pair (web/domains/pcb/canvas/pcb-sizes.ts)
   pcbSizes,

@@ -3,7 +3,7 @@ import { symbolLibId } from "./autoplace";
 import { autoRotateChanges } from "./autorotate";
 import { collisionCursor, collisionInit } from "./collision";
 import { setSelectionIds } from "./commands";
-import { junctionAt, lineEndsAt, lineMidsAt, needsJunction, pinsAt } from "./connect";
+import { breakLinesAt, junctionAt, lineEndsAt, lineMidsAt, needsJunction, pinsAt } from "./connect";
 import { junctionNode, lineNode } from "./nodes";
 import { anchorOf, shiftNode } from "./orient";
 import { K, POINT_KINDS, S, atOf, kid, kids, num, ptsOf, setAt, setPts } from "./state";
@@ -21,7 +21,10 @@ import { isLockedItem } from "./lock";
 // added or dropped and collinear wires merged the way AddJunctionsIfNeeded and
 // SCHEMATIC::CleanUp do on the desktop.  MOVE (M) is KiCad's plain move: the item
 // goes, its connections stay where they were.
-S.dragMode = "drag";                       // "drag" (G) | "move" (M)
+S.dragMode = "drag";                       // "drag" (G) | "move" (M): the mode of the drag in progress
+// What a mouse drag does (Preferences > Editing Options "Mouse drag performs Drag (G) operation", input.drag_is_move
+// inverted).  G and M choose for their own drag only: SCH_ACTIONS::drag and ::move are separate actions in KiCad.
+S.mouseDragMode = "drag";
 S.lineMode = "90";                         // "90" | "45" | "free"  (eeschema's LINE_MODE)
 export const LINE_MODES = ["90", "45", "free"];
 export const LINE_MODE_LABEL: Record<string, string> = { "90": "90°", "45": "45°", free: "free" };
@@ -44,8 +47,20 @@ export function setLineMode(ctx: SchCtx, mode: string) {
   return mode;
 }
 export function cycleLineMode(ctx: SchCtx) { return setLineMode(ctx, LINE_MODES[(LINE_MODES.indexOf(S.lineMode) + 1) % LINE_MODES.length]); }
-export function setDragMode(ctx: SchCtx, mode: string) {
-  S.dragMode = mode === "move" ? "move" : "drag"; announceModes(ctx);
+/** The mouse-drag preference (input.drag_is_move); a drag in progress keeps its own mode. */
+export function setMouseDragMode(ctx: SchCtx, mode: string) {
+  S.mouseDragMode = mode === "move" ? "move" : "drag";
+  if (!S.drag) { S.dragMode = S.mouseDragMode; announceModes(ctx); }
+  return S.mouseDragMode;
+}
+/**
+ * The mode of the drag in flight, else of the next one.  `once`: for the next keyboard Move / Drag (M / G) only; without
+ * it an idle call is the mouse-drag mode too (setMouseDragMode), so a pointer drag after an M is a drag again.
+ */
+export function setDragMode(ctx: SchCtx, mode: string, once?: boolean) {
+  S.dragMode = mode === "move" ? "move" : "drag";
+  if (!S.drag && !once) S.mouseDragMode = S.dragMode;
+  announceModes(ctx);
   if (S.drag) { applyDrag(ctx.doc, S.drag, S.drag.last[0], S.drag.last[1]); ctx.requestRender(); }
   return S.dragMode;
 }
@@ -155,6 +170,7 @@ export function beginDrag(ctx: SchCtx, items: KItem | KItem[], mm: Pt, byPointer
   }
   if (!list.length && !partial.length) return null;
   if (S.drag) endDrag(ctx, false);
+  if (byPointer) S.dragMode = S.mouseDragMode || "drag";   // a mouse drag follows the preference, whatever G / M did last
   const item = list[0] || partial[0].item, anchor0 = list.length ? anchorOf(item.kind, item.node) : partial[0].orig[partial[0].index].slice();
   const d: SchDrag = { items: list.map((it) => ({ item: it, kind: it.kind, orig: deep(it.node) })), item, kind: item.kind, orig: null, anchor0, grab: [mm[0] - anchor0[0], mm[1] - anchor0[1]],
     last: [0, 0], applied: [0, 0], moved: false, byPointer: !!byPointer, riders: [], anchors: [], preview: [] };
@@ -343,13 +359,29 @@ export function cleanupAt(doc: KDoc, changes: KChange[], touched: Pt[], keep: Se
       const needed = needsJunction(doc, p[0], p[1], "wire") || needsJunction(doc, p[0], p[1], "bus");
       const dropJ = j && !needed && !keep.has(j.id);
       if (dropJ) out.push(K.removeChange(j));
-      else if (!j && needed) out.push(addNode(doc, junctionNode(p)).change);
+      else if (!j && needed) {   // AddJunction: BreakSegments splits the lines that run through the point (not the ones in flight)
+        breakInto(doc, p, saved, new Set(changes.map((c) => c.id)), out, IU);
+        out.push(addNode(doc, junctionNode(p)).change);
+      }
       if ((!j || dropJ) && !needed) for (const kd of ["wire", "bus"]) { const m = mergeAt(doc, p, kd); if (m) { out.push(...m); break; } }
     }
   } finally {
     for (const [id, obj] of saved) { if (obj) doc.items.set(id, obj); else doc.items.delete(id); }
   }
   return out;
+}
+/**
+ * AddJunction's BreakSegments on a dry run: the wires and buses running through p split there, applied to the doc
+ * (`saved` keeps what to put back) so a later point on the same line splits the right half; `inFlight` lines are
+ * left alone.  A line already split here replaces its earlier change in `out`.
+ */
+export function breakInto(doc: KDoc, p: Pt, saved: Map<string, KItem | null>, inFlight: Set<string>, out: KChange[], IU: number) {
+  for (const kd of ["wire", "bus"]) for (const c of breakLinesAt(doc, p, kd)) {
+    if (inFlight.has(c.id)) continue;
+    if (!saved.has(c.id)) saved.set(c.id, doc.items.get(c.id) || null);
+    K.applyChange(doc, c, IU);
+    const i = out.findIndex((o) => o.id === c.id); if (i < 0) out.push(c); else out[i] = out[i].kind === "ADDED" ? Object.assign({}, c, { kind: "ADDED" }) : c;   // a piece split again stays an addition
+  }
 }
 // Two same-kind lines meeting end to end at p with nothing else there: one straight line.
 export function mergeAt(doc: KDoc, p: Pt, kind: string) {

@@ -305,8 +305,8 @@ export function applyPrefs(full = true): void {
       E.renderOpts.showHiddenPins = p.schDisplay.showHiddenPins; E.renderOpts.showHiddenFields = p.schDisplay.showHiddenFields; E.renderOpts.pageLimits = p.schDisplay.showPageLimits;
       setToggles({ toggleHiddenPins: p.schDisplay.showHiddenPins, toggleHiddenFields: p.schDisplay.showHiddenFields });
       const sch = CollabTools.sch;
-      if (sch) { try { const ctx = toolCtx(); sch.setLineMode(ctx, p.schEditing.lineMode); sch.setDragMode(ctx, p.schEditing.mouseDragIsDrag ? "drag" : "move"); const st = sch.state as { annotateAuto: boolean; autoStartWires: boolean; escClearsNetHighlight?: boolean; repeatOffset: [number, number]; repeatIncrement: number };
-          st.annotateAuto = p.schEditing.autoAnnotate; st.autoStartWires = p.schEditing.autoStartWires; st.escClearsNetHighlight = p.schEditing.escClearsNetHighlight;
+      if (sch) { try { const ctx = toolCtx(); sch.setLineMode(ctx, p.schEditing.lineMode); (sch.setMouseDragMode || sch.setDragMode)(ctx, p.schEditing.mouseDragIsDrag ? "drag" : "move"); const st = sch.state as { annotateAuto: boolean; autoStartWires: boolean; escClearsNetHighlight?: boolean; repeatOffset: [number, number]; repeatIncrement: number };
+          st.annotateAuto = p.schEditing.autoAnnotate; (st as { autoplace?: unknown }).autoplace = { enable: p.schEditing.autoplaceFields !== false, justify: p.schEditing.autoplaceJustify !== false, align: p.schEditing.autoplaceAlign !== false }; st.autoStartWires = p.schEditing.autoStartWires; st.escClearsNetHighlight = p.schEditing.escClearsNetHighlight;
           st.repeatOffset = [p.schEditing.repeatX, p.schEditing.repeatY]; st.repeatIncrement = p.schEditing.repeatIncrement; syncSchModes(); } catch (e) { console.warn(e); } }
     } else {
       E.renderOpts.padNumbers = p.pcbDisplay.showPadNumbers; E.renderOpts.netNames = p.pcbDisplay.showNetNames; E.renderOpts.pageLimits = p.pcbDisplay.showPageLimits;

@@ -74487,6 +74487,8 @@ var init_state = __esm({
       ctrlClickHighlight: false,
       // PCBNEW_SETTINGS m_CtrlClickHighlight: Ctrl+click highlights the net instead of toggling the selection
       selField: null,
+      selFields: [],
+      // more schematic fields picked with E.selField by Shift / Ctrl+click ({id, name}); only read while selField is set
       selPins: [],
       // bare symbol pins [{id, number}] (SCH_PIN_T selected on their own; Shift / Ctrl+click adds and toggles)
       fdrag: null,
@@ -81238,12 +81240,30 @@ function clearSelection() {
   E.selection.clear();
   E.selected = null;
   E.selField = null;
+  E.selFields = [];
   E.selPins = [];
   for (const f2 of clearHooks) f2();
   if (CollabTools.sch && CollabTools.sch.select) CollabTools.sch.select(null);
   const pcb = CollabTools.pcb && CollabTools.pcb.state;
   if (pcb && pcb.sel) pcb.sel.clear();
   if (pcb) pcb.padSel = null;
+}
+function selectedFields() {
+  const f2 = E.selField;
+  if (!f2) return [];
+  const out2 = [f2];
+  for (const g2 of E.selFields || []) if (!out2.some((h3) => h3.id === g2.id && h3.name === g2.name) && (!E.kdoc || E.kdoc.items.has(g2.id))) out2.push(g2);
+  return out2;
+}
+function fieldDragMore(main) {
+  const out2 = [];
+  if (!E.kdoc) return out2;
+  for (const f2 of selectedFields()) {
+    if (f2.id === main.id && f2.name === main.name) continue;
+    const it = E.kdoc.items.get(f2.id), pn = it && fieldOf4(it, f2.name), at5 = pn && KiCadCanvas.kid(pn, "at");
+    if (at5) out2.push({ id: f2.id, name: f2.name, orig: [KiCadCanvas.num(at5[1]), KiCadCanvas.num(at5[2])], origAt: at5.slice() });
+  }
+  return out2;
 }
 function fieldOf4(item, name) {
   return window.KDialogs && KDialogs._ ? KDialogs._.fieldNode(item.node, name) : null;
@@ -82334,7 +82354,7 @@ function canvasSelection() {
     const S3 = CollabTools.sch && CollabTools.sch.state;
     const extra = [];
     if (S3 && S3.sel) extra.push(S3.sel);
-    if (E.selField) extra.push(E.selField.id + "#field:" + E.selField.name);
+    for (const f2 of selectedFields()) extra.push(f2.id + "#field:" + f2.name);
     for (const p of E.selPins || []) extra.push(p.id + "#pin:" + p.number);
     if (S3 && S3.drag && S3.drag.items) {
       for (const e of S3.drag.items) if (e && e.item && e.item.id) extra.push(e.item.id);
@@ -83176,7 +83196,7 @@ function startFieldMove(mm4) {
   if (!at5) return false;
   const g2 = isSch() ? null : it.geom.find((q4) => q4.t === "text" && q4.field === sf.name && q4.textPos);
   const pos = isSch() ? [KiCadCanvas.num(at5[1]), KiCadCanvas.num(at5[2])] : g2 && g2.textPos ? [g2.textPos[0], g2.textPos[1]] : [mm4[0], mm4[1]];
-  E.fdrag = { id: it.id, name: sf.name, startMm: [mm4[0], mm4[1]], orig: [KiCadCanvas.num(at5[1]), KiCadCanvas.num(at5[2])], origAt: at5.slice(), moved: false, sticky: true, origin: pos };
+  E.fdrag = { id: it.id, name: sf.name, startMm: [mm4[0], mm4[1]], orig: [KiCadCanvas.num(at5[1]), KiCadCanvas.num(at5[2])], origAt: at5.slice(), moved: false, sticky: true, origin: pos, more: isSch() ? fieldDragMore(sf) : [] };
   return true;
 }
 function revertFieldDrag() {
@@ -83193,6 +83213,13 @@ function revertFieldDrag() {
       at5[2] = fd.orig[1];
     }
     KiCadCanvas.replaceChange(d, it);
+  }
+  if (d && fd.moved) for (const m of fd.more || []) {
+    const it2 = d.items.get(m.id), p2 = it2 && K11 && K11._.fieldNode ? K11._.fieldNode(it2.node, m.name) : null, a2 = p2 && KiCadCanvas.kid(p2, "at");
+    if (it2 && a2) {
+      a2.splice(0, a2.length, ...m.origAt);
+      KiCadCanvas.replaceChange(d, it2);
+    }
   }
 }
 function cancelInteraction() {
@@ -83266,11 +83293,16 @@ function startMove(mode) {
     if (!m) return false;
     const items = selectionItems();
     if (!items.length) return false;
+    const back = String(m.state.mouseDragMode || "drag");
     try {
-      m.setDragMode(toolCtx3(), mode);
-      return !!m.beginDrag(toolCtx3(), items.length === 1 ? items[0] : items, mm4, false);
+      m.setDragMode(toolCtx3(), mode, true);
+      const dr = m.beginDrag(toolCtx3(), items.length === 1 ? items[0] : items, mm4, false);
+      if (dr) dr.restoreMode = back;
+      else m.setDragMode(toolCtx3(), back);
+      return !!dr;
     } catch (e) {
       console.warn(e);
+      m.setDragMode(toolCtx3(), back);
       return false;
     }
   }
@@ -94319,18 +94351,29 @@ function hiddenFieldNode(node, name, k, find) {
   return copy;
 }
 function deleteSelectedField() {
-  const f2 = E.selField;
-  if (!f2 || !E.kdoc || !isSch()) return false;
+  const all2 = selectedFields();
+  if (!all2.length || !E.kdoc || !isSch()) return false;
   if (E.viewOnly) {
     toast("View-only access");
     return true;
   }
-  const it = E.kdoc.items.get(f2.id), k = kit();
-  if (!it || !k) return true;
-  const node = hiddenFieldNode(it.node, f2.name, k, (n2, nm4) => fieldOf4({ node: n2 }, nm4));
-  if (!node) return true;
-  commitChanges([KiCadCanvas.replaceChange(E.kdoc, Object.assign({}, it, { node, geom: [], bbox: null }))], "Delete");
+  const k = kit();
+  if (!k) return true;
+  const nodes = /* @__PURE__ */ new Map();
+  for (const f2 of all2) {
+    const it = E.kdoc.items.get(f2.id);
+    if (!it) continue;
+    const node = hiddenFieldNode(nodes.get(f2.id) || it.node, f2.name, k, (n2, nm4) => fieldOf4({ node: n2 }, nm4));
+    if (node) nodes.set(f2.id, node);
+  }
+  const changes = [];
+  for (const [id, node] of nodes) {
+    const it = E.kdoc.items.get(id);
+    if (it) changes.push(KiCadCanvas.replaceChange(E.kdoc, Object.assign({}, it, { node, geom: [], bbox: null })));
+  }
+  if (changes.length) commitChanges(changes, "Delete");
   E.selField = null;
+  E.selFields = [];
   drawSelection();
   renderProps();
   requestRender();
@@ -109909,6 +109952,7 @@ var api = {
   textMode: void 0,
   currentTextMode: textMode,
   strokeGlyph,
+  strokeAdvance,
   strokeLine,
   strokeLineWidth,
   strokeOrigin,
@@ -110454,10 +110498,10 @@ root.KiCadCanvas = api;
     return +(+deg.toPrecision(10)).toString();
   }
   function ellipseFromBox(a, b) {
-    const IU22 = 1e4, iu3 = (v) => Math.round(v * IU22), tdiv = (x, y) => Math.trunc(x / y);
+    const IU32 = 1e4, iu3 = (v) => Math.round(v * IU32), tdiv = (x, y) => Math.trunc(x / y);
     const x1 = iu3(a[0]), y1 = iu3(a[1]), x2 = iu3(b[0]), y2 = iu3(b[1]);
     const cx = tdiv(x1 + x2, 2), cy = tdiv(y1 + y2, 2), hw = tdiv(Math.abs(x2 - x1), 2), hh = tdiv(Math.abs(y2 - y1), 2), wide = hw >= hh;
-    return { cx: cx / IU22, cy: cy / IU22, major: Math.max(wide ? hw : hh, 1) / IU22, minor: Math.max(wide ? hh : hw, 1) / IU22, rotation: wide ? 0 : 90, start: 0, end: 360 };
+    return { cx: cx / IU32, cy: cy / IU32, major: Math.max(wide ? hw : hh, 1) / IU32, minor: Math.max(wide ? hh : hw, 1) / IU32, rotation: wide ? 0 : 90, start: 0, end: 360 };
   }
   function ellipseAngle(e, p) {
     const a = Math.max(1e-4, e.major), b = Math.max(1e-4, e.minor), r = e.rotation * Math.PI / 180, dx = p[0] - e.cx, dy = p[1] - e.cy;
@@ -110550,13 +110594,13 @@ root.KiCadCanvas = api;
   }
   var DEFAULT_TEXT_SIZE = 1.27;
   function drawTableSize(origin, cur2, grid2, textSize = DEFAULT_TEXT_SIZE) {
-    const IU22 = 1e4, iu3 = (v) => Math.round(v * IU22), g2 = iu3(grid2 > 0 ? grid2 : 1.27), fs2 = Math.max(1, iu3(textSize > 0 ? textSize : DEFAULT_TEXT_SIZE));
+    const IU32 = 1e4, iu3 = (v) => Math.round(v * IU32), g2 = iu3(grid2 > 0 ? grid2 : 1.27), fs2 = Math.max(1, iu3(textSize > 0 ? textSize : DEFAULT_TEXT_SIZE));
     const dx = iu3(cur2[0]) - iu3(origin[0]), dy = iu3(cur2[1]) - iu3(origin[1]);
     const cols = Math.max(1, Math.trunc(dx / (fs2 * 15))), rows3 = Math.max(1, Math.trunc(dy / (fs2 * 2)));
     let cw = Math.max(g2 * 5, Math.trunc(dx / cols)), ch = Math.max(g2 * 2, Math.trunc(dy / rows3));
     cw = Math.round(cw / g2) * g2;
     ch = Math.round(ch / g2) * g2;
-    return { rows: rows3, cols, cw: r45(cw / IU22), ch: r45(ch / IU22) };
+    return { rows: rows3, cols, cw: r45(cw / IU32), ch: r45(ch / IU32) };
   }
   function drawTableNode(origin, cur2, grid2, textSize = DEFAULT_TEXT_SIZE) {
     const z2 = drawTableSize(origin, cur2, grid2, textSize);
@@ -110886,14 +110930,14 @@ root.KiCadCanvas = api;
     setSpinOfNode(kind, out2, spin);
     return out2;
   }
-  function autoRotateChanges(doc2, changes, IU22) {
+  function autoRotateChanges(doc2, changes, IU32) {
     const want2 = changes.filter((c) => c.kind === "MODIFIED" && autoRotateOf(c.id) && supportsAutoRotate((doc2.items.get(c.id) || { kind: "" }).kind));
     if (!want2.length) return changes;
     const saved = /* @__PURE__ */ new Map();
     for (const c of changes) if (!saved.has(c.id)) saved.set(c.id, doc2.items.get(c.id) || null);
     const swap = /* @__PURE__ */ new Map();
     try {
-      for (const c of changes) K11.applyChange(doc2, c, IU22);
+      for (const c of changes) K11.applyChange(doc2, c, IU32);
       for (const c of want2) {
         const it = doc2.items.get(c.id);
         if (!it) continue;
@@ -111251,7 +111295,7 @@ root.KiCadCanvas = api;
     }
     return pts.filter((p) => analyzePoint(doc2, p, false, extra, skip).allows);
   }
-  function editTxn(doc2, IU22) {
+  function editTxn(doc2, IU32) {
     const saved = /* @__PURE__ */ new Map(), out2 = /* @__PURE__ */ new Map();
     const keep = (id, obj5) => {
       if (!saved.has(id)) saved.set(id, obj5 || null);
@@ -111269,7 +111313,7 @@ root.KiCadCanvas = api;
         let c = modChange(doc2, item, node);
         if (prev && prev.kind === "ADDED") c = Object.assign({}, c, { kind: "ADDED" });
         out2.set(item.id, c);
-        K11.applyChange(doc2, c, IU22 || 1e4);
+        K11.applyChange(doc2, c, IU32 || 1e4);
         return doc2.items.get(item.id);
       },
       remove(item) {
@@ -112720,6 +112764,20 @@ root.KiCadCanvas = api;
       const end = selEndOf(it.id);
       for (let k = 0; k < (times || 1) && ok2; k++) ok2 = transformNode(it.kind, n2, op, C, items.length === 1, end) !== false;
       if (!ok2) continue;
+      if (it.kind === "symbol") {
+        if (op === "x" || op === "y") dropKid(n2, "fields_autoplaced");
+        else if (apPrefs().enable && autoplaceAlgo({ node: n2 })) {
+          try {
+            const a = autoplaceNode(doc2, Object.assign({}, it, { node: n2 }), autoplaceAlgo({ node: n2, id: it.id }));
+            if (a) {
+              n2.length = 0;
+              n2.push(...a);
+            }
+          } catch (e) {
+            console.warn(e);
+          }
+        }
+      }
       for (const p of connPoints(doc2, it)) touched.push(p);
       for (const p of connPoints(doc2, { kind: it.kind, node: n2, id: it.id })) touched.push(p);
       out2.push(modChange(doc2, it, n2));
@@ -113131,14 +113189,17 @@ root.KiCadCanvas = api;
         const k = r45(p[0]) + "," + r45(p[1]);
         if (seen.has(k)) continue;
         seen.add(k);
-        if (!junctionAt(doc2, p[0], p[1]) && (needsJunction(doc2, p[0], p[1], "wire") || needsJunction(doc2, p[0], p[1], "bus"))) extra.push(addNode(doc2, junctionNode(p)).change);
+        if (!junctionAt(doc2, p[0], p[1]) && (needsJunction(doc2, p[0], p[1], "wire") || needsJunction(doc2, p[0], p[1], "bus"))) {
+          breakInto(doc2, p, saved, new Set(changes.map((c) => c.id)), extra, ctx.IU || 1e4);
+          extra.push(addNode(doc2, junctionNode(p)).change);
+        }
       }
     } finally {
       for (const [id, obj5] of saved) {
         if (obj5) doc2.items.set(id, obj5);
         else doc2.items.delete(id);
       }
-      for (const c of extra) doc2.items.delete(c.id);
+      for (const c of extra) if (c.kind === "ADDED") doc2.items.delete(c.id);
     }
     for (const id of added2) doc2.items.delete(id);
     const keepSel = d.anchors.flatMap((a) => a.ends.map((e) => e.item.id));
@@ -113393,7 +113454,11 @@ ${body}
         seen.add(key3);
         if (junctionAt(doc2, p[0], p[1])) continue;
         const need = line ? needsJunction(doc2, p[0], p[1], it.kind) : needsJunction(doc2, p[0], p[1], "wire") || needsJunction(doc2, p[0], p[1], "bus");
-        if (need) out2.push(addNode(doc2, junctionNode(p)).change);
+        if (need) {
+          if (line) out2.push(...breakLinesAt(doc2, p, it.kind).filter((c) => !items.some((n2) => n2.id === c.id)));
+          else for (const kd of ["wire", "bus"]) out2.push(...breakLinesAt(doc2, p, kd).filter((c) => !items.some((n2) => n2.id === c.id)));
+          out2.push(addNode(doc2, junctionNode(p)).change);
+        }
       }
     }
     return out2;
@@ -114455,7 +114520,7 @@ ${body}
       }
     }
     const symId = K11.hitTest(doc2, mm4[0], mm4[1], tol), sym2 = symId ? doc2.items.get(symId) : null;
-    if (sym2 && sym2.kind === "symbol" && isPowerSymbol(doc2, str9((kid8(sym2.node, "lib_id") || [])[1]))) {
+    if (sym2 && sym2.kind === "symbol" && symbolIsPower(doc2, sym2)) {
       const sp = symbolPins(doc2, sym2);
       if (sp.length === 1) return { item: sym2, at: [sp[0].x, sp[0].y], pin: sp[0].number };
     }
@@ -115139,7 +115204,7 @@ ${body}
       }
     }
     if (!labels.length) return null;
-    const IU22 = 1e4, iu3 = (mm22) => Math.round(mm22 * IU22), mm4 = (v) => r45(v / IU22);
+    const IU32 = 1e4, iu3 = (mm22) => Math.round(mm22 * IU32), mm4 = (v) => r45(v / IU32);
     const grid2 = iu3(1.27), ts = iu3(textSize);
     let pitch = Math.max(Math.round(ts * 2), iu3(2.54));
     pitch = Math.round(pitch / grid2) * grid2;
@@ -118445,7 +118510,8 @@ Link '${target2}' to this file?`)) return null;
       // Y is Mirror Vertically: (mirror x)
       case "d":
       case "D":
-        return duplicateSelected(ctx);
+        return showDatasheet(ctx);
+      // ACTIONS::showDatasheet (Duplicate is Ctrl+D)
       case "Insert":
         return repeatLast(ctx);
       case "o":
@@ -118465,8 +118531,10 @@ Link '${target2}' to this file?`)) return null;
       case "G":
       case "m":
       case "M": {
-        setDragMode(ctx, lower22 === "m" ? "move" : "drag");
-        if (S3.drag) return true;
+        if (S3.drag) {
+          setDragMode(ctx, lower22 === "m" ? "move" : "drag");
+          return true;
+        }
         if (!S3.cursor) return false;
         let it = S3.sel ? ctx.doc.items.get(S3.sel) : null;
         if (!it && !ctx.selected && !ctx.selection?.size) {
@@ -118474,7 +118542,15 @@ Link '${target2}' to this file?`)) return null;
           if (hovered?.kind === "no_connect") it = hovered;
         }
         if (!it) return false;
-        return !!beginDrag(ctx, it, S3.cursor, false);
+        const back = S3.mouseDragMode || "drag";
+        setDragMode(ctx, lower22 === "m" ? "move" : "drag", true);
+        const d = beginDrag(ctx, it, S3.cursor, false);
+        if (d) d.restoreMode = back;
+        else {
+          S3.dragMode = back;
+          announceModes(ctx);
+        }
+        return !!d;
       }
       case " ":
         if (ev && ev.shiftKey) {
@@ -119129,7 +119205,8 @@ Link '${target2}' to this file?`)) return null;
     return str9((kid8(node, "lib_id") || [])[1]);
   }
   function symbolIsPower(doc2, item) {
-    return isPowerSymbol(doc2, symbolLibId(item.node));
+    const ln = kid8(item.node, "lib_name");
+    return !!ln && isPowerSymbol(doc2, str9(ln[1])) || isPowerSymbol(doc2, symbolLibId(item.node));
   }
   function globalPowerPin(doc2, item, pin) {
     if (pin.type !== "power_in") return false;
@@ -119138,96 +119215,179 @@ Link '${target2}' to this file?`)) return null;
     if (pw) return true;
     return !!pin.hidden;
   }
-  var AP_HPADDING = 0.635;
-  var AP_VPADDING = 0.381;
-  var AP_GRID = 1.27;
-  var AP_WIRE_V = 2.54;
+  var IU22 = 1e4;
+  var HPAD = 6350;
+  var VPAD = 3810;
+  var GRID50 = 12700;
+  var WIRE_V = 25400;
   var SIDES = { right: [1, 0], top: [0, -1], left: [-1, 0], bottom: [0, 1] };
-  function roundN(v, n2, up) {
-    const q4 = v / n2, r = Math.round(q4);
-    if (Math.abs(q4 - r) < 1e-6) return r45(r * n2);
-    return r45((up ? Math.ceil(q4) : Math.floor(q4)) * n2);
-  }
+  var kiround = (v) => v < 0 ? -Math.round(-v) : Math.round(v);
+  var toIU2 = (mm4) => kiround(mm4 * IU22);
+  var idiv = (a, b) => Math.trunc(a / b);
+  var mmOf = (v) => r45(v / IU22);
+  var roundIU2 = (v, n2, up) => v % n2 ? n2 * (idiv(v, n2) + (up ? 1 : 0)) : v;
   function fieldHidden2(p) {
     const h3 = kid8(p, "hide");
     if (h3) return str9(h3[1]) !== "no";
     const ef = kid8(p, "effects");
     return !!(ef && (ef.includes("hide") || kid8(ef, "hide") && str9(kid8(ef, "hide")[1]) !== "no"));
   }
-  function fieldFont(p) {
+  var yesFlag = (n2, key3) => !!n2 && (n2.includes(key3) || !!kid8(n2, key3) && str9(kid8(n2, key3)[1]) !== "no");
+  function textPenIU(p) {
     const ef = kid8(p, "effects"), f2 = ef && kid8(ef, "font"), s2 = f2 && kid8(f2, "size"), th = f2 && kid8(f2, "thickness");
-    const size2 = s2 ? num13(s2[2], num13(s2[1], 1.27)) : 1.27;
-    const bold2 = !!(f2 && (f2.includes("bold") || kid8(f2, "bold") && str9(kid8(f2, "bold")[1]) !== "no"));
-    const thick = th && num13(th[1]) > 1e-3 ? num13(th[1]) : Math.min(bold2 ? size2 / 5 : size2 / 8, size2 / 4);
-    return { size: size2, thick, bold: bold2 };
+    const h3 = toIU2(s2 ? num13(s2[1], 1.27) : 1.27), w = toIU2(s2 ? num13(s2[2], num13(s2[1], 1.27)) : 1.27), bold2 = yesFlag(f2, "bold");
+    let pen = th ? toIU2(num13(th[1])) : 0;
+    if (pen <= 1) pen = bold2 ? kiround(w / 5) : kiround(w / 8);
+    else if (bold2) pen = kiround(pen * 1.6);
+    return Math.min(pen, kiround(Math.min(Math.abs(w), Math.abs(h3)) * 0.25));
+  }
+  function textBoxIU(p, text3) {
+    const ef = kid8(p, "effects"), f2 = ef && kid8(ef, "font"), s2 = f2 && kid8(f2, "size");
+    const h3 = toIU2(s2 ? num13(s2[1], 1.27) : 1.27), w = toIU2(s2 ? num13(s2[2], num13(s2[1], 1.27)) : 1.27), pen = textPenIU(p);
+    const t = K11.parseMarkup(text3 != null ? text3 : str9(p[2])).text, adv = K11.strokeAdvance;
+    let cur2 = 0;
+    for (const ch of t) {
+      if (ch === "	") continue;
+      cur2 += kiround((ch === " " ? adv(" ") : adv(ch)) * w);
+    }
+    const grow6 = 2 * kiround(pen * 1.5), ex = Math.abs(cur2 - kiround(w * 0.2)) + grow6, ey = h3 + grow6;
+    return { w: ex, h: ey + kiround(ey * 0.17) + ((text3 != null ? text3 : str9(p[2])).includes("~{") ? idiv(ey, 6) : 0) };
   }
   function fieldExtent(p) {
-    const { size: size2, thick } = fieldFont(p), text3 = str9(p[2]);
-    const lines = text3.split("\n"), w = Math.max(...lines.map((l) => K11.textWidth(l, size2, 0))) + 3 * thick;
-    return { w: r45(w), h: r45((size2 + 3 * thick) * 1.17 + (lines.length - 1) * size2 * 1.61) };
+    const b = textBoxIU(p);
+    return { w: mmOf(b.w), h: mmOf(b.h) };
   }
-  function bodyBox(doc2, item) {
+  var merge2 = (b, x0, y0, x1, y1) => b ? [Math.min(b[0], x0), Math.min(b[1], y0), Math.max(b[2], x1), Math.max(b[3], y1)] : [x0, y0, x1, y1];
+  function drawnSubs(lib, n2, allUnits) {
+    const unit2 = kid8(n2, "unit") ? num13(kid8(n2, "unit")[1], 1) : 1, styleN = kid8(n2, "body_style") || kid8(n2, "convert"), style = styleN ? num13(styleN[1], 1) : 1;
+    return kids7(lib, "symbol").filter((sub3) => {
+      const m = str9(sub3[1]).match(/_(\d+)_(\d+)$/);
+      const u = m ? +m[1] : 0, s2 = m ? +m[2] : 1;
+      return allUnits || !(u !== 0 && u !== unit2 || m && s2 !== 0 && s2 !== style);
+    });
+  }
+  function bodyBoxIU(doc2, item) {
     const n2 = item.node, libId = str9((kid8(n2, "lib_name") || kid8(n2, "lib_id") || [])[1]);
     const lib = K11.resolveLib(doc2, libId) || K11.resolveLib(doc2, symbolLibId(n2));
     const [ax, ay, rot3] = atOf4(n2), mN = kid8(n2, "mirror"), T = K11.symbolTransform(rot3, mN ? str9(mN[1]) : "");
-    const tf2 = (lx, ly) => [ax + T[0] * lx + T[1] * ly, ay + T[2] * lx + T[3] * ly];
     let b = null;
-    const take = (p) => {
-      b = b ? [Math.min(b[0], p[0]), Math.min(b[1], p[1]), Math.max(b[2], p[0]), Math.max(b[3], p[1])] : [p[0], p[1], p[0], p[1]];
+    const pt4 = (x, y) => [toIU2(x), -toIU2(y)];
+    const take = (pts, grow6) => {
+      for (const [x, y] of pts) b = merge2(b, x - grow6, y - grow6, x + grow6, y + grow6);
     };
-    if (lib) {
-      const unit2 = kid8(n2, "unit") ? num13(kid8(n2, "unit")[1], 1) : 1, styleN = kid8(n2, "body_style") || kid8(n2, "convert"), style = styleN ? num13(styleN[1], 1) : 1;
-      for (const sub3 of kids7(lib, "symbol")) {
-        const m = str9(sub3[1]).match(/_(\d+)_(\d+)$/);
-        const u = m ? +m[1] : 0, s2 = m ? +m[2] : 1;
-        if (u !== 0 && u !== unit2 || m && s2 !== 0 && s2 !== style) continue;
-        for (const g2 of sub3.slice(2)) {
-          if (!Array.isArray(g2)) continue;
-          const gk = g2[0];
-          if (gk === "rectangle") {
-            const a = kid8(g2, "start"), e = kid8(g2, "end");
-            take(tf2(num13(a[1]), num13(a[2])));
-            take(tf2(num13(e[1]), num13(e[2])));
-          } else if (gk === "circle") {
-            const c = kid8(g2, "center"), r = num13((kid8(g2, "radius") || [])[1]);
-            for (const [dx, dy] of [[-r, -r], [r, r], [-r, r], [r, -r]]) take(tf2(num13(c[1]) + dx, num13(c[2]) + dy));
-          } else if (gk === "arc") {
-            for (const key3 of ["start", "mid", "end"]) {
-              const k = kid8(g2, key3);
-              if (k) take(tf2(num13(k[1]), num13(k[2])));
-            }
-          } else if (gk === "polyline" || gk === "bezier") {
-            for (const [x, y] of ptsOf4(g2)) take(tf2(x, y));
-          } else if (gk === "text") {
-            const [tx, ty] = atOf4(g2), ef = K11.effectsOf(g2);
-            if (!ef.hide) {
-              const w = K11.textWidth(str9(g2[1]), ef.size, 0) / 2;
-              take(tf2(tx - w, ty - ef.size / 2));
-              take(tf2(tx + w, ty + ef.size / 2));
-            }
-          }
+    const half = (g2) => {
+      const st = kid8(g2, "stroke"), w = st && kid8(st, "width");
+      return idiv(Math.max(0, w ? toIU2(num13(w[1])) : 0), 2);
+    };
+    if (lib) for (const sub3 of drawnSubs(lib, n2, false)) for (const g2 of sub3.slice(2)) {
+      if (!Array.isArray(g2) || yesFlag(g2, "private")) continue;
+      const gk = g2[0];
+      if (gk === "rectangle") {
+        const a = kid8(g2, "start"), e = kid8(g2, "end");
+        if (a && e) take([pt4(num13(a[1]), num13(a[2])), pt4(num13(e[1]), num13(e[2]))], half(g2));
+      } else if (gk === "circle") {
+        const c = kid8(g2, "center"), r = toIU2(num13((kid8(g2, "radius") || [])[1]));
+        if (c) {
+          const [x, y] = pt4(num13(c[1]), num13(c[2]));
+          take([[x - r, y - r], [x + r, y + r]], half(g2));
         }
+      } else if (gk === "arc") {
+        const s0 = kid8(g2, "start"), m0 = kid8(g2, "mid"), e0 = kid8(g2, "end");
+        if (!s0 || !e0) continue;
+        const P = [s0, m0 || s0, e0].map((k) => pt4(num13(k[1]), num13(k[2])));
+        const pts = [P[0], P[2]];
+        const arc = m0 && K11.arcFrom3 ? K11.arcFrom3(P[0], P[1], P[2]) : null;
+        if (arc && isFinite(arc.r)) {
+          const ang = (q4) => Math.atan2(q4[1] - arc.y, q4[0] - arc.x), norm3 = (a) => (a % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+          const a0 = ang(P[0]), am = norm3(ang(P[1]) - a0), ae = norm3(ang(P[2]) - a0), ccw = am <= ae, sweep = ccw ? ae : 2 * Math.PI - ae;
+          for (let q4 = 0; q4 < 4; q4++) {
+            const a = q4 * Math.PI / 2, d = ccw ? norm3(a - a0) : norm3(a0 - a);
+            if (d > 0 && d < sweep) pts.push([kiround(arc.x + arc.r * Math.cos(a)), kiround(arc.y + arc.r * Math.sin(a))]);
+          }
+        } else pts.push(P[1]);
+        take(pts, half(g2));
+      } else if (gk === "polyline") take(ptsOf4(g2).map(([x, y]) => pt4(x, y)), half(g2));
+      else if (gk === "bezier") {
+        const c = ptsOf4(g2);
+        const curve = c.length >= 3 ? K11.bezierPts(c) : c;
+        take(curve.map(([x, y]) => pt4(x, y)), half(g2));
+      } else if (gk === "text" || gk === "text_box") {
+        const [tx, ty] = atOf4(g2);
+        if (fieldHidden2(g2)) continue;
+        if (gk === "text_box") {
+          const sz = kid8(g2, "size");
+          if (sz) take([pt4(tx, ty), pt4(tx + num13(sz[1]), ty + num13(sz[2]))], 0);
+          continue;
+        }
+        const tb = textBoxIU(g2, str9(g2[1])), [x, y] = pt4(tx, ty), vert = Math.round(num13(atOf4(g2)[2])) % 180 !== 0;
+        const hw = idiv(vert ? tb.h : tb.w, 2), hh = idiv(vert ? tb.w : tb.h, 2);
+        take([[x - hw, y - hh], [x + hw, y + hh]], 0);
+      } else if (gk === "pin") {
+        if (yesFlag(g2, "hide")) continue;
+        const [px, py, pr] = atOf4(g2), lenN = kid8(g2, "length"), len2 = lenN ? num13(lenN[1]) : 2.54;
+        const dir = (Math.round(pr) % 360 + 360) % 360, d = dir === 0 ? [1, 0] : dir === 90 ? [0, 1] : dir === 180 ? [-1, 0] : [0, -1];
+        const [x, y] = pt4(px, py), L = toIU2(len2);
+        take([[x + d[0] * L, y - d[1] * L]], 0);
       }
     }
-    for (const pin of symbolPins(doc2, item)) if (!pin.hidden) take(pin.root);
-    return (b || [ax, ay, ax, ay]).map(r45);
+    const ox = toIU2(ax), oy = toIU2(ay);
+    if (!b) return [ox, oy, ox, oy];
+    const Ti = [T[0], -T[1], T[2], -T[3]];
+    const tc = (x, y) => [Ti[0] * x + Ti[1] * y, Ti[2] * x + Ti[3] * y];
+    const [p0, p1] = [tc(b[0], b[1]), tc(b[2], b[3])];
+    return [Math.min(p0[0], p1[0]) + ox, Math.min(p0[1], p1[1]) + oy, Math.max(p0[0], p1[0]) + ox, Math.max(p0[1], p1[1]) + oy];
   }
-  var boxW = (b) => b[2] - b[0];
-  var boxH = (b) => b[3] - b[1];
-  function boxesIntersect(a, b) {
-    return a && b && a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
+  function bodyBox(doc2, item) {
+    return bodyBoxIU(doc2, item).map(mmOf);
+  }
+  function allPinsIU(doc2, n2) {
+    const lib = K11.resolveLib(doc2, str9((kid8(n2, "lib_name") || kid8(n2, "lib_id") || [])[1])) || K11.resolveLib(doc2, symbolLibId(n2));
+    if (!lib) return [];
+    const [ax, ay, rot3] = atOf4(n2), mN = kid8(n2, "mirror"), T = K11.symbolTransform(rot3, mN ? str9(mN[1]) : ""), ox = toIU2(ax), oy = toIU2(ay);
+    const tf2 = (x, y) => [ox + T[0] * x + T[1] * y, oy + T[2] * x + T[3] * y];
+    const out2 = [];
+    for (const sub3 of drawnSubs(lib, n2, true)) for (const g2 of kids7(sub3, "pin")) {
+      const [px, py, pr] = atOf4(g2), lenN = kid8(g2, "length"), L = toIU2(lenN ? num13(lenN[1]) : 2.54);
+      const dir = (Math.round(pr) % 360 + 360) % 360, d = dir === 0 ? [1, 0] : dir === 90 ? [0, 1] : dir === 180 ? [-1, 0] : [0, -1];
+      const x = toIU2(px), y = toIU2(py), pos = tf2(x, y), root22 = tf2(x + d[0] * L, y + d[1] * L);
+      const v = [T[0] * d[0] + T[1] * d[1], T[2] * d[0] + T[3] * d[1]];
+      const side = v[0] > 0 ? "left" : v[0] < 0 ? "right" : v[1] > 0 ? "top" : "bottom";
+      out2.push({ side, hidden: yesFlag(g2, "hide"), pos, root: root22 });
+    }
+    return out2;
+  }
+  var MANDATORY22 = ["Reference", "Value", "Footprint", "Datasheet", "Description"];
+  function autoplaceFields(node) {
+    const all2 = kids7(node, "property").filter((p) => !fieldHidden2(p) && !str9(p[1]).startsWith("ki_") && str9(p[2]) !== "");
+    const ord = (p) => {
+      const i = MANDATORY22.indexOf(str9(p[1]));
+      return i >= 0 ? i : MANDATORY22.length;
+    };
+    return all2.map((p, i) => ({ p, i })).sort((a, b) => ord(a.p) - ord(b.p) || a.i - b.i).map((e) => e.p);
+  }
+  var manualAutoplaced = /* @__PURE__ */ new Set();
+  function autoplaceAlgo(item) {
+    const fa = kid8(item.node, "fields_autoplaced");
+    if (!fa || str9(fa[1]) === "no") return null;
+    return { manual: !!item.id && manualAutoplaced.has(item.id) };
+  }
+  function apPrefs() {
+    const a = S3.autoplace;
+    return { enable: !a || a.enable !== false, justify: !a || a.justify !== false, align: !a || a.align !== false };
   }
   function autoplaceNode(doc2, item, opts2) {
     opts2 = opts2 || {};
-    const node = deep(item.node), power = symbolIsPower(doc2, item), pins2 = symbolPins(doc2, item).filter((p) => !p.hidden || power);
-    const fields = kids7(node, "property").filter((p) => !fieldHidden2(p) && !str9(p[1]).startsWith("ki_") && str9(p[2]) !== "");
+    const manual = opts2.manual === void 0 ? !!item.id && manualAutoplaced.has(item.id) : opts2.manual !== false, prefs3 = apPrefs();
+    const node = deep(item.node), power = symbolIsPower(doc2, item);
+    const fields = autoplaceFields(node).filter((p) => !yesFlag(p, "do_not_autoplace"));
     if (!fields.length) return null;
     const [, , rot3] = atOf4(node), mN = kid8(node, "mirror"), mirror = mN ? str9(mN[1]) : "", T = K11.symbolTransform(rot3, mirror);
     const fieldRot = T[1] !== 0 ? 90 : 0;
     const flipStored = (T[1] !== 0 ? T[1] : T[0]) < 0;
-    const body = bodyBox(doc2, item), symW = boxW(body), symH = boxH(body);
-    const ext = fields.map(fieldExtent);
-    let fbox = { w: Math.max(...ext.map((e) => e.w)), h: ext.reduce((t, e) => t + roundN(e.h, AP_GRID, true), 0) };
+    const body = bodyBoxIU(doc2, { node }), symW = body[2] - body[0], symH = body[3] - body[1];
+    const ext = fields.map((p) => textBoxIU(p));
+    const pins2 = allPinsIU(doc2, node).filter((p) => !p.hidden || power);
+    let fbox = { w: Math.max(...ext.map((e) => e.w)), h: ext.reduce((t, e) => t + (prefs3.align ? roundIU2(e.h, GRID50, true) : e.h + VPAD), 0) };
     const pinsOn = (side2) => pins2.filter((p) => p.side === side2).length;
     let sides = ["right", "top", "left", "bottom"].map((s2) => ({ side: s2, pins: pinsOn(s2) }));
     const swap = (i, j) => {
@@ -119235,56 +119395,62 @@ Link '${target2}' to this file?`)) return null;
       sides[i] = sides[j];
       sides[j] = t;
     };
+    const orient = (Math.round(rot3) % 360 + 360) % 360;
     if (power) {
-      if (rot3 === 0) {
+      if (orient === 0) {
         swap(0, 1);
         swap(1, 3);
-      } else if (rot3 === 90) {
+      } else if (orient === 90) {
         swap(0, 2);
         swap(1, 2);
-      } else if (rot3 === 180) swap(0, 3);
-      else if (rot3 === 270) swap(1, 2);
+      } else if (orient === 180) swap(0, 3);
+      else if (orient === 270) swap(1, 2);
     } else {
-      if (mirror === "x" && (rot3 === 0 || rot3 === 180)) swap(0, 2);
-      if (symH > 0 && symW / symH > 3) {
+      if (mirror === "x" && (orient === 0 || orient === 180)) swap(0, 2);
+      if (symW / symH > 3) {
         swap(0, 1);
         swap(1, 3);
       }
     }
     const place3 = (sp, size2) => {
-      const [sx2, sy2] = SIDES[sp.side], cx = (body[0] + body[2]) / 2, cy = (body[1] + body[3]) / 2;
-      let ox = (symW + size2.w) / 2, oy = (symH + size2.h) / 2;
-      if (sx2) ox += AP_HPADDING;
-      else if (sy2) oy += AP_VPADDING;
-      let x = cx + sx2 * ox - size2.w / 2, y = cy + sy2 * oy - size2.h / 2;
+      const [sx2, sy2] = SIDES[sp.side], cx = body[0] + idiv(symW, 2), cy = body[1] + idiv(symH, 2);
+      let ox = idiv(symW + size2.w, 2), oy = idiv(symH + size2.h, 2);
+      if (sx2) ox += HPAD;
+      else if (sy2) oy += VPAD;
+      let x = cx + sx2 * ox - idiv(size2.w, 2), y = cy + sy2 * oy - idiv(size2.h, 2);
       if (sp.pins > 0) {
         let pb = null;
-        for (const p of pins2) if (p.side === sp.side) for (const q4 of [[p.x, p.y], p.root]) pb = pb ? [Math.min(pb[0], q4[0]), Math.min(pb[1], q4[1]), Math.max(pb[2], q4[0]), Math.max(pb[3], q4[1])] : [q4[0], q4[1], q4[0], q4[1]];
+        for (const p of pins2) if (p.side === sp.side) for (const q4 of [p.pos, p.root]) pb = merge2(pb, q4[0], q4[1], q4[0], q4[1]);
         if (pb) {
-          if (sy2) x = pb[2] + 2 * AP_HPADDING;
-          else y = pb[1] - (size2.h + 2 * AP_VPADDING);
+          if (sy2) x = pb[2] + 2 * HPAD;
+          else y = pb[1] - (size2.h + 2 * VPAD);
         }
       }
       return [x, y];
     };
     const others = Array.from(doc2.items.values()).filter((it) => it !== item && it.id !== item.id && it.bbox);
+    const ibox = (it) => it.bbox.map(toIU2);
+    const hits2 = (box3) => others.filter((it) => {
+      const b = ibox(it);
+      return b[0] <= box3[2] && b[2] >= box3[0] && b[1] <= box3[3] && b[3] >= box3[1];
+    });
     const collision = (sp) => {
       const [x, y] = place3(sp, fbox), box3 = [x, y, x + fbox.w, y + fbox.h];
       let coll = "none";
-      for (const it of others) {
-        if (!boxesIntersect(it.bbox, box3)) continue;
-        if (isNetLine(it.kind) && !SIDES[sp.side][0] && ptsOf4(it.node).every((p) => Math.abs(p[1] - ptsOf4(it.node)[0][1]) < 1e-6) && coll !== "objects") coll = "hwires";
+      for (const it of hits2(box3)) {
+        const pts = ptsOf4(it.node);
+        if (isNetLine(it.kind) && !SIDES[sp.side][0]) coll = pts.length > 1 && pts[0][1] === pts[pts.length - 1][1] && coll !== "objects" ? "hwires" : "objects";
         else coll = "objects";
       }
       return coll;
     };
     sides.reverse();
     let side = { side: "right", pins: Infinity };
-    if (opts2.manual !== false) {
+    if (manual) {
       const colliding = /* @__PURE__ */ new Map();
-      for (const sp of sides) {
-        const c = collision(sp);
-        if (c !== "none") colliding.set(sp.side, c);
+      for (const s2 of ["right", "top", "left", "bottom"]) {
+        const c = collision({ side: s2, pins: pinsOn(s2) });
+        if (c !== "none") colliding.set(s2, c);
       }
       for (const kind of ["objects", "hwires"]) sides = sides.filter((sp) => {
         if (colliding.get(sp.side) !== kind) return true;
@@ -119304,42 +119470,55 @@ Link '${target2}' to this file?`)) return null;
     let [bx, by] = place3(chosen, fbox);
     const [sx, sy] = SIDES[chosen.side];
     let wireSpacing = false;
-    if (opts2.manual !== false && sy) {
-      const box3 = [bx, by, bx + fbox.w, by + fbox.h], hits2 = others.filter((it) => boxesIntersect(it.bbox, box3));
-      if (hits2.length && hits2.every((it) => isNetLine(it.kind) && ptsOf4(it.node).length > 1 && Math.abs(ptsOf4(it.node)[0][1] - ptsOf4(it.node)[1][1]) < 1e-6)) {
-        const offs = new Set(hits2.map((it) => r45(1.5 * AP_WIRE_V - ptsOf4(it.node)[0][1] % AP_WIRE_V)));
+    if (manual && sy) {
+      const found = hits2([bx, by, bx + fbox.w, by + fbox.h]);
+      if (found.length && found.every((it) => isNetLine(it.kind) && ptsOf4(it.node).length > 1 && toIU2(ptsOf4(it.node)[0][1]) === toIU2(ptsOf4(it.node)[ptsOf4(it.node).length - 1][1]))) {
+        const offs = new Set(found.map((it) => 3 * WIRE_V / 2 - toIU2(ptsOf4(it.node)[0][1]) % WIRE_V));
         if (offs.size === 1) {
           wireSpacing = true;
-          fbox = { w: fbox.w, h: fields.length * AP_WIRE_V };
-          by = roundN(by, AP_WIRE_V, chosen.side === "bottom");
+          fbox = { w: fbox.w, h: fields.length * WIRE_V };
+          by = roundIU2(by, WIRE_V, chosen.side === "bottom");
         }
       }
     }
     let lastY = by;
     fields.forEach((p, i) => {
-      let hj = sx ? sx > 0 ? "left" : "right" : "center";
-      if (chosen.pins > 0) hj = sy ? "left" : "center";
-      let x = hj === "left" ? bx : hj === "right" ? bx + fbox.w : bx + fbox.w / 2;
-      const fh = wireSpacing ? AP_WIRE_V / 2 : ext[i].h, pad2 = wireSpacing ? AP_WIRE_V / 2 : roundN(fh, AP_GRID, true) - fh;
-      let y = lastY + pad2 / 2 + fh / 2;
-      lastY += pad2 + fh;
-      if (sx) x = roundN(x, AP_GRID, sx >= 0);
-      if (sy) y = roundN(y, AP_GRID, sy >= 0);
-      const a = kid8(p, "at");
-      const keep = a ? a.slice(4) : [];
-      replaceKid(p, ["at", r45(x), r45(y), fieldRot, ...keep]);
-      const stored2 = flipStored ? hj === "left" ? "right" : hj === "right" ? "left" : "center" : hj;
       let ef = kid8(p, "effects");
       if (!ef) {
         ef = ["effects", fontNode(1.27)];
         p.push(ef);
       }
-      if (stored2 === "center") dropKid(ef, "justify");
-      else replaceKid(ef, ["justify", stored2]);
+      const cur2 = kid8(ef, "justify"), curH = cur2 ? cur2.includes("left") ? "left" : cur2.includes("right") ? "right" : "center" : "center";
+      let hj;
+      if (prefs3.justify) {
+        hj = sx ? sx > 0 ? "left" : "right" : "center";
+        if (chosen.pins > 0) hj = sy ? "left" : "center";
+      } else hj = flipStored ? curH === "left" ? "right" : curH === "right" ? "left" : "center" : curH;
+      let x = hj === "left" ? bx : hj === "right" ? bx + fbox.w : bx + idiv(fbox.w, 2);
+      const fh = wireSpacing ? WIRE_V / 2 : ext[i].h, pad2 = wireSpacing ? WIRE_V / 2 : prefs3.align ? roundIU2(fh, GRID50, true) - fh : VPAD;
+      let y = lastY + idiv(pad2, 2) + idiv(fh, 2);
+      lastY += pad2 + fh;
+      if (prefs3.align) {
+        if (sx) x = roundIU2(x, GRID50, sx >= 0);
+        if (sy) y = roundIU2(y, GRID50, sy >= 0);
+      }
+      const a = kid8(p, "at");
+      const keep = a ? a.slice(4) : [];
+      replaceKid(p, ["at", mmOf(x), mmOf(y), fieldRot, ...keep]);
+      if (prefs3.justify) {
+        const stored2 = flipStored ? hj === "left" ? "right" : hj === "right" ? "left" : "center" : hj;
+        const rest = cur2 ? cur2.slice(1).filter((t) => t === "mirror") : [];
+        if (stored2 === "center" && !rest.length) dropKid(ef, "justify");
+        else replaceKid(ef, ["justify", ...stored2 === "center" ? [] : [stored2], ...rest]);
+      }
     });
     dropKid(node, "fields_autoplaced");
     const ui = node.findIndex((c) => Array.isArray(c) && c[0] === "uuid");
     node.splice(ui >= 0 ? ui : node.length, 0, ["fields_autoplaced", "yes"]);
+    if (item.id) {
+      if (manual) manualAutoplaced.add(item.id);
+      else manualAutoplaced.delete(item.id);
+    }
     return node;
   }
   function autoplaceSelection(ctx, opts2) {
@@ -119347,7 +119526,7 @@ Link '${target2}' to this file?`)) return null;
     const changes = [];
     for (const it of selectedItems(ctx)) {
       if (it.kind !== "symbol" || isLockedNode(it.node)) continue;
-      const n2 = autoplaceNode(ctx.doc, it, opts2);
+      const n2 = autoplaceNode(ctx.doc, it, opts2 || { manual: true });
       if (n2) changes.push(modChange(ctx.doc, it, n2));
     }
     if (!changes.length) return false;
@@ -119355,6 +119534,7 @@ Link '${target2}' to this file?`)) return null;
     return true;
   }
   S3.dragMode = "drag";
+  S3.mouseDragMode = "drag";
   S3.lineMode = "90";
   var LINE_MODES = ["90", "45", "free"];
   var LINE_MODE_LABEL = { "90": "90\xB0", "45": "45\xB0", free: "free" };
@@ -119417,8 +119597,17 @@ Link '${target2}' to this file?`)) return null;
   function cycleLineMode(ctx) {
     return setLineMode(ctx, LINE_MODES[(LINE_MODES.indexOf(S3.lineMode) + 1) % LINE_MODES.length]);
   }
-  function setDragMode(ctx, mode2) {
+  function setMouseDragMode(ctx, mode2) {
+    S3.mouseDragMode = mode2 === "move" ? "move" : "drag";
+    if (!S3.drag) {
+      S3.dragMode = S3.mouseDragMode;
+      announceModes(ctx);
+    }
+    return S3.mouseDragMode;
+  }
+  function setDragMode(ctx, mode2, once2) {
     S3.dragMode = mode2 === "move" ? "move" : "drag";
+    if (!S3.drag && !once2) S3.mouseDragMode = S3.dragMode;
     announceModes(ctx);
     if (S3.drag) {
       applyDrag(ctx.doc, S3.drag, S3.drag.last[0], S3.drag.last[1]);
@@ -119559,6 +119748,7 @@ Link '${target2}' to this file?`)) return null;
     }
     if (!list.length && !partial.length) return null;
     if (S3.drag) endDrag(ctx, false);
+    if (byPointer) S3.dragMode = S3.mouseDragMode || "drag";
     const item = list[0] || partial[0].item, anchor0 = list.length ? anchorOf(item.kind, item.node) : partial[0].orig[partial[0].index].slice();
     const d = {
       items: list.map((it) => ({ item: it, kind: it.kind, orig: deep(it.node) })),
@@ -119868,10 +120058,10 @@ Link '${target2}' to this file?`)) return null;
     for (const c of out2.values()) if (c.kind === "ADDED") doc2.items.delete(c.id);
     return autoRotateChanges(doc2, Array.from(out2.values()), ctx.IU || 1e4);
   }
-  function cleanupAt(doc2, changes, touched, keep, IU22) {
+  function cleanupAt(doc2, changes, touched, keep, IU32) {
     const saved = /* @__PURE__ */ new Map();
     for (const c of changes) if (!saved.has(c.id)) saved.set(c.id, doc2.items.get(c.id) || null);
-    for (const c of changes) K11.applyChange(doc2, c, IU22);
+    for (const c of changes) K11.applyChange(doc2, c, IU32);
     const out2 = [], seen = /* @__PURE__ */ new Set();
     try {
       for (const p of touched) {
@@ -119882,7 +120072,10 @@ Link '${target2}' to this file?`)) return null;
         const needed = needsJunction(doc2, p[0], p[1], "wire") || needsJunction(doc2, p[0], p[1], "bus");
         const dropJ = j && !needed && !keep.has(j.id);
         if (dropJ) out2.push(K11.removeChange(j));
-        else if (!j && needed) out2.push(addNode(doc2, junctionNode(p)).change);
+        else if (!j && needed) {
+          breakInto(doc2, p, saved, new Set(changes.map((c) => c.id)), out2, IU32);
+          out2.push(addNode(doc2, junctionNode(p)).change);
+        }
         if ((!j || dropJ) && !needed) for (const kd of ["wire", "bus"]) {
           const m = mergeAt(doc2, p, kd);
           if (m) {
@@ -119898,6 +120091,16 @@ Link '${target2}' to this file?`)) return null;
       }
     }
     return out2;
+  }
+  function breakInto(doc2, p, saved, inFlight, out2, IU32) {
+    for (const kd of ["wire", "bus"]) for (const c of breakLinesAt(doc2, p, kd)) {
+      if (inFlight.has(c.id)) continue;
+      if (!saved.has(c.id)) saved.set(c.id, doc2.items.get(c.id) || null);
+      K11.applyChange(doc2, c, IU32);
+      const i = out2.findIndex((o) => o.id === c.id);
+      if (i < 0) out2.push(c);
+      else out2[i] = out2[i].kind === "ADDED" ? Object.assign({}, c, { kind: "ADDED" }) : c;
+    }
   }
   function mergeAt(doc2, p, kind) {
     const ends = lineEndsAt(doc2, p[0], p[1], kind);
@@ -120871,6 +121074,7 @@ Link '${target2}' to this file?`)) return null;
     endDrag,
     cancelDrag,
     setDragMode,
+    setMouseDragMode,
     setLineMode,
     cycleLineMode,
     modeText,

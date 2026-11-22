@@ -41,7 +41,7 @@ import { installPcbRouting, pcbLayerKey } from "./pcbrouting";
 import { installProjectWatch } from "./projectwatch";
 import { breakFollow, sendPresence } from "./peers";
 import { collapseSelectionTo, drawDrag, drawZoomRect, finishGroupDrag, finishZoomRect, measureCopy, measureDown, measureMove, measureUp, moveGroupDrag, openSelectionProperties, startGroupDrag } from "./pointer";
-import { clearSelection, selectedSet, drawBoxSel, drawSelection, fieldLocalDelta, fieldOf, finishBoxSel, groupExpand, hitAny, nearestFootprint, renderProps, renderPropsInto, hitOpts } from "./selection";
+import { clearSelection, fieldDragMore, pickField, selectedFields, selectedSet, drawBoxSel, drawSelection, fieldLocalDelta, fieldOf, finishBoxSel, groupExpand, hitAny, nearestFootprint, renderProps, renderPropsInto, hitOpts } from "./selection";
 import { E } from "./state";
 import "./panels/index";
 import { activeModule, commitChanges, commitObservers, deleteSelected, deleteSelection, moduleTool, moveOp, publishUndo, redoLast, redoStack, rotateSelected, runModuleHotkey, selectAll, setTool, toolCtx, undoLast, undoStack, unlockedForEdit } from "./tools";
@@ -302,13 +302,13 @@ stage.addEventListener("pointerdown", (ev) => {
     const won = f && !isSch() && E.hooks.fieldWins ? E.hooks.fieldWins([x, y], f.item.id, f.name, ev) : "field";
     if (won === "menu") { const pst = CollabTools.pcb && (CollabTools.pcb.state as { downHandled?: unknown } | undefined); if (pst) pst.downHandled = ev; ev.preventDefault(); return; }   // doSelectionMenu: the pick comes from the menu
     if (f && won === "field") {
-      const wasField = !!(E.selField && E.selField.id === f.item.id && E.selField.name === f.name);   // DRAG_SELECTED: only a selected field drags
-      clearSelection(); E.selField = { id: f.item.id, name: f.name };
+      const wasField = selectedFields().some((g) => g.id === f.item.id && g.name === f.name);   // DRAG_SELECTED: only a selected field drags
+      if (!wasField) { clearSelection(); E.selField = { id: f.item.id, name: f.name }; }   // a press on one of several selected fields drags them all
       const pst = !isSch() && CollabTools.pcb && (CollabTools.pcb.state as { downHandled?: unknown } | undefined); if (pst) pst.downHandled = ev;   // one item per click: the board module does not pick what lies under the field
       drawSelection(); renderProps(); renderObjects(); requestRender();
       const pn = fieldOf(f.item, f.name), at = pn && KiCadCanvas.kid(pn, "at");
       if (!wasField) { E.boxSel = { start: [x, y], cur: [x, y], pts: [[x, y]], lasso: E.selMode === "lasso", add: false, startClient: [ev.clientX, ev.clientY] }; stage.setPointerCapture(ev.pointerId); }
-      else if (at && !E.viewOnly && E.ws && E.ws.readyState === 1) { E.fdrag = { id: f.item.id, name: f.name, startMm: [x, y], orig: [KiCadCanvas.num(at[1]), KiCadCanvas.num(at[2])], origAt: at.slice(), moved: false }; stage.setPointerCapture(ev.pointerId); }
+      else if (at && !E.viewOnly && E.ws && E.ws.readyState === 1) { E.fdrag = { id: f.item.id, name: f.name, startMm: [x, y], orig: [KiCadCanvas.num(at[1]), KiCadCanvas.num(at[2])], origAt: at.slice(), moved: false, more: fieldDragMore({ id: f.item.id, name: f.name }) }; stage.setPointerCapture(ev.pointerId); }
       ev.preventDefault(); return;
     }
   }
@@ -462,6 +462,12 @@ function modifierClick(mm: [number, number], mc: ModClick): void {
         selectionChanged(); return;
       }
     }
+    // a symbol's field with nothing but fields selected: the field itself joins / leaves the selection (a plain press picks
+    // a field ahead of what lies under it, so the modifier click does too)
+    if (!E.selection.size && !E.selected && !E.selPins.length && !(sm && sm.state && sm.state.sel)) {
+      const f = KiCadCanvas.fieldAt(E.kdoc, x, y, E.hiddenLayers);
+      if (f) { pickField({ id: f.item.id, name: f.name }, mode); selectionChanged(); return; }
+    }
     // the module's items (wires, labels, junctions, text, graphics, sheets' pins ...) come first, as its own press does
     let hit: KItem | null = null; try { hit = sm && sm._ && sm._.pickNonSymbol ? sm._.pickNonSymbol(ctx, [x, y]) : null; } catch (e) { console.warn(e); }
     if (hit) {
@@ -513,17 +519,26 @@ function startModuleBox(ev: PointerEvent, x: number, y: number): void {
 
 /** Drop a field drag or Move: the original goes back first so the commit records the inverse (undo restores it exactly). */
 function commitFieldDrag(): void {
-  const fd = E.fdrag; E.fdrag = null; if (!fd) return;
-  const it = E.kdoc && E.kdoc.items.get(fd.id), pn = it && fieldOf(it, fd.name), at = pn && KiCadCanvas.kid(pn, "at");
-  if (fd.moved && at) {
-    const now = at.slice(), orig = fd.origAt || [at[0], fd.orig[0], fd.orig[1], ...at.slice(3)];
+  const fd = E.fdrag; E.fdrag = null; if (!fd || !E.kdoc) return;
+  if (!fd.moved) return;
+  // every carried field: put the original back, then one change per symbol with all of its fields where they ended up
+  const entries = [{ id: fd.id, name: fd.name, orig: fd.orig, origAt: fd.origAt }, ...((fd.more || []) as { id: string; name: string; orig: number[]; origAt?: SNode }[])];
+  const after = new Map<string, { name: string; now: SNode }[]>();
+  for (const e of entries) {
+    const it = E.kdoc.items.get(e.id), pn = it && fieldOf(it, e.name), at = pn && KiCadCanvas.kid(pn, "at"); if (!at) continue;
+    const now = at.slice() as SNode, orig = e.origAt || [at[0], e.orig[0], e.orig[1], ...at.slice(3)];
     at.splice(0, at.length, ...orig); KiCadCanvas.replaceChange(E.kdoc, it);
-    if (JSON.stringify(now) !== JSON.stringify(orig)) {
-      const node = JSON.parse(JSON.stringify(it.node)); const p2 = fieldOf({ node }, fd.name); const a2 = KiCadCanvas.kid(p2!, "at")!; a2.splice(0, a2.length, ...now);
-      commitChanges([KiCadCanvas.replaceChange(E.kdoc, Object.assign({}, it, { node, geom: [], bbox: null }))], "move " + fd.name.toLowerCase());
-    }
-    requestRender();
+    if (JSON.stringify(now) !== JSON.stringify(orig)) { const l = after.get(e.id) || []; l.push({ name: e.name, now }); after.set(e.id, l); }
   }
+  const changes = [];
+  for (const [id, list] of after) {
+    const it = E.kdoc.items.get(id); if (!it) continue;
+    const node = JSON.parse(JSON.stringify(it.node));
+    for (const { name, now } of list) { const p2 = fieldOf({ node }, name), a2 = p2 && KiCadCanvas.kid(p2, "at"); if (a2) a2.splice(0, a2.length, ...now); }
+    changes.push(KiCadCanvas.replaceChange(E.kdoc, Object.assign({}, it, { node, geom: [], bbox: null })));
+  }
+  if (changes.length) commitChanges(changes, entries.length > 1 ? "move fields" : "move " + fd.name.toLowerCase());
+  requestRender();
 }
 
 stage.addEventListener("pointermove", (ev) => {
@@ -570,7 +585,13 @@ function stagePointerMove(ev: PointerEvent, mm: [number, number]): void {
         const sp = E.fdrag.sticky ? snapMm(mm) : null;
         const w = sp ? [sp[0] - E.fdrag.origin[0], sp[1] - E.fdrag.origin[1]] : snapMm([mm[0] - E.fdrag.startMm[0], mm[1] - E.fdrag.startMm[1]]); const [ldx, ldy] = fieldLocalDelta(it, w[0], w[1]);
         at[1] = +(E.fdrag.orig[0] + ldx).toFixed(4); at[2] = +(E.fdrag.orig[1] + ldy).toFixed(4);
-        KiCadCanvas.replaceChange(E.kdoc, it); requestRender();
+        KiCadCanvas.replaceChange(E.kdoc, it);
+        for (const m of (E.fdrag.more || []) as { id: string; name: string; orig: number[] }[]) {   // the other selected fields move by the same step
+          const it2 = E.kdoc.items.get(m.id), p2 = it2 && fieldOf(it2, m.name), a2 = p2 && KiCadCanvas.kid(p2, "at"); if (!a2) continue;
+          const [mx, my] = fieldLocalDelta(it2, w[0], w[1]); a2[1] = +(m.orig[0] + mx).toFixed(4); a2[2] = +(m.orig[1] + my).toFixed(4);
+          KiCadCanvas.replaceChange(E.kdoc, it2);
+        }
+        requestRender();
       }
     }
     sendPresence(mm); return;

@@ -137,7 +137,7 @@ export type SchState = {
   sheetPreset?: { name: string; file: string; armed?: boolean } | null;
   pedit?: PointEdit | null;
   netHL?: NetHighlighter | null;
-  dragMode: string; lineMode: string; posture: boolean;
+  dragMode: string; mouseDragMode: string; lineMode: string; posture: boolean;
   /** eeschema input.esc_clears_net_highlight (default on) */ escClearsNetHighlight?: boolean;
   autoStartWires: boolean; autoPress?: { mm: Pt; client: Pt; mods: { shiftKey?: boolean; ctrlKey?: boolean; altKey?: boolean; metaKey?: boolean } } | null; autoCursor?: string | null;
   dragEndedAt?: number; wireEndedAt?: number; forceFollow?: boolean; internalSwitch?: boolean; multi?: Set<string> | null; otherRefs?: Iterable<string> | null;
@@ -157,7 +157,7 @@ export type SchState = {
   lastTextH?: string; lastTextV?: string; lastTextBold?: boolean; lastTextItalic?: boolean; lastTextVertical?: boolean; lastTextSpin?: number;
   // commands
   markers: ErcMarker[]; markersDoc: KDoc | null; lastPlaced: Placed[] | null; repeatOffset: Pt; repeatIncrement: number;
-  annotateAuto: boolean; unfold: UnfoldJob | null; docRef: KDoc | null;
+  annotateAuto: boolean; autoplace?: { enable: boolean; justify: boolean; align: boolean }; unfold: UnfoldJob | null; docRef: KDoc | null;
 };
 
 /** The modifier keys of a pointer or key event (a synthetic one may carry only some). */

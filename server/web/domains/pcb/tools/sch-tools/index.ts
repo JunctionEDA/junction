@@ -28,7 +28,7 @@ import { junctionAt, needsJunction, pinsAt } from "./connect";
 import { convertNode, convertSelection, validNetname } from "./convert";
 import { autostartKind, danglingEnds, danglingLabelIds, dragJunctions, drawOverlay } from "./dangling";
 import { type PromptFn, cursorNow, cursorPos, autostartAt, isPowerSymbol, onDownCapture, onKeyCapture, onUpCapture, pickSymbol, placeClassLabel, powerSymbols, setPromptImpl } from "./dom";
-import { beginDrag, bendPath, cancelDrag, cleanupAt, connPoints, cycleLineMode, endDrag, makeAnchor, mergeAt, modeText, moveDrag, ridersOf, setDragMode, setLineMode } from "./drag";
+import { beginDrag, bendPath, cancelDrag, cleanupAt, connPoints, cycleLineMode, endDrag, makeAnchor, mergeAt, modeText, moveDrag, ridersOf, setDragMode, setMouseDragMode, setLineMode } from "./drag";
 import { hierarchyTests, isGroundName, letterSubReference, normalizeSimilar, stackedPinNotationValid } from "./erc-tests";
 import { cleanupSheetPins, ercCheck, ercNets, itemRef, pinItemRef, runERC, subsheetDoc, syncSheetPins, autoPlaceSheetPinsNode, pinErrorAt, pinErrorSeverity, stackedPins, strNumCmp } from "./erc";
 import { fieldsTableChanges, fieldsTableRows, openFieldsTable } from "./fields-table";
@@ -67,7 +67,7 @@ const sch = {
   // for tests and the props panel
   state: S, select(id: string | null) { if (!id || S.sel !== id) S.selEnds = null; S.sel = id || null; }, selEndKeys, putSelEnd, boxLineFlags, setPrompt(fn: PromptFn) { setPromptImpl(fn); }, setNetHighlighter(h: NetHighlighter | null) { S.netHL = h || null; }, setImagePicker(fn: ImagePickerFn) { setImagePickerImpl(fn); },
   // connected drag engine, shared with app.js's select tool (symbols and sheets; an array drags a multi-selection)
-  beginDrag, moveDrag, endDrag, cancelDrag, setDragMode, setLineMode, cycleLineMode, modeText,
+  beginDrag, moveDrag, endDrag, cancelDrag, setDragMode, setMouseDragMode, setLineMode, cycleLineMode, modeText,
   // REMOVED changes (plus junction cleanup) for one item or a multi-selection; the net of an item on this sheet
   deleteChanges, netItems,
   // SCH_*::GetMsgPanelInfo of one selected item (the message panel); the KICURSOR the running tool switched to

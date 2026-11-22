@@ -1,8 +1,8 @@
 import type { SchCtx, Pt } from "./types";
-import { symbolPins } from "./autoplace";
+import { symbolIsPower, symbolPins } from "./autoplace";
+import { isPowerSymbol } from "./dom";
 import { cursorOf } from "./commands";
 import { pinsAt } from "./connect";
-import { isPowerSymbol } from "./dom";
 import { connPoints, isNetLine } from "./drag";
 import { hitNonSymbol } from "./hit";
 import { mmPerPx } from "./snap";
@@ -90,7 +90,7 @@ export function pickNet(ctx: SchCtx, mm: Pt): { item: KItem; at: Pt; pin?: strin
   }
   // a power symbol (its body or one of its fields) stands for the net of its single pin (highlightNet: pins.size() == 1)
   const symId = K.hitTest(doc, mm[0], mm[1], tol), sym = symId ? doc.items.get(symId) : null;
-  if (sym && sym.kind === "symbol" && isPowerSymbol(doc, str((kid(sym.node, "lib_id") || [])[1]))) {
+  if (sym && sym.kind === "symbol" && symbolIsPower(doc, sym)) {
     const sp = symbolPins(doc, sym); if (sp.length === 1) return { item: sym, at: [sp[0].x, sp[0].y], pin: sp[0].number };
   }
   return null;
