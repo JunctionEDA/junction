@@ -15,7 +15,12 @@ import * as P from "./sym-props-logic";
 import { commitWithOtherUnits } from "./sync-units";
 import * as L from "./sch-items-logic";
 import { resolvedFieldTemplates } from "./field-templates";
-import { fieldsGrid, messageBox, swatch, type Swatch } from "./sch-items";
+import { fieldsGrid, messageBox, schXref, selectReferenceNumber, swatch, type Swatch } from "./sch-items";
+import { embeddedFilesPanel, embeddedFileBytes } from "../editor/pcbdialogs/fp-3d-panel";
+import { checkField } from "../editor/pcbdialogs/ui";
+import { saveProject } from "./project";
+import { kicadIcon } from "../../../shared/components/kicon-dom";
+import { PIN_SHAPE_ICONS, PIN_TYPE_ICONS } from "../symedit/model";
 import { openChangeSymbols } from "./change-symbols";
 import { openSimModel } from "./sim-model";
 import { embeddedModelFiles, projectModelFiles, refPrefix, simPinsOfLib } from "./sim-files";
@@ -23,7 +28,7 @@ import { docBase, projectDocs, readDoc, submitDocOp } from "./project";
 import { currentInstance, loadSheets, netMap } from "../editor/schnets";
 import { fmtLen, parseLen, unitName } from "../editor/pcbdialogs/ui";
 import * as VM from "../canvas/variant-model";
-import { writeSymbolVariant } from "./variant-edits";
+import { writeSheetVariant, writeSymbolVariant } from "./variant-edits";
 import { chooserFilters } from "../library/fpchoice";
 import { docFiles, relativePath } from "./browse-cells";
 
@@ -44,7 +49,17 @@ export function setSymbolUnitHere(doc: KDoc, node: SNode, unit: number): void {
 }
 const SH = (): SchHelpers | null => { const m = CollabTools.sch; return m && m._ ? m._ as unknown as SchHelpers : null; };
 const MANDATORY_SYMBOL = ["Reference", "Value", "Footprint", "Datasheet", "Description"];
-const nextName = (rows: L.FieldRow[]): string => { let n = 1; const s = new Set(rows.map((r) => r.name)); while (s.has("Field" + n)) n++; return "Field" + n; };
+/** The grids show ${<uuid>:FIELD} as ${R1:FIELD} (ConvertKIIDsToRefs on every row's text). */
+function rowsToRefs(rows: L.FieldRow[], xref: { toRefs(t: string): string }): L.FieldRow[] { for (const r of rows) r.value = xref.toRefs(r.value); return rows; }
+/** …and on OK a row left as shown keeps the text it had; under a design variant the typed text goes back to UUIDs
+ *  (ConvertRefsToKIIDs of the variant text). */
+function rowsFromRefs(rows: L.FieldRow[], xref: { toRefs(t: string): string; toKiids(t: string): string }, variant: boolean): L.FieldRow[] {
+  for (const r of rows) {
+    const was = r.src ? L.fieldValue(r.src) : null;
+    if (was !== null && xref.toRefs(was) === r.value) r.value = was; else if (variant) r.value = xref.toKiids(r.value);
+  }
+  return rows;
+}
 const units = () => h("span", { class: "kd-note" }, unitName());
 const lenBox = (mm: number, id: string): HTMLInputElement => { const i = textInput(fmtLen(mm), undefined, { id, style: "width:90px" }); i.addEventListener("change", () => { const v = parseLen(i.value); if (Number.isFinite(v)) i.value = fmtLen(v); }); return i; };
 const lenOf = (i: HTMLInputElement, d: number): number => { const v = parseLen(i.value); return Number.isFinite(v) ? v : d; };
@@ -74,7 +89,7 @@ function libPins(lib: SNode | null, unit: number, body: number): LibPin[] {
       out.push({ number: n, name: nm ? L.str(nm[1]) : "", type: L.str(p[1]), style: L.str(p[2]), alternates: L.kids(p, "alternate").map((a) => L.str(a[1])) });
     }
   }
-  return out.sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true }));
+  return out.sort((a, b) => P.pinNumbersCompare(a.number, b.number));
 }
 const bodyStyles = (lib: SNode | null): number => { let n = 1; if (lib) for (const s of L.kids(lib, "symbol")) { const m = /_(\d+)_(\d+)$/.exec(L.str(s[1])); if (m) n = Math.max(n, +m[2]); } return n; };
 const pinHidden = (lib: SNode | null, key: "pin_numbers" | "pin_names"): boolean => { const c = lib && L.kid(lib, key); return !!c && ((c as unknown[]).includes("hide") || (!!L.kid(c, "hide") && L.str((L.kid(c, "hide") as SNode)[1]) !== "no")); };
@@ -96,7 +111,7 @@ function pathRefSuffix(): string {
   for (const id of here.uuidPath.slice(1)) { let hit: SNode | null = null; for (const d of c.docs.values()) { const it = d.items.get(id); if (it && it.kind === "sheet") { hit = it.node; break; } } nodes.push(hit); }
   return P.composeRefSuffix(nodes);
 }
-interface PinRow { number: string; name: string; alt: string; type: string; style: string; alts: string[] }
+interface PinRow { number: string; name: string; alt: string; type: string; style: string; alts: string[]; typeKey: string; styleKey: string }
 interface SymPropsOpts { pinMapPage?: boolean }
 /** The schematic's current design variant (the toolbar's; "" for the default). */
 const currentVariantName = (): string => String((E as { currentVariant?: string }).currentVariant || "");
@@ -112,7 +127,12 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
   const isPower = P.isPowerLib(lib), version = Number((doc as KDoc & { version?: number }).version) || 0;
   const pins = libPins(lib, unit, body);
   const alt0 = new Map<string, string>(); for (const p of L.kids(staged, "pin")) { const a = L.kid(p, "alternate"); if (a) alt0.set(L.str(p[1]), L.str(a[1])); }
-  const pinRows: PinRow[] = pins.map((p) => ({ number: p.number, name: p.name, alt: alt0.get(p.number) || "", type: TYPE_NAMES[p.type] || p.type, style: STYLE_NAMES[p.style] || p.style, alts: p.alternates }));
+  const rowsOfUnit = (u: number): PinRow[] => libPins(lib, u, body).map((p) => ({ number: p.number, name: p.name, alt: alt0.get(p.number) || "", type: TYPE_NAMES[p.type] || p.type, style: STYLE_NAMES[p.style] || p.style, alts: p.alternates, typeKey: p.type, styleKey: p.style }));
+  const pinRows: PinRow[] = rowsOfUnit(unit); void pins;
+  let pinGrid: { refresh(): void } | null = null;
+  const xref = schXref(doc);
+  let efPanel: ReturnType<typeof embeddedFilesPanel> | null = null;
+  const embedFonts = checkField(!!ownLib && L.yes(ownLib, "embedded_fonts"), "Embed fonts", { ro: ro || !ownLib, key: "embedFonts", tip: "Store a copy of all fonts used" });
   const els: Record<string, HTMLInputElement | HTMLSelectElement> = {};
   let grid: { rows(): L.FieldRow[]; setRows(rows: L.FieldRow[]): void } | null = null;
   const angle = ((Math.round(rot) % 360) + 360) % 360;
@@ -131,14 +151,23 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
         { label: "General", build(pg: HTMLElement) {
           const fh = h("div"); const fb = KD().staticBox(fh, "Fields"); pg.append(fh);
           // TransferDataToWindow: the symbol's fields, then "any template fieldnames not yet defined" (project and global)
-          grid = fieldsGrid(fb, L.addTemplateRows(L.fieldRows(staged, origin, MANDATORY_SYMBOL).sort((a, c) => { const i = MANDATORY_SYMBOL.indexOf(a.name), j = MANDATORY_SYMBOL.indexOf(c.name); return (i < 0 ? 99 : i) - (j < 0 ? 99 : j); }), resolvedFieldTemplates(), origin),
-            { readOnly: ro, doc, newName: nextName, height: 200, shown: [0, 1, 2, 3, 4, 5, 6, 7], browse: { footprint: () => chooserFilters(lib), footprintReadOnly: isPower, files: () => [docFiles(doc), lib] } });
+          grid = fieldsGrid(fb, L.addTemplateRows(rowsToRefs(L.fieldRows(staged, origin, MANDATORY_SYMBOL), xref).sort((a, c) => { const i = MANDATORY_SYMBOL.indexOf(a.name), j = MANDATORY_SYMBOL.indexOf(c.name); return (i < 0 ? 99 : i) - (j < 0 ? 99 : j); }), resolvedFieldTemplates(), origin),
+            { readOnly: ro, doc, height: 200, shown: [0, 1, 2, 3, 4, 5, 6, 7], browse: { footprint: () => chooserFilters(lib), footprintReadOnly: isPower, files: () => [docFiles(doc), lib] },
+              // OnAddField: "Field<row count>", hidden, with the Reference field's angle
+              addRow: (rows) => L.newParentFieldRow(rows, ["Reference"]), mandatoryNames: MANDATORY_SYMBOL });
+          // the Reference row's Value cell: its editor opens with only the number selected, each time it is shown
+          fb.addEventListener("focusin", (ev) => {
+            const t = ev.target as HTMLInputElement | null; if (!t || t.tagName !== "INPUT" || t.dataset.col !== "value") return;
+            const tr = t.closest("tr"), tb = tr && tr.parentElement; if (!tr || !tb || Array.from(tb.children).indexOf(tr) !== 0) return;
+            setTimeout(() => { if (document.activeElement === t) selectReferenceNumber(t); }, 0);
+          });
           const row = h("div", { style: "display:flex;gap:10px;margin-top:2px;align-items:stretch" });
           // General: Unit / Body style / Composed reference / Angle / Mirror, then Show pin numbers / Show pin names and Local power
           const gen = h("div", { style: "flex:7;min-width:0" }); const gb = KD().staticBox(gen, "General");
           const g = h("div", { class: "kd-fmt", style: "display:grid;grid-template-columns:max-content 1fr;gap:3px 8px;align-items:center" });
-          const us: [string, string][] = []; for (let u = 1; u <= nUnits; u++) us.push([String(u), unitLetter(u)]);
-          els.unit = select(us, String(unit), undefined, { id: "kd-sym-unit", disabled: ro || nUnits < 2 });
+          const us: [string, string][] = []; for (let u = 1; u <= nUnits; u++) us.push([String(u), L.unitDisplayName(lib, u, unitLetter)]);   // GetUnitDisplayName( ii, false )
+          // OnUnitChoice: the Pin Functions list is rebuilt from the pins of the chosen unit, sorted by number
+          els.unit = select(us, String(unit), (v) => { pinRows.splice(0, pinRows.length, ...rowsOfUnit(Number(v) || unit)); pinRows.sort((a, c) => P.pinRowCompare(a, c, "number", true)); if (pinGrid) pinGrid.refresh(); }, { id: "kd-sym-unit", disabled: ro || nUnits < 2 });
           els.body = select(bodyNames.map((n, i): [string, string] => [String(i + 1), n]), String(Math.min(body, nBodies)), undefined, { id: "kd-sym-body", disabled: ro || nBodies < 2 });
           els.angle = select([["0", "0"], ["90", "+90"], ["270", "-90"], ["180", "180"]], String(angle === 90 || angle === 180 || angle === 270 ? angle : 0), undefined, { id: "kd-sym-angle", disabled: ro });
           els.mirror = select([["", "Not mirrored"], ["x", "Around X axis"], ["y", "Around Y axis"]], mirror, undefined, { id: "kd-sym-mirror", disabled: ro });
@@ -165,8 +194,9 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
           // the button column: Update Symbol from Library... / Change Symbol... / Edit Symbol... / Edit Library Symbol...
           const btns = h("div", { style: "flex:6;min-width:0;display:flex;flex-direction:column;gap:6px;padding-top:12px" });
           const button = (label: string, id: string, fn: (() => void) | null, why?: string) => { const x = h("button", { type: "button", class: "btn", id, disabled: ro || !fn, title: why }, label); if (fn) x.addEventListener("click", fn); btns.append(x); return x; };
-          button("Update Symbol from Library...", "kd-sym-update", () => { (KDialogs as KDialogsApi).close(); openChangeSymbols("update"); });
-          button("Change Symbol...", "kd-sym-change", () => { (KDialogs as KDialogsApi).close(); openChangeSymbols("change"); });
+          // OnUpdateSymbol / OnExchangeSymbol: TransferDataFromWindow first; a failed validation keeps the dialog open
+          button("Update Symbol from Library...", "kd-sym-update", () => { if (apply()) openChangeSymbols("update"); });
+          button("Change Symbol...", "kd-sym-change", () => { if (apply()) openChangeSymbols("change"); });
           // OnClearVariantSymbol (shown only for a variant that holds a symbol override): apply the dialog, then clearVariantSymbol
           if (variant && VM.symbolVariantOverride(item.node, variant, vpath)) button("Clear Variant Symbol", "kd-sym-clearvariant", () => {
             if (!apply()) return;
@@ -183,32 +213,41 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
         { label: "Pin Functions", build(pg: HTMLElement) {
           if (nBodies > 1) { pg.append(h("div", { style: "display:flex;align-items:center;justify-content:center;min-height:300px" }, h("i", { id: "kd-sym-nopinfn" }, P.NO_PIN_FUNCTIONS_WITH_MULTIPLE_BODY_STYLES))); return; }
           let sortKey = "number", asc = true;
-          const cmp = (a: PinRow, c: PinRow): number => { const x = String((a as unknown as Record<string, unknown>)[sortKey] ?? ""), y = String((c as unknown as Record<string, unknown>)[sortKey] ?? ""); return (asc ? 1 : -1) * x.localeCompare(y, undefined, { numeric: true }); };
+          const cmp = (a: PinRow, c: PinRow): number => P.pinRowCompare(a, c, sortKey, asc);
+          // the type and style cells show the pin's bitmap beside the text (GetValue's icon + label)
+          const iconCell = (icons: Record<string, string>, key: "typeKey" | "styleKey", text: "type" | "style") => (td: HTMLElement, r: PinRow): void => {
+            td.className = "ro"; const ic = icons[r[key]];
+            td.replaceChildren(h("span", { style: "display:inline-flex;gap:4px;align-items:center" }, ic ? kicadIcon(ic, 16) : null, r[text]));
+          };
           const cols = [
-            { key: "number", label: "Pin Number", type: "ro" as const, width: 90 }, { key: "name", label: "Base Pin Name", type: "ro" as const, width: 150 },
-            { key: "alt", label: "Alternate Assignment", type: "choice" as const, width: 170, options: (r: PinRow) => [["", r.name], ...r.alts.map((a): [string, string] => [a, a])] as [string, string][], ro: (r: PinRow) => !r.alts.length },
-            { key: "type", label: "Electrical Type", type: "ro" as const, width: 130 }, { key: "style", label: "Graphic Style", type: "ro" as const, width: 130 },
+            { key: "number", label: "Number", type: "ro" as const, width: 90 }, { key: "name", label: "Base Name", type: "ro" as const, width: 150 },
+            { key: "alt", label: "Alternate Assignment", type: "choice" as const, width: 170, options: (r: PinRow) => [["", r.name], ...r.alts.map((a): [string, string] => [a, a])] as [string, string][], ro: (r: PinRow) => !r.alts.length, format: (_v: unknown, r: PinRow) => r.alt || r.name },
+            { key: "type", label: "Electrical Type", type: "ro" as const, width: 130, render: iconCell(PIN_TYPE_ICONS, "typeKey", "type") }, { key: "style", label: "Graphic Style", type: "ro" as const, width: 130, render: iconCell(PIN_SHAPE_ICONS, "styleKey", "style") },
           ];
           const pg2 = KD().grid(pg, cols, pinRows, { readOnly: ro, height: 360, onHeader(c) { if (sortKey === c.key) asc = !asc; else { sortKey = c.key; asc = true; } pinRows.sort(cmp); pg2.refresh(); } });
+          pinGrid = pg2;
           pinRows.sort(cmp); pg2.refresh();
         } },
       ];
       if (pinMapOn) tabs.push({ label: "Pin Map", build(pg: HTMLElement) { pinMapPanel(pg, pm, logicalPins(lib), ro); } });
-      if (embedded) tabs.push({ label: "Embedded Files", build(pg: HTMLElement) {
-        const rows = L.kids(embedded, "file").map((f) => { const n = L.str((L.kid(f, "name") || [])[1]); return { name: n, ref: "kicad-embed://" + n }; });
-        KD().grid(pg, [{ key: "name", label: "File name", type: "ro", width: 260 }, { key: "ref", label: "Internal Reference", type: "ro", width: 360 }], rows, { readOnly: true, height: 300 });
+      // PANEL_EMBEDDED_FILES over the symbol's own files (m_symbol->GetEmbeddedFiles(): its library copy): add, delete,
+      // export and Embed fonts, committed with the dialog
+      if (ownLib || embedded) tabs.push({ label: "Embedded Files", build(pg: HTMLElement) {
+        efPanel = embeddedFilesPanel({ names: P.embeddedFileNames(ownLib || lib), ro: ro || !ownLib, bytes: (n) => { const l = ownLib || lib; return l ? embeddedFileBytes(l, n) : null; }, embedFonts });
+        pg.append(efPanel.el);
       } });
       nb = KD().notebook(b, tabs);
       if (opts.pinMapPage && pinMapOn) nb.select(2);
       // the bottom bar: Library link: <read-only text>   Simulation Model...   (then Cancel / OK)
       const foot = api.foot, first = foot.firstChild;
-      const link = h("input", { type: "text", id: "kd-sym-lib", value: libId, readonly: true, style: "width:220px;font-size:11px;background:var(--bench);border:1px solid var(--line)" });
+      const link = h("input", { type: "text", id: "kd-sym-lib", value: L.unescapeString(libId), readonly: true, style: "width:220px;font-size:11px;background:var(--bench);border:1px solid var(--line)" });
       foot.insertBefore(h("label", { style: "font-size:11px;color:var(--ink-2);margin-right:4px" }, "Library link:"), first); foot.insertBefore(link, first);
       if (!isPower) { const sim = h("button", { type: "button", class: "btn", id: "kd-sym-sim", style: "margin-left:10px", disabled: ro }, "Simulation Model..."); sim.addEventListener("click", () => { const g = grid; if (!g) return; openSimModelFor(g, doc, staged, lib, nUnits, ro); }); foot.insertBefore(sim, first); }
     },
     ok() {
       if (ro || !grid) return;
-      const rows = L.withoutUnusedTemplates(grid.rows()); const dup = L.duplicateFieldName(rows); if (dup) { void messageBox(dup); return false; }
+      // every named row is saved, the template fields left empty too; only a row with neither name nor text is skipped
+      const rows = rowsFromRefs(L.withoutBlankRows(grid.rows()), xref, !!variant); const dup = L.duplicateFieldName(rows, MANDATORY_SYMBOL); if (dup) { void messageBox(dup); return false; }
       const bad = L.validateFieldRows("symbol", rows); if (bad) { void messageBox(bad.message, bad.title); return false; }
       const ref = rows.find((r) => r.name === "Reference");
       const n = L.clone(staged);
@@ -235,6 +274,11 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
       const libs: SNode[] = [];
       let base = ownLib;
       if (ownLib && pinMapOn && JSON.stringify([pm.maps.map((m) => [m.name, Array.from(m.entries)]), Array.from(pm.footprints), pm.unmapped]) !== pm0) { base = L.clone(ownLib); P.writePinMaps(base, pm); libs.push(base); }
+      // the Embedded Files page: files removed and added, and Embed fonts, on the symbol's library copy
+      if (base && efPanel) {
+        const c = base === ownLib ? L.clone(base) : base;
+        if (P.applyEmbeddedFiles(c, efPanel.get(), efPanel.added().map((a) => a.sexpr), embedFonts.get())) { base = c; if (!libs.includes(c)) libs.push(c); }
+      }
       const showNum = (els.pinnum as HTMLInputElement).checked, showName = (els.pinname as HTMLInputElement).checked, local = (els.localpower as HTMLInputElement).checked;
       if (base && (showNum === pinHidden(lib, "pin_numbers") || showName === pinHidden(lib, "pin_names") || (isPower && local !== P.isLocalPower(lib)))) {
         const copy = L.clone(base); L.setPinVisibility(copy, "pin_numbers", showNum); L.setPinVisibility(copy, "pin_names", showName); if (isPower) P.setLocalPower(copy, local);
@@ -349,19 +393,25 @@ function openSimModelFor(grid: { rows(): L.FieldRow[]; setRows?(rows: L.FieldRow
 }
 
 // ---------------------------------------------------------------- DIALOG_SHEET_PROPERTIES
-const instPage = (n: SNode): SNode | null => { for (const inst of L.kids(n, "instances")) for (const pr of L.kids(inst, "project")) for (const pa of L.kids(pr, "path")) { const pg = L.kid(pa, "page"); if (pg) return pg; } return null; };
 const normFile = (f: string): string => { f = f.trim().replace(/\\/g, "/").replace(/^\/+/, ""); if (f && !/\.kicad_sch$/i.test(f)) f += ".kicad_sch"; return f; };
 interface SheetOpts { onCreate?(node: SNode): boolean | void; isNew?: boolean; cancel?(): void }
 export function openSheetProperties(ctx: Ctx, item: KItem, opts: SheetOpts = {}): void {
-  const doc = ctx.doc, ro = !!ctx.viewOnly, staged = L.clone(item.node), [ax, ay] = L.atOf(staged), origin: [number, number] = [ax, ay];
-  const st = L.readStroke(staged), fillN = L.kid(staged, "fill"), bg = fillN ? L.colorOf(L.kid(fillN, "color")) : null, pg = instPage(staged);
+  // the sheet instance edited: this sheet on the sheet path now open (instance = GetCurrentSheet() + m_sheet)
+  const where = sheetPathNow(ctx.doc), variant = opts.onCreate ? "" : currentVariantName();
+  // TransferDataToWindow under a design variant: the user fields' texts and Exclude from simulation / BOM / DNP are the variant's
+  const doc = ctx.doc, ro = !!ctx.viewOnly, staged = L.clone(variant ? VM.symbolViewForVariant(item.node, variant, where.path, ctx.doc.version) : item.node), [ax, ay] = L.atOf(staged), origin: [number, number] = [ax, ay];
+  const st = L.readStroke(staged), fillN = L.kid(staged, "fill"), bg = fillN ? L.colorOf(L.kid(fillN, "color")) : null, page0 = L.sheetPageNumber(staged, where.path, where.project);
+  const SHEET_MANDATORY = ["Sheetname", "Sheetfile"], isSuffix = (r: { name: string }): boolean => r.name === P.REF_SUFFIX_FIELD;
+  const xref = schXref(doc);
   const fileOf = (n: SNode): string => { const p = L.kids(n, "property").find((q) => /^Sheet ?file$/i.test(L.fieldName(q))); return p ? L.fieldValue(p) : ""; };
   const nameOf = (rows: L.FieldRow[]): string => { const r = rows.find((x) => /^Sheet ?name$/i.test(x.name)); return r ? r.value : ""; };
   const oldFile = fileOf(staged);
   const c = netMap(), here = currentInstance(c);
   const els: Record<string, HTMLInputElement> = {}; let grid: { rows(): L.FieldRow[] } | null = null, bc: Swatch | null = null, fc: Swatch | null = null;
   const pathEl = h("span", { id: "kd-sh-path", class: "kd-note" });
-  const showPath = (name: string) => { pathEl.textContent = (here ? here.human : "/") + name + "/"; };
+  // the current sheet's path with its trailing "/", then the sheet name as shown ("/Power/Regulator")
+  const showPath = (name: string) => { const p = (here ? here.human : "/") + name; pathEl.textContent = "\u200e" + p; pathEl.dataset.path = p; pathEl.title = p; };   // left-to-right text in a box that ellipsizes at its start
+  Object.assign(pathEl.style, { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left", minWidth: "0", flex: "1" });
   KD().open({
     title: "Sheet Properties", width: 900, readOnly: ro, cls: "kd-wide", cancel: opts.cancel,
     build(b) {
@@ -371,11 +421,16 @@ export function openSheetProperties(ctx: Ctx, item: KItem, opts: SheetOpts = {})
         const here = projectDocs().find((d) => d.docId === appState.docId), dir = here && here.path.includes("/") ? here.path.slice(0, here.path.lastIndexOf("/")) : "";
         return projectDocs().filter((d) => d.docType === "kicad_sch" && (!here || d.docId !== here.docId)).map((d) => ({ path: relativePath(dir, d.path), here: dir })).sort((a, b) => a.path.localeCompare(b.path));
       };
-      grid = fieldsGrid(fh, L.fieldRows(staged, origin, ["Sheetname", "Sheetfile", "Sheet name", "Sheet file"]), { readOnly: ro, doc, newName: nextName, height: 150, shown: [0, 1, 2, 3, 4, 5, 6, 7], browse: { sheetFiles } });
+      // GetSheetFieldsForEditing: a hidden "Reference Suffix" row when the sheet has none, right after the mandatory rows
+      grid = fieldsGrid(fh, L.sheetFieldsForEditing(rowsToRefs(L.fieldRows(staged, origin, ["Sheetname", "Sheetfile", "Sheet name", "Sheet file"]), xref), P.REF_SUFFIX_FIELD), { readOnly: ro, doc, height: 150, shown: [0, 1, 2, 3, 4, 5, 6, 7], browse: { sheetFiles },
+        // OnAddField: "Field<row count>", hidden, with the Sheetname field's angle; the suffix row neither moves nor goes
+        addRow: (rows) => L.newParentFieldRow(rows, ["Sheetname", "Sheet name"]), mandatoryNames: SHEET_MANDATORY, pinned: isSuffix,
+        cannotRemove: (r) => (isSuffix(r) ? "The reference suffix field cannot be deleted. Clear its value instead." : null),
+        rowTitle: (r) => (isSuffix(r) ? "Appended to component references in this sheet. Example: _M1 produces R1_M1." : "") });
       // bSizer5: Attributes (Page number, Full reference suffix, the flags) beside Style (Border width / color | Fill color)
       const row = h("div", { style: "display:flex;gap:10px;margin-top:6px;align-items:stretch" });
       const att = h("div", { style: "flex:0 0 auto;display:flex;flex-direction:column" }); const ab = KD().staticBox(att, "Attributes"); ab.style.flex = "1";
-      els.page = textInput(pg ? L.str(pg[1]) : "", undefined, { id: "kd-sh-page", style: "width:90px", disabled: ro || (!pg && !opts.onCreate) });
+      els.page = textInput(page0, undefined, { id: "kd-sh-page", style: "width:90px", disabled: ro });
       // OnUpdateUI: the current path's suffix and this sheet's own, "None" when both are empty (read-only)
       const sufEl = h("input", { id: "kd-sh-fullsuffix", readOnly: true, tabIndex: -1, style: "width:110px" }) as HTMLInputElement;
       const suffixOf = (rows: L.FieldRow[]): string => { const r = rows.find((x) => x.name === P.REF_SUFFIX_FIELD); return r ? r.value : ""; };
@@ -401,11 +456,16 @@ export function openSheetProperties(ctx: Ctx, item: KItem, opts: SheetOpts = {})
       showSuffix(L.fieldRows(staged, origin));
       fh.addEventListener("input", () => { if (grid) showSuffix(grid.rows()); }); fh.addEventListener("change", () => { if (grid) showSuffix(grid.rows()); });
       showPath(nameOf(L.fieldRows(staged, origin)));
+      // OnUpdateUI: the name as it stands in the open cell editor
+      const nameNow = (): string => { const inp = fh.querySelector<HTMLInputElement>(".kd-grid tbody tr:first-child input[data-col=value]"); return inp && document.activeElement === inp ? inp.value : grid ? nameOf(grid.rows()) : ""; };
+      fh.addEventListener("input", () => showPath(nameNow()));
       fh.addEventListener("change", () => { if (grid) showPath(nameOf(grid.rows())); });
     },
     ok() {
       if (ro || !grid) return;
-      const rows = grid.rows(); const dup = L.duplicateFieldName(rows); if (dup) { void messageBox(dup); return false; }
+      // a row with neither name nor text is not saved, nor the Reference Suffix row still new and empty
+      const rows = rowsFromRefs(L.withoutBlankRows(grid.rows()).filter((r) => !(isSuffix(r) && !r.src && !r.value)), xref, !!variant);
+      const dup = L.duplicateFieldName(rows, SHEET_MANDATORY); if (dup) { void messageBox(dup); return false; }
       // the grid's FIELD_VALIDATORs (an emptied Sheetname cell is vetoed: "A sheet must have a name.") and Validate()
       const bad = L.validateFieldRows("sheet", rows); if (bad) { void messageBox(bad.message, bad.title); return false; }
       const nr = rows.find((x) => /^Sheet ?name$/i.test(x.name));
@@ -419,15 +479,26 @@ export function openSheetProperties(ctx: Ctx, item: KItem, opts: SheetOpts = {})
       L.writeStroke(n, { width: lenOf(els.bwidth, st.width), color: bc ? bc.get() : st.color });
       L.put(n, "fill", [["color", ...L.colorVals((fc ? fc.get() : bg) || [0, 0, 0, 0])]], ["uuid"]);
       setFlag(n, "exclude_from_sim", els.exsim.checked); setFlag(n, "in_bom", !els.exbom.checked); setFlag(n, "on_board", !els.exboard.checked); setFlag(n, "dnp", els.dnp.checked);
-      const npg = instPage(n); if (npg && els.page.value.trim()) npg[1] = els.page.value.trim() as unknown as SNode;
+      // instance.SetPageNumber( m_pageNumberTextCtrl->GetValue() ): this instance's page, written as typed
+      if (els.page.value !== page0) L.setSheetPageNumber(n, where.path, where.project, els.page.value);
       if (rows.some((r) => L.rowMoved(r, origin))) L.drop(n, "fields_autoplaced");
       if (opts.onCreate) return opts.onCreate(n) as boolean | undefined;
-      if (file === oldFile) { commit(n); return undefined; }
-      void changeSheetFile(ctx, item, n, oldFile, file).then((linked) => {
+      // under a design variant the user fields' texts and the three flags go to the variant; Exclude from board stays the sheet's
+      const out = variant ? writeSheetVariant(n, item.node, variant, where.path, doc.version) : n;
+      // net names embed the sheet path: a rename retargets the netclass patterns and net colours (RenameNetPathPrefix)
+      const oldName = nameOf(L.fieldRows(item.node, origin)), newName = nr ? nr.value : oldName, base = here ? here.human : "/";
+      const retarget = (): void => {
+        if (oldName === newName || !oldName) return;
+        let pro: Record<string, unknown> | null = null; try { pro = E.proSettings ? JSON.parse(E.proSettings) as Record<string, unknown> : null; } catch { pro = null; }
+        if (!pro || !L.renameNetPathPrefix(pro, base + oldName + "/", base + newName + "/")) return;
+        void saveProject((p) => { L.renameNetPathPrefix(p as Record<string, unknown>, base + oldName + "/", base + newName + "/"); }, "net settings").catch((e) => console.warn(e));
+      };
+      if (file === oldFile) { commit(out); retarget(); return undefined; }
+      void changeSheetFile(ctx, item, out, oldFile, file).then((linked) => {
         if (!linked) return;
-        commit(n);
+        commit(out); retarget();
         // a file already in the project now loads under this sheet: its symbols are new on these sheet paths
-        if (linked !== true) void annotateNewSheetPaths(ctx, n, linked);
+        if (linked !== true) void annotateNewSheetPaths(ctx, out, linked);
       });
       return undefined;
     },

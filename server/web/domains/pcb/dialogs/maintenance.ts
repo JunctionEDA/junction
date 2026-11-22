@@ -18,7 +18,7 @@ const KEEP = ["kui.boardDocs", "kc.guide", "kc.onboard.", "kui.clipboard"];
  * KIDIALOG's "Do not show again" answers (COMMON_SETTINGS m_DoNotShowAgain): here the project plugin recommendations
  * a person waved away (plugins/host.ts LS_DISMISS).
  */
-const DONT_SHOW_PREFIXES = ["kc.plugins.recommended.seen."];
+const DONT_SHOW_PREFIXES = ["kc.plugins.recommended.seen.", "kc.dontshow."];
 /**
  * The file histories (SETTINGS_MANAGER::ClearFileHistory).  The web editor has no Open Recent menu (projects are listed
  * by the server); the histories this browser keeps are the board Find dialog's and the library choosers' recently used.

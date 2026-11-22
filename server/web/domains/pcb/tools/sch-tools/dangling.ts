@@ -74,10 +74,16 @@ export function danglingEnds(doc: KDoc): Dangling[] {
   // connection point lies on the border of a rule area is attached to it (SCH_RULE_AREA::addDirective)
   const ruleBorders: Pt[][] = [];
   for (const it of doc.items.values()) if (it.kind === "rule_area") { const pl = kid(it.node, "polyline"); const poly = pl ? ptsOf(pl) : []; if (poly.length > 1) ruleBorders.push(poly); }
+  // the wire and bus segments by 5 mm cell, so each label looks only at the lines near it
+  const segCells = new Map<string, Pt[][]>();
+  if (labels.length) for (const ln of lines) for (const [a, b] of segs(ln)) {
+    const x0 = Math.floor((Math.min(a[0], b[0]) - 0.01) / 5), x1 = Math.floor((Math.max(a[0], b[0]) + 0.01) / 5), y0 = Math.floor((Math.min(a[1], b[1]) - 0.01) / 5), y1 = Math.floor((Math.max(a[1], b[1]) + 0.01) / 5);
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) { const k = x + "," + y, l = segCells.get(k); if (l) l.push([a, b]); else segCells.set(k, [[a, b]]); }
+  }
   for (const lb of labels) {
     const l = at.get(key(lb.p)) || [];
     if (l.some((x) => x.item !== lb.item && LABEL_OK.has(x.type))) continue;
-    if (lines.some((ln) => segs(ln).some(([a, b]) => segDist(lb.p, a, b) <= 1e-3))) continue;
+    if ((segCells.get(Math.floor(lb.p[0] / 5) + "," + Math.floor(lb.p[1] / 5)) || []).some(([a, b]) => segDist(lb.p, a, b) <= 1e-3)) continue;
     if ((lb.item.kind === "netclass_flag" || lb.item.kind === "directive_label") && ruleBorders.some((poly) => poly.some((v, i) => segDist(lb.p, v, poly[(i + 1) % poly.length]) <= 1e-4))) continue;
     out.push({ p: lb.p, what: "label", item: lb.item, color: lb.color });
   }

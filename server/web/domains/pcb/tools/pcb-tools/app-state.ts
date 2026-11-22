@@ -62,7 +62,7 @@ export function gfxLayers(doc: BoardDoc) {
 export function hoverPoint(ctx: PcbCtx, mm: Pt, magnetic: boolean, mods?: Mods | null): Hover {
   // the drawing tools resolve the cursor through the grid helper too (DRAWING_TOOL: grid.SetSnap( !Shift ), Ctrl = no grid: TOOL_EVENT::DisableGridSnapping)
   const sn = magnetic ? { p: ctx.snap(mm), anchor: null } : snapCursor(ctx, mm, null, mods);
-  const g = sn.p; const out: Hover = { x: g[0], y: g[1], snap: sn.anchor ? { x: g[0], y: g[1], kind: "anchor", type: sn.anchor.t || "none" } : null };
+  const g = sn.p; const out: Hover = { x: g[0], y: g[1], snap: sn.anchor ? { x: g[0], y: g[1], kind: "anchor", type: sn.anchor.t || "none", shape: !!sn.anchor.shape } : null };
   if (magnetic && ctx.doc) {
     const rt = S.route;
     // TOOL_BASE::updateEndItem: while routing only the routed net's items are end candidates (a route without a net has none)

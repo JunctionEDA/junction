@@ -2,7 +2,6 @@
 import type { BoardDoc, PcbChange, PcbCtx } from "./types";
 import { addedChange, removedChange, replacedChange } from "./changes";
 import { K, S } from "./state";
-import { transformChanges } from "./transforms";
 import { clone } from "./util";
 
 // ---------------------------------------------------------------- selection helpers and groups
@@ -79,4 +78,19 @@ export function setLocked(node: SNode, on: boolean) {
   if (/^gr_(line|rect|circle|arc|poly|curve)$/.test(k)) { const f = K.kid(node, "fill") || K.kid(node, "stroke"); if (f) at = node.indexOf(f) + 1; }
   node.splice(at, 0, ["locked", "yes"]); return node;
 }
-export const lockChanges = (doc: BoardDoc, ids: Iterable<string>, on: boolean) => transformChanges(doc, ids, (n: SNode) => { if (isLocked(n) === !!on) return false; setLocked(n, on); });
+/**
+ * BOARD_EDITOR_CONTROL::modifyLockSelected over the items: a pad is never locked on its own; a member of a generator
+ * (a tuning pattern) locks / unlocks the generator too; unlocking a footprint unlocks all its children.
+ */
+export function lockChanges(doc: BoardDoc, ids: Iterable<string>, on: boolean) {
+  const all = new Set<string>(); for (const id of ids) { all.add(id); const p = parentOf(doc, id); if (p && p.kind === "generated") all.add(p.id); }
+  const out: PcbChange[] = [];
+  for (const id of all) {
+    const it = doc.items.get(id); if (!it || it.kind === "pad") continue;
+    const node = clone(it.node); let changed = false;
+    if (isLocked(node) !== !!on) { setLocked(node, on); changed = true; }
+    if (!on && it.kind === "footprint") for (const c of node) if (Array.isArray(c) && isLocked(c as SNode)) { setLocked(c as SNode, false); changed = true; }
+    if (changed) out.push(replacedChange(it, node));
+  }
+  return out;
+}

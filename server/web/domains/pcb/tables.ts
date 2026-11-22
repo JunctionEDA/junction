@@ -152,7 +152,7 @@ export const FPEDIT_ONLY = new Set(["newLibrary", "addLibrary", "newFootprint", 
 /** Board-only actions the Footprint Editor does not have (its tools and menus leave them out; their hotkeys do nothing there). */
 export const FPEDIT_BLOCKED = new Set(["getAndPlace", "routeSingleTrack", "routeDiffPair", "tuneSingleTrack", "tuneDiffPair", "tuneSkew", "drawVia", "drawZone", "drawCopperThievingZone", "drillOrigin", "placeFootprint",
   "runDRC", "zoneFillAll", "zoneUnfillAll", "zoneFill", "zoneUnfill", "showRatsnest", "editFpInFpEditor", "editLibFpInFpEditor_board", "updateFootprint", "changeFootprint", "boardSetup", "selectLayerPair",
-  "trackWidthInc", "trackWidthDec", "viaSizeInc", "viaSizeDec", "updatePcbFromSchematic", "showEeschema", "highlightNet", "clearHighlight", "toggleNetHighlight"]);
+  "trackWidthInc", "trackWidthDec", "viaSizeInc", "viaSizeDec", "updatePcbFromSchematic", "showEeschema", "highlightNet", "clearHighlight", "toggleNetHighlight", "toggleLastNetHighlight"]);
 
 /** The icon KiCad gives a sub-menu (ACTION_MENU::SetIcon in the menubars and the tools' context menus), by its title. */
 export const SUBMENU_ICONS: Record<string, string> = { Import: "import", Export: "export_file", "Fabrication Outputs": "fabrication", "Set Language": "language", "Drawing Mode": "add_zone", "Contrast Mode": "contrast_mode",
@@ -206,7 +206,7 @@ export const MODULE_DUPLICATES: Record<Editor, string[]> = {
     "duplicateIncrement",   // Duplicate and Increment: a hotkey (Ctrl+Shift+D) and the selection menu, in no menu bar
     // PCB_SELECTION_TOOL's context menu only: Enter Group / Leave Group
     "enterGroup", "leaveGroup",
-    "highlightNetSelection", "cleanupTracks", "pack", "zoneFill", "zoneUnfill", "pointEditorAddCorner", "pointEditorRemoveCorner",
+    "highlightNetSelection", "cleanupTracks", "pack", "zoneFill", "zoneUnfill", "pointEditorAddCorner", "pointEditorRemoveCorner", "pointEditorChamferCorner", "pointEditorMoveCorner", "pointEditorMoveMidpoint",
     // the interactive router's own commands: KiCad offers them in the router's context menu and the route tool's toolbar menu only
     "routerHighlightMode", "routerShoveMode", "routerWalkaroundMode", "cycleRouterMode", "routerUndoLastSegment", "routerDiffPairDialog",
     // the length tuner's commands: the drawing tool's context menu while a tuning tool runs (drawing_tool.cpp tuningToolActive), hotkeys 1-4 and Ctrl+L
@@ -231,10 +231,10 @@ export const MODULE_DUPLICATES: Record<Editor, string[]> = {
     // the aux toolbar's track / via choices and the board's layer hotkeys (PgUp, PgDn, +, -, Alt+Shift+V): no menubar entry in KiCad
     "autoTrackWidth", "editPredefinedSizes", "layerToggle",
     // the left toolbar's Curved Ratsnest toggle and the Appearance panel's net commands; KiCad's Inspect menu has neither
-    "ratsnestLineMode", "showRatsnest", "highlightNet", "toggleNetHighlight", "localRatsnestTool", "hideNetInRatsnest", "showNetInRatsnest", "clearMarkers",
+    "ratsnestLineMode", "showRatsnest", "highlightNet", "toggleNetHighlight", "toggleLastNetHighlight", "localRatsnestTool", "hideNetInRatsnest", "showNetInRatsnest", "clearMarkers",
     // the selection's context menu (Select, Positioning Tools, Align/Distribute, Routing, Grouping, Locking, Create from
     // Selection, Zones, Attributes, Text Justification) and the hotkeys
-    "duplicate", "copyAsText", "selectNet", "deselectNet", "selectConnection", "selectUnconnected", "grabUnconnected", "selectSameSheet", "filterSelection", "move", "moveWithReference", "moveIndividually", "interactiveOffsetTool", "positionRelative", "alignLeft", "alignRight", "alignTop", "alignBottom", "alignCenterX", "alignCenterY", "swap", "createArray", "trackWidthInc", "trackWidthDec", "viaSizeInc", "viaSizeDec", "layerTop", "layerBottom", "layerNext", "layerPrev", "changeTrackLayerNext", "changeTrackLayerPrev", "breakTrack", "unrouteSelected", "deleteFull", "clearHighlight", "group", "ungroup", "addToGroup", "removeFromGroup", "toggleLock", "lock", "unlock", "toggleExcludeFromBOM", "toggleExcludeFromPosFiles", "toggleExcludeFromSim", "leftJustify", "centerJustify", "rightJustify", "convertToPoly", "convertToLines", "convertToTracks", "convertToZone", "convertToKeepout", "zonePriorityRaise", "zonePriorityLower", "zonePriorityMoveToTop", "zonePriorityMoveToBottom", "zoneDuplicate"],
+    "duplicate", "copyAsText", "selectNet", "deselectNet", "selectConnection", "selectUnconnected", "grabUnconnected", "selectSameSheet", "filterSelection", "move", "moveWithReference", "moveIndividually", "interactiveOffsetTool", "positionRelative", "alignLeft", "alignRight", "alignTop", "alignBottom", "alignCenterX", "alignCenterY", "swap", "createArray", "trackWidthInc", "trackWidthDec", "viaSizeInc", "viaSizeDec", "layerTop", "layerBottom", "layerNext", "layerPrev", "changeTrackLayerNext", "changeTrackLayerPrev", "breakTrack", "unrouteSelected", "deleteFull", "clearHighlight", "group", "ungroup", "addToGroup", "removeFromGroup", "toggleLock", "lock", "unlock", "toggleExcludeFromBOM", "toggleExcludeFromPosFiles", "toggleExcludeFromSim", "leftJustify", "centerJustify", "rightJustify", "convertToPoly", "convertToLines", "convertToTracks", "convertToArc", "convertToZone", "convertToKeepout", "zonePriorityRaise", "zonePriorityLower", "zonePriorityMoveToTop", "zonePriorityMoveToBottom", "zoneDuplicate", "zoneMerge"],
 };
 /** What an entry needs before it can run (KiCad's SELECTION_CONDITIONS / the read-only frame): greyed out otherwise. */
 export const NEEDS_SELECTION = new Set(["cut", "copy", "copyAsText", "doDelete", "duplicate", "increment", "decrement", "move", "drag", "drag45Degree", "dragFreeAngle", "rotateCCW", "rotateCW", "rotateCcw", "rotateCw",
@@ -244,13 +244,13 @@ export const NEEDS_SELECTION = new Set(["cut", "copy", "copyAsText", "doDelete",
   "toLabel", "toDLabel", "toHLabel", "toGLabel", "toText", "toTextBox", "breakWire", "slice", "unfoldBus", "syncSheetPins", "cleanupSheetPins", "selectConnection", "selectNode", "nextNetItem", "previousNetItem",
   "setExcludeFromSim", "setExcludeFromBOM", "setExcludeFromBoard", "setExcludeFromPosFiles", "setDNP", "selectNet", "deselectNet", "selectSameSheet", "filterSelection", "createArray",
   "changeTrackWidth", "module:setTrackWidthFromNetclass", "changeTrackLayerNext", "changeTrackLayerPrev", "breakTrack", "unrouteSelected", "deleteFull", "group", "ungroup", "addToGroup", "removeFromGroup",
-  "toggleLock", "lock", "unlock", "convertToPoly", "convertToZone", "convertToKeepout", "convertToLines", "convertToTracks", "zoneDuplicate", "zonePriorityMoveToTop", "zonePriorityRaise", "zonePriorityLower",
+  "toggleLock", "lock", "unlock", "convertToPoly", "convertToZone", "convertToKeepout", "convertToLines", "convertToTracks", "convertToArc", "zoneDuplicate", "zoneMerge", "zonePriorityMoveToTop", "zonePriorityRaise", "zonePriorityLower",
   "zonePriorityMoveToBottom", "toggleExcludeFromBOM", "toggleExcludeFromSim", "toggleExcludeFromPosFiles", "module:toggleDNP", "leftJustify", "centerJustify", "rightJustify", "hideNetInRatsnest", "showNetInRatsnest"]);
 /** Entries that never change the document: everything else is greyed out for a view-only visitor, as in a read-only frame. */
 export const READ_ONLY_OK = new Set(["compareSchematicWithFile", "compareSchematicWithHistory", "compareBoardWithFile", "compareBoardWithHistory", "saveCurrSheetCopyAs", "saveCopy", "drawSheetOnClipboard", "exportNetlist", "collabCopyLink", "collabComments", "collabFollow", "collabHistory", "collabLeave", "collabLeaveSession", "collabJoinSession", "collabCompare", "collabGithub", "close", "pluginsReload", "pluginsShowFolder", "showGitCommitPane", "archive", "clone",
   "openInKicad", "print", "plot", "home", "copy", "copyAsText", "selectAll", "unselectAll", "selectConnection", "selectNode", "nextNetItem", "previousNetItem", "find", "showDatasheet",
   "selectNet", "deselectNet", "selectSameSheet", "module:selectAllOnLayer", "selectUnconnected", "filterSelection", "runERC", "runDRC", "clearMarkers", "boardStatistics", "measureTool", "inspectClearance", "inspectConstraints", "showFootprintAssociations", "diffFootprint",
-  "highlightNetTool", "highlightNet", "clearHighlight", "toggleNetHighlight", "localRatsnestTool", "hideNetInRatsnest", "showNetInRatsnest", "showPcbNew", "showEeschema", "theme", "themeLight", "themeDark", "themeSystem", "languageEnglish",
+  "highlightNetTool", "highlightNet", "clearHighlight", "toggleNetHighlight", "toggleLastNetHighlight", "localRatsnestTool", "hideNetInRatsnest", "showNetInRatsnest", "showPcbNew", "showEeschema", "theme", "themeLight", "themeDark", "themeSystem", "languageEnglish",
   "layerTop", "layerBottom", "layerNext", "layerPrev", "showNetInspector", "showBusSyntaxHelp", "findNetInInspector", "showPeers", "showComments"]);
 /**
  * Keys a tool module binds to something other than KiCad's default, taken before the module sees them

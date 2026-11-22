@@ -3,7 +3,7 @@ import { hotkeyKey } from "../../../shared/keys";
 import { setGroupCurrent, setStatusBar, state, store } from "./appstore";
 import { refreshCrosshair } from "./crosshair";
 import { refreshCursor } from "./cursors";
-import { applyChanges, enterSheet, publishDocs, renderObjects, snapMm } from "./doc";
+import { applyChanges, enterSheet, publishDocs, renderObjects, setLayerVisible, snapMm } from "./doc";
 import { selectionIds, toolChanging } from "./gestures";
 import { sendOp } from "./net";
 import { cycleFollow, sendPresence } from "./peers";
@@ -11,6 +11,7 @@ import { applyBoardArea, boardAreaIds, clearSelection, drawSelection, filterAllo
 import { E } from "./state";
 import { subSheetDocs } from "./subsheets";
 import { api, toast } from "./util";
+import { appearanceDispatch } from "./panels/appearance";
 import { openDatasheet } from "../dialogs/browse-cells";
 import { clonePrefs, savePrefs } from "../dialogs/prefs";
 import type { CommitOpts, ItemSummary, UndoEntry } from "./types";
@@ -67,6 +68,8 @@ export function toolCtx(extra?: Record<string, unknown>) {
       requestRender(); sendPresence(null);
     },
     cursor: E.lastCursorMm, clipboard: appClipboard, designSettings: E.proSettings, customRules: E.druText,
+    // Hide / Show Net in Ratsnest: the Appearance panel's net list shows the same visibility (OnNetVisibilityChanged)
+    setNetsVisible(names: string[], visible: boolean) { for (const name of names) appearanceDispatch({ t: "netVisible", name, on: visible }); },
     setSelection(ids: Iterable<string> | null) { E.selection = new Set([...(ids || [])].filter((id) => E.kdoc && E.kdoc.items.has(id))); E.selected = null; E.selField = null; E.selPins = []; for (const id of E.selection) { const f = E.items.find((x: ItemSummary) => x.id === id); if (f) { E.selected = f; break; } } store.slice("selection", { ids: [...E.selection], primary: E.selected ? E.selected.id : null, version: (state.selection ? state.selection.version || 0 : 0) + 1 }); drawSelection(); renderProps(); renderObjects(); requestRender(); },
     setMarkers(list: unknown) { E.markers = Array.isArray(list) ? list : []; E.renderOpts.markers = E.markers.length ? E.markers : undefined; store.slice("viewport", { renderOpts: Object.assign({}, E.renderOpts) }); requestRender(); if (E.markers.length) toast(`${E.markers.length} marker${E.markers.length === 1 ? "" : "s"}`); },
     // one field of a symbol or sheet as the selection (Find selects the matching SCH_FIELD itself)
@@ -91,6 +94,10 @@ export function toolCtx(extra?: Record<string, unknown>) {
     loadSheetDoc(sheet: KItem): Promise<KDoc | null> { const f = E.hooks && (E.hooks as { loadSheetDoc?: (s: KItem) => Promise<KDoc | null> }).loadSheetDoc; return f ? f(sheet) : Promise.resolve(null); },
     // SCH_MOVE_TOOL::moveSelectionToSheet: the items a move dropped on a sheet symbol are added to its sub-sheet
     dropIntoSheet(sheet: KItem, label: string, build: (sub: KDoc) => KChange[]) { const f = E.hooks && (E.hooks as { dropIntoSheet?: (s: KItem, l: string, b: (sub: KDoc) => KChange[]) => void }).dropIntoSheet; if (f) f(sheet, label, build); },
+    // BASE_SCREEN::m_LocalOrigin as the drawing tools read and set it, and the Appearance panel's SetLayerVisible( layer, true )
+    localOrigin(): number[] { return (E.localOrigin as number[]).slice(); },
+    setLocalOrigin(p: number[]) { E.localOrigin = p.slice(); store.slice("viewport", { origin: E.localOrigin.slice() }); },
+    showLayer(layer: string) { if (E.kdoc && E.hiddenLayers.has(layer)) setLayerVisible(layer, true); },
     // PCB_BASE_FRAME::SelectToolbarAction: a toolbar group shows the given action (the arc tool's drawing mode)
     setGroupCurrent(group: string, id: string) { if (store.get().groupCurrent[group] !== id) setGroupCurrent(group, id); },
     // PCB_SELECTION_TOOL's hover selection: the Clarify Selection candidates under a point, the popup that asks

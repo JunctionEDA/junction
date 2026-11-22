@@ -9,9 +9,9 @@ import { E, appState, pushUndoFor, toast, toolCtx } from "./editor";
 import { KD, checkbox, h, textInput, type DlgApi } from "./dom";
 import { obj, projectDocs, projectJson, readDoc, saveProject, sub, submitDocOp } from "./project";
 import { effectiveTheme } from "../../../shared/theme";
-import { subsheetFiles } from "./annotate-logic";
+import { subsheetFiles, annotateSettingsFromProject, annotateProjectChanges } from "./annotate-logic";
 import { currentInstance, instancePage, loadSheets, netMap } from "../editor/schnets";
-import { messageBox, reportPanel, type ReportLine } from "../editor/pcbdialogs/ui";
+import { messageBox, reportPanel, type ReportLine, infoBar } from "../editor/pcbdialogs/ui";
 export { subsheetFiles };
 
 /** BITMAPS::annotate_down_right / annotate_right_down (24 px, light and dark), beside the two sort orders. */
@@ -41,9 +41,38 @@ interface SchAnnotate {
 }
 const sch = (): SchAnnotate | null => ((window as unknown as { CollabTools?: { sch?: SchAnnotate } }).CollabTools || {}).sch || null;
 
-/** What the dialog remembers between openings (KiCad keeps these in the eeschema settings). */
+/**
+ * What the dialog shows.  Scope, Recurse, Keep / Reset and Regroup are the app's (EESCHEMA_SETTINGS::m_AnnotatePanel,
+ * kept per browser); the order, the numbering method and the start number are the project's (SCHEMATIC_SETTINGS
+ * m_AnnotateSortOrder / m_AnnotateMethod / m_AnnotateStartNum), read when the dialog opens and written when it closes.
+ */
 const A = { scope: "all" as Scope, order: "x" as "x" | "y", numbering: "first" as "first" | "100" | "1000", start: 0, keep: true, recursive: true, regroup: false };
-
+const PANEL_KEY = "kui.annotate.panel";
+(() => {
+  try {
+    const v = JSON.parse(localStorage.getItem(PANEL_KEY) || "null") as { scope?: unknown; recursive?: unknown; options?: unknown; regroup_units?: unknown } | null; if (!v || typeof v !== "object") return;
+    if (v.scope === "all" || v.scope === "sheet" || v.scope === "selection") A.scope = v.scope;
+    if (typeof v.recursive === "boolean") A.recursive = v.recursive;
+    if (typeof v.options === "number") A.keep = v.options < 1;
+    if (typeof v.regroup_units === "boolean") A.regroup = v.regroup_units;
+  } catch { /* no storage */ }
+})();
+/** ~DIALOG_ANNOTATE: the panel settings into the app's; scope and recurse only when the scope could be chosen. */
+function savePanel(scopeEditable: boolean): void {
+  try {
+    const prev = JSON.parse(localStorage.getItem(PANEL_KEY) || "{}") as Record<string, unknown>;
+    const next: Record<string, unknown> = Object.assign({}, prev, { options: A.keep ? 0 : 1, regroup_units: A.regroup });
+    if (scopeEditable) { next.scope = A.scope; next.recursive = A.recursive; }
+    localStorage.setItem(PANEL_KEY, JSON.stringify(next));
+  } catch { /* no storage */ }
+}
+/** ~DIALOG_ANNOTATE: the sort order, method and start number go to the project when they differ from what it holds. */
+async function storeProjectSettings(): Promise<void> {
+  const cur = { sortY: A.order === "y", method: (A.numbering === "100" ? 1 : A.numbering === "1000" ? 2 : 0) as 0 | 1 | 2, startNum: A.start };
+  const ch = annotateProjectChanges(obj(projectJson().schematic) as never, cur);
+  if (!ch || E.viewOnly) return;
+  try { await saveProject((pro) => { const s = sub(pro, "schematic"); if (ch.sort_order !== undefined) sub(pro, "schematic", "annotation").sort_order = ch.sort_order; if (ch.method !== undefined) sub(pro, "schematic", "annotation").method = ch.method; if (ch.annotate_start_num !== undefined) s.annotate_start_num = ch.annotate_start_num; }, "annotation options"); } catch { /* the project keeps its settings */ }
+}
 
 /** The annotated references of a sheet ("R1", "#PWR03"; "R?" is not one) — what the other sheets must not reuse. */
 export function usedRefs(doc: KDoc): string[] {
@@ -172,6 +201,7 @@ async function runAnnotate(): Promise<void> {
   clearReport();
   if (E.viewOnly) { say("View-only access", true); return; }
   const interval = A.numbering === "100" ? 100 : A.numbering === "1000" ? 1000 : 0;
+  await storeReusedSheetMode();   // OnAnnotateClick: annotation reads the mode from the project, not from its arguments
   const { sheets, here } = await hierarchy(); if (!here) return;
   const tracker = projectTracker(S, sheets), tracked0 = S.serializeTracker(tracker.used);
   // ReplaceDuplicateTimeStamps (aRepairTimestamps): duplicate uuids across the screens get fresh ones first
@@ -186,7 +216,7 @@ async function runAnnotate(): Promise<void> {
   // CheckAnnotate: its errors, and "Annotation complete." only when there are none
   for (const l of r.errors) say(l.replace(/\n$/, ""), true);
   if (!r.errors.length) say("Annotation complete.");
-  await storeAnnotationSettings(S.serializeTracker(tracker.used) !== tracked0 ? S.serializeTracker(tracker.used) : null);
+  const tracked = S.serializeTracker(tracker.used); if (tracked !== tracked0) await storeUsedDesignators(tracked);
   if (S.state.refTracker) for (const d of tracker.used) S.state.refTracker.used.add(d);
   void refreshOtherRefs();
 }
@@ -203,51 +233,49 @@ async function runClear(): Promise<void> {
 }
 
 let reuseSuffix = false, initialReuse = false;
-/** The dialog's Order, Numbering and start number as the project keeps them (annotation.sort_order, annotation.method, annotate_start_num). */
-function loadAnnotationSettings(): void {
-  const sc = obj(obj(projectJson()).schematic), a = obj(sc.annotation);
-  A.order = a.sort_order === 1 ? "y" : "x";
-  A.numbering = a.method === 1 ? "100" : a.method === 2 ? "1000" : "first";
-  A.start = typeof sc.annotate_start_num === "number" && sc.annotate_start_num >= 0 ? Math.round(sc.annotate_start_num) : 0;
+/** storeReusedSheetMode: the Reused Sheets choice written to the project when it changed. */
+async function storeReusedSheetMode(): Promise<void> {
+  if (reuseSuffix === initialReuse || E.viewOnly) return;
+  initialReuse = reuseSuffix; const on = reuseSuffix;
+  await saveProject((pro) => { sub(pro, "schematic", "annotation").reused_sheet_suffixes = on; }, "annotation options");
+}
+/** The project's REFDES_TRACKER after an annotation handed out designators (used_designators). */
+async function storeUsedDesignators(used: string): Promise<void> {
+  await saveProject((pro) => { sub(pro, "schematic").used_designators = used; }, "annotation options");
 }
 /**
- * storeReusedSheetMode and the dialog's settings written to the project when they changed: the Reused Sheets choice,
- * the sort order, the numbering method and start number, and (`used`) the designators the annotation handed out.
+ * DIALOG_ANNOTATE( parent, message ).  With a message (SCH_EDIT_FRAME::ModalAnnotate, from ReadyToNetlist) the dialog
+ * is modal over whatever asked, its infobar shows the message, "Entire schematic" is ticked and that radio disabled.
+ * The promise resolves when the dialog closes.
  */
-async function storeAnnotationSettings(used: string | null): Promise<void> {
-  const sc = obj(obj(projectJson()).schematic), a = obj(sc.annotation);
-  const order = A.order === "y" ? 1 : 0, method = A.numbering === "100" ? 1 : A.numbering === "1000" ? 2 : 0, on = reuseSuffix;
-  const same = on === initialReuse && (a.sort_order === 1 ? 1 : 0) === order && (a.method === 1 || a.method === 2 ? a.method : 0) === method && (typeof sc.annotate_start_num === "number" ? sc.annotate_start_num : 0) === A.start && used === null;
-  if (same) return;
-  initialReuse = on;
-  await saveProject((pro) => {
-    const t = sub(pro, "schematic"), an = sub(pro, "schematic", "annotation");
-    an.reused_sheet_suffixes = on; an.sort_order = order; an.method = method; t.annotate_start_num = A.start;
-    if (used !== null) t.used_designators = used;
-  }, "annotation options");
-}
-/**
- * Tools > Annotate Schematic… (DIALOG_ANNOTATE).  `message`: why the dialog was opened for the user (SCH_EDIT_FRAME::
- * ModalAnnotate: the first line of the message window); the dialog then stays over the one that asked and `onClosed`
- * runs when it is closed.
- */
-export function openAnnotate(message?: string, onClosed?: () => void): void {
+export function openAnnotate(o?: { message?: string }): Promise<void> {
+  const message = o && typeof o.message === "string" ? o.message : "";
+  const scope0 = A.scope, recursive0 = A.recursive;
+  if (message) A.scope = "all";
+  const ps = annotateSettingsFromProject(obj(projectJson().schematic) as never);
+  A.order = ps.sortY ? "y" : "x"; A.numbering = ps.method === 1 ? "100" : ps.method === 2 ? "1000" : "first"; A.start = ps.startNum;
+  let closed: () => void = () => {}, gone = false;
+  const done = new Promise<void>((resolve) => { closed = resolve; });
+  const destroyed = (): void => {
+    if (gone) return; gone = true;
+    savePanel(!message);
+    if (message) { A.scope = scope0; A.recursive = recursive0; }
+    void Promise.all([storeProjectSettings(), storeReusedSheetMode()]).then(closed, closed);
+  };
   const radio = (name: string, value: string, label: string, on: boolean, set: () => void, disabled = false) => {
     const r = h("input", { type: "radio", name, value, checked: on, disabled, id: `kd-ann-${name}-${value}` }); r.addEventListener("change", () => { if (r.checked) set(); });
     return h("label", { class: "kd-chk", style: "display:flex;gap:6px;align-items:center" }, r, label);
   };
   const box = (title: string, ...rows: HTMLElement[]) => { const b = h("div", { style: "flex:1;min-width:0" }); KD().staticBox(b, title).append(...rows); return b; };
   api = KD().open({
-    title: "Annotate Schematic", width: 600, child: message !== undefined,
+    title: "Annotate Schematic", width: 600, child: !!message,
     build(body) {
+      if (message) { const bar = infoBar(); body.append(bar.el); bar.show(message); (bar.el.querySelector("button.x") as HTMLElement | null)?.remove(); }
       // m_MessageWindow: WX_HTML_REPORT_PANEL labelled "Annotation Messages:", saved as report.txt (SetFileName)
-      loadAnnotationSettings();
       reportLines = []; report = reportPanel("160px", { fileName: "report.txt", empty: "" });
       (report.el.firstElementChild as HTMLElement).setAttribute("data-ann-msgs", "1");
       report.set(reportLines);
-      if (message) say(message);
       const messages = h("div", { style: "margin-top:10px" }); KD().staticBox(messages, "Annotation Messages:").append(report.el);
-      const hasSel = E.selection.size > 0 || !!E.selected;
       const start = textInput(String(A.start), (v) => { A.start = Math.max(0, parseInt(v, 10) || 0); }, { id: "kd-ann-start", style: "width:70px", type: "number", min: "0" });
       const dark = effectiveTheme() === "dark";
       // bSizerXpos / bSizerYpos: the radio button, then annotate_down_right / annotate_right_down beside it
@@ -262,8 +290,8 @@ export function openAnnotate(message?: string, onClosed?: () => void): void {
       // fgSizer1 (2 × 2): Scope | Order, Options | Numbering; the Reused Sheets box; then the message panel
       body.append(
         h("div", { style: "display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 12px" },
-          box("Scope", radio("scope", "all", "Entire schematic", A.scope === "all", () => { A.scope = "all"; }), radio("scope", "sheet", "Current sheet only", A.scope === "sheet", () => { A.scope = "sheet"; }),
-            radio("scope", "selection", "Selection", A.scope === "selection", () => { A.scope = "selection"; }, !hasSel),
+          box("Scope", radio("scope", "all", "Entire schematic", A.scope === "all", () => { A.scope = "all"; }, !!message), radio("scope", "sheet", "Current sheet only", A.scope === "sheet", () => { A.scope = "sheet"; }),
+            radio("scope", "selection", "Selection", A.scope === "selection", () => { A.scope = "selection"; }),
             checkbox("Recurse into subsheets", A.recursive, (on) => { A.recursive = on; }, { id: "kd-ann-recursive" })),
           box("Order", withBmp(radio("order", "x", "Sort symbols by X position", A.order === "x", () => { A.order = "x"; }), "x"), withBmp(radio("order", "y", "Sort symbols by Y position", A.order === "y", () => { A.order = "y"; }), "y")),
           box("Options", radio("keep", "keep", "Keep existing annotations", A.keep, () => keepChanged(true)), radio("keep", "reset", "Reset existing annotations", !A.keep, () => keepChanged(false)), regroup),
@@ -276,16 +304,22 @@ export function openAnnotate(message?: string, onClosed?: () => void): void {
           withTip(radio("reuse", "suffix", "Number each file once and add the sheet's reference suffix (R1_M1, R1_M2 ...)", reuseSuffix, () => { reuseSuffix = true; }),
             "Repeated instances of one sheet file need distinct full reference suffixes. Set Reference Suffix in Sheet Properties."))),
         messages);
-      if (A.scope === "selection" && !hasSel) { A.scope = "all"; const r = body.querySelector<HTMLInputElement>("#kd-ann-scope-all"); if (r) r.checked = true; }
     },
     buttons: [
       { label: "Clear Annotation", fn: () => { void runClear(); }, id: "kd-ann-clear" },
       { label: "Close", close: true },
       { label: "Annotate", primary: true, isDefault: true, fn: () => { void runAnnotate(); }, id: "kd-ann-run" },
     ],
+    // ~DIALOG_ANNOTATE: the settings are stored whichever way the dialog closes
+    cancel() {
+      const st = document.getElementById("kd-ann-start") as HTMLInputElement | null; if (st) A.start = Math.max(0, parseInt(st.value, 10) || 0);
+      destroyed();
+    },
   });
-  const ov = onClosed && api ? api.body.closest(".kd-overlay") : null;
-  if (ov && onClosed) { const mo = new MutationObserver(() => { if (!ov.isConnected) { mo.disconnect(); onClosed(); } }); mo.observe(document.body, { childList: true }); }
+  // the dialog can also go without its Close (another dialog replacing it): the destructor runs all the same
+  const ov = api.body.closest(".kd-overlay");
+  if (ov) { const mo = new MutationObserver(() => { if (!ov.isConnected) { mo.disconnect(); destroyed(); } }); mo.observe(document.body, { childList: true }); }
+  return done;
 }
 
 /**
@@ -297,13 +331,13 @@ export function openIncrementAnnotations(): void {
   let ref: HTMLInputElement | null = null, by: HTMLInputElement | null = null, all: HTMLInputElement | null = null;
   KD().open({ title: "Increment Annotations From", width: 360,
     build(body) {
-      ref = h("input", { type: "text", id: "kd-inc-ref", style: "width:100%", title: "The symbol name in library and also the default\nsymbol value when loaded in the schematic." }) as HTMLInputElement;
+      ref = h("input", { type: "text", id: "kd-inc-ref", style: "width:100%" }) as HTMLInputElement;
       by = h("input", { type: "number", id: "kd-inc-by", min: "1", max: "64", step: "1", value: "1", style: "width:80px" }) as HTMLInputElement;
       by.addEventListener("change", () => { const v = Math.round(+by!.value); by!.value = String(Math.max(1, Math.min(64, isFinite(v) ? v : 1))); });
       const radio = (value: string, label: string, on: boolean): [HTMLInputElement, HTMLElement] => { const r = h("input", { type: "radio", name: "kd-inc-scope", value, checked: on, id: "kd-inc-" + value }) as HTMLInputElement; return [r, h("label", { class: "kd-chk", style: "display:flex;gap:6px;align-items:center;margin-top:6px" }, r, label)]; };
       const [, cur] = radio("sheet", "Current sheet only", true), [a, allRow] = radio("all", "All sheets", false); all = a;
       body.append(h("div", { style: "display:grid;grid-template-columns:max-content 1fr;gap:6px 10px;align-items:center" },
-        h("label", { for: "kd-inc-ref" }, "Start reference designator:"), ref, h("label", { for: "kd-inc-by" }, "Increment by:"), by), cur, allRow);
+        h("label", { for: "kd-inc-ref", title: "The symbol name in library and also the default\nsymbol value when loaded in the schematic." }, "Start reference designator:"), ref, h("label", { for: "kd-inc-by" }, "Increment by:"), by), cur, allRow);
       setTimeout(() => ref && ref.focus(), 0);
     },
     ok() {

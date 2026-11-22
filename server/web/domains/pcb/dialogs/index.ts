@@ -121,7 +121,7 @@ export function installDialogs(HANDLERS: Record<string, Handler>): void {
     assignNetclass: needDoc(assignNetclass, true),   // SCH_EDITOR_CONTROL::AssignNetclass
     // SCH_EDITOR_CONTROL::FindNetInInspector
     findNetInInspector: (() => { if (!E.kdoc || !isSch()) return; if (!findNetInNavigator(selectionIds())) toast("No connected net selected."); }) as Handler,
-    annotate: needDoc(() => openAnnotate(), true),
+    annotate: needDoc(() => { void openAnnotate(); }, true),
     incrementAnnotations: needDoc(openIncrementAnnotations, true),
     // DIALOG_CHANGE_SYMBOLS: Edit > Change Symbols…, Tools > Update Symbols from Library…, the symbol context menu
     changeSymbols: needDoc(() => openChangeSymbols("change"), true), changeSymbol: needDoc(() => openChangeSymbols("change"), true),

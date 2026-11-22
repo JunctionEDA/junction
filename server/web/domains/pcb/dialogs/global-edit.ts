@@ -194,7 +194,7 @@ export function openGlobalEdit(): void {
   };
 
   KD().open({
-    title: "Edit Text and Graphics Properties", width: 860, readOnly: !!E.viewOnly,
+    title: "Edit Text and Graphic Properties", width: 860, readOnly: !!E.viewOnly,
     build(body) {
       const col = (...c: Node[]) => h("div", { style: "display:flex;flex-direction:column" }, ...c);
       // Scope

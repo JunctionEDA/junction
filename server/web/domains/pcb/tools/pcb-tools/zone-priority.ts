@@ -111,3 +111,98 @@ export function autoZonePriorities(doc: BoardDoc, current?: Map<string, number>)
   if (!zones.some((z) => z.prio !== original.get(z))) return null;
   return new Map(zones.map((z) => [z.id, z.prio]));
 }
+
+// ---------------------------------------------------------------- BOARD_EDITOR_CONTROL::ZonePriority*
+/** A zone the priority commands see: not a rule area, not a teardrop area (any layer). */
+interface PZ { id: string; layers: Set<string>; outlines: [number, number][][]; bbox: [number, number, number, number]; prio: number }
+function priorityZones(doc: BoardDoc): PZ[] {
+  const copper = doc.copper && doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"]; const out: PZ[] = [];
+  for (const it of doc.items.values()) {
+    if (it.kind !== "zone") continue; const n = it.node;
+    if (K.kid(n, "keepout") || K.kid(n, "attr")) continue;
+    const layers = new Set(zoneLayers(n).flatMap((l) => (l === "*.Cu" ? copper : l === "F&B.Cu" ? ["F.Cu", "B.Cu"] : [l])));
+    const outlines = K.kids(n, "polygon").map((p) => chainPoints(K.kid(p, "pts")) as [number, number][]).filter((c) => c.length >= 3);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const o of outlines) for (const [x, y] of o) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+    const pr = K.kid(n, "priority");
+    out.push({ id: it.id, layers, outlines, bbox: [x0, y0, x1, y1], prio: pr ? K.num(pr[1]) : 0 });
+  }
+  return out;
+}
+const inPZ = (p: number[], z: PZ): boolean => z.outlines.some((o) => inPoly(p, o));
+/** getOverlappingZones: the zones sharing a layer with `zone` whose outline collides with it or contains / is contained by it. */
+function overlappingOf(zones: PZ[], zone: PZ): PZ[] {
+  const out: PZ[] = [];
+  for (const c of zones) {
+    if (c === zone) continue;
+    if (![...c.layers].some((l) => zone.layers.has(l))) continue;
+    if (!c.outlines.length || !zone.outlines.length) continue;
+    if (zone.bbox[2] < c.bbox[0] || c.bbox[2] < zone.bbox[0] || zone.bbox[3] < c.bbox[1] || c.bbox[3] < zone.bbox[1]) continue;
+    const paths = (z: PZ): PathsD => z.outlines.map((o) => o.map(([x, y]) => ({ x, y })));
+    const inter = intersectD(paths(zone), paths(c), FillRule.EvenOdd, 6);
+    if (areaPathsD(inter) !== 0 || inPZ(c.outlines[0][0], zone) || inPZ(zone.outlines[0][0], c)) out.push(c);
+  }
+  return out;
+}
+/** findCascadeZones: the contiguous chain of zones from a priority that must shift to free it; viable when it ends at a gap. */
+function cascadeZones(byPriority: Map<number, PZ[]>, from: number, up: boolean): { zones: PZ[]; viable: boolean } {
+  const zones: PZ[] = []; let p = from;
+  for (let list = byPriority.get(p); list; list = byPriority.get(p)) {
+    zones.push(...list);
+    if (up) { if (p >= 0xFFFFFFFF) return { zones, viable: false }; p++; }
+    else { if (p === 0) return { zones, viable: false }; p--; }
+  }
+  return { zones, viable: true };
+}
+/** ZONE_PRIORITY_CONTEXT_MENU::update: whether an overlapping zone has a higher / a lower priority than the one selected zone. */
+export function zonePriorityAbility(doc: BoardDoc, ids: Iterable<string>): { canRaise: boolean; canLower: boolean } {
+  const sel = Array.from(ids); const zones = priorityZones(doc); const zone = sel.length === 1 ? zones.find((z) => z.id === sel[0]) : undefined;
+  let canRaise = false, canLower = false;
+  if (zone) for (const o of overlappingOf(zones, zone)) { if (o.prio > zone.prio) canRaise = true; if (o.prio < zone.prio) canLower = true; }
+  return { canRaise, canLower };
+}
+/**
+ * ZonePriorityRaise / Lower / MoveToTop / MoveToBottom on the one selected zone: the new priorities by zone id (the
+ * zone and any zone displaced with it), or null when the command does nothing.
+ *   raise: just above the overlapping zone with the lowest priority still above ours, nothing else changes
+ *   lower: just below the overlapping zone with the highest priority still below ours (a swap when that is 0)
+ *   top / bottom: the highest / lowest overlapping priority, the chain of zones there shifted by one; of the two
+ *                 ways to do it the viable one displacing fewer zones
+ */
+export function zonePriorityPlan(doc: BoardDoc, ids: Iterable<string>, how: string): Map<string, number> | null {
+  const sel = Array.from(ids); if (sel.length !== 1) return null;
+  const zones = priorityZones(doc); const zone = zones.find((z) => z.id === sel[0]); if (!zone) return null;
+  const overlapping = overlappingOf(zones, zone); const out = new Map<string, number>();
+  if (how === "raise") {
+    let target: PZ | null = null; for (const o of overlapping) if (o.prio > zone.prio && (!target || o.prio < target.prio)) target = o;
+    if (!target) return null;
+    if (target.prio < 0xFFFFFFFF) out.set(zone.id, target.prio + 1); else { out.set(zone.id, 0xFFFFFFFF); out.set(target.id, zone.prio); }
+    return out;
+  }
+  if (how === "lower") {
+    let target: PZ | null = null; for (const o of overlapping) if (o.prio < zone.prio && (!target || o.prio > target.prio)) target = o;
+    if (!target) return null;
+    if (target.prio > 0) out.set(zone.id, target.prio - 1); else { out.set(zone.id, 0); out.set(target.id, zone.prio); }
+    return out;
+  }
+  const byPriority = new Map<number, PZ[]>(); for (const z of zones) if (z !== zone) { const l = byPriority.get(z.prio); if (l) l.push(z); else byPriority.set(z.prio, [z]); }
+  if (how === "top") {
+    let max = zone.prio; for (const o of overlapping) max = Math.max(max, o.prio);
+    if (zone.prio >= max) return null;
+    const down = cascadeZones(byPriority, max, false); const up = max < 0xFFFFFFFF ? cascadeZones(byPriority, max + 1, true) : { zones: [], viable: false };
+    if (!down.viable && !up.viable) return null;
+    if (down.viable && (!up.viable || down.zones.length <= up.zones.length)) { out.set(zone.id, max); for (const z of down.zones) out.set(z.id, z.prio - 1); }
+    else { out.set(zone.id, max + 1); for (const z of up.zones) out.set(z.id, z.prio + 1); }
+    return out;
+  }
+  if (how === "bottom") {
+    let min = zone.prio; for (const o of overlapping) min = Math.min(min, o.prio);
+    if (zone.prio <= min) return null;
+    const up = cascadeZones(byPriority, min, true); const down = min > 0 ? cascadeZones(byPriority, min - 1, false) : { zones: [], viable: false };
+    if (!up.viable && !down.viable) return null;
+    if (up.viable && (!down.viable || up.zones.length <= down.zones.length)) { out.set(zone.id, min); for (const z of up.zones) out.set(z.id, z.prio + 1); }
+    else { out.set(zone.id, min - 1); for (const z of down.zones) out.set(z.id, z.prio - 1); }
+    return out;
+  }
+  return null;
+}

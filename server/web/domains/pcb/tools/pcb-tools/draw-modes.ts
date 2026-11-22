@@ -116,9 +116,13 @@ export function drawTrack(d: DrawState, raw: Pt, ctrl: boolean) {
 /** DRAWING_TOOL::WIDTH_STEP (0.1 mm): Ctrl++ / Ctrl+- while a shape is being drawn (incWidth / decWidth). */
 export const WIDTH_STEP = 0.1;
 export function drawWidth(layer: string) { return S.strokeW != null ? S.strokeW : gfxWidth(layer); }
+/** The tools whose loop takes incWidth / decWidth before the first click too (drawShape, drawManagedShape: m_stroke). */
+export const WIDTH_TOOLS = new Set(["gline", "grect", "gcircle", "garc", "gcurve"]);
 export function stepDrawWidth(ctx: PcbCtx, dir: number) {
-  const d = S.draw; if (!d || d.shape === "gtextbox" || d.shape === "table") return false;
-  if (DIM_TYPE[d.shape] && d.pts.length < 2 && !d.end && d.pts.length === 0) return false;
+  const d = S.draw, t = d ? d.shape : S.modTool;
+  if (!t || t === "gtextbox" || t === "table") return false;
+  if (POLY_TOOLS.has(t)) return !!d;   // DrawZone has no incWidth / decWidth branch: the key does nothing there
+  if (!d && !WIDTH_TOOLS.has(t)) return false;
   const w = drawWidth(S.gfxLayer);
   if (dir > 0) S.strokeW = +(w + WIDTH_STEP).toFixed(6);
   else if (w > WIDTH_STEP) S.strokeW = +(w - WIDTH_STEP).toFixed(6);
@@ -144,4 +148,51 @@ export function undoChainSegment(ctx: PcbCtx) {
   if (ctx.doc.items.has(last!.id)) ctx.commit(deleteChanges(ctx.doc, [last!.id]), "line", { amend: true, discard: true });
   d.start = last!.start; d.pts = [last!.start]; d.cur = last!.end.slice();
   ctx.requestRender(); return true;
+}
+/**
+ * BEZIER_GEOM_MANAGER: start, control 1, end, then control 2 as the cursor mirrored through the end (GetControlC2:
+ * m_end - ( m_controlC2 - m_end )).  The four points of the curve for the clicks locked so far and the cursor; each
+ * set point seeds the ones after it (setStart, setControlC1, setEnd), so an unfinished curve is still whole.
+ */
+export function curveGeom(pts: Pt[], cur: Pt): Pt[] {
+  const s = pts[0], n = pts.length;
+  if (n <= 1) return [s, cur, cur, cur];
+  if (n === 2) return [s, pts[1], cur, cur];
+  const e = pts[2], h = n > 3 ? pts[3] : cur;
+  return [s, pts[1], e, [r6(2 * e[0] - h[0]), r6(2 * e[1] - h[1])]];
+}
+/** TestSegmentHit( p, a, b, 1 nm ) as SHAPE_LINE_CHAIN::Simplify asks it. */
+const onSeg = (p: Pt, a: Pt, b: Pt) => {
+  const T = 1e-6, x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
+  if (y0 - p[1] > T || p[1] - y1 > T || x0 - p[0] > T || p[0] - x1 > T) return false;
+  const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+  const k = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+  return Math.hypot(p[0] - (a[0] + k * dx), p[1] - (a[1] + k * dy)) < 2 * T;
+};
+/**
+ * ZONE_CREATE_HELPER::OnComplete on the closed outline: SHAPE_LINE_CHAIN::Simplify( 1 ) drops duplicate and collinear
+ * corners, then the start point goes when it lies on the line between its neighbours (Simplify does not handle that).
+ */
+export function simplifyOutline(pts: Pt[]): Pt[] {
+  const n = pts.length; let out: Pt[] = [];
+  if (n < 3) out = pts.slice();
+  else {
+    for (let s = 0; s < n;) {
+      out.push(pts[s]);
+      let e = (s + 2) % n, can = true;
+      while (can && e !== s) {
+        for (let t = (s + 1) % n; t !== e; t = (t + 1) % n) if (!onSeg(pts[t], pts[s], pts[e])) { can = false; break; }
+        if (can) e = (e + 1) % n;
+      }
+      if (e === (s + 2) % n) s++;
+      else { const ns = (e + n - 1) % n; if (ns <= s) break; s = ns; }
+    }
+    if (out.length === 1) out.push(pts[n - 1]);
+  }
+  if (out.length >= 3) {   // SEG( last, pts[1] ).LineDistance( pts[0] ) <= 1
+    const a = out[out.length - 1], b = out[1], p = out[0], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy);
+    const dist = l ? Math.abs((p[0] - a[0]) * dy - (p[1] - a[1]) * dx) / l : Math.hypot(p[0] - a[0], p[1] - a[1]);
+    if (dist <= 1e-6) out.shift();
+  }
+  return out;
 }

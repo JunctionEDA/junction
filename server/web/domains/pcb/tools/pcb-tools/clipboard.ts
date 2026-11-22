@@ -12,8 +12,9 @@ import { netTable } from "./netlist";
 import { netNode, netOf, netStyle } from "./nets";
 import { padsOf } from "./route-geom";
 import { BOARD_VERSION, K, S } from "./state";
-import { PCB_KINDS, anchorOf, isFootprintNode, selectionCenter, translateNode } from "./transforms";
-import { clone, isList } from "./util";
+import { PCB_KINDS, anchorOf, isFootprintNode, mapNodePoints, selectionCenter, translateNode } from "./transforms";
+import { clone, isList, norm360, r6, rotator } from "./util";
+import { uniqueZoneName } from "./zone-modes";
 
 // ---------------------------------------------------------------- clipboard (KiCad's own format: a kicad_pcb document)
 // formatBoardLayers: the copper layers first, in stack order (the parser counts them there), then the rest by id.
@@ -32,15 +33,42 @@ export function referencePoint(doc: BoardDoc, ids: string[], cursor: Pt | null |
   if (cursor) for (const it of items) { const pts = it.kind === "footprint" ? [anchorOf(it)].concat(padsOf(it).map((p) => [p.x, p.y])) : [anchorOf(it)].concat(conductorEnds(it)); for (const p of pts) { const d = Math.hypot(p[0] - cursor![0], p[1] - cursor![1]); if (d < bd) { bd = d; best = p; } } }
   return best || cursor || selectionCenter(items);
 }
-/** CLIPBOARD_IO::SaveSelection: a kicad_pcb with the board's layers, the nets in use and the items moved so ref sits at (0, 0); locks dropped. */
-export function clipboardText(doc: BoardDoc, ids: Iterable<string>, ref?: Pt | null) {
-  ref = ref || [0, 0]; const NT = netTable(doc); const items = Array.from(expandGroups(doc, ids)).map((id) => doc.items.get(id)).filter(Boolean);
+/** PCB_FIELD::IsMandatory: the footprint fields every footprint has (a copy never carries them into another footprint). */
+const MANDATORY_FIELDS = new Set(["Reference", "Value", "Datasheet", "Description"]);
+const isMandatoryFieldNode = (n: SNode) => (n[0] === "property" && MANDATORY_FIELDS.has(K.str(n[1]))) || (n[0] === "fp_text" && (n[1] === "reference" || n[1] === "value"));
+const stripPadNet = (pad: SNode) => { for (let i = pad.length - 1; i > 0; i--) { const c = pad[i]; if (isList(c) && c[0] === "net") pad.splice(i, 1); } };
+/**
+ * CLIPBOARD_IO::SaveSelection.  Board editor: a kicad_pcb with the board's layers and the items moved so ref sits at
+ * (0, 0); locks dropped; a lone footprint is copied without its pad nets.  KiCad writes no net declarations (items
+ * carry their net names); a board in the older numbered-net style gets the table its (net N) items need.
+ * Footprint editor: one (footprint "clipboard:<uuid>" …) holding the selected children — mandatory fields skipped,
+ * pad nets cleared.  `extra` are nodes the caller built itself (a field copied as text, a pad in its own footprint),
+ * already in board coordinates.
+ */
+export function clipboardText(doc: BoardDoc, ids: Iterable<string>, ref?: Pt | null, extra?: SNode[] | null) {
+  ref = ref || [0, 0]; const NT = netTable(doc); const top = Array.from(ids); const items = Array.from(expandGroups(doc, top)).map((id) => doc.items.get(id)).filter(Boolean);
+  if (doc.fpEditor) {
+    const FD = K.footprintDoc; const parts = [`(footprint ${quote("clipboard:" + K.newUuid())} (layer "F.Cu") (at 0 0)`];
+    for (const it of items) {
+      if (it!.kind === "property" && isMandatoryFieldNode(it!.node)) continue;
+      const node = clone(it!.node); if (node[0] === "pad") stripPadNet(node);
+      translateNode(node, -ref![0], -ref![1]);
+      setLocked(node, false); parts.push(K.serialize(FD && FD.toFileNode ? FD.toFileNode(node) : node));
+    }
+    return parts.join("\n") + "\n)";
+  }
+  const lone = top.length === 1 && !(extra && extra.length) && !!doc.items.get(top[0]) && doc.items.get(top[0])!.kind === "footprint";
   const refd = new Map<string, number>(); const take = (n: NetRef) => { const key = NT.key(n); if (key && !refd.has(key)) refd.set(key, n.code > 0 ? n.code : 0); };
-  for (const it of items) { if (it!.kind === "footprint") for (const p of K.kids(it!.node, "pad")) take(netOf(p)); else if (K.kid(it!.node, "net")) take(netOf(it!.node)); }
+  if (!lone) for (const it of items) { if (it!.kind === "footprint") for (const p of K.kids(it!.node, "pad")) take(netOf(p)); else if (K.kid(it!.node, "net")) take(netOf(it!.node)); }
   let next = 1; const used = new Set(refd.values()); for (const [k, v] of refd) if (!v) { while (used.has(next)) next++; refd.set(k, next); used.add(next); }
-  const parts = [`(kicad_pcb (version ${BOARD_VERSION}) (generator "kicad-collab-web") (generator_version "10.0")`, layersText(doc), '(net 0 "")'];
-  for (const [name, code] of Array.from(refd).sort((a, b) => a[1] - b[1])) parts.push(`(net ${code} ${quote(name)})`);
-  for (const it of items) { const node = clone(it!.node); translateNode(node, -ref![0], -ref![1]); setLocked(node, false); parts.push(K.serialize(node)); }
+  const parts = [`(kicad_pcb (version ${BOARD_VERSION}) (generator "pcbnew") (generator_version "10.0")`, layersText(doc)];
+  if (netStyle(doc) === "code" && refd.size) { parts.push('(net 0 "")'); for (const [name, code] of Array.from(refd).sort((a, b) => a[1] - b[1])) parts.push(`(net ${code} ${quote(name)})`); }
+  for (const it of items) {
+    const node = clone(it!.node); translateNode(node, -ref![0], -ref![1]); setLocked(node, false);
+    if (lone) for (const p of K.kids(node, "pad")) stripPadNet(p);   // "Copy without nets"
+    parts.push(K.serialize(node));
+  }
+  for (const n of extra || []) { const node = clone(n); translateNode(node, -ref![0], -ref![1]); setLocked(node, false); parts.push(K.serialize(node)); }
   return parts.join("\n") + "\n)";
 }
 export function parseClipboard(text: string) {
@@ -77,26 +105,138 @@ export function rewriteNets(nodes: SNode[], codeToName: Map<number, string>, doc
   for (const n of nodes) walk(n);
 }
 export const refProp = (node: SNode) => K.kids(node, "property").find((p) => K.str(p[1]) === "Reference");
-/** Paste-special annotation modes (PASTE_MODE): keep (the default), unique, clear (REF**). */
+/** StrNumCmp( a, b, CMP_T::IGNORE_CASE ): digit runs compare by value, the rest letter by letter without case. */
+function strNumCmpNoCase(a: string, b: string) {
+  const ra = a.match(/\d+|\D/g) || [], rb = b.match(/\d+|\D/g) || [];
+  for (let i = 0; i < ra.length && i < rb.length; i++) {
+    const x = ra[i], y = rb[i]; const nx = /^\d/.test(x), ny = /^\d/.test(y);
+    if (nx && ny) { const d = parseInt(x, 10) - parseInt(y, 10); if (d) return d; }
+    else { const c = x.toUpperCase() < y.toUpperCase() ? -1 : x.toUpperCase() > y.toUpperCase() ? 1 : 0; if (c) return c; }
+  }
+  return ra.length - rb.length;
+}
+/**
+ * Paste-special annotation modes (PASTE_MODE): keep (the default), unique, clear (REF**).
+ * unique is BOARD_REANNOTATE_TOOL::ReannotateDuplicates: the pasted footprints sorted by reference (StrNumCmp without
+ * case), then Y descending, X ascending; each one whose reference the board already has counts up from its own
+ * number until free (no number: from 1), and only a renumbered reference is recorded as used.
+ */
 export function annotate(nodes: SNode[], doc: BoardDoc, mode: string) {
   if (mode === "keep") return;
-  const used = new Set<string>(); for (const it of doc.items.values()) if (it.kind === "footprint" && it.ref) used.add(it.ref);
-  for (const n of nodes) {
-    if (!isFootprintNode(n)) continue; const p = refProp(n); if (!p) continue; const ref = K.str(p[2]);
-    if (mode === "clear") { p[2] = "REF**"; continue; }
-    const m = /^(.*?)(\d+)$/.exec(ref); if (!m) continue;
-    if (!used.has(ref)) { used.add(ref); continue; }
-    let k = 1; while (used.has(m[1] + k)) k++; p[2] = m[1] + k; used.add(p[2]);
+  const fps = nodes.filter((n) => isFootprintNode(n) && refProp(n));
+  if (mode === "clear") { for (const n of fps) refProp(n)![2] = "REF**"; return; }
+  const used = new Set<string>(); for (const it of doc.items.values()) if (it.kind === "footprint") used.add(it.ref || "");
+  const order = fps.map((n, i) => ({ n, i })).sort((a, b) => {
+    const c = strNumCmpNoCase(K.str(refProp(a.n)![2]), K.str(refProp(b.n)![2])); if (c) return c;
+    const pa = K.atOf(a.n), pb = K.atOf(b.n); if (pa[1] !== pb[1]) return pb[1] - pa[1]; if (pa[0] !== pb[0]) return pa[0] - pb[0]; return a.i - b.i;
+  });
+  for (const { n } of order) {
+    const p = refProp(n)!; let ref = K.str(p[2]);
+    const stem = ref.replace(/[\d?]+$/, "");                      // UTIL::GetRefDesPrefix
+    const d = ref.search(/\d/); let value = d < 0 || !/^\d+$/.test(ref.slice(d)) ? -1 : parseInt(ref.slice(d), 10);   // UTIL::GetRefDesNumber
+    let duplicate = false;
+    while (used.has(ref)) { duplicate = true; value = value < 0 ? 1 : value + 1; ref = stem + value; }
+    if (duplicate) { p[2] = ref; used.add(ref); }
   }
 }
-/** ADDED changes for clipboard text placed with its reference point at `at`; returns { changes, ids }. */
+/** The layer names a (layers …) list stands for on a board with this copper stack. */
+const expandLayers = (names: string[], copper: string[]) => names.flatMap((n) => (n === "*.Cu" ? copper : n === "F&B.Cu" ? ["F.Cu", "B.Cu"] : n.startsWith("*.") ? ["F" + n.slice(1), "B" + n.slice(1)] : [n]));
+/** PCB_LAYER_ID of a copper layer name: F.Cu 0, B.Cu 2, InN.Cu 2N + 2. */
+const copperId = (name: string) => name === "F.Cu" ? 0 : name === "B.Cu" ? 2 : /^In(\d+)\.Cu$/.test(name) ? 2 * parseInt(name.slice(2), 10) + 2 : -1;
+export const PASTE_LAYERS_MSG = "Warning: some pasted items were on layers which are not present in the current board.\nThese items could not be pasted.\n";
+/**
+ * PCB_CONTROL::pruneItemLayers: an item that does not fit the board's enabled layers is not pasted (and leaves its
+ * group); a kept one is confined to the layers the board has.  A footprint is judged by its side only and a group is
+ * layer-agnostic; a via needs a valid layer pair as well (PCB_VIA::HasValidLayerPair).  Returns the kept nodes.
+ */
+export function pruneItemLayers(nodes: SNode[], doc: BoardDoc): SNode[] {
+  const enabled = new Set<string>(doc.layers.keys()); const copper = copperOf(doc); if (!enabled.size) return nodes;
+  const out: SNode[] = [], gone = new Set<string>();
+  for (const n of nodes) {
+    const k = n[0] as string; let fits = true;
+    if (k === "group" || k === "generated") fits = true;
+    else if (k === "footprint") { const l = K.kid(n, "layer"); const side = l ? K.str(l[1]) : ""; fits = side === "F.Cu" || side === "B.Cu"; }
+    else if (k === "via") {
+      const ls = K.kid(n, "layers"); const pair = ls ? ls.slice(1).map(K.str) : ["F.Cu", "B.Cu"]; const a = copperId(pair[0]), b = copperId(pair[pair.length - 1]);
+      const lim = copper.length * 2; const span = copper.filter((c) => { const id = copperId(c), lo = a === 2 ? Infinity : a, hi = b === 2 ? Infinity : b; const v = id === 2 ? Infinity : id; return v >= Math.min(lo, hi) && v <= Math.max(lo, hi); });
+      fits = span.length > 0 && !(a > 2 && a > lim) && !(b > 2 && b > lim);
+    } else {
+      const l = K.kid(n, "layer"), ls = K.kid(n, "layers");
+      if (ls) {
+        const keep = expandLayers(ls.slice(1).map(K.str), copper).filter((x) => enabled.has(x)); fits = keep.length > 0;
+        if (fits && keep.length !== expandLayers(ls.slice(1).map(K.str), copper).length) {   // SetLayerSet( GetLayerSet() & enabledLayers )
+          ls.splice(1, ls.length - 1, ...keep);
+          if (k === "zone") for (const fp of K.kids(n, "filled_polygon")) { const fl = K.kid(fp, "layer"); if (fl && !enabled.has(K.str(fl[1]))) n.splice(n.indexOf(fp), 1); }
+        }
+      } else if (l) fits = enabled.has(K.str(l[1]));
+    }
+    if (fits) out.push(n); else { const u = K.kid(n, "uuid") || K.kid(n, "tstamp"); if (u) gone.add(K.str(u[1])); }
+  }
+  if (gone.size) for (const n of out) if (n[0] === "group" || n[0] === "generated") { const m = K.kid(n, "members"); if (m) m.splice(1, m.length - 1, ...m.slice(1).filter((id) => !gone.has(K.str(id)))); }
+  return out;
+}
+/** The footprint editor keeps these loose board items of a pasted board (PCB_CONTROL::Paste); tracks, vias, zones, images go. */
+const FP_PASTE_DRAWINGS = new Set(["gr_text", "gr_text_box", "table", "gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_curve", "gr_ellipse", "gr_ellipse_arc", "barcode", "dimension", "point"]);
+/**
+ * pasteFootprintItemsToFootprintEditor: a pasted footprint is taken apart.  Its pads and zones keep where they are on
+ * the clipboard (the footprint's place and turn applied); its graphics and non-mandatory fields keep their position
+ * relative to the footprint, texts turned back by its orientation; mandatory fields are dropped.  Groups travel as
+ * they are.
+ */
+function footprintToEditorItems(fp: SNode): SNode[] {
+  const FD = K.footprintDoc; const at = K.atOf(fp); const px = at[0] || 0, py = at[1] || 0, rot = at[2] || 0; const R = rotator(rot);
+  const abs = (x: number, y: number) => { const [dx, dy] = R(x, y); return [px + dx, py + dy]; };
+  const out: SNode[] = [];
+  for (const c of fp.slice(1)) {
+    if (!isList(c) || !FD || !FD.isOwnedFileNode(c)) continue;
+    if (isMandatoryFieldNode(c)) continue;
+    const k = c[0] as string; let n = clone(c);
+    if (k === "pad" || k === "zone") mapNodePoints(n, abs);
+    else if ((k === "fp_text" || k === "property") && rot) { const a = K.kid(n, "at"); if (a) { const ang = r6(norm360((a.length > 3 ? K.num(a[3]) : 0) - rot)); a.length = 3; if (ang) a.push(ang); } }
+    n = FD.toBoardNode(n); out.push(n);
+  }
+  return out;
+}
+/** PCB_CONTROL::Paste in the footprint editor: footprints taken apart, of the loose board items only drawings kept. */
+function footprintEditorNodes(nodes: SNode[]): SNode[] {
+  const out: SNode[] = [];
+  for (const n of nodes) {
+    if (n[0] === "footprint") out.push(...footprintToEditorItems(n));
+    else if (n[0] === "group" || FP_PASTE_DRAWINGS.has(n[0] as string)) out.push(n);
+  }
+  const kept = new Set<string>(); for (const n of out) { const u = K.kid(n, "uuid") || K.kid(n, "tstamp"); if (u) kept.add(K.str(u[1])); }
+  for (const n of out) if (n[0] === "group") { const m = K.kid(n, "members"); if (m) m.splice(1, m.length - 1, ...m.slice(1).filter((id) => kept.has(K.str(id)))); }
+  return out;
+}
+/**
+ * ADDED changes for clipboard text placed with its reference point at `at`; returns { changes, ids, select, pruned }.
+ * `select` are the ids PCB_CONTROL::placeBoardItems selects (items whose parent group is not pasted with them);
+ * `pruned` says pruneItemLayers left something out (PASTE_LAYERS_MSG).
+ */
 export function pasteChanges(doc: BoardDoc, text: string, at: Pt | null | undefined, opts?: PasteOpts | null) {
   opts = opts || {}; const parsed = parseClipboard(text); if (!parsed) return { changes: [], ids: [] };
-  const nodes = parsed.nodes.map(clone); freshUuids(nodes); rewriteNets(nodes, parsed.codeToName, doc); annotate(nodes, doc, opts.annotations || "keep");
-  if (opts.clearNets) clearNets(nodes, doc);
-  const changes: PcbChange[] = [], ids: string[] = [];
-  for (const n of nodes) { if (at && (at[0] || at[1])) translateNode(n, at[0], at[1]); const c = addedChange(doc, n); changes.push(c); ids.push(c.id); }
-  return { changes, ids };
+  let nodes = parsed.nodes.map(clone); let pruned = false;
+  if (doc.fpEditor) nodes = footprintEditorNodes(nodes);
+  else { const kept = pruneItemLayers(nodes, doc); pruned = kept.length < nodes.length; nodes = kept; }
+  freshUuids(nodes); rewriteNets(nodes, parsed.codeToName, doc);
+  if (!doc.fpEditor) annotate(nodes, doc, opts.annotations || "keep");
+  if (opts.clearNets || doc.fpEditor) clearNets(nodes, doc);
+  for (const n of nodes) {
+    // a pasted footprint is new: no schematic symbol behind it (footprint->SetPath( KIID_PATH() ))
+    if (n[0] === "footprint") { const p = K.kid(n, "path"); if (p) n.splice(n.indexOf(p), 1); }
+    // a pasted zone must not reuse a name the board has (BOARD::GetUniqueZoneName)
+    if (n[0] === "zone" && !doc.fpEditor) { const nm = K.kid(n, "name"); if (nm && K.str(nm[1])) nm[1] = uniqueZoneName(doc, K.str(nm[1])); }
+  }
+  const changes: PcbChange[] = [], ids: string[] = []; const inGroup = new Set<string>();
+  for (const n of nodes) if (n[0] === "group" || n[0] === "generated") for (const id of groupMembers(n)) inGroup.add(id);
+  for (const n of nodes) {
+    if (at && (at[0] || at[1])) translateNode(n, at[0], at[1]);
+    const c = addedChange(doc, n); changes.push(c); ids.push(c.id);
+  }
+  const res: { changes: PcbChange[]; ids: string[]; select?: string[]; pruned?: boolean } = { changes, ids };
+  if (ids.some((id) => inGroup.has(id))) res.select = ids.filter((id) => !inGroup.has(id));
+  if (pruned) res.pruned = true;
+  return res;
 }
 /**
  * DIALOG_PASTE_SPECIAL's "Clear net assignments": every pasted connected item goes onto the orphaned net
@@ -174,9 +314,15 @@ export function clipSet(ctx: PcbCtx, text: string) {
   clipBuffer = text; if (ctx.clipboard && ctx.clipboard.set) ctx.clipboard.set(text);
   if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => {});
 }
+/**
+ * What Ctrl+V pastes: the system clipboard as it is (KiCad items, any other text, or "" when it holds no text — an
+ * image, perhaps); the editor's own buffer only when the clipboard cannot be read or is empty.
+ */
 export function clipGet(ctx: PcbCtx, done: (text: string) => void) {
-  if (ctx.clipboard && ctx.clipboard.get) { const v = ctx.clipboard.get(); if (v && typeof (v as Promise<string | null | undefined>).then === "function") { (v as Promise<string | null | undefined>).then((t) => done(t || clipBuffer), () => done(clipBuffer)); return; } done((v as string | null | undefined) || clipBuffer); return; }
-  if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.readText) { navigator.clipboard.readText().then((t) => done(t && /\(kicad_pcb|\(footprint|\(segment|\(via|\(gr_|\(zone/.test(t) ? t : clipBuffer), () => done(clipBuffer)); return; }
+  const cb = ctx.clipboard;
+  if (cb && typeof cb.read === "function") { try { const v = cb.read(); if (v && typeof v.then === "function") { v.then((t) => done(t === "" ? "" : t || clipBuffer), () => done(clipBuffer)); return; } } catch (e) { /* fall through */ } }
+  if (cb && cb.get) { const v = cb.get(); if (v && typeof (v as Promise<string | null | undefined>).then === "function") { (v as Promise<string | null | undefined>).then((t) => done(t || clipBuffer), () => done(clipBuffer)); return; } done((v as string | null | undefined) || clipBuffer); return; }
+  if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.readText) { navigator.clipboard.readText().then((t) => done(t || clipBuffer), () => done(clipBuffer)); return; }
   done(clipBuffer);
 }
 export function cursorPoint(ctx: PcbCtx) {

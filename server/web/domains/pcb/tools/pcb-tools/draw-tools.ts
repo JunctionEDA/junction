@@ -10,17 +10,59 @@ import { openForm } from "./dialogs";
 import { DIM_TYPE, dimensionNode, snap45 } from "./dimensions";
 import type { DimSpec } from "./dimensions";
 import { pickerImpl, promptImpl } from "./dom";
-import { POLY_TOOLS, RULE_AREA_LAYERS, constrainDraw, drawTrack, drawWidth, pushPt, withStroke } from "./draw-modes";
+import { POLY_TOOLS, RULE_AREA_LAYERS, constrainDraw, curveGeom, drawTrack, drawWidth, pushPt, simplifyOutline, withStroke } from "./draw-modes";
 import { applySelection, selectionIds } from "./groups";
 import { base64Bytes, imageInfo, imageMm } from "./images";
 import { netTable } from "./netlist";
 import { netOf } from "./nets";
-import { circleNode, curveNode, imageNode, lineNode, polyNode, rectNode, ruleAreaNode, tableNode, textBoxNode, thievingAllowed, thievingZoneNode, THIEVING_NEEDS_VERSION_MSG, zoneLayers, zoneNode } from "./nodes";
+import { circleNode, curveNode, imageNode, lineNode, polyFilledOn, polyNode, rectNode, ruleAreaNode, tableNode, textBoxNode, thievingAllowed, thievingZoneNode, THIEVING_NEEDS_VERSION_MSG, zoneLayers, zoneNode } from "./nodes";
 import { netUnder } from "./route-geom";
 import { K, S, lastCtx } from "./state";
 import { samePt, vadd, vsub, xy } from "./util";
 import { similarZoneNode, zoneCutoutChanges, zoneLayerList } from "./zone-modes";
 
+/** The shapes DRAWING_TOOL::drawShape draws: while one is in progress the screen's local origin is its first point. */
+const ORIGIN_SHAPES = new Set(["gline", "grect", "gcircle", "gtextbox"]);
+/**
+ * drawShape: `if( !isLocalOriginSet ) m_LocalOrigin = cursorPos` at the first click and back to (0, 0) when the shape
+ * ends, unless the user had (or has since) set a local origin (resetLocalCoords).
+ */
+export function drawOriginBegin(ctx: PcbCtx, p: Pt) {
+  if (!ctx.localOrigin || !ctx.setLocalOrigin) return;
+  const o = ctx.localOrigin();
+  if (S.drawOrigin) { if (o && samePt(o, S.drawOrigin)) { S.drawOrigin = p.slice(); ctx.setLocalOrigin(p.slice()); } else S.drawOrigin = null; return; }   // the next segment of a chain
+  if (o && (o[0] || o[1])) return;   // isLocalOriginSet
+  S.drawOrigin = p.slice(); ctx.setLocalOrigin(p.slice());
+}
+/** The shape ended (committed, cancelled, the tool left): the origin this tool set goes back to (0, 0). */
+export function drawOriginSync(ctx: PcbCtx | null | undefined) {
+  if (!S.drawOrigin || (S.draw && ORIGIN_SHAPES.has(S.draw.shape))) return;
+  const mine = S.drawOrigin; S.drawOrigin = null;
+  if (!ctx || !ctx.localOrigin || !ctx.setLocalOrigin) return;
+  const o = ctx.localOrigin(); if (o && samePt(o, mine)) ctx.setLocalOrigin([0, 0]);
+}
+/**
+ * The first click of a shape, zone or dimension: ACTIONS::selectionClear, and the layer it is drawn on is made visible
+ * (GetAppearancePanel()->SetLayerVisible( m_layer, true )).
+ */
+export function drawBegin(ctx: PcbCtx, layer: string | null | undefined) {
+  applySelection(ctx, []);
+  if (layer && ctx.showLayer) ctx.showLayer(layer);
+}
+/** DRAWING_TOOL::DrawBezier's commit: "Draw Bezier", the curve selected. */
+function commitCurve(ctx: PcbCtx, g: Pt[]) {
+  // curveGeom gives start, control 1, end, control 2; the file's order is start, control 1, control 2, end
+  const c = addedChange(ctx.doc, withStroke(curveNode([g[0], g[1], g[3], g[2]], S.gfxLayer)));
+  ctx.commit([c], "Draw Bezier"); applySelection(ctx, [c.id]);
+}
+/**
+ * ACTIONS::finishInteractive or a double-click while a bezier is drawn (drawManagedShape): what there is so far is
+ * kept and committed, and no further curve is chained.
+ */
+export function finishCurve(ctx: PcbCtx) {
+  const d = S.draw; if (!d || d.shape !== "gcurve") return false;
+  S.draw = null; commitCurve(ctx, curveGeom(d.pts, d.cur)); ctx.requestRender(); return true;
+}
 export function drawClick(ctx: PcbCtx, hv: Hover, t: string, ev: PtrEvent) {
   if (S.draw && S.draw.shape !== "garc") { const c = constrainDraw(S.draw, [hv.x, hv.y], !!(ev && (ev.ctrlKey || ev.metaKey))); hv = Object.assign({}, hv, { x: c[0], y: c[1] }); }
   if (t === "garc" && S.draw && S.draw.shape === "garc") arcMove(S.draw, [hv.x, hv.y], !!(ev && (ev.ctrlKey || ev.metaKey)));
@@ -29,7 +71,7 @@ export function drawClick(ctx: PcbCtx, hv: Hover, t: string, ev: PtrEvent) {
   if (!S.draw && t === "thievingzone") {
     // ZONE_CREATE_HELPER::createNewZone with m_thieving: no pre-draw dialog, COPPER_THIEVING on the active layer, net 0
     const tpl = zoneTemplate(ctx, false, true);
-    S.draw = { shape: t, start: p, cur: p.slice(), pts: [p], template: tpl, layer: zoneLayers(tpl)[0] }; ctx.requestRender();
+    S.draw = { shape: t, start: p, cur: p.slice(), pts: [p], template: tpl, layer: zoneLayers(tpl)[0] }; drawBegin(ctx, S.draw.layer); ctx.requestRender();
     return;
   }
   if (!S.draw && t === "zone" && S.zoneMode) {
@@ -39,7 +81,7 @@ export function drawClick(ctx: PcbCtx, hv: Hover, t: string, ev: PtrEvent) {
     if (!src) { S.zoneMode = null; ctx.setTool("select"); return; }
     const layers = zoneLayerList(src.node), active = sizesOf(ctx).activeLayer || S.layer;
     S.draw = { shape: t, start: p, cur: p.slice(), pts: [p], template: src.node, layer: S.zoneMode.mode === "similar" && !layers.includes(active) ? layers[0] : active, zoneMode: S.zoneMode.mode };
-    ctx.requestRender(); return;
+    drawBegin(ctx, S.draw.layer); ctx.requestRender(); return;
   }
   if (!S.draw && (t === "zone" || t === "rulearea") && newItemDialogs.zone) {
     // ZONE_CREATE_HELPER::OnFirstPoint → createNewZone: the properties dialog on a template first; Cancel ends it
@@ -48,18 +90,25 @@ export function drawClick(ctx: PcbCtx, hv: Hover, t: string, ev: PtrEvent) {
     newItemDialogs.zone(ctx, tpl, (node: SNode | null) => {
       if (S.draw !== d) return;
       if (!node) { S.draw = null; ctx.requestRender(); return; }
-      d.template = node; d.pending = false; d.layer = zoneLayers(node)[0] || d.layer; ctx.requestRender();
+      d.template = node; d.pending = false; d.layer = zoneLayers(node)[0] || d.layer; drawBegin(ctx, d.layer); ctx.requestRender();
     });
     return;
   }
   if (t === "garc") { arcClick(ctx, p); return; }
-  if (!S.draw) { S.draw = { shape: t, start: p, cur: p.slice(), pts: [p] }; if (t === "dimortho") S.draw.orientation = "h"; ctx.requestRender(); return; }
+  if (!S.draw) {
+    S.draw = { shape: t, start: p, cur: p.slice(), pts: [p] }; if (t === "dimortho") S.draw.orientation = "h";
+    drawBegin(ctx, t === "zone" || t === "thievingzone" ? S.layer : t === "rulearea" ? null : layer);
+    if (ORIGIN_SHAPES.has(t)) drawOriginBegin(ctx, p);
+    ctx.requestRender(); return;
+  }
   const d = S.draw;
   if (POLY_TOOLS.has(t)) {
     if (d.pending) return;   // the properties dialog is still open
     drawTrack(d, p, !!(ev && (ev.ctrlKey || ev.metaKey)));
-    // NewPointClosesOutline (or the last corner clicked again, the double-click): done
-    if (samePt(p, d.pts[0]) || samePt(p, d.pts[d.pts.length - 1])) finishPoly(ctx);
+    // NewPointClosesOutline: only the first corner closes the outline; the last corner clicked again adds nothing
+    // (POLYGON_GEOM_MANAGER::AddPoint), a double-click or Finish ends it
+    if (samePt(p, d.pts[0])) finishPoly(ctx);
+    else if (samePt(p, d.pts[d.pts.length - 1])) return;
     else {   // AddPoint: the leader's bend and its end are locked in
       const L = d.leader || [d.pts[d.pts.length - 1], p];
       if (L.length > 1) { pushPt(d.pts, L[L.length - 2]); pushPt(d.pts, L[L.length - 1]); } else pushPt(d.pts, p);
@@ -69,9 +118,16 @@ export function drawClick(ctx: PcbCtx, hv: Hover, t: string, ev: PtrEvent) {
     return;
   }
   if (t === "gcurve") {
-    if (samePt(p, d.pts[d.pts.length - 1])) { ctx.toast("Click a different point for the curve"); return; }
+    // BEZIER_GEOM_MANAGER::acceptPoint: SET_START, SET_CONTROL1, SET_END (refused while it equals the start),
+    // SET_CONTROL2 (the cursor mirrored through the end)
+    if (d.pts.length === 2 && samePt(p, d.pts[0])) return;
     d.pts.push(p);
-    if (d.pts.length === 4) { ctx.commit([addedChange(ctx.doc, withStroke(curveNode(d.pts, layer)))], "curve"); S.draw = null; }
+    if (d.pts.length === 4) {
+      const g = curveGeom(d.pts, p), end = g[2], c2 = g[3];
+      commitCurve(ctx, g);
+      // DrawBezier chains: the next curve starts at this one's end, its control 1 the last arm mirrored (when there is one)
+      S.draw = { shape: t, start: end, cur: p.slice(), pts: samePt(end, c2) ? [end] : [end, [2 * end[0] - c2[0], 2 * end[1] - c2[1]]] };
+    }
     ctx.requestRender(); return;
   }
   if (t === "gtextbox" || t === "table") {
@@ -97,9 +153,13 @@ export function drawClick(ctx: PcbCtx, hv: Hover, t: string, ev: PtrEvent) {
   if (samePt(p, d.start)) { S.draw = null; ctx.requestRender(); return; }   // clicking the start again ends the chain
   const node = withStroke(t === "gline" ? lineNode(d.start, p, layer) : t === "grect" ? rectNode(d.start, p, layer) : circleNode(d.start, p, layer));
   const add = addedChange(ctx.doc, node);
-  ctx.commit([add], t === "gline" ? "line" : t === "grect" ? "rectangle" : "circle");
+  ctx.commit([add], t === "gline" ? "Draw Line" : t === "grect" ? "Draw Rectangle" : "Draw Circle");
+  // drawShape: a line whose end snapped onto an existing graphic closes a path: it is selected and the chain ends
+  const closes = t === "gline" && !!(hv.snap && hv.snap.shape);
+  if (t !== "gline" || closes) applySelection(ctx, [add.id]);   // DrawRectangle / DrawCircle: ACTIONS::selectItem
   // lines chain like KiCad's polyline drawing; the committed segments stack up for deleteLastPoint (aCommittedGraphics)
-  S.draw = t === "gline" ? { shape: t, start: p, cur: p.slice(), pts: [p], chain: (d.chain || []).concat([{ id: add.id, start: d.start, end: p }]) } : null;
+  S.draw = t === "gline" && !closes ? { shape: t, start: p, cur: p.slice(), pts: [p], chain: (d.chain || []).concat([{ id: add.id, start: d.start, end: p }]) } : null;
+  if (S.draw) drawOriginBegin(ctx, p);
   ctx.requestRender();
 }
 /**
@@ -128,11 +188,13 @@ export function polyOutline(d: DrawState) {
     for (const p of (d.loop || []).slice(1, -1)) pushPt(out, p);
   }
   while (out.length > 1 && samePt(out[out.length - 1], out[0])) out.pop();
-  return out;
+  return simplifyOutline(out);   // chain.Simplify( true ), then the start point when it is collinear with its neighbours
 }
 export function finishPoly(ctx: PcbCtx) {
   const d = S.draw; if (!d || !POLY_TOOLS.has(d.shape) || d.pending) return;
   S.draw = null; ctx.requestRender();
+  const locked: Pt[] = []; for (const p of d.pts) pushPt(locked, p);
+  if (locked.length < 3) return;   // OnComplete: fewer than three locked corners scrap the zone or polygon, silently
   d.pts = polyOutline(d);
   if (d.template && d.zoneMode) {
     if (d.pts.length < 3) return;
@@ -154,18 +216,25 @@ export function finishPoly(ctx: PcbCtx) {
     const node = JSON.parse(JSON.stringify(d.template)), poly = K.kid(node, "polygon");
     const pts = ["pts", ...d.pts.map(xy)];
     if (poly) poly.splice(1, poly.length - 1, pts); else node.push(["polygon", pts]);
-    ctx.commit([addedChange(ctx.doc, node, netOf(node))], d.shape === "rulearea" ? "rule area" : d.shape === "thievingzone" ? "copper thieving zone" : "zone"); return;
+    const c = addedChange(ctx.doc, node, netOf(node));
+    ctx.commit([c], "Draw Zone"); applySelection(ctx, [c.id]); return;   // commitZone: "Draw Zone", ACTIONS::selectItem
   }
-  if (d.pts.length < 3) { ctx.toast("A polygon needs at least three corners"); return; }
-  if (d.shape === "gpoly") { ctx.commit([addedChange(ctx.doc, withStroke(polyNode(d.pts, S.gfxLayer)))], "polygon"); return; }
-  if (d.shape === "rulearea") { ctx.commit([addedChange(ctx.doc, ruleAreaNode(d.pts, RULE_AREA_LAYERS))], "rule area"); return; }
+  if (d.pts.length < 3) return;
+  if (d.shape === "gpoly") {
+    // ZONE_MODE::GRAPHIC_POLYGON: filled off Edge.Cuts and the courtyards, the layer's default line thickness, solid
+    // (the width hotkeys do not reach it), "Draw Polygon", selected
+    const c = addedChange(ctx.doc, polyNode(d.pts, S.gfxLayer, polyFilledOn(S.gfxLayer), true));
+    ctx.commit([c], "Draw Polygon"); applySelection(ctx, [c.id]); return;
+  }
+  if (d.shape === "rulearea") { const c = addedChange(ctx.doc, ruleAreaNode(d.pts, RULE_AREA_LAYERS)); ctx.commit([c], "Draw Zone"); applySelection(ctx, [c.id]); return; }
   // a copper zone on the active layer: the net comes from the prompt, which offers the board's nets and
   // starts on whatever copper the first corner sits on (KiCad takes the highlighted or selected net)
   const layer = S.layer, nets = boardNets(ctx.doc), under = netUnder(ctx.doc, d.pts[0][0], d.pts[0][1], layer);
   askText(ctx, "Zone net", under.name, (name: string | null) => {
     if (name === null) return;
     const net = name ? (nets.find((n) => n.name === name) || { code: -1, name }) : { code: 0, name: "" };
-    ctx.commit([addedChange(ctx.doc, zoneNode(ctx.doc, d.pts, layer, net), net)], "zone");
+    const c = addedChange(ctx.doc, zoneNode(ctx.doc, d.pts, layer, net), net);
+    ctx.commit([c], "Draw Zone"); applySelection(ctx, [c.id]);
   }, nets.map((n) => n.name));
 }
 // DRAWING_TOOL::DrawDimension: SET_ORIGIN, SET_END (centre, radial and leader are done there), then SET_HEIGHT where

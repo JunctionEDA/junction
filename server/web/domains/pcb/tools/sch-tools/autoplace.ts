@@ -10,12 +10,23 @@ import { deep, dropKid, modChange, r4, replaceKid } from "./util";
 // ---------------------------------------------------------------- symbol pins with their electrical type (lib symbol + transform)
 /** A symbol pin on the sheet: its connection point, the root at the body, number, name, electrical type and side. */
 export interface SymPin { x: number; y: number; root: Pt; number: string; name: string; type: string; hidden: boolean; len: number; side: string; shape?: string; libRot?: number }
+// symbolPins is asked for the same symbol many times per frame (junction previews, hit tests, dangling ends): the
+// result is kept per node and reused while the node's library symbol, position, orientation, unit and body style
+// are unchanged (nodes can be edited in place, so the key is checked every time).
+const PIN_CACHE = new WeakMap<object, { lib: SNode; key: string; pins: SymPin[] }>();
 export function symbolPins(doc: KDoc, item: Pick<KItem, "node">): SymPin[] {
   const n = item.node, out: SymPin[] = [];
   const libId = str((kid(n, "lib_name") || kid(n, "lib_id") || [])[1]);
   const lib = K.resolveLib(doc, libId) || K.resolveLib(doc, str((kid(n, "lib_id") || [])[1])); if (!lib) return out;
   const [ax, ay, rot] = atOf(n), mN = kid(n, "mirror"), T = K.symbolTransform(rot, mN ? str(mN[1]) : "");
   const unit = kid(n, "unit") ? num(kid(n, "unit")![1], 1) : 1, styleN = kid(n, "body_style") || kid(n, "convert"), style = styleN ? num(styleN[1], 1) : 1;
+  const key = ax + "," + ay + "," + rot + "," + (mN ? str(mN[1]) : "") + "," + unit + "," + style;
+  const hit = PIN_CACHE.get(n as object);
+  if (hit && hit.lib === lib && hit.key === key) return hit.pins.slice();
+  const pins = symbolPinsOf(lib, ax, ay, T, unit, style); PIN_CACHE.set(n as object, { lib, key, pins }); return pins.slice();
+}
+function symbolPinsOf(lib: SNode, ax: number, ay: number, T: number[], unit: number, style: number): SymPin[] {
+  const out: SymPin[] = [];
   const tf = (lx: number, ly: number): Pt => [r4(ax + T[0] * lx + T[1] * ly), r4(ay + T[2] * lx + T[3] * ly)];
   for (const sub of kids(lib, "symbol")) {
     const m = str(sub[1]).match(/_(\d+)_(\d+)$/); const u = m ? +m[1] : 0, s = m ? +m[2] : 1;

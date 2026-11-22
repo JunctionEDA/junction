@@ -7,8 +7,9 @@
 //            remaining main outline with its holes, unfilled, the source removed, "Add Zone Cutout"; the first new zone
 //            is selected and becomes the source for the next cutout.
 import type { BoardDoc, PcbChange, PcbCtx, Pt } from "./types";
-import { FillRule, differenceD, type PathD } from "clipper2-ts";
-import { addedChange, removedChange } from "./changes";
+import { FillRule, areaPathsD, differenceD, intersectD, unionD, type PathD } from "clipper2-ts";
+import { addedChange, removedChange, replacedChange } from "./changes";
+import { netTable } from "./netlist";
 import { netOf } from "./nets";
 import { K } from "./state";
 import { clone, isList, r6 } from "./util";
@@ -120,4 +121,75 @@ export function zoneCutoutChanges(doc: BoardDoc, zone: KItem, cut: Pt[]): { chan
   }
   changes.push(removedChange(zone));
   return { changes, first };
+}
+
+export const ZONE_MERGE_MSG = "Zones have insufficient overlap for merging.";
+/** BOARD::TestZoneIntersection as the merge uses it: the two outlines overlap, or one holds the other's first corner. */
+function zonesIntersect(a: Pt[][], b: Pt[][]): boolean {
+  if (!a.length || !b.length) return false;
+  const paths = (c: Pt[][]): PathD[] => c.map((p) => p.map((q) => ({ x: q[0], y: q[1] })));
+  return areaPathsD(intersectD(paths(a), paths(b), FillRule.EvenOdd, 6)) !== 0 || inside(b[0][0], a[0]) || inside(a[0][0], b[0]);
+}
+/**
+ * BOARD_EDITOR_CONTROL::ZoneMerge + mergeZones over the selected items, in selection order: at least two selected;
+ * a zone joins when it has the first zone's net, rule-area flag and layer set and intersects one already accepted.
+ * The outlines are united into the first zone (arcs flattened), the others removed, and the merged zone takes the
+ * highest priority.  { changes, merged } — or { error } when the union is not one outline.
+ */
+export function zoneMergeChanges(doc: BoardDoc, ids: string[]): { changes: PcbChange[]; merged: string | null; error?: string } {
+  const none = { changes: [] as PcbChange[], merged: null };
+  if (ids.length < 2) return none;
+  const NT = netTable(doc); let first: KItem | null = null; const toMerge: KItem[] = [];
+  const layerKey = (n: SNode) => zoneLayerList(n).slice().sort().join("|");
+  for (const id of ids) {
+    const cur = doc.items.get(id); if (!cur || cur.kind !== "zone") continue;
+    if (!first) first = cur;
+    if (NT.key(netOf(cur.node)) !== NT.key(netOf(first.node))) continue;          // "Some zone netcodes did not match and were not merged."
+    if (!!K.kid(cur.node, "keepout") !== !!K.kid(first.node, "keepout")) continue;  // "Some zones were rule areas and were not merged."
+    if (layerKey(cur.node) !== layerKey(first.node)) continue;                      // "Some zone layer sets did not match and were not merged."
+    let hit = cur === first; const cc = zoneChains(cur.node);
+    for (const cand of toMerge) { if (hit) break; if (zonesIntersect(cc, zoneChains(cand.node))) hit = true; }
+    if (!hit) continue;                                                             // "Some zones did not intersect and were not merged."
+    toMerge.push(cur);
+  }
+  if (!first || !toMerge.length) return none;
+  if (toMerge.length < 2) return { changes: [], merged: toMerge[0].id };   // the first zone alone: its outline is its own union
+  const toPath = (p: Pt[]): PathD => p.map((q) => ({ x: q[0], y: q[1] }));
+  let acc = zoneChains(toMerge[0].node).map(toPath);
+  for (let i = 1; i < toMerge.length; i++) acc = unionD(acc, zoneChains(toMerge[i].node).map(toPath), FillRule.EvenOdd, 6);
+  const res = acc.map((p) => p.map((q) => [r6(q.x), r6(q.y)] as Pt)).filter((p) => p.length >= 3);
+  const pos = res.filter((p) => area(p) > 0), neg = res.filter((p) => area(p) < 0);
+  const [O, H] = pos.length >= 1 && (neg.length === 0 || Math.max(...pos.map((p) => Math.abs(area(p)))) >= Math.max(...neg.map((p) => Math.abs(area(p))))) ? [pos, neg] : [neg, pos];
+  // one polygon, possibly with holes; two (the zones met in a point, or inside a hole) cannot be merged
+  if (O.length !== 1) return { changes: [], merged: null, error: ZONE_MERGE_MSG };
+  const prio = (n: SNode) => { const p = K.kid(n, "priority"); return p ? K.num(p[1]) : 0; };
+  const highest = toMerge.reduce((m, z) => Math.max(m, prio(z.node)), 0);
+  const n = withOutline(toMerge[0].node, O[0], H);
+  const p = K.kid(n, "priority");
+  if (highest) { if (p) p[1] = highest; else { const before = K.kid(n, "connect_pads") || K.kid(n, "min_thickness"); n.splice(before ? n.indexOf(before) : n.length, 0, ["priority", highest]); } } else if (p) n.splice(n.indexOf(p), 1);
+  const changes: PcbChange[] = [replacedChange(toMerge[0], n)];
+  for (let i = 1; i < toMerge.length; i++) changes.push(removedChange(toMerge[i]));
+  return { changes, merged: toMerge[0].id };
+}
+/**
+ * BOARD_EDITOR_CONTROL::ZoneDuplicate after the zone dialog's OK: `edited` is the zone with the dialog's settings.  The
+ * copy is unfilled, gets a new id and a unique name, and moves by (1 mm, 1 mm) when its layers are the zone's own.
+ */
+export function zoneDuplicateNode(doc: BoardDoc, zone: KItem, edited: SNode): SNode {
+  const n = clone(edited);
+  for (let i = n.length - 1; i > 0; i--) { const c = n[i]; if (isList(c) && (c[0] === "filled_polygon" || c[0] === "fill_segments")) n.splice(i, 1); }
+  const fill = K.kid(n, "fill"); if (fill && fill[1] === "yes") fill.splice(1, 1);
+  freshUuid(n);
+  const nm = K.kid(n, "name"); if (nm && K.str(nm[1])) nm[1] = uniqueZoneName(doc, K.str(nm[1]));
+  const key = (x: SNode) => zoneLayerList(x).slice().sort().join("|");
+  if (key(n) === key(zone.node)) for (const poly of K.kids(n, "polygon")) { const pts = K.kid(poly, "pts"); if (pts) shiftPts(pts, 1, 1); }
+  return n;
+}
+/** Move every point of a (pts …) list (xy and arc points). */
+function shiftPts(pts: SNode, dx: number, dy: number) {
+  for (const c of pts.slice(1)) {
+    if (!isList(c)) continue;
+    if (c[0] === "xy") { c[1] = r6(K.num(c[1]) + dx); c[2] = r6(K.num(c[2]) + dy); }
+    else if (c[0] === "arc") for (const k of ["start", "mid", "end"]) { const q = K.kid(c, k); if (q) { q[1] = r6(K.num(q[1]) + dx); q[2] = r6(K.num(q[2]) + dy); } }
+  }
 }

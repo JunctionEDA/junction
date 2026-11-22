@@ -19,14 +19,14 @@ import { loadFab } from "../editor/fab-outputs";
 import { adoptProjectFile, canWriteProject, loadProjectFile, saveProjectFile } from "../editor/projectfile";
 import { PLOT } from "../editor/pcbdialogs/canvas";
 import { deliver, loadPrefs, savePrefs } from "../editor/pcbdialogs/plot-out";
-import { box, checkField, ensureCss, h, numField, reportPanel, selectField, textField, type ReportLine } from "../editor/pcbdialogs/ui";
+import { box, checkField, ensureCss, h, lenField, numField, reportPanel, selectField, textField, unitLabel, type ReportLine } from "../editor/pcbdialogs/ui";
 import { obj, projectJson } from "./project";
 import { sheetList, withSheetContext, type SheetInstance } from "./sch-hierarchy";
 import { schVariantNames, symbolNodeForVariant } from "./sch-variants";
 
 export interface SchPlotPrefs { format: number; pageSize: number; frame: boolean; color: boolean; theme: string; background: boolean; minWidth: number; popups: boolean; links: boolean; metadata: boolean; dxfInch: boolean; dpi: number; antialias: boolean; openAfter: boolean }
 const KEY = "kicad.plot.schematic";
-export const SCH_PLOT_DEFAULTS: SchPlotPrefs = { format: 1, pageSize: 0, frame: true, color: true, theme: "default", background: false, minWidth: 0.1524, popups: true, links: true, metadata: true, dxfInch: false, dpi: 300, antialias: true, openAfter: false };
+export const SCH_PLOT_DEFAULTS: SchPlotPrefs = { format: 1, pageSize: 0, frame: true, color: true, theme: "default", background: false, minWidth: 0.1524, popups: true, links: true, metadata: true, dxfInch: true, dpi: 300, antialias: true, openAfter: false };
 /** m_plotFormatOpt: Postscript, PDF, SVG, DXF, PNG */
 const FORMATS = ["Postscript", "PDF", "SVG", "DXF", "PNG"];
 const EXT = ["ps", "pdf", "svg", "dxf", "png"];
@@ -60,8 +60,8 @@ function docForVariant(doc: KDoc, uuidPath: string[], variant: string): KDoc {
 function show(fab: KiCadFabApi, variants: string[]): void {
   const pref = loadPrefs(KEY, SCH_PLOT_DEFAULTS);
   const pro = projectJson();
-  const cur = String((E as { currentVariant?: string }).currentVariant || "");   // the schematic's current variant (the toolbar's)
-  const variantSel = selectField<string>(cur && variants.includes(cur) ? cur : variants[0], variants.map((v) => [v, v] as [string, string]), { key: "variant" });
+  // m_variantChoiceCtrl->Select( 0 ): the dialog opens on the default variant
+  const variantSel = selectField<string>(variants[0], variants.map((v) => [v, v] as [string, string]), { key: "variant" });
   /** getSelectedVariant: empty for the default */
   const selectedVariant = (): string => (variantSel.get() !== variants[0] ? variantSel.get() : "");
   const storedDir = String(obj(pro.schematic).plot_directory || "");
@@ -76,7 +76,7 @@ function show(fab: KiCadFabApi, variants: string[]): void {
   const theme = selectField<string>(pref.theme, themes, { key: "theme" }); theme.input.title = "Select the color theme to use for plotting";
   const themeLabel = h("span", { class: "pd-lbl" }, "Color theme:");
   const background = checkField(pref.background, "Plot background color", { key: "background", tip: "Plot the background color if the output format supports it" });
-  const minWidth = numField(pref.minWidth, { key: "minWidth", digits: 4 }); minWidth.input.title = "Selection of the default pen thickness used to draw items, when their thickness is set to 0.";
+  const minWidth = lenField(pref.minWidth, { key: "minWidth" });   // m_defaultLineWidth: a UNIT_BINDER in the frame's units minWidth.input.title = "Selection of the default pen thickness used to draw items, when their thickness is set to 0.";
   const minLabel = h("span", { class: "pd-lbl" }, "Minimum line width:");
   const popups = checkField(pref.popups, "Generate property popups", { key: "popups" });
   const links = checkField(pref.links, "Generate clickable links for hierarchical elements", { key: "links" });
@@ -154,7 +154,7 @@ function show(fab: KiCadFabApi, variants: string[]): void {
   }
 
   const lbl = (t: string): HTMLElement => h("span", { class: "pd-lbl" }, t);
-  KDialogs!.open({ title: "Plot Schematic Options", width: 720,
+  KDialogs!.open({ title: "Plot Schematic", width: 720,
     buttons: [
       { label: "Plot All Pages", primary: true, isDefault: true, id: "plotAll", fn: () => { void plot(true); } },
       { label: "Plot Current Page", id: "plotCurrent", fn: () => { void plot(false); } },
@@ -171,7 +171,7 @@ function show(fab: KiCadFabApi, variants: string[]): void {
           h("div", null,
             box("Options", h("div", { style: "display:grid;grid-template-columns:max-content 1fr max-content;gap:6px 8px;align-items:center" },
               lbl("Page size:"), pageSize.el, h("span"), h("div", { style: "grid-column:1/-1" }, frame.el), lbl("Output mode:"), mode.el, h("span"),
-              themeLabel, theme.el, h("span"), h("div", { style: "grid-column:1/-1" }, background.el), minLabel, minWidth.el, h("span", { class: "unit" }, "mm"))),
+              themeLabel, theme.el, h("span"), h("div", { style: "grid-column:1/-1" }, background.el), minLabel, minWidth.el, unitLabel())),
             box("PDF Options", popups.el, links.el, metadata.el),
             box("DXF Options", h("div", { class: "pd-row" }, dxfLabel, dxfUnits.el)),
             pngBox,

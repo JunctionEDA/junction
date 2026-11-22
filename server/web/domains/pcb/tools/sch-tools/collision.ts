@@ -64,12 +64,21 @@ export function collisionMarkers(doc: KDoc, nc: NetCollision, junctions: Pt[]): 
   const ss = (doc as KDoc & { schSettings?: { junctionDiameter?: number } | null }).schSettings;
   const jd = ss && typeof ss.junctionDiameter === "number" ? Math.max(ss.junctionDiameter, IU) : 0.9144;
   const jr = Math.max(jd * 1.5, MIN_R);
+  // every item's connection points gathered once (bucketed by 1 mm cell) rather than walked again for each junction
+  const items: { it: KItem; pts: Pt[]; line: boolean }[] = [], cells = new Map<string, number[]>(), lineIdx: number[] = [];
+  if (junctions.length) for (const it of doc.items.values()) {
+    const pts = connPoints(doc, it); if (!pts.length) continue;
+    const i = items.length, line = isNetLine(it.kind); items.push({ it, pts, line }); if (line) lineIdx.push(i);
+    for (const q of pts) { const k = Math.round(q[0]) + "," + Math.round(q[1]), l = cells.get(k); if (!l) cells.set(k, [i]); else if (l[l.length - 1] !== i) l.push(i); }
+  }
   for (const p of junctions) {
     let first: number | undefined, diff = false, movedNet = false;
-    for (const it of doc.items.values()) {
-      const pts = connPoints(doc, it); if (!pts.length) continue;
+    const cand = new Set<number>(lineIdx), cx = Math.round(p[0]), cy = Math.round(p[1]);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (const i of cells.get((cx + dx) + "," + (cy + dy)) || []) cand.add(i);
+    for (const ci of Array.from(cand).sort((a, b) => a - b)) {
+      const { it, pts } = items[ci];
       let i = pts.findIndex((q) => same(q, p, 1e-4));
-      if (i < 0 && isNetLine(it.kind) && segs(it).some(([a, b]) => onSegMid(p, a, b))) i = 0;
+      if (i < 0 && items[ci].line && segs(it).some(([a, b]) => onSegMid(p, a, b))) i = 0;
       if (i < 0) continue;
       const net = nc.nets.get(keyOf(it.id, i)); if (net === undefined) continue;
       if (first !== undefined && first !== net) diff = true;

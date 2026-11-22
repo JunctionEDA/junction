@@ -12,7 +12,7 @@ import { root } from "../root";
 import { runAction } from "./actions";
 import { appGlobal, appTool, editorState, gfxLayers, isPcbDoc, liveDoc, liveSelected, liveZoom, sizesOf } from "./app-state";
 import { cancelOps } from "./assistants";
-import { angleSnapMode, gfxTool, stepDrawWidth } from "./draw-modes";
+import { angleSnapMode, gfxTool, stepDrawWidth, POLY_TOOLS, drawTrack } from "./draw-modes";
 import { itemAt } from "./guess";
 import { hitTestItem } from "./hit";
 import { editHandleUp, onHandlePointerDown } from "./point-editor";
@@ -82,8 +82,8 @@ export const liveSelection = () => appGlobal(() => editorState()!.selection, nul
  * PCB_PICKER_TOOL: the next click hands a point (selectPointInteractively, snapped like the cursor) or the item under
  * the cursor (selectItemInteractively) to done(); Escape hands back null.  Either way the tool goes back to Select.
  */
-export function pickInteractively(ctx: PcbCtx, mode: string, prompt: string, done: (res: Pt | KItem | null) => void) {
-  bind(ctx); S.pick = { done, prompt }; ctx.setTool(mode === "item" ? "pickitem" : "pickpoint");   // the prompt is the tool's hint
+export function pickInteractively(ctx: PcbCtx, mode: string, prompt: string, done: (res: Pt | KItem | null) => void, filter?: (it: KItem) => boolean) {
+  bind(ctx); S.pick = { done, prompt, filter }; ctx.setTool(mode === "item" ? "pickitem" : "pickpoint");   // the prompt follows the mouse (assistants.ts drawPickerPrompt)
 }
 /** GetVectorSnapped45 / GetVectorSnapped90 (geometry_utils.h): the end of a vector from o held to the angle snap mode. */
 export function vectorSnapped(mode: string, o: Pt, e: Pt): Pt {
@@ -137,7 +137,7 @@ export function pickClick(ctx: PcbCtx, t: string, hv: Hover, mm: Pt, ev?: PtrEve
   const pk = S.pick; S.pick = null;
   let res: Pt | KItem | null = null;
   if (t === "pickpoint") res = [hv.x, hv.y];
-  else { const it = itemAt(ctx, mm); res = it || null; if (!it) { S.pick = pk; return; } }   // a click on nothing keeps picking
+  else { const it = itemAt(ctx, mm); res = it || null; if (!it || (pk && pk.filter && !pk.filter(it))) { S.pick = pk; return; } }   // a click on nothing, or on an item m_ItemFilter refuses, keeps picking
   ctx.setTool("select");
   if (pk && pk.done) pk.done(res);
 }
@@ -174,6 +174,13 @@ export function undoRedoInFlight(ctx: PcbCtx, which: string) {
   if (S.tune.pattern) { if (which === "undo") tuneCancel(ctx); return true; }   // Undo drops the pattern being placed
   if (S.route) { if (which === "undo" && !ctx.viewOnly) undoRouteLeg(ctx); return true; }
   if (!(S.pedit || S.draw || S.drag || S.image || S.move)) return false;
+  // DrawZone: ACTIONS::undo is deleteLastPoint (POLYGON_GEOM_MANAGER::DeleteLastCorner): the last corner goes and the
+  // outline stays in progress; the first corner going ends it
+  if (which === "undo" && S.draw && POLY_TOOLS.has(S.draw.shape) && !S.pedit && !S.move) {
+    const d = S.draw; if (d.pending) return true;
+    if (d.pts.length > 1) { d.pts.pop(); drawTrack(d, d.cur, !!S.drawCtrl); } else S.draw = null;
+    ctx.requestRender(); return true;
+  }
   if (which === "undo") cancelInFlight(true);
   return true;
 }

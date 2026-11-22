@@ -6,7 +6,8 @@ export interface EditPoint { key: string; p: Pt; circle?: boolean; lines?: Pt[] 
 import { appTool, isBoardLikeDoc, liveDoc } from "./app-state";
 import { crossZ } from "./arcs";
 import { addedChange, replacedChange } from "./changes";
-import { dimEditNode, dimEditPoints } from "./dimensions";
+import { dimEditNode, dimEditPoints, snap45, snap90 } from "./dimensions";
+import { angleSnapMode } from "./draw-modes";
 import { isLocked, selectionIds } from "./groups";
 import { line } from "./overlay";
 import { lsGet, lsSet } from "./router-settings";
@@ -21,7 +22,36 @@ import type { GenEdit } from "./tuning-edit";
 // the corners / ends (EDIT_POINT), circles on the edge midpoints (EDIT_LINE centre points).  Dragging a handle reshapes
 // the item; a zone or polygon edge midpoint drags the whole edge; Ins (Create Corner) adds a corner on the edge under
 // the cursor, Remove Corner takes the corner under it out.  Only the edited coordinates are rewritten.
-export const PE_KINDS = new Set(["zone", "gr_poly", "gr_line", "gr_rect", "gr_circle", "gr_arc", "dimension"]);
+export const PE_KINDS = new Set(["zone", "gr_poly", "gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_curve", "gr_text_box", "barcode", "dimension"]);
+/** What a handle drag carries besides the cursor: Ctrl held, the grid pitch (0: off) and the line mode's angle limit. */
+export interface EditOpts { ctrl?: boolean; gridPitch?: number; angle?: string }
+/** Every contour of a zone outline or polygon as its (pts) list: the main outline first, then the holes ((polygon …) children of a zone). */
+export function peContours(node: SNode): SNode[] {
+  if (node[0] !== "zone") { const p = K.kid(node, "pts"); return p ? [p] : []; }
+  return K.kids(node, "polygon").map((pg) => K.kid(pg, "pts")).filter(Boolean) as SNode[];
+}
+const ptsOfList = (pn: SNode): Pt[] => K.kids(pn, "xy").map((x) => [K.num(x[1]), K.num(x[2])]);
+/** A flat corner index (SHAPE_POLY_SET's global vertex index, holes included) as { contour, index, pts, node }. */
+export function peLocate(node: SNode, g: number) {
+  let base = 0, ci = 0;
+  for (const pn of peContours(node)) { const pts = ptsOfList(pn); if (g < base + pts.length) return { contour: ci, index: g - base, base, pts, node: pn }; base += pts.length; ci++; }
+  return null;
+}
+/** RECT_MIN_SIZE: PinEditedCorner keeps the corners one mil apart (EDA_UNIT_UTILS::Mils2IU( 1 )). */
+export const RECT_MIN = 0.0254;
+/** The rectangle of a gr_rect, an upright gr_text_box or a barcode at a cardinal angle as [left, top, right, bottom], or null. */
+export function peRect(n: SNode, kind: string): [number, number, number, number] | null {
+  if (kind === "barcode") {
+    const at = K.kid(n, "at"), sz = K.kid(n, "size"); if (!at || !sz) return null;
+    const ang = ((K.num(at[3], 0) % 360) + 360) % 360; if (ang % 90) return null;   // BARCODE_POINT_EDIT_BEHAVIOR: cardinal angles only
+    let w = K.num(sz[1]), h = K.num(sz[2]); if (ang % 180) [w, h] = [h, w];
+    return [K.num(at[1]) - w / 2, K.num(at[2]) - h / 2, K.num(at[1]) + w / 2, K.num(at[2]) + h / 2];
+  }
+  const a = pt(n, "start"), b = pt(n, "end"); if (!a || !b) return null;   // a rotated text box is a polygon: not editable
+  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
+}
+/** EDA_SHAPE::GetCornerRadius of a gr_rect: its (radius …), 0 without one. */
+export const rectRadius = (n: SNode) => { const r = n[0] === "gr_rect" ? K.kid(n, "radius") : null; return r ? K.num(r[1], 0) : 0; };
 /** The (pts) list a polygon edit works on: the zone's first outline, the polygon's own points. */
 export function pePtsNode(node: SNode) { const host = node[0] === "zone" ? K.kid(node, "polygon") : node; return host ? K.kid(host, "pts") : null; }
 export function pePolyPts(node: SNode) { const p = pePtsNode(node); return p ? K.kids(p, "xy").map((x) => [K.num(x[1]), K.num(x[2])]) : []; }
@@ -32,13 +62,28 @@ export function editPoints(it: KItem): EditPoint[] {
   const n = it.node, out: EditPoint[] = [];
   if (it.kind === "dimension") return dimEditPoints(n);
   if (it.kind === "zone" || it.kind === "gr_poly") {
-    const pts = pePolyPts(n); pts.forEach((p, i) => out.push({ key: "c" + i, p }));
-    if (pts.length > 1) pts.forEach((p, i) => { const q = pts[(i + 1) % pts.length]; out.push({ key: "m" + i, p: [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2], circle: true }); });
+    // BuildForPolyOutline: every contour (the main outline and the holes) has its corners and its edge lines
+    let base = 0; const mids: EditPoint[] = [];
+    for (const pn of peContours(n)) {
+      const pts = ptsOfList(pn);
+      pts.forEach((p, i) => out.push({ key: "c" + (base + i), p }));
+      if (pts.length > 1) pts.forEach((p, i) => { const q = pts[(i + 1) % pts.length]; mids.push({ key: "m" + (base + i), p: [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2], circle: true }); });
+      base += pts.length;
+    }
+    out.push(...mids);
   } else if (it.kind === "gr_line") { for (const k of ["start", "end"]) { const p = pt(n, k); if (p) out.push({ key: k, p }); } }
-  else if (it.kind === "gr_rect") {
-    const a = pt(n, "start"), b = pt(n, "end"); if (!a || !b) return out;
-    const c = [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]];
+  else if (it.kind === "gr_curve") {   // EDA_BEZIER_POINT_EDIT_BEHAVIOR: start, control 1, control 2, end, with indicator lines to the controls
+    const ps = K.ptsOf(n); if (ps.length !== 4) return out;
+    out.push({ key: "b0", p: ps[0] }, { key: "b1", p: ps[1], lines: [ps[0]] }, { key: "b2", p: ps[2], lines: [ps[3]] }, { key: "b3", p: ps[3] });
+  }
+  else if (it.kind === "gr_rect" || it.kind === "gr_text_box" || it.kind === "barcode") {
+    // RECTANGLE_POINT_EDIT_BEHAVIOR::MakePoints: the corners (top left, top right, bottom right, bottom left), the
+    // centre, the corner-radius handle (drawn round) and the four edge lines
+    const r = peRect(n, it.kind); if (!r) return out; const [x0, y0, x1, y1] = r;
+    const c = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
     c.forEach((p, i) => out.push({ key: "r" + i, p }));
+    out.push({ key: "rc", p: [(x0 + x1) / 2, (y0 + y1) / 2] });
+    if (it.kind === "gr_rect") out.push({ key: "rr", p: [x1 - rectRadius(n), y0], circle: true });
     c.forEach((p, i) => { const q = c[(i + 1) % 4]; out.push({ key: "e" + i, p: [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2], circle: true }); });
   } else if (it.kind === "gr_circle") { const c = pt(n, "center"), e = pt(n, "end"); if (c) out.push({ key: "center", p: c }); if (e) out.push({ key: "end", p: e }); }
   else if (it.kind === "gr_arc") {   // ARC_START, ARC_MID, ARC_END, ARC_CENTER, with indicator lines from the centre to the ends
@@ -127,8 +172,79 @@ export function arcEditGeometry(orig: SNode, key: string, p: Pt, raw: Pt, mode: 
 }
 export const setXY = (node: SNode, key: string, p: Pt) => { const k = K.kid(node, key); if (k) { k[1] = r6(p[0]); k[2] = r6(p[1]); } };
 /** The node with handle `key` moved to `p` (from the original node `orig`). */
-export function editPointNode(orig: SNode, kind: string, key: string, p: Pt, raw: Pt | null | undefined, grid: ((p: Pt) => Pt) | null | undefined) {
+/** The intersection of the lines through (a, a + u) and (b, b + v), or null when they are parallel (SEG::IntersectLines). */
+export function lineX(a: Pt, u: Pt, b: Pt, v: Pt): Pt | null {
+  const den = u[0] * v[1] - u[1] * v[0]; if (Math.abs(den) < 1e-12) return null;
+  const t = ((b[0] - a[0]) * v[1] - (b[1] - a[1]) * v[0]) / den; return [a[0] + u[0] * t, a[1] + u[1] * t];
+}
+/** SEG::Intersect: where two segments cross (their ends included), or null. */
+export function segX(a: Pt, b: Pt, c: Pt, d: Pt): Pt | null {
+  const u = vsub(b, a), v = vsub(d, c), den = u[0] * v[1] - u[1] * v[0]; if (Math.abs(den) < 1e-12) return null;
+  const t = ((c[0] - a[0]) * v[1] - (c[1] - a[1]) * v[0]) / den, k = ((c[0] - a[0]) * u[1] - (c[1] - a[1]) * u[0]) / den;
+  return t >= -1e-9 && t <= 1 + 1e-9 && k >= -1e-9 && k <= 1 + 1e-9 ? [a[0] + u[0] * t, a[1] + u[1] * t] : null;
+}
+/** SEG::Angle: the acute angle between two segments' lines, in degrees (0..90). */
+const lineAngle = (u: Pt, v: Pt) => { const a = Math.abs(Math.atan2(u[0] * v[1] - u[1] * v[0], u[0] * v[0] + u[1] * v[1])) * 180 / Math.PI; return a > 90 ? 180 - a : a; };
+/**
+ * POLYGON_EDGE_DRAG_POLICY: the dragged edge of a polygon or zone outline moves perpendicular to itself.  CONVERGING
+ * (the default) keeps the two neighbouring edges on their lines, so the edge's corners slide along them (and meet at
+ * most where those lines cross); FIXED_LENGTH (Ctrl) keeps the edge's length.  With the grid on the perpendicular
+ * displacement is quantized to it (pcb_point_editor.cpp: "Quantize the perpendicular displacement directly").
+ * Returns the new positions of the edge's two corners.
+ */
+export function polyEdgeDrag(pts: Pt[], i: number, pos: Pt, fixedLength: boolean, gridPitch: number): [Pt, Pt] {
+  const n = pts.length, j = (i + 1) % n, origin = pts[i], end = pts[j], prev = pts[(i - 1 + n) % n], next = pts[(j + 1) % n];
+  const originDir = vsub(origin, prev), endDir = vsub(end, next), dragged = vsub(end, origin);
+  const center: Pt = [(origin[0] + end[0]) / 2, (origin[1] + end[1]) / 2], perp: Pt = [-dragged[1], dragged[0]];
+  const len = Math.hypot(dragged[0], dragged[1]), triangle = n === 3;
+  if (!len) return [origin.slice(), end.slice()];
+  const originCollinear = lineAngle(dragged, originDir) < 10, endCollinear = lineAngle(dragged, endDir) < 10;
+  const convergence = lineX(origin, originDir, end, endDir) || center;
+  if (gridPitch > 0) {
+    const u: Pt = [perp[0] / len, perp[1] / len], step = Math.hypot(gridPitch * u[0], gridPitch * u[1]);
+    if (step > 0) { const off = Math.round(((pos[0] - center[0]) * u[0] + (pos[1] - center[1]) * u[1]) / step) * step; pos = [center[0] + u[0] * off, center[1] + u[1] * off]; }
+  }
+  let nc = lineX(center, perp, pos, dragged) || pos;
+  if (!fixedLength && !triangle) {
+    const den = (convergence[0] - center[0]) * perp[0] + (convergence[1] - center[1]) * perp[1];
+    if (Math.abs(den) > 1e-12 && ((nc[0] - center[0]) * perp[0] + (nc[1] - center[1]) * perp[1]) / den > 1) nc = convergence;
+  }
+  if (fixedLength) { const h: Pt = [dragged[0] / 2, dragged[1] / 2]; return [vsub(nc, h), vadd(nc, h)]; }
+  if (originCollinear && endCollinear) {   // both neighbours run along the edge: the corners stay on that line
+    const l = Math.hypot(originDir[0], originDir[1]) || 1, d: Pt = [originDir[0] / l, originDir[1] / l];
+    const proj = (q: Pt): Pt => { const t = (q[0] - prev[0]) * d[0] + (q[1] - prev[1]) * d[1]; return [prev[0] + d[0] * t, prev[1] + d[1] * t]; };
+    return [proj(origin), proj(end)];
+  }
+  let o = lineX(nc, dragged, prev, originDir) || origin.slice(), e = lineX(nc, dragged, next, endDir) || end.slice();
+  if (!triangle) { const x = segX(e, next, o, prev); if (x) { o = x; e = x.slice(); } }
+  return [o, e];
+}
+/**
+ * The 45 / 90 degree limit of the line mode on a dragged handle (setAltConstraint: EDIT_RELATION::Angle45 / Angle90 on
+ * get45DegConstrainer): a line's end is held to the other end, a circle's or an arc's handle to the centre, anything
+ * else to where the handle was.
+ */
+export function constrainHandle(orig: SNode, kind: string, key: string, p: Pt, angle: string | undefined): Pt {
+  if (angle !== "45" && angle !== "90") return p;
+  if (kind === "dimension" || kind === "generated" || /^[em]/.test(key) || key === "rr") return p;   // edge lines and the radius handle move on their own lines
+  let ref: Pt | null = null;
+  if (kind === "gr_line") ref = pt(orig, key === "start" ? "end" : "start");
+  else if (kind === "gr_circle") ref = key === "center" ? null : pt(orig, "center");
+  else if (kind === "gr_arc") { const s = pt(orig, "start"), m = pt(orig, "mid"), e = pt(orig, "end"), a = s && m && e ? K.arcFrom3(s, m, e) : null; ref = a && key !== "center" ? [a.x, a.y] : null; }
+  if (!ref) { const h = editPoints({ kind, node: orig } as unknown as KItem).find((x) => x.key === key); ref = h ? h.p : null; }
+  if (!ref) return p;
+  const v = vsub(p, ref), sn = angle === "45" ? snap45(v) : snap90(v);
+  return [r6(ref[0] + sn[0]), r6(ref[1] + sn[1])];
+}
+/** ZONE::UnFill on a zone node: the filled areas go and the fill is no longer marked done (ZONE_POINT_EDIT_BEHAVIOR::UpdateItem). */
+export function unfillZoneNode(node: SNode) {
+  for (let i = node.length - 1; i > 0; i--) if (Array.isArray(node[i]) && (node[i] as SNode)[0] === "filled_polygon") node.splice(i, 1);
+  const fill = K.kid(node, "fill"); if (fill && fill[1] === "yes") fill.splice(1, 1);
+  return node;
+}
+export function editPointNode(orig: SNode, kind: string, key: string, p: Pt, raw: Pt | null | undefined, grid: ((p: Pt) => Pt) | null | undefined, opts?: EditOpts) {
   if (kind === "dimension") return dimEditNode(orig, key, p, raw || p, (grid || null));
+  p = constrainHandle(orig, kind, key, p, opts && !opts.ctrl ? opts.angle : undefined);
   if (kind === "gr_arc") {
     const g = arcEditGeometry(orig, key, p, raw || p, arcEditMode()); if (!g) return clone(orig);
     const node = clone(orig), cw = crossZ(g.mid[0] - g.start[0], g.mid[1] - g.start[1], g.end[0] - g.mid[0], g.end[1] - g.mid[1]) >= 0;
@@ -137,22 +253,44 @@ export function editPointNode(orig: SNode, kind: string, key: string, p: Pt, raw
   }
   const node = clone(orig);
   if (kind === "zone" || kind === "gr_poly") {
-    const pn = pePtsNode(node); const xs = pn ? K.kids(pn, "xy") : []; const nn = xs.length; if (!nn) return node;
-    const i = +key.slice(1);
+    const loc = peLocate(node, +key.slice(1)); if (!loc) return node;
+    const xs = K.kids(loc.node, "xy"), nn = xs.length, i = loc.index;
+    if (kind === "zone") unfillZoneNode(node);   // m_zone.UnFill()
     if (key[0] === "c") { xs[i][1] = r6(p[0]); xs[i][2] = r6(p[1]); }
-    else {   // an edge midpoint drags the edge: both its corners move by the same offset
-      const j = (i + 1) % nn; const a = [K.num(xs[i][1]), K.num(xs[i][2])], b = [K.num(xs[j][1]), K.num(xs[j][2])];
-      const d = [p[0] - (a[0] + b[0]) / 2, p[1] - (a[1] + b[1]) / 2];
-      xs[i][1] = r6(a[0] + d[0]); xs[i][2] = r6(a[1] + d[1]); xs[j][1] = r6(b[0] + d[0]); xs[j][2] = r6(b[1] + d[1]);
+    else {   // an edge line: POLYGON_EDGE_DRAG_POLICY (converging, Ctrl: fixed length) from the cursor itself
+      const j = (i + 1) % nn;
+      const [a, b] = polyEdgeDrag(loc.pts, i, raw || p, !!(opts && opts.ctrl), grid && opts && opts.gridPitch ? opts.gridPitch : 0);
+      xs[i][1] = r6(a[0]); xs[i][2] = r6(a[1]); xs[j][1] = r6(b[0]); xs[j][2] = r6(b[1]);
     }
   } else if (kind === "gr_line") setXY(node, key, p);
-  else if (kind === "gr_rect") {
-    const a = pt(orig, "start"), b = pt(orig, "end"); let x0 = a![0], y0 = a![1], x1 = b![0], y1 = b![1];
-    // corners TL TR BR BL as start / end coordinates; an edge moves one coordinate
-    const sx = (v: number) => { x0 = v; }, sy = (v: number) => { y0 = v; }, ex = (v: number) => { x1 = v; }, ey = (v: number) => { y1 = v; };
-    ({ r0: () => { sx(p[0]); sy(p[1]); }, r1: () => { ex(p[0]); sy(p[1]); }, r2: () => { ex(p[0]); ey(p[1]); }, r3: () => { sx(p[0]); ey(p[1]); },
-      e0: () => sy(p[1]), e1: () => ex(p[0]), e2: () => ey(p[1]), e3: () => sx(p[0]) } as Record<string, () => void>)[key]();
-    setXY(node, "start", [x0, y0]); setXY(node, "end", [x1, y1]);
+  else if (kind === "gr_curve") {   // EDA_BEZIER_POINT_EDIT_BEHAVIOR::UpdateItem: the dragged point alone
+    const pn = K.kid(node, "pts"), xs = pn ? K.kids(pn, "xy") : [], i = +key.slice(1);
+    if (xs[i]) { xs[i][1] = r6(p[0]); xs[i][2] = r6(p[1]); }
+  }
+  else if (kind === "gr_rect" || kind === "gr_text_box" || kind === "barcode") {
+    // RECTANGLE_POINT_EDIT_BEHAVIOR::UpdateItem after PinEditedCorner: a corner or an edge never crosses the
+    // opposite one (one mil stays between them), the centre moves the rectangle, the radius handle rounds it
+    const r0 = peRect(orig, kind); if (!r0) return node;
+    let [L, T, R, B] = r0; let radius = rectRadius(orig);
+    ({ r0: () => { L = Math.min(p[0], R - RECT_MIN); T = Math.min(p[1], B - RECT_MIN); }, r1: () => { R = Math.max(p[0], L + RECT_MIN); T = Math.min(p[1], B - RECT_MIN); },
+      r2: () => { R = Math.max(p[0], L + RECT_MIN); B = Math.max(p[1], T + RECT_MIN); }, r3: () => { L = Math.min(p[0], R - RECT_MIN); B = Math.max(p[1], T + RECT_MIN); },
+      e0: () => { T = Math.min(p[1], B - RECT_MIN); }, e1: () => { R = Math.max(p[0], L + RECT_MIN); }, e2: () => { B = Math.max(p[1], T + RECT_MIN); }, e3: () => { L = Math.min(p[0], R - RECT_MIN); },
+      rc: () => { const dx = p[0] - (L + R) / 2, dy = p[1] - (T + B) / 2; L += dx; R += dx; T += dy; B += dy; },
+      rr: () => { const maxR = Math.min(R - L, B - T) / 2; radius = R - Math.max(R - maxR, Math.min(R, p[0])); } } as Record<string, () => void>)[key]?.();
+    if (kind === "barcode") {   // BARCODE_POINT_EDIT_BEHAVIOR: the centre and the size (turned back by the barcode's angle)
+      const at = K.kid(node, "at")!, sz = K.kid(node, "size")!, ang = ((K.num(at[3], 0) % 360) + 360) % 360;
+      at[1] = r6((L + R) / 2); at[2] = r6((T + B) / 2);
+      const w = R - L, h = B - T; sz[1] = r6(ang % 180 ? h : w); sz[2] = r6(ang % 180 ? w : h);
+      return node;
+    }
+    // setLeft / setRight / setTop / setBottom under SwapX / SwapY: the start and the end keep their sides
+    const a = pt(orig, "start")!, b = pt(orig, "end")!, sx = a[0] > b[0], sy = a[1] > b[1];
+    setXY(node, "start", [sx ? R : L, sy ? B : T]); setXY(node, "end", [sx ? L : R, sy ? T : B]);
+    if (key === "rr") {
+      const rn = K.kid(node, "radius");
+      if (radius > 0) { if (rn) rn[1] = r6(radius); else node.splice(node.indexOf(K.kid(node, "end")!) + 1, 0, ["radius", r6(radius)]); }
+      else if (rn) node.splice(node.indexOf(rn), 1);
+    }
   } else if (kind === "gr_circle") {
     if (key === "center") { const c = pt(orig, "center"), e = pt(orig, "end"); setXY(node, "center", p); setXY(node, "end", [e![0] + p[0] - c![0], e![1] + p[1] - c![1]]); }
     else setXY(node, "end", p);
@@ -172,15 +310,24 @@ export function editHandleAt(doc: BoardDoc, x: number, y: number, tol: number) {
   for (const h of editPoints(it)) { const d = Math.max(Math.abs(h.p[0] - x), Math.abs(h.p[1] - y)); if (d <= bd) { bd = d; best = h; } }
   return best ? { it, h: best } : null;
 }
-/** PCB_POINT_EDITOR::addCorner: a corner on the zone / polygon edge nearest the cursor, or a line split there. */
+/**
+ * PCB_POINT_EDITOR::addCorner: a corner on the zone / polygon side nearest the cursor (holes included; at the side's
+ * middle when the nearest point is one of its ends), or a line or an arc split there.
+ */
 export function addCornerChanges(doc: BoardDoc, id: string, at: Pt) {
   const it = doc.items.get(id); if (!it) return [];
   if (it.kind === "zone" || it.kind === "gr_poly") {
-    const pts = pePolyPts(it.node); if (pts.length < 2) return [];
-    let bi = -1, bd = Infinity, bp: Pt | null = null;
-    for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; const q = closestOnSeg(at, a, b); const d = Math.hypot(q[0] - at[0], q[1] - at[1]); if (d < bd) { bd = d; bi = i; bp = q; } }
-    const node = clone(it.node); const pn = pePtsNode(node); const xs = K.kids(pn!, "xy"); const after = xs[bi];
-    pn!.splice(pn!.indexOf(after) + 1, 0, ["xy", r6(bp![0]), r6(bp![1])]);
+    const node = clone(it.node);
+    let best: { pn: SNode; i: number; a: Pt; b: Pt } | null = null, bd = Infinity;
+    for (const pn of peContours(node)) {
+      const pts = ptsOfList(pn); if (pts.length < 2) continue;
+      for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; const q = closestOnSeg(at, a, b); const d = Math.hypot(q[0] - at[0], q[1] - at[1]); if (d < bd) { bd = d; best = { pn, i, a, b }; } }
+    }
+    if (!best) return [];
+    let q = closestOnSeg(at, best.a, best.b).map(r6);
+    if (samePt(q, best.a) || samePt(q, best.b)) q = [r6((best.a[0] + best.b[0]) / 2), r6((best.a[1] + best.b[1]) / 2)];   // never a duplicate of a corner
+    const xs = K.kids(best.pn, "xy");
+    best.pn.splice(best.pn.indexOf(xs[best.i]) + 1, 0, ["xy", q[0], q[1]]);
     return [replacedChange(it, node)];
   }
   if (it.kind === "gr_line") {   // the segment splits in two at the cursor's projection
@@ -189,21 +336,91 @@ export function addCornerChanges(doc: BoardDoc, id: string, at: Pt) {
     const second = clone(it.node); setXY(second, "start", q); const u = K.kid(second, "uuid"); if (u) u[1] = K.newUuid ? K.newUuid() : u[1] + "-1";
     return [replacedChange(it, first), addedChange(doc, second)];
   }
+  if (it.kind === "gr_arc") {   // "Split Arc": the arc ends at the nearest point on it and a second arc runs on to the old end
+    const s = pt(it.node, "start"), m = pt(it.node, "mid"), e = pt(it.node, "end"), a = s && m && e ? K.arcFrom3(s, m, e) : null; if (!a) return [];
+    const c: Pt = [a.x, a.y], ang = (q: Pt) => Math.atan2(q[1] - c[1], q[0] - c[0]);
+    // the sweep from the start through the mid to the end, signed
+    const norm = (x: number) => { while (x <= -Math.PI) x += 2 * Math.PI; while (x > Math.PI) x -= 2 * Math.PI; return x; };
+    const d1 = norm(ang(m!) - ang(s!)), d2 = norm(ang(e!) - ang(m!)), sweep = d1 + d2, a0 = ang(s!);
+    let t = norm(ang(at) - a0); if (sweep > 0 && t < 0) t += 2 * Math.PI; if (sweep < 0 && t > 0) t -= 2 * Math.PI;
+    if (Math.abs(t) >= Math.abs(sweep)) {   // off the arc: SHAPE_ARC::NearestPoint is the nearer end
+      t = Math.hypot(at[0] - s![0], at[1] - s![1]) <= Math.hypot(at[0] - e![0], at[1] - e![1]) ? 0 : sweep;
+    }
+    if (Math.abs(t) < 1e-9 || Math.abs(t - sweep) < 1e-9) return [];
+    const on = (x: number): Pt => [r6(c[0] + a.r * Math.cos(a0 + x)), r6(c[1] + a.r * Math.sin(a0 + x))];
+    const q = on(t), first = clone(it.node), second = clone(it.node);
+    setXY(first, "start", s!); setXY(first, "mid", on(t / 2)); setXY(first, "end", q);
+    setXY(second, "start", q); setXY(second, "mid", on((t + sweep) / 2)); setXY(second, "end", e!);
+    const u = K.kid(second, "uuid"); if (u) u[1] = K.newUuid ? K.newUuid() : u[1] + "-1";
+    return [replacedChange(it, first), addedChange(doc, second)];
+  }
   return [];
 }
-/** PCB_POINT_EDITOR::canAddCorner: zones, polygons and plain lines. */
-export function canAddCorner(it: KItem) { return !!it && (it.kind === "zone" || it.kind === "gr_poly" || it.kind === "gr_line"); }
-/** PCB_POINT_EDITOR::canRemoveCorner: a zone or polygon with more than three corners, one of them under the cursor. */
-export function canRemoveCorner(doc: BoardDoc, id: string, at: Pt) { const it = doc.items.get(id); if (!it || (it.kind !== "zone" && it.kind !== "gr_poly") || pePolyPts(it.node).length <= 3) return false; return !at || removeCornerChanges(doc, id, at, handleTol()).length > 0; }
+/** The commit label of addCorner: "Add Zone Corner" for outlines, "Split Segment" / "Split Arc" for a line or an arc. */
+export const addCornerLabel = (it: KItem | undefined) => (it && it.kind === "gr_line" ? "Split Segment" : it && it.kind === "gr_arc" ? "Split Arc" : "Add Zone Corner");
+/** PCB_POINT_EDITOR::CanAddCorner: zones, polygons, plain lines and arcs. */
+export function canAddCorner(it: KItem) { return !!it && (it.kind === "zone" || it.kind === "gr_poly" || it.kind === "gr_line" || it.kind === "gr_arc"); }
+/** The corner of a zone / polygon (any contour) within tol of a point, as its flat index, or -1. */
+export function cornerAt(node: SNode, at: Pt, tol: number) {
+  let bi = -1, bd = tol, g = 0;
+  for (const pn of peContours(node)) for (const p of ptsOfList(pn)) { const d = Math.max(Math.abs(p[0] - at[0]), Math.abs(p[1] - at[1])); if (d <= bd) { bd = d; bi = g; } g++; }
+  return bi;
+}
+/**
+ * PCB_POINT_EDITOR::CanRemoveCorner: a corner of a zone or polygon under the cursor; the main outline must keep
+ * three, a hole may lose them all (it is removed with its last corners).
+ */
+export function canRemoveCorner(doc: BoardDoc, id: string, at: Pt) {
+  const it = doc.items.get(id); if (!it || (it.kind !== "zone" && it.kind !== "gr_poly")) return false;
+  if (!at) return pePolyPts(it.node).length > 3 || peContours(it.node).length > 1;
+  return removeCornerChanges(doc, id, at, handleTol()).length > 0;
+}
 export function closestOnSeg(p: Pt, a: Pt, b: Pt) { const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy; if (!L) return a.slice(); const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L)); return [a[0] + t * dx, a[1] + t * dy]; }
-/** PCB_POINT_EDITOR::removeCorner: the zone / polygon corner under the cursor, while more than three remain. */
+/**
+ * PCB_POINT_EDITOR::removeCorner: the zone / polygon corner under the cursor goes while its contour keeps three;
+ * a hole down to three corners is removed whole (RemoveContour).
+ */
 export function removeCornerChanges(doc: BoardDoc, id: string, at: Pt, tol: number) {
   const it = doc.items.get(id); if (!it || (it.kind !== "zone" && it.kind !== "gr_poly")) return [];
-  const pts = pePolyPts(it.node); if (pts.length <= 3) return [];
-  let bi = -1, bd = tol; pts.forEach((p, i) => { const d = Math.max(Math.abs(p[0] - at[0]), Math.abs(p[1] - at[1])); if (d <= bd) { bd = d; bi = i; } });
-  if (bi < 0) return [];
-  const node = clone(it.node); const pn = pePtsNode(node); pn!.splice(pn!.indexOf(K.kids(pn!, "xy")[bi]), 1);
+  const g = cornerAt(it.node, at, tol); if (g < 0) return [];
+  const node = clone(it.node), loc = peLocate(node, g)!;
+  if (loc.pts.length > 3) loc.node.splice(loc.node.indexOf(K.kids(loc.node, "xy")[loc.index]), 1);
+  else if (loc.contour > 0) { const pg = K.kids(node, "polygon")[loc.contour]; node.splice(node.indexOf(pg), 1); }
+  else return [];
   return [replacedChange(it, node)];
+}
+/** The commit label of removeCorner / chamferCorner by item. */
+export const removeCornerLabel = (it: KItem | undefined) => (it && it.kind === "zone" ? "Remove Zone Corner" : "Remove Polygon Corner");
+export const chamferCornerLabel = (it: KItem | undefined) => (it && it.kind === "zone" ? "Break Zone Corner" : "Break Polygon Corner");
+/**
+ * PCB_POINT_EDITOR::chamferCorner: the corner nearest the cursor (holes included) is replaced by two, set back along
+ * its two sides by min( 5 mm, a quarter of each side ) (ComputeChamferPoints with equal setbacks, in nm as there).
+ */
+export function chamferCornerChanges(doc: BoardDoc, id: string, at: Pt) {
+  const it = doc.items.get(id); if (!it || (it.kind !== "zone" && it.kind !== "gr_poly")) return [];
+  const node = clone(it.node);
+  let g = -1, bd = Infinity, k = 0;
+  for (const pn of peContours(node)) for (const p of ptsOfList(pn)) { const d = Math.hypot(p[0] - at[0], p[1] - at[1]); if (d < bd) { bd = d; g = k; } k++; }
+  const loc = g < 0 ? null : peLocate(node, g); if (!loc || loc.pts.length < 3) return [];
+  const n = loc.pts.length, c = loc.pts[loc.index], prev = loc.pts[(loc.index - 1 + n) % n], next = loc.pts[(loc.index + 1) % n];
+  const la = Math.hypot(prev[0] - c[0], prev[1] - c[1]), lb = Math.hypot(next[0] - c[0], next[1] - c[1]);
+  const setback = Math.min(5e6, Math.trunc(la * 1e6 * 0.25), Math.trunc(lb * 1e6 * 0.25)) / 1e6;
+  if (!(setback > 0)) return [];   // "No chamfer to do"
+  const along = (to: Pt, l: number): Pt => [r6(c[0] + (to[0] - c[0]) * setback / l), r6(c[1] + (to[1] - c[1]) * setback / l)];
+  const pa = along(prev, la), pb = along(next, lb);
+  if (samePt(pa, prev) || samePt(pb, next)) return [];   // m_updated_seg_a / _b missing: nothing is done
+  const xs = K.kids(loc.node, "xy"), at0 = loc.node.indexOf(xs[loc.index]);
+  loc.node.splice(at0, 1, ["xy", pa[0], pa[1]], ["xy", pb[0], pb[1]]);
+  if (it.kind === "zone") unfillZoneNode(node);   // SetNeedRefill
+  return [replacedChange(it, node)];
+}
+/** The handle a "Move Corner to Location" would move: the one under the cursor, a corner or an edge line's midpoint. */
+export function movePointTitle(key: string) { return /^[em]\d/.test(key) ? { title: "Move Midpoint to Location", label: "Move Midpoint" } : { title: "Move Corner to Location", label: "Move Corner" }; }
+/** PCB_POINT_EDITOR::movePoint after the dialog: the handle set to the entered position, the item updated (no grid, no angle limit). */
+export function movePointChanges(doc: BoardDoc, id: string, key: string, to: Pt) {
+  const it = doc.items.get(id); if (!it || !PE_KINDS.has(it.kind)) return [];
+  const node = editPointNode(it.node, it.kind, key, to, to, null);
+  return K.serialize(node) === K.serialize(it.node) ? [] : [replacedChange(it, node)];
 }
 export const handleTol = () => 6 * (S.mmPerPx || 0.05);   // a few screen pixels around the 8 px handle
 export function onHandlePointerDown(ev: PointerEvent) {
@@ -213,23 +430,26 @@ export function onHandlePointerDown(ev: PointerEvent) {
   const doc = liveDoc(); if (!doc) return; const mm = ctx.worldMm(ev);
   const hit = editHandleAt(doc, mm[0], mm[1], handleTol()); if (!hit) return;
   ev.stopImmediatePropagation(); ev.preventDefault();
+  S.peditCtrl = false;
   S.pedit = { id: hit.it.id, kind: hit.it.kind, key: hit.h.key, orig: clone(hit.it.node), start: mm, moved: false, ignoreGrid: !!(hit.h as { ignoreGrid?: boolean }).ignoreGrid };
   if (isTuningPattern(hit.it)) genStartEdit(ctx, hit.it);   // PCB_POINT_EDITOR: genStartEdit
   try { stage.setPointerCapture(ev.pointerId!); } catch (e) { /* synthetic event */ }
 }
-export function editHandleMove(ctx: PcbCtx, mm: Pt) {
+export function editHandleMove(ctx: PcbCtx, mm: Pt, ev?: { ctrlKey?: boolean; metaKey?: boolean } | null) {
+  if (ev) S.peditCtrl = !!(ev.ctrlKey || ev.metaKey);
   const pe = S.pedit; if (!pe) return; const it = ctx.doc.items.get(pe.id); if (!it) { S.pedit = null; return; }
   if (!pe.moved && Math.hypot(mm[0] - pe.start[0], mm[1] - pe.start[1]) < 1e-3) return;
   const p = pe.ignoreGrid ? mm : ctx.snapOn && ctx.snap ? ctx.snap([mm[0], mm[1]]) : mm;   // the amplitude and spacing handles ignore the grid
   if (pe.kind === "generated") { pe.moved = true; pe.node = tuningEditNode(pe.orig, pe.key, p); genUpdateEdit(ctx, pe.node); return; }   // genUpdateEdit: re-tuned live
-  pe.moved = true; pe.node = editPointNode(pe.orig, pe.kind, pe.key, p, mm, ctx.snapOn && ctx.snap ? ctx.snap : null);
+  // the line mode's 45 / 90 limit unless Ctrl is held; Ctrl on a polygon edge keeps its length
+  pe.moved = true; pe.node = editPointNode(pe.orig, pe.kind, pe.key, p, mm, ctx.snapOn && ctx.snap ? ctx.snap : null, { ctrl: !!S.peditCtrl, gridPitch: ctx.snapOn ? ctx.gridPitch || 0 : 0, angle: angleSnapMode() });
   it.node.length = 0; it.node.push(...clone(pe.node!)); K.replaceChange(ctx.doc, it); ctx.requestRender();
 }
 export function editHandleUp(ctx: PcbCtx, commit: boolean) {
   const pe = S.pedit; S.pedit = null; if (!pe) return; const it = ctx.doc.items.get(pe.id); if (!it) { genCancelEdit(ctx); return; }
   if (pe.kind === "generated") { if (commit && pe.moved) genFinishEdit(ctx); else genCancelEdit(ctx); return; }   // genFinishEdit: "Edit Tuning Pattern"
   it.node.length = 0; it.node.push(...clone(pe.orig)); K.replaceChange(ctx.doc, it);   // the original back first: commit records the inverse
-  if (commit && pe.moved && pe.node && K.serialize(pe.node) !== K.serialize(pe.orig)) ctx.commit([replacedChange(it, pe.node)], "edit points");
+  if (commit && pe.moved && pe.node && K.serialize(pe.node) !== K.serialize(pe.orig)) ctx.commit([replacedChange(it, pe.node)], "Move Point");
   ctx.requestRender();
 }
 export function drawEditPoints(c: CanvasRenderingContext2D, ctx: PcbCtx, px: number) {

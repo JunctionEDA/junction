@@ -23,7 +23,7 @@ import { obj, projectJson, saveProject, sub } from "./project";
 import { openSchematicSetup } from "./schematic-setup";
 import { messageBox, textEntryBox } from "../editor/pcbdialogs/ui";
 import type { Units } from "../../../shared/store";
-import { ercJsonReport, ercTextReport, sevOf, shownBy } from "./erc-report";
+import { ercJsonReport, ercPhaseMessages, ercTextReport, sevOf, shownBy } from "./erc-report";
 import { messageText } from "../../../shared/units";
 import { KICAD_BASE_VERSION } from "../canvas/version";
 import { sheetList, type SheetInstance } from "./sch-hierarchy";
@@ -371,22 +371,24 @@ export function openErc(): void {
   };
   const rowMenu = (m: ErcViolation, x: number, y: number) => {
     const sev = severityOf(m.code), et = ruleTitle(m);
+    // the menu entries' help strings: listName follows the rule's severity (settings.GetSeverity)
+    const listName = sev === "error" ? "errors" : sev === "warning" ? "warnings" : "appropriate", SETUP = "Open the Schematic Setup dialog", ALSO = "Violation severities can also be edited in Schematic Setup";
     const items: PopItem[] = isExcluded(m)
-      ? [{ label: "Remove exclusion for this violation", run: () => exclude(m, false) },
+      ? [{ label: "Remove exclusion for this violation", title: `It will be placed back in the ${listName} list`, run: () => exclude(m, false) },
          { label: "Edit exclusion comment...", run: () => askComment(m.comment || "", (t) => exclude(m, true, t)) }]
-      : [{ label: "Exclude this violation", run: () => exclude(m, true) },
-         { label: "Exclude with comment...", run: () => askComment("", (t) => exclude(m, true, t)) }];
+      : [{ label: "Exclude this violation", title: `It will be excluded from the ${listName} list`, run: () => exclude(m, true) },
+         { label: "Exclude with comment...", title: `It will be excluded from the ${listName} list`, run: () => askComment("", (t) => exclude(m, true, t)) }];
     items.push({ sep: true });
     // SCH_INSPECTION_TOOL::InspectERCErrorMenuText then SCH_EDIT_TOOL::FixERCErrorMenuText, a separator after them
     const fixes = fixEntries(m); if (fixes.length) items.push(...fixes, { sep: true });
     if (m.code !== "pin_to_pin") {
-      if (sev === "warning") items.push({ label: `Change severity to Error for all '${et}' violations`, run: () => setSeverity(m, "error") });
-      else items.push({ label: `Change severity to Warning for all '${et}' violations`, run: () => setSeverity(m, "warning") });
+      if (sev === "warning") items.push({ label: `Change severity to Error for all '${et}' violations`, title: ALSO, run: () => setSeverity(m, "error") });
+      else items.push({ label: `Change severity to Warning for all '${et}' violations`, title: ALSO, run: () => setSeverity(m, "warning") });
     }
-    items.push({ label: `Ignore all '${et}' violations`, run: () => setSeverity(m, "ignore") }, { sep: true });
-    if (m.code === "pin_to_pin") items.push({ label: "Edit pin-to-pin conflict map...", run: () => openSchematicSetup("Pin Conflicts Map") });
-    else items.push({ label: "Edit violation severities...", run: () => openSchematicSetup("Violation Severity") });
-    if (m.code === "endpoint_off_grid") items.push({ label: "Edit connection grid spacing...", run: () => openSchematicSetup("Formatting") });
+    items.push({ label: `Ignore all '${et}' violations`, title: "Violations will not be checked or reported", run: () => setSeverity(m, "ignore") }, { sep: true });
+    if (m.code === "pin_to_pin") items.push({ label: "Edit pin-to-pin conflict map...", title: SETUP, run: () => openSchematicSetup("Pin Conflicts Map") });
+    else items.push({ label: "Edit violation severities...", title: SETUP, run: () => openSchematicSetup("Violation Severity") });
+    if (m.code === "endpoint_off_grid") items.push({ label: "Edit connection grid spacing...", title: SETUP, run: () => openSchematicSetup("Formatting") });
     popupMenu(x, y, items);
   };
   // OnERCItemDClick: Show( false ) on the modeless dialog, nothing destroyed
@@ -433,6 +435,8 @@ export function openErc(): void {
     const close = closeBtn(), busy = ["kd-erc-run", "kd-erc-del", "kd-erc-delall", "kd-erc-save"].map(footBtn);
     if (close) close.textContent = "Cancel";
     for (const b of busy) if (b) b.disabled = true;
+    // ERC_TESTER::RunTests' AdvancePhase lines, for the tests the severities leave enabled
+    const sv = severities(); for (const line of ercPhaseMessages((code) => severityOf(code, sv) !== "ignore")) report(line);
     try {
       const mine = await runHierErc({ showAllErrors: opts.showAllErrors }, (l) => withExclusions(l as unknown as ErcViolation[]) as unknown as HierMarker[]);
       if (cancelled) { forgetHierErc(); publishMarkers([]); }
@@ -496,6 +500,7 @@ export function openErc(): void {
     };
     const sheets = list.length ? list.map((x) => x.sheetPath) : undefined;
     const name = json ? "ERC.json" : "ERC.rpt";
+    try {
     if (json) {
       // the KIID path of each sheet instance: the top-level sheet's uuid, then the sheet symbols down to it
       const top = (x: SheetInstance): SheetInstance => { let t = x; for (let k = 0; k < 64 && t.sheetItemId && t.parentDocId; k++) { const p = list.find((q) => q.docId === t.parentDocId && q.uuidPath.join("/") === t.uuidPath.slice(0, -1).join("/")); if (!p) break; t = p; } return t; };
@@ -506,6 +511,7 @@ export function openErc(): void {
       download(name, ercJsonReport(markers(), { ...show, units: u, date: isoNow(), source, kicadVersion: KICAD_BASE_VERSION, ignored: ignoredRules(severities()),
         sheets: list.map((x) => ({ path: x.sheetPath, uuidPath: uuidPath(x) })), sheetOf: idx, title: errorMessage, text: unescape }), "application/json;charset=utf-8");
     } else download(name, ercTextReport(markers(), { ...show, units: u, date: isoNow(), ignored: ignoredTests(severities()), sheets, sheetOf, title: errorMessage, text: unescape }), "text/plain;charset=utf-8");
+    } catch { messageBox("Error", `Failed to create file '${name}'.`); return; }   // DisplayErrorMessage
     report(`Report file '${name}' created.`);
   };
   api = KD().open({

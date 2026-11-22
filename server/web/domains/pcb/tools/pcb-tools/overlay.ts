@@ -2,13 +2,13 @@
 import type { BoardDoc, CopperShape, DesignSettings, DrawState, GeomPrim, PcbCtx, Pt, RatsnestLine, SnapType } from "./types";
 import { appGlobal, editorState, netlistCached, netNameOf, sizesOf } from "./app-state";
 import { drawArcPreview } from "./arcs";
-import { dimensionLabel, drawStatusPopup, drawTwoPointAssistant, textNextToCursor } from "./assistants";
+import { dimensionLabel, drawStatusPopup, drawTwoPointAssistant, textNextToCursor, AUX_ITEMS_COLOR, drawPickerPrompt } from "./assistants";
 import { DIM_TYPE, dimensionNode, snap45 } from "./dimensions";
 import type { DimSpec } from "./dimensions";
 import { padShape, polysOverlap, rectCore, shapeOffset } from "./distances";
 import { courtyards, netClearance } from "./drc";
 import { settingsOf } from "./dialogs";
-import { POLY_TOOLS, RULE_AREA_LAYERS, drawWidth } from "./draw-modes";
+import { POLY_TOOLS, RULE_AREA_LAYERS, curveGeom, drawWidth } from "./draw-modes";
 import { selectionIds } from "./groups";
 import { drawGroupFrames, enteredGroupIds } from "./group-edit";
 import { netTable, ratsnest } from "./netlist";
@@ -377,8 +377,13 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
       for (let i = 1; i < L.cols; i++) line(c, [L.x + L.cw * i, L.y], [L.x + L.cw * i, L.y + h]);
       for (let i = 1; i < L.rows; i++) line(c, [L.x, L.y + L.ch * i], [L.x + w, L.y + L.ch * i]);
     } else if (d.shape === "garc") drawArcPreview(c, d, px, color(layer)); else if (d.shape === "gcurve") {
-      const pts = d.pts.concat([d.cur]); polyline(c, K.bezierPts(pts), false);
-      c.setLineDash([2 * px, 2 * px]); polyline(c, pts, false); c.setLineDash([]);   // the control polygon
+      // BEZIER_GEOM_MANAGER's four points for the clicks so far, and BEZIER_ASSISTANT's guides: a dashed line from the
+      // start to control 1 and, once the end is set, one of double length through the end (control 2 and its mirror)
+      const g = curveGeom(d.pts, d.cur); polyline(c, K.bezierPts([g[0], g[1], g[3], g[2]]), false);
+      c.save(); c.globalAlpha = 1; c.lineWidth = px; c.strokeStyle = AUX_ITEMS_COLOR; c.setLineDash([12 * px, 6 * px]);
+      line(c, g[0], g[1]);
+      if (d.pts.length >= 3) line(c, g[3], [2 * g[2][0] - g[3][0], 2 * g[2][1] - g[3][1]]);
+      c.restore();
     } else if (POLY_TOOLS.has(d.shape)) {
       if (d.pending) { /* the properties dialog is open: nothing drawn yet */ }
       else {
@@ -427,6 +432,7 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
   drawClearanceOutlines(c, ctx, px * (view.dpr || 1));   // the active copper layer's clearance lines (always-show tracks / vias, pads)
   drawGroupFrames(c, ctx, px * (view.dpr || 1));   // PCB_PAINTER::draw( PCB_GROUP ): a selected or entered group's box
   drawStatusPopup(c, px * (view.dpr || 1));
+  drawPickerPrompt(c, px * (view.dpr || 1));
   // delete tool: what the click would remove is brightened by the document pass (brightenedIds), as KiCad does
   // a move's magnetic snap (the anchor the cursor was pulled onto): GRID_HELPER's SNAP_INDICATOR
   const cpx = px * (view.dpr || 1);

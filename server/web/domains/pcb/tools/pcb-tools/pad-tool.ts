@@ -71,7 +71,7 @@ export function ipcRoundingRatio(w: number, h: number): number { const m = Math.
 export function defaultPad(type: PadType): SNode {
   switch (type) {
   case "smd": return ["pad", "", "smd", "roundrect", ["at", 0, 0], ["size", 2, 1], ["layers", "F.Cu", "F.Mask", "F.Paste"], ["roundrect_rratio", ipcRoundingRatio(2, 1)]];
-  case "npth": return ["pad", "", "np_thru_hole", "circle", ["at", 0, 0], ["size", 1, 1], ["drill", 1], ["layers", "*.Cu", "*.Mask"]];
+  case "npth": return ["pad", "", "np_thru_hole", "circle", ["at", 0, 0], ["size", 1, 1], ["drill", 1], ["layers", "F&B.Cu", "*.Mask"]];   // PAD::UnplatedHoleMask
   case "paste": return ["pad", "", "smd", "roundrect", ["at", 0, 0], ["size", 1, 1], ["layers", "F.Paste"], ["roundrect_rratio", ipcRoundingRatio(1, 1)]];
   case "mask": return ["pad", "", "smd", "roundrect", ["at", 0, 0], ["size", 1, 1], ["layers", "F.Mask"], ["roundrect_rratio", ipcRoundingRatio(1, 1)]];
   case "conn": return ["pad", "", "connect", "rect", ["at", 0, 0], ["size", 2.54, 1.27], ["layers", "F.Cu", "F.Mask"]];

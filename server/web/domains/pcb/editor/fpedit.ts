@@ -16,6 +16,7 @@
 import { loadPinnedLibs, setLibPinned } from "../library/pinned";
 import { setStatusBar, state, store } from "./appstore";
 import { keyName } from "../../../shared/keys";
+import { getInactiveMode, setInactiveMode } from "./panels/appearance";
 import { E } from "./state";
 import { showPane, syncSchModes } from "./panes";
 import { commitObservers, setTool, toolCtx, undoStack } from "./tools";
@@ -959,10 +960,14 @@ function pushPadSettings(): void {
 /** PAD_TOOL::ExitPadEditMode / RecombinePad: the shapes drawn on the pad's layer go back into the custom pad. */
 function exitPadEditMode(): void {
   const doc = E.kdoc as KDoc | null; const id = FP.padEdit; if (!doc || !id) return;
-  const ctx = toolCtx(); FP.padEdit = null;
+  const ctx = toolCtx(); FP.padEdit = null; leavePadEditContrast();
   if (doc.items.has(id)) { const r = PT().fpPads.recombinePadChanges(doc, id); ctx.setSelection([]); if (r.changes.length) ctx.commit(r.changes, "Edit Pad"); }
   toast("", 1);
 }
+/** PAD_TOOL::m_previousHighContrastMode: the inactive-layer mode pad edit mode was entered with. */
+let padEditContrast: ReturnType<typeof getInactiveMode> | null = null;
+/** PAD_TOOL::ExitPadEditMode: the contrast mode goes back to what it was when the mode was entered. */
+function leavePadEditContrast(): void { const prev = padEditContrast; padEditContrast = null; if (prev && prev !== getInactiveMode()) setInactiveMode(prev); }
 function editPad(): void {
   const doc = E.kdoc as KDoc | null; if (!doc || !isFpEdit() || E.viewOnly) return;
   const ctx = toolCtx();
@@ -973,6 +978,8 @@ function editPad(): void {
   if (ch.length) ctx.commit(ch, "Edit Pad");
   ctx.setSelection([]); const pcbSel = CollabTools.pcb && (CollabTools.pcb.state as unknown as { sel?: Set<string> }).sel; if (pcbSel) pcbSel.clear();
   FP.padEdit = id;
+  // PAD_TOOL::enterPadEditMode: the contrast mode is remembered and Normal becomes Dimmed while the pad is edited
+  padEditContrast = getInactiveMode(); if (padEditContrast === "normal") setInactiveMode("dim");
   const it = doc.items.get(id); if (it) E.activeLayer = PT().fpPads.principalLayer(it.node);
   toast(`Pad Edit Mode.  Press ${keyName("Ctrl+E")} again to exit.`, 24 * 3600 * 1000);
 }
@@ -988,7 +995,7 @@ window.addEventListener("kc-doc-saved", ((ev: CustomEvent) => {
     FD().markFootprintSaved(E.kdoc, text); FP.snapSeq = Math.max(FP.snapSeq, seq); refreshTitle();
   })();
 }) as EventListener);
-commitObservers.push((phase) => { if (phase === "after" && FP.padEdit && E.kdoc && !E.kdoc.items.has(FP.padEdit)) { FP.padEdit = null; toast("", 1); } });
+commitObservers.push((phase) => { if (phase === "after" && FP.padEdit && E.kdoc && !E.kdoc.items.has(FP.padEdit)) { FP.padEdit = null; leavePadEditContrast(); toast("", 1); } });
 
 /** FOOTPRINT_EDIT_FRAME::ExportFootprint: the .kicad_mod as KiCad writes it (PCB_IO_KICAD_SEXPR, Prettify). */
 function exportFootprint(): void {

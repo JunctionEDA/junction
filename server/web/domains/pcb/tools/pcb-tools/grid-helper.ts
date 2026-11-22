@@ -64,7 +64,9 @@ export function itemAnchors(it: KItem, from: boolean, mouse: Pt | null, gridPitc
   const out: SnapAnchor[] = []; const n = it.node, k = it.kind;
   const f = (opts && opts.filter) || null, mag = (opts && opts.magnetic) || magneticSettings();
   const off = (key: string) => from && !!f && f[key] === false;
-  const add = (p: Pt | null | undefined, flags: number, t?: SnapType) => { if (p) { const a = [p[0], p[1]] as SnapAnchor; a.t = t || "none"; a.f = flags; a.id = it.id; out.push(a); } };
+  // the anchor is on a graphic shape (GetSnapped() is a PCB_SHAPE: lines, rectangles, circles, arcs, polygons, beziers, text boxes)
+  const isShape = /^gr_(line|rect|circle|arc|poly|curve|text_box)$/.test(it.kind);
+  const add = (p: Pt | null | undefined, flags: number, t?: SnapType) => { if (p) { const a = [p[0], p[1]] as SnapAnchor; a.t = t || "none"; a.f = flags; a.id = it.id; if (isShape) a.shape = true; out.push(a); } };
   const rectPoints = (x0: number, y0: number, x1: number, y1: number) => {   // addRectPoints: the centre, the corners, the middle of each side
     const fl = C | SN; add([(x0 + x1) / 2, (y0 + y1) / 2], fl, "center");
     for (const p of [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]) add(p, fl, "corner"); for (const p of [[(x0 + x1) / 2, y0], [x1, (y0 + y1) / 2], [(x0 + x1) / 2, y1], [x0, (y0 + y1) / 2]]) add(p, fl, "mid");
@@ -195,7 +197,7 @@ export function snapAnchors(it: KItem, only: string, gridPitch: number, ref?: Pt
     const l = K.kid(c as SNode, "layer"); const layer = l ? K.str(l[1]) : "";
     if ((only && layer !== only) || (hidden && hidden.has(layer))) continue;
     const local: Pt | null = ref ? (() => { const [x, y] = rotator(-fa)(ref[0] - fx, ref[1] - fy); return [x, y] as Pt; })() : null;
-    for (const p of itemAnchors({ id: it.id, kind, node: c as SNode, layer, geom: [] } as unknown as KItem, false, local, gridPitch, opts)) { const [x, y] = R(p[0], p[1]); const q = [fx + x, fy + y] as SnapAnchor; q.t = p.t; q.f = p.f; q.id = it.id; out.push(q); }
+    for (const p of itemAnchors({ id: it.id, kind, node: c as SNode, layer, geom: [] } as unknown as KItem, false, local, gridPitch, opts)) { const [x, y] = R(p[0], p[1]); const q = [fx + x, fy + y] as SnapAnchor; q.t = p.t; q.f = p.f; q.id = it.id; if (p.shape) q.shape = true; out.push(q); }
   }
   return out;
 }

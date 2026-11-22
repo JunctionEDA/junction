@@ -92,11 +92,15 @@ export function cycleVia(ctx: PcbCtx, dir: number) {
   const R = sizesOf(ctx), fwd = dir !== -1;
   const sel = S.route ? null : sizeSelection(ctx);
   if (sel) {
-    const changes = [];
+    const changes = []; let complexPadstacks = 0;
     for (const it of sel) {
-      if (it.kind !== "via") continue; const sn = K.kid(it.node, "size"); const v = R.steppedVia(sn ? K.num(sn[1]) : 0, fwd); if (!v) continue;
-      const node = clone(it.node); const s2 = K.kid(node, "size"), d2 = K.kid(node, "drill"); if (s2) s2[1] = r6(v.diameter); if (d2 && v.drill > 0) d2[1] = r6(v.drill); changes.push(replacedChange(it, node));
+      if (it.kind !== "via") continue;
+      // a via whose padstack is not PADSTACK::MODE::NORMAL is left alone
+      const ps = K.kid(it.node, "padstack"), mode = ps && K.kid(ps, "mode"); if (mode && K.str(mode[1]) !== "normal") { complexPadstacks++; continue; }
+      const sn = K.kid(it.node, "size"); const v = R.steppedVia(sn ? K.num(sn[1]) : 0, fwd); if (!v) continue;
+      const node = clone(it.node); const s2 = K.kid(node, "size"), d2 = K.kid(node, "drill"); if (s2) s2[1] = r6(v.diameter); if (d2) d2[1] = r6(v.drill); changes.push(replacedChange(it, node));   // via->SetDrill( dims.m_Drill ): always the preset's
     }
+    if (!changes.length && complexPadstacks > 0) ctx.toast(`${fwd ? "Increase Via Size" : "Decrease Via Size"} not supported on complex padstacks.`);
     if (changes.length) ctx.commit(changes, fwd ? "Increase Via Size" : "Decrease Via Size");
     return true;
   }

@@ -268,3 +268,77 @@ export function effectivePadNumber(lib: SNode | null, o: PinMapOverride, footpri
   if (o.mode !== "identity" && o.edits.has(pinNumber)) return o.edits.get(pinNumber) as string;
   return map && map.entries.has(pinNumber) ? map.entries.get(pinNumber) as string : pinNumber;
 }
+
+// ---------------------------------------------------------------- PANEL_EMBEDDED_FILES on a symbol's library copy
+/** The names of the library symbol's (embedded_files (file (name …) …)). */
+export function embeddedFileNames(lib: SNode | null): string[] {
+  const ef = lib && kid(lib, "embedded_files"); return ef ? kids(ef, "file").map((f) => str((kid(f, "name") || [])[1])) : [];
+}
+/**
+ * PANEL_EMBEDDED_FILES::TransferDataFromWindow on the library copy: the files not in `keep` go, each added (file …)
+ * form replaces the file of its name or joins the list, and (embedded_fonts yes|no) follows the box ((embedded_fonts)
+ * comes before (embedded_files), both after the units).  True when the node changed.
+ */
+export function applyEmbeddedFiles(lib: SNode, keep: string[], added: string[], embedFonts: boolean): boolean {
+  const before = JSON.stringify(lib);
+  let ef = kid(lib, "embedded_files");
+  if (ef) { const names = new Set(keep); for (let j = ef.length - 1; j >= 1; j--) { const c = ef[j]; if (isList(c) && c[0] === "file" && !names.has(str((kid(c as SNode, "name") || [])[1]))) ef.splice(j, 1); } }
+  for (const text of added) {
+    const node = parse(text), name = str((kid(node, "name") || [])[1]);
+    if (!ef) { ef = ["embedded_files"] as unknown as SNode; lib.push(ef); }
+    const i = ef.findIndex((c, j) => j > 0 && isList(c) && c[0] === "file" && str((kid(c as SNode, "name") || [])[1]) === name);
+    if (i > 0) ef[i] = node; else ef.push(node);
+  }
+  if (ef && !kids(ef, "file").length) lib.splice(lib.indexOf(ef), 1);
+  const fonts = kid(lib, "embedded_fonts");
+  if (fonts) { if (yesOf(fonts) !== embedFonts) fonts[1] = (embedFonts ? "yes" : "no") as unknown as SNode; }
+  else if (embedFonts) { const at = lib.findIndex((c, j) => j > 1 && isList(c) && c[0] === "embedded_files"); lib.splice(at > 0 ? at : lib.length, 0, parse("(embedded_fonts yes)")); }
+  return JSON.stringify(lib) !== before;
+}
+const yesOf = (n: SNode): boolean => str(n[1]) !== "no";
+
+// ---------------------------------------------------------------- the Pin Functions table's order
+/**
+ * PIN_NUMBERS::Compare (common/pin_numbers.cpp): the strings split into numbers (digits with an optional sign and
+ * '.', 'v' or 'V' as the decimal point) and the text between them; numbers compare by value, a number sorts before
+ * text, text compares as text.  Negative, zero or positive.
+ */
+export function pinNumbersCompare(lhs: string, rhs: string): number {
+  const digit = (c: string | undefined): boolean => c !== undefined && c >= "0" && c <= "9";
+  const next = (s: string, at: { i: number }): string => {
+    if (at.i >= s.length) return "";
+    const begin = at.i; let c = s[at.i];
+    if (digit(c) || ((c === "+" || c === "-") && at.i < s.length - 1 && digit(s[at.i + 1]))) {
+      while (++at.i < s.length) { c = s[at.i]; if (digit(c) || c === "v" || c === "V" || c === ".") continue; break; }
+    } else {
+      while (++at.i < s.length) { if (digit(s[at.i])) break; }
+    }
+    return s.slice(begin, at.i);
+  };
+  const a = { i: 0 }, b = { i: 0 };
+  for (;;) {
+    const x = next(lhs, a), y = next(rhs, b);
+    if (!x && !y) return 0;
+    if (!x) return -2;
+    if (!y) return 2;
+    const nx = /[0-9]/.test(x), ny = /[0-9]/.test(y);
+    if (nx) {
+      if (!ny) return -2;
+      const v1 = parseFloat(x.replace(/[vV]/, ".")) || 0, v2 = parseFloat(y.replace(/[vV]/, ".")) || 0;
+      if (v1 < v2) return v1 === v2 - 1 ? -1 : -2;
+      if (v1 > v2) return v1 === v2 + 1 ? 1 : 2;
+    } else {
+      if (ny) return 2;
+      if (x !== y) return x < y ? -1 : 1;
+    }
+  }
+}
+/** SCH_PIN_TABLE_DATA_MODEL::compare: Number / Base Name / Alternate with PIN_NUMBERS::Compare, type and style without
+ *  case; rows that tie fall back to the pin number. */
+export function pinRowCompare(a: { number: string; name: string; alt: string; type: string; style: string }, b: { number: string; name: string; alt: string; type: string; style: string }, key: string, asc: boolean): number {
+  const val = (r: typeof a, k: string): string => (k === "alt" ? r.alt || r.name : k === "name" ? r.name : k === "type" ? r.type : k === "style" ? r.style : r.number);
+  let k = key, x = val(a, k), y = val(b, k);
+  if (x === y) { k = "number"; x = val(a, k); y = val(b, k); }
+  const c = k === "type" || k === "style" ? (x.toLowerCase() < y.toLowerCase() ? -1 : x.toLowerCase() > y.toLowerCase() ? 1 : 0) : pinNumbersCompare(x, y);
+  return asc ? c : -c;
+}

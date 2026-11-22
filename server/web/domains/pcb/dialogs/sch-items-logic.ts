@@ -5,6 +5,8 @@
 // themselves are in sch-items.ts.  Every writer edits only the children it owns and keeps the others, and their
 // order, as they were.
 
+import { isBusGroup, isBusVector } from "../canvas/busname";
+
 const K = (): KiCadCanvasApi => (globalThis as unknown as { KiCadCanvas: KiCadCanvasApi }).KiCadCanvas;
 const isList = Array.isArray;
 export const clone = (n: SNode): SNode => (K().cloneNode as (x: SNode) => SNode)(n);
@@ -109,7 +111,27 @@ export interface FieldRow {
   src: SNode | null;
   /** a field name template's row the symbol does not have yet (DIALOG_*_PROPERTIES "Add in any template fieldnames") */
   template?: boolean;
+  /** The placed symbol the field belongs to: h / v are then the justification as displayed (GetEffective*Justify). */
+  parent?: SNode | null;
 }
+/**
+ * SCH_FIELD::IsHorizJustifyFlipped / IsVertJustifyFlipped: does the parent symbol's transform draw a field's stored
+ * justification on the other side?  KiCad compares the rendered bounding box centre with the field position; the box
+ * of a left-justified text lies towards +x of its anchor (a top-justified one towards +y), is turned by the text angle
+ * (RotatePoint) and then by the symbol's TRANSFORM, and the side is read along the draw rotation's axis
+ * (GetDrawRotation: the text angle, swapped when the transform has a y1 term).  Only a placed symbol has a transform.
+ */
+export function justifyFlips(parent: SNode | null | undefined, vertical: boolean): { h: boolean; v: boolean } {
+  if (!parent || parent[0] !== "symbol" || !kid(parent, "lib_id")) return { h: false, v: false };
+  const m = kid(parent, "mirror"), T = (K().symbolTransform as (r: number, m: string) => number[])(atOf(parent)[2], m ? str(m[1]) : "");
+  const x1 = T[0], y1 = -T[1], x2 = T[2], y2 = -T[3];             // KiCad's own (Y-down) matrix
+  const tr = (dx: number, dy: number): [number, number] => { const [rx, ry] = vertical ? [dy, -dx] : [dx, dy]; return [x1 * rx + y1 * ry, x2 * rx + y2 * ry]; };
+  const drawVertical = vertical !== (y1 !== 0);
+  const ch = tr(1, 0), cv = tr(0, 1);                              // box centre of a LEFT / of a TOP justified text, from its anchor
+  return { h: drawVertical ? ch[1] > 0 : ch[0] < 0, v: drawVertical ? cv[0] < 0 : cv[1] < 0 };
+}
+const flipH = (h: HAlign): HAlign => (h === "left" ? "right" : h === "right" ? "left" : h);
+const flipV = (v: VAlign): VAlign => (v === "top" ? "bottom" : v === "bottom" ? "top" : v);
 /**
  * The field name templates the symbol does not define yet, as new rows shown per the template's visibility.  `rows`
  * gains them in place; `withoutUnusedTemplates` leaves out the ones still empty when the dialog closes, so a dialog
@@ -125,20 +147,23 @@ export const META_FIELD = /^ki_/;
 export function fieldName(p: SNode): string { return str(p[1]) === "private" && p.length > 3 && !isList(p[2]) ? str(p[2]) : str(p[1]); }
 export function fieldValue(p: SNode): string { return str(p[1]) === "private" && p.length > 3 && !isList(p[2]) ? str(p[3]) : str(p[2]); }
 function setFieldValue(p: SNode, v: string): void { if (str(p[1]) === "private" && p.length > 3 && !isList(p[2])) p[3] = v as unknown as SNode; else p[2] = v as unknown as SNode; }
-export function rowFromField(p: SNode, origin: [number, number], mandatory: boolean): FieldRow {
-  const fx = readFx(p), [x, y, rot] = atOf(p), r = ((Math.round(rot) % 360) + 360) % 360;
-  return { name: fieldName(p), value: fieldValue(p), show: !fx.hidden, showName: yes(p, "show_name"), h: fx.h, v: fx.v, italic: fx.italic, bold: fx.bold,
-    size: fx.size, orient: r === 90 || r === 270 ? 90 : 0, x: r4(x - origin[0]), y: r4(y - origin[1]), font: fx.font, color: fx.color,
+export function rowFromField(p: SNode, origin: [number, number], mandatory: boolean, parent?: SNode | null): FieldRow {
+  const fx = readFx(p), [x, y, rot] = atOf(p), r = ((Math.round(rot) % 360) + 360) % 360, vertical = r === 90 || r === 270;
+  const fl = justifyFlips(parent, vertical);      // GetEffectiveHorizJustify / GetEffectiveVertJustify
+  const row: FieldRow = { name: fieldName(p), value: fieldValue(p), show: !fx.hidden, showName: yes(p, "show_name"), h: fl.h ? flipH(fx.h) : fx.h, v: fl.v ? flipV(fx.v) : fx.v, italic: fx.italic, bold: fx.bold,
+    size: fx.size, orient: vertical ? 90 : 0, x: r4(x - origin[0]), y: r4(y - origin[1]), font: fx.font, color: fx.color,
     autoplace: !yes(p, "do_not_autoplace"), mandatory, src: p };
+  if (parent) row.parent = parent;
+  return row;
 }
 export function fieldRows(node: SNode, origin: [number, number], mandatory: string[] = []): FieldRow[] {
-  return kids(node, "property").filter((p) => !META_FIELD.test(fieldName(p))).map((p) => rowFromField(p, origin, mandatory.includes(fieldName(p))));
+  return kids(node, "property").filter((p) => !META_FIELD.test(fieldName(p))).map((p) => rowFromField(p, origin, mandatory.includes(fieldName(p)), node));
 }
 export function newRow(name: string, origin: [number, number], size = 1.27): FieldRow {
   return { name, value: "", show: true, showName: false, h: "left", v: "center", italic: false, bold: false, size, orient: 0, x: 0, y: 0, font: KICAD_FONT, color: null, autoplace: true, mandatory: false, src: null };
 }
 /** The text of a row written into its (property) node (new or the one it came from, cloned). */
-export function fieldFromRow(r: FieldRow, origin: [number, number]): SNode {
+export function fieldFromRow(r: FieldRow, origin: [number, number], parent: SNode | null | undefined = r.parent): SNode {
   const p = r.src ? clone(r.src) : (["property", r.name, r.value, ["at", 0, 0, 0], ["effects", ["font", ["size", 1.27, 1.27]]]] as unknown as SNode);
   if (fieldName(p) !== r.name) { if (str(p[1]) === "private" && p.length > 3 && !isList(p[2])) p[2] = r.name as unknown as SNode; else p[1] = r.name as unknown as SNode; }
   setFieldValue(p, r.value);
@@ -148,12 +173,14 @@ export function fieldFromRow(r: FieldRow, origin: [number, number]): SNode {
   else if (r.src && kid(r.src, "show_name")) put(p, "show_name", ["no"], ["do_not_autoplace", "effects"]);
   drop(p, "do_not_autoplace"); if (!r.autoplace) put(p, "do_not_autoplace", ["yes"], ["effects"]);
   else if (r.src && kid(r.src, "do_not_autoplace")) put(p, "do_not_autoplace", ["no"], ["effects"]);
-  writeFx(p, { font: r.font, size: r.size, bold: r.bold, italic: r.italic, color: r.color, h: r.h, v: r.v });
+  // SetHorizJustify / SetVertJustify, then the opposite when the parent draws it flipped (IsHorizJustifyFlipped)
+  const fl = justifyFlips(parent, r.orient === 90);
+  writeFx(p, { font: r.font, size: r.size, bold: r.bold, italic: r.italic, color: r.color, h: fl.h ? flipH(r.h) : r.h, v: fl.v ? flipV(r.v) : r.v });
   return p;
 }
 /** Did a row move (positioningChanged: position, justification or angle)? */
 export function rowMoved(r: FieldRow, origin: [number, number]): boolean {
-  if (!r.src) return false; const o = rowFromField(r.src, origin, r.mandatory);
+  if (!r.src) return false; const o = rowFromField(r.src, origin, r.mandatory, r.parent);
   return o.x !== r.x || o.y !== r.y || o.h !== r.h || o.v !== r.v || o.orient !== r.orient;
 }
 /**
@@ -173,17 +200,90 @@ export function tidyRows(rows: FieldRow[]): FieldRow[] {
 /** FIELDS_GRID_TABLE's name check: "Field name '%s' already in use." for the first clash. */
 /** What deleting a mandatory row says (DIALOG_LABEL_PROPERTIES::OnDeleteField, DIALOG_SHEET_PROPERTIES::OnDeleteField). */
 export function mandatoryFieldsMessage(n: number): string { return n <= 1 ? "The first field is mandatory." : `The first ${n} fields are mandatory.`; }
-export function duplicateFieldName(rows: FieldRow[]): string | null {
-  const seen = new Set<string>();
-  for (const r of rows) { if (!r.name) continue; if (seen.has(r.name)) return `Field name '${r.name}' already in use.`; seen.add(r.name); }
+export function duplicateFieldName(rows: FieldRow[], mandatory: string[] = []): string | null {
+  const seen: string[] = [];
+  for (const r of rows) { if (!r.name) continue; if (seen.some((s) => fieldNamesAreDuplicates(r.name, s, mandatory))) return `Field name '${r.name}' already in use.`; seen.push(r.name); }
   return null;
+}
+/** The untranslated mandatory field names per parent (MANDATORY_FIELDS, SHEET_MANDATORY_FIELDS, GLOBALLABEL_MANDATORY_FIELDS). */
+export function mandatoryNamesOf(parentKind: string): string[] {
+  return parentKind === "symbol" || parentKind === "lib_symbol" ? ["Reference", "Value", "Footprint", "Datasheet", "Description"]
+    : parentKind === "sheet" ? ["Sheetname", "Sheetfile"] : parentKind === "global_label" ? ["Intersheetrefs"] : [];
+}
+/** OnGridCellChanging on a Name cell: the message when `name` clashes with another row's name, else null. */
+export function fieldNameClash(rows: { name: string }[], index: number, name: string, mandatory: string[]): string | null {
+  for (let i = 0; i < rows.length; i++) if (i !== index && fieldNamesAreDuplicates(name, rows[i].name, mandatory)) return `Field name '${name}' already in use.`;
+  return null;
+}
+
+// ---------------------------------------------------------------- OnAddField
+/** GetUserFieldName( m_fields->size() ): "Field" and the number of rows there are. */
+export const userFieldName = (count: number): string => "Field" + count;
+/**
+ * DIALOG_SYMBOL_PROPERTIES::OnAddField / DIALOG_SHEET_PROPERTIES::OnAddField: "Field<row count>", hidden, with the text
+ * angle of the Reference (a symbol) or Sheetname (a sheet) row.
+ */
+export function newParentFieldRow(rows: FieldRow[], angleOf: string[]): FieldRow {
+  const r = newRow(userFieldName(rows.length), [0, 0]), a = rows.find((x) => angleOf.includes(x.name));
+  r.show = false; if (a) r.orient = a.orient;
+  return r;
+}
+/** SCH_LABEL_BASE::GetDefaultFieldName: what a label's field is called on screen (the stored name stays). */
+export function labelFieldDisplayName(name: string): string { return name === "Intersheetrefs" ? "Sheet References" : name === "Netclass" ? "Net Class" : name; }
+/** The stored name of what was typed in a label's Name cell (SCH_FIELD::GetUntranslatedName recovers "Net Class"). */
+export function labelFieldStoredName(shown: string): string { return shown === "Net Class" ? "Netclass" : shown === "Sheet References" ? "Intersheetrefs" : shown; }
+/**
+ * DIALOG_LABEL_PROPERTIES::OnAddField: "Netclass" (shown as "Net Class") while every row is the intersheet references
+ * field or a Netclass field, else "Field"; the attributes and visibility of the last row (SetAttributes: angle, size,
+ * italic, bold, justification, font, colour), or visible and italic when it is the first.
+ */
+export function newLabelFieldRow(rows: FieldRow[]): FieldRow {
+  const plain = rows.some((x) => !(x.mandatory && x.name === "Intersheetrefs") && x.name !== "Netclass");
+  const r = newRow(plain ? "Field" : "Netclass", [0, 0]), last = rows[rows.length - 1];
+  if (last) { r.show = last.show; r.h = last.h; r.v = last.v; r.italic = last.italic; r.bold = last.bold; r.size = last.size; r.orient = last.orient; r.font = last.font; r.color = last.color ? (last.color.slice() as Color) : null; }
+  else { r.show = true; r.italic = true; }
+  return r;
+}
+/** SCH_FIELD::IsEmpty rows are not saved (DIALOG_SHEET_PROPERTIES::TransferDataFromWindow: name and text both blank). */
+export function withoutBlankRows(rows: FieldRow[]): FieldRow[] { return rows.filter((r) => r.mandatory || !!r.name.trim() || !!r.value.trim()); }
+/** ::IsGeneratedField: a field whose name is a ${...} expression (its text is the name and cannot be edited). */
+export function isGeneratedField(name: string): boolean { return /^(\$\{[\w.]*\}|@\{.*\})$/.test(name); }
+
+// ---------------------------------------------------------------- UNIT_BINDER::Validate
+/**
+ * "%s must be at least %s." / "%s must be less than %s." with the control's label (without its colon) and the bound in
+ * the user's units; null when `v` lies within [min, max].  `fmt` writes a length with its unit.
+ */
+export function rangeError(label: string, v: number | undefined, min: number, max: number, fmt: (mm: number) => string): string | null {
+  const name = label.replace(/:\s*$/, "");
+  if (v === undefined || v < min) return `${name} must be at least ${fmt(min)}.`;
+  if (v > max) return `${name} must be less than ${fmt(max)}.`;
+  return null;
+}
+
+// ---------------------------------------------------------------- SCH_NETNAME_VALIDATOR (eeschema/sch_validators.cpp)
+/**
+ * NETNAME_VALIDATOR::IsValid then SCH_NETNAME_VALIDATOR::IsValid: "" for a usable signal name, else KiCad's message.
+ * A '{' that does not follow $ _ ^ ~ (m_busGroupRegex) with a '}' somewhere must parse as a bus group; otherwise any
+ * '[' or ']' must parse as a bus vector.  A single character is never checked further.
+ */
+export function netNameError(text: string, allowSpaces = true): string {
+  if (/[\r\n]/.test(text)) return "Signal names cannot contain CR or LF characters";
+  if (!allowSpaces && /[ \t]/.test(text)) return "Signal names cannot contain spaces";
+  if (text.length === 1) return "";
+  if (/(^|[^$_^~])\{/.test(text) && text.includes("}")) {
+    if (!isBusGroup(text)) return "Signal name contains '{' and '}' but is not a valid bus name";
+  } else if (text.includes("[") || text.includes("]")) {
+    if (!isBusVector(text)) return "Signal name contains '[' or ']' but is not a valid bus name.";
+  }
+  return "";
 }
 /** Replace the node's (property) children by the rows: the property block keeps its place among the other children. */
 export function writeFields(node: SNode, rows: FieldRow[], origin: [number, number]): void {
   const meta = kids(node, "property").filter((p) => META_FIELD.test(fieldName(p)));
   let first = -1;
   for (let j = node.length - 1; j > 0; j--) { const c = node[j]; if (isList(c) && c[0] === "property") { node.splice(j, 1); first = j; } }
-  const block = [...rows.map((r) => fieldFromRow(r, origin)), ...meta];
+  const block = [...rows.map((r) => fieldFromRow(r, origin, node)), ...meta];
   if (first < 0) { const before = ["pin", "instances"].map((k) => idx(node, k)).filter((j) => j > 0); first = before.length ? Math.min(...before) : node.length; }
   node.splice(first, 0, ...block);
 }
@@ -593,10 +693,10 @@ export function supportsEndings(kind: string, n: SNode): boolean {
 
 /** FieldNamesAreDuplicates (template_fieldnames.cpp): the same name, or a case variant of a mandatory field's name
  *  (the parser folds those). */
-export function fieldNamesAreDuplicates(a: string, b: string): boolean {
+export function fieldNamesAreDuplicates(a: string, b: string, mandatory: string[] = ["Reference", "Value", "Footprint", "Datasheet", "Description"]): boolean {
   if (a === b) return true;
   if (a.toLowerCase() !== b.toLowerCase()) return false;
-  return ["reference", "value", "footprint", "datasheet", "description"].includes(a.toLowerCase());
+  return mandatory.some((m) => m.toLowerCase() === a.toLowerCase());
 }
 
 /** DIALOG_TEXT_PROPERTIES' hyperlink combo (dialog_text_properties.cpp): one "Page <n> (<sheet>)" entry per sheet page,
@@ -611,4 +711,220 @@ export function hyperlinkPick(choice: string, pages: [string, string][], prev: s
   if (i >= 0) return "#" + pages[i][0];
   if (choice === "file://..." || choice === "http://..." || choice === "https://...") return choice.slice(0, -3);
   return choice === "---" ? prev : choice;
+}
+
+// ---------------------------------------------------------------- KIUI::SelectReferenceNumber
+/**
+ * The part of a reference designator a first focus selects: the run of '?' (or of '*'), else the number left once
+ * non-digits are trimmed from both ends ("R12" -> the "12").  null: select everything (no number).
+ */
+export function referenceNumberRange(ref: string): [number, number] | null {
+  for (const ch of ["?", "*"]) if (ref.includes(ch)) return [ref.indexOf(ch), ref.lastIndexOf(ch) + 1];
+  const digit = (c: string): boolean => c >= "0" && c <= "9";
+  let num = ref;
+  while (num && (!digit(num[num.length - 1]) || !digit(num[0]))) {
+    if (!digit(num[num.length - 1])) num = num.slice(0, -1);
+    if (num && !digit(num[0])) num = num.slice(1);
+  }
+  if (!num) return null;
+  const at = ref.indexOf(num); return [at, at + num.length];
+}
+/** LIB_SYMBOL::GetUnitDisplayName( unit, false ): the library's (unit_name …) when set, else the unit's letter. */
+export function unitDisplayName(lib: SNode | null, unit: number, letter: (u: number) => string): string {
+  if (lib) for (const s of kids(lib, "symbol")) {
+    const m = /_(\d+)_(\d+)$/.exec(str(s[1])); if (!m || Number(m[1]) !== unit) continue;
+    const un = kid(s, "unit_name"); if (un && str(un[1])) return str(un[1]);
+  }
+  return letter(unit);
+}
+
+// ---------------------------------------------------------------- SCHEMATIC::ConvertRefsToKIIDs / ConvertKIIDsToRefs
+/** One symbol instance: its KIID path ("/<sheet uuids…>/<symbol uuid>"), uuid and reference on that sheet path. */
+export interface XrefSymbol { path: string; uuid: string; ref: string; power?: boolean }
+/** An escaped expression (\${…} or \@{…}) starting at i: copied verbatim; the index of its last character, else -1. */
+function copyEscaped(src: string, i: number, out: string[]): number {
+  const n = src.length;
+  if (!(src[i] === "\\" && i + 2 < n && src[i + 2] === "{" && (src[i + 1] === "$" || src[i + 1] === "@"))) return -1;
+  out.push(src[i], src[i + 1], src[i + 2]); i += 2;
+  let depth = 1;
+  for (i = i + 1; i < n && depth > 0; ++i) { if (src[i] === "{") depth++; else if (src[i] === "}") depth--; out.push(src[i]); }
+  return i - 1;
+}
+/** ${R1:Value} -> ${<sheet path>/<symbol uuid>:Value} for the first non-power symbol instance with that reference. */
+export function schRefsToKiids(src: string, symbols: XrefSymbol[]): string {
+  const out: string[] = [], n = src.length;
+  for (let i = 0; i < n; ++i) {
+    const e = copyEscaped(src, i, out); if (e >= 0) { i = e; continue; }
+    if (src[i] === "$" && i + 1 < n && src[i + 1] === "{") {
+      let token = "", cross = false, nesting = 0;
+      for (i = i + 2; i < n; ++i) {
+        if (src[i] === "{" && (src[i - 1] === "_" || src[i - 1] === "^" || src[i - 1] === "~")) nesting++;
+        if (src[i] === "}") { nesting--; if (nesting < 0) break; }
+        if (src[i] === ":") cross = true;
+        token += src[i];
+      }
+      if (cross) {
+        const k = token.indexOf(":"), ref = token.slice(0, k), rest = token.slice(k + 1);
+        const hit = symbols.find((s) => !s.power && s.ref === ref);
+        if (hit) token = hit.path + ":" + rest;
+      }
+      out.push("${" + token + "}");
+    } else out.push(src[i]);
+  }
+  return out.join("");
+}
+/** ${<path or uuid>:Value} -> ${R1:Value} when the last id of the path is a symbol (its reference on that sheet path). */
+export function schKiidsToRefs(src: string, symbols: XrefSymbol[]): string {
+  const out: string[] = [], n = src.length;
+  for (let i = 0; i < n; ++i) {
+    const e = copyEscaped(src, i, out); if (e >= 0) { i = e; continue; }
+    if (src[i] === "$" && i + 1 < n && src[i + 1] === "{") {
+      let token = "", cross = false;
+      for (i = i + 2; i < n; ++i) { if (src[i] === "}") break; if (src[i] === ":") cross = true; token += src[i]; }
+      if (cross) {
+        const k = token.indexOf(":"), ref = token.slice(0, k), rest = token.slice(k + 1);
+        const ids = ref.split("/").filter(Boolean), uuid = ids[ids.length - 1] || "";
+        // ResolveItem( uuid ), on the sheet path the reference names when it has one
+        const hit = (ids.length > 1 && symbols.find((s) => s.path === "/" + ids.join("/"))) || symbols.find((s) => s.uuid === uuid);
+        if (uuid && hit) token = hit.ref + ":" + rest;
+      }
+      out.push("${" + token + "}");
+    } else out.push(src[i]);
+  }
+  return out.join("");
+}
+
+// ---------------------------------------------------------------- DIALOG_TEXT_PROPERTIES: a text box that fits its text
+/**
+ * After the properties are applied: where the box is smaller than SCH_TEXTBOX::GetMinSize the end corner is pushed out
+ * (end = end >= start ? start + min : start - min, per axis).  True when the (size …) changed.
+ */
+export function growTextBox(n: SNode, min: [number, number]): boolean {
+  const sz = kid(n, "size"); if (!sz) return false;
+  let grown = false;
+  for (const ax of [0, 1]) {
+    const cur = num(sz[1 + ax]), m = min[ax];
+    if (m > 0 && Math.abs(cur) < m) { sz[1 + ax] = r4(cur >= 0 ? m : -m) as unknown as SNode; grown = true; }
+  }
+  return grown;
+}
+
+// ---------------------------------------------------------------- DIALOG_SHEET_PROPERTIES
+/** The (path …) entry of the sheet instance on `path` (this sheet under the sheet path now open); without a known path,
+ *  the only entry there is. */
+function sheetInstanceEntry(node: SNode, path: string | null, project: string | null): SNode | null {
+  const inst = kid(node, "instances"); if (!inst) return null;
+  const prs = kids(inst, "project").slice().sort((a, b) => Number(str(b[1]) === project) - Number(str(a[1]) === project));
+  const all: SNode[] = []; for (const pr of prs) all.push(...kids(pr, "path"));
+  if (path) return all.find((p) => str(p[1]) === path) || null;
+  return all.length === 1 ? all[0] : null;
+}
+/** instance.GetPageNumber(): the page of this sheet on the current sheet path ("" when it has none). */
+export function sheetPageNumber(node: SNode, path: string | null, project: string | null): string {
+  const e = sheetInstanceEntry(node, path, project), pg = e && kid(e, "page"); return pg ? str(pg[1]) : "";
+}
+/** instance.SetPageNumber( text ): written as typed (an empty text too); the instance entry is made when missing. */
+export function setSheetPageNumber(node: SNode, path: string | null, project: string | null, page: string): boolean {
+  let e = sheetInstanceEntry(node, path, project);
+  if (!e) {
+    if (!path || !project) return false;
+    let inst = kid(node, "instances"); if (!inst) { inst = ["instances"] as unknown as SNode; node.push(inst); }
+    let pr = kids(inst, "project").find((x) => str(x[1]) === project); if (!pr) { pr = qnode("project", project); inst.push(pr); }
+    e = qnode("path", path); pr.push(e);
+  }
+  const pg = kid(e, "page"); if (pg) pg[1] = String(page) as unknown as SNode; else e.splice(2, 0, qnode("page", String(page)));
+  return true;
+}
+/**
+ * GetSheetFieldsForEditing (eeschema/fields_grid_table.cpp): a hidden Reference Suffix row (the Sheetname's size and
+ * angle) when the sheet has none; the mandatory rows first, the suffix row right after them, the rest in their order.
+ */
+export function sheetFieldsForEditing(rows: FieldRow[], suffixName: string): FieldRow[] {
+  const out = rows.slice();
+  if (!out.some((r) => r.name === suffixName)) {
+    const name = out.find((r) => /^Sheet ?name$/i.test(r.name)), r = newRow(suffixName, [0, 0], name ? name.size : 1.27);
+    r.show = false; if (name) r.orient = name.orient;
+    out.push(r);
+  }
+  const rank = (r: FieldRow): number => (r.mandatory ? 0 : r.name === suffixName ? 1 : 2);
+  return out.map((r, i) => ({ r, i })).sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i).map((x) => x.r);
+}
+/**
+ * NET_SETTINGS::RenameNetPathPrefix on the .kicad_pro: the netclass patterns and the net colour keys that start with
+ * the old path prefix take the new one.  True when something changed.
+ */
+export function renameNetPathPrefix(pro: Record<string, unknown>, oldPrefix: string, newPrefix: string): boolean {
+  if (!oldPrefix || oldPrefix === newPrefix) return false;
+  const ns = pro.net_settings as Record<string, unknown> | undefined; if (!ns || typeof ns !== "object") return false;
+  let changed = false;
+  if (Array.isArray(ns.netclass_patterns)) for (const p of ns.netclass_patterns as { pattern?: unknown }[]) {
+    if (p && typeof p.pattern === "string" && p.pattern.startsWith(oldPrefix)) { p.pattern = newPrefix + p.pattern.slice(oldPrefix.length); changed = true; }
+  }
+  const colors = ns.net_colors as Record<string, unknown> | null | undefined;
+  if (colors && typeof colors === "object" && !Array.isArray(colors)) {
+    const next: Record<string, unknown> = {}; let any = false;
+    for (const [k, v] of Object.entries(colors)) { if (k.startsWith(oldPrefix)) { next[newPrefix + k.slice(oldPrefix.length)] = v; any = true; } else next[k] = v; }
+    if (any) { ns.net_colors = next; changed = true; }
+  }
+  return changed;
+}
+
+// ---------------------------------------------------------------- SCINTILLA_TRICKS::DoTextVarAutocomplete
+/** Scintilla's WordStartPosition( pos, onlyWordCharacters = true ): back over letters, digits, '_' and non-ASCII. */
+export function wordStart(text: string, pos: number): number {
+  let i = Math.max(0, Math.min(pos, text.length));
+  while (i > 0 && (/[A-Za-z0-9_]/.test(text[i - 1]) || text.charCodeAt(i - 1) >= 0x80)) i--;
+  return i;
+}
+/**
+ * What the caret is completing: after "${" the variable name typed so far (`xref` ""), after "${REF:" the name typed
+ * so far with the cross-referenced symbol's reference in `xref`.  null when the caret is in neither.
+ */
+export function textVarContext(text: string, pos: number): { partial: string; xref: string; start: number } | null {
+  const start = wordStart(text, pos), isRef = (p: number): boolean => p >= 2 && text[p - 2] === "$" && text[p - 1] === "{";
+  if (start > 1 && text[start - 1] === ":") {
+    const refStart = wordStart(text, start - 1);
+    return isRef(refStart) ? { partial: text.slice(start, pos), xref: text.slice(refStart, start - 1), start } : null;
+  }
+  return isRef(start) ? { partial: text.slice(start, pos), xref: "", start } : null;
+}
+/** DoAutocomplete: the tokens that contain the partial text (without case), in case-insensitive order. */
+export function autocompleteMatches(partial: string, tokens: string[]): string[] {
+  const f = partial.toLowerCase();
+  const cmp = (a: string, b: string): number => { const x = a.toLowerCase(), y = b.toLowerCase(); return x < y ? -1 : x > y ? 1 : 0; };
+  return tokens.filter((t) => t.toLowerCase().includes(f)).sort(cmp);
+}
+/** The field names a parent offers as variables: a mandatory field by its untranslated name in capitals, the others as named. */
+function fieldVarNames(node: SNode, mandatory: string[], skipPrivate: boolean): string[] {
+  const out: string[] = [];
+  for (const p of kids(node, "property")) {
+    const name = fieldName(p); if (META_FIELD.test(name)) continue;
+    if (skipPrivate && str(p[1]) === "private" && p.length > 3 && !isList(p[2])) continue;
+    out.push(mandatory.some((m) => m.toLowerCase() === name.replace(/ /g, "").toLowerCase()) ? name.replace(/ /g, "").toUpperCase() : name);
+  }
+  return out;
+}
+/** SCH_SYMBOL::GetContextualTextVars. */
+export function symbolTextVars(node: SNode): string[] {
+  return [...fieldVarNames(node, mandatoryNamesOf("symbol"), true), "OP", "FOOTPRINT_LIBRARY", "FOOTPRINT_NAME", "UNIT", "SHORT_REFERENCE", "SYMBOL_LIBRARY", "SYMBOL_NAME", "SYMBOL_DESCRIPTION",
+    "SYMBOL_KEYWORDS", "SYMBOL_IS_POWER", "SYMBOL_IS_LOCAL_POWER", "EXCLUDE_FROM_BOM", "EXCLUDE_FROM_BOARD", "EXCLUDE_FROM_SIM", "DNP", "SHORT_NET_NAME(<pin_number>)", "NET_NAME(<pin_number>)",
+    "NET_CLASS(<pin_number>)", "PIN_NAME(<pin_number>)", "REFERENCE(<pin_number>)", "SHORT_REFERENCE(<pin_number>)", "UNIT(<pin_number>)"];
+}
+/** SCH_LABEL_BASE::GetContextualTextVars. */
+export function labelTextVars(kind: string, node: SNode): string[] {
+  return [...fieldVarNames(node, mandatoryNamesOf(kind), false), "OP", "CONNECTION_TYPE", "SHORT_NET_NAME", "NET_NAME", "NET_CLASS"];
+}
+const TITLE_BLOCK_VARS = ["ISSUE_DATE", "CURRENT_DATE", "CURRENT_TIME_LOCALE", "CURRENT_TIME_HH_MM_SS", "REVISION", "TITLE", "COMPANY", "COMMENT1", "COMMENT2", "COMMENT3", "COMMENT4", "COMMENT5", "COMMENT6", "COMMENT7", "COMMENT8", "COMMENT9"];
+/**
+ * SCH_SHEET::GetContextualTextVars of the sheet at the end of `chain` (the sheet symbols from the top sheet down to it;
+ * empty for the root sheet): each sheet's fields, innermost first, then SCHEMATIC::GetContextualTextVars (with the
+ * project's text variables) and the sheet's own tokens, each name once.
+ */
+export function sheetTextVars(chain: SNode[], projectVars: string[]): string[] {
+  const out: string[] = [], add = (v: string): void => { if (!out.includes(v)) out.push(v); };
+  for (let i = chain.length - 1; i >= 0; i--) for (const v of fieldVarNames(chain[i], mandatoryNamesOf("sheet"), false)) add(v);
+  for (const v of ["SHEETNAME", "SHEETFILE"]) add(v);                    // the root sheet's own mandatory fields
+  for (const v of ["#", "##", "SHEETPATH", "SHEETNAME", "FILENAME", "FILEPATH", "PROJECTNAME", "VARIANT", "VARIANT_DESC", ...TITLE_BLOCK_VARS, ...projectVars]) add(v);
+  for (const v of ["EXCLUDE_FROM_BOM", "EXCLUDE_FROM_BOARD", "EXCLUDE_FROM_SIM", "DNP", "ERC_ERROR <message_text>", "ERC_WARNING <message_text>"]) add(v);
+  return out;
 }

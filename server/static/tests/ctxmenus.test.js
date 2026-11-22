@@ -119,4 +119,17 @@ test("pcb-tools cancel(): nothing in flight afterwards", () => {
   pcb.cancel();
   assert.ok(!S.pending && !S.drag && !S.draw && !S.move && !S.route);
 });
+test("board, via tool: Select Via Size (VIA_SIZE_MENU) sits at order 500, and only for the via tool", () => {
+  const v = menu({ editor: "pcb", tool: "via" }, true);
+  assert.ok(v.includes(">Select Via Size")); assert.ok(v.indexOf(">Select Via Size") < v.indexOf(">Zoom"));
+  assert.ok(!menu({ editor: "pcb", tool: "gline" }, true).includes(">Select Via Size"));
+});
+test("board, pickers: Cancel, the all-layers snap toggle, Zoom and Grid (PCB_PICKER_TOOL::Init)", () => {
+  for (const t of ["pickpoint", "pickitem"]) { const m = menu({ editor: "pcb", tool: t }, true); assert.strictEqual(m[0], "cancelInteractive"); assert.ok(m.includes(">Zoom") && m.includes(">Grid")); }
+});
+test("board: Create Arc from Selection wants exactly one track, track arc or graphic line (canCreateArcs)", () => {
+  const has = (kinds) => allActs(evaluate(menuFor(ctx({ editor: "pcb", kinds }), false), ctx({ editor: "pcb", kinds }))).includes("PCB_ACTIONS::convertToArc");
+  assert.ok(has(["segment"])); assert.ok(has(["arc"])); assert.ok(has(["gr_line"]));
+  assert.ok(!has(["segment", "segment"])); assert.ok(!has(["gr_rect"]));
+});
 console.log(`\n${passed} passed, ${failed} failed`); process.exit(failed ? 1 : 0);

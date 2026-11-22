@@ -286,7 +286,7 @@ test("module: selection keys — U expands the run, W changes width, Delete remo
   assert.equal(pcb.onKey("Flip", ev(), ctx), true); assert.equal(doc.items.get("fp-1").layer, "B.Cu");
   assert.equal(pcb.onKey("R", ev({ shiftKey: true }), ctx), true); assert.equal(log.tool, "grect");
   pcb.onPointerDown(ev(), [10, 10], ctx); pcb.onPointerDown(ev(), [20, 15], ctx);
-  assert.equal(log.commits.at(-1).label, "rectangle"); assert.equal(doc.items.get(log.commits.at(-1).changes[0].id).kind, "gr_rect");
+  assert.equal(log.commits.at(-1).label, "Draw Rectangle"); assert.equal(doc.items.get(log.commits.at(-1).changes[0].id).kind, "gr_rect");
 });
 
 test("module: D drags the selected segment with the router, a click commits the rebuilt line", () => {
@@ -463,18 +463,18 @@ test("module: graphic polygon (Ctrl+Shift+P) closes on the first corner or End; 
   assert.equal(pcb.onKey("Backspace", ev(), ctx), true); assert.equal(P.state.draw.pts.length, 3, "Backspace drops the last corner");
   pcb.onPointerDown(ev(), [10, 20], ctx);
   pcb.onPointerDown(ev(), [10, 10], ctx);                                   // back on the first corner: closed
-  let c = log.commits.at(-1); assert.equal(c.label, "polygon"); assert.equal(c.changes[0].typeName, "PCB_SHAPE");
+  let c = log.commits.at(-1); assert.equal(c.label, "Draw Polygon"); assert.equal(c.changes[0].typeName, "PCB_SHAPE");
   const node = K.kid(K.parse(c.changes[0].sexpr), "gr_poly");
-  assert.deepEqual(node.slice(0, 5), ["gr_poly", ["pts", ["xy", 10, 10], ["xy", 20, 10], ["xy", 20, 20], ["xy", 10, 20]], ["stroke", ["width", 0.1], ["type", "default"]], ["fill", "no"], ["layer", "F.SilkS"]]);
+  assert.deepEqual(node.slice(0, 5), ["gr_poly", ["pts", ["xy", 10, 10], ["xy", 20, 10], ["xy", 20, 20], ["xy", 10, 20]], ["stroke", ["width", 0.1], ["type", "solid"]], ["fill", "yes"], ["layer", "F.SilkS"]]);   // ZONE_CREATE_HELPER::createNewZone: a solid stroke, filled off Edge.Cuts and the courtyards
   assert.equal(node[5][0], "uuid"); assert.equal(node.length, 6);
-  const it = doc.items.get(c.changes[0].id); assert.equal(it.kind, "gr_poly"); assert.equal(it.geom[0].t, "poly"); assert.equal(it.geom[0].close, true); assert.equal(it.geom[0].fill, null);
+  const it = doc.items.get(c.changes[0].id); assert.equal(it.kind, "gr_poly"); assert.equal(it.geom[0].t, "poly"); assert.equal(it.geom[0].close, true); assert.ok(it.geom[0].fill, "filled");
   assert.equal(P.state.draw, null);
   pcb.onPointerDown(ev(), [30, 30], ctx); pcb.onPointerDown(ev(), [40, 30], ctx); pcb.onPointerDown(ev(), [40, 40], ctx);
   assert.equal(pcb.onKey("End", ev(), ctx), true);
   c = log.commits.at(-1); assert.equal(K.ptsOf(K.kid(K.parse(c.changes[0].sexpr), "gr_poly")).length, 3, "End closes too");
   const n = log.commits.length;
   pcb.onPointerDown(ev(), [50, 50], ctx); pcb.onPointerDown(ev(), [60, 50], ctx); assert.equal(pcb.onKey("End", ev(), ctx), true);
-  assert.equal(log.commits.length, n); assert.ok(log.toasts.at(-1).includes("three corners")); assert.equal(P.state.draw, null);
+  assert.equal(log.commits.length, n); assert.ok(!log.toasts.some((m) => /three corners/.test(m)), "scrapped without a message (ZONE_CREATE_HELPER::OnComplete)"); assert.equal(P.state.draw, null);
 });
 
 test("module: the delete tool removes tracks, graphics and footprints under the click and stays armed", () => {
@@ -618,17 +618,22 @@ test("new items take BOARD_DESIGN_SETTINGS' layer-class defaults: line widths, t
 test("module: Bezier (Ctrl+Shift+B) takes the start, two control points and the end; the node is a gr_curve", () => {
   const doc = fixture(); const { ctx, log } = fakeCtx(doc); pcb.onDocChanged(ctx);
   assert.equal(pcb.onKey("Bezier", ev(), ctx), true); assert.equal(log.tool, "gcurve");
-  pcb.onPointerDown(ev(), [10, 10], ctx); pcb.onPointerDown(ev(), [12, 4], ctx); pcb.onPointerDown(ev(), [18, 4], ctx);
+  // BEZIER_GEOM_MANAGER: start, control 1, end, then control 2 as the cursor mirrored through the end
+  pcb.onPointerDown(ev(), [10, 10], ctx); pcb.onPointerDown(ev(), [12, 4], ctx); pcb.onPointerDown(ev(), [20, 10], ctx);
   assert.equal(pcb.onKey("Backspace", ev(), ctx), true); assert.equal(P.state.draw.pts.length, 2, "Backspace drops the last point");
-  pcb.onPointerDown(ev(), [18, 4], ctx);
-  const n = log.commits.length; pcb.onPointerDown(ev(), [18, 4], ctx); assert.equal(log.commits.length, n, "a repeated point is refused");
-  pcb.onPointerMove(ev(), [20, 10], ctx); assert.deepEqual(P.state.draw.cur, [20, 10]);
-  pcb.onPointerDown(ev(), [20, 10], ctx);
-  const c = log.commits.at(-1); assert.equal(c.label, "curve"); assert.equal(c.changes[0].typeName, "PCB_SHAPE");
+  const n = log.commits.length; pcb.onPointerDown(ev(), [10, 10], ctx); assert.equal(P.state.draw.pts.length, 2, "an end on the start is refused"); assert.equal(log.toasts.length, 0, "silently");
+  pcb.onPointerDown(ev(), [20, 10], ctx); assert.equal(log.commits.length, n);
+  pcb.onPointerMove(ev(), [22, 16], ctx); assert.deepEqual(P.state.draw.cur, [22, 16]);
+  pcb.onPointerDown(ev(), [22, 16], ctx);
+  const c = log.commits.at(-1); assert.equal(c.label, "Draw Bezier"); assert.equal(c.changes[0].typeName, "PCB_SHAPE");
   const node = lastNode(log, "gr_curve");
   assert.deepEqual(node.slice(0, 4), ["gr_curve", ["pts", ["xy", 10, 10], ["xy", 12, 4], ["xy", 18, 4], ["xy", 20, 10]], ["stroke", ["width", 0.1], ["type", "default"]], ["layer", "F.SilkS"]]);
   assert.equal(node[4][0], "uuid"); assert.equal(node.length, 5);
   const it = doc.items.get(c.changes[0].id); assert.equal(it.kind, "gr_curve"); assert.equal(it.geom[0].t, "poly"); assert.equal(it.geom[0].close, false); assert.ok(it.geom[0].pts.length > 4, "flattened curve");
+  assert.deepEqual([...P.selectionIds(ctx)], [c.changes[0].id], "the new curve is selected");
+  // DrawBezier chains: the next curve starts at the end, its control 1 the last arm mirrored
+  assert.deepEqual(P.state.draw.pts, [[20, 10], [22, 16]]); assert.equal(log.tool, "gcurve");
+  pcb.cancel();
   assert.equal(P.state.draw, null); assert.equal(log.tool, "gcurve");
 });
 
@@ -732,7 +737,7 @@ test("module: zone (Alt+Z) closes on the first corner, asks for the net and writ
   for (const p of [[112, 50], [130, 45], [130, 70], [95, 70]]) pcb.onPointerDown(ev(), p, ctx);
   pcb.onPointerDown(ev(), [112, 50], ctx);
   assert.equal(asked.t, "Zone net"); assert.equal(asked.initial, "GND", "the copper under the first corner"); assert.deepEqual(asked.options, ["/SIG", "GND"]);
-  const c = log.commits.at(-1); assert.equal(c.label, "zone"); assert.equal(c.changes[0].typeName, "ZONE"); assert.equal(c.changes[0].netName, "GND");
+  const c = log.commits.at(-1); assert.equal(c.label, "Draw Zone"); assert.equal(c.changes[0].typeName, "ZONE"); assert.equal(c.changes[0].netName, "GND");
   const node = lastNode(log, "zone");
   assert.deepEqual(node.slice(0, 3), ["zone", ["net", "GND"], ["layer", "F.Cu"]]); assert.deepEqual(node[3], ["uuid", c.changes[0].id]);
   assert.deepEqual(node.slice(4), [["hatch", "edge", 0.5], ["connect_pads", ["clearance", 0.5]], ["min_thickness", 0.25],
@@ -762,8 +767,9 @@ test("module: rule area (Ctrl+Shift+K) is a keepout on both outer copper layers 
   const doc = fixture(); const { ctx, log } = fakeCtx(doc); pcb.onDocChanged(ctx);
   assert.equal(pcb.onKey("RuleArea", ev(), ctx), true); assert.equal(log.tool, "rulearea");
   for (const p of [[10, 10], [20, 10], [20, 20], [10, 20]]) pcb.onPointerDown(ev(), p, ctx);
-  pcb.onPointerDown(ev(), [10, 20], ctx);   // the last corner again closes
-  const c = log.commits.at(-1); assert.equal(c.label, "rule area"); assert.equal(c.changes[0].typeName, "ZONE"); assert.equal(c.changes[0].netName, undefined);
+  const n0 = log.commits.length; pcb.onPointerDown(ev(), [10, 20], ctx); assert.equal(log.commits.length, n0, "the last corner again neither closes nor adds (POLYGON_GEOM_MANAGER::AddPoint)"); assert.equal(P.state.draw.pts.length, 4);
+  pcb.onPointerDown(ev(), [10, 10], ctx);   // the first corner closes
+  const c = log.commits.at(-1); assert.equal(c.label, "Draw Zone"); assert.equal(c.changes[0].typeName, "ZONE"); assert.equal(c.changes[0].netName, undefined);
   const node = lastNode(log, "zone");
   assert.deepEqual(node[1], ["layers", "F.Cu", "B.Cu"]); assert.deepEqual(node[2], ["uuid", c.changes[0].id]);
   assert.deepEqual(node.slice(3), [["hatch", "edge", 0.5], ["connect_pads", ["clearance", 0.5]], ["min_thickness", 0.25],
@@ -988,9 +994,9 @@ test("DRC: clearance, board edge, missing connections, dangling and zero-length 
 
 test("clipboard: copy writes KiCad's kicad_pcb clipboard document; paste lands at the cursor with fresh uuids, kept nets and unique references", () => {
   const doc = fixture(); const text = P.clipboardText(doc, ["fp-1", "s-1"], [100, 50]);
-  const tree = K.parse(text); assert.equal(tree[0], "kicad_pcb"); assert.equal(K.kid(tree, "generator")[1], "kicad-collab-web"); assert.equal(K.kid(tree, "version")[1], P.BOARD_VERSION);
+  const tree = K.parse(text); assert.equal(tree[0], "kicad_pcb"); assert.equal(K.kid(tree, "generator")[1], "pcbnew"); assert.equal(K.kid(tree, "version")[1], P.BOARD_VERSION);
   assert.deepEqual(K.kid(tree, "layers").slice(1, 3), [[0, "F.Cu", "signal"], [2, "B.Cu", "signal"]], "copper first, in stack order");
-  assert.deepEqual(K.kids(tree, "net"), [["net", 0, ""], ["net", 1, "GND"], ["net", 2, "/SIG"]]);
+  assert.deepEqual(K.kids(tree, "net"), [], "KiCad writes no net declarations: the items carry their net names");
   const fp = K.kid(tree, "footprint"), seg = K.kid(tree, "segment"); assert.deepEqual(K.atOf(fp).slice(0, 2), [0, 0], "the reference point sits at the origin"); assert.deepEqual(K.kid(seg, "start").slice(1), [10, 0]);
   assert.equal(K.uuidOf(fp), "fp-1", "copies keep their ids; paste mints new ones");
   const r = P.pasteChanges(doc, text, [200, 100]);
@@ -1134,7 +1140,8 @@ test("conversions, selection helpers, statistics and the small edits", () => {
   assert.deepEqual(K.kid(K.kid(node(P.justifyChanges(doc2, [t], "center")[0]), "effects"), "justify"), ["justify", "bottom", "mirror"]);
   const z1 = P.addedChange(doc2, P.zoneNode(doc2, [[0, 0], [1, 0], [1, 1]], "F.Cu", { code: -1, name: "GND" })).id;
   assert.deepEqual(K.kid(doc2.items.get(z1).node, "priority"), ["priority", 1], "the zone from the rectangle took 0, so the new one gets the next free priority");
-  assert.deepEqual(K.kid(node(P.zonePriorityChanges(doc2, [z1], "raise")[0]), "priority"), ["priority", 2]); assert.equal(K.kid(node(P.zonePriorityChanges(doc2, [z1], "bottom")[0]), "priority"), null); assert.equal(P.zonePriorityChanges(doc2, [zn[0].id], "lower").length, 0);
+  // ZonePriorityRaise / MoveToBottom / Lower: nothing happens without an overlapping zone above / below
+  for (const how of ["raise", "bottom", "lower", "top"]) assert.equal(P.zonePriorityChanges(doc2, [z1], how).length, 0, how);
   assert.deepEqual(K.kid(node(P.footprintAttrChanges(doc2, ["fp-1"], "dnp")[0]), "attr"), ["attr", "dnp"]);
 });
 
@@ -1166,14 +1173,15 @@ test("actions: the map carries KiCad's ids and hotkeys; copy / paste / cut / dup
   ctx.selection = new Set(["s-1"]); ctx.cursor = [110, 50];
   assert.equal(pcb.onKey("Copy", ev(), ctx), true); assert.ok(/^\(kicad_pcb \(version/.test(log.clip) && /\(segment \(start 0 0\) \(end 5 0\)/.test(log.clip));
   ctx.cursor = [200, 100]; assert.equal(pcb.onKey("Paste", ev(), ctx), true);
-  let c = log.commits.at(-1); assert.equal(c.label, "paste"); assert.equal(c.changes[0].kind, "ADDED"); assert.deepEqual(log.selection, [c.changes[0].id]); assert.deepEqual(pt(doc.items.get(c.changes[0].id).node, "start"), [200, 100]);
+  let c = log.commits.at(-1); assert.equal(c.label, "Paste"); assert.equal(c.changes[0].kind, "ADDED"); assert.deepEqual(log.selection, [c.changes[0].id]); assert.deepEqual(pt(doc.items.get(c.changes[0].id).node, "start"), [200, 100]);
   // the paste hangs on the cursor until a click places it (dropped where it is here)
   assert.deepEqual(P.state.move && P.state.move.placing, [c.changes[0].id]); P.state.move = null;
   ctx.selection = new Set(["s-4"]); assert.equal(pcb.runAction("duplicate", ctx), true); c = log.commits.at(-1); assert.equal(c.label, "Duplicate"); assert.notEqual(c.changes[0].id, "s-4"); assert.deepEqual(pt(doc.items.get(c.changes[0].id).node, "start"), [130, 50]);
   assert.deepEqual(P.state.move && P.state.move.placing, [c.changes[0].id]); P.state.move = null;
   ctx.selection = new Set(["a-1"]); assert.equal(pcb.onKey("Cut", ev(), ctx), true); c = log.commits.at(-1); assert.deepEqual(c.changes.map((x) => [x.kind, x.id]), [["REMOVED", "a-1"]]); assert.ok(/\(arc /.test(log.clip)); assert.deepEqual(log.selection, []);
   ctx.selection = new Set(["s-1", "s-2"]); assert.equal(pcb.runAction("group", ctx), true); c = log.commits.at(-1); assert.equal(c.changes[0].typeName, "PCB_GROUP"); const gid = c.changes[0].id;
-  ctx.selection = new Set(["s-1"]); assert.equal(pcb.runAction("ungroup", ctx), true); assert.deepEqual(log.commits.at(-1).changes.map((x) => [x.kind, x.id]), [["REMOVED", gid]]);
+  assert.equal(log.commits.at(-1).label, "Group Items"); assert.deepEqual([...log.selection].sort(), [gid, "s-1", "s-2"].sort(), "the new group is the selection");
+  assert.equal(pcb.runAction("ungroup", ctx), true); assert.deepEqual(log.commits.at(-1).changes.map((x) => [x.kind, x.id]), [["REMOVED", gid]]); assert.equal(log.commits.at(-1).label, "Ungroup Items");
   // R turns a multi-selection about its centre, F flips it; Shift+M moves exactly through the (stubbed) dialog
   ctx.selection = new Set(["s-1", "s-4"]); assert.equal(pcb.onKey("r", ev(), ctx), true); assert.equal(log.commits.at(-1).label, "Rotate"); assert.equal(log.commits.at(-1).changes.length, 2); assert.deepEqual(pt(doc.items.get("s-1").node, "start"), [122.5, 62.5]);
   assert.equal(pcb.onKey("Flip", ev(), ctx), true); assert.equal(K.kid(doc.items.get("s-4").node, "layer")[1], "B.Cu");
@@ -1474,7 +1482,7 @@ const PE_FIXTURE = FIXTURE.replace(/\)\s*$/, `
 test("point editor: KiCad's edit points per shape, and dragging one reshapes only that coordinate", () => {
   const doc = K.parseDoc(PE_FIXTURE, "kicad_pcb"); const keys = (id) => P.editPoints(doc.items.get(id)).map((h) => h.key);
   assert.deepEqual(keys("g-1"), ["start", "end"]);
-  assert.deepEqual(keys("r-1"), ["r0", "r1", "r2", "r3", "e0", "e1", "e2", "e3"], "rectangle: corners, then edge midpoints");
+  assert.deepEqual(keys("r-1"), ["r0", "r1", "r2", "r3", "rc", "rr", "e0", "e1", "e2", "e3"], "rectangle: corners, centre, corner radius, then the edges (RECTANGLE_POINT_EDIT_BEHAVIOR)");
   assert.deepEqual(keys("c-1"), ["center", "end"]);
   assert.deepEqual(keys("ar-1"), ["start", "mid", "end", "center"], "an arc: ends, mid and the centre handle");
   assert.deepEqual(P.editPoints(doc.items.get("ar-1")).at(-1).p, [41, 40]);
@@ -1528,7 +1536,7 @@ test("point editor: Create Corner and Remove Corner (PCB_POINT_EDITOR::addCorner
   const zpts = () => K.kids(K.kid(K.kid(doc.items.get("z-1").node, "polygon"), "pts"), "xy").map((x) => [K.num(x[1]), K.num(x[2])]);
   ctx.selection = new Set(["z-1"]); ctx.cursor = [55, 49.9];
   assert.equal(P.canAddCorner(doc.items.get("z-1")), true); assert.equal(P.canAddCorner(doc.items.get("c-1")), false);
-  assert.equal(pcb.runAction("pointEditorAddCorner", ctx), true); assert.equal(log.commits.at(-1).label, "add corner");
+  assert.equal(pcb.runAction("pointEditorAddCorner", ctx), true); assert.equal(log.commits.at(-1).label, "Add Zone Corner");
   assert.deepEqual(zpts(), [[50, 50], [55, 50], [60, 50], [60, 60], [50, 60]], "the corner lands on the nearest edge, after its first corner");
   assert.equal(P.canRemoveCorner(doc, "z-1", [55, 50]), true); assert.equal(P.canRemoveCorner(doc, "z-1", [57, 55]), false, "nothing under the cursor");
   ctx.cursor = [60, 60]; assert.equal(pcb.runAction("pointEditorRemoveCorner", ctx), true);
@@ -1917,8 +1925,10 @@ test("Line Modes: lines, polygons and zones follow the angle snap mode (Ctrl fre
   // POLYGON_GEOM_MANAGER: the cursor is reached through a leader with one 45° bend, and a loop line of the same kind closes
   pcb.onPointerMove(ev(), [12, 9], ctx); assert.deepEqual(P.state.draw.cur, [12, 9]);
   assert.deepEqual(P.state.draw.leader, [[10, 0], [12, 2], [12, 9]]); assert.deepEqual(P.state.draw.loop, [[12, 9], [9, 9], [0, 0]]);
+  { const n0 = log.commits.length; pcb.onKey("End", ev(), ctx); assert.equal(log.commits.length, n0, "fewer than three locked corners: the outline is scrapped (ZONE_CREATE_HELPER::OnComplete)"); assert.equal(P.state.draw, null); }
+  pcb.onPointerDown(ev(), [0, 0], ctx); pcb.onPointerDown(ev(), [10, 1], ctx); pcb.onPointerDown(ev(), [12, 2], ctx); pcb.onPointerMove(ev(), [12, 9], ctx);
   pcb.onKey("End", ev(), ctx);
-  const poly = log.commits.at(-1).changes[0].id; assert.equal(log.commits.at(-1).label, "polygon");
+  const poly = log.commits.at(-1).changes[0].id; assert.equal(log.commits.at(-1).label, "Draw Polygon");
   assert.deepEqual(K.kid(doc.items.get(poly).node, "pts").slice(1).map((x) => x.slice(1)), [[0, 0], [10, 0], [12, 2], [12, 9], [9, 9]], "the leader's and the loop's bends are corners too");
   // H/V: one bend on the horizontal first
   A.lineMode90.run(ctx); pcb.onActivate("gpoly", ctx); pcb.onPointerDown(ev(), [0, 0], ctx); pcb.onPointerMove(ev(), [5, 3], ctx);
@@ -1944,7 +1954,7 @@ test("Draw Zone / Rule Area: the properties dialog opens on a template at the fi
   assert.equal(seen[0], "zone"); assert.equal(P.netOf(seen).name, "GND", "the highlighted net"); assert.ok(!K.kid(seen, "name"));
   for (const p of [[10, 0], [10, 10]]) pcb.onPointerDown(ev(), p, ctx);
   pcb.onPointerDown(ev(), [0, 0], ctx);   // the first corner again closes it
-  const z = doc.items.get(log.commits.at(-1).changes[0].id); assert.equal(log.commits.at(-1).label, "zone");
+  const z = doc.items.get(log.commits.at(-1).changes[0].id); assert.equal(log.commits.at(-1).label, "Draw Zone");
   assert.equal(K.kid(z.node, "min_thickness")[1], 0.3, "the dialog's settings"); assert.equal(P.netOf(z.node).name, "GND");
   assert.deepEqual(K.kid(K.kid(z.node, "polygon"), "pts").slice(1).map((x) => x.slice(1)), [[0, 0], [10, 0], [10, 10]]);
   // Cancel: nothing is drawn and the next click asks again

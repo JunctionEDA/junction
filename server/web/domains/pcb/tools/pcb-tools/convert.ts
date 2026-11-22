@@ -1,11 +1,12 @@
 // pcb-tools/convert.ts — pads under a point, CONVERT_TOOL's conversions and small item edits, board statistics.
+import { zonePriorityPlan } from "./zone-priority";
 import type { BoardDoc, NetRef, PadInfo, PcbChange, Pt, SAtom } from "./types";
 import { addedChange, removedChange } from "./changes";
 import { arcLength, arcPoints } from "./distances";
 import { RULE_AREA_LAYERS } from "./draw-modes";
 import { boardOutline, chainLoops } from "./drc";
 import { bboxOfPts } from "./msgpanel";
-import { netNode } from "./nets";
+import { netNode, netOf } from "./nets";
 import { lineNode, polyNode, ruleAreaNode, segmentNode, zoneNode } from "./nodes";
 import { netUnder, padCovers, padOnLayer, padsOf } from "./route-geom";
 import { K } from "./state";
@@ -32,6 +33,43 @@ export const closedShapeLoop = (it: KItem) => {
   if (it.kind === "gr_circle") { const c = pt(n, "center"), e = pt(n, "end"); const r = Math.hypot(e![0] - c![0], e![1] - c![1]); const pts: Pt[] = []; for (let i = 0; i < 32; i++) pts.push([c![0] + r * Math.cos(i * Math.PI / 16), c![1] + r * Math.sin(i * Math.PI / 16)]); return pts; }
   return null;
 };
+/**
+ * CONVERT_TOOL::SegmentToArc ("Create Arc"): the first selected item gives an arc beside it, the source stays.  A graphic
+ * line becomes a graphic arc and a track segment a track arc, both through a midpoint pushed a tenth of the length along
+ * the segment's normal; a graphic arc becomes a track arc and a track arc a graphic arc over the same three points.
+ */
+export function segmentToArcChanges(doc: BoardDoc, ids: string[]): PcbChange[] {
+  const src = ids.length ? doc.items.get(ids[0]) : null; if (!src || !["gr_line", "gr_arc", "segment", "arc"].includes(src.kind)) return [];
+  const n = src.node, a = pt(n, "start"), b = pt(n, "end"), l = layerOf(n); if (!a || !b) return [];
+  // getStartEndPoints + ( B - A ).Perpendicular().Resize( 0.1 * length ) from the segment's centre
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const mid: Pt = len > 0 ? [(a[0] + b[0]) / 2 - (b[1] - a[1]) * 0.1, (a[1] + b[1]) / 2 + (b[0] - a[0]) * 0.1] : [a[0], a[1]];
+  const xyz = (k: string, p: Pt): SAtom => [k, r6(p[0]), r6(p[1])];
+  if (src.kind === "gr_line") {
+    // SetCenter( CalcArcCenter( start, mid, end ) ), SetStart, SetEnd: an EDA_SHAPE arc runs from its start to its end
+    // with the angle growing (CalcArcAngles), and the file's mid is the start turned by half that angle (GetArcMid)
+    const c3 = K.arcFrom3(a, mid, b) as { x: number; y: number } | null; if (!c3) return [];
+    const c: Pt = [c3.x, c3.y];
+    const sa = Math.atan2(a[1] - c[1], a[0] - c[0]); let ea = Math.atan2(b[1] - c[1], b[0] - c[0]);
+    if (ea === sa) ea = sa + 2 * Math.PI; while (ea < sa) ea += 2 * Math.PI;
+    const h = (ea - sa) / 2, rx = a[0] - c[0], ry = a[1] - c[1];
+    const m: Pt = [c[0] + rx * Math.cos(h) - ry * Math.sin(h), c[1] + rx * Math.sin(h) + ry * Math.cos(h)];
+    const stroke = K.kid(n, "stroke");
+    return [addedChange(doc, ["gr_arc", xyz("start", a), xyz("mid", m), xyz("end", b), stroke ? JSON.parse(JSON.stringify(stroke)) : ["stroke", ["width", 0], ["type", "default"]], ["layer", l]])];
+  }
+  if (src.kind === "gr_arc") {
+    const m = pt(n, "mid"); if (!m) return [];
+    const w = +((K.kid(K.kid(n, "stroke") || [], "width") || [])[1] || 0);
+    return [addedChange(doc, ["arc", xyz("start", a), xyz("mid", m), xyz("end", b), ["width", r6(w)], ["layer", l], netNode(doc, null)])];
+  }
+  const w = +((K.kid(n, "width") || [])[1] || 0);
+  if (src.kind === "segment") {
+    const net = netOf(n);
+    return [addedChange(doc, ["arc", xyz("start", a), xyz("mid", mid), xyz("end", b), ["width", r6(w)], ["layer", l], netNode(doc, net)], net)];
+  }
+  const m = pt(n, "mid"); if (!m) return [];
+  return [addedChange(doc, ["gr_arc", xyz("start", a), xyz("mid", m), xyz("end", b), ["stroke", ["width", r6(w)], ["type", "solid"]], ["layer", l]])];
+}
 /** Lines and arcs of the selection chained into closed loops (world points), plus any closed shapes. */
 export function selectionLoops(items: Iterable<KItem>) {
   const chains: Pt[][] = [], loops: Pt[][] = [];
@@ -77,13 +115,12 @@ export function justifyChanges(doc: BoardDoc, ids: Iterable<string>, how: string
     if (j) { if (toks.length) j.splice(1, j.length - 1, ...toks); else eff.splice(eff.indexOf(j), 1); } else if (toks.length) eff.push(["justify", ...toks]);
   });
 }
+/** BOARD_EDITOR_CONTROL::ZonePriority*: the one selected zone's new priority and those of the zones displaced with it (zonePriorityPlan). */
 export function zonePriorityChanges(doc: BoardDoc, ids: Iterable<string>, how: string) {
-  const zones = Array.from(doc.items.values()).filter((it) => it.kind === "zone" && !K.kid(it.node, "keepout")); const prio = (it: KItem) => { const p = K.kid(it.node, "priority"); return p ? K.num(p[1]) : 0; };
-  const top = zones.reduce((m, z) => Math.max(m, prio(z)), 0);
-  return transformChanges(doc, ids, (n, it: KItem) => {
-    if (it.kind !== "zone" || K.kid(n, "keepout")) return false; const cur = prio(it);
-    const want = how === "raise" ? cur + 1 : how === "lower" ? Math.max(0, cur - 1) : how === "top" ? top + 1 : 0; if (want === cur) return false;
-    const p = K.kid(n, "priority"); if (want) { if (p) p[1] = want; else n.splice(n.indexOf((K.kid(n, "connect_pads") || K.kid(n, "min_thickness"))!), 0, ["priority", want]); } else if (p) n.splice(n.indexOf(p), 1);
+  const plan = zonePriorityPlan(doc, ids, how); if (!plan) return [];
+  return transformChanges(doc, plan.keys(), (n, it: KItem) => {
+    const want = plan.get(it.id)!; const p = K.kid(n, "priority"); if ((p ? K.num(p[1]) : 0) === want) return false;
+    if (want) { if (p) p[1] = want; else n.splice(n.indexOf((K.kid(n, "connect_pads") || K.kid(n, "min_thickness"))!), 0, ["priority", want]); } else if (p) n.splice(n.indexOf(p), 1);
   });
 }
 /** EDIT_TOOL::ToggleFootprintAttribute: the flag goes on for every selected footprint when any of them lacks it (as

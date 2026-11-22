@@ -2,6 +2,7 @@
 // that mean something in a browser.  Common > Mouse and Touchpad (common/dialogs/panel_mouse_settings), Hotkeys
 // (panel_hotkeys_editor, read-only here); Schematic Editor > Display Options, Grids, Editing Options, Colors;
 // PCB Editor > Display Options, Grids, Origins & Axes, Editing Options.  Everything is kept in localStorage (prefs.ts) and applied on OK.
+import { boardFontFaces } from "../editor/pcbdialogs/text-graphics";
 import { trapTab } from "../tools/kicad-dialogs/shell";
 import { E, isSch, requestRender, setToggles, store, toast } from "./editor";
 import { colorPicker, fromHex, toHex } from "../editor/pcbdialogs/color-picker";
@@ -643,7 +644,7 @@ function schDisplayPage(L: HTMLElement, R: HTMLElement, p: Prefs, v: SchView): v
     cb("Flash cross-probed selection", val("crossProbeFlash"), (on) => { d.crossProbeFlash = on; }, "xpflash", "Temporarily flash the newly cross-probed selection 3 times"));
   // Appearance
   const ap = head(R, "Appearance");
-  ap.append(h("div", { class: "kd-row", style: "margin:0 0 4px" }, h("label", null, "Default font:"), select([["", "KiCad Font"]], val("defaultFont"), (x) => { d.defaultFont = x; }, { id: "kd-pref-defaultfont", style: "width:180px" })),
+  ap.append(h("div", { class: "kd-row", style: "margin:0 0 4px" }, h("label", null, "Default font:"), select([["", "KiCad Font"], ...boardFontFaces((E.kdoc as KDoc | null) || null).map((f) => [f, f] as [string, string])], val("defaultFont"), (x) => { d.defaultFont = x; }, { id: "kd-pref-defaultfont", style: "width:180px" })),
     cb("Show hidden pins", d.showHiddenPins, (on) => { d.showHiddenPins = on; }, "hiddenpins"),
     cb("Show original pin numbers when remapped", val("remappedPinNumbers"), (on) => { d.remappedPinNumbers = on; }, "remappedpins"),
     cb("Show hidden fields", d.showHiddenFields, (on) => { d.showHiddenFields = on; }, "hiddenfields"),

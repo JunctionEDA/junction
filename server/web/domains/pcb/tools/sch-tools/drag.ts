@@ -10,7 +10,7 @@ import { lineNode } from "./nodes";
 import { txnTrimOverlapping } from "./repeat";
 import { anchorOf, shiftNode } from "./orient";
 import { mmPerPx } from "./snap";
-import { K, LINE_KINDS, POINT_KINDS, S, atOf, kid, kids, num, ptsOf, setPts, uuidOf } from "./state";
+import { K, LINE_KINDS, POINT_KINDS, S, atOf, kid, kids, num, ptsOf, setPts, str, uuidOf } from "./state";
 import { endBreak } from "./transforms";
 import { addNode, deep, itemSexpr, modChange, r4, same, segDist, segs, typeNameFor } from "./util";
 import { wireModeChanged, mergeOverlap } from "./wire";
@@ -70,9 +70,20 @@ export function setDragMode(ctx: SchCtx, mode: string, once?: boolean) {
 }
 
 // Connection points of an item (mm): symbol pins, sheet pins, bus-entry ends, net-line ends, anchors.
+const CONN_CACHE = new WeakMap<object, { key: string; lib: unknown; pts: Pt[] }>();
 export function connPoints(doc: KDoc, item: Pick<KItem, "kind" | "node"> & { id?: string }): Pt[] {
   const k = item.kind, n = item.node;
-  if (k === "symbol") return K.pinPoints(doc, item).map((p) => [r4(p.x), r4(p.y)]);
+  if (k === "symbol") {
+    // kept per node while its library symbol, position, orientation, unit and body style are unchanged: the move
+    // previews ask for every symbol's points on each mouse move
+    const at = kid(n, "at"), mi = kid(n, "mirror"), un = kid(n, "unit"), bs = kid(n, "body_style") || kid(n, "convert");
+    const lid = kid(n, "lib_name") || kid(n, "lib_id"), lib = lid ? K.resolveLib(doc, str(lid[1])) : null;
+    const key = (at ? at.slice(1).join(",") : "") + "|" + (mi ? str(mi[1]) : "") + "|" + (un ? str(un[1]) : "") + "|" + (bs ? str(bs[1]) : "") + "|" + (lid ? str(lid[1]) : "");
+    const hit = CONN_CACHE.get(n as object);
+    if (hit && hit.key === key && hit.lib === lib) return hit.pts.map((p) => p.slice());
+    const pts: Pt[] = K.pinPoints(doc, item).map((p) => [r4(p.x), r4(p.y)]);
+    CONN_CACHE.set(n as object, { key, lib, pts }); return pts.map((p) => p.slice());
+  }
   if (k === "sheet") return kids(n, "pin").map((p) => atOf(p).slice(0, 2).map(r4));
   if (k === "bus_entry") { const [x, y] = atOf(n), s = kid(n, "size"); return [[r4(x), r4(y)], [r4(x + num(s && s[1], 2.54)), r4(y + num(s && s[2], 2.54))]]; }
   if (isNetLine(k)) { const p = ptsOf(n); return p.length > 1 ? [p[0].slice(), p[p.length - 1].slice()] : []; }

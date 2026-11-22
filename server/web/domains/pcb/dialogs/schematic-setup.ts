@@ -14,8 +14,8 @@ import { canWriteProject } from "../editor/projectfile";
 import { state as appState } from "../editor/appstore";
 import { allNetNames, loadSheets } from "../editor/schnets";
 import { netclassPatternMatches } from "../canvas/pcb-sizes";
-import { infoBar } from "../editor/pcbdialogs/ui";
-import { SCH_IMPORT_OPTIONS, annotationOf, annotationPage, chainClassError, chainClassesJson, chainsOf, embeddedFilesPage, importSections, netChainsPage, parityOf, parityPage, writeAnnotation, type ChainState } from "./schematic-setup-pages";
+import { infoBar, messageBox as buttonBox } from "../editor/pcbdialogs/ui";
+import { SCH_IMPORT_OPTIONS, annotationOf, annotationPage, chainClassError, chainClassesJson, chainsOf, embeddedFilesPage, importSections, netChainsPage, parityOf, parityPage, writeAnnotation, aliasNameError, clampPrecision, connectionGridError, memberNameError, resetButtonState, sortAliases, templateFieldNameError, templateNamesWithWhitespace, untitledFieldName, type ChainState } from "./schematic-setup-pages";
 import { kicadIcon } from "../../../shared/components/kicon-dom";
 import { colorPicker, type RGBA } from "../editor/pcbdialogs/color-picker";
 import { PIN_MAP_BMP } from "./pinmap-bitmaps";
@@ -95,7 +95,9 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
   const rootP = root || rootText();
   const sch = sub(pro, "schematic"), drawing = sub(pro, "schematic", "drawing"), erc = sub(pro, "erc"), net = sub(pro, "net_settings");
   const dv = (k: string): Json => (drawing[k] !== undefined ? drawing[k] : DRAWING_DEFAULTS[k]);
-  const units: string = E.units === "mil" ? "mils" : E.units === "in" ? "in" : "mm";
+  // PANEL_SETUP_FORMATTING: m_textSize / m_lineWidth / m_pinSymbolSize / m_connectionGridSize .SetUnits( EDA_UNITS::MILS ),
+  // whatever the editor's units
+  const units: string = "mils";
   const toUser = (mils: number) => (units === "mils" ? mils : units === "in" ? mils / 1000 : mils * MIL), fromUser = (v: number) => (units === "mils" ? v : units === "in" ? v * 1000 : v / MIL);
   const fmt = (v: number) => String(+v.toFixed(units === "mm" ? 4 : units === "in" ? 5 : 2));
   // ---- working copies
@@ -108,7 +110,8 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
   const classes: NetClassRow[] = (Array.isArray(net.classes) ? net.classes as JsonObj[] : [{ name: "Default", wire_width: 6, bus_width: 12, line_style: 0, schematic_color: "rgba(0, 0, 0, 0.000)" }]).map((c) => ({ name: str(c.name), wire: numOf(c.wire_width, 6) + " mils", bus: numOf(c.bus_width, 12) + " mils", color: str(c.schematic_color || "rgba(0, 0, 0, 0.000)"), style: lineStyle(numOf(c.line_style, 0))[0], src: c }));
   const classes0 = classes.map((c) => c.src);
   const patterns: PatternRow[] = (Array.isArray(net.netclass_patterns) ? net.netclass_patterns as JsonObj[] : []).map((p) => ({ pattern: str(p.pattern), netclass: str(p.netclass) }));
-  const aliases: { name: string; members: NameRow[] }[] = Object.entries(obj(sch.bus_aliases)).map(([name, m]) => ({ name, members: (Array.isArray(m) ? m : []).map((x) => ({ name: str(x) })) }));
+  const aliases: { name: string; members: NameRow[] }[] = sortAliases(Object.entries(obj(sch.bus_aliases)).map(([name, m]) => ({ name, members: (Array.isArray(m) ? m : []).map((x) => ({ name: str(x) })) })));
+  let connGrid = numOf(sch.connection_grid_size, 50);
   const vars: VarRow[] = Object.entries(obj(pro.text_variables)).map(([name, value]) => ({ name, value: str(value) }));
   const annotation = annotationOf(sch), parity = parityOf(sch), annotation0 = JSON.stringify(annotation), parity0 = JSON.stringify(parity);
   const chainClasses = obj(net.net_chain_classes);
@@ -126,7 +129,7 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
   /** the working copies written into a project file (OK, and before an import replaces some of them) */
   const writeInto = (p: JsonObj): void => {
     const s = sub(p, "schematic"), d = sub(p, "schematic", "drawing"), e = sub(p, "erc"), n = sub(p, "net_settings");
-    Object.assign(d, drawing); d.field_names = templates.filter((t) => t.name.trim()).map((t) => ({ name: t.name.trim(), url: t.url, visible: t.visible }));
+    Object.assign(d, drawing); d.field_names = templates.filter((t) => t.name).map((t) => ({ name: t.name, url: t.url, visible: t.visible }));
     if (sch.connection_grid_size !== undefined) s.connection_grid_size = sch.connection_grid_size;
     if (Array.isArray(s.bom_presets)) s.bom_presets = (s.bom_presets as JsonObj[]).filter((x) => bomPresets.some((b) => b.name === str(x.name)));
     if (Array.isArray(s.bom_fmt_presets)) s.bom_fmt_presets = (s.bom_fmt_presets as JsonObj[]).filter((x) => bomFmts.some((b) => b.name === str(x.name)));
@@ -142,22 +145,25 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
     const cc = chainClassesJson(chains, chainClasses); if (chainsLoaded && JSON.stringify(cc) !== JSON.stringify(chainClasses)) n.net_chain_classes = cc;
     const tv: JsonObj = {}; for (const v of vars) if (v.name.trim()) tv[v.name.trim()] = v.value; p.text_variables = tv;
   };
-  let tb: { current(): string | null } | null = null;
-  // PAGED_DIALOG::UpdateResetButton: "Reset <page> to Defaults" on a resettable page (the Pin Conflicts Map), else a disabled "Reset to Defaults"
-  let resetPage: (() => void) | null = null, resetPinMap: (() => void) | null = null;
-  const updateResetButton = (label: string): void => {
-    const b = document.getElementById("kd-ss-reset") as HTMLButtonElement | null, name = label.split("/").pop() || "";
-    resetPage = name === "Pin Conflicts Map" && !ro ? () => { if (resetPinMap) resetPinMap(); } : null;
-    if (b) { b.textContent = resetPage ? `Reset ${name} to Defaults` : "Reset to Defaults"; b.disabled = !resetPage; }
+  let tb: { current(): string | null; select(label: string): void } | null = null;
+  // PAGED_DIALOG's reset button: the page's ResetPanel
+  let annotationPg: HTMLElement | null = null, resetPinMap: (() => void) | null = null;
+  const resetPage = (): void => {
+    const cur = tb && tb.current();
+    if (cur === "Annotation") { Object.assign(annotation, annotationOf({})); if (annotationPg) { annotationPg.replaceChildren(); annotationPage(annotationPg, annotation, ro); } }
+    else if (cur === "Pin Conflicts Map") { for (let i = 0; i < 12; i++) for (let j = 0; j < 12; j++) pinMap[i][j] = DEFAULT_PIN_MAP[i][j]; if (resetPinMap) resetPinMap(); }
+  };
+  const syncReset = (label: string | null): void => {
+    const b = document.getElementById("kd-ss-reset") as HTMLButtonElement | null; if (!b) return;
+    const st = resetButtonState(label); b.textContent = st.label; b.disabled = ro || !st.enabled;
   };
   const importSettings = (): void => importDialog((other, sel) => {
     // ImportSettingsFrom on each chosen page: this dialog's edits so far, then the other project's sections, shown again
     writeInto(pro); importSections(pro, other, sel);
     KD().close(); build(pro, (tb && tb.current()) || page, rootP);
   });
-  KD().open({ title: "Schematic Setup", width: 980, cls: "kd-wide kd-flush", readOnly: ro,
-    // PAGED_DIALOG: m_resetButton, then the auxiliary button
-    extra: [{ label: "Reset to Defaults", fn: () => { if (resetPage) resetPage(); }, id: "kd-ss-reset" }, { label: "Import Settings from Another Project...", fn: importSettings, id: "kd-ss-import" }],
+  const dlg = KD().open({ title: "Schematic Setup", width: 980, cls: "kd-wide kd-flush", readOnly: ro,
+    extra: [{ label: "Reset to Defaults", fn: resetPage, id: "kd-ss-reset" }, { label: "Import Settings from Another Project...", fn: importSettings, id: "kd-ss-import" }],
     build(body) {
       // the infobar: KiCad shows it when the project is missing or read-only
       const bar = infoBar(); body.append(bar.el);
@@ -179,28 +185,37 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
             row3(conn.grid, "Junction dot size:", select(JUNCTION_SIZES, JUNCTION_SIZES[numOf(dv("junction_size_choice"), 3)] || "Default", (v) => { drawing.junction_size_choice = JUNCTION_SIZES.indexOf(v); }, { id: "kd-ss-junction", disabled: ro }), "");
             row3(conn.grid, "Hop-over size:", select(HOP_SIZES, HOP_SIZES[numOf(dv("hop_over_size_choice"), 0)] || "None", (v) => { drawing.hop_over_size_choice = HOP_SIZES.indexOf(v); }, { id: "kd-ss-hop", disabled: ro }), "");
             const cg = numOf(sch.connection_grid_size, 50);
-            row3(conn.grid, "Connection grid:", textInput(fmt(toUser(cg)), (v) => { const x = parseFloat(v); if (!isNaN(x)) sch.connection_grid_size = +fromUser(x).toFixed(4); }, { id: "kd-ss-conngrid", disabled: ro, style: "width:90px" }), units);
+            row3(conn.grid, "Connection grid:", textInput(fmt(toUser(cg)), (v) => { const x = parseFloat(v); connGrid = isNaN(x) ? NaN : +fromUser(x).toFixed(4); if (!isNaN(x)) sch.connection_grid_size = connGrid; }, { id: "kd-ss-conngrid", disabled: ro, style: "width:90px" }), units);
             const isr = KD().staticBox(R, "Inter-sheet References");
             const radio = (label: string, short: boolean) => { const r = h("input", { type: "radio", name: "kd-ss-isr", checked: !!dv("intersheets_ref_short") === short, disabled: ro }); r.addEventListener("change", () => { if ((r as HTMLInputElement).checked) drawing.intersheets_ref_short = short; }); return h("label", { class: "kd-chk", style: "margin-left:18px" }, r, label); };
-            isr.append(checkbox("Show inter-sheet references", !!dv("intersheets_ref_show"), (on) => { drawing.intersheets_ref_show = on; }, { disabled: ro, id: "kd-ss-isr-show" }), h("div", { style: "margin-left:18px" }, checkbox("Show own page reference", !!dv("intersheets_ref_own_page"), (on) => { drawing.intersheets_ref_own_page = on; }, { disabled: ro })),
+            // PANEL_SETUP_FORMATTING::onCheckBoxIref: own page, Standard / Abbreviated, Prefix and Suffix follow the checkbox
+            const isrParts = h("div", { id: "kd-ss-isr-parts" }, h("div", { style: "margin-left:18px" }, checkbox("Show own page reference", !!dv("intersheets_ref_own_page"), (on) => { drawing.intersheets_ref_own_page = on; }, { disabled: ro })),
               radio("Standard (1,2,3)", false), radio("Abbreviated (1..3)", true),
               h("div", { class: "kv", style: "margin:6px 0 0 18px;grid-template-columns:max-content 90px" }, h("label", null, "Prefix:"), textInput(str(dv("intersheets_ref_prefix")), (v) => { drawing.intersheets_ref_prefix = v; }, { disabled: ro }), h("label", null, "Suffix:"), textInput(str(dv("intersheets_ref_suffix")), (v) => { drawing.intersheets_ref_suffix = v; }, { disabled: ro })));
+            const isrEnable = (on: boolean): void => { isrParts.querySelectorAll<HTMLInputElement>("input").forEach((i) => { i.disabled = ro || !on; }); isrParts.style.opacity = on ? "" : ".5"; };
+            isr.append(checkbox("Show inter-sheet references", !!dv("intersheets_ref_show"), (on) => { drawing.intersheets_ref_show = on; isrEnable(on); }, { disabled: ro, id: "kd-ss-isr-show" }), isrParts);
+            isrEnable(!!dv("intersheets_ref_show"));
             const dash = flex(R, "Dashed Lines");
             row3(dash.grid, "Dash length:", numField("dashed_lines_dash_length_ratio", "kd-ss-dash", "raw"), "");
             row3(dash.grid, "Gap length:", numField("dashed_lines_gap_length_ratio", "kd-ss-gap", "raw"), "");
             dash.box.append(h("p", { class: "kd-note", style: "margin:8px 0 0" }, "Dash and dot lengths are ratios of the line width."));
             const opo = flex(R, "Operating-point Overlay");
             const range = (key: string, list: string[]) => { const cur = str(dv(key)); const shown = cur.startsWith("~") ? "Auto" : cur; return select(list, list.includes(shown) ? shown : "Auto", (v) => { drawing[key] = v === "Auto" ? "~" + list[6] : v; }, { disabled: ro }); };
-            row3(opo.grid, "Significant digits (voltages):", numField("operating_point_overlay_v_precision", "kd-ss-vprec", "raw", 60), "");
+            // wxSpinCtrl( 1 .. 10 )
+            const spin = (key: string, id: string): HTMLInputElement => {
+              const i = h("input", { type: "number", min: "1", max: "10", step: "1", value: String(clampPrecision(numOf(dv(key), 3))), id, disabled: ro, style: "width:60px" }) as HTMLInputElement;
+              i.addEventListener("change", () => { const v = clampPrecision(+i.value); i.value = String(v); drawing[key] = v; }); return i;
+            };
+            row3(opo.grid, "Significant digits (voltages):", spin("operating_point_overlay_v_precision", "kd-ss-vprec"), "");
             row3(opo.grid, "Range (voltages):", range("operating_point_overlay_v_range", V_RANGES), "");
-            row3(opo.grid, "Significant digits (currents):", numField("operating_point_overlay_i_precision", "kd-ss-iprec", "raw", 60), "");
+            row3(opo.grid, "Significant digits (currents):", spin("operating_point_overlay_i_precision", "kd-ss-iprec"), "");
             row3(opo.grid, "Range (currents):", range("operating_point_overlay_i_range", I_RANGES), "");
           } },
-          { label: "Annotation", build(pg) { annotationPage(pg, annotation, ro); } },
+          { label: "Annotation", build(pg) { annotationPg = pg; annotationPage(pg, annotation, ro); } },
           { label: "Field Name Templates", build(pg) {
             pg.append(h("div", { style: "font-weight:600;margin-bottom:6px" }, "Field Name Templates"));
             KD().grid<FieldTpl>(pg, [{ key: "name", label: "Name", type: "text" }, { key: "visible", label: "Visible", type: "bool", width: 70 }, { key: "url", label: "URL", type: "bool", width: 60 }], templates,
-              { readOnly: ro, height: 330, buttons: { add: () => ({ name: "", visible: false, url: false }), move: true, remove: true } });
+              { readOnly: ro, height: 330, buttons: { add: () => ({ name: untitledFieldName(templates.map((t) => t.name)), visible: false, url: false }), move: true, remove: true } });
           } },
           { label: "BOM Presets", build(pg) {
             pg.append(h("div", { style: "font-weight:600;margin-bottom:6px" }, "Bill of Materials Presets"));
@@ -261,7 +276,7 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
             }
             wrap.append(labels, box);
             // PANEL_SETUP_PINMAP::ResetPanel, run by the dialog's "Reset Pin Conflicts Map to Defaults" button
-            resetPinMap = () => { for (let i = 0; i < 12; i++) for (let j = 0; j < 12; j++) pinMap[i][j] = DEFAULT_PIN_MAP[i][j]; box.querySelectorAll<HTMLElement>("button[data-cell]").forEach((b) => { const [i, j] = b.dataset.cell!.split(",").map(Number); paint(b, pinMap[i][j]); }); };
+            resetPinMap = () => { box.querySelectorAll<HTMLElement>("button[data-cell]").forEach((b) => { const [i, j] = b.dataset.cell!.split(",").map(Number); paint(b, pinMap[i][j]); }); };
             pg.append(wrap);
           } },
         ] },
@@ -299,9 +314,17 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
           { label: "Bus Alias Definitions", build(pg) {
             const cols = h("div", { style: "display:grid;grid-template-columns:1fr 1fr;gap:16px" }), L = h("div"), R = h("div"); cols.append(L, R); pg.append(cols);
             const rtitle = h("div", { style: "font-weight:600;margin-bottom:6px" }, "Members of ''"); let mg: GridApi<NameRow> | null = null; const mhost = h("div");
-            const show = (a: { name: string; members: NameRow[] } | null) => { rtitle.textContent = `Members of '${a ? a.name : ""}'`; mhost.replaceChildren(); mg = a ? KD().grid<NameRow>(mhost, [{ key: "name", label: "Net or Nested Bus Name", type: "text" }], a.members, { readOnly: ro, height: 280, buttons: { add: () => ({ name: "" }), remove: true } }) : null; void mg; };
+            // OnMemberGridCellChanging: an emptied member is refused (the cell keeps its text)
+            const show = (a: { name: string; members: NameRow[] } | null) => { rtitle.textContent = `Members of '${a ? a.name : ""}'`; mhost.replaceChildren(); let before = a ? a.members.map((m) => m.name) : [];
+              mg = a ? KD().grid<NameRow>(mhost, [{ key: "name", label: "Net or Nested Bus Name", type: "text" }], a.members, { readOnly: ro, height: 280, onChange: (r, key, _v, index) => {
+                if (r && key === "name" && before[index] !== undefined && before[index] !== "") { const err = memberNameError(r.name); if (err) { r.name = before[index]; mg!.refresh(); void messageBox(err); return; } }
+                before = a.members.map((m) => m.name); }, buttons: { add: () => ({ name: "" }), remove: true } }) : null; void mg; };
             L.append(h("div", { style: "font-weight:600;margin-bottom:6px" }, "Bus Definitions"));
-            const ag = KD().grid<{ name: string; members: NameRow[] }>(L, [{ key: "name", label: "Alias", type: "text" }], aliases, { readOnly: ro, height: 280, onSelect: (r) => show(r), onChange: (r, key) => { if (key === "name" && r) rtitle.textContent = `Members of '${r.name}'`; }, buttons: { add: () => ({ name: "", members: [] }), remove: true } });
+            // OnAliasesGridCellChanging: a name another alias has is refused (the cell keeps its text)
+            let aliasNames = aliases.map((a) => a.name);
+            const ag = KD().grid<{ name: string; members: NameRow[] }>(L, [{ key: "name", label: "Alias", type: "text" }], aliases, { readOnly: ro, height: 280, onSelect: (r) => show(r), onChange: (r, key, _v, index) => {
+              if (key === "name" && r) { const err = aliasNameError(aliases.map((a) => a.name), index, r.name); if (err) { r.name = aliasNames[index] || ""; ag.refresh(); void messageBox(err); return; } rtitle.textContent = `Members of '${r.name}'`; }
+              aliasNames = aliases.map((a) => a.name); }, buttons: { add: () => ({ name: "", members: [] }), remove: true } });
             R.append(rtitle, mhost); if (aliases.length) ag.select(0); else show(null);
           } },
           { label: "Net Chains", build(pg) { const wait = h("div", { class: "ro" }, "Loading..."); pg.append(wait); void chainsReady.then(() => { wait.remove(); netChainsPage(pg, chains, () => classes.map((c) => c.name), ro); }); } },
@@ -312,17 +335,33 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
         { label: "Schematic Data", pages: [
           { label: "Embedded Files", build(pg) { embeddedFilesPage(pg, () => rootP); } },
         ] },
-      ], { selected: page, onSelect: updateResetButton });
-      // the button row is laid out with the dialog: the page shown first sets the button once it exists
-      setTimeout(() => { if (tb && tb.current()) updateResetButton(tb.current()!); }, 0);
+      ], { selected: page, onSelect: (label) => syncReset(label) });
+      setTimeout(() => syncReset(tb ? tb.current() : null), 0);
     },
     ok() {
       if (ro) return;
+      // PANEL_SETUP_FORMATTING::TransferDataFromWindow: the connection grid must lie in 25 .. 10000 mils
+      const ge = connectionGridError(connGrid);
+      if (ge) { if (tb) tb.select("Formatting"); void messageBox(ge).then(() => { const i = document.getElementById("kd-ss-conngrid") as HTMLInputElement | null; if (i) { i.focus(); i.select(); } }); return false; }
       const ce = chainClassError(chains.classes); if (ce) { void messageBox(ce, "Net Chain Classes"); return false; }
       const bad = vars.find((v) => v.name && !/^[^\s${}:]+$/.test(v.name)); if (bad) { toast(`Text variable name '${bad.name}' may not contain spaces, $, {, } or :`, 4000); return false; }
-      saveProject((p) => {
-        writeInto(p);
-      }, "schematic setup").then(() => toast("Schematic setup saved to the project"), (err: Error) => toast("Could not save the project settings: " + err.message, 5000));
+      // PANEL_TEMPLATE_FIELDNAMES::TransferDataFromWindow: white space is asked about name by name, then a mandatory
+      // field's name and a repeated name are refused on their row
+      void (async () => {
+        for (const i of templateNamesWithWhitespace(templates.map((t) => t.name))) {
+          const t = templates[i];
+          const remove = await new Promise<boolean>((resolve) => { buttonBox("Warning", `The field name '${t.name}' contains trailing and/or leading white space.\n\nThis may result in what appears to be duplicate field names but are actually unique names differing only by white space characters.  Removing the white space characters will have no effect on existing symbol field names.`,
+            [{ label: "Keep White Space", fn: () => resolve(false) }, { label: "Remove White Space", fn: () => resolve(true) }], 0); });
+          if (remove) t.name = t.name.trim();
+        }
+        const te = templateFieldNameError(templates.map((t) => t.name));
+        if (te) { if (tb) tb.select("Field Name Templates"); void messageBox(te.message); return; }
+        dlg.close();
+        saveProject((p) => {
+          writeInto(p);
+        }, "schematic setup").then(() => toast("Schematic setup saved to the project"), (err: Error) => toast("Could not save the project settings: " + err.message, 5000));
+      })();
+      return false;
     } });
 }
 

@@ -5,7 +5,7 @@ import type { DrawState, PcbCtx, Pt } from "./types";
 export type NewItemDialog = (ctx: PcbCtx, node: SNode, done: (node: SNode | null) => void) => void;
 import { addedChange } from "./changes";
 import { closeTextPrompt } from "./dom";
-import { askText } from "./draw-tools";
+import { askText, drawOriginSync } from "./draw-tools";
 import { sizeUnits } from "./edit-commands";
 import { applySelection } from "./groups";
 import { barcodeAllowed, barcodeNode, BARCODE_NEEDS_VERSION_MSG, textNode } from "./nodes";
@@ -39,15 +39,28 @@ export function drawTwoPointAssistant(c: CanvasRenderingContext2D, d: DrawState,
   if (t === "gcircle") { c.save(); c.globalAlpha = 1; c.lineWidth = px; line(c, o, e); c.restore(); }
   textNextToCursor(c, e, vsub(o, e), strs, px, colour);   // DrawTextNextToCursor( end, origin - end )
 }
-/** KIGFX::PREVIEW::DrawTextNextToCursor: the lines beside the cursor, on the side away from aTextQuadrant. */
-export function textNextToCursor(c: CanvasRenderingContext2D, e: Pt, q: Pt, strs: string[], px: number, colour: string) {
-  c.save(); c.globalAlpha = 1;
-  const fs = 12 * px, pitch = fs * 1.4;
-  c.font = `${fs}px sans-serif`; c.fillStyle = colour; c.textBaseline = "top";
+/** LAYER_AUX_ITEMS of the board editor's theme: what the drawing assistants write and rule in. */
+export const AUX_ITEMS_COLOR = "#FFFFFF";
+/** KIGFX::PREVIEW::GetConstantGlyphHeight( gal, 0 ): the glyph height in pixels, and the shadow and line pitch factors (HiDPI canvases use the smaller set). */
+export function previewTextDims() {
+  const hidpi = typeof devicePixelRatio === "number" && devicePixelRatio > 1;
+  return hidpi ? { height: 11, shadow: 0.10, pitch: 1.7 } : { height: 14, shadow: 0.15, pitch: 1.9 };
+}
+/**
+ * KIGFX::PREVIEW::DrawTextNextToCursor: the lines beside the cursor, on the side away from aTextQuadrant, a constant
+ * size on screen, in LAYER_AUX_ITEMS over a drop shadow (GetShadowColor: black under a bright colour); 15 px off the
+ * cursor, one line pitch per string, top to bottom.
+ */
+export function textNextToCursor(c: CanvasRenderingContext2D, e: Pt, q: Pt, strs: string[], px: number, colour?: string) {
+  void colour;   // the layer colour the callers have: the assistant's text is always LAYER_AUX_ITEMS
+  c.save(); c.globalAlpha = 1; c.setLineDash([]);
+  const dims = previewTextDims(), h = dims.height * px, pitch = h * dims.pitch, shadow = h * dims.shadow;
+  c.font = `${h / 0.7}px sans-serif`; c.textBaseline = "middle";   // the glyph size is the capital height
   let x = e[0], y = e[1];
   if (q[1] > 0) y -= pitch * (strs.length + 1);
-  if (q[0] < 0) { c.textAlign = "left"; x += 15 * px; } else { c.textAlign = "right"; x -= 15 * px; }
-  strs.forEach((sx: string, i: number) => c.fillText(sx, x, y + (i + 0.5) * pitch));
+  if (q[0] < 0) { c.textAlign = "left"; x += 15 * px - 1.2 * shadow; } else { c.textAlign = "right"; x -= 15 * px - 1.2 * shadow; }
+  c.lineJoin = "round"; c.lineWidth = 2 * shadow; c.strokeStyle = "#000000"; c.fillStyle = AUX_ITEMS_COLOR;
+  strs.forEach((sx: string, i: number) => { c.strokeText(sx, x, y + (i + 1) * pitch); c.fillText(sx, x, y + (i + 1) * pitch); });
   c.restore();
 }
 export function drawStatusPopup(c: CanvasRenderingContext2D, px: number) {
@@ -59,6 +72,19 @@ export function drawStatusPopup(c: CanvasRenderingContext2D, px: number) {
   const w = Math.max(...lines.map((l) => c.measureText(l).width)) + 2 * m, h = fs + (lines.length - 1) * lh + 2 * m, x = p.at[0] + 20 * px, y = p.at[1] + 20 * px;
   c.fillStyle = css("--panel", "#2b2b2b"); c.strokeStyle = css("--line", "#555"); c.lineWidth = px; c.fillRect(x, y, w, h); c.strokeRect(x, y, w, h);
   c.fillStyle = css("--ink", "#e0e0e0"); c.textBaseline = "top"; lines.forEach((l, i) => c.fillText(l, x + m, y + m + i * lh)); c.restore();
+}
+/**
+ * PCB_PICKER_TOOL's STATUS_TEXT_POPUP: the picker's prompt in a small box that follows the mouse, 20 px right of it
+ * and 50 px above (statusPopup.Move( mouse + wxPoint( 20, -50 ) )).
+ */
+export function drawPickerPrompt(c: CanvasRenderingContext2D, px: number) {
+  // a two-point pick (pickTwoPoints) shows its prompt in its own status popup (S.popup), not a second time here
+  const pk = S.pick, at = S.hover; if (!pk || !pk.prompt || pk.two || !at || (S.modTool !== "pickpoint" && S.modTool !== "pickitem")) return;
+  const css = (name: string, dflt: string) => { try { const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); return v || dflt; } catch (e) { return dflt; } };
+  const fs = 12 * px, m = 5 * px; c.save(); c.globalAlpha = 1; c.setLineDash([]); c.font = `${fs}px sans-serif`;
+  const w = c.measureText(pk.prompt).width + 2 * m, h = fs + 2 * m, x = at.x + 20 * px, y = at.y - 50 * px;
+  c.fillStyle = css("--panel", "#2b2b2b"); c.strokeStyle = css("--line", "#555"); c.lineWidth = px; c.fillRect(x, y, w, h); c.strokeRect(x, y, w, h);
+  c.fillStyle = css("--ink", "#e0e0e0"); c.textBaseline = "top"; c.textAlign = "left"; c.fillText(pk.prompt, x + m, y + m); c.restore();
 }
 export function placeText(ctx: PcbCtx, mm: Pt, text: string) { ctx.commit([addedChange(ctx.doc, textNode(text, mm[0], mm[1], S.gfxLayer))], "text"); }
 // the editor's dialogs for a new item (pcbdialogs/item-props.ts): kind -> (ctx, node, done(node | null))
@@ -98,6 +124,6 @@ export function placeBarcodeAt(ctx: PcbCtx, at: Pt) {
     const c = addedChange(ctx.doc, n); ctx.commit([c], "Draw Barcode"); applySelection(ctx, [c.id]); ctx.requestRender();
   });
 }
-export function cancelOps() { if (S.drag && lastCtx && lastCtx.doc) { const D = S.drag; S.drag = null; routeUnhighlight(lastCtx, D.subs[0]); } if (S.route) { K.pcbSizes.state.endRoute(); const rt = S.route; S.route = null; if (lastCtx && lastCtx.doc) routeUnhighlight(lastCtx, rt); } S.violations = null; S.routeQueue = null; S.draw = null; S.drag = null; S.image = null; S.pending = null; if (S.move && lastCtx) finishSelectMove(lastCtx, false); S.move = null; if (S.pedit && lastCtx) editHandleUp(lastCtx, false); closeTextPrompt(); if (S.tune) S.tune.pattern = null; }
+export function cancelOps() { if (S.drag && lastCtx && lastCtx.doc) { const D = S.drag; S.drag = null; routeUnhighlight(lastCtx, D.subs[0]); } if (S.route) { K.pcbSizes.state.endRoute(); const rt = S.route; S.route = null; if (lastCtx && lastCtx.doc) routeUnhighlight(lastCtx, rt); } S.violations = null; S.routeQueue = null; S.draw = null; drawOriginSync(lastCtx); S.drag = null; S.image = null; S.pending = null; if (S.move && lastCtx) finishSelectMove(lastCtx, false); S.move = null; if (S.pedit && lastCtx) editHandleUp(lastCtx, false); closeTextPrompt(); if (S.tune) S.tune.pattern = null; }
 /** pcb.setNewItemDialogs: the editor's dialogs for a new item. */
 export function setNewItemDialogsImpl(d: Record<string, NewItemDialog | undefined>) { newItemDialogs = d; }

@@ -2,7 +2,7 @@
 import type { BoardDoc, NetRef, Pt } from "./types";
 import { netNode } from "./nets";
 import { K } from "./state";
-import { LINE_W, corners, isBack, layerClass, r6, textStyle, xy } from "./util";
+import { LINE_W, corners, isBack, layerClass, projectZoneDefaults, r6, textStyle, xy } from "./util";
 
 // ---------------------------------------------------------------- node builders (KiCad board file shapes)
 export function segmentNode(doc: BoardDoc, a: Pt, b: Pt, width: number, layer: string, net: NetRef | null): SNode {
@@ -14,13 +14,17 @@ export function viaNode(doc: BoardDoc, x: number, y: number, size: number, drill
 export const gfxWidth = (layer: string) => LINE_W[layerClass(layer)];
 export const strokeNode = (w: number): SNode => ["stroke", ["width", r6(w)], ["type", "default"]];
 export function lineNode(a: Pt, b: Pt, layer: string): SNode { return ["gr_line", ["start", r6(a[0]), r6(a[1])], ["end", r6(b[0]), r6(b[1])], strokeNode(gfxWidth(layer)), ["layer", layer]]; }
-export function rectNode(a: Pt, b: Pt, layer: string): SNode { return ["gr_rect", ["start", r6(a[0]), r6(a[1])], ["end", r6(b[0]), r6(b[1])], strokeNode(gfxWidth(layer)), ["fill", "no"], ["layer", layer]]; }
+// DRAWING_TOOL::DrawRectangle: rect->Normalize() stores the start top-left and the end bottom-right
+export function rectNode(a: Pt, b: Pt, layer: string): SNode { return ["gr_rect", ["start", r6(Math.min(a[0], b[0])), r6(Math.min(a[1], b[1]))], ["end", r6(Math.max(a[0], b[0])), r6(Math.max(a[1], b[1]))], strokeNode(gfxWidth(layer)), ["fill", "no"], ["layer", layer]]; }
 export function circleNode(c: Pt, e: Pt, layer: string): SNode { return ["gr_circle", ["center", r6(c[0]), r6(c[1])], ["end", r6(e[0]), r6(e[1])], strokeNode(gfxWidth(layer)), ["fill", "no"], ["layer", layer]]; }
 // PCB_IO_KICAD_SEXPR::format(PCB_SHAPE): start/mid/end, stroke, (fill only for closed shapes), layer, then the uuid
 // EDA_SHAPE::SetArcGeometry keeps one winding: from start to end the polar angle grows (clockwise on the board), so an
 // arc given the other way round is stored with its ends swapped, as pcbnew writes it.
 export function arcNode(a: Pt, m: Pt, b: Pt, layer: string): SNode { if ((m[0] - a[0]) * (b[1] - m[1]) - (m[1] - a[1]) * (b[0] - m[0]) < 0) [a, b] = [b, a]; return ["gr_arc", ["start", r6(a[0]), r6(a[1])], ["mid", r6(m[0]), r6(m[1])], ["end", r6(b[0]), r6(b[1])], strokeNode(gfxWidth(layer)), ["layer", layer]]; }
-export function polyNode(pts: Pt[], layer: string): SNode { return ["gr_poly", ["pts", ...pts.map((p: Pt) => ["xy", r6(p[0]), r6(p[1])])], strokeNode(gfxWidth(layer)), ["fill", "no"], ["layer", layer]]; }
+// fill and solid: ZONE_CREATE_HELPER's GRAPHIC_POLYGON (SetFilled, STROKE_PARAMS( width, LINE_STYLE::SOLID )) and CONVERT_TOOL
+export function polyNode(pts: Pt[], layer: string, fill = false, solid = false): SNode { const st = strokeNode(gfxWidth(layer)); if (solid) (st[2] as SNode)[1] = "solid"; return ["gr_poly", ["pts", ...pts.map((p: Pt) => ["xy", r6(p[0]), r6(p[1])])], st, ["fill", fill ? "yes" : "no"], ["layer", layer]]; }
+/** The layers a new graphic polygon is left unfilled on (zone_create_helper.cpp: Edge_Cuts, F_CrtYd, B_CrtYd). */
+export const polyFilledOn = (layer: string) => layer !== "Edge.Cuts" && layer !== "F.CrtYd" && layer !== "B.CrtYd";
 // DRAWING_TOOL::PlaceText: the layer class's size and thickness, left / bottom justified, mirrored on the back;
 // PCB_IO_KICAD_SEXPR::format(PCB_TEXT) writes the text, (at), (layer), (uuid) and then the effects.
 export function textNode(text: string, x: number, y: number, layer: string): SNode {
@@ -88,7 +92,39 @@ export function imageNode(x: number, y: number, base64: string, layer: string): 
 }
 // ZONE_SETTINGS defaults (zones.h): edge hatch 0.5, clearance 0.5, min thickness 0.25, thermal gap / spoke 0.5, islands
 // always removed.  A new zone travels unfilled (no "yes" on fill) — every client refills for itself.
-export const zoneFillNode = (): SNode => ["fill", ["thermal_gap", 0.5], ["thermal_bridge_width", 0.5], ["island_removal_mode", 0]];
+/**
+ * BOARD_DESIGN_SETTINGS::GetDefaultZoneSettings (ZONE_CREATE_HELPER::createNewZone, CONVERT_TOOL::CreatePolys): the
+ * project's defaults.zones (Board Setup > Design Rules > Zones) over ZONE_SETTINGS' own defaults; a value outside the
+ * parameter's range falls back to the default, as PARAM does.
+ */
+export function zoneDefaultSettings() {
+  const z = projectZoneDefaults();
+  const num = (k: string, d: number, lo: number, hi: number) => { const v = z[k]; return typeof v === "number" && v >= lo && v <= hi ? v : d; };
+  const int = (k: string, d: number, lo: number, hi: number) => { const v = z[k]; return typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : d; };
+  return { clearance: num("min_clearance", 0.5, 0, 25), minThickness: num("min_thickness", 0.25, 0.025, 25), padConnection: int("pad_connection", 1, 0, 3),
+    thermalGap: num("thermal_relief_gap", 0.5, 0, 25), spokeWidth: num("thermal_relief_spoke_width", 0.5, 0, 25), border: int("border_display_style", 2, 0, 3), hatchPitch: num("border_hatch_pitch", 0.5, 0.1, 2),
+    fillMode: int("fill_mode", 0, 0, 2), hatchThickness: num("hatch_thickness", 1, 0, 25), hatchGap: num("hatch_gap", 1.5, 0, 25), hatchOrientation: typeof z.hatch_orientation === "number" ? z.hatch_orientation : 0,
+    smoothLevel: int("hatch_smoothing_level", 0, 0, 3), smoothValue: num("hatch_smoothing_value", 0.1, 0, 1), cornerSmoothing: int("corner_smoothing", 0, 0, 2), cornerRadius: typeof z.corner_radius === "number" ? z.corner_radius : 0,
+    islands: int("remove_islands", 0, 0, 2), islandArea: typeof z.min_island_area === "number" ? z.min_island_area : 10 };
+}
+/** (hatch <style> <pitch>): ZONE_BORDER_DISPLAY_STYLE NO_HATCH 0, DIAGONAL_FULL 1, DIAGONAL_EDGE 2 (anything else writes none). */
+export const zoneHatchNode = (): SNode => { const d = zoneDefaultSettings(); return ["hatch", d.border === 2 ? "edge" : d.border === 1 ? "full" : "none", r6(d.hatchPitch)]; };
+/** (connect_pads [no | yes | thru_hole_only] (clearance …)): ZONE_CONNECTION NONE 0, THERMAL 1 (not written), FULL 2, THT_THERMAL 3. */
+export const zoneConnectNode = (): SNode => { const d = zoneDefaultSettings(); const n: SNode = ["connect_pads"]; if (d.padConnection === 3) n.push("thru_hole_only"); else if (d.padConnection === 2) n.push("yes"); else if (d.padConnection === 0) n.push("no"); n.push(["clearance", r6(d.clearance)]); return n; };
+/** The (fill …) of a new zone in the writer's order: mode, thermal gap and spoke, corner smoothing, islands, the hatch keys. */
+export const zoneFillNode = (): SNode => {
+  const d = zoneDefaultSettings(); const f: SNode = ["fill"];
+  if (d.fillMode === 1) f.push(["mode", "hatch"]);
+  f.push(["thermal_gap", r6(d.thermalGap)], ["thermal_bridge_width", r6(d.spokeWidth)]);
+  if (d.cornerSmoothing) { f.push(["smoothing", d.cornerSmoothing === 1 ? "chamfer" : "fillet"]); if (d.cornerRadius) f.push(["radius", r6(d.cornerRadius)]); }
+  f.push(["island_removal_mode", d.islands]); if (d.islands === 2) f.push(["island_area_min", r6(d.islandArea)]);
+  if (d.fillMode === 1) {
+    f.push(["hatch_thickness", r6(d.hatchThickness)], ["hatch_gap", r6(d.hatchGap)], ["hatch_orientation", r6(d.hatchOrientation)]);
+    if (d.smoothLevel > 0) f.push(["hatch_smoothing_level", d.smoothLevel], ["hatch_smoothing_value", r6(d.smoothValue)]);
+    f.push(["hatch_border_algorithm", "hatch_thickness"], ["hatch_min_hole_area", 0.3]);
+  }
+  return f;
+};
 export const zoneLayers = (node: SNode) => { const l = K.kid(node, "layer"); if (l) return [K.str(l[1])]; const ls = K.kid(node, "layers"); return ls ? ls.slice(1).map(K.str) : []; };
 /** ZONE_CREATE_HELPER::setUniquePriority: the lowest priority no copper zone on the board uses yet. */
 export function zonePriority(doc: BoardDoc) {
@@ -163,15 +199,16 @@ export const thievingAllowed = (doc: BoardDoc | null | undefined) => !doc || !(N
 export const THIEVING_NEEDS_VERSION_MSG = "Copper thieving needs a board in the KiCad 11 file format (version 20260513 or later); this board is saved in an older format, which cannot store it.";
 export function zoneNode(doc: BoardDoc, pts: Pt[], layer: string, net: NetRef | null): SNode {
   const node: SNode = ["zone"]; const nn = netNode(doc, net); if (nn[1]) node.push(nn);   // (net …) only for a real net
-  node.push(["layer", layer], ["uuid", K.newUuid()], ["hatch", "edge", 0.5]);
+  node.push(["layer", layer], ["uuid", K.newUuid()], zoneHatchNode());
   const prio = zonePriority(doc); if (prio > 0) node.push(["priority", prio]);
-  node.push(["connect_pads", ["clearance", 0.5]], ["min_thickness", 0.25], zoneFillNode(), ["polygon", ["pts", ...pts.map(xy)]]);
+  node.push(zoneConnectNode(), ["min_thickness", r6(zoneDefaultSettings().minThickness)], zoneFillNode(), ["polygon", ["pts", ...pts.map(xy)]]);
+  if (zoneDefaultSettings().fillMode === 2 && thievingAllowed(doc)) setZoneFillMode(node, "thieving");   // the default fill mode is COPPER_THIEVING
   return node;
 }
 // A rule area with ZONE_SETTINGS' default keepouts: tracks, vias and pads out; copper pours and footprints allowed.
 export function ruleAreaNode(pts: Pt[], layers: string[]): SNode {
-  return ["zone", layers.length > 1 ? ["layers", ...layers] : ["layer", layers[0]], ["uuid", K.newUuid()], ["hatch", "edge", 0.5],
-    ["connect_pads", ["clearance", 0.5]], ["min_thickness", 0.25],
+  return ["zone", layers.length > 1 ? ["layers", ...layers] : ["layer", layers[0]], ["uuid", K.newUuid()], zoneHatchNode(),
+    zoneConnectNode(), ["min_thickness", r6(zoneDefaultSettings().minThickness)],
     ["keepout", ["tracks", "not_allowed"], ["vias", "not_allowed"], ["pads", "not_allowed"], ["copperpour", "allowed"], ["footprints", "allowed"]],
     ["placement", ["enabled", "no"], ["sheetname", ""]], zoneFillNode(), ["polygon", ["pts", ...pts.map(xy)]]];
 }

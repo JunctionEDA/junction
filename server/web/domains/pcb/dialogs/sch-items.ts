@@ -26,9 +26,10 @@ import { colorPicker, type RGBA } from "../editor/pcbdialogs/color-picker";
 import { facesUsed, fontPicker, type FontPickerEl } from "./font-picker";
 import * as L from "./sch-items-logic";
 import { commitWithOtherUnits } from "./sync-units";
-import { HL, netMap } from "../editor/schnets";
+import { HL, currentInstance as currentInstanceOf, netMap } from "../editor/schnets";
 import { fmtLen, parseLen, unitName } from "../editor/pcbdialogs/ui";
 import { openSheetProperties, openSymbolProperties, setSymbolUnitHere, sheetPathNow, symbolUnits, unitLetter } from "./sch-symbol-sheet";
+import { chooserFilters } from "../library/fpchoice";
 import { openPageSettings } from "./page-settings";
 import { datasheetButton, docFiles, footprintButton, projectVars, sheetFileButton } from "./browse-cells";
 import { isURL, resolveUriVars, type FpChooserFilters } from "../library/fpchoice";
@@ -89,15 +90,70 @@ function toggle(icon: string, title: string, on: boolean, id: string): HTMLButto
   return b;
 }
 /** SetInitialFocus: a dialog opened by a click keeps its first control focused once the click's pointerup lands. */
-function initialFocus(el: HTMLInputElement | HTMLTextAreaElement | null): void {
+function initialFocus(el: HTMLInputElement | HTMLTextAreaElement | null, sel?: (el: HTMLInputElement) => void): void {
   if (!el) return;
-  const f = (): void => { const act = document.activeElement as HTMLElement | null; if (document.contains(el) && act !== el && !(act && act.closest && act.closest(".kd-font-pop")) && !(act && act.closest && act.closest(".kd-dialog") && act.closest(".kd-dialog") !== el.closest(".kd-dialog"))) { el.focus(); el.select(); } };
+  let first = !!sel;   // a custom selection is made once even when the box already has the focus (the shell selected it all)
+  const f = (): void => { const act = document.activeElement as HTMLElement | null; if (document.contains(el) && (act !== el || first) && !(act && act.closest && act.closest(".kd-font-pop")) && !(act && act.closest && act.closest(".kd-dialog") && act.closest(".kd-dialog") !== el.closest(".kd-dialog"))) { first = false; el.focus(); if (sel) sel(el as HTMLInputElement); else el.select(); } };
   setTimeout(f, 0);
   const up = (): void => { setTimeout(f, 0); };
   window.addEventListener("pointerup", up, { once: true, capture: true });
   setTimeout(() => window.removeEventListener("pointerup", up, { capture: true }), 1500);
 }
 const isOn = (b: HTMLElement): boolean => b.classList.contains("on");
+/** KIUI::SelectReferenceNumber on a text box: only the number (or the '?'s) of a reference designator. */
+export function selectReferenceNumber(el: HTMLInputElement): void {
+  const r = L.referenceNumberRange(el.value);
+  if (r) el.setSelectionRange(r[0], r[1]); else el.select();
+}
+/** Schematic Setup > Formatting as the .kicad_pro holds it (schematic.drawing). */
+function drawingSettings(): Record<string, unknown> {
+  try { const j = E.proSettings ? JSON.parse(E.proSettings) as { schematic?: { drawing?: Record<string, unknown> } } : null; return (j && j.schematic && j.schematic.drawing) || {}; } catch { return {}; }
+}
+/** m_Drawing.default_line_thickness (mils) as a length: what a border ticked on with no width takes. */
+export function defaultLineThickness(): number { const m = Number(drawingSettings().default_line_thickness); return L.r4((Number.isFinite(m) && m > 0 ? m : 6) * 0.0254); }
+const INTERSHEET_NOTICE = "Intersheet reference visibility is controlled globally from Schematic Setup > General > Formatting";
+/** UNIT_BINDER::Validate( 0.01, 1000.0, EDA_UNITS::MM ) on a text size / pin length box: the message, or null. */
+const sizeError = (label: string, v: number | undefined): string | null => L.rangeError(label, v, 0.01, 1000, (mm) => `${fmtLen(mm)} ${unitName()}`);
+/** The message, then the box selected and focused (UNIT_BINDER's DELAY_FOCUS). */
+function sizeInvalid(label: string, box: HTMLInputElement | null, v: number | undefined): boolean {
+  const err = sizeError(label, v); if (!err) return false;
+  void messageBox(err).then(() => { if (box && document.contains(box)) { box.focus(); box.select(); } });
+  return true;
+}
+/**
+ * SCHEMATIC::ConvertKIIDsToRefs / ConvertRefsToKIIDs for the dialogs: every symbol instance of the hierarchy with its
+ * reference on that sheet path (GetRef( path, true ): the sheet's reference suffix and, for a multi-unit part, the unit).
+ */
+export function schXref(doc: KDoc): { toRefs(t: string): string; toKiids(t: string): string; find(ref: string): L.XrefSymbol | null } {
+  let list: L.XrefSymbol[] | null = null;
+  const build = (): L.XrefSymbol[] => {
+    const out: L.XrefSymbol[] = [], c = netMap(), H = schH(), here = sheetPathNow(doc);
+    const add = (d: KDoc, path: string, suffix: string): void => {
+      for (const it of d.items.values()) {
+        if (it.kind !== "symbol") continue;
+        const u = L.kid(it.node, "uuid"), lib = L.kid(it.node, "lib_id"); if (!u) continue;
+        const e = L.instanceEntry(it.node, path, here.project), er = e && L.kid(e, "reference"), eu = e && L.kid(e, "unit");
+        const rp = L.kids(it.node, "property").find((p) => L.fieldName(p) === "Reference");
+        let ref = er ? L.str(er[1]) : rp ? L.fieldValue(rp) : "";
+        if (suffix && !ref.endsWith("?")) ref += suffix;
+        let units = 1; try { units = symbolUnits(d, it.node).count; } catch { units = 1; }
+        if (units > 1) { const un = L.kid(it.node, "unit"); ref += unitLetter(eu ? L.num(eu[1], 1) : un ? L.num(un[1], 1) : 1); }
+        out.push({ path: path + "/" + L.str(u[1]), uuid: L.str(u[1]), ref, power: !!(H && lib && H.isPowerSymbol(d, L.str(lib[1]))) });
+      }
+    };
+    if (c && c.instances.length) {
+      for (const inst of c.instances) {
+        const d = c.docs.get(inst.file); if (!d) continue;
+        let suffix = "";
+        for (const id of inst.uuidPath.slice(1)) for (const sd of c.docs.values()) { const sh = sd.items.get(id); if (sh && sh.kind === "sheet") { const p = L.kids(sh.node, "property").find((q) => L.fieldName(q) === "Reference Suffix"); if (p) suffix += L.fieldValue(p); break; } }
+        add(d, "/" + inst.uuidPath.join("/"), suffix);
+      }
+    } else add(doc, here.path || "", "");
+    return out;
+  };
+  const get = (): L.XrefSymbol[] => list || (list = build());
+  return { find: (ref: string) => get().find((x) => !x.power && x.ref === ref) || null, toRefs: (t) => (t && t.includes("${") ? L.schKiidsToRefs(t, get()) : t), toKiids: (t) => (t && t.includes("${") ? L.schRefsToKiids(t, get()) : t) };
+}
 function radioGroup(name: string, opts: [string, string][], value: string, onPick?: (v: string) => void, columns = 2): HTMLElement {
   const box = h("div", { style: `display:grid;grid-template-columns:repeat(${columns},max-content);gap:3px 18px` });
   for (const [v, label] of opts) {
@@ -130,6 +186,80 @@ const commitItem = (ctx: Ctx, item: KItem, node: SNode, label: string): void => 
   ctx.commit([KiCadCanvas.replaceChange(ctx.doc, Object.assign({}, item, { node, geom: [], bbox: null }) as KItem)], label);
 };
 
+// ---------------------------------------------------------------- text variable autocompletion (SCINTILLA_TRICKS)
+/** The sheet symbols from the top sheet down to the sheet on screen (the chain SCH_SHEET::GetContextualTextVars walks). */
+function sheetChain(): SNode[] {
+  const c = netMap(), here = c ? currentInstanceOf(c) : null, out: SNode[] = []; if (!c || !here) return out;
+  for (const id of here.uuidPath.slice(1)) for (const d of c.docs.values()) { const it = d.items.get(id); if (it && it.kind === "sheet") { out.push(it.node); break; } }
+  return out;
+}
+/** The node of the non-power symbol whose reference (GetRef( path, true )) is `ref`, anywhere in the hierarchy. */
+function symbolByRef(doc: KDoc, ref: string): SNode | null {
+  const hit = schXref(doc).find(ref); if (!hit) return null;
+  const c = netMap(); const docs: KDoc[] = c ? Array.from(c.docs.values()) : [doc]; if (!docs.includes(doc)) docs.push(doc);
+  for (const d of docs) for (const it of d.items.values()) if (it.kind === "symbol") { const u = L.kid(it.node, "uuid"); if (u && L.str(u[1]) === hit.uuid) return it.node; }
+  return null;
+}
+/**
+ * getContextualTextVars of the text, text box and table dialogs: after "${REF:" the variables of that symbol, else
+ * those of the sheet on screen.  `parent` (SCH_FIELD::OnScintillaCharAdded): a field also offers its parent's own
+ * variables and the project's text variables.
+ */
+export function contextualTextVars(doc: KDoc, xref: string, parent?: KItem | null): string[] {
+  const pv = Object.keys(projectVars() || {});
+  if (xref) { const n = xref === "OP" && parent ? null : symbolByRef(doc, xref); return n ? L.symbolTextVars(n) : []; }
+  if (!parent) return L.sheetTextVars(sheetChain(), pv);
+  const out: string[] = [];
+  if (parent.kind === "symbol") out.push(...L.symbolTextVars(parent.node), ...L.sheetTextVars(sheetChain(), pv));
+  else if (parent.kind === "sheet") out.push(...L.sheetTextVars([...sheetChain(), parent.node], pv));
+  else if (L.LABEL_KINDS.has(parent.kind)) out.push(...L.labelTextVars(parent.kind, parent.node));
+  out.push(...pv);
+  return out;
+}
+/**
+ * DoTextVarAutocomplete on a text box: each character typed after "${" (or "${REF:") shows the variable names that
+ * contain what was typed; Up / Down move, Enter or Tab (or a click) put the name in place of the typed part, Escape
+ * closes the list.
+ */
+export function textVarAutocomplete(input: HTMLInputElement | HTMLTextAreaElement, getTokens: (xref: string) => string[]): void {
+  let pop: HTMLElement | null = null, list: string[] = [], cur = 0, from = 0;
+  const close = (): void => { if (pop) { pop.remove(); pop = null; } };
+  const mark = (): void => { if (!pop) return; Array.from(pop.children).forEach((r, i) => { r.classList.toggle("on", i === cur); if (i === cur) (r as HTMLElement).scrollIntoView({ block: "nearest" }); }); };
+  const take = (i: number): void => {
+    const t = list[i]; if (t === undefined) { close(); return; }
+    const pos = input.selectionStart ?? input.value.length;
+    input.value = input.value.slice(0, from) + t + input.value.slice(pos);
+    const at = from + t.length; input.setSelectionRange(at, at); close();
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const show = (): void => {
+    const pos = input.selectionStart ?? input.value.length, cx = L.textVarContext(input.value, pos);
+    const found = cx ? L.autocompleteMatches(cx.partial, getTokens(cx.xref)) : [];
+    if (!cx || !found.length) { close(); return; }
+    list = found; cur = 0; from = cx.start;
+    if (!pop) {
+      pop = h("div", { class: "ksel-pop kd-textvar-pop", role: "listbox", "data-popup-open": "", style: "position:fixed;z-index:90;max-height:180px;overflow:auto;min-width:160px" });
+      const p = pop;
+      p.addEventListener("pointerdown", (ev) => ev.preventDefault());   // the text keeps the keyboard focus
+      p.addEventListener("click", (ev) => { const r = (ev.target as HTMLElement).closest(".ksel-opt") as HTMLElement | null; if (r) take(Number(r.dataset.i)); });
+      document.body.append(p);
+    }
+    pop.replaceChildren(...list.map((t, i) => h("div", { class: "ksel-opt", role: "option", "data-i": String(i) }, t)));
+    const r = input.getBoundingClientRect(); pop.style.left = r.left + "px"; pop.style.top = Math.min(r.bottom + 2, window.innerHeight - 190) + "px";
+    mark();
+  };
+  let taking = false;
+  input.addEventListener("input", (ev) => { if (taking) return; const it = (ev as InputEvent).inputType; if (it && !it.startsWith("insert")) { close(); return; } if (!(ev as InputEvent).inputType) return; show(); });
+  input.addEventListener("keydown", (ev) => {
+    if (!pop) return;
+    const k = (ev as KeyboardEvent).key;
+    if (k === "ArrowDown" || k === "ArrowUp") { ev.preventDefault(); ev.stopPropagation(); cur = (cur + (k === "ArrowDown" ? 1 : list.length - 1)) % list.length; mark(); }
+    else if (k === "Enter" || k === "Tab") { ev.preventDefault(); ev.stopPropagation(); taking = true; try { take(cur); } finally { taking = false; } }
+    else if (k === "Escape") { ev.preventDefault(); ev.stopPropagation(); close(); }
+  });
+  input.addEventListener("blur", () => setTimeout(close, 0));
+}
+
 // ---------------------------------------------------------------- the fields grid (FIELDS_GRID_TABLE)
 interface GRow extends L.FieldRow { sizeT: string; xT: string; yT: string; hT: string; vT: string; orientT: string; colorT: string }
 const toG = (r: L.FieldRow): GRow => Object.assign(r, { sizeT: fmtLen(r.size), xT: fmtLen(r.x), yT: fmtLen(r.y), hT: r.h, vT: r.v, orientT: r.orient === 90 ? "Vertical" : "Horizontal", colorT: r.color ? L.colorToHex(r.color) : "" });
@@ -156,8 +286,25 @@ function urlTemplateNames(): Set<string> {
     return new Set(Array.isArray(list) ? list.filter((f) => f && f.url === true).map((f) => String(f.name)) : []);
   } catch { return new Set(); }
 }
-export function fieldsGrid(host: HTMLElement, rows0: L.FieldRow[], opts: { readOnly?: boolean; doc: KDoc | null; newName(rows: L.FieldRow[]): string; height?: number; shown?: number[]; browse?: FieldsGridBrowse }): { rows(): L.FieldRow[]; setRows(rows: L.FieldRow[]): void } {
+export interface FieldsGridOpts {
+  readOnly?: boolean; doc: KDoc | null; newName?(rows: L.FieldRow[]): string; height?: number; shown?: number[]; browse?: FieldsGridBrowse;
+  /** OnAddField: the row "Add field" appends (else a shown row named by newName). */
+  addRow?(rows: L.FieldRow[]): L.FieldRow;
+  /** The parent's untranslated mandatory field names (FieldNamesAreDuplicates folds their case). */
+  mandatoryNames?: string[];
+  /** A row that neither moves nor lets another row past it, besides the mandatory ones (a sheet's Reference Suffix). */
+  pinned?(row: L.FieldRow): boolean;
+  /** OnDeleteField's further refusals: a message for a row that cannot be deleted. */
+  cannotRemove?(row: L.FieldRow): string | null;
+  /** The Name column's shown text and the stored name of what was typed there (a label's fields). */
+  displayName?: { show(name: string): string; store(shown: string): string };
+  /** OnGridMotion: a row's tooltip. */
+  rowTitle?(row: L.FieldRow): string;
+}
+export function fieldsGrid(host: HTMLElement, rows0: L.FieldRow[], opts: FieldsGridOpts): { rows(): L.FieldRow[]; setRows(rows: L.FieldRow[]): void } {
   const rows: GRow[] = rows0.map(toG);
+  const names = new WeakMap<GRow, string>(); for (const r of rows) names.set(r, r.name);
+  const dn = opts.displayName;
   const faces = fontFaces(opts.doc);
   const br = opts.browse || {}, urlNames = urlTemplateNames(), vars = projectVars();
   const fpBtn = br.footprint ? footprintButton(() => br.footprint!()) : null, fileBtn = br.sheetFiles ? sheetFileButton(() => br.sheetFiles!()) : null;
@@ -168,7 +315,7 @@ export function fieldsGrid(host: HTMLElement, rows0: L.FieldRow[], opts: { readO
   const urlShown = new WeakMap<GRow, boolean>();   // the editor each row was drawn with: a value that becomes (or stops being) a link redraws
   const valueButton = (r: GRow): GridCellButton | null => { const u = !isFp(r) && !isFile(r) && isUrl(r); urlShown.set(r, u); return isFp(r) ? fpBtn : isFile(r) ? fileBtn : u ? urlBtn : null; };
   const cols = [
-    { key: "name", label: "Name", width: 110, ro: (r: GRow) => r.mandatory },
+    { key: "name", label: "Name", width: 110, ro: (r: GRow) => r.mandatory, format: dn ? (v: unknown) => dn.show(String(v ?? "")) : undefined },
     { key: "value", label: "Value", width: 170, ro: (r: GRow) => !!br.footprintReadOnly && isFp(r), button: valueButton },
     { key: "show", label: "Show", type: "bool" as const, width: 42 },
     { key: "showName", label: "Show Name", type: "bool" as const, width: 42 },
@@ -191,20 +338,37 @@ export function fieldsGrid(host: HTMLElement, rows0: L.FieldRow[], opts: { readO
   const g = KD().grid<GRow>(host, visible(), rows, {
     readOnly: opts.readOnly, height: opts.height || 170,
     onChange(row, key) {
-      if (key === "sizeT" || key === "xT" || key === "yT") { fromG(row); toG(row); g.refresh(); }
+      titles();
+      if (key === "name") {
+        // OnGridCellChanging: a name already in use is vetoed ("Field name '%s' already in use."), the cell keeps its text
+        if (dn) row.name = dn.store(row.name);
+        const clash = L.fieldNameClash(rows, rows.indexOf(row), row.name, opts.mandatoryNames || []);
+        if (clash) { row.name = names.get(row) ?? ""; g.refresh(); titles(); void messageBox(clash); return; }
+        names.set(row, row.name);
+        if (dn) { g.refresh(); titles(); }
+      }
+      if (key === "sizeT" || key === "xT" || key === "yT") { fromG(row); toG(row); g.refresh(); titles(); }
       else if ((key === "value" || key === "name") && urlShown.has(row) && urlShown.get(row) !== (!isFp(row) && !isFile(row) && isUrl(row))) g.refresh();
     },
-    buttons: { add: () => toG(L.newRow(opts.newName(rows), [0, 0])), addTitle: "Add field", remove: true, removeTitle: "Delete field", move: true, canRemove: (r) => { if (r.mandatory) { void messageBox(L.mandatoryFieldsMessage(rows.filter((x) => x.mandatory).length)); return false; } return true; } },
+    buttons: { add: () => { const r = toG(opts.addRow ? opts.addRow(rows) : L.newRow(opts.newName ? opts.newName(rows) : L.userFieldName(rows.length), [0, 0])); names.set(r, r.name); return r; }, addTitle: "Add field", remove: true, removeTitle: "Delete field", move: true,
+      // OnMoveUp / OnMoveDown: only rows below the mandatory ones change places
+      canMove: (r, other) => !r.mandatory && !other.mandatory && !(opts.pinned && (opts.pinned(r) || opts.pinned(other))),
+      canRemove: (r) => {
+        if (r.mandatory) { void messageBox(L.mandatoryFieldsMessage(rows.filter((x) => x.mandatory).length)); return false; }
+        const why = opts.cannotRemove ? opts.cannotRemove(r) : null; if (why) { void messageBox(why); return false; }
+        return true;
+      } },
   });
+  const titles = (): void => { if (!opts.rowTitle) return; Array.from(g.el.querySelectorAll<HTMLElement>("tbody tr")).forEach((tr, i) => { const t = rows[i] ? opts.rowTitle!(rows[i]) : ""; if (t) tr.title = t; else tr.removeAttribute("title"); }); };
+  titles();
   g.el.style.maxWidth = "100%";
   if (opts.shown) g.el.addEventListener("contextmenu", (ev) => {
     const t = ev.target as Element | null; if (!t || !t.closest || !t.closest("thead")) return;
     ev.preventDefault();
-    popupMenu(ev.clientX, ev.clientY, cols.map((c, i) => ({ label: c.label, check: true, checked: shown.has(i), disabled: i < 2, run: () => { if (shown.has(i)) shown.delete(i); else shown.add(i); g.columns = visible(); g.refresh(); } })));
+    popupMenu(ev.clientX, ev.clientY, cols.map((c, i) => ({ label: c.label, check: true, checked: shown.has(i), disabled: i < 2, run: () => { if (shown.has(i)) shown.delete(i); else shown.add(i); g.columns = visible(); g.refresh(); titles(); } })));
   });
-  return { rows: () => rows.map(fromG), setRows(next: L.FieldRow[]) { rows.splice(0, rows.length, ...next.map(toG)); g.refresh(); } };
+  return { rows: () => rows.map(fromG), setRows(next: L.FieldRow[]) { rows.splice(0, rows.length, ...next.map(toG)); for (const r of rows) names.set(r, r.name); g.refresh(); titles(); } };
 }
-const nextFieldName = (rows: L.FieldRow[]): string => { let n = 1; const names = new Set(rows.map((r) => r.name)); while (names.has("Field" + n)) n++; return "Field" + n; };
 
 // ---------------------------------------------------------------- DIALOG_LABEL_PROPERTIES
 /**
@@ -241,7 +405,9 @@ export function openLabelDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
   ensureCss();
   const kind = item.kind, doc = ctx.doc, isNew = !!opts.onCreate, dir = L.isDirective(kind);
   const staged = L.clone(item.node), st = L.readLabel(kind, staged), [ox, oy] = L.atOf(staged), origin: [number, number] = [ox, oy];
-  st.text = L.unescapeString(st.text);   // TransferDataToWindow shows control characters in a human-readable format
+  const xref = schXref(doc);
+  // TransferDataToWindow shows control characters, then text variable cross-references, in a human-readable format
+  st.text = xref.toRefs(L.unescapeString(st.text));
   const AR = (): { autoRotateOf(id: string): boolean; setAutoRotate(id: string, on: boolean): void; labelOrientationForPoint(d: KDoc, p: [number, number], dflt: number, skip?: string): 0 | 1 | 2 | 3 } | null => {
     const m = CollabTools.sch; return m && m._ && (m._ as Record<string, unknown>).labelOrientationForPoint ? m._ as never : null; };
   if (!isNew && (kind === "global_label" || kind === "hierarchical_label")) { const ar = AR(); st.autoRotate = !!ar && ar.autoRotateOf(item.id); }
@@ -280,7 +446,8 @@ export function openLabelDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
       // Fields (sbFields)
       const fOuter = h("div", { style: "margin-top:8px" }); b.append(fOuter);
       const fHost = KD().staticBox(fOuter, "Fields"); fHost.dataset.k = "fields-box";
-      grid = fieldsGrid(fHost, L.fieldRows(staged, origin, mandatory), { readOnly: ro, doc, newName: nextFieldName, height: 150, shown: [0, 1, 2, 3, 4, 5, 6, 7] });
+      grid = fieldsGrid(fHost, L.fieldRows(staged, origin, mandatory), { readOnly: ro, doc, height: 150, shown: [0, 1, 2, 3, 4, 5, 6, 7],
+        addRow: L.newLabelFieldRow, mandatoryNames: mandatory, displayName: { show: L.labelFieldDisplayName, store: L.labelFieldStoredName } });
       // Shape + Formatting
       const bottom = h("div", { style: "display:flex;gap:12px;align-items:stretch;margin-top:4px" });
       const shapes = L.labelShapes(kind);
@@ -288,7 +455,6 @@ export function openLabelDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
       const fm = h("div", { style: "flex:1" }); const fbox = KD().staticBox(fm, "Formatting");
       const grd = h("div", { class: "kd-fmt" });
       boldB = toggle("text_bold", "Bold", st.bold, "kd-lbl-bold"); italB = toggle("text_italic", "Italic", st.italic, "kd-lbl-italic");
-      const spinNames = dir ? ["Down", "Up", "Right", "Left"] : ["Align right", "Align left", "Align bottom", "Align top"];
       // the bitmaps DIALOG_LABEL_PROPERTIES gives m_spin0..3 per label type
       const spinIcon = dir ? ["pinorient_down", "pinorient_up", "pinorient_right", "pinorient_left"] : kind === "global_label" || kind === "hierarchical_label" ? ["label_align_left", "label_align_right", "label_align_bottom", "label_align_top"] : ["text_align_left", "text_align_right", "text_align_bottom", "text_align_top"];
       // m_spin0..3: RIGHT, LEFT, UP, BOTTOM (SPIN_STYLE 0, 2, 1, 3)
@@ -296,10 +462,10 @@ export function openLabelDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
       // m_iconBar: separator, bold, italic, separator, the four spin buttons, Auto, separator
       const bar = h("span", { style: "display:inline-flex;gap:2px;align-items:center" });
       if (!dir) bar.append(h("span", { class: "kd-sep" }), boldB, italB, h("span", { class: "kd-sep" }));
-      spinVal.forEach((sv, i) => { const btn = toggle(spinIcon[i], spinNames[i], st.spin === sv, "kd-lbl-spin" + i); btn.dataset.group = "spin"; btn.dataset.spin = String(sv); spins.push(btn); bar.append(btn); });
+      spinVal.forEach((sv, i) => { const btn = toggle(spinIcon[i], "", st.spin === sv, "kd-lbl-spin" + i); btn.removeAttribute("title"); btn.dataset.group = "spin"; btn.dataset.spin = String(sv); spins.push(btn); bar.append(btn); });
       if (kind === "global_label" || kind === "hierarchical_label") {
         const S = CollabTools.sch ? CollabTools.sch.state as { lastAutoRotate?: boolean } : {};
-        const a = checkbox("Auto", isNew ? !!S.lastAutoRotate : st.autoRotate, undefined, { id: "kd-lbl-auto", title: "Automatically rotate the label to face away from the wire or pin it is placed on" });
+        const a = checkbox("Auto", isNew ? !!S.lastAutoRotate : st.autoRotate, undefined, { id: "kd-lbl-auto" });
         a.style.margin = "0 5px"; autoCb = a.querySelector("input") as HTMLInputElement; bar.append(a);
       }
       if (!dir) bar.append(h("span", { class: "kd-sep" }));
@@ -317,12 +483,15 @@ export function openLabelDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
     ok() {
       if (ro || !body || !grid) return;
       const size = sizeIn ? lenValue(sizeIn) : st.size;
-      if (size === undefined || size < 0.01 || size > 1000) { void messageBox(`The value must be between ${fmtLen(0.01)} and ${fmtLen(1000)} ${unitName()}.`); return false; }
+      if (sizeInvalid(dir ? "Pin length:" : "Text size:", sizeIn, size) || size === undefined) return false;
       const raw = textEl ? textEl.value : "";
       const multi = !!(multiCb && multiCb.checked);
       if (!dir && !raw.trim()) { void messageBox("Label can not be empty."); return false; }
       const rows = L.tidyRows(grid.rows());
-      const dup = L.duplicateFieldName(rows); if (dup) { void messageBox(dup); return false; }
+      const dup = L.duplicateFieldName(rows, mandatory); if (dup) { void messageBox(dup); return false; }
+      // the intersheet references field's Show follows Schematic Setup, whatever the row says
+      const isr = rows.find((r) => r.mandatory && r.name === "Intersheetrefs");
+      if (isr && isr.show !== !!drawingSettings().intersheets_ref_show) void messageBox(INTERSHEET_NOTICE, "Information");
       const spinBtn = spins.find(isOn);
       const next: L.LabelState = { text: raw, shape: radioValue(body, "kd-lbl-shape") || st.shape, font: fontSel ? fontSel.value : st.font, size,
         bold: boldB ? isOn(boldB) : st.bold, italic: italB ? isOn(italB) : st.italic, color: color ? color.get() : st.color,
@@ -331,12 +500,15 @@ export function openLabelDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
       const ar = AR();
       if (!isNew && next.autoRotate && ar) next.spin = ar.labelOrientationForPoint(doc, origin, st.spin, item.id);
       const moved = rows.some((r) => L.rowMoved(r, origin));
-      const lines = dir ? [""] : L.labelLines(raw, multi, isNew);
+      // labels need escaping; then any text variable cross-references become their UUIDs
+      const lines = dir ? [""] : L.labelLines(raw, multi, isNew).map((t) => xref.toKiids(t));
       if (!lines.length) { void messageBox("Label can not be empty."); return false; }
       const build = (text: string): SNode => {
         const n = L.clone(staged); L.writeLabel(kind, n, Object.assign({}, next, { text }));
         L.writeFields(n, rows, origin);
         if (moved) L.drop(n, "fields_autoplaced");
+        // AutoplaceFields( screen, fieldsAutoplaced ) once the text, size, shape and spin are set: the fields follow the body
+        else if (!isNew && L.yes(n, "fields_autoplaced")) autoplaceLabelFields(doc, kind, n);
         return n;
       };
       const S = CollabTools.sch ? CollabTools.sch.state as Record<string, unknown> : {};
@@ -357,12 +529,33 @@ export function openLabelDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
   });
 }
 
+/** SCH_LABEL_BASE::AutoplaceFields on an edited label: its fields placed again for the body it now has (in place). */
+function autoplaceLabelFields(doc: KDoc, kind: string, n: SNode): void {
+  const H = schH() as (SchHelpers & { autoplaceLabelNode?(kind: string, node: SNode, labelLen?: number): SNode | null }) | null;
+  if (!H || !H.autoplaceLabelNode || !L.kids(n, "property").length) return;
+  let len = 0;
+  if (kind === "global_label") {
+    // GetBodyBoundingBox().GetSizeMax(): the longer side of the flag outline
+    try {
+      const probe = L.clone(n), u = L.kid(probe, "uuid"); if (u) u[1] = KiCadCanvas.newUuid() as unknown as SNode;
+      const K = KiCadCanvas as unknown as { addItem(d: KDoc, n: SNode): KItem | null }, g = K.addItem(doc, probe); if (g) doc.items.delete(g.id);
+      const body = g ? (g.geom as unknown as { t: string; close?: boolean; pts?: [number, number][] }[]).find((q) => q.t === "poly" && q.close && q.pts) : null;
+      if (body && body.pts) { const xs = body.pts.map((q) => q[0]), ys = body.pts.map((q) => q[1]); len = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)); }
+    } catch { len = 0; }
+  }
+  const placed = H.autoplaceLabelNode(kind, n, len); if (!placed) return;
+  const next = L.kids(placed, "property"); let k = 0;
+  for (let j = 1; j < n.length; j++) { const c = n[j]; if (Array.isArray(c) && c[0] === "property" && next[k]) n[j] = next[k++]; }
+}
+
 // ---------------------------------------------------------------- DIALOG_TEXT_PROPERTIES (text and text box)
 export function openTextDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
   ensureCss();
   const kind = item.kind, doc = ctx.doc, box = kind === "text_box", ro = !!ctx.viewOnly;
   const staged = L.clone(item.node), fx = L.readFx(staged), rot = L.atOf(staged)[2], vertical = Math.round(rot) % 180 !== 0;
+  const strokeN = L.kid(staged, "stroke"), strokeW = strokeN && L.kid(strokeN, "width"), hasBorder = !strokeW || L.num(strokeW[1]) >= 0;
   const stroke = L.readStroke(staged), fill = L.readFill(staged), exclude = L.yes(staged, "exclude_from_sim");
+  const xref = opts.symbolEditor ? null : schXref(doc);
   let body: HTMLElement | null = null;
   const els: Record<string, HTMLElement> = {};
   let tcol: Swatch | null = null, bcol: Swatch | null = null, fcol: Swatch | null = null;
@@ -370,8 +563,10 @@ export function openTextDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
     title: opts.title || (box ? "Text Box Properties" : "Text Properties"), width: 640, readOnly: ro, cancel: opts.cancel,
     build(b) {
       body = b;
-      const ta = h("textarea", { id: "kd-txt-text", rows: 5, style: "width:100%;font-family:var(--mono, monospace)", disabled: ro }) as HTMLTextAreaElement; ta.value = L.str(staged[1]); els.text = ta;
+      const ta = h("textarea", { id: "kd-txt-text", rows: 5, style: "width:100%;font-family:var(--mono, monospace)", disabled: ro }) as HTMLTextAreaElement; ta.value = xref ? xref.toRefs(L.str(staged[1])) : L.str(staged[1]); els.text = ta;   // ConvertKIIDsToRefs
       b.append(h("div", { style: "display:flex;gap:8px;align-items:flex-start" }, h("label", { style: "padding-top:4px" }, "Text:"), ta));
+      // onCharFn: DoTextVarAutocomplete( getContextualTextVars )
+      if (!ro && !opts.symbolEditor) textVarAutocomplete(ta, (x) => contextualTextVars(doc, x));
       // row 1: Exclude from simulation on the left, the Syntax help link on the right (SCH_TEXT::ShowSyntaxHelp);
       // the symbol editor hides both, and the hyperlink row (m_isSymbolEditor)
       if (!opts.symbolEditor) {
@@ -392,9 +587,16 @@ export function openTextDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
       tcol = swatch(fx.color, "kd-txt-color", undefined, ro);
       g.append(h("label", null, "Text size:"), h("span", { style: "display:flex;gap:6px;align-items:center" }, size, units(), h("label", { style: "margin-left:15px" }, "Color:"), tcol.el), h("span"));
       if (box) {
-        const bw = lenBox(stroke.width, "kd-txt-bwidth"); els.bwidth = bw; bcol = swatch(stroke.color, "kd-txt-bcolor", undefined, ro);
-        const bst = select(L.LINE_STYLES, stroke.style, undefined, { id: "kd-txt-bstyle", disabled: ro, icons: L.LINE_STYLE_ICONS }); els.bstyle = bst;
-        const border = checkbox("Border", stroke.width >= 0, undefined, { id: "kd-txt-border" }); els.border = border.querySelector("input") as HTMLInputElement;
+        // TransferDataToWindow: the width only when there is a border; m_borderStyleCombo holds lineTypeNames (no
+        // "Default" entry: a default-styled border shows the first, Solid); width, colour and style follow the checkbox
+        const bw = lenBox(hasBorder ? stroke.width : undefined, "kd-txt-bwidth"); els.bwidth = bw; bcol = swatch(stroke.color, "kd-txt-bcolor", undefined, ro || !hasBorder);
+        const bst = select(L.LINE_STYLES.filter(([v]) => v !== "default"), stroke.style === "default" ? "solid" : stroke.style, undefined, { id: "kd-txt-bstyle", disabled: ro || !hasBorder, icons: L.LINE_STYLE_ICONS }); els.bstyle = bst;
+        bw.disabled = ro || !hasBorder;
+        // onBorderChecked: ticked with no width, the default line thickness
+        const border = checkbox("Border", hasBorder, (on) => {
+          if (on && lenValue(bw) === undefined) bw.value = fmtLen(defaultLineThickness());
+          bw.disabled = !on; bst.disabled = !on; if (bcol) bcol.enable(on);
+        }, { id: "kd-txt-border", disabled: ro }); els.border = border.querySelector("input") as HTMLInputElement;
         g.append(h("span"), border, h("span"), h("label", null, "Width:"), h("span", { style: "display:flex;gap:6px;align-items:center" }, bw, units()), h("span"),
           h("label", null, "Color:"), bcol.el, h("span"), h("label", null, "Style:"), bst, h("span"));
         const fillCb = checkbox("Background fill", fill.mode !== "none", (on) => fcol && fcol.enable(on), { id: "kd-txt-fill" }); els.fill = fillCb.querySelector("input") as HTMLInputElement;
@@ -404,7 +606,7 @@ export function openTextDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
       const se = opts.symbolEditor;
       if (se) {
         // m_fgSymbolEditor: Private to Symbol Editor, Common to all units / body styles
-        const priv = checkbox("Private to Symbol Editor", se.private, undefined, { id: "kd-txt-private" }); els.private = priv.querySelector("input") as HTMLInputElement;
+        const priv = checkbox("Private to symbol editor", se.private, undefined, { id: "kd-txt-private" }); els.private = priv.querySelector("input") as HTMLInputElement;
         const au = checkbox("Common to all units", se.multiUnit && se.allUnits, undefined, { id: "kd-txt-allunits", disabled: !se.multiUnit }); els.allUnits = au.querySelector("input") as HTMLInputElement;
         const ab = checkbox("Common to all body styles", se.multiBody && se.allBodies, undefined, { id: "kd-txt-allbodies", disabled: !se.multiBody }); els.allBodies = ab.querySelector("input") as HTMLInputElement;
         g.append(h("span"), h("span", { style: "display:flex;flex-direction:column;gap:3px;margin-top:6px" }, priv, au, ab), h("span"));
@@ -438,10 +640,10 @@ export function openTextDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
       if (ro || !body) return;
       const text = (els.text as HTMLTextAreaElement).value.replace(/\r/g, "\n");
       const size = lenValue(els.size as HTMLInputElement);
-      if (size === undefined || size < 0.01 || size > 1000) { void messageBox(`The value must be between ${fmtLen(0.01)} and ${fmtLen(1000)} ${unitName()}.`); return false; }
+      if (sizeInvalid("Text size:", els.size as HTMLInputElement, size) || size === undefined) return false;
       const link = els.link ? (els.link as HTMLInputElement).value.trim() : fx.href;
       if (!L.validHyperlink(link)) { void messageBox(L.BAD_LINK); return false; }
-      const n = L.clone(staged); n[1] = text as unknown as SNode;
+      const n = L.clone(staged); n[1] = (xref ? xref.toKiids(text) : text) as unknown as SNode;   // ConvertRefsToKIIDs
       const hv = (["left", "center", "right"] as const).find((v, i) => isOn(els["h" + i])) || fx.h;
       const vv = (["top", "center", "bottom"] as const).find((v, i) => isOn(els["v" + i])) || fx.v;
       L.writeFx(n, { font: (els.font as FontPickerEl).value, size: Math.abs(size - fx.size) > 1e-9 ? size : undefined, bold: isOn(els.bold), italic: isOn(els.italic),
@@ -455,6 +657,9 @@ export function openTextDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
         if (!on) { const s = L.kid(n, "stroke"); const wd = s && L.kid(s, "width"); if (wd) wd[1] = -1 as unknown as SNode; }
         const filled = (els.fill as HTMLInputElement).checked;
         L.writeFill(n, filled ? "solid" : "none", filled ? (fcol ? fcol.get() : fill.color) : null);
+        // the box grows to fit its text (GetMinSize against the box, the end corner pushed out)
+        const H = schH() as (SchHelpers & { textBoxMinSize?(node: SNode): [number, number] }) | null;
+        if (H && H.textBoxMinSize) L.growTextBox(n, H.textBoxMinSize(n));
       }
       if (opts.symbolEditor) { opts.symbolEditor.apply(n, { private: (els.private as HTMLInputElement).checked, allUnits: (els.allUnits as HTMLInputElement).checked, allBodies: (els.allBodies as HTMLInputElement).checked }); return undefined; }
       const S = CollabTools.sch ? CollabTools.sch.state as Record<string, unknown> : {};
@@ -474,18 +679,33 @@ export function openFieldDialog(ctx: Ctx, item: KItem, name: string, apply?: (fi
   ensureCss();
   const p0 = L.kids(item.node, "property").find((p) => L.fieldName(p) === name); if (!p0) return false;
   const doc = ctx.doc, ro = !!ctx.viewOnly, fx = L.readFx(p0), [x0, y0, r0] = L.atOf(p0), isFile = item.kind === "sheet" && (name === "Sheetfile" || name === "Sheet file");
+  // the alignment as displayed (GetEffectiveHorizJustify / GetEffectiveVertJustify), not as stored
+  const row0 = L.rowFromField(p0, [0, 0], false, item.node);
+  const xref = apply ? null : schXref(doc), generated = L.isGeneratedField(name);
+  const isLabelParent = L.LABEL_KINDS.has(item.kind), shownName = isLabelParent ? L.labelFieldDisplayName(name) : name;
+  const libOf = (): SNode | null => { const li = L.kid(item.node, "lib_name") || L.kid(item.node, "lib_id"); return li ? (KiCadCanvas.resolveLib(doc, L.str(li[1])) as SNode | null) : null; };
   const els: Record<string, HTMLElement> = {}; let col: Swatch | null = null;
   const units0 = name === "Reference" && item.kind === "symbol" ? symbolUnits(doc, item.node) : { count: 1, unit: 1 };
   KD().open({
     title: L.fieldDialogTitle(name, item.kind), width: 560, readOnly: ro,
     build(b) {
       const g = h("div", { class: "kd-fmt" });
-      const text = textInput(L.fieldValue(p0), undefined, { id: "kd-fld-text", style: "width:100%", disabled: ro || isFile }); els.text = text;
-      g.append(h("label", null, "Text:"), text, h("span"));
+      // the text of the sheet file name and of a generated field (IsGeneratedField) cannot be edited here
+      const text = textInput(xref ? xref.toRefs(L.fieldValue(p0)) : L.fieldValue(p0), undefined, { id: "kd-fld-text", style: "width:100%", disabled: ro || isFile || generated }); els.text = text;
+      // m_TextValueSelectButton (BITMAPS::small_library) on a symbol's Footprint field: the footprint chooser
+      let textCell: HTMLElement = text;
+      if (name === "Footprint" && item.kind === "symbol" && !ro) {
+        const spec = footprintButton(() => chooserFilters(libOf()));
+        const fb = bitmapButton(spec.icon(text.value), spec.title(text.value), () => { spec.run(text.value, (v) => { text.value = v; }, text); }, { id: "kd-fld-fpbrowse", flat: true });
+        textCell = h("span", { style: "display:flex;gap:4px;align-items:center" }, text, fb); text.style.flex = "1";
+      }
+      // SCH_FIELD::OnScintillaCharAdded: the parent's variables, the sheet's and the project's
+      if (!ro && !apply && !text.disabled) textVarAutocomplete(text, (x) => contextualTextVars(doc, x, item));
+      g.append(h("label", { id: "kd-fld-textlabel" }, shownName + ":"), textCell, h("span"));   // m_textLabel->SetLabel( aField->GetName() + ":" )
       if (isFile) g.append(h("span"), h("span", { class: "kd-note", id: "kd-fld-note" }, "Sheet filename can only be modified in Sheet Properties dialog."), h("span"));
       // m_unitLabel / m_unitChoice: the Reference field of a multi-unit symbol also picks the unit (dialog_field_properties.cpp)
       if (units0.count > 1 && !apply) {
-        const us: [string, string][] = []; for (let u = 1; u <= units0.count; u++) us.push([String(u), unitLetter(u)]);
+        const us: [string, string][] = []; const ulib = libOf(); for (let u = 1; u <= units0.count; u++) us.push([String(u), L.unitDisplayName(ulib, u, unitLetter)]);
         els.unit = select(us, String(Math.min(units0.unit, units0.count)), undefined, { id: "kd-fld-unit", disabled: ro, style: "width:90px" });
         g.append(h("label", null, "Unit:"), els.unit, h("span"));
       }
@@ -496,8 +716,8 @@ export function openFieldDialog(ctx: Ctx, item: KItem, name: string, apply?: (fi
       const bold = toggle("text_bold", "Bold", fx.bold, "kd-fld-bold"), ital = toggle("text_italic", "Italic", fx.italic, "kd-fld-italic"); els.bold = bold; els.italic = ital;
       const vertical = Math.round(r0) % 180 !== 0;
       const hz = toggle("text_horizontal", "Horizontal text", !vertical, "kd-fld-horiz"), vt = toggle("text_vertical", "Vertical text", vertical, "kd-fld-vert"); hz.dataset.group = "o"; vt.dataset.group = "o"; els.vert = vt;
-      const hb = (["left", "center", "right"] as const).map((v, i) => { const t = toggle(["text_align_left", "text_align_center", "text_align_right"][i], ["Align left", "Align horizontal center", "Align right"][i], fx.h === v, "kd-fld-h-" + v); t.dataset.group = "h"; els["h" + i] = t; return t; });
-      const vb = (["top", "center", "bottom"] as const).map((v, i) => { const t = toggle(["text_valign_top", "text_valign_center", "text_valign_bottom"][i], ["Align top", "Align vertical center", "Align bottom"][i], fx.v === v, "kd-fld-v-" + v); t.dataset.group = "v"; els["v" + i] = t; return t; });
+      const hb = (["left", "center", "right"] as const).map((v, i) => { const t = toggle(["text_align_left", "text_align_center", "text_align_right"][i], ["Align left", "Align horizontal center", "Align right"][i], row0.h === v, "kd-fld-h-" + v); t.dataset.group = "h"; els["h" + i] = t; return t; });
+      const vb = (["top", "center", "bottom"] as const).map((v, i) => { const t = toggle(["text_valign_top", "text_valign_center", "text_valign_bottom"][i], ["Align top", "Align vertical center", "Align bottom"][i], row0.v === v, "kd-fld-v-" + v); t.dataset.group = "v"; els["v" + i] = t; return t; });
       g.append(h("label", null, "Font:"), h("span", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" }, font, bold, ital, h("span", { class: "kd-sep" }), hz, vt), h("span"));
       const size = lenBox(fx.size, "kd-fld-size"); els.size = size;
       g.append(h("label", null, "Text size:"), h("span", { style: "display:flex;gap:6px;align-items:center" }, size, units()), h("span"));
@@ -507,20 +727,25 @@ export function openFieldDialog(ctx: Ctx, item: KItem, name: string, apply?: (fi
       const px = lenBox(x0, "kd-fld-x"), py = lenBox(y0, "kd-fld-y"); els.x = px; els.y = py;
       g.append(h("label", null, "Position X:"), h("span", { style: "display:flex;gap:6px;align-items:center" }, px, units()), h("span"), h("label", null, "Position Y:"), h("span", { style: "display:flex;gap:6px;align-items:center" }, py, units()), h("span"));
       b.append(g);
+      // OnSetFocusText, the first time: the number of a reference designator, everything for the others
+      if (name === "Reference" && !ro) initialFocus(text, selectReferenceNumber);
     },
     ok() {
       if (ro) return;
-      const size = lenValue(els.size as HTMLInputElement);
-      if (size === undefined || size < 0.01 || size > 1000) { void messageBox(`The value must be between ${fmtLen(0.01)} and ${fmtLen(1000)} ${unitName()}.`); return false; }
+      // DIALOG_FIELD_PROPERTIES never validates the size's range: what was typed is taken (the old size when it is no length)
+      const size = lenValue(els.size as HTMLInputElement) ?? fx.size;
       // FIELD_VALIDATOR on the text of a Reference, Footprint, Datasheet, Sheetname or Sheetfile field
       const fid: L.FieldId | null = item.kind === "symbol" || item.kind === "lib_symbol" ? (name === "Reference" ? "REFERENCE" : name === "Footprint" ? "FOOTPRINT" : name === "Datasheet" ? "DATASHEET" : null)
         : item.kind === "sheet" ? (/^Sheet ?name$/i.test(name) ? "SHEET_NAME" : isFile ? "SHEET_FILENAME" : null) : null;
       const verr = fid && !isFile ? L.fieldValidationError(fid, (els.text as HTMLInputElement).value) : "";
       if (verr) { void messageBox(verr, "Field Validation Error"); (els.text as HTMLInputElement).focus(); return false; }
       const staged = L.clone(item.node); const p = L.kids(staged, "property").find((q) => L.fieldName(q) === name) as SNode;
-      const hv = (["left", "center", "right"] as const).find((v, i) => isOn(els["h" + i])) || fx.h, vv = (["top", "center", "bottom"] as const).find((v, i) => isOn(els["v" + i])) || fx.v;
-      const row = L.rowFromField(p, [0, 0], false);
-      Object.assign(row, { value: isFile ? row.value : (els.text as HTMLInputElement).value, show: (els.visible as HTMLInputElement).checked, showName: (els.showName as HTMLInputElement).checked,
+      const hv = (["left", "center", "right"] as const).find((v, i) => isOn(els["h" + i])) || row0.h, vv = (["top", "center", "bottom"] as const).find((v, i) => isOn(els["v" + i])) || row0.v;
+      const row = L.rowFromField(p, [0, 0], false, item.node);
+      // "Intersheet reference visibility is controlled globally…" when the box differs from Schematic Setup
+      if (item.kind === "global_label" && name === "Intersheetrefs" && (els.visible as HTMLInputElement).checked !== !!drawingSettings().intersheets_ref_show) void messageBox(INTERSHEET_NOTICE, "Information");
+      const typed = (els.text as HTMLInputElement).value;
+      Object.assign(row, { value: isFile || generated ? row.value : xref ? xref.toKiids(typed) : typed, show: (els.visible as HTMLInputElement).checked, showName: (els.showName as HTMLInputElement).checked,
         autoplace: (els.autoplace as HTMLInputElement).checked, font: (els.font as FontPickerEl).value, size, bold: isOn(els.bold), italic: isOn(els.italic), color: col ? col.get() : fx.color,
         h: hv, v: vv, orient: isOn(els.vert) ? 90 : 0, x: lenValue(els.x as HTMLInputElement) ?? x0, y: lenValue(els.y as HTMLInputElement) ?? y0 });
       const moved = L.rowMoved(row, [0, 0]);
@@ -625,7 +850,7 @@ function strokeDialog(ctx: Ctx, items: KItem[], kind: "lines" | "wires"): void {
       style = select(styles, sty0, undefined, { id: "kd-ln-style", disabled: ro, icons: L.LINE_STYLE_ICONS });
       g.append(h("label", null, "Style:"), style, h("span"));
       if (kind === "wires") {
-        jsize = lenBox(jd, "kd-ln-jsize"); jsize.disabled = ro || !juncs.length; if (juncs.length && jd === undefined) jsize.value = INDETERMINATE_ACTION;
+        jsize = lenBox(jd, "kd-ln-jsize"); jsize.disabled = ro || !juncs.length; if (!juncs.length || jd === undefined) jsize.value = INDETERMINATE_ACTION;
         g.append(h("label", null, "Junction size:"), h("span", { style: "display:flex;gap:6px;align-items:center" }, jsize, units()), h("span"));
       }
       b.append(g);
@@ -692,27 +917,35 @@ function shapeDialog(ctx: Ctx, item: KItem): void {
   KD().open({
     title: `${name} Properties`, width: withEnds ? 620 : 440, readOnly: ro,
     build(b) {
-      const g = h("div", { class: "kd-fmt" });
-      const bw = lenBox(st.width >= 0 ? st.width : 0, "kd-sh-width"); els.width = bw;
-      const style = select(L.LINE_STYLES, st.style, undefined, { id: "kd-sh-style", disabled: ro, icons: L.LINE_STYLE_ICONS }); els.style = style;
-      bc = swatch(st.color, "kd-sh-bcolor", undefined, ro);
-      const border = checkbox("Border", st.width >= 0, (on) => { bw.disabled = !on; style.disabled = !on; if (bc) bc.enable(on); if (on && !lenValue(bw)) bw.value = fmtLen(0); }, { id: "kd-sh-border" });
-      els.border = border.querySelector("input") as HTMLInputElement;
-      g.append(h("span"), border, h("span"), h("label", null, "Border width:"), h("span", { style: "display:flex;gap:6px;align-items:center" }, bw, units()), h("span"),
-        h("label", null, "Border color:"), bc.el, h("span"), h("label", null, "Border style:"), style, h("span"));
-      const fill = select(L.FILL_MODES, fl.mode, (v) => { if (fc) fc.enable(v !== "none"); }, { id: "kd-sh-fill", disabled: ro }); els.fill = fill;
-      fc = swatch(fl.color, "kd-sh-fcolor", undefined, ro || fl.mode === "none");
-      g.append(h("label", null, "Fill:"), fill, h("span"), h("label", null, "Fill color:"), fc.el, h("span"));
-      b.append(g);
-      if (withEnds) { ends = endingsBlock([item.node], ro, Number((ctx.doc as KDoc & { version?: number }).version) || 0); b.append(ends.el); }
+      // the rule area's boxes first (dialog_shape_properties_base.cpp): simulation, board, DNP, bill of materials
       if (rule) {
-        const a = h("div", { style: "margin-top:6px" });
-        for (const [k, label] of [["exclude_from_sim", "Exclude from simulation"], ["in_bom", "Exclude from bill of materials"], ["on_board", "Exclude from board"], ["dnp", "Do not populate"]] as [string, string][]) {
+        const a = h("div", { style: "margin-bottom:8px" });
+        const tips: Record<string, string> = {
+          on_board: "This is useful for adding symbols that only get exported to the bill of materials but\nnot required to layout the board such as mechanical fasteners and enclosures",
+          in_bom: "This is useful for adding symbols for board footprints such as fiducials\nand logos that you do not want to appear in the bill of materials export" };
+        for (const [k, label] of [["exclude_from_sim", "Exclude from simulation"], ["on_board", "Exclude from board"], ["dnp", "Do not populate"], ["in_bom", "Exclude from bill of materials"]] as [string, string][]) {
           const inv = k === "in_bom" || k === "on_board"; const on = L.kid(item.node, k) ? (inv ? !L.yes(item.node, k) : L.yes(item.node, k)) : false;
-          const c = checkbox(label, on, undefined, { id: "kd-sh-" + k }); els[k] = c.querySelector("input") as HTMLInputElement; a.append(c);
+          const c = checkbox(label, on, undefined, { id: "kd-sh-" + k, title: tips[k], disabled: ro }); els[k] = c.querySelector("input") as HTMLInputElement; a.append(c);
         }
         b.append(a);
       }
+      const g = h("div", { class: "kd-fmt" });
+      const hasBorder = st.width >= 0;
+      const bw = lenBox(hasBorder ? st.width : undefined, "kd-sh-width"); els.width = bw; bw.disabled = ro || !hasBorder;
+      // m_borderStyleCombo: lineTypeNames only (no "Default"); a default-styled border shows Solid
+      const style = select(L.LINE_STYLES.filter(([v]) => v !== "default"), st.style === "default" ? "solid" : st.style, undefined, { id: "kd-sh-style", disabled: ro || !hasBorder, icons: L.LINE_STYLE_ICONS }); els.style = style;
+      bc = swatch(st.color, "kd-sh-bcolor", undefined, ro || !hasBorder);
+      // onBorderChecked: ticked with no (a negative) width, the default line thickness
+      const border = checkbox("Border", hasBorder, (on) => { bw.disabled = !on; style.disabled = !on; if (bc) bc.enable(on); if (on && lenValue(bw) === undefined) bw.value = fmtLen(defaultLineThickness()); }, { id: "kd-sh-border", disabled: ro });
+      els.border = border.querySelector("input") as HTMLInputElement;
+      g.append(h("span"), border, h("span"), h("label", null, "Width:"), h("span", { style: "display:flex;gap:6px;align-items:center" }, bw, units()), h("span"),
+        h("label", null, "Color:"), bc.el, h("span"), h("label", null, "Style:"), style, h("span"));
+      const fill = select(L.FILL_MODES, fl.mode, (v) => { if (fc) fc.enable(v !== "none"); }, { id: "kd-sh-fill", disabled: ro }); els.fill = fill;
+      fc = swatch(fl.color, "kd-sh-fcolor", undefined, ro || fl.mode === "none");
+      const note1 = h("p", { class: "kd-note", id: "kd-sh-note-width", style: "margin:4px 0 6px;grid-column:1 / -1" }, "Set border width to 0 to use schematic's default line width.");
+      g.append(note1, h("label", null, "Fill:"), fill, h("span"), h("label", null, "Fill color:"), fc.el, h("span"));
+      b.append(g, h("p", { class: "kd-note", id: "kd-sh-note-color", style: "margin:8px 0 0" }, "Clear colors to use Schematic Editor colors."));
+      if (withEnds) { ends = endingsBlock([item.node], ro, Number((ctx.doc as KDoc & { version?: number }).version) || 0); b.append(ends.el); }
     },
     ok() {
       if (ro) return;
@@ -779,9 +1012,11 @@ export function openSheetPinDialog(ctx: Ctx, sheet: KItem, index: number): boole
     },
     ok() {
       if (ro || !body || !nameIn) return;
+      // SCH_NETNAME_VALIDATOR( true ) on the name ("Invalid signal name"), then the empty check
+      const bad = L.netNameError(nameIn.value); if (bad) { const box = nameIn; void messageBox(bad, "Invalid signal name").then(() => box.focus()); return false; }
       const err = L.sheetPinNameError(nameIn.value); if (err) { void messageBox(err); return false; }
-      const size = sizeIn ? lenValue(sizeIn) : st.size;
-      if (size === undefined || size < 0.01 || size > 1000) { void messageBox(`The value must be between ${fmtLen(0.01)} and ${fmtLen(1000)} ${unitName()}.`); return false; }
+      // DIALOG_SHEET_PIN_PROPERTIES never validates the size's range
+      const size = (sizeIn ? lenValue(sizeIn) : undefined) ?? st.size;
       const cur = ctx.doc.items.get(sheet.id) || sheet, n = L.clone(cur.node), pin = L.kids(n, "pin")[index]; if (!pin) return;
       L.writeSheetPin(pin, { text: nameIn.value, shape: radioValue(body, "kd-spin-shape") || st.shape, font: fontSel ? fontSel.value : st.font, size,
         bold: boldB ? isOn(boldB) : st.bold, italic: italB ? isOn(italB) : st.italic, color: color ? color.get() : st.color });
@@ -825,7 +1060,7 @@ export function schItemDialog(ctx: ToolCtx, item: KItem, opts: ItemOpts = {}): b
   if (k === "sheet" && !opts.onCreate) { const pin = sheetPinUnderCursor(c, item); if (pin >= 0 && openSheetPinDialog(c, item, pin)) return true; }
   if (k === "sheet") { openSheetProperties(c, item, opts); return true; }
   if (k === "symbol") { openSymbolProperties(c, item, { pinMapPage: !!opts.pinMapPage }); return true; }
-  if (k === "table") { schTableDialog(ctx, item); return true; }   // SCH_EDIT_TOOL::Properties, SCH_TABLE_T: DIALOG_TABLE_PROPERTIES
+  if (k === "table") { schTableDialog(ctx, item, undefined, { cellEditor: (ta) => textVarAutocomplete(ta, (x) => contextualTextVars(c.doc, x)) }); return true; }   // SCH_EDIT_TOOL::Properties, SCH_TABLE_T: DIALOG_TABLE_PROPERTIES
   return false;
 }
 export function schFieldDialog(ctx: ToolCtx, item: KItem, name: string): boolean {

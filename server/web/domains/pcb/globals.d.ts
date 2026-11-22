@@ -235,6 +235,8 @@ interface ToolModule {
   enteredGroupIds?(doc: KDoc): Set<string> | null;
   withinEnteredGroup?(doc: KDoc, ids: string[]): string[];
   selectedTopGroup?(ctx: ToolCtx): string | null;
+  /** what the board's context menus ask of the selection: GROUP_CONTEXT_MENU::update's counts and ZONE_PRIORITY_CONTEXT_MENU::update's canRaise / canLower */
+  menuState?(ctx: ToolCtx): { grouping: { count: number; hasGroup: boolean; onlyOneGroup: boolean; hasNonGroup: boolean; hasMember: boolean }; zoneCanRaise: boolean; zoneCanLower: boolean };
   enterGroupAt?(ctx: ToolCtx, id: string): boolean;
   leaveGroupOutside?(mm: [number, number], ctx: ToolCtx): boolean;
   exitGroup?(ctx?: ToolCtx): boolean;

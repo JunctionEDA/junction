@@ -125,7 +125,8 @@ export function pinDialog(se: SymbolEditor, p: M.PinInfo, existing: M.Node | nul
         if (alts.some((a) => !a.name)) { void messageBox("Alternate pin definitions must have a name."); return false; }
         const r = read();
         const moved = Math.abs(r.x - p.x) > 1e-9 || Math.abs(r.y - p.y) > 1e-9;
-        const offGrid = (v: number) => Math.round(v / M.MIL) % 50 !== 0 || Math.abs(v / M.MIL - Math.round(v / M.MIL)) > 1e-6;
+        // ( m_posX.GetValue() % standard_grid ) || ( m_posY.GetValue() % standard_grid ): the value in internal units (100 nm)
+        const offGrid = (v: number) => M.pinOffStandardGrid(v);
         if (moved && (offGrid(r.x) || offGrid(r.y))) {
           void confirmBox("Confirmation", "This pin is not on a 50 mils grid which will make it difficult to connect to in the schematic.\nDo you wish to continue?", "Yes").then((yes) => { if (yes) { KD().close(); resolve(r); } });
           return false;

@@ -31,6 +31,30 @@ export function writeSymbolVariant(edited: SNode, base: SNode, variant: string, 
   return VM.setSymbolVariant(n, variant, { flags, fields }, path, ver);
 }
 
+/** DIALOG_SHEET_PROPERTIES::TransferDataFromWindow with a current variant: the user fields' texts go to the sheet
+ *  instance's variant and the sheet keeps its default texts (the mandatory Sheetname / Sheetfile are the sheet's own);
+ *  Exclude from simulation, Exclude from bill of materials and Do not populate are the variant's, Exclude from board
+ *  stays the sheet's.  `edited` is the sheet as the dialog wrote it, `base` the sheet before the dialog. */
+export function writeSheetVariant(edited: SNode, base: SNode, variant: string, path: string | null, ver?: number | null): SNode {
+  const n = L.clone(edited), fields: Record<string, string> = {};
+  for (const p of L.kids(n, "property")) {
+    const name = L.fieldName(p); if (/^Sheet ?(name|file)$/i.test(name)) continue;
+    const old = L.kids(base, "property").find((q) => L.fieldName(q) === name); if (!old) continue;   // a new field is the sheet's own
+    fields[name] = L.fieldValue(p);
+    const vi = p.findIndex((c, j) => j > 0 && !Array.isArray(c) && L.str(c) !== "private") + 1;
+    const oi = old.findIndex((c, j) => j > 0 && !Array.isArray(c) && L.str(c) !== "private") + 1;
+    if (vi > 0 && oi > 0) p[vi] = old[oi];
+  }
+  const shown = VM.symbolFlags(n), flags: Partial<VM.SymFlags> = {};
+  for (const [key, f] of FLAG_KEYS) {
+    if (key === "on_board" || key === "in_pos_files") continue;
+    flags[f] = shown[f];
+    const b = L.kid(base, key), i = n.findIndex((c) => Array.isArray(c) && c[0] === key);
+    if (b && i > 0) n[i] = L.clone(b); else if (b) L.put(n, key, [L.str(b[1])], ["fields_autoplaced", "stroke", "uuid", "property"]); else if (i > 0) n.splice(i, 1);
+  }
+  return VM.setSymbolVariant(n, variant, { flags, fields }, path, ver);
+}
+
 /** The SymRow flag names as SCH_SYMBOL's variant flags. */
 const VARIANT_FLAG: Record<string, keyof VM.SymFlags> = { dnp: "dnp", excludeBom: "excludedFromBOM", excludeBoard: "excludedFromBoard", excludeSim: "excludedFromSim", excludePos: "excludedFromPosFiles" };
 /** A document whose symbols show as `variant` has them on the instance `path` (null: the first) (FIELDS_EDITOR_GRID_DATA_MODEL with a current variant). */

@@ -19,24 +19,95 @@ export const BUS_TEXT = /\[.*\.\..*\]|\{.*\}/;
  * wires meeting end to end do not count as two exits.  `extra` adds lines that are not in the document
  * (a wire being drawn: [{ kind, a, b }]), `skip` leaves items out (ids).
  */
-export function analyzePoint(doc: KDoc, p: Pt, breakCrossings: boolean, extra?: PreviewLine[] | null, skip?: Set<string> | null) {
-  const info = { isJunction: false, hasDot: false, hasBusEntry: false, hasBusAtPoint: false, multiWires: false, multiBuses: false, allows: false };
-  const lines: { layer: string; a: Pt; b: Pt; stroke: string }[] = [], others: KItem[] = [];
+/**
+ * The sheet's items as analyzePoint reads them, gathered once so that many points can be analysed without walking
+ * every item (and every symbol's pins) again for each one: a moved 100-pin symbol asks about every pin each frame.
+ */
+export interface PointIndex {
+  lines: { layer: string; a: Pt; b: Pt; stroke: string }[];
+  dots: Pt[];
+  entries: { item: KItem; c: Pt[]; m: number }[];
+  /** every symbol, sheet and label, with the points where it adds an exit or a break */
+  others: { item: KItem; pts: Pt[] }[];
+  /** grid buckets of `others` and `dots` by rounded point (1 mm cells) */
+  cells: Map<string, number[]>; dotCells: Map<string, number[]>;
+  /** `lines` by 5 mm cell of their bounding box */
+  lineCells: Map<string, number[]>;
+}
+const LINE_CELL = 5;
+const cellKey = (x: number, y: number) => Math.round(x) + "," + Math.round(y);
+function cellsNear(cells: Map<string, number[]>, p: Pt): number[] {
+  const out: number[] = [], cx = Math.round(p[0]), cy = Math.round(p[1]);
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) { const l = cells.get((cx + dx) + "," + (cy + dy)); if (l) for (const i of l) out.push(i); }
+  return out;
+}
+export function pointIndex(doc: KDoc, skip?: Set<string> | null): PointIndex {
+  const ix: PointIndex = { lines: [], dots: [], entries: [], others: [], cells: new Map(), dotCells: new Map(), lineCells: new Map() };
   const strokeOf = (it: KItem) => K.serialize(kid(it.node, "stroke") || []);
-  const onLine = (a: Pt, b: Pt) => segDist(p, a, b) <= 1e-3;
+  const bucket = (cells: Map<string, number[]>, q: Pt, i: number) => { const k = cellKey(q[0], q[1]), l = cells.get(k); if (l) { if (l[l.length - 1] !== i) l.push(i); } else cells.set(k, [i]); };
   for (const it of doc.items.values()) {
     if (skip && skip.has(it.id)) continue;
-    if (it.kind === "wire" || it.kind === "bus") { for (const [a, b] of segs(it)) if (onLine(a, b)) lines.push({ layer: it.kind, a, b, stroke: strokeOf(it) }); }
-    else if (it.kind === "junction") { if (same(atOf(it.node), p)) { info.hasDot = true; } }
-    else if (it.kind === "bus_entry") {
-      // aItems.Overlapping( aPosition ): any entry whose bounding box (inflated by half its pen width + 1 IU) holds the
-      // point sets hasBusEntry, connected or not; only one that ends here adds exits
-      const c = connPoints(doc, it), st = kid(it.node, "stroke"), w = st ? num((kid(st, "width") || [])[1]) : 0, m = (w > 0 ? w : 0.1524) / 2 + 1e-4;
-      if (p[0] >= Math.min(c[0][0], c[1][0]) - m && p[0] <= Math.max(c[0][0], c[1][0]) + m && p[1] >= Math.min(c[0][1], c[1][1]) - m && p[1] <= Math.max(c[0][1], c[1][1]) + m) info.hasBusEntry = true;
-      if (c.some((q) => same(q, p))) { info.hasBusEntry = true; others.push(it); }
+    if (it.kind === "wire" || it.kind === "bus") {
+      const st = strokeOf(it);
+      for (const [a, b] of segs(it)) {
+        const i = ix.lines.length; ix.lines.push({ layer: it.kind, a, b, stroke: st });
+        const x0 = Math.floor((Math.min(a[0], b[0]) - 0.01) / LINE_CELL), x1 = Math.floor((Math.max(a[0], b[0]) + 0.01) / LINE_CELL);
+        const y0 = Math.floor((Math.min(a[1], b[1]) - 0.01) / LINE_CELL), y1 = Math.floor((Math.max(a[1], b[1]) + 0.01) / LINE_CELL);
+        for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) { const k = x + "," + y, l = ix.lineCells.get(k); if (l) l.push(i); else ix.lineCells.set(k, [i]); }
+      }
     }
-    else if (it.kind === "symbol" || it.kind === "sheet" || it.kind === "label" || it.kind === "global_label" || it.kind === "hierarchical_label") others.push(it);
+    else if (it.kind === "junction") { const q = atOf(it.node) as Pt; bucket(ix.dotCells, q, ix.dots.length); ix.dots.push(q); }
+    else if (it.kind === "bus_entry") {
+      const c = connPoints(doc, it), st = kid(it.node, "stroke"), w = st ? num((kid(st, "width") || [])[1]) : 0;
+      ix.entries.push({ item: it, c, m: (w > 0 ? w : 0.1524) / 2 + 1e-4 });
+    } else if (it.kind === "symbol" || it.kind === "sheet" || it.kind === "label" || it.kind === "global_label" || it.kind === "hierarchical_label") {
+      const pts: Pt[] = it.kind === "symbol" ? symbolPins(doc, it).filter((q) => q.type !== "no_connect").map((q) => [q.x, q.y] as Pt)
+        : it.kind === "sheet" ? kids(it.node, "pin").map((pin) => atOf(pin) as Pt) : [atOf(it.node) as Pt];
+      const i = ix.others.length; ix.others.push({ item: it, pts }); for (const q of pts) bucket(ix.cells, q, i);
+    }
   }
+  return ix;
+}
+/** The part of pointIndex that matters at p alone, gathered in one pass (no buckets beyond p's own cells). */
+function pointScan(doc: KDoc, p: Pt, skip?: Set<string> | null): PointIndex {
+  const ix: PointIndex = { lines: [], dots: [], entries: [], others: [], cells: new Map(), dotCells: new Map(), lineCells: new Map() };
+  const lk = Math.floor(p[0] / LINE_CELL) + "," + Math.floor(p[1] / LINE_CELL), ck = cellKey(p[0], p[1]), li: number[] = [], di: number[] = [], oi: number[] = [];
+  ix.lineCells.set(lk, li); ix.dotCells.set(ck, di); ix.cells.set(ck, oi);
+  for (const it of doc.items.values()) {
+    if (skip && skip.has(it.id)) continue;
+    if (it.kind === "wire" || it.kind === "bus") {
+      let st: string | null = null;
+      for (const [a, b] of segs(it)) if (segDist(p, a, b) <= 1e-3) { if (st === null) st = K.serialize(kid(it.node, "stroke") || []); li.push(ix.lines.length); ix.lines.push({ layer: it.kind, a, b, stroke: st }); }
+    } else if (it.kind === "junction") { const q = atOf(it.node) as Pt; if (same(q, p)) { di.push(ix.dots.length); ix.dots.push(q); } }
+    else if (it.kind === "bus_entry") {
+      const c = connPoints(doc, it), st = kid(it.node, "stroke"), w = st ? num((kid(st, "width") || [])[1]) : 0;
+      ix.entries.push({ item: it, c, m: (w > 0 ? w : 0.1524) / 2 + 1e-4 });
+    } else if (it.kind === "symbol" || it.kind === "sheet" || it.kind === "label" || it.kind === "global_label" || it.kind === "hierarchical_label") {
+      const pts: Pt[] = it.kind === "symbol" ? symbolPins(doc, it).filter((q) => q.type !== "no_connect" && same([q.x, q.y], p)).map((q) => [q.x, q.y] as Pt)
+        : it.kind === "sheet" ? kids(it.node, "pin").map((pin) => atOf(pin) as Pt).filter((q) => same(q, p)) : [atOf(it.node) as Pt].filter((q) => same(q, p));
+      if (pts.length) { oi.push(ix.others.length); ix.others.push({ item: it, pts }); }
+    }
+  }
+  return ix;
+}
+export function analyzePoint(doc: KDoc, p: Pt, breakCrossings: boolean, extra?: PreviewLine[] | null, skip?: Set<string> | null, index?: PointIndex | null) {
+  const info = { isJunction: false, hasDot: false, hasBusEntry: false, hasBusAtPoint: false, multiWires: false, multiBuses: false, allows: false };
+  const lines: { layer: string; a: Pt; b: Pt; stroke: string }[] = [], others: KItem[] = [];
+  const onLine = (a: Pt, b: Pt) => segDist(p, a, b) <= 1e-3;
+  // one point on its own (the document may be changing between calls): read the items directly; many points at
+  // once (previewJunctions) pass an index built once
+  const ix = index || pointScan(doc, p, skip);
+  for (const i of ix.lineCells.get(Math.floor(p[0] / LINE_CELL) + "," + Math.floor(p[1] / LINE_CELL)) || []) { const l = ix.lines[i]; if (onLine(l.a, l.b)) lines.push(l); }
+  for (const i of cellsNear(ix.dotCells, p)) if (same(ix.dots[i], p)) info.hasDot = true;
+  for (const e of ix.entries) {
+    // aItems.Overlapping( aPosition ): any entry whose bounding box (inflated by half its pen width + 1 IU) holds the
+    // point sets hasBusEntry, connected or not; only one that ends here adds exits
+    const c = e.c, m = e.m;
+    if (p[0] >= Math.min(c[0][0], c[1][0]) - m && p[0] <= Math.max(c[0][0], c[1][0]) + m && p[1] >= Math.min(c[0][1], c[1][1]) - m && p[1] <= Math.max(c[0][1], c[1][1]) + m) info.hasBusEntry = true;
+    if (c.some((q) => same(q, p))) { info.hasBusEntry = true; others.push(e.item); }
+  }
+  const near = new Set<number>(cellsNear(ix.cells, p));
+  for (const i of Array.from(near).sort((a, b) => a - b)) { const o = ix.others[i]; if (o.pts.some((q) => same(q, p))) others.push(o.item); }
   for (const e of extra || []) if ((e.kind === "wire" || e.kind === "bus") && !same(e.a, e.b) && onLine(e.a, e.b)) lines.push({ layer: e.kind, a: e.a, b: e.b, stroke: DEFAULT_STROKE });
   const isEnd = (l: { a: Pt; b: Pt }) => same(l.a, p) || same(l.b, p);
   const pre: Record<string, Set<number>> = { wire: new Set(), bus: new Set() };
@@ -62,9 +133,9 @@ export function analyzePoint(doc: KDoc, p: Pt, breakCrossings: boolean, extra?: 
   }
   for (const it of others) {
     if (it.kind === "bus_entry") { brk.bus = true; exits.bus.add(unique++); entryBus++; brk.wire = true; exits.wire.add(unique++); info.hasBusEntry = true; }
-    else if (it.kind === "symbol") { if (symbolPins(doc, it).some((q) => q.type !== "no_connect" && same([q.x, q.y], p))) { brk.wire = true; exits.wire.add(unique++); } }
-    else if (it.kind === "sheet") { if (kids(it.node, "pin").some((pin) => same(atOf(pin), p))) { brk.wire = true; exits.wire.add(unique++); } }
-    else if (same(atOf(it.node), p)) {
+    else if (it.kind === "symbol") { brk.wire = true; exits.wire.add(unique++); }             // a pin (not a no-connect pin) lands here
+    else if (it.kind === "sheet") { brk.wire = true; exits.wire.add(unique++); }              // a sheet pin lands here
+    else {
       if (it.kind === "label" && BUS_TEXT.test(str(it.node[1]))) brk.bus = true; else brk.wire = true;
     }
   }
@@ -90,9 +161,18 @@ export function previewJunctions(doc: KDoc, lines: PreviewLine[], skip?: Set<str
   if (!extra.length && !(points && points.length)) return [];
   const conns = screenConnections(doc);
   const push = (p: Pt) => { const k = r4(p[0]) + "," + r4(p[1]); if (!seen.has(k)) { seen.add(k); pts.push(p); } };
-  for (const l of extra) { push(l.a); push(l.b); for (const c of conns) if (segDist(c, l.a, l.b) <= 1e-3) push(c); }
+  // the connection points by 5 mm cell: each preview line looks only at the cells its box covers
+  const connCells = new Map<string, Pt[]>();
+  if (extra.length) for (const c of conns) { const k = Math.floor(c[0] / LINE_CELL) + "," + Math.floor(c[1] / LINE_CELL), l = connCells.get(k); if (l) l.push(c); else connCells.set(k, [c]); }
+  for (const l of extra) {
+    push(l.a); push(l.b);
+    const x0 = Math.floor((Math.min(l.a[0], l.b[0]) - 0.01) / LINE_CELL), x1 = Math.floor((Math.max(l.a[0], l.b[0]) + 0.01) / LINE_CELL);
+    const y0 = Math.floor((Math.min(l.a[1], l.b[1]) - 0.01) / LINE_CELL), y1 = Math.floor((Math.max(l.a[1], l.b[1]) + 0.01) / LINE_CELL);
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (const c of connCells.get(x + "," + y) || []) if (segDist(c, l.a, l.b) <= 1e-3) push(c);
+  }
   for (const p of points || []) push(p);
-  return pts.filter((p) => analyzePoint(doc, p, false, extra, skip).allows);
+  const ix = pointIndex(doc, skip);
+  return pts.filter((p) => analyzePoint(doc, p, false, extra, skip, ix).allows);
 }
 
 // A dry-run edit of the sheet: changes are applied to the document as they are made (so the analysis sees

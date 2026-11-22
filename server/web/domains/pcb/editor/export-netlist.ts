@@ -26,7 +26,7 @@ import { currentVariant } from "./variant";
 const PAGES = ["KiCad", "OrcadPCB2", "Allegro", "CadStar", "PADS", "SPICE", "SPICE Model"] as const;
 const HEAD: Record<string, string> = { KiCad: "Export netlist in KiCad format", OrcadPCB2: "Export netlist in OrcadPCB2 format", Allegro: "Export netlist in Allegro format",
   CadStar: "Export netlist in CadStar format", PADS: "Export netlist in PADS format", SPICE: "Export netlist in SPICE format", "SPICE Model": "Export netlist as a SPICE .subckt model" };
-const EXT: Record<string, string> = { KiCad: "net", OrcadPCB2: "net", Allegro: "txt", CadStar: "frp", PADS: "asc", SPICE: "cir", "SPICE Model": "cir" };
+const EXT: Record<string, string> = { KiCad: "net", OrcadPCB2: "net", Allegro: "txt", CadStar: "frp", PADS: "asc", SPICE: "cir", "SPICE Model": "sub" };
 
 interface Saved { page?: number; curSheetAsRoot?: boolean; saveAllVoltages?: boolean; saveAllCurrents?: boolean; saveAllDissipations?: boolean; saveAllEvents?: boolean; modelCurSheetAsRoot?: boolean }
 const KEY = "kc.exportNetlist";
@@ -148,21 +148,41 @@ async function hierarchySheets(): Promise<NK.NlSheet[] | null> {
   if ("error" in res) return null;
   return NK.nlSheets(res.netlist.instances || [], (f) => { const x = res.files.get(f); return x ? (x.doc as KDoc) : null; });
 }
+type AnnotInstance = { doc: KDoc; path: string; page: number; suffix?: string };
 /**
- * SCH_EDIT_FRAME::ReadyToNetlist: the schematic must be annotated (else the Annotate dialog opens with the reason and
- * the work goes on only when it is annotated once that dialog is closed), then "Error: duplicate sheet names.
- * Continue?" when two sheets on one sheet share a name.
+ * SCH_EDIT_FRAME::CheckAnnotate( ANNOTATE_ALL ) over the hierarchy's sheet instances: the schematic module's
+ * SCH_REFERENCE_LIST::CheckAnnotation (sch.checkAnnotate).  When the project numbers reused sheets with suffixes
+ * (annotation.reused_sheet_suffixes) each instance's references compose with the Reference Suffix of the sheets down to it.
+ */
+function annotationErrors(sheets: NK.NlSheet[]): number {
+  const S = ((window as unknown as { CollabTools?: { sch?: { checkAnnotate?(insts: AnnotInstance[]): number } } }).CollabTools || {}).sch;
+  if (!S || !S.checkAnnotate) return 0;
+  let suffixes = false;
+  try { const pro = JSON.parse((E.proSettings as string | null) || "{}") as { schematic?: { annotation?: { reused_sheet_suffixes?: boolean } } }; suffixes = !!(pro.schematic && pro.schematic.annotation && pro.schematic.annotation.reused_sheet_suffixes); } catch (e) { suffixes = false; }
+  return S.checkAnnotate(sheets.map((sh, i) => {
+    let suffix = "";
+    if (suffixes) for (let k = 2; k <= sh.uuidPath.length; k++) {
+      const a = sheets.find((x) => x.uuidPath.length === k && x.uuidPath.every((u, j) => sh.uuidPath[j] === u));
+      if (a && a.sheetNode) suffix += NK.fieldValue(a.sheetNode, "Reference Suffix");
+    }
+    return { doc: sh.doc, path: "/" + sh.uuidPath.join("/"), page: i + 1, suffix };
+  }));
+}
+/**
+ * SCH_EDIT_FRAME::ReadyToNetlist: the schematic must be annotated (else ModalAnnotate opens the Annotate dialog with the
+ * reason and the work goes on only when it is annotated once that dialog is closed), then "Error: duplicate sheet
+ * names. Continue?" when two sheets on one sheet share a name.
  */
 export async function readyToNetlist(annotateMessage: string): Promise<boolean> {
-  const suffixes = (): boolean => { try { const pro = JSON.parse((E.proSettings as string | null) || "{}") as { schematic?: { annotation?: { reused_sheet_suffixes?: boolean } } }; return !!(pro.schematic && pro.schematic.annotation && pro.schematic.annotation.reused_sheet_suffixes); } catch (e) { return false; } };
   let sheets = await hierarchySheets();
   if (!sheets) return true;   // the export itself reports what could not be read
-  if (NK.annotationErrors(sheets, suffixes()) > 0) {
-    await new Promise<void>((done) => openAnnotate(annotateMessage, done));
+  if (annotationErrors(sheets) > 0) {
+    await openAnnotate({ message: annotateMessage });
     sheets = await hierarchySheets();
-    if (!sheets || NK.annotationErrors(sheets, suffixes()) > 0) return false;
+    if (!sheets || annotationErrors(sheets) > 0) return false;
   }
   if (NK.duplicateSheetNames(sheets) > 0) {
+    // IsOK( this, ... ): a Yes / No question, No (and Escape) stops
     const go = await new Promise<boolean>((done) => { if (!messageBox("Confirmation", "Error: duplicate sheet names. Continue?", [{ label: "No", fn: () => done(false) }, { label: "Yes", fn: () => done(true) }], 0)) done(true); });
     if (!go) return false;
   }
@@ -180,10 +200,10 @@ export function openExportNetlist(): void {
     el.append(pageHead(name));
     if (name === "SPICE") {
       opts.curSheetAsRoot = checkField(!!saved.curSheetAsRoot, "Use current sheet as root", { key: "cur-sheet-as-root", tip: "Export netlist only for the current sheet" });
-      opts.saveAllVoltages = checkField(saved.saveAllVoltages !== false, "Save all voltages", { key: "save-all-voltages", tip: "Write a directive to save all voltages (.save all)" });
-      opts.saveAllCurrents = checkField(saved.saveAllCurrents !== false, "Save all currents", { key: "save-all-currents", tip: "Write a directive to save all currents (.probe alli)" });
-      opts.saveAllDissipations = checkField(saved.saveAllDissipations !== false, "Save all power dissipations", { key: "save-all-dissipations", tip: "Write directives to save power dissipation of all items (.probe p(<item>))" });
-      opts.saveAllEvents = checkField(saved.saveAllEvents !== false, "Save all digital event data", { key: "save-all-events", tip: "If not set, write a directive to prevent the saving of digital event data (esave none)" });
+      opts.saveAllVoltages = checkField(!!saved.saveAllVoltages, "Save all voltages", { key: "save-all-voltages", tip: "Write a directive to save all voltages (.save all)" });
+      opts.saveAllCurrents = checkField(!!saved.saveAllCurrents, "Save all currents", { key: "save-all-currents", tip: "Write a directive to save all currents (.probe alli)" });
+      opts.saveAllDissipations = checkField(!!saved.saveAllDissipations, "Save all power dissipations", { key: "save-all-dissipations", tip: "Write directives to save power dissipation of all items (.probe p(<item>))" });
+      opts.saveAllEvents = checkField(!!saved.saveAllEvents, "Save all digital event data", { key: "save-all-events", tip: "If not set, write a directive to prevent the saving of digital event data (esave none)" });
       for (const k of ["curSheetAsRoot", "saveAllVoltages", "saveAllCurrents", "saveAllDissipations", "saveAllEvents"]) el.append(h("div", { style: "margin-bottom:5px" }, opts[k].el));
       const run = checkField(false, "Run external simulator command:", { ro: true, key: "run-simulator", tip: "Enter the command line to run SPICE\nUsually '<path to SPICE binary> \"%I\"'\n%I will be replaced by the netlist filepath" });
       el.append(h("div", { style: "margin-top:10px" }, run.el), textField("", { ro: true, key: "simulator-command" }).el, note("A browser cannot run a simulator on this computer."));
@@ -192,7 +212,7 @@ export function openExportNetlist(): void {
       el.append(opts.modelCurSheetAsRoot.el);
     }
   } }));
-  openDialog({ title: "Export Netlist", width: 560, okLabel: "Export Netlist", cancelLabel: "Close",
+  const dlg = openDialog({ title: "Export Netlist", width: 560, okLabel: "Export Netlist", cancelLabel: "Close",
     build(body) {
       nb = notebook(pages, { start: Math.min(Math.max(saved.page || 0, 0), PAGES.length - 1) });
       report = reportPanel("120px");
@@ -201,8 +221,8 @@ export function openExportNetlist(): void {
     ok() {
       const page = nb ? nb.current() : 0, name = PAGES[page];
       const v = (k: string, d: boolean): boolean => (opts[k] ? opts[k].get() : d);
-      store({ page, curSheetAsRoot: v("curSheetAsRoot", !!saved.curSheetAsRoot), saveAllVoltages: v("saveAllVoltages", saved.saveAllVoltages !== false), saveAllCurrents: v("saveAllCurrents", saved.saveAllCurrents !== false),
-        saveAllDissipations: v("saveAllDissipations", saved.saveAllDissipations !== false), saveAllEvents: v("saveAllEvents", saved.saveAllEvents !== false), modelCurSheetAsRoot: v("modelCurSheetAsRoot", !!saved.modelCurSheetAsRoot) });
+      store({ page, curSheetAsRoot: v("curSheetAsRoot", !!saved.curSheetAsRoot), saveAllVoltages: v("saveAllVoltages", !!saved.saveAllVoltages), saveAllCurrents: v("saveAllCurrents", !!saved.saveAllCurrents),
+        saveAllDissipations: v("saveAllDissipations", !!saved.saveAllDissipations), saveAllEvents: v("saveAllEvents", !!saved.saveAllEvents), modelCurSheetAsRoot: v("modelCurSheetAsRoot", !!saved.modelCurSheetAsRoot) });
       const lines: ReportLine[] = [];
       const say = (text: string, severity: string): void => { lines.push({ severity, text }); if (report) report.set(lines.slice()); };
       const fname = `${stem}.${EXT[name]}`;
@@ -220,6 +240,7 @@ export function openExportNetlist(): void {
               const bytes = await zip(entries);
               download(new Blob([bytes as BlobPart], { type: "application/zip" }), `${stem}-allegro.zip`);
               say(`Netlist exported to '${fname}' with ${a.devices.size} device file${a.devices.size === 1 ? "" : "s"} in 'devices' (${stem}-allegro.zip).`, "info");
+              if (dlg) dlg.close();   // TransferDataFromWindow returned true: the dialog ends
               return;
             }
           }
@@ -227,10 +248,10 @@ export function openExportNetlist(): void {
             let o = 0;
             if (name === "SPICE") {
               o |= SP.OPTION_SIM_COMMAND;
-              if (v("saveAllVoltages", true)) o |= SP.OPTION_SAVE_ALL_VOLTAGES;
-              if (v("saveAllCurrents", true)) o |= SP.OPTION_SAVE_ALL_CURRENTS;
-              if (v("saveAllDissipations", true)) o |= SP.OPTION_SAVE_ALL_DISSIPATIONS;
-              if (v("saveAllEvents", true)) o |= SP.OPTION_SAVE_ALL_EVENTS;
+              if (v("saveAllVoltages", false)) o |= SP.OPTION_SAVE_ALL_VOLTAGES;
+              if (v("saveAllCurrents", false)) o |= SP.OPTION_SAVE_ALL_CURRENTS;
+              if (v("saveAllDissipations", false)) o |= SP.OPTION_SAVE_ALL_DISSIPATIONS;
+              if (v("saveAllEvents", false)) o |= SP.OPTION_SAVE_ALL_EVENTS;
               if (v("curSheetAsRoot", false)) o |= SP.OPTION_CUR_SHEET_AS_ROOT;
             } else if (v("modelCurSheetAsRoot", false)) o |= SP.OPTION_CUR_SHEET_AS_ROOT;
             text = await projectSpiceNetlist(o, (m, sev) => say(m, sev), name === "SPICE Model");
@@ -244,6 +265,7 @@ export function openExportNetlist(): void {
         if (text === null) { say(`Failed to create file '${fname}'.`, "error"); return; }
         download(text, fname);
         say(`Netlist exported to '${fname}'.`, "info");
+        if (dlg) dlg.close();   // TransferDataFromWindow returned true: the dialog ends
       })();
       return false;
     } });

@@ -163,7 +163,7 @@ export function sheetTests(doc: KDoc, nets: ErcNet[], mark: Mark, itemRef: (doc:
 }
 
 /** A sheet for CheckAnnotate: its document, the instance path its symbols record and its page, when the caller knows the hierarchy. */
-export interface AnnotInstance { doc: KDoc; path?: string | null; page?: number }
+export interface AnnotInstance { doc: KDoc; path?: string | null; page?: number; /** the sheet path's reference suffix (SCHEMATIC::GetRefSuffix) when the project numbers reused sheets with suffixes */ suffix?: string }
 /**
  * SCH_SHEET_LIST::GetSymbols( refs, SYMBOL_FILTER_NON_POWER, true ) for ANNOTATE_ALL: the references of every sheet
  * instance.  Without known instance paths a file counts once, however many sheets use it.
@@ -174,7 +174,8 @@ function annotationRefs(insts: AnnotInstance[]): { sheets: (AnnSheet | null)[]; 
     if (!path) { if (seenDocs.has(s.doc)) return null; seenDocs.add(s.doc); }
     return { doc: s.doc, path, page: s.page || i + 1 };
   });
-  const refs: SchRef[] = []; for (const sh of sheets) if (sh) refs.push(...sheetReferences(sh, null, true));
+  const refs: SchRef[] = [];
+  sheets.forEach((sh, i) => { if (!sh) return; const suffix = insts[i].suffix; for (const r of sheetReferences(sh, null, true)) { if (suffix) r.suffix = suffix; refs.push(r); } });
   return { sheets, refs };
 }
 /** SCH_EDIT_FRAME::CheckAnnotate( handler, ANNOTATE_ALL ): the number of annotation errors of the whole schematic. */

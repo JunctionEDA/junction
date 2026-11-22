@@ -36,9 +36,11 @@ export interface PcbCtx extends ToolCtx {
   /** the clipboard bridge app.js may hand over */
   /** commit with the editor's options (tentative: a paste or duplicate that rides the cursor until placed; discard: an amend that drops it again) */
   commit(changes: KChange[], label?: string, opts?: { amend?: boolean; tentative?: boolean; discard?: boolean }): void;
-  clipboard?: { set?(text: string): void; get?(): string | null | undefined | Promise<string | null | undefined> };
+  clipboard?: { set?(text: string): void; get?(): string | null | undefined | Promise<string | null | undefined>; /** the system clipboard: its text, "" when it holds none (an image, perhaps) */ read?(): Promise<string | null | undefined> };
   /** the editor's selection seam (app.js owns the whole selection when it hands this over) */
   setSelection?(ids: Iterable<string>): void;
+  /** the ratsnest visibility of nets changed (the Appearance panel's net list follows) */
+  setNetsVisible?(names: string[], visible: boolean): void;
   /** the items under a point, for the selection clarification */
   candidatesAt?(mm: Pt): string[] | null;
   /** the clarification menu: picks one of the candidates, then calls back with a context for it (or null) */
@@ -51,6 +53,11 @@ export interface PcbCtx extends ToolCtx {
   fieldAt?(mm: Pt): { id: string; name: string } | null;
   /** hand a drag the editor started to the module's move session */
   handoffDrag?(): unknown;
+  /** the screen's local origin (the status bar's dx / dy / dist read from it), and setting it */
+  localOrigin?(): Pt | null;
+  setLocalOrigin?(p: Pt): void;
+  /** make a layer visible (the Appearance panel's SetLayerVisible( layer, true )) */
+  showLayer?(layer: string): void;
   /** the toolbar group's shown action (the Arc group follows the arc drawing mode) */
   setGroupCurrent?(group: string, action: string): void;
 }
@@ -104,7 +111,7 @@ export interface PcbGeom extends KGeom {
 }
 
 /** A magnetic target under the cursor (snapTarget): a pad, via, track end or the body of a routed-net track. */
-export interface SnapHit { x: number; y: number; net: NetRef; kind: string; fp?: string; padIndex?: number; id?: string; layers?: string[] | null; /** the copper layer the snap was found on (ROUTER_TOOL::getStartLayer) */ onLayer?: string }
+export interface SnapHit { x: number; y: number; net: NetRef; kind: string; fp?: string; padIndex?: number; id?: string; layers?: string[] | null; /** the copper layer the snap was found on (ROUTER_TOOL::getStartLayer) */ onLayer?: string; shape?: undefined }
 
 /** One element of a track line: a straight segment or a three-point arc. */
 export type TrackElem = { t: "seg"; a: Pt; b: Pt; m?: undefined } | { t: "arc"; a: Pt; m: Pt; b: Pt };
@@ -115,8 +122,8 @@ export interface Mods { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean
 /** POINT_TYPE of a snap anchor (the SNAP_INDICATOR icon): corner, end, mid, center, quadrant, intersection, onElement, or none. */
 export type SnapType = "corner" | "end" | "mid" | "center" | "quadrant" | "intersection" | "onElement" | "none";
 /** A snap anchor: the point and its POINT_TYPE. */
-export type SnapAnchor = Pt & { t?: SnapType; /** PCB_GRID_HELPER::ANCHOR_FLAGS (grid-helper.ts) */ f?: number; /** the item the anchor belongs to */ id?: string };
-export interface Hover { x: number; y: number; snap: SnapHit | { x: number; y: number; kind: string; net?: undefined; type?: SnapType } | null; del?: KItem | null }
+export type SnapAnchor = Pt & { t?: SnapType; /** PCB_GRID_HELPER::ANCHOR_FLAGS (grid-helper.ts) */ f?: number; /** the item the anchor belongs to */ id?: string; /** the anchor is on a graphic shape (PCB_SHAPE): PCB_GRID_HELPER::GetSnapped */ shape?: boolean };
+export interface Hover { x: number; y: number; snap: SnapHit | { x: number; y: number; kind: string; net?: undefined; type?: SnapType; shape?: boolean } | null; del?: KItem | null }
 
 /** The module state: one in-progress operation at a time, plus a selection of our own. */
 // a type alias rather than an interface: it is handed over as ToolModule.state, a Record<string, unknown>
@@ -140,6 +147,8 @@ export type PcbState = {
   markers: DrcMarker[];
   showRatsnest: boolean; localRatsnest: boolean; hiddenNets: Set<string>; rats: { doc: BoardDoc; lines: RatsnestLine[] } | null; ratsDirty: boolean;
   settings: DesignSettings | null; settingsSrc: unknown; settingsCache: DesignSettings | null; druSrc?: string | null; highlightNet: string | null;
+  /** the nets the canvas highlights (RENDER_SETTINGS::GetHighlightNetCodes), BOARD_INSPECTION_TOOL::m_currentlyHighlighted and m_lastHighlighted, as net keys */
+  hlShown: string[]; hlCurrent: string[]; hlLast: string[];
   /** the router's caches (per document change) and the obstacles shown in violation */
   docVer: number; rworld: RouterWorld | null; nlc: { doc: BoardDoc; ver: number; nl: Netlist } | null; violations: { obs: Obstacle[]; at: Pt } | null;
   /** the length tuner: the pattern being placed, the track under the cursor */
@@ -156,7 +165,7 @@ export type PcbState = {
   /** the board the shove world was last built for (its clearance queries resolve rules against it) */
   shoveDoc?: BoardDoc | null;
   move?: SelectMove | null; pending?: PendingDrag | null; sworld?: { doc: BoardDoc; ver: number; key: string; w: ShoveWorld } | null;
-  joints?: Joints; strokeW?: number | null; pick?: { done: (res: Pt | KItem | null) => void; prompt: string;
+  joints?: Joints; strokeW?: number | null; drawOrigin?: Pt | null; peditCtrl?: boolean; lastDown?: { t: number; x: number; y: number } | null; pick?: { done: (res: Pt | KItem | null) => void; prompt: string; filter?: (it: KItem) => boolean;
     /** a two-point pick (TWO_POINT_GEOMETRY_MANAGER): the prompts, the preview drawn between the points, the first point once set, the end under the cursor */
     two?: { first: string; second: string; preview: "axis" | "ruler"; done: (a: Pt | null, b: Pt | null) => void }; from?: Pt | null; cur?: Pt | null; dragged?: boolean } | null;
   /** the interactive offset's arrow, left in place while its dialog is open ([cursor end, arrow end]) */ pickKeep?: [Pt, Pt] | null; popup?: { text: string; at: Pt; until: number } | null;

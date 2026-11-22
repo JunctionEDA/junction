@@ -363,9 +363,9 @@ export function enumPick(st: EnumState, doc: BoardDoc, pads: KItem[], isClick: b
       const val = st.stored.length ? st.stored.shift()! : (st.next += st.step, st.next - st.step);
       const label = enumLabel(st, val);
       st.old.set(it.id, { val, was: st.numbers.has(it.id) ? st.numbers.get(it.id)! : str(it.node[1]) });
-      st.numbers.set(it.id, label); st.picked.add(it.id); any = true;
+      st.numbers.set(it.id, label); st.picked.add(it.id); any = true; padMemory.lastNumber = label;   // SetLastPadNumber( newNumber )
     } else if (isClick) {
-      const o = st.old.get(it.id); if (o) { st.stored.push(o.val); st.numbers.set(it.id, o.was); st.old.delete(it.id); }
+      const o = st.old.get(it.id); if (o) { st.stored.push(o.val); st.numbers.set(it.id, o.was); st.old.delete(it.id); padMemory.lastNumber = o.was; }
       st.picked.delete(it.id); any = true;
     }
   }

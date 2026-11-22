@@ -148,8 +148,8 @@ function mixedLen(v: number, mixed: boolean, ro: boolean, key: string): { el: HT
   return { el: input, get: () => (input.value === MIXED ? null : input.value === fmtLen(cur) ? cur : (isNaN(parseLen(input.value)) ? cur : parseLen(input.value))), set(x) { cur = x; input.value = fmtLen(x); } };
 }
 /** COLOR_SWATCH: a swatch that opens the colour picker; "" is the default (unspecified) colour. */
-function swatch(rgba: string, mixed: boolean, ro: boolean, key: string): { el: HTMLElement; get(): string | null } {
-  let cur: string | null = mixed ? null : rgba;
+function swatch(rgba: string, mixed: boolean, ro: boolean, key: string): { el: HTMLElement; get(): string | null; enable(on: boolean): void } {
+  let cur: string | null = mixed ? null : rgba, off = false;
   const sw = h("span", { class: "tc-swatch", "data-k": key, title: "Set Color...", style: "display:inline-block;width:34px;height:20px;border:1px solid var(--line);border-radius:var(--r-1);vertical-align:middle;cursor:pointer" });
   const paint = (): void => {
     if (cur === null) { sw.style.background = "repeating-linear-gradient(45deg,var(--panel-2) 0 4px,var(--panel) 4px 8px)"; sw.title = MIXED; return; }
@@ -158,7 +158,7 @@ function swatch(rgba: string, mixed: boolean, ro: boolean, key: string): { el: H
   };
   // COLOR_SWATCH::GetNewSwatchColor: DIALOG_COLOR_PICKER with opacity, the default UNSPECIFIED
   sw.addEventListener("click", () => {
-    if (ro) return;
+    if (ro || off) return;
     const p = cur ? cur.split(" ").map(Number) : null;
     colorPicker(p ? { r: p[0] / 255, g: p[1] / 255, b: p[2] / 255, a: p[3] ?? 1 } : null, true, (c) => {
       cur = c.r === 0 && c.g === 0 && c.b === 0 && c.a === 0 ? "" : [Math.round(c.r * 255), Math.round(c.g * 255), Math.round(c.b * 255), Math.round(c.a * 1000) / 1000].join(" "); paint();
@@ -166,7 +166,9 @@ function swatch(rgba: string, mixed: boolean, ro: boolean, key: string): { el: H
   });
   // no button beside it: the default colour is set with the picker's Clear Color (DIALOG_COLOR_PICKER, default UNSPECIFIED)
   paint();
-  return { el: h("span", { style: "position:relative;display:inline-flex;align-items:center" }, sw), get: () => cur };
+  // wxWindow::Enable( false ) on the swatch (and its label): greyed, no picker
+  const enable = (on: boolean): void => { off = !on; sw.style.opacity = on ? "" : "0.4"; sw.style.cursor = on && !ro ? "pointer" : "default"; sw.setAttribute("aria-disabled", on ? "false" : "true"); };
+  return { el: h("span", { style: "position:relative;display:inline-flex;align-items:center" }, sw), get: () => cur, enable };
 }
 
 
@@ -289,12 +291,22 @@ const schStroke = (n: SNode | null): SchStroke => {
 const strokeNode = (s: SchStroke): SNode => { const n: SNode = ["stroke", ["width", f4(Math.max(0, s.width))], ["type", s.style]]; if (s.color) n.push(["color", ...s.color.split(" ").map(Number)]); return n; };
 
 /** DIALOG_TABLE_PROPERTIES (eeschema).  `create`: Draw Table's dialog on the new table (OK hands it over, Cancel null). */
-export function schTableDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void): boolean {
+/** m_Drawing.default_line_thickness (mils, 6 unless Schematic Setup says otherwise) as a length in mm. */
+export function schDefaultLineThickness(proText?: string | null): number {
+  let mils = 6;
+  try {
+    const t = proText !== undefined ? proText : ((globalThis as { CollabEditor?: { proSettings?: string | null } }).CollabEditor || {}).proSettings;
+    const j = t ? JSON.parse(t) as { schematic?: { drawing?: { default_line_thickness?: unknown } } } : null, v = Number(j && j.schematic && j.schematic.drawing && j.schematic.drawing.default_line_thickness);
+    if (Number.isFinite(v) && v > 0) mils = v;
+  } catch { mils = 6; }
+  return Math.round(mils * 0.0254 * 10000) / 10000;
+}
+export function schTableDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void, hooks?: { cellEditor?(ta: HTMLTextAreaElement): void }): boolean {
   const doc = ctx.doc as KDoc; if (!doc) return false;
   const node0 = item.node, ro = !!ctx.viewOnly, T = M().tableInfo(node0);
   const border = kid(node0, "border"), seps = kid(node0, "separators"); const bs = schStroke(border), ss = schStroke(seps);
   const inputs: (HTMLTextAreaElement | null)[][] = [];
-  let f: Record<string, Field<string | number | boolean>> = {}; let bcol: { el: HTMLElement; get(): string | null } | null = null, scol: { el: HTMLElement; get(): string | null } | null = null;
+  let f: Record<string, Field<string | number | boolean>> = {}; let bcol: ReturnType<typeof swatch> | null = null, scol: ReturnType<typeof swatch> | null = null;
   /** (border …) and (separators …) as the dialog's fields say */
   const strokes = (): { bn: SNode; sn: SNode } => {
     const b = !!f.external.get() || !!f.header.get(), s = !!f.rows.get() || !!f.cols.get();
@@ -319,6 +331,7 @@ export function schTableDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode 
           if (cs === 0 || rs === 0) { gridEl.append(h("div", { style: `min-height:${hgt}px;background:var(--panel-2)`, title: "Covered by a merged cell" })); row.push(null); continue; }
           const t = h("textarea", { "data-k": `cell-${r}-${c}`, readOnly: ro, spellcheck: false, style: `min-height:${hgt}px;resize:none;border:0;border-radius:0;padding:3px 4px;font:inherit;background:var(--bench);color:var(--ink)` }) as HTMLTextAreaElement;
           t.value = M().cellText(cell); if (!first) first = t; gridEl.append(t); row.push(t);
+          if (!ro && hooks && hooks.cellEditor) hooks.cellEditor(t);   // GRID_CELL_STC_EDITOR's onCharFn: text variable autocompletion
         }
         inputs.push(row);
       }
@@ -327,9 +340,14 @@ export function schTableDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode 
       const bw = lenField(bs.width, { ro, key: "borderWidth" }), bstyle = selectField<string>(bs.style, LINE_STYLES, { ro, key: "borderStyle", icons: LINE_STYLE_ICONS });
       const sw = lenField(ss.width, { ro, key: "sepWidth" }), sstyle = selectField<string>(ss.style, LINE_STYLES, { ro, key: "sepStyle", icons: LINE_STYLE_ICONS });
       bcol = swatch(bs.color, false, ro, "borderColor"); scol = swatch(ss.color, false, ro, "sepColor");
+      // onBorderChecked: width, colour and style follow their group's boxes; a group ticked on with no (a negative)
+      // width takes the default line thickness
       const sync = (): void => {
         const b = !!f.external.get() || !!f.header.get(), s = !!f.rows.get() || !!f.cols.get();
+        if (b && !(Number(bw.get()) >= 0)) bw.set(schDefaultLineThickness());
+        if (s && !(Number(sw.get()) >= 0)) sw.set(schDefaultLineThickness());
         bw.input.disabled = bstyle.input.disabled = ro || !b; sw.input.disabled = sstyle.input.disabled = ro || !s;
+        if (bcol) bcol.enable(b); if (scol) scol.enable(s);
       };
       const external = checkField(ext, "External border", { ro, key: "external", onChange: sync }), header = checkField(hdr, "Header border", { ro, key: "header", onChange: sync });
       const rows = checkField(rws, "Row lines", { ro, key: "rows", onChange: sync }), cols2 = checkField(cls, "Column lines", { ro, key: "cols", onChange: sync });

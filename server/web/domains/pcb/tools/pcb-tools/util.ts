@@ -44,6 +44,8 @@ export function useFootprintEditorDefaults(on: boolean) {
 }
 /** Take the project's per-layer-class defaults (board.design_settings.defaults) for new graphics and text. */
 let rawDefaults: DesignDefaults = {};
+/** The project's defaults.zones (BOARD_DESIGN_SETTINGS::m_defaultZoneSettings as the project file stores it), or {}. */
+export const projectZoneDefaults = (): Record<string, unknown> => { const z = (rawDefaults as { zones?: unknown }).zones; return z && typeof z === "object" ? z as Record<string, unknown> : {}; };
 export function layerDefaults(d: DesignDefaults) {
   rawDefaults = fpEditorDefaults ? {} : (d || {});
   if (fpEditorDefaults) { useFootprintEditorDefaults(true); return; }

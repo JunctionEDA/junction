@@ -214,7 +214,7 @@ function walkSymbols(inp: NlInput, excluded: (s: Sym) => boolean): { sym: Sym; e
   return out;
 }
 
-const fieldValue = (n: N, name: string): string => { for (const p of kidsOf(n, "property")) { const f = fieldParts(p); if (f.name === name) return f.value; } return ""; };
+export const fieldValue = (n: N, name: string): string => { for (const p of kidsOf(n, "property")) { const f = fieldParts(p); if (f.name === name) return f.value; } return ""; };
 /** The symbol's field texts for a variant (SCH_SYMBOL::GetFieldText( name, sheet, variant )). */
 function fieldsFor(s: Sym, variant: string): Map<string, string> {
   const m = new Map<string, string>();
@@ -537,51 +537,7 @@ function exportNets(inp: NlInput, _syms: Sym[], excluded: (s: Sym) => boolean): 
   return out.sort((a, b) => strNumCmp(a.name, b.name));
 }
 
-// ---------------------------------------------------------------- annotation check
-/**
- * SCH_EDIT_FRAME::CheckAnnotate( ANNOTATE_ALL ) through SCH_REFERENCE_LIST::CheckAnnotation: the number of annotation
- * errors of the whole hierarchy (power and '#' symbols left out).  A reference that ends in '?' or not in a digit is
- * not annotated; a unit beyond the library symbol's units, two symbols of one reference with the same unit, with
- * differing unit counts or with differing values are errors.  `suffixes`: the project numbers reused sheets with the
- * sheets' "Reference Suffix" (annotation.reused_sheet_suffixes), which then is part of the reference.
- */
-export function annotationErrors(sheets: NlSheet[], suffixes = false): number {
-  interface Ref { key: string; unit: number; units: number | null; value: string }
-  const libCache = new Map<string, LibInfo>(), list: Ref[] = [];
-  let errors = 0;
-  for (const sh of sheets) {
-    let suffix = "";
-    if (suffixes) for (let k = 2; k <= sh.uuidPath.length; k++) {
-      const a = sheets.find((x) => x.uuidPath.length === k && x.uuidPath.every((u, i) => sh.uuidPath[i] === u));
-      if (a && a.sheetNode) suffix += fieldValue(a.sheetNode, "Reference Suffix");
-    }
-    for (const s of symbolsOf(sh, libCache)) {
-      const ln = sh.doc.lib.get(sv((kidOf(s.node, "lib_name") || kidOf(s.node, "lib_id") || [])[1]));
-      if ((ln && kidOf(ln as N, "power")) || s.ref.startsWith("#")) continue;
-      const units = s.lib ? s.lib.unitCount : null;
-      // SCH_REFERENCE::Split: m_isNew
-      if (s.ref === "" || s.ref.endsWith("?") || !/[0-9]$/.test(s.ref)) { errors++; continue; }
-      if (units !== null && Math.max(units, 1) < s.unit) errors++;
-      list.push({ key: s.ref.toUpperCase() + "\u0000" + suffix, unit: s.unit, units, value: fieldValue(s.node, "Value") });
-    }
-  }
-  const groups = new Map<string, Ref[]>();
-  for (const r of list) { const g = groups.get(r.key); if (g) g.push(r); else groups.set(r.key, [r]); }
-  for (const g of groups.values()) {
-    const first = new Map<number, Ref>();
-    for (const r of g) {
-      const o = first.get(r.unit) || (first.size ? first.values().next().value as Ref : undefined);
-      if (o) {
-        if (o.unit === r.unit) errors++;
-        else if (o.units !== null && r.units !== null && o.units !== r.units) errors++;
-        else if (o.value !== r.value) errors++;
-      }
-      if (!first.has(r.unit)) first.set(r.unit, r);
-    }
-  }
-  return errors;
-}
-
+// ---------------------------------------------------------------- ReadyToNetlist
 /**
  * ERC_TESTER::TestDuplicateSheetNames: the number of pairs of sheet symbols on one sheet whose names are equal without
  * regard to case, over every sheet of the hierarchy.

@@ -149,11 +149,17 @@ export function updateSymbolNode(node: SNode, lib: SNode, libId: string, o: Upda
   // the fields, last to first (removing as it goes)
   const props = n.map((c, j) => [c, j] as [SNode, number]).filter(([c, j]) => j > 0 && isList(c) && c[0] === "property" && !META.test(propName(c)));
   for (let k = props.length - 1; k >= 0; k--) {
-    const [field] = props[k]; const name = propName(field);
+    let [field] = props[k]; const name = propName(field);
     const doUpdate = isPrivate(field) || o.fields.has(name);
     if (!doUpdate) continue;
     const libField = fieldOf(lib, name);
     if (libField) {
+      // field.SetPrivate( libField->IsPrivate() )
+      // (a copy without the reader's quoting marks: the serializer then writes the keyword bare and the two strings quoted)
+      if (isPrivate(libField) !== isPrivate(field)) {
+        const next = (isPrivate(field) ? [field[0], ...field.slice(2)] : [field[0], "private", ...field.slice(1)]) as SNode;
+        n[props[k][1]] = next; field = next;
+      }
       const lt = propValue(libField);
       const resetText = lt === "" ? o.resetEmpty : o.resetText;
       if (resetText) {
@@ -217,6 +223,8 @@ export function updateSymbolNode(node: SNode, lib: SNode, libId: string, o: Upda
     pins.push(p);
   }
   for (let j = n.length - 1; j >= 1; j--) if (isList(n[j]) && (n[j] as SNode)[0] === "pin") n.splice(j, 1);
+  // "Update/reset pin map overrides": SetPinMapOverride( PIN_MAP_INSTANCE_OVERRIDE() ), the library default again
+  if (o.resetPinMaps) for (let j = n.length - 1; j >= 1; j--) if (isList(n[j]) && (n[j] as SNode)[0] === "pin_map_override") n.splice(j, 1);
   let at = -1; for (let j = 1; j < n.length; j++) if (isList(n[j]) && ((n[j] as SNode)[0] === "property" || (n[j] as SNode)[0] === "uuid")) at = j;
   n.splice(at > 0 ? at + 1 : n.length, 0, ...pins);
   return n;

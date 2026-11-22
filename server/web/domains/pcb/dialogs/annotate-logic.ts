@@ -13,3 +13,22 @@ export function subsheetFiles(doc: KDoc, dir: string, only?: Set<string> | null)
   }
   return out;
 }
+
+
+/** SCHEMATIC_SETTINGS m_AnnotateSortOrder / m_AnnotateMethod / m_AnnotateStartNum as the .kicad_pro keeps them. */
+export interface AnnotateProjectSettings { sortY: boolean; method: 0 | 1 | 2; startNum: number }
+type ProSch = { annotation?: { sort_order?: unknown; method?: unknown } | null; annotate_start_num?: unknown };
+/** DIALOG_ANNOTATE::TransferDataToWindow's project half (anything else is the default: by X, first free, 0). */
+export function annotateSettingsFromProject(sch: ProSch): AnnotateProjectSettings {
+  const a = sch && sch.annotation && typeof sch.annotation === "object" ? sch.annotation : {};
+  const m = a.method === 1 || a.method === 2 ? a.method : 0;
+  return { sortY: a.sort_order === 1, method: m as 0 | 1 | 2, startNum: sch && typeof sch.annotate_start_num === "number" && sch.annotate_start_num >= 0 ? Math.floor(sch.annotate_start_num) : 0 };
+}
+/** ~DIALOG_ANNOTATE: the keys whose value differs from the project's ("modified"), or null when none does. */
+export function annotateProjectChanges(sch: ProSch, now: AnnotateProjectSettings): { sort_order?: number; method?: number; annotate_start_num?: number } | null {
+  const was = annotateSettingsFromProject(sch), out: { sort_order?: number; method?: number; annotate_start_num?: number } = {};
+  if (was.sortY !== now.sortY) out.sort_order = now.sortY ? 1 : 0;
+  if (was.method !== now.method) out.method = now.method;
+  if (was.startNum !== now.startNum) out.annotate_start_num = now.startNum;
+  return Object.keys(out).length ? out : null;
+}

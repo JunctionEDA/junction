@@ -146,6 +146,18 @@ export function findHits(doc: FindDoc, o: FindOpts, selection?: Set<string> | nu
   }
   return hits.map((h, i) => ({ h, i })).sort((a, b) => hitOrder(a.h, b.h) || a.i - b.i).map((e) => e.h);
 }
+/** SCH_FIND_REPLACE_TOOL::UpdateFind: the items to brighten for a sheet's hits, each once, in search order. */
+export function findHighlightIds(hits: Pick<FindHit, "id">[]): string[] { const out: string[] = []; for (const x of hits) if (!out.includes(x.id)) out.push(x.id); return out; }
+/**
+ * DIALOG_SCH_FIND::OnOptions: ticking "Regular Expression" clears "Whole words only" and "Match case"; ticking (or
+ * clearing) either of those clears "Regular Expression".  The other options only take their value.
+ */
+export function findOptionChanged<T extends FindOpts>(o: T, key: keyof FindOpts | "currentSheetOnly", on: boolean): T {
+  const out = Object.assign({}, o, { [key]: on }) as T;
+  if (key === "regex") { out.wholeWord = false; out.matchCase = false; }
+  else if (key === "matchCase" || key === "wholeWord") out.regex = false;
+  return out;
+}
 /** Apply a replacement to a cloned node for one hit; false when the hit is not replaceable or nothing changed. */
 export function replaceInNode(node: SNode, hit: Pick<FindHit, "what" | "field" | "replaceable" | "kind" | "sub">, o: FindOpts, replacement: string): boolean {
   if (!hit.replaceable) return false;
@@ -186,13 +198,15 @@ export const QTY = "${QUANTITY}", ITEM_NO = "${ITEM_NUMBER}";
 export interface SymRow { id: string; ids: string[]; ref: string; values: Record<string, string>; dnp: boolean; excludeBom: boolean; excludeBoard: boolean; excludeSim: boolean; excludePos: boolean; sheet: string; editable: boolean }
 const yes = (n: SNode, key: string, def: boolean) => { const k = kid(n, key); return k ? str(k[1]) === "yes" : def; };
 /** One row per reference designator on a sheet (the units of a multi-unit symbol share a row); power symbols (#PWR…) are left out. */
-export function symbolRows(doc: Pick<KDoc, "items">, sheet = "", editable = true): SymRow[] {
+export function symbolRows(doc: Pick<KDoc, "items">, sheet = "", editable = true, isPower?: (it: KItem) => boolean): SymRow[] {
   const byRef = new Map<string, SymRow>(), rows: SymRow[] = [];
   for (const it of doc.items.values()) {
     if (it.kind !== "symbol") continue;
     const values: Record<string, string> = {};
-    for (const p of kids(it.node, "property")) { const nm = str(p[1]); if (!nm.startsWith("ki_")) values[nm] = str(p[2]); }
-    const ref = values.Reference || ""; if (ref.startsWith("#")) continue;
+    // private fields ((property private "Name" "Value" …)) stay out of the table (SCH_FIELD::IsPrivate)
+    for (const p of kids(it.node, "property")) { if (p[1] === "private" && typeof p[2] === "string" && typeof p[3] === "string") continue; const nm = str(p[1]); if (!nm.startsWith("ki_")) values[nm] = str(p[2]); }
+    // "Don't add power symbols": SCH_SYMBOL::IsPower of its library symbol when the caller can tell, else the "#" reference
+    const ref = values.Reference || ""; if (isPower ? isPower(it) : ref.startsWith("#")) continue;
     const prev = ref && !/\?$/.test(ref) ? byRef.get(ref) : undefined;
     if (prev) { prev.ids.push(it.id); continue; }
     const row: SymRow = { id: it.id, ids: [it.id], ref, values, sheet, editable, dnp: yes(it.node, "dnp", false), excludeBom: !yes(it.node, "in_bom", true), excludeBoard: !yes(it.node, "on_board", true), excludeSim: yes(it.node, "exclude_from_sim", false), excludePos: !yes(it.node, "in_pos_files", true) };
@@ -201,7 +215,48 @@ export function symbolRows(doc: Pick<KDoc, "items">, sheet = "", editable = true
   return rows;
 }
 /** Every field name the rows carry, the four mandatory ones first (the dialog's field list). */
-export function fieldNames(rows: SymRow[]): string[] { const out = ["Reference", "Value", "Footprint", "Datasheet", "Description"]; for (const r of rows) for (const k of Object.keys(r.values)) if (!out.includes(k)) out.push(k); return out; }
+export const MANDATORY_FIELD_NAMES = ["Reference", "Value", "Footprint", "Datasheet", "Description"];
+/** DIALOG_SYMBOL_FIELDS_TABLE::SetupAllColumnProperties: the mandatory fields, then the user fields as a std::set orders them. */
+export function fieldNames(rows: SymRow[]): string[] {
+  const user = new Set<string>(); for (const r of rows) for (const k of Object.keys(r.values)) if (!MANDATORY_FIELD_NAMES.includes(k)) user.add(k);
+  return [...MANDATORY_FIELD_NAMES, ...[...user].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))];
+}
+/** The view controls' display name of a field: the generated columns by their names. */
+export function fieldDisplayName(name: string): string { return name === QTY ? "Quantity" : name === ITEM_NO ? "Item Number" : name; }
+const generatedField = (name: string): boolean => name === QTY || name === ITEM_NO || !!ATTR_FIELDS[name];
+/**
+ * DIALOG_FIELDS_TABLE::OnRemoveField's refusals: a mandatory field, or a column the table generates; null when the
+ * field may be removed (after "Are you sure you want to remove the field '%s'?").
+ */
+export function removeFieldError(name: string): string | null {
+  if (MANDATORY_FIELD_NAMES.includes(name)) return `The first ${MANDATORY_FIELD_NAMES.length} fields are mandatory.`;
+  if (generatedField(name)) return `The '${fieldDisplayName(name)}' field cannot be removed.`;
+  return null;
+}
+/** DIALOG_FIELDS_TABLE::OnRenameField before it asks for the name. */
+export function renameFieldError(name: string): string | null {
+  if (MANDATORY_FIELD_NAMES.includes(name)) return `The first ${MANDATORY_FIELD_NAMES.length} fields are mandatory and names cannot be changed.`;
+  if (generatedField(name)) return `The '${fieldDisplayName(name)}' field cannot be renamed.`;
+  return null;
+}
+/** OnRenameField once the name is entered: "" for the same name (nothing to do), a message to show, or null to rename. */
+export function renameFieldCheck(existing: string[], oldName: string, newName: string): string | null {
+  if (newName === oldName) return "";
+  if (!newName) return "Field must have a name.";
+  if (existing.includes(newName)) return `Field name ${newName} already exists.`;
+  return null;
+}
+/** OnViewControlsCellChanged( GROUP_BY_COLUMN ): the generated count columns cannot be grouped by. */
+export function groupByError(name: string): string | null {
+  return name === QTY ? "The Quantity column cannot be grouped by." : name === ITEM_NO ? "The Item Number column cannot be grouped by." : null;
+}
+/** DIALOG_FIELDS_TABLE::OnColSort vetoes the Item Number column (the sort generates it). */
+export const canSortBy = (name: string): boolean => name !== ITEM_NO;
+/** A row's fields after a rename: the new name carries the value, the old one is gone. */
+export function renameRowField(values: Record<string, string>, oldName: string, newName: string): boolean {
+  if (values[oldName] === undefined) return false;
+  values[newName] = values[oldName]; delete values[oldName]; return true;
+}
 export function splitRef(ref: string): [string, number] { const m = /^(.*?)(\d+)$/.exec(ref); return m ? [m[1], +m[2]] : [ref, -1]; }
 export function refCmp(a: string, b: string): number { const [pa, na] = splitRef(a), [pb, nb] = splitRef(b); return pa < pb ? -1 : pa > pb ? 1 : na - nb || (a < b ? -1 : a > b ? 1 : 0); }
 /** SCH_REFERENCE_LIST::Shorthand: "R1, R2", runs of three or more as "R1-R3" unless the range delimiter is empty. */

@@ -1360,3 +1360,7 @@ export function explodeStackedPin(sym: Node, pin: Node): Node[] | string {
   }
   return out;
 }
+
+/** DIALOG_PIN_PROPERTIES::TransferDataFromWindow's "not on a 50 mils grid" test: the UNIT_BINDER value, in internal
+ *  units (100 nm), modulo standard_grid (50). */
+export function pinOffStandardGrid(mm: number): boolean { return Math.round(mm / 0.0001) % 50 !== 0; }

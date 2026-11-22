@@ -379,7 +379,11 @@ export class PcbSizes {
   /** "Use Starting Track Width" / "Use Net Class Values" of TRACK_WIDTH_MENU */
   setUseConnectedWidth(on: boolean): void { this.useConnectedWidth = !!on; this.emit(); }
   /** PCB_ACTIONS::autoTrackWidth */
-  toggleConnectedWidth(): boolean { this.useConnectedWidth = !this.useConnectedWidth; this.emit(); return this.useConnectedWidth; }
+  toggleConnectedWidth(): boolean {
+    // BOARD_EDITOR_CONTROL::AutoTrackWidth: custom sizes in use are switched off and the connected width turned on
+    if (this.useCustomTrackVia) { this.useCustomTrackVia = false; this.useConnectedWidth = true; } else this.useConnectedWidth = !this.useConnectedWidth;
+    this.emit(); return this.useConnectedWidth;
+  }
   setActiveLayer(layer: string): void { if (layer === this.activeLayer) return; this.activeLayer = layer; this.emit(); }
   setLayerPair(top: string, bottom: string): void { this.layerPair = [top, bottom]; this.emit(); }
   setCurvedRatsnest(on: boolean): void { this.curvedRatsnest = !!on; this.emit(); }

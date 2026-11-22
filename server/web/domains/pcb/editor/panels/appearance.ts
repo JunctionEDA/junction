@@ -360,6 +360,16 @@ function setInactive(mode: InactiveMode, save = true): void {
 /** The board's inactive layer display mode (Preferences ▸ PCB Editor ▸ Display Options reads and sets it too). */
 export function getInactiveMode(): InactiveMode { return inactiveMode(); }
 export function setInactiveMode(mode: InactiveMode): void { if (isSchDoc() || !kdoc()) return; setInactive(mode); applyAppearance(); publishAppearance(); }
+/** PCB_CONTROL::NetColorModeCycle ("Net Color Mode (3-state)"): all -> ratsnest -> off -> all. */
+export function cycleNetColorMode(): void {
+  if (isSchDoc() || !kdoc()) return;
+  appearanceDispatch({ t: "netColorMode", mode: user.netColorMode === "all" ? "ratsnest" : user.netColorMode === "ratsnest" ? "off" : "all" });
+}
+/** PCB_CONTROL::RatsnestModeCycle ("Ratsnest Mode (3-state)"): hidden -> all layers -> visible layers -> hidden. */
+export function cycleRatsnestMode(): void {
+  if (isSchDoc() || !kdoc()) return;
+  appearanceDispatch({ t: "ratsnestMode", mode: user.ratsnestMode === "none" ? "all" : user.ratsnestMode === "all" ? "visible" : "none" });
+}
 const CONTRAST_LABELS: [InactiveMode, string][] = [["normal", "Normal"], ["dim", "Dimmed"], ["hide", "Hidden"]];
 /** View ▸ Inactive Layer View Mode (ACTIONS::highContrastMode, PCB_CONTROL::HighContrastMode): normal ⇄ dimmed. */
 export function toggleInactiveMode(): void {

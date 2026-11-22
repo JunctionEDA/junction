@@ -1543,27 +1543,112 @@
   var DEFAULT_STROKE = K.serialize(["stroke", ["width", 0], ["type", "default"]]);
   var angleKey = (from, to) => Math.round(Math.atan2(to[1] - from[1], to[0] - from[0]) * 1800 / Math.PI);
   var BUS_TEXT = /\[.*\.\..*\]|\{.*\}/;
-  function analyzePoint(doc, p, breakCrossings, extra, skip) {
-    const info = { isJunction: false, hasDot: false, hasBusEntry: false, hasBusAtPoint: false, multiWires: false, multiBuses: false, allows: false };
-    const lines = [], others = [];
+  var LINE_CELL = 5;
+  var cellKey = (x, y) => Math.round(x) + "," + Math.round(y);
+  function cellsNear(cells, p) {
+    const out = [], cx = Math.round(p[0]), cy = Math.round(p[1]);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      const l = cells.get(cx + dx + "," + (cy + dy));
+      if (l) for (const i of l) out.push(i);
+    }
+    return out;
+  }
+  function pointIndex(doc, skip) {
+    const ix = { lines: [], dots: [], entries: [], others: [], cells: /* @__PURE__ */ new Map(), dotCells: /* @__PURE__ */ new Map(), lineCells: /* @__PURE__ */ new Map() };
     const strokeOf2 = (it) => K.serialize(kid(it.node, "stroke") || []);
-    const onLine = (a, b) => segDist(p, a, b) <= 1e-3;
+    const bucket = (cells, q, i) => {
+      const k = cellKey(q[0], q[1]), l = cells.get(k);
+      if (l) {
+        if (l[l.length - 1] !== i) l.push(i);
+      } else cells.set(k, [i]);
+    };
     for (const it of doc.items.values()) {
       if (skip && skip.has(it.id)) continue;
       if (it.kind === "wire" || it.kind === "bus") {
-        for (const [a, b] of segs(it)) if (onLine(a, b)) lines.push({ layer: it.kind, a, b, stroke: strokeOf2(it) });
+        const st = strokeOf2(it);
+        for (const [a, b] of segs(it)) {
+          const i = ix.lines.length;
+          ix.lines.push({ layer: it.kind, a, b, stroke: st });
+          const x0 = Math.floor((Math.min(a[0], b[0]) - 0.01) / LINE_CELL), x1 = Math.floor((Math.max(a[0], b[0]) + 0.01) / LINE_CELL);
+          const y0 = Math.floor((Math.min(a[1], b[1]) - 0.01) / LINE_CELL), y1 = Math.floor((Math.max(a[1], b[1]) + 0.01) / LINE_CELL);
+          for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+            const k = x + "," + y, l = ix.lineCells.get(k);
+            if (l) l.push(i);
+            else ix.lineCells.set(k, [i]);
+          }
+        }
       } else if (it.kind === "junction") {
-        if (same(atOf(it.node), p)) {
-          info.hasDot = true;
+        const q = atOf(it.node);
+        bucket(ix.dotCells, q, ix.dots.length);
+        ix.dots.push(q);
+      } else if (it.kind === "bus_entry") {
+        const c = connPoints(doc, it), st = kid(it.node, "stroke"), w = st ? num((kid(st, "width") || [])[1]) : 0;
+        ix.entries.push({ item: it, c, m: (w > 0 ? w : 0.1524) / 2 + 1e-4 });
+      } else if (it.kind === "symbol" || it.kind === "sheet" || it.kind === "label" || it.kind === "global_label" || it.kind === "hierarchical_label") {
+        const pts = it.kind === "symbol" ? symbolPins(doc, it).filter((q) => q.type !== "no_connect").map((q) => [q.x, q.y]) : it.kind === "sheet" ? kids(it.node, "pin").map((pin) => atOf(pin)) : [atOf(it.node)];
+        const i = ix.others.length;
+        ix.others.push({ item: it, pts });
+        for (const q of pts) bucket(ix.cells, q, i);
+      }
+    }
+    return ix;
+  }
+  function pointScan(doc, p, skip) {
+    const ix = { lines: [], dots: [], entries: [], others: [], cells: /* @__PURE__ */ new Map(), dotCells: /* @__PURE__ */ new Map(), lineCells: /* @__PURE__ */ new Map() };
+    const lk = Math.floor(p[0] / LINE_CELL) + "," + Math.floor(p[1] / LINE_CELL), ck = cellKey(p[0], p[1]), li = [], di = [], oi = [];
+    ix.lineCells.set(lk, li);
+    ix.dotCells.set(ck, di);
+    ix.cells.set(ck, oi);
+    for (const it of doc.items.values()) {
+      if (skip && skip.has(it.id)) continue;
+      if (it.kind === "wire" || it.kind === "bus") {
+        let st = null;
+        for (const [a, b] of segs(it)) if (segDist(p, a, b) <= 1e-3) {
+          if (st === null) st = K.serialize(kid(it.node, "stroke") || []);
+          li.push(ix.lines.length);
+          ix.lines.push({ layer: it.kind, a, b, stroke: st });
+        }
+      } else if (it.kind === "junction") {
+        const q = atOf(it.node);
+        if (same(q, p)) {
+          di.push(ix.dots.length);
+          ix.dots.push(q);
         }
       } else if (it.kind === "bus_entry") {
-        const c = connPoints(doc, it), st = kid(it.node, "stroke"), w = st ? num((kid(st, "width") || [])[1]) : 0, m = (w > 0 ? w : 0.1524) / 2 + 1e-4;
-        if (p[0] >= Math.min(c[0][0], c[1][0]) - m && p[0] <= Math.max(c[0][0], c[1][0]) + m && p[1] >= Math.min(c[0][1], c[1][1]) - m && p[1] <= Math.max(c[0][1], c[1][1]) + m) info.hasBusEntry = true;
-        if (c.some((q) => same(q, p))) {
-          info.hasBusEntry = true;
-          others.push(it);
+        const c = connPoints(doc, it), st = kid(it.node, "stroke"), w = st ? num((kid(st, "width") || [])[1]) : 0;
+        ix.entries.push({ item: it, c, m: (w > 0 ? w : 0.1524) / 2 + 1e-4 });
+      } else if (it.kind === "symbol" || it.kind === "sheet" || it.kind === "label" || it.kind === "global_label" || it.kind === "hierarchical_label") {
+        const pts = it.kind === "symbol" ? symbolPins(doc, it).filter((q) => q.type !== "no_connect" && same([q.x, q.y], p)).map((q) => [q.x, q.y]) : it.kind === "sheet" ? kids(it.node, "pin").map((pin) => atOf(pin)).filter((q) => same(q, p)) : [atOf(it.node)].filter((q) => same(q, p));
+        if (pts.length) {
+          oi.push(ix.others.length);
+          ix.others.push({ item: it, pts });
         }
-      } else if (it.kind === "symbol" || it.kind === "sheet" || it.kind === "label" || it.kind === "global_label" || it.kind === "hierarchical_label") others.push(it);
+      }
+    }
+    return ix;
+  }
+  function analyzePoint(doc, p, breakCrossings, extra, skip, index) {
+    const info = { isJunction: false, hasDot: false, hasBusEntry: false, hasBusAtPoint: false, multiWires: false, multiBuses: false, allows: false };
+    const lines = [], others = [];
+    const onLine = (a, b) => segDist(p, a, b) <= 1e-3;
+    const ix = index || pointScan(doc, p, skip);
+    for (const i of ix.lineCells.get(Math.floor(p[0] / LINE_CELL) + "," + Math.floor(p[1] / LINE_CELL)) || []) {
+      const l = ix.lines[i];
+      if (onLine(l.a, l.b)) lines.push(l);
+    }
+    for (const i of cellsNear(ix.dotCells, p)) if (same(ix.dots[i], p)) info.hasDot = true;
+    for (const e of ix.entries) {
+      const c = e.c, m = e.m;
+      if (p[0] >= Math.min(c[0][0], c[1][0]) - m && p[0] <= Math.max(c[0][0], c[1][0]) + m && p[1] >= Math.min(c[0][1], c[1][1]) - m && p[1] <= Math.max(c[0][1], c[1][1]) + m) info.hasBusEntry = true;
+      if (c.some((q) => same(q, p))) {
+        info.hasBusEntry = true;
+        others.push(e.item);
+      }
+    }
+    const near = new Set(cellsNear(ix.cells, p));
+    for (const i of Array.from(near).sort((a, b) => a - b)) {
+      const o = ix.others[i];
+      if (o.pts.some((q) => same(q, p))) others.push(o.item);
     }
     for (const e of extra || []) if ((e.kind === "wire" || e.kind === "bus") && !same(e.a, e.b) && onLine(e.a, e.b)) lines.push({ layer: e.kind, a: e.a, b: e.b, stroke: DEFAULT_STROKE });
     const isEnd = (l) => same(l.a, p) || same(l.b, p);
@@ -1608,16 +1693,12 @@
         exits.wire.add(unique++);
         info.hasBusEntry = true;
       } else if (it.kind === "symbol") {
-        if (symbolPins(doc, it).some((q) => q.type !== "no_connect" && same([q.x, q.y], p))) {
-          brk.wire = true;
-          exits.wire.add(unique++);
-        }
+        brk.wire = true;
+        exits.wire.add(unique++);
       } else if (it.kind === "sheet") {
-        if (kids(it.node, "pin").some((pin) => same(atOf(pin), p))) {
-          brk.wire = true;
-          exits.wire.add(unique++);
-        }
-      } else if (same(atOf(it.node), p)) {
+        brk.wire = true;
+        exits.wire.add(unique++);
+      } else {
         if (it.kind === "label" && BUS_TEXT.test(str(it.node[1]))) brk.bus = true;
         else brk.wire = true;
       }
@@ -1662,13 +1743,22 @@
         pts.push(p);
       }
     };
+    const connCells = /* @__PURE__ */ new Map();
+    if (extra.length) for (const c of conns) {
+      const k = Math.floor(c[0] / LINE_CELL) + "," + Math.floor(c[1] / LINE_CELL), l = connCells.get(k);
+      if (l) l.push(c);
+      else connCells.set(k, [c]);
+    }
     for (const l of extra) {
       push(l.a);
       push(l.b);
-      for (const c of conns) if (segDist(c, l.a, l.b) <= 1e-3) push(c);
+      const x0 = Math.floor((Math.min(l.a[0], l.b[0]) - 0.01) / LINE_CELL), x1 = Math.floor((Math.max(l.a[0], l.b[0]) + 0.01) / LINE_CELL);
+      const y0 = Math.floor((Math.min(l.a[1], l.b[1]) - 0.01) / LINE_CELL), y1 = Math.floor((Math.max(l.a[1], l.b[1]) + 0.01) / LINE_CELL);
+      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (const c of connCells.get(x + "," + y) || []) if (segDist(c, l.a, l.b) <= 1e-3) push(c);
     }
     for (const p of points || []) push(p);
-    return pts.filter((p) => analyzePoint(doc, p, false, extra, skip).allows);
+    const ix = pointIndex(doc, skip);
+    return pts.filter((p) => analyzePoint(doc, p, false, extra, skip, ix).allows);
   }
   function editTxn(doc, IU3) {
     const saved = /* @__PURE__ */ new Map(), out = /* @__PURE__ */ new Map();
@@ -2518,22 +2608,23 @@
         break;
       }
     }
-    const sameBase = (a, b) => compareRef(a.ref, b.ref) === 0 && a.numRef === b.numRef;
+    const sfx = (r) => r.isNew || r.numRef < 0 ? "" : r.suffix || "";
+    const sameBase = (a, b) => compareRef(a.ref, b.ref) === 0 && a.numRef === b.numRef && sfx(a) === sfx(b);
     const checkPackage = (first, second) => {
       if (first.unit === second.unit) {
-        handler("duplicate_reference", `Duplicate items ${first.ref}${numText(first)}${first.libNode && first.units > 1 ? sub(first, first.unit) : ""}
+        handler("duplicate_reference", `Duplicate items ${first.ref}${numText(first)}${first.libNode && first.units > 1 ? sub(first, first.unit) : ""}${sfx(first)}
 `, first, second);
         error++;
         return;
       }
       if (first.libNode && second.libNode && first.units !== second.units) {
-        handler("duplicate_reference", `Differing unit counts for item ${first.ref}${numText(first)}${sub(first, first.unit)} and ${second.ref}${numText(second)}${sub(first, second.unit)}
+        handler("duplicate_reference", `Differing unit counts for item ${first.ref}${numText(first)}${sub(first, first.unit)}${sfx(first)} and ${second.ref}${numText(second)}${sub(first, second.unit)}${sfx(second)}
 `, first, second);
         error++;
         return;
       }
       if (compareValue(first.value, second.value) !== 0) {
-        handler("different_unit_value", `Different values for ${first.ref}${first.numRef}${sub(first, first.unit)} (${first.value}) and ${second.ref}${second.numRef}${sub(first, second.unit)} (${second.value})`, first, second);
+        handler("different_unit_value", `Different values for ${first.ref}${first.numRef}${sub(first, first.unit)}${sfx(first)} (${first.value}) and ${second.ref}${second.numRef}${sub(first, second.unit)}${sfx(second)} (${second.value})`, first, second);
         error++;
       }
     };
@@ -2541,7 +2632,7 @@
     const composed = /* @__PURE__ */ new Map();
     for (const r of list) {
       if (r.isNew) continue;
-      const key = r.ref + r.numRefStr;
+      const key = r.ref + r.numRefStr + sfx(r);
       let units = composed.get(key);
       if (!units) {
         units = /* @__PURE__ */ new Map();
@@ -6357,13 +6448,27 @@ Link '${target}' to this file?`)) return null;
     const ss = doc.schSettings;
     const jd = ss && typeof ss.junctionDiameter === "number" ? Math.max(ss.junctionDiameter, IU) : 0.9144;
     const jr = Math.max(jd * 1.5, MIN_R);
+    const items = [], cells = /* @__PURE__ */ new Map(), lineIdx = [];
+    if (junctions.length) for (const it of doc.items.values()) {
+      const pts = connPoints(doc, it);
+      if (!pts.length) continue;
+      const i = items.length, line = isNetLine(it.kind);
+      items.push({ it, pts, line });
+      if (line) lineIdx.push(i);
+      for (const q of pts) {
+        const k = Math.round(q[0]) + "," + Math.round(q[1]), l = cells.get(k);
+        if (!l) cells.set(k, [i]);
+        else if (l[l.length - 1] !== i) l.push(i);
+      }
+    }
     for (const p of junctions) {
       let first, diff = false, movedNet = false;
-      for (const it of doc.items.values()) {
-        const pts = connPoints(doc, it);
-        if (!pts.length) continue;
+      const cand = new Set(lineIdx), cx = Math.round(p[0]), cy = Math.round(p[1]);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (const i of cells.get(cx + dx + "," + (cy + dy)) || []) cand.add(i);
+      for (const ci of Array.from(cand).sort((a, b) => a - b)) {
+        const { it, pts } = items[ci];
         let i = pts.findIndex((q) => same(q, p, 1e-4));
-        if (i < 0 && isNetLine(it.kind) && segs(it).some(([a, b]) => onSegMid(p, a, b))) i = 0;
+        if (i < 0 && items[ci].line && segs(it).some(([a, b]) => onSegMid(p, a, b))) i = 0;
         if (i < 0) continue;
         const net = nc.nets.get(keyOf(it.id, i));
         if (net === void 0) continue;
@@ -6506,10 +6611,19 @@ Link '${target}' to this file?`)) return null;
       const poly = pl ? ptsOf(pl) : [];
       if (poly.length > 1) ruleBorders.push(poly);
     }
+    const segCells = /* @__PURE__ */ new Map();
+    if (labels.length) for (const ln of lines) for (const [a, b] of segs(ln)) {
+      const x0 = Math.floor((Math.min(a[0], b[0]) - 0.01) / 5), x1 = Math.floor((Math.max(a[0], b[0]) + 0.01) / 5), y0 = Math.floor((Math.min(a[1], b[1]) - 0.01) / 5), y1 = Math.floor((Math.max(a[1], b[1]) + 0.01) / 5);
+      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+        const k = x + "," + y, l = segCells.get(k);
+        if (l) l.push([a, b]);
+        else segCells.set(k, [[a, b]]);
+      }
+    }
     for (const lb of labels) {
       const l = at.get(key(lb.p)) || [];
       if (l.some((x) => x.item !== lb.item && LABEL_OK.has(x.type))) continue;
-      if (lines.some((ln) => segs(ln).some(([a, b]) => segDist(lb.p, a, b) <= 1e-3))) continue;
+      if ((segCells.get(Math.floor(lb.p[0] / 5) + "," + Math.floor(lb.p[1] / 5)) || []).some(([a, b]) => segDist(lb.p, a, b) <= 1e-3)) continue;
       if ((lb.item.kind === "netclass_flag" || lb.item.kind === "directive_label") && ruleBorders.some((poly) => poly.some((v, i) => segDist(lb.p, v, poly[(i + 1) % poly.length]) <= 1e-4))) continue;
       out.push({ p: lb.p, what: "label", item: lb.item, color: lb.color });
     }
@@ -7590,7 +7704,14 @@ Link '${target}' to this file?`)) return null;
       return { doc: s.doc, path, page: s.page || i + 1 };
     });
     const refs = [];
-    for (const sh of sheets) if (sh) refs.push(...sheetReferences(sh, null, true));
+    sheets.forEach((sh, i) => {
+      if (!sh) return;
+      const suffix = insts[i].suffix;
+      for (const r of sheetReferences(sh, null, true)) {
+        if (suffix) r.suffix = suffix;
+        refs.push(r);
+      }
+    });
     return { sheets, refs };
   }
   function checkAnnotate(insts) {
@@ -12877,6 +12998,7 @@ was dropped because the destination already has the sheet or one of its subsheet
   }
 
   // web/domains/pcb/tools/sch-tools/autoplace.ts
+  var PIN_CACHE = /* @__PURE__ */ new WeakMap();
   function symbolPins(doc, item) {
     const n = item.node, out = [];
     const libId = str((kid(n, "lib_name") || kid(n, "lib_id") || [])[1]);
@@ -12884,6 +13006,15 @@ was dropped because the destination already has the sheet or one of its subsheet
     if (!lib) return out;
     const [ax, ay, rot] = atOf(n), mN = kid(n, "mirror"), T = K.symbolTransform(rot, mN ? str(mN[1]) : "");
     const unit = kid(n, "unit") ? num(kid(n, "unit")[1], 1) : 1, styleN = kid(n, "body_style") || kid(n, "convert"), style = styleN ? num(styleN[1], 1) : 1;
+    const key = ax + "," + ay + "," + rot + "," + (mN ? str(mN[1]) : "") + "," + unit + "," + style;
+    const hit = PIN_CACHE.get(n);
+    if (hit && hit.lib === lib && hit.key === key) return hit.pins.slice();
+    const pins = symbolPinsOf(lib, ax, ay, T, unit, style);
+    PIN_CACHE.set(n, { lib, key, pins });
+    return pins.slice();
+  }
+  function symbolPinsOf(lib, ax, ay, T, unit, style) {
+    const out = [];
     const tf = (lx, ly) => [r4(ax + T[0] * lx + T[1] * ly), r4(ay + T[2] * lx + T[3] * ly)];
     for (const sub of kids(lib, "symbol")) {
       const m = str(sub[1]).match(/_(\d+)_(\d+)$/);
@@ -13429,9 +13560,19 @@ was dropped because the destination already has the sheet or one of its subsheet
     }
     return S.dragMode;
   }
+  var CONN_CACHE = /* @__PURE__ */ new WeakMap();
   function connPoints(doc, item) {
     const k = item.kind, n = item.node;
-    if (k === "symbol") return K.pinPoints(doc, item).map((p) => [r4(p.x), r4(p.y)]);
+    if (k === "symbol") {
+      const at = kid(n, "at"), mi = kid(n, "mirror"), un = kid(n, "unit"), bs = kid(n, "body_style") || kid(n, "convert");
+      const lid = kid(n, "lib_name") || kid(n, "lib_id"), lib = lid ? K.resolveLib(doc, str(lid[1])) : null;
+      const key = (at ? at.slice(1).join(",") : "") + "|" + (mi ? str(mi[1]) : "") + "|" + (un ? str(un[1]) : "") + "|" + (bs ? str(bs[1]) : "") + "|" + (lid ? str(lid[1]) : "");
+      const hit = CONN_CACHE.get(n);
+      if (hit && hit.key === key && hit.lib === lib) return hit.pts.map((p) => p.slice());
+      const pts = K.pinPoints(doc, item).map((p) => [r4(p.x), r4(p.y)]);
+      CONN_CACHE.set(n, { key, lib, pts });
+      return pts.map((p) => p.slice());
+    }
     if (k === "sheet") return kids(n, "pin").map((p) => atOf(p).slice(0, 2).map(r4));
     if (k === "bus_entry") {
       const [x, y] = atOf(n), s = kid(n, "size");
@@ -14571,14 +14712,26 @@ was dropped because the destination already has the sheet or one of its subsheet
       if (!it || it.kind !== "symbol") continue;
       const n = deep(it.node);
       let changed = false;
+      for (const name of e.remove || []) {
+        if (["Reference", "Value", "Footprint", "Datasheet", "Description"].includes(name)) continue;
+        const i = n.findIndex((q) => Array.isArray(q) && q[0] === "property" && str(q[1]) === name && !(q[1] === "private" && typeof q[3] === "string"));
+        if (i >= 0) {
+          n.splice(i, 1);
+          changed = true;
+        }
+      }
       for (const [name, text] of Object.entries(e.values || {})) {
+        if ((e.remove || []).includes(name)) continue;
         let p = kids(n, "property").find((q) => str(q[1]) === name);
         if (!p) {
-          if (str(text) === "") continue;
+          if (str(text) === "" && !(e.present || []).includes(name)) continue;
           p = ["property", name, "", ["at", ...atOf(n).slice(0, 2), 0], ["hide", "yes"], ["effects", fontNode(1.27)]];
           insertField(n, p);
+          changed = true;
         }
-        if (str(p[2]) === str(text)) continue;
+        if (str(p[2]) === str(text)) {
+          continue;
+        }
         if (name === "Reference") setReference(n, str(text));
         else p[2] = str(text);
         changed = true;

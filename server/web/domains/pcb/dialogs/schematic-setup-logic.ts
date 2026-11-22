@@ -143,3 +143,52 @@ export function importSections(to: JsonObj, from: JsonObj, sel: string[]): void 
   if (has("busAliases")) tSch.bus_aliases = clone(fSch.bus_aliases || {});
   if (has("textVars")) to.text_variables = clone(from.text_variables || {});
 }
+
+// ---------------------------------------------------------------- Formatting / Field Name Templates / Buses / Reset
+/** schematic_settings.h MIN_CONNECTION_GRID_MILS and PANEL_SETUP_FORMATTING's upper bound. */
+export const MIN_CONNECTION_GRID_MILS = 25, MAX_CONNECTION_GRID_MILS = 10000;
+/** m_connectionGridSize.Validate( MIN_CONNECTION_GRID_MILS, 10000, EDA_UNITS::MILS ): UNIT_BINDER's message, or null. */
+export function connectionGridError(mils: number): string | null {
+  if (!(mils >= MIN_CONNECTION_GRID_MILS)) return `Connection grid must be at least ${MIN_CONNECTION_GRID_MILS} mils.`;
+  if (mils > MAX_CONNECTION_GRID_MILS) return `Connection grid must be less than ${MAX_CONNECTION_GRID_MILS} mils.`;
+  return null;
+}
+/** The operating-point precision spin controls: wxSpinCtrl( 1 .. 10 ). */
+export function clampPrecision(v: number): number { const n = Math.round(v); return isFinite(n) ? Math.max(1, Math.min(10, n)) : 3; }
+/** PANEL_TEMPLATE_FIELDNAMES::OnAddButtonClick: "Untitled Field", then "Untitled Field 2", "Untitled Field 3" … */
+export function untitledFieldName(existing: string[]): string {
+  const base = "Untitled Field"; let name = base, suffix = 2;
+  while (existing.includes(name)) name = `${base} ${suffix++}`;
+  return name;
+}
+/** The names with leading or trailing white space (each is asked about: Remove White Space / Keep White Space). */
+export function templateNamesWithWhitespace(names: string[]): number[] { const out: number[] = []; names.forEach((n, i) => { if (n && n !== n.trim()) out.push(i); }); return out; }
+/**
+ * PANEL_TEMPLATE_FIELDNAMES::TransferDataFromWindow's refusals, in row order: a name that is a mandatory field's
+ * (without case), then a name already used by an earlier row.  Empty names are skipped.
+ */
+export function templateFieldNameError(names: string[]): { row: number; message: string } | null {
+  const seen = new Set<string>(), mandatory = ["reference", "value", "footprint", "datasheet", "description"];
+  for (let row = 0; row < names.length; row++) {
+    const n = names[row]; if (!n) continue;
+    if (mandatory.includes(n.toLowerCase())) return { row, message: `Field name template '${n}' already exists as a mandatory field.` };
+    if (seen.has(n)) return { row, message: `Field name template '${n}' already exists.` };
+    seen.add(n);
+  }
+  return null;
+}
+/** PANEL_SETUP_BUSES::loadAliases: the aliases by name without case (wxString::CmpNoCase). */
+export function sortAliases<T extends { name: string }>(list: T[]): T[] {
+  return list.map((a, i) => ({ a, i })).sort((x, y) => { const p = x.a.name.toLowerCase(), q = y.a.name.toLowerCase(); return p < q ? -1 : p > q ? 1 : x.i - y.i; }).map((e) => e.a);
+}
+/** OnAliasesGridCellChanging: another row already has the name. */
+export function aliasNameError(names: string[], row: number, name: string): string | null {
+  return names.some((n, i) => i !== row && n === name) ? `Alias name '${name}' already in use.` : null;
+}
+/** OnMemberGridCellChanging. */
+export function memberNameError(name: string): string | null { return name === "" ? "Member net/alias name cannot be empty." : null; }
+/** PAGED_DIALOG::UpdateResetButton: "Reset <page> to Defaults" and enabled on a resettable page, else "Reset to Defaults" disabled. */
+export const RESETTABLE_SCH_SETUP_PAGES = ["Annotation", "Pin Conflicts Map"];
+export function resetButtonState(page: string | null): { label: string; enabled: boolean } {
+  return page && RESETTABLE_SCH_SETUP_PAGES.includes(page) ? { label: `Reset ${page} to Defaults`, enabled: true } : { label: "Reset to Defaults", enabled: false };
+}

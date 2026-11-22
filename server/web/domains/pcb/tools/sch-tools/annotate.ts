@@ -86,6 +86,8 @@ export interface SchRef {
   unit: number; value: string; lib: string | null; sheetNum: number; x: number; y: number; uuid: string;
   /** LIB_SYMBOL::GetUnitCount (0: no library symbol) and IsPower */
   units: number; power: boolean; libNode: SNode | null;
+  /** SCH_REFERENCE::m_refSuffix (SCHEMATIC::GetPackageRefSuffix): the sheet suffix the board reference composes with, when the project numbers reused sheets with suffixes */
+  suffix?: string;
 }
 const valueField = (node: SNode): string => { const p = kids(node, "property").find((q) => str(q[1]) === "Value"); return p ? str(p[2]) : ""; };
 const instPaths = (node: SNode): SNode[] => { const out: SNode[] = []; for (const inst of kids(node, "instances")) for (const pr of kids(inst, "project")) out.push(...kids(pr, "path")); return out; };
@@ -379,19 +381,21 @@ export function checkAnnotation(list: SchRef[], handler: (code: AnnotationErrorC
       break;
     }
   }
-  const sameBase = (a: SchRef, b: SchRef): boolean => compareRef(a.ref, b.ref) === 0 && a.numRef === b.numRef;
+  // GetRefSuffix: empty unless hasRef() (split: not new and numbered)
+  const sfx = (r: SchRef): string => (r.isNew || r.numRef < 0 ? "" : r.suffix || "");
+  const sameBase = (a: SchRef, b: SchRef): boolean => compareRef(a.ref, b.ref) === 0 && a.numRef === b.numRef && sfx(a) === sfx(b);
   const checkPackage = (first: SchRef, second: SchRef): void => {
     if (first.unit === second.unit) {   // same reference, same unit
-      handler("duplicate_reference", `Duplicate items ${first.ref}${numText(first)}${first.libNode && first.units > 1 ? sub(first, first.unit) : ""}\n`, first, second); error++;
+      handler("duplicate_reference", `Duplicate items ${first.ref}${numText(first)}${first.libNode && first.units > 1 ? sub(first, first.unit) : ""}${sfx(first)}\n`, first, second); error++;
       return;
     }
     // units differ but the parts per package do not agree (U3 with one part and a U3B)
     if (first.libNode && second.libNode && first.units !== second.units) {
-      handler("duplicate_reference", `Differing unit counts for item ${first.ref}${numText(first)}${sub(first, first.unit)} and ${second.ref}${numText(second)}${sub(first, second.unit)}\n`, first, second); error++;
+      handler("duplicate_reference", `Differing unit counts for item ${first.ref}${numText(first)}${sub(first, first.unit)}${sfx(first)} and ${second.ref}${numText(second)}${sub(first, second.unit)}${sfx(second)}\n`, first, second); error++;
       return;
     }
     if (compareValue(first.value, second.value) !== 0) {
-      handler("different_unit_value", `Different values for ${first.ref}${first.numRef}${sub(first, first.unit)} (${first.value}) and ${second.ref}${second.numRef}${sub(first, second.unit)} (${second.value})`, first, second); error++;
+      handler("different_unit_value", `Different values for ${first.ref}${first.numRef}${sub(first, first.unit)}${sfx(first)} (${first.value}) and ${second.ref}${second.numRef}${sub(first, second.unit)}${sfx(second)} (${second.value})`, first, second); error++;
     }
   };
   for (let ii = 1; ii < list.length; ii++) if (sameBase(list[ii - 1], list[ii])) checkPackage(list[ii - 1], list[ii]);
@@ -399,7 +403,7 @@ export function checkAnnotation(list: SchRef[], handler: (code: AnnotationErrorC
   const composed = new Map<string, Map<number, SchRef>>();
   for (const r of list) {
     if (r.isNew) continue;
-    const key = r.ref + r.numRefStr; let units = composed.get(key); if (!units) { units = new Map(); composed.set(key, units); }
+    const key = r.ref + r.numRefStr + sfx(r); let units = composed.get(key); if (!units) { units = new Map(); composed.set(key, units); }
     let first = units.get(r.unit);
     if (!first && units.size) first = units.get(Math.min(...units.keys()));
     if (first && !sameBase(first, r)) checkPackage(first, r);

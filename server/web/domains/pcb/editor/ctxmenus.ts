@@ -31,6 +31,10 @@ export interface MenuCtx {
   canClose: boolean; canUndoPoint: boolean;
   /** PCB_POINT_EDITOR::addCornerCondition / removeCornerCondition for the single selected item at the cursor */
   canAddCorner?: boolean; canRemoveCorner?: boolean;
+  /** PCB_POINT_EDITOR::HasCorner / HasMidpoint (the handle under the cursor) and CanChamferCorner */
+  hasCorner?: boolean; hasMidpoint?: boolean; canChamferCorner?: boolean;
+  /** MAGNETIC_SETTINGS::allLayers: object snapping looks at every visible layer (PCB_PICKER_TOOL's menu offers the other) */
+  snapAllLayers?: boolean;
   /** EDIT_TOOL's selectionHasEditableCorners: one polygon or non-teardrop zone */
   editableCorners?: boolean;
   highlight: boolean;
@@ -42,6 +46,10 @@ export interface MenuCtx {
   pinAlts?: boolean;
   belowRoot: boolean;
   hasLocked: boolean; hasUnlocked: boolean;
+  /** GROUP_CONTEXT_MENU::update's view of the selection (board): absent where the entries are not greyed */
+  grouping?: { count: number; hasGroup: boolean; onlyOneGroup: boolean; hasNonGroup: boolean; hasMember: boolean };
+  /** ZONE_PRIORITY_CONTEXT_MENU::update: an overlapping zone has a higher / lower priority than the one selected zone */
+  zoneCanRaise?: boolean; zoneCanLower?: boolean;
   /** board: the selection is one group (groupEnterCondition) / a group is entered (inGroupCondition) */
   groupSelected?: boolean; inGroup?: boolean;
   /** board is not empty (EDIT_TOOL's noItemsCondition) */
@@ -61,17 +69,17 @@ export interface MenuDef {
   icon?: string;
   entries: Entry[];
   /** filled in by the editor: the zoom presets, the grid list */
-  dynamic?: "zoom" | "grid" | "diffpair" | "trackwidth" | "pinfunction" | "pinhelpers" | "unfold";
+  dynamic?: "zoom" | "grid" | "diffpair" | "trackwidth" | "viasize" | "pinfunction" | "pinhelpers" | "unfold";
 }
 export type Entry =
-  | { order: number; cond: Cond; act: string; check?: boolean }
+  | { order: number; cond: Cond; act: string; check?: boolean; enable?: Cond }
   | { order: number; cond: Cond; sep: true }
   | { order: number; cond: Cond; menu: MenuDef };
 
 const always: Cond = () => true;
 
 export class CondMenu implements MenuDef {
-  title: string; icon?: string; entries: Entry[] = []; dynamic?: "zoom" | "grid" | "diffpair" | "trackwidth" | "pinfunction" | "pinhelpers" | "unfold";
+  title: string; icon?: string; entries: Entry[] = []; dynamic?: "zoom" | "grid" | "diffpair" | "trackwidth" | "viasize" | "pinfunction" | "pinhelpers" | "unfold";
   constructor(title = "", icon?: string) { this.title = title; this.icon = icon; }
   private add(e: Entry, order: number | undefined): this {
     e.order = order === undefined || order < 0 ? this.entries.length : order;
@@ -79,6 +87,8 @@ export class CondMenu implements MenuDef {
     this.entries.splice(i, 0, e); return this;
   }
   item(act: string, cond: Cond = always, order?: number): this { return this.add({ order: 0, cond, act }, order); }
+  /** An entry that is always listed and greyed while `enable` is false (ACTION_MENU::update's Enable()). */
+  itemEnabled(act: string, enable: Cond, cond: Cond = always, order?: number): this { return this.add({ order: 0, cond, act, enable }, order); }
   check(act: string, cond: Cond = always, order?: number): this { return this.add({ order: 0, cond, act, check: true }, order); }
   sep(cond: Cond | number = always, order?: number): this { return typeof cond === "number" ? this.add({ order: 0, cond: always, sep: true }, cond) : this.add({ order: 0, cond, sep: true }, order); }
   sub(menu: MenuDef, cond: Cond = always, order?: number): this { return this.add({ order: 0, cond, menu }, order); }
@@ -105,13 +115,17 @@ export const GRID_MENU: MenuDef = { title: "Grid", icon: "grid_select", entries:
 /** ROUTER_TOOL's DIFF_PAIR_MENU: Use Net Class Values, Use Custom Values... and the pre-defined pair dimensions (filled in by the board module). */
 /** ROUTER_TOOL's TRACK_WIDTH_MENU: Use Starting Track Width / Use Net Class Values / Use Custom Values..., the track widths and the via sizes (filled in by the board module). */
 export const TRACK_WIDTH_MENU: MenuDef = { title: "Select Track/Via Width", icon: "width_track_via", entries: [], dynamic: "trackwidth" };
+/** DRAWING_TOOL's VIA_SIZE_MENU (the via tool): Use Custom Values... and the board's via sizes (filled in by the board module). */
+export const VIA_SIZE_MENU: MenuDef = { title: "Select Via Size", icon: "width_track_via", entries: [], dynamic: "viasize" };
 export const DIFF_PAIR_MENU: MenuDef = { title: "Select Differential Pair Dimensions", icon: "width_track_via", entries: [], dynamic: "diffpair" };
 /** GRID_MENU::update() puts this above the grid list. */
 export const GRID_ORIGIN = "ACTIONS::gridOrigin";
 function standardSubMenus(m: CondMenu): CondMenu { return m.sep(1000).sub(ZOOM_MENU, always, 1000).sub(GRID_MENU, always, 1000); }
 
 /** GROUP_CONTEXT_MENU (common/tool/group_tool.cpp). */
-const GROUP_MENU = new CondMenu("Grouping", "group").item("ACTIONS::group").item("ACTIONS::ungroup").item("ACTIONS::addToGroup").item("ACTIONS::removeFromGroup");
+const GROUP_MENU = new CondMenu("Grouping", "group")
+  .itemEnabled("ACTIONS::group", (c) => !c.grouping || c.grouping.count >= 2).itemEnabled("ACTIONS::ungroup", (c) => !c.grouping || c.grouping.hasGroup)
+  .itemEnabled("ACTIONS::addToGroup", (c) => !c.grouping || (c.grouping.onlyOneGroup && c.grouping.hasNonGroup)).itemEnabled("ACTIONS::removeFromGroup", (c) => !c.grouping || c.grouping.hasMember);
 
 // ================================================================ eeschema
 // kicad-canvas kinds per KICAD_T.  A (polyline …) is the file's graphic line / polygon (SCH_LINE on
@@ -348,6 +362,9 @@ const pcbLockMenu = () => new CondMenu("Locking", "locked")
 const pcbZoneMenu = () => new CondMenu("Zones", "add_zone")
   .item("PCB_ACTIONS::zoneFill").item("PCB_ACTIONS::zoneFillAll").item("PCB_ACTIONS::zoneUnfill").item("PCB_ACTIONS::zoneUnfillAll").sep()
   .item("PCB_ACTIONS::zoneMerge").item("PCB_ACTIONS::zoneDuplicate").item("PCB_ACTIONS::drawZoneCutout").item("PCB_ACTIONS::drawSimilarZone").sep()
+  .sub(new CondMenu("Zone Priority", "swap")   // ZONE_PRIORITY_CONTEXT_MENU
+    .itemEnabled("PCB_ACTIONS::zonePriorityMoveToTop", (c) => !!c.zoneCanRaise).itemEnabled("PCB_ACTIONS::zonePriorityRaise", (c) => !!c.zoneCanRaise)
+    .itemEnabled("PCB_ACTIONS::zonePriorityLower", (c) => !!c.zoneCanLower).itemEnabled("PCB_ACTIONS::zonePriorityMoveToBottom", (c) => !!c.zoneCanLower)).sep()
   .item("PCB_ACTIONS::zonesManager");
 /** NET_CONTEXT_MENU (board_inspection_tool.cpp). */
 const pcbNetMenu = () => new CondMenu("Net Inspection Tools", "show_ratsnest")
@@ -363,7 +380,7 @@ const pcbConvertMenu = () => new CondMenu("Create from Selection", "convert")
   .item("PCB_ACTIONS::convertToPoly", hasTypes(set(...PCB_SHAPES, "segment", "arc", "zone")))
   .item("PCB_ACTIONS::convertToZone", hasTypes(set(...PCB_SHAPES, "segment", "arc", "zone"))).item("PCB_ACTIONS::convertToKeepout", hasTypes(set(...PCB_SHAPES, "segment", "arc", "zone")))
   .item("PCB_ACTIONS::convertToLines", hasTypes(PCB_POLY)).item("PCB_ACTIONS::outsetItems", hasTypes(PCB_SHAPES)).sep()
-  .item("PCB_ACTIONS::convertToTracks", hasTypes(PCB_TO_TRACK)).item("PCB_ACTIONS::convertToArc", onlyTypes(set("gr_line", "segment"))).sep()
+  .item("PCB_ACTIONS::convertToTracks", hasTypes(PCB_TO_TRACK)).item("PCB_ACTIONS::convertToArc", and(count(1), onlyTypes(set("gr_line", "segment", "arc")))).sep()
   .item("PCB_ACTIONS::createArray", notEmpty);
 /** makeShapeModificationMenu (edit_tool.cpp): shape cleanup, corner modifications, point editor corners, polygon booleans. */
 const FILLET_TYPES = set("gr_poly", "gr_rect", "gr_line"), SIMPLIFY_TYPES = set("gr_poly", "zone"), BOOLEAN_TYPES = set("gr_rect", "gr_poly", "gr_circle");
@@ -372,11 +389,13 @@ const pcbShapeModMenu = () => new CondMenu("Shape Modification")
   .item("PCB_ACTIONS::simplifyPolygons", hasTypes(SIMPLIFY_TYPES)).sep(onlyTypes(FILLET_TYPES))
   .item("PCB_ACTIONS::filletLines", onlyTypes(FILLET_TYPES)).item("PCB_ACTIONS::chamferLines", onlyTypes(FILLET_TYPES))
   .item("PCB_ACTIONS::extendLines", and(onlyTypes(set("gr_line")), count(2))).sep(count(1))
+  .item("PCB_ACTIONS::pointEditorMoveCorner", (c) => !!c.hasCorner).item("PCB_ACTIONS::pointEditorMoveMidpoint", (c) => !!c.hasMidpoint)
   .item("PCB_ACTIONS::pointEditorAddCorner", and(count(1), (c) => !!c.canAddCorner)).item("PCB_ACTIONS::pointEditorRemoveCorner", and(count(1), (c) => !!c.canRemoveCorner))
+  .item("PCB_ACTIONS::pointEditorChamferCorner", and(count(1), (c) => !!c.canChamferCorner))
   .item("PCB_ACTIONS::editVertices", (c) => !!c.editableCorners)
   .sep(shapeBoolean).item("PCB_ACTIONS::mergePolygons", shapeBoolean).item("PCB_ACTIONS::subtractPolygons", shapeBoolean).item("PCB_ACTIONS::intersectPolygons", shapeBoolean);
 /** shapeModificationCondition: the sub-menu shows when any of its items would. */
-const shapeModVisible = or(hasTypes(SIMPLIFY_TYPES), onlyTypes(FILLET_TYPES), and(count(1), (c) => !!c.canAddCorner || !!c.canRemoveCorner), (c) => !!c.editableCorners, shapeBoolean);
+const shapeModVisible = or(hasTypes(SIMPLIFY_TYPES), onlyTypes(FILLET_TYPES), and(count(1), (c) => !!c.canAddCorner || !!c.canRemoveCorner || !!c.canChamferCorner), (c) => !!c.hasCorner || !!c.hasMidpoint, (c) => !!c.editableCorners, shapeBoolean);
 /** CONSTRAINT_EDIT_TOOL's menu. */
 const pcbConstraintMenu = () => new CondMenu("Constraints", "measurement").item("PCB_ACTIONS::manageConstraints");
 
@@ -468,28 +487,36 @@ function pcbDrawingToolMenu(): CondMenu {
   m.item("PCB_ACTIONS::spacingIncrease", tuning, 200).item("PCB_ACTIONS::spacingDecrease", tuning, 200).item("PCB_ACTIONS::amplIncrease", tuning, 200)
     .item("PCB_ACTIONS::amplDecrease", tuning, 200).item("PCB_ACTIONS::lengthTunerSettings", tuning, 200);
   m.item("PCB_ACTIONS::changeDimensionArrows", tool("dimaligned", "dimortho", "dimcenter", "dimradial", "leader"), 200);
-  m.sep(500); m.sep(500);
+  m.sep(500); m.sub(VIA_SIZE_MENU, tool("via"), 500); m.sep(500);
   standardSubMenus(m);
   // BOARD_EDITOR_CONTROL::Init (the drawing tool's menu)
   m.sub(pcbZoneMenu(), tool("zone"), 300);
   return m;
 }
 
+/** PCB_PICKER_TOOL::Init (pcb_picker_tool.cpp): Cancel, the snap layer mode that is not the current one, Zoom and Grid. */
+function pcbPickerMenu(): CondMenu {
+  const m = new CondMenu();
+  m.item("ACTIONS::cancelInteractive", always, 1).sep(1);
+  m.item("PCB_ACTIONS::magneticSnapAllLayers", (c) => !c.snapAllLayers, 1).item("PCB_ACTIONS::magneticSnapActiveLayer", (c) => !!c.snapAllLayers, 1).sep(1);
+  return standardSubMenus(m);
+}
 /** The base menu of a tool that defines none of its own: Cancel, Zoom, Grid (SCH_TOOL_BASE::Init, PCB_TOOL_BASE). */
 function basicToolMenu(): CondMenu { const m = new CondMenu(); m.item("ACTIONS::cancelInteractive", always, 1).sep(1); return standardSubMenus(m); }
 
-const MENUS = { schSelection: schSelectionMenu(), schWire: schWireToolMenu(), schDrawing: schDrawingToolMenu(), pcbSelection: pcbSelectionMenu(), pcbRouter: pcbRouterMenu(), pcbDrawing: pcbDrawingToolMenu(), basic: basicToolMenu() };
+const MENUS = { schSelection: schSelectionMenu(), schWire: schWireToolMenu(), schDrawing: schDrawingToolMenu(), pcbSelection: pcbSelectionMenu(), pcbRouter: pcbRouterMenu(), pcbDrawing: pcbDrawingToolMenu(), pcbPicker: pcbPickerMenu(), basic: basicToolMenu() };
 
 /** The menu KiCad would show for the active tool: the tool's own while it runs, the selection tool's otherwise. */
 export function menuFor(c: MenuCtx, moduleTool: boolean): MenuDef {
   if (c.tool === "select" || c.tool === "highlight") return c.editor === "sch" ? MENUS.schSelection : MENUS.pcbSelection;
   if (!moduleTool) return MENUS.basic;                       // pan, zoom-to-selection, measure, comment: Cancel + Zoom + Grid
   if (c.editor === "sch") return [...SCH_WIRE_TOOLS, "lines"].includes(c.tool) ? MENUS.schWire : c.tool === "delete" ? MENUS.basic : MENUS.schDrawing;
+  if (c.tool === "pickpoint" || c.tool === "pickitem") return MENUS.pcbPicker;
   return c.tool === "route" || c.tool === "routediff" ? MENUS.pcbRouter : c.tool === "delete" || c.tool === "drag" ? MENUS.basic : MENUS.pcbDrawing;
 }
 
 /** One evaluated entry: CONDITIONAL_MENU::Evaluate's output before labels and availability are attached. */
-export type Resolved = { sep: true } | { act: string; check: boolean } | { menu: MenuDef; items: Resolved[] };
+export type Resolved = { sep: true } | { act: string; check: boolean; disabled?: boolean } | { menu: MenuDef; items: Resolved[] };
 
 export function evaluate(menu: MenuDef, c: MenuCtx): Resolved[] {
   const out: Resolved[] = []; let since = 0;
@@ -502,7 +529,8 @@ export function evaluate(menu: MenuDef, c: MenuCtx): Resolved[] {
       if (!e.menu.dynamic && !items.length) continue;       // wx hides nothing here, but an empty submenu is never what KiCad shows
       out.push({ menu: e.menu, items }); since++; continue;
     }
-    out.push({ act: e.act, check: !!e.check }); since++;
+    let off = false; if (e.enable) { try { off = !e.enable(c); } catch { off = true; } }
+    out.push(off ? { act: e.act, check: !!e.check, disabled: true } : { act: e.act, check: !!e.check }); since++;
   }
   while (out.length && "sep" in out[out.length - 1]) out.pop();
   return out;

@@ -407,7 +407,8 @@ test("29: CadStar and PADS nets list board-excluded symbols and keep a stacked p
 test("32: the annotation check and the duplicate sheet name check of ReadyToNetlist (CheckAnnotation, TestDuplicateSheetNames)", () => {
   const NK = load("sim/netlist-kicad.ts");
   const sheetsOf = (body, subs) => { const nl = netlist(body, subs); return NK.nlSheets(nl.instances, (f) => (nl.files[f] ? nl.files[f].doc : null)); };
-  const count = (body, subs) => NK.annotationErrors(sheetsOf(body, subs));
+  // ReadyToNetlist's CheckAnnotate is the schematic module's (sch.checkAnnotate over the sheet instances)
+  const count = (body, subs) => sch.checkAnnotate(sheetsOf(body, subs).map((sh, i) => ({ doc: sh.doc, path: "/" + sh.uuidPath.join("/"), page: i + 1 })));
   assert.strictEqual(count(symbol("Device:R", "R1", 50, 50) + symbol("Device:R", "R2", 70, 50) + symbol("power:GND", "#PWR?", 90, 50)), 0, "annotated; power symbols are not checked");
   assert.strictEqual(count(symbol("Device:R", "R?", 50, 50) + symbol("Device:R", "R2", 70, 50)), 1, "R? is not annotated");
   assert.strictEqual(count(symbol("Device:R", "R", 50, 50)), 1, "a reference without a number is not annotated");

@@ -37,10 +37,10 @@ import { root } from "../root";
 import { appGlobal, editorState, gfxLayers, sizesOf } from "./app-state";
 import { ARC_MODE_ACTIONS, arcDrawMode, setArcDrawMode, switchArcMode, syncArcDraw } from "./arcs";
 import { arrayChanges } from "./array";
-import { addedChange, boardNets, deleteChanges, replacedChange } from "./changes";
-import { clipGet, clipSet, clipboardText, cursorPoint, duplicateChanges, pasteChanges, referencePoint, textOfItem } from "./clipboard";
+import { addedChange, boardNets, deleteChanges, removedChange, replacedChange } from "./changes";
+import { PASTE_LAYERS_MSG, clipGet, clipSet, clipboardText, cursorPoint, duplicateChanges, parseClipboard, pasteChanges, referencePoint, textOfItem } from "./clipboard";
 import { connectedRun } from "./connected";
-import { boardStatistics, convertChanges, footprintAttrChanges, justifyChanges, zonePriorityChanges } from "./convert";
+import { boardStatistics, convertChanges, footprintAttrChanges, justifyChanges, segmentToArcChanges, zonePriorityChanges } from "./convert";
 import { copperOf, num0, openForm, settingsOf } from "./dialogs";
 import { DIM_TYPE } from "./dimensions";
 import { pickTwoPoints } from "./dom";
@@ -48,8 +48,8 @@ import { angleSnapMode, nextLineMode, setAngleSnap, stepDrawWidth } from "./draw
 import { askText } from "./draw-tools";
 import { drc, mm4, netclassName, netclassOf } from "./drc";
 import { cycleVia, cycleWidth, sizeUnits, stepLayer } from "./edit-commands";
-import { enterGroup, exitGroup, selectedTopGroup, withinEnteredGroup } from "./group-edit";
-import { applySelection, expandGroups, groupChanges, groupMembers, groupMembersChanges, groupOf, isLocked, lockChanges, selectedItems, selectionIds, topParentOf, ungroupChanges } from "./groups";
+import { enterGroup, exitGroup, selectedTopGroup, withinEnteredGroup, enteredGroup } from "./group-edit";
+import { applySelection, expandGroups, groupChanges, groupMembers, groupMembersChanges, groupOf, isLocked, lockChanges, selectedItems, selectionIds, topParentOf, ungroupChanges, groupNode, parentOf, setLocked } from "./groups";
 import { itemAt } from "./guess";
 import { hitTestItem } from "./hit";
 import { LENGTH_UNCONSTRAINED, TUNE_IU, setTargetLength, setTargetSkew, tuneCopy } from "./meander";
@@ -57,7 +57,7 @@ import { idsOnLayer, inspectClearance } from "./msgpanel";
 import { connectedCopperIds, netHighlightIds, netInspector, netItemIds, netTable, netlist, ratsnest, selectionNets } from "./netlist";
 import { netOf } from "./nets";
 import { zoneLayers } from "./nodes";
-import { ARC_EDIT_ACTIONS, addCornerChanges, arcEditMode, canAddCorner, handleTol, nextArcEditMode, peSingleId, removeCornerChanges, setArcEditMode } from "./point-editor";
+import { ARC_EDIT_ACTIONS, addCornerChanges, addCornerLabel, arcEditMode, canAddCorner, chamferCornerChanges, chamferCornerLabel, editHandleAt, handleTol, movePointChanges, movePointTitle, nextArcEditMode, peSingleId, removeCornerChanges, removeCornerLabel, setArcEditMode } from "./point-editor";
 import { netUnder, padsOf } from "./route-geom";
 import { attemptFinish, continueFromEnd, selectLayerAndPlaceVia, setLayer, startWithVia, toggleViaPlacement, undoRouteLeg, viaSpan } from "./route-tool";
 import { CM_M45, CM_M90, CM_R45, CM_R90, RM_MARK, RM_SHOVE, RM_WALK, setRouterSettings } from "./router-settings";
@@ -69,10 +69,15 @@ import { ALIGN_COMMIT, mirrorAxisChanges, alignChanges, anchorOf, bboxUnion, dis
 import { isTuningPattern, regenerateTuning, tuneStep, tuningPatternInfo } from "./tuning-patterns";
 import { editTuningPattern, selectedTuningPattern, tuningNodeWithSettings } from "./tuning-edit";
 import { isTuneTool, tuneMode, tuneUpdate } from "./tuning-tool";
-import { clone, fmt, layerOf, r6, widthOf } from "./util";
-import { flipFieldChange, footprintFieldNode, requestField, rotateFieldChange } from "./field-edit";
+import { clone, fmt, layerOf, r6, widthOf, rotator } from "./util";
+import { flipFieldChange, footprintFieldNode, requestField, rotateFieldChange, hideFieldChanges } from "./field-edit";
+import { imageInfo } from "./images";
+import { imageNode, textNode } from "./nodes";
+import { padMemory, typeFromPad } from "./pad-tool";
 import { diffPairMarkers, matchedLengthMarkers } from "./dru";
-import { sourceZone } from "./zone-modes";
+import { sourceZone, zoneDuplicateNode, zoneMergeChanges } from "./zone-modes";
+import { zonePriorityAbility } from "./zone-priority";
+import { newItemDialogs } from "./assistants";
 import { routeSelected, unrouteSegment } from "./route-selected";
 import { optimizeSelected } from "./optimize-selected";
 import { cycleLayerPairPresets, setSnapMode } from "./snap-pairs";
@@ -99,23 +104,114 @@ act("decWidth", "Decrease Line Width", "Ctrl+-", (ctx: PcbCtx) => stepDrawWidth(
 // clipboard
 // EDIT_TOOL::copyToClipboard / cutToClipboard: the selection, or the item under the cursor (a hover selection);
 // the reference point is the anchor nearest the cursor.  KiCad writes "Selection copied" to the status bar only.
+/**
+ * CLIPBOARD_IO::SaveSelection's conversions in the board editor: a footprint field is copied as a board text (its
+ * position, layer, attributes and draw rotation; ${VALUE} / ${REFERENCE} replaced by the footprint's own), a pad
+ * picked on its own is wrapped in a new footprint at the pad's position.  Returns the nodes (board coordinates),
+ * their anchors and the field they came from, or null when the selection holds neither.
+ */
+export function copyExtras(ctx: PcbCtx, cursor: Pt | null): { nodes: SNode[]; pts: Pt[]; field: { id: string; name: string } | null } | null {
+  const doc = ctx.doc; if (!doc || doc.fpEditor) return null;
+  const nodes: SNode[] = [], pts: Pt[] = [];
+  const keys = S.padSel ? [S.padSel].concat(S.padAlso && S.padAlso.anchor === S.padSel ? S.padAlso.keys.filter((k) => k !== S.padSel) : []) : [];
+  for (const key of keys) {
+    const i = key.lastIndexOf("#"), fp = doc.items.get(key.slice(0, i)); if (!fp || fp.kind !== "footprint") continue;
+    const info = padsOf(fp)[+key.slice(i + 1)], src = K.kids(fp.node, "pad")[+key.slice(i + 1)]; if (!info || !src) continue;
+    const pad = clone(src); const a = K.kid(pad, "at"); if (a) { a[1] = 0; a[2] = 0; }
+    nodes.push(["footprint", "", ["layer", "F.Cu"], ["uuid", K.newUuid()], ["at", r6(info.x), r6(info.y)], pad]); pts.push([info.x, info.y]);
+  }
+  if (nodes.length) return { nodes, pts, field: null };
+  const f = requestField(ctx, cursor); if (!f) return null;
+  const fp = doc.items.get(f.id)!; const fn = footprintFieldNode(fp.node, f.name); const fa = fn && K.kid(fn, "at"); if (!fn || !fa) return null;
+  const [fx, fy, frot] = K.atOf(fp.node); const [rx, ry] = rotator(frot || 0)(K.num(fa[1]), K.num(fa[2])); const x = r6(fx + rx), y = r6(fy + ry);
+  let text = K.str(fn[2]);
+  const own = (name: string) => { const n = footprintFieldNode(fp.node, name); return n ? K.str(n[2]) : ""; };
+  if (text === "${VALUE}") text = own("Value"); else if (text === "${REFERENCE}") text = own("Reference");
+  const node: SNode = ["gr_text", text, ["at", x, y, fa.length > 3 ? K.num(fa[3]) : 0]];
+  const layer = K.kid(fn, "layer"); node.push(layer ? clone(layer) : ["layer", "F.SilkS"], ["uuid", K.newUuid()]);
+  const eff = K.kid(fn, "effects"); if (eff) { const e = clone(eff); const h = e.indexOf("hide"); if (h > 0) e.splice(h, 1); const hk = K.kid(e, "hide"); if (hk) e.splice(e.indexOf(hk), 1); node.push(e); }
+  return { nodes: [node], pts: [[x, y]], field: { id: f.id, name: f.name } };
+}
+/** BestDragOrigin over the copied items and the converted ones: the anchor nearest the cursor. */
+function copyReference(doc: BoardDoc, ids: string[], pts: Pt[], cursor: Pt): Pt {
+  let best: Pt | null = ids.length ? referencePoint(doc, ids, cursor) : null, bd = best ? Math.hypot(best[0] - cursor[0], best[1] - cursor[1]) : Infinity;
+  for (const p of pts) { const d = Math.hypot(p[0] - cursor[0], p[1] - cursor[1]); if (d < bd) { bd = d; best = p; } }
+  return best || cursor;
+}
 act("copy", "Copy", "Ctrl+C", (ctx: PcbCtx) => {
+  const cur = cursorPoint(ctx); const extra = copyExtras(ctx, ctx.cursor ? ctx.cursor.slice() : cur);
+  if (extra) { const ids = Array.from(selectionIds(ctx)); clipSet(ctx, clipboardText(ctx.doc, ids, copyReference(ctx.doc, ids, extra.pts, cur), extra.nodes)); return true; }
   const sel = requestSelection(ctx, { locks: false, rerun: (c: PcbCtx) => runAction("copy", c) }); if (!sel) return true;
   clipSet(ctx, clipboardText(ctx.doc, sel.ids, referencePoint(ctx.doc, sel.ids, cursorPoint(ctx)))); endHover(ctx, sel); return true;
 });
 act("cut", "Cut", "Ctrl+X", (ctx: PcbCtx) => {
   if (S.move) return true;   // doMoveSelection: ACTIONS::cut while moving is wxBell
   if (!canEdit(ctx)) return true;
+  const cur = cursorPoint(ctx); const extra = copyExtras(ctx, ctx.cursor ? ctx.cursor.slice() : cur);
+  if (extra) {   // a field is hidden, never removed (EDIT_TOOL::DeleteItems); a board's pad stays with its footprint
+    const ids = Array.from(selectionIds(ctx)); clipSet(ctx, clipboardText(ctx.doc, ids, copyReference(ctx.doc, ids, extra.pts, cur), extra.nodes));
+    const ch: PcbChange[] = ids.length ? deleteChanges(ctx.doc, ids) : [];
+    if (extra.field) ch.push(...hideFieldChanges(ctx.doc, extra.field));
+    if (ch.length) { ctx.commit(ch, "Cut"); applySelection(ctx, []); }
+    return true;
+  }
   const sel = requestSelection(ctx, { rerun: (c: PcbCtx) => runAction("cut", c) }); if (!sel) return true;
   clipSet(ctx, clipboardText(ctx.doc, sel.ids, referencePoint(ctx.doc, sel.ids, cursorPoint(ctx))));
   ctx.commit(deleteChanges(ctx.doc, sel.ids), "Cut"); applySelection(ctx, []); return true;
 });
+/** ADVANCED_CFG::m_MaxPastedTextLength: longer clipboard text asks before it becomes a text item. */
+export const MAX_PASTED_TEXT_LENGTH = 100;
+/**
+ * PCB_CONTROL::placeBoardItems for new items: with a group entered, each pasted groupable item that has no parent
+ * group joins it (the group is modified in the same commit); the items PCB_CONTROL selects are selected and all of
+ * them hang on the cursor by the reference point until a click places them.  A cancelled paste puts the group back.
+ */
+function placePasted(ctx: PcbCtx, changes: PcbChange[], ids: string[], select: string[], label: string, origin: Pt) {
+  const doc = ctx.doc; const all = changes.slice(); let restore: { id: string; node: SNode }[] | undefined;
+  const eg = enteredGroup(doc), g = eg ? doc.items.get(eg) : null;
+  if (g && select.length) { restore = [{ id: g.id, node: clone(g.node) }]; all.push(...groupMembersChanges(doc, g, select, [])); }
+  ctx.commit(all, label, { tentative: true }); applySelection(ctx, select); beginCarryMove(ctx, { placing: ids.slice(), restore, origin });
+  // recordPastedItems: a pasted pad becomes the pad tool's master of its type once the paste is placed
+  if (doc.fpEditor && S.move && S.move.placing) {
+    const prev = S.move.after;
+    S.move.after = (placed: boolean, committed: boolean) => {
+      if (prev) prev(placed, committed);
+      if (placed) for (const id of ids) { const it = ctx.doc.items.get(id); const t = it && it.kind === "pad" ? typeFromPad(it.node) : null; if (t) { padMemory.lastType = t; padMemory.lastByType[t] = id; } }
+    };
+  }
+}
+/** The clipboard held no board items: its text becomes a PCB_TEXT on the active layer, placed like a paste ("Paste Text"). */
+function pasteTextItem(ctx: PcbCtx, text: string) {
+  const go = () => {
+    const at = cursorPoint(ctx); const c = addedChange(ctx.doc, textNode(text, at[0], at[1], ctx.activeLayer || S.layer));
+    placePasted(ctx, [c], [c.id], [c.id], "Paste Text", at);
+  };
+  if (text.length > MAX_PASTED_TEXT_LENGTH) openForm({ title: "Confirmation", width: 420, fields: [{ type: "note", value: "Pasting a long text text string may be very slow.  Do you want to continue?" }], apply: () => { go(); } });
+  else go();
+}
+/** No text on the clipboard: an image there becomes a PCB_REFERENCE_IMAGE on the active layer, placed the same way. */
+function pasteImageItem(ctx: PcbCtx) {
+  const nav = typeof navigator !== "undefined" ? navigator : null;
+  if (!nav || !nav.clipboard || typeof nav.clipboard.read !== "function") return;
+  nav.clipboard.read().then(async (list) => {
+    for (const item of list) {
+      const type = item.types.find((t) => t === "image/png") || item.types.find((t) => t === "image/jpeg"); if (!type) continue;
+      const bytes = new Uint8Array(await (await item.getType(type)).arrayBuffer()); if (!bytes.length || !imageInfo(bytes)) continue;
+      let bin = ""; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      bind(ctx); const at = cursorPoint(ctx); const c = addedChange(ctx.doc, imageNode(at[0], at[1], btoa(bin), ctx.activeLayer || S.layer));
+      placePasted(ctx, [c], [c.id], [c.id], "Paste Text", at); return;
+    }
+  }, () => { /* the clipboard cannot be read: nothing to paste */ });
+}
 export function pasteAt(ctx: PcbCtx, opts: { annotations: string; clearNets?: boolean }) {
   clipGet(ctx, (text: string) => {
-    if (!text) return;
-    const r = pasteChanges(ctx.doc, text, cursorPoint(ctx), opts); if (!r.changes.length) return;
+    if (!text) { pasteImageItem(ctx); return; }
+    if (!parseClipboard(text)) { pasteTextItem(ctx, text); return; }
+    const at = cursorPoint(ctx); const r: { changes: PcbChange[]; ids: string[]; select?: string[]; pruned?: boolean } = pasteChanges(ctx.doc, text, at, opts);
+    if (r.pruned) ctx.toast(PASTE_LAYERS_MSG);
+    if (!r.changes.length) return;
     // EDIT_TOOL::Paste: the pasted items hang on the cursor by their reference point until a click places them
-    ctx.commit(r.changes, "paste", { tentative: true }); applySelection(ctx, r.ids); beginCarryMove(ctx, { placing: r.ids.slice() });
+    placePasted(ctx, r.changes, r.ids, r.select || r.ids, "Paste", at);
   });
   return true;
 }
@@ -620,7 +716,7 @@ act("setTrackWidthFromNetclass", "Set Track / Via Sizes from Netclass", "", (ctx
 act("trackWidthInc", "Increase Track Width", "W", (ctx: PcbCtx) => { if (canEdit(ctx)) cycleWidth(ctx, 1); return true; });
 act("trackWidthDec", "Decrease Track Width", "Shift+W", (ctx: PcbCtx) => { if (canEdit(ctx)) cycleWidth(ctx, -1); return true; });
 act("viaSizeInc", "Increase Via Size", "'", (ctx: PcbCtx) => { if (canEdit(ctx)) cycleVia(ctx, 1); return true; }); act("viaSizeDec", "Decrease Via Size", "\\", (ctx: PcbCtx) => { if (canEdit(ctx)) cycleVia(ctx, -1); return true; });
-act("autoTrackWidth", "Automatically select track width", "", (ctx: PcbCtx) => { const on = sizesOf(ctx).toggleConnectedWidth(); ctx.toast(on ? "Routing from an existing track uses its width" : "New tracks take the current width setting"); return true; }, { toggle: () => !!K.pcbSizes.state.useConnectedWidth, menu: "-" });
+act("autoTrackWidth", "Automatically select track width", "", (ctx: PcbCtx) => { sizesOf(ctx).toggleConnectedWidth(); return true; }, { toggle: () => !!K.pcbSizes.state.useConnectedWidth, menu: "-" });
 // the active layer (PCB_CONTROL): PgUp / PgDn, + / -, and V with nothing being routed toggles within the routing pair
 act("layerTop", "Switch to Component (F.Cu) layer", "PgUp", (ctx: PcbCtx) => { setLayer(ctx, viaSpan(ctx.doc)[0]); return true; }, { menu: "-" });
 act("layerBottom", "Switch to Copper (B.Cu) Layer", "PgDn", (ctx: PcbCtx) => { setLayer(ctx, viaSpan(ctx.doc)[1]); return true; }, { menu: "-" });
@@ -821,10 +917,18 @@ act("inspectClearance", "Clearance Resolution…", "", (ctx: PcbCtx) => {
   const r = inspectClearance(ctx.doc, ids[0], ids[1], settingsOf(ctx)); if (!r) { ctx.toast("Both items need copper"); return true; }
   return openForm({ title: "Clearance Report", fields: [{ type: "note", value: r.sameNet ? `Both items are on net '${r.nets[0]}': no clearance applies.` : r.gap === null ? "The items share no copper layer." : `Clearance required ${mm4(r.required)}; actual ${mm4(r.gap)} — ${r.gap >= r.required ? "OK" : "VIOLATION"}` }] });
 });
-act("showRatsnest", "Show Ratsnest", "", (ctx: PcbCtx) => { S.showRatsnest = !S.showRatsnest; ctx.toast(S.showRatsnest ? "Ratsnest shown" : "Ratsnest hidden"); ctx.requestRender(); return true; }, { toggle: () => !!S.showRatsnest });
+act("showRatsnest", "Show Ratsnest", "", (ctx: PcbCtx) => { S.showRatsnest = !S.showRatsnest; ctx.requestRender(); return true; }, { toggle: () => !!S.showRatsnest });
 act("localRatsnestTool", "Local Ratsnest (selected footprints only)", "", (ctx: PcbCtx) => { S.localRatsnest = !S.localRatsnest; ctx.toast(S.localRatsnest ? "Ratsnest: selected footprints only" : "Ratsnest: whole board"); ctx.requestRender(); return true; }, { toggle: () => !!S.localRatsnest });
-act("hideNetInRatsnest", "Hide Net in Ratsnest", "", (ctx: PcbCtx) => { const nl = netlist(ctx.doc); const keys = selectionNets(ctx, nl); for (const k of keys) S.hiddenNets.add(k); ctx.toast(keys.size ? `Hidden: ${Array.from(keys).join(", ")}` : "Select something on a net"); ctx.requestRender(); return true; });
-act("showNetInRatsnest", "Show Net in Ratsnest", "", (ctx: PcbCtx) => { const nl = netlist(ctx.doc); const keys = selectionNets(ctx, nl); if (!keys.size) S.hiddenNets.clear(); else for (const k of keys) S.hiddenNets.delete(k); ctx.requestRender(); return true; });
+// BOARD_INSPECTION_TOOL::HideNetInRatsnest / ShowNetInRatsnest: the nets of the selected connected items; silent, and
+// nothing selected on a net changes nothing.  The Appearance panel's net list follows (OnNetVisibilityChanged).
+function setRatsnestNets(ctx: PcbCtx, visible: boolean) {
+  const nl = netlist(ctx.doc); const keys = selectionNets(ctx, nl); if (!keys.size) return true;
+  for (const k of keys) { if (visible) S.hiddenNets.delete(k); else S.hiddenNets.add(k); }
+  if (ctx.setNetsVisible) ctx.setNetsVisible(Array.from(keys), visible);
+  ctx.requestRender(); return true;
+}
+act("hideNetInRatsnest", "Hide Net in Ratsnest", "", (ctx: PcbCtx) => setRatsnestNets(ctx, false));
+act("showNetInRatsnest", "Show Net in Ratsnest", "", (ctx: PcbCtx) => setRatsnestNets(ctx, true));
 /**
  * BOARD_INSPECTION_TOOL::highlightNet( aPosition, aUseSelection ).  Plain Highlight Net (`, Ctrl+click) takes the
  * copper under the MOUSE (GetMousePosition: not the snapped cursor, which can sit on a neighbouring track), whatever
@@ -837,38 +941,158 @@ export function highlightNetAt(ctx: PcbCtx, at?: Pt | null, useSelection = false
   if (useSelection) for (const it of selectedItems(ctx)) { if (it.kind !== "footprint" && K.kid(it.node, "net")) { const k = nl.table.key(netOf(it.node)); if (k) keys.add(k); } }
   if (useSelection && S.padSel) { const i = S.padSel.lastIndexOf("#"), fp = ctx.doc.items.get(S.padSel.slice(0, i)), pad = fp && padsOf(fp)[+S.padSel.slice(i + 1)]; const k = pad && nl.table.key(pad.net); if (k) keys.add(k); }
   if (!keys.size) { const p = at || (ctx.cursor ? ctx.cursor.slice() as Pt : cursorPoint(ctx)); const k = nl.table.key(netUnder(ctx.doc, p[0], p[1], null)); if (k) keys = new Set([k]); }
-  if (!keys.size) { highlightIds(ctx, null); S.highlightNet = null; return true; }
-  const key = keys.values().next().value; if (keys.size === 1 && S.highlightNet === key) { S.highlightNet = null; highlightIds(ctx, null); return true; }
-  S.highlightNet = key!; const ids = new Set<string>(); for (const k of keys) for (const id of netHighlightIds(ctx.doc, k, nl)) ids.add(id); highlightIds(ctx, ids, keys); return true;   // no infobar: the net shows in the message panel
+  // m_lastHighlighted takes the nets that were showing whenever the highlight changes; m_currentlyHighlighted the new ones
+  const shown = shownHighlight();
+  if (!keys.size) { if (shown.length) S.hlLast = shown; S.hlCurrent = []; showHighlight(ctx, []); return true; }
+  const key = keys.values().next().value; if (keys.size === 1 && S.highlightNet === key) { if (shown.length) S.hlLast = shown; S.hlCurrent = []; showHighlight(ctx, []); return true; }
+  if (shown.length) S.hlLast = shown;
+  S.hlCurrent = Array.from(keys); showHighlight(ctx, S.hlCurrent, nl); return true;   // no infobar: the net shows in the message panel
+}
+/** The nets the canvas highlights now (RENDER_SETTINGS::GetHighlightNetCodes: empty while the highlight is off). */
+function shownHighlight(): string[] { return S.highlightNet ? (S.hlShown.length ? S.hlShown.slice() : [S.highlightNet]) : []; }
+/** RENDER_SETTINGS::SetHighlight( nets, enabled ): these nets are highlighted, or with none the highlight is off. */
+function showHighlight(ctx: PcbCtx, keys: string[], nl?: ReturnType<typeof netlist>) {
+  S.hlShown = keys.slice(); S.highlightNet = keys.length ? keys[0] : null;
+  if (!keys.length) { highlightIds(ctx, null); return; }
+  const n = nl || netlist(ctx.doc); const ids = new Set<string>(); for (const k of keys) for (const id of netHighlightIds(ctx.doc, k, n)) ids.add(id);
+  highlightIds(ctx, ids, keys);
 }
 act("highlightNet", "Highlight Net", "`", (ctx: PcbCtx) => highlightNetAt(ctx));
 act("highlightNetSelection", "Highlight Net of Selection", "", (ctx: PcbCtx) => highlightNetAt(ctx, null, true));
-act("clearHighlight", "Clear Net Highlighting", "~", (ctx: PcbCtx) => { S.highlightNet = null; highlightIds(ctx, null); return true; });
-alias("toggleNetHighlight", "highlightNet", "Toggle Last Net Highlight", "Alt+`");
+act("clearHighlight", "Clear Net Highlighting", "~", (ctx: PcbCtx) => { S.hlCurrent = []; S.hlLast = []; showHighlight(ctx, []); return true; });
+// BOARD_INSPECTION_TOOL::HighlightNet, toggleNetHighlight: the current highlight goes off, and comes back on the next press
+act("toggleNetHighlight", "Toggle Net Highlight", "Alt+`", (ctx: PcbCtx) => { bind(ctx); const turnOn = !shownHighlight().length && S.hlCurrent.length > 0; showHighlight(ctx, turnOn ? S.hlCurrent : []); return true; });
+// toggleLastNetHighlight: the nets highlighted before the current ones come back, and the two sets swap
+act("toggleLastNetHighlight", "Toggle Last Net Highlight", "", (ctx: PcbCtx) => { bind(ctx); const temp = shownHighlight(); showHighlight(ctx, S.hlLast); S.hlCurrent = S.hlLast.slice(); S.hlLast = temp; return true; });
 // groups and locks
-act("group", "Group Items", "", (ctx: PcbCtx) => { const ids = needSel(ctx, "Select items to group"); if (!ids || !canEdit(ctx)) return true; const ch = groupChanges(ctx.doc, ids, ""); if (!ch.length) { ctx.toast("Nothing to group"); return true; } ctx.commit(ch, "group"); ctx.toast(`Grouped ${plural(ids.size, "item")}`); return true; });
-act("ungroup", "Ungroup Items", "", (ctx: PcbCtx) => { const ids = needSel(ctx, "Select a group or a member"); if (!ids || !canEdit(ctx)) return true; return commitSel(ctx, ungroupChanges(ctx.doc, ids), "ungroup"); });
-act("addToGroup", "Add Items to Group", "", (ctx: PcbCtx) => { const ids = needSel(ctx); if (!ids || !canEdit(ctx)) return true; const g = Array.from(ids).map((id) => groupOf(ctx.doc, id) || (ctx.doc.items.get(id)!.kind === "group" ? ctx.doc.items.get(id) : null)).find(Boolean); if (!g) { ctx.toast("The selection touches no group"); return true; } return commitSel(ctx, groupMembersChanges(ctx.doc, g, Array.from(ids).filter((id) => id !== g.id), []), "add to group"); });
-act("removeFromGroup", "Remove Items from Group", "", (ctx: PcbCtx) => { const ids = needSel(ctx); if (!ids || !canEdit(ctx)) return true; const out = []; const seen = new Map(); for (const id of ids) { const g = groupOf(ctx.doc, id); if (g) { if (!seen.has(g.id)) seen.set(g.id, { g, ids: [] }); seen.get(g.id).ids.push(id); } } for (const { g, ids: rm } of seen.values()) out.push(...groupMembersChanges(ctx.doc, g, [], rm)); return commitSel(ctx, out, "remove from group"); });
+export const GROUP_MSG_FOOTPRINT = "Footprint items cannot be grouped separately from their parent footprint.";
+export const GROUP_MSG_TYPE = "Some selected items cannot be grouped.";
+/**
+ * The selection as KiCad holds it: a member of a group that is not entered stands for its outermost group (the web
+ * selection lists the members beside it), each item once.
+ */
+export function selectionUnits(ctx: PcbCtx): KItem[] {
+  const out = new Map<string, KItem>();
+  for (const id of selectionIds(ctx)) { const it = topParentOf(ctx.doc, id) || ctx.doc.items.get(id); if (it) out.set(it.id, it); }
+  return Array.from(out.values());
+}
+/**
+ * What the context menus ask of the selection.  GROUP_CONTEXT_MENU::update: how many items, whether a group is among
+ * them (and only one), whether anything else is, and whether an item has a parent group.  ZONE_PRIORITY_CONTEXT_MENU::
+ * update: whether a zone overlapping the one selected zone has a higher / lower priority.
+ */
+export function menuState(ctx: PcbCtx) {
+  const grouping = { count: 0, hasGroup: false, onlyOneGroup: false, hasNonGroup: false, hasMember: false };
+  if (!ctx.doc) return { grouping, zoneCanRaise: false, zoneCanLower: false };
+  const units = selectionUnits(ctx);
+  for (const it of units) {
+    grouping.count++;
+    if (it.kind === "group") { if (grouping.hasGroup) grouping.onlyOneGroup = false; else { grouping.onlyOneGroup = true; grouping.hasGroup = true; } }
+    else grouping.hasNonGroup = true;
+    if (parentOf(ctx.doc, it.id)) grouping.hasMember = true;
+  }
+  if (!units.length && S.padSel) { grouping.count += 1 + (S.padAlso && S.padAlso.anchor === S.padSel ? S.padAlso.keys.filter((k) => k !== S.padSel).length : 0); grouping.hasNonGroup = true; }
+  const a = zonePriorityAbility(ctx.doc, units.map((it) => it.id));
+  return { grouping, zoneCanRaise: a.canRaise, zoneCanLower: a.canLower };
+}
+/** PCB_GROUP_TOOL::canGroupItem (BOARD_ITEM::IsGroupableType): the message when the item cannot be in a group, else "". */
+function cannotGroup(it: KItem): string { return it.kind === "target" || it.kind === "marker" ? GROUP_MSG_TYPE : ""; }
+/** A pad or field picked on its own in the board editor is a footprint child: it cannot be grouped apart from its footprint. */
+const footprintChildPicked = (ctx: PcbCtx) => !ctx.doc.fpEditor && (!!S.padSel || !!(typeof ctx.selectedField === "function" && ctx.selectedField()));
+/**
+ * Membership edits as one set of changes: per group the ids joining and leaving.  A group left without members is
+ * removed (and leaves its own parent group).
+ */
+function membershipChanges(doc: BoardDoc, edits: Map<string, { add: string[]; remove: string[] }>): PcbChange[] {
+  const out: PcbChange[] = []; const todo = new Map(edits);
+  for (let guard = 0; todo.size && guard < 64; guard++) {
+    const [gid, e] = todo.entries().next().value as [string, { add: string[]; remove: string[] }]; todo.delete(gid);
+    const g = doc.items.get(gid); if (!g) continue;
+    const ch = groupMembersChanges(doc, g, e.add, e.remove); out.push(...ch);
+    if (ch.length && ch[0].kind === "REMOVED") { const p = parentOf(doc, gid); if (p) { const pe = todo.get(p.id) || { add: [], remove: [] }; pe.remove.push(gid); todo.set(p.id, pe); } }
+  }
+  return out;
+}
+/** Select whole units (a group with its members, as a click on a member does). */
+const selectUnits = (ctx: PcbCtx, ids: string[]) => applySelection(ctx, ids.length ? expandGroups(ctx.doc, ids) : []);
+// PCB_GROUP_TOOL::Group: at least two groupable items; the new group is locked when a member is; a member leaves the
+// group it was in (so groups nest); afterwards the new group is the selection.  Commit "Group Items".
+act("group", "Group Items", "", (ctx: PcbCtx) => {
+  if (!canEdit(ctx)) return true; const doc = ctx.doc;
+  let errorMsg = footprintChildPicked(ctx) ? GROUP_MSG_FOOTPRINT : "";
+  const units = selectionUnits(ctx).filter((it) => { const m = cannotGroup(it); if (m) errorMsg = m; return !m; });
+  if (units.length < 2) { if (errorMsg) ctx.toast(errorMsg); return true; }
+  const ids = units.map((it) => it.id); const node = groupNode("", ids); if (units.some((it) => isLocked(it.node))) setLocked(node, true);
+  const edits = new Map<string, { add: string[]; remove: string[] }>();
+  for (const id of ids) { const old = parentOf(doc, id); if (old) { const e = edits.get(old.id) || { add: [], remove: [] }; e.remove.push(id); edits.set(old.id, e); } }
+  const added = addedChange(doc, node);
+  // BOARD_COMMIT::Push: a new item with no parent group joins the entered group
+  const eg = enteredGroup(doc); if (eg) { const e = edits.get(eg) || { add: [], remove: [] }; e.add.push(added.id); edits.set(eg, e); }
+  ctx.commit([added as PcbChange].concat(membershipChanges(doc, edits)), "Group Items"); selectUnits(ctx, [added.id]);
+  if (errorMsg) ctx.toast(errorMsg);
+  return true;
+});
+// GROUP_TOOL::Ungroup: only the selected groups are dissolved; their former members end up selected.  "Ungroup Items".
+act("ungroup", "Ungroup Items", "", (ctx: PcbCtx) => {
+  if (!canEdit(ctx)) return true; const doc = ctx.doc;
+  const groups = selectionUnits(ctx).filter((it) => it.kind === "group" || it.kind === "generated"); if (!groups.length) return true;
+  const out: PcbChange[] = [], toSelect: string[] = [], edits = new Map<string, { add: string[]; remove: string[] }>();
+  for (const g of groups) {
+    out.push(removedChange(g)); toSelect.push(...groupMembers(g.node));
+    const p = parentOf(doc, g.id); if (p) { const e = edits.get(p.id) || { add: [], remove: [] }; e.remove.push(g.id); edits.set(p.id, e); }
+  }
+  ctx.commit(out.concat(membershipChanges(doc, edits)), "Ungroup Items"); selectUnits(ctx, toSelect.filter((id) => doc.items.has(id))); return true;
+});
+// GROUP_TOOL::AddToGroup: exactly one selected group and at least one other groupable item; an item leaves the group it
+// was in; afterwards the group is the selection.  "Add Items to Group".
+act("addToGroup", "Add Items to Group", "", (ctx: PcbCtx) => {
+  if (!canEdit(ctx)) return true; const doc = ctx.doc;
+  let group: KItem | null = null, errorMsg = footprintChildPicked(ctx) ? GROUP_MSG_FOOTPRINT : ""; const toAdd: KItem[] = [];
+  for (const it of selectionUnits(ctx)) {
+    if (it.kind === "group") { if (group) return true; group = it; }   // only one group may be selected
+    else { const m = cannotGroup(it); if (m) errorMsg = m; else toAdd.push(it); }
+  }
+  if (!group || !toAdd.length) { if (errorMsg) ctx.toast(errorMsg); return true; }
+  const edits = new Map<string, { add: string[]; remove: string[] }>([[group.id, { add: [], remove: [] }]]);
+  for (const it of toAdd) {
+    const old = parentOf(doc, it.id); if (old && old.id === group.id) continue;
+    if (old) { const e = edits.get(old.id) || { add: [], remove: [] }; e.remove.push(it.id); edits.set(old.id, e); }
+    edits.get(group.id)!.add.push(it.id);
+  }
+  const ch = membershipChanges(doc, edits); if (ch.length) ctx.commit(ch, "Add Items to Group");
+  selectUnits(ctx, [group.id]); if (errorMsg) ctx.toast(errorMsg);
+  return true;
+});
+// GROUP_TOOL::RemoveFromGroup: each selected item leaves its parent group; a group left empty is removed; afterwards
+// nothing is selected (the items are no longer members of the entered group).  "Remove Group Items".
+act("removeFromGroup", "Remove Items from Group", "", (ctx: PcbCtx) => {
+  if (!canEdit(ctx)) return true; const doc = ctx.doc; const edits = new Map<string, { add: string[]; remove: string[] }>();
+  for (const it of selectionUnits(ctx)) { const g = parentOf(doc, it.id); if (g) { const e = edits.get(g.id) || { add: [], remove: [] }; e.remove.push(it.id); edits.set(g.id, e); } }
+  if (!edits.size) return true;
+  ctx.commit(membershipChanges(doc, edits), "Remove Group Items"); applySelection(ctx, []); return true;
+});
 // PCB_SELECTION_TOOL::EnterGroup / ExitGroup
 act("enterGroup", "Enter Group", "", (ctx: PcbCtx) => { const g = selectedTopGroup(ctx); if (!g) { ctx.toast("Select a group to enter"); return true; } enterGroup(ctx, g); return true; }, { tip: "Enter the group to edit items" });
 act("leaveGroup", "Leave Group", "", (ctx: PcbCtx) => { if (!exitGroup(ctx, true)) ctx.toast("No group is entered"); return true; }, { tip: "Leave the current group" });
-// BOARD_EDITOR_CONTROL::ToggleLockSelected: the selection or the item under the cursor; locked if anything was not
-act("toggleLock", "Toggle Lock", "L", (ctx: PcbCtx) => {
+// BOARD_EDITOR_CONTROL::modifyLockSelected: the selection or the item under the cursor (a hover selection is cleared
+// afterwards).  Toggle unlocks when anything in it is locked, else locks.  Commit "Lock" / "Unlock".
+function modifyLock(ctx: PcbCtx, mode: "toggle" | "on" | "off", id: string) {
   if (!canEdit(ctx)) return true;
-  const sel = requestSelection(ctx, { locks: false, rerun: (c: PcbCtx) => runAction("toggleLock", c) }); if (!sel) return true;
-  const on = !sel.items.every((it) => isLocked(it!.node)); const ch = lockChanges(ctx.doc, sel.ids, on); if (ch.length) ctx.commit(ch, on ? "lock" : "unlock");
+  const sel = requestSelection(ctx, { locks: false, rerun: (c: PcbCtx) => runAction(id, c) }); if (!sel) return true;
+  const on = mode === "toggle" ? !sel.ids.some((i) => isLocked(ctx.doc.items.get(i)!.node)) : mode === "on";
+  const ch = lockChanges(ctx.doc, sel.ids, on); if (ch.length) ctx.commit(ch, on ? "Lock" : "Unlock");
   endHover(ctx, sel); ctx.requestRender(); return true;
-});
-act("lock", "Lock", "", (ctx: PcbCtx) => { const ids = needSel(ctx, "Select items to lock"); if (!ids || !canEdit(ctx)) return true; return commitSel(ctx, lockChanges(ctx.doc, ids, true), "lock"); });
-act("unlock", "Unlock", "", (ctx: PcbCtx) => { const ids = needSel(ctx, "Select items to unlock"); if (!ids || !canEdit(ctx)) return true; return commitSel(ctx, lockChanges(ctx.doc, ids, false), "unlock"); });
+}
+act("toggleLock", "Toggle Lock", "L", (ctx: PcbCtx) => modifyLock(ctx, "toggle", "toggleLock"));
+act("lock", "Lock", "", (ctx: PcbCtx) => modifyLock(ctx, "on", "lock"));
+act("unlock", "Unlock", "", (ctx: PcbCtx) => modifyLock(ctx, "off", "unlock"));
 // footprint attributes, text, conversions, zones
 act("toggleExcludeFromBOM", "Exclude from Bill of Materials", "", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select footprints first"); if (!ids) return true; return commitSel(ctx, footprintAttrChanges(ctx.doc, ids, "exclude_from_bom"), "Toggle Attribute"); });
 act("toggleExcludeFromPosFiles", "Exclude from Position Files", "", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select footprints first"); if (!ids) return true; return commitSel(ctx, footprintAttrChanges(ctx.doc, ids, "exclude_from_pos_files"), "Toggle Attribute"); });
 act("toggleExcludeFromSim", "Exclude from Simulation", "", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select footprints first"); if (!ids) return true; return commitSel(ctx, footprintAttrChanges(ctx.doc, ids, "exclude_from_sim"), "Toggle Attribute"); });
 act("toggleDNP", "Do Not Populate", "", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select footprints first"); if (!ids) return true; return commitSel(ctx, footprintAttrChanges(ctx.doc, ids, "dnp"), "Toggle Attribute"); });
 for (const [id, how, label] of [["leftJustify", "left", "Left Justify"], ["centerJustify", "center", "Center Justify"], ["rightJustify", "right", "Right Justify"]])
-  act(id, label, "", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select text first"); if (!ids) return true; return commitSel(ctx, justifyChanges(ctx.doc, ids, how), label.toLowerCase()); });
+  act(id, label, "", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select text first"); if (!ids) return true; return commitSel(ctx, justifyChanges(ctx.doc, ids, how), label); });
 for (const [id, to, label] of [["convertToPoly", "poly", "Create Polygon from Selection"], ["convertToLines", "lines", "Create Lines from Selection"], ["convertToTracks", "tracks", "Create Tracks from Selection"], ["convertToZone", "zone", "Create Zone from Selection"], ["convertToKeepout", "keepout", "Create Rule Area from Selection"]])
   act(id, label, "", (ctx: PcbCtx) => {
     const ids = selectionOrToast(ctx, "Select graphic shapes first"); if (!ids) return true;
@@ -876,8 +1100,30 @@ for (const [id, to, label] of [["convertToPoly", "poly", "Create Polygon from Se
       askText(ctx, "Zone net", "", (name: string | null) => { if (name === null) return; const net = name ? (nets.find((n) => n.name === name) || { code: -1, name }) : { code: 0, name: "" }; commitSel(ctx, convertChanges(ctx.doc, ids, "zone", { layer, net }), "zone from shapes"); }, nets.map((n) => n.name)); return true; }
     return commitSel(ctx, convertChanges(ctx.doc, ids, to), label.toLowerCase());
   });
-for (const [id, how, label] of [["zonePriorityRaise", "raise", "Raise Zone Priority"], ["zonePriorityLower", "lower", "Lower Zone Priority"], ["zonePriorityMoveToTop", "top", "Move Zone Priority to Top"], ["zonePriorityMoveToBottom", "bottom", "Move Zone Priority to Bottom"]])
-  act(id, label, "", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select a zone first"); if (!ids) return true; return commitSel(ctx, zonePriorityChanges(ctx.doc, ids, how), label.toLowerCase()); });
+// CONVERT_TOOL::SegmentToArc: the arc is added beside its source ("Create Arc"); nothing fitting selected does nothing
+act("convertToArc", "Create Arc from Selection", "", (ctx: PcbCtx) => {
+  if (!canEdit(ctx)) return true;
+  const changes = segmentToArcChanges(ctx.doc, Array.from(selectionIds(ctx))); if (!changes.length) return true;
+  ctx.commit(changes, "Create Arc"); ctx.requestRender(); return true;
+}, { tip: "Creates an arc from the selected line segment" });
+// BOARD_EDITOR_CONTROL::ZonePriority*: exactly one selected zone (no rule area, no teardrop); only zones overlapping it
+// matter, and nothing happens without one above / below.  Labels as PCB_ACTIONS names them, commits as the tool does.
+for (const [id, how, label, commit] of [["zonePriorityMoveToTop", "top", "Move to Top", "Move Zone to Top Priority"], ["zonePriorityRaise", "raise", "Raise", "Raise Zone Priority"], ["zonePriorityLower", "lower", "Lower", "Lower Zone Priority"], ["zonePriorityMoveToBottom", "bottom", "Move to Bottom", "Move Zone to Bottom Priority"]])
+  act(id, label, "", (ctx: PcbCtx) => {
+    if (!canEdit(ctx)) return true;
+    const ch = zonePriorityChanges(ctx.doc, selectionUnits(ctx).map((it) => it.id), how); if (ch.length) { ctx.commit(ch, commit); ctx.requestRender(); }
+    return true;
+  }, { enabled: (ctx: PcbCtx) => { const a = zonePriorityAbility(ctx.doc, selectionUnits(ctx).map((it) => it.id)); return how === "top" || how === "raise" ? a.canRaise : a.canLower; } });
+// BOARD_EDITOR_CONTROL::ZoneMerge: the selection is cleared and the merged zone selected; "Merge Zones"
+act("zoneMerge", "Merge Zones", "", (ctx: PcbCtx) => {
+  if (!canEdit(ctx)) return true;
+  const units = selectionUnits(ctx); if (units.length < 2) return true;
+  const r = zoneMergeChanges(ctx.doc, units.map((it) => it.id));
+  applySelection(ctx, []);
+  if (r.error) { ctx.toast(r.error); return true; }
+  if (r.changes.length) { ctx.commit(r.changes, "Merge Zones"); if (r.merged) applySelection(ctx, [r.merged]); }
+  return true;
+});
 /**
  * DRAWING_TOOL::DrawZone with ZONE_MODE::CUTOUT / SIMILAR: getSourceZoneForAction wants exactly one selected zone (with
  * nothing selected, the zone under the cursor); without one the action does nothing.  The zone tool then runs in
@@ -895,19 +1141,43 @@ function zoneModeAction(mode: "cutout" | "similar") {
 }
 act("drawZoneCutout", "Add a Zone Cutout", "Shift+C", zoneModeAction("cutout"), { tip: "Add a cutout to an existing zone or rule area" });
 act("drawSimilarZone", "Add a Similar Zone", "Ctrl+Shift+.", zoneModeAction("similar"), { tip: "Add a zone with the same settings as an existing zone" });
-act("zoneDuplicate", "Duplicate Zone onto Layer…", "", (ctx: PcbCtx) => {
-  const ids = selectionOrToast(ctx, "Select a zone first"); if (!ids) return true; const zones = ids.map((id) => ctx.doc.items.get(id)).filter((it) => it!.kind === "zone"); if (!zones.length) { ctx.toast("No zone selected"); return true; }
-  return openForm({ title: "Duplicate Zone", fields: [{ k: "layer", label: "Layer", type: "select", value: zoneLayers(zones[0]!.node)[0] || "F.Cu", options: copperOf(ctx.doc) }], apply: (v: { layer: string }) => { const out = []; for (const z of zones) { const node = clone(z!.node); const u = K.kid(node, "uuid"); if (u) node.splice(node.indexOf(u), 1); for (const fp of K.kids(node, "filled_polygon")) node.splice(node.indexOf(fp), 1); const l = K.kid(node, "layer"), ls = K.kid(node, "layers"); if (l) l[1] = v.layer; else if (ls) ls.splice(1, ls.length - 1, v.layer); out.push(addedChange(ctx.doc, node, netOf(node))); } commitSel(ctx, out, "duplicate zone"); } });
+// BOARD_EDITOR_CONTROL::ZoneDuplicate: exactly one selected zone; the zone dialog of its kind (copper zone, rule area,
+// non-copper zone) opens with its settings, and on OK the copy takes them ("Duplicate Zone")
+act("zoneDuplicate", "Duplicate Zone onto Layer...", "", (ctx: PcbCtx) => {
+  if (!canEdit(ctx)) return true;
+  const units = selectionUnits(ctx); const zone = units.length === 1 && units[0].kind === "zone" ? units[0] : null; if (!zone) return true;
+  const done = (edited: SNode | null) => { if (!edited) return; const node = zoneDuplicateNode(ctx.doc, zone, edited); ctx.commit([addedChange(ctx.doc, node, netOf(node))], "Duplicate Zone"); ctx.requestRender(); };
+  if (newItemDialogs.zone) newItemDialogs.zone(ctx, clone(zone.node), done); else done(clone(zone.node));
+  return true;
 });
 // PCB_POINT_EDITOR::addCorner / removeCorner on the single selected item, at the cursor
 act("pointEditorAddCorner", "Create Corner", "Ins", (ctx: PcbCtx) => {
   const id = peSingleId(ctx); if (!id || !canAddCorner(ctx.doc.items.get(id)!)) return false;
-  if (!canEdit(ctx)) return true; const ch = addCornerChanges(ctx.doc, id, cursorPoint(ctx)); if (ch.length) ctx.commit(ch, "add corner"); return true;
+  if (!canEdit(ctx)) return true; const ch = addCornerChanges(ctx.doc, id, cursorPoint(ctx)); if (ch.length) ctx.commit(ch, addCornerLabel(ctx.doc.items.get(id))); return true;
 });
 act("pointEditorRemoveCorner", "Remove Corner", "", (ctx: PcbCtx) => {
   const id = peSingleId(ctx); if (!id) return false;
-  if (!canEdit(ctx)) return true; const ch = removeCornerChanges(ctx.doc, id, ctx.cursor || cursorPoint(ctx), handleTol()); if (ch.length) ctx.commit(ch, "remove corner"); return true;
+  if (!canEdit(ctx)) return true; const ch = removeCornerChanges(ctx.doc, id, ctx.cursor || cursorPoint(ctx), handleTol()); if (ch.length) ctx.commit(ch, removeCornerLabel(ctx.doc.items.get(id))); return true;
 });
+// PCB_POINT_EDITOR::chamferCorner: the corner of the selected zone or polygon nearest the cursor is broken in two
+act("pointEditorChamferCorner", "Chamfer Corner", "", (ctx: PcbCtx) => {
+  const id = peSingleId(ctx), it = id ? ctx.doc.items.get(id) : null; if (!it || (it.kind !== "zone" && it.kind !== "gr_poly")) return false;
+  if (!canEdit(ctx)) return true; const ch = chamferCornerChanges(ctx.doc, it.id, ctx.cursor || cursorPoint(ctx)); if (ch.length) ctx.commit(ch, chamferCornerLabel(it)); return true;
+}, { tip: "Chamfer corner" });
+// PCB_POINT_EDITOR::movePoint: WX_PT_ENTRY_DIALOG ("X:", "Y:") on the handle under the cursor; OK moves it there
+function movePointAction(midpoint: boolean) {
+  return (ctx: PcbCtx) => {
+    const at = ctx.cursor || cursorPoint(ctx), hit = ctx.doc ? editHandleAt(ctx.doc, at[0], at[1], handleTol()) : null;
+    if (!hit || /^[em]\d/.test(hit.h.key) !== midpoint) return false;
+    if (!canEdit(ctx)) return true;
+    const t = movePointTitle(hit.h.key), id = hit.it.id, key = hit.h.key;
+    openForm({ title: t.title, fields: [{ k: "x", label: "X:", type: "num", value: r6(hit.h.p[0]), unit: "mm" }, { k: "y", label: "Y:", type: "num", value: r6(hit.h.p[1]), unit: "mm" }],
+      apply: (v: { x: number; y: number }) => { if (!isFinite(v.x) || !isFinite(v.y)) return false; const ch = movePointChanges(ctx.doc, id, key, [v.x, v.y]); if (ch.length) ctx.commit(ch, t.label); return true; } });
+    return true;
+  };
+}
+act("pointEditorMoveCorner", "Move Corner To...", "", movePointAction(false), { tip: "Move the active corner to an exact location" });
+act("pointEditorMoveMidpoint", "Move Midpoint To...", "", movePointAction(true), { tip: "Move the active midpoint to an exact location" });
 // PCB_POINT_EDITOR::changeArcEditMode: the three arc editing modes (check items of the Arc toolbar group's menu) and
 // Cycle Arc Editing Mode (Ctrl+Space, also in the selection menu for one selected arc)
 ARC_EDIT_ACTIONS.forEach((id, m) => {
@@ -954,7 +1224,8 @@ export function unfillChanges(doc: BoardDoc, zones: (KItem | undefined)[]) {
   }
   return out;
 }
-act("zoneUnfill", "Unfill Selected Zone(s)", "", (ctx: PcbCtx) => { if (!canEdit(ctx)) return true; const ids = selectionOrToast(ctx, "Select a zone first"); if (!ids) return true; return commitSel(ctx, unfillChanges(ctx.doc, ids.map((id) => ctx.doc.items.get(id))), "Unfill Zone"); });
+// ZONE_FILLER_TOOL::ZoneUnfill: no zone in the selection is a wxBell, no message
+act("zoneUnfill", "Unfill Selected Zone(s)", "", (ctx: PcbCtx) => { if (!canEdit(ctx)) return true; const ids = Array.from(expandGroups(ctx.doc, selectionIds(ctx))).filter((id) => { const it = ctx.doc.items.get(id); return !!it && it.kind === "zone"; }); if (!ids.length) return true; return commitSel(ctx, unfillChanges(ctx.doc, ids.map((id) => ctx.doc.items.get(id))), "Unfill Zone"); });
 act("zoneUnfillAll", "Unfill All Zones", "Ctrl+B", (ctx: PcbCtx) => { if (!canEdit(ctx)) return true; return commitSel(ctx, unfillChanges(ctx.doc, Array.from(ctx.doc.items.values())), "Unfill All Zones"); });
 // The autorouter is its own bundle (web/domains/pcb/router → dist/autoroute.js); this is its entry in the Route menu.
 act("autoroute", "Autoroute…", "", (ctx: PcbCtx) => { const r = root.PcbAutoRouter; if (!r || !r.open) { ctx.toast("The autorouter is not loaded"); return true; } return r.open(ctx); }, { menu: "Route" });

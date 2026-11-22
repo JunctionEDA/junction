@@ -31,6 +31,8 @@ import { printDialog } from "./print";
 import { importNonKicad } from "./import-nonkicad";
 import { openCalculator } from "../calculator";
 import { setCad } from "./cad-setting";
+import { cycleNetColorMode, cycleRatsnestMode } from "./panels/appearance";
+import { keyName } from "../../../shared/keys";
 import type { AppAction } from "../../../shared/store";
 import type { ActionAnchor, ActionHandler } from "./types";
 // ---- actions (the home menu's entries and the collab items of the editor menus) ----
@@ -87,6 +89,23 @@ export function toggleRenderOpt(key: string, id: string) { E.renderOpts[key] = !
 // Every chrome action the web editor handles, by KiCad action id (or one of ours).  An id missing here
 // that maps to a tool (server/web/domains/pcb/tables.ts TOOL_MAP) activates the tool; anything else is dimmed and
 // explained as desktop-only by the chrome itself.  Handlers get the anchor rect of the clicked control.
+const ZONE_FILL_WARNING_KEY = "kc.dontshow.zoneFillWarning";
+/** PCB_CONTROL::unfilledZoneCheck: people confuse filling zones with the display modes, so showing zone fills with
+ *  an unfilled zone on the board says so for five seconds (with a "Don't show again" link). */
+function unfilledZoneCheck(): void {
+  try { if (localStorage.getItem(ZONE_FILL_WARNING_KEY)) return; } catch { /* no storage: the warning shows */ }
+  const doc = E.kdoc as { items: Map<string, { kind: string; node: unknown[] }> } | null; if (!doc || isSch()) return;
+  let unfilled = false;
+  for (const it of doc.items.values()) {
+    if (it.kind !== "zone" || KiCadCanvas.kid(it.node as never, "keepout") || KiCadCanvas.kid(it.node as never, "filled_polygon")) continue;
+    unfilled = true; break;
+  }
+  if (!unfilled) return;
+  const m = activeModule(), fill = m && m.actions && m.actions.zoneFillAll;
+  toast(`Not all zones are filled. Use Edit > Fill All Zones (${keyName(fill && fill.key ? fill.key : "B")}) if you wish to see all fills.`, 5000,
+    { text: "Don't show again", run: () => { try { localStorage.setItem(ZONE_FILL_WARNING_KEY, "1"); } catch { /* not kept */ } toast("", 1); } });
+}
+
 export const HANDLERS: Record<string, ActionHandler> = {
   selectSetRect: () => { E.selMode = "rect"; setRadio("Selection modes", "selectSetRect"); store.slice("viewport", { selMode: E.selMode }); setTool("select"); },
   selectSetLasso: () => { E.selMode = "lasso"; setRadio("Selection modes", "selectSetLasso"); store.slice("viewport", { selMode: E.selMode }); setTool("select"); },
@@ -111,8 +130,11 @@ export const HANDLERS: Record<string, ActionHandler> = {
   highContrastMode: () => toggleRenderOpt("highContrast", "highContrastMode"),
   padDisplayMode: () => toggleRenderOpt("outlinePads", "padDisplayMode"), viaDisplayMode: () => toggleRenderOpt("outlineVias", "viaDisplayMode"), trackDisplayMode: () => toggleRenderOpt("outlineTracks", "trackDisplayMode"),
   graphicsOutlines: () => toggleRenderOpt("sketchGraphics", "graphicsOutlines"), textOutlines: () => toggleRenderOpt("sketchText", "textOutlines"),
-  zoneDisplayFilled: () => { E.renderOpts.zoneOutline = false; setToggles({ zoneDisplayFilled: true, zoneDisplayOutline: false }); store.slice("viewport", { renderOpts: Object.assign({}, E.renderOpts) }); requestRender(); },
+  zoneDisplayFilled: () => { unfilledZoneCheck(); E.renderOpts.zoneOutline = false; setToggles({ zoneDisplayFilled: true, zoneDisplayOutline: false }); store.slice("viewport", { renderOpts: Object.assign({}, E.renderOpts) }); requestRender(); },
   zoneDisplayOutline: () => { E.renderOpts.zoneOutline = true; setToggles({ zoneDisplayFilled: false, zoneDisplayOutline: true }); store.slice("viewport", { renderOpts: Object.assign({}, E.renderOpts) }); requestRender(); },
+  // PCB_CONTROL::ZoneDisplayMode, zoneDisplayToggle ("Toggle Zone Display"): filled <-> outlines, without the unfilled-zones warning
+  zoneDisplayToggle: () => { const outline = !E.renderOpts.zoneOutline; E.renderOpts.zoneOutline = outline; setToggles({ zoneDisplayFilled: !outline, zoneDisplayOutline: outline }); store.slice("viewport", { renderOpts: Object.assign({}, E.renderOpts) }); requestRender(); },
+  ratsnestModeCycle: () => cycleRatsnestMode(), netColorModeCycle: () => cycleNetColorMode(),
   // on by default (render(): netNames !== false), so the first toggle turns them off
   showNetNames: () => { E.renderOpts.netNames = E.renderOpts.netNames === false; setToggle("showNetNames", E.renderOpts.netNames !== false); store.slice("viewport", { renderOpts: Object.assign({}, E.renderOpts) }); requestRender(); },
   flipBoard: () => toggleRenderOpt("flip", "flipBoard"),

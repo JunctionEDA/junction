@@ -276,7 +276,7 @@ export function startPendingDrag(ctx: PcbCtx, pd: PendingDrag) {
 }
 export function onStagePointerMove(ev: PointerEvent) {
   const ctx = lastCtx; if (!ctx || !isBoardLikeDoc()) return;
-  if (S.pedit) { ev.stopImmediatePropagation(); editHandleMove(ctx, ctx.worldMm(ev)); return; }
+  if (S.pedit) { ev.stopImmediatePropagation(); editHandleMove(ctx, ctx.worldMm(ev), ev); return; }
   if (S.pending) {
     const pd = S.pending;
     // the drag starts past KiCad's drag threshold in screen pixels (gestures.ts DRAG_THRESHOLD_PX)
@@ -294,7 +294,7 @@ export function onStagePointerUp(ev?: PointerEvent | null) {
     const pick = topParentOf(ctx.doc, pd.item.id) ? Array.from(expandGroups(ctx.doc, [pd.item.id])) : [pd.item.id];
     S.sel = new Set(pick); if (ctx.setSelection) ctx.setSelection([]); ctx.requestRender();
   }
-  if (S.pedit) { if (ev) { ev.stopImmediatePropagation(); editHandleMove(ctx, ctx.worldMm(ev)); } editHandleUp(ctx, !!ev && ev.type === "pointerup"); return; }
+  if (S.pedit) { if (ev) { ev.stopImmediatePropagation(); editHandleMove(ctx, ctx.worldMm(ev), ev); } editHandleUp(ctx, !!ev && ev.type === "pointerup"); return; }
   if (S.stickyUp) { S.stickyUp = false; if (ev) { ev.stopImmediatePropagation(); ev.preventDefault(); } return; }   // the release of the click that dropped a Move
   if (S.drag && S.drag.bySelect) { if (ev) dragMove(ctx, ctx.worldMm(ev)); finishDrag(ctx, true, !!(ev && (ev.ctrlKey || ev.metaKey))); }   // Ctrl on release commits a drag in violation
   else if (S.move && !S.move.sticky) finishSelectMove(ctx, true);

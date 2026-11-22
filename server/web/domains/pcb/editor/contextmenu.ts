@@ -89,14 +89,19 @@ function menuCtx(): MenuCtx {
   const routing = !sch && !!p && !!p.route;
   const root = sch ? rootSchematic() : null;
   // PCB_POINT_EDITOR's corner conditions, asked of the module for the one selected item at the cursor
-  const P = (window as unknown as { PcbTools?: { canAddCorner?: (it: unknown) => boolean; canRemoveCorner?: (d: KDoc, id: string, at: number[] | null) => boolean } }).PcbTools;
+  const P = (window as unknown as { PcbTools?: { canAddCorner?: (it: unknown) => boolean; canRemoveCorner?: (d: KDoc, id: string, at: number[] | null) => boolean; handleKeyAt?: (d: KDoc, at: number[] | null) => string | null; snapAllLayersOn?: (ctx: unknown) => boolean } }).PcbTools;
   const one = !sch && items.length === 1 ? items[0] : null;
   // SCH_POINT_EDITOR's, asked of the schematic module for its edited item at the cursor
   const SP = sch ? (CollabTools as unknown as { sch?: { canAddCorner?: (ctx: unknown, at: number[] | null) => boolean; canRemoveCorner?: (ctx: unknown, at: number[] | null) => boolean } }).sch : null;
   const schCorner = (fn?: (ctx: unknown, at: number[] | null) => boolean): boolean => { try { return !!(fn && items.length === 1 && E.kdoc && fn(toolCtx(), (E.lastCursorMm as number[] | null) || null)); } catch (e) { return false; } };
   const canAddCorner = sch ? schCorner(SP ? SP.canAddCorner : undefined) : !!(one && P && P.canAddCorner && P.canAddCorner(one));
   const canRemoveCorner = sch ? schCorner(SP ? SP.canRemoveCorner : undefined) : !!(one && P && P.canRemoveCorner && E.kdoc && P.canRemoveCorner(E.kdoc as KDoc, one.id, (E.lastCursorMm as number[] | null) || null));
+  // PCB_POINT_EDITOR::HasCorner / HasMidpoint (the handle under the cursor) and CanChamferCorner (a polygon or a zone)
+  let handleKey: string | null = null; try { handleKey = one && P && P.handleKeyAt && E.kdoc ? P.handleKeyAt(E.kdoc as KDoc, (E.lastCursorMm as number[] | null) || null) : null; } catch (e) { handleKey = null; }
+  const midHandle = !!handleKey && /^[em]\d/.test(handleKey);
   return {
+    snapAllLayers: (() => { try { return !sch && !!(P && P.snapAllLayersOn && P.snapAllLayersOn(toolCtx())); } catch (e) { return false; } })(),
+    hasCorner: !!handleKey && !midHandle, hasMidpoint: midHandle, canChamferCorner: !!one && (one.kind === "gr_poly" || one.kind === "zone"),
     editor: editor(), kinds, tool: E.tool, drawingLine, routing,
     fpEditor: !sch && !!(E.kdoc && E.kdoc.fpEditor), padEdit: !sch && !!FP.padEdit,
     busy: interactionBusy() || drawingLine || routing || !!draw || (sch && !!s && !!s.carry),
@@ -105,7 +110,7 @@ function menuCtx(): MenuCtx {
     pinAlts: !!(E.selPins.length === 1 && E.kdoc && schPins() && schPins()!.pinAlternates(E.kdoc as KDoc, E.selPins[0])),   // ALT_PIN_FUNCTION_MENU: one pin only
     highlight: !!E.highlightIds, belowRoot: !!root && !topLevelSchematics().some((t) => t.doc === (state as { doc?: unknown }).doc),
     hasLocked: items.some((it) => isLocked(it.node)), hasUnlocked: items.some((it) => !isLocked(it.node)),
-    groupSelected: sch ? schGroupSelected(items) : boardGroupSelected(),
+    groupSelected: sch ? schGroupSelected(items) : boardGroupSelected(), ...boardMenuState(sch),
     inGroup: sch ? !!((CollabTools.sch as unknown as { enteredGroupId?: () => string | null } | undefined)?.enteredGroupId?.()) : !!(CollabTools.pcb && (CollabTools.pcb.state as { enteredGroup?: string | null }).enteredGroup),
     hasItems: !!E.kdoc && E.kdoc.items.size > 0, checks: attributeChecks(items),
     overDrawingSheet: sch && !items.length && overDrawingSheet(),
@@ -194,6 +199,11 @@ function schGroupSelected(items: KItem[]): boolean {
   for (const g of groups) { let all: Set<string>; try { all = new Set(sm.expandGroups(E.kdoc as KDoc, [g.id])); } catch (e) { continue; } if (items.every((it) => all.has(it.id))) return true; }
   return false;
 }
+/** The board module's view of the selection for the Grouping and Zone Priority sub-menus (their update() greys entries). */
+function boardMenuState(sch: boolean): Pick<MenuCtx, "grouping" | "zoneCanRaise" | "zoneCanLower"> {
+  if (sch || !CollabTools.pcb || !CollabTools.pcb.menuState || !E.kdoc) return {};
+  try { return CollabTools.pcb.menuState(toolCtx()); } catch (e) { return {}; }
+}
 /** PCB_SELECTION_TOOL's groupEnterCondition: the selection is one group. */
 function boardGroupSelected(): boolean {
   if (isSch() || !CollabTools.pcb || !CollabTools.pcb.selectedTopGroup) return false;
@@ -238,18 +248,19 @@ function gridRows(c: MenuCtx): CtxItem[] {
   }
   return rows;
 }
-function row(act: string, check: boolean, c: MenuCtx): CtxItem {
+function row(act: string, check: boolean, c: MenuCtx, disabled?: boolean): CtxItem {
   const meta = metaOf(act), r = resolve(act, c);
   const it: CtxItem = { act, label: meta ? meta.label : (act.split("::").pop() as string), icon: meta && meta.icon ? meta.icon : undefined, key: r.key || (meta && meta.key) || undefined };
   if (check) { it.check = true; it.checked = !!c.checks[act]; }
-  if (r.run) it.run = runRow(r.run); else it.why = r.why || DESKTOP;
+  if (disabled) it.why = r.why || " ";   // greyed by the menu's update() (ACTION_MENU::Enable( id, false ))
+  else if (r.run) it.run = runRow(r.run); else it.why = r.why || DESKTOP;
   return it;
 }
 function rows(list: Resolved[], c: MenuCtx): CtxItem[] {
   return list.map((e): CtxItem => {
     if ("sep" in e) return { sep: true };
     if ("menu" in e) return { label: e.menu.title, icon: e.menu.icon, sub: subRows(e.menu, e.items, c) };
-    return row(e.act, e.check, c);
+    return row(e.act, e.check, c, e.disabled);
   });
 }
 /** DIFF_PAIR_MENU's rows, from the board module (pcb-tools.js diffPairMenu). */
@@ -264,6 +275,12 @@ function trackWidthRows(): CtxItem[] {
   const pcb = (CollabTools as unknown as { pcb?: { trackWidthMenu?: (ctx: unknown) => DpRow[] } }).pcb;
   if (!pcb || !pcb.trackWidthMenu) return [];
   return pcb.trackWidthMenu(toolCtx()).map((r): CtxItem => (r.sep ? { sep: true } : { label: r.label, check: true, checked: !!r.checked, run: runRow(() => { if (r.run) r.run(); }) }));
+}
+/** VIA_SIZE_MENU's rows, from the board module (pcb-tools.js viaSizeMenu). */
+function viaSizeRows(): CtxItem[] {
+  const pcb = (CollabTools as unknown as { pcb?: { viaSizeMenu?: (ctx: unknown) => DpRow[] } }).pcb;
+  if (!pcb || !pcb.viaSizeMenu) return [];
+  return pcb.viaSizeMenu(toolCtx()).map((r): CtxItem => (r.sep ? { sep: true } : { label: r.label, check: true, checked: !!r.checked, run: runRow(() => { if (r.run) r.run(); }) }));
 }
 /** The schematic module's pin helpers (sch-tools pins.ts). */
 interface PinRef { id: string; number: string }
@@ -335,7 +352,7 @@ function unfoldRows(): CtxItem[] {
   const c = (E.lastClient as [number, number] | null) || [window.innerWidth / 2, window.innerHeight / 2];
   openPopupMenu(c[0], c[1], unfoldPopup(entries, bus, at, true));
 };
-function subRows(menu: MenuDef, items: Resolved[], c: MenuCtx): CtxItem[] { return menu.dynamic === "unfold" ? unfoldRows() : menu.dynamic === "zoom" ? zoomRows() : menu.dynamic === "grid" ? gridRows(c) : menu.dynamic === "diffpair" ? diffPairRows() : menu.dynamic === "trackwidth" ? trackWidthRows() : menu.dynamic === "pinfunction" ? pinFunctionRows() : menu.dynamic === "pinhelpers" ? pinHelperRows() : rows(items, c); }
+function subRows(menu: MenuDef, items: Resolved[], c: MenuCtx): CtxItem[] { return menu.dynamic === "unfold" ? unfoldRows() : menu.dynamic === "zoom" ? zoomRows() : menu.dynamic === "grid" ? gridRows(c) : menu.dynamic === "diffpair" ? diffPairRows() : menu.dynamic === "trackwidth" ? trackWidthRows() : menu.dynamic === "viasize" ? viaSizeRows() : menu.dynamic === "pinfunction" ? pinFunctionRows() : menu.dynamic === "pinhelpers" ? pinHelperRows() : rows(items, c); }
 
 /** "Symbol R1 (10k)", "Wire", "Track [VCC] on B.Cu, length 0.6400 mm": how KiCad names an item in a disambiguation menu. */
 function describe(it: KItem | string): string {

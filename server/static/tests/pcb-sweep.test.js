@@ -90,7 +90,7 @@ test("Undo / Redo with a move in flight: Undo cancels it (\"Perform undo locally
 test("Paste and Duplicate commit a tentative step (a cancel gives the redo list back); Escape takes the items out", () => {
   const doc = board(); const { ctx, log } = fakeCtx(doc);
   log.clip = P.clipboardText(doc, ["top"], [20, 10]); ctx.cursor = [40, 40];
-  pcb.runAction("paste", ctx); const c = log.commits.at(-1); assert.equal(c.label, "paste"); assert.deepEqual(c.opts, { tentative: true });
+  pcb.runAction("paste", ctx); const c = log.commits.at(-1); assert.equal(c.label, "Paste"); assert.deepEqual(c.opts, { tentative: true });
   assert.ok(P.state.move && P.state.move.placing, "the pasted track follows the cursor");
   pcb.cancel(); const back = log.commits.at(-1); assert.deepEqual([back.opts.amend, back.opts.discard], [true, true], "the cancel discards the tentative step");
   ctx.selection = new Set(["top"]); pcb.runAction("duplicate", ctx); assert.deepEqual(log.commits.at(-1).opts, { tentative: true });

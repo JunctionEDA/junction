@@ -4,7 +4,7 @@
 // (when allowed), values, fields, labels and text as ordinary collab changes.
 import { E, appState, applyView, centerOn, openDocId, pushUndoFor, toolCtx, cloneNode } from "./editor";
 import { KD, checkbox, h, textInput, type DlgApi } from "./dom";
-import { findHits, hitOrder, replaceInNode, str, pushFindHistory, type FindHit, type FindOpts } from "./logic";
+import { findHits, findHighlightIds, findOptionChanged, hitOrder, replaceInNode, str, pushFindHistory, type FindHit, type FindOpts } from "./logic";
 import { sheetList } from "./sch-hierarchy";
 import { comboBox } from "../../../shared/components/kcombo";
 import { projectDocs, readDoc, submitDocOp } from "./project";
@@ -39,6 +39,22 @@ function setStatus(text: string, bad = false, ms = 0): void {
   if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
   if (statusEl) { statusEl.textContent = text; statusEl.style.color = bad ? "var(--err)" : "var(--ink-2)"; }
   if (ms && text) statusTimer = setTimeout(() => { statusTimer = null; if (statusEl) statusEl.textContent = ""; }, ms);
+}
+/** What the open dialog refreshes after a find, a replace or a change of the search (wxUpdateUIEvent / ACTIONS::updateFind). */
+let syncUi: () => void = () => {};
+/** SCH_FIND_REPLACE_TOOL::HasMatch: the current match still matches the search. */
+export function findHasMatch(): boolean { return !!F.query && !!last && last.docId === S.docId && hitsHere().some((x) => keyOf(x) === last!.key); }
+/**
+ * SCH_FIND_REPLACE_TOOL::UpdateFind: while the dialog is open every item of the sheet shown that matches the search
+ * (within the selection for a selection-only search) is brightened; with nothing to look for, or the dialog closed,
+ * the brightening goes.
+ */
+let foundItemHighlighted = false;
+export function updateFind(): void {
+  const ids = findIsOpen() && F.query ? findHighlightIds(hitsHere()) : [];
+  if (!ids.length && !foundItemHighlighted) return;
+  foundItemHighlighted = ids.length > 0;
+  try { toolCtx().setHighlight(ids.length ? new Set(ids) : null); } catch { /* no canvas */ }
 }
 function hitsHere(): FindHit[] { return E.kdoc ? findHits(E.kdoc, F, F.selectionOnly ? new Set<string>(E.selection) : null, resolveLib) : []; }
 
@@ -100,8 +116,8 @@ export async function findNext(reverse = false): Promise<FindHit | null> {
     openDocId(onDoc);
     hit = (await whenDocOpen(onDoc)) ? nextHit(hitsHere(), null, rev) : null;
   }
-  if (!hit) { last = null; setStatus("No matches found.", false, 2000); return null; }
-  last = { docId: S.docId, key: keyOf(hit), x: hit.x, y: hit.y, id: hit.id }; focusHit(hit);
+  if (!hit) { last = null; setStatus("No matches found.", false, 2000); updateFind(); syncUi(); return null; }
+  last = { docId: S.docId, key: keyOf(hit), x: hit.x, y: hit.y, id: hit.id }; focusHit(hit); updateFind(); syncUi();
   if (wrapped) setStatus(searchAll ? "Reached end of schematic." : "Reached end of sheet.", false, 2000); else setStatus("");
   return hit;
 }
@@ -140,6 +156,7 @@ export async function replaceAll(): Promise<void> {
     }
   }
   last = null; setStatus("");   // ReplaceAll shows no status
+  updateFind(); syncUi();
 }
 
 export function openFind(replace: boolean): void {
@@ -148,17 +165,37 @@ export function openFind(replace: boolean): void {
   api = KD().open({ title: replace ? "Find and Replace" : "Find", width: 560, modeless: true, cls: "kd-find", buttons: [],
     build(body, a) {
       a.foot.style.display = "none";
-      const q = textInput(F.query, (v) => { F.query = v; last = null; }, { id: "kd-find-q" });
+      const q = textInput(F.query, (v) => { F.query = v; last = null; changed(); }, { id: "kd-find-q" });
       q.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && !qc.isOpen()) { ev.preventDefault(); run(() => findNext(ev.shiftKey)); } });
       const rw = textInput(F.replacement, (v) => { F.replacement = v; }, { id: "kd-find-r", disabled: ro });
       // m_comboFind / m_comboReplace are wxComboBox with the search history; picking an entry sets the text
       const qc = comboBox(q, () => hist.find), rc = comboBox(rw, () => hist.replace);
-      q.addEventListener("input", () => { F.query = q.value; last = null; });
+      q.addEventListener("input", () => { F.query = q.value; last = null; changed(); });
+      // DIALOG_SCH_FIND::OnReplaceWithEnter: Enter in "Replace with" finds
+      rw.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && !rc.isOpen()) { ev.preventDefault(); run(() => findNext(ev.shiftKey)); } });
       rw.addEventListener("input", () => { F.replacement = rw.value; });
-      q.addEventListener("change", () => { F.query = q.value; last = null; });
+      q.addEventListener("change", () => { F.query = q.value; last = null; changed(); });
       rw.addEventListener("change", () => { F.replacement = rw.value; });
       const run = (fn: () => Promise<unknown>): void => { F.query = q.value; if (replace) F.replacement = rw.value; remember(); qc.setOptions(hist.find); rc.setOptions(hist.replace); void fn(); };
-      const opt = (label: string, key: keyof FindState, id: string) => checkbox(label, !!F[key], (on) => { (F as unknown as Record<string, boolean>)[key] = on; last = null; }, { id });
+      // DIALOG_SCH_FIND::OnOptions / updateFlags: Regular Expression clears Match case and Whole words only (and either
+      // of those clears it); a selection-only search greys "Search the current sheet only", whose own value is kept
+      const boxes: Record<string, HTMLInputElement> = {};
+      const opt = (label: string, key: keyof FindState, id: string) => {
+        const c = checkbox(label, !!F[key], (on) => {
+          Object.assign(F, findOptionChanged(F, key as keyof FindOpts | "currentSheetOnly", on)); last = null;
+          for (const k of ["matchCase", "wholeWord", "regex"]) if (boxes[k]) boxes[k].checked = !!(F as unknown as Record<string, boolean>)[k];
+          changed();
+        }, { id });
+        boxes[key] = c.querySelector("input") as HTMLInputElement; return c;
+      };
+      // OnUpdateReplaceUI / OnUpdateReplaceAllUI, and ACTIONS::updateFind after any change of the search
+      const changed = (): void => { updateFind(); syncUi(); };
+      syncUi = (): void => {
+        const rb = document.getElementById("kd-find-replace") as HTMLButtonElement | null, ra = document.getElementById("kd-find-replaceall") as HTMLButtonElement | null;
+        if (rb) rb.disabled = ro || !q.value || !findHasMatch();
+        if (ra) ra.disabled = ro || !q.value;
+        if (boxes.currentSheetOnly) { boxes.currentSheetOnly.disabled = !!F.selectionOnly; const l = boxes.currentSheetOnly.closest("label") as HTMLElement | null; if (l) l.style.opacity = F.selectionOnly ? ".5" : ""; }
+      };
       const fields = h("div", { class: "kv", style: "margin-bottom:10px" }, h("label", null, "Search for:"), q);
       if (replace) fields.append(h("label", null, "Replace with:"), rw);
       const left = h("div", { style: "flex:1;min-width:0" }, fields,
@@ -178,7 +215,9 @@ export function openFind(replace: boolean): void {
       link.addEventListener("click", (ev) => { ev.preventDefault(); const sp = (E as unknown as { hooks: { showPane?: (n: string, s?: boolean) => void } }).hooks.showPane; if (sp) sp("search", true); a.close(); setTimeout(() => { const b = document.getElementById("searchBox") as HTMLInputElement | null; if (b) b.focus(); }, 50); });
       body.append(h("div", { style: "display:flex;gap:16px" }, left, right), statusEl,
         h("div", { style: "border-top:1px solid var(--line);margin-top:8px;padding-top:6px;text-align:right" }, link));
+      // the dialog is up: ACTIONS::find / findAndReplace run UpdateFind on what is already typed
+      setTimeout(() => { if (findIsOpen()) { updateFind(); syncUi(); } }, 0);
     },
-    cancel() { api = null; statusEl = null; } });
+    cancel() { api = null; statusEl = null; syncUi = () => {}; updateFind(); } });
 }
 export function findIsOpen(): boolean { return !!api && KD().isOpen(); }

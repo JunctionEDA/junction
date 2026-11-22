@@ -41,7 +41,7 @@ export const S = {
   padClearance: true,                     // pcb_display.pad_clearance (Show pad clearance), on by default
   trackClearance: 2,                      // pcb_display.track_clearance_mode (Preferences ▸ PCB Editor ▸ Display Options), SHOW_WITH_VIA_WHILE_ROUTING
   showRatsnest: true, localRatsnest: false, hiddenNets: new Set(), rats: null, ratsDirty: true,   // ratsnest display (KiCad shows it by default)
-  settings: null, settingsSrc: null, settingsCache: null, highlightNet: null,
+  settings: null, settingsSrc: null, settingsCache: null, highlightNet: null, hlShown: [], hlCurrent: [], hlLast: [],
   docVer: 0, rworld: null, nlc: null, violations: null,   // the router's caches (per document change) and the obstacles shown in violation
   tune: { pattern: null, picker: null, cursor: null },   // the length tuner: the pattern being placed, the track under the cursor
 } as unknown as PcbState;   // rs, tuneSettings and the rest are set by the later sections' own top-level statements as the script loads

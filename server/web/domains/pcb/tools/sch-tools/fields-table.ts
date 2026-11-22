@@ -12,7 +12,11 @@ export const refCmp = (a: unknown, b: unknown) => { const ma = str(a).match(/^(.
 /** A row of the fields table: a symbol and its field values by name. */
 export interface FieldsRow { id: string; ref: string; values: Record<string, string> }
 /** An edit of the table: new field values (by name) for one symbol. */
-export interface FieldsEdit { id: string; values?: Record<string, unknown> }
+export interface FieldsEdit { id: string; values?: Record<string, unknown>;
+  /** fields the table removed from the symbol (Remove Field, Clear Cell, the old name of a renamed field) */
+  remove?: string[];
+  /** fields the table holds for the symbol even when empty (the new name of a renamed field) */
+  present?: string[] }
 /** FieldNamesAreDuplicates (template_fieldnames.cpp): the same name, or a case variant of a mandatory field's name. */
 function fieldNamesAreDuplicates(a: string, b: string): boolean {
   if (a === b) return true;
@@ -36,10 +40,18 @@ export function fieldsTableChanges(doc: KDoc, edits: FieldsEdit[] | null | undef
   for (const e of edits || []) {
     const it = doc.items.get(e.id); if (!it || it.kind !== "symbol") continue;
     const n = deep(it.node); let changed = false;
+    // SYMBOL_FIELDS_EDITOR_GRID_DATA_MODEL::ApplyData: a field the data store marks removed leaves the symbol, unless
+    // it is mandatory or private
+    for (const name of e.remove || []) {
+      if (["Reference", "Value", "Footprint", "Datasheet", "Description"].includes(name)) continue;
+      const i = n.findIndex((q) => Array.isArray(q) && q[0] === "property" && str(q[1]) === name && !(q[1] === "private" && typeof q[3] === "string"));
+      if (i >= 0) { n.splice(i, 1); changed = true; }
+    }
     for (const [name, text] of Object.entries(e.values || {})) {
+      if ((e.remove || []).includes(name)) continue;
       let p = kids(n, "property").find((q) => str(q[1]) === name);
-      if (!p) { if (str(text) === "") continue; p = ["property", name, "", ["at", ...atOf(n).slice(0, 2), 0], ["hide", "yes"], ["effects", fontNode(1.27)]]; insertField(n, p); }
-      if (str(p[2]) === str(text)) continue;
+      if (!p) { if (str(text) === "" && !(e.present || []).includes(name)) continue; p = ["property", name, "", ["at", ...atOf(n).slice(0, 2), 0], ["hide", "yes"], ["effects", fontNode(1.27)]]; insertField(n, p); changed = true; }
+      if (str(p[2]) === str(text)) { continue; }
       if (name === "Reference") setReference(n, str(text)); else p[2] = str(text);
       changed = true;
     }

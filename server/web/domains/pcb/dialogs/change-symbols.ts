@@ -16,6 +16,7 @@ import { projectDocs, readDoc, submitDocOp } from "./project";
 import * as L from "./change-symbols-logic";
 import * as core from "../library/core";
 import { fetchItem } from "../library/sources";
+import { readPinMaps, writePinMaps } from "./sym-props-logic";
 
 type Mode = "update" | "change";
 interface LibApi { fetch(kind: "symbol", id: string): Promise<{ symbol?: string; libId?: string }>; openChooser(kind: "symbol", opts?: { title?: string; filter?: string; browser?: boolean }): Promise<{ libId?: string } | null> }
@@ -83,10 +84,13 @@ export function openChangeSymbols(mode: Mode): void {
   /** updateFieldsList: the mandatory fields, then every other field name of the matching symbols and their library symbols. */
   const refreshFields = async (): Promise<void> => {
     if (!fieldsHost) return;
-    const here = matching([{ doc, current: true }]);
+    // frame->Schematic().Hierarchy(): the matching symbols of every sheet; in update mode the fields of their current
+    // library symbols (GetLibSymbol( symbol->GetLibId() ), flattened), so a field new in the library is listed
+    const here = matching(await allSheets());
     const libs: SNode[] = [];
     if (C) { if (/^[^:]+:.+$/.test(newId)) { const l = await libSymbol(newId); if (l) libs.push(l); } }
-    else for (const it of here) { const l = doc.lib.get(L.libIdOf(it.node)); if (l) libs.push(l); }
+    else for (const id of new Set(here.map((it) => L.libIdOf(it.node)))) { const l = await libSymbol(id); if (l) libs.push(l); }
+    if (!fieldsHost) return;
     const names = L.MANDATORY.concat(L.fieldNames(here.map((it) => it.node), libs));
     const before = new Map<string, boolean>(); for (const [k, cb] of checks) before.set(k, cb.checked);
     const allChecked = Array.from(checks).every(([k, cb]) => cb.checked || k === "Reference" || k === "Value");
@@ -99,7 +103,8 @@ export function openChangeSymbols(mode: Mode): void {
   };
   const radio = (value: L.Scope, label: string, input?: HTMLElement) => {
     const r = h("input", { type: "radio", name: "kd-chs-scope", value, checked: scope === value, id: "kd-chs-" + value });
-    r.addEventListener("change", () => { if (r.checked) { scope = value; void refreshFields(); } });
+    // onMatchByReference / onMatchByValue / onMatchById: the row's text box takes the focus
+    r.addEventListener("change", () => { if (r.checked) { scope = value; void refreshFields(); const box = input ? (input.matches("input") ? input : input.querySelector("input")) as HTMLInputElement | null : null; if (box) box.focus(); } });
     return [h("label", { class: "kd-chk", style: "display:flex;gap:6px;align-items:center;white-space:nowrap" }, r, label), input || h("span")];
   };
   // m_matchIdBrowserButton / m_newIdBrowserButton: STD_BITMAP_BUTTONs with BITMAPS::small_library (dialog_change_symbols.cpp:83-84)
@@ -130,10 +135,15 @@ export function openChangeSymbols(mode: Mode): void {
     for (const [it, sheet] of items) {
       const oldId = L.libIdOf(it.node), target = C ? newId.trim() : oldId, refList = L.symbolRefs(it.node);
       if (!/^[^:]+:.+$/.test(target)) { say(L.reportLine(mode, refList, oldId, target) + ": *** symbol lib id not valid ***", "error"); continue; }
-      const lib = await libSymbol(target);
+      let lib = await libSymbol(target);
       if (!lib) { say(L.reportLine(mode, refList, oldId, target) + ": *** symbol not found ***", "error"); continue; }
       const unitN = KiCadCanvas.kid(it.node, "unit") as SNode | null; const unit = unitN ? KiCadCanvas.num(unitN[1], 1) : 1;
       if (L.libUnits(lib) < unit) { say(L.reportLine(mode, refList, oldId, target) + ": *** new symbol has too few units ***", "error"); continue; }
+      // keepPinMaps: the library copy's pin maps and associated footprints survive SetLibSymbol unless they are reset
+      if (!o.resetPinMaps) {
+        const ln = KiCadCanvas.kid(it.node, "lib_name") as SNode | null, was = (ln && sheet.doc.lib.get(String(ln[1]))) || sheet.doc.lib.get(oldId) || null;
+        if (was) { lib = (KiCadCanvas.cloneNode as (n: SNode) => SNode)(lib); writePinMaps(lib, readPinMaps(was)); }
+      }
       let node = L.updateSymbolNode((KiCadCanvas.cloneNode as (n: SNode) => SNode)(it.node), lib, target, o, refs, () => KiCadCanvas.newUuid());
       // AutoplaceFields when positions were reset and the symbol's fields are autoplaced
       if (o.resetPositions && KiCadCanvas.kid(node, "fields_autoplaced")) {
