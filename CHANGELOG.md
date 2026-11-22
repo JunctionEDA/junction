@@ -4,6 +4,38 @@ Releases of Junction, which was called KiCad Collaborative up to 1.0.9. The
 version here is the product version (`packaging/VERSION`), not the KiCad
 version it is based on.
 
+## 2.2.2 (2026-11-22)
+
+### Desktop
+- Choose Symbol finds vendor parts. Type an LCSC number (C1550762), a
+  manufacturer part number or words, and the LCSC, Mouser and DigiKey parts
+  that match are listed under the libraries, as in the web editor. Pick one to
+  see its symbol; placing it keeps the symbol and its footprint in the
+  project (`collab-libs/LCSC.kicad_sym` and `LCSC.pretty`, added to the
+  project's library tables) with its LCSC, MPN and Manufacturer fields, so
+  Update PCB finds the footprint. Needs signing in to Junction.
+- The unconnected-pin circle goes away as soon as a wire reaches the pin, and
+  comes back as soon as the wire is removed or undone, on every symbol
+  including power symbols. Before, the old circle stayed until the symbol was
+  selected (the same bug upstream KiCad fixed on 2026-11-20), and edits from
+  collaborators never repainted it at all.
+- About and Help say Junction: Help, About Junction; the About tab describes
+  Junction, based on KiCad 10 (KiCad's credits are kept), with links to
+  junctioneda.com and the source on GitHub. Report Bug opens Junction's issue
+  tracker, and KiCad's Donate entries are gone.
+- File, Start Collaboration Session is now **Add Collaborators...**: on a
+  project that is not shared yet it puts it online, on a shared one it copies
+  an invite link. Copy Share Link is now Copy Invite Link. The web editor's
+  menus say the same.
+
+### Downloads
+
+| Platform | File | Notes |
+|---|---|---|
+| macOS (Apple Silicon, macOS 15+) | `Junction-2.2.2-macos.dmg` | Ad-hoc signed: first launch is right-click, Open. Replace the old app in Applications. |
+| Windows x64 | `Junction-2.2.2-windows-x64.exe` | Installer; upgrades earlier versions in place. |
+| Linux x64 (Ubuntu 24.04 LTS) | `Junction-2.2.2-linux-x64.tar.gz` | Extract anywhere, install the packages listed in `usr/share/junction/ubuntu-packages.txt` (`sudo apt install $(cat usr/share/junction/ubuntu-packages.txt)`), run `usr/bin/junction`. |
+
 ## 2.2.1 (2026-11-17)
 
 ### Import from another EDA
