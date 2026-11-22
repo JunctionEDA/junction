@@ -135,15 +135,15 @@ function deleteAll(): void {
 /** Entries with behaviour of their own.  A function returns the runner, or a string saying why the row is dimmed. */
 const SPECIAL: Record<string, (c: MenuCtx) => Run | string> = {
   "ACTIONS::cancelInteractive": () => escape,
-  "ACTIONS::finishInteractive": (c) => (c.drawingLine || c.routing || c.canUndoPoint || (c.editor === "sch" && (c.tool === "arc" || c.tool === "bezier")) || (c.editor === "pcb" && (c.tool === "garc" || c.tool === "gcurve")) ? moduleKey("Enter") : "nothing is being drawn"),
+  "ACTIONS::finishInteractive": (c) => (c.drawingLine || c.routing || c.canUndoPoint || (c.editor === "sch" && (c.tool === "arc" || c.tool === "bezier")) || (c.editor === "pcb" && (c.tool === "garc" || c.tool === "gcurve")) ? moduleKey("End") : "nothing is being drawn"),
   "SCH_ACTIONS::undoLastSegment": (c) => (schState()?.wire ? moduleKey("Backspace") : c.canUndoPoint ? moduleKey("Backspace") : "no segment to take back"),
   "ACTIONS::deleteLastPoint": () => moduleKey("Backspace"),
   "SCH_ACTIONS::switchSegmentPosture": () => (schState()?.wire ? moduleKey("/") : "no wire is being drawn"),
   "ACT_SwitchPosture": (c) => (c.routing ? moduleKey("/") : "no track is being routed"),
   "ACT_PlaceThroughVia": (c) => (c.routing ? moduleKey("v") : "no track is being routed"),
   "PCB_ACTIONS::routerUndoLastSegment": (c) => (c.routing ? moduleKey("Backspace") : "no track is being routed"),
-  "SCH_ACTIONS::closeOutline": () => moduleKey("Enter"),
-  "PCB_ACTIONS::closeOutline": () => moduleKey("Enter"),
+  "SCH_ACTIONS::closeOutline": () => moduleKey("End"),
+  "PCB_ACTIONS::closeOutline": () => moduleKey("End"),
   "SCH_ACTIONS::properties": () => (window.KDialogs ? openProperties : NOT_YET),
   "PCB_ACTIONS::properties": () => (window.KDialogs ? openProperties : NOT_YET),
   "ACTIONS::selectAll": () => () => { clearAllSelection(false); selectAll(); requestRender(); },

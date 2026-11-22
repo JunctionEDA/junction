@@ -1,3 +1,4 @@
+import { applyAxisLock, axisLockKey, keyboardCursorKey, newAxisLock } from "../axis-lock";
 import type { Anchor, LineEnd, PartialLine, Rider, SchCtx, SchDrag, Pt } from "./types";
 import { symbolLibId } from "./autoplace";
 import { autoRotateChanges } from "./autorotate";
@@ -249,7 +250,10 @@ export function restorePristine(doc: KDoc, d: SchDrag) {
 }
 export function moveDrag(ctx: SchCtx, mm: Pt) {
   const d = S.drag; if (!d) return;
-  const t = ctx.snap([mm[0] - d.grab[0], mm[1] - d.grab[1]]);
+  // an arrow key locks the move to its axis, for the mouse too, until the opposite key (tools/axis-lock.ts)
+  const key = keyboardCursorKey(); if (key) d.axis = axisLockKey(d.axis || newAxisLock(), key);
+  const prev = [d.anchor0[0] + d.last[0], d.anchor0[1] + d.last[1]];
+  const t = applyAxisLock(d.axis ? d.axis.lock : "", ctx.snap([mm[0] - d.grab[0], mm[1] - d.grab[1]]), prev);
   const dx = r4(t[0] - d.anchor0[0]), dy = r4(t[1] - d.anchor0[1]);
   if (dx === d.last[0] && dy === d.last[1]) return;
   d.last = [dx, dy]; d.moved = true;

@@ -10,7 +10,7 @@
 //   Help     List Hotkeys, About (help-dialogs.ts)
 import { leaveSheet } from "./schnets";
 import type { ActionHandler } from "./types";
-import { cursorStep, panStep } from "./crosshair";
+import { cursorClick, cursorStep, panStep } from "./crosshair";
 import { gridIndex, gridList, navigateDocs, openDoc, rootSchematic, setActiveLayer, setGridIndex } from "./doc";
 import { HANDLERS, toggleRenderOpt } from "./actions";
 import { setToggle, state, store } from "./appstore";
@@ -19,6 +19,8 @@ import { setCrosshair, setUnitsAction, toggleAlwaysShowCursor } from "./panes";
 import { cycleInactiveMode, layerAlphaStep, toggleInactiveMode } from "./panels/appearance";
 import { openSelectionProperties } from "./pointer";
 import { E } from "./state";
+import { KICAD_BASE_VERSION } from "../canvas/version";
+import { PRODUCT_VERSION } from "../generated/product-version";
 import { openExportNetlist } from "./export-netlist";
 import { startMove } from "./gestures";
 import { schKey } from "./tools";
@@ -120,6 +122,16 @@ function stepLayer(dir: number): void {
 function copperLayer(name: string): void { const cu = (store.get().document.copperLayers || []) as LayerRow[]; if (cu.some((l) => l.name === name)) setActiveLayer(name); }
 
 
+const DOCS = "https://go.kicad.org/docs/", PRODUCT_REPO = "https://github.com/JunctionEDA/junction";
+/** GetMajorMinorVersion: "10.99" of the KiCad this editor is built on. */
+const docsVersion = (): string => KICAD_BASE_VERSION.split(".").slice(0, 2).join(".");
+/** GetVersionInfoData's first lines, as the bug report's body carries them. */
+function versionInfo(): string {
+  const nav = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  return `Application: Junction ${isSch() ? "Schematic Editor" : "PCB Editor"} (web)\nVersion: ${PRODUCT_VERSION}, based on KiCad ${KICAD_BASE_VERSION}\nBrowser: ${nav}`;
+}
+function openUrl(url: string): void { window.open(url, "_blank", "noopener"); }
+
 export const MENU_HANDLERS: Record<string, ActionHandler> = {
   saveCopy: () => saveDocCopy(), saveCurrSheetCopyAs: () => saveDocCopy(),
   exportNetlist: () => openExportNetlist(), drawSheetOnClipboard: () => drawingToClipboard(),
@@ -128,6 +140,16 @@ export const MENU_HANDLERS: Record<string, ActionHandler> = {
   panUp: () => panStep(0, 1), panDown: () => panStep(0, -1), panLeft: () => panStep(1, 0), panRight: () => panStep(-1, 0),
   cursorUp: () => cursorStep(0, -1, 1), cursorDown: () => cursorStep(0, 1, 1), cursorLeft: () => cursorStep(-1, 0, 1), cursorRight: () => cursorStep(1, 0, 1),
   cursorUpFast: () => cursorStep(0, -1, 10), cursorDownFast: () => cursorStep(0, 1, 10), cursorLeftFast: () => cursorStep(-1, 0, 10), cursorRightFast: () => cursorStep(1, 0, 10),
+  // Enter / the Double-click action: the mouse button at the cursor (COMMON_TOOLS::CursorControl).  End is
+  // ACTIONS::finishInteractive first, which the tools take themselves (a wire, a shape, a route): when none is in
+  // progress KiCad's tools ignore it, so the key does nothing here either.
+  cursorClick: () => cursorClick(1), cursorDblClick: () => cursorClick(2), finishInteractive: () => {},
+  // COMMON_CONTROL::ShowHelp / GetInvolved / ReportBug: the online manual of this editor (help_name), Getting Started,
+  // the source repository and a new issue carrying the version, each in a new browser tab as wxLaunchDefaultBrowser
+  help: () => openUrl(`${DOCS}${docsVersion()}/en/${isSch() ? "eeschema" : "pcbnew"}/`),
+  gettingStarted: () => openUrl(`${DOCS}${docsVersion()}/en/getting_started_in_kicad/`),
+  getInvolved: () => openUrl(PRODUCT_REPO),
+  reportBug: () => openUrl(`${PRODUCT_REPO}/issues/new?body=${encodeURIComponent("```\n" + versionInfo() + "\n```")}`),
   gridNext: () => stepGrid(1), gridPrev: () => stepGrid(-1),
   millimetersUnits: () => setUnits("mm"), inchesUnits: () => setUnits("in"), milsUnits: () => setUnits("mil"), toggleUnits,
   resetLocalCoords,

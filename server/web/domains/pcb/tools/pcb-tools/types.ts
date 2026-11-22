@@ -307,6 +307,8 @@ export interface RefImage { base64: string; info: import("./images").ImageInfo; 
 
 /** S.move: a select-tool move (EDIT_TOOL::doMoveSelection) of footprints and other items. */
 export interface SelectMove {
+  /** the arrow keys' axis lock (tools/axis-lock.ts) */
+  axis?: import("../axis-lock").AxisLockState;
   ids: string[]; start: Pt; orig: Map<string, SNode>; ends: { id: string; key: string }[]; last: Pt; moved: boolean;
   sticky?: boolean; placing?: string[] | null; restore?: { id: string; node: SNode }[] | null; hover?: boolean; skip?: Set<string>; conns?: { l: TrackLine; vertex: number }[];
   /** the nodes as they were before a turn / flip / mirror during the move, and whether one happened */

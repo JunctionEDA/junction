@@ -359,7 +359,12 @@ export const pcb = {
       if (!isTuneTool(S.modTool) || ev.ctrlKey || ev.metaKey || ev.altKey) return false;
       return runAction(({ 1: "spacingIncrease", 2: "spacingDecrease", 3: "amplIncrease", 4: "amplDecrease" } as Record<string, string>)[k], ctx);
     case "Tab": return S.moveSeq ? runAction("skip", ctx) : false;   // PCB_ACTIONS::skip while moving individually
-    case "End": if (S.route) { if (editing()) endRoute(ctx, true); return true; } return false;
+    // ACTIONS::finishInteractive: the route, or the shape being drawn, ends where it is
+    case "End":
+      if (S.route) { if (editing()) endRoute(ctx, true); return true; }
+      if (S.draw && S.draw.shape === "garc") { finishArc(ctx, editing); return true; }
+      if (S.draw) { if (POLY_TOOLS.has(S.draw.shape)) { if (editing()) finishPoly(ctx); } else { S.draw = null; ctx.requestRender(); } return true; }
+      return false;
     case "u": case "U": return expandSelection(ctx) || (selectionIds(ctx).size ? runAction("selectConnection", ctx) : false);   // app.js's selection goes through the action
     case "w": case "W": if (editing()) cycleWidth(ctx, shift ? -1 : 1); return true;
     // the non-tool commands on KiCad's hotkeys (Ctrl / Alt chords arrive re-posted from the capture handler)
@@ -379,10 +384,10 @@ export const pcb = {
     case "~": return runAction("clearHighlight", ctx);
     case "'": return runAction("viaSizeInc", ctx);
     case "\\": return runAction("viaSizeDec", ctx);
-    case "Enter":   // ACTIONS::cursorClick: a click where the cursor is (it fixes the head and routing goes on)
+    // ACTIONS::cursorClick: a click where the cursor is (it fixes the head and routing goes on; anything else, a shape
+    // being drawn among them, takes the editor's click at the cursor)
+    case "Enter":
       if (S.route) { if (editing()) { const rt = S.route; const hv = S.hover || { x: rt.cursor[0], y: rt.cursor[1], snap: null }; routeClick(ctx, hv, [hv.x, hv.y], { enter: true }); } return true; }
-      if (S.draw && S.draw.shape === "garc") { finishArc(ctx, editing); return true; }
-      if (S.draw) { if (POLY_TOOLS.has(S.draw.shape)) { if (editing()) finishPoly(ctx); } else { S.draw = null; ctx.requestRender(); } return true; }
       if (S.drag) { if (editing()) finishDrag(ctx, true, false); return true; }
       return false;
     // @ts-expect-error -- TS7029: the fall-through to "Delete" below is intended

@@ -198,7 +198,7 @@ export const MODULE_DUPLICATES: Record<Editor, string[]> = {
     // context menus only (board_editor_control.cpp ZONE_CONTEXT_MENU, the selection tool's menu, EDIT_TOOL's menu)
     "getAndPlace", "copyWithReference", "drawZoneCutout", "drawSimilarZone",
     // ROUTER_TOOL's context menu (router_tool.cpp:700-708) and the selection tool's (unrouteSegment)
-    "routerAttemptFinish", "routerContinueFromEnd", "routerRouteSelected", "routerRouteSelectedFromEnd", "routerAutorouteSelected", "unrouteSegment",
+    "routerAttemptFinish", "routerContinueFromEnd", "routerRouteSelected", "routerRouteSelectedFromEnd", "routerAutorouteSelected", "routerOptimizeSelected", "unrouteSegment",
     // PCB_CONTROL's hotkey-only cycles (Shift+V, Shift+S) and the two snap modes they flip between
     "layerPairPresetsCycle", "magneticSnapToggle", "magneticSnapActiveLayer", "magneticSnapAllLayers",
     "duplicateIncrement",   // Duplicate and Increment: a hotkey (Ctrl+Shift+D) and the selection menu, in no menu bar

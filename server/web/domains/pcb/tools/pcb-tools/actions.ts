@@ -72,6 +72,7 @@ import { flipFieldChange, requestField, rotateFieldChange } from "./field-edit";
 import { diffPairMarkers, matchedLengthMarkers } from "./dru";
 import { sourceZone } from "./zone-modes";
 import { routeSelected, unrouteSegment } from "./route-selected";
+import { optimizeSelected } from "./optimize-selected";
 import { cycleLayerPairPresets, setSnapMode } from "./snap-pairs";
 import { copyWithReference, interactiveOffset, moveIndividually, moveWithReference, skipMoveItem } from "./ref-move";
 
@@ -581,6 +582,7 @@ act("routerContinueFromEnd", "Route From Other End", "Ctrl+E", (ctx: PcbCtx) => 
 act("routerRouteSelected", "Route Selected", "Shift+X", (ctx: PcbCtx) => { if (!canEdit(ctx)) return true; routeSelected(ctx, "manual"); return true; }, { menu: false, tip: "Sequentially route selected items from ratsnest anchor" });
 act("routerRouteSelectedFromEnd", "Route Selected From Other End", "Shift+E", (ctx: PcbCtx) => { if (!canEdit(ctx)) return true; routeSelected(ctx, "otherEnd"); return true; }, { menu: false, tip: "Sequentially route selected items to ratsnest anchor" });
 act("routerAutorouteSelected", "Attempt Finish Selected (Autoroute)", "Shift+F", (ctx: PcbCtx) => { if (!canEdit(ctx)) return true; routeSelected(ctx, "auto"); return true; }, { menu: false, tip: "Sequentially trigger routing and attempt to finish all selected items" });
+act("routerOptimizeSelected", "Optimize Selected Track(s)", "Shift+T", (ctx: PcbCtx) => { if (S.route || S.draw || S.move || !canEdit(ctx)) return false; return optimizeSelected(ctx); }, { menu: false, tip: "Simplify selected routed track(s)." });
 act("unrouteSegment", "Unroute Segment", "Backspace", (ctx: PcbCtx) => (S.route || S.draw || S.move || !canEdit(ctx) ? false : unrouteSegment(ctx)), { menu: false, tip: "Unroutes the selected track segment and selects the connected tracks" });
 // PCB_CONTROL::CycleLayerPresets and SnapMode (global hotkeys, no menu entry in pcbnew)
 act("layerPairPresetsCycle", "Cycle Layer Pair Presets", "Shift+V", (ctx: PcbCtx) => { cycleLayerPairPresets(ctx); return true; }, { menu: false, tip: "Cycle between preset layer pairs" });

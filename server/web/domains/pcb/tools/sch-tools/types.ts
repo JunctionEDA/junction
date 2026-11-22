@@ -96,6 +96,8 @@ export interface SchDrag {
   mapPt?: (p: Pt) => Pt;
   /** the moved items' connection points before the first turn (the cleanup looks there too) */
   touched0?: Pt[];
+  /** the arrow keys' axis lock (tools/axis-lock.ts) */
+  axis?: import("../axis-lock").AxisLockState;
 }
 /** S.wire: the wire / bus / line being drawn. */
 export interface SchWire { kind: string; segs: Pt[][]; cur: Pt; quitOnDraw: boolean; stroke: SNode | null }

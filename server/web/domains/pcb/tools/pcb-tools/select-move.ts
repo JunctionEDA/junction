@@ -1,4 +1,5 @@
 // pcb-tools/select-move.ts — the select tool's move (EDIT_TOOL::doMoveSelection) and the stage's pointer handlers.
+import { applyAxisLock, axisLockKey, keyboardCursorKey, newAxisLock } from "../axis-lock";
 import type { BoardDoc, Obstacle, PadInfo, PcbChange, PcbCtx, PendingDrag, Pt, SelectMove } from "./types";
 
 /** Where the obstacles a component drag hit were first met. */
@@ -88,7 +89,10 @@ export function selectMoveTo(ctx: PcbCtx, mm: Pt, mods?: SelectMove["mods"]) {
   const sn = snapCursor(ctx, [mm[0], mm[1]], m.skip || new Set(m.orig.keys()), mods || m.mods, dirs.length ? { origin: m.start, dirs } : null); m.snapAt = sn.anchor;
   const guide = sn.guide || null; if (!sameGuide(m.guide, guide)) { m.guide = guide; ctx.requestRender(); }
   if (S.moveSeq && S.popup) S.popup.at = [mm[0], mm[1]];   // Move Individually's popup stays by the cursor
-  const sN = sn.p; const dx = r6(sN[0] - m.start[0]), dy = r6(sN[1] - m.start[1]);
+  // an arrow key locks the move to its axis, for the mouse too, until the opposite key (tools/axis-lock.ts)
+  const key = keyboardCursorKey(); if (key) m.axis = axisLockKey(m.axis || newAxisLock(), key);
+  const sN = applyAxisLock(m.axis ? m.axis.lock : "", sn.p, [m.start[0] + m.last[0], m.start[1] + m.last[1]]);
+  const dx = r6(sN[0] - m.start[0]), dy = r6(sN[1] - m.start[1]);
   if (dx === m.last[0] && dy === m.last[1]) return;
   m.last = [dx, dy]; m.moved = true;
   if (m.gen) { genMoveStep(ctx, dx, dy); return; }

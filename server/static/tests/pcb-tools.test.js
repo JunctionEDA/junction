@@ -433,9 +433,9 @@ test("module: arc modes: Start, End, Midpoint / Start, End, Center (/ = major ar
   // Cycle Arc Drawing Mode (Alt+/): Tangent -> Start, Direction, End -> Center, Start, End
   assert.equal(pcb.onKey("/", ev({ altKey: true }), ctx), true); assert.equal(P.arcDrawMode(), 4);
   pcb.actions.cycleArcDrawMode.run(ctx); assert.equal(P.arcDrawMode(), 0);
-  // Enter keeps the arc drawn so far and ends the tool
+  // End (finishInteractive) keeps the arc drawn so far and ends the tool
   pcb.actions.drawArcStartEndMid.run(ctx); clickAt(ctx, [10, 90]); clickAt(ctx, [20, 90]); pcb.onPointerMove(ev(), [15, 95], ctx);
-  const n = log.commits.length; pcb.onKey("Enter", ev(), ctx); assert.equal(log.commits.length, n + 1); assert.equal(log.tool, "select");
+  const n = log.commits.length; pcb.onKey("End", ev(), ctx); assert.equal(log.commits.length, n + 1); assert.equal(log.tool, "select");
 });
 
 test("arc construction (KIGEOM::ArcFrom…) and tangent seeds (ArcTangentSeedAt) in internal units", () => {
@@ -455,7 +455,7 @@ test("arc construction (KIGEOM::ArcFrom…) and tangent seeds (ArcTangentSeedAt)
   const s = P.arcTangentSeedNear(arc, [-9e6, 0]); assert.deepEqual(s.start, [-10e6, 0]); assert.ok(near(s.dir[1], -1) && near(s.dir[0], 0), JSON.stringify(s.dir));
 });
 
-test("module: graphic polygon (Ctrl+Shift+P) closes on the first corner or Enter; fewer than three corners is refused", () => {
+test("module: graphic polygon (Ctrl+Shift+P) closes on the first corner or End; fewer than three corners is refused", () => {
   const doc = fixture(); const { ctx, log } = fakeCtx(doc); pcb.onDocChanged(ctx);
   assert.equal(pcb.onKey("Polygon", ev(), ctx), true); assert.equal(log.tool, "gpoly");
   for (const p of [[10, 10], [20, 10], [20, 20], [10, 20]]) pcb.onPointerDown(ev(), p, ctx);
@@ -469,10 +469,10 @@ test("module: graphic polygon (Ctrl+Shift+P) closes on the first corner or Enter
   const it = doc.items.get(c.changes[0].id); assert.equal(it.kind, "gr_poly"); assert.equal(it.geom[0].t, "poly"); assert.equal(it.geom[0].close, true); assert.equal(it.geom[0].fill, null);
   assert.equal(P.state.draw, null);
   pcb.onPointerDown(ev(), [30, 30], ctx); pcb.onPointerDown(ev(), [40, 30], ctx); pcb.onPointerDown(ev(), [40, 40], ctx);
-  assert.equal(pcb.onKey("Enter", ev(), ctx), true);
-  c = log.commits.at(-1); assert.equal(K.ptsOf(K.kid(K.parse(c.changes[0].sexpr), "gr_poly")).length, 3, "Enter closes too");
+  assert.equal(pcb.onKey("End", ev(), ctx), true);
+  c = log.commits.at(-1); assert.equal(K.ptsOf(K.kid(K.parse(c.changes[0].sexpr), "gr_poly")).length, 3, "End closes too");
   const n = log.commits.length;
-  pcb.onPointerDown(ev(), [50, 50], ctx); pcb.onPointerDown(ev(), [60, 50], ctx); assert.equal(pcb.onKey("Enter", ev(), ctx), true);
+  pcb.onPointerDown(ev(), [50, 50], ctx); pcb.onPointerDown(ev(), [60, 50], ctx); assert.equal(pcb.onKey("End", ev(), ctx), true);
   assert.equal(log.commits.length, n); assert.ok(log.toasts.at(-1).includes("three corners")); assert.equal(P.state.draw, null);
 });
 
@@ -738,18 +738,18 @@ test("module: zone (Alt+Z) closes on the first corner, asks for the net and writ
     ["fill", ["thermal_gap", 0.5], ["thermal_bridge_width", 0.5], ["island_removal_mode", 0]],
     ["polygon", ["pts", ["xy", 112, 50], ["xy", 130, 45], ["xy", 130, 70], ["xy", 95, 70]]]]);
   const it = doc.items.get(c.changes[0].id); assert.equal(it.kind, "zone"); assert.ok(it.geom.some((g) => g.t === "poly" && !g.fill) && !it.geom.some((g) => g.zoneFill), "outline and hatch, no fill");
-  // the next copper zone takes the next free priority; an empty net means no (net); Enter closes too; B.Cu when active
+  // the next copper zone takes the next free priority; an empty net means no (net); End closes too; B.Cu when active
   pcb.setPrompt((t, i, cl, done) => done(""));
   assert.equal(pcb.onKey("PageDown", ev(), ctx), true);
   for (const p of [[10, 10], [20, 10], [20, 20]]) pcb.onPointerDown(ev(), p, ctx);
-  assert.equal(pcb.onKey("Enter", ev(), ctx), true);
+  assert.equal(pcb.onKey("End", ev(), ctx), true);
   const z2 = lastNode(log, "zone");
   assert.deepEqual(z2[1], ["layer", "B.Cu"]); assert.deepEqual(z2[4], ["priority", 1]); assert.equal(log.commits.at(-1).changes[0].netName, undefined);
   // a cancelled prompt drops the outline; fewer than three corners is refused
   const n = log.commits.length; pcb.setPrompt((t, i, cl, done) => done(null));
   for (const p of [[30, 30], [40, 30], [40, 40]]) pcb.onPointerDown(ev(), p, ctx); pcb.onPointerDown(ev(), [30, 30], ctx);
   assert.equal(log.commits.length, n); assert.equal(P.state.draw, null);
-  pcb.onPointerDown(ev(), [50, 50], ctx); pcb.onPointerDown(ev(), [60, 50], ctx); assert.equal(pcb.onKey("Enter", ev(), ctx), true); assert.equal(log.commits.length, n);
+  pcb.onPointerDown(ev(), [50, 50], ctx); pcb.onPointerDown(ev(), [60, 50], ctx); assert.equal(pcb.onKey("End", ev(), ctx), true); assert.equal(log.commits.length, n);
   // the legacy net style writes the code
   const legacy = K.parseDoc(CODE_STYLE, "kicad_pcb");
   assert.deepEqual(P.zoneNode(legacy, [[0, 0], [1, 0], [1, 1]], "B.Cu", { code: 2, name: "GND" })[1], ["net", 2]);
@@ -857,9 +857,9 @@ test("module: centre, radial and leader dimensions — a 45° cross, an R-prefix
     ["gr_text", "Leader", ["at", 32.7, 15, 0], ["layer", "F.SilkS"], ["uuid", id], ["effects", ["font", ["size", 1, 1], ["thickness", 0.1]]]]]);
   assert.deepEqual(opened, [id], "the leader's properties open at once"); delete globalThis.KDialogs;
   const n = log.commits.length;
-  // Enter drops a dimension in progress; a back layer mirrors the value text
+  // End drops a dimension in progress; a back layer mirrors the value text
   ctx.setTool("dimaligned"); pcb.onPointerDown(ev(), [1, 1], ctx); pcb.onPointerDown(ev(), [5, 1], ctx);
-  assert.equal(pcb.onKey("Enter", ev(), ctx), true); assert.equal(P.state.draw, null); assert.equal(log.commits.length, n);
+  assert.equal(pcb.onKey("End", ev(), ctx), true); assert.equal(P.state.draw, null); assert.equal(log.commits.length, n);
   assert.deepEqual(K.kid(K.kid(P.dimensionNode("aligned", { start: [0, 0], end: [4, 0], height: 2 }, "B.SilkS"), "gr_text"), "effects")[2], ["justify", "mirror"]);
 });
 
@@ -1916,7 +1916,7 @@ test("Line Modes: lines, polygons and zones follow the angle snap mode (Ctrl fre
   // POLYGON_GEOM_MANAGER: the cursor is reached through a leader with one 45° bend, and a loop line of the same kind closes
   pcb.onPointerMove(ev(), [12, 9], ctx); assert.deepEqual(P.state.draw.cur, [12, 9]);
   assert.deepEqual(P.state.draw.leader, [[10, 0], [12, 2], [12, 9]]); assert.deepEqual(P.state.draw.loop, [[12, 9], [9, 9], [0, 0]]);
-  pcb.onKey("Enter", ev(), ctx);
+  pcb.onKey("End", ev(), ctx);
   const poly = log.commits.at(-1).changes[0].id; assert.equal(log.commits.at(-1).label, "polygon");
   assert.deepEqual(K.kid(doc.items.get(poly).node, "pts").slice(1).map((x) => x.slice(1)), [[0, 0], [10, 0], [12, 2], [12, 9], [9, 9]], "the leader's and the loop's bends are corners too");
   // H/V: one bend on the horizontal first

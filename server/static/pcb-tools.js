@@ -28251,6 +28251,27 @@
   }
   var padToolApi = { nextPadNumber, masterPad, defaultPad, typeFromPad, newPadNode, placePad, moveAnchorChanges, enumerateChanges, padMemory, strNumCmp, ipcRoundingRatio, refDesPrefix, trailingInt, canHaveNumber };
 
+  // web/domains/pcb/tools/axis-lock.ts
+  var newAxisLock = () => ({ lock: "", lastKey: null });
+  var OPPOSITE = { left: "right", right: "left", up: "down", down: "up" };
+  function axisLockKey(s, key) {
+    const axis = key === "left" || key === "right" ? "h" : "v";
+    let lock = s.lock;
+    if (lock === axis) {
+      if (s.lastKey === OPPOSITE[key]) lock = "";
+    } else lock = axis;
+    return { lock, lastKey: key };
+  }
+  function applyAxisLock(lock, p, prev) {
+    if (lock === "h") return [p[0], prev[1]];
+    if (lock === "v") return [prev[0], p[1]];
+    return p;
+  }
+  function keyboardCursorKey() {
+    const g = typeof window !== "undefined" ? window : globalThis;
+    return g.KiCadKeyboardCursor || null;
+  }
+
   // web/domains/pcb/tools/pcb-tools/clipboard.ts
   function layersBlock(doc) {
     const rows = [];
@@ -30434,7 +30455,9 @@
       ctx.requestRender();
     }
     if (S.moveSeq && S.popup) S.popup.at = [mm[0], mm[1]];
-    const sN = sn.p;
+    const key = keyboardCursorKey();
+    if (key) m.axis = axisLockKey(m.axis || newAxisLock(), key);
+    const sN = applyAxisLock(m.axis ? m.axis.lock : "", sn.p, [m.start[0] + m.last[0], m.start[1] + m.last[1]]);
     const dx = r6(sN[0] - m.start[0]), dy = r6(sN[1] - m.start[1]);
     if (dx === m.last[0] && dy === m.last[1]) return;
     m.last = [dx, dy];
@@ -38091,6 +38114,130 @@
   }
   setRouteQueueNext(routeNext);
 
+  // web/domains/pcb/tools/pcb-tools/optimize-selected.ts
+  function mergeFull(O, pts, r) {
+    let path = simplifyPts(pts);
+    let step = path.length - 2;
+    for (let guard = 0; guard < 400; guard++) {
+      const nSegs = path.length - 1;
+      if (step > nSegs - 2) step = nSegs - 2;
+      if (step < 1) break;
+      const costOrig = cornerCost(path);
+      let picked = null;
+      for (let n = 0; n < nSegs - step && !picked; n++) {
+        const a = path[n], b = path[n + step + 1];
+        const cands = [null, null], cost = [Infinity, Infinity];
+        for (let i = 0; i < 2; i++) {
+          const bypass = initialTrace(a, b, -1, i === 1);
+          if (bypass.length < 2 || !pathClear(O, bypass, r)) continue;
+          cands[i] = simplifyPts(path.slice(0, n).concat(bypass, path.slice(n + step + 2)));
+          cost[i] = cornerCost(cands[i]);
+        }
+        if (cost[0] < costOrig && cost[0] < cost[1]) picked = cands[0];
+        else if (cost[1] < costOrig) picked = cands[1];
+      }
+      if (picked) path = picked;
+      else step--;
+      if (!step) break;
+    }
+    return simplifyPts(path);
+  }
+  function intersectLines(a0, a1, b0, b1) {
+    const r = [a1[0] - a0[0], a1[1] - a0[1]], s = [b1[0] - b0[0], b1[1] - b0[1]], den = r[0] * s[1] - r[1] * s[0];
+    if (Math.abs(den) < 1e-12) return null;
+    const t = ((b0[0] - a0[0]) * s[1] - (b0[1] - a0[1]) * s[0]) / den;
+    return [Math.round((a0[0] + t * r[0]) * 1e6) / 1e6, Math.round((a0[1] + t * r[1]) * 1e6) / 1e6];
+  }
+  var obtuse = (a0, a1, b0, b1) => {
+    const d1 = dir8(a0, a1), d22 = dir8(b0, b1);
+    return d1 >= 0 && d22 >= 0 && (angleType(d1, d22) & ANG_OBTUSE) !== 0;
+  };
+  function mergeObtuse(O, pts, r) {
+    let path = pts.map((p) => p.slice());
+    let step = path.length - 3;
+    if (step < 0) return path;
+    for (let guard = 0; guard < 400; guard++) {
+      const nSegs = path.length - 1;
+      if (step > nSegs - 2) step = nSegs - 2;
+      if (step < 2) return path;
+      let found = false;
+      for (let n = 0; n < nSegs - step; n++) {
+        const s1a = path[n], s1b = path[n + 1], s2a = path[n + step], s2b = path[n + step + 1];
+        if (!obtuse(s1a, s1b, s2a, s2b)) continue;
+        const ip = intersectLines(s1a, s1b, s2a, s2b);
+        if (!ip) continue;
+        if (!obtuse(s1a, ip, ip, s2b) || !pathClear(O, [s1a, ip, s2b], r)) continue;
+        path = path.slice(0, n + 1).concat([ip], path.slice(n + step + 1));
+        found = true;
+        break;
+      }
+      if (!found) {
+        if (step <= 2) return path;
+        step--;
+      }
+    }
+    return path;
+  }
+  function fanoutCleanup(doc, O, l, pts) {
+    if (pts.length < 3) return null;
+    const a = pts[0], b = pts[pts.length - 1];
+    const sp = padOrViaAt(doc, l.layer, l.netKey, a), ep = padOrViaAt(doc, l.layer, l.netKey, b);
+    if (!sp || !ep) return null;
+    let len3 = 0;
+    for (let i = 1; i < pts.length; i++) len3 += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    if (len3 >= l.width * 10) return null;
+    for (let i = 0; i < 2; i++) {
+      const t = initialTrace(a, b, -1, i === 1);
+      if (t.length >= 2 && pathClear(O, t, l.width / 2)) return t;
+    }
+    return null;
+  }
+  function optimizeTrackLine(ctx, l) {
+    const O = routeObstacles(ctx.doc, settingsOf(ctx), l.netKey, l.layer, l.netKey ? null : new Set(l.ids), null), r = l.width / 2;
+    let pts = mergeFull(O, l.pts, r);
+    pts = mergeObtuse(O, pts, r);
+    pts = simplifyPts(pts);
+    const sp = runSmartPads(ctx.doc, pts, l.width, l.layer, l.netKey, (q) => pathClear(O, q, r));
+    if (sp) pts = sp;
+    const fo = fanoutCleanup(ctx.doc, O, l, pts);
+    if (fo) pts = fo;
+    if (pts.length === l.pts.length && pts.every((p, i) => peq(p, l.pts[i]))) return null;
+    if (!pathClear(O, pts, r)) return null;
+    return pts;
+  }
+  var DP_OPTIMIZE_MSG = "Differential pair members cannot be optimized.";
+  function optimizeSelected(ctx) {
+    const doc = ctx.doc;
+    if (!doc) return false;
+    const ids = [...selectionIds(ctx)];
+    let tracks = ids.map((id) => doc.items.get(id)).filter((it) => !!it && (it.kind === "segment" || it.kind === "arc"));
+    if (!tracks.length) return false;
+    applySelection(ctx, []);
+    const before = tracks.length;
+    tracks = tracks.filter((t) => {
+      const l = assembleLine(doc, t);
+      return !(l && l.net && dpNetPair(doc, l.net));
+    });
+    if (tracks.length < before) ctx.toast(DP_OPTIMIZE_MSG);
+    const done = /* @__PURE__ */ new Set();
+    let first = true;
+    for (const t of tracks) {
+      if (done.has(t.id) || !doc.items.has(t.id)) continue;
+      const l = assembleLine(doc, t);
+      if (!l) continue;
+      for (const id of l.ids) done.add(id);
+      if (l.ids.some((id) => doc.items.get(id)?.kind === "arc")) continue;
+      const pts = optimizeTrackLine(ctx, l);
+      if (!pts) continue;
+      const changes = dragChanges(ctx, { sol: { lines: [{ l, pts }] } });
+      if (!changes.length) continue;
+      ctx.commit(changes, "Optimize Selected", first ? void 0 : { amend: true });
+      first = false;
+    }
+    ctx.requestRender();
+    return true;
+  }
+
   // web/domains/pcb/tools/pcb-tools/ref-move.ts
   function itemWord(it) {
     if (it.kind === "footprint") return it.ref || "";
@@ -39376,6 +39523,10 @@ Press <esc> to cancel all; double-click to finish`;
     routeSelected(ctx, "auto");
     return true;
   }, { menu: false, tip: "Sequentially trigger routing and attempt to finish all selected items" });
+  act("routerOptimizeSelected", "Optimize Selected Track(s)", "Shift+T", (ctx) => {
+    if (S.route || S.draw || S.move || !canEdit(ctx)) return false;
+    return optimizeSelected(ctx);
+  }, { menu: false, tip: "Simplify selected routed track(s)." });
   act("unrouteSegment", "Unroute Segment", "Backspace", (ctx) => S.route || S.draw || S.move || !canEdit(ctx) ? false : unrouteSegment(ctx), { menu: false, tip: "Unroutes the selected track segment and selects the connected tracks" });
   act("layerPairPresetsCycle", "Cycle Layer Pair Presets", "Shift+V", (ctx) => {
     cycleLayerPairPresets(ctx);
@@ -45774,9 +45925,23 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         case "Tab":
           return S.moveSeq ? runAction("skip", ctx) : false;
         // PCB_ACTIONS::skip while moving individually
+        // ACTIONS::finishInteractive: the route, or the shape being drawn, ends where it is
         case "End":
           if (S.route) {
             if (editing()) endRoute(ctx, true);
+            return true;
+          }
+          if (S.draw && S.draw.shape === "garc") {
+            finishArc(ctx, editing);
+            return true;
+          }
+          if (S.draw) {
+            if (POLY_TOOLS.has(S.draw.shape)) {
+              if (editing()) finishPoly(ctx);
+            } else {
+              S.draw = null;
+              ctx.requestRender();
+            }
             return true;
           }
           return false;
@@ -45821,25 +45986,14 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
           return runAction("viaSizeInc", ctx);
         case "\\":
           return runAction("viaSizeDec", ctx);
+        // ACTIONS::cursorClick: a click where the cursor is (it fixes the head and routing goes on; anything else, a shape
+        // being drawn among them, takes the editor's click at the cursor)
         case "Enter":
           if (S.route) {
             if (editing()) {
               const rt = S.route;
               const hv = S.hover || { x: rt.cursor[0], y: rt.cursor[1], snap: null };
               routeClick(ctx, hv, [hv.x, hv.y], { enter: true });
-            }
-            return true;
-          }
-          if (S.draw && S.draw.shape === "garc") {
-            finishArc(ctx, editing);
-            return true;
-          }
-          if (S.draw) {
-            if (POLY_TOOLS.has(S.draw.shape)) {
-              if (editing()) finishPoly(ctx);
-            } else {
-              S.draw = null;
-              ctx.requestRender();
             }
             return true;
           }

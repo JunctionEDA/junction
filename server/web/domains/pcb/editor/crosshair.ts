@@ -126,7 +126,33 @@ export function cursorStep(dx: number, dy: number, steps: number): void {
     E.viewTouched = true; E.panX -= dx * d * ppx; E.panY -= dy * d * ppx; applyView();
     [x, y] = toScreen(to);
   }
-  stage.dispatchEvent(new PointerEvent("pointermove", { clientX: x, clientY: y, bubbles: true, cancelable: true, pointerType: "mouse", isPrimary: true }));
+  // which key moved the cursor, for the length of this one event: a move in progress locks to its axis (tools/axis-lock.ts)
+  const g = window as unknown as { KiCadKeyboardCursor?: string | null };
+  g.KiCadKeyboardCursor = dx < 0 ? "left" : dx > 0 ? "right" : dy < 0 ? "up" : "down";
+  try { stage.dispatchEvent(new PointerEvent("pointermove", { clientX: x, clientY: y, bubbles: true, cancelable: true, pointerType: "mouse", isPrimary: true })); }
+  finally { g.KiCadKeyboardCursor = null; }
+}
+
+/**
+ * COMMON_TOOLS::CursorControl with CURSOR_CLICK / CURSOR_DBL_CLICK (Enter / the Double-click action): a left click
+ * (or a double click) of the mouse at the cursor, as if the button had been pressed where the cursor is.  Whatever
+ * the active tool does with a click happens: the select tool selects, the wire tool fixes a corner, a placed item
+ * drops, the router fixes the head.
+ */
+export function cursorClick(count: 1 | 2): void {
+  if (!E.kdoc) return;
+  let mm = E.lastCursorMm as number[] | null;
+  const wr = world.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+  if (!mm) mm = [mmX0() + ((sr.left + sr.width / 2 - wr.left) / wr.width) * mmW(), mmY0() + ((sr.top + sr.height / 2 - wr.top) / wr.height) * mmH()];
+  const x = wr.left + ((mm[0] - mmX0()) / mmW()) * wr.width, y = wr.top + ((mm[1] - mmY0()) / mmH()) * wr.height;
+  const mods = { shiftKey: false, ctrlKey: false, altKey: false, metaKey: false };
+  const at = { clientX: x, clientY: y, bubbles: true, cancelable: true, pointerType: "mouse", isPrimary: true, pointerId: 1, ...mods };
+  for (let i = 1; i <= count; i++) {
+    stage.dispatchEvent(new PointerEvent("pointerdown", { ...at, button: 0, buttons: 1, detail: i }));
+    stage.dispatchEvent(new PointerEvent("pointerup", { ...at, button: 0, buttons: 0, detail: i }));
+    stage.dispatchEvent(new MouseEvent("click", { ...at, button: 0, detail: i }));
+  }
+  if (count === 2) stage.dispatchEvent(new MouseEvent("dblclick", { ...at, button: 0, detail: 2 }));
 }
 
 /** COMMON_TOOLS::PanControl (Shift + arrows): the view moves by ten grid steps. */

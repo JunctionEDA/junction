@@ -132,7 +132,7 @@ test("wire ending on the middle of another wire gets a junction (T)", () => {
   ctx.tWire = wires[0].id; ctx.tJunction = js[0].id;
 });
 
-test("90-degree routing: two segments per leg, '/' flips the posture, Enter finishes", () => {
+test("90-degree routing: two segments per leg, '/' flips the posture, End finishes", () => {
   sch.onActivate("wire", ctx);
   sch.onPointerDown(ev(), [152.4, 88.9], ctx);
   sch.onPointerMove(ev(), [165.1, 101.6], ctx);
@@ -150,7 +150,7 @@ test("90-degree routing: two segments per leg, '/' flips the posture, Enter fini
   assert.strictEqual(_.wireKey(ctx, "Ctrl+Z"), false, "Ctrl+Z falls through to the document's undo"); assert.strictEqual(_.wireKey(ctx, "Ctrl+Y"), true, "redo is swallowed");
   assert.strictEqual(ctx.log.length, n0);
   sch.onPointerMove(ev(), [177.8, 114.3], ctx);
-  assert.ok(sch.onKey("Enter", {}, ctx)); assert.strictEqual(sch.state.wire, null);
+  assert.ok(sch.onKey("End", {}, ctx)); assert.strictEqual(sch.state.wire, null);
   const c = lastCommit(ctx);
   const segsMade = c.changes.filter((x) => x.typeName === "SCH_LINE").map((x) => ptsOf(fragItem(x)));
   assert.deepStrictEqual(segsMade, [[[152.4, 88.9], [177.8, 88.9]], [[177.8, 88.9], [177.8, 114.3]]], "with the corner taken back the first leg stretches again");
@@ -226,7 +226,7 @@ test("junction / no-connect / bus entry tools place KiCad-shaped items", () => {
   sch.onPointerDown(Object.assign(ev(), { detail: 2 }), [63.5, 63.5], ctx);
   assert.strictEqual(sch.state.tool, "select", "a double click ends the tool");
   sch.onActivate("bus", ctx);
-  sch.onPointerDown(ev(), [203.2, 25.4], ctx); sch.onPointerDown(ev(), [215.9, 25.4], ctx); sch.onKey("Enter", {}, ctx);
+  sch.onPointerDown(ev(), [203.2, 25.4], ctx); sch.onPointerDown(ev(), [215.9, 25.4], ctx); sch.onKey("End", {}, ctx);
   n = fragItem(lastCommit(ctx).changes[0]); assert.strictEqual(n[0], "bus"); assert.strictEqual(lastCommit(ctx).changes[0].typeName, "SCH_LINE");
   ctx.notify = false;
 });
@@ -453,7 +453,7 @@ test("arc: KiCad 10's five drawing modes (EE_GRAPHIC_TOOL::DrawArc with ARC_MODE
   // Cycle Arc Drawing Mode (Alt+/) walks the modes and is remembered
   sch.onKey("/", { altKey: true }, ctx); assert.deepStrictEqual(groups[groups.length - 1], ["Arc", "drawArcStartEndMid"]);
   assert.strictEqual(sch.state.draw.arc.mode, 1);
-  // Tangent: a click on a graphic line's end leaves along it; Enter keeps the arc and ends the tool
+  // Tangent: a click on a graphic line's end leaves along it; End keeps the arc and ends the tool
   // Tangent: a click on the end of a graphic seeds the arc from it; the next click ends it, on the same circle here
   sch.actions.drawArcTangent.run(ctx); assert.strictEqual(sch.state.draw.arc.mode, 3);
   const n1 = ctx.log.length;
@@ -462,12 +462,12 @@ test("arc: KiCad 10's five drawing modes (EE_GRAPHIC_TOOL::DrawArc with ARC_MODE
   const t = fragItem(lastCommit(ctx).changes[0]), gt = K.arcFrom3(t[1].slice(1), t[2].slice(1), t[3].slice(1));
   assert.ok(near(gt.x, 50.8, 1e-3) && near(gt.y, 15.24, 1e-3) && near(gt.r, 10.16, 1e-3), JSON.stringify([t.slice(1, 4), gt]));
   assert.ok(sch.state.draw && sch.state.draw.chainSeeded, "the next arc leaves from where this one ended");
-  // Enter (finishInteractive) with no arc yet commits nothing and ends the tool
-  const n2 = ctx.log.length; assert.ok(sch.onKey("Enter", {}, ctx)); assert.strictEqual(ctx.log.length, n2); assert.strictEqual(sch.state.tool, "select");
+  // End (finishInteractive) with no arc yet commits nothing and ends the tool
+  const n2 = ctx.log.length; assert.ok(sch.onKey("End", {}, ctx)); assert.strictEqual(ctx.log.length, n2); assert.strictEqual(sch.state.tool, "select");
   sch.actions.drawArcCenter.run(ctx); sch.onActivate("select", ctx);   // leave the remembered mode at its default
 });
 
-test("lines (I): KiCad's drawLines — one SCH_LINE per segment on the notes layer, a double click finishes, Enter too, a lone point is dropped", () => {
+test("lines (I): KiCad's drawLines — one SCH_LINE per segment on the notes layer, a double click finishes, End too, a lone point is dropped", () => {
   sch.setLineMode(ctx, "90");
   assert.ok(sch.onKey("i", {}, ctx)); assert.strictEqual(sch.state.tool, "lines"); _.cancelWire(ctx);
   for (const p of [[25.4, 25.4], [38.1, 25.4], [38.1, 38.1], [50.8, 38.1]]) sch.onPointerDown(ev(), p, ctx);
@@ -479,11 +479,11 @@ test("lines (I): KiCad's drawLines — one SCH_LINE per segment on the notes lay
   assert.deepStrictEqual(c.changes.map((x) => ptsOf(fragItem(x))), [[[25.4, 25.4], [38.1, 25.4]], [[38.1, 25.4], [38.1, 38.1]], [[38.1, 38.1], [50.8, 38.1]]]);
   let n = fragItem(c.changes[0]); assert.deepStrictEqual(n.slice(0, 3), ["polyline", ["pts", ["xy", 25.4, 25.4], ["xy", 38.1, 25.4]], STROKE0]);
   assert.strictEqual(sch.state.wire, null); assert.strictEqual(sch.state.tool, "lines");
-  sch.onPointerDown(ev(), [63.5, 25.4], ctx); sch.onPointerDown(ev(), [76.2, 25.4], ctx); assert.ok(sch.onKey("Enter", {}, ctx));
-  c = lastCommit(ctx); n = fragItem(c.changes[0]); assert.deepStrictEqual(ptsOf(n), [[63.5, 25.4], [76.2, 25.4]], "Enter finishes a two-point line");
+  sch.onPointerDown(ev(), [63.5, 25.4], ctx); sch.onPointerDown(ev(), [76.2, 25.4], ctx); assert.ok(sch.onKey("End", {}, ctx));
+  c = lastCommit(ctx); n = fragItem(c.changes[0]); assert.deepStrictEqual(ptsOf(n), [[63.5, 25.4], [76.2, 25.4]], "End finishes a two-point line");
   sch.onPointerDown(ev(), [88.9, 25.4], ctx); sch.onPointerDown(ev(), [88.9, 30], ctx); sch.onPointerDown(ev(), [76.2, 25.4], ctx);
   assert.strictEqual(sch.state.wire, null, "a line ends by itself on another graphic line (IsTerminalPoint, LAYER_NOTES)");
-  const before = ctx.log.length; sch.onPointerDown(ev(), [101.6, 25.4], ctx); assert.ok(sch.onKey("Enter", {}, ctx));
+  const before = ctx.log.length; sch.onPointerDown(ev(), [101.6, 25.4], ctx); assert.ok(sch.onKey("End", {}, ctx));
   assert.strictEqual(ctx.log.length, before); assert.strictEqual(sch.state.wire, null);
 });
 
@@ -830,7 +830,7 @@ test("bezier: start, control 1, end, then the far handle (BEZIER_GEOM_MANAGER); 
   const dm = dragItem(c, it, [25.4, 50.8], [38.1, 50.8]); assert.deepStrictEqual(ptsOf(fragItem(dm.changes[0]))[0], [38.1, 50.8], "drags by its points");
 });
 
-test("polygon: points close back onto the first one (the file repeats it); Enter closes too; fewer than three points is nothing", () => {
+test("polygon: points close back onto the first one (the file repeats it); End closes too; fewer than three points is nothing", () => {
   const { d, c } = fresh();
   sch.onActivate("polygon", c);
   for (const p of [[25.4, 25.4], [38.1, 25.4], [38.1, 38.1]]) sch.onPointerDown(ev(), p, c);
@@ -840,8 +840,8 @@ test("polygon: points close back onto the first one (the file repeats it); Enter
   assert.deepStrictEqual(n.slice(0, 4), ["polyline", ["pts", ["xy", 25.4, 25.4], ["xy", 38.1, 25.4], ["xy", 38.1, 38.1], ["xy", 25.4, 25.4]], STROKE0, FILL_NONE]); assert.strictEqual(n[4][0], "uuid");
   assert.strictEqual(d.items.get(cm.changes[0].id).kind, "polyline"); assert.strictEqual(sch.state.draw, null); assert.strictEqual(sch.state.tool, "polygon");
   for (const p of [[50.8, 25.4], [63.5, 25.4], [63.5, 38.1], [50.8, 38.1]]) sch.onPointerDown(ev(), p, c);
-  assert.ok(sch.onKey("Enter", {}, c)); n = fragItem(lastCommit(c).changes[0]); assert.strictEqual(ptsOf(n).length, 5); assert.deepStrictEqual(ptsOf(n)[4], [50.8, 25.4]);
-  const before = c.log.length; sch.onPointerDown(ev(), [76.2, 25.4], c); sch.onPointerDown(ev(), [88.9, 25.4], c); assert.ok(sch.onKey("Enter", {}, c));
+  assert.ok(sch.onKey("End", {}, c)); n = fragItem(lastCommit(c).changes[0]); assert.strictEqual(ptsOf(n).length, 5); assert.deepStrictEqual(ptsOf(n)[4], [50.8, 25.4]);
+  const before = c.log.length; sch.onPointerDown(ev(), [76.2, 25.4], c); sch.onPointerDown(ev(), [88.9, 25.4], c); assert.ok(sch.onKey("End", {}, c));
   assert.strictEqual(c.log.length, before, "two points make no polygon"); assert.strictEqual(sch.state.draw, null);
 });
 
@@ -1079,7 +1079,7 @@ test("repeat last item (Insert): labels step their number and move by the repeat
   assert.deepStrictEqual([n[0], n[1], atOf(n)], ["label", "D1", [88.9, 91.44, 0]], "100 mil down, number + 1");
   assert.deepStrictEqual(c.lastSelection, [lastCommit(c).changes[0].id]);
   sch.runAction("repeatLast", c); n = fragItem(lastCommit(c).changes[0]); assert.deepStrictEqual([n[1], atOf(n)[1]], ["D2", 93.98], "repeats chain");
-  sch.onActivate("wire", c); sch.onPointerDown(ev(), [152.4, 25.4], c); sch.onPointerDown(ev(), [165.1, 25.4], c); sch.onPointerMove(ev(), [165.1, 38.1], c); sch.onKey("Enter", {}, c); sch.onActivate("select", c);
+  sch.onActivate("wire", c); sch.onPointerDown(ev(), [152.4, 25.4], c); sch.onPointerDown(ev(), [165.1, 25.4], c); sch.onPointerMove(ev(), [165.1, 38.1], c); sch.onKey("End", {}, c); sch.onActivate("select", c);
   assert.ok(sch.runAction("repeatLast", c), "the whole wire is repeated, every segment"); 
   assert.deepStrictEqual(lastCommit(c).changes.slice(0, 2).map((x) => [fragItem(x)[0], ptsOf(fragItem(x))]), [["wire", [[152.4, 27.94], [165.1, 27.94]]], ["wire", [[165.1, 27.94], [165.1, 40.64]]]]);
   // the copy lands across the original's vertical leg: AddJunctionsIfNeeded breaks it, CleanUp merges the overlap
@@ -1530,12 +1530,12 @@ test("with an item on the cursor Ctrl+Y beeps and Del cancels it (TwoClickPlace 
 test("a new wire, bus or graphic line inherits the stroke of the line it starts on (startSegments duplicates GetLine) and merges with it", () => {
   const { d, c } = fresh();
   const w = K.createItem(d, ["wire", ["pts", ["xy", 50.8, 30.48], ["xy", 63.5, 30.48]], ["stroke", ["width", 0], ["type", "solid"]], ["uuid", "ws"]]);
-  sch.onActivate("wire", c); sch.onPointerDown(ev(), [50.8, 30.48], c); sch.onPointerDown(ev(), [45.72, 30.48], c); sch.onKey("Enter", {}, c);
+  sch.onActivate("wire", c); sch.onPointerDown(ev(), [50.8, 30.48], c); sch.onPointerDown(ev(), [45.72, 30.48], c); sch.onKey("End", {}, c);
   const cm = lastCommit(c); assert.strictEqual(cm.label, "Draw Wires");
   assert.strictEqual(cm.changes.filter((x) => x.kind === "ADDED").length, 0, "the continuation merged into the solid wire");
   assert.deepStrictEqual(ptsOf(d.items.get("ws").node).map((p) => p[0]).sort((a, b) => a - b), [45.72, 63.5]); void w;
   const g = K.createItem(d, ["polyline", ["pts", ["xy", 50.8, 20.32], ["xy", 63.5, 20.32]], ["stroke", ["width", 0.254], ["type", "dash"], ["color", 255, 0, 0, 1]], ["uuid", "gl"]]);
-  sch.onActivate("lines", c); sch.onPointerDown(ev(), [63.5, 20.32], c); sch.onPointerDown(ev(), [63.5, 12.7], c); sch.onKey("Enter", {}, c);
+  sch.onActivate("lines", c); sch.onPointerDown(ev(), [63.5, 20.32], c); sch.onPointerDown(ev(), [63.5, 12.7], c); sch.onKey("End", {}, c);
   const add = lastCommit(c).changes.find((x) => x.kind === "ADDED"); assert.ok(add);
   assert.deepStrictEqual(kid(fragItem(add), "stroke"), ["stroke", ["width", 0.254], ["type", "dash"], ["color", 255, 0, 0, 1]], "dashed red line continued as such"); void g;
   assert.strictEqual(_.sourceLine(d, "wire", [10, 10]), null);

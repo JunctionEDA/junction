@@ -151,14 +151,15 @@ export function onPointerMove(ev: PtrEvent | null | undefined, mm: Pt, ctx: SchC
 }
 export function onPointerUp() { /* clicks are handled on pointerdown, drags in the capture hooks */ }
 /**
- * Keys while a wire is being drawn (doDrawSegments): '/' switches the posture, End / Enter / K finish,
+ * Keys while a wire is being drawn (doDrawSegments): '/' switches the posture, End finishes (Enter is a click at the
+ * cursor, the editor's cursorClick),
  * Backspace (undoLastSegment), Del (doDelete) and Ctrl+Z (undo) take back the last segment.  With nothing
  * left to take back Ctrl+Z reaches the document's undo and the others do nothing; Ctrl+Y (redo) does nothing.
  */
 export function wireKey(ctx: SchCtx, combo: string) {
   if (!S.wire) return false;
   if (combo === "/") { switchPosture(ctx); return true; }
-  if (combo === "Enter" || combo === "End" || combo === "k" || combo === "K") { finishWire(ctx); return true; }   // ACTIONS::finishInteractive
+  if (combo === "End") { finishWire(ctx); return true; }   // ACTIONS::finishInteractive (Enter is ACTIONS::cursorClick: a click at the cursor)
   if (combo === "Backspace" || combo === "Del") { undoSegment(ctx); return true; }
   if (combo === "Ctrl+Z") return undoSegment(ctx);
   if (combo === "Ctrl+Y" || combo === "Ctrl+Shift+Z") return true;
@@ -179,7 +180,7 @@ export function onKey(key: string, ev: Mods | null | undefined, ctx: SchCtx) {
   };
   if (S.wire && wireKey(ctx, key === "Backspace" ? "Backspace" : key === "Delete" ? "Del" : key)) return true;
   if (S.draw && S.draw.arc) {   // EE_GRAPHIC_TOOL::drawManagedShape with an ARC_MODE_SESSION
-    if (key === "Enter" || key === "End") { finishSchArc(ctx); return true; }
+    if (key === "End") { finishSchArc(ctx); return true; }   // finishInteractive; Enter is a click at the cursor (arcSession.PlacePoint)
     // deleteLastPoint (Backspace) always backs up; doDelete (Del) only once the arc is started, before that it is the
     // selection's delete (the arc just committed is selected)
     if (key === "Backspace" || (key === "Delete" && S.draw.started)) { schArcBackup(ctx); return true; }
@@ -187,7 +188,7 @@ export function onKey(key: string, ev: Mods | null | undefined, ctx: SchCtx) {
     if (key === "Escape") { cancelDraw(ctx); return true; }
   }
   if (S.draw && !S.draw.await) {
-    if (key === "Enter" || key === "End") {
+    if (key === "End") {   // finishInteractive; Enter is a click at the cursor (another corner)
       const sh = S.draw.shape, n = S.draw.pts.length;
       if ((sh === "lines" && n >= 2) || ((sh === "polygon" || sh === "rulearea") && n >= 3)) finishDraw(ctx); else cancelDraw(ctx);
       return true;
