@@ -1606,6 +1606,15 @@
     P.flush();
     return P;
   }
+  function setInstanceReference(n, ref) {
+    const ed = globalThis.CollabEditor;
+    const path = ed && ed.currentSheetPathOf ? ed.currentSheetPathOf() : null;
+    for (const inst of kids(n, "instances")) for (const pr of kids(inst, "project")) for (const pa of kids(pr, "path")) {
+      if (path && str(pa[1]) !== path) continue;
+      const r = kid(pa, "reference");
+      if (r) r[1] = ref;
+    }
+  }
   function renderFields(P, node) {
     for (const p of fieldList(node)) {
       const name = str(p[1]);
@@ -1613,7 +1622,10 @@
         name,
         str(p[2]),
         isHidden(p),
-        (v) => P.edit(name.toLowerCase(), (n) => setField(n, name, v)),
+        (v) => P.edit(name.toLowerCase(), (n) => {
+          setField(n, name, v);
+          if (name === "Reference" && n[0] === "symbol") setInstanceReference(n, str(v));
+        }),
         (shown) => P.edit((shown ? "show " : "hide ") + name, (n) => setFieldHidden(n, name, !shown))
       );
     }

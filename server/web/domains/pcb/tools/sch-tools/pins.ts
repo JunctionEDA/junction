@@ -195,7 +195,7 @@ function wireStubsInFlight(ctx: SchCtx, ids: string[]): string[] {
  * The instance pin's assigned alternate (SCH_PIN::m_alt) as the library defines it: SCH_PIN::GetShownName returns its
  * name and SCH_PIN::GetType its electrical type.  Null for the base function or an alternate the library lacks.
  */
-export function pinAltFunction(doc: KDoc, it: KItem, number: string): { name: string; type: string } | null {
+export function pinAltFunction(doc: KDoc, it: KItem, number: string): { name: string; type: string; shape: string } | null {
   const ip = kids(it.node, "pin").find((x) => str(x[1]) === number), a = ip && kid(ip, "alternate"); if (!a) return null;
   const want = str(a[1]); if (!want) return null;
   const libId = str((kid(it.node, "lib_name") || kid(it.node, "lib_id") || [])[1]);
@@ -203,7 +203,7 @@ export function pinAltFunction(doc: KDoc, it: KItem, number: string): { name: st
   for (const sub of kids(lib, "symbol")) for (const g of kids(sub, "pin")) {
     if (str((kid(g, "number") || [])[1]) !== number) continue;
     const alt = kids(g, "alternate").find((x) => str(x[1]) === want);
-    if (alt) return { name: want, type: str(alt[2]) || "unspecified" };
+    if (alt) return { name: want, type: str(alt[2]) || "unspecified", shape: str(alt[3]) || "line" };
   }
   return null;
 }

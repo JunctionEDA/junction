@@ -6,7 +6,8 @@
 // options are remembered per browser, as KiCad keeps them in its settings.
 import { E } from "./state";
 import { state } from "./appstore";
-import { box, checkField, h, note, notebook, openDialog, reportPanel, textField, type Field, type ReportLine } from "./pcbdialogs/ui";
+import { box, checkField, h, messageBox, note, notebook, openDialog, reportPanel, textField, type Field, type ReportLine } from "./pcbdialogs/ui";
+import { openAnnotate } from "../dialogs/annotate";
 import { projectNetlist } from "./pcbdialogs/update-pcb";
 import { liveDocument, loadProjectFile, projectDocs } from "./projectfile";
 import { download, fileStem } from "./download";
@@ -141,6 +142,33 @@ export async function projectNlInput(): Promise<NK.NlInput | { error: string }> 
     libUri: (nick) => (uris.has(nick) ? (uris.get(nick) as string) : `\${KICAD10_SYMBOL_DIR}/${nick}.kicad_sym`) };
 }
 
+/** The sheets of the hierarchy as the netlist exporters walk them, or null when the project cannot be read. */
+async function hierarchySheets(): Promise<NK.NlSheet[] | null> {
+  const res = await projectNetlist();
+  if ("error" in res) return null;
+  return NK.nlSheets(res.netlist.instances || [], (f) => { const x = res.files.get(f); return x ? (x.doc as KDoc) : null; });
+}
+/**
+ * SCH_EDIT_FRAME::ReadyToNetlist: the schematic must be annotated (else the Annotate dialog opens with the reason and
+ * the work goes on only when it is annotated once that dialog is closed), then "Error: duplicate sheet names.
+ * Continue?" when two sheets on one sheet share a name.
+ */
+export async function readyToNetlist(annotateMessage: string): Promise<boolean> {
+  const suffixes = (): boolean => { try { const pro = JSON.parse((E.proSettings as string | null) || "{}") as { schematic?: { annotation?: { reused_sheet_suffixes?: boolean } } }; return !!(pro.schematic && pro.schematic.annotation && pro.schematic.annotation.reused_sheet_suffixes); } catch (e) { return false; } };
+  let sheets = await hierarchySheets();
+  if (!sheets) return true;   // the export itself reports what could not be read
+  if (NK.annotationErrors(sheets, suffixes()) > 0) {
+    await new Promise<void>((done) => openAnnotate(annotateMessage, done));
+    sheets = await hierarchySheets();
+    if (!sheets || NK.annotationErrors(sheets, suffixes()) > 0) return false;
+  }
+  if (NK.duplicateSheetNames(sheets) > 0) {
+    const go = await new Promise<boolean>((done) => { if (!messageBox("Confirmation", "Error: duplicate sheet names. Continue?", [{ label: "No", fn: () => done(false) }, { label: "Yes", fn: () => done(true) }], 0)) done(true); });
+    if (!go) return false;
+  }
+  return true;
+}
+
 export function openExportNetlist(): void {
   const saved = loadSaved();
   const { stem } = fileStem();
@@ -179,6 +207,7 @@ export function openExportNetlist(): void {
       const say = (text: string, severity: string): void => { lines.push({ severity, text }); if (report) report.set(lines.slice()); };
       const fname = `${stem}.${EXT[name]}`;
       void (async () => {
+        if (!(await readyToNetlist("Exporting netlist requires a fully annotated schematic."))) return;
         let text: string | null = null;
         try {
           if (name === "KiCad" || name === "Allegro") {

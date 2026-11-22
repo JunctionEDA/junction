@@ -271,7 +271,8 @@ test("module: selection keys — U expands the run, W changes width, Delete remo
   const doc = fixture(); const { ctx, log } = fakeCtx(doc);
   pcb.onDocChanged(ctx); pcb.onActivate("select", ctx);   // W edits the selection only with the select tool (ToolStackIsEmpty)
   P.state.sel = new Set(["s-1"]);
-  assert.equal(pcb.onKey("u", ev(), ctx), true); assert.equal(P.state.sel.size, 4);
+  assert.equal(pcb.onKey("u", ev(), ctx), true); assert.equal(P.state.sel.size, 2, "PCB_SELECTION_TOOL::expandConnection: first to the next junction (the via)");
+  assert.equal(pcb.onKey("u", ev(), ctx), true); assert.equal(P.state.sel.size, 4, "pressed again: on to the pads");
   P.state.sel = new Set(["s-1"]);
   assert.equal(pcb.onKey("w", ev(), ctx), true);
   assert.equal(K.kid(doc.items.get("s-1").node, "width")[1], 0.3); assert.equal(log.commits.at(-1).changes[0].typeName, "PCB_TRACK");
@@ -1058,7 +1059,7 @@ test("move exactly, position relative, rotate / flip / mirror about the selectio
   const mv = node(P.mirrorChanges(doc, ["s-4"], 132.5, 50, "v")[0]); assert.deepEqual(pt(mv, "start"), [130, 50]); const mh = node(P.mirrorChanges(doc, [rt], 10, 10, "h")[0]); assert.ok(K.kid(K.kid(mh, "effects"), "justify").includes("mirror"));
   const sw = P.swapChanges(doc, ["s-1", "s-4"]); assert.deepEqual(pt(node(sw.find((c) => c.id === "s-1")), "start"), [130, 50]); assert.deepEqual(pt(node(sw.find((c) => c.id === "s-4")), "start"), [110, 50]);
   const doc2 = K.parseDoc(DRC_BOARD, "kicad_pcb"); const pk = P.packChanges(doc2, ["fp-1", "fp-2", "fp-3", "fp-4"]); assert.ok(pk.length >= 3);
-  const boxes = pk.map((c) => { K.applyChange(doc2, c, IU); return doc2.items.get(c.id).bbox; }); for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) assert.ok(boxes[i][2] <= boxes[j][0] + 1e-6 || boxes[j][2] <= boxes[i][0] + 1e-6 || boxes[i][3] <= boxes[j][1] + 1e-6 || boxes[j][3] <= boxes[i][1] + 1e-6, "packed footprints do not overlap");
+  const boxes = pk.map((c) => { K.applyChange(doc2, c, IU); return P.alignBox(doc2.items.get(c.id)); }); for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) assert.ok(boxes[i][2] <= boxes[j][0] + 1e-6 || boxes[j][2] <= boxes[i][0] + 1e-6 || boxes[i][3] <= boxes[j][1] + 1e-6 || boxes[j][3] <= boxes[i][1] + 1e-6, "packed footprints do not overlap");
 });
 
 test("cleanup tracks & vias plans KiCad's options: null, duplicate, contained and collinear segments, tracks in pads, shorts, dangling ends", () => {
@@ -1168,22 +1169,22 @@ test("actions: the map carries KiCad's ids and hotkeys; copy / paste / cut / dup
   let c = log.commits.at(-1); assert.equal(c.label, "paste"); assert.equal(c.changes[0].kind, "ADDED"); assert.deepEqual(log.selection, [c.changes[0].id]); assert.deepEqual(pt(doc.items.get(c.changes[0].id).node, "start"), [200, 100]);
   // the paste hangs on the cursor until a click places it (dropped where it is here)
   assert.deepEqual(P.state.move && P.state.move.placing, [c.changes[0].id]); P.state.move = null;
-  ctx.selection = new Set(["s-4"]); assert.equal(pcb.runAction("duplicate", ctx), true); c = log.commits.at(-1); assert.equal(c.label, "duplicate"); assert.notEqual(c.changes[0].id, "s-4"); assert.deepEqual(pt(doc.items.get(c.changes[0].id).node, "start"), [130, 50]);
+  ctx.selection = new Set(["s-4"]); assert.equal(pcb.runAction("duplicate", ctx), true); c = log.commits.at(-1); assert.equal(c.label, "Duplicate"); assert.notEqual(c.changes[0].id, "s-4"); assert.deepEqual(pt(doc.items.get(c.changes[0].id).node, "start"), [130, 50]);
   assert.deepEqual(P.state.move && P.state.move.placing, [c.changes[0].id]); P.state.move = null;
   ctx.selection = new Set(["a-1"]); assert.equal(pcb.onKey("Cut", ev(), ctx), true); c = log.commits.at(-1); assert.deepEqual(c.changes.map((x) => [x.kind, x.id]), [["REMOVED", "a-1"]]); assert.ok(/\(arc /.test(log.clip)); assert.deepEqual(log.selection, []);
   ctx.selection = new Set(["s-1", "s-2"]); assert.equal(pcb.runAction("group", ctx), true); c = log.commits.at(-1); assert.equal(c.changes[0].typeName, "PCB_GROUP"); const gid = c.changes[0].id;
   ctx.selection = new Set(["s-1"]); assert.equal(pcb.runAction("ungroup", ctx), true); assert.deepEqual(log.commits.at(-1).changes.map((x) => [x.kind, x.id]), [["REMOVED", gid]]);
   // R turns a multi-selection about its centre, F flips it; Shift+M moves exactly through the (stubbed) dialog
-  ctx.selection = new Set(["s-1", "s-4"]); assert.equal(pcb.onKey("r", ev(), ctx), true); assert.equal(log.commits.at(-1).label, "rotate"); assert.equal(log.commits.at(-1).changes.length, 2); assert.deepEqual(pt(doc.items.get("s-1").node, "start"), [122.5, 62.5]);
+  ctx.selection = new Set(["s-1", "s-4"]); assert.equal(pcb.onKey("r", ev(), ctx), true); assert.equal(log.commits.at(-1).label, "Rotate"); assert.equal(log.commits.at(-1).changes.length, 2); assert.deepEqual(pt(doc.items.get("s-1").node, "start"), [122.5, 62.5]);
   assert.equal(pcb.onKey("Flip", ev(), ctx), true); assert.equal(K.kid(doc.items.get("s-4").node, "layer")[1], "B.Cu");
   pcb.setForm((spec) => { assert.equal(spec.title, "Move Item"); spec.apply({ dx: 1, dy: 0, rotation: 0, about: "center" }); return true; });
   ctx.selection = new Set(["s-3"]); assert.equal(pcb.onKey("M", ev({ shiftKey: true }), ctx), true); assert.equal(log.commits.at(-1).label, "Move Exactly"); assert.deepEqual(pt(doc.items.get("s-3").node, "start"), [119, 53]);
   pcb.setForm((spec) => { spec.apply({ ref: "origin", px: 0, py: 0, dx: 5, dy: 6 }); return true; }); assert.equal(pcb.onKey("P", ev({ shiftKey: true }), ctx), true); assert.deepEqual(pt(doc.items.get("s-3").node, "start"), [5, 6]);
-  pcb.setForm((spec) => { spec.apply({ netclass: false, width: 0.4, viaSize: 0.9, viaDrill: 0.45, viaType: "through", l0: "F.Cu", l1: "B.Cu" }); return true; });
-  ctx.selection = new Set(["s-3", "v-1"]); assert.equal(pcb.runAction("changeTrackWidth", ctx), true); assert.equal(K.kid(doc.items.get("s-3").node, "width")[1], 0.4); assert.equal(K.kid(doc.items.get("v-1").node, "size")[1], 0.9);
+  // EDIT_TOOL::ChangeTrackWidth: no dialog, the board's current track width and via size at once
+  ctx.selection = new Set(["s-3", "v-1"]); assert.equal(pcb.runAction("changeTrackWidth", ctx), true); assert.equal(log.commits.at(-1).label, "Edit Track Width/Via Size"); assert.equal(K.kid(doc.items.get("s-3").node, "width")[1], K.pcbSizes.state.currentTrackWidth()); assert.equal(K.kid(doc.items.get("v-1").node, "size")[1], K.pcbSizes.state.currentVia().diameter);
   // alignment needs two items; locks toggle; select net and connection grow the selection
   const rects = [P.addedChange(doc, P.rectNode([0, 0], [2, 2], "F.SilkS")).id, P.addedChange(doc, P.rectNode([3, 5], [5, 7], "F.SilkS")).id]; ctx.selection = new Set(rects);
-  assert.equal(pcb.runAction("alignLeft", ctx), true); assert.equal(log.commits.at(-1).label, "align to left"); assert.deepEqual(pt(doc.items.get(rects[1]).node, "start"), [0, 5]);
+  assert.equal(pcb.runAction("alignLeft", ctx), true); assert.equal(log.commits.at(-1).label, "Align to Left"); assert.deepEqual(pt(doc.items.get(rects[1]).node, "start"), [0, 5]);
   ctx.selection = new Set(["s-4"]); assert.equal(pcb.onKey("l", ev(), ctx), true); assert.ok(P.isLocked(doc.items.get("s-4").node)); assert.equal(pcb.onKey("l", ev(), ctx), true); assert.ok(!P.isLocked(doc.items.get("s-4").node));
   ctx.selection = new Set(["v-1"]); assert.equal(pcb.runAction("selectNet", ctx), true); assert.ok(log.selection.includes("s-4") && log.selection.includes("v-1") && !log.selection.includes("fp-1"), "the net's copper, not its footprints");
   ctx.selection = new Set(["v-1"]); assert.equal(pcb.runAction("selectConnection", ctx), true); assert.deepEqual(log.selection.sort(), ["s-2", "v-1"], "s-1 was turned and s-3 moved away above");
@@ -1711,14 +1712,14 @@ const LOCKED_MSG = "Selection contains locked items. Enable 'Override locks' to 
 test("hover selection: R / F / L / Ctrl+C / Del act on the item under the cursor and leave nothing selected; an empty spot does nothing silently", () => {
   const doc = fixture(); const { ctx, log } = fullCtx(doc);
   ctx.cursor = [132, 50]; log.selection = null;
-  assert.equal(pcb.runAction("rotateSelection", ctx), true); assert.equal(log.commits.at(-1).label, "rotate");
+  assert.equal(pcb.runAction("rotateSelection", ctx), true); assert.equal(log.commits.at(-1).label, "Rotate");
   assert.deepEqual([pt(doc.items.get("s-4").node, "start"), pt(doc.items.get("s-4").node, "end")], [[130, 50], [130, 45]], "a lone segment turns about its start (GetPosition)");
   assert.deepEqual(log.selection, [], "the hover selection is cleared afterwards");
   ctx.cursor = [130, 47]; assert.equal(pcb.runAction("flipSelection", ctx), true); assert.equal(K.kid(doc.items.get("s-4").node, "layer")[1], "B.Cu");
-  ctx.cursor = [130, 47]; assert.equal(pcb.runAction("toggleLock", ctx), true); assert.ok(P.isLocked(doc.items.get("s-4").node));
-  ctx.cursor = [130, 47]; assert.equal(pcb.runAction("copy", ctx), true); assert.ok(/\(segment /.test(log.clip) && !/locked/.test(log.clip), "a clipboard copy drops the lock (CLIPBOARD_IO)");
+  ctx.cursor = [130, 53]; assert.equal(pcb.runAction("toggleLock", ctx), true); assert.ok(P.isLocked(doc.items.get("s-4").node));
+  ctx.cursor = [130, 53]; assert.equal(pcb.runAction("copy", ctx), true); assert.ok(/\(segment /.test(log.clip) && !/locked/.test(log.clip), "a clipboard copy drops the lock (CLIPBOARD_IO)");
   // the locked segment: KiCad's warning, nothing turns
-  const n = log.commits.length; ctx.cursor = [130, 47];
+  const n = log.commits.length; ctx.cursor = [130, 53];
   assert.equal(pcb.runAction("rotateSelection", ctx), true); assert.equal(log.commits.length, n); assert.equal(log.toasts.at(-1), LOCKED_MSG);
   assert.equal(pcb.onKey("Delete", ev(), ctx), true); assert.equal(log.commits.length, n); assert.ok(doc.items.has("s-4"));
   // nothing there: nothing happens and nothing is said
@@ -1734,7 +1735,7 @@ test("hover selection with several candidates asks Clarify Selection and runs th
   ctx.cursor = [118, 53]; ctx.candidatesAt = () => ["v-1", "s-2", "s-3"];
   ctx.clarify = (ids, then) => { asked = ids; ctx.selection = new Set(["v-1"]); then(ctx); };
   assert.equal(pcb.runAction("rotateSelection", ctx), true); assert.deepEqual(asked, ["v-1", "s-2", "s-3"]);
-  assert.equal(log.commits.at(-1).label, "rotate"); assert.deepEqual(log.commits.at(-1).changes.map((c) => c.id), ["v-1"]); assert.deepEqual(log.selection, [], "the pick was a hover selection");
+  assert.equal(log.commits.at(-1).label, "Rotate"); assert.deepEqual(log.commits.at(-1).changes.map((c) => c.id), ["v-1"]); assert.deepEqual(log.selection, [], "the pick was a hover selection");
   // a pad stands for its footprint, a group member for its group
   ctx.candidatesAt = () => ["fp-1#0", "fp-1"]; ctx.selection = new Set(); ctx.cursor = [100, 49];
   assert.equal(pcb.runAction("flipSelection", ctx), true); assert.equal(doc.items.get("fp-1").layer, "B.Cu");
@@ -1760,7 +1761,7 @@ test("Rotate / Flip / Mirror during a Move turn the move about the cursor; the c
   assert.deepEqual([pt(doc.items.get("s-4").node, "start"), pt(doc.items.get("s-4").node, "end")], [[140, 60], [140, 55]], "turned about the cursor");
   P.selectMoveTo(ctx, [150, 60]); assert.deepEqual(pt(doc.items.get("s-4").node, "end"), [150, 55], "the turn moves on with the cursor");
   P.finishSelectMove(ctx, true, false);
-  assert.equal(log.commits.length, n + 1); assert.equal(log.commits.at(-1).label, "move");
+  assert.equal(log.commits.length, n + 1); assert.equal(log.commits.at(-1).label, "Move");
   assert.deepEqual([pt(doc.items.get("s-4").node, "start"), pt(doc.items.get("s-4").node, "end")], [[150, 60], [150, 55]]);
   // Escape after a turn and a flip: the true originals come back
   const before = K.serialize(doc.items.get("s-4").node); ctx.cursor = [150, 60];
@@ -1776,7 +1777,7 @@ test("Rotate / Flip / Mirror during a Move turn the move about the cursor; the c
 
 test("Mirror: graphics and tracks in place about the modification point; footprints are skipped with KiCad's message", () => {
   const doc = fixture(); const { ctx, log } = fullCtx(doc);
-  ctx.selection = new Set(["s-2"]); assert.equal(pcb.runAction("mirrorH", ctx), true); assert.equal(log.commits.at(-1).label, "mirror");
+  ctx.selection = new Set(["s-2"]); assert.equal(pcb.runAction("mirrorH", ctx), true); assert.equal(log.commits.at(-1).label, "Mirror");
   assert.deepEqual([pt(doc.items.get("s-2").node, "start"), pt(doc.items.get("s-2").node, "end")], [[115, 50], [112, 53]], "about the segment's start");
   ctx.selection = new Set(["fp-1"]); const n = log.commits.length; assert.equal(pcb.runAction("mirrorV", ctx), true); assert.equal(log.commits.length, n);
   assert.equal(log.toasts.at(-1), "Footprints cannot be mirrored. Use Flip to move them to the other side of the board.");
@@ -1789,7 +1790,7 @@ test("Duplicate keeps references, locks and nets, and a copy joins its original'
   ctx.selection = new Set(["fp-1"]); pcb.runAction("toggleLock", ctx);
   const g = P.groupChanges(doc, ["s-4", "a-1"], "pair"); ctx.commit(g, "group"); const gid = g[0].id;
   ctx.selection = new Set(["fp-1"]); P.state.sel.clear(); assert.equal(pcb.runAction("duplicate", ctx), true);
-  const c = log.commits.at(-1); assert.equal(c.label, "duplicate"); const nfp = doc.items.get(c.changes[0].id);
+  const c = log.commits.at(-1); assert.equal(c.label, "Duplicate"); const nfp = doc.items.get(c.changes[0].id);
   assert.equal(nfp.ref, "R1", "BOARD_ITEM::Duplicate keeps the reference"); assert.ok(P.isLocked(nfp.node), "and the lock"); assert.notEqual(nfp.id, "fp-1");
   P.finishSelectMove(ctx, true, false);
   // a member of a group whose group is not duplicated: the copy joins the group in the same commit
@@ -2141,22 +2142,31 @@ test("Create Array: ARRAY_OPTIONS transforms, ARRAY_TOOL's copies, and DIALOG_CR
   assert.equal(P.arrayStacked({ ...g, dx: 0, dy: 0 }, [0, 0]), true); assert.equal(P.arrayStacked(g, [0, 0]), false);
   assert.equal(P.arrayStacked({ ...c, count: 5, rotateItems: false }, [10, 0]), true, "five quarter turns come round to the first");
   assert.equal(P.arrayStacked({ ...c, count: 5 }, [10, 0]), false, "unless the item turns: -360 is not 0 to EDA_ANGLE");
-  // the copies: footprints reannotated, the original stays the first cell and is selected with them
+  // the copies: ARRAY_TOOL runs the cells backwards, so a copy takes the first cell where the original was (keeping its
+  // reference) and the original itself moves to the last cell, reannotated last
   const doc = fixture();
   let r = P.arrayChanges(doc, ["fp-1", "s-4"], { ...g, nx: 2, ny: 1 });
-  assert.equal(r.label, "Create Array"); assert.equal(r.changes.length, 2); assert.deepEqual(r.ids.slice(-2), ["fp-1", "s-4"]);
-  const fpc = r.changes.find((x) => x.typeName === "FOOTPRINT" || /^\(kicad_pcb.*\(footprint/s.test(x.sexpr) && x.sexpr.includes("(footprint"));
-  assert.ok(fpc && fpc.sexpr.includes('"Reference" "R2"') && fpc.sexpr.includes("(translate 110 50)"), fpc && fpc.sexpr.slice(0, 300));
-  assert.ok(r.changes.some((x) => x.sexpr.includes("(segment (start 140 50) (end 145 50)")));
+  assert.equal(r.label, "Create Array"); assert.deepEqual(r.changes.map((x) => x.kind), ["ADDED", "ADDED", "MODIFIED", "MODIFIED"]); assert.deepEqual(r.ids.slice(-2), ["fp-1", "s-4"]);
+  const fpc = r.changes.find((x) => x.kind === "ADDED" && x.sexpr.includes("(footprint"));
+  assert.ok(fpc && fpc.sexpr.includes('"Reference" "R1"') && fpc.sexpr.includes("(translate 100 50)"), fpc && fpc.sexpr.slice(0, 300));
+  const fpo = r.changes.find((x) => x.id === "fp-1");
+  assert.ok(fpo.sexpr.includes('"Reference" "R2"') && fpo.sexpr.includes("(translate 110 50)"), fpo.sexpr.slice(0, 300));
+  assert.ok(r.changes.some((x) => x.kind === "ADDED" && x.sexpr.includes("(segment (start 130 50) (end 135 50)")), "the copy stays in the first cell");
+  assert.ok(r.changes.some((x) => x.id === "s-4" && x.sexpr.includes("(segment (start 140 50) (end 145 50)")), "the original goes to the last cell");
   r = P.arrayChanges(fixture(), ["fp-1"], { ...g, nx: 2, ny: 1, keepRefs: true });
-  assert.ok(r.changes[0].sexpr.includes('"Reference" "R1"'), "Keep existing reference designators");
-  // centred: the originals move too (MODIFIED), in the same commit
+  assert.ok(r.changes.every((x) => x.sexpr.includes('"Reference" "R1"')), "Keep existing reference designators");
+  // three cells: the copies keep R1 and take R2, the original (last cell) takes R3
+  r = P.arrayChanges(fixture(), ["fp-1"], { ...g, nx: 3, ny: 1 });
+  assert.deepEqual(r.changes.map((x) => [x.kind, /"Reference" "(\w+)"/.exec(x.sexpr)[1], /\(translate (\d+) /.exec(x.sexpr)[1]]), [["ADDED", "R1", "100"], ["ADDED", "R2", "110"], ["MODIFIED", "R3", "120"]]);
+  // centred: copies in the first two cells, the original in the last
   r = P.arrayChanges(fixture(), ["s-4"], { ...g, nx: 3, ny: 1, centred: true });
   assert.deepEqual(r.changes.map((x) => x.kind), ["ADDED", "ADDED", "MODIFIED"]);
-  assert.ok(r.changes[2].sexpr.includes("(start 120 50) (end 125 50)"), r.changes[2].sexpr);
-  // circular, clockwise on screen: (130, 50) a quarter turn about (130, 60) is (140, 60), and the track turns with it
+  assert.ok(r.changes[0].sexpr.includes("(start 120 50) (end 125 50)") && r.changes[2].sexpr.includes("(start 140 50) (end 145 50)"), r.changes[2].sexpr);
+  // circular, clockwise on screen: (130, 50) a quarter turn about (130, 60) is (140, 60), and the track turns with it:
+  // the original takes that last cell, its copy stays put
   r = P.arrayChanges(fixture(), ["s-4"], { ...c, centre: [130, 60], count: 2, angle: 90 });
-  assert.ok(r.changes[0].sexpr.includes("(start 140 60) (end 140 65)"), r.changes[0].sexpr);
+  assert.ok(r.changes[0].kind === "ADDED" && r.changes[0].sexpr.includes("(start 130 50) (end 135 50)"), r.changes[0].sexpr);
+  assert.ok(r.changes[1].id === "s-4" && r.changes[1].sexpr.includes("(start 140 60) (end 140 65)"), r.changes[1].sexpr);
   // arrange: the selection, in order, one item to a cell from the first one's position
   r = P.arrayChanges(fixture(), ["s-4", "s-1"], { ...g, nx: 2, ny: 1, arrange: true });
   assert.equal(r.label, "Arrange selection"); assert.equal(r.changes.length, 1); assert.ok(r.changes[0].sexpr.includes("(start 140 50) (end 145 50)") && r.changes[0].sexpr.includes('"s-1"'), r.changes[0].sexpr);

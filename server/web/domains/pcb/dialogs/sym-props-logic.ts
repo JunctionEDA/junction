@@ -2,6 +2,7 @@
 // the other item dialogs: the passthrough mode, local power (LIB_SYMBOL::SetLocalPowerProp), body style names,
 // the composed reference suffix, SCH_SYMBOL::SyncOtherUnits / CollectOtherUnits and the pin-to-pad maps
 // (PANEL_SYMBOL_PIN_MAP, file version 20260629).
+import * as VM from "../canvas/variant-model";
 import { clone, drop, fieldName, fieldValue, instanceEntry, kid, kids, num, put, qnode, str } from "./sch-items-logic";
 
 const isList = Array.isArray;
@@ -83,7 +84,8 @@ const r4 = (v: number): number => Math.round(v * 1e4) / 1e4;
  * other non-reference fields (added at the same offset from the symbol, extra non-mandatory ones removed), the
  * exclude / DNP flags, the pin map override and the alternate pin assignments.
  */
-export function syncUnit(src: SNode, dst: SNode, what: SyncWhat = SYNC_ALL): SNode | null {
+export function syncUnit(src: SNode, dst: SNode, what: SyncWhat = SYNC_ALL, inst?: SyncInstance | null): SNode | null {
+  if (inst && !VM.isDefaultVariant(inst.variant)) return syncUnitVariant(src, dst, what, inst);
   const out = clone(dst);
   const props = (n: SNode) => kids(n, "property");
   const find = (n: SNode, name: string) => props(n).find((p) => fieldName(p) === name) || null;
@@ -112,6 +114,52 @@ export function syncUnit(src: SNode, dst: SNode, what: SyncWhat = SYNC_ALL): SNo
     drop(out, "pin_map_override");
     if (s) { const at = out.findIndex((c, j) => j > 0 && isList(c) && c[0] === "dnp"); if (at > 0) out.splice(at + 1, 0, clone(s)); else put(out, "pin_map_override", s.slice(1), ["passthrough", "locked", "fields_autoplaced", "uuid", "property"]); }
   }
+  if (what.pins) {
+    const altOf = new Map<string, string>(); for (const p of kids(src, "pin")) { const a = kid(p, "alternate"); altOf.set(str(p[1]), a ? str(a[1]) : ""); }
+    for (const p of kids(out, "pin")) {
+      if (!altOf.has(str(p[1]))) continue;
+      const want = altOf.get(str(p[1])) || ""; drop(p, "alternate");
+      if (want) { const u = p.findIndex((c, j) => j > 0 && isList(c) && c[0] === "uuid"); p.splice(u > 0 ? u + 1 : p.length, 0, qnode("alternate", want)); }
+    }
+  }
+  return JSON.stringify(out) === JSON.stringify(dst) ? null : out;
+}
+/** The sheet paths a variant-aware sync reads from (`srcPath`) and writes to (`dstPaths`), and the variant. */
+export interface SyncInstance { variant: string; srcPath: string | null; dstPaths: (string | null)[]; ver?: number | null }
+/**
+ * SyncOtherUnits with a variant name: every copy goes through the variant setters for the other unit's sheet path
+ * (SetFieldText / SetText / SetExcludedFromBOM / SetExcludedFromBoard / SetExcludedFromPosFiles / SetDNP with
+ * &sheet, aVariantName), reading the source through the variant on its own path; the base fields and flags of the
+ * other unit stay as they are.  A field the other unit lacks is added as a copy of the source's (base text) first.
+ */
+function syncUnitVariant(src: SNode, dst: SNode, what: SyncWhat, inst: SyncInstance): SNode | null {
+  let out = clone(dst);
+  const props = (n: SNode) => kids(n, "property");
+  const find = (n: SNode, name: string) => props(n).find((p) => fieldName(p) === name) || null;
+  const view = VM.symbolViewForVariant(src, inst.variant, inst.srcPath, inst.ver), flags = VM.symbolFlagsForVariant(src, inst.variant, inst.srcPath, inst.ver);
+  const fields: Record<string, string> = {};
+  const take = (name: string) => { const s = find(view, name); if (s && find(out, name)) fields[name] = fieldValue(s); };
+  if (what.value) take("Value");
+  if (what.field) take(what.field);
+  if (what.otherFields) {
+    const [sx, sy] = atXY(src), [dx, dy] = atXY(out);
+    for (const f of props(src)) {
+      const name = fieldName(f); if (name === "Reference" || name === "Value") continue;
+      if (!find(out, name)) {
+        const nf = clone(f); const a = kid(nf, "at"); if (a) { a[1] = r4(num(a[1]) - sx + dx) as unknown as SNode; a[2] = r4(num(a[2]) - sy + dy) as unknown as SNode; }
+        const last = out.reduce((acc: number, c, j) => (j > 0 && isList(c) && c[0] === "property" ? j : acc), -1);
+        out.splice(last > 0 ? last + 1 : out.length, 0, nf);
+      }
+      take(name);
+    }
+    for (let j = out.length - 1; j > 0; j--) { const c = out[j]; if (isList(c) && c[0] === "property") { const name = fieldName(c as SNode); if (!MANDATORY.includes(name) && !find(src, name)) out.splice(j, 1); } }
+  }
+  const fl: Partial<VM.SymFlags> = {};
+  if (what.exclBOM) fl.excludedFromBOM = flags.excludedFromBOM;
+  if (what.exclBoard) fl.excludedFromBoard = flags.excludedFromBoard;
+  if (what.exclPos) fl.excludedFromPosFiles = flags.excludedFromPosFiles;
+  if (what.dnp) fl.dnp = flags.dnp;
+  for (const p of inst.dstPaths) out = VM.setSymbolVariant(out, inst.variant, { flags: fl, fields }, p, inst.ver);
   if (what.pins) {
     const altOf = new Map<string, string>(); for (const p of kids(src, "pin")) { const a = kid(p, "alternate"); altOf.set(str(p[1]), a ? str(a[1]) : ""); }
     for (const p of kids(out, "pin")) {

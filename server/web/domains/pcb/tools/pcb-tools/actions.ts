@@ -1,5 +1,5 @@
 // pcb-tools/actions.ts — pcbnew's non-tool commands (pcb.actions): the action table, its dialogs and runAction.
-import type { BoardDoc, FormField, PcbChange, PcbCtx, Pt } from "./types";
+import type { BoardDoc, FormField, PcbChange, PcbCtx, Pt, SelectMove } from "./types";
 import type { RouterSettings } from "./router-settings";
 import type { MeanderSettings } from "./meander";
 
@@ -43,17 +43,18 @@ import { connectedRun } from "./connected";
 import { boardStatistics, convertChanges, footprintAttrChanges, justifyChanges, zonePriorityChanges } from "./convert";
 import { copperOf, num0, openForm, settingsOf } from "./dialogs";
 import { DIM_TYPE } from "./dimensions";
+import { pickTwoPoints } from "./dom";
 import { angleSnapMode, nextLineMode, setAngleSnap, stepDrawWidth } from "./draw-modes";
 import { askText } from "./draw-tools";
-import { drc, mm4, netclassName } from "./drc";
+import { drc, mm4, netclassName, netclassOf } from "./drc";
 import { cycleVia, cycleWidth, sizeUnits, stepLayer } from "./edit-commands";
-import { enterGroup, exitGroup, selectedTopGroup } from "./group-edit";
+import { enterGroup, exitGroup, selectedTopGroup, withinEnteredGroup } from "./group-edit";
 import { applySelection, expandGroups, groupChanges, groupMembers, groupMembersChanges, groupOf, isLocked, lockChanges, selectedItems, selectionIds, topParentOf, ungroupChanges } from "./groups";
 import { itemAt } from "./guess";
 import { hitTestItem } from "./hit";
 import { LENGTH_UNCONSTRAINED, TUNE_IU, setTargetLength, setTargetSkew, tuneCopy } from "./meander";
 import { idsOnLayer, inspectClearance } from "./msgpanel";
-import { connectedCopperIds, netHighlightIds, netInspector, netItemIds, netlist, ratsnest, selectionNets } from "./netlist";
+import { connectedCopperIds, netHighlightIds, netInspector, netItemIds, netTable, netlist, ratsnest, selectionNets } from "./netlist";
 import { netOf } from "./nets";
 import { zoneLayers } from "./nodes";
 import { ARC_EDIT_ACTIONS, addCornerChanges, arcEditMode, canAddCorner, handleTol, nextArcEditMode, peSingleId, removeCornerChanges, setArcEditMode } from "./point-editor";
@@ -61,14 +62,15 @@ import { netUnder, padsOf } from "./route-geom";
 import { attemptFinish, continueFromEnd, selectLayerAndPlaceVia, setLayer, startWithVia, toggleViaPlacement, undoRouteLeg, viaSpan } from "./route-tool";
 import { CM_M45, CM_M90, CM_R45, CM_R90, RM_MARK, RM_SHOVE, RM_WALK, setRouterSettings } from "./router-settings";
 import { beginCarryMove, moveTransform } from "./select-move";
+import { connectedItemNets, expandConnection, footprintSheetPath, isExpandableGraphicShape, isPadKey, itemPassesFilter, nearestUnconnectedFootprints, netCopperIds, sheetItemIds, unconnectedFootprints, unrouteIds } from "./select-connected";
 import { K, S, bind, lastCtx } from "./state";
 import { breakTrackChanges, cleanupChanges, cleanupPlan, trackEditChanges, trackLayerChanges, type CleanupOpts } from "./track-edit";
-import { alignChanges, anchorOf, bboxUnion, distributeChanges, flipChanges, mirrorChanges, moveExactChanges, packChanges, positionRelativeChanges, rotateChanges, swapChanges, topLeftAnchor, transformChanges } from "./transforms";
+import { ALIGN_COMMIT, mirrorAxisChanges, alignChanges, anchorOf, bboxUnion, distributeChanges, flipChanges, mirrorChanges, moveExactChanges, packNodes, positionRelativeChanges, rotateChanges, swapChanges, topLeftAnchor, transformChanges } from "./transforms";
 import { isTuningPattern, regenerateTuning, tuneStep, tuningPatternInfo } from "./tuning-patterns";
 import { editTuningPattern, selectedTuningPattern, tuningNodeWithSettings } from "./tuning-edit";
 import { isTuneTool, tuneMode, tuneUpdate } from "./tuning-tool";
 import { clone, fmt, layerOf, r6, widthOf } from "./util";
-import { flipFieldChange, requestField, rotateFieldChange } from "./field-edit";
+import { flipFieldChange, footprintFieldNode, requestField, rotateFieldChange } from "./field-edit";
 import { diffPairMarkers, matchedLengthMarkers } from "./dru";
 import { sourceZone } from "./zone-modes";
 import { routeSelected, unrouteSegment } from "./route-selected";
@@ -102,10 +104,11 @@ act("copy", "Copy", "Ctrl+C", (ctx: PcbCtx) => {
   clipSet(ctx, clipboardText(ctx.doc, sel.ids, referencePoint(ctx.doc, sel.ids, cursorPoint(ctx)))); endHover(ctx, sel); return true;
 });
 act("cut", "Cut", "Ctrl+X", (ctx: PcbCtx) => {
+  if (S.move) return true;   // doMoveSelection: ACTIONS::cut while moving is wxBell
   if (!canEdit(ctx)) return true;
   const sel = requestSelection(ctx, { rerun: (c: PcbCtx) => runAction("cut", c) }); if (!sel) return true;
   clipSet(ctx, clipboardText(ctx.doc, sel.ids, referencePoint(ctx.doc, sel.ids, cursorPoint(ctx))));
-  ctx.commit(deleteChanges(ctx.doc, sel.ids), "cut"); applySelection(ctx, []); return true;
+  ctx.commit(deleteChanges(ctx.doc, sel.ids), "Cut"); applySelection(ctx, []); return true;
 });
 export function pasteAt(ctx: PcbCtx, opts: { annotations: string; clearNets?: boolean }) {
   clipGet(ctx, (text: string) => {
@@ -123,43 +126,116 @@ act("pasteSpecial", "Paste Special…", "Ctrl+Shift+V", (ctx: PcbCtx) => canEdit
   { k: "annotations", label: "Reference Designators", type: "radio", value: "keep", options: [["unique", "Assign unique reference designators to pasted symbols", "Finds the next available reference designator for any designators that already exist in the design."], ["keep", "Keep existing reference designators, even if they are duplicated"], ["clear", "Clear reference designators on all pasted symbols", "Replaces reference designators with 'REF**'."]] },
   { k: "clearNets", label: "Clear net assignments", type: "check", value: false, tip: "Remove the net information from all connected items before pasting" }],
   apply: (v: { annotations: string; clearNets: boolean }) => { pasteAt(ctx, { annotations: v.annotations, clearNets: !!v.clearNets }); } }));
+/** EDIT_TOOL::Duplicate's DisplayToolMsg: "Duplicated %d item(s)" in the status bar, counting the top-level copies. */
+export function duplicatedMsg(ctx: PcbCtx, ids: string[]) {
+  const n = ids.filter((id) => !topParentOf(ctx.doc, id) || !ids.includes(topParentOf(ctx.doc, id)!.id)).length;
+  if (ctx.setStatus) ctx.setStatus(`Duplicated ${n} item(s)`);
+}
 act("duplicate", "Duplicate", "Ctrl+D", (ctx: PcbCtx) => {
+  if (S.move) return true;   // doMoveSelection: ACTIONS::duplicate while moving is wxBell
   if (!canEdit(ctx)) return true;
   const sel = requestSelection(ctx, { locks: false, rerun: (c: PcbCtx) => runAction("duplicate", c) }); if (!sel) return true;
   // EDIT_TOOL::Duplicate: the copies follow the cursor from where the originals are; a click places them (one
   // "Duplicate" step), Escape drops them; a hover selection is not kept afterwards
   const r = duplicateChanges(ctx.doc, sel.ids); if (!r.changes.length) return true;
-  ctx.commit(r.changes, "duplicate", { tentative: true }); applySelection(ctx, r.ids); beginCarryMove(ctx, { placing: r.ids.slice(), restore: r.restore, hover: sel.hover }); return true;
+  ctx.commit(r.changes, "Duplicate", { tentative: true }); applySelection(ctx, r.ids); duplicatedMsg(ctx, r.ids); beginCarryMove(ctx, { placing: r.ids.slice(), restore: r.restore, hover: sel.hover }); return true;
 });
 act("duplicateIncrement", "Duplicate and Increment", "Ctrl+Shift+D", (ctx: PcbCtx) => {
+  if (S.move) return true;
   if (!canEdit(ctx)) return true;
   const sel = requestSelection(ctx, { locks: false, rerun: (c: PcbCtx) => runAction("duplicateIncrement", c) }); if (!sel) return true;
   const r = duplicateChanges(ctx.doc, sel.ids, null, { increment: true }); if (!r.changes.length) return true;
-  ctx.commit(r.changes, "duplicate", { tentative: true }); applySelection(ctx, r.ids); beginCarryMove(ctx, { placing: r.ids.slice(), restore: r.restore, hover: sel.hover }); return true;
+  ctx.commit(r.changes, "Duplicate", { tentative: true }); applySelection(ctx, r.ids); duplicatedMsg(ctx, r.ids); beginCarryMove(ctx, { placing: r.ids.slice(), restore: r.restore, hover: sel.hover }); return true;
 });
-act("copyAsText", "Copy as Text", "", (ctx: PcbCtx) => { const ids = needSel(ctx); if (!ids) return true; const t = Array.from(ids, (id) => textOfItem(ctx.doc.items.get(id)!)).filter(Boolean).join("\n"); clipSet(ctx, t); ctx.toast(t ? "Text copied" : "Nothing textual selected"); return true; });
+// EDIT_TOOL::copyToClipboardAsText: the selection or the item under the cursor (a hover selection is cleared), nothing
+// filtered and nothing said; texts, fields, dimensions, text boxes and tables give their text, trimmed, one per line,
+// and the clipboard is left alone when there is none
+act("copyAsText", "Copy as Text", "Ctrl+Shift+C", (ctx: PcbCtx) => {
+  const fr = requestField(ctx, ctx.cursor ? ctx.cursor.slice() : cursorPoint(ctx));
+  if (fr) { const f = footprintFieldNode(ctx.doc.items.get(fr.id)!.node, fr.name); const t = f ? K.str(f[2]).trim() : ""; if (t) clipSet(ctx, t); return true; }
+  const sel = requestSelection(ctx, { locks: false, rerun: (c: PcbCtx) => runAction("copyAsText", c) }); if (!sel) return true;
+  const texts = sel.ids.map((id) => textOfItem(ctx.doc.items.get(id)!).trim()).filter(Boolean);
+  endHover(ctx, sel); if (texts.length) clipSet(ctx, texts.join("\n")); return true;
+}, { tip: "Copy selected item(s) to clipboard as text" });
 // selection
-act("selectNet", "Select Net", "", (ctx: PcbCtx) => {
-  const ids = needSel(ctx, "Select a track, via or footprint first"); if (!ids) return true; const nl = netlist(ctx.doc); const out = new Set(ids);
-  for (const key of selectionNets(ctx, nl)) for (const id of netItemIds(ctx.doc, key, nl)) if (ctx.doc.items.get(id)!.kind !== "footprint") out.add(id);
-  applySelection(ctx, out); ctx.toast(`${plural(out.size, "item")} selected`); return true;
-});
-act("deselectNet", "Deselect Net", "", (ctx: PcbCtx) => { const ids = needSel(ctx); if (!ids) return true; const nl = netlist(ctx.doc); const drop = new Set(); for (const key of selectionNets(ctx, nl)) for (const id of netItemIds(ctx.doc, key, nl)) drop.add(id); applySelection(ctx, Array.from(ids).filter((id) => !drop.has(id))); return true; });
-act("selectConnection", "Select/Expand Connection", "U", (ctx: PcbCtx) => { const ids = needSel(ctx, "Select a track first"); if (!ids) return true; const run = connectedRun(ctx.doc, ids); if (!run.size) { ctx.toast("No tracks in the selection"); return true; } for (const id of ids) run.add(id); applySelection(ctx, run); ctx.toast(run.size > ids.size ? `Selected the connected run (${run.size} items)` : "Nothing else connected"); return true; });
-export function unconnectedNeighbours(ctx: PcbCtx) {
-  const ids = needSel(ctx, "Select a footprint first"); if (!ids) return null; const out = new Set<string>();
-  for (const l of ratsnest(ctx.doc)) { const [a, b] = l.ids; if (ids.has(a) && !ids.has(b)) out.add(b); else if (ids.has(b) && !ids.has(a)) out.add(a); }
-  return Array.from(out).filter((id) => ctx.doc.items.get(id)!.kind === "footprint");
+/** The pads picked on their own ("footprintId#index"): PCB_PAD_T items of m_selection. */
+const padSelKeys = (): string[] => (S.padSel ? [S.padSel, ...(S.padAlso && S.padAlso.anchor === S.padSel ? S.padAlso.keys.filter((k) => k !== S.padSel) : [])] : []);
+/** itemPassesFilter( item, true ) under the Selection Filter pane, for the connection walks. */
+const walkFilter = (ctx: PcbCtx) => (it: KItem, pad?: boolean) => itemPassesFilter(ctx.doc, ctx.selFilter, it, { pad, multi: true });
+/** itemIsSelectableAsConnected: inside the entered group, or outside any group (a generator's members count). */
+const walkScope = (ctx: PcbCtx) => (it: KItem) => { if (S.enteredGroup && ctx.doc.items.has(S.enteredGroup)) return withinEnteredGroup(ctx.doc, [it.id]).length > 0; const par = topParentOf(ctx.doc, it.id); return !par || par.kind === "generated"; };
+/**
+ * PCB_SELECTION_TOOL::selectCursor: with nothing selected (or aForceSelect) the item under the cursor becomes the
+ * selection (selectPoint: Clarify Selection asks between several, and the action runs again on the pick).  Returns
+ * the selection (pads on their own as "footprintId#index"), or null when there is none.  No message either way.
+ */
+function selectCursor(ctx: PcbCtx, rerun: (c: PcbCtx) => unknown, force?: boolean, client?: (ids: string[]) => string[]): string[] | null {
+  let ids = Array.from(selectionIds(ctx)).concat(padSelKeys());
+  if (ids.length && !force) return ids;
+  if (force) { applySelection(ctx, []); S.padSel = null; S.padAlso = null; }
+  const at = ctx.cursor ? ctx.cursor.slice() : cursorPoint(ctx);
+  let cands = cursorCandidates(ctx, at); if (client) cands = client(cands);
+  if (!cands.length) return null;
+  if (cands.length > 1 && typeof ctx.clarify === "function") { ctx.clarify(cands, (fresh) => { rerun(fresh || ctx); }); return null; }
+  ids = applySelection(ctx, [cands[0]]);
+  return ids.length ? ids : null;
 }
-act("selectUnconnected", "Select Unconnected Footprints", "O", (ctx: PcbCtx) => { const n = unconnectedNeighbours(ctx); if (!n) return true; if (!n.length) { ctx.toast("Nothing unconnected to reach"); return true; } applySelection(ctx, n); ctx.toast(`${plural(n.length, "footprint")} at the other end of the ratsnest selected`); return true; });
-act("grabUnconnected", "Grab Unconnected Footprints", "Shift+O", (ctx: PcbCtx) => { const n = unconnectedNeighbours(ctx); if (!n) return true; if (!n.length) { ctx.toast("Nothing unconnected to grab"); return true; } applySelection(ctx, n); ctx.toast(`${plural(n.length, "footprint")} selected — drag them into place`); return true; });
+/** connectedItemFilter: one BOARD_CONNECTED_ITEM per net; everything else goes. */
+const connectedItemFilter = (ctx: PcbCtx) => (ids: string[]) => {
+  const nets = new Set<string>(), out: string[] = [];
+  for (let i = ids.length - 1; i >= 0; i--) {
+    const it = ctx.doc.items.get(ids[i]); if (!it || !(it.kind === "segment" || it.kind === "arc" || it.kind === "via" || it.kind === "zone" || (/^gr_/.test(it.kind) && K.kid(it.node, "net")))) continue;
+    const n = netOf(it.node), key = n.name || String(n.code); if (nets.has(key)) continue; nets.add(key); out.unshift(ids[i]);
+  }
+  return out;
+};
+/** Hand back a selection that may hold pad keys: the items through applySelection, the pads stay as they were picked. */
+function applyWalkSelection(ctx: PcbCtx, ids: Iterable<string>) { const pads = { sel: S.padSel, also: S.padAlso }; applySelection(ctx, Array.from(ids).filter((id) => !isPadKey(id))); S.padSel = pads.sel; S.padAlso = pads.also; }
+// PCB_SELECTION_TOOL::selectNet / SelectAllItemsOnNet: the tracks, arcs, vias and copper shapes on the nets of the
+// selected connected items (a footprint gives no net); with nothing selected, of the item under the cursor
+function selectNetAction(ctx: PcbCtx, select: boolean) {
+  const sel = selectCursor(ctx, (c) => runAction(select ? "selectNet" : "deselectNet", c)); if (!sel) return true;
+  const nl = netlist(ctx.doc), out = new Set(sel), pass = walkFilter(ctx);
+  for (const key of connectedItemNets(ctx.doc, sel, nl)) for (const id of netCopperIds(ctx.doc, key, nl, pass)) { if (select) out.add(id); else out.delete(id); }
+  applyWalkSelection(ctx, out); return true;
+}
+act("selectNet", "Select Net", "", (ctx: PcbCtx) => selectNetAction(ctx, true));
+act("deselectNet", "Deselect Net", "", (ctx: PcbCtx) => selectNetAction(ctx, false));
+// PCB_SELECTION_TOOL::expandConnection: each press widens the selection by one stage (to the next junction, then to
+// the pads, then the whole connection); nothing connected selected picks the connected item under the cursor first
+act("selectConnection", "Select/Expand Connection", "U", (ctx: PcbCtx) => {
+  let ids = Array.from(selectionIds(ctx)).concat(padSelKeys());
+  const startish = (id: string) => { if (isPadKey(id)) return true; const it = ctx.doc.items.get(id); return !!it && (it.kind === "footprint" || it.kind === "generated" || it.kind === "segment" || it.kind === "arc" || it.kind === "via" || it.kind === "zone" || (/^gr_/.test(it.kind) && /\.Cu$/.test(layerOf(it.node, "")) && !!K.kid(it.node, "net"))); };
+  if (!ids.some(startish) && !ids.some((id) => { const it = ctx.doc.items.get(id); return !!it && isExpandableGraphicShape(it); })) {
+    const picked = selectCursor(ctx, (c) => runAction("selectConnection", c), true, connectedItemFilter(ctx)); if (!picked) return true;
+    ids = picked;
+  }
+  const out = expandConnection(ctx.doc, ids, { passes: walkFilter(ctx), inScope: walkScope(ctx), accuracy: 5 / Math.max(1e-6, ctx.pxPerMm || 1) });
+  applyWalkSelection(ctx, out); return true;
+});
+// PCB_SELECTION_TOOL::selectUnconnected: the footprints at the far end of the ratsnest lines of the selected
+// footprints' (and pads') pads join the selection
+act("selectUnconnected", "Select Unconnected Footprints", "O", (ctx: PcbCtx) => {
+  const ids = Array.from(selectionIds(ctx)).concat(padSelKeys()); const nl = netlist(ctx.doc);
+  const more = unconnectedFootprints(ctx.doc, ids, ratsnest(ctx.doc, nl)); if (!more.length) return true;
+  applyWalkSelection(ctx, ids.concat(more)); return true;
+});
+// PCB_SELECTION_TOOL::grabUnconnected: per selected source the nearest unconnected footprint by ratsnest length
+// replaces the selection, and Move Individually picks them up one after the other
+act("grabUnconnected", "Grab Unconnected Footprints", "Shift+O", (ctx: PcbCtx) => {
+  const ids = Array.from(selectionIds(ctx)).concat(padSelKeys()); const nl = netlist(ctx.doc);
+  const near = nearestUnconnectedFootprints(ctx.doc, ids, nl, ratsnest(ctx.doc, nl)); if (!near.length) return true;
+  S.padSel = null; S.padAlso = null; applySelection(ctx, Array.from(new Set(near)));
+  return runAction("moveIndividually", ctx);
+});
 act("selectAllOnLayer", "Select All on Active Layer", "", (ctx: PcbCtx) => { const layer = ctx.activeLayer || S.layer; const ids = idsOnLayer(ctx.doc, layer); applySelection(ctx, ids); ctx.toast(`${plural(ids.size, "item")} on ${layer}`); return true; });
+// PCB_SELECTION_TOOL::selectSameSheet: the first selected item, when it is a footprint with a sheet path, gives the
+// sheet; its footprints and the copper that joins only them replace the selection (selectAllItemsOnSheet)
 act("selectSameSheet", "Select Footprints on Same Sheet", "", (ctx: PcbCtx) => {
-  const ids = needSel(ctx, "Select a footprint first"); if (!ids) return true; const sheets = new Set();
-  for (const id of ids) { const it = ctx.doc.items.get(id); const sf = it!.kind === "footprint" && (K.kid(it!.node, "sheetfile") || K.kid(it!.node, "sheetname")); if (sf) sheets.add(K.str(sf[1])); }
-  if (!sheets.size) { ctx.toast("The selection carries no sheet"); return true; } const out = new Set<string>();
-  for (const it of ctx.doc.items.values()) if (it.kind === "footprint") { const sf = K.kid(it.node, "sheetfile") || K.kid(it.node, "sheetname"); if (sf && sheets.has(K.str(sf[1]))) out.add(it.id); }
-  applySelection(ctx, out); ctx.toast(`${plural(out.size, "footprint")} on ${Array.from(sheets).join(", ")}`); return true;
+  const first = selectedItems(ctx)[0]; if (!first || first.kind !== "footprint") return true;
+  const sheet = footprintSheetPath(first); if (sheet === null) return true;
+  S.padSel = null; S.padAlso = null;
+  applySelection(ctx, sheetItemIds(ctx.doc, sheet, netlist(ctx.doc), { passes: walkFilter(ctx), inScope: walkScope(ctx) })); return true;
 });
 act("unselectAll", "Unselect All", "", (ctx: PcbCtx) => { applySelection(ctx, []); return true; });
 // placement
@@ -252,7 +328,7 @@ act("move", "Move", "M", (ctx: PcbCtx) => {
   beginCarryMove(ctx, { ids: sel.ids, hover: sel.hover }); return true;
 });
 act("moveExactly", "Move Exactly…", "Shift+M", (ctx: PcbCtx) => {
-  if (!canEdit(ctx) || S.route) return true;
+  if (!canEdit(ctx) || S.route || S.move) return true;   // moveExact while moving: wxBell
   const sel = requestSelection(ctx, { rerun: (c: PcbCtx) => runAction("moveExactly", c) }); if (!sel) return true; const ids = sel.ids;
   const run = (v: MoveExactResult): void => { commitSel(ctx, moveExactChanges(ctx.doc, ids, { dx: v.dx, dy: v.dy, rotation: v.rotation, about: v.about }), "Move Exactly"); if (sel.hover) applySelection(ctx, []); };
   if (routingDialogs.moveExact) { const items = ids.map((id) => ctx.doc.items.get(id)).filter(Boolean) as KItem[]; routingDialogs.moveExact({ single: ids.length === 1, bbox: bboxUnion(items) }, run); return true; }
@@ -275,7 +351,8 @@ act("copyWithReference", "Copy with Reference...", "", (ctx: PcbCtx) => {
 act("moveIndividually", "Move Individually", "Ctrl+M", (ctx: PcbCtx) => {
   if (S.route || S.move || !canEdit(ctx)) return true;
   const sel = requestSelection(ctx, { rerun: (c: PcbCtx) => runAction("moveIndividually", c) }); if (!sel) return true;
-  return moveIndividually(ctx, sel.ids.filter((id) => { const it = ctx.doc.items.get(id); return it && it.kind !== "group" && !topParentOf(ctx.doc, id); }).concat(sel.ids.filter((id) => ctx.doc.items.get(id)?.kind === "group" && !topParentOf(ctx.doc, id))));
+  // the selection's top-level items in order: a group is one item of the sequence (its members move with it)
+  return moveIndividually(ctx, sel.ids.filter((id) => ctx.doc.items.has(id) && !topParentOf(ctx.doc, id)));
 }, { tip: "Moves the selected items one-by-one" });
 act("skip", "Skip", "Tab", (ctx: PcbCtx) => skipMoveItem(ctx), { menu: false, tip: "Skip to next item" });
 act("interactiveOffsetTool", "Interactive Offset Tool", "", (ctx: PcbCtx) => {
@@ -319,6 +396,7 @@ export function getAndPlaceRef(ctx: PcbCtx, ref: string): boolean {
   return beginCarryMove(ctx, { ids: [fp.id], origin: [fp.x || 0, fp.y || 0] });
 }
 act("positionRelative", "Position Relative To…", "Shift+P", (ctx: PcbCtx) => {
+  if (S.route || S.move) return true;   // isRouterActive, and positionRelative while moving: wxBell
   if (!canEdit(ctx)) return true;
   const sel = requestSelection(ctx, { rerun: (c: PcbCtx) => runAction("positionRelative", c) }); if (!sel) return true; const ids = sel.ids;
   const items = ids.map((id) => ctx.doc.items.get(id)).filter(Boolean) as KItem[]; const a = topLeftAnchor(items);
@@ -332,10 +410,26 @@ act("positionRelative", "Position Relative To…", "Shift+P", (ctx: PcbCtx) => {
     { k: "dx", label: "Offset X:", type: "num", value: 0, unit: "mm" }, { k: "dy", label: "Offset Y:", type: "num", value: 0, unit: "mm" }],
     apply: (v: { ref: string; px: number; py: number; dx: number; dy: number }) => { const ref = v.ref === "origin" ? [0, 0] : v.ref === "point" ? [num0(v.px, 0), num0(v.py, 0)] : anchorOf(ctx.doc.items.get(v.ref)!); run(ref as Pt, num0(v.dx, 0), num0(v.dy, 0)); } });
 });
-for (const [id, mode, label] of [["alignLeft", "left", "Align to Left"], ["alignRight", "right", "Align to Right"], ["alignTop", "top", "Align to Top"], ["alignBottom", "bottom", "Align to Bottom"], ["alignCenterX", "centerX", "Align to Vertical Center"], ["alignCenterY", "centerY", "Align to Horizontal Center"]])
-  act(id, label, "", (ctx: PcbCtx) => { const ids = editableOrToast(ctx, "Select two or more items to align"); if (!ids) return true; return commitSel(ctx, alignChanges(ctx.doc, ids, mode, ctx.cursor!), label.toLowerCase()); });
-for (const [id, axis, centers, label] of [["distributeH", "x", false, "Distribute Horizontally by Gaps"], ["distributeV", "y", false, "Distribute Vertically by Gaps"], ["distributeHCenters", "x", true, "Distribute Horizontally by Centers"], ["distributeVCenters", "y", true, "Distribute Vertically by Centers"]] as [string, string, boolean, string][])
-  act(id, label, "", (ctx: PcbCtx) => { const ids = editableOrToast(ctx, "Select three or more items to distribute"); if (!ids) return true; if (ids.length < 3) { ctx.toast("Distribute needs at least three items"); return true; } return commitSel(ctx, distributeChanges(ctx.doc, ids, axis, centers), label.toLowerCase()); });
+for (const [id, mode, label] of [["alignLeft", "left", "Align to Left"], ["alignRight", "right", "Align to Right"], ["alignTop", "top", "Align to Top"], ["alignBottom", "bottom", "Align to Bottom"], ["alignCenterX", "centerX", "Align to Horizontal Center"], ["alignCenterY", "centerY", "Align to Vertical Center"]])
+  act(id, label, "", (ctx: PcbCtx) => {
+    // ALIGN_DISTRIBUTE_TOOL::GetSelections: nothing is filtered for locks; the locked items are the alignment targets
+    // and stay put, the rest move.  A selected pad stands for its footprint.  Nothing is said when nothing moves.
+    if (!canEdit(ctx)) return true;
+    const sel = requestSelection(ctx, { locks: false, rerun: (c: PcbCtx) => runAction(id, c) }); if (!sel) return true;
+    const locked = new Set(sel.ids.filter((x) => { const it = ctx.doc.items.get(x); if (!it) return false; if (isLocked(it.node)) return true; for (let g = groupOf(ctx.doc, x); g; g = groupOf(ctx.doc, g.id)) if (isLocked(g.node)) return true; return false; }));
+    const ch = alignChanges(ctx.doc, sel.ids, mode, ctx.cursor ? ctx.cursor : cursorPoint(ctx), { locked, mirrored: !!appGlobal(() => (editorState() as unknown as { renderOpts?: { flip?: boolean } }).renderOpts!.flip, false) });
+    if (ch.length) ctx.commit(ch, ALIGN_COMMIT[mode]);
+    endHover(ctx, sel); ctx.requestRender(); return true;
+  });
+for (const [id, axis, centers, label] of [["distributeH", "x", false, "Distribute Horizontally with Even Gaps"], ["distributeV", "y", false, "Distribute Vertically with Even Gaps"], ["distributeHCenters", "x", true, "Distribute Horizontally by Centers"], ["distributeVCenters", "y", true, "Distribute Vertically by Centers"]] as [string, string, boolean, string][])
+  act(id, label, "", (ctx: PcbCtx) => {
+    // ALIGN_DISTRIBUTE_TOOL::DistributeItems: locked items refuse it (the infobar warning); fewer than three items,
+    // or nothing to move, is silent; the commit carries the action's name
+    if (!canEdit(ctx)) return true;
+    const sel = requestSelection(ctx, { rerun: (c: PcbCtx) => runAction(id, c) }); if (!sel) return true;
+    const ch = sel.items.length < 3 ? [] : distributeChanges(ctx.doc, sel.ids, axis, centers); if (ch.length) ctx.commit(ch, label);
+    endHover(ctx, sel); ctx.requestRender(); return true;
+  });
 alias("distributeHorizontallyGaps", "distributeH"); alias("distributeVerticallyGaps", "distributeV"); alias("distributeHorizontallyCenters", "distributeHCenters"); alias("distributeVerticallyCenters", "distributeVCenters");
 /**
  * A board footprint the app itself is dragging (its pointer drag) goes over to the module's move first, so a turn
@@ -349,10 +443,10 @@ export function rotateBy(ctx: PcbCtx, deg: number) {
   if (!canEdit(ctx)) return true;
   // a footprint field (PCB_FIELD_T): PCB_TEXT::Rotate about its own position; a selected field stays selected
   const fr = requestField(ctx, ctx.cursor ? ctx.cursor.slice() : cursorPoint(ctx));
-  if (fr) { const ch = rotateFieldChange(ctx.doc, fr, deg); if (ch) ctx.commit([ch], "rotate"); ctx.requestRender(); return true; }
+  if (fr) { const ch = rotateFieldChange(ctx.doc, fr, deg); if (ch) ctx.commit([ch], "Rotate"); ctx.requestRender(); return true; }
   const sel = requestSelection(ctx, { rerun: (c: PcbCtx) => rotateBy(c, deg) }); if (!sel) return true;
   const c = modificationPoint(ctx, sel.items, true);
-  const ch = rotateChanges(ctx.doc, sel.ids, c[0], c[1], deg); if (ch.length) ctx.commit(ch, "rotate");
+  const ch = rotateChanges(ctx.doc, sel.ids, c[0], c[1], deg); if (ch.length) ctx.commit(ch, "Rotate");
   endHover(ctx, sel); ctx.requestRender(); return true;
 }
 /**
@@ -366,17 +460,19 @@ act("rotateSelectionCw", "Rotate Clockwise", "", (ctx: PcbCtx) => rotateBy(ctx, 
  * EDIT_TOOL::Flip ("Change Side / Flip"): a lone item about its own position (a rectangle or table about its centre),
  * several about the middle of their box; nothing is said afterwards.
  */
+/** PCBNEW_SETTINGS m_FlipDirection ("Flip board items": Left/right | Top/bottom; top / bottom unless the preference says otherwise). */
+export const flipDirection = (): "lr" | "tb" => S.flipDirection === "lr" ? "lr" : "tb";
 export function flipBy(ctx: PcbCtx) {
   if (S.route) { attemptFinish(ctx); return true; }   // F while routing is routerAttemptFinish
   if (moveInFlight(ctx)) return moveTransform(ctx, "flip");
   if (!canEdit(ctx)) return true;
   // a footprint field: PCB_TEXT::Flip about its own position ("Change Side / Flip")
   const fr = requestField(ctx, ctx.cursor ? ctx.cursor.slice() : cursorPoint(ctx));
-  if (fr) { const ch = flipFieldChange(ctx.doc, fr); if (ch) ctx.commit([ch], "flip"); ctx.requestRender(); return true; }
+  if (fr) { const ch = flipFieldChange(ctx.doc, fr, flipDirection()); if (ch) ctx.commit([ch], "Change Side / Flip"); ctx.requestRender(); return true; }
   const sel = requestSelection(ctx, { rerun: (c: PcbCtx) => flipBy(c) }); if (!sel) return true;
   const items = sel.items, one = items.length === 1 && items[0]!.kind !== "gr_rect" && items[0]!.kind !== "table";
-  const b = bboxUnion(items); const cx = one ? anchorOf(items[0]!)[0] : b ? (b[0] + b[2]) / 2 : 0;
-  const ch = flipChanges(ctx.doc, sel.ids, cx); if (ch.length) ctx.commit(ch, "flip");
+  const b = bboxUnion(items); const c: Pt = one ? anchorOf(items[0]!) : b ? [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] : [0, 0];
+  const ch = flipChanges(ctx.doc, sel.ids, c[0], c[1], flipDirection()); if (ch.length) ctx.commit(ch, "Change Side / Flip");
   endHover(ctx, sel); ctx.requestRender(); return true;
 }
 act("flipSelection", "Flip", "F", (ctx: PcbCtx) => flipBy(ctx));
@@ -401,27 +497,62 @@ export function mirrorBy(ctx: PcbCtx, axis: string) {
   }
   for (const it of sel.items) if (it!.kind === "footprint" && !skip.has(it!.id)) footprints++;
   const ids = sel.ids.filter((id) => !skip.has(id)); const items = ids.map((id) => doc.items.get(id)).filter((it) => it && it.kind !== "group") as KItem[];
-  if (items.length) { const c = modificationPoint(ctx, items, false); const ch = mirrorChanges(doc, ids, c[0], c[1], axis); if (ch.length) ctx.commit(ch, "mirror"); }
+  if (items.length) { const c = modificationPoint(ctx, items, false); const ch = mirrorChanges(doc, ids, c[0], c[1], axis); if (ch.length) ctx.commit(ch, "Mirror"); }
   if (footprints) ctx.toast(MIRROR_FOOTPRINTS, 3500); else if (groups) ctx.toast(MIRROR_GROUPS, 3500);
   endHover(ctx, sel); ctx.requestRender(); return true;
 }
 for (const [id, axis, label] of [["mirrorH", "h", "Mirror Horizontally"], ["mirrorV", "v", "Mirror Vertically"]]) act(id, label, "", (ctx: PcbCtx) => mirrorBy(ctx, axis));
+export const MIRROR_ARBITRARY = "Items that cannot be mirrored about an arbitrary axis were skipped.";
+/**
+ * EDIT_TOOL::MirrorInteractive: the selection (or the item under the cursor, locks honoured), then two points picked
+ * for the mirror axis - "Select the first point of the mirror axis...", "Select the second point of the mirror
+ * axis..." - with the axis drawn between them (held to the angle snap mode, Ctrl: 45 degrees).  A zero-length axis is
+ * refused ("The mirror axis must have a non-zero length."); otherwise every mirrorable item is reflected about it in
+ * one "Mirror" step, with KiCad's infobar message for what was skipped.  A hover selection is cleared afterwards.
+ */
+act("mirrorInteractive", "Mirror Interactive", "", (ctx: PcbCtx) => {
+  if (S.route || S.move) return true;   // isRouterActive: wxBell
+  if (!canEdit(ctx)) return true;
+  const sel = requestSelection(ctx, { rerun: (c: PcbCtx) => runAction("mirrorInteractive", c) }); if (!sel) return true;
+  if (sel.hover) applySelection(ctx, sel.ids);
+  pickTwoPoints(ctx, "Select the first point of the mirror axis...", "Select the second point of the mirror axis...", "axis", (a, b) => {
+    if (!a || !b) { endHover(ctx, sel); return; }
+    const r = mirrorAxisChanges(ctx.doc, sel.ids.filter((id) => ctx.doc.items.has(id)), a, b, (id) => groupOf(ctx.doc, id) || null, (id) => Array.from(expandGroups(ctx.doc, [id])));
+    if (r.changes.length) ctx.commit(r.changes, "Mirror");
+    if (r.skips.footprints) ctx.toast(MIRROR_FOOTPRINTS, 3500); else if (r.skips.groups) ctx.toast(MIRROR_GROUPS, 3500); else if (r.skips.items) ctx.toast(MIRROR_ARBITRARY, 3500);
+    endHover(ctx, sel); ctx.requestRender();
+  });
+  return true;
+}, { tip: "Mirrors selected item(s) interactively" });
 // EDIT_TOOL::Swap (no tracks: PCB_TRACE_T is filtered) and PackAndMoveFootprints (footprints only)
 act("swap", "Swap", "Alt+S", (ctx: PcbCtx) => {
+  if (S.route) return true;   // isRouterActive: wxBell
   if (!canEdit(ctx)) return true;
   const sel = requestSelection(ctx, { filter: (it: KItem) => it.kind !== "segment", rerun: (c: PcbCtx) => runAction("swap", c) }); if (!sel) return true;
-  const ch = swapChanges(ctx.doc, sel.ids); if (ch.length) ctx.commit(ch, "swap"); endHover(ctx, sel); ctx.requestRender(); return true;
+  const ch = swapChanges(ctx.doc, sel.ids); if (ch.length) ctx.commit(ch, "Swap"); endHover(ctx, sel); ctx.requestRender(); return true;
 });
 act("pack", "Pack and Move Footprints", "P", (ctx: PcbCtx) => {
+  if (S.route || S.move) return true;   // isRouterActive() || m_dragging: wxBell
   if (!canEdit(ctx)) return true;
-  const sel = requestSelection(ctx, { filter: (it: KItem) => it.kind === "footprint" || it.kind === "group", rerun: (c: PcbCtx) => runAction("pack", c) }); if (!sel) return true;
-  // EDIT_TOOL::PackAndMoveFootprints: SpreadFootprints packs them at their box's corner, then doMoveSelection carries them under the cursor
-  const ch = packChanges(ctx.doc, sel.ids); if (ch.length) ctx.commit(ch, "pack footprints");
-  if (S.route || S.move) { endHover(ctx, sel); ctx.requestRender(); return true; }
-  applySelection(ctx, sel.ids); beginCarryMove(ctx, { ids: sel.ids, hover: false }); return true;
-});
+  const sel = requestSelection(ctx, { filter: (it: KItem) => it.kind === "footprint", rerun: (c: PcbCtx) => runAction("pack", c) }); if (!sel) return true;
+  const fps = sel.ids.filter((id) => ctx.doc.items.get(id)?.kind === "footprint"); if (!fps.length) return true;
+  // EDIT_TOOL::PackAndMoveFootprints: SpreadFootprints packs them at their box's corner inside the move's own commit,
+  // then doMoveSelection carries them under the cursor: a click pushes one "Pack Footprints" step holding the pack and
+  // the move, Escape reverts both (commit.Revert()).  The pack is the move session's starting shape (m.orig), the
+  // footprints as they were its restore point (m.base).
+  const before = new Map(fps.map((id) => [id, clone(ctx.doc.items.get(id)!.node)] as [string, SNode]));
+  const packed = packNodes(ctx.doc, fps);
+  for (const [id, node] of packed) { const it = ctx.doc.items.get(id)!; it.node.length = 0; it.node.push(...clone(node)); K.replaceChange(ctx.doc, it); }
+  applySelection(ctx, fps);
+  if (!beginCarryMove(ctx, { ids: fps, hover: sel.hover }) || !S.move) {
+    for (const [id, node] of before) { const it = ctx.doc.items.get(id)!; it.node.length = 0; it.node.push(...node); K.replaceChange(ctx.doc, it); }
+    ctx.requestRender(); return true;
+  }
+  const m = S.move as SelectMove; m.base = before; m.xformed = packed.size > 0; m.label = "Pack Footprints";
+  return true;
+}, { tip: "Sorts selected footprints by reference, packs based on size and initiates movement" });
 alias("packAndMoveFootprints", "pack");
-act("createArray", "Create Array…", "", (ctx: PcbCtx) => {   // DIALOG_CREATE_ARRAY lives in web/domains/pcb/editor/pcbdialogs/array.ts; this short form stands in without it
+act("createArray", "Create Array…", "Ctrl+T", (ctx: PcbCtx) => {   // DIALOG_CREATE_ARRAY lives in web/domains/pcb/editor/pcbdialogs/array.ts; this short form stands in without it
   const ids = selectionOrToast(ctx, "Select items to array"); if (!ids) return true;
   return openForm({ title: "Create Array", fields: [{ k: "nx", label: "Horizontal count", type: "num", value: 5, step: "1" }, { k: "ny", label: "Vertical count", type: "num", value: 5, step: "1" }, { k: "dx", label: "Horizontal spacing (mm)", type: "num", value: 2.54 }, { k: "dy", label: "Vertical spacing (mm)", type: "num", value: 2.54 }],
     apply: (v: { nx: number; ny: number; dx: number; dy: number }) => { const r = arrayChanges(ctx.doc, ids, { type: "grid", nx: num0(v.nx, 1), ny: num0(v.ny, 1), dx: num0(v.dx, 0), dy: num0(v.dy, 0), offX: 0, offY: 0, stagger: 1, staggerRows: true, centred: false, hThenV: true }); if (!r.changes.length) return; ctx.commit(r.changes, r.label); applySelection(ctx, r.ids); } });
@@ -457,19 +588,34 @@ export function swapLayerChanges(doc: BoardDoc, map: Record<string, string>): KC
   });
 }
 // tracks and vias
-act("changeTrackWidth", "Change Track Width / Via Size…", "", (ctx: PcbCtx) => {
-  const ids = selectionOrToast(ctx, "Select tracks or vias first"); if (!ids) return true; const copper = copperOf(ctx.doc);
-  const items = ids.map((id) => ctx.doc.items.get(id)); const seg = items.find((it) => it!.kind === "segment" || it!.kind === "arc"), via = items.find((it) => it!.kind === "via");
-  if (!seg && !via) { ctx.toast("No tracks or vias in the selection"); return true; }
-  const vl = via ? (K.kid(via.node, "layers") || [0, "F.Cu", "B.Cu"]).slice(1).map(K.str) : ["F.Cu", "B.Cu"];
-  return openForm({ title: "Track & Via Properties", fields: [
-    { k: "netclass", label: "Use netclass values", type: "check", value: false },
-    { k: "width", label: "Track width (mm)", type: "num", value: seg ? widthOf(seg.node, 0.25) : "" },
-    { k: "viaSize", label: "Via diameter (mm)", type: "num", value: via ? K.num((K.kid(via.node, "size") || [0, 0.8])[1]) : "" }, { k: "viaDrill", label: "Via drill (mm)", type: "num", value: via ? K.num((K.kid(via.node, "drill") || [0, 0.4])[1]) : "" },
-    { k: "viaType", label: "Via type", type: "select", value: via ? (via.node.includes("micro") ? "micro" : via.node.includes("blind") ? "blind" : "through") : "through", options: [["through", "Through"], ["blind", "Blind/buried"], ["micro", "Micro"]] },
-    { k: "l0", label: "Via start layer", type: "select", value: vl[0], options: copper }, { k: "l1", label: "Via end layer", type: "select", value: vl[1] || copper[copper.length - 1], options: copper }],
-    apply: (v: { netclass: boolean; width: number; viaSize: number; viaDrill: number; viaType: string; l0: string; l1: string }) => commitSel(ctx, trackEditChanges(ctx.doc, ids, { netclass: v.netclass, width: num0(v.width, 0), viaSize: num0(v.viaSize, 0), viaDrill: num0(v.viaDrill, 0), viaType: v.viaType, viaLayers: [v.l0, v.l1] }, settingsOf(ctx)), "track width") });
-});
+/**
+ * EDIT_TOOL::ChangeTrackWidth: the selected tracks and vias (or the one under the cursor), locks honoured, take the
+ * board's current sizes at once - GetCurrentTrackWidth for a track or arc, GetCurrentViaSize / GetCurrentViaDrill for
+ * a via (a microvia its netclass's microvia size) - in one "Edit Track Width/Via Size" step; no dialog.
+ */
+export function currentSizeChanges(ctx: PcbCtx, ids: string[]): KChange[] {
+  const R = sizesOf(ctx), w = R.currentTrackWidth(), via = R.currentVia(), s = settingsOf(ctx), NT = netTable(ctx.doc);
+  return transformChanges(ctx.doc, ids, (n, it: KItem) => {
+    if (it.kind === "segment" || it.kind === "arc") {
+      if (!(w > 0) || widthOf(n, 0) === r6(w)) return false;
+      const wn = K.kid(n, "width"); if (wn) wn[1] = r6(w); else n.splice(n.indexOf(K.kid(n, "layer")!), 0, ["width", r6(w)]); return undefined;
+    }
+    if (it.kind !== "via") return false;
+    let size = via.diameter, drill = via.drill;
+    if (n.includes("micro")) { const nc = netclassOf(s, NT.key(netOf(n))) as { microvia_diameter?: number; microvia_drill?: number }; if (!(nc.microvia_diameter! > 0) || !(nc.microvia_drill! > 0)) return false; size = nc.microvia_diameter!; drill = nc.microvia_drill!; }
+    const sn = K.kid(n, "size"), dn = K.kid(n, "drill"); let did = false;
+    if (sn && size > 0 && K.num(sn[1]) !== r6(size)) { sn[1] = r6(size); did = true; }
+    if (dn && drill > 0 && K.num(dn[1]) !== r6(drill)) { dn[1] = r6(drill); did = true; }
+    return did ? undefined : false;
+  });
+}
+const isTrackKind = (it: KItem) => it.kind === "segment" || it.kind === "arc" || it.kind === "via";
+act("changeTrackWidth", "Change Track Width", "", (ctx: PcbCtx) => {
+  if (!canEdit(ctx)) return true;
+  const sel = requestSelection(ctx, { filter: isTrackKind, rerun: (c: PcbCtx) => runAction("changeTrackWidth", c) }); if (!sel) return true;
+  const ch = currentSizeChanges(ctx, sel.ids); if (ch.length) ctx.commit(ch, "Edit Track Width/Via Size");
+  endHover(ctx, sel); ctx.requestRender(); return true;
+}, { tip: "Updates selected track & via sizes" });
 act("setTrackWidthFromNetclass", "Set Track / Via Sizes from Netclass", "", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select tracks or vias first"); if (!ids) return true; return commitSel(ctx, trackEditChanges(ctx.doc, ids, { netclass: true }, settingsOf(ctx)), "netclass sizes"); });
 act("trackWidthInc", "Increase Track Width", "W", (ctx: PcbCtx) => { if (canEdit(ctx)) cycleWidth(ctx, 1); return true; });
 act("trackWidthDec", "Decrease Track Width", "Shift+W", (ctx: PcbCtx) => { if (canEdit(ctx)) cycleWidth(ctx, -1); return true; });
@@ -597,8 +743,22 @@ act("editPredefinedSizes", "Edit Pre-defined Sizes...", "", (ctx: PcbCtx) => { i
 act("gridOrigin", "Grid Origin...", "", (ctx: PcbCtx) => { openGridOrigin(ctx); return true; }, { menu: false, tip: "Set the grid origin point" });
 act("gridResetOrigin", "Reset Grid Origin", "", (ctx: PcbCtx) => { sizesOf(ctx).setGridOrigin([0, 0]); ctx.toast("Grid origin reset"); ctx.requestRender(); return true; }, { menu: "-" });
 act("drillResetOrigin", "Reset Drill Origin", "", (ctx: PcbCtx) => { if (canEdit(ctx)) { sizesOf(ctx).setAuxOrigin([0, 0]); ctx.toast("Drill/place file origin reset"); ctx.requestRender(); } return true; }, { menu: "-" });
-act("changeTrackLayerNext", "Move Track to Next Layer", "", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select tracks first"); if (!ids) return true; return commitSel(ctx, trackLayerChanges(ctx.doc, ids, 1), "track layer"); });
-act("changeTrackLayerPrev", "Move Track to Previous Layer", "", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select tracks first"); if (!ids) return true; return commitSel(ctx, trackLayerChanges(ctx.doc, ids, -1), "track layer"); });
+/**
+ * EDIT_TOOL::ChangeTrackLayer (Ctrl++ / Ctrl+-): not while routing; the selected tracks (or the one under the cursor,
+ * locks honoured) are taken first, then the active layer steps (layerNext / layerPrev) and, when it changed, every
+ * selected track and arc goes onto the new active layer - "Edit Track Layer".  A hover selection is cleared.
+ */
+export function changeTrackLayer(ctx: PcbCtx, next: boolean, id: string) {
+  if (S.route) return true;
+  if (!canEdit(ctx)) return true;
+  const sel = requestSelection(ctx, { filter: isTrackKind, rerun: (c: PcbCtx) => runAction(id, c) });
+  const R = sizesOf(ctx), from = R.activeLayer || S.layer; stepLayer(ctx, next); const to = R.activeLayer || S.layer;
+  if (!sel || !to || to === from) return true;
+  const ch = trackLayerChanges(ctx.doc, sel.ids, 0, to); if (ch.length) ctx.commit(ch, "Edit Track Layer");
+  endHover(ctx, sel); ctx.requestRender(); return true;
+}
+act("changeTrackLayerNext", "Switch Track to Next Layer", "Ctrl++", (ctx: PcbCtx) => changeTrackLayer(ctx, true, "changeTrackLayerNext"), { tip: "Switch track to next enabled copper layer" });
+act("changeTrackLayerPrev", "Switch Track to Previous Layer", "Ctrl+-", (ctx: PcbCtx) => changeTrackLayer(ctx, false, "changeTrackLayerPrev"), { tip: "Switch track to previous enabled copper layer" });
 act("cleanupTracks", "Cleanup Tracks & Vias…", "", (ctx: PcbCtx) => {
   if (!canEdit(ctx)) return true; const doc = ctx.doc;
   const settings = settingsOf(ctx), selNow = new Set(expandGroups(doc, Array.from(S.sel)));
@@ -628,7 +788,16 @@ act("cleanupTracks", "Cleanup Tracks & Vias…", "", (ctx: PcbCtx) => {
 });
 alias("cleanupTracksAndVias", "cleanupTracks");
 act("breakTrack", "Break Track", "", (ctx: PcbCtx) => { if (!canEdit(ctx)) return true; const seg = selectedItems(ctx).find((it) => it.kind === "segment"); return commitSel(ctx, breakTrackChanges(ctx.doc, cursorPoint(ctx), seg && hitTestItem(ctx.doc, cursorPoint(ctx)[0], cursorPoint(ctx)[1], 0.3) === seg ? seg : null), "break track"); });
-act("unrouteSelected", "Unroute Selected", "", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select footprints or tracks to unroute"); if (!ids) return true; const nl = netlist(ctx.doc); const seeds = new Set(ids); const remove = connectedCopperIds(nl, seeds); return commitSel(ctx, deleteChanges(ctx.doc, Array.from(remove)), "unroute"); });
+// PCB_SELECTION_TOOL::unrouteSelected: the tracks from the selection's pads and connected items up to the next pads
+// go; the footprints and pads that were selected are selected again; one "Unroute Selected" step
+act("unrouteSelected", "Unroute Selected", "", (ctx: PcbCtx) => {
+  if (!canEdit(ctx)) return true;
+  const ids = Array.from(selectionIds(ctx)), pads = { sel: S.padSel, also: S.padAlso };
+  const remove = unrouteIds(ctx.doc, ids.concat(padSelKeys()), ctx.selFilter);
+  const keep = ids.filter((id) => { const it = ctx.doc.items.get(id); return !!it && it.kind === "footprint"; });
+  if (remove.size) ctx.commit(deleteChanges(ctx.doc, Array.from(remove)), "Unroute Selected");
+  applySelection(ctx, keep); S.padSel = pads.sel; S.padAlso = pads.also; ctx.requestRender(); return true;
+});
 act("deleteFull", "Delete Full Track", "Shift+Delete", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select a track first"); if (!ids) return true; const run = connectedRun(ctx.doc, ids); for (const id of ids) run.add(id); S.sel.clear(); return commitSel(ctx, deleteChanges(ctx.doc, Array.from(run)), "delete full track"); });
 // inspection
 act("runDRC", "Design Rules Checker…", "", (ctx: PcbCtx) => {

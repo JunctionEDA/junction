@@ -58,7 +58,7 @@ export async function projectNetlist(): Promise<{ netlist: Netlist; root: string
     const out: string[] = []; for (const p of parts) { if (p === "..") out.pop(); else out.push(p); }
     return files.get(out.join("/")) || files.get(file) || null;
   };
-  const netlist = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve, { symbolPins: helpers.symbolPins, isPower: (d, it) => helpers.isPowerSymbol(d, String(((KiCadCanvas.kid(it.node, "lib_id") as SNode | null) || [])[1])) }, root.path.split("/").pop()!.replace(/\.kicad_sch$/, ""));
+  const netlist = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve, { symbolPins: helpers.symbolPins, isPower: (d, it) => helpers.isPowerSymbol(d, String(((KiCadCanvas.kid(it.node, "lib_id") as SNode | null) || [])[1])) }, root.path.split("/").pop()!.replace(/\.kicad_sch$/, ""), NL().netlistOptions(pro));
   return { netlist, root: tops.length > 1 ? tops[0].path : root.path, files };
 }
 

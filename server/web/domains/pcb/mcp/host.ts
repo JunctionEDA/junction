@@ -411,7 +411,7 @@ async function schematicSpice(req: Request, p: Project, withCommands: boolean, n
       return files.get(out.join("/")) || files.get(file) || null;
     };
     const isPower = (d: any, it: any) => hp.isPowerSymbol(d, String((k.kid(it.node, "lib_id") || [])[1]));
-    const nl = k.pcbNetlist.buildNetlist(tops.length > 1 ? tops : rootFile, resolve, { symbolPins: hp.symbolPins, isPower }, root.path.split("/").pop()!.replace(/\.kicad_sch$/, ""));
+    const nl = k.pcbNetlist.buildNetlist(tops.length > 1 ? tops : rootFile, resolve, { symbolPins: hp.symbolPins, isPower }, root.path.split("/").pop()!.replace(/\.kicad_sch$/, ""), k.pcbNetlist.netlistOptions(ed.proSettings || null));
     const insts: any[] = nl.instances || []; const docOf = (f: string) => { const x = files.get(f); return x ? x.doc : null; };
     const placed = new Map<string, any>(NK.nlSheets(insts, docOf).map((x: any) => [x.uuidPath.join("/"), x]));
     const parentDoc = (u: string[]) => { const par = insts.find((i) => i.uuidPath.length === u.length - 1 && i.uuidPath.every((x: string, j: number) => u[j] === x)); return par ? docOf(par.file) : null; };

@@ -19,7 +19,7 @@ interface KItem { id: string; kind: string; node: SNode }
 interface KApi {
   kids(n: unknown, k: string): SNode[]; kid(n: unknown, k: string): SNode | null; str(v: unknown): string; ptsOf(n: unknown): number[][];
   drawStrokeText(ctx: CanvasRenderingContext2D, base: number[], spec: { x: number; y: number; text: string; size: number; rot?: number; h: string; v: string; pen: number }, color: string, minPen: number): void;
-  SCH: Record<string, string>; schTheme?: () => string;
+  SCH: Record<string, string>; schTheme?: () => string; textWidth?(text: string, size: number, pen: number): number;
 }
 interface PinGeom { x: number; y: number; root: number[]; number: string; len: number }
 interface SchApi { _: { symbolPins(doc: unknown, it: KItem): PinGeom[] } }
@@ -74,7 +74,8 @@ function opFormats(): { vPrec: number; vRange: string; iPrec: number; iRange: st
   return d;
 }
 
-interface OpText { x: number; y: number; text: string; rot: number; h: string; v: string; kind: "V" | "I" }
+/** `span`: a voltage's wire length in mm, `vertical` whether that is its height (SCH_LINE::ViewGetLOD's measure). */
+interface OpText { x: number; y: number; text: string; rot: number; h: string; v: string; kind: "V" | "I"; span?: number; vertical?: boolean }
 /** The overlay texts of the sheet on screen. */
 export function operatingPointTexts(textSize: number): OpText[] {
   const out: OpText[] = [];
@@ -98,8 +99,9 @@ export function operatingPointTexts(textSize: number): OpText[] {
     for (const [name, { w }] of best) {
       const op = operatingPoint(name, f.vPrec, f.vRange); if (!op || op === "--" || op === "?") continue;
       const p = K.ptsOf(w.node), mx = (p[0][0] + p[1][0]) / 2, my = (p[0][1] + p[1][1]) / 2;
-      if (Math.abs(p[0][1] - p[1][1]) < 1e-9) out.push({ x: mx, y: my - off, text: op, rot: 0, h: "center", v: "bottom", kind: "V" });
-      else out.push({ x: mx + off * 1.2, y: my, text: op, rot: 0, h: "left", v: "center", kind: "V" });
+      const hgt = Math.abs(p[0][1] - p[1][1]), wid = Math.abs(p[0][0] - p[1][0]), lod = hgt > 1e-9 ? { span: hgt, vertical: true } : { span: wid, vertical: false };
+      if (hgt < 1e-9) out.push({ x: mx, y: my - off, text: op, rot: 0, h: "center", v: "bottom", kind: "V", ...lod });
+      else out.push({ x: mx + off * 1.2, y: my, text: op, rot: 0, h: "left", v: "center", kind: "V", ...lod });
     }
   }
   if (showI && sch && sch._) {
@@ -139,14 +141,21 @@ function draw(ctx: CanvasRenderingContext2D): void {
   const dark = backgroundDark(K.SCH.bg || "#FFFFFF");
   const ex = schExtraColors(K.schTheme ? K.schTheme() : "default");
   const colV = dark ? "#E46FA0" : ex.opVoltage, colI = dark ? "#FF6060" : ex.opCurrent;
-  const pen = size / 8;   // GetPenSizeForDemiBold
+  const pen = size / 6;   // GetPenSizeForDemiBold (common/gr_text.cpp: size / 6)
   const base = [m.a, 0, 0, m.d, m.e, m.f];
+  // SCH_LINE::ViewGetLOD( LAYER_OP_VOLTAGES ): a voltage shows once its wire is 5 mm high (a horizontal one 15 mm
+  // wide) on screen, at the canvas' 91 px per inch
+  const pxPerMm = s / (window.devicePixelRatio || 1), MM = 91 / 25.4;
   ctx.save();
   for (const t of texts) {
+    if (t.kind === "V" && t.span !== undefined && t.span * pxPerMm < (t.vertical ? 5 : 15) * MM) continue;
     const color = t.kind === "V" ? colV : colI;
-    // knockoutText: the background behind the glyphs first
-    ctx.save(); K.drawStrokeText(ctx, base, { x: t.x, y: t.y, text: t.text, size, rot: t.rot, h: t.h, v: t.v, pen: pen * 3 }, K.SCH.bg || "#FFFFFF", 1 / s); ctx.restore();
-    ctx.save(); K.drawStrokeText(ctx, base, { x: t.x, y: t.y, text: t.text, size, rot: t.rot, h: t.h, v: t.v, pen }, color, 1 / s); ctx.restore();
+    // knockoutText: the glyphs' box inflated by 2 x the stroke width filled in the layer colour, the glyphs cut out
+    const w = K.textWidth ? K.textWidth(t.text, size, pen) : t.text.length * size * 0.8, mg = pen / 2 + 2 * pen;
+    const x0 = t.h === "left" ? 0 : t.h === "right" ? -w : -w / 2, y0 = t.v === "top" ? 0 : t.v === "bottom" ? -size : -size / 2;
+    ctx.save(); ctx.translate(t.x, t.y); if (t.rot) ctx.rotate(-t.rot * Math.PI / 180);
+    ctx.fillStyle = color; ctx.fillRect(x0 - mg, y0 - mg, w + 2 * mg, size + 2 * mg); ctx.restore();
+    ctx.save(); K.drawStrokeText(ctx, base, { x: t.x, y: t.y, text: t.text, size, rot: t.rot, h: t.h, v: t.v, pen }, K.SCH.bg || "#FFFFFF", 1 / s); ctx.restore();
   }
   ctx.restore();
 }

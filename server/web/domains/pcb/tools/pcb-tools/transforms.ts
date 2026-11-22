@@ -110,8 +110,18 @@ export function reflectZoneOrientations(node: SNode, leftRight: boolean) {
   const h = K.kid(f, "hatch_orientation"); if (h) refl(h);
   const t = K.kid(f, "thieving"); if (t) refl(K.kid(t, "orientation"));
 }
-/** KiCad's Flip (left / right) about the vertical axis x = cx: other side, layers swapped, texts mirrored. */
-export function flipNode(node: SNode, cx: number, doc: BoardDoc) {
+/**
+ * KiCad's Flip about (cx, cy): other side, layers swapped, texts mirrored.  dir is FLIP_DIRECTION: "lr" (the default
+ * here, what SetLayerAndFlip uses) mirrors about the vertical axis x = cx; "tb" (PCBNEW_SETTINGS m_FlipDirection's
+ * default) about the horizontal axis y = cy.  FOOTPRINT::Flip flips top / bottom and turns half a turn for left /
+ * right, so the two differ by exactly that half turn about the centre, for every item (a text: -angle against
+ * 180 - angle).
+ */
+export function flipNode(node: SNode, cx: number, doc: BoardDoc, cy?: number, dir?: string): SNode {
+  if (dir === "tb" && cy !== undefined) {
+    if (node[0] === "zone") { mapNodePoints(node, (x: number, y: number) => [x, 2 * cy - y]); flipLayerKid(node); reflectZoneOrientations(node, false); return node; }
+    flipNode(node, cx, doc); return rotateNode(node, cx, cy, 180);
+  }
   const k = node[0]; const mirror = (x: number, y: number) => [2 * cx - x, y];
   if (k === "footprint") { flipFootprintNode(node); return mapNodePoints(node, mirror); }
   mapNodePoints(node, mirror); flipLayerKid(node);
@@ -135,12 +145,111 @@ export function mirrorNode(node: SNode, cx: number, cy: number, axis: string) {
   if (k === "gr_rect" || k === "gr_text_box") { const a = pt(node, "start"), b = pt(node, "end"); if (a && b) { const [x0, y0, x1, y1] = corners(a, b); K.kid(node, "start")!.splice(1, 2, r6(x0), r6(y0)); K.kid(node, "end")!.splice(1, 2, r6(x1), r6(y1)); } }
   return node;
 }
-/** The point an item is placed by: its (at) / origin, else the middle of its bounding box. */
+/** EDIT_TOOL::MirrorableItems as the kinds here: what Mirror( const SEG& ) exists for. */
+const MIRRORABLE = new Set(["gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_curve", "gr_text", "gr_text_box", "property", "zone", "pad", "segment", "arc", "via", "group", "generated", "table", "image",
+  "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "fp_curve", "fp_text", "fp_text_box"]);
+/**
+ * BOARD_ITEM::Mirror( const SEG& aAxis ): the item reflected in place about the line through A and B (no side
+ * change).  Points go through SEG::ReflectPoint; an angle a becomes EDA_ANGLE::Reflect( axisAngle ) = 2 * axisAngle - a
+ * with axisAngle = -angle( B - A ).  PCB_TEXT keeps the text readable (an angle past 90 up to 270 turns back half a
+ * turn and the horizontal justification swaps); a PCB_TEXTBOX slides by its centre's reflection; a rectangle about
+ * an oblique axis becomes a polygon; a zone's hatch and thieving orientations reflect; a pad's own geometry mirrors
+ * top / bottom in its frame.  Returns false for what has no arbitrary-axis mirror (the caller counts the skips).
+ */
+export function mirrorNodeAxis(node: SNode, A: Pt, B: Pt): SNode | false {
+  const k = String(node[0]).replace(/^fp_/, "gr_"); if (!MIRRORABLE.has(node[0] as string) || k === "image") return false;
+  const dx = B[0] - A[0], dy = B[1] - A[1], L2 = dx * dx + dy * dy; if (!L2) return false;
+  const aligned = A[0] === B[0] || A[1] === B[1];
+  const refl = (x: number, y: number) => { const t = ((x - A[0]) * dx + (y - A[1]) * dy) / L2; return [2 * (A[0] + t * dx) - x, 2 * (A[1] + t * dy) - y]; };
+  const axisAngle = -Math.atan2(dy, dx) * 180 / Math.PI, reflect = (a: number) => 2 * axisAngle - a;
+  if (k === "table") { if (!aligned) return false; mirrorNode(node, A[0], A[1], A[0] === B[0] ? "h" : "v"); return node; }   // PCB_TABLE::Mirror( aAxis.A, flipDirection )
+  if (k === "gr_text" || k === "property") {
+    mapNodePoints(node, refl); let a = norm360(reflect(angleKid(node)));
+    if (a > 90 && a <= 270) {
+      a -= 180;
+      let eff = K.kid(node, "effects"); if (!eff) { eff = ["effects"]; node.push(eff); }
+      let j = K.kid(eff, "justify"); if (!j) { j = ["justify"]; eff.push(j); }
+      const li = j.indexOf("left"), ri = j.indexOf("right");
+      if (li > 0) j[li] = "right"; else if (ri > 0) j[ri] = "left";   // a centred text stays centred
+      if (j.length === 1) eff.splice(eff.indexOf(j), 1);
+    }
+    setAngleKid(node, a); return node;
+  }
+  if (k === "gr_text_box" && K.kid(node, "start") && K.kid(node, "end")) {
+    const s = K.kid(node, "start")!, e = K.kid(node, "end")!; const cx = (K.num(s[1]) + K.num(e[1])) / 2, cy = (K.num(s[2]) + K.num(e[2])) / 2;
+    const [rx, ry] = refl(cx, cy); const ddx = r6(rx - cx), ddy = r6(ry - cy);
+    s[1] = r6(K.num(s[1]) + ddx); s[2] = r6(K.num(s[2]) + ddy); e[1] = r6(K.num(e[1]) + ddx); e[2] = r6(K.num(e[2]) + ddy);
+    setTextBoxAngle(node, reflect(textBoxAngle(node))); return node;
+  }
+  if (k === "gr_rect" && !aligned) {   // "Convert non-cardinally-mirrored rect to a polygon."
+    const a = pt(node, "start"), b = pt(node, "end"); if (!a || !b) return false; const [x0, y0, x1, y1] = corners(a, b);
+    const pts = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => refl(x, y));
+    node[0] = node[0] === "fp_rect" ? "fp_poly" : "gr_poly"; for (const key of ["start", "end"]) { const i = node.indexOf(K.kid(node, key)!); if (i > 0) node.splice(i, 1); }
+    node.splice(1, 0, ["pts", ...pts.map(xy)]); return node;
+  }
+  mapNodePoints(node, refl);
+  if (k === "gr_text_box") setTextBoxAngle(node, reflect(textBoxAngle(node)));   // a polygon text box: its vertices and the text angle
+  if (k === "zone") {
+    const f = K.kid(node, "fill"); const set = (c: SNode | null | undefined) => { if (c && c.length > 1) c[1] = r6(norm360(reflect(K.num(c[1])))); };
+    if (f) { set(K.kid(f, "hatch_orientation")); const t = K.kid(f, "thieving"); if (t) set(K.kid(t, "orientation")); }
+  }
+  if (k === "pad") {
+    // PAD::Mirror: the orientation reflects and the pad's own geometry mirrors top / bottom in its frame - the same
+    // copper as a left / right mirror of that geometry (padMirrorX) at the orientation less half a turn
+    const o = angleKid(node); padMirrorX(node); setAngleKid(node, reflect(o) - 180);
+    const ch = K.kid(node, "chamfer"); const lr: Record<string, string> = { top_left: "top_right", top_right: "top_left", bottom_left: "bottom_right", bottom_right: "bottom_left" };
+    if (ch) for (let i = 1; i < ch.length; i++) { const v = K.str(ch[i]); if (lr[v]) ch[i] = lr[v]; }
+  }
+  return node;
+}
+/** MIRROR_SKIPS: what a mirror could not move. */
+export interface MirrorSkips { footprints: number; groups: number; items: number }
+/**
+ * mirrorSelection( commit, selection, aAxis ) (edit_tool.cpp): every mirrorable item of the selection about the axis
+ * A-B.  A footprint is skipped (counted); a top-level group holding a footprint - or, for an oblique axis, a table -
+ * is skipped whole (counted); a table about an oblique axis is skipped (counted as an item).
+ */
+export function mirrorAxisChanges(doc: BoardDoc, ids: string[], A: Pt, B: Pt, groupOfId: (id: string) => KItem | null, members: (id: string) => string[]): { changes: PcbChange[]; skips: MirrorSkips } {
+  const skips: MirrorSkips = { footprints: 0, groups: 0, items: 0 }, aligned = A[0] === B[0] || A[1] === B[1]; const skip = new Set<string>();
+  for (const id of ids) {
+    const it = doc.items.get(id); if (!it || it.kind !== "group" || groupOfId(id)) continue;   // the top-level groups
+    const inner = members(id).map((x) => doc.items.get(x)).filter(Boolean) as KItem[];
+    if (inner.some((m) => m.kind === "footprint" || (!aligned && m.kind === "table"))) { skips.groups++; skip.add(id); inner.forEach((m) => skip.add(m.id)); }
+  }
+  const changes = transformChanges(doc, ids.filter((id) => !skip.has(id)), (n, it) => {
+    if (it.kind === "footprint") { skips.footprints++; return false; }
+    if (it.kind === "table" && !aligned) { skips.items++; return false; }
+    if (it.kind === "image") { skips.items++; return false; }   // the bitmap itself would have to be mirrored (BITMAP_BASE::Mirror)
+    return mirrorNodeAxis(n, A, B);
+  });
+  return { changes, skips };
+}
+/** The centre of the circle through an arc's start, mid and end, or null when they are in line. */
+export function arcCentre3(a: Pt, m: Pt, e: Pt): Pt | null {
+  const d = 2 * (a[0] * (m[1] - e[1]) + m[0] * (e[1] - a[1]) + e[0] * (a[1] - m[1])); if (Math.abs(d) < 1e-12) return null;
+  const A = a[0] * a[0] + a[1] * a[1], M = m[0] * m[0] + m[1] * m[1], E = e[0] * e[0] + e[1] * e[1];
+  return [(A * (m[1] - e[1]) + M * (e[1] - a[1]) + E * (a[1] - m[1])) / d, (A * (e[0] - m[0]) + M * (a[0] - e[0]) + E * (m[0] - a[0])) / d];
+}
+/** The first vertex of a (pts ...) list: an (xy) or the start of an (arc). */
+function firstVertex(pts: SNode | null | undefined): Pt | null {
+  if (pts) for (const p of pts.slice(1)) { if (!isList(p)) continue; if (p[0] === "xy") return [K.num(p[1]), K.num(p[2])]; const s = pt(p, "start"); if (s) return s; }
+  return null;
+}
+/**
+ * BOARD_ITEM::GetPosition: a footprint's, via's, text's or image's (at); a track's start; EDA_SHAPE::getPosition for
+ * graphics (an arc's centre, a polygon's first vertex, m_start for the rest: a line's start, a rectangle's start
+ * corner, a circle's centre); a text box's start corner; a zone's first corner; a dimension's start; a table's first
+ * cell's start.  The middle of the bounding box only when the node has none of these.
+ */
 export function anchorOf(item: KItem): Pt {
   const n = item.node, k = item.kind;
   if (k === "footprint" || k === "via" || k === "gr_text" || k === "image" || k === "target") { const [x, y] = K.atOf(n); return [x, y]; }
-  if (k === "segment" || k === "arc" || k === "gr_line" || k === "gr_arc") { const p = pt(n, "start"); if (p) return p; }
+  if (k === "gr_arc") { const a = pt(n, "start"), m = pt(n, "mid"), e = pt(n, "end"); const c = a && m && e ? arcCentre3(a, m, e) : pt(n, "center"); if (c) return [r6(c[0]), r6(c[1])]; }
+  if (k === "segment" || k === "arc" || k === "gr_line" || k === "gr_arc" || k === "gr_rect" || k === "gr_text_box") { const p = pt(n, "start"); if (p) return p; }
   if (k === "gr_circle") { const p = pt(n, "center"); if (p) return p; }
+  if (k === "gr_poly" || k === "gr_curve" || k === "dimension" || k === "gr_text_box") { const p = firstVertex(K.kid(n, "pts")); if (p) return p; }
+  if (k === "zone") { const poly = K.kid(n, "polygon"); const p = poly && firstVertex(K.kid(poly, "pts")); if (p) return p; }
+  if (k === "table") { const cells = K.kid(n, "cells"); const first = cells && K.kids(cells, "table_cell")[0]; const p = first && pt(first, "start"); if (p) return p; }
   if (k === "generated") { const c = K.kid(n, "origin"); const xy = c && K.kid(c, "xy"); if (xy) return [K.num(xy[1]), K.num(xy[2])]; }   // PCB_GENERATOR::GetPosition
   const b = item.bbox; return b ? [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] : [0, 0];
 }
@@ -161,7 +270,7 @@ export function transformChanges(doc: BoardDoc, ids: Iterable<string>, fn: (node
 }
 export const moveChanges = (doc: BoardDoc, ids: Iterable<string>, dx: number, dy: number) => (dx || dy) ? transformChanges(doc, ids, (n) => translateNode(n, dx, dy)) : [];
 export const rotateChanges = (doc: BoardDoc, ids: Iterable<string>, cx: number, cy: number, deg: number) => transformChanges(doc, ids, (n) => rotateNode(n, cx, cy, deg));
-export const flipChanges = (doc: BoardDoc, ids: Iterable<string>, cx: number) => transformChanges(doc, ids, (n) => flipNode(n, cx, doc));
+export const flipChanges = (doc: BoardDoc, ids: Iterable<string>, cx: number, cy?: number, dir?: string) => transformChanges(doc, ids, (n) => flipNode(n, cx, doc, cy, dir));
 export const mirrorChanges = (doc: BoardDoc, ids: Iterable<string>, cx: number, cy: number, axis: string) => transformChanges(doc, ids, (n) => mirrorNode(n, cx, cy, axis));
 /** DIALOG_MOVE_EXACT: translate, then turn about the selection centre, each item's own anchor, or a point. */
 export function moveExactChanges(doc: BoardDoc, ids: string[], opts: { dx?: number; dy?: number; rotation?: number; about?: string | Pt }) {
@@ -172,7 +281,12 @@ export function moveExactChanges(doc: BoardDoc, ids: string[], opts: { dx?: numb
   return transformChanges(doc, ids, (n, it: KItem) => { translateNode(n, dx, dy); if (rot) { const p = c || vadd(anchorOf(it), [dx, dy]); rotateNode(n, p[0], p[1], rot); } });
 }
 /** PCB_SELECTION::GetTopLeftItem: the item whose anchor is leftmost, then topmost — the selection's own anchor. */
-export function topLeftAnchor(items: KItem[]) { let best: Pt | null = null; for (const it of items) { const p = anchorOf(it); if (!best || p[0] < best[0] - 1e-9 || (Math.abs(p[0] - best[0]) <= 1e-9 && p[1] < best[1])) best = p; } return best || [0, 0]; }
+export function topLeftAnchor(items: KItem[]): Pt {
+  // POSITION_RELATIVE_TOOL: "We prefer footprints, then pads, then anything else" (GetTopLeftItem( true ) first)
+  const fps = items.filter((it) => it.kind === "footprint"); if (fps.length && fps.length < items.length) return topLeftAnchor(fps);
+  const pads = items.filter((it) => it.kind === "pad"); if (pads.length && pads.length < items.length) return topLeftAnchor(pads);
+  let best: Pt | null = null; for (const it of items) { const p = anchorOf(it); if (!best || p[0] < best[0] - 1e-9 || (Math.abs(p[0] - best[0]) <= 1e-9 && p[1] < best[1])) best = p; } return best || [0, 0];
+}
 /** POSITION_RELATIVE_TOOL: put the selection's anchor at the reference point plus the offset. */
 export function positionRelativeChanges(doc: BoardDoc, ids: string[], ref: Pt, dx: number, dy: number) {
   const items = ids.map((id: string) => doc.items.get(id)).filter(Boolean) as KItem[]; if (!items.length) return [];
@@ -200,12 +314,23 @@ export function alignBox(it: KItem) {
 export const alignItems = (doc: BoardDoc, ids: string[]) => (ids.map((id: string) => doc.items.get(id)).filter((it) => it && it.bbox && it.kind !== "group") as KItem[]).map((it: KItem) => ({ id: it.id, kind: it.kind, bbox: alignBox(it)! }));
 /** An item as Align / Distribute see it. */
 export type AlignItem = ReturnType<typeof alignItems>[number];
-export function alignChanges(doc: BoardDoc, ids: string[], mode: string, cursor: Pt | null | undefined) {
+/** KiCad's commit names for the six alignments (ALIGN_DISTRIBUTE_TOOL: AlignCenterX pushes "Align to Middle", AlignCenterY "Align to Center"). */
+export const ALIGN_COMMIT: Record<string, string> = { left: "Align to Left", right: "Align to Right", top: "Align to Top", bottom: "Align to Bottom", centerX: "Align to Middle", centerY: "Align to Center" };
+/**
+ * ALIGN_DISTRIBUTE_TOOL::Align*: GetSelections splits the locked items (opts.locked) from the ones to align, each
+ * list sorted by the mode's edge; selectTarget prefers a locked item (the one under the cursor, else the first), then
+ * an item to align under the cursor, then the first; only the unlocked items move.  AlignLeft / AlignRight change
+ * places when the view is mirrored (opts.mirrored: IsMirroredX), because the boxes are not mirrored with it.
+ */
+export function alignChanges(doc: BoardDoc, ids: string[], mode: string, cursor: Pt | null | undefined, opts?: { locked?: Set<string>; mirrored?: boolean }) {
+  if (opts && opts.mirrored && (mode === "left" || mode === "right")) mode = mode === "left" ? "right" : "left";
   const A = ALIGN[mode]; if (!A) return [];
-  const items = alignItems(doc, ids); if (items.length < 2) return [];
-  items.sort((p, q) => A.sort(p.bbox) - A.sort(q.bbox));
-  const under = cursor && items.find((it) => cursor[0] >= it.bbox[0] && cursor[0] <= it.bbox[2] && cursor[1] >= it.bbox[1] && cursor[1] <= it.bbox[3]);
-  const t = A.target((under || items[0]).bbox); const out: PcbChange[] = [];
+  const all = alignItems(doc, ids); const isLocked = (id: string) => !!(opts && opts.locked && opts.locked.has(id));
+  const items = all.filter((it) => !isLocked(it.id)), locked = all.filter((it) => isLocked(it.id)); if (!items.length) return [];
+  const byEdge = (p: AlignItem, q: AlignItem) => A.sort(p.bbox) - A.sort(q.bbox); items.sort(byEdge); locked.sort(byEdge);
+  const underOf = (list: AlignItem[]) => cursor ? list.find((it) => cursor[0] >= it.bbox[0] && cursor[0] <= it.bbox[2] && cursor[1] >= it.bbox[1] && cursor[1] <= it.bbox[3]) : undefined;
+  const target = locked.length ? underOf(locked) || locked[0] : underOf(items) || items[0];
+  const t = A.target(target.bbox); const out: PcbChange[] = [];
   for (const it of items) { const [dx, dy] = A.move(it.bbox, t); if (Math.abs(dx) > 1e-9 || Math.abs(dy) > 1e-9) out.push(...moveChanges(doc, [it.id], dx, dy)); }
   return out;
 }
@@ -229,32 +354,176 @@ export function distributeChanges(doc: BoardDoc, ids: string[], axis: string, by
   const d = byCenters ? distributeDeltasPoints(items.map((it) => mid(it.bbox))) : distributeDeltasGaps(items.map((it) => [lo(it.bbox), hi(it.bbox)]));
   const out: PcbChange[] = []; items.forEach((it, i: number) => { if (Math.abs(d[i]) > 1e-9) out.push(...moveChanges(doc, [it.id], x ? d[i] : 0, x ? 0 : d[i])); }); return out;
 }
-/** EDIT_TOOL::Swap: each item takes the place of the next (positions; footprints also trade orientation and side). */
+/** The kinds that share a KICAD_T (a == b in EDIT_TOOL::Swap's a->Type() == b->Type()). */
+const swapType = (k: string) => /^gr_(line|rect|circle|arc|poly|curve)$/.test(k) ? "shape" : k;
+/**
+ * EDIT_TOOL::Swap: each item takes the place of the next (positions; footprints also trade orientation and side; two
+ * other items of the same type, groups apart, trade layers as well).  KiCad swaps the pairs (i, i + 1) in turn, so
+ * the layers travel the same way the positions do wherever neighbours share a type.
+ */
 export function swapChanges(doc: BoardDoc, ids: string[]) {
   const items = ids.map((id: string) => doc.items.get(id)).filter((it) => it && it.kind !== "group") as KItem[]; if (items.length < 2) return [];
   const slots = items.map((it: KItem) => ({ p: anchorOf(it), rot: it.kind === "footprint" ? it.rot : 0, layer: it.kind === "footprint" ? it.layer : null }));
   const out: PcbChange[] = [];
+  // a->SetLayer( bLayer ), pair by pair: only single-layer items (a (layer) child) of one type, never footprints or groups
+  const layerKid = (it: KItem) => it.kind === "footprint" || it.kind === "group" || it.kind === "generated" ? null : K.kid(it.node, "layer");
+  const layers = items.map((it) => { const l = layerKid(it); return l ? K.str(l[1]) : null; });
+  for (let i = 0; i + 1 < items.length; i++) if (swapType(items[i].kind) === swapType(items[i + 1].kind) && layers[i] !== null && layers[i + 1] !== null) { const t = layers[i]; layers[i] = layers[i + 1]; layers[i + 1] = t; }
   items.forEach((it: KItem, i: number) => {
     const to = slots[(i + 1) % items.length], from = slots[i]; const node = clone(it.node);
+    const lk = K.kid(node, "layer"); if (layers[i] !== null && lk && it.kind !== "footprint" && K.str(lk[1]) !== layers[i]) lk[1] = layers[i]!;
     translateNode(node, to.p[0] - from.p[0], to.p[1] - from.p[1]);
     if (it.kind === "footprint") { if (to.layer !== from.layer) flipNode(node, to.p[0], doc); if (to.rot !== K.atOf(node)[2]) rotateFootprintNode(node, to.rot! - K.atOf(node)[2]); }
     out.push(replacedChange(it, node));
   });
   return out;
 }
-/** Pack the footprints into rows (KiCad's P): biggest first, 1 mm apart, from the selection's top-left corner. */
-export function packChanges(doc: BoardDoc, ids: string[], gap?: number) {
-  gap = gap === undefined ? 1 : gap;
-  const fps = ids.map((id: string) => doc.items.get(id)).filter((it) => it && it.kind === "footprint" && it.bbox) as (KItem & { bbox: Box })[]; if (fps.length < 2) return [];
-  const b = bboxUnion(fps)!; const rowW = Math.max(b[2] - b[0], Math.sqrt(fps.reduce((s, f) => s + (f.bbox[2] - f.bbox[0] + gap!) * (f.bbox[3] - f.bbox[1] + gap), 0)) * 1.2);
-  fps.sort((p, q) => (q.bbox[2] - q.bbox[0]) * (q.bbox[3] - q.bbox[1]) - (p.bbox[2] - p.bbox[0]) * (p.bbox[3] - p.bbox[1]));
-  let x = b[0], y = b[1], rowH = 0; const out: PcbChange[] = [];
+// ---------------------------------------------------------------- rectpack2D (thirdparty/rectpack2d), flipping disabled
+interface PackRect { x: number; y: number; w: number; h: number }
+/** rectpack2D::insert_and_split: the spaces left when an image takes the corner of an empty space, or null when it does not fit. */
+function insertAndSplit(w: number, h: number, sp: PackRect): PackRect[] | null {
+  const fw = sp.w - w, fh = sp.h - h;
+  if (fw < 0 || fh < 0) return null;
+  if (fw === 0 && fh === 0) return [];
+  if (fw > 0 && fh === 0) return [{ x: sp.x + w, y: sp.y, w: sp.w - w, h: sp.h }];
+  if (fw === 0 && fh > 0) return [{ x: sp.x, y: sp.y + h, w: sp.w, h: sp.h - h }];
+  if (fw > fh) return [{ x: sp.x + w, y: sp.y, w: fw, h: sp.h }, { x: sp.x, y: sp.y + h, w, h: fh }];
+  return [{ x: sp.x, y: sp.y + h, w: sp.w, h: fh }, { x: sp.x + w, y: sp.y, w: fw, h }];
+}
+/** rectpack2D::empty_spaces with default_empty_spaces: candidates are tried from the last space added back to the first. */
+class EmptySpaces {
+  spaces: PackRect[] = [];
+  reset(w: number, h: number) { this.spaces = [{ x: 0, y: 0, w, h }]; }
+  insert(w: number, h: number): PackRect | null {
+    for (let i = this.spaces.length - 1; i >= 0; --i) {
+      const sp = this.spaces[i], splits = insertAndSplit(w, h, sp); if (!splits) continue;
+      this.spaces[i] = this.spaces[this.spaces.length - 1]; this.spaces.pop();
+      for (const r of splits) this.spaces.push(r);
+      return { x: sp.x, y: sp.y, w, h };
+    }
+    return null;
+  }
+}
+/** best_packing_for_ordering_impl: the binary search on the bin size; a bin [w, h], or the area inserted when even the starting bin fails. */
+function bestPackingImpl(root: EmptySpaces, order: PackRect[], start: [number, number], discardStep: number, dim: "both" | "w" | "h"): [number, number] | number {
+  const bin: [number, number] = [start[0], start[1]]; let tries = 0;
+  if (discardStep <= 0) { tries = -discardStep; discardStep = 1; }
+  let step: number;
+  if (dim === "both") { bin[0] = Math.trunc(bin[0] / 2); bin[1] = Math.trunc(bin[1] / 2); step = Math.trunc(bin[0] / 2); }
+  else if (dim === "w") { bin[0] = Math.trunc(bin[0] / 2); step = Math.trunc(bin[0] / 2); }
+  else { bin[1] = Math.trunc(bin[1] / 2); step = Math.trunc(bin[1] / 2); }
+  for (;; step = Math.max(1, Math.trunc(step / 2))) {
+    root.reset(bin[0], bin[1]);
+    let inserted = 0, all = true;
+    for (const r of order) { if (root.insert(r.w, r.h)) inserted += r.w * r.h; else { all = false; break; } }
+    if (all) {
+      if (step <= discardStep) { if (tries > 0) tries--; else return bin; }
+      if (dim === "both") { bin[0] -= step; bin[1] -= step; } else if (dim === "w") bin[0] -= step; else bin[1] -= step;
+    } else if (dim === "both") { bin[0] += step; bin[1] += step; if (bin[0] * bin[1] > start[0] * start[1]) return inserted; }
+    else if (dim === "w") { bin[0] += step; if (bin[0] > start[0]) return inserted; }
+    else { bin[1] += step; if (bin[1] > start[1]) return inserted; }
+  }
+}
+/** best_packing_for_ordering: both sides together, then the width and the height on their own. */
+function bestPackingForOrdering(root: EmptySpaces, order: PackRect[], start: [number, number], discardStep: number): [number, number] | number {
+  const first = bestPackingImpl(root, order, start, discardStep, "both"); if (typeof first === "number") return first;
+  let best = first;
+  for (const dim of ["w", "h"] as const) { const t = bestPackingImpl(root, order, best, discardStep, dim); if (typeof t !== "number") best = t; }
+  return best;
+}
+/**
+ * rectpack2D::find_best_packing with its six stock orderings (area, perimeter, longer side, width, height,
+ * pathological_mult, each descending), flipping disabled: the rectangles take their x / y in the best bin found.
+ * Returns false when no ordering could be tried or a rectangle did not fit the best bin (the caller grows the bin).
+ */
+export function findBestPacking(rects: PackRect[], maxSide: number, discardStep: number): boolean {
+  const live = rects.filter((r) => r.w * r.h > 0);
+  const f32 = Math.fround, patho = (r: PackRect) => f32(f32(f32(Math.max(r.w, r.h)) / f32(Math.min(r.w, r.h))) * f32(r.w * r.h));
+  const keys: ((r: PackRect) => number)[] = [(r) => r.w * r.h, (r) => 2 * r.w + 2 * r.h, (r) => Math.max(r.w, r.h), (r) => r.w, (r) => r.h, patho];
+  const orders = keys.map((k) => live.slice().sort((a, b) => k(b) - k(a)));
+  const root = new EmptySpaces(); let bestOrder: PackRect[] | null = null, bestInserted = -1, bestBin: [number, number] = [maxSide, maxSide];
+  for (const order of orders) {
+    const packing = bestPackingForOrdering(root, order, [maxSide, maxSide], discardStep);
+    if (typeof packing === "number") { if (bestOrder === null && packing > bestInserted) { bestOrder = order; bestInserted = packing; } }
+    else if (packing[0] * packing[1] <= bestBin[0] * bestBin[1]) { bestOrder = order; bestBin = packing; }
+  }
+  if (!bestOrder) return false;
+  root.reset(bestBin[0], bestBin[1]);
+  for (const r of bestOrder) { const got = root.insert(r.w, r.h); if (!got) return false; r.x = got.x; r.y = got.y; }   // report_unsuccessful: ABORT_PACKING
+  return true;
+}
+const PACK_SCALE = 10000;   // spread_footprints.cpp `scale`: placement in 0.01 mm units
+/** spreadRectangles: the bin starts at the larger area side and grows by a fifth until every rectangle fits. */
+function spreadRectangles(rects: PackRect[], areaX: number, areaY: number) {
+  let maxSide = Math.max(Math.trunc(areaX / PACK_SCALE), Math.trunc(areaY / PACK_SCALE));
+  for (let i = 0; i < 2000; i++) { if (findBestPacking(rects, maxSide, 1)) break; maxSide = Math.trunc(maxSide * 1.2); }
+}
+/** UTIL::GetRefDesPrefix and GetTrailingInt, for compareFootprintsbyRef. */
+const refDesPrefix = (ref: string) => ref.replace(/[0-9?]+$/, "");
+const trailingInt = (ref: string) => { const m = /(\d+)$/.exec(ref); return m ? parseInt(m[1], 10) : 0; };
+/**
+ * SpreadFootprints( footprints, target, aGroupBySheet = false ) (pcbnew/autorouter/spread_footprints.cpp) as
+ * EDIT_TOOL::PackAndMoveFootprints calls it, in nanometres: the footprints are grouped by the size of their
+ * GetBoundingBox( false ) plus the 1 mm component gap; each size's footprints, sorted by reference, are laid out in
+ * a block of rows or columns; the blocks are packed with rectpack2D in 0.01 mm units; and the whole lot goes to
+ * `target` (the selection box's origin).  Returns each footprint's node at its packed place (only those that moved).
+ */
+export function packNodes(doc: BoardDoc, ids: string[]): Map<string, SNode> {
+  const IU = 1e6, GAP = 1 * IU, GROUP_GAP = 1.5 * IU;
+  interface Fp { it: KItem; x: number; y: number; w: number; h: number; dx: number; dy: number }
+  const fps: Fp[] = [];
+  for (const id of ids) {
+    const it = doc.items.get(id); if (!it || it.kind !== "footprint") continue; const b = alignBox(it); if (!b) continue;
+    fps.push({ it, x: Math.round(b[0] * IU), y: Math.round(b[1] * IU), w: Math.round(b[2] * IU) - Math.round(b[0] * IU), h: Math.round(b[3] * IU) - Math.round(b[1] * IU), dx: 0, dy: 0 });
+  }
+  const out = new Map<string, SNode>(); if (!fps.length) return out;
+  type Box4 = [number, number, number, number] | null;   // x0, y0, x1, y1
+  const merge = (b: Box4, x0: number, y0: number, x1: number, y1: number): Box4 => b ? [Math.min(b[0], x0), Math.min(b[1], y0), Math.max(b[2], x1), Math.max(b[3], y1)] : [x0, y0, x1, y1];
+  const moveFp = (f: Fp, dx: number, dy: number) => { f.x += dx; f.y += dy; f.dx += dx; f.dy += dy; };
+  let target: Box4 = null; for (const f of fps) target = merge(target, f.x, f.y, f.x + f.w, f.y + f.h);   // footprintsBbox.Normalize().GetOrigin()
+  // sizeToFpMap: std::map<VECTOR2I, …> keyed by the size plus the gap, in x-then-y order
+  const bySize = new Map<string, { sx: number; sy: number; fps: Fp[]; box: Box4 }>();
+  for (const f of fps) { const sx = f.w + GAP, sy = f.h + GAP, k = `${sx},${sy}`; if (!bySize.has(k)) bySize.set(k, { sx, sy, fps: [], box: null }); bySize.get(k)!.fps.push(f); }
+  const blocks = Array.from(bySize.values()).sort((a, b) => a.sx - b.sx || a.sy - b.sy);
+  for (const blk of blocks) {
+    const n = blk.fps.length, { sx, sy } = blk;
+    const initialSide = Math.sqrt(sx * sy * n), vertical = sx >= sy; let perLine = n;
+    // "Wrap the line if the ratio is not satisfied" (singleLineRatio 5; integer division)
+    if (vertical) { if (Math.trunc(sy * n / sx) > 5) perLine = Math.trunc(initialSide / sy); }
+    else if (Math.trunc(sx * n / sy) > 5) perLine = Math.trunc(initialSide / sx);
+    let optimal = perLine, rem = n % optimal;
+    if (rem !== 0) for (let i = Math.max(2, perLine - 2); i <= Math.min(n - 2, perLine + 2); i++) { const r = n % i; if (r === 0 || r >= rem) { optimal = i; rem = r; } }
+    blk.fps.sort((a, b) => {   // compareFootprintsbyRef
+      const ra = a.it.ref || "", rb = b.it.ref || "", pa = refDesPrefix(ra), pb = refDesPrefix(rb);
+      return pa !== pb ? (pa < pb ? -1 : 1) : trailingInt(ra) - trailingInt(rb);
+    });
+    blk.fps.forEach((f, i) => {
+      let px = Math.trunc(sx / 2), py = Math.trunc(sy / 2);
+      if (vertical) { px += sx * Math.trunc(i / optimal); py += sy * (i % optimal); } else { px += sx * (i % optimal); py += sy * Math.trunc(i / optimal); }
+      moveFp(f, px - f.x, py - f.y);
+      const g = Math.trunc(GAP / 2); blk.box = merge(blk.box, f.x - g, f.y - g, f.x + f.w + g, f.y + f.h + g);
+    });
+  }
+  // pack the blocks
+  const rects: PackRect[] = blocks.map((b) => ({ x: 0, y: 0, w: Math.trunc((b.box![2] - b.box![0]) / PACK_SCALE), h: Math.trunc((b.box![3] - b.box![1]) / PACK_SCALE) }));
+  let blocksArea = 0; for (const b of blocks) blocksArea += (b.box![2] - b.box![0]) * (b.box![3] - b.box![1]);
+  const side = Math.round(Math.sqrt(blocksArea)); spreadRectangles(rects, side, side);
+  let sheet: Box4 = null;
+  blocks.forEach((b, i) => { const tx = rects[i].x * PACK_SCALE, ty = rects[i].y * PACK_SCALE; for (const f of b.fps) { moveFp(f, tx - b.box![0], ty - b.box![1]); sheet = merge(sheet, f.x, f.y, f.x + f.w, f.y + f.h); } });
+  // the one sheet group (aGroupBySheet false): its box with the group gap is packed alone, then set down at the target
+  const sb = sheet as unknown as [number, number, number, number];
+  const sr: PackRect[] = [{ x: 0, y: 0, w: Math.trunc((sb[2] - sb[0] + 2 * GROUP_GAP) / PACK_SCALE), h: Math.trunc((sb[3] - sb[1] + 2 * GROUP_GAP) / PACK_SCALE) }];
+  const sside = Math.trunc(Math.sqrt((sb[2] - sb[0]) * (sb[3] - sb[1]))); spreadRectangles(sr, sside, sside);
+  const tx = sr[0].x * PACK_SCALE + target![0], ty = sr[0].y * PACK_SCALE + target![1];
   for (const f of fps) {
-    const w = f.bbox[2] - f.bbox[0], h = f.bbox[3] - f.bbox[1];
-    if (x > b[0] && x + w > b[0] + rowW) { x = b[0]; y += rowH + gap!; rowH = 0; }
-    out.push(...moveChanges(doc, [f.id], x - f.bbox[0], y - f.bbox[1])); x += w + gap!; rowH = Math.max(rowH, h);
+    moveFp(f, tx - sb[0], ty - sb[1]);
+    if (f.dx || f.dy) out.set(f.it.id, translateNode(clone(f.it.node), f.dx / IU, f.dy / IU));
   }
   return out;
+}
+/** The MODIFIED changes of packNodes (Pack and Move Footprints without the move). */
+export function packChanges(doc: BoardDoc, ids: string[]) {
+  const out: PcbChange[] = []; for (const [id, node] of packNodes(doc, ids)) out.push(replacedChange(doc.items.get(id)!, node)); return out;
 }
 
 /** A pad's own geometry mirrored left / right: drill offset, trapezoid delta and custom primitives, the angle negated. */

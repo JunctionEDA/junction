@@ -2,7 +2,7 @@
 import type { BoardDoc, CopperShape, DesignSettings, DrawState, GeomPrim, PcbCtx, Pt, RatsnestLine, SnapType } from "./types";
 import { appGlobal, editorState, netlistCached, netNameOf, sizesOf } from "./app-state";
 import { drawArcPreview } from "./arcs";
-import { drawStatusPopup, drawTwoPointAssistant } from "./assistants";
+import { dimensionLabel, drawStatusPopup, drawTwoPointAssistant, textNextToCursor } from "./assistants";
 import { DIM_TYPE, dimensionNode, snap45 } from "./dimensions";
 import type { DimSpec } from "./dimensions";
 import { padShape, polysOverlap, rectCore, shapeOffset } from "./distances";
@@ -288,7 +288,7 @@ export function drawDimPreview(c: CanvasRenderingContext2D, d: DrawState, px: nu
     if (g.t === "line") { c.lineWidth = Math.max(g.w || 0, px); line(c, [g.x1, g.y1], [g.x2, g.y2]); }
     else if (g.t === "circle") { c.lineWidth = Math.max(g.w || 0, px); ring(c, [g.x, g.y], g.r); }
     else if (g.t === "poly" && g.pts) { c.lineWidth = Math.max(g.w || 0, px); polyline(c, g.pts, !!g.close); }
-    else if (g.t === "text" && base && K.drawTextStroke) { c.save(); K.drawTextStroke(c, g, px, c.strokeStyle, base, false); c.restore(); }
+    else if (g.t === "text" && base && K.drawTextStroke) { c.save(); K.drawTextStroke(c, g, px, c.strokeStyle, base, base[0] < 0 /* the flipped board view */); c.restore(); }
   }
 }
 export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCtx) {
@@ -409,6 +409,20 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
     line(c, [S.hover.x - img.w / 2, S.hover.y - img.h / 2], [S.hover.x + img.w / 2, S.hover.y + img.h / 2]);
     line(c, [S.hover.x + img.w / 2, S.hover.y - img.h / 2], [S.hover.x - img.w / 2, S.hover.y + img.h / 2]);
     }
+  }
+  // a two-point pick's preview in LAYER_ANCHOR: MIRROR_AXIS_ITEM is one line a pixel wide between the points; the
+  // interactive offset's RULER_ITEM (no ticks, an arrow head on its end) runs from the cursor to the first point, with
+  // its x / y / r / theta strings beside the cursor.  The arrow stays while Offset Item is open (S.pickKeep).
+  const tp = S.pick && S.pick.two && S.pick.from && S.pick.cur ? S.pick : null;
+  const seg: [Pt, Pt] | null = tp ? (tp.two!.preview === "ruler" ? [tp.cur!, tp.from!] : [tp.from!, tp.cur!]) : S.pickKeep || null;
+  if (seg && !samePt(seg[0], seg[1])) {
+    const [a, b] = seg, w = px * (view.dpr || 1); c.save(); c.globalAlpha = 1; c.strokeStyle = ANCHOR; c.lineWidth = w; c.setLineDash([]); line(c, a, b);
+    if (!tp || tp.two!.preview === "ruler") {
+      const v = vsub(b, a), L = Math.hypot(v[0], v[1]), head = 17.5 * w, R = (deg: number): Pt => { const t = deg * Math.PI / 180, cs = Math.cos(t), sn = Math.sin(t); return [(v[0] * cs - v[1] * sn) / L * head, (v[0] * sn + v[1] * cs) / L * head]; };
+      for (const d of [30, -30]) { const h = R(d); line(c, b, [b[0] - h[0], b[1] - h[1]]); }   // RULER_ITEM: m_showEndArrowHead, 30 degrees a side
+      if (tp) textNextToCursor(c, a, vsub(b, a), [dimensionLabel("x", v[0]), dimensionLabel("y", v[1]), dimensionLabel("r", L), dimensionLabel("θ", Math.atan2(-v[1], v[0]) * 180 / Math.PI, true)], w, ANCHOR);
+    }
+    c.restore();
   }
   drawClearanceOutlines(c, ctx, px * (view.dpr || 1));   // the active copper layer's clearance lines (always-show tracks / vias, pads)
   drawGroupFrames(c, ctx, px * (view.dpr || 1));   // PCB_PAINTER::draw( PCB_GROUP ): a selected or entered group's box

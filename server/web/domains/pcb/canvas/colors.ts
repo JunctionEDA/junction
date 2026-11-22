@@ -34,6 +34,9 @@ export const SCH_DEFAULT = Object.freeze({
   // shadow", (.4, .7, 1.0, .8) elsewhere (builtin_color_themes.h)
   selection: IS_MAC_PLATFORM ? "rgba(77,179,255,0.6)" : "rgba(102,179,255,0.8)",
   hovered: "#0000FF",      // LAYER_HOVERED: hypertext under the cursor (builtin_color_themes.h:33)
+  // LAYER_BUS_JUNCTION, LAYER_SHEET_BACKGROUND (alpha 0: not drawn), LAYER_SCHEMATIC_ANCHOR, LAYER_ERC_ERR / WARN / EXCLUSION
+  busJunction: "#000084", sheetBg: "rgba(255,255,255,0)", anchor: "#0000FF",
+  ercErr: "rgba(230,9,13,0.8)", ercWarn: "rgba(209,146,0,0.8)", ercExcl: "rgba(194,194,194,0.8)",
 });
 
 // ---------------------------------------------------------------- schematic colour themes
@@ -51,6 +54,7 @@ export const SCH_THEMES: Record<string, SchThemeDef> & { default: SchThemeDef } 
     sheet: "#840084", sheetName: "#008484", sheetFile: "#848400", sheetFields: "#840084", sheetLabel: "#008484", noconnect: "#000084", notes: "#0000C2",
     busEntry: "#008400", dnp: "rgba(255,0,0,0.85)", netclass: "#000000", ruleArea: "#840000", excluded: "rgba(194,194,194,0.95)", hidden: "#C2C2C2",
     privateNotes: "#0000C2", frame: "#840000", brightened: "#FF00FF",
+    busJunction: "#000084", ercErr: "rgba(255,0,0,0.8)", ercWarn: "rgba(0,255,0,0.8)", ercExcl: "#C2C2C2",   // BLUE, PURERED / PUREGREEN @ 0.8, LIGHTGRAY
     selection: IS_MAC_PLATFORM ? "rgba(199,235,255,0.8)" : "rgba(102,179,255,0.8)",   // KiCad Classic's shadow
   } },
   // A dark sheet in the manner of the popular community dark themes: near-black paper, KiCad's hues lifted so
@@ -91,9 +95,19 @@ export function withSchTheme<T>(id: string, fn: () => T): T {
   try { return fn(); } finally { setSchTheme(was); }
 }
 
-// draw order (eeschema SCH_VIEW layer order, bottom first)
-export const SCH_Z: Record<string, number> = { bitmap: -7, sheetBg: -6, sheetFields: -5, sheet: -4, notesBg: -3, deviceBg: -2, notes: -1, device: 0, pinName: 1, pinNum: 2, pin: 3,
-  wire: 4, bus: 5, junction: 6, noconnect: 7, loclabel: 8, globlabel: 9, hierlabel: 10, ruleArea: 11, netclass: 12, fields: 13, value: 14, ref: 15, marker: 16 };
+// draw order (eeschema/sch_view.h SCH_LAYER_ORDER, bottom first; only the background layers are negative).  Label
+// bodies are on LAYER_DEVICE (SCH_LABEL_BASE::ViewGetLayers), sheet pins on LAYER_HIERLABEL (SCH_SHEET::ViewGetLayers).
+export const SCH_Z: Record<string, number> = { notesBg: -7, sheetBg: -6, deviceBg: -5, shapesBg: -4, bitmap: -3, sheet: 0, device: 1, pinName: 2, pinNum: 3, pin: 4,
+  loclabel: 5, hierlabel: 5, bus: 6, wire: 7, privateNotes: 8, notes: 9, sheetFields: 10, sheetName: 11, sheetFile: 12, globlabel: 13, sheetPin: 14,
+  noconnect: 15, junction: 16, busJunction: 17, ruleArea: 18, netclass: 19, intersheet: 20, fields: 21, value: 22, ref: 23, marker: 24 };
+
+/** COLOR4D::Darkened(f): every channel c → c·(1−f), alpha kept */
+export const DARK_CACHE = new Map<string, string>();
+export function darkened(c: string, f: number): string {
+  const key = f + c; let v = DARK_CACHE.get(key); if (v) return v;
+  const [r, g, b, a] = parseColor(c); v = rgba(Math.round(r * (1 - f)), Math.round(g * (1 - f)), Math.round(b * (1 - f)), a);
+  if (DARK_CACHE.size < 4096) DARK_CACHE.set(key, v); return v;
+}
 
 // [layer name, palette key]: the colour is read from the live palette, so it follows the theme
 export const SCH_LAYERS: [string, keyof typeof SCH_DEFAULT][] = [

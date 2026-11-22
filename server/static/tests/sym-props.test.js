@@ -76,6 +76,19 @@ test("SyncOtherUnits with a property filter: only that property", () => {
   const v = S(P.syncUnit(src, dst, P.syncFor("Value"))); assert.ok(/"Value" "X"/.test(v) && /\(dnp no\)/.test(v));
   const d = S(P.syncUnit(src, dst, P.syncFor("Do not Populate"))); assert.ok(/"Value" "74HC00"/.test(d) && /\(dnp yes\)/.test(d));
 });
+
+test("SyncOtherUnits with a variant: the copies go to the other unit's variant on its own sheet path, its base stays", () => {
+  const inst = (p, v) => `(instances (project "p" (path "${p}" (reference "U1") (unit 1)${v || ""})))`;
+  const mk = (uuid, extra) => N(`(symbol (lib_id "74xx:74HC00") (at 50 50 0) (unit 1) (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "${uuid}") (property "Reference" "U1" (at 52 48 0)) (property "Value" "74HC00" (at 52 52 0)) ${extra})`);
+  const src = mk("a", inst("/r/a", ' (variant (name "Lite") (dnp yes) (field (name "Value") (value "74LS00")))'));
+  const dst = mk("b", inst("/r/b"));
+  const out = P.syncUnit(src, dst, P.SYNC_ALL || undefined, { variant: "Lite", srcPath: "/r/a", dstPaths: ["/r/b"] });
+  const t = S(out);
+  assert.ok(/\(property "Value" "74HC00"/.test(t) && /\(dnp no\)/.test(t), "base value and flag untouched: " + t);
+  assert.ok(/\(variant \(name "Lite"\) \(dnp yes\) \(field \(name "Value"\) \(value "74LS00"\)\)\)/.test(t), t);
+  assert.strictEqual(P.syncUnit(src, out, P.SYNC_ALL || undefined, { variant: "Lite", srcPath: "/r/a", dstPaths: ["/r/b"] }), null, "already in step");
+  assert.strictEqual(P.syncUnit(src, dst, P.SYNC_ALL || undefined, { variant: "", srcPath: "/r/a", dstPaths: ["/r/b"] }), null, "the default variant compares the base, which is equal");
+});
 test("CollectOtherUnits: same reference on that path, same lib_id, other unit; power symbols never", () => {
   const doc = K.parseDoc(`(kicad_sch (version 20250114) (generator "eeschema") (uuid "root") (paper "A4") (lib_symbols)
     ${SYM}

@@ -10,6 +10,7 @@ import { drawHover } from "./gestures";
 import { pcbTools } from "./panels/core";
 import { anchorMm, breakFollow, followAction, peerName, sendPresence } from "./peers";
 import { drawSelection, selectedFields, selectedSet } from "./selection";
+import { schNetStyles } from "./schnets";
 import { E } from "./state";
 import { paintConfig, paintDocument, settledFrame, stats as paintStats } from "./paint";
 import { variantView } from "./variant";
@@ -105,10 +106,13 @@ E.drawCanvasSettled = drawCanvasSettled;
  * What the schematic painter needs from the tools besides the selection: the dangling local labels (a selected
  * one shows no anchor) and the items moved whole (their fields show no anchor, SCH_PAINTER's parentMoving).
  */
-function schPaintState(selected: Set<string> | null): { dangling?: Set<string>; moving?: Set<string> } {
+function schPaintState(selected: Set<string> | null): { dangling?: Set<string>; moving?: Set<string>; schNetStyle?: ReturnType<typeof schNetStyles>; schEnteredGroup?: string | null } {
   if (!isSch() || !E.kdoc || !CollabTools.sch) return {};
   const tools = CollabTools.sch as unknown as { _?: { danglingLabelIds?: (d: KDoc) => Set<string> }; state?: { drag?: { items?: { item?: { id?: string } }[] } | null } };
-  const out: { dangling?: Set<string>; moving?: Set<string> } = {};
+  const out: { dangling?: Set<string>; moving?: Set<string>; schNetStyle?: ReturnType<typeof schNetStyles>; schEnteredGroup?: string | null } = {};
+  // each connected item's net class style (colour, wire / bus width, line style), and the entered group's id
+  try { out.schNetStyle = schNetStyles(); } catch (e) { /* no net map yet */ }
+  const eg = (CollabTools.sch as unknown as { enteredGroupId?: () => string | null }).enteredGroupId; if (eg) { try { out.schEnteredGroup = eg(); } catch (e) { /* older module */ } }
   if (selected && selected.size && tools._ && tools._.danglingLabelIds) { try { out.dangling = tools._.danglingLabelIds(E.kdoc); } catch (e) { /* no tools yet */ } }
   const d = tools.state && tools.state.drag;
   if (d && d.items && d.items.length) out.moving = new Set(d.items.map((e) => (e && e.item && e.item.id) || "").filter((id) => id));
@@ -178,8 +182,8 @@ export function drawCanvas() {
     }
   }
   const m = activeModule();
-  if (m && m.drawOverlay) { try { cctx.save(); KiCadCanvas.setViewTransform(cctx, view); m.drawOverlay(cctx, view, toolCtx()); } catch (e) { console.warn(e); } finally { cctx.restore(); } }
-  try { cctx.save(); KiCadCanvas.setViewTransform(cctx, view); drawAppOverlays(cctx, view, isSch()); } catch (e) { console.warn(e); } finally { cctx.restore(); }
+  if (m && m.drawOverlay) { try { cctx.save(); KiCadCanvas.setViewTransform(cctx, view, viewFlipped() ? E.kdoc : null); m.drawOverlay(cctx, view, toolCtx()); } catch (e) { console.warn(e); } finally { cctx.restore(); } }
+  try { cctx.save(); KiCadCanvas.setViewTransform(cctx, view, viewFlipped() ? E.kdoc : null); drawAppOverlays(cctx, view, isSch()); } catch (e) { console.warn(e); } finally { cctx.restore(); }
   drawHover(cctx, view);
   if (E.selPins.length && CollabTools.sch && CollabTools.sch._) {
     // the selected pins drawn in the selection colour over their symbols
@@ -304,9 +308,14 @@ export function zoomBy(factor: number, cx?: number, cy?: number) {
 }
 
 
+/** Flip Board View is on: the canvas draws the board mirrored in X about its centre (KiCadCanvas.flipCentre). */
+export function viewFlipped(): boolean { return !isSch() && !!E.kdoc && !!(E.renderOpts && E.renderOpts.flip); }
+/** Document x <-> x as drawn in the view (an involution); the identity while the view is not flipped. */
+export function flipMmX(x: number): number { return viewFlipped() ? (KiCadCanvas.unflipX as (d: unknown, x: number) => number)(E.kdoc, x) : x; }
 export function worldMm(ev: { clientX: number; clientY: number }): [number, number] {
   const r = world.getBoundingClientRect();
-  return [mmX0() + ((ev.clientX - r.left) / r.width) * mmW(), mmY0() + ((ev.clientY - r.top) / r.height) * mmH()];
+  // the pointer in document coordinates: the flipped view's mirror is undone, as KiCad's view transform does
+  return [flipMmX(mmX0() + ((ev.clientX - r.left) / r.width) * mmW()), mmY0() + ((ev.clientY - r.top) / r.height) * mmH()];
 }
 
 export function pxPerMm() { const r = world.getBoundingClientRect(); return r.width > 0 ? r.width / mmW() : 4; }

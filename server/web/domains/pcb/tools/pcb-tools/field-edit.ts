@@ -58,10 +58,10 @@ export function rotateFieldChange(doc: BoardDoc, ref: FieldRef, deg: number): Pc
  * and so stays, the library angle reflects over the flip axis plus a half turn (left / right: lib -> -lib, so the
  * board angle 2·fpAngle − angle), the layer goes to the other side and a side-specific layer's text is mirrored.
  */
-export function flipFieldChange(doc: BoardDoc, ref: FieldRef): PcbChange | null {
+export function flipFieldChange(doc: BoardDoc, ref: FieldRef, dir?: string): PcbChange | null {
   return fieldChange(doc, ref, (f, fp) => {
     const a0 = K.atOf(fp)[2] || 0;
-    setAngleKid(f, 2 * a0 - angleKid(f));
+    setAngleKid(f, 2 * a0 - angleKid(f) + (dir === "tb" ? 180 : 0));   // PCB_TEXT::Flip: left / right -angle, top / bottom 180 - angle
     flipLayerKid(f); toggleMirror(f);
   });
 }

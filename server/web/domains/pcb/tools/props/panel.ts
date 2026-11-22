@@ -5,7 +5,7 @@ import { field, fieldList, isHidden, setField, setFieldHidden } from "./fields";
 import { footprintAttrs, netNameOf, setFootprintAttrs, setFootprintPosition, setFootprintRotation, setFootprintSide, type FootprintAttrs } from "./footprint";
 import { boardLayers, setDiameter, setLayer, setRotation, setShape, setStrokeWidth, setText, setTextSize, setViaDrill, setViaLayers, setViaSize, setWidth, setZoneName, setZonePriority, strokeWidth, textSize } from "./items";
 import { PAD_LAYER_PRESETS, type PadPatch, type PadRow, boardNetNames, padInfo, padList, padNode, setPad } from "./pads";
-import { atOf, clone, deg360, isList, kid, layerOf, normDeg, num, str, yes } from "./sexpr";
+import { atOf, clone, deg360, isList, kid, kids, layerOf, normDeg, num, str, yes } from "./sexpr";
 import { libUnitCount, mirrorOf, setSymbolFlag, setSymbolMirror, setSymbolPosition, setSymbolRotation, setSymbolUnit } from "./symbol";
 import "../../../../shared/components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
 
@@ -195,11 +195,23 @@ export function renderInto(el: HTMLElement, ctx: PanelCtx, item: PanelItem, opts
   return P;
 }
 
+/**
+ * SCH_SYMBOL::SetRef( &currentSheet, ref ): the reference of the sheet instance on screen follows the field (every
+ * instance entry when the hierarchy is not known), so the canvas, the netlist and the annotation read the new one.
+ */
+function setInstanceReference(n: SNode, ref: string): void {
+  const ed = (globalThis as unknown as { CollabEditor?: { currentSheetPathOf?: () => string | null } }).CollabEditor;
+  const path = ed && ed.currentSheetPathOf ? ed.currentSheetPathOf() : null;
+  for (const inst of kids(n, "instances")) for (const pr of kids(inst, "project")) for (const pa of kids(pr, "path")) {
+    if (path && str(pa[1]) !== path) continue;
+    const r = kid(pa, "reference"); if (r) r[1] = ref;
+  }
+}
 function renderFields(P: Panel, node: SNode): void {
   for (const p of fieldList(node)) {
     const name = str(p[1]);
     P.field(name, str(p[2]), isHidden(p),
-      (v) => P.edit(name.toLowerCase(), (n) => setField(n, name, v)),
+      (v) => P.edit(name.toLowerCase(), (n) => { setField(n, name, v); if (name === "Reference" && n[0] === "symbol") setInstanceReference(n, str(v)); }),
       (shown) => P.edit((shown ? "show " : "hide ") + name, (n) => setFieldHidden(n, name, !shown)));
   }
 }

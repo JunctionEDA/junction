@@ -11,7 +11,7 @@ import { collisionCursor, collisionMarkers, drawCollision } from "./collision";
 import { snapAnchor, snapConn } from "./snap";
 import { drawSchArcPreview } from "./arcs";
 import { drawTableLines, ellipseArcAngles, ellipseFromBox, sheetCorner, sheetNode } from "./nodes";
-import { CLR, K, S, atOf, kids, ptsOf, str, toolOf } from "./state";
+import { CLR, K, S, atOf, kid, kids, ptsOf, str, toolOf } from "./state";
 import { ghost, r4, same, segDist, segs } from "./util";
 import { segNull } from "./wire";
 
@@ -34,7 +34,7 @@ export function danglingEnds(doc: KDoc): Dangling[] {
     else if (k === "junction") add(atOf(n), "JUNCTION_END", it);
     else if (k === "no_connect") add(atOf(n), "NO_CONNECT_END", it);
     else if (DANGLE_LABEL_COLOR[k]) { add(atOf(n), "LABEL_END", it); labels.push({ p: atOf(n).slice(0, 2), item: it, color: DANGLE_LABEL_COLOR[k] }); }
-    else if (k === "sheet") for (const pin of kids(n, "pin")) { add(atOf(pin), "SHEET_LABEL_END", it); labels.push({ p: atOf(pin).slice(0, 2), item: it, color: "sheetLabel" }); }
+    else if (k === "sheet") for (const pin of kids(n, "pin")) { add(atOf(pin), "SHEET_LABEL_END", it); labels.push({ p: atOf(pin).slice(0, 2), item: it, color: "hlabel" }); }   // a sheet pin's box is drawn through draw( SCH_HIERLABEL ): LAYER_HIERLABEL
     else if (k === "bus_entry") { const c = connPoints(doc, it); add(c[0], "BUS_ENTRY_END", it); add(c[1], "WIRE_ENTRY_END", it); }
   }
   const out: Dangling[] = [];
@@ -70,10 +70,15 @@ export function danglingEnds(doc: KDoc): Dangling[] {
     if (!l.some((x) => x.item !== item && PIN_OK.has(x.type))) out.push({ p: [q.x, q.y], what: "pin", item, color: "pin" });
   }
   const LABEL_OK = new Set(["PIN_END", "NO_CONNECT_END", "LABEL_END", "SHEET_LABEL_END"]);
+  // SCH_DIRECTIVE_LABEL::IsDangling: m_isDangling && m_connected_rule_areas.empty() — a directive label whose
+  // connection point lies on the border of a rule area is attached to it (SCH_RULE_AREA::addDirective)
+  const ruleBorders: Pt[][] = [];
+  for (const it of doc.items.values()) if (it.kind === "rule_area") { const pl = kid(it.node, "polyline"); const poly = pl ? ptsOf(pl) : []; if (poly.length > 1) ruleBorders.push(poly); }
   for (const lb of labels) {
     const l = at.get(key(lb.p)) || [];
     if (l.some((x) => x.item !== lb.item && LABEL_OK.has(x.type))) continue;
     if (lines.some((ln) => segs(ln).some(([a, b]) => segDist(lb.p, a, b) <= 1e-3))) continue;
+    if ((lb.item.kind === "netclass_flag" || lb.item.kind === "directive_label") && ruleBorders.some((poly) => poly.some((v, i) => segDist(lb.p, v, poly[(i + 1) % poly.length]) <= 1e-4))) continue;
     out.push({ p: lb.p, what: "label", item: lb.item, color: lb.color });
   }
   return out;
@@ -128,14 +133,19 @@ export function danglingLabelIds(doc: KDoc): Set<string> {
 }
 export function drawDangling(c: CanvasRenderingContext2D, doc: KDoc, px: number) {
   danglingList(doc);
-  const thick = Math.max(DEFAULT_PEN / 3, px);
+  // GetDanglingIndicatorThickness(): the schematic's default line width / 3
+  const schPen = typeof K.schPen === "function" ? K.schPen() : DEFAULT_PEN;
+  const thick = Math.max(schPen / 3, px);
   c.save(); c.lineWidth = thick;
   for (const d of danglingCache.list) {
     const col = brighten(K.SCH[d.color] || K.SCH.wire, 0.3); c.strokeStyle = col;
     if (d.what === "pin") { c.beginPath(); c.arc(d.p[0], d.p[1], TARGET_PIN_RADIUS, 0, Math.PI * 2); c.stroke(); continue; }
     // SCH_PAINTER::draw( SCH_BUS_ENTRY_BASE ): a circle of the pen width plus TARGET_BUSENTRY_RADIUS / 2 (6 mils)
     if (d.what === "busEntry") { const n = d.item.node, st = n.find((x) => Array.isArray(x) && x[0] === "stroke") as SNode | undefined, wd = st ? (st.find((x) => Array.isArray(x) && x[0] === "width") as SNode | undefined) : undefined; const pen = wd && +wd[1] > 0 ? +wd[1] : DEFAULT_PEN; c.beginPath(); c.arc(d.p[0], d.p[1], pen + TARGET_BUSENTRY_RADIUS / 2, 0, Math.PI * 2); c.stroke(); continue; }
-    const w = d.what === "wire" ? DEFAULT_PEN : DANGLING_SYMBOL_SIZE / 2, r = w + DANGLING_SYMBOL_SIZE / 2;
+    // a wire end: half-size KiROUND( width ) + DANGLING_SYMBOL_SIZE / 2 with the wire's own pen width
+    let wireW = DEFAULT_PEN;
+    if (d.what === "wire") { const st = d.item.node.find((x) => Array.isArray(x) && x[0] === "stroke") as SNode | undefined, wd = st ? (st.find((x) => Array.isArray(x) && x[0] === "width") as SNode | undefined) : undefined; if (wd && +wd[1] > 0) wireW = +wd[1]; }
+    const w = d.what === "wire" ? wireW : DANGLING_SYMBOL_SIZE / 2, r = w + DANGLING_SYMBOL_SIZE / 2;
     c.strokeRect(d.p[0] - r, d.p[1] - r, 2 * r, 2 * r);
   }
   c.restore();
@@ -185,7 +195,7 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: SchCt
   const w = S.wire;
   if (w) {
     // the segments in KiCad's preview colours (wire / bus / notes), then the junction dots the drop would add
-    c.save(); c.strokeStyle = w.kind === "bus" ? CLR.bus : w.kind === "polyline" ? K.SCH.notes : CLR.wire; c.lineWidth = Math.max(w.kind === "bus" ? 0.3048 : 0.1524, 2 * px); c.lineCap = "round"; c.lineJoin = "round";
+    c.save(); c.strokeStyle = w.kind === "bus" ? CLR.bus : w.kind === "polyline" ? K.SCH.notes : CLR.wire; c.lineWidth = Math.max(w.kind === "bus" ? 0.3048 : w.kind === "polyline" && typeof K.schPen === "function" ? K.schPen() : 0.1524, 2 * px); c.lineCap = "round"; c.lineJoin = "round";
     if (w.kind === "polyline") c.setLineDash([1.27 * 0.5, 1.27 * 0.5]);
     c.beginPath(); for (const sg of w.segs) if (!segNull(sg)) { c.moveTo(sg[0][0], sg[0][1]); c.lineTo(sg[1][0], sg[1][1]); } c.stroke();
     c.restore();

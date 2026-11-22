@@ -82,13 +82,16 @@ export interface Prefs {
   common: { hcDimming: number; immediateActions: boolean };
   /** PCB Editor > Origins & Axes (PCBNEW_SETTINGS m_Display.m_DisplayOrigin, m_DisplayInvertXAxis / YAxis) */
   pcbOrigin: { origin: "page" | "aux" | "grid"; invertX: boolean; invertY: boolean };
+  /** PCB Editor > Snapping, Object Snapping (PCBNEW_SETTINGS::m_MagneticItems): pads and tracks capture the cursor never, when routing tracks, or always; graphics never or always */
+  pcbSnapping: { pads: "never" | "trackTool" | "always"; tracks: "never" | "trackTool" | "always"; graphics: boolean };
   /**
    * PCB Editor > Editing Options (PCBNEW_SETTINGS): m_RotationAngle (degrees), m_TrackDragAction, m_CtrlClickHighlight,
    * m_Display.m_RatsnestThickness (pixels), m_ESCClearsNetHighlight, m_ShowCourtyardCollisions, m_AutoRefillZones.  The
    * angle snap mode, the arc editing mode and curved ratsnest lines are the board tools' own (toolbar and View menu too).
    */
   pcbEditing: { rotationAngle: number; trackDragAction: "move" | "drag" | "dragFree"; ctrlClickHighlight: boolean; ratsnestThickness: number;
-    escClearsNetHighlight: boolean; showCourtyardCollisions: boolean; autoRefillZones: boolean };
+    escClearsNetHighlight: boolean; showCourtyardCollisions: boolean; autoRefillZones: boolean; /** m_AllowFreePads: pads move with respect to the rest of their footprint */ allowFreePads: boolean;
+    /** m_FlipDirection ("editing.flip_left_right"): Flip board items left/right instead of top/bottom (the default) */ flipLeftRight?: boolean };
   /** Footprint Editor > Editing Options (FOOTPRINT_EDITOR_SETTINGS): m_RotationAngle (degrees), apart from the board's */
   fpEditing: { rotationAngle: number };
   grids: Record<EditorId, GridPrefs>;
@@ -110,8 +113,8 @@ export const DEFAULT_PREFS: Prefs = {
   mouse: { autoZoomSpeed: true, zoomSpeed: IS_MAC ? 5 : 1, middleDrag: "pan", rightDrag: "pan", centerOnZoom: false, autoPan: false, autoPanSpeed: 5, zoomAccel: false, leftDrag: "dragSelected", motionPanMod: "",
     // TOUCHPAD_MODE: native gestures by default on Windows only
     touchpadMode: IS_WIN ? "native" : "scroll", zoomMod: "", panHMod: "ctrl", panVMod: "shift", reverseZoom: false, reversePanH: false, horizontalPan: true },
-  schDisplay: { showHiddenPins: false, showHiddenFields: false, showPageLimits: true, defaultFont: "", remappedPinNumbers: false, selDrawChildren: true, selFill: false, selWidth: 3, highlightWidth: 2, collisionWidth: 4,
-    highlightNetclass: true, colorHighlightThickness: 15, colorHighlightOpacity: 60, crossProbeSelect: true, crossProbeCenter: true, crossProbeZoom: true, crossProbeHighlight: true, crossProbeFlash: false },
+  schDisplay: { showHiddenPins: false, showHiddenFields: false, showPageLimits: true, defaultFont: "", remappedPinNumbers: true, selDrawChildren: true, selFill: false, selWidth: 3, highlightWidth: 2, collisionWidth: 4,
+    highlightNetclass: false, colorHighlightThickness: 15, colorHighlightOpacity: 60, crossProbeSelect: true, crossProbeCenter: true, crossProbeZoom: true, crossProbeHighlight: true, crossProbeFlash: false },
   sim: SIM_MOUSE_DEFAULTS,
   schEditing: { lineMode: "90", mouseDragIsDrag: true, autoAnnotate: true, autoStartWires: true, escClearsNetHighlight: true, repeatX: 0, repeatY: 100 * 0.0254, repeatIncrement: 1,
     arcEditMode: "center", autoPlaceSheetPins: true, unconstrainedPinSwaps: false, sheetBorder: "", sheetBackground: "", newPowerSymbols: "default", pinSelectsSymbol: false,
@@ -126,7 +129,8 @@ export const DEFAULT_PREFS: Prefs = {
   symColors: { useSch: true, theme: "default" },
   schFieldNames: [],
   pcbOrigin: { origin: "page", invertX: false, invertY: false },
-  pcbEditing: { rotationAngle: 90, trackDragAction: "drag", ctrlClickHighlight: false, ratsnestThickness: 0.5, escClearsNetHighlight: true, showCourtyardCollisions: true, autoRefillZones: false },
+  pcbSnapping: { pads: "trackTool", tracks: "trackTool", graphics: true },
+  pcbEditing: { rotationAngle: 90, trackDragAction: "drag", ctrlClickHighlight: false, ratsnestThickness: 0.5, escClearsNetHighlight: true, showCourtyardCollisions: true, autoRefillZones: false, allowFreePads: false },
   fpEditing: { rotationAngle: 90 },
   grids: {
     // APP_SETTINGS_BASE::DefaultGridSizeList and addParamsForWindow's defaultGridIdx (common/settings/app_settings.cpp):
@@ -233,7 +237,7 @@ export function registerUserThemes(p: Prefs = prefs()): string[] {
   if (typeof KiCadCanvas === "undefined" || !KiCadCanvas.SCH_THEMES) return [];
   const changed: string[] = [], T = KiCadCanvas.SCH_THEMES;
   for (const u of p.schColors.user || []) {
-    const stamp = JSON.stringify([u.name, u.colors]);
+    const stamp = JSON.stringify([u.name, u.colors, !!u.overrideItemColors]);
     if (registered.get(u.id) === stamp && T[u.id]) continue;
     T[u.id] = { name: u.name, dark: isDarkBackground(u.colors.bg || "#FFFFFF"), colors: { ...u.colors } }; registered.set(u.id, stamp); changed.push(u.id);
   }
@@ -249,6 +253,9 @@ function applyColorTheme(p: Prefs): void {
     requestRender();
   }
   if (KiCadCanvas.setSchTheme(want)) requestRender();
+  // the theme's "Override individual item colors" (COLOR_SETTINGS::GetOverrideSchItemColors): the sheet is rebuilt on a change
+  const ut = (p.schColors.user || []).find((u) => u.id === want);
+  if (KiCadCanvas.setSchFormatting({ overrideItemColors: !!(ut && ut.overrideItemColors) }, E.kdoc && E.kdoc.type === "sch" ? E.kdoc : null)) requestRender();
   // with "follow the app's dark mode" on, a UI theme change (menu, other tab, the system) swaps the sheet too
   if (!followingUi) { followingUi = true; subscribeTheme(() => applyColorTheme(prefs())); }
 }
@@ -270,13 +277,17 @@ export function activeGridPitch(): number {
  * modes (after OK in the dialog, and once when the page's first document opens) — otherwise a toolbar toggle made
  * since would be undone every time a sheet is entered.
  */
-type PcbToolPrefState = { trackClearance?: number; padClearance?: boolean; rotationAngle?: number; fpRotationAngle?: number; trackDragAction?: string; showCourtyardCollisions?: boolean };
+type PcbToolPrefState = { magnetic?: { pads: string; tracks: string; graphics: boolean } | null; allowFreePads?: boolean; trackClearance?: number; padClearance?: boolean; rotationAngle?: number; fpRotationAngle?: number; trackDragAction?: string; showCourtyardCollisions?: boolean; flipDirection?: "tb" | "lr" };
 /** The board tools' copies of the preferences (they load lazily: dialogs/index.ts calls this again on "kc-pcb-tools"). */
 export function applyPcbToolPrefs(p: Prefs = prefs()): void {
   const pcbS = CollabTools.pcb && (CollabTools.pcb.state as PcbToolPrefState); if (!pcbS) return;
   pcbS.trackClearance = p.pcbDisplay.trackClearance; pcbS.padClearance = p.pcbDisplay.padClearance !== false;
   pcbS.rotationAngle = p.pcbEditing.rotationAngle; pcbS.fpRotationAngle = p.fpEditing.rotationAngle; pcbS.trackDragAction = p.pcbEditing.trackDragAction;
+  pcbS.flipDirection = p.pcbEditing.flipLeftRight ? "lr" : "tb";   // one setting for both editors (panel_edit_options.cpp)
   pcbS.showCourtyardCollisions = p.pcbEditing.showCourtyardCollisions;   // not LAYER_CONFLICTS_SHADOW's visibility: that is the Appearance eye's
+  // MAGNETIC_SETTINGS (PCB_GRID_HELPER::computeAnchors reads them) and m_AllowFreePads (FilterCollectorForFreePads)
+  pcbS.magnetic = { pads: p.pcbSnapping.pads, tracks: p.pcbSnapping.tracks, graphics: p.pcbSnapping.graphics !== false };
+  pcbS.allowFreePads = !!p.pcbEditing.allowFreePads;
 }
 export function applyPrefs(full = true): void {
   const p = prefs();
@@ -307,7 +318,15 @@ export function applyPrefs(full = true): void {
     if (!full) { /* grids and colours only */ }
     else if (isSch()) {
       E.renderOpts.showHiddenPins = p.schDisplay.showHiddenPins; E.renderOpts.showHiddenFields = p.schDisplay.showHiddenFields; E.renderOpts.pageLimits = p.schDisplay.showPageLimits;
+      // EESCHEMA_SETTINGS m_Selection: selection / highlight thickness, fill_shapes, draw_selected_children, and the net
+      // class colour highlight (thickness in mils, opacity in percent)
+      const sd = p.schDisplay, SD = DEFAULT_PREFS.schDisplay;
+      Object.assign(E.renderOpts, { selThickness: sd.selWidth ?? SD.selWidth, hlThickness: sd.highlightWidth ?? SD.highlightWidth, selFill: !!(sd.selFill ?? SD.selFill), selChildren: (sd.selDrawChildren ?? SD.selDrawChildren) !== false,
+        netclassHighlight: (sd.highlightNetclass ?? SD.highlightNetclass) ? { thickness: sd.colorHighlightThickness ?? 15, alpha: (sd.colorHighlightOpacity ?? 60) / 100 } : null });
       setToggles({ toggleHiddenPins: p.schDisplay.showHiddenPins, toggleHiddenFields: p.schDisplay.showHiddenFields });
+      // appearance.show_remapped_pin_numbers: the symbols are laid out again when it changes
+      const remap = (p.schDisplay.remappedPinNumbers ?? DEFAULT_PREFS.schDisplay.remappedPinNumbers) !== false;
+      if (KiCadCanvas.schDisplay && (KiCadCanvas.schDisplay as { remappedPinNumbers?: boolean }).remappedPinNumbers !== remap) { KiCadCanvas.setSchDisplay({ remappedPinNumbers: remap }, E.kdoc && E.kdoc.type === "sch" ? E.kdoc : null); requestRender(); }
       const sch = CollabTools.sch;
       if (sch) { try { const ctx = toolCtx(); sch.setLineMode(ctx, p.schEditing.lineMode); (sch.setMouseDragMode || sch.setDragMode)(ctx, p.schEditing.mouseDragIsDrag ? "drag" : "move"); const st = sch.state as { annotateAuto: boolean; autoStartWires: boolean; escClearsNetHighlight?: boolean; repeatOffset: [number, number]; repeatIncrement: number };
           st.annotateAuto = p.schEditing.autoAnnotate; (st as { autoplace?: unknown }).autoplace = { enable: p.schEditing.autoplaceFields !== false, justify: p.schEditing.autoplaceJustify !== false, align: p.schEditing.autoplaceAlign !== false }; st.autoStartWires = p.schEditing.autoStartWires; st.escClearsNetHighlight = p.schEditing.escClearsNetHighlight;

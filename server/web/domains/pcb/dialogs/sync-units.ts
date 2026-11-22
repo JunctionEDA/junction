@@ -8,6 +8,7 @@ import { projectDocs, readDoc, submitDocOp } from "./project";
 import * as L from "./sch-items-logic";
 import * as P from "./sym-props-logic";
 import { netMap, currentInstance } from "../editor/schnets";
+import { currentVariant } from "../editor/variant";
 
 interface SchH { isPowerSymbol(d: KDoc, name: string): boolean }
 const SH = (): SchH | null => { const m = CollabTools.sch; return m && m._ ? m._ as unknown as SchH : null; };
@@ -22,9 +23,12 @@ export function commitWithOtherUnits(ctx: ToolCtx & { doc: KDoc }, item: KItem, 
   const doc = ctx.doc, what = P.syncFor(property);
   const units = otherUnitsOf(doc, item, out); if (!units) { ctx.commit(changes, label); return; }
   const all = changes.slice();
-  for (const it of units.here) { const node = P.syncUnit(out, it.node, what); if (node) all.push(KiCadCanvas.replaceChange(doc, Object.assign({}, it, { node, geom: [], bbox: null }) as KItem)); }
+  // SyncOtherUnits( aSourceSheet, …, aVariantName ): each other unit is written on the sheet paths it was found on
+  const variant = currentVariant(), ver = doc.version;
+  const instOf = (id: string): P.SyncInstance => ({ variant, srcPath: units.srcPath, dstPaths: units.paths.get(id) || [], ver });
+  for (const it of units.here) { const node = P.syncUnit(out, it.node, what, instOf(it.id)); if (node) all.push(KiCadCanvas.replaceChange(doc, Object.assign({}, it, { node, geom: [], bbox: null }) as KItem)); }
   ctx.commit(all, label);
-  commitOtherSheets(label, units.there, (n) => P.syncUnit(out, n, what));
+  commitOtherSheets(label, units.there, (n) => P.syncUnit(out, n, what, instOf(L.str((L.kid(n, "uuid") || [])[1]))));
 }
 
 /**
@@ -32,7 +36,7 @@ export function commitWithOtherUnits(ctx: ToolCtx & { doc: KDoc }, item: KItem, 
  * (its node as `node`): the other units on the open sheet (`here`) and, per other sheet file, their ids with that
  * file's document as the net map holds it (`there`).  Null when the symbol is single-unit or not annotated.
  */
-export function otherUnitsOf(doc: KDoc, item: KItem, node: SNode = item.node): { here: KItem[]; there: { file: string; doc: KDoc; ids: string[] }[] } | null {
+export function otherUnitsOf(doc: KDoc, item: KItem, node: SNode = item.node): { here: KItem[]; there: { file: string; doc: KDoc; ids: string[] }[]; paths: Map<string, string[]>; srcPath: string | null } | null {
   if (item.kind !== "symbol") return null;
   const c = netMap(), here = currentInstance(c);
   const pro = projectDocs().find((d) => d.docType === "kicad_pro");
@@ -51,11 +55,13 @@ export function otherUnitsOf(doc: KDoc, item: KItem, node: SNode = item.node): {
   const H = SH(); const isPower = (d: KDoc, it: KItem): boolean => !!H && H.isPowerSymbol(d, L.str((L.kid(it.node, "lib_id") || [])[1]));
   const hits = P.collectOtherUnits(sheets, item, ref, unit, libId, project, isPower);
   const mine = new Map<string, KItem>(); const theirs = new Map<string, { file: string; doc: KDoc; ids: string[] }>();
+  const paths = new Map<string, string[]>();
   for (const h of hits) {
+    const ps = paths.get(h.item.id) || []; if (h.sheet.path && !ps.includes(h.sheet.path)) ps.push(h.sheet.path); paths.set(h.item.id, ps);
     if (h.sheet.file === cur || h.sheet.doc === doc) { const it = doc.items.get(h.item.id); if (it) mine.set(it.id, it); }
     else { const t = theirs.get(h.sheet.file) || { file: h.sheet.file, doc: h.sheet.doc, ids: [] }; if (!t.ids.includes(h.item.id)) t.ids.push(h.item.id); theirs.set(h.sheet.file, t); }
   }
-  return { here: [...mine.values()], there: [...theirs.values()] };
+  return { here: [...mine.values()], there: [...theirs.values()], paths, srcPath: path };
 }
 
 /**

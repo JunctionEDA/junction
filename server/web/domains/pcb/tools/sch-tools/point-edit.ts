@@ -1,4 +1,5 @@
 import type { EditFollower, EditPoints, PointEdit, PtrEvent, SchCtx, Pt, Box } from "./types";
+import { textPenIU } from "./autoplace";
 import { restoreNode } from "./drag";
 import { TEXTBOX_MARGIN } from "./nodes";
 import { mmPerPx } from "./snap";
@@ -212,15 +213,36 @@ export function editBox(box: Box, ep: EditPoints, idx: number, p: Pt, minW: numb
   else if (edge === 2) y1 = Math.max(p[1], y0 + minH); else if (edge === 3) x0 = Math.min(p[0], x1 - minW);
   return [x0, y0, x1, y1];
 }
-// Sheet minimum size (SCH_SHEET::GetMinWidth / GetMinHeight): the pins on the moving edges' perpendicular sides keep fitting.
+/** MIN_SHEET_WIDTH / MIN_SHEET_HEIGHT (sch_sheet.h): 500 x 150 mils. */
+export const MIN_SHEET_WIDTH = 12.7, MIN_SHEET_HEIGHT = 3.81;
+/** bumpToNextGrid( aVal, aDirection ) on the 50 mil grid, in IU. */
+function bumpToNextGrid(val: number, dir: number): number {
+  const grid = 12700; let base = Math.trunc(val / grid); const excess = Math.abs(val % grid);
+  if (val < 0 && excess > 0) --base;   // floor division for negative coordinates between grid lines
+  if (dir > 0) return (base + 1) * grid;
+  if (excess > 0) return base * grid;
+  return (base - 1) * grid;
+}
+// Sheet minimum size (SCH_SHEET::GetMinWidth( aFromLeft ) / GetMinHeight( aFromTop )): never under 500 x 150 mils,
+// and the pins on the sides the moving edge runs along keep fitting — each by its bounding box
+// (SCH_HIERLABEL::GetBodyBoundingBox: the text height plus pen and text offset across the pin), bumped to the next
+// 50 mil grid line.  `fromRight` / `fromBottom`: the right / bottom edge is the one that moves.
 export function sheetMin(node: SNode, box: Box, fromRight: boolean, fromBottom: boolean) {
-  let w = PE_MIN, h = PE_MIN;
+  const IU = 1e4, iu = (mm: number) => Math.round(mm * IU);
+  const x0 = iu(box[0]), y0 = iu(box[1]), x1 = iu(box[2]), y1 = iu(box[3]);
+  let pinsLeft = x1, pinsRight = x0, pinsTop = y1, pinsBottom = y0;
   for (const pin of kids(node, "pin")) {
     const [x, y, rot] = atOf(pin), r = ((Math.round(rot || 0) % 360) + 360) % 360;
-    if (r === 90 || r === 270) w = Math.max(w, fromRight ? x - box[0] : box[2] - x);
-    else h = Math.max(h, fromBottom ? y - box[1] : box[3] - y);
+    const ef = kid(pin, "effects"), f = ef && kid(ef, "font"), sz = f && kid(f, "size"), th = iu(sz ? num(sz[1], 1.27) : 1.27);
+    const pen = textPenIU(pin), margin = Math.round(K.schFormat.textOffsetRatio * th), height = th + pen + margin, half = Math.trunc(height / 2);
+    if (r === 90 || r === 270) { pinsLeft = Math.min(pinsLeft, iu(x) - half); pinsRight = Math.max(pinsRight, iu(x) - half + height); }
+    else { pinsTop = Math.min(pinsTop, iu(y) - half); pinsBottom = Math.max(pinsBottom, iu(y) - half + height); }
   }
-  return [w, h];
+  pinsLeft = bumpToNextGrid(pinsLeft, -1); pinsRight = bumpToNextGrid(pinsRight, 1);
+  pinsTop = bumpToNextGrid(pinsTop, -1); pinsBottom = bumpToNextGrid(pinsBottom, 1);
+  const w = pinsLeft >= pinsRight ? 0 : fromRight ? pinsRight - x0 : x1 - pinsLeft;
+  const h = pinsTop >= pinsBottom ? 0 : fromBottom ? pinsBottom - y0 : y1 - pinsTop;
+  return [Math.max(w / IU, MIN_SHEET_WIDTH), Math.max(h / IU, MIN_SHEET_HEIGHT)];
 }
 // SCH_TEXTBOX::GetMinSize: the text's own box height (EDA_TEXT::GetTextBox: the stroke glyph extent inflated by
 // 1.5 x pen width each side, + 17 %, + an interline pitch per further line, + an overbar's sixth) plus the top

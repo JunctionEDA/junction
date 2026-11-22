@@ -49,7 +49,23 @@ function applyProjectSettings(): void {
   const ratios = KiCadCanvas.DASH_RATIOS as { dash: number; gap: number }; ratios.dash = s.dash; ratios.gap = s.gap;
   const before = doc.schSettings ? doc.schSettings.junctionDiameter : 0.9144; doc.schSettings = { junctionDiameter: s.junctionDiameter };
   if (Math.abs(before - s.junctionDiameter) > 1e-6) for (const it of doc.items.values()) if (it.kind === "junction") KiCadCanvas.replaceChange(doc, it);   // rebuilds the dot at its new size
-  KiCadCanvas.setSchFormatting({ textOffsetRatio: s.textOffsetRatio, labelSizeRatio: s.labelSizeRatio, pinSymbolSize: s.pinSymbolSize, showDnpMarkers: s.showDnpMarkers, lineWidth: s.lineWidth, overbarHeight: s.overbarHeight, hopOverChoice: s.hopOverChoice }, doc);   // Formatting page
+  // Schematic Setup > Annotation: the unit notation the references show, the numbering new symbols take and the
+  // designator tracker (SCHEMATIC_SETTINGS: subpart_first_id / subpart_id_separator, annotate_start_num,
+  // annotation.method / sort_order, reuse_designators / used_designators)
+  const sc = (projectJson().schematic || {}) as Record<string, unknown>, an = (sc.annotation || {}) as Record<string, unknown>;
+  const firstId = typeof sc.subpart_first_id === "number" && sc.subpart_first_id >= 49 && sc.subpart_first_id <= 122 ? sc.subpart_first_id : 65;
+  const separator = typeof sc.subpart_id_separator === "number" && sc.subpart_id_separator >= 0 && sc.subpart_id_separator <= 126 ? sc.subpart_id_separator : 0;
+  const tools = CollabTools.sch as unknown as { deserializeTracker?(d: string): Set<string>; state: { annotation?: unknown; refTracker?: { reuse: boolean; used: Set<string> } | null } } | undefined;
+  if (tools && tools.state) {
+    tools.state.annotation = { startNum: typeof sc.annotate_start_num === "number" ? sc.annotate_start_num : 0, method: an.method === 1 || an.method === 2 ? an.method : 0, sortY: an.sort_order === 1 };
+    const used = tools.deserializeTracker ? tools.deserializeTracker(typeof sc.used_designators === "string" ? sc.used_designators : "") : new Set<string>();
+    if (tools.state.refTracker) for (const d of tools.state.refTracker.used) used.add(d);   // the ones handed out this session
+    tools.state.refTracker = { reuse: sc.reuse_designators !== false, used };
+  }
+  // the project's field name templates: a ${NAME} of one a symbol does not carry reads as empty (SCH_SYMBOL::ResolveTextVar)
+  const names = ((sc.drawing || {}) as Record<string, unknown>).field_names;
+  (doc as KDoc & { templateFieldNames?: string[] }).templateFieldNames = Array.isArray(names) ? (names as { name?: unknown }[]).map((f) => String((f && f.name) || "")).filter(Boolean) : [];
+  KiCadCanvas.setSchFormatting({ textOffsetRatio: s.textOffsetRatio, labelSizeRatio: s.labelSizeRatio, pinSymbolSize: s.pinSymbolSize, showDnpMarkers: s.showDnpMarkers, lineWidth: s.lineWidth, overbarHeight: s.overbarHeight, hopOverChoice: s.hopOverChoice, subpartIdSeparator: separator, subpartFirstId: firstId }, doc);   // Formatting page
   requestRender();
 }
 /** The ERC takes the project's rule severities and pin conflicts map (Schematic Setup > Electrical Rules). */
@@ -105,7 +121,7 @@ export function installDialogs(HANDLERS: Record<string, Handler>): void {
     assignNetclass: needDoc(assignNetclass, true),   // SCH_EDITOR_CONTROL::AssignNetclass
     // SCH_EDITOR_CONTROL::FindNetInInspector
     findNetInInspector: (() => { if (!E.kdoc || !isSch()) return; if (!findNetInNavigator(selectionIds())) toast("No connected net selected."); }) as Handler,
-    annotate: needDoc(openAnnotate, true),
+    annotate: needDoc(() => openAnnotate(), true),
     incrementAnnotations: needDoc(openIncrementAnnotations, true),
     // DIALOG_CHANGE_SYMBOLS: Edit > Change Symbols…, Tools > Update Symbols from Library…, the symbol context menu
     changeSymbols: needDoc(() => openChangeSymbols("change"), true), changeSymbol: needDoc(() => openChangeSymbols("change"), true),

@@ -80,6 +80,8 @@ export type GeomFlags = {
   pinNo?: string;
   /** a schematic's excluded-from-simulation marker (drawn under markSimExclusions) */
   simMarker?: boolean;
+  /** schematic: the colour of the wide net class highlight pass under this wire / bus / bus entry (render.ts netStyled) */
+  ncColor?: string | null;
   /** a PCB_DIMENSION_BASE's lines and text: the sketch graphics mode draws them as hairlines (PCB_PAINTER outline_mode) */
   dim?: boolean;
   /** hatch fill lines: no selection shadow of their own */
@@ -144,6 +146,10 @@ export interface SheetContext {
   fileName?: string; filePath?: string; fileRoot?: string; sheetName?: string; sheetPath?: string; projectName?: string;
   projectVars?: Record<string, string> | null; kicadVersion?: string; sheetLayer?: string; sheetVars?: Record<string, string> | null;
   isFirstPage?: boolean;
+  /** the displayed sheet instance's path ("/<root uuid>/<sheet uuid>…"): the symbols show that instance's reference and unit */
+  instancePath?: string | null;
+  /** the project's field name templates: a ${NAME} of one a symbol lacks reads as empty */
+  templateFieldNames?: string[] | null;
   /** the session's current design variant (${VARIANT}, empty for the default) and its description (${VARIANT_DESC}) */
   variantName?: string; variantDesc?: string;
   /** the document's own (kicad_wks …), parsed; null for KiCad's built-in sheet */
@@ -243,6 +249,7 @@ export interface RenderOpts {
   /** board: the grid items (PCB_GRID_ITEM, Appearance ▸ Grids, LAYER_SUBGRIDS); false hides them; their colour */
   subgrids?: boolean; gridItemColor?: string;
   selected?: Set<string> | null; highlight?: Set<string> | null; lockedIds?: Set<string> | null;
+  /** schematic items brightened by a cross-probe (EDA_ITEM::IsBrightened), named as `highlight` names them */ schBrightened?: Set<string> | null;
   showHiddenPins?: boolean; showHiddenText?: boolean; /** eeschema's View > Show Hidden Fields (not pcbnew's hidden text) */ showHiddenFields?: boolean; zoneOutline?: boolean; padNumbers?: boolean;
   /** GetShowPageLimits (m_ShowPageLimits / eeschema's show_page_limits): the paper outline; on unless false */ pageLimits?: boolean;
   /** PCB_VIEWERS_SETTINGS_BASE m_ViewersDisplay.m_DisplayGraphicsFill / m_DisplayTextFill off (View > Sketch Graphic Items, Sketch Text Items) */ sketchGraphics?: boolean; sketchText?: boolean;
@@ -283,7 +290,17 @@ export interface RenderOpts {
   moving?: Set<string> | null;
   /** schematic View-menu display options (EESCHEMA_SETTINGS appearance) */
   showDirectiveLabels?: boolean; markSimExclusions?: boolean; showErcErrors?: boolean; showErcWarnings?: boolean; showErcExclusions?: boolean;
+  /** schematic: EESCHEMA_SETTINGS selection.selection_thickness / highlight_thickness (3 / 2), fill_shapes (off) and draw_selected_children (on) */
+  selThickness?: number; hlThickness?: number; selFill?: boolean; selChildren?: boolean;
+  /** schematic: the entered group's id (SCH_GROUP::IsEntered: its box is drawn) */
+  schEnteredGroup?: string | null;
+  /** schematic: each connected item's effective net class style, by item id (colour, wire / bus width in mm, line style) */
+  schNetStyle?: Map<string, SchNetStyle> | null;
+  /** schematic: selection.highlight_netclass_colors: wires in the layer colour over a wider translucent pass in the class colour (thickness in mils, alpha 0..1) */
+  netclassHighlight?: { thickness: number; alpha: number } | null;
 }
+/** NETCLASS::GetSchematicColor / GetWireWidth / GetBusWidth / GetLineStyle of an item's effective net class. */
+export interface SchNetStyle { color?: string | null; wireWidth?: number; busWidth?: number; dashType?: string | null }
 /** renderSvg / renderPng options: render()'s, plus the export area and format. */
 export interface ExportOpts extends RenderOpts {
   /** the schematic colour theme to export in (KiCad Default unless given) */

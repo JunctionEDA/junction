@@ -16,21 +16,37 @@ import { startWire } from "./wire";
 // "{A B C}" -> A B C, "NAME{A B}" -> NAME.A NAME.B; vectors nest inside groups.
 /** A bus label's members: a vector (DATA[0..3]) or a group ({A B}, NAME{A B}). */
 export interface BusMembers { name: string; members: string[]; vector?: boolean; group?: boolean }
-export function busMembers(text: SAtom): BusMembers | null {
+/** SCHEMATIC::GetBusAlias: the project's bus aliases (through the editor) and those the sheet carries ((bus_alias …)). */
+export function busAliasesOf(doc?: KDoc | null): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const pro = S.netHL && S.netHL.busAliases ? S.netHL.busAliases() : null;
+  if (pro) for (const k of Object.keys(pro)) if (k && Array.isArray(pro[k])) out.set(k, pro[k].map(String));
+  const own = doc && doc.busAliases;
+  if (own) for (const name of Object.keys(own)) if (!out.has(name)) out.set(name, own[name]);
+  return out;
+}
+/** A group's member tokens with every bus alias replaced by its own members (SCH_CONNECTION::ConfigureFromLabel). */
+function groupTokens(inner: string, aliases?: Map<string, string[]> | null): string[] {
+  const out: string[] = [];
+  for (const m of inner.split(/[\s,]+/).filter(Boolean)) { const al = aliases ? aliases.get(m) : undefined; if (al) out.push(...al.filter(Boolean)); else out.push(m); }
+  return out;
+}
+export function busMembers(text: SAtom, aliases?: Map<string, string[]> | null): BusMembers | null {
   text = str(text).trim();
   const v = text.match(/^([^\s\[\]{}]*)\[(\d+)\.\.(\d+)\]([+\-PN]*)$/);
   if (v) { let a = +v[2], b = +v[3]; if (a === b) return null; if (a > b) { const t = a; a = b; b = t; } const members: string[] = []; for (let i = a; i <= b; i++) members.push(v[1] + i + v[4]); return { name: v[1], members, vector: true }; }
   const g = text.match(/^([^\s\[\]{}]*)\{(.*)\}$/);
   if (g) {
     const prefix = g[1] ? g[1] + "." : "", members: string[] = [];
-    for (const m of g[2].split(/[\s,]+/).filter(Boolean)) { const sub = busMembers(m); if (sub && sub.vector) members.push(...sub.members.map((x) => prefix + x)); else members.push(prefix + m); }
+    for (const m of groupTokens(g[2], aliases)) { const sub = busMembers(m); if (sub && sub.vector) members.push(...sub.members.map((x) => prefix + x)); else members.push(prefix + m); }
     return members.length ? { name: g[1], members, group: true } : null;
   }
   return null;
 }
 export function busLabelsOf(doc: KDoc, bus: KItem) {
   const out: (BusMembers & { label: KItem })[] = [];
-  for (const id of netItems(doc, bus)) { const it = doc.items.get(id); if (it && (it.kind === "label" || it.kind === "global_label" || it.kind === "hierarchical_label")) { const m = busMembers(it.node[1]); if (m) out.push(Object.assign({ label: it }, m)); } }
+  const aliases = busAliasesOf(doc);
+  for (const id of netItems(doc, bus)) { const it = doc.items.get(id); if (it && (it.kind === "label" || it.kind === "global_label" || it.kind === "hierarchical_label")) { const m = busMembers(it.node[1], aliases); if (m) out.push(Object.assign({ label: it }, m)); } }
   return out;
 }
 /**
@@ -42,13 +58,14 @@ export interface UnfoldEntry { name: string; bus: boolean; members: string[] }
 export function unfoldEntries(doc: KDoc, bus: KItem): UnfoldEntry[] {
   const out: UnfoldEntry[] = [], seen = new Set<string>();
   const add = (e: UnfoldEntry) => { const k = (e.bus ? "b:" : "n:") + e.name; if (seen.has(k)) return; seen.add(k); out.push(e); };
+  const aliases = busAliasesOf(doc);
   for (const id of netItems(doc, bus)) {
     const it = doc.items.get(id); if (!it || !(it.kind === "label" || it.kind === "global_label" || it.kind === "hierarchical_label")) continue;
-    const text = str(it.node[1]).trim(), m = busMembers(text); if (!m) continue;
+    const text = str(it.node[1]).trim(), m = busMembers(text, aliases); if (!m) continue;
     if (m.vector) { for (const n of m.members) add({ name: n, bus: false, members: [] }); continue; }
     const g = text.match(/^([^\s\[\]{}]*)\{(.*)\}$/); if (!g) continue;
     const prefix = g[1] ? g[1] + "." : "";
-    for (const tok of g[2].split(/[\s,]+/).filter(Boolean)) {
+    for (const tok of groupTokens(g[2], aliases)) {
       const sub = busMembers(tok);
       if (sub && sub.vector) add({ name: prefix + tok, bus: true, members: sub.members.map((x) => prefix + x) });
       else add({ name: prefix + tok, bus: false, members: [] });

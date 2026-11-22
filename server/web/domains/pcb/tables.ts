@@ -238,7 +238,7 @@ export const MODULE_DUPLICATES: Record<Editor, string[]> = {
 };
 /** What an entry needs before it can run (KiCad's SELECTION_CONDITIONS / the read-only frame): greyed out otherwise. */
 export const NEEDS_SELECTION = new Set(["cut", "copy", "copyAsText", "doDelete", "duplicate", "increment", "decrement", "move", "drag", "drag45Degree", "dragFreeAngle", "rotateCCW", "rotateCW", "rotateCcw", "rotateCw",
-  "mirrorH", "mirrorV", "flip", "swap", "packAndMoveFootprints", "properties", "editReference", "editValue", "editFootprint", "autoplaceFields", "showDatasheet", "zoomFitSelection",
+  "mirrorH", "mirrorV", "mirrorInteractive", "flip", "swap", "packAndMoveFootprints", "properties", "editReference", "editValue", "editFootprint", "autoplaceFields", "showDatasheet", "zoomFitSelection",
   "alignLeft", "alignCenterX", "alignRight", "alignTop", "alignCenterY", "alignBottom", "alignToGrid", "module:moveExactly", "moveExact", "moveWithReference", "moveIndividually", "positionRelative", "interactiveOffsetTool",
   "distributeHorizontallyCenters", "distributeHorizontallyGaps", "distributeVerticallyCenters", "distributeVerticallyGaps", "previousUnit", "nextUnit", "placeNextSymbolUnit", "cycleBodyStyle",
   "toLabel", "toDLabel", "toHLabel", "toGLabel", "toText", "toTextBox", "breakWire", "slice", "unfoldBus", "syncSheetPins", "cleanupSheetPins", "selectConnection", "selectNode", "nextNetItem", "previousNetItem",

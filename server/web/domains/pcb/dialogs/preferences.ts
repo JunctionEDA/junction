@@ -96,6 +96,7 @@ export function resetPage(key: string, st: Staged): void {
     case "Footprint Editor/Editing Options": st.p.fpEditing = d.fpEditing; break;
     case "PCB Editor/Display Options": st.p.pcbDisplay = { ...d.pcbDisplay, showPageLimits: st.p.pcbDisplay.showPageLimits }; st.p.gal.pcb = d.gal.pcb; break;
     case "PCB Editor/Grids": st.p.grids.pcb = d.grids.pcb; break;
+    case "PCB Editor/Snapping": st.p.pcbSnapping = d.pcbSnapping; break;
     case "PCB Editor/Origins & Axes": st.p.pcbOrigin = d.pcbOrigin; break;
     case "PCB Editor/Editing Options": st.p.pcbEditing = d.pcbEditing; st.p.pcbDisplay.showPageLimits = d.pcbDisplay.showPageLimits; st.arcEdit = 0; st.hv45 = true; st.curved = false; break;
     default: break;
@@ -215,8 +216,12 @@ export function openPreferences(page?: string, staged?: Staged): void {
     }, { id: "kd-pref-theme", style: "width:260px" });
     let copied: RGBA | null = null;
     const grid = h("div", { id: "kd-pref-swatches", style: "display:grid;grid-template-columns:repeat(2,max-content minmax(0,1fr));gap:5px 10px;align-items:center;margin-top:12px" });
+    // PANEL_EESCHEMA_COLOR_SETTINGS m_optOverrideColors: stored with the theme, so a built-in (read-only) theme has it off
+    const override = h("div", { style: "margin-top:8px" });
     const paint = (): void => {
       const C = colorsOf(sc.theme), u = userOf(sc.theme), bg = C.bg || "#FFFFFF";
+      override.replaceChildren(checkbox("Override individual item colors", !!(u && u.overrideItemColors), (on) => { if (u) u.overrideItemColors = on; },
+        { id: "kd-pref-overridecolors", disabled: !u, title: "Show all items in their default color even if they have specific colors set in their properties." }));
       grid.replaceChildren();
       for (const [k, label] of SCH_COLOR_ITEMS) {
         const sw = colorSwatch(parseColor(C[k]), { opacity: true, readOnly: !u, key: `sch-color-${k}`, title: label.replace("&&", "&"),
@@ -237,7 +242,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
     };
     pg.append(h("div", { class: "kd-row", style: "gap:8px" }, h("label", { style: "color:var(--ink-2)" }, "Theme:"), theme),
       h("div", { style: "margin-top:8px" }, checkbox("Follow the app's dark mode for the schematic sheet", sc.followDark, (on) => { sc.followDark = on; }, { id: "kd-pref-followdark", title: "While the user interface is dark, draw the schematic with the Dark theme" })),
-      grid,
+      override, grid,
       h("p", { class: "kd-note", style: "margin-top:10px" }, "Built-in themes are read-only: choose New Theme... to make an editable copy.  Right-click a color to copy, paste or revert it.  Changes are applied when the dialog is closed with OK; plots and exports use KiCad Default unless told otherwise."));
     paint();
   };
@@ -356,6 +361,19 @@ export function openPreferences(page?: string, staged?: Staged): void {
               checkbox("Refresh 3D view automatically", !!d.live3DRefresh, (on) => { d.live3DRefresh = on; }, { id: "kd-pref-live3drefresh" }));
           } },
           { label: "Grids", build: gridsPage("pcb") },
+          { label: "Snapping", build(pg) {
+            // panel_snapping (PANEL_PCB_SNAPPING), Object Snapping: MagneticSnapOptions( routing ) for pads and tracks, Never / Always for graphics
+            const sn = p.pcbSnapping;
+            const box = KD().staticBox(pg, "Object Snapping");
+            const routing: [string, string][] = [["never", "Never"], ["trackTool", "When routing tracks"], ["always", "Always"]];
+            const pads = select(routing, sn.pads, (v) => { sn.pads = v as typeof sn.pads; }, { id: "kd-pref-snap-pads", style: "width:100%" }); pads.title = "Capture cursor when the mouse enters a pad area";
+            const tracks = select(routing, sn.tracks, (v) => { sn.tracks = v as typeof sn.tracks; }, { id: "kd-pref-snap-tracks", style: "width:100%" }); tracks.title = "Capture cursor when the mouse approaches a track";
+            const gfx = select([["never", "Never"], ["always", "Always"]], sn.graphics ? "always" : "never", (v) => { sn.graphics = v === "always"; }, { id: "kd-pref-snap-graphics", style: "width:100%" }); gfx.title = "Capture cursor when the mouse approaches graphical control points";
+            box.append(h("div", { style: "display:grid;grid-template-columns:max-content minmax(0,260px);gap:6px 8px;align-items:center" },
+              h("label", { style: "color:var(--ink-2);white-space:nowrap" }, "Snap to pads:"), pads,
+              h("label", { style: "color:var(--ink-2);white-space:nowrap" }, "Snap to tracks and vias:"), tracks,
+              h("label", { style: "color:var(--ink-2);white-space:nowrap" }, "Snap to graphics:"), gfx));
+          } },
           { label: "Origins & Axes", build(pg) {
             // panel_pcbnew_display_origin: where the status bar counts from, and which way each axis increases
             const o = p.pcbOrigin;
@@ -387,7 +405,13 @@ export function openPreferences(page?: string, staged?: Staged): void {
             ed.append(checkbox("Constrain actions to H, V, 45 degrees", hv45, (on) => { hv45 = on; }, { id: "kd-pref-hv45" }),
               grid(["Step for rotate commands:", h("div", { class: "kd-row", style: "gap:6px" }, rot, h("span", null, "deg"))],
                 ["Arc editing mode:", select([["0", "Keep center, adjust radius"], ["1", "Keep endpoints or direction of starting point"], ["2", "Keep center and radius, adjust endpoints"]], String(arcEdit), (v) => { arcEdit = +v; }, { id: "kd-pref-arcedit", style: "width:100%" })],
-                ["Track mouse-drag mode:", select([["move", "Move"], ["drag", "Drag (45 degree mode)"], ["dragFree", "Drag (free angle)"]], e.trackDragAction, (v) => { e.trackDragAction = v as typeof e.trackDragAction; }, { id: "kd-pref-trackdrag", style: "width:100%" })]));
+                ["Track mouse-drag mode:", select([["move", "Move"], ["drag", "Drag (45 degree mode)"], ["dragFree", "Drag (free angle)"]], e.trackDragAction, (v) => { e.trackDragAction = v as typeof e.trackDragAction; }, { id: "kd-pref-trackdrag", style: "width:100%" })],
+                // m_rbFlipLeftRight / m_rbFlipTopBottom ("Flip board items:"), PCBNEW_SETTINGS m_FlipDirection (top/bottom by default)
+                ["Flip board items:", h("div", { class: "kd-row", style: "gap:14px" }, ...([[true, "Left/right", "lr"], [false, "Top/bottom", "tb"]] as [boolean, string, string][]).map(([v, label, id]) => {
+                  const r = h("input", { type: "radio", name: "kd-pref-flipdir", id: `kd-pref-flipdir-${id}` }) as HTMLInputElement; r.checked = !!e.flipLeftRight === v;
+                  r.addEventListener("change", () => { if (r.checked) e.flipLeftRight = v; }); return h("label", { class: "kd-row", style: "gap:6px" }, r, label);
+                }))]),
+              checkbox("Allow free pads", !!e.allowFreePads, (on) => { e.allowFreePads = on; }, { id: "kd-pref-freepads", title: "If checked, pads can be moved with respect to the rest of the footprint." }));
             // Left Click Mouse Commands (m_mouseCmdsWinLin / m_mouseCmdsOSX): fixed rows, and Ctrl's choice
             const lc = KD().staticBox(L, "Left Click Mouse Commands");
             const radio = (v: boolean, label: string) => { const r = h("input", { type: "radio", name: "kd-pref-ctrlclick", id: `kd-pref-ctrlclick-${v ? "hl" : "toggle"}` }) as HTMLInputElement; r.checked = e.ctrlClickHighlight === v; r.addEventListener("change", () => { if (r.checked) e.ctrlClickHighlight = v; }); return h("label", { class: "kd-row", style: "gap:6px" }, r, label); };

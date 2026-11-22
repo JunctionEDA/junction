@@ -6,7 +6,7 @@
 // (the BOARD_LISTENER callbacks that clear m_upToDate); each hit is selected and brought into view.
 import { comboBox } from "../../../../shared/components/kcombo";
 import { E } from "../state";
-import { applyView, mmH, mmW, mmX0, mmY0, stage, world } from "../view";
+import { applyView, flipMmX, mmH, mmW, mmX0, mmY0, stage, world } from "../view";
 import { centerOn } from "../comments";
 import { clearSelection, filterAllows } from "../selection";
 import { keyName } from "../../../../shared/keys";
@@ -45,7 +45,7 @@ let lastDoc: unknown = null;
 /** A board point (mm) in client pixels. */
 function toClient(x: number, y: number): [number, number] {
   const w = world.getBoundingClientRect();
-  return [w.left + ((x - mmX0()) / mmW()) * w.width, w.top + ((y - mmY0()) / mmH()) * w.height];
+  return [w.left + ((flipMmX(x) - mmX0()) / mmW()) * w.width, w.top + ((y - mmY0()) / mmH()) * w.height];
 }
 type Rect = { l: number; t: number; r: number; b: number };
 const grow = (q: Rect, d: number): Rect => ({ l: q.l - d, t: q.t - d, r: q.r + d, b: q.b + d });
@@ -53,7 +53,7 @@ const inside = (q: Rect, p: [number, number]) => p[0] >= q.l && p[0] <= q.r && p
 /** EDA_DRAW_FRAME::FocusOnLocation: the view moves only when the point is off screen (or within 10 % of the edge) or
  *  behind a dialog (or within 10 % of it); it is then centred in the largest part of the canvas the dialogs leave free
  *  (VIEW::SetCenter( aPos, obscuringScreenRects )). */
-function focusOnLocation(x: number, y: number): void {
+export function focusOnLocation(x: number, y: number): void {
   const s = stage.getBoundingClientRect(); const view: Rect = { l: s.left, t: s.top, r: s.right, b: s.bottom };
   const dialogs: Rect[] = Array.from(document.querySelectorAll<HTMLElement>(".kd-dialog")).filter((d) => d.offsetParent !== null).map((d) => { const r = d.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; });
   const p = toClient(x, y);

@@ -8,6 +8,7 @@ import { kids, str } from "./logic";
 import { projectDocs, readDoc, submitDocOp } from "./project";
 import { selectionIds } from "../editor/gestures";
 import { labelDefaults } from "../editor/schnets";
+import { addCommitRewriter } from "../editor/tools";
 
 interface SchInternals { sheetPinNode(name: string, p: [number, number], side: string): SNode; labelNode(kind: string, text: string, p: [number, number], rot: number): SNode; modChange(doc: KDoc, item: KItem, node: SNode): KChange; itemSexpr(doc: KDoc, kind: string, node: SNode): string; typeNameFor(item: { kind: string }): string; autoPlaceSheetPinsNode(sheet: SNode, sub: KDoc, textSize?: number): SNode | null }
 const S = appState;
@@ -97,3 +98,52 @@ export async function autoplaceAllSheetPins(): Promise<void> {
   if (!node) { toast("No new hierarchical labels found.", 2000); return; }
   ctx.commit([I.modChange(E.kdoc as KDoc, cur, node)], "Auto-place Sheet Pins");
 }
+
+// ---------------------------------------------------------------- SCH_LABEL_BASE::SetLabelShape
+interface ShapeFollowers { changes: KChange[]; pins: { text: string; shape: string }[]; labels: { file: string; text: string; shape: string }[] }
+interface ShapeApi {
+  labelShapeFollowers?(doc: KDoc, changes: KChange[]): ShapeFollowers;
+  hierLabelShapeChanges(doc: KDoc, text: string, shape: string): KChange[];
+  sheetPinShapeChanges(doc: KDoc, use: (sheetFile: string) => boolean, text: string, shape: string): KChange[];
+}
+const dirOfPath = (path: string): string => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
+const joinPath = (dir: string, f: string): string => { const out: string[] = []; for (const x of (dir ? dir + "/" + f : f).split("/")) { if (x === "..") out.pop(); else if (x && x !== ".") out.push(x); } return out.join("/"); };
+/**
+ * A hierarchical label whose shape is changed takes the other hierarchical labels of its text on the sheet with it and
+ * the sheet pins of that text on every sheet symbol that uses this sheet; a sheet pin takes the other pins of its text
+ * on its sheet and the hierarchical labels of that text in the sheet's file.  What is in this document joins the edit;
+ * the other documents get their own change (and their own undo step, as Sync Sheet Pins does).
+ */
+function followLabelShape(changes: KChange[]): KChange[] {
+  const doc = E.kdoc as KDoc | null, A = CollabTools.sch as unknown as ShapeApi | undefined;
+  if (!doc || doc.type !== "sch" || !A || !A.labelShapeFollowers) return changes;
+  const f = A.labelShapeFollowers(doc, changes);
+  if (f.pins.length || f.labels.length) void followLabelShapeElsewhere(A, f).catch((e) => console.warn(e));
+  return f.changes;
+}
+async function followLabelShapeElsewhere(A: ShapeApi, f: ShapeFollowers): Promise<void> {
+  const all = projectDocs().filter((d) => d.docType === "kicad_sch"), here = all.find((d) => d.docId === S.docId); if (!here) return;
+  const jobs = new Map<string, ((doc: KDoc) => KChange[])[]>();
+  const job = (docId: string, fn: (doc: KDoc) => KChange[]): void => { const l = jobs.get(docId); if (l) l.push(fn); else jobs.set(docId, [fn]); };
+  for (const l of f.labels) {
+    const path = joinPath(dirOfPath(here.path), l.file), d = all.find((x) => x.path === path) || all.find((x) => x.path.split("/").pop() === l.file.split("/").pop());
+    if (d && d.docId !== here.docId) job(d.docId, (doc) => A.hierLabelShapeChanges(doc, l.text, l.shape));
+  }
+  if (f.pins.length) for (const d of all) {
+    if (d.docId === here.docId) continue;
+    for (const p of f.pins) job(d.docId, (doc) => A.sheetPinShapeChanges(doc, (file) => joinPath(dirOfPath(d.path), file) === here.path, p.text, p.shape));
+  }
+  for (const [docId, fns] of jobs) {
+    const doc = await readDoc(docId, "kicad_sch"), changes: KChange[] = [], inverse: KChange[] = [], seen = new Set<string>();
+    for (const fn of fns) for (const c of fn(doc)) {
+      const it = doc.items.get(c.id); if (!it) continue;
+      if (!seen.has(c.id)) { seen.add(c.id); inverse.push({ id: c.id, kind: "MODIFIED", typeName: c.typeName, sexpr: KiCadCanvas.serializeItem(doc, it) }); }
+      KiCadCanvas.applyChange(doc, c, 1e4);
+      const at = changes.findIndex((x) => x.id === c.id); if (at >= 0) changes[at] = c; else changes.push(c);
+    }
+    if (!changes.length) continue;
+    await submitDocOp(docId, changes);
+    pushUndoFor(docId, { label: "Change Label Shape", changes, inverse });
+  }
+}
+addCommitRewriter(followLabelShape);

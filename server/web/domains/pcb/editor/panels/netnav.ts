@@ -10,7 +10,7 @@
 // hierarchy, kept as names.
 import type { NetNavNode, PanelAction } from "../../panels-api";
 import type { schNets } from "../../canvas/sch-nets";
-import { HL, clearHighlight, currentInstance, docOfInstance, goTo, netMap, onNetsChanged } from "../schnets";
+import { HL, clearHighlight, currentInstance, docOfInstance, goTo, netMap, onNetsChanged, setNavStepper } from "../schnets";
 import { store } from "../appstore";
 import { E } from "../state";
 import { isSchDoc, kdoc, loadJson, panelStore, saveJson } from "./core";
@@ -22,7 +22,7 @@ const unescape = (s: string): string => (KiCadCanvas as unknown as { pcbNetlist:
 
 /** The filter text and mode (eeschema settings: net_nav_search_mode_wildcard). */
 const filterState = loadJson<{ text: string; wildcard: boolean }>("kc.netnav.filter", { text: "", wildcard: true });
-interface NavTarget { inst: number; at: [number, number] | null; item: boolean }
+interface NavTarget { inst: number; at: [number, number] | null; item: boolean; id?: string }
 const targets = new Map<string, NavTarget>();
 
 function netNode(name: string, collapsed: boolean): NetNavNode {
@@ -33,7 +33,7 @@ function netNode(name: string, collapsed: boolean): NetNavNode {
     key: "net:" + name, label: unescape(name), collapsed,
     children: sheets.map((s) => {
       const sk = `sheet:${name}|${s.inst}`; targets.set(sk, { inst: s.inst, at: null, item: false });
-      const items = s.items.map((it) => { const k = `item:${name}|${it.inst}|${it.id}|${it.pin || ""}`; targets.set(k, { inst: it.inst, at: it.at, item: true }); return { key: k, label: it.label, ids: [it.id] }; });
+      const items = s.items.map((it) => { const k = `item:${name}|${it.inst}|${it.id}|${it.pin || ""}`; targets.set(k, { inst: it.inst, at: it.at, item: true, id: it.id }); return { key: k, label: it.label, ids: [it.id] }; });
       return { key: sk, label: s.label, children: items, collapsed: !(sel && items.some((i) => i.key === sel)) };
     }),
   };
@@ -50,7 +50,8 @@ function build(): { root: NetNavNode | null; selected: string | null } {
   }
   const match = SN().netFilter(filterState.text, filterState.wildcard);
   const names = SN().netNames(c.map).filter((n) => match(unescape(n)));
-  return { root: { key: "nets", label: "Nets", bold: true, children: names.map((n) => netNode(n, true)) }, selected: null };
+  // MakeNetNavigatorNode ends with Expand( aParentId ): every net shows its sheets, the sheet nodes stay folded
+  return { root: { key: "nets", label: "Nets", bold: true, children: names.map((n) => netNode(n, false)) }, selected: null };
 }
 
 const shown = (): boolean => !!((store.get() as { panes?: Record<string, boolean> }).panes || {}).netnav;
@@ -71,6 +72,7 @@ export function publishNetNav(): void {
   panelStore.set({ netNav: { root: r.root, version: cur.version + 1, selected, filter: filterState.text, filterEnabled: !HL.name, wildcard: filterState.wildcard } });
 }
 onNetsChanged(() => publishNetNav());
+setNavStepper((dir) => stepNavigator(dir));
 
 /**
  * HIERARCHY_PANE::UpdateNetHighlight: the hierarchy tree paths ("/" root, "/uuid/…/" below) of the sheets that hold the
@@ -112,6 +114,29 @@ export function netNavDispatch(a: PanelAction): boolean {
   if (!t) return true;                       // the root, or a net name while every net is listed: nothing happens
   void goTo(t.inst, t.item ? t.at : null).then(() => { const now = currentInstance(); if (now && now.index === t.inst) publishNetNav(); });
   return true;
+}
+
+/**
+ * SCH_EDIT_FRAME::SelectNextPrevNetNavigatorItem (Next / Previous Net Item, Tab / Shift+Tab): from the navigator's
+ * selected node to the next leaf of the tree in tree order (the pins, labels, sheet pins and no-connects of the sheets
+ * listed), wrapping at both ends.  The tree selection moves with it, which changes sheet and focuses on the item
+ * (onNetNavigatorSelection); the item's id comes back for the selection tool, null when there is no selected leaf.
+ */
+export async function stepNavigator(dir: number): Promise<string | null> {
+  let r: { root: NetNavNode | null; selected: string | null } = { root: null, selected: null };
+  try { r = build(); } catch (e) { console.warn(e); }
+  if (!r.root) return null;
+  const leaves: string[] = [];
+  const walk = (n: NetNavNode): void => { for (const c of n.children || []) { if ((c.children || []).length) walk(c); else if (targets.get(c.key)?.item) leaves.push(c.key); } };
+  walk(r.root);
+  const cur = userSel && targets.has(userSel) ? userSel : r.selected;
+  const i = cur ? leaves.indexOf(cur) : -1; if (i < 0) return null;
+  const key = leaves[((i + (dir >= 0 ? 1 : -1)) % leaves.length + leaves.length) % leaves.length], t = targets.get(key) as NavTarget;
+  userSel = key;
+  const now = panelStore.get().netNav; panelStore.set({ netNav: Object.assign({}, now, { selected: key }) });
+  await goTo(t.inst, t.at);
+  const here = currentInstance(); if (here && here.index === t.inst) publishNetNav();
+  return here && here.index === t.inst ? t.id || null : null;
 }
 
 /**

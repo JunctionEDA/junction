@@ -85,6 +85,8 @@ export function parseDoc(text: string, docType?: string): Doc {
     else if (k === "title_block") { doc.titleBlock = titleBlockOf(node); continue; }
     else if (k === "sheet_instances") { const p = kid(node, "path"); const pg = p && kid(p, "page"); if (pg) doc.pageNumber = str(pg[1]) || "1"; continue; }
     else if (k === "version") { doc.version = num(node[1], 0); continue; }
+    // a sheet's own bus aliases (files before the project file kept them): (bus_alias "NAME" (members "A" "B"))
+    else if (type === "sch" && k === "bus_alias") { const m = kid(node, "members"); if (str(node[1]) && m) (doc.busAliases || (doc.busAliases = {}))[str(node[1])] = m.slice(1).map((x) => str(x)); continue; }
     else if (k === "uuid") { doc.uuid = str(node[1]); continue; }   // the sheet's own id: the root of its instance paths   // echoed back on every fragment we send
     else if (type === "pcb" && k === "layers") {
       // (0 "F.Cu" signal ["user name"])

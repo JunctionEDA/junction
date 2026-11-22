@@ -3,7 +3,7 @@
 // Select > Filter Selected Items... keeps.  The dialog is inclusive: a kind it has no option for is dropped.
 import type { BoardDoc } from "./types";
 import { K } from "./state";
-import { isLocked } from "./groups";
+import { groupMembers, isLocked } from "./groups";
 
 export interface FilterSelectionOptions {
   includeFootprints: boolean; includeLockedFootprints: boolean; includeTracks: boolean; includeVias: boolean; includeZones: boolean;
@@ -26,9 +26,16 @@ export function itemIsIncludedByFilter(it: KItem, o: FilterSelectionOptions): bo
   if (TEXTS.has(k)) return o.includePcbTexts;
   return false;
 }
-/** The ids of the selection the options keep, in selection order. */
+/**
+ * The ids of the selection the options keep, in selection order.  A selected group (or generator) is one item of
+ * KiCad's selection, a kind the dialog has no option for: it goes as a whole, its members with it (this selection
+ * model holds a selected group as its id plus every member).
+ */
 export function filterSelectionIds(doc: BoardDoc, ids: Iterable<string>, o: FilterSelectionOptions): string[] {
+  const all = Array.from(ids), gone = new Set<string>();
+  const drop = (id: string, depth: number) => { const it = doc.items.get(id); if (!it || gone.has(id) || depth > 32) return; gone.add(id); if (it.kind === "group" || it.kind === "generated") for (const m of groupMembers(it.node)) drop(m, depth + 1); };
+  for (const id of all) { const it = doc.items.get(id); if (it && (it.kind === "group" || it.kind === "generated")) drop(id, 0); }
   const out: string[] = [];
-  for (const id of ids) { const it = doc.items.get(id); if (it && itemIsIncludedByFilter(it, o)) out.push(id); }
+  for (const id of all) { if (gone.has(id)) continue; const it = doc.items.get(id); if (it && itemIsIncludedByFilter(it, o)) out.push(id); }
   return out;
 }

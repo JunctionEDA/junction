@@ -28,6 +28,10 @@ export interface NetHighlighter {
   docChanged(ctx: SchCtx, sameDoc: boolean): void;
   wireDriverName?(wireId: string): string;
   labelDefaults?(): { textSize: number; intersheetRefsShow: boolean };
+  /** the project's bus aliases (.kicad_pro schematic.bus_aliases): name -> member texts */
+  busAliases?(): Record<string, string[]> | null;
+  /** Next / Previous Net Item through the Net Navigator's tree (SelectNextPrevNetNavigatorItem); false when it cannot step */
+  stepNetItem?(ctx: SchCtx, dir: number): boolean;
 }
 
 /** The context app.js hands every hook: its toolCtx(), with a document loaded, plus what some callers add. */
@@ -208,7 +212,14 @@ export type SchState = {
   lastTextH?: string; lastTextV?: string; lastTextBold?: boolean; lastTextItalic?: boolean; lastTextVertical?: boolean; lastTextSpin?: number;
   // commands
   markers: ErcMarker[]; markersDoc: KDoc | null; lastPlaced: Placed[] | null; repeatOffset: Pt; repeatIncrement: number;
-  annotateAuto: boolean; autoplace?: { enable: boolean; justify: boolean; align: boolean }; unfold: UnfoldJob | null; docRef: KDoc | null;
+  annotateAuto: boolean;
+  /** the project's annotation settings (SCHEMATIC_SETTINGS): annotate_start_num, annotation.method (0 first free, 1 sheet x 100, 2 sheet x 1000), annotation.sort_order (1: by Y) */
+  annotation?: { startNum: number; method: number; sortY: boolean } | null;
+  /** the page numbers of every sheet instance of the hierarchy, from the editor (null: not known) */
+  hierarchyPages?: (() => string[] | null) | null;
+  /** the project's REFDES_TRACKER (reuse_designators, used_designators) */
+  refTracker?: { reuse: boolean; used: Set<string> } | null;
+  autoplace?: { enable: boolean; justify: boolean; align: boolean }; unfold: UnfoldJob | null; docRef: KDoc | null;
   /** busUnfoldPersistentSettings.label_spin_style: the rotation (0 / 90 / 180 / 270) the next bus unfold's label gets */
   unfoldSpin?: number;
 };

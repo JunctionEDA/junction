@@ -1,17 +1,16 @@
 // pcb-tools/edit-commands.ts — edit commands on the selection: layer steps, rotate, flip, delete, track width and via size cycling.
-import type { BoardDoc, PcbCtx, Pt } from "./types";
+import type { BoardDoc, PcbChange, PcbCtx, Pt } from "./types";
 import { requestSelection, runAction, unlockedIds } from "./actions";
 import { appGlobal, editorState, netNameOf, sizesOf } from "./app-state";
 import { deleteChanges, replacedChange } from "./changes";
-import { connectedRun } from "./connected";
 import { copperOf } from "./dialogs";
 import { refreshChip } from "./dom";
 import { trackEnds } from "./dragger";
 import { applySelection, expandGroups, selectedItems } from "./groups";
-import { distSeg } from "./hit";
+import { distSeg, pointInPoly } from "./hit";
 import { setLayer } from "./route-tool";
 import { K, S, lastCtx } from "./state";
-import { clone, pt, r6, widthOf } from "./util";
+import { clone, isList, pt, r6, widthOf } from "./util";
 import { cursorPoint } from "./clipboard";
 import { hideFieldChanges, requestField } from "./field-edit";
 
@@ -25,18 +24,40 @@ export function stepLayer(ctx: PcbCtx, forward: boolean) {
 // (about the selection centre).  Nothing of ours selected lets app.js's orientation-only fallback run.
 export function rotateSelected(ctx: PcbCtx) { return runAction("rotateSelection", ctx); }
 export function flipSelected(ctx: PcbCtx) { return runAction("flipSelection", ctx); }
+/**
+ * EDIT_TOOL::DeleteItems on a zone: "Only interact with cutouts when deleting and a single item is selected" - with
+ * the cursor inside one of the zone's cutouts (ZONE::HitTestCutout: the holes are the polygons after the outline)
+ * Delete takes that cutout out (RemoveCutout, UnFill) and the zone stays selected.  The MODIFIED change, or null.
+ */
+export function zoneCutoutDeleteChange(doc: BoardDoc, ids: string[], cursor: Pt | null | undefined): PcbChange | null {
+  if (ids.length !== 1 || !cursor) return null;
+  const it = doc.items.get(ids[0]); if (!it || it.kind !== "zone") return null;
+  const polys = K.kids(it.node, "polygon");
+  for (let i = 1; i < polys.length; i++) {
+    const pts: Pt[] = []; for (const p of (K.kid(polys[i], "pts") || []).slice(1)) if (isList(p)) { if (p[0] === "xy") pts.push([K.num(p[1]), K.num(p[2])]); else for (const k of ["start", "mid", "end"]) { const q = pt(p, k); if (q) pts.push(q); } }
+    if (pts.length < 3 || !pointInPoly(pts, cursor[0], cursor[1])) continue;
+    const node = clone(it.node); let seen = 0;
+    for (let j = 1; j < node.length; j++) { const c = node[j]; if (isList(c) && c[0] === "polygon" && seen++ === i) { node.splice(j, 1); break; } }
+    for (let j = node.length - 1; j > 0; j--) { const c = node[j]; if (isList(c) && (c[0] === "filled_polygon" || c[0] === "fill_segments")) node.splice(j, 1); }
+    const fill = K.kid(node, "fill"); if (fill && fill[1] === "yes") fill.splice(1, 1);
+    return replacedChange(it, node);
+  }
+  return null;
+}
 export function deleteSelection(ctx: PcbCtx) {
   const ids = unlockedIds(ctx, Array.from(expandGroups(ctx.doc, S.sel))); if (!ids.length) return;   // locked: the warning, nothing deleted
+  const cut = zoneCutoutDeleteChange(ctx.doc, ids, ctx.cursor ? ctx.cursor : cursorPoint(ctx));
+  if (cut) { ctx.commit([cut], "Delete"); ctx.requestRender(); return; }   // the zone stays selected
   const changes = deleteChanges(ctx.doc, ids); S.sel.clear(); if (!changes.length && !changes.infoError) return;
-  ctx.commit(changes, "delete");   // EDIT_TOOL::Remove says nothing
+  ctx.commit(changes, "Delete");   // EDIT_TOOL::Remove says nothing
 }
 /** EDIT_TOOL::Remove with nothing selected: the item under the cursor (hover), locks honoured; silent. */
 export function hoverDelete(ctx: PcbCtx) {
   // a footprint field (the selected one, or the one under the cursor) is hidden, never removed (DeleteItems, PCB_FIELD_T)
   const fr = requestField(ctx, ctx.cursor ? ctx.cursor.slice() : cursorPoint(ctx));
-  if (fr) { ctx.commit(hideFieldChanges(ctx.doc, fr), "delete"); if (!fr.hover && ctx.clearField) ctx.clearField(); ctx.requestRender(); return; }
+  if (fr) { ctx.commit(hideFieldChanges(ctx.doc, fr), "Delete"); if (!fr.hover && ctx.clearField) ctx.clearField(); ctx.requestRender(); return; }
   const sel = requestSelection(ctx, { rerun: (c) => hoverDelete(c) }); if (!sel) return;
-  ctx.commit(deleteChanges(ctx.doc, sel.ids), "delete"); applySelection(ctx, []);
+  ctx.commit(deleteChanges(ctx.doc, sel.ids), "Delete"); applySelection(ctx, []);
 }
 export const sizeUnits = () => appGlobal(() => editorState()!.units, "mm") || "mm";
 /** A size in the editor's units, trailing zeros trimmed: "0.25 mm", "9.84 mils". */
@@ -86,16 +107,14 @@ export function viaNow(node: SNode) {
   if (node) { const s = K.kid(node, "size"), d = K.kid(node, "drill"); return { size: s ? K.num(s[1]) : 0, drill: d ? K.num(d[1]) : 0 }; }
   const R = sizesOf(lastCtx!); const v = S.route ? R.routeVia(netNameOf((lastCtx || {}) as PcbCtx, S.route.net)) : R.currentVia(); return { size: v.diameter, drill: v.drill };
 }
-export function expandSelection(ctx: PcbCtx) {
-  if (!S.sel.size) return false;
-  const before = S.sel.size; S.sel = connectedRun(ctx.doc, S.sel);
-  ctx.toast(S.sel.size > before ? `Selected the connected run (${S.sel.size} items)` : "Nothing else connected"); ctx.requestRender(); return true;
-}
-/** KiCad's `routable` selection (PCB_SELECTION_TOOL::Main): tracks, or one via, and nothing else.  Arcs are moved instead here. */
+/**
+ * KiCad's `routable` selection (PCB_SELECTION_TOOL::Main): nothing but tracks, arcs and vias, with at least one
+ * segment or arc, or exactly one via ("multi-track dragging is currently supported, but not multi-via").
+ */
 export function routableItems(doc: BoardDoc, ids: Iterable<string>) {
   const its = Array.from(ids, (id) => doc.items.get(id)).filter(Boolean) as KItem[];
-  const segs = its.filter((it) => it!.kind === "segment").length, vias = its.filter((it) => it!.kind === "via").length;
-  if (!its.length || segs + vias !== its.length || vias > 1 || (!segs && vias !== 1)) return null;
+  const segs = its.filter((it) => it!.kind === "segment").length, arcs = its.filter((it) => it!.kind === "arc").length, vias = its.filter((it) => it!.kind === "via").length;
+  if (!its.length || segs + arcs + vias !== its.length || !(segs >= 1 || arcs >= 1 || vias === 1)) return null;
   return its;
 }
 export const distToItem = (it: KItem, p: Pt) => { if (it.kind === "via") { const a = pt(it.node, "at"); return Math.hypot(p[0] - a![0], p[1] - a![1]); } const [a, b] = trackEnds(it); return distSeg(p[0], p[1], a[0], a[1], b[0], b[1]); };

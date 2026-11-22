@@ -3,7 +3,7 @@ import { carried, editable, selectedItems } from "./commands";
 import { isPowerSymbol } from "./dom";
 import { isLockedNode } from "./lock";
 import { isNetLine } from "./drag";
-import { fontNode } from "./nodes";
+import { autoplaceSheetFields, fontNode } from "./nodes";
 import { K, S, atOf, kid, kids, num, ptsOf, str } from "./state";
 import { deep, dropKid, modChange, r4, replaceKid } from "./util";
 
@@ -62,7 +62,7 @@ export function fieldHidden(p: SNode) { const h = kid(p, "hide"); if (h) return 
 const yesFlag = (n: SNode | undefined | null, key: string) => !!n && (n.includes(key) || (!!kid(n, key) && str(kid(n, key)![1]) !== "no"));
 export function fieldFont(p: SNode) { const ef = kid(p, "effects"), f = ef && kid(ef, "font"), s = f && kid(f, "size"), th = f && kid(f, "thickness"); const size = s ? num(s[2], num(s[1], 1.27)) : 1.27; const bold = yesFlag(f, "bold"); const thick = th && num(th[1]) > 0.001 ? num(th[1]) : Math.min(bold ? size / 5 : size / 8, size / 4); return { size, thick, bold }; }
 /** EDA_TEXT::GetEffectiveTextPenWidth (default pen 0) in IU. */
-function textPenIU(p: SNode): number {
+export function textPenIU(p: SNode): number {
   const ef = kid(p, "effects"), f = ef && kid(ef, "font"), s = f && kid(f, "size"), th = f && kid(f, "thickness");
   const h = toIU(s ? num(s[1], 1.27) : 1.27), w = toIU(s ? num(s[2], num(s[1], 1.27)) : 1.27), bold = yesFlag(f, "bold");
   let pen = th ? toIU(num(th[1])) : 0;
@@ -185,14 +185,21 @@ export function autoplaceNode(doc: KDoc, item: KItem, opts?: { manual?: boolean 
   // load, a placement or a copy, MANUAL once Autoplace Fields (O) ran on it here; edits re-autoplace with it
   opts = opts || {};
   const manual = opts.manual === undefined ? !!item.id && manualAutoplaced.has(item.id) : opts.manual !== false, prefs = apPrefs();
-  const node = deep(item.node), power = symbolIsPower(doc, item);
+  const node = deep(item.node);
+  // AUTOPLACER: m_is_power_symbol = !m_symbol->IsInNetlist(), i.e. the reference on this sheet path starts with '#'
+  const inst = K.symbolInstance(item.node, doc.instancePath), refP = kids(item.node, "property").find((p) => str(p[1]) === "Reference");
+  const power = (inst ? inst.ref : refP ? str(refP[2]) : "").startsWith("#");
   const fields = autoplaceFields(node).filter((p) => !yesFlag(p, "do_not_autoplace"));
   if (!fields.length) return null;
   const [, , rot] = atOf(node), mN = kid(node, "mirror"), mirror = mN ? str(mN[1]) : "", T = K.symbolTransform(rot, mirror);
   const fieldRot = T[1] !== 0 ? 90 : 0;                          // vertical storage counters the transform: fields always display horizontally
   const flipStored = (T[1] !== 0 ? T[1] : T[0]) < 0;             // the canvas (and IsHorizJustifyFlipped) render the stored justify flipped
   const body = bodyBoxIU(doc, { node }), symW = body[2] - body[0], symH = body[3] - body[1];
-  const ext = fields.map((p) => textBoxIU(p));
+  // the boxes are those of the shown text (SCH_FIELD::GetBoundingBox -> GetShownText): unit suffix on the reference,
+  // variables resolved, "Name: " prefix; the canvas geometry holds exactly that text
+  const shownText = new Map<string, string>();
+  for (const g of item.geom || []) if (g.t === "text" && g.field && typeof g.field === "string" && typeof g.text === "string" && !shownText.has(g.field)) shownText.set(g.field, g.text);
+  const ext = fields.map((p) => textBoxIU(p, shownText.get(str(p[1]))));
   const pins = allPinsIU(doc, node).filter((p) => !p.hidden || power);
   // computeFBoxSize( dynamic )
   let fbox = { w: Math.max(...ext.map((e) => e.w)), h: ext.reduce((t, e) => t + (prefs.align ? roundIU(e.h, GRID50, true) : e.h + VPAD), 0) };
@@ -215,12 +222,31 @@ export function autoplaceNode(doc: KDoc, item: KItem, opts?: { manual?: boolean 
     return [x, y];
   };
   // chooseSideForFields (manual: sides whose field box collides with other items go last)
-  const others = Array.from(doc.items.values()).filter((it) => it !== item && it.id !== item.id && it.bbox);
-  const ibox = (it: KItem): BoxIU => (it.bbox as number[]).map(toIU) as BoxIU;
-  const hits = (box: BoxIU) => others.filter((it) => { const b = ibox(it); return b[0] <= box[2] && b[2] >= box[0] && b[1] <= box[3] && b[3] >= box[1]; });
+  // getPossibleCollisions / filterCollisions: another symbol counts with its body-and-pins box and each of its visible
+  // fields on its own; every SCH_LINE (wire, bus, two-point graphic line) is a line; the rest by bounding box
+  type Collider = { box: BoxIU; line: Pt[] | null };
+  const colliders: Collider[] = [];
+  for (const it of doc.items.values()) {
+    if (it === item || it.id === item.id || !it.bbox) continue;
+    if (it.kind === "symbol") {
+      let sb: BoxIU | null = bodyBoxIU(doc, it); for (const p of allPinsIU(doc, it.node)) for (const q of [p.pos, p.root]) sb = merge(sb, q[0], q[1], q[0], q[1]);
+      if (sb) colliders.push({ box: sb, line: null });
+      for (const f of K.fieldBoxes(it)) { const xs = f.pts.map((q) => toIU(q[0])), ys = f.pts.map((q) => toIU(q[1])); colliders.push({ box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], line: null }); }
+      continue;
+    }
+    const pts = ptsOf(it.node), line = isNetLine(it.kind) || (it.kind === "polyline" && pts.length === 2);
+    colliders.push({ box: (it.bbox as number[]).map(toIU) as BoxIU, line: line ? pts : null });
+  }
+  const hits = (box: BoxIU) => colliders.filter((c) => { const b = c.box; return b[0] <= box[2] && b[2] >= box[0] && b[1] <= box[3] && b[3] >= box[1]; });
+  const horiz = (c: Collider) => !!c.line && c.line.length > 1 && toIU(c.line[0][1]) === toIU(c.line[c.line.length - 1][1]);
+  // getDrawableArea: the page inside the drawing sheet's margins; a field box that leaves it collides
+  const page = doc.page, ds = (doc as { drawingSheet?: { setup?: { left: number; right: number; top: number; bottom: number } } | null }).drawingSheet, su = (ds && ds.setup) || { left: 10, right: 10, top: 10, bottom: 10 };   // DS_DATA_MODEL default margins
+  const area: BoxIU | null = page ? [toIU(su.left), toIU(su.top), toIU(page[0] - su.right), toIU(page[1] - su.bottom)] : null;
+  const checkArea = !!area && area[2] - area[0] > 0 && area[3] - area[1] > 0;
   const collision = (sp: { side: string; pins: number }) => {
     const [x, y] = place(sp, fbox), box: BoxIU = [x, y, x + fbox.w, y + fbox.h]; let coll = "none";
-    for (const it of hits(box)) { const pts = ptsOf(it.node); if (isNetLine(it.kind) && !SIDES[sp.side][0]) coll = pts.length > 1 && pts[0][1] === pts[pts.length - 1][1] && coll !== "objects" ? "hwires" : "objects"; else coll = "objects"; }
+    for (const c of hits(box)) { if (c.line && !SIDES[sp.side][0]) coll = horiz(c) && coll !== "objects" ? "hwires" : "objects"; else coll = "objects"; }
+    if (checkArea && !(box[0] >= area![0] && box[1] >= area![1] && box[2] <= area![2] && box[3] <= area![3])) coll = "objects";
     return coll;
   };
   sides.reverse();
@@ -238,8 +264,8 @@ export function autoplaceNode(doc: KDoc, item: KItem, opts?: { manual?: boolean 
   let wireSpacing = false;
   if (manual && sy) {
     const found = hits([bx, by, bx + fbox.w, by + fbox.h]);
-    if (found.length && found.every((it) => isNetLine(it.kind) && ptsOf(it.node).length > 1 && toIU(ptsOf(it.node)[0][1]) === toIU(ptsOf(it.node)[ptsOf(it.node).length - 1][1]))) {
-      const offs = new Set(found.map((it) => 3 * WIRE_V / 2 - (toIU(ptsOf(it.node)[0][1]) % WIRE_V)));
+    if (found.length && found.every(horiz)) {
+      const offs = new Set(found.map((c) => 3 * WIRE_V / 2 - (toIU(c.line![0][1]) % WIRE_V)));
       if (offs.size === 1) { wireSpacing = true; fbox = { w: fbox.w, h: fields.length * WIRE_V }; by = roundIU(by, WIRE_V, chosen.side === "bottom"); }
     }
   }
@@ -275,7 +301,17 @@ export function autoplaceSelection(ctx: SchCtx, opts?: { manual?: boolean } | nu
   if (cr) { if (cr.item.kind !== "symbol") return false; const n = autoplaceNode(ctx.doc, cr.item, opts || { manual: true }); if (n) cr.write(n); return !!n; }
   const changes: KChange[] = [];
   // SCH_EDIT_TOOL::AutoplaceFields skips the items that IsLocked()
-  for (const it of selectedItems(ctx)) { if (it.kind !== "symbol" || isLockedNode(it.node)) continue; const n = autoplaceNode(ctx.doc, it, opts || { manual: true }); if (n) changes.push(modChange(ctx.doc, it, n)); }
+  for (const it of selectedItems(ctx)) {
+    if (isLockedNode(it.node)) continue;
+    if (it.kind === "sheet") {   // SCH_SHEET::AutoplaceFields, then the item is flagged autoplaced
+      const n = deep(it.node); autoplaceSheetFields(n);
+      const fa = kid(n, "fields_autoplaced"); if (fa) fa[1] = "yes"; else { const ui = n.findIndex(c => Array.isArray(c) && c[0] === "stroke"); n.splice(ui >= 0 ? ui : n.length, 0, ["fields_autoplaced", "yes"]); }
+      if (JSON.stringify(n) !== JSON.stringify(it.node)) changes.push(modChange(ctx.doc, it, n));
+      continue;
+    }
+    if (it.kind !== "symbol") continue;
+    const n = autoplaceNode(ctx.doc, it, opts || { manual: true }); if (n) changes.push(modChange(ctx.doc, it, n));
+  }
   if (!changes.length) return false;
   ctx.commit(changes, "autoplace fields"); return true;
 }

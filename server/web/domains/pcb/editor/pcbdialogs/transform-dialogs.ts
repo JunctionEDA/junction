@@ -115,12 +115,16 @@ export function openMoveExact(req: { single: boolean; bbox: number[] | null }, d
 // ---------------------------------------------------------------- Position Relative To Reference Item
 type AnchorType = "item" | "user" | "grid" | "point";
 let anchorType: AnchorType = "item";   // DIALOG_POSITION_RELATIVE::s_anchorType
+// POSITION_RELATIVE_TOOL keeps its dialog (and m_anchorItemPosition with the "Reference item:" line) between
+// invocations: the reference picked last time is still the reference the next time the dialog opens
+let lastAnchor: { pos: Pt; text: string } | null = null;
 interface PcbPick { pickInteractively?(ctx: unknown, mode: string, prompt: string, done: (res: Pt | KItem | null) => void): void; anchorOf?(it: KItem): Pt; itemDescription?(doc: KDoc, id: string, units: string): string }
 const PT = (): PcbPick => ((globalThis as { PcbTools?: PcbPick }).PcbTools || {}) as PcbPick;
 export function openPositionRelative(req: { ctx: unknown; selAnchor: Pt }, done: (anchor: Pt, dx: number, dy: number) => void, again?: { anchorPos: Pt; anchorText: string; x: string; y: string; polar: boolean }): void {
   const key = "Position Relative To Reference Item";
   const st = again ? null : loadState<{ x: string; y: string; polar: boolean; units: string }>(key);
-  let anchorPos: Pt = again ? again.anchorPos : [0, 0];
+  let anchorPos: Pt = again ? again.anchorPos : lastAnchor ? [lastAnchor.pos[0], lastAnchor.pos[1]] : [0, 0];
+  if (again) lastAnchor = { pos: [again.anchorPos[0], again.anchorPos[1]], text: again.anchorText };
   const info = h("div", { "data-k": "referenceInfo", style: "margin-bottom:6px" });
   const grid = (): Pt => { const o = (E.pcbOrigins || {}) as { grid?: Pt }; return o.grid ? [o.grid[0], o.grid[1]] : [0, 0]; };
   const anchorNow = (): Pt => (anchorType === "grid" ? grid() : anchorType === "user" ? [E.localOrigin[0], E.localOrigin[1]] : anchorPos);
@@ -128,7 +132,7 @@ export function openPositionRelative(req: { ctx: unknown; selAnchor: Pt }, done:
     info.textContent = anchorType === "grid" ? "Reference location: grid origin" : anchorType === "user" ? "Reference location: local coordinates origin"
       : anchorType === "point" ? `Reference location: selected point (${fmtLen(anchorPos[0])} ${unitName()}, ${fmtLen(anchorPos[1])} ${unitName()})` : `Reference item: ${text || "<none selected>"}`;
   };
-  setInfo(again ? again.anchorText : undefined);
+  setInfo(again ? again.anchorText : lastAnchor ? lastAnchor.text : undefined);
   const pair = xyPair(["Offset X:", "Offset Y:"], ["offsetX", "offsetY"]);
   const polar = checkField(false, "Use polar coordinates", { key: "polar" });
   let sx = 0, sy = 0, sr = 0, sq = 0;

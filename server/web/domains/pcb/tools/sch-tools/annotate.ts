@@ -9,82 +9,486 @@ import { switchTool } from "./junction";
 import { fontNode } from "./nodes";
 import { anchorOf, cloneNode } from "./orient";
 import { K, S, atOf, kid, kids, num, str, uuidOf } from "./state";
-import { deep, ghost, modChange, replaceKid } from "./util";
+import { deep, ghost, modChange, replaceKid, itemSexpr, typeNameFor } from "./util";
 
-// ---------------------------------------------------------------- annotation (sch_reference_list.cpp Annotate / sortByXPosition)
-export function splitRef(ref: SAtom) {
-  ref = str(ref); if (!ref) return { prefix: "U", num: -1, isNew: true };
-  if (/\?$/.test(ref)) return { prefix: ref.slice(0, -1), num: -1, isNew: true };
-  const m = ref.match(/^(.*?)(\d+)$/); if (!m) return { prefix: ref, num: -1, isNew: true };
-  return { prefix: m[1], num: +m[2], isNew: false };
-}
-// opts: { order: "x" | "y", keep: true (incremental) | false (renumber everything), start: 0, sheetInterval: 0 | 100 | 1000, sheetNumber: 1, only: Set of ids,
-//         reserved: references in use on the project's other sheets (KiCad annotates against the whole hierarchy's reference list) }
-/** Annotation options (see annotateChanges). */
-export interface AnnotateOpts { order?: string; keep?: boolean; /** reset only: multi-unit symbols are not kept in their old packages */ regroup?: boolean; start?: number; sheetInterval?: number; sheetNumber?: number; only?: Set<string> | null; reserved?: Iterable<string> }
-/** A symbol's reference as the annotation sees it. */
-interface RefEntry { item: KItem; prefix: string; num: number; isNew: boolean; old: string; x: number; y: number; unit: number }
-/** Who holds a reference number: the library symbol, its value and the unit (-1: another sheet). */
-interface RefHolder { lib: string | null; value: string | null; unit: number }
-export function annotateChanges(doc: KDoc, opts?: AnnotateOpts | null) {
-  opts = opts || {};
-  const order = opts.order === "y" ? "y" : "x", keep = opts.keep !== false, start = opts.start! | 0, interval = opts.sheetInterval! | 0, sheetNum = opts.sheetNumber || 1;
-  const refs: RefEntry[] = [];
-  for (const it of doc.items.values()) {
-    if (it.kind !== "symbol") continue;
-    const p = refField(it.node); if (!p) continue;
-    const r = splitRef(p[2]); const [x, y] = atOf(it.node); const unitN = kid(it.node, "unit");
-    refs.push({ item: it, prefix: r.prefix, num: r.num, isNew: (r.isNew || !keep) && (!opts!.only || opts!.only.has(it.id)), old: str(p[2]), x, y, unit: unitN ? num(unitN[1], 1) : 1 });
+// ---------------------------------------------------------------- annotation (annotate.cpp, sch_reference_list.cpp)
+/** StrNumCmp( a, b, aCaseSensitivity ): runs of digits compare by value. */
+export function strNumCmp(a: string, b: string, ignoreCase: boolean): number {
+  let i = 0, j = 0; const dig = (c: string): boolean => c >= "0" && c <= "9";
+  while (i < a.length && j < b.length) {
+    let c1 = a[i], c2 = b[j];
+    if (dig(c1) && dig(c2)) {
+      let n1 = 0, n2 = 0;
+      do { n1 = n1 * 10 + (a.charCodeAt(i) - 48); i++; } while (i < a.length && dig(a[i]));
+      do { n2 = n2 * 10 + (b.charCodeAt(j) - 48); j++; } while (j < b.length && dig(b[j]));
+      if (n1 < n2) return -1; if (n1 > n2) return 1;
+      c1 = i < a.length ? a[i] : "\0"; c2 = j < b.length ? b[j] : "\0";
+    }
+    if (ignoreCase) { if (c1 !== c2) { const u1 = c1.toUpperCase(), u2 = c2.toUpperCase(); if (u1 !== u2) return u1 < u2 ? -1 : 1; } }
+    else { if (c1 < c2) return -1; if (c1 > c2) return 1; }
+    if (i < a.length) i++;
+    if (j < b.length) j++;
   }
-  refs.sort((a, b) => a.prefix.localeCompare(b.prefix) || (order === "x" ? (a.x - b.x || a.y - b.y) : (a.y - b.y || a.x - b.x)) || (a.item.id < b.item.id ? -1 : 1));
-  // prefix -> number -> the units holding it ({lib, value, unit}), like FindFirstUnusedReference's refNumberMap
-  const used = new Map<string, Map<number, RefHolder[]>>();
-  const valueOf = (node: SNode) => { const p = kids(node, "property").find((q) => str(q[1]) === "Value"); return p ? str(p[2]) : ""; };
-  const holder = (r: RefEntry): RefHolder => ({ lib: symbolLibId(r.item.node), value: valueOf(r.item.node), unit: r.unit });
-  const put = (prefix: string, n: number, h: RefHolder) => { if (!used.has(prefix)) used.set(prefix, new Map()); const m = used.get(prefix)!; if (!m.has(n)) m.set(n, []); m.get(n)!.push(h); };
-  const take = (r: RefEntry, n: number) => put(r.prefix, n, holder(r));
-  for (const r of refs) if (!r.isNew && r.num >= 0) take(r, r.num);
-  // references held on other sheets: taken outright (no library / value to share a package with)
-  for (const ref of opts.reserved || []) { const r = splitRef(ref); if (!r.isNew) put(r.prefix, r.num, { lib: null, value: null, unit: -1 }); }
-  const minRef = interval ? sheetNum * interval + 1 : start + 1;
-  // REFDES_TRACKER::GetNextRefDesForUnits: a free number, or for a unit of a multi-unit symbol one whose holders
-  // are the same library symbol with the same value and leave this unit free
-  const firstFree = (r: RefEntry, multi: boolean) => {
-    const m = used.get(r.prefix), me = holder(r);
-    for (let n = minRef; ; n++) {
-      const hs = m && m.get(n);
-      if (!hs || !hs.length) return n;
-      if (multi && hs.every((h) => h.lib === me.lib && h.value === me.value && h.unit !== me.unit)) return n;
+  if (i >= a.length && j < b.length) return -1;
+  if (i < a.length && j >= b.length) return 1;
+  return 0;
+}
+const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+/** SCH_REFERENCE::CompareRef: the natural order ignoring case, then the plain one. */
+export const compareRef = (a: string, b: string): number => strNumCmp(a, b, true) || cmp(a, b);
+/** SCH_REFERENCE::CompareValue: the natural order with case, then the plain one. */
+const compareValue = (a: string, b: string): number => strNumCmp(a, b, false) || cmp(a, b);
+/** UTIL::GetRefDesPrefix / GetRefDesUnannotated: the reference without its trailing digits and question marks. */
+export const refDesPrefix = (ref: string): string => str(ref).replace(/[0-9?]+$/, "");
+export const refDesUnannotated = (ref: string): string => refDesPrefix(ref) + "?";
+
+/** SCH_REFERENCE::Split: "R12" is R and 12, "R?" and "XYZ" are new; the number keeps its text ("R01" stays "01"). */
+export function splitRef(ref: SAtom) {
+  const r = { ref: str(ref), numRef: -1, numRefStr: "", isNew: false }; splitInto(r);
+  return { prefix: r.ref, num: r.numRef, numStr: r.numRefStr, isNew: r.isNew };
+}
+function splitInto(r: { ref: string; numRef: number; numRefStr: string; isNew: boolean }): void {
+  let text = r.ref; r.numRef = -1; r.numRefStr = "";
+  let ll = text.length - 1;
+  const digit = (c: string | undefined): boolean => c !== undefined && c >= "0" && c <= "9";
+  if (ll < 0) { r.isNew = true; return; }
+  if (text[ll] === "?") { r.isNew = true; r.ref = text.slice(0, ll); return; }
+  if (!digit(text[ll])) { r.isNew = true; return; }
+  while (ll >= 0) {
+    if (text[ll] <= " " || digit(text[ll])) { ll--; continue; }
+    if (digit(text[ll + 1])) r.numRef = atoi(text.slice(ll + 1));
+    r.numRefStr = text.slice(ll + 1); text = text.slice(0, ll + 1);
+    break;
+  }
+  r.ref = text;
+}
+
+/** One sheet instance of the hierarchy (a SCH_SHEET_PATH): the file's document, the instance path its symbols record and its page. */
+export interface AnnSheet {
+  doc: KDoc;
+  /** "/<root uuid>/<sheet uuid>…"; null when the hierarchy is not known (every instance entry is then the sheet's) */
+  path: string | null;
+  /** SCH_SHEET_PATH::GetPageNumberAsInt: the page number, else the virtual one */
+  page: number;
+  /** the instance the document shows (its references go to the Reference field too: UpdateAllScreenReferences) */
+  shown?: boolean;
+  /** the project the instance entries are written under */
+  project?: string | null;
+  file?: string; human?: string;
+}
+/** REFDES_TRACKER: the designators ever handed out, and whether one that is no longer in use may be given again. */
+export interface RefTracker { reuse: boolean; used: Set<string> }
+/** A SCH_REFERENCE: one symbol on one sheet instance. */
+export interface SchRef {
+  sheet: AnnSheet | null; item: KItem | null;
+  /** the whole reference until split, then its prefix */
+  ref: string; numRef: number; numRefStr: string; isNew: boolean; flag: number;
+  unit: number; value: string; lib: string | null; sheetNum: number; x: number; y: number; uuid: string;
+  /** LIB_SYMBOL::GetUnitCount (0: no library symbol) and IsPower */
+  units: number; power: boolean; libNode: SNode | null;
+}
+const valueField = (node: SNode): string => { const p = kids(node, "property").find((q) => str(q[1]) === "Value"); return p ? str(p[2]) : ""; };
+const instPaths = (node: SNode): SNode[] => { const out: SNode[] = []; for (const inst of kids(node, "instances")) for (const pr of kids(inst, "project")) out.push(...kids(pr, "path")); return out; };
+/** The symbol's instance entry on a sheet path (m_instancePathIndex.find). */
+export function instanceOn(node: SNode, path: string | null): SNode | null {
+  if (!path) return null;
+  return instPaths(node).find((e) => str(e[1]) === path) || null;
+}
+/** SCH_SYMBOL::GetRef( sheet ): the instance's reference, else the Reference field, else the unannotated prefix. */
+export function refOn(node: SNode, path: string | null): string {
+  const e = instanceOn(node, path), r = e ? kid(e, "reference") : null;
+  let ref = r ? str(r[1]) : "";
+  if (!ref) { const p = refField(node); ref = p ? str(p[2]) : ""; }
+  return ref || "U?";
+}
+/** SCH_SYMBOL::GetUnitSelection( sheet ): the instance's unit, else the symbol's own. */
+export function unitOn(node: SNode, path: string | null): number {
+  const e = instanceOn(node, path), u = e ? kid(e, "unit") : null, own = kid(node, "unit");
+  return u ? num(u[1], 1) : own ? num(own[1], 1) : 1;
+}
+/** SCH_SYMBOL::IsAnnotated( sheet ): the path has an instance whose reference does not end in '?'. */
+function annotatedOn(node: SNode, path: string | null): boolean {
+  if (!path) { const p = refField(node), r = p ? str(p[2]) : ""; return !!r && !r.endsWith("?"); }
+  const e = instanceOn(node, path), r = e && kid(e, "reference") ? str(kid(e, "reference")![1]) : "";
+  return !!r && !r.endsWith("?");
+}
+/**
+ * SCH_SYMBOL::SetRef( sheet, ref ) and SetUnitSelection( sheet, unit ) on a copy being edited: the path's instance
+ * entry (added when the symbol has none), and for the instance on screen the Reference field and (unit) as well.
+ * Without a known path every entry and the field take the reference, as a file with one sheet path has it.
+ */
+export function setInstanceOn(node: SNode, sheet: Pick<AnnSheet, "path" | "shown" | "project">, ref: string | null, unit?: number | null): void {
+  if (!sheet.path) {
+    if (ref !== null) setReference(node, ref);
+    if (unit !== null && unit !== undefined) { replaceKid(node, ["unit", unit]); for (const e of instPaths(node)) { const u = kid(e, "unit"); if (u) u[1] = unit; } }
+    return;
+  }
+  let e = instanceOn(node, sheet.path);
+  if (!e) {
+    let inst = kid(node, "instances"); if (!inst) { inst = ["instances"]; node.push(inst); }
+    const name = sheet.project || (kids(inst, "project")[0] ? str(kids(inst, "project")[0][1]) : "");
+    let pr = kids(inst, "project").find((x) => str(x[1]) === name);
+    if (!pr) { pr = K.parse(`(project ${JSON.stringify(name)})`) as SNode; inst.push(pr); }
+    e = K.parse(`(path ${JSON.stringify(sheet.path)} (reference ${JSON.stringify(ref !== null ? ref : refOn(node, null))}) (unit ${unit !== null && unit !== undefined ? unit : unitOn(node, null)}))`) as SNode;
+    pr.push(e);
+  } else {
+    if (ref !== null) { const r = kid(e, "reference"); if (r) r[1] = ref; else e.splice(2, 0, K.parse(`(reference ${JSON.stringify(ref)})`) as SNode); }
+    if (unit !== null && unit !== undefined) { const u = kid(e, "unit"); if (u) u[1] = unit; else e.push(["unit", unit]); }
+  }
+  if (sheet.shown) {
+    if (ref !== null) { const p = refField(node); if (p) p[2] = ref; }
+    if (unit !== null && unit !== undefined) replaceKid(node, ["unit", unit]);
+  }
+}
+/** The sheet a document's own commands work on: the instance on screen (KDoc.instancePath) when the editor knows it. */
+export function sheetOf(doc: KDoc, page?: number): AnnSheet {
+  const pg = parseInt(String((doc as KDoc & { pageNumber?: string }).pageNumber || ""), 10);
+  return { doc, path: doc.instancePath || null, page: page || (pg > 0 ? pg : 1), shown: true };
+}
+/** matchesSymbolFilter's pseudo symbol: a power symbol, or (legacy libraries) a reference starting with '#'. */
+function isPseudo(lib: SNode | null, ref: string): boolean { return (!!lib && !!kid(lib, "power")) || ref[0] === "#"; }
+/** SCH_REFERENCE( symbol, sheetPath ). */
+export function schReference(sheet: AnnSheet, item: KItem): SchRef {
+  const n = item.node, lib = (K.resolveLib(sheet.doc, symbolLibId(n)) as SNode | null) || null, [x, y] = atOf(n);
+  return { sheet, item, ref: refOn(n, sheet.path), numRef: -1, numRefStr: "", isNew: false, flag: 0, unit: unitOn(n, sheet.path), value: valueField(n) || "~",
+    lib: symbolLibId(n), sheetNum: sheet.page, x: Math.round(x * 1e4), y: Math.round(y * 1e4), uuid: item.id, units: lib ? libUnits(sheet.doc, n).units : 0, power: !!lib && !!kid(lib, "power"), libNode: lib };
+}
+/**
+ * SCH_SHEET_PATH::GetSymbols( refs, SYMBOL_FILTER_NON_POWER, aForceIncludeOrphanSymbols ): the sheet's symbols that
+ * are not power or '#' symbols, the ones without a library symbol only when asked for.
+ */
+export function sheetReferences(sheet: AnnSheet, only?: Set<string> | null, orphans = false): SchRef[] {
+  const out: SchRef[] = [];
+  for (const it of sheet.doc.items.values()) {
+    if (it.kind !== "symbol" || (only && !only.has(it.id))) continue;
+    const r = schReference(sheet, it);
+    if (isPseudo(r.libNode, r.ref)) continue;
+    if (!r.libNode && !orphans) continue;
+    out.push(r);
+  }
+  return out;
+}
+const sameInstance = (a: SchRef, b: SchRef): boolean => a.uuid === b.uuid && a.sheet === b.sheet && !!a.item;
+/** SCH_REFERENCE::formatRefStr: a power symbol's number is written 0nnn. */
+const formatRefStr = (r: SchRef, n: number): string => (r.power ? "0" + n : String(n));
+const refNumber = (r: SchRef): string => (r.numRef < 0 ? "?" : r.numRefStr);
+/** buildFullReference: "U1..2". */
+const fullReference = (r: SchRef, unit = -1): string => r.ref + refNumber(r) + ".." + (unit < 0 ? r.unit : unit);
+const sortX = (a: SchRef, b: SchRef): number => compareRef(a.ref, b.ref) || a.sheetNum - b.sheetNum || a.x - b.x || a.y - b.y || cmp(a.uuid, b.uuid);
+const sortY = (a: SchRef, b: SchRef): number => compareRef(a.ref, b.ref) || a.sheetNum - b.sheetNum || a.y - b.y || a.x - b.x || cmp(a.uuid, b.uuid);
+
+/** REFDES_TRACKER::areUnitsAvailable. */
+function unitsAvailable(ref: SchRef, holders: SchRef[], units: number[]): boolean {
+  for (const unit of units) for (const h of holders) if (h.lib === null || h.lib !== ref.lib || compareValue(h.value, ref.value) !== 0 || h.unit === unit) return false;
+  return true;
+}
+/**
+ * SCH_REFERENCE_LIST::FindFirstUnusedReference with REFDES_TRACKER::GetNextRefDesForUnits: the first number from
+ * `min` that no annotated reference of the prefix holds (and, unless designators are reused, that was never handed
+ * out), or one whose holders are the same library symbol and value and leave every unit of `units` free.
+ */
+export function firstUnusedReference(list: SchRef[], ref: SchRef, min: number, units: number[], tracker?: RefTracker | null): number {
+  const map = new Map<number, SchRef[]>();
+  const needUnits = units.some((u) => u >= 0);
+  for (const r of list) {
+    if (compareRef(r.ref, ref.ref) !== 0 || r.isNew) continue;
+    let l = map.get(r.numRef); if (!l) { l = []; map.set(r.numRef, l); }
+    if (needUnits) l.push(r);
+  }
+  const valid = units.filter((u) => u >= 0);
+  for (let candidate = min; ; candidate++) {
+    const holders = map.get(candidate);
+    if (!holders) {
+      const des = ref.ref + String(candidate);
+      if (!tracker || tracker.reuse || !tracker.used.has(des)) { if (tracker) tracker.used.add(des); return candidate; }
+      continue;
+    }
+    if (!valid.length) continue;
+    if (unitsAvailable(ref, holders, valid)) return candidate;
+  }
+}
+/** REFDES_TRACKER::parseRefDes: the prefix and the trailing number (0 for a prefix on its own). */
+function parseRefDes(des: string): [string, number] {
+  let pos = des.length; while (pos > 0 && des[pos - 1] >= "0" && des[pos - 1] <= "9") pos--;
+  if (pos === 0 || pos === des.length) return [des, 0];
+  const n = Number(des.slice(pos)); if (!Number.isSafeInteger(n) || n > 0x7FFFFFFF) return [des, 0];
+  return [des.slice(0, pos), n];
+}
+/** REFDES_TRACKER::Serialize: "C1-3,R1,R5-6,U" — each prefix's numbers as ranges, '\\', ',' and '-' of a prefix escaped. */
+export function serializeTracker(used: Iterable<string>): string {
+  const byPrefix = new Map<string, Set<number>>();
+  for (const d of used) { if (!d) continue; const [p, n] = parseRefDes(d); let l = byPrefix.get(p); if (!l) { l = new Set(); byPrefix.set(p, l); } l.add(n); }
+  const esc = (t: string): string => t.replace(/[\\,-]/g, (c) => "\\" + c);
+  const out: string[] = [];
+  for (const prefix of [...byPrefix.keys()].sort()) {
+    const all = byPrefix.get(prefix)!, nums = [...all].filter((n) => n > 0).sort((a, b) => a - b), e = esc(prefix);
+    for (let i = 0; i < nums.length;) {
+      let j = i; while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+      out.push(i === j ? e + nums[i] : e + nums[i] + "-" + nums[j]);
+      i = j + 1;
+    }
+    if (all.has(0)) out.push(e);
+  }
+  return out.join(",");
+}
+/** REFDES_TRACKER::Deserialize: the designators of a "used_designators" string; a malformed one gives none. */
+export function deserializeTracker(data: string): Set<string> {
+  const used = new Set<string>(); if (!data) return used;
+  const parts: string[] = []; let cur = "", escaped = false;
+  for (const c of data) {
+    if (escaped) { cur += c; escaped = false; }
+    else if (c === "\\") { escaped = true; cur += c; }
+    else if (c === ",") { parts.push(cur); cur = ""; }
+    else cur += c;
+  }
+  if (cur) parts.push(cur);
+  const unesc = (t: string): string => { let r = "", e = false; for (const c of t) { if (e) { r += c; e = false; } else if (c === "\\") e = true; else r += c; } return r; };
+  const positive = (t: string): number => { const n = Number(t); return Number.isSafeInteger(n) && n > 0 && n <= 0x7FFFFFFF ? n : 0; };
+  for (const part of parts) {
+    const u = unesc(part); let m: RegExpExecArray | null;
+    if ((m = /^([\s\S]*\D)(\d+)-(\d+)$/.exec(u))) {
+      const a = positive(m[2]), b = positive(m[3]); if (!a || !b) return new Set();
+      for (let i = a; i <= b; i++) used.add(m[1] + i);
+    } else if ((m = /^([\s\S]*\D)(\d+)$/.exec(u))) {
+      const a = positive(m[2]); if (!a) return new Set();
+      used.add(m[1] + a);
+    } else if (u.length) used.add(u);
+    else return new Set();
+  }
+  return used;
+}
+/**
+ * The first number a new symbol's reference may take (SCH_REFERENCE_LIST::Annotate's minRefId from the project's
+ * annotation settings): annotate_start_num + 1, or with "sheet number X 100 / 1000" the sheet's page times that, + 1.
+ */
+export function newSymbolMinRef(page: number): number {
+  const a = S.annotation; if (!a) return 1;
+  return a.method === 1 ? page * 100 + 1 : a.method === 2 ? page * 1000 + 1 : (a.startNum | 0) + 1;
+}
+/** SCH_REFERENCE_LIST::GetPackageUnits. */
+function packageUnits(locked: SchRef[], ref: SchRef): number[] {
+  const units = new Set<number>([ref.unit]);
+  for (const r of locked) if (compareValue(r.value, ref.value) === 0 && r.lib === ref.lib) units.add(r.unit);
+  return [...units].sort((a, b) => a - b);
+}
+export interface AnnotateListOpts { order?: string; sheetInterval?: number; start?: number; startAtCurrent?: boolean; tracker?: RefTracker | null }
+/**
+ * SCH_REFERENCE_LIST::AnnotateByOptions / Annotate over split references: `list` is sorted (prefix, sheet number,
+ * position) and every new reference numbered; `locked` holds the multi-unit packages that stay together (whole
+ * reference -> its units) and `additional` the references outside the list that must not be duplicated.
+ */
+export function annotateList(list: SchRef[], locked: Map<string, SchRef[]>, additional: SchRef[], o: AnnotateListOpts): void {
+  if (o.order === "y") list.sort(sortY); else if (o.order !== "unsorted") list.sort(sortX);
+  const interval = o.sheetInterval! | 0, useSheetNum = interval > 0, start = o.start! | 0;
+  const startAtCurrent = !!o.startAtCurrent && !useSheetNum;   // "Not implemented for sheet # * 100"
+  if (!list.length) return;
+  const originalSize = list.length, inUse = new Set<string>();
+  for (const a of additional) {
+    const c: SchRef = Object.assign({}, a); splitInto(c);
+    if (!c.isNew) inUse.add(fullReference(c));
+    c.isNew = false; list.push(c);
+  }
+  // which locked package each instance belongs to (the first one in the map's order)
+  const lockedOf = new Map<string, SchRef[]>(), ikey = (r: SchRef) => r.uuid + "\0" + (r.sheet ? r.sheet.path || "" : "");
+  for (const key of [...locked.keys()].sort()) for (const r of locked.get(key)!) if (!lockedOf.has(ikey(r))) lockedOf.set(ikey(r), locked.get(key)!);
+  let first = 0, minRefId = useSheetNum ? list[first].sheetNum * interval + 1 : start + 1, last = 0;
+  for (let ii = 0; ii < list.length; ii++) {
+    const ru = list[ii];
+    if (ru.flag) continue;
+    const lockedList = ru.item ? lockedOf.get(ikey(ru)) || null : null;
+    if (compareRef(list[first].ref, ru.ref) !== 0 || (useSheetNum && list[first].sheetNum !== ru.sheetNum)) {
+      first = ii;
+      minRefId = useSheetNum ? ru.sheetNum * interval + 1 : start + 1;
+    }
+    if (startAtCurrent && ru.numRef > 0) minRefId = ru.numRef;
+    if (ru.units <= 1) {   // one part per package (trivial case)
+      if (ru.isNew) { last = firstUnusedReference(list, ru, minRefId, [], o.tracker); ru.numRef = last; ru.numRefStr = formatRefStr(ru, last); }
+      ru.flag = 1; ru.isNew = false;
+      continue;
+    }
+    if (lockedList) {
+      const units = packageUnits(lockedList, ru);
+      if (ru.isNew) { last = firstUnusedReference(list, ru, minRefId, units, o.tracker); ru.numRef = last; ru.numRefStr = formatRefStr(ru, last); ru.isNew = false; ru.flag = 1; }
+      for (const lr of lockedList) {
+        if (sameInstance(lr, ru)) { ru.unit = lr.unit; inUse.add(fullReference(ru)); }
+        if (compareValue(lr.value, ru.value) !== 0) continue;
+        if (lr.lib !== ru.lib) continue;
+        for (let jj = ii + 1; jj < list.length; jj++) {
+          if (!sameInstance(lr, list[jj])) continue;
+          if (compareRef(list[jj].ref, ru.ref) !== 0) continue;
+          const candidate = fullReference(ru, lr.unit);
+          // not allocated twice: the previous annotation may hold duplicates
+          if (!inUse.has(candidate)) { list[jj].numRef = ru.numRef; list[jj].numRefStr = ru.numRefStr; list[jj].isNew = false; list[jj].flag = 1; inUse.add(candidate); break; }
+        }
+      }
+    } else if (ru.isNew) {
+      // a unit not annotated yet: the first number that leaves this unit free; its package forms in the later passes
+      last = firstUnusedReference(list, ru, minRefId, [ru.unit], o.tracker);
+      ru.numRef = last; ru.numRefStr = formatRefStr(ru, last); ru.isNew = false; ru.flag = 1;
+    }
+  }
+  list.length = originalSize;
+}
+/** SCH_SHEET_PATH::AppendMultiUnitSymbol over references: the annotated units of multi-unit symbols by whole reference. */
+export function multiUnitMap(refs: SchRef[]): Map<string, SchRef[]> {
+  const m = new Map<string, SchRef[]>();
+  for (const r of refs) {
+    if (r.units <= 1 || r.ref.endsWith("?")) continue;
+    let l = m.get(r.ref); if (!l) { l = []; m.set(r.ref, l); }
+    l.push(Object.assign({}, r));
+  }
+  return m;
+}
+/** The reference a SCH_REFERENCE writes (SCH_REFERENCE::Annotate). */
+const annotatedRef = (r: SchRef): string => (r.numRef < 0 ? r.ref + "?" : r.ref + refNumber(r));
+/** SCH_SYMBOL::SubReference( unit, addSeparator ) of a placed symbol. */
+export function subReference(doc: KDoc, node: SNode, unit: number, addSeparator = true): string {
+  return K.subReference(K.resolveLib(doc, symbolLibId(node)), unit, addSeparator);
+}
+/** GetValue( sheet, FOR_GUI ): the Value with the symbol's own ${FIELD} references resolved. */
+function shownValue(node: SNode, ref: string): string {
+  const v = valueField(node); if (v.indexOf("${") < 0) return v;
+  return v.replace(/\$\{([^{}]+)\}/g, (m, tok: string) => {
+    const up = tok.toUpperCase(); if (up === "REFERENCE") return ref; if (up === "VALUE") return m;
+    const f = kids(node, "property").find((q) => str(q[1]).toUpperCase() === up); return f ? str(f[2]) : m;
+  });
+}
+
+export type AnnotationErrorCode = "unannotated" | "extra_units" | "duplicate_reference" | "different_unit_value";
+/**
+ * SCH_REFERENCE_LIST::CheckAnnotation: the references sorted by reference and value, then "Item not annotated",
+ * "Error: symbol … exceeds units defined", "Duplicate items", "Differing unit counts" and "Different values".
+ * Returns the number of errors; `handler` gets each message with the one or two references involved.
+ */
+export function checkAnnotation(list: SchRef[], handler: (code: AnnotationErrorCode, msg: string, a: SchRef, b: SchRef | null) => void): number {
+  let error = 0;
+  list.sort((a, b) => compareRef(a.ref, b.ref) || compareValue(a.value, b.value) || a.unit - b.unit || a.sheetNum - b.sheetNum || a.x - b.x || a.y - b.y || cmp(a.uuid, b.uuid));
+  for (const r of list) splitInto(r);
+  const sub = (r: SchRef, unit: number): string => (r.item && r.sheet ? subReference(r.sheet.doc, r.item.node, unit) : K.subReference(null, unit));
+  const numText = (r: SchRef): string => (r.numRef >= 0 ? r.numRefStr : "?");
+  for (const r of list) {
+    if (r.isNew) {   // not yet annotated
+      const tmp = numText(r);
+      const msg = r.unit > 0 && r.unit < 0x7FFFFFFF && r.libNode && r.units > 1 ? `Item not annotated: ${r.ref}${tmp} (unit ${r.unit})` : `Item not annotated: ${r.ref}${tmp}`;
+      handler("unannotated", msg, r, null); error++;
+      break;
+    }
+    // the unit selected does not exist: the library symbol changed after a previous annotation
+    if (r.libNode && Math.max(r.units, 1) < r.unit) {
+      handler("extra_units", `Error: symbol ${r.ref}${numText(r)}${sub(r, r.unit)} (unit ${r.unit}) exceeds units defined (${r.units})`, r, null); error++;
+      break;
+    }
+  }
+  const sameBase = (a: SchRef, b: SchRef): boolean => compareRef(a.ref, b.ref) === 0 && a.numRef === b.numRef;
+  const checkPackage = (first: SchRef, second: SchRef): void => {
+    if (first.unit === second.unit) {   // same reference, same unit
+      handler("duplicate_reference", `Duplicate items ${first.ref}${numText(first)}${first.libNode && first.units > 1 ? sub(first, first.unit) : ""}\n`, first, second); error++;
+      return;
+    }
+    // units differ but the parts per package do not agree (U3 with one part and a U3B)
+    if (first.libNode && second.libNode && first.units !== second.units) {
+      handler("duplicate_reference", `Differing unit counts for item ${first.ref}${numText(first)}${sub(first, first.unit)} and ${second.ref}${numText(second)}${sub(first, second.unit)}\n`, first, second); error++;
+      return;
+    }
+    if (compareValue(first.value, second.value) !== 0) {
+      handler("different_unit_value", `Different values for ${first.ref}${first.numRef}${sub(first, first.unit)} (${first.value}) and ${second.ref}${second.numRef}${sub(first, second.unit)} (${second.value})`, first, second); error++;
     }
   };
-  const assigned = new Map<string, number>();   // old full reference of a multi-unit package -> its new number
-  const changes: KChange[] = [];
-  for (const r of refs) {
-    if (!r.isNew) continue;
-    let n: number;
-    const multi = libUnits(doc, r.item.node).units > 1;
-    // units of one multi-unit package (same old reference) stay together, like KiCad's locked-unit map
-    // Regroup symbol units (a reset with aRegroupUnits) skips GetMultiUnitSymbols' locked map: units group afresh by placement
-    const packageKey = !opts.regroup && multi && r.old && !/\?$/.test(r.old) ? r.prefix + ":" + r.old : null;
-    if (packageKey && assigned.has(packageKey)) n = assigned.get(packageKey)!;   // already held since the package's first unit
-    else {
-      n = packageKey ? firstFree(r, false) : firstFree(r, multi);
-      // AnnotateReferences numbers a locked set at once: every unit of the package holds the number from here on
-      take(r, n);
-      if (packageKey) { assigned.set(packageKey, n); for (const o of refs) if (o !== r && o.isNew && o.prefix === r.prefix && o.old === r.old && libUnits(doc, o.item.node).units > 1) take(o, n); }
-    }
-    const ref = r.prefix + n; if (ref === r.old) continue;
-    const node = deep(r.item.node); setReference(node, ref); changes.push(modChange(doc, r.item, node));
+  for (let ii = 1; ii < list.length; ii++) if (sameBase(list[ii - 1], list[ii])) checkPackage(list[ii - 1], list[ii]);
+  // different base and number splits can identify the same complete package reference
+  const composed = new Map<string, Map<number, SchRef>>();
+  for (const r of list) {
+    if (r.isNew) continue;
+    const key = r.ref + r.numRefStr; let units = composed.get(key); if (!units) { units = new Map(); composed.set(key, units); }
+    let first = units.get(r.unit);
+    if (!first && units.size) first = units.get(Math.min(...units.keys()));
+    if (first && !sameBase(first, r)) checkPackage(first, r);
+    if (!units.has(r.unit)) units.set(r.unit, r);
   }
-  return changes;
+  return error;
 }
-/** LIB_SYMBOL::LetterSubReference( unit, 'A' ): A … Z, AA … */
-const unitLetter = (unit: number): string => { let n = unit, s = ""; while (n > 0) { n--; s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26); } return s; };
+
+/** ANNOTATE_SCOPE_T with the sheets it takes in: every sheet, or some (the current one, the ones below it, selected ones). */
+export interface AnnotateScope { all: boolean; sheets: { sheet: AnnSheet; only?: Set<string> | null }[] }
+// opts: { order: "x" | "y", keep: true (incremental) | false (renumber everything), start: 0, sheetInterval: 0 | 100 | 1000, sheetNumber: 1, only: Set of ids,
+//         reserved: references in use on sheets the caller could not hand over as documents }
+/** Annotation options (see annotateChanges). */
+export interface AnnotateOpts { order?: string; keep?: boolean; /** reset only: multi-unit symbols are not kept in their old packages */ regroup?: boolean; start?: number; sheetInterval?: number; sheetNumber?: number; only?: Set<string> | null; reserved?: Iterable<string>; tracker?: RefTracker | null }
+export interface AnnotateResult {
+  /** the changes of each document, in the order its symbols were annotated */
+  changes: Map<KDoc, KChange[]>;
+  /** AnnotateSymbols' report: "Annotated %s as %s." / "Updated %s from %s to %s." */
+  messages: string[];
+  /** CheckAnnotate's errors over the scope after the annotation */
+  errors: string[];
+}
+/** A reference held somewhere the caller has no document for: it blocks its number outright. */
+function foreignRef(ref: string): SchRef {
+  return { sheet: null, item: null, ref, numRef: -1, numRefStr: "", isNew: false, flag: 0, unit: -1, value: "", lib: null, sheetNum: 0, x: 0, y: 0, uuid: "", units: 1, power: false, libNode: null };
+}
 /**
- * SCH_EDIT_FRAME::AnnotateSymbols' and DeleteAnnotation's report lines for the changes (read before they are applied):
- * "Annotated %s as %s." / "Updated %s from %s to %s." (with " (unit %s)" for a multi-unit symbol) and
- * "Cleared annotation for %s." — the symbol named by its value.
+ * SCH_EDIT_FRAME::AnnotateSymbols over the hierarchy `sheets` (every sheet instance, in page order): the references
+ * in `scope` are numbered — each (symbol, sheet path) pair on its own, so a file used twice gets two sets — against
+ * the rest of the hierarchy, the result written to the path's instance entry.  Power and '#' symbols are left alone
+ * (SYMBOL_FILTER_NON_POWER).  The documents are not touched: the changes come back per document, with the report.
  */
+export function annotateHierarchy(sheets: AnnSheet[], scope: AnnotateScope, opts?: AnnotateOpts | null): AnnotateResult {
+  const o = opts || {}, reset = o.keep === false, regroup = reset && !!o.regroup;
+  const refs: SchRef[] = []; for (const s of scope.sheets) refs.push(...sheetReferences(s.sheet, s.only));
+  // the units that are annotated together; a regroup lets them group afresh by placement
+  let locked = regroup ? new Map<string, SchRef[]>() : multiUnitMap(refs);
+  // mapExistingAnnotation: what every symbol of the hierarchy was called
+  const prevOf = new Map<SchRef["item"], Map<AnnSheet, string>>();
+  const allRefs: SchRef[] = []; for (const s of sheets) allRefs.push(...sheetReferences(s));
+  for (const r of allRefs) {
+    if (!annotatedOn(r.item!.node, r.sheet!.path)) continue;
+    let m = prevOf.get(r.item); if (!m) { m = new Map(); prevOf.set(r.item, m); }
+    m.set(r.sheet!, r.units > 1 ? r.ref + subReference(r.sheet!.doc, r.item!.node, r.unit) : r.ref);
+  }
+  // AnnotateReferences: a group holding one unit twice gets fresh assignments when resetting
+  if (reset) for (const [k, l] of [...locked]) { const seen = new Set<number>(); if (l.some((r) => seen.has(r.unit) || (seen.add(r.unit), false))) locked.delete(k); }
+  if (reset) for (const r of refs) r.isNew = true;
+  // the references of the rest of the hierarchy must not be duplicated (none when the whole schematic is annotated)
+  const additional: SchRef[] = [];
+  if (!scope.all) for (const r of allRefs) if (!refs.some((x) => sameInstance(x, r))) additional.push(r);
+  for (const ref of o.reserved || []) additional.push(foreignRef(str(ref)));
+  for (const r of refs) splitInto(r);
+  annotateList(refs, locked, additional, { order: o.order === "y" ? "y" : "x", sheetInterval: o.sheetInterval, start: o.start, tracker: o.tracker });
+  // SCH_REFERENCE::Annotate on copies of the nodes; a symbol of a shared sheet takes one entry per path
+  const nodes = new Map<KItem, SNode>(), order: KItem[] = [], messages: string[] = [];
+  for (const r of refs) {
+    const it = r.item!, sh = r.sheet!;
+    let node = nodes.get(it); if (!node) { node = deep(it.node); nodes.set(it, node); order.push(it); }
+    const ref = annotatedRef(r);
+    setInstanceOn(node, sh, ref, r.unit);
+    const multi = r.units > 1, sub = multi ? subReference(sh.doc, it.node, r.unit, false) : "";
+    const newRef = multi ? ref + subReference(sh.doc, it.node, r.unit) : ref, prev = (prevOf.get(it) || new Map<AnnSheet, string>()).get(sh) || "";
+    const val = shownValue(it.node, ref);
+    if (prev) {
+      if (newRef === prev) continue;
+      messages.push(multi ? `Updated ${val} (unit ${sub}) from ${prev} to ${newRef}.` : `Updated ${val} from ${prev} to ${newRef}.`);
+    } else messages.push(multi ? `Annotated ${val} (unit ${sub}) as ${newRef}.` : `Annotated ${val} as ${newRef}.`);
+  }
+  const changes = new Map<KDoc, KChange[]>(), docOf = new Map<KItem, KDoc>();
+  for (const r of refs) docOf.set(r.item!, r.sheet!.doc);
+  for (const it of order) {
+    const node = nodes.get(it)!; if (K.serialize(node) === K.serialize(it.node)) continue;
+    const doc = docOf.get(it)!; let l = changes.get(doc); if (!l) { l = []; changes.set(doc, l); }
+    l.push(modChange(doc, it, node));
+  }
+  // CheckAnnotate over the same scope, on what the symbols are called now (symbols without a library symbol too)
+  const check: SchRef[] = refs.map((r) => Object.assign({}, r, { ref: annotatedRef(r), isNew: false, flag: 0, numRef: -1, numRefStr: "" }));
+  for (const s of scope.sheets) for (const r of sheetReferences(s.sheet, s.only, true)) if (!r.libNode) check.push(r);
+  const errors: string[] = [];
+  if (check.length) checkAnnotation(check, (_c, msg) => { errors.push(msg); });
+  return { changes, messages, errors };
+}
+/** One sheet annotated on its own (the tool action, a test): annotateHierarchy over the document's sheet instance. */
+export function annotateChanges(doc: KDoc, opts?: AnnotateOpts | null) {
+  const o = opts || {}, sheet = sheetOf(doc, o.sheetNumber);
+  const r = annotateHierarchy([sheet], { all: false, sheets: [{ sheet, only: o.only || null }] }, o);
+  return r.changes.get(doc) || [];
+}
 /**
  * SCH_EDITOR_CONTROL::IncrementAnnotations on one sheet: every symbol (power symbols too, SYMBOL_FILTER_ALL) whose
  * reference has the start reference's prefix and a number at least the start's moves up by `by`.  A start reference
@@ -104,7 +508,7 @@ export function splitReference(ref: string): { prefix: string; num: string } {
   return { prefix: ref, num: "" };
 }
 /** atoi: leading blanks, a sign and digits; anything else is 0. */
-const atoi = (t: string): number => { const n = parseInt(t, 10); return isFinite(n) ? n : 0; };
+function atoi(t: string): number { const n = parseInt(t, 10); return isFinite(n) ? n : 0; }
 /**
  * SCH_EDITOR_CONTROL::IncrementAnnotations: a start reference that IsSplitNeeded (ends in a digit or "?") gives the
  * prefix and the first number (atoi, so "R?" starts at 0 and takes the unannotated ones too); every symbol whose
@@ -122,44 +526,110 @@ export function incrementAnnotationChanges(doc: KDoc, start: string, by: number)
   }
   return changes;
 }
-export function annotateMessages(doc: KDoc, changes: KChange[], clear = false): string[] {
+/**
+ * SCH_EDIT_FRAME::AnnotateSymbols' and DeleteAnnotation's report lines for the changes of one sheet (read before they
+ * are applied): "Annotated %s as %s." / "Updated %s from %s to %s." (with " (unit %s)" for a multi-unit symbol) and
+ * "Cleared annotation for %s." — the symbol named by its shown value, the unit by SubReference( unit, false ).
+ */
+export function annotateMessages(doc: KDoc, changes: KChange[], clear = false, sheet: AnnSheet = sheetOf(doc)): string[] {
   const out: string[] = [];
   for (const c of changes) {
     const it = doc.items.get(c.id as string); if (!it || it.kind !== "symbol") continue;
-    const p0 = refField(it.node), prev = p0 ? str(p0[2]) : "", annotated = !!prev && !/\?$/.test(prev);
-    const val = (() => { const v = kids(it.node, "property").find((q) => str(q[1]) === "Value"); return v ? str(v[2]) : ""; })();
-    const multi = libUnits(doc, it.node).units > 1, u = kid(it.node, "unit"), sub = multi ? unitLetter(u ? num(u[1], 1) : 1) : "";
-    if (clear) { out.push(multi ? `Cleared annotation for ${val} (unit ${sub}).` : `Cleared annotation for ${val}.`); continue; }
-    const n = typeof c.sexpr === "string" ? K.parseAll(c.sexpr).find((t) => Array.isArray(t) && t[0] !== "lib_symbols") : null, p1 = n ? refField(n as SNode) : null;
-    // GetRef( sheet, true ): a multi-unit symbol's reference carries its unit letter (mapExistingAnnotation stores it the same way)
-    const u1 = n ? kid(n as SNode, "unit") : null, sub1 = multi ? unitLetter(u1 ? num(u1[1], 1) : u ? num(u[1], 1) : 1) : "";
-    const ref = (p1 ? str(p1[2]) : "") + sub1, prevRef = prev + sub;
+    const prev = refOn(it.node, sheet.path), annotated = annotatedOn(it.node, sheet.path);
+    const multi = libUnits(doc, it.node).units > 1, u = unitOn(it.node, sheet.path);
+    if (clear) { const val = shownValue(it.node, prev); out.push(multi ? `Cleared annotation for ${val} (unit ${subReference(doc, it.node, u, false)}).` : `Cleared annotation for ${val}.`); continue; }
+    const n = typeof c.sexpr === "string" ? K.parseAll(c.sexpr).find((t) => Array.isArray(t) && t[0] !== "lib_symbols") as SNode | undefined : undefined;
+    if (!n) continue;
+    // GetRef( sheet, true ): a multi-unit symbol's reference carries its unit (mapExistingAnnotation stores it the same way)
+    const u1 = unitOn(n, sheet.path), base = refOn(n, sheet.path), val = shownValue(n, base);
+    const ref = multi ? base + subReference(doc, it.node, u1) : base, prevRef = multi ? prev + subReference(doc, it.node, u) : prev;
     if (annotated && ref === prevRef) continue;
+    const sub1 = multi ? subReference(doc, it.node, u1, false) : "";
     if (annotated) out.push(multi ? `Updated ${val} (unit ${sub1}) from ${prevRef} to ${ref}.` : `Updated ${val} from ${prevRef} to ${ref}.`);
     else out.push(multi ? `Annotated ${val} (unit ${sub1}) as ${ref}.` : `Annotated ${val} as ${ref}.`);
   }
   return out;
 }
-export function clearAnnotationChanges(doc: KDoc, only?: Set<string> | null) {
+/**
+ * SCH_EDIT_FRAME::DeleteAnnotation on one sheet instance: every symbol annotated on that path (power symbols too)
+ * goes back to its prefix and '?' — SCH_SYMBOL::ClearAnnotation( sheet ), the other sheet paths' references stay.
+ */
+export function clearAnnotationChanges(doc: KDoc, only?: Set<string> | null, sheet: AnnSheet = sheetOf(doc)) {
   const changes: KChange[] = [];
   for (const it of doc.items.values()) {
     if (it.kind !== "symbol" || (only && !only.has(it.id))) continue;
-    const p = refField(it.node); if (!p || /\?$/.test(str(p[2]))) continue;
-    const node = deep(it.node); setReference(node, unannotated(str(p[2]))); changes.push(modChange(doc, it, node));
+    if (!annotatedOn(it.node, sheet.path)) continue;
+    const node = deep(it.node); setInstanceOn(node, sheet, refDesUnannotated(refOn(it.node, sheet.path))); changes.push(modChange(doc, it, node));
   }
   return changes;
 }
+/**
+ * SCH_EDIT_FRAME::DeleteAnnotation over sheet instances: each (symbol, sheet path) annotated there is cleared and
+ * reported; a symbol of a file used by several of the instances takes every clearing in one change.
+ */
+export function clearAnnotationHierarchy(scope: { sheet: AnnSheet; only?: Set<string> | null }[]): { changes: Map<KDoc, KChange[]>; messages: string[] } {
+  const nodes = new Map<KItem, SNode>(), docOf = new Map<KItem, KDoc>(), order: KItem[] = [], messages: string[] = [];
+  for (const { sheet, only } of scope) {
+    for (const it of sheet.doc.items.values()) {
+      if (it.kind !== "symbol" || (only && !only.has(it.id))) continue;
+      if (!annotatedOn(it.node, sheet.path)) continue;
+      const prev = refOn(it.node, sheet.path), val = shownValue(it.node, prev);
+      messages.push(libUnits(sheet.doc, it.node).units > 1 ? `Cleared annotation for ${val} (unit ${subReference(sheet.doc, it.node, unitOn(it.node, sheet.path), false)}).` : `Cleared annotation for ${val}.`);
+      let node = nodes.get(it); if (!node) { node = deep(it.node); nodes.set(it, node); docOf.set(it, sheet.doc); order.push(it); }
+      setInstanceOn(node, sheet, refDesUnannotated(prev));
+    }
+  }
+  const changes = new Map<KDoc, KChange[]>();
+  for (const it of order) { const doc = docOf.get(it)!; let l = changes.get(doc); if (!l) { l = []; changes.set(doc, l); } l.push(modChange(doc, it, nodes.get(it)!)); }
+  return { changes, messages };
+}
+/**
+ * SCH_SCREENS::ReplaceDuplicateTimeStamps over the screens `docs` (each file once, in hierarchy order): an item whose
+ * uuid an earlier item already has gets a fresh one (removed and added again under it).  Returns the changes per
+ * document and how many were replaced ("%d duplicate time stamps were found and replaced.").
+ */
+export function replaceDuplicateIds(docs: KDoc[]): { changes: Map<KDoc, KChange[]>; count: number } {
+  const seen = new Set<string>(), changes = new Map<KDoc, KChange[]>(); let count = 0;
+  for (const doc of docs) {
+    for (const it of [...doc.items.values()]) {
+      if (!seen.has(it.id)) { seen.add(it.id); continue; }
+      const node = deep(it.node), u = kid(node, "uuid"); if (!u) continue;   // an item without a uuid of its own (a rule area's sits in its outline)
+      const id = K.newUuid(); u[1] = id; seen.add(id); count++;
+      let l = changes.get(doc); if (!l) { l = []; changes.set(doc, l); }
+      l.push({ id: it.id, kind: "REMOVED", typeName: typeNameFor(it), properties: [] }, { id, kind: "ADDED", typeName: typeNameFor(it), sexpr: itemSexpr(doc, it.kind, node) });
+    }
+  }
+  return { changes, count };
+}
+/**
+ * getInferredSymbols and AnnotateSymbols' addSelectedSheet over a selection: the selected symbols, the symbols inside
+ * selected groups (at any depth), and the selected sheets with those inside groups.  A selected Reference field is its
+ * symbol (the editor's selection holds the symbol's id for it).
+ */
+export function inferredSelection(doc: KDoc, ids: Iterable<string>): { symbols: Set<string>; sheets: Set<string> } {
+  const symbols = new Set<string>(), sheets = new Set<string>(), seen = new Set<string>();
+  const walk = (id: string): void => {
+    if (seen.has(id)) return; seen.add(id);
+    const it = doc.items.get(id); if (!it) return;
+    if (it.kind === "symbol") symbols.add(id);
+    else if (it.kind === "sheet") sheets.add(id);
+    else if (it.kind === "group") { const m = kid(it.node, "members"); if (m) for (const c of m.slice(1)) walk(str(c)); }
+  };
+  for (const id of ids) walk(id);
+  return { symbols, sheets };
+}
+/** Tools > Annotate on the open sheet (the dialog annotates the hierarchy): one "Annotate" commit, nothing said. */
 export function annotate(ctx: SchCtx, opts?: AnnotateOpts | null) {
   if (!editable(ctx)) return false;
-  const changes = annotateChanges(ctx.doc, Object.assign({ sheetNumber: ctx.pageNumber }, opts || {}));
-  if (!changes.length) { ctx.toast("Nothing to annotate"); return true; }
-  ctx.commit(changes, "annotate"); ctx.toast(`Annotated ${changes.length} symbol${changes.length === 1 ? "" : "s"}`); return true;
+  const changes = annotateChanges(ctx.doc, Object.assign({ sheetNumber: ctx.pageNumber, tracker: S.refTracker || null }, opts || {}));
+  if (changes.length) ctx.commit(changes, "Annotate");
+  return true;
 }
 export function clearAnnotation(ctx: SchCtx, opts?: { only?: Set<string> | null } | null) {
   if (!editable(ctx)) return false;
   const changes = clearAnnotationChanges(ctx.doc, opts && opts.only);
   if (!changes.length) return true;
-  ctx.commit(changes, "clear annotation"); return true;
+  ctx.commit(changes, "Delete Annotation"); return true;
 }
 export function editFieldPrompt(ctx: SchCtx, name: string, title: string, quiet: boolean) {
   if (!editable(ctx)) return false;
@@ -235,9 +705,9 @@ export function stepUnit(ctx: SchCtx, dir: number) {
   if (!editable(ctx)) return false;
   const it = selectedItems(ctx).find((x) => x.kind === "symbol"); if (!it) return false;
   const { units } = libUnits(ctx.doc, it.node); if (units < 2) { ctx.toast("Symbol has a single unit"); return false; }
-  const cur = kid(it.node, "unit") ? num(kid(it.node, "unit")![1], 1) : 1, next = ((cur - 1 + dir + units) % units) + 1;
-  const node = deep(it.node); replaceKid(node, ["unit", next]);
-  for (const inst of kids(node, "instances")) for (const pr of kids(inst, "project")) for (const pa of kids(pr, "path")) { const u = kid(pa, "unit"); if (u) u[1] = next; }
+  // SetUnitSelection( &sheet, unit ): the unit of the sheet instance on screen; the other sheet paths keep theirs
+  const sheet = sheetOf(ctx.doc), cur = unitOn(it.node, sheet.path), next = ((cur - 1 + dir + units) % units) + 1;
+  const node = deep(it.node); setInstanceOn(node, sheet, null, next);
   ctx.commit([modChange(ctx.doc, it, node)], "unit"); return true;
 }
 export function cycleBodyStyle(ctx: SchCtx) {

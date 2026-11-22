@@ -39,6 +39,10 @@ interface KDoc {
   fpEditor?: boolean;
   /** the file's (version …) */
   version?: number;
+  /** the displayed sheet instance's path ("/<root uuid>/<sheet uuid>…"), set by the editor (KiCadCanvas.setInstancePath) */
+  instancePath?: string | null;
+  /** a schematic sheet's own (bus_alias "NAME" (members …)) entries: name -> member texts */
+  busAliases?: Record<string, string[]>;
   /** board-level items read after another one with the same uuid (canvas/doc.ts parseDoc), in file order */
   dupItems?: { id: string; node: SNode }[];
   /** a root schematic older than 20221002: its (symbol_instances …), each symbol's reference, unit and value by its
@@ -85,7 +89,7 @@ interface KiCadCanvasApi {
   removeChange(item: KItem): KChange;
   typeNameOf(item: Pick<KItem, "kind"> & Partial<Pick<KItem, "docType">>): string;
   render(doc: KDoc, ctx: CanvasRenderingContext2D, view: KView, opts?: KRenderOpts): void;
-  setViewTransform(ctx: CanvasRenderingContext2D, view: KView): number;
+  setViewTransform(ctx: CanvasRenderingContext2D, view: KView, flipDoc?: unknown): number;
   drawSelectionHalo(ctx: CanvasRenderingContext2D, doc: KDoc, ids: Set<string>, s: number, dpr: number, hidden?: Set<string>): void;
   movableItems(doc: KDoc): { id: string; kind: string; x: number; y: number; rot: number; ref: string; value: string; lib: string; layer: string; bbox: KItem["bbox"]; name?: string; file?: string; page?: string; w?: number; h?: number }[];
   hitTest(doc: KDoc, x: number, y: number, slopMm?: number): string | null;
@@ -132,9 +136,16 @@ interface KiCadCanvasApi {
   schTheme(): string;
   schThemeColors(id: string): Record<string, string>;
   setSchTheme(id: string): boolean;
-  setSchDisplay(o: { pinAltIcons?: boolean }, doc?: KDoc | null): void;
+  setSchDisplay(o: { pinAltIcons?: boolean; remappedPinNumbers?: boolean }, doc?: KDoc | null): void;
   setIntersheetRefs(refs: { show: boolean; ownPage: boolean; short: boolean; prefix: string; suffix: string; pages: Record<string, number[]>; names: Record<number, string>; current: number } | null, doc?: KDoc | null): void;
-  setSchFormatting(o: { textOffsetRatio?: number; labelSizeRatio?: number; pinSymbolSize?: number; showDnpMarkers?: boolean; lineWidth?: number; overbarHeight?: number; hopOverChoice?: number }, doc?: KDoc | null): boolean;
+  schPen?(): number;
+  setSchFormatting(o: { textOffsetRatio?: number; labelSizeRatio?: number; pinSymbolSize?: number; showDnpMarkers?: boolean; lineWidth?: number; overrideItemColors?: boolean; overbarHeight?: number; hopOverChoice?: number; subpartIdSeparator?: number; subpartFirstId?: number }, doc?: KDoc | null): boolean;
+  /** SCH_SYMBOL::SubReference: the unit suffix of a reference (the library's unit name, else the project's notation) */
+  subReference(lib: SNode | null | undefined, unit: number, addSeparator?: boolean): string;
+  /** the symbol's (instances …) entry of a sheet path: its reference and unit, null without one */
+  symbolInstance(node: SNode, path: string | null | undefined): { ref: string; unit: number | null } | null;
+  /** the displayed sheet instance; the symbols are rebuilt with its references and units (true when it changed) */
+  setInstancePath(doc: KDoc | null | undefined, path: string | null): boolean;
   /** pixel size, MIME type and PPI of a PNG / JPEG / BMP / GIF header (BITMAP_BASE::updatePPI) */
   imageInfo(bytes: ArrayLike<number>): { mime: string; w: number; h: number; ppi: number };
   schFormat: { textOffsetRatio: number; labelSizeRatio: number; pinSymbolSize: number; showDnpMarkers: boolean; overbarHeight: number; hopOverChoice: number };

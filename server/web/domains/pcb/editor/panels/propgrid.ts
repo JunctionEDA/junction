@@ -272,15 +272,22 @@ function schLineProps(it: KItem): PropDef[] {
     { group: BASIC, name: "Length", type: "length", get: (x) => { const p = K().ptsOf(x.node); let l = 0; for (let i = 1; i < p.length; i++) l += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]); return l; } },
     ...strokeProps(BASIC, it.kind === "polyline" ? "Line Style" : "Wire Style", true)];
 }
+/** FLAG_SHAPE: a directive label's flag (the file's (shape dot | round | diamond | rectangle)). */
+const FLAG_SHAPES: [string, string][] = [["dot", "Dot"], ["round", "Circle"], ["diamond", "Diamond"], ["rectangle", "Rectangle"]];
 const LABEL_SHAPES: [string, string][] = [["input", "Input"], ["output", "Output"], ["bidirectional", "Bidirectional"], ["tri_state", "Tri-state"], ["passive", "Passive"]];
 function schTextProps(it: KItem): PropDef[] {
   const h = H(), k = it.kind, T = "Text Properties";
   const out: PropDef[] = [atProp("Position X", 1), atProp("Position Y", 2)];
   if (k === "global_label" || k === "hierarchical_label") out.push({ group: BASIC, name: "Shape", type: "enum", choices: LABEL_SHAPES, get: (x) => h.str((h.kid(x.node, "shape") || [])[1] || "input"), set: (n, v) => { h.setShape(n, String(v)); } });
-  out.push({ group: BASIC, name: "Text", type: k === "text" || k === "text_box" ? "longtext" : "text", get: (x) => h.str(x.node[1]), set: (n, v) => { h.setText(n, String(v)); } });
+  // SCH_DIRECTIVE_LABEL_DESC: "Shape" (the flag's) and "Pin length"; "Text", "Thickness", "Italic", "Bold" and the
+  // justifications are masked (a directive label shows no text of its own)
+  const directive = k === "netclass_flag" || k === "directive_label";
+  if (directive) out.push({ group: BASIC, name: "Shape", type: "enum", choices: FLAG_SHAPES, get: (x) => h.str((h.kid(x.node, "shape") || [])[1] || "round"), set: (n, v) => { h.setKid(n, "shape", [String(v)], ["at", "fields_autoplaced", "effects", "uuid"]); } },
+    { group: BASIC, name: "Pin length", type: "length", get: (x) => h.num((h.kid(x.node, "length") || [])[1], 2.54), set: (n, v) => { if (!((v as number) >= 0)) return false; h.setKid(n, "length", [r6(v as number)], ["shape", "at", "fields_autoplaced", "effects", "uuid"]); } });
+  else out.push({ group: BASIC, name: "Text", type: k === "text" || k === "text_box" ? "longtext" : "text", get: (x) => h.str(x.node[1]), set: (n, v) => { h.setText(n, String(v)); } });
   out.push({ group: BASIC, name: "Orientation", type: "enum", choices: ORIENT4, get: (x) => String(h.deg360(K().atOf(x.node)[2])), set: (n, v) => { const [x, y] = K().atOf(n); K().setAt(n, x, y, +(v as string)); } });
   out.push({ group: T, name: "Text Size", type: "length", get: (x) => h.textSize(x.node), set: (n, v) => { if (!((v as number) > 0)) return false; h.setTextSize(n, v as number); } });
-  out.push(fontFlag(T, "Bold", "bold"), fontFlag(T, "Italic", "italic"));
+  if (!directive) out.push(fontFlag(T, "Bold", "bold"), fontFlag(T, "Italic", "italic"));
   if (k === "text") out.push(...justifyProps(T));
   return out;
 }
@@ -298,7 +305,11 @@ function schProps(it: KItem, doc: KDoc): PropDef[] {
     case "wire": case "bus": case "polyline": return schLineProps(it);
     case "label": case "global_label": case "hierarchical_label": case "netclass_flag": case "directive_label": case "text": case "text_box": return schTextProps(it);
     case "junction": return [atProp("Position X", 1), atProp("Position Y", 2),
-      { group: BASIC, name: "Diameter", type: "length", get: (x) => h.num((h.kid(x.node, "diameter") || [])[1], 0), set: (n, v) => { h.setDiameter(n, Math.max(0, v as number)); } }];
+      { group: BASIC, name: "Diameter", type: "length", get: (x) => h.num((h.kid(x.node, "diameter") || [])[1], 0), set: (n, v) => { h.setDiameter(n, Math.max(0, v as number)); } },
+      // SCH_JUNCTION_DESC "Color": the junction's own (color r g b a); "" is UNSPECIFIED (the netclass or layer colour)
+      { group: BASIC, name: "Color", type: "color",
+        get: (x) => { const c = h.kid(x.node, "color"); if (!c || (!h.num(c[4]) && !h.num(c[1]) && !h.num(c[2]) && !h.num(c[3]))) return ""; return colorText([1, 2, 3].map((i) => h.num(c[i])), c.length > 4 ? h.num(c[4]) : 1); },
+        set: (n, v) => { const c = parseColorText(String(v || "")); h.setKid(n, "color", c || [0, 0, 0, 0], ["uuid"]); } }];
     case "no_connect": return [atProp("Position X", 1), atProp("Position Y", 2)];
     case "bus_entry": return [atProp("Position X", 1), atProp("Position Y", 2), ...strokeProps(BASIC, "Wire Style", true)];
     case "sheet": {

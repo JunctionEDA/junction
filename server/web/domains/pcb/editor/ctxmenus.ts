@@ -329,14 +329,14 @@ const noActiveTool = tool("select");
 /** SELECT_MENU (pcb_selection_tool.cpp). */
 const pcbSelectMenu = () => new CondMenu("Select")
   .item("PCB_ACTIONS::filterSelection").sep()
-  .item("PCB_ACTIONS::selectConnection").item("PCB_ACTIONS::selectNet").sep()
-  .item("PCB_ACTIONS::selectSameSheet").item("PCB_ACTIONS::selectOnSchematic").sep()
+  .item("PCB_ACTIONS::selectConnection").item("PCB_ACTIONS::selectNet")
+  .item("PCB_ACTIONS::selectSameSheet").item("PCB_ACTIONS::selectOnSchematic")
   .item("PCB_ACTIONS::selectUnconnected").item("PCB_ACTIONS::grabUnconnected");
 const pcbRoutingMenu = () => new CondMenu("Routing", "special_tools")
   .item("PCB_ACTIONS::routerRouteSelected", pcbRoutable).item("PCB_ACTIONS::routerRouteSelectedFromEnd", pcbRoutable).item("PCB_ACTIONS::unrouteSelected", pcbRoutable)
   .item("PCB_ACTIONS::unrouteSegment", pcbRoutable).item("PCB_ACTIONS::routerAutorouteSelected", pcbRoutable).item("PCB_ACTIONS::routerOptimizeSelected", and(hasTypes(set("segment", "arc")), idle));
 const pcbMirrorRotateMenu = () => new CondMenu("Mirror / Rotate", "special_tools")
-  .item("PCB_ACTIONS::rotateCcw", notEmpty).item("PCB_ACTIONS::rotateCw", notEmpty).item("PCB_ACTIONS::mirrorH", pcbCanMirror).item("PCB_ACTIONS::mirrorV", pcbCanMirror);
+  .item("PCB_ACTIONS::rotateCcw", notEmpty).item("PCB_ACTIONS::rotateCw", notEmpty).item("PCB_ACTIONS::mirrorH", pcbCanMirror).item("PCB_ACTIONS::mirrorV", pcbCanMirror).item("PCB_ACTIONS::mirrorInteractive", pcbCanMirror);
 const pcbPositionMenu = () => new CondMenu("Position", "special_tools")
   .item("PCB_ACTIONS::moveExact", idleSelection).item("PCB_ACTIONS::moveWithReference", idleSelection).item("PCB_ACTIONS::moveIndividually", and(moreThan(1), idle))
   .item("PCB_ACTIONS::positionRelative", idleSelection).item("PCB_ACTIONS::interactiveOffsetTool", idleSelection);
@@ -386,8 +386,8 @@ function pcbSelectionMenu(): CondMenu {
   // PCB_SELECTION_TOOL::Init
   m.sub(pcbSelectMenu(), notEmpty); m.sep(1000);
   m.item("ACTIONS::cancelInteractive", not(noActiveTool), 1);
-  m.item("PCB_ACTIONS::clearHighlight", haveHighlight, 1).sep(haveHighlight, 1);
   m.item("ACTIONS::groupEnter", (c) => !!c.groupSelected, 1).item("ACTIONS::groupLeave", (c) => !!c.inGroup, 1);
+  m.item("PCB_ACTIONS::clearHighlight", haveHighlight, 1).sep(haveHighlight, 1);
   addTableSelectItems(m, tableCellSelection);
   m.sep(1); standardSubMenus(m);
   // EDIT_TOOL::Init

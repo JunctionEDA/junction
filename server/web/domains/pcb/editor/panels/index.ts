@@ -39,6 +39,8 @@ window.CollabPanels = api;
 
 /** The select tool's gate for the tool modules' own picks (the app's picks go through filterAllows directly). */
 E.pickAllowed = (it: KItem): boolean => !!it && filterAllows(it.kind, it) && !itemObjectHidden(it);
+/** PCB_SELECTION_TOOL::Selectable's object-class visibility alone (no Selection Filter): candidates are collected with it, then filtered. */
+E.objectHidden = (it: KItem): boolean => !!it && itemObjectHidden(it);
 // sch-tools' Attributes toggles (SCH_EDIT_TOOL::SetAttribute) keep the other units of a multi-unit part in step
 E.toggleAttribute = toggleAttribute;
 

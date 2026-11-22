@@ -54,7 +54,7 @@ test("pin-to-pin: one marker per offending pin, heaviest pin type first, paired 
   wire(d, [50.8, 50.8], [127, 50.8]);
   const ms = p2p(sch.ercCheck(d));
   // U1 (sorted first) pairs with U2, its nearest; U3 still conflicts with U2: a second marker on U2 paired with U3
-  assert.deepStrictEqual(ms.map((m) => m.text).sort(), ["Pins of type Output and Output are connected: U1 pin 1 (P) and U2 pin 1 (P)", "Pins of type Output and Output are connected: U2 pin 1 (P) and U3 pin 1 (P)"]);
+  assert.deepStrictEqual(ms.map((m) => m.text + ": " + m.items.map((r) => r.desc.slice(7, 15)).join(" and ")).sort(), ["Pins of type Output and Output are connected: U1 Pin 1 and U2 Pin 1", "Pins of type Output and Output are connected: U2 Pin 1 and U3 Pin 1"]);
   // an unspecified pin (weight 10) outranks the outputs (3): it carries the first marker
   d.lib.set("T:UNS", K.parse(LIB("T:UNS", "U", PIN("unspecified", "Q", "1", 0, 0))));
   const u = place(c, "T:UNS", [101.6, 63.5], "U4"); wire(d, [101.6, 63.5], [101.6, 50.8]);

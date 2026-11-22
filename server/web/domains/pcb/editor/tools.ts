@@ -7,7 +7,7 @@ import { applyChanges, enterSheet, publishDocs, renderObjects, snapMm } from "./
 import { selectionIds, toolChanging } from "./gestures";
 import { sendOp } from "./net";
 import { cycleFollow, sendPresence } from "./peers";
-import { clearSelection, drawSelection, filterAllows, groupExpand, renderProps, scopeToEnteredGroup, selFilter } from "./selection";
+import { applyBoardArea, boardAreaIds, clearSelection, drawSelection, filterAllows, groupExpand, renderProps, scopeToEnteredGroup, selFilter } from "./selection";
 import { E } from "./state";
 import { subSheetDocs } from "./subsheets";
 import { api, toast } from "./util";
@@ -119,12 +119,17 @@ export function toolCtx(extra?: Record<string, unknown>) {
  */
 /** Watchers of local edits (ZONE_FILLER_TOOL's dirty-zone refill): called before the edit applies and after. */
 export const commitObservers: ((phase: "before" | "after", changes: unknown[], label: string | undefined, opts: unknown) => void)[] = [];
+/** What an edit takes with it before it is applied (SCH_LABEL_BASE::SetLabelShape's twins): each returns the changes to commit. */
+let commitRewriters: ((changes: KChange[]) => KChange[])[] | undefined;
+/** Register a commit rewriter.  The list is made on first use: the modules that register at load import this one in a cycle. */
+export function addCommitRewriter(fn: (changes: KChange[]) => KChange[]): void { (commitRewriters = commitRewriters || []).push(fn); }
 export function commitChanges(changes: KChange[] | null | undefined, label?: string, opts?: CommitOpts) {
   // EDIT_TOOL::DeleteItems on fields only: "Hide Field(s)", or the info bar when nothing changes (pcb-tools deleteChanges)
   const tag = changes as (KChange[] & { hideLabel?: string; infoError?: string }) | null | undefined;
   if (tag && tag.infoError && !tag.length) { toast(tag.infoError, 4000); return; }
   if (tag && tag.hideLabel && (label === "delete" || label === "Delete")) label = tag.hideLabel;
   if (!changes || !changes.length) return;
+  for (const f of commitRewriters || []) { try { changes = f(changes); } catch (e) { console.error(e); } }
   for (const f of commitObservers) { try { f("before", changes, label, opts); } catch (e) { console.error(e); } }
   const inverse: KChange[] = [];
   for (const c of changes) {
@@ -333,6 +338,9 @@ export function selectAll() {
   // SCH_SELECTION_TOOL::SelectAll sets STARTPOINT | ENDPOINT on every line: no wire stays selected by one end
   const schSt = isSch() && CollabTools.sch ? (CollabTools.sch.state as unknown as { selEnds?: Map<string, number> | null }) : null;
   if (schSt) schSt.selEnds = null;
+  // PCB_SELECTION_TOOL::SelectAll: every item that is Selectable (shown) and passes the Selection Filter, through
+  // FilterCollectorForHierarchy; no message
+  if (!isSch()) { applyBoardArea(boardAreaIds({ box: [-1e9, -1e9, 1e9, 1e9], contained: true }), { add: false }); return; }
   const all: KItem[] = []; for (const it of E.kdoc.items.values()) if (it.bbox && filterAllows(it.kind, it)) all.push(it);
   scopeToEnteredGroup(all); for (const it of all) E.selection.add(it.id);   // SelectAll runs FilterCollectorForHierarchy too
   E.selected = E.items.find((f: ItemSummary) => E.selection.has(f.id)) || null;

@@ -324,20 +324,22 @@ export function selectionBox(): [number, number, number, number] | null {
  * Every item whose own geometry is under `mm` — the candidates KiCad's Clarify Selection menu lists.
  * A symbol counts by its body box (SCH_SYMBOL::HitTest); a footprint only by geometry that is drawn there.
  */
-export function hitsAt(mm: Mm): KItem[] {
+export function hitsAt(mm: Mm, raw = false): KItem[] {
   const d = doc(); if (!d) return [];
   const [x, y] = mm, tol = isSch() ? Math.max(0.1, 3 / Math.max(1, pxPerMm())) : HIT_PX / Math.max(1, pxPerMm()), hidden = E.hiddenLayers as Set<string>;
   const geomHit = KiCadCanvas.geomHit as (g: KGeom, x: number, y: number, tol: number) => boolean;
   const out: KItem[] = [];
   for (const it of d.items.values()) {
     const b = it.bbox; if (!b || x < b[0] - tol || x > b[2] + tol || y < b[1] - tol || y > b[3] + tol) continue;
-    if (!filterAllows(it.kind, it)) continue;
+    // raw: everything PCB_SELECTION_TOOL::Selectable takes, whatever the Selection Filter says (the caller filters)
+    if (raw ? !!(E.objectHidden && E.objectHidden(it)) : !filterAllows(it.kind, it)) continue;
     let hit = false;
     if (it.kind === "symbol" || it.kind === "sheet") hit = true;
     else for (const g of it.geom) {
       if (g.layer && hidden.has(g.layer)) continue;
       if (g.padText || g.padNum || g.noBox) continue;
-      if (it.kind === "zone" && g.fill) continue;
+      // GENERAL_COLLECTOR: a zone is hit on its filled area while zones are displayed filled, else by its outline only
+      if (it.kind === "zone" && g.fill && !(g.zoneFill && !isSch() && !(E.renderOpts && E.renderOpts.zoneOutline))) continue;
       // a footprint's texts are its fields (PCB_FIELD, collected on their own): only a point on the text itself counts
       // for the footprint, never the click tolerance around it (that ring is the footprint hull's business: FOOTPRINT::HitTestAccurate)
       const t = it.kind === "footprint" && g.t === "text" ? 0 : tol;
@@ -441,6 +443,7 @@ export function cancelInteraction(): boolean {
   if (E.boxSel) { E.boxSel = null; took = true; }
   if (E.measure && E.measure.set) { E.measure = null; took = true; }   // MeasureTool: Esc drops a ruler that follows the cursor; the tool stays
   if (E.fdrag) { revertFieldDrag(); took = true; }
+  if (E.hooks.cancelPadDrag && E.hooks.cancelPadDrag()) took = true;   // a free pad drag (index.ts): the pads go back
   if (E.drag) { revertAppDrag(); took = true; }
   const s = schState();
   if (s && isSch() && (s.drag || s.pending)) { s.pending = null; if (s.drag && CollabTools.sch && CollabTools.sch.cancelDrag) { try { CollabTools.sch.cancelDrag(toolCtx()); } catch (e) { console.warn(e); } } took = true; }

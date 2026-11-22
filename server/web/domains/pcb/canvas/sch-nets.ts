@@ -8,6 +8,8 @@
 // Pure functions over parsed documents, exposed as KiCadCanvas.schNets for the node tests.
 import { unescapeNetName, type NetEntry, type NetMember, type SheetInstance } from "./pcb-netlist";
 import { atOf, kid, num, ptsOf, str } from "./sexpr";
+import { geomBox } from "./hit";
+import type { Geom } from "./types";
 
 export type NetMap = Map<string, NetEntry>;
 
@@ -55,9 +57,24 @@ export function instanceFor(instances: SheetInstance[], file: string, human?: st
  * MakeNetNavigatorNode's sheet node text: the top-level sheet's name (the root file's name when it has none),
  * then "/" and each sub-sheet's name.
  */
-export function sheetNodeText(inst: SheetInstance, rootName: string): string {
+export function sheetNodeText(inst: SheetInstance, rootName: string, instances?: SheetInstance[]): string {
+  // with several top-level sheets each instance's path already starts at its top-level sheet (sheetPath.at( 0 )'s
+  // Sheetname, the file's base name when that is empty); with one root the path starts below it
+  const tops = instances ? instances.filter((i) => i.uuidPath.length === 1) : [];
+  if (tops.length > 1) {
+    const top = tops.find((t) => t.uuidPath[0] === inst.uuidPath[0]);
+    if (top && top.sheetName) return inst.human.replace(/^\//, "").replace(/\/$/, "");
+    const stem = top ? (top.file.split("/").pop() || top.file).replace(/\.kicad_sch$/, "") : rootName;
+    return [stem, ...inst.human.split("/").filter(Boolean)].join("/");
+  }
   const parts = inst.human.split("/").filter(Boolean);
   return [rootName, ...parts].join("/");
+}
+/** GetBoundingBox().Centre() of a set of drawn primitives; null when there are none. */
+function centreOf(geoms: Geom[]): [number, number] | null {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const g of geoms) { const b = geomBox(g); if (!b) continue; if (b[0] < x0) x0 = b[0]; if (b[1] < y0) y0 = b[1]; if (b[2] > x1) x1 = b[2]; if (b[3] > y1) y1 = b[3]; }
+  return x0 <= x1 && y0 <= y1 ? [(x0 + x1) / 2, (y0 + y1) / 2] : null;
 }
 
 export interface NavItem { inst: number; id: string; kind: string; pin?: string; label: string; at: [number, number] | null }
@@ -69,16 +86,22 @@ const pt = (f: Fmt, p: number[] | undefined | null): string => `(${f(p ? p[0] : 
 export function describeMember(m: NetMember, doc: KDoc | null, f: Fmt): { label: string; at: [number, number] | null } {
   const it = doc ? doc.items.get(m.id) : null, n = it ? it.node : null;
   const at = n ? (atOf(n) as number[]).slice(0, 2) as [number, number] : null;
+  // onNetNavigatorSelection: FocusOnLocation( item->GetBoundingBox().Centre() ) of the pin / sheet pin / label ITSELF
+  const geoms = ((it as unknown as { geom?: Geom[] } | null) || {}).geom || [];
+  const own = (): [number, number] | null => centreOf(geoms) || at;
   switch (m.kind) {
     case "pin": {
       const shown = m.pinName && m.pinName !== "~" ? unescapeNetName(m.pinName) : "";
-      return { label: `Symbol '${m.ref || "?"}' pin '${unescapeNetName(m.pin || "")}'` + (shown ? ` (${shown})` : ""), at };
+      return { label: `Symbol '${m.ref || "?"}' pin '${unescapeNetName(m.pin || "")}'` + (shown ? ` (${shown})` : ""), at: centreOf(geoms.filter((g) => g.pinNo === m.pin)) || at };
     }
-    case "sheet_pin": return { label: `Sheet '${m.text || ""}' pin '${unescapeNetName(m.pin || "")}'`, at };
-    case "label": return { label: `Label '${unescapeNetName(m.text || "")}' at ${pt(f, at)}`, at };
-    case "global_label": return { label: `Global label '${unescapeNetName(m.text || "")}' at ${pt(f, at)}`, at };
-    case "hierarchical_label": return { label: `Hierarchical label '${unescapeNetName(m.text || "")}' at ${pt(f, at)}`, at };
-    case "netclass_flag": case "directive_label": return { label: `Netclass label '${unescapeNetName(m.text || (n ? str(n[1]) : ""))}' at ${pt(f, at)}`, at };
+    case "sheet_pin": {
+      const pin = n ? (n.filter((c) => Array.isArray(c) && c[0] === "pin" && str((c as SNode)[1]) === m.pin)[0] as SNode | undefined) : undefined;
+      return { label: `Sheet '${m.text || ""}' pin '${unescapeNetName(m.pin || "")}'`, at: centreOf(geoms.filter((g) => g.pinNo === m.pin)) || (pin ? (atOf(pin) as number[]).slice(0, 2) as [number, number] : at) };
+    }
+    case "label": return { label: `Label '${unescapeNetName(m.text || "")}' at ${pt(f, at)}`, at: own() };
+    case "global_label": return { label: `Global label '${unescapeNetName(m.text || "")}' at ${pt(f, at)}`, at: own() };
+    case "hierarchical_label": return { label: `Hierarchical label '${unescapeNetName(m.text || "")}' at ${pt(f, at)}`, at: own() };
+    case "netclass_flag": case "directive_label": return { label: `Netclass label '${unescapeNetName(m.text || (n ? str(n[1]) : ""))}' at ${pt(f, at)}`, at: own() };
     case "junction": return { label: `Junction at ${pt(f, at)}`, at };
     case "no_connect": return { label: `No-Connect at ${pt(f, at)}`, at };
     case "wire": case "bus": { const p = n ? ptsOf(n) as number[][] : []; return { label: `${m.kind === "wire" ? "Wire" : "Bus"} from ${pt(f, p[0])} to ${pt(f, p[p.length - 1])}`, at: p[0] ? [p[0][0], p[0][1]] : null }; }
@@ -95,20 +118,30 @@ const byText = (a: { label: string }, b: { label: string }): number => (a.label 
 export function navSheets(map: NetMap, name: string, instances: SheetInstance[], rootName: string, docOf: (inst: SheetInstance) => KDoc | null, f: Fmt): NavSheet[] {
   const e = map.get(name); if (!e) return [];
   const per = new Map<number, NavItem[]>();
-  for (const m of e.members) {
+  // NAVIGATION_QUERY::NetItems( name, aIncludeBusParents = true ): the items of the buses that carry the net as well
+  // (their labels and sheet pins show under the net)
+  const members = e.members.slice();
+  if (!e.bus) for (const b of map.values()) if (b.bus && b.busMembers.includes(name)) members.push(...b.members);
+  const seen = new Set<string>();
+  for (const m of members) {
+    const mk = m.inst + "|" + m.id + "|" + m.kind + "|" + (m.pin || "");
+    if (seen.has(mk)) continue; seen.add(mk);
     if (!per.has(m.inst)) per.set(m.inst, []);
     if (NOT_LISTED.has(m.kind)) continue;
     const inst = instances[m.inst]; const d = describeMember(m, inst ? docOf(inst) : null, f);
     (per.get(m.inst) as NavItem[]).push({ inst: m.inst, id: m.id, kind: m.kind, pin: m.pin, label: d.label, at: d.at });
   }
   const out: NavSheet[] = [];
-  for (const [i, items] of per) { const inst = instances[i]; if (!inst) continue; out.push({ inst: i, label: sheetNodeText(inst, rootName), items: items.sort(byText) }); }
+  for (const [i, items] of per) { const inst = instances[i]; if (!inst) continue; out.push({ inst: i, label: sheetNodeText(inst, rootName, instances), items: items.sort(byText) }); }
   return out.sort(byText);
 }
 
-/** The names the "Nets" root lists: every net (not the buses), unescaped for display, sorted. */
-export function netNames(map: NetMap): string[] {
-  return Array.from(map.values()).filter((e) => !e.bus).map((e) => e.name).sort((a, b) => { const x = unescapeNetName(a), y = unescapeNetName(b); return x < y ? -1 : x > y ? 1 : 0; });
+/**
+ * NAVIGATION_QUERY::NetNames: every non-empty key of the connection graph's net map, the buses among them (the "Nets"
+ * root lists them), sorted by the name shown.  `buses` false leaves the buses out (the netclass assignment candidates).
+ */
+export function netNames(map: NetMap, buses = true): string[] {
+  return Array.from(map.values()).filter((e) => buses || !e.bus).map((e) => e.name).sort((a, b) => { const x = unescapeNetName(a), y = unescapeNetName(b); return x < y ? -1 : x > y ? 1 : 0; });
 }
 
 /** WildCompareString( pattern, text, caseSensitive = false ): * matches any run, ? any one character. */
@@ -131,7 +164,7 @@ export function wildCompare(pattern: string, text: string): boolean {
 export function netFilter(filter: string, wildcard = true): (displayName: string) => boolean {
   if (!filter) return () => true;
   if (wildcard) { const glob = /[*?]/.test(filter) ? filter : "*" + filter + "*"; return (n) => wildCompare(glob, n); }
-  let re: RegExp | null = null; try { re = new RegExp(filter); } catch (e) { re = null; }
+  let re: RegExp | null = null; try { re = new RegExp(filter, "i"); } /* std::regex_constants::icase | ECMAScript */ catch (e) { re = null; }
   return re ? (n) => (re as RegExp).test(n) : () => true;
 }
 

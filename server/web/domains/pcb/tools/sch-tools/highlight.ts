@@ -11,8 +11,8 @@ import { onSegMid, r4, same, segs } from "./util";
 
 // ---------------------------------------------------------------- net highlighting (connectivity on this sheet)
 // Terminals of an item: { p, net: "wire" | "bus" | "any", key }.  Terminals join where they share a
-// point (a wire never joins a bus directly, everything else is agnostic) or sit on the middle of a
-// net line; `key` names a net that spans the sheet — net labels by text, global labels and power
+// point (a wire never joins a bus directly, everything else is agnostic); a junction or a label also
+// joins the net line whose middle it sits on; `key` names a net that spans the sheet — net labels by text, global labels and power
 // symbols by name, hierarchical labels by text.  Net lines, junctions and bus entries conduct
 // between all their terminals; a symbol's or sheet's pins are separate nets.
 export const NET_PICK = new Set(["wire", "bus", "junction", "bus_entry", "label", "global_label", "hierarchical_label", "netclass_flag", "directive_label"]);
@@ -37,6 +37,13 @@ export function terminalsOf(doc: KDoc, it: KItem): Terminal[] {
 }
 export const conducts = (it: KItem) => isNetLine(it.kind) || it.kind === "junction" || it.kind === "bus_entry";
 export const joins = (a: { net: string }, b: { net: string }) => a.net === "any" || b.net === "any" || a.net === b.net;
+/**
+ * What reaches the MIDDLE of a line (CONNECTION_GRAPH::updateItemConnectivity): a junction and a label (and a
+ * directive label) on any line, a bus entry on a bus.  A pin, a sheet pin or another line's end resting on the middle
+ * of a wire is not connected: SCH_LINE::GetConnectionPoints is the two ends only.
+ */
+const MID_KINDS = new Set(["junction", "label", "global_label", "hierarchical_label", "netclass_flag", "directive_label"]);
+const reachesMiddle = (owner: KItem, lineKind: string): boolean => MID_KINDS.has(owner.kind) || (owner.kind === "bus_entry" && lineKind === "bus");
 /** Ids of everything on the net of `item` on this sheet; `near` picks the pin of a symbol or sheet. */
 export function netItems(doc: KDoc, item: KItem, near?: Pt | null) { return netWalk(doc, item, near, false).ids; }
 /**
@@ -54,7 +61,7 @@ export function netWalk(doc: KDoc, item: KItem, near: Pt | null | undefined, phy
     for (const u of conducts(it) ? terms.get(it)! : [t]) { if (done.has(u)) continue; done.add(u); reached.set(u, it); work.push(u); if (u.key && !physical) keys.add(u.key); }
     if (isNetLine(it.kind)) {                                 // things sitting on the middle of a reached line
       const sg = segs(it), lineT = { net: it.kind };
-      for (const [o, ts] of terms) { if (o === it) continue; for (const u of ts) if (!done.has(u) && joins(lineT, u) && sg.some(([a, b]) => onSegMid(u.p, a, b))) reach(o, u); }
+      for (const [o, ts] of terms) { if (o === it) continue; for (const u of ts) if (!done.has(u) && reachesMiddle(o, it.kind) && joins(lineT, u) && sg.some(([a, b]) => onSegMid(u.p, a, b))) reach(o, u); }
     }
   };
   if (item.kind === "symbol" || item.kind === "sheet") {
@@ -64,10 +71,10 @@ export function netWalk(doc: KDoc, item: KItem, near: Pt | null | undefined, phy
   } else for (const t of mine) reach(item, t);
   for (;;) {
     while (work.length) {
-      const t = work.pop()!;
+      const t = work.pop()!, owner = reached.get(t);
       for (const [it, ts] of terms) {
         for (const u of ts) if (!done.has(u) && joins(t, u) && same(u.p, t.p)) reach(it, u);
-        if (isNetLine(it.kind) && !set.has(it.id) && joins(t, { net: it.kind }) && segs(it).some(([a, b]) => onSegMid(t.p, a, b))) reach(it, ts[0]);
+        if (isNetLine(it.kind) && !set.has(it.id) && owner && reachesMiddle(owner, it.kind) && joins(t, { net: it.kind }) && segs(it).some(([a, b]) => onSegMid(t.p, a, b))) reach(it, ts[0]);
       }
     }
     const fresh = Array.from(keys).filter((k) => !keysDone.has(k)); if (!fresh.length) break;

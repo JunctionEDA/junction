@@ -11,7 +11,7 @@
 import { KICURSOR_IMAGES } from "./kicursors.generated";
 import { E } from "./state";
 import { lassoSigned } from "./selection";
-import { isSch, stage } from "./view";
+import { isSch, stage, viewFlipped } from "./view";
 import { ctrlDown, modifierCursorOf, modifiersState } from "./selmodes";
 import { activeModule, moduleTool, toolCtx } from "./tools";
 
@@ -69,7 +69,7 @@ export function currentCursor(): string {
     // SCH_SELECTION_TOOL::selectLasso: a lasso drawn clockwise is INSIDE_LASSO and shows SELECT_WINDOW, anticlockwise
     // (TOUCHING_LASSO) SELECT_LASSO
     if (bs && bs.lasso && isSch()) { const lp = (bs as unknown as { live?: boolean; pts: number[][] }).live ? [...(bs as unknown as { pts: number[][] }).pts, bs.cur] : (bs as unknown as { pts: number[][] }).pts; return lassoSigned(lp) > 0 ? "SELECT_WINDOW" : "SELECT_LASSO"; }
-    if (bs) return bs.lasso || bs.cur[0] < bs.start[0] ? "SELECT_LASSO" : "SELECT_WINDOW";
+    if (bs) return bs.lasso || (bs.cur[0] < bs.start[0]) !== viewFlipped() ? "SELECT_LASSO" : "SELECT_WINDOW";
     const m = activeModule() as CursorModule | null;
     if ((E.drag && E.drag.moved) || (E.fdrag && E.fdrag.moved)) return "MOVING";
     if (m && m.cursorNow) { try { const c = m.cursorNow(toolCtx()); if (c) return c; } catch (e) { console.warn(e); } }

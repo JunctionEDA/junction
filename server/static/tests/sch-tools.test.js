@@ -1167,14 +1167,14 @@ test("annotate: X-then-Y numbering per prefix, incremental keeps existing refere
   const a = symAt(c, 76.2, 25.4), b = symAt(c, 50.8, 25.4), e = symAt(c, 63.5, 50.8), f = symAt(c, 63.5, 25.4);
   d.lib.set("power:GND", K.parse(LIB_SYM("power:GND", "#PWR", "(power)"))); const g = K.createItem(d, _.symbolNode(d, "power:GND", [10, 10], 0, ""));
   assert.deepStrictEqual([a.ref, g.ref], ["R?", "#PWR?"]);
-  assert.deepStrictEqual(_.splitRef("R12"), { prefix: "R", num: 12, isNew: false }); assert.deepStrictEqual(_.splitRef("U?"), { prefix: "U", num: -1, isNew: true }); assert.deepStrictEqual(_.splitRef("XYZ"), { prefix: "XYZ", num: -1, isNew: true });
+  assert.deepStrictEqual(_.splitRef("R12"), { prefix: "R", num: 12, numStr: "12", isNew: false }); assert.deepStrictEqual(_.splitRef("U?"), { prefix: "U", num: -1, numStr: "", isNew: true }); assert.deepStrictEqual(_.splitRef("XYZ"), { prefix: "XYZ", num: -1, numStr: "", isNew: true });
   assert.ok(sch.runAction("annotate", c));
-  const cm = lastCommit(c); assert.strictEqual(cm.label, "annotate");
+  const cm = lastCommit(c); assert.strictEqual(cm.label, "Annotate");
   const refOf = (id) => kids(d.items.get(id).node, "property")[0][2];
-  assert.deepStrictEqual([refOf("s1"), refOf(b.id), refOf(f.id), refOf(e.id), refOf(a.id), refOf(g.id)], ["R1", "R2", "R3", "R4", "R5", "#PWR1"], "left to right, then top to bottom");
-  assert.ok(cm.changes.every((x) => x.kind === "MODIFIED" && x.typeName === "SCH_SYMBOL") && cm.changes.length === 5);
-  assert.ok(c.toasts.some((m) => /Annotated 5 symbols/.test(m)));
-  assert.strictEqual(sch.runAction("annotate", c), true); assert.ok(c.toasts.some((m) => /Nothing to annotate/.test(m)));
+  assert.deepStrictEqual([refOf("s1"), refOf(b.id), refOf(f.id), refOf(e.id), refOf(a.id), refOf(g.id)], ["R1", "R2", "R3", "R4", "R5", "#PWR?"], "left to right, then top to bottom; power symbols are left alone (SYMBOL_FILTER_NON_POWER)");
+  assert.ok(cm.changes.every((x) => x.kind === "MODIFIED" && x.typeName === "SCH_SYMBOL") && cm.changes.length === 4);
+  assert.ok(!c.toasts.some((m) => /Annotated|Nothing to annotate/.test(m)), "KiCad reports in the dialog, not in a toast");
+  { const n = c.log.length; sch.runAction("annotate", c); assert.strictEqual(c.log.length, n, "nothing left to annotate: no commit"); }
   assert.ok(sch.runAction("annotate", c, { keep: false, order: "y" })); assert.deepStrictEqual([refOf(b.id), refOf(f.id), refOf(a.id), refOf(e.id), refOf("s1")], ["R1", "R2", "R3", "R4", "R5"], "top to bottom, then left to right");
   assert.ok(sch.runAction("clearAnnotation", c));
   assert.deepStrictEqual([refOf("s1"), refOf(a.id), refOf(g.id)], ["R?", "R?", "#PWR?"]);
@@ -1186,7 +1186,7 @@ test("annotate: X-then-Y numbering per prefix, incremental keeps existing refere
   assert.deepStrictEqual(sch.clearAnnotationChanges(d, new Set(["s1"])).map((x) => x.id), ["s1"]);
   // references used on the project's other sheets are skipped (one reference list over the whole hierarchy)
   assert.ok(sch.runAction("clearAnnotation", c)); assert.ok(sch.runAction("annotate", c, { reserved: ["R1", "R2", "R4", "#PWR1", "C1"] }));
-  assert.deepStrictEqual([refOf("s1"), refOf(b.id), refOf(f.id), refOf(g.id)], ["R3", "R5", "R6", "#PWR2"], "R1, R2, R4 and #PWR1 belong to another sheet");
+  assert.deepStrictEqual([refOf("s1"), refOf(b.id), refOf(f.id), refOf(g.id)], ["R3", "R5", "R6", "#PWR?"], "R1, R2 and R4 belong to another sheet");
 });
 
 test("paste modes (DIALOG_PASTE_SPECIAL): keep, remove, unique", () => {
@@ -1222,11 +1222,12 @@ test("annotate reset: units keep their packages unless Regroup symbol units is o
     (symbol "DUAL_1_1" (pin input line (at 0 0 0) (length 2.54) (name "A" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27))))))
     (symbol "DUAL_2_1" (pin input line (at 0 0 0) (length 2.54) (name "B" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27)))))))`));
   const withUnit = (it, u) => { kid(it.node, "unit")[1] = u; return it; };
-  // U7 unit A at the left, U9 unit B next to it: kept apart on a reset, packed into one with Regroup
-  const a = withUnit(place(c, "T:DUAL", [20.32, 76.2], "U7"), 1), b = withUnit(place(c, "T:DUAL", [40.64, 76.2], "U9"), 2);
-  const refs = (o) => { const ch = sch.annotateChanges(d, o); const r = (it) => { const x = ch.find((y) => y.id === it.id); return x ? kids(fragItem(x), "property")[0][2] : null; }; return [r(a), r(b)]; };
-  assert.deepStrictEqual(refs({ keep: false }), ["U1", "U2"]);
-  assert.deepStrictEqual(refs({ keep: false, regroup: true }), ["U1", "U1"]);
+  // U7 unit A at the left, U9 unit B, then U7 unit B: a reset keeps U7's units together (the locked-unit map of
+  // AnnotateSymbols), Regroup lets each unit join the first package with room for it
+  const a = withUnit(place(c, "T:DUAL", [20.32, 76.2], "U7"), 1), e = withUnit(place(c, "T:DUAL", [30.48, 76.2], "U9"), 2), b = withUnit(place(c, "T:DUAL", [40.64, 76.2], "U7"), 2);
+  const refs = (o) => { const ch = sch.annotateChanges(d, o); const r = (it) => { const x = ch.find((y) => y.id === it.id); return x ? kids(fragItem(x), "property")[0][2] : null; }; return [r(a), r(e), r(b)]; };
+  assert.deepStrictEqual(refs({ keep: false }), ["U1", "U2", "U1"]);
+  assert.deepStrictEqual(refs({ keep: false, regroup: true }), ["U1", "U1", "U2"]);
 });
 
 test("paste (UNIQUE_ANNOTATIONS, ReannotateDuplicates): a cut unit comes back as itself, a copy takes the next package", () => {
@@ -1257,32 +1258,38 @@ test("ERC on the embedded sheet: unconnected pins, dangling wires, then the fixe
   assert.ok(sch.runAction("runERC", c));
   let ms = sch.markers(); const texts = () => ms.map((m) => m.text);
   assert.strictEqual(ms, sch.state.markers);
-  assert.ok(texts().includes("Pin not connected: R1 pin 1") && texts().includes("Pin not connected: R1 pin 2"));
-  assert.ok(ms.some((m) => m.code === "wire_dangling" && m.severity === "error" && m.ids.includes("w4") && m.x === 101.6 && m.y === 63.5), "w4 touches nothing at either end");
-  assert.strictEqual(ms.filter((m) => m.code === "unconnected_wire_endpoint").length, 5, "w1, w2, w3, w5 and w6 each have a loose end");
-  assert.ok(!ms.some((m) => /Label not connected/.test(m.text)), "NETA sits on w1");
+  // KiCad's messages: the rule title alone, the pin in the item line
+  const pnc = ms.filter((m) => m.code === "pin_not_connected");
+  assert.deepStrictEqual(pnc.map((m) => m.text + " @ " + m.items[0].desc), ["Pin not connected @ Symbol R1 Pin 1 [Passive, Line]", "Pin not connected @ Symbol R1 Pin 2 [Passive, Line]"]);
+  // ercCheckFloatingWires: one marker per driverless group of wires, at its first wire's start point
+  assert.deepStrictEqual(ms.filter((m) => m.code === "wire_dangling").map((m) => [m.severity, m.x, m.y, m.text, m.ids.join(",")]), [["error", 101.6, 50.8, "Wires not connected to anything", "w4"], ["error", 127, 50.8, "Wires not connected to anything", "w5,w6"]]);
+  assert.strictEqual(ms.filter((m) => m.code === "unconnected_wire_endpoint").length, 7, "every loose wire end: w1, w2, w3, both of w4, w5 and w6");
+  assert.ok(ms.some((m) => m.code === "label_dangling" && m.text === "Label not connected" && m.ids.includes("l1")), "NETA's net has no pin at all");
   assert.ok(ms.every((m) => typeof m.x === "number" && typeof m.y === "number" && ["error", "warning"].includes(m.severity) && Array.isArray(m.ids)));
-  assert.ok(c.toasts.some((m) => /^ERC: 3 errors, 5 warnings$/.test(m)), c.toasts.join("|"));
+  assert.ok(c.toasts.some((m) => /^ERC: 5 errors, 7 warnings$/.test(m)), c.toasts.join("|"));
   // fixes: a no-connect on pin 1, a wire on pin 2; a no-connect on a connected pin warns; an unannotated symbol and a duplicate reference are errors
   K.createItem(d, _.noConnectNode([25.4, 96.52])); K.createItem(d, _.lineNode("wire", [25.4, 104.14], [38.1, 104.14])); K.createItem(d, _.noConnectNode([25.4, 104.14]));
   const dup = symAt(c, 50.8, 127); _.setReference(dup.node, "R1"); K.buildGeom(d, dup); const q = symAt(c, 76.2, 127);
   ms = sch.ercCheck(d);
   assert.ok(!ms.some((m) => m.code === "pin_not_connected" && m.ids.includes("s1")), "R1's pins are covered (the duplicate R1 still has loose pins)");
   assert.strictEqual(ms.filter((m) => m.code === "pin_not_connected" && m.ids.includes(dup.id)).length, 2);
-  assert.ok(ms.some((m) => m.code === "no_connect_connected" && m.severity === "warning" && /R1 pin 2/.test(m.text)));
-  assert.ok(ms.some((m) => m.code === "duplicate_reference" && m.ids.includes(dup.id) && m.ids.includes("s1")));
-  assert.ok(ms.some((m) => m.code === "unannotated" && m.ids.includes(q.id) && m.text === "Symbol R? is not annotated"));
+  assert.ok(!ms.some((m) => m.code === "no_connect_connected"), "a flag on a pin with a wire stub: the net has one pin only");
+  { const dr = ms.find((m) => m.code === "duplicate_reference"); assert.ok(dr && dr.text === "Duplicate items R1\n" && dr.ids.length === 2 && dr.ids.includes(dup.id) && dr.ids.includes("s1"), JSON.stringify(dr)); }
+  assert.ok(ms.some((m) => m.code === "unannotated" && m.ids.includes(q.id) && m.text === "Item not annotated: R?"), texts().join("|"));
   assert.ok(ms.some((m) => m.code === "no_connect_dangling") === false);
   K.createItem(d, _.noConnectNode([150, 150])); ms = sch.ercCheck(d); assert.ok(ms.some((m) => m.code === "no_connect_dangling" && m.x === 150));
   // labels on nothing, only one pin, similar names, empty
   K.createItem(d, _.labelNode("label", "LONELY", [160, 160], 0)); K.createItem(d, _.labelNode("global_label", "lonely", [170, 170], 0)); K.createItem(d, _.labelNode("label", "", [180, 180], 0));
   const w = K.createItem(d, _.lineNode("wire", [76.2, 123.19], [88.9, 123.19])); K.createItem(d, _.labelNode("label", "ONEPIN", [88.9, 123.19], 0));   // q's pin 1
   ms = sch.ercCheck(d);
-  assert.ok(ms.some((m) => m.code === "label_dangling" && m.text === "Label not connected: LONELY"));
+  assert.ok(ms.some((m) => m.code === "label_dangling" && m.text === "Label not connected" && m.items[0].desc.includes("LONELY")));
   { const sl = ms.find((m) => m.code === "similar_labels"); assert.ok(sl && sl.text === "Labels are similar" && sl.items.length === 2 && sl.items.map((r) => r.desc).join(" ").includes("LONELY") && sl.items.map((r) => r.desc).join(" ").includes("lonely"), JSON.stringify(sl)); }
   assert.ok(ms.some((m) => m.code === "empty_label_name" && m.severity === "error"));
-  assert.ok(ms.some((m) => m.code === "isolated_pin_label" && /ONEPIN/.test(m.text) && m.severity === "warning"), texts().join("|"));
-  assert.ok(ms.some((m) => m.code === "label_multiple_wires") === false); K.createItem(d, _.lineNode("wire", [88.9, 123.19], [88.9, 110])); ms = sch.ercCheck(d); assert.ok(ms.some((m) => m.code === "label_multiple_wires" && /ONEPIN/.test(m.text)));
+  assert.ok(ms.some((m) => m.code === "isolated_pin_label" && m.text === "Label connected to only one pin" && /ONEPIN/.test(m.items[0].desc) && m.severity === "warning"), texts().join("|"));
+  // TestLabelMultipleWires: wires ending on the label do not count, two wires passing through its point do
+  K.createItem(d, _.lineNode("wire", [88.9, 123.19], [88.9, 110])); ms = sch.ercCheck(d); assert.ok(!ms.some((m) => m.code === "label_multiple_wires"), "a corner under the label");
+  K.createItem(d, _.labelNode("label", "CROSS", [200, 100], 0)); K.createItem(d, _.lineNode("wire", [190, 100], [210, 100])); K.createItem(d, _.lineNode("wire", [200, 90], [200, 110]));
+  ms = sch.ercCheck(d); assert.ok(ms.some((m) => m.code === "label_multiple_wires" && m.text === "Label connects more than one wire at 2000000, 1000000" && m.ids.length === 3), texts().join("|"));
   ms.sort((a, b) => a.y - b.y); assert.ok(w);
 });
 
@@ -1293,7 +1300,7 @@ test("ERC pin conflicts: KiCad's pin matrix (two outputs, output to power output
   // two outputs wired together
   const o1 = place(c, "T:OUT", [50.8, 152.4], "U1"), o2 = place(c, "T:OUT", [76.2, 152.4], "U2"); K.createItem(d, _.lineNode("wire", [50.8, 152.4], [76.2, 152.4]));
   let ms = sch.ercCheck(d), m = ms.find((x) => x.code === "pin_to_pin");
-  assert.ok(m && m.severity === "error" && /Pins of type Output and Output are connected: U1 pin 1 \(P\) and U2 pin 1 \(P\)/.test(m.text) && m.ids.includes(o1.id) && m.ids.includes(o2.id), JSON.stringify(m));
+  assert.ok(m && m.severity === "error" && m.text === "Pins of type Output and Output are connected" && m.items[0].desc.startsWith("Symbol U1 Pin 1") && m.items[1].desc.startsWith("Symbol U2 Pin 1") && m.ids.includes(o1.id) && m.ids.includes(o2.id), JSON.stringify(m));
   // an input driven by a bidirectional pin is fine; an output on a power output is an error; an unspecified pin warns
   const i1 = place(c, "T:IN", [50.8, 165.1], "U3"), b1 = place(c, "T:BIDI", [76.2, 165.1], "U4"); K.createItem(d, _.lineNode("wire", [50.8, 165.1], [76.2, 165.1]));
   ms = sch.ercCheck(d); assert.ok(!ms.some((x) => x.ids.includes(i1.id) && /pin_to_pin|not driven/.test(x.code)), "input + bidi is clean"); assert.ok(b1);
@@ -1302,17 +1309,17 @@ test("ERC pin conflicts: KiCad's pin matrix (two outputs, output to power output
   // a chip's power input fed by a passive pin: not driven until a PWR_FLAG (power output) joins the net
   const pi = place(c, "T:PWRI", [101.6, 152.4], "U7"); place(c, "T:PAS", [127, 152.4], "J1"); K.createItem(d, _.lineNode("wire", [101.6, 152.4], [127, 152.4]));
   ms = sch.ercCheck(d); m = ms.find((x) => x.code === "power_pin_not_driven");
-  assert.ok(m && m.severity === "error" && /Input Power pin not driven by any Output Power pins: U7 pin 1/.test(m.text) && m.ids.includes(pi.id), texts(ms));
+  assert.ok(m && m.severity === "error" && m.text === "Input Power pin not driven by any Output Power pins" && m.items[0].desc.startsWith("Symbol U7 Pin 1") && m.ids.includes(pi.id), texts(ms));
   // Show all errors (ERC_TESTER m_showAllErrors): a marker on every power input of the undriven net, not only the first
   const pi3 = place(c, "T:PWRI", [101.6, 139.7], "U9"); K.createItem(d, _.lineNode("wire", [101.6, 139.7], [101.6, 152.4]));
   assert.equal(sch.ercCheck(d).filter((x) => x.code === "power_pin_not_driven").length, 1);
   const all = sch.ercCheck(d, { showAllErrors: true }).filter((x) => x.code === "power_pin_not_driven");
   assert.ok(all.length === 2 && all.some((x) => x.ids.includes(pi.id)) && all.some((x) => x.ids.includes(pi3.id)), JSON.stringify(all.map((x) => x.text)));
   place(c, "power:PWR_FLAG", [114.3, 152.4], "#FLG1"); ms = sch.ercCheck(d); assert.ok(!ms.some((x) => x.code === "power_pin_not_driven"), "PWR_FLAG drives it");
-  // a power symbol's net without a power output: only a warning here, the flag may live on another sheet
+  // a power symbol's net without a power output is an error like any other (ERC_TESTER::TestPinToPin judges the whole net)
   // (erc.cpp marks powerInPinsNeedingDrivers.front(): pins sort by reference, so #PWR1's power input before U8's)
   const pi2 = place(c, "T:PWRI", [101.6, 165.1], "U8"), vcc = place(c, "power:VCC", [127, 165.1], "#PWR1"); K.createItem(d, _.lineNode("wire", [101.6, 165.1], [127, 165.1]));
-  ms = sch.ercCheck(d); m = ms.find((x) => x.code === "power_pin_not_driven"); assert.ok(m && m.severity === "warning" && /no driver on this sheet/.test(m.text) && m.ids.includes(vcc.id), JSON.stringify(m)); assert.ok(pi2);
+  ms = sch.ercCheck(d); m = ms.find((x) => x.code === "power_pin_not_driven"); assert.ok(m && m.severity === "error" && m.text === "Input Power pin not driven by any Output Power pins" && m.ids.includes(vcc.id), JSON.stringify(m)); assert.ok(pi2);
   // an input with nothing driving it, and a hierarchical label that hides the driver on another sheet
   const i2 = place(c, "T:IN", [101.6, 177.8], "U9"); place(c, "T:IN", [127, 177.8], "U10"); K.createItem(d, _.lineNode("wire", [101.6, 177.8], [127, 177.8]));
   ms = sch.ercCheck(d); assert.ok(ms.some((x) => x.code === "pin_not_driven" && x.severity === "error" && x.ids.includes(i2.id)));
@@ -1324,9 +1331,9 @@ test("ERC pin conflicts: KiCad's pin matrix (two outputs, output to power output
   ms = sch.ercCheck(d); assert.ok(!ms.some((x) => x.code === "hier_label_mismatch"), "without the sub-sheet nothing can be checked");
   ms = sch.ercCheck(d, { sheetDocs: new Map([["Sub.kicad_sch", sub]]) });
   const hm = ms.filter((x) => x.code === "hier_label_mismatch").map((x) => x.text).sort();
-  assert.deepStrictEqual(hm, ["Hierarchical label C in Sub.kicad_sch has no sheet pin", "Sheet pin B has no matching hierarchical label in Sub.kicad_sch"]);
+  assert.deepStrictEqual(hm, ["Hierarchical label C has no matching sheet pin in the parent sheet", "Sheet pin B has no matching hierarchical label inside the sheet"]);
   c.sheetDocs = { "Sub.kicad_sch": sub }; sch.runAction("runERC", c); assert.strictEqual(sch.markers().filter((x) => x.code === "hier_label_mismatch").length, 2);
-  c.parentSheetPins = ["OTHER"]; sch.runAction("runERC", c); assert.ok(sch.markers().some((x) => /FROM_PARENT has no sheet pin on the parent sheet/.test(x.text)));
+  c.parentSheetPins = ["OTHER"]; sch.runAction("runERC", c); assert.ok(sch.markers().some((x) => x.text === "Hierarchical label FROM_PARENT has no matching sheet pin in the parent sheet"));
   // sync / cleanup sheet pins against the sub-sheet
   c.selection = new Set([sheet.id]); assert.ok(sch.runAction("syncSheetPins", c)); assert.deepStrictEqual(kids(d.items.get(sheet.id).node, "pin").map((p) => p[1]), ["A", "B", "C"]);
   assert.ok(sch.runAction("cleanupSheetPins", c)); assert.deepStrictEqual(kids(d.items.get(sheet.id).node, "pin").map((p) => p[1]), ["A", "C"]);
@@ -1411,7 +1418,10 @@ test("group rotate / mirror: a multi-selection turns about its half-grid centre 
   assert.ok(sch.onKey("r", {}, c)); const rn = fragItem(lastCommit(c).changes[0]); assert.deepStrictEqual([kid(rn, "start").slice(1), kid(rn, "end").slice(1)], [[105.41, 97.79], [110.49, 110.49]]);
   const tb = K.createItem(d, _.textBoxNode("box", [120, 120], [140, 130])); sch.select(tb.id); assert.ok(sch.onKey("r", {}, c)); const tn = fragItem(lastCommit(c).changes[0]); assert.deepStrictEqual([atOf(tn)[2], kid(tn, "size").slice(1)], [90, [10, 20]]);
   const fl = K.createItem(d, _.classLabelNode("Power", [150, 150], 0)); sch.select(fl.id); assert.ok(sch.onKey("r", {}, c)); const fn = fragItem(lastCommit(c).changes[0]); assert.deepStrictEqual(atOf(fn), [150, 150, 90]); assert.deepStrictEqual(atOf(kids(fn, "property")[0]), [147.46, 149.3015, 90], "the Netclass field is re-autoplaced for the new spin");
-  assert.ok(sch.onKey("y", {}, c)); assert.deepStrictEqual(atOf(fragItem(lastCommit(c).changes[0]))[2], 270, "Mirror Vertically flips a vertical flag");
+  // SCH_DIRECTIVE_LABEL::MirrorSpinStyle: "the text is in fact a graphic shape" — a flag at angle 90 lies along x, so
+  // Mirror Vertically leaves its angle and Mirror Horizontally swaps 90 and 270 (SPIN_STYLE::MirrorX)
+  assert.ok(sch.onKey("y", {}, c)); assert.deepStrictEqual(atOf(fragItem(lastCommit(c).changes[0]))[2], 90, "Mirror Vertically leaves a flag at 90");
+  assert.ok(sch.onKey("x", {}, c)); assert.deepStrictEqual(atOf(fragItem(lastCommit(c).changes[0]))[2], 270, "Mirror Horizontally flips a flag at 90");
   const sh = K.createItem(d, _.sheetNode([160, 160], [180, 170], "S", "S.kicad_sch")); _.placeSheetPin(c, sh, "P", [160, 165.1], "left"); c.selected = { id: sh.id }; sch.select(null);
   assert.ok(sch.onKey("r", {}, c)); const shn = fragItem(lastCommit(c).changes[0]); assert.deepStrictEqual(kid(shn, "size").slice(1), [10, 20]);
   const pin = kids(shn, "pin")[0]; assert.strictEqual(atOf(pin)[2], 270, "the left pin is now on the bottom edge"); assert.strictEqual(atOf(pin)[1], atOf(shn)[1] + 20);
@@ -1712,8 +1722,8 @@ await testAsync("sheet: two corners, name and file prompts, the file created on 
   const n = fragItem(cm.changes[0]);
   assert.deepStrictEqual(n.slice(0, 10), ["sheet", ["at", 101.6, 88.9], ["size", 25.4, 12.7], ["exclude_from_sim", "no"], ["in_bom", "yes"], ["on_board", "yes"], ["dnp", "no"], ["fields_autoplaced", "yes"], ["stroke", ["width", 0.1524], ["type", "solid"]], ["fill", ["color", 0, 0, 0, 0]]]);
   assert.strictEqual(n[10][0], "uuid");
-  assert.deepStrictEqual(n[11], ["property", "Sheetname", "Power", ["at", 101.6, 88.1888, 0], ["effects", ["font", ["size", 1.27, 1.27]], ["justify", "left", "bottom"]]], "name sits border/2 + 4 IU + 0.5 × text size above");
-  assert.deepStrictEqual(n[12], ["property", "Sheetfile", "Power.kicad_sch", ["at", 101.6, 102.1842, 0], ["effects", ["font", ["size", 1.27, 1.27]], ["justify", "left", "top"]]], "file sits border/2 + 4 IU + 0.4 × text size below");
+  assert.deepStrictEqual(n[11], ["property", "Sheetname", "Power", ["at", 101.6, 88.1884, 0], ["effects", ["font", ["size", 1.27, 1.27]], ["justify", "left", "bottom"]]], "name sits border/2 + 4 IU + 0.5 × text size above");
+  assert.deepStrictEqual(n[12], ["property", "Sheetfile", "Power.kicad_sch", ["at", 101.6, 102.1846, 0], ["effects", ["font", ["size", 1.27, 1.27]], ["justify", "left", "top"]]], "file sits border/2 + 4 IU + 0.4 × text size below");
   assert.deepStrictEqual(n[13], ["instances", ["project", "t", ["path", "/root-uuid", ["page", "2"]]]], "the path and project name this sheet's symbols record; page 2 of a 2-sheet project (quoted: a string to KiCad)");
   assert.strictEqual(n.length, 14);
   assert.ok(/\(page "2"\)/.test(cm.changes[0].sexpr) && /\(color 0 0 0 0\)/.test(cm.changes[0].sexpr), cm.changes[0].sexpr);
@@ -1732,9 +1742,12 @@ await testAsync("sheet: an existing file is referenced (no request) relative to 
   sch.onActivate("sheet", c); sch.onPointerDown(ev(), [10.16, 10.16], c); sch.onPointerDown(ev(), [30.48, 20.32], c);
   const before = c.log.length; await sch.state.sheetJob.promise;
   assert.strictEqual(c.log.length, before, "nothing committed"); assert.ok(c.toasts.some((m) => /Could not create the sheet: boom/.test(m))); assert.strictEqual(sch.state.sheetJob, null);
-  assert.strictEqual(_.nextPage(c, d), 3);
-  const sn = _.sheetNode([50.8, 50.8], [63.5, 63.5], "X", "X.kicad_sch"); sn.push(["instances", ["project", "t", ["path", "/root-uuid", ["page", "3"]]]]); K.createItem(d, sn);
-  assert.strictEqual(_.nextPage(c, d), 4);
+  // SCH_SHEET_LIST::GetNextPageNumber: the smallest positive integer no sheet of the hierarchy uses
+  const np = _.nextPage(c, d);
+  const sn = _.sheetNode([50.8, 50.8], [63.5, 63.5], "X", "X.kicad_sch"); sn.push(["instances", ["project", "t", ["path", "/root-uuid", ["page", String(np)]]]]); K.createItem(d, sn);
+  assert.strictEqual(_.nextPage(c, d), np + 1);
+  const sn2 = _.sheetNode([70, 50.8], [90, 63.5], "Y", "Y.kicad_sch"); sn2.push(["instances", ["project", "t", ["path", "/root-uuid", ["page", String(np + 2)]]]]); K.createItem(d, sn2);
+  assert.strictEqual(_.nextPage(c, d), np + 1, "a gap is filled before the highest page is passed");
   assert.deepStrictEqual(_.sheetInstance(c, d, 4), ["instances", ["project", "t", ["path", "/root-uuid", ["page", "4"]]]]);
   assert.strictEqual(_.sheetInstance(c, K.parseDoc('(kicad_sch (version 20250114) (generator "eeschema") (paper "A4"))'), 2), null, "no instance data without a known sheet path");
   // a subdirectory in the file name goes to the server verbatim, relative to this sheet's directory; the extension is added
@@ -1872,7 +1885,7 @@ test("point editor: no handles on wires, joined graphic lines follow, a sheet's 
   const wire = ch.find((x) => x.typeName === "SCH_LINE"); assert.ok(wire, "the wire on the pin follows"); assert.deepStrictEqual(ptsOf(fragItem(wire))[0], [160.02, 160.02]);
   c.selected = { id: sheet.id };
   assert.ok(_.pointEditStart(c, [127, 172.72], {})); _.pointEditMove(c, [127, 165.1], {}); ch = _.pointEditEnd(c, true);
-  assert.strictEqual(kid(fragItem(ch[0]), "size")[2], 17.78, "the bottom stops where the left pin still fits");
+  assert.strictEqual(kid(fragItem(ch[0]), "size")[2], 19.05, "the bottom stops at SCH_SHEET::GetMinHeight: the left pin's text box bumped to the next 50 mil");
 });
 
 test("ghostSegs: the in-flight wire is offered to peers as mm segments", () => {

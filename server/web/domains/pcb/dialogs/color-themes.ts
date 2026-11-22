@@ -3,7 +3,7 @@
 // colors/*.json, kept with the preferences here) and the checks the panel makes.  No editor imports.
 
 /** A theme the user made with New Theme...: its name, and every palette key's colour (web/domains/pcb/canvas/colors.ts SCH_DEFAULT). */
-export interface UserSchTheme { id: string; name: string; colors: Record<string, string> }
+export interface UserSchTheme { id: string; name: string; colors: Record<string, string>; /** "Override individual item colors" (schematic.override_item_colors) */ overrideItemColors?: boolean }
 
 /**
  * The swatches of PANEL_EESCHEMA_COLOR_SETTINGS::createSwatches (eeschema/dialogs/panel_eeschema_color_settings.cpp):

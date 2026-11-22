@@ -12,12 +12,14 @@ import { checkField, currentUnits, fmtLen, form, h, lenField, messageBox, openDi
 interface Result { changes: KChange[]; label: string; message: string | null; select: string[] }
 interface ShapeApi {
   modifyLines(doc: KDoc, ids: string[], op: string, value: number): Result | { error: string };
+  lineCheck(doc: KDoc, ids: string[], op: string): string | null;
   simplifyPolygons(doc: KDoc, ids: string[], tol: number): Result;
   booleanPolygons(doc: KDoc, ids: string[], op: string): Result;
 }
 interface OutsetParams { outset: number; roundCorners: boolean; useSourceLayers: boolean; useSourceWidths: boolean; layer: string; lineWidth: number; gridRounding: number | null; deleteSourceItems: boolean }
 interface OutsetApi { outsetItems(doc: KDoc, ids: string[], p: OutsetParams): Result; outsetDefaults(fpEditor: boolean, lineWidth: (layer: string) => number): OutsetParams }
-const PT = (): { shapeModify: ShapeApi; outset: OutsetApi; layerStyle(layer: string): { line: number }; boardLayerName(doc: KDoc, l: string): string; applySelection?(ctx: ToolCtx, ids: string[]): void; unlockedIds?(ctx: ToolCtx, ids: string[], quiet: boolean): string[] } =>
+const PT = (): { shapeModify: ShapeApi; outset: OutsetApi; layerStyle(layer: string): { line: number }; boardLayerName(doc: KDoc, l: string): string; applySelection?(ctx: ToolCtx, ids: string[]): void; unlockedIds?(ctx: ToolCtx, ids: string[], quiet: boolean): string[];
+  requestSelection?(ctx: ToolCtx, opts: { locks?: boolean; filter?(it: KItem): boolean; rerun?(c: ToolCtx): void }): { ids: string[]; hover: boolean } | null } =>
   (window as unknown as { PcbTools: ReturnType<typeof PT> }).PcbTools;
 // s_filletRadius (1 mm), the chamfer setback (1 mm) and s_toleranceValue (3 mm)
 const remembered: Record<string, number> = { filletLines: 1, chamferLines: 1, simplifyPolygons: 3 };
@@ -38,24 +40,54 @@ function apply(ctx: ToolCtx, r: Result | { error: string }): void {
 }
 const board = (ctx: ToolCtx): KDoc | null => (ctx.doc && ctx.doc.type === "pcb" && !ctx.viewOnly ? ctx.doc : null);
 
+/**
+ * RequestSelection with the action's client filter: the selection, or the item under the cursor (which becomes the
+ * selection), cut down to the kinds the action takes; FilterCollectorForLockedItems + ReportFilteredLockedItems on a
+ * board (a footprint holder's items are never locked).  null: nothing to act on.
+ */
+function request(ctx: ToolCtx, doc: KDoc, keep: (it: KItem) => boolean, rerun: (c: ToolCtx) => void): string[] | null {
+  const P = PT(); let ids: string[];
+  if (P.requestSelection) {
+    const sel = P.requestSelection(ctx, { locks: false, filter: keep, rerun }); if (!sel) return null;
+    ids = sel.ids.filter((id) => { const it = doc.items.get(id); return !!it && keep(it); });
+    if (sel.hover && P.applySelection) P.applySelection(ctx, sel.ids);
+  } else ids = selectionIds().filter((id) => { const it = doc.items.get(id); return !!it && keep(it); });
+  if (!doc.fpEditor && P.unlockedIds) ids = P.unlockedIds(ctx, ids, false);
+  return ids.length ? ids : null;
+}
+const LINE_KINDS = new Set(["gr_line", "gr_rect", "gr_poly"]), BOOL_KINDS = new Set(["gr_poly", "gr_rect", "gr_circle"]);
+const isLineKind = (it: KItem): boolean => LINE_KINDS.has(it.kind);
+/** ModifyLines: the line count is checked before the routine's dialog opens. */
+function linesFor(ctx: ToolCtx, doc: KDoc, op: string, rerun: (c: ToolCtx) => void): string[] | null {
+  const ids = request(ctx, doc, isLineKind, rerun) || [];
+  const err = PT().shapeModify.lineCheck(doc, ids, op); if (err) { ctx.toast(err); return null; }
+  return ids;
+}
 export function filletLines(ctx: ToolCtx): void {
-  const doc = board(ctx); if (!doc) return; const ids = selectionIds();
+  const doc = board(ctx); if (!doc) return; const ids = linesFor(ctx, doc, "filletLines", filletLines); if (!ids) return;
   unitEntry("Fillet Lines", "Radius:", "filletLines", (v) => apply(ctx, PT().shapeModify.modifyLines(doc, ids, "filletLines", v)));
 }
 export function chamferLines(ctx: ToolCtx): void {
-  const doc = board(ctx); if (!doc) return; const ids = selectionIds();
+  const doc = board(ctx); if (!doc) return; const ids = linesFor(ctx, doc, "chamferLines", chamferLines); if (!ids) return;
   unitEntry("Chamfer Lines", "Chamfer setback:", "chamferLines", (v) => apply(ctx, PT().shapeModify.modifyLines(doc, ids, "chamferLines", v)));
 }
 export function extendLines(ctx: ToolCtx): void {
   const doc = board(ctx); if (!doc) return;
-  apply(ctx, PT().shapeModify.modifyLines(doc, selectionIds(), "extendLines", 0));
+  const ids = linesFor(ctx, doc, "extendLines", extendLines); if (!ids) return;
+  apply(ctx, PT().shapeModify.modifyLines(doc, ids, "extendLines", 0));
 }
 export function simplifyPolygons(ctx: ToolCtx): void {
-  const doc = board(ctx); if (!doc) return; const ids = selectionIds();
+  const doc = board(ctx); if (!doc) return;
+  // PCB_SHAPE_LOCATE_POLY_T and zones, teardrop areas left out
+  const ids = request(ctx, doc, (it) => it.kind === "gr_poly" || (it.kind === "zone" && !(it.node as unknown[]).some((c) => Array.isArray(c) && c[0] === "attr")), simplifyPolygons) || [];
   unitEntry("Simplify Shapes", "Tolerance value:", "simplifyPolygons", (v) => apply(ctx, PT().shapeModify.simplifyPolygons(doc, ids, v)));
 }
 export function booleanPolygons(op: "mergePolygons" | "subtractPolygons" | "intersectPolygons"): (ctx: ToolCtx) => void {
-  return (ctx) => { const doc = board(ctx); if (!doc) return; apply(ctx, PT().shapeModify.booleanPolygons(doc, selectionIds(), op)); };
+  const run = (ctx: ToolCtx): void => {
+    const doc = board(ctx); if (!doc) return;
+    apply(ctx, PT().shapeModify.booleanPolygons(doc, request(ctx, doc, (it) => BOOL_KINDS.has(it.kind), run) || [], op));
+  };
+  return run;
 }
 
 // DIALOG_OUTSET_ITEMS' statics: the presets and the values used this session (sorted, without repeats)

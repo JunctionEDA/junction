@@ -50,14 +50,15 @@ export function uuidIndex(doc: KDoc): Map<string, string> {
 }
 
 /** A kicad-cli violation as a dialog marker: its rule, severity, message, place and the items it names. */
-export function toMarker(v: CliViolation, ids: Map<string, string>): { code: string; severity: string; x: number; y: number; text: string; ids: string[]; kiids: string[]; descs: string[]; layer?: string; excluded?: boolean; comment?: string; items: { x: number; y: number; desc: string }[] } {
+export function toMarker(v: CliViolation, ids: Map<string, string>): { code: string; severity: string; x: number; y: number; text: string; ids: string[]; kiids: string[]; descs: string[]; layer?: string; excluded?: boolean; comment?: string; items: { x: number; y: number; desc: string; id?: string; uuid?: string }[] } {
   const items = v.items || [];
   const at = v.pos || (items[0] && items[0].pos) || { x: 0, y: 0 };
   const found = items.map((i) => (i.uuid ? ids.get(i.uuid) || "" : "")).filter((x) => x);
   return {
     code: v.type, severity: v.severity === "error" ? "error" : v.severity === "warning" ? "warning" : v.severity,
     x: at.x, y: at.y, text: v.description, ...(v.layer ? { layer: v.layer } : {}), ids: Array.from(new Set(found)), kiids: items.map((i) => i.uuid || "").filter((u) => u), descs: items.map((i) => i.description),
-    items: items.map((i) => ({ x: i.pos ? i.pos.x : at.x, y: i.pos ? i.pos.y : at.y, desc: i.description })),
+    // each item with its own uuid (a pin's) and the id of the item that holds it, for the report and the cross-probe
+    items: items.map((i) => ({ x: i.pos ? i.pos.x : at.x, y: i.pos ? i.pos.y : at.y, desc: i.description, ...(i.uuid ? { uuid: i.uuid, ...(ids.get(i.uuid) ? { id: ids.get(i.uuid) } : {}) } : {}) })),
     ...(v.excluded ? { excluded: true, comment: v.comment || "" } : {}),
   };
 }

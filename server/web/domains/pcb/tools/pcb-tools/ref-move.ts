@@ -16,24 +16,33 @@ import { replacedChange } from "./changes";
 import { clipSet, clipboardText, cursorPoint } from "./clipboard";
 import { KD, openForm } from "./dialogs";
 import { sizeUnits } from "./edit-commands";
-import { pickInteractively } from "./dom";
-import { applySelection } from "./groups";
+import { pickInteractively, pickTwoPoints } from "./dom";
+import { applySelection, expandGroups } from "./groups";
 import { beginCarryMove, finishSelectMove } from "./select-move";
-import { S } from "./state";
-import { moveChanges } from "./transforms";
+import { K, S } from "./state";
+import { bboxUnion, moveChanges } from "./transforms";
 import { anchorOf } from "./transforms";
 import { clone, r6 } from "./util";
 
 export interface MoveSeq { ids: string[]; idx: number; base: Map<string, SNode>; committed: boolean }
 
-/** The word KiCad's popup names an item by: a footprint's reference, else its type description in lower case. */
-export function itemWord(it: KItem): string {
+/**
+ * The word KiCad's popup names an item by (updateStatusPopup): a footprint's reference, "%s pad %s" for a pad of a
+ * footprint, else EDA_ITEM::GetTypeDesc().Lower() (ENUM_MAP<KICAD_T>: every shape is a "graphic", a field a "text",
+ * a leader dimension a "leader").
+ */
+export function itemWord(it: KItem, doc?: { items: Map<string, KItem> } | null): string {
   if (it.kind === "footprint") return it.ref || "";
+  if (it.kind === "pad") { const fp = doc && Array.from(doc.items.values()).find((x) => x.kind === "footprint"); return `${fp ? fp.ref || "" : ""} pad ${K.str(it.node[1])}`.trim(); }
+  if (it.kind === "dimension" && K.str((K.kid(it.node, "type") || [])[1]) === "leader") return "leader";
+  if (it.kind === "property" || it.kind === "fp_text") return "text";
+  if (/^fp_(line|rect|circle|arc|poly|curve)$/.test(it.kind)) return "graphic";
+  if (it.kind === "fp_text_box") return "text box";
   const T: Record<string, string> = { segment: "track", arc: "track", via: "via", zone: "zone", gr_line: "graphic", gr_rect: "graphic", gr_circle: "graphic", gr_arc: "graphic", gr_poly: "graphic", gr_curve: "graphic",
     gr_text: "text", gr_text_box: "text box", dimension: "dimension", image: "reference image", table: "table", group: "group", generated: "generator", target: "target", point: "point", barcode: "barcode" };
   return T[it.kind] || it.kind;
 }
-export const moveIndividuallyText = (it: KItem, i: number, n: number) => `Click to place ${itemWord(it)} (item ${i} of ${n})\nPress <esc> to cancel all; double-click to finish`;
+export const moveIndividuallyText = (it: KItem, i: number, n: number, doc?: { items: Map<string, KItem> } | null) => `Click to place ${itemWord(it, doc)} (item ${i} of ${n})\nPress <esc> to cancel all; double-click to finish`;
 
 /** Move with Reference: the picked point is the move's reference point; Escape at the pick ends it (a hover selection is cleared). */
 export function moveWithReference(ctx: PcbCtx, ids: string[], hover: boolean) {
@@ -56,12 +65,15 @@ export function copyWithReference(ctx: PcbCtx, ids: string[], hover: boolean) {
   return true;
 }
 
-/** Move Individually: the first item picked up; each click places one and picks up the next. */
+/**
+ * Move Individually: the first item picked up; each click places one and picks up the next.  A selected group is one
+ * item of the sequence (it moves whole, about PCB_GROUP::GetPosition(), the middle of its box).
+ */
 export function moveIndividually(ctx: PcbCtx, ids: string[]) {
-  const items = ids.map((id) => ctx.doc.items.get(id)).filter((it): it is KItem => !!it && it.kind !== "group");
+  const items = ids.map((id) => ctx.doc.items.get(id)).filter((it): it is KItem => !!it);
   if (!items.length) return true;
   const seq: MoveSeq = { ids: items.map((it) => it.id), idx: 0, base: new Map(), committed: false };
-  for (const it of items) seq.base.set(it.id, clone(it.node));
+  for (const id of expandGroups(ctx.doc, seq.ids)) { const it = ctx.doc.items.get(id); if (it && it.kind !== "group") seq.base.set(id, clone(it.node)); }
   S.moveSeq = seq; pickUp(ctx, seq);
   return true;
 }
@@ -70,7 +82,9 @@ function pickUp(ctx: PcbCtx, seq: MoveSeq) {
   if (!it) { nextItem(ctx, seq); return; }
   applySelection(ctx, [id]);
   // the item's position goes to the cursor: its position is the reference point (nextItem->Move( cursor - pos ))
-  if (!beginCarryMove(ctx, { ids: [id], origin: anchorOf(it) }) || !S.move) { S.moveSeq = null; return; }
+  const members = it.kind === "group" ? Array.from(expandGroups(ctx.doc, [id])).map((m) => ctx.doc.items.get(m)).filter((m): m is KItem => !!m && m.kind !== "group") : [];
+  const gb = it.kind === "group" ? bboxUnion(members) : null;
+  if (!beginCarryMove(ctx, { ids: [id], origin: gb ? [(gb[0] + gb[2]) / 2, (gb[1] + gb[3]) / 2] : anchorOf(it) }) || !S.move) { S.moveSeq = null; S.popup = null; return; }
   const m = S.move; m.amend = seq.committed;
   m.after = (placed, wrote) => {
     if (S.moveSeq !== seq) return;
@@ -78,7 +92,7 @@ function pickUp(ctx: PcbCtx, seq: MoveSeq) {
     if (!placed) { cancelAll(ctx, seq); return; }
     nextItem(ctx, seq);
   };
-  S.popup = { text: moveIndividuallyText(it, seq.idx + 1, seq.ids.length), at: ctx.cursor ? ctx.cursor.slice() : cursorPoint(ctx), until: Number.MAX_SAFE_INTEGER }; ctx.requestRender();   // follows the cursor (select-move.ts)
+  S.popup = { text: moveIndividuallyText(it, seq.idx + 1, seq.ids.length, ctx.doc), at: ctx.cursor ? ctx.cursor.slice() : cursorPoint(ctx), until: Number.MAX_SAFE_INTEGER }; ctx.requestRender();   // follows the cursor (select-move.ts)
 }
 function nextItem(ctx: PcbCtx, seq: MoveSeq) {
   if (++seq.idx < seq.ids.length) { pickUp(ctx, seq); return; }
@@ -88,10 +102,20 @@ function nextItem(ctx: PcbCtx, seq: MoveSeq) {
 function cancelAll(ctx: PcbCtx, seq: MoveSeq) {
   S.moveSeq = null; S.popup = null;
   if (seq.committed) {
-    const back = seq.ids.slice(0, seq.idx).filter((id) => ctx.doc.items.has(id)).map((id) => replacedChange(ctx.doc.items.get(id)!, seq.base.get(id)!));
+    const back = Array.from(expandGroups(ctx.doc, seq.ids.slice(0, seq.idx))).filter((id) => ctx.doc.items.has(id) && seq.base.has(id)).map((id) => replacedChange(ctx.doc.items.get(id)!, seq.base.get(id)!));
     if (back.length) ctx.commit(back, "cancel", { amend: true, discard: true });
   }
   applySelection(ctx, []); ctx.requestRender();
+}
+/**
+ * A double-click while moving individually (evt->IsDblClick( BUT_LEFT )): "The first click will move the new item, so
+ * put it back" - the item just picked up returns to where it was and the sequence ends with what was placed so far.
+ */
+export function finishMoveIndividually(ctx: PcbCtx): boolean {
+  const seq = S.moveSeq, m = S.move; if (!seq || !m || !m.after) return false;
+  const id = seq.ids[seq.idx];
+  m.after = undefined; finishSelectMove(ctx, false);
+  S.moveSeq = null; S.popup = null; applySelection(ctx, ctx.doc.items.has(id) ? [id] : []); ctx.requestRender(); return true;
 }
 /** PCB_ACTIONS::skip (Tab) while moving individually: the current item goes back where it was and the next is picked up. */
 export function skipMoveItem(ctx: PcbCtx): boolean {
@@ -107,18 +131,18 @@ export function skipMoveItem(ctx: PcbCtx): boolean {
 export function interactiveOffset(ctx: PcbCtx, ids: string[], hover: boolean) {
   const done = () => { if (hover) applySelection(ctx, []); };
   const round = (): void => {
-    pickInteractively(ctx, "point", "Select the reference point on the item to move.", (a) => {
-      if (!a || !Array.isArray(a)) { done(); return; }
-      pickInteractively(ctx, "point", "Select the point to define the new offset from.", (b) => {
-        if (!b || !Array.isArray(b)) { round(); return; }       // Escape with the origin set: cleanup(), back to the first point
-        const P = a as Pt, Q = b as Pt; const off: Pt = [r6(P[0] - Q[0]), r6(P[1] - Q[1])];
-        openOffsetDialog(ctx, off, (o) => {
-          const mv: Pt = [Q[0] - P[0] + o[0], Q[1] - P[1] + o[1]];
-          // moveSelectionBy: the selection translated by the vector (positionRelativeChanges to the anchor's new place)
-          const ch = offsetChanges(ctx, ids, mv); if (ch.length) ctx.commit(ch, "Set Relative Position Interactively");
-          ctx.requestRender(); round();
-        }, round);
-      });
+    // the two-step ruler (TWO_POINT_GEOMETRY_MANAGER + RULER_ITEM as an arrow): its end stays on the reference point,
+    // its origin follows the cursor; Escape with the first point set goes back to the first point (cleanup())
+    pickTwoPoints(ctx, "Select the reference point on the item to move.", "Select the point to define the new offset from.", "ruler", (P, Q) => {
+      if (!P || !Q) { done(); return; }
+      const off: Pt = [r6(P[0] - Q[0]), r6(P[1] - Q[1])];
+      S.pickKeep = [Q, P];   // the arrow stays drawn while Offset Item is open
+      openOffsetDialog(ctx, off, (o) => {
+        const mv: Pt = [Q[0] - P[0] + o[0], Q[1] - P[1] + o[1]];
+        // moveSelectionBy: the selection translated by the vector (positionRelativeChanges to the anchor's new place)
+        const ch = offsetChanges(ctx, ids, mv); if (ch.length) ctx.commit(ch, "Set Relative Position Interactively");
+        ctx.requestRender(); round();
+      }, round);
     });
   };
   round();

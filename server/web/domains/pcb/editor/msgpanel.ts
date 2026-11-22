@@ -10,6 +10,8 @@ import { isSch } from "./view";
 import { selectionIds } from "./gestures";
 import { nameOfPick, netMap } from "./schnets";
 import { variantView } from "./variant";
+import { messageText } from "../../../shared/units";
+import type { Units } from "../../../shared/store";
 
 export interface MsgItem { title: string; value: string }
 type PcbApi = { msgPanelInfo?: (doc: KDoc, ids: string[], opts: Record<string, unknown>) => MsgItem[]; designSettings?: (src: unknown) => unknown };
@@ -102,13 +104,13 @@ function updateSchMsgPanel(doc: KDoc): void {
   let items: MsgItem[] = [];
   if (sel && M && M.msgPanelInfo) {
     try {
-      items = M.msgPanelInfo(doc, sel, { units: E.units, sheetPath, ellipsize, connection: (it: KItem, pin?: string) => connectionOf(it, pin) });
+      items = M.msgPanelInfo(doc, sel, { units: E.units, sheetPath, rootName: rootFileName(), ellipsize, connection: (it: KItem, pin?: string) => connectionOf(it, pin) });
     } catch (e) { console.warn(e); }
   }
   store.set({ msgPanel: { items } });
 }
 
-interface ErcMarkerSel { code: string; severity: string; text: string; ids: string[]; base?: string; comment?: string; selected?: boolean }
+interface ErcMarkerSel { code: string; severity: string; text: string; ids: string[]; base?: string; comment?: string; selected?: boolean; items?: { desc: string; len?: number }[] }
 /** The ERC marker selected on the canvas (SCH_SELECTION_TOOL holds a SCH_MARKER_T), or null. */
 function selectedErcMarker(): ErcMarkerSel | null { return ((E.markers || []) as ErcMarkerSel[]).find((m) => m && m.selected) || null; }
 /** SCH_MARKER::GetMsgPanelInfo: Type / Violation / Severity, the main and aux items' descriptions, the exclusion comment. */
@@ -119,24 +121,40 @@ function markerMsgPanel(doc: KDoc, m: ErcMarkerSel): MsgItem[] {
   const un = (KiCadCanvas as unknown as { unescapeText?: (s: string) => string }).unescapeText, text = un ? un(m.text) : m.text;
   const out: MsgItem[] = [{ title: "Type", value: "Marker" }, { title: "Violation", value: text }];
   if (sev === "warning") out.push({ title: "Severity", value: "Warning" }); else if (sev === "error") out.push({ title: "Severity", value: "Error" }); else if (sev === "ignore") out.push({ title: "Severity", value: "Ignore" });
-  out.push({ title: desc(m.ids[0]), value: desc(m.ids[1]) });
+  // the violation's own main and aux items (a pin violation names the pin, "Symbol U1 Pin 3 [IN+, Input, Line]"), on whichever sheet they are
+  const own = (i: number): string | null => { const r = m.items && m.items[i]; return r ? (r.len !== undefined ? r.desc.replace("%L", messageText(r.len, (E.units === "in" || E.units === "mil" ? E.units : "mm") as Units, "sch")) : r.desc) : null; };
+  const main = own(0), aux = own(1);
+  out.push(m.items && m.items.length ? { title: main || "", value: aux || "" } : { title: desc(m.ids[0]), value: desc(m.ids[1]) });
   if (excluded) out.push({ title: "Excluded", value: m.comment || "" });
   return out;
 }
 
+/** The root sheet's file name without its extension (SCH_SHEET_PATH::PathHumanReadable( false ) starts with it). */
+function rootFileName(): string { try { const c = netMap(); return c ? c.rootName : ""; } catch (e) { return ""; } }
 /** SCH_CONNECTIVITY::AppendConnectionInfo's data: the connection's name, bus or net, and the net's resolved netclass. */
-function connectionOf(it: KItem, pin?: string): { name: string; bus: boolean; netclass: string } | null {
+function connectionOf(it: KItem, pin?: string): { name: string; bus: boolean; netclass: string; wireWidth?: number; aliases?: { name: string; members: string[] }[] } | null {
   const r = nameOfPick({ item: it, pin }); if (!r || !r.name) return null;
   const c = netMap(); const e = c ? c.map.get(r.name) : null;
   const bus = !!(e && e.bus);
-  let netclass = "Default";
+  let netclass = "Default", wireWidth: number | undefined;
   if (!bus) {
-    const PS = (KiCadCanvas as unknown as { pcbSizes?: { boardSizes(src: unknown): unknown; effectiveNetclass(s: unknown, net: string): { name?: string } } }).pcbSizes;
-    if (PS) { try { if (sizesSrc !== E.proSettings) { sizesSrc = E.proSettings; sizes = PS.boardSizes(E.proSettings || null); } netclass = PS.effectiveNetclass(sizes, r.name).name || "Default"; } catch (e2) { /* no project */ } }
+    const PS = (KiCadCanvas as unknown as { pcbSizes?: { boardSizes(src: unknown): unknown; effectiveNetclass(s: unknown, net: string): { name?: string }; effectiveNetclassNames?(s: unknown, net: string): string[] } }).pcbSizes;
+    if (PS) { try { if (sizesSrc !== E.proSettings) { sizesSrc = E.proSettings; sizes = PS.boardSizes(E.proSettings || null); } netclass = PS.effectiveNetclass(sizes, r.name).name || "Default";
+      if (PS.effectiveNetclassNames) wireWidth = netclassWireWidth(PS.effectiveNetclassNames(sizes, r.name)); } catch (e2) { /* no project */ } }
   }
-  return { name: r.name, bus, netclass };
+  return { name: r.name, bus, netclass, wireWidth, aliases: bus && e && e.aliases ? e.aliases : undefined };
 }
 let sizesSrc: unknown = undefined, sizes: unknown = null;
+/**
+ * The effective netclass's wire width in mm (NETCLASS::GetWireWidth of the merged class: the first of the net's
+ * classes, by priority, that sets one, else the Default class's; net_settings.classes[].wire_width is in mils).
+ */
+function netclassWireWidth(names: string[]): number {
+  let classes: { name?: string; wire_width?: number }[] = [];
+  try { const pro = JSON.parse((E.proSettings as string | null) || "{}") as { net_settings?: { classes?: { name?: string; wire_width?: number }[] } }; classes = (pro.net_settings && pro.net_settings.classes) || []; } catch (e) { classes = []; }
+  for (const n of [...names, "Default"]) { const c = classes.find((x) => x.name === n); if (c && typeof c.wire_width === "number") return c.wire_width * 0.0254; }
+  return 6 * 0.0254;
+}
 
 /**
  * FOOTPRINT::GetMsgPanelInfo in the Footprint Editor (nothing selected: the frame shows the footprint): reference /

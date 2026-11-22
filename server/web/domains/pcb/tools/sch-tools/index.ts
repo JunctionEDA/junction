@@ -19,7 +19,7 @@ import type { NetHighlighter, Pt, SchCtx } from "./types";
 import { root } from "../root";
 import { actions, runAction } from "./actions";
 import { isLockedItem, isLockedNode, modifyLock, setLockedNode } from "./lock";
-import { annotate, annotateChanges, annotateMessages, clearAnnotation, clearAnnotationChanges, cycleBodyStyle, incrementAnnotationChanges, editFieldPrompt, libUnits, placeNextUnit, showDatasheet, splitRef, stepUnit, toggleSymbolFlag, symbolShownText, unplacedUnits } from "./annotate";
+import { annotate, annotateChanges, annotateMessages, clearAnnotation, clearAnnotationChanges, cycleBodyStyle, incrementAnnotationChanges, editFieldPrompt, libUnits, placeNextUnit, showDatasheet, splitRef, stepUnit, toggleSymbolFlag, symbolShownText, unplacedUnits, annotateHierarchy, clearAnnotationHierarchy, replaceDuplicateIds, checkAnnotation, compareRef, deserializeTracker, inferredSelection, instanceOn, newSymbolMinRef, refOn, serializeTracker, setInstanceOn, sheetOf, sheetReferences, subReference, unitOn } from "./annotate";
 import { areaCandidates, candInPoly, crossProbeZoomRatio, polyArea, bodyAndPinsBox, candBox, candHit, candInBox, candOfKey, clickCandidates, collectHits, fieldKey, guessCandidates, narrowCands, pinKey, selectableItem, shapeFilled, sheetBody } from "./guess";
 import { autoplaceNode, autoplaceSelection, bodyBox, fieldExtent, globalPowerPin, symbolPins, autoplaceLabelNode } from "./autoplace";
 import { dropCarry, placeCarry, placeText, singleClickPlace, startCarry, placeLabel } from "./carry";
@@ -30,8 +30,8 @@ import { convertNode, convertSelection, validNetname } from "./convert";
 import { autostartKind, danglingEnds, danglingLabelIds, dragJunctions, drawOverlay } from "./dangling";
 import { type PromptFn, cursorNow, cursorPos, autostartAt, isPowerSymbol, onDownCapture, onKeyCapture, onUpCapture, pickSymbol, placeClassLabel, powerSymbols, setPromptImpl } from "./dom";
 import { beginDrag, cancelDrag, cleanupAt, connPoints, cycleLineMode, endDrag, foldChanges, makeAnchor, modeText, moveDrag, orthoLineDrag, ridersOf, setDragMode, setMouseDragMode, setLineMode, junctionMerges } from "./drag";
-import { hierarchyTests, isGroundName, letterSubReference, normalizeSimilar, stackedPinNotationValid } from "./erc-tests";
-import { cleanupSheetPins, ercCheck, ercNets, itemRef, pinItemRef, runERC, subsheetDoc, syncSheetPins, autoPlaceSheetPinsNode, pinErrorAt, pinErrorSeverity, stackedPins, strNumCmp } from "./erc";
+import { hierarchyTests, isGroundName, letterSubReference, normalizeSimilar, stackedPinNotationValid, checkAnnotate } from "./erc-tests";
+import { cleanupSheetPins, ercCheck, ercNets, itemRef, pinItemRef, runERC, subsheetDoc, syncSheetPins, autoPlaceSheetPinsNode, pinErrorAt, pinErrorSeverity, stackedPins, strNumCmp, type ErcOpts, netTests, withKiids } from "./erc";
 import { fieldsTableChanges, fieldsTableRows, openFieldsTable } from "./fields-table";
 import { highlightClick, netItems, pickNet, setHighlight, terminalsOf } from "./highlight";
 import { geomDist, hitNonSymbol, pickAny, pickNonSymbol, textRect } from "./hit";
@@ -39,7 +39,7 @@ import { busyMessage, hotkeyTool, onActivate, onDocChanged, onKey, onPointerDown
 import { IMAGE_ACCEPT, type ImagePickerFn, openImagePicker, setImagePickerImpl } from "./images";
 import { analyzePoint, cancelWire, editTxn, explicitJunctionAllowed, explicitJunctionNeeded, finishWire, previewJunctions, txnCleanUp, txnTrimWire } from "./junction";
 import { expandConnectionGraphically, expandConnectionWithGraph, selectConnection, selectNode, stepNetItem } from "./netwalk";
-import { SHEET_FILE_OFF, SHEET_NAME_OFF, arcNode, base64ToBytes, bezierNode, busEntryNode, bytesToBase64, circleNode, classLabelNode, imageData, imageNode, imageSize, junctionNode, labelNode, lineNode, noConnectNode, polygonNode, polylineNode, rectangleNode, ruleAreaNode, sheetNode, sheetCorner, sheetPinNode, ellipseFromBox, ellipseArcAngles, ellipseNode, symbolNode, tableNode, drawTableNode, drawTableSize, textBoxNode } from "./nodes";
+import { SHEET_FILE_OFF, SHEET_NAME_OFF, arcNode, base64ToBytes, bezierNode, busEntryNode, bytesToBase64, circleNode, classLabelNode, imageData, imageNode, imageSize, junctionNode, labelNode, lineNode, noConnectNode, polygonNode, polylineNode, rectangleNode, ruleAreaNode, sheetNode, sheetCorner, sheetPinNode, ellipseFromBox, ellipseArcAngles, ellipseNode, symbolNode, tableNode, drawTableNode, drawTableSize, textBoxNode, autoplaceSheetFields, placeFlagFields, labelShapeFollowers, hierLabelShapeChanges, sheetPinShapeChanges } from "./nodes";
 import { MX, MY, RCCW, anchorOf, cloneNode, mirrorNode, mul, orientOf, orientSymbol, rotateNode, shiftNode, tFrom } from "./orient";
 import { ghostSegs } from "./overlay";
 import { collisionInit, collisionMarkers } from "./collision";
@@ -87,9 +87,19 @@ const sch = {
   // KiCad's non-tool commands: { id: { id, label, key, run(ctx, opts) -> handled } }; app.js binds menus and keys to them
   actions, runAction, markers() { return S.markers; },
   // clipboard text in the desktop's format and its parser, ERC and annotation as pure functions over a doc
-  clipboardText, parseClipboard, placeImported, ercCheck, incrementAnnotationChanges, ercHierarchy: (docs: { doc: KDoc; key: string }[]) => hierarchyTests(docs.map((d) => ({ doc: d.doc, key: d.key, nets: ercNets(d.doc).nets })), itemRef, pinItemRef), annotateChanges, annotateMessages, clearAnnotationChanges, fieldsTableRows, fieldsTableChanges, busMembers,
+  // SCH_LABEL_BASE::SetLabelShape: what follows a hierarchical label's or a sheet pin's new shape
+  labelShapeFollowers, hierLabelShapeChanges, sheetPinShapeChanges,
+  clipboardText, parseClipboard, placeImported, ercCheck, incrementAnnotationChanges, ercHierarchy: (docs: { doc: KDoc; key: string; path?: string | null; page?: number; parent?: number | null; sheetId?: string | null; root?: boolean }[], opts?: ErcOpts | null) => {
+    // the tests over every sheet at once: ERC_TESTER's hierarchy-wide tests, then the ones on whole nets
+    const infos = docs.map((d) => ercNets(d.doc));
+    const per = hierarchyTests(docs.map((d, i) => ({ doc: d.doc, key: d.key, path: d.path, page: d.page, nets: infos[i].nets })), itemRef, pinItemRef);
+    const nets = netTests(docs.map((d, i) => ({ doc: d.doc, key: d.key, info: infos[i], parent: d.parent, sheetId: d.sheetId, root: d.root })), opts);
+    return per.map((l, i) => withKiids(l.concat(nets[i])));
+  },
+  // SCH_EDIT_FRAME::CheckAnnotate( handler, ANNOTATE_ALL ) over the hierarchy's sheets: the number of annotation errors
+  checkAnnotate, annotateChanges, annotateHierarchy, clearAnnotationHierarchy, replaceDuplicateIds, checkAnnotation, sheetReferences, inferredSelection, serializeTracker, deserializeTracker, annotateMessages, clearAnnotationChanges, fieldsTableRows, fieldsTableChanges, busMembers,
   _: { setFollow(on: boolean) { S.forceFollow = !!on; }, junctionMerges, sheetAutoplaceFields, annotatePastedUnique, annotationSettings, pastedSheetRecursion, schItemAsText, itemPosition, setImageFlipImpl, pasteSpecial, pasteSelection, isGroundName, stackedPinNotationValid, normalizeSimilar, letterSubReference, pinErrorAt, pinErrorSeverity, stackedPins, strNumCmp, isLockedNode, isLockedItem, setLockedNode, modifyLock, lineEndAt, lineEndDangling, selectThreshold, danglingLabelIds, dragJunctions, schArcDrawMode, pinAt, pinBox, pinAltFunction, pinOf, pinProperties, pinHelper, PIN_HELPERS, swapPinLabels, singleNetLabelForPin, labelShapeForPin, pinAlternates, setAltPinFunction, labelOrientationForPoint, autoRotateNode, autoRotateChanges, autoRotateOf, setAutoRotate, setSpinOfNode, spinOfNode, textBoxMinSize, globalPowerPin, breakAgain, sourceLine, danglingEnds, endBreak, onKeyCapture, onUpCapture, onDownCapture, selectedItems, setSelectionIds, cursorOf, pasteChanges, pasteText, cutSelection, copySelection, duplicateSelection, copyAsText, incrementText, incrementLabelNode, repeatLast, rememberPlaced,
-    convertNode, convertSelection, validNetname, symbolPins, bodyBox, fieldExtent, autoplaceNode, autoplaceSelection, splitRef, setReference, assignPastedRef, annotate, clearAnnotation,
+    convertNode, convertSelection, validNetname, symbolPins, bodyBox, fieldExtent, autoplaceNode, autoplaceSelection, splitRef, setReference, assignPastedRef, annotate, clearAnnotation, compareRef, newSymbolMinRef, subReference, sheetOf, setInstanceOn, instanceOn, refOn, unitOn,
     ercNets, runERC, subsheetDoc, syncSheetPins, cleanupSheetPins, autoPlaceSheetPinsNode, transformNode, transformChanges, transformSelected, selectionCentre, halfGrid, swapNodes, swapChanges, swapSelection,
     alignToGridChanges, alignToGrid, alignEdgeChanges, alignEdges, moveExactChanges, moveExactly, rotationCentre, breakWireChanges, breakWire, openFieldsTable, unfoldMembers, unfoldEntries, busForUnfolding, printBusForUI, busLabelsOf, unfoldBus, unfoldAction,
     areaCandidates, candInPoly, crossProbeZoomRatio, polyArea, clickCandidates, collectHits, guessCandidates, narrowCands, candOfKey, candInBox, candBox, candHit, pinKey, fieldKey, sheetBody, bodyAndPinsBox, selectableItem, shapeFilled,
@@ -99,12 +109,12 @@ const sch = {
     analyzePoint, autostartKind, autostartAt, explicitJunctionNeeded, explicitJunctionAllowed, previewJunctions, editTxn, txnCleanUp, txnTrimWire, singleClickPlace, busyMessage, vetoTool, startWire, cancelWire, hitNonSymbol, textRect, pickNonSymbol,
     beginDrag, moveDrag, endDrag, placeText, orthoLineDrag, connPoints, makeAnchor, ridersOf, cleanupAt, foldChanges, startCarry, placeCarry, dropCarry, finishWire, deleteSelected, duplicateSelected, orientSelected, modChange,
     // graphic shapes, directive labels, power symbols and the delete tool
-    rectangleNode, circleNode, arcNode, polylineNode, textBoxNode, classLabelNode, placeClassLabel, isPowerSymbol, powerSymbols, pickSymbol,
+    rectangleNode, circleNode, arcNode, polylineNode, textBoxNode, classLabelNode, placeFlagFields, placeClassLabel, isPowerSymbol, powerSymbols, pickSymbol,
     drawClick, finishDraw, cancelDraw, deleteChanges, deleteAt, pickAny, geomDist, anchorOf, DELETE_CURSOR,
     // sheets, sheet pins, tables, curves, polygons, rule areas, images and net highlighting
     build45Leader, ruleAreaLeader, ruleAreaOutline, placeLabel, autoplaceLabelNode, unplacedUnits, symbolShownText, IMAGE_ACCEPT,
     sheetNode, sheetCorner, sheetPinNode, ellipseFromBox, ellipseArcAngles, ellipseNode, tableNode, drawTableNode, drawTableSize, bezierNode, polygonNode, ruleAreaNode, imageNode, imageData, imageSize, bytesToBase64, base64ToBytes,
     placeSheet, ensureSheetDoc, sheetInstance, sheetPathHere, nextPage, emptySheetDoc, relPath, currentDoc, sheetEdgeAt, sheetPinPoint, sheetPinClick, placeSheetPin,
-    openImagePicker, netItems, terminalsOf, pickNet, highlightClick, setHighlight, typeNameFor, ruleAreaId, itemSexpr, SHEET_NAME_OFF, SHEET_FILE_OFF },
+    openImagePicker, netItems, terminalsOf, pickNet, highlightClick, setHighlight, typeNameFor, ruleAreaId, itemSexpr, SHEET_NAME_OFF, SHEET_FILE_OFF, autoplaceSheetFields },
 };
 root.CollabTools.sch = sch;

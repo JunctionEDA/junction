@@ -9,6 +9,7 @@ import { hitNonSymbol } from "./hit";
 import { selectThreshold } from "./line-ends";
 import { S, atOf, kid, num, ptsOf } from "./state";
 import { onSegMid, r4, same, segs } from "./util";
+import { mmPerPx } from "./snap";
 
 // ---------------------------------------------------------------- select connection / node, net walking
 type StopAt = "junction" | "pin" | "never";
@@ -177,18 +178,22 @@ export function selectNode(ctx: SchCtx) {
 }
 /**
  * SCH_SELECTION_TOOL::SelectNext / SelectPrevious: only while the first selected item is on the highlighted net
- * (IsNetHighlighted); the next item comes from the net navigator's order when the editor publishes it, else this
- * sheet's items of the highlighted net in sheet order (top to bottom, left to right).
+ * (IsNetHighlighted); the next item comes from the editor's Net Navigator, else from this sheet's items of the
+ * highlighted net in sheet order (top to bottom, left to right).
  */
 export function stepNetItem(ctx: SchCtx, dir: number) {
   const items = selectedItems(ctx); if (!items.length) return false;
-  const hl = S.highlight as Set<string> | null; if (!hl || !hl.has(items[0].id)) return false;
-  const nav = (root.CollabEditor as unknown as { netNavigatorOrder?: () => string[] } | undefined);
-  let ids: string[] = []; try { ids = nav && nav.netNavigatorOrder ? nav.netNavigatorOrder().filter((id) => ctx.doc.items.has(id)) : []; } catch (e) { ids = []; }
-  if (ids.length < 2) {
-    const pos = (id: string): Pt => { const it = ctx.doc.items.get(id)!, b = it.bbox; return b ? [b[0], b[1]] : atOf(it.node); };
-    ids = [...hl].filter((id) => ctx.doc.items.has(id)).sort((a, b) => { const p = pos(a), q = pos(b); return p[1] - q[1] || p[0] - q[0] || (a < b ? -1 : 1); });
-  }
+  // nothing unless the first selected item is net-highlighted (a symbol through one of its highlighted pins)
+  const id = items[0].id, hl = S.highlight as Set<string> | null;
+  let lit = !!hl && hl.has(id);
+  if (!lit && hl) for (const k of hl) if (k.startsWith(id + "#pin:")) { lit = true; break; }
+  if (!lit || !hl) return false;
+  // SelectNextPrevNetNavigatorItem: the next leaf of the Net Navigator's tree (pins, labels, sheet pins and
+  // no-connects across the sheets it lists), which the editor keeps
+  if (S.netHL && S.netHL.stepNetItem) return S.netHL.stepNetItem(ctx, dir);
+  // without the editor: this sheet's items of the highlighted net in sheet order
+  const pos = (k: string): Pt => { const it = ctx.doc.items.get(k)!, bb = it.bbox; return bb ? [bb[0], bb[1]] : atOf(it.node); };
+  const ids = [...hl].filter((k) => ctx.doc.items.has(k)).sort((x, y) => { const p = pos(x), q = pos(y); return p[1] - q[1] || p[0] - q[0] || (x < y ? -1 : 1); });
   if (ids.length < 2) return false;
   const i = ids.indexOf(items[0].id), next = ids[((i < 0 ? 0 : i) + dir + ids.length) % ids.length];
   setSelectionIds(ctx, [next]); return true;

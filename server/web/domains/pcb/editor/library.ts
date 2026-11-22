@@ -127,7 +127,11 @@ function rideCursor(s: SymbolSession, node: SNode): void {
 /** The reference of the next package of this session's symbol (annotate()). */
 function sessionReference(s: SymbolSession, doc: KDoc, sch: SchToolModule): string {
   const me = s.units > 1 ? { lib: s.libId, value: (s.fields && s.fields.Value !== undefined) ? s.fields.Value : (core.symbolInfo(s.lib).fields.find((f) => f.name === "Value") || { value: "" }).value, unit: s.unit } : null;
-  return core.nextReference(core.symbolInfo(s.lib).reference, usedReferences(doc, sch), !!sch.state.annotateAuto, me);
+  // AnnotateNewSymbol: the project's start number / sheet-number method, the designator tracker, 0nnn for a power symbol
+  const info = core.symbolInfo(s.lib), st = sch.state as { refTracker?: { reuse: boolean; used: Set<string> } | null };
+  const page = parseInt(String((doc as KDoc & { pageNumber?: string }).pageNumber || ""), 10);
+  const minRef = (sch._ as unknown as { newSymbolMinRef?(page: number): number }).newSymbolMinRef;
+  return core.nextReference(info.reference, usedReferences(doc, sch), !!sch.state.annotateAuto, me, { min: minRef ? minRef(page > 0 ? page : 1) : 1, power: info.power, tracker: st.refTracker || null });
 }
 
 function carrySymbol(s: SymbolSession, sameReference: boolean): void {

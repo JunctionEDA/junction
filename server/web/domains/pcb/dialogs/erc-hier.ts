@@ -5,14 +5,14 @@
 // canvas; the others wait until their sheet is opened (onSheetOpened), and the ERC dialog lists them all.
 import { E, appState, requestRender, store } from "./editor";
 import { obj, projectJson } from "./project";
-import { applySeverities } from "./erc-rules";
+import { applySeverities, sheetOrder } from "./erc-rules";
 import { sheetList, type SheetInstance } from "./sch-hierarchy";
 import { currentSheetPath } from "../editor/variant";
-import { onNetsChanged } from "../editor/schnets";
+import { loadSheets, netMap, onNetsChanged } from "../editor/schnets";
 import { serverErc, toMarker, uuidIndex } from "../editor/kicad-check";
 
 export interface HierMarker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; docId?: string; sheetPath?: string; sheetKey?: string; selected?: boolean; [k: string]: unknown }
-interface SchErc { ercCheck(doc: KDoc, opts: Record<string, unknown>): HierMarker[]; ercHierarchy?(docs: { doc: KDoc; key: string }[]): HierMarker[][]; state: { markers?: unknown[]; markersDoc?: KDoc | null } }
+interface SchErc { ercCheck(doc: KDoc, opts: Record<string, unknown>): HierMarker[]; ercHierarchy?(docs: { doc: KDoc; key: string; path?: string | null; parent?: number | null; sheetId?: string | null; root?: boolean }[], opts?: Record<string, unknown>): HierMarker[][]; state: { markers?: unknown[]; markersDoc?: KDoc | null } }
 const sch = (): SchErc | null => ((window as unknown as { CollabTools?: { sch?: SchErc } }).CollabTools || {}).sch || null;
 
 /** The project's ERC options for ercCheck: its Pin Conflicts Map, the connection grid (schematic.connection_grid_size,
@@ -59,7 +59,14 @@ export async function runHierErc(opts: { showAllErrors?: boolean }, resolve: (l:
   const here = hereDoc();
   if (!list.length || !list.some((x) => x.docId === here)) return null;   // a sheet outside the hierarchy: the caller checks it alone
   const erc = obj(projectJson().erc), sev = obj(erc.rule_severities) as Record<string, unknown>, base = ercProjectOpts();
-  const out: typeof sheets = [], docs: { doc: KDoc; key: string }[] = [], raw: HierMarker[][] = [];
+  const out: typeof sheets = [], docs: { doc: KDoc; key: string; path?: string | null; parent?: number | null; sheetId?: string | null; root?: boolean }[] = [], raw: HierMarker[][] = [];
+  // the sheet instance a sheet symbol sits on, and each instance's KIID_PATH (the top-level sheet's uuid first)
+  const parentOf = (inst: SheetInstance): number => (inst.sheetItemId && inst.parentDocId ? list.findIndex((p) => p.docId === inst.parentDocId && p.uuidPath.join("/") === inst.uuidPath.slice(0, -1).join("/")) : -1);
+  const fullPath = (inst: SheetInstance): string[] => {
+    let top = inst; for (let k = 0; k < 64; k++) { const pi = parentOf(top); if (pi < 0) break; top = list[pi]; }
+    const u = String((top.doc as KDoc & { uuid?: string }).uuid || "");
+    return u ? [u, ...inst.uuidPath] : [];
+  };
   // KiCad's own ERC on the server (editor/kicad-check.ts): each sheet instance takes the report's sheet with its uuid path
   // ("/<root>/<sheet>/…"; the run keys leave the root out).  The browser's checks below when it cannot run.
   const rep = here ? await serverErc(here) : null;
@@ -70,7 +77,8 @@ export async function runHierErc(opts: { showAllErrors?: boolean }, resolve: (l:
       const doc = inst.docId === here && E.kdoc ? E.kdoc : inst.doc, ix = uuidIndex(doc);
       const all = (ks ? ks.violations || [] : []).map((v) => toMarker(v, ix) as unknown as HierMarker);
       const ms = resolve(all);
-      for (const m of ms) { m.docId = inst.docId; m.sheetPath = inst.sheetPath; m.sheetKey = key; }
+      const up = ks ? String(ks.uuid_path || "").split("/").filter(Boolean) : fullPath(inst);
+      for (const m of ms) { m.docId = inst.docId; m.sheetPath = inst.sheetPath; m.sheetKey = key; m.uuidPath = up; }
       out.push({ docId: inst.docId, sheetPath: inst.sheetPath, key, markers: ms });
     }
     sheets = out; runPid = pidNow(); ercSource = "kicad";
@@ -85,24 +93,38 @@ export async function runHierErc(opts: { showAllErrors?: boolean }, resolve: (l:
       const it = inst.doc.items.get(child.sheetItemId); if (it && it.file) subDocs.set(it.file, child.doc);
     }
     let parentPins: string[] | null = null;
+    const pIdx = parentOf(inst);
     if (inst.sheetItemId && inst.parentDocId) {
-      const parent = list.find((p) => p.docId === inst.parentDocId && p.uuidPath.join("/") === inst.uuidPath.slice(0, -1).join("/"));
+      const parent = pIdx >= 0 ? list[pIdx] : undefined;
       const it = parent && parent.doc.items.get(inst.sheetItemId);
       if (it) parentPins = KiCadCanvas.kids(it.node, "pin").map((p) => KiCadCanvas.str(p[1] as SNode));
     }
     const doc = inst.docId === here && E.kdoc ? E.kdoc : inst.doc;
     let ms: HierMarker[] = [];
     // the tests across sheets (units, local / global and similar names, single global labels) run once below
-    try { ms = s.ercCheck(doc, Object.assign({}, base, { sheetDocs: subDocs, parentPins, showAllErrors: !!opts.showAllErrors, crossSheet: !s.ercHierarchy ? true : false })); } catch (e) { ms = []; }
-    docs.push({ doc, key: inst.uuidPath.join("/") }); raw.push(ms);
+    try { ms = s.ercCheck(doc, Object.assign({}, base, { sheetDocs: subDocs, parentPins, showAllErrors: !!opts.showAllErrors, root: !inst.sheetItemId, crossSheet: !s.ercHierarchy ? true : false })); } catch (e) { ms = []; }
+    // the instance path the symbols record: "/<root uuid>/<sheet uuids>" (the keys leave the root out)
+    const fp = fullPath(inst);
+    docs.push({ doc, key: inst.uuidPath.join("/"), path: fp.length ? "/" + fp.join("/") : undefined, parent: pIdx >= 0 ? pIdx : null, sheetId: inst.sheetItemId, root: !inst.sheetItemId }); raw.push(ms);
   }
+  // the net names KiCad gives (the hierarchy's net map), for the tests that compare and print them
+  let netName: ((i: number, id: string, pin: string) => string | undefined) | undefined;
+  try {
+    await loadSheets();
+    const nm = netMap();
+    if (nm) {
+      const at = list.map((inst) => nm.instances.find((x) => x.file === inst.path && x.uuidPath.slice(1).join("/") === inst.uuidPath.join("/")));
+      netName = (i, id, pin) => { const x = at[i]; return x ? nm.index.get(x.index + "|" + id + "#pin:" + pin) : undefined; };
+    }
+  } catch (e) { netName = undefined; }
   let cross: HierMarker[][] = [];
-  try { cross = s.ercHierarchy ? s.ercHierarchy(docs) : []; } catch (e) { cross = []; }
+  try { cross = s.ercHierarchy ? s.ercHierarchy(docs, Object.assign({}, base, { showAllErrors: !!opts.showAllErrors, netName })) : []; } catch (e) { cross = []; }
   list.forEach((inst, i) => {
     const key = docs[i].key, all = raw[i].concat(cross[i] || []);
-    all.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1) || a.y - b.y || a.x - b.x);
-    const ms = resolve(applySeverities(all, sev) as HierMarker[]);
-    for (const m of ms) { m.docId = inst.docId; m.sheetPath = inst.sheetPath; m.sheetKey = key; }
+    const up = fullPath(inst);
+    // SHEETLIST_ERC_ITEMS_PROVIDER: a sheet's markers by x, y and message (the dialog then lists errors before warnings)
+    const ms = resolve(applySeverities(sheetOrder(all), sev) as HierMarker[]);
+    for (const m of ms) { m.docId = inst.docId; m.sheetPath = inst.sheetPath; m.sheetKey = key; m.uuidPath = up; }
     out.push({ docId: inst.docId, sheetPath: inst.sheetPath, key, markers: ms });
   });
   sheets = out; runPid = pidNow();

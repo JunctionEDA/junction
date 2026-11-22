@@ -255,19 +255,28 @@ export interface RefHolder { ref: string; lib: string; value: string; unit: numb
  * number whose holders are all the same library symbol with the same value and leave its unit free
  * (REFDES_TRACKER::GetNextRefDesForUnits / areUnitsAvailable), so unit B placed after U1A becomes U1B.
  */
-export function nextReference(prefix: string, used: Iterable<string | RefHolder>, auto: boolean, me?: { lib: string; value: string; unit: number } | null): string {
+export function nextReference(prefix: string, used: Iterable<string | RefHolder>, auto: boolean, me?: { lib: string; value: string; unit: number } | null,
+  opts?: { /** the first number to try (the project's annotate_start_num + 1, or the sheet's block) */ min?: number; /** a power symbol: its number is written 0nnn */ power?: boolean; /** REFDES_TRACKER */ tracker?: { reuse: boolean; used: Set<string> } | null } | null): string {
   prefix = prefix || "U";
   // SCH_REFERENCE::AlwaysAnnotate: power symbols and the other "#" references are numbered even with automatic annotation off
   if (!auto && !prefix.startsWith("#")) return prefix + "?";
-  const holders = new Map<string, RefHolder[]>();
+  // prefix and number -> its holders (SCH_REFERENCE::Split): "#PWR01" holds number 1 of "#PWR"
+  const holders = new Map<number, RefHolder[]>();
   for (const u of used) {
     const h: RefHolder = typeof u === "string" ? { ref: u, lib: "", value: "", unit: -1 } : u;
-    const l = holders.get(h.ref); if (l) l.push(h); else holders.set(h.ref, [h]);
+    const m = /^([\s\S]*?)(\d+)$/.exec(h.ref); if (!m || m[1] !== prefix) continue;
+    const n = parseInt(m[2], 10), l = holders.get(n); if (l) l.push(h); else holders.set(n, [h]);
   }
-  for (let n = 1; ; n++) {
-    const hs = holders.get(prefix + n);
-    if (!hs || !hs.length) return prefix + n;
-    if (me && hs.every((h) => h.unit >= 0 && h.unit !== me.unit && h.lib === me.lib && h.value === me.value)) return prefix + n;
+  const tracker = opts && opts.tracker, text = (n: number): string => prefix + (opts && opts.power ? "0" + n : n);
+  for (let n = Math.max(1, (opts && opts.min) || 1); ; n++) {
+    const hs = holders.get(n);
+    if (!hs || !hs.length) {
+      // REFDES_TRACKER::GetNextRefDesForUnits: a designator used before is skipped unless designators are reused
+      if (tracker && !tracker.reuse && tracker.used.has(prefix + n)) continue;
+      if (tracker) tracker.used.add(prefix + n);
+      return text(n);
+    }
+    if (me && hs.every((h) => h.unit >= 0 && h.unit !== me.unit && h.lib === me.lib && h.value === me.value)) return text(n);
   }
 }
 

@@ -59,13 +59,14 @@ interface ArrayApi {
   arraySize(o: ArrayOpts): number; arrayStacked(o: ArrayOpts, pos: [number, number]): boolean; arrayOrigin(doc: KDoc, ids: string[]): [number, number];
   applySelection(ctx: ToolCtx, ids: string[]): void; anchorOf(item: KItem): [number, number];
   pickInteractively(ctx: ToolCtx, mode: "point" | "item", prompt: string, done: (r: [number, number] | KItem | null) => void): void;
-  requestSelection(ctx: ToolCtx, opts: { rerun(c: ToolCtx): void }): { ids: string[] } | null;
+  requestSelection(ctx: ToolCtx, opts: { locks?: boolean; rerun(c: ToolCtx): void }): { ids: string[] } | null;
 }
 const PT = (): ArrayApi => (window as unknown as { PcbTools: ArrayApi }).PcbTools;
 
 /** The ids Create Array works on: PCB_SELECTION_TOOL::RequestSelection (the selection, else the item under the cursor). */
 function selectedIds(ctx: ToolCtx): string[] | null {
-  const sel = PT().requestSelection(ctx, { rerun: (c: ToolCtx) => { createArrayDialog(c); } });
+  // ARRAY_TOOL::CreateArray's filter drops markers and children only: locked items are arrayed like any other
+  const sel = PT().requestSelection(ctx, { locks: false, rerun: (c: ToolCtx) => { createArrayDialog(c); } });
   return sel && sel.ids.length ? sel.ids : null;
 }
 

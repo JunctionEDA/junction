@@ -102,7 +102,7 @@ test("hierarchical label uses the template shape and text width offset", () => {
 test("sheet pins swap input/output shapes and read into the sheet", () => {
   const doc = K.parseDoc('(kicad_sch (version 20250114) (generator "t") (paper "A4") (sheet (at 50 50) (size 20 10) (stroke (width 0.1524)) (fill (color 0 0 0 0)) (uuid "s1") (property "Sheetname" "sub" (at 50 49 0) (effects (font (size 1.27 1.27)) (justify left bottom))) (property "Sheetfile" "sub.kicad_sch" (at 50 61 0) (effects (font (size 1.27 1.27)) (justify left top))) (pin "P" input (at 70 55 0) (effects (font (size 1.27 1.27)) (justify right)) (uuid "p1"))))');
   const it = doc.items.get("s1");
-  const file = texts(it, (g) => g.text.startsWith("File: "))[0]; assert(file, "sheet file field gets the File: prefix");
+  const file = texts(it, (g) => g.field === "Sheetfile")[0]; assert(file && !file.text.startsWith("File: "), "the sheet file field is its value alone (SCH_FIELD::GetShownText adds no prefix)");
   const pin = texts(it, (g) => g.text === "P")[0]; assert.strictEqual(pin.h, "right"); near(pin.x, 70 - (0.15 * 1.27 + 1.27), 1e-6);
   const shape = it.geom.find((g) => g.t === "poly" && g.pts.length === 6); const hs = 0.635;
   assert.deepStrictEqual(shape.pts.map((p) => [+((p[0] - 70) / hs).toFixed(6), +((p[1] - 55) / hs).toFixed(6)]), [[-2, 0], [-1, 1], [0, 1], [0, -1], [-1, -1], [-2, 0]]);   // input pin draws the OUTPUT_HN template
@@ -295,7 +295,7 @@ test("schematic image: base64 atoms join, size = px × 25.4/PPI × scale centred
     const doc = K.parseDoc(SCH_HEAD + body + ")"); const it = doc.items.get("im1"); assert(it && it.kind === "image");
     const g = it.geom.find((x) => x.t === "image"); assert(g, "image geometry record");
     const pxMm = 25.4 / 96; near(g.w, 4 * pxMm * 2, 1e-9); near(g.h, 2 * pxMm * 2, 1e-9); near(g.x + g.w / 2, 100, 1e-9); near(g.y + g.h / 2, 50, 1e-9);
-    assert.strictEqual(g.layer, "Images"); assert(g.z < -6, "bitmaps draw under everything"); assert.strictEqual(g.color, K.SCH.notes);
+    assert.strictEqual(g.layer, "Images"); assert(g.z < 0 && g.z > K.SCH_Z.shapesBg && g.z < K.SCH_Z.sheet, "LAYER_DRAW_BITMAPS: over every background fill, under the items"); assert.strictEqual(g.color, K.SCH.notes);
     assert.strictEqual(g.entry.url, "data:image/png;base64," + b64); assert.strictEqual(FakeImage.made.length, 1); assert.strictEqual(FakeImage.made[0].src, g.entry.url);
     assert(!g.entry.loaded);
     // movable + hit-testable, listed on the Images layer
@@ -350,7 +350,7 @@ test("sheet pins: every side reads into the sheet with the swapped input/output 
     pin("R", "input", 70, 55, 0, "p1") + pin("T", "output", 60, 50, 90, "p2") + pin("L", "bidirectional", 50, 55, 180, "p3") + pin("B", "tri_state", 60, 60, 270, "p4") + pin("P", "passive", 65, 60, 270, "p5") + "))");
   const it = doc.items.get("s1"); const d = 0.15 * 1.27 + 1.27, hs = 0.635;
   const pins = { R: [70, 55], T: [60, 50], L: [50, 55], B: [60, 60], P: [65, 60] };
-  const shapes = it.geom.filter((g) => g.t === "poly" && g.layer === "Sheets" && g.color === K.SCH.sheetLabel && (g.pts.length === 5 || g.pts.length === 6));
+  const shapes = it.geom.filter((g) => g.t === "poly" && g.layer === "Sheets" && g.color === K.SCH.hlabel && (g.pts.length === 5 || g.pts.length === 6));
   assert.strictEqual(shapes.length, 5);
   const shapeOf = (name) => shapes.find((g) => g.pts.every((p) => Math.hypot(p[0] - pins[name][0], p[1] - pins[name][1]) <= 3 * hs));   // templates reach at most √5·hs from the pin
   const tR = texts(it, (g) => g.text === "R")[0], tT = texts(it, (g) => g.text === "T")[0], tL = texts(it, (g) => g.text === "L")[0], tB = texts(it, (g) => g.text === "B")[0];

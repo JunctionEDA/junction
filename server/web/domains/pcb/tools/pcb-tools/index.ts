@@ -28,21 +28,21 @@ import type { PickerFn, PromptFn } from "./dom";
 import type { LayerPicker } from "./route-tool";
 import type { RouterSettings } from "./router-settings";
 import { root } from "../root";
-import { highlightNetAt, setDragImpl, swapLayerChanges, footprintByRef, footprintRefChoices, ACTIONS, LOCKED_WARNING, VIA_SIZES, applyTuneSettings, modificationPoint, requestSelection, routingDialogs, runAction, setRoutingDialogsImpl, tuneSettingsView, tunerProperties, unfillChanges, unlockedIds } from "./actions";
+import { currentSizeChanges, flipDirection, highlightNetAt, setDragImpl, swapLayerChanges, footprintByRef, footprintRefChoices, ACTIONS, LOCKED_WARNING, VIA_SIZES, applyTuneSettings, modificationPoint, requestSelection, routingDialogs, runAction, setRoutingDialogsImpl, tuneSettingsView, tunerProperties, unfillChanges, unlockedIds } from "./actions";
 import { hoverPoint, liveSelected, netNameOf, nextWidth, sizesOf } from "./app-state";
 import { ArcGeom, arcBackup, arcDrawMode, arcFromStartEndCenterDrag, arcFromStartEndMidDrag, arcFromStartTangentEnd, arcMove, arcTangentSeedAt, arcTangentSeedNear, finishArc, setArcDrawMode, showArcMode } from "./arcs";
-import { arrayChanges, arrayOrigin, arraySize, arrayStacked, arrayTransform } from "./array";
+import { arrayChanges, arrayOrigin, arraySize, arrayStacked, arrayTransform, reannotateBlocks } from "./array";
 import { cancelOps, dimensionLabel, newItemDialogs, placeBarcodeAt, placeTextAt, setNewItemDialogsImpl } from "./assistants";
 import { branchChanges, branchDoc, branchOpFresh, updateHead } from "./branch";
 import { addedChange, boardNets, deleteChanges, removedChange, replacedChange, typeNameOf, wrapBoard } from "./changes";
-import { annotate, clearNets, clipboardText, cursorPoint, duplicateChanges, freshUuids, layersBlock, parseClipboard, pasteChanges, referencePoint, rewriteNets } from "./clipboard";
+import { textOfItem, annotate, clearNets, clipboardText, cursorPoint, duplicateChanges, freshUuids, layersBlock, parseClipboard, pasteChanges, referencePoint, rewriteNets } from "./clipboard";
 import { connectedRun } from "./connected";
 import { boardStatistics, convertChanges, footprintAttrChanges, justifyChanges, padAt, selectionLoops, zonePriorityChanges } from "./convert";
 import { formImpl, padProperties, setFormImpl } from "./dialogs";
 import { DP_MSG_GAP, DP_MSG_NETS, DP_MSG_NOWHERE, DP_MSG_START, dpGateway, dpNetPair, dpPrimitives, dpSizes, findDpPrimitivePair, matchDpSuffix, offsetPts } from "./diffpair";
 import { ARROW_LEN, DIM_CLASS, DIM_TYPE, EXT_HEIGHT, EXT_OFFSET, dimBaseText, dimEditNode, dimEditPoints, dimGeometry, dimRead, dimUpdate, dimValueText, dimWrite, dimensionNode, readableAngle, snap45, snap90, snapVec45 } from "./dimensions";
 import { arcLength, arcPoints, boxGrid, boxesTouch, coreDist, padCopperLayers, padShape, firstEdgeConflict, polyPolyDist, segSegDist, segsIntersect, shapeGap, viaLayers } from "./distances";
-import { applySelMode, closeTextPrompt, pickClick, pickInteractively, refreshChip, setPickerImpl, setPromptImpl, routerKeyAction, selMode, undoRedoInFlight } from "./dom";
+import { applySelMode, closeTextPrompt, pickClick, pickInteractively, pickTwoPoints, twoPointMove, twoPointUp, vectorSnapped, refreshChip, setPickerImpl, setPromptImpl, routerKeyAction, selMode, undoRedoInFlight } from "./dom";
 import { changedArea, dragChanges, dragTo, optimizeDragged } from "./drag-optimize";
 import { assembleLine, dragCorner45, dragCornerFree, dragSegment45, dragSolution, dragStart, initialTrace } from "./dragger";
 import { ANGLE_SNAP_MSG, DRAWING_TOOL_IDS, MOVE_SNAP_MSG, POLY_TOOLS, RULE_AREA_LAYERS, angleSnapMode, displayConstraintsMsg, build45Leader, constrainDraw, drawTrack, nextLineMode, setAngleSnap, stepDrawWidth, undoChainSegment, withStroke } from "./draw-modes";
@@ -50,11 +50,14 @@ import { drawClick, finishPoly, openImagePicker, placeImage, polyOutline, zoneTe
 import { circleApprox, circleOutside, clipperArea, ovalApprox, ovalOutside, sliverMarkers, sliverPoints, splitCollinearOutlines } from "./drc-sliver";
 import { PolygonTest, connectionWidthMarkers } from "./drc-connwidth";
 import { DEFAULT_SETTINGS, boardOutline, chainLoops, courtyards, deflatePoly, designSettings, drc, edgeShapes, mmPair, netClearance, netclassName, netclassOf, segCross } from "./drc";
-import { cycleWidth, deleteSelection, expandSelection, flipSelected, fmtSize, hoverDelete, rotateSelected, routableItems, sizeUnits } from "./edit-commands";
+import { cycleWidth, deleteSelection, flipSelected, fmtSize, hoverDelete, rotateSelected, routableItems, sizeUnits, zoneCutoutDeleteChange } from "./edit-commands";
 import { messageText } from "../../../../shared/units";
 import { flipFootprintNode, rotateFootprintNode } from "./footprint";
-import { angleSnapDirections, bestDragOrigin, itemAnchors, nearestSnapLinePoint, snapAnchors, snapCursor } from "./grid-helper";
-import { OffsetItemState } from "./ref-move";
+import { angleSnapDirections, bestDragOrigin, itemAnchors, magneticSettings, nearestAnchor, nearestSnapLinePoint, snapAnchors, snapCursor, snapRanges } from "./grid-helper";
+import { boxContains, collectMultiple, itemInArea, lassoContains, padInArea } from "./box-select";
+import { expandConnection, filterCategory, footprintSheetPath, itemPassesFilter, nearestUnconnectedFootprints, selectAllConnectedShapes, selectAllConnectedTracks, selectConnections, sheetItemIds, unconnectedFootprints, unrouteIds } from "./select-connected";
+import { footprintCoverageRatio, geomPolys } from "./guess";
+import { OffsetItemState, finishMoveIndividually, interactiveOffset, itemWord, moveIndividuallyText } from "./ref-move";
 import { applySelection, expandGroups, groupChanges, groupMembers, groupMembersChanges, groupNode, groupOf, isLocked, lockChanges, selectionIds, setLocked, topParentOf, ungroupChanges } from "./groups";
 import { deleteAt, deleteCandidate, fieldCandidateId, guessCandidates, hitTestDistance, itemAt } from "./guess";
 import { hitTestItem } from "./hit";
@@ -114,7 +117,7 @@ import { DRCET, DRC_RUN_TEXT, fixDrcEntry, inspectDrcAction, violatingRuleName, 
 import { starvedThermalMarkers, isolatedCopperMarkers, padZoneConnection, thermalGap, padOutline } from "./drc-zones";
 import { silkClearanceMarkers, silkEdgeMarkers, silkToMaskMarkers, maskBridgeMarkers, silkMaskMarkers, boardElements, maskSetup, primShapes, geomShapes, elementGap } from "./drc-silk";
 import { courtyardMarkers, courtyardOutlines, disabledLayerMarkers, effectivePenWidth, holeClearanceMarkers, holeToHoleMarkers, keepoutMarkers, moreDrcMarkers, textDimsMarkers, textMirroringMarkers, textOnEdgeCutsMarkers } from "./drc-more";
-import { PCB_KINDS, rotateTextBoxNode, setTextBoxAngleSliding, textBoxAngle, alignBox, alignChanges, anchorOf, distributeChanges, distributeDeltasGaps, distributeDeltasPoints, flipChanges, flipNode, mapNodePoints, mirrorChanges, mirrorNode, moveChanges, moveExactChanges, packChanges, positionRelativeChanges, rotateChanges, rotateNode, selectionCenter, swapChanges, topLeftAnchor, transformChanges, translateNode } from "./transforms";
+import { mirrorNodeAxis, mirrorAxisChanges, packNodes, findBestPacking, ALIGN_COMMIT, arcCentre3, PCB_KINDS, rotateTextBoxNode, setTextBoxAngleSliding, textBoxAngle, alignBox, alignChanges, anchorOf, distributeChanges, distributeDeltasGaps, distributeDeltasPoints, flipChanges, flipNode, mapNodePoints, mirrorChanges, mirrorNode, moveChanges, moveExactChanges, packChanges, positionRelativeChanges, rotateChanges, rotateNode, selectionCenter, swapChanges, topLeftAnchor, transformChanges, translateNode } from "./transforms";
 import { customRouteClearance, pinnedOpt, routedRuleItem, rulePairClearance, ruleSizes } from "./rule-resolver";
 import { assertionMarkers, disallowMarkers, padAnnulus, ruleItems, sizeMarkers, trackAngleMarkers } from "./drc-rules";
 import { callFunc, footprintSelector, itemShape } from "./dru-eval";
@@ -180,6 +183,18 @@ export const pcb = {
     bind(ctx); if (!ctx.doc || ctx.viewOnly || !ctx.live || !routableItems(ctx.doc, ids)) return false;
     S.pending = { ids: Array.from(ids), item: ctx.doc.items.get(ids[0]), mm: mm.slice(), client: [ev.clientX || 0, ev.clientY || 0], app: true }; return true;
   },
+  /**
+   * The drag of the selection `ids` from the press at `mm` (PCB_SELECTION_TOOL::Main once the drag threshold is past):
+   * the router's drag for a routable selection, the move tool's for anything else.  `lead` is the selected item
+   * under the press, `app` says the selection is held by the editor rather than by this module.
+   */
+  dragFrom(ctx: PcbCtx, ids: string[], lead: string | null, mm: Pt, client: number[], app: boolean) {
+    bind(ctx); if (!ctx.doc || ctx.viewOnly || !ctx.live) return false;
+    const list = ids.filter((id) => ctx.doc.items.has(id)); if (!list.length) return false;
+    const item = ctx.doc.items.get(lead && list.includes(lead) ? lead : list[0])!;
+    S.pending = null;
+    return !!startPendingDrag(ctx, { ids: list, item, mm: mm.slice(), client: [client[0] || 0, client[1] || 0], app });
+  },
   /** What the canvas leaves out while it is drawn elsewhere (the lines being dragged). */
   hiddenIds() { return routeHiddenIds() || tuneHiddenIds() || genHiddenIds() || dragHiddenIds(); },
   onActivate(t: string, ctx: PcbCtx) {
@@ -187,6 +202,8 @@ export const pcb = {
     const mine = TOOLS.some((x) => x.id === t);
     if (S.route && t !== (S.route.dp ? "routediff" : "route")) { const rt = S.route; S.route = null; routeUnhighlight(ctx, rt); }   // leaving the tool drops the unfixed leg
     S.violations = null;
+    if (t !== "pickpoint" && S.pick && S.pick.two) { S.pick = null; S.popup = null; }   // IsActivate: another tool ends a two-point pick
+    if (t !== "pickpoint" && t !== "select") S.pickKeep = null;
     if (!isTuneTool(t) || t !== S.modTool) { S.tune.pattern = null; S.tune.picker = null; }
     if (S.drag && t !== "drag") { const D = S.drag; S.drag = null; routeUnhighlight(ctx, D.subs[0]); }
     S.zoneMode = t === "zone" ? S.zoneModeNext || null : null; S.zoneModeNext = null;
@@ -220,7 +237,7 @@ export const pcb = {
     else if (t === "gtext") placeTextAt(ctx, [hv.x, hv.y]);
     else if (t === "barcode") placeBarcodeAt(ctx, [hv.x, hv.y]);
     else if (t === "image") { if (S.image) placeImage(ctx, hv); else openImagePicker(); }
-    else if (t === "pickpoint" || t === "pickitem") pickClick(ctx, t, hv, mm);
+    else if (t === "pickpoint" || t === "pickitem") pickClick(ctx, t, hv, mm, ev);
     else if (t === "delete") deleteAt(ctx, mm);   // an empty click is ours too: the tool stays armed
     else drawClick(ctx, hv, t, ev);
     return true;
@@ -309,6 +326,7 @@ export const pcb = {
     if (ev && typeof ev.clientX === "number") S.client = [ev.clientX, ev.clientY!];
     const hv = hoverPoint(ctx, mm, t === "route" || t === "routediff" || t === "via" || t === "gridorigin" || t === "drillorigin" || t === "pickpoint" || t === "anchor" || !!PAD_TOOLS[t], ev); S.hover = hv;
     if (t === "enumpads") enumMove(ev, mm, ctx);
+    if (t === "pickpoint" && S.pick && S.pick.two) twoPointMove(ctx, hv, ev);
     if (t === "delete") hv.del = ctx.viewOnly ? null : deleteCandidate(ctx, mm);
     if (S.violations && Math.hypot(hv.x - S.violations.at[0], hv.y - S.violations.at[1]) > 0.5) S.violations = null;
     if (S.route) { S.route.cursor = [hv.x, hv.y]; updateHead(ctx); }
@@ -317,7 +335,11 @@ export const pcb = {
     if (S.draw) { S.drawRaw = [hv.x, hv.y]; S.drawCtrl = !!(ev && (ev.ctrlKey || ev.metaKey)); if (S.draw.shape === "garc") arcMove(S.draw, S.drawRaw, S.drawCtrl); else drawTrack(S.draw, S.drawRaw, S.drawCtrl); }
     ctx.requestRender();
   },
-  onPointerUp() {},
+  onPointerUp(ev: PtrEvent, mm: Pt, ctx: PcbCtx) {
+    // the release of a press-drag during a two-point pick is its second point
+    if (S.modTool !== "pickpoint" || !S.pick || !S.pick.two || !ctx || !ctx.doc || !mm) return;
+    bind(ctx); twoPointUp(ctx, hoverPoint(ctx, mm, true, ev), ev);
+  },
   onKey(k: string, ev: PtrEvent, ctx: PcbCtx) {
     bind(ctx); if (!ctx.doc) return false;
     const editing = () => { if (ctx.viewOnly) { ctx.toast("View-only access"); return false; } return true; };
@@ -365,7 +387,7 @@ export const pcb = {
       if (S.draw && S.draw.shape === "garc") { finishArc(ctx, editing); return true; }
       if (S.draw) { if (POLY_TOOLS.has(S.draw.shape)) { if (editing()) finishPoly(ctx); } else { S.draw = null; ctx.requestRender(); } return true; }
       return false;
-    case "u": case "U": return expandSelection(ctx) || (selectionIds(ctx).size ? runAction("selectConnection", ctx) : false);   // app.js's selection goes through the action
+    case "u": case "U": return runAction("selectConnection", ctx);   // PCB_ACTIONS::selectConnection: expandConnection, one stage per press
     case "w": case "W": if (editing()) cycleWidth(ctx, shift ? -1 : 1); return true;
     // the non-tool commands on KiCad's hotkeys (Ctrl / Alt chords arrive re-posted from the capture handler)
     case "Copy": return runAction("copy", ctx);
@@ -407,8 +429,13 @@ export const pcb = {
       if (S.draw && S.draw.shape === "gline") { if (editing() && !undoChainSegment(ctx)) { S.draw = null; ctx.requestRender(); } return true; }
       if (S.route) { if (editing()) undoRouteLeg(ctx); return true; }   // ACTIONS::doDelete while routing: undo the last segment
       if (shift && selectionIds(ctx).size && connectedRun(ctx.doc, selectionIds(ctx)).size) return runAction("deleteFull", ctx);   // Shift+Delete: the whole connected run
+      // doMoveSelection: ACTIONS::doDelete ends the move ("there will no longer be anything to drag") and is passed on
+      if (S.move && editing()) { S.moveSeq = null; S.popup = null; finishSelectMove(ctx, true); }
       if (S.sel.size) { if (editing()) deleteSelection(ctx); return true; }
-      if (ctx.selection && ctx.selection.size) { if (editing()) { const free = unlockedIds(ctx, Array.from(ctx.selection)); if (free.length) { ctx.commit(deleteChanges(ctx.doc, free), "delete"); applySelection(ctx, []); } } return true; }   // app.js's box selection of one item
+      if (ctx.selection && ctx.selection.size) { if (editing()) { const free = unlockedIds(ctx, Array.from(ctx.selection)); const cut = zoneCutoutDeleteChange(ctx.doc, free, ctx.cursor ? ctx.cursor : cursorPoint(ctx)); if (cut) { ctx.commit([cut], "Delete"); ctx.requestRender(); } else if (free.length) { ctx.commit(deleteChanges(ctx.doc, free), "Delete"); applySelection(ctx, []); } } return true; }   // app.js's box selection of one item
+      // EDIT_TOOL::Remove on a selected pad (not a free pad): the pad is promoted to its footprint and nothing is deleted
+      // (wxBell: "a little too dangerous for a destructive operation"); a second Delete then takes the footprint
+      if (S.padSel && !selectionIds(ctx).size) { const fp = S.padSel.slice(0, S.padSel.lastIndexOf("#")); if (editing() && ctx.doc.items.has(fp)) { S.padSel = null; applySelection(ctx, [fp]); ctx.requestRender(); } return true; }
       if (!selectionIds(ctx).size && !S.padSel) { if (editing()) hoverDelete(ctx); return true; }   // nothing selected: what is under the cursor
       return false;
     default: return false;
@@ -568,11 +595,15 @@ root.PcbTools = { OffsetItemState, snapAnchors, textGraphics: textGraphicsApi, l
   DRCET, DRC_RUN_TEXT, fixDrcEntry, inspectDrcAction, violatingRuleName, applyExclusions, exclusionKey, exclusionOf, legacyExclusion, projectExclusions, readExclusion, withExclusion, withoutExclusions,
   ACTIONS, runAction, mapNodePoints, translateNode, rotateNode, rotateTextBoxNode, setTextBoxAngleSliding, textBoxAngle, flipNode, mirrorNode, anchorOf, selectionCenter, transformChanges, moveChanges, rotateChanges, flipChanges, mirrorChanges,
   moveExactChanges, positionRelativeChanges, swapLayerChanges, topLeftAnchor, alignChanges, distributeChanges, distributeDeltasGaps, distributeDeltasPoints, swapChanges, packChanges,
-  selectionIds, applySelection, requestSelection, bestDragOrigin, snapCursor, itemAnchors, unlockedIds, moveTransform, modificationPoint, clearNets, LOCKED_WARNING, groupNode, groupOf, groupMembers, expandGroups, groupChanges, ungroupChanges, groupMembersChanges, isLocked, setLocked, lockChanges,
+  selectionIds, applySelection, requestSelection, bestDragOrigin, snapCursor, itemAnchors, nearestAnchor, snapRanges, magneticSettings,
+  boxContains, collectMultiple, itemInArea, lassoContains, padInArea, expandConnection, filterCategory, footprintSheetPath, itemPassesFilter, nearestUnconnectedFootprints, selectAllConnectedShapes, selectAllConnectedTracks, selectConnections, sheetItemIds, unconnectedFootprints, unrouteIds, footprintCoverageRatio, geomPolys, unlockedIds, moveTransform, modificationPoint, clearNets, LOCKED_WARNING, groupNode, groupOf, groupMembers, expandGroups, groupChanges, ungroupChanges, groupMembersChanges, isLocked, setLocked, lockChanges,
   // netTable, editPoints and editPointNode are listed above (the script named them twice, to the same values)
   shapeGap, coreDist, segsIntersect, polyPolyDist, firstEdgeConflict, deflatePoly, padShape, padCopperLayers, viaLayers, arcPoints, arcLength, conductors, clusterRoots, netlist, ratsnest, localRatsnest, netInspector, netLengths, copperStack, stackupItems, layerDistance, netItemIds, netHighlightIds, msgPanelInfo, boardLayerName, itemDescription, dynamicRatsnest, selMode, addCornerChanges, removeCornerChanges, canAddCorner, canRemoveCorner, connectedCopperIds,
   sliverMarkers, sliverPoints, clipperArea, PolygonTest, padAnnulus, connectionWidthMarkers, boxGrid, boxesTouch, circleOutside, ovalOutside, circleApprox, ovalApprox, splitCollinearOutlines,
   designSettings, netclassName, netclassOf, netClearance, mmPair, DEFAULT_SETTINGS, edgeShapes, chainLoops, boardOutline, courtyards, drc, trackEditChanges, trackLayerChanges, breakTrackChanges, cleanupPlan, cleanupChanges, unusedPadLayerChanges, graphicsCleanup, teardropEditChanges, globalTrackViaChanges, autoZonePriorities, fpModels: fpModelsApi, inspectConstraints, footprintDiffLines, shapeModify: shapeModifyApi, outset: outsetApi, boardStats: boardStatsApi, filterSelectionIds, FILTER_SELECTION_DEFAULTS, repairBoard, geomPages, shapeGeomOf, setShapeGeom, geographicalReannotate, reannotateOrder,
   layersBlock, referencePoint, clipboardText, parseClipboard, freshUuids, rewriteNets, annotate, pasteChanges, duplicateChanges, arrayChanges, arraySize, arrayTransform, arrayStacked, arrayOrigin, pickInteractively, cursorPoint,
   adjustColor, courtyardConflicts, drawSnapIndicator, gridOriginColor, snapTypeOf, startLayerOf, groupBox, enteredGroupIds, withinEnteredGroup, drawGroupFrames, clearanceOutlines, drawClearanceOutlines, drawStatusNote, statusNoteDims,
-  padAt, padProperties, convertChanges, selectionLoops, justifyChanges, zonePriorityChanges, footprintAttrChanges, boardStatistics, idsOnLayer, filterIds, SELECTION_TYPES, inspectClearance, VIA_SIZES, PCB_KINDS };
+  padAt, padProperties, convertChanges, selectionLoops, justifyChanges, zonePriorityChanges, footprintAttrChanges, boardStatistics, idsOnLayer, filterIds, SELECTION_TYPES, inspectClearance, VIA_SIZES, PCB_KINDS,
+  // the edit / move parity pass
+  mirrorNodeAxis, mirrorAxisChanges, packNodes, findBestPacking, ALIGN_COMMIT, arcCentre3, reannotateBlocks, textOfItem, finishMoveIndividually, itemWord, moveIndividuallyText, currentSizeChanges, flipDirection,
+  zoneCutoutDeleteChange, pickTwoPoints, vectorSnapped, interactiveOffset, flipFieldChange };

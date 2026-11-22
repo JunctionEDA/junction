@@ -280,8 +280,8 @@ export interface AppState {
   groupCurrent: Record<string, string>;
   /** selection-filter categories that are enabled (missing = enabled) */
   filter: Record<string, boolean>;
-  /** the Selection Filter boxes that rejected the last click (HighlightSelectionFilter): they flash once */
-  filterFlash?: { keys: string[]; at: number } | null;
+  /** the Selection Filter boxes that just turned a click away (they flash); n counts the flashes */
+  filterFlash?: { keys: string[]; n: number } | null;
   panes: Record<string, boolean>;
   undo: { undo: number; redo: number };
   /** the Footprint Editor (web/domains/pcb/editor/fpedit.ts): the project's footprint libraries and the open footprint's title */

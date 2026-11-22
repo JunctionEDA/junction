@@ -273,11 +273,12 @@ export async function projectErc(doc: any, path: string, extra?: Record<string, 
   const erc = pro.erc || {}, ns = pro.net_settings || {}, cg = pro.schematic && pro.schematic.connection_grid_size;
   const classes = Array.isArray(ns.classes) ? ns.classes.map((c: any) => String((c && c.name) || "")).filter(Boolean) : null;
   const cross = !!s.ercHierarchy;
-  const marks = s.ercCheck(doc, Object.assign({ pinMap: Array.isArray(erc.pin_map) ? erc.pin_map : undefined, netclasses: classes, connectionGrid: typeof cg === "number" && cg > 0 ? cg * 0.0254 : 1.27 }, extra || {}, cross ? { crossSheet: false } : {}));
+  const eo = Object.assign({ pinMap: Array.isArray(erc.pin_map) ? erc.pin_map : undefined, netclasses: classes, connectionGrid: typeof cg === "number" && cg > 0 ? cg * 0.0254 : 1.27 }, extra || {});
+  const marks = s.ercCheck(doc, Object.assign({}, eo, cross ? { crossSheet: false } : {}));
   if (cross) {
     const sheets = await hierarchyDocs(doc, path);
     const i = sheets.findIndex((x) => x.doc === doc);
-    try { const per = s.ercHierarchy(sheets.map((x) => ({ doc: x.doc, key: x.path }))); if (i >= 0 && per[i]) marks.push(...per[i]); } catch { /* the sheet's own tests stand */ }
+    try { const per = s.ercHierarchy(sheets.map((x) => ({ doc: x.doc, key: x.path })), eo); if (i >= 0 && per[i]) marks.push(...per[i]); } catch { /* the sheet's own tests stand */ }
   }
   return applySeverities(marks, erc.rule_severities && typeof erc.rule_severities === "object" ? erc.rule_severities : null);
 }

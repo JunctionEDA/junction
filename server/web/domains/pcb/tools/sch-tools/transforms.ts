@@ -7,8 +7,8 @@ import { junctionAt, needsJunction } from "./connect";
 import { DRAG_KINDS, LABEL_KINDS, announceModes, applyDrag, breakInto, cleanupAt, connPoints, endDrag, foldChanges, isNetLine, makeAnchor, restoreNode, noConnectsAt } from "./drag";
 import { editTxn } from "./junction";
 import { hitNonSymbol, rectOf } from "./hit";
-import { PIN_SIDE, corners, flagFieldAt, fontNode, imageData, imageNode, junctionNode, lineNode } from "./nodes";
-import { SCREEN_OP, anchorOf, mirrorNode, mirrorTextSpin, orientSymbol, rotateText90, setTextRot, shiftAt, shiftNode, symOrient } from "./orient";
+import { PIN_SIDE, corners, flagFieldAt, fontNode, imageData, imageNode, junctionNode, lineNode, autoplaceSheetFields, SHEET_FILE_OFF, SHEET_NAME_OFF, placeFlagFields } from "./nodes";
+import { SCREEN_OP, anchorOf, mirrorNode, mirrorTextSpin, orientSymbol, rotateText90, setTextRot, shiftAt, shiftNode, symOrient, mirrorLabelFields, rotateLabelFields, rotateNode } from "./orient";
 import { mmPerPx } from "./snap";
 import { K, LINE_KINDS, POINT_KINDS, S, TEXT_KINDS, atOf, kid, kids, num, ptsOf, setAt, setPts, str } from "./state";
 import { selEndOf } from "./line-ends";
@@ -66,9 +66,11 @@ export function tableRawCentre(node: SNode): Pt {
 export function tableCentre(node: SNode): Pt { const c = tableRawCentre(node); return [halfGrid(c[0]), halfGrid(c[1])]; }
 // op: "ccw" | "cw" | "x" (KiCad's Mirror Vertically: y flips) | "y" (Mirror Horizontally: x flips)
 export function mapPoint(op: string, C: Pt, p: Pt): Pt { const [dx, dy] = SCREEN_OP[op](p[0] - C[0], p[1] - C[1]); return [r4(C[0] + dx), r4(C[1] + dy)]; }
-export function setFlagRot(node: SNode, rot: number) {
+export function setFlagRot(node: SNode, rot: number, cw = false) {
   rot = ((rot % 360) + 360) % 360; const a = kid(node, "at"); if (!a) return; if (a.length >= 4) a[3] = rot; else a.push(rot);
-  const p = [num(a[1]), num(a[2])]; for (const pr of kids(node, "property")) replaceKid(pr, flagFieldAt(p, rot));
+  // SCH_LABEL_BASE::Rotate90: autoplaced fields are placed again (SCH_DIRECTIVE_LABEL::AutoplaceFields), the others
+  // turn a quarter about the label
+  rotateLabelFields("netclass_flag", node, cw, (_k, n) => placeFlagFields(n));
 }
 export function sideOfEdge(p: Pt, box: Box) { const d: [string, number][] = [["left", Math.abs(p[0] - box[0])], ["right", Math.abs(p[0] - box[2])], ["top", Math.abs(p[1] - box[1])], ["bottom", Math.abs(p[1] - box[3])]]; d.sort((a, b) => a[1] - b[1]); return d[0][0]; }
 /**
@@ -90,12 +92,20 @@ export function transformNode(kind: string, node: SNode, op: string, C: Pt, lone
   }
   case "label": case "global_label": case "hierarchical_label": {
     const p0 = anchorOf(kind, node);
-    if (rot) setTextRot(kind, node, atOf(node)[2] + (op === "cw" ? 270 : 90)); else mirrorNode(kind, node, op);
+    if (rot) rotateNode(kind, node, op === "cw"); else mirrorNode(kind, node, op, lone);
     moveTo(p0); return true;
   }
   case "netclass_flag": case "directive_label": {
     const p0 = anchorOf(kind, node), r0 = atOf(node)[2] || 0;
-    if (rot) setFlagRot(node, r0 + (op === "cw" ? 270 : 90)); else { const flip: Record<number, number> = op === "y" ? { 0: 180, 180: 0 } : { 90: 270, 270: 90 }; if (flip[r0] !== undefined) setFlagRot(node, flip[r0]); }
+    if (rot) setFlagRot(node, r0 + (op === "cw" ? 270 : 90), op === "cw");
+    else {
+      // SCH_DIRECTIVE_LABEL::MirrorSpinStyle / MirrorHorizontally / MirrorVertically: "the text is in fact a graphic
+      // shape", so Mirror Horizontally ("y") swaps up and down (SPIN_STYLE::MirrorX) and Mirror Vertically left and
+      // right (MirrorY); the fields are mirrored about the label
+      const flip: Record<number, number> = op === "y" ? { 90: 270, 270: 90 } : { 0: 180, 180: 0 };
+      mirrorLabelFields(kind, node, op, lone);
+      const a = kid(node, "at"); if (flip[r0] !== undefined && a) { if (a.length >= 4) a[3] = flip[r0]; else a.push(flip[r0]); }
+    }
     moveTo(p0); return true;
   }
   case "junction": case "no_connect": mapAt(node); return true;
@@ -178,40 +188,15 @@ export function transformNode(kind: string, node: SNode, op: string, C: Pt, lone
     // SCH_SHEET::Rotate: AutoplaceFields when the fields are autoplaced, else they move with the sheet's corner;
     // MirrorHorizontally / MirrorVertically only move them (SCH_EDIT_TOOL::Mirror then drops the autoplaced flag)
     const auto = kid(node, "fields_autoplaced") && str(kid(node, "fields_autoplaced")![1]) !== "no";
-    if (rot && auto) sheetAutoplaceFields(node);
+    if (rot && auto) autoplaceSheetFields(node);
     else for (const pr of kids(node, "property")) shiftAt(pr, r4(x0 - x), r4(y0 - y));
     return true;
   }
   default: return false;
   }
 }
-/** SCH_SHEET::IsVerticalOrientation: pins on the top / bottom edges only. */
-export function sheetIsVertical(node: SNode): boolean {
-  let leftRight = 0, topBottom = 0;
-  for (const pin of kids(node, "pin")) { const a = ((atOf(pin)[2] || 0) % 360 + 360) % 360; if (a === 90 || a === 270) topBottom++; else leftRight++; }
-  return topBottom > 0 && leftRight === 0;
-}
-/**
- * SCH_SHEET::AutoplaceFields: the name above and the file name below a horizontal sheet; beside a vertical one (pins
- * on top / bottom only), reading upwards: the name left of the left edge, the file name right of the right edge, both
- * from the bottom.  margin = KiROUND( pen / 2 ) + 4 IU + KiROUND( text size x 0.5 ) (0.4 for the file name).
- */
-export function sheetAutoplaceFields(node: SNode) {
-  const IU = 1e4, kiround = (v: number) => (v < 0 ? -Math.round(-v) : Math.round(v));
-  const [x, y] = atOf(node), s = kid(node, "size"); if (!s) return;
-  const w = num(s[1]), h = num(s[2]), st = kid(node, "stroke"), sw = st ? num((kid(st, "width") || [])[1], 0) : 0;
-  const border = kiround((sw > 0 ? sw : 0.1524) * IU / 2) + 4, vertical = sheetIsVertical(node);
-  const size = (pr: SNode) => { const ef = kid(pr, "effects"), f = ef && kid(ef, "font"), z = f && kid(f, "size"); return z ? Math.max(num(z[1], 1.27), num(z[2], 1.27)) : 1.27; };
-  const put = (pr: SNode, p: Pt, just: string) => {
-    replaceKid(pr, ["at", r4(p[0]), r4(p[1]), vertical ? 90 : 0]);
-    let ef = kid(pr, "effects"); if (!ef) { ef = ["effects", fontNode(1.27)]; pr.push(ef); } replaceKid(ef, ["justify", "left", just]);
-  };
-  for (const pr of kids(node, "property")) {
-    const name = str(pr[1]);
-    if (name === "Sheetname") { const m = (border + kiround(size(pr) * IU * 0.5)) / IU; put(pr, vertical ? [x - m, y + h] : [x, y - m], "bottom"); }
-    else if (name === "Sheetfile") { const m = (border + kiround(size(pr) * IU * 0.4)) / IU; put(pr, vertical ? [x + w + m, y + h] : [x, y + h + m], "top"); }
-  }
-}
+/** SCH_SHEET::AutoplaceFields (one port, in nodes.ts). */
+export const sheetAutoplaceFields = autoplaceSheetFields;
 /**
  * What SCH_EDIT_TOOL::Rotate / Mirror do to an item once it has turned: a mirror drops the autoplaced flag
  * (SetFieldsAutoplaced( AUTOPLACE_NONE ): a symbol or sheet always, any item of a multi-selection), a rotation

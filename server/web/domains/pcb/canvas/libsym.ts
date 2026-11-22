@@ -14,10 +14,10 @@
 // Item ids are stable for the life of the symbol's structure: "g:<sub-symbol name>:<child index>" for a shape /
 // text of a sub-symbol, "p:<sub-symbol name>:<child index>" for a pin and "f:<field name>" for a field, so a
 // selection survives a rebuild after a move.  item.libRef says where the node lives.
-import { SCH, SCH_Z, dimColor } from "./colors";
+import { SCH, SCH_Z, darkened, parseColor, rgba } from "./colors";
 import { G, boxUnion, textGeom, transformedText } from "./geom";
 import { PIN_TEXT_OFFSET, TARGET_PIN_RADIUS, TILDE_LITERAL_VERSION, buildPinGeom, pinHidden, shapeGeom, type PinSym } from "./geom-sch";
-import { atOf, effectsOf, faceOf, has, isList, kid, kids, num, str, strokeColorOf, widthOf } from "./sexpr";
+import { atOf, effectsOf, faceOf, fillOf, has, isList, kid, kids, num, str, strokeColorOf, widthOf } from "./sexpr";
 import { SCH_PEN, textPen } from "./text";
 import { newDoc } from "./doc";
 import type { Doc, GeomSink, Item, Pt } from "./types";
@@ -68,7 +68,7 @@ function pinSymOf(sym: SNode, col: (c: string) => string, fileVersion = 0): PinS
 export function libGraphicGeom(item: GeomSink, g: SNode, col: (c: string) => string): void {
   const gk = String(g[0]);
   if (gk === "rectangle" || gk === "polyline" || gk === "bezier" || gk === "circle" || gk === "arc" || gk === "ellipse" || gk === "ellipse_arc") {
-    shapeGeom(item, g, gk, tf, col(yes(g, "private") ? SCH.privateNotes : SCH.outline), "Symbols", SCH_Z.device, SCH_Z.deviceBg, widthOf(g, 0) || SCH_PEN, undefined, true);
+    shapeGeom(item, g, gk, tf, yes(g, "private") ? SCH.privateNotes : SCH.outline, "Symbols", SCH_Z.device, fillOf(g).type === "background" ? SCH_Z.deviceBg : SCH_Z.shapesBg, widthOf(g, 0) || SCH_PEN, undefined, true);
     if (col !== ident) for (const x of item.geom) { if (x.color) x.color = col(x.color); if (x.fill) x.fill = col(x.fill); }
   } else if (gk === "text" || gk === "text_box") {
     const [x, y, r0] = atOf(g); const ef = effectsOf(g); const [px, py] = tf(x, y);
@@ -87,7 +87,9 @@ const ident = (c: string): string => c;
 /** The pin's dangling target and electrical-type name, as the symbol editor always shows them. */
 function pinExtras(item: GeomSink, p: SNode, color: string, showType: boolean): void {
   const [x, y, r] = atOf(p); const [px, py] = tf(x, y);
-  G(item, { t: "circle", x: px, y: py, r: TARGET_PIN_RADIUS, w: SCH_PEN / 3, color, layer: "Pins", z: SCH_Z.pin });
+  // drawPinDanglingIndicator: the target circle in aColor.Brightened( 0.3 )
+  const [cr, cg, cb, ca] = parseColor(color), br = (v: number) => Math.round(v * 0.7 + 255 * 0.3);
+  G(item, { t: "circle", x: px, y: py, r: TARGET_PIN_RADIUS, w: SCH_PEN / 3, color: rgba(br(cr), br(cg), br(cb), ca), layer: "Pins", z: SCH_Z.pin });
   if (!showType) return;
   const label = PIN_TYPE_NAMES[str(p[1])] || "Unspecified";
   const nameN = kid(p, "name"); const nameSize = nameN ? effectsOf(nameN).size : 1.27;
@@ -111,7 +113,8 @@ export function parseLibSymbol(sym: SNode, opts?: LibSymbolOpts): Doc {
   opts = opts || {};
   const unit = opts.unit || 1, body = opts.bodyStyle || 1;
   const doc = newDoc("sch"); doc.page = [0, 0];
-  const dim = (c: string) => dimColor(c, SCH.bg);
+  // SCH_PAINTER::getRenderColor with m_ShowDisabled / m_ShowGraphicsDisabled: color.Darken( 0.5 ) (each channel halved)
+  const dim = (c: string) => darkened(c, 0.5);
   const colAll = opts.disabled ? dim : ident;
   const showHiddenPins = opts.showHiddenPins !== false, showHiddenFields = opts.showHiddenFields !== false, showType = opts.showElectricalTypes !== false;
   const add = (id: string, ref: LibRef, sink: GeomSink, kind: string): void => {
@@ -158,7 +161,7 @@ export function parseLibSymbol(sym: SNode, opts?: LibSymbolOpts): Doc {
     const showName = yes(p, "show_name");
     const shownText = (showName ? name + ": " : "") + val; if (!val) continue;
     const isRV = name === "Reference" || name === "Value";
-    const color = colAll(ef.color || (hide ? SCH.hidden : yes(p, "private") ? SCH.privateNotes : isRV ? SCH.ref : SCH.field));   // SCH_FIELD::GetFieldColor
+    const color = colAll(ef.color || (hide ? SCH.hidden : yes(p, "private") ? SCH.privateNotes : name === "Reference" ? SCH.ref : name === "Value" ? SCH.value : SCH.field));   // SCH_FIELD::GetFieldColor
     const [x, y, r] = atOf(p);
     const sink: GeomSink = { geom: [], bbox: null };
     transformedText(sink, IDENT, x, -y, shownText, ef.size, color, r, ef.just, isRV ? "Reference & value" : "Fields", { z: name === "Reference" ? SCH_Z.ref : name === "Value" ? SCH_Z.value : SCH_Z.fields, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, field: name, olKind: "field" });

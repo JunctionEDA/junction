@@ -175,7 +175,7 @@ test("Schematic Setup > Formatting: label size and text offset ratios, DNP marke
     assert.ok(K.setSchFormatting({ labelSizeRatio: 0.75, textOffsetRatio: 0.5, lineWidth: 0.254 }, doc));
     assert.ok(Math.abs(span("g1") - g0 - 2 * 0.375 * 1.27) < 1e-6, "the global label outline grows by the margin each side");
     assert.ok(textY("l1") < y0 - 0.3 * 1.27, "a local label's text sits text_offset_ratio x size above its anchor");
-    assert.ok(Math.abs(doc.items.get("s1").geom.find((g) => g.color === K.SCH.dnp).w - 3 * 0.254) < 1e-9 && Math.abs(w0 - 3 * 0.1524) < 1e-9, "the DNP cross: 3 x the default line width");
+    assert.ok(Math.abs(doc.items.get("s1").geom.find((g) => g.color === K.SCH.dnp).w - 3 * 0.1524) < 1e-9 && Math.abs(w0 - 3 * 0.1524) < 1e-9, "the DNP cross: 3 x DEFAULT_LINE_WIDTH_MILS (18 mils), whatever the schematic's default line width");
     assert.ok(K.setSchFormatting({ showDnpMarkers: false }, doc));
     assert.strictEqual(doc.items.get("s1").geom.filter((g) => g.color === K.SCH.dnp).length, 0, "show_dnp_markers off: no cross");
     assert.strictEqual(K.setSchFormatting({ showDnpMarkers: false }, doc), false, "nothing changed: nothing rebuilt");

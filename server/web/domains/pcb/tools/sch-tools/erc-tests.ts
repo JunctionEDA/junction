@@ -3,6 +3,7 @@
 // netclasses (one sheet), and the tests that look across the whole hierarchy: multi-unit footprints / values / missing
 // units, local vs global names, similar names, single global labels (crossSheet).
 import type { Pt, ErcMarker } from "./types";
+import { type AnnSheet, type SchRef, checkAnnotation, sheetReferences } from "./annotate";
 import { type SymPin, globalPowerPin, symbolIsPower, symbolLibId, symbolPins } from "./autoplace";
 import { terminalsOf } from "./highlight";
 import { K, atOf, kid, kids, num, str } from "./state";
@@ -161,18 +162,49 @@ export function sheetTests(doc: KDoc, nets: ErcNet[], mark: Mark, itemRef: (doc:
   }
 }
 
+/** A sheet for CheckAnnotate: its document, the instance path its symbols record and its page, when the caller knows the hierarchy. */
+export interface AnnotInstance { doc: KDoc; path?: string | null; page?: number }
+/**
+ * SCH_SHEET_LIST::GetSymbols( refs, SYMBOL_FILTER_NON_POWER, true ) for ANNOTATE_ALL: the references of every sheet
+ * instance.  Without known instance paths a file counts once, however many sheets use it.
+ */
+function annotationRefs(insts: AnnotInstance[]): { sheets: (AnnSheet | null)[]; refs: SchRef[] } {
+  const seenDocs = new Set<KDoc>(), sheets: (AnnSheet | null)[] = insts.map((s, i) => {
+    const path = s.path !== undefined ? s.path : s.doc.instancePath || null;
+    if (!path) { if (seenDocs.has(s.doc)) return null; seenDocs.add(s.doc); }
+    return { doc: s.doc, path, page: s.page || i + 1 };
+  });
+  const refs: SchRef[] = []; for (const sh of sheets) if (sh) refs.push(...sheetReferences(sh, null, true));
+  return { sheets, refs };
+}
+/** SCH_EDIT_FRAME::CheckAnnotate( handler, ANNOTATE_ALL ): the number of annotation errors of the whole schematic. */
+export function checkAnnotate(insts: (AnnotInstance | KDoc)[]): number {
+  const { refs } = annotationRefs(insts.map((s) => ((s as KDoc).items instanceof Map ? { doc: s as KDoc } : s as AnnotInstance)));
+  return refs.length ? checkAnnotation(refs, () => { /* counted only */ }) : 0;
+}
+
 /** A sheet instance for the hierarchy-wide tests; `key` names the sheet path its markers go to. */
-export interface ErcInstance { doc: KDoc; key: string; nets: ErcNet[] }
+export interface ErcInstance { doc: KDoc; key: string; nets: ErcNet[]; /** the instance path its symbols record ("/<root uuid>/<sheet uuid>…") and its page, when the caller knows the hierarchy */ path?: string | null; page?: number }
 interface Named { inst: number; it: KItem; p: Pt; name: string; pin: boolean; global: boolean; hier: boolean; label: boolean; ref?: ErcItemRef }
 
 /**
  * The tests over every sheet of the schematic at once (ERC_TESTER: TestMultiunitFootprints, TestMissingUnits,
- * CheckAnnotation's unit_value_mismatch, TestSameLocalGlobalLabel, TestSimilarLabels, ercCheckSingleGlobalLabel).
+ * CheckAnnotation, TestFootprintFilters, TestSameLocalGlobalLabel, TestSimilarLabels, ercCheckSingleGlobalLabel).
  * Returns the markers of each instance (by index).
  */
 export function hierarchyTests(insts: ErcInstance[], itemRef: (doc: KDoc, it: KItem) => ErcItemRef, pinRef: (t: ErcTerm & { pin: SymPin }) => ErcItemRef): ErcMarker[][] {
   const out: ErcMarker[][] = insts.map(() => []);
   const mark = (i: number, code: string, severity: string, p: Pt, text: string, ids: string[], items: ErcItemRef[]): void => { out[i].push({ code, severity, x: r4(p[0]), y: r4(p[1]), text, ids: Array.from(new Set(ids)), items } as ErcMarker); };
+  // ---- ERC_TESTER::TestAnnotation: SCH_REFERENCE_LIST::CheckAnnotation over every sheet instance (power and '#'
+  // symbols left out); the marker carries the handler's message as it is and sits on the first item's symbol, on its sheet
+  {
+    const { sheets: annSheets, refs } = annotationRefs(insts);
+    const CODES: Record<string, string> = { unannotated: "unannotated", extra_units: "extra_units", duplicate_reference: "duplicate_reference", different_unit_value: "unit_value_mismatch" };
+    if (refs.length) checkAnnotation(refs, (code, msg, a, b) => {
+      const i = annSheets.indexOf(a.sheet), ia = a.item!, ib = b && b.item;
+      mark(Math.max(0, i), CODES[code], "error", atOf(ia.node), msg, ib ? [ia.id, ib.id] : [ia.id], ib && b!.sheet ? [itemRef(a.sheet!.doc, ia), itemRef(b!.sheet.doc, ib)] : [itemRef(a.sheet!.doc, ia)]);
+    });
+  }
   // ---- multi-unit symbols, grouped by reference
   interface Unit { inst: number; it: KItem; unit: number; fp: string; value: string; ref: string }
   const groups = new Map<string, Unit[]>();
@@ -191,16 +223,12 @@ export function hierarchyTests(insts: ErcInstance[], itemRef: (doc: KDoc, it: KI
     let count = 1; for (const s of subs) { const m = str(s[1]).match(/_(\d+)_(\d+)$/); if (m) count = Math.max(count, +m[1]); }
     const unitName = (u: number): string => { for (const s of subs) { const m = str(s[1]).match(/_(\d+)_(\d+)$/); if (m && +m[1] === u) { const un = kid(s, "unit_name"); if (un) return str(un[1]); } } return letterSubReference(u); };
     const nameOf = (x: Unit): string => x.ref + (count > 1 ? letterSubReference(x.unit) : "");
+    // GetMultiUnitSymbols: only symbols of more than one unit are compared
+    if (count <= 1) continue;
     // TestMultiunitFootprints: the first unit with a footprint is the reference
     const base = units.find((x) => x.fp);
     if (base) for (const x of units) if (x.fp && x.fp !== base.fp)
       mark(x.inst, "different_unit_footprint", "error", atOf(x.it.node), `Different footprints assigned to ${nameOf(base)} and ${nameOf(x)}`, [base.it.id, x.it.id], [itemRef(insts[base.inst].doc, base.it), itemRef(insts[x.inst].doc, x.it)]);
-    // SCH_REFERENCE_LIST::CheckAnnotation: units of one reference with different values
-    if (count > 1) for (let k = 1; k < units.length; k++) {
-      const a = units[k - 1], b = units[k]; if (a.value === b.value) continue;
-      const num0 = ref.match(/(\d+)$/), base0 = num0 ? ref.slice(0, -num0[1].length) : ref, n = num0 ? num0[1] : "";
-      mark(a.inst, "unit_value_mismatch", "error", atOf(a.it.node), `Different values for ${base0}${n}${letterSubReference(a.unit)} (${a.value}) and ${base0}${n}${letterSubReference(b.unit)} (${b.value})`, [a.it.id, b.it.id], [itemRef(insts[a.inst].doc, a.it), itemRef(insts[b.inst].doc, b.it)]);
-    }
     // TestMissingUnits
     if (count > 1 && subs.length) {
       const placed = new Set(units.map((x) => x.unit)), missing: number[] = [], power: number[] = [], input: number[] = [], bidi: number[] = [];
@@ -219,6 +247,22 @@ export function hierarchyTests(insts: ErcInstance[], itemRef: (doc: KDoc, it: KI
       report(bidi, "missing_bidi_pin", "warning", (n) => `Symbol ${ref} has bidirectional pins in units ${n} that are not placed`);
     }
   }
+  // ---- TestFootprintFilters: the assigned footprint against the library symbol's footprint filters
+  const wild = (text: string, pattern: string): boolean => new RegExp("^" + pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$").test(text);
+  insts.forEach((s, i) => {
+    for (const it of s.doc.items.values()) {
+      if (it.kind !== "symbol") continue;
+      const lib = K.resolveLib(s.doc, symbolLibId(it.node)); if (!lib) continue;
+      const filters = propText(lib, "ki_fp_filters").split(/\s+/).filter((f) => f); if (!filters.length) continue;
+      const fp = propText(it.node, "Footprint"), lowerId = fp.toLowerCase(), colon = fp.indexOf(":");
+      // LIB_ID::Parse: an illegal character after the first one drops the footprint from the test
+      const name = colon >= 0 ? fp.slice(colon + 1) : fp;
+      if (name.search(/[<>"\\:\t\n\r]/) > 0) continue;
+      const lowerName = name.toLowerCase();
+      if (filters.some((f) => (f.includes(":") ? wild(lowerId, f.toLowerCase()) : wild(lowerName, f.toLowerCase())))) continue;
+      mark(i, "footprint_filter", "warning", atOf(it.node), `Assigned footprint (${lowerName}) doesn't match footprint filters (${filters.join(" ")})`, [it.id], [itemRef(s.doc, it)]);
+    }
+  });
   // ---- named items: labels and power pins (collectNamedItems)
   const named = (similar: boolean): Named[] => {
     const l: Named[] = [];

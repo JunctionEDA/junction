@@ -71,12 +71,22 @@ export function sheetPathHere(doc: KDoc) {
   const top = (m: Map<string, number>) => { let best: string | null = null, bn = 0; for (const [k, n] of m) if (n > bn) { bn = n; best = k; } return best; };
   return { path: top(paths), project: top(names) };
 }
-// Next free page: the project's sheet count (root is page 1), bumped past the pages used on this screen.
+// SCH_SHEET_LIST::GetNextPageNumber: the smallest positive integer no sheet instance of the hierarchy has as its page
+// (pages that are not numbers do not count).  The hierarchy's pages come from the editor (S.hierarchyPages); without
+// them, the pages this screen and its loaded sub-sheets record stand in.
 export function nextPage(ctx: SchCtx, doc: KDoc) {
-  const used = new Set(["1"]);
-  for (const it of doc.items.values()) if (it.kind === "sheet") for (const inst of kids(it.node, "instances")) for (const pr of kids(inst, "project")) for (const pa of kids(pr, "path")) { const pg = kid(pa, "page"); if (pg) used.add(str(pg[1])); }
-  let n = Math.max(2, schDocs(ctx).length);
-  while (used.has(String(n))) n++;
+  const used = new Set<number>(), take = (t: string) => { if (/^\s*[+-]?\d+\s*$/.test(t)) { const n = parseInt(t, 10); if (n > 0) used.add(n); } };
+  const pagesOf = (d: KDoc) => { for (const it of d.items.values()) if (it.kind === "sheet") for (const inst of kids(it.node, "instances")) for (const pr of kids(inst, "project")) for (const pa of kids(pr, "path")) { const pg = kid(pa, "page"); if (pg) take(str(pg[1])); } };
+  let all: string[] | null = null; try { all = S.hierarchyPages ? S.hierarchyPages() : null; } catch (e) { all = null; }
+  if (all) for (const p of all) take(p);
+  else {
+    take(str((doc as KDoc & { pageNumber?: string }).pageNumber || "1"));
+    const subs = ctx.sheetDocs ? (ctx.sheetDocs instanceof Map ? [...ctx.sheetDocs.values()] : Object.values(ctx.sheetDocs)) : [];
+    for (const d of subs) if (d && typeof d !== "string") pagesOf(d);
+  }
+  pagesOf(doc);   // the sheets drawn since the hierarchy was read
+  let n = 1;
+  while (used.has(n)) n++;
   return n;
 }
 export function sheetInstance(ctx: SchCtx, doc: KDoc, page: number) {

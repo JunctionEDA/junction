@@ -1,5 +1,6 @@
 import type { SchCtx, Pt } from "./types";
 import { root } from "../root";
+import { newSymbolMinRef } from "./annotate";
 import { PASTE_KINDS, clipRead, clipWrite, cursorOf, editable, selectedItems, setSelectionIds, snapCursor } from "./commands";
 import { breakLinesAt, junctionAt, needsJunction } from "./connect";
 import { LABEL_KINDS, beginDrag, connPoints, isNetLine } from "./drag";
@@ -114,9 +115,21 @@ export function assignPastedRef(doc: KDoc, node: SNode, used: Set<string>) {
   const free = (r: string): boolean => { const n = refNumber(r); return n < 0 ? !used.has(r) : !(taken.get(refPrefix(r)) || new Set()).has(n); };
   if (!/\?$/.test(ref) && free(ref)) { takeRef(used, ref); return; }
   let next = unannotated(ref);
-  if (S.annotateAuto) { const prefix = refPrefix(ref); let n = 1; while (!free(prefix + n)) n++; next = prefix + n; takeRef(used, next); }
+  if (S.annotateAuto) {
+    // AnnotateNewSymbol: ReannotateByOptions with the project's start number / sheet-number method, the designators
+    // the tracker bars from reuse skipped, and a power symbol's number written 0nnn (SCH_REFERENCE::formatRefStr)
+    const prefix = refPrefix(ref), tracker = S.refTracker, power = isPowerLib(doc, node);
+    let n = newSymbolMinRef(pageOf(doc));
+    while (!free(prefix + n) || (tracker && !tracker.reuse && tracker.used.has(prefix + n))) n++;
+    if (tracker) tracker.used.add(prefix + n);
+    next = prefix + (power ? "0" + n : n); takeRef(used, next);
+  }
   setReference(node, next);
 }
+/** LIB_SYMBOL::IsPower of a placed symbol's library symbol. */
+function isPowerLib(doc: KDoc, node: SNode): boolean { const lib = doc ? K.resolveLib(doc, str((kid(node, "lib_id") || [])[1])) : null; return !!lib && !!kid(lib, "power"); }
+/** SCH_SHEET_PATH::GetPageNumberAsInt of the sheet on screen. */
+function pageOf(doc: KDoc): number { const n = parseInt(String((doc && (doc as KDoc & { pageNumber?: string }).pageNumber) || ""), 10); return n > 0 ? n : 1; }
 // prefix -> the numbers in use, kept beside each reference set so that repeated checks stay cheap
 const numbersOf = new WeakMap<Set<string>, Map<string, Set<number>>>();
 function refNumbers(used: Set<string>): Map<string, Set<number>> {
@@ -180,8 +193,10 @@ const unitOf = (node: SNode): number => { const u = kid(node, "unit"); return u 
  */
 export function annotatePastedUnique(doc: KDoc, nodes: SNode[], cfg?: Partial<AnnotateCfg> & { reannotate?: boolean }): void {
   interface Holder { lib: string; value: string; unit: number }
-  const held = new Map<string, Holder[]>();        // full reference ("U1") -> who holds it
-  const hold = (ref: string, h: Holder) => { const l = held.get(ref); if (l) l.push(h); else held.set(ref, [h]); };
+  // prefix and number -> who holds it: "#PWR01" and "#PWR1" are one reference (SCH_REFERENCE::Split's m_numRef)
+  const held = new Map<string, Holder[]>();
+  const keyOf = (ref: string): string => { const n = refNumber(ref); return n < 0 ? ref : refPrefix(ref) + "\u0000" + n; };
+  const hold = (ref: string, h: Holder) => { const k = keyOf(ref), l = held.get(k); if (l) l.push(h); else held.set(k, [h]); };
   // the other sheets: their units when known (a package may span sheets), else the bare reference, held outright
   const known = new Set<string>();
   for (const u of S.otherUnits || []) { known.add(u.ref); hold(u.ref, { lib: u.lib, value: u.value, unit: u.unit }); }
@@ -192,12 +207,15 @@ export function annotatePastedUnique(doc: KDoc, nodes: SNode[], cfg?: Partial<An
     hold(ref, { lib: str((kid(it.node, "lib_id") || [])[1]), value: valueOf(it.node), unit: unitOf(it.node) });
   }
   // AnnotateByOptions' sort, then the pasted units of one reference annotated as one locked package
-  const c = cfg || {}, step = c.method === 1 ? 100 : c.method === 2 ? 1000 : 0, startAtCurrent = !c.reannotate && !step;
+  // without explicit settings: the project's, as the editor keeps them in S.annotation
+  const c: Partial<AnnotateCfg> & { reannotate?: boolean } = cfg || (S.annotation ? { method: S.annotation.method, sortY: S.annotation.sortY, startNum: S.annotation.startNum, sheetNumber: pageOf(doc) } : {}), step = c.method === 1 ? 100 : c.method === 2 ? 1000 : 0, startAtCurrent = !c.reannotate && !step;
   const base = step ? (c.sheetNumber || 1) * step + 1 : (c.reannotate ? c.startNum || 0 : 0) + 1;
   const syms = nodes.filter((n) => n[0] === "symbol" && refField(n)).map((n) => { const at = kid(n, "at"); return { n, ref: str(refField(n)![2]), prefix: refPrefix(str(refField(n)![2])), x: at ? num(at[1]) : 0, y: at ? num(at[2]) : 0, uuid: uuidOf(n) || "", lib: str((kid(n, "lib_id") || [])[1]), value: valueOf(n), unit: unitOf(n), multi: unitCountOf(doc, n) > 1 }; });
   syms.sort((a, b) => (a.prefix < b.prefix ? -1 : a.prefix > b.prefix ? 1 : 0) || (c.sortY ? a.y - b.y || a.x - b.x : a.x - b.x || a.y - b.y) || (a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0));
   const done = new Set<typeof syms[number]>();
   let group: string | null = null, minRef = base;
+  // REFDES_TRACKER (reuse_designators / used_designators)
+  const tracker = S.refTracker;
   for (const s of syms) {
     // minRefId: reset for each new prefix, moved to the symbol's own number when starting at the current one
     if (s.prefix !== group) { group = s.prefix; minRef = base; }
@@ -208,13 +226,16 @@ export function annotatePastedUnique(doc: KDoc, nodes: SNode[], cfg?: Partial<An
     const pkg = current >= 0 && s.multi ? syms.filter((o) => !done.has(o) && o.ref === s.ref && o.lib === s.lib && o.value === s.value) : [s];
     const units = new Set(pkg.map((o) => o.unit));
     const fits = (n: number): boolean => {
-      const hs = held.get(prefix + n);
-      if (!hs || !hs.length) return true;
+      const hs = held.get(prefix + "\u0000" + n);
+      // REFDES_TRACKER::GetNextRefDesForUnits: a number nothing holds is taken unless it was used before and designators are not reused
+      if (!hs || !hs.length) return !tracker || tracker.reuse || !tracker.used.has(prefix + n);
       return s.multi && hs.every((h) => h.unit >= 0 && h.lib === s.lib && h.value === s.value && !units.has(h.unit));
     };
     let n = Math.max(1, minRef);
     while (!fits(n)) n++;
-    for (const o of pkg) { done.add(o); setReference(o.n, prefix + n); hold(prefix + n, { lib: o.lib, value: o.value, unit: o.unit }); }
+    if (tracker && !held.has(prefix + "\u0000" + n)) tracker.used.add(prefix + n);
+    const text = prefix + (isPowerLib(doc, s.n) ? "0" + n : n);
+    for (const o of pkg) { done.add(o); setReference(o.n, text); hold(text, { lib: o.lib, value: o.value, unit: o.unit }); }
   }
 }
 // Junctions the new items need: every connection point of every new item (items must be in the doc).

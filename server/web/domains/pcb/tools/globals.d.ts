@@ -18,6 +18,8 @@ interface ToolsCanvasApi extends KiCadCanvasApi {
   bezierPts(p: number[][], segs?: number): number[][];
   /** Stroke-font text width (mm). */
   textWidth(text: string, size: number, thick: number): number;
+  /** SCH_CONNECTION::ConfigureFromLabel of a bus label (web/domains/pcb/canvas/busname.ts): its net members, aliases expanded. */
+  busConnection(label: string, aliases?: Map<string, string[]> | Record<string, string[]> | null): { type: "vector" | "group"; prefix: string; members: { local: string; full: string; vectorIndex: number; nested: boolean }[]; aliases: { name: string; members: string[] }[] } | null;
 }
 
 /** window.CollabTools as the tool scripts fill it: one entry per script. */

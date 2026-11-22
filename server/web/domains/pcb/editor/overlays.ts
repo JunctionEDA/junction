@@ -7,6 +7,8 @@
 import { rulerOps, shadowColor, type RulerUnits } from "./ruler";
 import { areaFill } from "./selmodes";
 import { E } from "./state";
+/** Flip Board View is on (view.ts viewFlipped; this module is drawn by view.ts and does not import it). */
+const viewFlipped = (): boolean => !!(E.kdoc && E.renderOpts && E.renderOpts.flip);
 
 /** More app overlays, painted first (the table cell selection and its handles, editor/tablecells.ts). */
 export const overlayHooks: ((ctx: CanvasRenderingContext2D) => void)[] = [];
@@ -89,7 +91,7 @@ function drawRuler(ctx: CanvasRenderingContext2D, view: OverlayView, sch: boolea
       ctx.strokeStyle = c; ctx.lineWidth = Math.max(op.w / IU, minPen); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
     } else {
       const at = toMm(op.at);
-      K.drawStrokeText(ctx, base, { x: at[0], y: at[1], text: op.text, size: op.size / IU, rot: op.rot, mirror: false, h: op.h, v: "center", pen: op.pen / IU, italic: false, dy: 0 }, c, minPen);
+      K.drawStrokeText(ctx, base, { x: at[0], y: at[1], text: op.text, size: op.size / IU, rot: op.rot, mirror: base[0] < 0 /* the flipped board view: the ruler's text stays readable */, h: op.h, v: "center", pen: op.pen / IU, italic: false, dy: 0 }, c, minPen);
     }
   }
 }
@@ -105,10 +107,11 @@ export function drawAppOverlays(ctx: CanvasRenderingContext2D, view: OverlayView
   const bs = E.boxSel as { start: Pt; cur: Pt; pts: Pt[]; lasso: boolean; add?: boolean; mode?: string | null } | null;
   if (bs) {
     const { additive, subtractive } = areaFill(bs, sch);   // SELECTION_AREA::ViewDraw
-    // a lasso kept alive after the button came up (selectLasso): its points, then the cursor
-    const lp = bs.lasso && (bs as { live?: boolean }).live ? [...bs.pts, bs.cur] : bs.pts;
-    if (bs.lasso) drawSelectionArea(ctx, px, dark, { poly: lp, inside: lassoArea(lp) > 0, additive, subtractive });
-    else drawSelectionArea(ctx, px, dark, { rect: [bs.start, bs.cur], inside: bs.cur[0] >= bs.start[0], additive, subtractive });
+    // a lasso kept going after the button came up (the schematic's selectLasso, the board's SelectPolyArea): its
+    // points, then the cursor
+    const lp = bs.lasso && ((bs as { live?: boolean }).live || (bs as { open?: boolean }).open) ? [...bs.pts, bs.cur] : bs.pts;
+    if (bs.lasso) drawSelectionArea(ctx, px, dark, { poly: lp, inside: sch ? lassoArea(lp) > 0 : (lassoArea(bs.pts) > 0) !== (viewFlipped() && lassoArea(bs.pts) !== 0), additive, subtractive });
+    else drawSelectionArea(ctx, px, dark, { rect: [bs.start, bs.cur], inside: (bs.cur[0] >= bs.start[0]) !== (!sch && viewFlipped()), additive, subtractive });
   }
   const zr = E.zoomRect as { a?: Pt; b?: Pt } | null;
   if (zr && zr.a && zr.b) drawSelectionArea(ctx, px, dark, { rect: [zr.a, zr.b], inside: true });
@@ -125,6 +128,6 @@ export function drawFieldUmbilical(ctx: CanvasRenderingContext2D, px: number): v
   const K = KiCadCanvas;
   const prop = K.kids(it.node, "property").find((p: SNode) => K.str(p[1]) === fd.name); if (!prop) return;
   const fa = K.kid(prop, "at"), pa = K.kid(it.node, "at"); if (!fa || !pa) return;
-  ctx.save(); ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.strokeStyle = "#0000FF"; ctx.lineWidth = px; ctx.lineCap = "butt";
+  ctx.save(); ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.strokeStyle = (K.SCH && K.SCH.anchor) || "#0000FF"; ctx.lineWidth = px; ctx.lineCap = "butt";
   ctx.beginPath(); ctx.moveTo(K.num(fa[1]), K.num(fa[2])); ctx.lineTo(K.num(pa[1]), K.num(pa[2])); ctx.stroke(); ctx.restore();
 }

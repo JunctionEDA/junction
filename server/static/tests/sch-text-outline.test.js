@@ -89,10 +89,10 @@ test("fields: symbol, sheet and label fields take their own colour (SCH_FIELD::G
       (pin "P" input (at 120 105 0) ${FONT(RED)} (uuid "p1")))
     (label "L" (at 30 30 0) ${FONT()} (uuid "l1") (property "Netclass" "fast" (at 30 33 0) ${FONT(RED)}))`);
   const sym = d.items.get("s1"), ref = texts(sym).find((g) => g.field === "Reference"), val = texts(sym).find((g) => g.field === "Value");
-  same(ref.color, [255, 0, 0, 1]); same(val.color, rgb(K.SCH.ref));
+  same(ref.color, [255, 0, 0, 1]); same(val.color, rgb(K.SCH.value));
   same(texts(sym).find((g) => g.text === "body").color, [0, 0, 255, 1], "a symbol's own text keeps its colour (isSymbolChild)");
   const hid = (sym.hiddenGeom || []).find((g) => g.field === "Note"); same(hid.color, [0, 255, 0, 1], "a hidden field shown keeps its colour");
-  const sh = d.items.get("sh1"); same(texts(sh).find((g) => g.text === "S").color, [255, 0, 0, 1]); same(texts(sh).find((g) => /File/.test(g.text)).color, rgb(K.SCH.sheetFile));
+  const sh = d.items.get("sh1"); same(texts(sh).find((g) => g.text === "S").color, [255, 0, 0, 1]); same(texts(sh).find((g) => g.field === "Sheetfile").color, rgb(K.SCH.sheetFile));
   for (const g of sh.geom.filter((g) => g.pinNo === "P")) same(g.color, [255, 0, 0, 1], "sheet pin " + g.t);
   same(texts(d.items.get("l1")).find((g) => g.field === "Netclass").color, [255, 0, 0, 1]);
 });

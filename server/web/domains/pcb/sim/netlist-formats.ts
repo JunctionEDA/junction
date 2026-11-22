@@ -55,12 +55,16 @@ export function resolveField(comp: NetComponent, text: string, depth = 0): strin
 }
 const valueOf = (c: NetComponent): string => resolveField(c, c.value), footprintOf = (c: NetComponent): string => resolveField(c, c.footprint);
 
-/** m_exportNets with each net's pins sorted and de-duplicated, nets by name. */
+/** m_exportNets (every symbol pin of every net, board-excluded symbols included) with each net's pins sorted and
+ *  de-duplicated on (reference, shown pin number: a stacked pin stays as written), nets by name. */
 function sortedNets(nl: Netlist): [string, { ref: string; pin: string }[]][] {
   const out: [string, { ref: string; pin: string }[]][] = [];
-  for (const [name, pins] of nl.nets) {
-    const s = pins.slice().sort((a, b) => cmp(a.ref, b.ref) || cmp(a.pin, b.pin));
-    out.push([name, s.filter((p, i) => i === 0 || p.ref !== s[i - 1].ref || p.pin !== s[i - 1].pin)]);
+  for (const e of (nl.netMap || new Map()).values()) {
+    if (e.bus) continue;
+    const pins: { ref: string; pin: string }[] = [];
+    for (const m of e.members) if (m.kind === "pin" && m.pin !== undefined) pins.push({ ref: m.symRef !== undefined ? m.symRef : m.ref || "", pin: m.pin });
+    const s = pins.sort((a, b) => cmp(a.ref, b.ref) || cmp(a.pin, b.pin));
+    out.push([e.name, s.filter((p, i) => i === 0 || p.ref !== s[i - 1].ref || p.pin !== s[i - 1].pin)]);
   }
   return out.sort((a, b) => cmp(a[0], b[0]));
 }

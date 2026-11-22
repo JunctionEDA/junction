@@ -22,7 +22,7 @@
 // static/kicad-canvas.js, which the server serves and the node test suites load.
 // kicad-canvas — GENERATED SOURCE MODULE (split from the former static/kicad-canvas.js; static/kicad-canvas.js is now the esbuild output of web/domains/pcb/canvas/index.ts — edit these modules, not the bundle).
 import { root } from "./env";
-import { PCB_BG, PCB_COLORS, PCB_HIDDEN_DEFAULT, SCH, SCH_DEFAULT, SCH_THEMES, pcbColor, pcbZ, schTheme, schThemeColors, setSchTheme, withSchTheme } from "./colors";
+import { PCB_BG, PCB_COLORS, PCB_HIDDEN_DEFAULT, SCH, SCH_DEFAULT, SCH_THEMES, SCH_Z, pcbColor, pcbZ, schTheme, schThemeColors, setSchTheme, withSchTheme } from "./colors";
 import { PAPER_SIZES, addItem, applyDocProps, computeBBox, mm2mils, paperSize, parseDoc, titleBlockOf } from "./doc";
 import type { Doc } from "./types";
 import { addChange, boardChangeExtras, createItem, fieldAt, fieldBoxes, groupMemberIds, moveItem, netNameOf, newUuid, pinPoints, pointInQuad, removeChange, replaceChange, typeNameOf, wireEndsAt } from "./edit";
@@ -30,12 +30,11 @@ import { SvgPath, renderPng, renderSvg, serialize, serializeItem, setRenderCache
 import { buildGeom, ensureFontGeom, ensureSchTheme, inSchTheme } from "./geom";
 import { faceMetrics, kicadAscDesc, outlineBoxCorners, outlineLayout, readSfnt } from "./outline-text";
 import { hatchLines } from "./geom-pcb";
-import { ORIENT, fieldColor, hasOpTextVar, intersheetRefsText, opVars, resolveLib, schDisplay, schFormat, symbolTransform, type OpTextVar } from "./geom-sch";
+import { ORIENT, fieldColor, hasOpTextVar, intersheetRefsText, letterSubReference, opVars, resolveLib, schDisplay, schFormat, subReference, symVars, symbolInstance, symbolTransform, unitDisplayNames, type OpTextVar, hasNetTextVar, labelVars, type LabelTextVar } from "./geom-sch";
 import { bboxOf, geomBox, geomHit, geomTouchesRect, itemTouchesRect, itemVisible, hitTest, hitTestDetail, layerList, movableItems, padAt, padGeomHit, snap } from "./hit";
 import { applyChange, setAt, setPts } from "./ops";
-import { darkened, mixColor, brightenedItemColor, lockedShadowMargin, footprintBodyBox, drawLockedShadow, DRC_HIGHLIGHTED, HL_FACTOR, HC_EDGE_MIN, viaSpans, umbilicalLines, viaStitchOutline, viaStitchTicks, gridItemGeom, gridItemArea, gridTakesPrecedence, autoSparsePitch } from "./render";
-import { DASH_RATIOS, HIDDEN_TEXT_ALPHA, HL_DIM, MARKER_COLORS, MARKER_CORNERS, MARKER_SCALE, PX_PER_MM_ZOOM1, RATSNEST_COLOR, VIA_NETNAME_COLOR, ZONE_OPACITY, brightened, dashPattern, defaultCreateCanvas, drawDrawingSheet, drawHalo, drawMarkers, drawPad, drawSelectionHalo, SCH_SELECTION_SHADOW, selectedColor, flipCentre, flipX, highlightColor, markerAt, markerPolygon, markerScale, render, busConnectedLabels, busPinTint, setViewTransform, trackNameColor, unflipX, zoomFactor } from "./render";
-import { isBusLabel } from "./busname";
+import { darkened, mixColor, brightenedItemColor, lockedShadowMargin, footprintBodyBox, drawLockedShadow, DRC_HIGHLIGHTED, HL_FACTOR, HC_EDGE_MIN, viaSpans, umbilicalLines, viaStitchOutline, viaStitchTicks, gridItemGeom, gridItemArea, gridTakesPrecedence, autoSparsePitch, DASH_RATIOS, HIDDEN_TEXT_ALPHA, HL_DIM, MARKER_COLORS, MARKER_CORNERS, MARKER_SCALE, PX_PER_MM_ZOOM1, RATSNEST_COLOR, VIA_NETNAME_COLOR, ZONE_OPACITY, brightened, dashPattern, defaultCreateCanvas, drawDrawingSheet, drawHalo, drawMarkers, drawPad, drawSelectionHalo, SCH_SELECTION_SHADOW, selectedColor, flipCentre, flipX, highlightColor, markerAt, markerPolygon, markerScale, render, busConnectedLabels, busPinTint, setViewTransform, trackNameColor, unflipX, zoomFactor, SEL_STYLE, busJunctions, directiveOnlyAreas, netStyled } from "./render";
+import { busConnection, busMemberNames, isBusLabel } from "./busname";
 import { boardSetup } from "./board-setup";
 import { PlotRecorder, blackAndWhite, dashRuns, itemsBox, luminance, plotItems, plotRecorder, sheetPlotItems } from "./plot-rec";
 import { plotParams } from "./plot-params";
@@ -63,8 +62,12 @@ export const api = {
   // the schematic View options that change geometry (show_pin_alt_icons): set, then the symbols of `doc` are rebuilt
   // Schematic Setup > Formatting: the painter's text offset / label size ratios, pin symbol size, DNP markers and
   // default line width; the document's items are rebuilt with them
-  setSchFormatting(o: { textOffsetRatio?: number; labelSizeRatio?: number; pinSymbolSize?: number; showDnpMarkers?: boolean; lineWidth?: number; overbarHeight?: number; hopOverChoice?: number }, doc?: Doc | null) {
+  setSchFormatting(o: { textOffsetRatio?: number; labelSizeRatio?: number; pinSymbolSize?: number; showDnpMarkers?: boolean; lineWidth?: number; overbarHeight?: number; hopOverChoice?: number; subpartIdSeparator?: number; subpartFirstId?: number; overrideItemColors?: boolean }, doc?: Doc | null) {
     let changed = false;
+    // Schematic Setup > Annotation: the unit notation (U1A, U1.A, U1-1 …) every shown reference carries
+    for (const k of ["subpartIdSeparator", "subpartFirstId"] as const) { const v = o[k]; if (typeof v === "number" && isFinite(v) && v >= 0 && v !== schFormat[k]) { schFormat[k] = Math.round(v); changed = true; } }
+    // the colour theme's "Override individual item colors" (SCH_RENDER_SETTINGS::m_OverrideItemColors)
+    if (typeof o.overrideItemColors === "boolean" && o.overrideItemColors !== schFormat.overrideItemColors) { schFormat.overrideItemColors = o.overrideItemColors; changed = true; }
     // overbar_offset_ratio (KIFONT::METRICS::m_OverbarHeight) and hop_over_size_choice are applied at paint time
     if (typeof o.overbarHeight === "number" && isFinite(o.overbarHeight) && o.overbarHeight > 0) schFormat.overbarHeight = o.overbarHeight;
     if (typeof o.hopOverChoice === "number" && o.hopOverChoice >= 0) schFormat.hopOverChoice = Math.min(5, Math.round(o.hopOverChoice));
@@ -81,8 +84,25 @@ export const api = {
   // ${OP} text variables: the host's resolver (sim/op-overlay.ts), and a rebuild of the items of `doc` that use one
   // once the operating point changes (SCH_EDIT_FRAME::RefreshOperatingPointDisplay)
   setOpTextVar(fn: OpTextVar | null) { opVars.resolve = fn; },
+  /**
+   * The displayed sheet instance of a schematic (SCH_SHEET_PATH::UpdateAllScreenReferences): its symbols are rebuilt
+   * with that path's reference and unit.  true when the path changed.
+   */
+  setInstancePath(doc: Doc | null | undefined, path: string | null): boolean {
+    if (!doc || doc.type !== "sch" || (doc.instancePath || null) === (path || null)) return false;
+    doc.instancePath = path || null;
+    for (const it of doc.items.values()) if (it.kind === "symbol") { try { buildGeom(doc, it); } catch (e) { /* no geometry */ } }
+    return true;
+  },
+  // ${NET_NAME} / ${SHORT_NET_NAME} / ${NET_CLASS} of labels: the host's resolver (editor/schnets.ts), and a rebuild of
+  // the labels of `doc` that use one once the nets change
+  setLabelTextVar(fn: LabelTextVar | null) { labelVars.resolve = fn; },
+  refreshLabelTextVars(doc?: Doc | null) { if (!doc || doc.type !== "sch") return false; let any = false; for (const it of doc.items.values()) if (hasNetTextVar(it)) { any = true; try { buildGeom(doc, it); } catch (e) { /* no geometry */ } } return any; },
+  /** The schematic's default line width in mm (SCHEMATIC_SETTINGS::m_DefaultLineWidth), as the painter has it now. */
+  schPen(): number { return SCH_PEN; },
+  busJunctions, directiveOnlyAreas, netStyled, SEL_STYLE, SCH_Z,
   refreshOpTextVars(doc?: Doc | null) { if (!doc || doc.type !== "sch") return; for (const it of doc.items.values()) if (hasOpTextVar(it)) { try { buildGeom(doc, it); } catch (e) { /* no geometry */ } } },
-  setSchDisplay(o: { pinAltIcons?: boolean }, doc?: Doc | null) { if (typeof o.pinAltIcons === "boolean") schDisplay.pinAltIcons = o.pinAltIcons; if (doc && doc.type === "sch") for (const it of doc.items.values()) if (it.kind === "symbol") { try { buildGeom(doc, it); } catch (e) { /* no geometry */ } } }, schDisplay,
+  setSchDisplay(o: { pinAltIcons?: boolean; remappedPinNumbers?: boolean }, doc?: Doc | null) { if (typeof o.pinAltIcons === "boolean") schDisplay.pinAltIcons = o.pinAltIcons; if (typeof o.remappedPinNumbers === "boolean") schDisplay.remappedPinNumbers = o.remappedPinNumbers; if (doc && doc.type === "sch") for (const it of doc.items.values()) if (it.kind === "symbol") { try { buildGeom(doc, it); } catch (e) { /* no geometry */ } } }, schDisplay,
   parse, parseAll, serialize, serializeItem, parseDoc, applyDocProps, paperSize, titleBlockOf, DASH_RATIOS, setViewTransform, drawSelectionHalo, selectedColor, moveItem, replaceChange, addChange, removeChange, typeNameOf, boardChangeExtras, netNameOf, groupMemberIds, wrapFragment, pinPoints, wireEndsAt, newUuid, createItem, setPts, setAt, atOf, ptsOf, kid, kids, num, str, uuidOf, cloneNode, quotedMask, resolveLib, ORIENT, addItem, applyChange, render, movableItems, hitTest, layerList, snap, computeBBox, PCB_HIDDEN_DEFAULT, SCH, PCB_COLORS, PCB_BG,
   // schematic colour themes (colors.ts): KiCad Default / KiCad Classic / Dark; the painters rebuild stale geometry,
   // renderSvg / renderPng use opts.colorTheme (KiCad Default unless given)
@@ -106,14 +126,14 @@ export const api = {
   // exposed for tests and tools
   symbolTransform, textWidth, parseMarkup, urlRuns, urlRunAt, urlRunBox, isUrlText, hatchLines, arcFrom3, bezierPts, pcbColor, pcbZ, drawPad, buildGeom, effectsOf, fillOf,
   // display-option helpers (see render()): ratsnest / marker / net-name / zone-preview / flip constants and look-ups
-  bboxOf, padAt, padGeomHit, markerAt, markerPolygon, markerScale, busConnectedLabels, busPinTint, isBusLabel, drawMarkers, zoomFactor, flipX, unflipX, flipCentre, dashPattern, trackNameColor,
+  bboxOf, padAt, padGeomHit, markerAt, markerPolygon, markerScale, busConnectedLabels, busPinTint, isBusLabel, busConnection, busMemberNames, drawMarkers, zoomFactor, flipX, unflipX, flipCentre, dashPattern, trackNameColor,
   MARKER_CORNERS, MARKER_SCALE, MARKER_COLORS, RATSNEST_COLOR, ZONE_OPACITY, HIDDEN_TEXT_ALPHA, PX_PER_MM_ZOOM1, VIA_NETNAME_COLOR,
   // export: SVG / PNG of the whole document or a subset; createCanvas is the offscreen-canvas factory (replaceable for tests / workers)
   renderSvg, renderPng, SvgPath, createCanvas: defaultCreateCanvas, pointInPoly,
   // KiCad's stroke font (web/domains/pcb/canvas/stroke-font.ts): glyphs, markup, line layout, word wrap and the painter.
   // textMode: undefined = stroke font wherever Path2D exists, canvas fonts otherwise; "stroke" / "native" force one
   textMode: undefined, currentTextMode: textMode, strokeGlyph, strokeAdvance, strokeLine, strokeLineWidth, strokeOrigin, parseStrokeMarkup, linebreakText, drawStrokeText, drawTextStroke,
-  unescapeText, displayNetName, netCode, unitLetter, GRID_MIN_SPACING, GRID_TICK, MIN_TEXT_PX,
+  unescapeText, displayNetName, netCode, unitLetter, letterSubReference, subReference, unitDisplayNames, symbolInstance, symVars, GRID_MIN_SPACING, GRID_TICK, MIN_TEXT_PX,
   // the board editor's track / via sizes, netclass resolution and routing layer pair (web/domains/pcb/canvas/pcb-sizes.ts)
   pcbSizes,
   // the Symbol Editor's render mode (web/domains/pcb/canvas/libsym.ts): one library symbol as an editable document

@@ -1,7 +1,7 @@
 import type { Box, Pt } from "./types";
 import { tFrom } from "./orient";
-import { K, S, atOf, kid, kids, str } from "./state";
-import { deep, r4 } from "./util";
+import { K, S, atOf, kid, kids, str, num } from "./state";
+import { deep, r4, replaceKid } from "./util";
 
 // ---------------------------------------------------------------- node builders (KiCad 9 file shapes)
 export const fontNode = (size: number): SNode => ["font", ["size", size, size]];
@@ -73,7 +73,31 @@ export function textBoxNode(text: string, a: Pt, b: Pt): SNode {
 // Hierarchical sheet (sch_io_kicad_sexpr.cpp saveSheet): flags, 6 mil solid border, transparent fill, uuid,
 // then the Sheetname / Sheetfile fields where SCH_SHEET::AutoplaceFields puts them for a horizontal sheet:
 // margin = round(border/2) + 4 IU + text size × 0.5 (name, above) or × 0.4 (file, below).
-export const SHEET_BORDER = 0.1524, SHEET_NAME_OFF = r4(SHEET_BORDER / 2 + 0.000004 + 1.27 * 0.5), SHEET_FILE_OFF = r4(SHEET_BORDER / 2 + 0.000004 + 1.27 * 0.4);
+export const SHEET_BORDER = 0.1524, SHEET_NAME_OFF = r4(SHEET_BORDER / 2 + 0.0004 + 1.27 * 0.5), SHEET_FILE_OFF = r4(SHEET_BORDER / 2 + 0.0004 + 1.27 * 0.4);
+/**
+ * SCH_SHEET::AutoplaceFields on a sheet node: border margin = KiROUND(pen / 2) + 4 IU, then the larger text
+ * dimension x 0.5 (name) or x 0.4 (file). A sheet whose pins are all on the top / bottom edges
+ * (IsVerticalOrientation) reads upwards: the name left of the left edge, the file right of the right edge, both
+ * from the bottom corner; otherwise the name sits above the top-left corner and the file below the bottom-left.
+ */
+export function autoplaceSheetFields(node: SNode, defaultLineWidth = SHEET_BORDER) {
+  const at = kid(node, "at"), sz = kid(node, "size"); if (!at || !sz) return;
+  const x = num(at[1]), y = num(at[2]), w = num(sz[1]), h = num(sz[2]);
+  let leftRight = 0, topBottom = 0;
+  for (const pin of kids(node, "pin")) { const a = ((num((kid(pin, "at") || [])[3]) % 360) + 360) % 360; if (a === 90 || a === 270) topBottom++; else leftRight++; }
+  const vertical = topBottom > 0 && leftRight === 0;
+  const st = kid(node, "stroke"), sw = st ? num((kid(st, "width") || [])[1]) : 0, pen = sw > 0 ? sw : defaultLineWidth;
+  const border = Math.round(pen / 2 * 1e4) / 1e4 + 0.0004;
+  for (const pr of kids(node, "property")) {
+    const name = str(pr[1]); if (name !== "Sheetname" && name !== "Sheetfile") continue;
+    let ef = kid(pr, "effects"); if (!ef) { ef = ["effects", fontNode(1.27)]; pr.push(ef); }
+    const fs = kid(kid(ef, "font") || [], "size"), ts = fs ? Math.max(num(fs[1]), num(fs[2])) : 1.27;
+    const margin = border + Math.round(ts * (name === "Sheetname" ? 0.5 : 0.4) * 1e4) / 1e4;
+    const pos = name === "Sheetname" ? (vertical ? [x - margin, y + h] : [x, y - margin]) : (vertical ? [x + w + margin, y + h] : [x, y + h + margin]);
+    replaceKid(pr, ["at", r4(pos[0]), r4(pos[1]), vertical ? 90 : 0]);
+    replaceKid(ef, ["justify", "left", name === "Sheetname" ? "bottom" : "top"]);
+  }
+}
 /**
  * SCH_DRAWING_TOOLS::sizeSheet: the sheet keeps its first corner and grows toward the cursor only, at least
  * MIN_SHEET_WIDTH x MIN_SHEET_HEIGHT (500 x 150 mil), its far corner on the nearest grid point but never rounded
@@ -206,6 +230,29 @@ export function flagFieldAt(p: Pt, rot: number): SNode {
     : rot === 270 ? [FLAG_LENGTH, -(FLAG_SYMBOL + FLAG_MARGIN)] : [FLAG_SYMBOL + FLAG_MARGIN, -FLAG_LENGTH];
   return ["at", r4(p[0] + off[0]), r4(p[1] + off[1]), rot === 90 || rot === 270 ? 90 : 0];
 }
+/**
+ * SCH_DIRECTIVE_LABEL::AutoplaceFields: margin = the text offset (× 1.5 for an italic label), symbol width = the 20 mil
+ * symbol (doubled for a diamond or a rectangle), origin = the pin length.  Each field with text goes beside the flag
+ * for the label's spin, left-justified, and the next one a text height + margin nearer the connection point.
+ */
+export function placeFlagFields(node: SNode) {
+  const at = kid(node, "at"); if (!at) return;
+  const x = num(at[1]), y = num(at[2]), rot = ((Math.round(num(at[3]) || 0) % 360) + 360) % 360, ef = K.effectsOf(node);
+  const lenN = kid(node, "length"), shapeN = kid(node, "shape"), shape = shapeN ? str(shapeN[1]) : "round";
+  let margin = K.schFormat.textOffsetRatio * ef.size; if (ef.italic) margin *= 1.5;
+  const symbolWidth = shape === "diamond" || shape === "rectangle" ? 2 * FLAG_SYMBOL : FLAG_SYMBOL;
+  let origin = lenN ? num(lenN[1]) : FLAG_LENGTH;
+  for (const pr of kids(node, "property")) {
+    if (str(pr[2]) === "") continue;
+    const off = rot === 180 ? [symbolWidth + margin, origin] : rot === 90 ? [-origin, -(symbolWidth + margin)] : rot === 270 ? [origin, -(symbolWidth + margin)] : [symbolWidth + margin, -origin];
+    const a: SNode = ["at", r4(x + off[0]), r4(y + off[1]), rot === 90 || rot === 270 ? 90 : 0];
+    const i = pr.findIndex((c) => Array.isArray(c) && c[0] === "at"); if (i >= 0) pr[i] = a; else pr.splice(3, 0, a);
+    let fe = kid(pr, "effects"); if (!fe) { fe = ["effects", fontNode(1.27)]; pr.push(fe); }
+    const j = kid(fe, "justify"), rest = j ? j.slice(1).filter((v) => v !== "left" && v !== "right") : [];
+    const ji = fe.findIndex((c) => Array.isArray(c) && c[0] === "justify"); if (ji >= 0) fe[ji] = ["justify", "left", ...rest]; else fe.push(["justify", "left", ...rest]);
+    origin -= K.effectsOf(pr).size + margin;
+  }
+}
 export function classLabelNode(name: string, p: Pt, rot: number): SNode {
   rot = ((Math.round(rot || 0) % 360) + 360) % 360;
   return ["netclass_flag", "", ["length", FLAG_LENGTH], ["shape", "round"], ["at", r4(p[0]), r4(p[1]), rot], ["fields_autoplaced", "yes"],
@@ -241,4 +288,71 @@ export function symbolNode(doc: KDoc, libId: string, p: Pt, rot: number, mirror?
   for (const lp of libProps) if (!MANDATORY.includes(str(lp[1]))) n.push(prop(str(lp[1]), lp));
   if (lib) for (const sub of kids(lib, "symbol")) for (const pin of kids(sub, "pin")) { const nn = kid(pin, "number"); n.push(["pin", str(nn ? nn[1] : ""), ["uuid", K.newUuid()]]); }
   return n;
+}
+
+// ---------------------------------------------------------------- SCH_LABEL_BASE::SetLabelShape
+const shapeOfLabel = (n: SNode): string => str((kid(n, "shape") || [])[1]);
+const modified = (doc: KDoc, it: KItem, node: SNode): KChange => ({ id: it.id, kind: "MODIFIED", typeName: K.typeNameOf(it), sexpr: K.serializeItem(doc, { kind: it.kind, node }) });
+const sheetFileOf = (n: SNode): string => str((kids(n, "property").find((p) => str(p[1]) === "Sheetfile" || str(p[1]) === "Sheet file") || [])[2]);
+/** The hierarchical labels of `text` in the document given `shape` (not the ones in `skip`). */
+export function hierLabelShapeChanges(doc: KDoc, text: string, shape: string, skip?: Set<string>): KChange[] {
+  const out: KChange[] = [];
+  for (const it of doc.items.values()) {
+    if (it.kind !== "hierarchical_label" || (skip && skip.has(it.id)) || str(it.node[1]) !== text || shapeOfLabel(it.node) === shape) continue;
+    const n = deep(it.node) as SNode, s = kid(n, "shape"); if (s) s[1] = shape; else n.splice(2, 0, ["shape", shape]);
+    out.push(modified(doc, it, n));
+  }
+  return out;
+}
+/** The sheet pins of `text` given `shape` on the sheet symbols `use` accepts (by their Sheetfile). */
+export function sheetPinShapeChanges(doc: KDoc, use: (sheetFile: string, item: KItem) => boolean, text: string, shape: string): KChange[] {
+  const out: KChange[] = [];
+  for (const it of doc.items.values()) {
+    if (it.kind !== "sheet" || !use(sheetFileOf(it.node), it)) continue;
+    if (!kids(it.node, "pin").some((p) => str(p[1]) === text && str(p[2]) !== shape)) continue;
+    const n = deep(it.node) as SNode; for (const p of kids(n, "pin")) if (str(p[1]) === text) p[2] = shape;
+    out.push(modified(doc, it, n));
+  }
+  return out;
+}
+export interface ShapeFollowers {
+  /** the changes with the twins of this document added (and the other pins of a changed sheet set in its own change) */
+  changes: KChange[];
+  /** hierarchical labels whose shape changed: the sheet pins of that text on every sheet symbol using this file follow */
+  pins: { text: string; shape: string }[];
+  /** sheet pins whose shape changed: the hierarchical labels of that text in the sheet's file follow */
+  labels: { file: string; text: string; shape: string }[];
+}
+/**
+ * SCH_LABEL_BASE::SetLabelShape for an edit about to be committed: a hierarchical label whose shape changes takes the
+ * other hierarchical labels of its text on the sheet with it (and the sheet pins of that text on the sheet symbols
+ * using this sheet: `pins`); a sheet pin whose shape changes takes the other pins of its text on that sheet symbol
+ * (and the hierarchical labels of that text in the sheet's file: `labels`).
+ */
+export function labelShapeFollowers(doc: KDoc, changes: KChange[]): ShapeFollowers {
+  const out: ShapeFollowers = { changes, pins: [], labels: [] };
+  const touched = new Set(changes.map((c) => c.id)), extra: KChange[] = [];
+  const next = changes.map((c) => {
+    const it = c.kind === "MODIFIED" && c.sexpr ? doc.items.get(c.id) : null;
+    if (!it || (it.kind !== "hierarchical_label" && it.kind !== "sheet")) return c;
+    let n: SNode; try { n = K.parse(c.sexpr as string) as SNode; } catch (e) { return c; }
+    if (it.kind === "hierarchical_label") {
+      const shape = shapeOfLabel(n), text = str(n[1]);
+      if (shape === shapeOfLabel(it.node)) return c;
+      for (const x of hierLabelShapeChanges(doc, text, shape, touched)) { extra.push(x); touched.add(x.id); }
+      out.pins.push({ text, shape });
+      return c;
+    }
+    const before = new Map(kids(it.node, "pin").map((p) => [str((kid(p, "uuid") || [])[1]), str(p[2])]));
+    let rewrote = false; const followed = new Set<SNode>();
+    for (const p of kids(n, "pin")) {
+      const id = str((kid(p, "uuid") || [])[1]), text = str(p[1]), shape = str(p[2]);
+      if (followed.has(p) || !before.has(id) || before.get(id) === shape) continue;
+      for (const o of kids(n, "pin")) if (o !== p && str(o[1]) === text && str(o[2]) !== shape) { o[2] = shape; followed.add(o); rewrote = true; }
+      out.labels.push({ file: sheetFileOf(n), text, shape });
+    }
+    return rewrote ? Object.assign({}, c, { sexpr: K.serializeItem(doc, { kind: it.kind, node: n }) }) : c;
+  });
+  if (extra.length || next.some((c, i) => c !== changes[i])) out.changes = next.concat(extra);
+  return out;
 }

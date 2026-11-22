@@ -12,13 +12,14 @@ import { root } from "../root";
 import { runAction } from "./actions";
 import { appGlobal, appTool, editorState, gfxLayers, isPcbDoc, liveDoc, liveSelected, liveZoom, sizesOf } from "./app-state";
 import { cancelOps } from "./assistants";
-import { gfxTool, stepDrawWidth } from "./draw-modes";
+import { angleSnapMode, gfxTool, stepDrawWidth } from "./draw-modes";
 import { itemAt } from "./guess";
 import { hitTestItem } from "./hit";
 import { editHandleUp, onHandlePointerDown } from "./point-editor";
 import { undoRouteLeg } from "./route-tool";
 import { onStagePointerMove, onStagePointerUp, onStickyPointerDown } from "./select-move";
 import { HIT_MM, K, S, bind, lastCtx } from "./state";
+import { samePt } from "./util";
 
 // set once the stage listeners are installed (ensureDom)
 export let domReady = false;
@@ -84,7 +85,55 @@ export const liveSelection = () => appGlobal(() => editorState()!.selection, nul
 export function pickInteractively(ctx: PcbCtx, mode: string, prompt: string, done: (res: Pt | KItem | null) => void) {
   bind(ctx); S.pick = { done, prompt }; ctx.setTool(mode === "item" ? "pickitem" : "pickpoint");   // the prompt is the tool's hint
 }
-export function pickClick(ctx: PcbCtx, t: string, hv: Hover, mm: Pt) {
+/** GetVectorSnapped45 / GetVectorSnapped90 (geometry_utils.h): the end of a vector from o held to the angle snap mode. */
+export function vectorSnapped(mode: string, o: Pt, e: Pt): Pt {
+  const x = e[0] - o[0], y = e[1] - o[1], ax = Math.abs(x), ay = Math.abs(y); let nx = x, ny = y;
+  const sign = (mag: number, of: number) => (of < 0 || Object.is(of, -0) ? -Math.abs(mag) : Math.abs(mag));   // std::copysign
+  if (mode === "90") { if (ax >= ay) ny = 0; else nx = 0; }
+  else if (mode === "45") { if (ax > ay * 2) ny = 0; else if (ay > ax * 2) nx = 0; else if (ax > ay) ny = sign(x, y); else nx = sign(y, x); }
+  return [o[0] + nx, o[1] + ny];
+}
+/**
+ * Two points picked one after the other, with a preview between them (MirrorInteractive's axis, InteractiveOffset's
+ * ruler): a click or the start of a drag sets the first point, a second click or the release of the drag the second.
+ * Escape with the first point set goes back to the first prompt (cancelAxis / cleanup); Escape before it hands back
+ * (null, null).  The prompt rides beside the cursor as KiCad's status popup does.
+ */
+export function pickTwoPoints(ctx: PcbCtx, first: string, second: string, preview: "axis" | "ruler", done: (a: Pt | null, b: Pt | null) => void) {
+  bind(ctx); S.pickKeep = null;
+  S.pick = { done: () => {}, prompt: first, two: { first, second, preview, done }, from: null, cur: null };
+  ctx.setTool("pickpoint");
+  S.popup = { text: first, at: ctx.cursor ? ctx.cursor.slice() : [0, 0], until: Number.MAX_SAFE_INTEGER }; ctx.requestRender();
+}
+/** The second point under the cursor: the mirror axis holds to the angle snap mode (Ctrl: 45 degrees), the ruler's free end does not. */
+export function twoPointEnd(p: Pt, ev?: { ctrlKey?: boolean; metaKey?: boolean } | null): Pt {
+  const pk = S.pick; if (!pk || !pk.two || !pk.from) return p;
+  return pk.two.preview === "axis" ? vectorSnapped(ev && (ev.ctrlKey || ev.metaKey) ? "45" : angleSnapMode(), pk.from, p) : p;
+}
+/** The pointer moved during a two-point pick: the popup follows, and with the first point set the preview's end. */
+export function twoPointMove(ctx: PcbCtx, hv: Hover, ev?: PtrEvent | null) {
+  const pk = S.pick; if (!pk || !pk.two) return;
+  if (S.popup) S.popup.at = [hv.x, hv.y];
+  if (pk.from) { pk.cur = twoPointEnd([hv.x, hv.y], ev); if (ev && ev.buttons && !samePt(pk.cur, pk.from)) pk.dragged = true; }
+  ctx.requestRender();
+}
+/** The release of a drag that began on the first point is the second point (IsMouseUp( BUT_LEFT ) with the origin set). */
+export function twoPointUp(ctx: PcbCtx, hv: Hover, ev?: PtrEvent | null) {
+  const pk = S.pick; if (!pk || !pk.two || !pk.from || !pk.dragged) return;
+  twoPointFinish(ctx, twoPointEnd([hv.x, hv.y], ev));
+}
+function twoPointFinish(ctx: PcbCtx, end: Pt) {
+  const pk = S.pick; if (!pk || !pk.two || !pk.from) return;
+  if (pk.two.preview === "axis" && samePt(end, pk.from)) { ctx.toast("The mirror axis must have a non-zero length.", 3500); return; }
+  const from = pk.from; S.pick = null; S.popup = null; ctx.setTool("select");
+  pk.two.done(from, end);
+}
+export function pickClick(ctx: PcbCtx, t: string, hv: Hover, mm: Pt, ev?: PtrEvent | null) {
+  if (S.pick && S.pick.two) {
+    const pk = S.pick;
+    if (!pk.from) { pk.from = [hv.x, hv.y]; pk.cur = [hv.x, hv.y]; pk.dragged = false; pk.prompt = pk.two!.second; if (S.popup) S.popup.text = pk.two!.second; ctx.requestRender(); return; }
+    twoPointFinish(ctx, twoPointEnd([hv.x, hv.y], ev)); return;
+  }
   const pk = S.pick; S.pick = null;
   let res: Pt | KItem | null = null;
   if (t === "pickpoint") res = [hv.x, hv.y];
@@ -92,13 +141,21 @@ export function pickClick(ctx: PcbCtx, t: string, hv: Hover, mm: Pt) {
   ctx.setTool("select");
   if (pk && pk.done) pk.done(res);
 }
-export function pickCancel() { const pk = S.pick; S.pick = null; if (lastCtx) lastCtx.setTool("select"); if (pk && pk.done) pk.done(null); return true; }
+export function pickCancel() {
+  if (S.pick && S.pick.two) {
+    const pk = S.pick;
+    if (pk.from) { pk.from = null; pk.cur = null; pk.dragged = false; pk.prompt = pk.two!.first; if (S.popup) S.popup.text = pk.two!.first; if (lastCtx) lastCtx.requestRender(); return true; }
+    S.pick = null; S.popup = null; S.pickKeep = null; if (lastCtx) lastCtx.setTool("select"); pk.two!.done(null, null); return true;
+  }
+  const pk = S.pick; S.pick = null; if (lastCtx) lastCtx.setTool("select"); if (pk && pk.done) pk.done(null); return true; }
 /** The first Escape: the operation in flight is cancelled, KiCad style (the next one leaves the tool).  False with none. */
 export function cancelInFlight(any?: boolean) {
   if (S.pick) return pickCancel();
   if (S.pedit && lastCtx) { editHandleUp(lastCtx, false); return true; }
   if (S.tune.pattern) return tuneCancel(lastCtx!);   // the first Escape drops the pattern, the next leaves the tool
-  if (S.route || S.draw || S.drag || S.text || S.image || (S.move && (any || S.move.sticky))) {
+  // IsCancelInteractive ends every move, one made with the button held as well as one that follows the cursor: the
+  // items go back and the selection stays
+  if (S.route || S.draw || S.drag || S.text || S.image || S.move) {
     const dragTool = S.drag && S.drag.tool;
     cancelOps();
     if (dragTool && lastCtx) lastCtx.setTool("select");   // Escape ends InlineDrag: back to the selection tool

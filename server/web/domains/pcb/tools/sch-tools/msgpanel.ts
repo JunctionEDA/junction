@@ -8,17 +8,24 @@
 import type { Units } from "../../../../shared/store";
 import { angleText, messageText } from "../../../../shared/units";
 import { K, kid, kids, num, str, atOf, ptsOf } from "./state";
+import * as VM from "../../canvas/variant-model";
+import { root } from "../root";
 import { symbolPins, type SymPin } from "./autoplace";
+import { pinAltFunction } from "./pins";
 import { isPowerSymbol } from "./dom";
 import { spinOfNode } from "./autorotate";
 import { base64ToBytes, imageData, imageSize } from "./nodes";
 
 export interface MsgItem { title: string; value: string }
-export interface Connection { name: string; bus: boolean; netclass: string }
+export interface Connection { name: string; bus: boolean; netclass: string; /** the effective netclass's wire width, mm (SCH_JUNCTION::getEffectiveShape) */ wireWidth?: number; /** the bus aliases a bus group names, with their members */ aliases?: { name: string; members: string[] }[] }
 export interface SchMsgOpts {
   units: Units;
   /** the human-readable path of the sheet on screen ("/" on the root, "/Sub/" below) */
   sheetPath?: string;
+  /** the root sheet's file name without its extension: PathHumanReadable( false ) starts with it */
+  rootName?: string;
+  /** the current design variant and the instance path of the sheet on screen (GetDNP( currentSheet, currentVariant )); the editor's when left out */
+  variant?: string; instancePath?: string | null;
   /** SCH_CONNECTIVITY::AppendConnectionInfo's source: the item's connection on this sheet (a pin by number) */
   connection?: (item: KItem, pin?: string) => Connection | null;
   /** KIUI::EllipsizeStatusText's width rule; the default only folds line breaks and tabs */
@@ -74,11 +81,30 @@ const ell = (s: string, o: SchMsgOpts): string => { const t = unescapeString(s).
 function connectionRows(item: KItem, o: SchMsgOpts, pin?: string): MsgItem[] {
   const c = o.connection ? o.connection(item, pin) : null; if (!c) return [];
   const out: MsgItem[] = [{ title: "Connection Name", value: unescapeString(c.name) }];
+  // "Bus Alias %s Members": one row per alias a bus group names, its members joined by spaces
+  if (c.bus) for (const a of c.aliases || []) out.push({ title: `Bus Alias ${a.name} Members`, value: a.members.join(" ") });
   if (!c.bus) out.push({ title: "Resolved Netclass", value: unescapeString(c.netclass || "Default") });
   return out;
 }
 
 // ---------------------------------------------------------------- symbols
+/** GetDNP( currentSheet, currentVariant ): the symbol's or sheet's DNP as the current variant has it on this sheet instance. */
+function dnpNow(doc: KDoc, node: SNode, o: SchMsgOpts): boolean {
+  const ed = root.CollabEditor as { currentVariant?: string; currentSheetPathOf?: () => string | null } | undefined;
+  const variant = o.variant !== undefined ? o.variant : String((ed && ed.currentVariant) || "");
+  if (!variant) return flag(node, "dnp");
+  const path = o.instancePath !== undefined ? o.instancePath : ed && ed.currentSheetPathOf ? ed.currentSheetPathOf() : null;
+  try { return VM.symbolFlagsForVariant(node, variant, path, doc.version).dnp; } catch (e) { return flag(node, "dnp"); }
+}
+/**
+ * LIB_SYMBOL::GetBodyStyleDescription: "Standard" / "Alternate" for De Morgan body styles, the library's own names
+ * for named ones ((body_styles "a" "b")), "?" otherwise.
+ */
+function bodyStyleDescription(lib: SNode | null, style: number): string {
+  const bs = lib ? kid(lib, "body_styles") : null, named = bs ? bs.slice(1).filter((x) => str(x) !== "demorgan").map((x) => str(x)) : [];
+  if (!bs || bs.slice(1).some((x) => str(x) === "demorgan")) { if (style === 2) return "Alternate"; if (style === 1) return "Standard"; return "?"; }
+  return style >= 1 && style <= named.length ? named[style - 1] : "?";
+}
 const fieldNode = (node: SNode, name: string): SNode | null => kids(node, "property").find((p) => str(p[1]) === name) || null;
 const fieldText = (node: SNode, name: string): string => { const f = fieldNode(node, name); return f ? str(f[2]) : ""; };
 function libOf(doc: KDoc, node: SNode): SNode | null {
@@ -110,7 +136,7 @@ function symbolRows(doc: KDoc, it: KItem, o: SchMsgOpts): MsgItem[] {
     if (flag(n, "exclude_from_sim")) m.push("Simulation");
     const bom = kid(n, "in_bom"); if (bom && str(bom[1]) === "no") m.push("BOM");
     const brd = kid(n, "on_board"); if (brd && str(brd[1]) === "no") m.push("Board");
-    if (flag(n, "dnp")) m.push("DNP");
+    if (dnpNow(doc, n, o)) m.push("DNP");
     if (m.length) out.push({ title: "Exclude from", value: m.join(", ") });
   };
   if (lib) {
@@ -126,7 +152,8 @@ function symbolRows(doc: KDoc, it: KItem, o: SchMsgOpts): MsgItem[] {
     const fp = ell(fieldText(n, "Footprint"), o);
     out.push({ title: "Footprint", value: fp || "<Unknown>" });
     const kw = fieldNode(lib, "ki_keywords");
-    out.push({ title: `Description: ${fieldText(n, "Description") || fieldText(lib, "Description")}`, value: `Keywords: ${kw ? str(kw[2]) : ""}` });
+    // the symbol's own Description field (GetField( FIELD_T::DESCRIPTION )->GetText()), the library's keywords
+    out.push({ title: `Description: ${fieldText(n, "Description")}`, value: `Keywords: ${kw ? str(kw[2]) : ""}` });
   } else {
     out.push({ title: "Reference", value: ref }, { title: "Value", value: ell(value, o) });
     excludes();
@@ -147,9 +174,11 @@ function pinRows(doc: KDoc, it: KItem, number: string, o: SchMsgOpts): MsgItem[]
   // SCH_ITEM::GetMsgPanelInfo: the parent symbol's unit and body style
   const unit = kid(n, "unit") ? num(kid(n, "unit")![1], 1) : 1;
   if (info.units > 1) out.push({ title: "Unit", value: info.names.get(unit) || unitLetter(unit) });
-  if (info.styles > 1) { const bs = kid(n, "body_style") || kid(n, "convert"); const s = bs ? num(bs[1], 1) : 1; out.push({ title: "Body Style", value: s === 1 ? "Standard" : s === 2 ? "Alternate" : `Body style ${s}` }); }
-  out.push({ title: "Name", value: unescapeString(pin.name === "~" ? "" : pin.name) }, { title: "Number", value: pin.number === "~" ? "" : pin.number },
-    { title: "Type", value: PIN_TYPE[pin.type] || "Unspecified" }, { title: "Style", value: PIN_SHAPE[pin.shape || "line"] || "Line" },
+  if (info.styles > 1) { const bs = kid(n, "body_style") || kid(n, "convert"); out.push({ title: "Body Style", value: bodyStyleDescription(lib, bs ? num(bs[1], 1) : 1) }); }
+  // SCH_PIN::GetShownName / GetType / GetShape: the assigned alternate function's when the pin has one
+  const alt = pinAltFunction(doc, it, number), name = alt ? alt.name : pin.name, type = alt ? alt.type : pin.type, shape = alt ? alt.shape : pin.shape || "line";
+  out.push({ title: "Name", value: unescapeString(name === "~" ? "" : name) }, { title: "Number", value: pin.number === "~" ? "" : pin.number },
+    { title: "Type", value: PIN_TYPE[type] || "Unspecified" }, { title: "Style", value: PIN_SHAPE[shape] || "Line" },
     { title: "Visible", value: pin.hidden ? "No" : "Yes" }, { title: "Length", value: len(pin.len, o) },
     { title: "Orientation", value: PIN_ORIENT[((Math.round(pin.libRot || 0) % 360) + 360) % 360] || "Right" },
     { title: it.ref || fieldText(n, "Reference"), value: unescapeString(fieldText(n, "Value")) });
@@ -252,16 +281,17 @@ function lineRows(it: KItem, o: SchMsgOpts): MsgItem[] {
   return out;
 }
 
-function sheetRows(it: KItem, o: SchMsgOpts): MsgItem[] {
+function sheetRows(doc: KDoc, it: KItem, o: SchMsgOpts): MsgItem[] {
   const n = it.node, name = fieldText(n, "Sheetname") || fieldText(n, "Sheet name"), file = fieldText(n, "Sheetfile") || fieldText(n, "Sheet file");
   const out: MsgItem[] = [{ title: "Sheet Name", value: ell(name, o) }];
-  if (o.sheetPath !== undefined) { const base = o.sheetPath.endsWith("/") ? o.sheetPath : o.sheetPath + "/"; out.push({ title: "Hierarchical Path", value: `${base}${name}/` }); }
+  // PathHumanReadable( false, true ): the root file's name, the sheet names down to this one, no trailing separator
+  if (o.sheetPath !== undefined) { const base = o.sheetPath.endsWith("/") ? o.sheetPath : o.sheetPath + "/"; out.push({ title: "Hierarchical Path", value: `${o.rootName || ""}${base}${name}` }); }
   out.push({ title: "File Name", value: ell(file, o) });
   const m: string[] = [];
   if (flag(n, "exclude_from_sim")) m.push("Simulation");
   const bom = kid(n, "in_bom"); if (bom && str(bom[1]) === "no") m.push("BOM");
   const brd = kid(n, "on_board"); if (brd && str(brd[1]) === "no") m.push("Board");
-  if (flag(n, "dnp")) m.push("DNP");
+  if (dnpNow(doc, n, o)) m.push("DNP");
   if (m.length) out.push({ title: "Exclude from", value: m.join(", ") });
   return out;
 }
@@ -298,10 +328,13 @@ export function msgPanelInfo(doc: KDoc, sel: SchMsgSel, o: SchMsgOpts): MsgItem[
     case "text": return textRows(it, o);
     case "text_box": return textBoxRows(it, o);
     case "rectangle": case "circle": case "arc": case "bezier": return shapeRows(it, o);
-    case "sheet": return sheetRows(it, o);
+    case "sheet": return sheetRows(doc, it, o);
     case "junction": {
       const d = kid(it.node, "diameter"), dia = d && num(d[1], 0) > 0 ? num(d[1]) : (doc as KDoc & { schSettings?: { junctionDiameter?: number } }).schSettings?.junctionDiameter ?? 0.9144;
-      return [{ title: "Junction", value: "" }, { title: "Size", value: len(dia, o) }, ...connectionRows(it, o)];
+      // SCH_JUNCTION::getEffectiveShape: at least 170 % of the connected wire's width, unless the diameter is 1 IU ("do not draw")
+      const c = o.connection ? o.connection(it) : null, ww = c && c.wireWidth ? Math.trunc(Math.round(c.wireWidth * 1e4) * 1.7) / 1e4 : 0;
+      const eff = Math.round(dia * 1e4) === 1 ? dia : Math.max(dia, ww);
+      return [{ title: "Junction", value: "" }, { title: "Size", value: len(eff, o) }, ...connectionRows(it, o)];
     }
     case "bus_entry": return [{ title: "Bus Entry Type", value: "Wire" }, ...connectionRows(it, o)];
     case "image": {
@@ -340,7 +373,16 @@ export function itemDescription(doc: KDoc, id: string, units: Units, sub?: { fie
     case "symbol": {
       const libId = str((kid(n, "lib_id") || [])[1]), name = libId.slice(libId.indexOf(":") + 1);
       const ref = ellipsizeMenuText(it.ref || fieldText(n, "Reference"));
-      if (sub && sub.pin !== undefined) return `Symbol ${ref} Pin ${sub.pin}`;
+      if (sub && sub.pin !== undefined) {
+        // SCH_PIN::GetItemDescription: "Symbol %s %s" with "Pin %s [%s, %s, %s]" (no name: "[%s, %s]"; "Hidden pin …")
+        const number = sub.pin, pin = symbolPins(doc, it).find((p) => p.number === number);
+        const cur = unescapeString(it.ref || fieldText(n, "Reference"));
+        if (!pin) return `Symbol ${cur} Undefined library pin.`;
+        const alt = pinAltFunction(doc, it, number), nm = unescapeString(alt ? alt.name : pin.name === "~" ? "" : pin.name);
+        const ty = PIN_TYPE[alt ? alt.type : pin.type] || "Unspecified", sh = PIN_SHAPE[alt ? alt.shape : pin.shape || "line"] || "Line";
+        const shownNumber = pin.number === "~" ? "" : pin.number;
+        return `Symbol ${cur} ${pin.hidden ? "Hidden pin" : "Pin"} ${shownNumber} ${nm ? `[${nm}, ${ty}, ${sh}]` : `[${ty}, ${sh}]`}`;
+      }
       return `Symbol ${ref} [${ellipsizeMenuText(name)}]`;
     }
     case "wire": case "bus": case "polyline": {

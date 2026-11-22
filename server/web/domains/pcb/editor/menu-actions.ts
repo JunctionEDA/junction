@@ -27,7 +27,7 @@ import { openExportNetlist } from "./export-netlist";
 import { startMove } from "./gestures";
 import { schKey } from "./tools";
 import { esc, toast } from "./util";
-import { applyView, fitBox, isSch, mmW, mmX0, mmY0, requestRender, stage, world, zoomBy, zoomStep } from "./view";
+import { applyView, fitBox, flipMmX, isSch, mmW, mmX0, mmY0, requestRender, stage, world, zoomBy, zoomStep } from "./view";
 import { fitMargin } from "./zoomlist";
 import { currentDoc, download, fileStem } from "./download";
 
@@ -70,7 +70,7 @@ interface LayerRow { key: string; name: string; color: string }
 /** The cursor's position in stage pixels (zoom-at-cursor and centre-on-cursor work from it). */
 function cursorPx(): [number, number] {
   const r = world.getBoundingClientRect(), s = stage.getBoundingClientRect(); const mm = E.lastCursorMm as number[];
-  return [r.left - s.left + ((mm[0] - mmX0()) / mmW()) * r.width, r.top - s.top + ((mm[1] - mmY0()) / mmW()) * r.width];
+  return [r.left - s.left + ((flipMmX(mm[0]) - mmX0()) / mmW()) * r.width, r.top - s.top + ((mm[1] - mmY0()) / mmW()) * r.width];
 }
 function zoomAtCursor(zoomIn: boolean): void { const [x, y] = cursorPx(); zoomStep(zoomIn, x, y); }   // doZoomInOut( dir, aCenterOnCursor ); the browser cannot warp the mouse, so the cursor point stays put
 function centreOnCursor(): void { const [x, y] = cursorPx(); E.viewTouched = true; E.panX += stage.clientWidth / 2 - x; E.panY += stage.clientHeight / 2 - y; applyView(); }

@@ -15,8 +15,9 @@ import { clearAllSelection, selectItemId, selectionChanged } from "./gestures";
 import { E } from "./state";
 import { setTool } from "./tools";
 import { ago, api, toast } from "./util";
-import { applyView, cmtG, cmtPanel, mmH, mmW, mmX0, mmY0, pxPerMm, requestRender, stage, world, worldMm } from "./view";
+import { applyView, cmtG, cmtPanel, flipMmX, mmH, mmW, mmX0, mmY0, pxPerMm, requestRender, stage, world, worldMm } from "./view";
 import { closeMark } from "../../../shared/components/kicon-dom";
+import { focusScreenPoint } from "../dialogs/erc-rules";
 
 export interface Anchor { kind: "item" | "net"; id: string; label: string; item?: string | null }
 export interface CommentRow {
@@ -189,14 +190,29 @@ export function drawComments(): void {
 
 export function centerOn(xMm: number, yMm: number): void {
   const w = worldEl.clientWidth, h = (w * mmH()) / mmW();
-  E.panX = stageEl.clientWidth / 2 - ((xMm - mmX0()) / mmW()) * w * E.zoom;
+  E.panX = stageEl.clientWidth / 2 - ((flipMmX(xMm) - mmX0()) / mmW()) * w * E.zoom;
   E.panY = stageEl.clientHeight / 2 - ((yMm - mmY0()) / mmH()) * h * E.zoom;
+  applyView();
+}
+
+/**
+ * EDA_DRAW_FRAME::FocusOnLocation( pos, allowScroll ): the view is centred on the point only when it is near the edge
+ * of the viewport, off it, or under one of the dialogs (their client rectangles), and then onto the area the dialogs
+ * leave free; the zoom is kept.
+ */
+export function focusOnLocation(xMm: number, yMm: number, allowScroll: boolean, dialogs: { left: number; top: number; width: number; height: number }[] = []): void {
+  if (!allowScroll) return;
+  const w = worldEl.clientWidth, h = (w * mmH()) / mmW(), sr = stageEl.getBoundingClientRect();
+  const sx = E.panX + ((xMm - mmX0()) / mmW()) * w * E.zoom, sy = E.panY + ((yMm - mmY0()) / mmH()) * h * E.zoom;
+  const to = focusScreenPoint([sx, sy], { w: stageEl.clientWidth, h: stageEl.clientHeight }, dialogs.map((r) => ({ x: r.left - sr.left, y: r.top - sr.top, w: r.width, h: r.height })));
+  if (!to) return;
+  E.panX += to[0] - sx; E.panY += to[1] - sy;
   applyView();
 }
 
 function panelAt(xMm: number, yMm: number): void {
   const wr = worldEl.getBoundingClientRect(), sr = stageEl.getBoundingClientRect();
-  const px = wr.left - sr.left + ((xMm - mmX0()) / mmW()) * wr.width;
+  const px = wr.left - sr.left + ((flipMmX(xMm) - mmX0()) / mmW()) * wr.width;
   const py = wr.top - sr.top + ((yMm - mmY0()) / mmH()) * wr.height;
   panel.classList.add("open");
   const pw = panel.offsetWidth || 320, ph = panel.offsetHeight || 200;

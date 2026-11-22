@@ -120,6 +120,16 @@ export function netclassPatternMatches(pattern: string, net: string): boolean {
  * merged from the lowest priority up (a smaller priority number wins), the Default class completing whatever
  * the resolved classes leave unset.  A net with no assignment — and the empty net — is in Default.
  */
+/** The names of the netclasses a net resolves to, the highest priority first (none: the Default class alone applies). */
+export function effectiveNetclassNames(s: BoardSizes, net: string): string[] {
+  if (!net) return [];
+  const names = new Set<string>();
+  for (const n of s.assignments[net] || []) names.add(n);
+  for (const p of s.patterns) if (netclassPatternMatches(p.pattern, net)) names.add(p.netclass);
+  const resolved = Array.from(names, (n) => s.classes.find((c) => c.name === n)).filter((c): c is NetClassDef => !!c);
+  resolved.sort((a, b) => (a.priority !== b.priority ? a.priority - b.priority : a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return resolved.map((c) => c.name);
+}
 export function effectiveNetclass(s: BoardSizes, net: string): NetClassValues {
   const def = defaultNetclass(s);
   if (!net) return def;
@@ -499,7 +509,7 @@ export function setupOrigins(setup: unknown): { aux: [number, number]; grid: [nu
 }
 
 export const pcbSizes = {
-  state: new PcbSizes(), PcbSizes, boardSizes, defaultNetclass, effectiveNetclass, netclassPatternMatches, nextPredefinedIndex,
+  state: new PcbSizes(), PcbSizes, boardSizes, defaultNetclass, effectiveNetclass, effectiveNetclassNames, netclassPatternMatches, nextPredefinedIndex,
   comboBoxUnits, unitPair, trackWidthLabels, viaSizeLabels, layerUiRank, enabledLayers, copperStack, stepCopperLayer,
   kicadJson, setProjectValue, sizesToProject, setupOrigins, USE_NETCLASS_TRACK, USE_NETCLASS_VIA, EDIT_SIZES,
 };

@@ -13,7 +13,7 @@
 import { snapMm } from "./doc";
 import { E } from "./state";
 import { activeModule } from "./tools";
-import { applyView, canvas, isSch, mmH, mmW, mmX0, mmY0, stage, world } from "./view";
+import { applyView, canvas, flipMmX, isSch, mmH, mmW, mmX0, mmY0, stage, world } from "./view";
 
 const SMALL = 80;   // OPENGL_GAL::blitCursor: cursorSize = 80 screen (device) pixels
 
@@ -92,7 +92,7 @@ export function drawCrosshair(ctx: CanvasRenderingContext2D): void {
   if (!(wr.width > 0) || !(wr.height > 0)) return;
   const dpr = window.devicePixelRatio || 1;
   // device pixels, on the pixel centre so a one-pixel line stays crisp
-  const x = Math.round((wr.left - sr.left + ((at[0] - mmX0()) / mmW()) * wr.width) * dpr) + 0.5;
+  const x = Math.round((wr.left - sr.left + ((flipMmX(at[0]) - mmX0()) / mmW()) * wr.width) * dpr) + 0.5;
   const y = Math.round((wr.top - sr.top + ((at[1] - mmY0()) / mmH()) * wr.height) * dpr) + 0.5;
   const W = ctx.canvas.width, H = ctx.canvas.height, L = W + H;
   const mode = E.crosshairMode === "full" || E.crosshairMode === "45" ? E.crosshairMode : "small";
@@ -115,9 +115,9 @@ function gridStep(): number { const g = E.gridFor ? E.gridFor() : E.gridPitch; r
 export function cursorStep(dx: number, dy: number, steps: number): void {
   if (!E.kdoc) return;
   const sr = stage.getBoundingClientRect(), d = gridStep() * steps;
-  const toScreen = (q: number[]): number[] => { const wr = world.getBoundingClientRect(); return [wr.left + ((q[0] - mmX0()) / mmW()) * wr.width, wr.top + ((q[1] - mmY0()) / mmH()) * wr.height]; };
+  const toScreen = (q: number[]): number[] => { const wr = world.getBoundingClientRect(); return [wr.left + ((flipMmX(q[0]) - mmX0()) / mmW()) * wr.width, wr.top + ((q[1] - mmY0()) / mmH()) * wr.height]; };
   let from = E.lastCursorMm as number[] | null;
-  if (!from) { const wr = world.getBoundingClientRect(); from = [mmX0() + ((sr.left + sr.width / 2 - wr.left) / wr.width) * mmW(), mmY0() + ((sr.top + sr.height / 2 - wr.top) / wr.height) * mmH()]; }
+  if (!from) { const wr = world.getBoundingClientRect(); from = [flipMmX(mmX0() + ((sr.left + sr.width / 2 - wr.left) / wr.width) * mmW()), mmY0() + ((sr.top + sr.height / 2 - wr.top) / wr.height) * mmH()]; }
   const s = snapMm(from), to = [s[0] + dx * d, s[1] + dy * d];
   let [x, y] = toScreen(to);
   const m = 4;
@@ -143,8 +143,8 @@ export function cursorClick(count: 1 | 2): void {
   if (!E.kdoc) return;
   let mm = E.lastCursorMm as number[] | null;
   const wr = world.getBoundingClientRect(), sr = stage.getBoundingClientRect();
-  if (!mm) mm = [mmX0() + ((sr.left + sr.width / 2 - wr.left) / wr.width) * mmW(), mmY0() + ((sr.top + sr.height / 2 - wr.top) / wr.height) * mmH()];
-  const x = wr.left + ((mm[0] - mmX0()) / mmW()) * wr.width, y = wr.top + ((mm[1] - mmY0()) / mmH()) * wr.height;
+  if (!mm) mm = [flipMmX(mmX0() + ((sr.left + sr.width / 2 - wr.left) / wr.width) * mmW()), mmY0() + ((sr.top + sr.height / 2 - wr.top) / wr.height) * mmH()];
+  const x = wr.left + ((flipMmX(mm[0]) - mmX0()) / mmW()) * wr.width, y = wr.top + ((mm[1] - mmY0()) / mmH()) * wr.height;
   const mods = { shiftKey: false, ctrlKey: false, altKey: false, metaKey: false };
   const at = { clientX: x, clientY: y, bubbles: true, cancelable: true, pointerType: "mouse", isPrimary: true, pointerId: 1, ...mods };
   for (let i = 1; i <= count; i++) {

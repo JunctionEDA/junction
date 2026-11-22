@@ -13,6 +13,7 @@ import { expandGroups, isLocked } from "./groups";
 import { hitTestItem } from "./hit";
 import { HIT_MM, K, S } from "./state";
 import { layerOf } from "./util";
+import { clockwise, stadium, subtract as subtractPolys, union as unionPolys } from "../../fab/poly";
 
 /** The delete tool's click: a track / via / graphic under the cursor first, else the footprint app.js would pick. */
 export function itemAt(ctx: PcbCtx, mm: Pt) {
@@ -94,6 +95,62 @@ export function coverageArea(e: CandEntry, x: number, y: number, px: number, max
   if (it.kind === "zone") { let a = 0; for (const g of e.geoms) if (g.t === "poly" && !g.fill && g.pts && g.pts.length > 2) a = Math.max(a, polyAreaMm(g.pts)); return a; }
   let a = 0; for (const g of e.geoms) a += geomArea(g); return a;
 }
+type P2 = [number, number];
+/** A geometry record as closed polygons (TransformShapeToPolygon), grown by `margin`. */
+export function geomPolys(g: GeomPrim, margin = 0): P2[][] {
+  const w = Math.max(g.w || 0, 1e-4) + 2 * margin, out: P2[][] = [];
+  const along = (pts: ArrayLike<number>[], closed: boolean) => { for (let i = 0; i < (closed ? pts.length : pts.length - 1); i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; out.push(clockwise(stadium(a[0], a[1], b[0], b[1], w))); } };
+  const ring = (r: number, from: number, sweep: number) => { const n = Math.max(8, Math.ceil(Math.abs(sweep) / (Math.PI / 16))), pts: P2[] = []; for (let i = 0; i <= n; i++) { const a = from + (sweep * i) / n; pts.push([g.x + r * Math.cos(a), g.y + r * Math.sin(a)]); } return pts; };
+  switch (g.t) {
+  case "line": out.push(clockwise(stadium(g.x1, g.y1, g.x2, g.y2, w))); break;
+  case "circle": if (g.fill) out.push(clockwise(ring(g.r + (g.w || 0) / 2 + margin, 0, 2 * Math.PI).slice(0, -1))); else along(ring(g.r, 0, 2 * Math.PI).slice(0, -1), true); break;
+  case "arc": {
+    if (g.a0 === undefined || g.a1 === undefined) { along(ring(g.r, 0, 2 * Math.PI).slice(0, -1), true); break; }
+    const TWO = Math.PI * 2, nrm = (v: number) => ((v % TWO) + TWO) % TWO, from = g.anticlockwise ? g.a1 : g.a0, sweep = nrm((g.anticlockwise ? g.a0 : g.a1) - from) || TWO;
+    along(ring(g.r, from, sweep), false); break;
+  }
+  case "poly": if (g.pts && g.pts.length > 1) { if (g.fill && g.pts.length > 2) out.push(clockwise(g.pts.map((p) => [p[0], p[1]] as P2))); if (!g.fill || (g.w || 0) > 0 || margin > 0) along(g.pts, !!(g.close || g.fill)); } break;
+  case "pad": {
+    const a = ((g.rot as number) || 0) * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a), hw = g.w / 2 + margin, hh = g.h / 2 + margin;
+    const P = (lx: number, ly: number): P2 => [g.x + lx * c - ly * sn, g.y + lx * sn + ly * c];
+    if (g.shape === "circle") out.push(clockwise(ring(hw, 0, 2 * Math.PI).slice(0, -1)));
+    else if (g.shape === "oval") { const rr = Math.min(hw, hh), ex = hw - rr, ey = hh - rr; const p0 = P(-ex, -ey), p1 = P(ex, ey); out.push(clockwise(stadium(p0[0], p0[1], p1[0], p1[1], 2 * rr))); }
+    else out.push(clockwise([P(-hw, -hh), P(hw, -hh), P(hw, hh), P(-hw, hh)]));
+    break;
+  }
+  default: { const b = K.geomBox(g); if (b) out.push([[b[0] - margin, b[1] - margin], [b[2] + margin, b[1] - margin], [b[2] + margin, b[3] + margin], [b[0] - margin, b[3] + margin]]); }
+  }
+  return out;
+}
+const signedArea = (pts: P2[]) => { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1]; return a / 2; };
+const COVER_KINDS = /^(gr_|segment$|arc$|via$|barcode$|property$|fp_text$|text$)/;
+/**
+ * FOOTPRINT::CoverageRatio: how much of the footprint's bounding hull is covered by its own pads, its own texts
+ * (grown by the collector's accuracy) and the other collected items (texts, shapes, tracks, arcs, vias that are not
+ * its children; another footprint by its hull) — clipped to the hull, as a share of the hull's area.
+ */
+export function footprintCoverageRatio(e: CandEntry, all: CandEntry[], textMargin: number): number {
+  const hb = hullBox(e.geoms); if (!hb) return 1;
+  const hullArea = (hb[2] - hb[0]) * (hb[3] - hb[1]); if (!(hullArea > 0)) return 1;
+  const hull: P2[] = [[hb[0], hb[1]], [hb[2], hb[1]], [hb[2], hb[3]], [hb[0], hb[3]]], cov: P2[][] = [];
+  for (const g of (e.item.geom || []) as GeomPrim[]) {
+    if (g.padText || g.padNum || g.noBox || g.hole) continue;
+    if (g.pad || g.padIndex !== undefined && g.padIndex !== null) cov.push(...geomPolys(g));
+    else if (g.t === "text") cov.push(...geomPolys(g, textMargin));
+  }
+  for (const o of all) {
+    if (o === e || o.item === e.item || o.pad) continue;
+    if (o.item.kind === "footprint" && !o.field) { const ob = hullBox(o.geoms); if (ob) cov.push([[ob[0], ob[1]], [ob[2], ob[1]], [ob[2], ob[3]], [ob[0], ob[3]]]); continue; }
+    if (!o.field && !COVER_KINDS.test(o.item.kind)) continue;
+    for (const g of o.geoms) cov.push(...geomPolys(g));
+  }
+  if (!cov.length) return 0;
+  let uncovered = 0;
+  try { for (const p of subtractPolys([hull], unionPolys(cov))) uncovered += signedArea(p); } catch (err) { return 1; }   // better to be conservative: the menu asks
+  const ratio = (hullArea - Math.abs(uncovered)) / hullArea;
+  if (ratio < 0) return 1;
+  return Math.min(ratio, 1);
+}
 export function entryOnLayer(e: CandEntry, layer: string) {
   if (!layer) return false;
   const cu = /\.Cu$/.test(layer);
@@ -126,9 +183,8 @@ export function guessCandidates(doc: BoardDoc, ids: string[], where: Pt, opts?: 
   const byArea = list.map((e): [CandEntry, number] => [e, coverageArea(e, x, y, px, maxSlop)]).sort((a, b) => a[1] - b[1]);
   const rejected = new Set<CandEntry>(); let rejecting = false;
   for (let i = 1; i < byArea.length; i++) { if (byArea[i][1] > byArea[i - 1][1] * 1.5) rejecting = true; if (rejecting) rejected.add(byArea[i][0]); }
-  for (const [e, a] of byArea) if (e.item.kind === "footprint" && !e.pad && !e.field && a > 0) {   // FOOTPRINT::CoverageRatio: a covered footprint stays for the menu
-    let cov = 0; for (const [o, oa] of byArea) if (o !== e && !((o.pad || o.field) && o.item === e.item) && o.item.kind !== "zone") cov += oa;
-    if (cov / a > 0.7) rejected.delete(e);
+  for (const e of list) if (e.item.kind === "footprint" && !e.pad && !e.field) {   // FOOTPRINT::CoverageRatio: a covered footprint stays for the menu
+    if (footprintCoverageRatio(e, list, maxSlop) > 0.7) rejected.delete(e);
   }
   if (list.length > rejected.size) list = list.filter((e) => !rejected.has(e));
   // what is left has similar areas: only those on the active layer, when there are any

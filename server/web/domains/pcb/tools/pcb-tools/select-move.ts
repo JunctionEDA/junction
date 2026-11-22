@@ -4,7 +4,7 @@ import type { BoardDoc, Obstacle, PadInfo, PcbChange, PcbCtx, PendingDrag, Pt, S
 
 /** Where the obstacles a component drag hit were first met. */
 export type DragHits = Obstacle[] & { at?: Pt | null };
-import { unlockedIds } from "./actions";
+import { flipDirection, unlockedIds } from "./actions";
 import { isBoardLikeDoc } from "./app-state";
 import { cancelOps } from "./assistants";
 import { deleteChanges, replacedChange } from "./changes";
@@ -17,6 +17,7 @@ import { netClearance } from "./drc";
 import { routableItems } from "./edit-commands";
 import { angleSnapDirections, beginSelectDrag, bestDragOrigin, snapCursor } from "./grid-helper";
 import { MOVE_SNAP_MSG, angleSnapMode, displayConstraintsMsg } from "./draw-modes";
+import { finishMoveIndividually } from "./ref-move";
 import { applySelection, expandGroups, selectionIds, topParentOf } from "./groups";
 import { beginInlineDrag, dragMove, finishDrag } from "./inline-drag";
 import { editHandleMove, editHandleUp } from "./point-editor";
@@ -68,14 +69,17 @@ export function moveTransform(ctx: PcbCtx, how: string, arg?: number | string) {
   if ((m.conns && m.conns.length) || m.ends.length) return true;   // a drag keeps its tracks attached: they cannot follow a turn
   if (!m.base) m.base = new Map(Array.from(m.orig, ([id, n]) => [id, clone(n)]));
   let cx = m.start[0], cy = m.start[1];
-  if (how === "flip" && m.ids.length > 1) {
+  // EDIT_TOOL::Flip while moving: several items, or a lone rectangle or table, flip about the middle of their box
+  // (selection.GetCenter()); any other lone item about the move's reference point
+  const lone = m.ids.length === 1 ? ctx.doc.items.get(m.ids[0]) : null;
+  if (how === "flip" && (m.ids.length > 1 || (lone && (lone.kind === "gr_rect" || lone.kind === "table")))) {
     const b = bboxUnion(m.ids.map((id: string) => ctx.doc.items.get(id)).filter(Boolean) as KItem[]);
     if (b) { cx = (b[0] + b[2]) / 2 - m.last[0]; cy = (b[1] + b[3]) / 2 - m.last[1]; }
   }
   for (const id of m.ids) {
     const n = m.orig.get(id); if (!n) continue;
     if (how === "rotate") rotateNode(n, cx, cy, arg as number);
-    else if (how === "flip") flipNode(n, cx, ctx.doc);
+    else if (how === "flip") flipNode(n, cx, ctx.doc, cy, flipDirection());
     else mirrorNode(n, cx, cy, arg as string);
   }
   m.xformed = true; moveApply(ctx, m, m.last[0], m.last[1]); ctx.requestRender(); return true;
@@ -127,7 +131,7 @@ function finishMove(ctx: PcbCtx, m: SelectMove, commit: boolean, force?: boolean
   }
   const changes = moveNodesAt(m, dx, dy).map(({ id, node }) => replacedChange(ctx.doc.items.get(id)!, node));
   if (m.conns && m.conns.length) changes.push(...dragChanges(ctx, { sol: { lines: connLines(m, dx, dy) } }));
-  ctx.commit(changes, m.conns && m.conns.length ? "drag" : "move", m.placing || m.amend ? { amend: true } : undefined);
+  ctx.commit(changes, m.conns && m.conns.length ? "drag" : m.label || "Move", m.placing || m.amend ? { amend: true } : undefined);
   unhover(); ctx.requestRender(); return true;
 }
 /**
@@ -149,7 +153,7 @@ export function beginCarryMove(ctx: PcbCtx, opts?: { placing?: string[]; ids?: s
   // drag made with the button held keeps KiCad's no-warp behaviour: the reference is the cursor where the drag began.
   // D/G on one footprint (ROUTER_TOOL::InlineDrag) takes the same no-warp branch: the reference is the grid-snapped
   // cursor where D was pressed, so the footprint moves by whole grid steps and never jumps on the first motion.
-  const at = opts.origin ? opts.origin.slice() : opts.placing && !opts.restore ? cursorPoint(ctx) : opts.sticky === false || (opts.drag && free.length === 1 && doc.items.get(free[0]!)?.kind === "footprint") ? snapCursor(ctx, mouse, new Set(free), {}).p : bestDragOrigin(doc, free, mouse, ctx.gridPitch);
+  const at = opts.origin ? opts.origin.slice() : opts.placing && !opts.restore ? cursorPoint(ctx) : opts.sticky === false || (opts.drag && free.length === 1 && doc.items.get(free[0]!)?.kind === "footprint") ? snapCursor(ctx, mouse, new Set(free), {}).p : bestDragOrigin(doc, free, mouse, ctx.gridPitch, { filter: ctx.selFilter, mmPerPx: 1 / Math.max(1e-6, ctx.pxPerMm || 4) });
   const m: SelectMove = { ids: free, start: at.slice(), orig: new Map(), ends: [], last: [0, 0], moved: false, sticky: opts.sticky !== false, placing: opts.placing || null, restore: opts.restore || null, hover: !!opts.hover };
   for (const id of free) m.orig.set(id, clone(doc.items.get(id)!.node));
   const gen = !opts.placing && !opts.drag ? selectedTuningPattern(ctx, free) : null;
@@ -247,9 +251,16 @@ export function onStickyPointerDown(ev: PointerEvent) {
   // the move's context menu while the selection keeps following the cursor, as in KiCad
   if (ev.button !== 0) return;
   ev.stopImmediatePropagation(); ev.preventDefault();
+  // the second press of a double-click (a pointerdown carries no click count: the time and place of the last one do)
+  const now = typeof ev.timeStamp === "number" ? ev.timeStamp : Date.now(), was = lastStickyDown;
+  lastStickyDown = { t: now, x: ev.clientX, y: ev.clientY };
+  const dbl = ev.detail === 2 || (!!was && now - was.t <= DBLCLICK_MS && Math.hypot(ev.clientX - was.x, ev.clientY - was.y) <= DRAG_PX);
+  if (dbl && S.moveSeq) { lastStickyDown = null; S.stickyUp = true; finishMoveIndividually(ctx); return; }
   selectMoveTo(ctx, ctx.worldMm(ev)); S.stickyUp = true; finishSelectMove(ctx, true, !!(ev.ctrlKey || ev.metaKey));
 }
 export const DRAG_PX = 5;
+const DBLCLICK_MS = 500;
+let lastStickyDown: { t: number; x: number; y: number } | null = null;
 /**
  * PCB_SELECTION_TOOL::Main on a left-drag that started on the selection: a routable selection (tracks, or one via) runs
  * the router's drag (drag45Degree or dragFreeAngle, per the Editing Options' track mouse-drag mode), anything else is moved.
@@ -259,7 +270,7 @@ export function startPendingDrag(ctx: PcbCtx, pd: PendingDrag) {
   // m_TrackDragAction: DRAG -> drag45Degree, DRAG_FREE_ANGLE -> dragFreeAngle, MOVE -> the move tool
   const mode = S.trackDragAction || "drag";
   const its = mode === "move" ? null : routableItems(ctx.doc, ids);
-  if (its) return beginInlineDrag(ctx, its, pd.mm, mode === "dragFree", pd.app ? "app" : "select");
+  if (its && beginInlineDrag(ctx, its, pd.mm, mode === "dragFree", pd.app ? "app" : "select")) return true;   // (a line the dragger cannot take — an arc under the cursor — is moved)
   if (ids.length > 1) return beginCarryMove(ctx, { at: pd.mm, sticky: false });
   return beginSelectDrag(ctx, ctx.doc.items.get(ids[0])!, pd.mm);
 }

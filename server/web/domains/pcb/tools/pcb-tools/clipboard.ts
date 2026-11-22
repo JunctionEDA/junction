@@ -3,7 +3,7 @@ import { canHaveNumber, nextPadNumber, padMemory } from "./pad-tool";
 import type { BoardDoc, NetRef, PcbChange, PcbCtx, Pt, SAtom } from "./types";
 
 /** A paste-special / duplicate option bag. */
-export interface PasteOpts { annotations?: string; clearNets?: boolean; xform?: (n: SNode, it: KItem) => void; increment?: boolean }
+export interface PasteOpts { annotations?: string; clearNets?: boolean; xform?: (n: SNode, it: KItem, src?: KItem) => void; increment?: boolean }
 import { addedChange } from "./changes";
 import { conductorEnds } from "./connected";
 import { copperOf } from "./dialogs";
@@ -137,7 +137,7 @@ export function duplicateChanges(doc: BoardDoc, ids: Iterable<string>, offset?: 
       n[1] = padMemory.lastNumber = nextPadNumber(doc, padMemory.lastNumber, incUsed); incUsed.add(String(n[1]));
     }
     if (opts && opts.annotations) annotate(nodes, doc, opts.annotations);
-    if (opts && opts.xform) for (const n of nodes) opts.xform(n, it);   // the array tool's per-copy transform (about the top item)
+    if (opts && opts.xform) nodes.forEach((n, i) => opts.xform!(n, it, src[i]));   // the array tool's per-copy transform (about the top item)
     // members first, so a group's ADDED change finds them
     const order = nodes.map((n, i: number) => i).sort((a, b) => (isParent(nodes[a]) as unknown as number) - (isParent(nodes[b]) as unknown as number) || b - a);   // booleans subtract as 0/1
     let topId: string | null = null;
@@ -151,7 +151,23 @@ export function duplicateChanges(doc: BoardDoc, ids: Iterable<string>, offset?: 
   for (const [gid, add] of joins) { const g = doc.items.get(gid); out.restore.push({ id: gid, node: clone(g!.node) }); out.changes.push(...groupMembersChanges(doc, g!, add, [])); }
   return out;
 }
-export const textOfItem = (it: KItem) => it.kind === "footprint" ? (it.ref || "") : it.kind === "gr_text" || it.kind === "gr_text_box" ? K.str(it.node[1]) : it.kind === "dimension" ? K.str((K.kid(it.node, "gr_text") || [])[1]) : "";
+/**
+ * EDIT_TOOL::copyToClipboardAsText's getItemText: a text, a field (footprint editor), a dimension or a text box gives
+ * its text; a table its cells, tab-joined along a row and newline-joined down the rows; anything else (a footprint
+ * included) has no string representation.
+ */
+export function textOfItem(it: KItem): string {
+  if (it.kind === "gr_text" || it.kind === "gr_text_box" || it.kind === "fp_text" || it.kind === "fp_text_box") return K.str(it.node[1]);
+  if (it.kind === "property") return K.str(it.node[2]);
+  if (it.kind === "dimension") return K.str((K.kid(it.node, "gr_text") || [])[1]);
+  if (it.kind === "table") {
+    const cols = Math.max(1, K.num((K.kid(it.node, "column_count") || [])[1]) || 1), cells = K.kid(it.node, "cells"); if (!cells) return "";
+    const texts = K.kids(cells, "table_cell").map((c) => K.str(c[1])); const rows: string[] = [];
+    for (let i = 0; i < texts.length; i += cols) rows.push(texts.slice(i, i + cols).join("\t"));
+    return rows.join("\n");
+  }
+  return "";
+}
 // The clipboard: the browser's when it can be reached, an app-supplied one, else a buffer of our own.
 export let clipBuffer = "";
 export function clipSet(ctx: PcbCtx, text: string) {

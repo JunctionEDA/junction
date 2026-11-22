@@ -17,9 +17,9 @@ import { APP_TOOLS, state, store } from "./appstore";
 import { enterSheet, rootSchematic, setGridPitch, topLevelSchematics } from "./doc";
 import { FP } from "./fpedit";
 import { ARC_EDIT_MODE_MENU, evaluate, GRID_ORIGIN, menuFor, type MenuCtx, type MenuDef, type Resolved } from "./ctxmenus";
-import { activeModuleTool, applyPickMode, clearAllSelection, hitsAt, markerUnder, interactionBusy, pcbState, pickAt, schState, selectAt, selectionBox, selectionChanged, selectionIds, selectionItems, selectItemId, stage, startFieldMove, startMove, toolCtx, worldMm, zoomBy } from "./gestures";
+import { activeModuleTool, applyPickMode, clearAllSelection, selectedAnywhere, hitsAt, markerUnder, interactionBusy, pcbState, pickAt, schState, selectAt, selectionBox, selectionChanged, selectionIds, selectionItems, selectItemId, stage, startFieldMove, startMove, toolCtx, worldMm, zoomBy } from "./gestures";
 import { E } from "./state";
-import { HIT_PX, nearestFootprint, schCands } from "./selection";
+import { HIT_PX, nearestFootprint, schCands, filterAllows, groupExpand, selectedFields } from "./selection";
 import { activeModule, deleteSelection, moduleTool, runModuleAction, selectAll, setTool } from "./tools";
 import { isSch, kicadZoom, pxPerMm, requestRender } from "./view";
 import { openSelectionProperties } from "./pointer";
@@ -361,26 +361,48 @@ function describe(it: KItem | string): string {
  * The candidates under the cursor, as ids: on a board a pad under the cursor is its own candidate
  * ("footprintId#padIndex", ahead of its footprint), as PCB_SELECTION_TOOL's collector lists PCB_PAD_T.
  */
-export function candidatesAt(mm: Mm, withFields = false): string[] {
+export function candidatesAt(mm: Mm, withFields = false, info?: CollectInfo | null): string[] {
   // schematic: disambiguateCursor's SelectPoint with m_skip_heuristics: every collected item, pin and field that is
   // Selectable and passes the filter
   if (isSch() && E.kdoc && CollabTools.sch && CollabTools.sch._ && (CollabTools.sch._ as { clickCandidates?: unknown }).clickCandidates) return schCands(mm, { skip: true }).cands.map((c) => c.key);
-  const hits = hitsAt(mm); const ids = hits.map((it) => it.id);
-  if (isSch() || !E.kdoc) return ids;
-  // FOOTPRINT::HitTest: a footprint is hit inside its bounding hull, not only on its drawn shapes (as a left click's pickAt)
-  const fp = nearestFootprint(mm[0], mm[1], 5 / Math.max(1, E.zoom * 0.6)) as { id: string } | null;
-  // (only where nothing drawn is hit: over its own shapes or another item the existing candidates already decide)
-  if (fp && !ids.length) ids.push(fp.id);
-  let pad: { item?: KItem; index?: number } | null = null;
-  try { pad = (KiCadCanvas.padAt as (d: KDoc, x: number, y: number) => { item?: KItem; index?: number } | null)(E.kdoc as KDoc, mm[0], mm[1]); } catch { pad = null; }
+  if (isSch() || !E.kdoc) return hitsAt(mm).map((it) => it.id);
+  const d = E.kdoc as KDoc, hidden = E.hiddenLayers as Set<string>;
+  const P = (window as unknown as { PcbTools?: { itemPassesFilter?: PassesFilter } }).PcbTools;
   const f = store.get().filter as Record<string, boolean>;
-  if (pad && pad.item && pad.index !== undefined && f.pads !== false) { const i = ids.indexOf(pad.item.id); const key = `${pad.item.id}#${pad.index}`; if (i >= 0) ids.splice(i, 0, key); else ids.unshift(key); }
+  // collectAtPoint: everything Selectable under the cursor first, then the Selection Filter (itemPassesFilter)
+  const ids = hitsAt(mm, true).map((it) => it.id);
+  // FOOTPRINT::HitTestAccurate: a footprint is hit inside its bounding hull, not only on its drawn shapes;
+  // GuessSelectionCandidates then weighs it against what else is there
+  for (const it of d.items.values()) {
+    if (it.kind !== "footprint" || ids.includes(it.id) || !it.bbox || (E.objectHidden && E.objectHidden(it))) continue;
+    if (KiCadCanvas.itemVisible(it, hidden) && footprintHullHit(it, mm)) ids.push(it.id);
+  }
+  let pad: { item?: KItem; index?: number } | null = null;
+  try { pad = (KiCadCanvas.padAt as (d: KDoc, x: number, y: number) => { item?: KItem; index?: number } | null)(d, mm[0], mm[1]); } catch { pad = null; }
+  if (pad && pad.item && pad.index !== undefined && !(E.objectHidden && E.objectHidden(pad.item))) { const i = ids.indexOf(pad.item.id); const key = `${pad.item.id}#${pad.index}`; if (i >= 0) ids.splice(i, 0, key); else ids.unshift(key); }
   // GENERAL_COLLECTOR collects the PCB_FIELD under the cursor too ("fpId@field:Name"); the menus list it, the board
   // module's hover selection takes fields through its own requestField
-  const fld = withFields && E.hooks.fieldAt ? E.hooks.fieldAt(mm) : null, fid = fld ? fieldId(fld.id, fld.name) : null;
-  if (fid && !ids.includes(fid)) ids.unshift(fid);
-  return ids;
+  if (withFields) {
+    const hit = KiCadCanvas.fieldAt(d, mm[0], mm[1], hidden);
+    const fid = hit && hit.item.kind === "footprint" ? fieldId(hit.item.id, hit.name) : null;
+    if (fid && !ids.includes(fid)) ids.unshift(fid);
+  }
+  if (info) info.preFilter = ids.length;
+  const base = (id: string): KItem | undefined => { const h = id.indexOf("#"), fi = id.indexOf("@field:"); return d.items.get(h > 0 ? id.slice(0, h) : fi > 0 ? id.slice(0, fi) : id); };
+  // FilterCollectedItems: the Selection Filter, "Locked items" by the item or its parent footprint (a single clicked pad excepted)
+  let kept = ids.filter((id) => {
+    const it = base(id); if (!it) return false;
+    if (P && P.itemPassesFilter) return P.itemPassesFilter(d, f, it, { pad: id.includes("#"), child: id.includes("@field:"), multi: false, rejected: info ? info.rejected : undefined });
+    return id.includes("#") ? f.pads !== false : id.includes("@field:") ? f.text !== false : filterAllows(it.kind, it);
+  });
+  // FilterCollectorForHierarchy: nothing outside an entered group
+  const pm = CollabTools.pcb;
+  if (pm && pm.withinEnteredGroup) { try { const ok = new Set(pm.withinEnteredGroup(d, kept.map((id) => base(id)!.id))); kept = kept.filter((id) => ok.has(base(id)!.id)); } catch (e) { console.warn(e); } }
+  return kept;
 }
+/** collectAtPoint's by-products: how many items were under the cursor before the filter, and which filter boxes turned them away. */
+export interface CollectInfo { preFilter?: number; rejected?: Set<string> }
+type PassesFilter = (d: KDoc, f: Record<string, boolean>, it: KItem, o: { pad?: boolean; child?: boolean; multi?: boolean; rejected?: Set<string> }) => boolean;
 const fieldId = (fpId: string, name: string): string => `${fpId}@field:${name}`;   // pcb-tools guess.ts fieldCandidateId
 /** The item a candidate row brightens: a pad's or a field's footprint. */
 const candidateHover = (id: string): string => (id.includes("#") ? id.slice(0, id.indexOf("#")) : id.includes("@field:") ? id.slice(0, id.indexOf("@field:")) : id);
@@ -395,6 +417,15 @@ function selectCandidate(id: string): void {
   }
   const hash = id.indexOf("#");
   if (hash > 0 && !isSch()) { const ps = pcbState() as unknown as { padSel?: string | null } | null; if (ps) ps.padSel = id; requestRender(); return; }
+  // FilterCollectorForHierarchy: a member of a group (or generator) selects its top-level parent, which this
+  // selection model holds as the parent's id with all its members
+  const g = isSch() ? null : groupExpand([id]);
+  if (g && g.size > 1) {
+    const d = E.kdoc as KDoc, ps = pcbState(), fps = [...g].filter((m) => (E.items as { id: string }[]).some((q) => q.id === m));
+    if (fps.length) { for (const m of g) E.selection.add(m); E.selected = (E.items as { id: string }[]).find((q) => q.id === (fps.includes(id) ? id : fps[0])) as typeof E.selected; if (ps) for (const m of g) { const it = d.items.get(m); if (it && it.kind !== "footprint") ps.sel.delete(m); } }
+    else if (ps) ps.sel = new Set(g);
+    requestRender(); return;
+  }
   selectItemId(id);
 }
 /**
@@ -402,15 +433,19 @@ function selectCandidate(id: string): void {
  * item beats a much larger one around it, the active layer beats the others — so only real overlaps (stacked tracks,
  * a via on a track, two pads) stay ambiguous.
  */
-type Guess = (d: KDoc, ids: string[], where: Mm, o: { px: number; hidden: Set<string>; viewport: [number, number] }) => string[];
+type Guess = (d: KDoc, ids: string[], where: Mm, o: { px: number; hidden: Set<string>; viewport: [number, number]; activeLayer?: string; highContrast?: boolean }) => string[];
+/** GuessSelectionCandidates' view of the editor: a pixel in mm, the hidden layers, the viewport, the real active layer and high-contrast mode. */
+function guessOpts(): { px: number; hidden: Set<string>; viewport: [number, number]; activeLayer?: string; highContrast?: boolean } {
+  const ppm = Math.max(1e-6, pxPerMm()), r = stage.getBoundingClientRect();
+  return { px: 1 / ppm, hidden: E.hiddenLayers as Set<string>, viewport: [r.width / ppm, r.height / ppm], activeLayer: (E.activeLayer as string) || undefined, highContrast: !!(E.renderOpts && E.renderOpts.highContrast) };
+}
 function ambiguousAt(mm: Mm, withFields = false): string[] {
   // schematic: what SCH_SELECTION_TOOL::GuessSelectionCandidates leaves of the collector (sch-tools guess.ts)
   if (isSch() && E.kdoc && CollabTools.sch && CollabTools.sch._ && (CollabTools.sch._ as { clickCandidates?: unknown }).clickCandidates) return schCands(mm).cands.map((c) => c.key);
   const ids = candidatesAt(mm, withFields); if (isSch() || !E.kdoc) return ids;
   const P = (window as unknown as { PcbTools?: { guessCandidates?: Guess } }).PcbTools;
   if (P && P.guessCandidates) {
-    const ppm = Math.max(1e-6, pxPerMm()), r = stage.getBoundingClientRect();
-    try { return P.guessCandidates(E.kdoc as KDoc, ids, mm, { px: 1 / ppm, hidden: E.hiddenLayers as Set<string>, viewport: [r.width / ppm, r.height / ppm] }); } catch (e) { console.warn(e); }
+    try { return P.guessCandidates(E.kdoc as KDoc, ids, mm, guessOpts()); } catch (e) { console.warn(e); }
   }
   const others = ids.filter((id) => { const it = (E.kdoc as KDoc).items.get(id); return !(it && it.kind === "footprint"); });
   return others.length ? others : ids;
@@ -434,8 +469,7 @@ E.hooks.fieldWins = (mm: Mm, fpId: string, name: string, ev?: { clientX: number;
   const fid = P.fieldCandidateId(fpId, name);
   const ids = candidatesAt(mm).filter((id) => id !== fid); if (!ids.length) return "field";
   ids.unshift(fid);
-  const ppm = Math.max(1e-6, pxPerMm()), r = stage.getBoundingClientRect();
-  let kept: string[]; try { kept = P.guessCandidates(E.kdoc as KDoc, ids, mm, { px: 1 / ppm, hidden: E.hiddenLayers as Set<string>, viewport: [r.width / ppm, r.height / ppm] }); } catch (e) { console.warn(e); return "field"; }
+  let kept: string[]; try { kept = P.guessCandidates(E.kdoc as KDoc, ids, mm, guessOpts()); } catch (e) { console.warn(e); return "field"; }
   if (!kept.includes(fid)) return "other";
   if (kept.length === 1) return "field";
   if (!ev) return "field";
@@ -491,6 +525,101 @@ export function openClarifyMenu(ev: { clientX: number; clientY: number }, mode: 
   const mm = worldMm(ev); E.lastCursorMm = mm;
   const ids = candidatesAt(mm, true).slice(0, 100); if (ids.length < 2) return false;
   clarifyPopup(ev, ids, null, null, mode); return true;
+}
+/** A zone hit on its outline (ZONE::HitTest( point ): corners and edges), not merely on its filled area. */
+function zoneOutlineHit(it: KItem, mm: Mm, tol: number): boolean {
+  const geomHit = KiCadCanvas.geomHit as (g: KGeom, x: number, y: number, tol: number) => boolean, hidden = E.hiddenLayers as Set<string>;
+  for (const g of it.geom) { if (g.fill || (g.layer && hidden.has(g.layer)) || g.noBox) continue; try { if (geomHit(g, mm[0], mm[1], tol)) return true; } catch { /* unknown record */ } }
+  return false;
+}
+/**
+ * PCB_SELECTION_TOOL::selectPoint without modifiers, on a board: collect what is under the point, filter it
+ * (Selection Filter, entered group), run GuessSelectionCandidates; one candidate replaces the selection, several open
+ * Clarify Selection (doSelectionMenu), none clears the selection — and when only the filter emptied the list its
+ * boxes flash (HighlightSelectionFilter).  onDrag (the press of a drag with nothing selected): zones hit only on
+ * their filled area do not count (zoneFilledAreaFilter) and an ambiguous point selects nothing ("menu": KiCad waits
+ * for the button and then asks).  True when something was selected.
+ */
+export function boardSelectPoint(mm: Mm, ev: { clientX: number; clientY: number }, onDrag = false): boolean | "menu" {
+  if (isSch() || !E.kdoc) return false;
+  const d = E.kdoc as KDoc;
+  if (CollabTools.pcb && CollabTools.pcb.leaveGroupOutside) { try { CollabTools.pcb.leaveGroupOutside(mm, toolCtx()); } catch (e) { console.warn(e); } }
+  const info: CollectInfo = { rejected: new Set<string>() };
+  let all = candidatesAt(mm, true, info);
+  if (onDrag) { const tol = HIT_PX / Math.max(1e-6, pxPerMm()); all = all.filter((id) => { const it = d.items.get(id); return !(it && it.kind === "zone" && !zoneOutlineHit(it, mm, tol)); }); }
+  let ids = all;
+  const P = (window as unknown as { PcbTools?: { guessCandidates?: Guess } }).PcbTools;
+  if (ids.length > 1 && P && P.guessCandidates) { try { ids = P.guessCandidates(d, ids, mm, guessOpts()); } catch (e) { console.warn(e); } }
+  // one top-level group per candidate: two members of the same group are one choice
+  { const seen = new Set<string>(); ids = ids.filter((id) => { if (id.includes("#") || id.includes("@field:")) return true; const g = groupExpand([id]); const key = g.size > 1 ? [...g].sort()[0] : id; if (seen.has(key)) return false; seen.add(key); return true; }); }
+  if (!ids.length) {
+    if (!all.length && (info.preFilter || 0) > 0 && info.rejected && info.rejected.size) flashSelectionFilter([...info.rejected]);
+    if (selectedAnywhere().size || E.selField) { clearAllSelection(false); selectionChanged(); }
+    return false;
+  }
+  E.lastCursorMm = mm;
+  if (ids.length > 1) { if (onDrag) return "menu"; clarifyPopup(ev, ids.slice(0, 100), null, all); return false; }
+  clearAllSelection(false); selectCandidate(ids[0]); selectionChanged();
+  return true;
+}
+/**
+ * selectPoint with a modifier held (Shift adds, Ctrl toggles): the same collection and heuristics as the plain click;
+ * one item is added / toggled, several open Clarify Selection for that mode.  False when the point holds no single
+ * item of its own (nothing, or a pad — the caller's pad pick takes those).
+ */
+export function boardModifierPick(mm: Mm, ev: { clientX: number; clientY: number }, mode: "add" | "toggle"): boolean {
+  if (isSch() || !E.kdoc) return false;
+  const all = candidatesAt(mm); let ids = all;
+  const P = (window as unknown as { PcbTools?: { guessCandidates?: Guess } }).PcbTools;
+  if (ids.length > 1 && P && P.guessCandidates) { try { ids = P.guessCandidates(E.kdoc as KDoc, ids, mm, guessOpts()); } catch (e) { console.warn(e); } }
+  if (!ids.length || ids.some((id) => id.includes("#"))) return false;
+  E.lastCursorMm = mm;
+  if (ids.length > 1) { clarifyPopup(ev, ids, null, all, mode); return true; }
+  applyPickMode(ids[0], mode); return true;
+}
+/** PANEL_SELECTION_FILTER::flashCheckbox: the Selection Filter boxes that turned a click away blink (SelectionFilter.tsx). */
+export function flashSelectionFilter(keys: string[]): void {
+  const prev = (store.get() as unknown as { filterFlash?: { n: number } }).filterFlash;
+  store.set({ filterFlash: { keys, n: ((prev && prev.n) || 0) + 1 } } as never);
+}
+/**
+ * PCB_SELECTION_TOOL::SelectionContains( point ): is the point on a selected item, within the 20 px GRIP_MARGIN?
+ * Each item by its own HitTest( point, margin ): a footprint by its bounding box without its texts, a pad by its
+ * shape, a field by its text box, a zone by its outline (not its fill), everything else by its drawn shape.
+ */
+export function boardSelectionContains(mm: Mm): boolean {
+  if (isSch() || !E.kdoc) return false;
+  const d = E.kdoc as KDoc, m = 20 / Math.max(1e-6, pxPerMm()), hidden = E.hiddenLayers as Set<string>, [x, y] = mm;
+  const geomHit = KiCadCanvas.geomHit as (g: KGeom, x: number, y: number, tol: number) => boolean;
+  const geomBox = KiCadCanvas.geomBox as (g: KGeom) => number[] | null;
+  const inBox = (b: number[] | null | undefined) => !!b && x >= b[0] - m && x <= b[2] + m && y >= b[1] - m && y <= b[3] + m;
+  const ps = pcbState() as unknown as { padSel?: string | null; padAlso?: { anchor: string; keys: string[] } | null } | null;
+  const pads = ps && ps.padSel ? [ps.padSel, ...(ps.padAlso && ps.padAlso.anchor === ps.padSel ? ps.padAlso.keys : [])] : [];
+  for (const key of pads) {
+    const h = key.lastIndexOf("#"), it = d.items.get(key.slice(0, h)), idx = +key.slice(h + 1); if (!it) continue;
+    for (const g of it.geom) { if ((g as { padIndex?: number }).padIndex !== idx || g.padText || g.padNum || (g.layer && hidden.has(g.layer))) continue; try { if (geomHit(g, x, y, m)) return true; } catch { /* unknown record */ } }
+  }
+  for (const f of selectedFields()) {
+    const it = d.items.get(f.id); if (!it) continue;
+    for (const fb of (KiCadCanvas.fieldBoxes as (it: KItem, hidden: Set<string>) => { name: string; pts: number[][] }[])(it, hidden)) {
+      if (fb.name !== f.name) continue;
+      const xs = fb.pts.map((p) => p[0]), ys = fb.pts.map((p) => p[1]); if (inBox([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)])) return true;
+    }
+  }
+  for (const id of selectionIds()) {
+    const it = d.items.get(id); if (!it || it.kind === "group" || it.kind === "generated") continue;
+    if (it.kind === "footprint") {   // FOOTPRINT::HitTest( point, accuracy ): GetBoundingBox( false ) — no texts — inflated
+      let hull: number[] | null = null;
+      for (const g of it.geom) { if (g.padText || g.padNum || g.noBox || g.t === "text") continue; const b = geomBox(g); if (!b) continue; hull = hull ? [Math.min(hull[0], b[0]), Math.min(hull[1], b[1]), Math.max(hull[2], b[2]), Math.max(hull[3], b[3])] : b.slice(); }
+      if (inBox(hull || it.bbox)) return true; continue;
+    }
+    if (!inBox(it.bbox)) continue;
+    for (const g of it.geom) {
+      if ((g.layer && hidden.has(g.layer)) || g.noBox || (it.kind === "zone" && g.fill)) continue;
+      try { if (geomHit(g, x, y, m)) return true; } catch { /* unknown record */ }
+    }
+  }
+  return false;
 }
 /** selectPoint's m_additive / m_subtractive / m_exclusive_or for what the Clarify Selection menu picks. */
 type PickMode = "add" | "toggle" | "remove";
@@ -590,7 +719,7 @@ export function startLongPress(ev: PointerEvent): void {
     if (E.fdrag && E.fdrag.moved) return;
     if (candidatesAt(worldMm({ clientX: at.x, clientY: at.y } as PointerEvent), true).length < 2) return;
     // the press becomes the disambiguation: whatever it started (a box, a pending drag) is dropped
-    E.boxSel = null; if (g) E.drag = null; if (ps) ps.pending = null; E.fdrag = null;
+    E.boxSel = null; if (g) E.drag = null; if (ps) ps.pending = null; E.fdrag = null; if (E.hooks.cancelPress) E.hooks.cancelPress();
     if (isSch() && ss) {
       ss.pending = null;
       const sm = CollabTools.sch as unknown as { endDrag?: (c: unknown, commit: boolean) => void } | undefined;

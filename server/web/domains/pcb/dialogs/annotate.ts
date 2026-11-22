@@ -10,6 +10,7 @@ import { KD, checkbox, h, textInput, type DlgApi } from "./dom";
 import { obj, projectDocs, projectJson, readDoc, saveProject, sub, submitDocOp } from "./project";
 import { effectiveTheme } from "../../../shared/theme";
 import { subsheetFiles } from "./annotate-logic";
+import { currentInstance, instancePage, loadSheets, netMap } from "../editor/schnets";
 import { messageBox, reportPanel, type ReportLine } from "../editor/pcbdialogs/ui";
 export { subsheetFiles };
 
@@ -20,12 +21,23 @@ const ORDER_BMP: Record<string, [string, string]> = {
 };
 
 type Scope = "all" | "sheet" | "selection";
-interface AnnotateOpts { order: "x" | "y"; keep: boolean; start: number; sheetInterval: number; sheetNumber?: number; only?: Set<string>; reserved?: string[]; regroup?: boolean }
+interface AnnotateOpts { order: "x" | "y"; keep: boolean; start: number; sheetInterval: number; sheetNumber?: number; only?: Set<string>; reserved?: string[]; regroup?: boolean; tracker?: { reuse: boolean; used: Set<string> } | null }
+/** A sheet instance as the annotation takes it (sch-tools AnnSheet). */
+interface AnnSheet { doc: KDoc; path: string | null; page: number; shown?: boolean; project?: string | null; file?: string; human?: string }
+interface HSheet extends AnnSheet { docId: string; uuidPath: string[] }
+interface AnnScope { all: boolean; sheets: { sheet: AnnSheet; only?: Set<string> | null }[] }
 interface SchAnnotate {
   annotateChanges(doc: KDoc, opts: AnnotateOpts): KChange[];
   annotateMessages(doc: KDoc, changes: KChange[], clear?: boolean): string[];
   clearAnnotationChanges(doc: KDoc, only?: Set<string> | null): KChange[];
   incrementAnnotationChanges?(doc: KDoc, start: string, by: number): KChange[];
+  annotateHierarchy(sheets: AnnSheet[], scope: AnnScope, opts: AnnotateOpts): { changes: Map<KDoc, KChange[]>; messages: string[]; errors: string[] };
+  clearAnnotationHierarchy(scope: AnnScope["sheets"]): { changes: Map<KDoc, KChange[]>; messages: string[] };
+  replaceDuplicateIds(docs: KDoc[]): { changes: Map<KDoc, KChange[]>; count: number };
+  inferredSelection(doc: KDoc, ids: Iterable<string>): { symbols: Set<string>; sheets: Set<string> };
+  serializeTracker(used: Iterable<string>): string;
+  deserializeTracker(data: string): Set<string>;
+  state: { refTracker?: { reuse: boolean; used: Set<string> } | null };
 }
 const sch = (): SchAnnotate | null => ((window as unknown as { CollabTools?: { sch?: SchAnnotate } }).CollabTools || {}).sch || null;
 
@@ -39,7 +51,6 @@ export function usedRefs(doc: KDoc): string[] {
   for (const it of doc.items.values()) if (it.kind === "symbol" && it.ref && !/\?$/.test(it.ref)) out.push(it.ref);
   return out;
 }
-const pageOf = (doc: KDoc, fallback: number): number => { const p = parseInt(String((doc as KDoc & { pageNumber?: string }).pageNumber || ""), 10); return p > 0 ? p : fallback; };
 const inverseOf = (doc: KDoc, ch: KChange[]): KChange[] => ch.map((c) => { const it = doc.items.get(c.id as string); return it ? KiCadCanvas.replaceChange(doc, it) : null; }).filter(Boolean) as KChange[];
 
 /**
@@ -79,16 +90,6 @@ const say = (text: string, bad = false) => {
 };
 const clearReport = (): void => { reportLines = []; if (report) report.set(reportLines); };
 
-const dirOf = (path: string): string => path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
-/** The sheets below this one (Recurse into subsheets): the sheet files its sheets name, then theirs. */
-function belowHere(others: { docId: string; path: string; doc: KDoc }[], only: Set<string> | null): typeof others {
-  const here = projectDocs().find((d) => d.docId === appState.docId), byPath = new Map(others.map((o) => [o.path, o])), out: typeof others = [], seen = new Set<string>();
-  const walk = (doc: KDoc, dir: string, sel: Set<string> | null): void => {
-    for (const f of subsheetFiles(doc, dir, sel)) { const o = byPath.get(f); if (!o || seen.has(o.docId)) continue; seen.add(o.docId); out.push(o); walk(o.doc, dirOf(o.path), null); }
-  };
-  if (E.kdoc) walk(E.kdoc, here ? dirOf(here.path) : "", only);
-  return out;
-}
 async function otherSheets(): Promise<{ docId: string; path: string; doc: KDoc }[]> {
   const out: { docId: string; path: string; doc: KDoc }[] = [];
   for (const d of projectDocs().filter((x) => x.docType === "kicad_sch" && x.docId !== appState.docId)) {
@@ -97,39 +98,96 @@ async function otherSheets(): Promise<{ docId: string; path: string; doc: KDoc }
   return out;
 }
 
+/**
+ * The schematic's sheet instances (SCHEMATIC::Hierarchy(), sorted by page): each with its file's document, the
+ * instance path its symbols record ("/<root uuid>/<sheet uuid>…") and its page number as an integer
+ * (SCH_SHEET_PATH::GetPageNumberAsInt: the page when it is a number, else the virtual page), and the one on screen.
+ * Without a readable hierarchy the open sheet stands alone.
+ */
+async function hierarchy(): Promise<{ sheets: HSheet[]; here: HSheet | null }> {
+  const doc = E.kdoc as KDoc; const pro = projectDocs().find((d) => d.docType === "kicad_pro");
+  const project = pro ? (pro.path.split("/").pop() || "").replace(/\.kicad_pro$/, "") : null;
+  const alone = (): { sheets: HSheet[]; here: HSheet | null } => {
+    const pg = parseInt(String((doc as KDoc & { pageNumber?: string }).pageNumber || ""), 10);
+    const h: HSheet = { doc, path: doc.instancePath || null, page: pg > 0 ? pg : 1, shown: true, project, docId: appState.docId as string, uuidPath: [] };
+    return { sheets: [h], here: h };
+  };
+  try { await loadSheets(); } catch (e) { /* the sheets that could be read */ }
+  const c = netMap(), cur = currentInstance(c);
+  if (!c || !cur || !c.instances.length) return alone();
+  const idOf = new Map(projectDocs().filter((d) => d.docType === "kicad_sch").map((d) => [d.path, d.docId]));
+  const rows = c.instances.filter((i) => c.docs.has(i.file) && idOf.has(i.file)).map((i, n) => ({ i, n, text: instancePage(c, i) }));
+  // SCH_SHEET_LIST::SortByPageNumbers: by page number (natural order), ties in hierarchy order; the position is the virtual page
+  rows.sort((a, b) => a.text.localeCompare(b.text, undefined, { numeric: true }) || a.n - b.n);
+  const firstOfFile = new Set<string>(), sheets: HSheet[] = []; let here: HSheet | null = null;
+  rows.forEach((r, n) => {
+    const isHere = r.i === cur, d = isHere ? doc : c.docs.get(r.i.file) as KDoc;
+    const h: HSheet = { doc: d, path: "/" + r.i.uuidPath.join("/"), page: /^\s*[+-]?\d+\s*$/.test(r.text) ? parseInt(r.text, 10) : n + 1, project, file: r.i.file, human: r.i.human, docId: idOf.get(r.i.file) as string, uuidPath: r.i.uuidPath };
+    if (isHere) here = h;
+    sheets.push(h);
+  });
+  // the Reference field of a file follows the instance on screen, else the file's first instance
+  for (const h of sheets) { if (h.doc === doc) h.shown = h === here; else if (!firstOfFile.has(h.docId)) { firstOfFile.add(h.docId); h.shown = true; } }
+  if (!here) return alone();
+  return { sheets, here };
+}
+/** The sheet instances strictly below a path (SCH_SHEET_LIST::GetSheetsWithinPath of its sub-sheets). */
+const below = (sheets: HSheet[], top: string[]): HSheet[] => sheets.filter((h) => h.uuidPath.length > top.length && top.every((u, i) => h.uuidPath[i] === u));
+/**
+ * ANNOTATE_SCOPE_T over the hierarchy: the entire schematic; the current sheet (with Recurse, the sheets below it);
+ * or the selection — getInferredSymbols (symbols, the symbols in selected groups) on this sheet and, with Recurse, the
+ * sheets below the selected sheets.
+ */
+function scopeOf(S: SchAnnotate, sheets: HSheet[], here: HSheet): AnnScope {
+  if (A.scope === "all") return { all: true, sheets: sheets.map((sheet) => ({ sheet })) };
+  if (A.scope === "sheet") return { all: false, sheets: [{ sheet: here }, ...(A.recursive ? below(sheets, here.uuidPath).map((sheet) => ({ sheet })) : [])] };
+  const ids = new Set<string>(E.selection); if (E.selected) ids.add(E.selected.id);
+  const sel = S.inferredSelection(E.kdoc as KDoc, ids), out: AnnScope["sheets"] = [{ sheet: here, only: sel.symbols }];
+  if (A.recursive) { const seen = new Set<HSheet>(); for (const id of sel.sheets) for (const h of [...sheets.filter((x) => x.uuidPath.length === here.uuidPath.length + 1 && x.uuidPath[here.uuidPath.length] === id && here.uuidPath.every((u, i) => x.uuidPath[i] === u)), ...below(sheets, [...here.uuidPath, id])]) if (!seen.has(h)) { seen.add(h); out.push({ sheet: h }); } }
+  return { all: false, sheets: out };
+}
+/** One step on each document: the open sheet through its tool context, the others through their own operation logs. */
+async function applyChanges(sheets: HSheet[], changes: Map<KDoc, KChange[]>, label: string, failed: string): Promise<void> {
+  for (const [doc, ch] of changes) {
+    if (!ch.length) continue;
+    if (doc === E.kdoc) { toolCtx().commit(ch, label); continue; }
+    const h = sheets.find((x) => x.doc === doc); if (!h) continue;
+    const inverse = inverseOf(doc, ch);
+    try { await submitDocOp(h.docId, ch); } catch (e) { say(`${failed} ${h.file || ""}: ${(e as Error).message}`, true); continue; }
+    pushUndoFor(h.docId, { label, changes: ch, inverse });
+    for (const c of ch) KiCadCanvas.applyChange(doc, c, 1e4);
+  }
+}
+/** The project's REFDES_TRACKER (reuse_designators, used_designators) with every designator in use (CacheExistingAnnotation). */
+function projectTracker(S: SchAnnotate, sheets: HSheet[]): { reuse: boolean; used: Set<string> } {
+  const sc = obj(obj(projectJson()).schematic);
+  const used = S.deserializeTracker(typeof sc.used_designators === "string" ? sc.used_designators : "");
+  const live = S.state.refTracker; if (live) for (const r of live.used) used.add(r);
+  for (const h of sheets) for (const it of h.doc.items.values()) if (it.kind === "symbol" && it.ref && !/\?$/.test(it.ref) && it.ref[0] !== "#") used.add(it.ref);
+  return { reuse: sc.reuse_designators !== false, used };
+}
+
 async function runAnnotate(): Promise<void> {
   const S = sch(); if (!S || !E.kdoc) return;
   clearReport();
   if (E.viewOnly) { say("View-only access", true); return; }
   const interval = A.numbering === "100" ? 100 : A.numbering === "1000" ? 1000 : 0;
-  await storeReusedSheetMode();   // annotation reads the mode from the project
+  const { sheets, here } = await hierarchy(); if (!here) return;
+  const tracker = projectTracker(S, sheets), tracked0 = S.serializeTracker(tracker.used);
+  // ReplaceDuplicateTimeStamps (aRepairTimestamps): duplicate uuids across the screens get fresh ones first
+  const files: KDoc[] = []; for (const h of sheets) if (!files.includes(h.doc)) files.push(h.doc);
+  const rep = S.replaceDuplicateIds(files);
+  if (rep.count) { await applyChanges(sheets, rep.changes, "Annotate", "Could not annotate"); say(`${rep.count} duplicate time stamps were found and replaced.`); }
   // OnAnnotateClick: regroupUnits = resetAnnotation && m_checkRegroupUnits
-  const base: AnnotateOpts = { order: A.order, keep: A.keep, start: A.numbering === "first" ? A.start : 0, sheetInterval: interval, regroup: !A.keep && A.regroup };
-  const only = A.scope === "selection" ? new Set<string>(E.selection) : undefined;
-  if (A.scope === "selection" && E.selected) only!.add(E.selected.id);
-  const others = await otherSheets();
-  // the sheets annotated besides this one: all of them, or with Recurse the ones below this sheet (or the selected sheets)
-  const targets = A.scope === "all" ? others : A.recursive ? belowHere(others, only || null) : [];
-  const targetIds = new Set(targets.map((t) => t.docId));
-  // the references the sheets left alone keep: everything on them when only some sheets are annotated, or when existing
-  // annotations are kept; a reset of the entire schematic starts from nothing and fills sheet after sheet
-  const reserved: string[] = others.filter((o) => !targetIds.has(o.docId) || A.keep).flatMap((o) => usedRefs(o.doc));
-  const here = S.annotateChanges(E.kdoc, Object.assign({}, base, { only, reserved, sheetNumber: pageOf(E.kdoc, 1) }));
-  const lines: string[] = S.annotateMessages ? S.annotateMessages(E.kdoc, here) : [];
-  if (here.length) toolCtx().commit(here, "Annotate");
-  reserved.push(...usedRefs(E.kdoc));
-  for (const [i, o] of targets.entries()) {
-    const ch = S.annotateChanges(o.doc, Object.assign({}, base, { reserved: reserved.slice(), sheetNumber: pageOf(o.doc, i + 2) }));
-    if (ch.length) {
-      const inverse = inverseOf(o.doc, ch), msgsHere = S.annotateMessages ? S.annotateMessages(o.doc, ch) : [];
-      try { await submitDocOp(o.docId, ch); } catch (e) { say(`Could not annotate ${o.path}: ${(e as Error).message}`, true); continue; }
-      pushUndoFor(o.docId, { label: "Annotate", changes: ch, inverse }); lines.push(...msgsHere);
-      for (const c of ch) KiCadCanvas.applyChange(o.doc, c, 1e4);
-    }
-    reserved.push(...usedRefs(o.doc));
-  }
-  for (const l of lines) say(l);
-  say("Annotation complete.");
+  const opts: AnnotateOpts = { order: A.order, keep: A.keep, start: A.numbering === "first" ? A.start : 0, sheetInterval: interval, regroup: !A.keep && A.regroup, tracker };
+  const r = S.annotateHierarchy(sheets, scopeOf(S, sheets, here), opts);
+  await applyChanges(sheets, r.changes, "Annotate", "Could not annotate");
+  for (const l of r.messages) say(l);
+  // CheckAnnotate: its errors, and "Annotation complete." only when there are none
+  for (const l of r.errors) say(l.replace(/\n$/, ""), true);
+  if (!r.errors.length) say("Annotation complete.");
+  await storeAnnotationSettings(S.serializeTracker(tracker.used) !== tracked0 ? S.serializeTracker(tracker.used) : null);
+  if (S.state.refTracker) for (const d of tracker.used) S.state.refTracker.used.add(d);
   void refreshOtherRefs();
 }
 
@@ -137,43 +195,57 @@ async function runClear(): Promise<void> {
   const S = sch(); if (!S || !E.kdoc) return;
   clearReport();
   if (E.viewOnly) { say("View-only access", true); return; }
-  const only = A.scope === "selection" ? new Set<string>(E.selection) : null;
-  if (only && E.selected) only.add(E.selected.id);
-  const here = S.clearAnnotationChanges(E.kdoc, only);
-  const lines: string[] = S.annotateMessages ? S.annotateMessages(E.kdoc, here, true) : [];
-  if (here.length) toolCtx().commit(here, "Delete Annotation");
-  const others = A.scope === "all" || A.recursive ? await otherSheets() : [];
-  const targets = A.scope === "all" ? others : A.recursive ? belowHere(others, only) : [];
-  for (const o of targets) {
-    const ch = S.clearAnnotationChanges(o.doc, null); if (!ch.length) continue;
-    const inverse = inverseOf(o.doc, ch), msgsHere = S.annotateMessages ? S.annotateMessages(o.doc, ch, true) : [];
-    try { await submitDocOp(o.docId, ch); } catch (e) { say(`Could not clear ${o.path}: ${(e as Error).message}`, true); continue; }
-    pushUndoFor(o.docId, { label: "Delete Annotation", changes: ch, inverse }); lines.push(...msgsHere);
-    for (const c of ch) KiCadCanvas.applyChange(o.doc, c, 1e4);
-  }
-  for (const l of lines) say(l);
+  const { sheets, here } = await hierarchy(); if (!here) return;
+  const r = S.clearAnnotationHierarchy(scopeOf(S, sheets, here).sheets);
+  await applyChanges(sheets, r.changes, "Delete Annotation", "Could not clear");
+  for (const l of r.messages) say(l);
+  void refreshOtherRefs();
 }
 
 let reuseSuffix = false, initialReuse = false;
-/** storeReusedSheetMode: the Reused Sheets choice written to the project when it changed. */
-async function storeReusedSheetMode(): Promise<void> {
-  if (reuseSuffix === initialReuse) return;
-  initialReuse = reuseSuffix; const on = reuseSuffix;
-  await saveProject((pro) => { sub(pro, "schematic", "annotation").reused_sheet_suffixes = on; }, "annotation options");
+/** The dialog's Order, Numbering and start number as the project keeps them (annotation.sort_order, annotation.method, annotate_start_num). */
+function loadAnnotationSettings(): void {
+  const sc = obj(obj(projectJson()).schematic), a = obj(sc.annotation);
+  A.order = a.sort_order === 1 ? "y" : "x";
+  A.numbering = a.method === 1 ? "100" : a.method === 2 ? "1000" : "first";
+  A.start = typeof sc.annotate_start_num === "number" && sc.annotate_start_num >= 0 ? Math.round(sc.annotate_start_num) : 0;
 }
-export function openAnnotate(): void {
+/**
+ * storeReusedSheetMode and the dialog's settings written to the project when they changed: the Reused Sheets choice,
+ * the sort order, the numbering method and start number, and (`used`) the designators the annotation handed out.
+ */
+async function storeAnnotationSettings(used: string | null): Promise<void> {
+  const sc = obj(obj(projectJson()).schematic), a = obj(sc.annotation);
+  const order = A.order === "y" ? 1 : 0, method = A.numbering === "100" ? 1 : A.numbering === "1000" ? 2 : 0, on = reuseSuffix;
+  const same = on === initialReuse && (a.sort_order === 1 ? 1 : 0) === order && (a.method === 1 || a.method === 2 ? a.method : 0) === method && (typeof sc.annotate_start_num === "number" ? sc.annotate_start_num : 0) === A.start && used === null;
+  if (same) return;
+  initialReuse = on;
+  await saveProject((pro) => {
+    const t = sub(pro, "schematic"), an = sub(pro, "schematic", "annotation");
+    an.reused_sheet_suffixes = on; an.sort_order = order; an.method = method; t.annotate_start_num = A.start;
+    if (used !== null) t.used_designators = used;
+  }, "annotation options");
+}
+/**
+ * Tools > Annotate Schematic… (DIALOG_ANNOTATE).  `message`: why the dialog was opened for the user (SCH_EDIT_FRAME::
+ * ModalAnnotate: the first line of the message window); the dialog then stays over the one that asked and `onClosed`
+ * runs when it is closed.
+ */
+export function openAnnotate(message?: string, onClosed?: () => void): void {
   const radio = (name: string, value: string, label: string, on: boolean, set: () => void, disabled = false) => {
     const r = h("input", { type: "radio", name, value, checked: on, disabled, id: `kd-ann-${name}-${value}` }); r.addEventListener("change", () => { if (r.checked) set(); });
     return h("label", { class: "kd-chk", style: "display:flex;gap:6px;align-items:center" }, r, label);
   };
   const box = (title: string, ...rows: HTMLElement[]) => { const b = h("div", { style: "flex:1;min-width:0" }); KD().staticBox(b, title).append(...rows); return b; };
   api = KD().open({
-    title: "Annotate Schematic", width: 600,
+    title: "Annotate Schematic", width: 600, child: message !== undefined,
     build(body) {
       // m_MessageWindow: WX_HTML_REPORT_PANEL labelled "Annotation Messages:", saved as report.txt (SetFileName)
+      loadAnnotationSettings();
       reportLines = []; report = reportPanel("160px", { fileName: "report.txt", empty: "" });
       (report.el.firstElementChild as HTMLElement).setAttribute("data-ann-msgs", "1");
       report.set(reportLines);
+      if (message) say(message);
       const messages = h("div", { style: "margin-top:10px" }); KD().staticBox(messages, "Annotation Messages:").append(report.el);
       const hasSel = E.selection.size > 0 || !!E.selected;
       const start = textInput(String(A.start), (v) => { A.start = Math.max(0, parseInt(v, 10) || 0); }, { id: "kd-ann-start", style: "width:70px", type: "number", min: "0" });
@@ -212,6 +284,8 @@ export function openAnnotate(): void {
       { label: "Annotate", primary: true, isDefault: true, fn: () => { void runAnnotate(); }, id: "kd-ann-run" },
     ],
   });
+  const ov = onClosed && api ? api.body.closest(".kd-overlay") : null;
+  if (ov && onClosed) { const mo = new MutationObserver(() => { if (!ov.isConnected) { mo.disconnect(); onClosed(); } }); mo.observe(document.body, { childList: true }); }
 }
 
 /**

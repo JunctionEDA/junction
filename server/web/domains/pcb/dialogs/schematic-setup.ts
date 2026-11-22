@@ -143,13 +143,21 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
     const tv: JsonObj = {}; for (const v of vars) if (v.name.trim()) tv[v.name.trim()] = v.value; p.text_variables = tv;
   };
   let tb: { current(): string | null } | null = null;
+  // PAGED_DIALOG::UpdateResetButton: "Reset <page> to Defaults" on a resettable page (the Pin Conflicts Map), else a disabled "Reset to Defaults"
+  let resetPage: (() => void) | null = null, resetPinMap: (() => void) | null = null;
+  const updateResetButton = (label: string): void => {
+    const b = document.getElementById("kd-ss-reset") as HTMLButtonElement | null, name = label.split("/").pop() || "";
+    resetPage = name === "Pin Conflicts Map" && !ro ? () => { if (resetPinMap) resetPinMap(); } : null;
+    if (b) { b.textContent = resetPage ? `Reset ${name} to Defaults` : "Reset to Defaults"; b.disabled = !resetPage; }
+  };
   const importSettings = (): void => importDialog((other, sel) => {
     // ImportSettingsFrom on each chosen page: this dialog's edits so far, then the other project's sections, shown again
     writeInto(pro); importSections(pro, other, sel);
     KD().close(); build(pro, (tb && tb.current()) || page, rootP);
   });
   KD().open({ title: "Schematic Setup", width: 980, cls: "kd-wide kd-flush", readOnly: ro,
-    extra: [{ label: "Import Settings from Another Project...", fn: importSettings, id: "kd-ss-import" }],
+    // PAGED_DIALOG: m_resetButton, then the auxiliary button
+    extra: [{ label: "Reset to Defaults", fn: () => { if (resetPage) resetPage(); }, id: "kd-ss-reset" }, { label: "Import Settings from Another Project...", fn: importSettings, id: "kd-ss-import" }],
     build(body) {
       // the infobar: KiCad shows it when the project is missing or read-only
       const bar = infoBar(); body.append(bar.el);
@@ -204,9 +212,13 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
         { label: "Electrical Rules", pages: [
           { label: "Violation Severity", build(pg) {
             const g = h("div", { id: "kd-ss-severities", style: "display:grid;grid-template-columns:1fr max-content max-content max-content;gap:3px 16px;align-items:center" });
-            for (const r of ERC_RULES) {
-              if (!r[1]) { g.append(h("div", { style: "grid-column:1/-1;font-weight:600;margin-top:8px" }, r[0])); continue; }
-              const code = r[1]; g.append(h("label", null, r[0]));
+            // PANEL_SETUP_SEVERITIES: underlined headings, "<rule>:" rows, and the pin conflicts row after the last rule
+            const pinRow = ERC_RULES.find((r) => r[1] === "pin_to_pin");
+            for (const r of [...ERC_RULES.filter((x) => x[1] !== "pin_to_pin"), ...(pinRow ? [pinRow] : [])]) {
+              if (!r[1]) { g.append(h("div", { style: "grid-column:1/-1;margin-top:8px;padding:0 13px 2px;border-bottom:1px solid var(--line)" }, r[0])); continue; }
+              const code = r[1];
+              if (code === "pin_to_pin") g.append(h("div", { style: "grid-column:1/-1;height:5px" }));
+              g.append(h("label", null, r[0] + ":"));
               const opts: [Severity, string][] = code === "pin_to_pin" ? [["error", "From Pin Conflicts Map"], ["warning", ""], ["ignore", "Ignore"]] : [["error", "Error"], ["warning", "Warning"], ["ignore", "Ignore"]];
               for (const [val, label] of opts) {
                 if (!label) { g.append(h("span")); continue; }
@@ -243,12 +255,14 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
                 const b = h("button", { type: "button", class: "kd-bmpbtn", disabled: ro, style: `position:absolute;left:${x}px;top:${y}px;width:${BW + PX}px;height:${BH + PY}px;padding:0;border:0;background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer` }, h("img", { width: "16", height: "16", alt: "" }));
                 b.dataset.cell = `${i},${j}`; paint(b, pinMap[i][j]);
                 b.addEventListener("click", () => { const v = (pinMap[i][j] + 1) % 3; pinMap[i][j] = pinMap[j][i] = v; paint(b, v); }); box.append(b);
+                // OnMouseEnter / OnMouseLeave: the button under the pointer takes the highlight colour
+                b.addEventListener("mouseenter", () => { if (!ro) b.style.background = "var(--blue)"; }); b.addEventListener("mouseleave", () => { b.style.background = "transparent"; });
               }
             }
             wrap.append(labels, box);
-            // m_ResetMatrixButton under the matrix
-            pg.append(wrap, h("div", { class: "kd-row", style: "margin-top:8px" },
-              h("button", { class: "btn sm", type: "button", disabled: ro, onclick: () => { for (let i = 0; i < 12; i++) for (let j = 0; j < 12; j++) pinMap[i][j] = DEFAULT_PIN_MAP[i][j]; box.querySelectorAll<HTMLElement>("button[data-cell]").forEach((b) => { const [i, j] = b.dataset.cell!.split(",").map(Number); paint(b, pinMap[i][j]); }); } }, "Reset to Defaults")));
+            // PANEL_SETUP_PINMAP::ResetPanel, run by the dialog's "Reset Pin Conflicts Map to Defaults" button
+            resetPinMap = () => { for (let i = 0; i < 12; i++) for (let j = 0; j < 12; j++) pinMap[i][j] = DEFAULT_PIN_MAP[i][j]; box.querySelectorAll<HTMLElement>("button[data-cell]").forEach((b) => { const [i, j] = b.dataset.cell!.split(",").map(Number); paint(b, pinMap[i][j]); }); };
+            pg.append(wrap);
           } },
         ] },
         { label: "Project", pages: [
@@ -298,7 +312,9 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
         { label: "Schematic Data", pages: [
           { label: "Embedded Files", build(pg) { embeddedFilesPage(pg, () => rootP); } },
         ] },
-      ], { selected: page });
+      ], { selected: page, onSelect: updateResetButton });
+      // the button row is laid out with the dialog: the page shown first sets the button once it exists
+      setTimeout(() => { if (tb && tb.current()) updateResetButton(tb.current()!); }, 0);
     },
     ok() {
       if (ro) return;

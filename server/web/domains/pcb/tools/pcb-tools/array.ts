@@ -10,8 +10,9 @@ export interface ArrayOpts {
 }
 /** One copy's move: the offset in mm and the rotation in degrees. */
 export interface ArrayStep { offset: Pt; rot: number }
-import { duplicateChanges } from "./clipboard";
-import { expandGroups, parentOf } from "./groups";
+import { duplicateChanges, refProp } from "./clipboard";
+import { expandGroups, groupMembers, parentOf } from "./groups";
+import { K } from "./state";
 import { anchorOf, rotateNode, selectionCenter, transformChanges, translateNode } from "./transforms";
 import { r6, rotator } from "./util";
 
@@ -64,12 +65,54 @@ export function arrayStacked(o: ArrayOpts, pos: Pt) {
 export function arrayOrigin(doc: BoardDoc, ids: string[]) { const items = ids.map((id: string) => doc.items.get(id)).filter(Boolean) as KItem[]; return items.length === 1 ? anchorOf(items[0]) : selectionCenter(items); }
 /** TransformItem: Move by the offset, then Rotate about the item's (new) position. */
 export function arrayApply(node: SNode, t: ArrayStep, pos: Pt) { if (t.offset[0] || t.offset[1]) translateNode(node, t.offset[0], t.offset[1]); if (t.rot) rotateNode(node, pos[0] + t.offset[0], pos[1] + t.offset[1], t.rot); }
+/** StrNumCmp( a, b, CMP_T::IGNORE_CASE ): digit runs compare as numbers, the rest letter by letter without case. */
+export function strNumCmp(a: string, b: string): number {
+  let i = 0, j = 0; const dig = (c: string) => c >= "0" && c <= "9";
+  while (i < a.length && j < b.length) {
+    if (dig(a[i]) && dig(b[j])) {
+      let x = 0, y = 0; while (i < a.length && dig(a[i])) x = x * 10 + +a[i++]; while (j < b.length && dig(b[j])) y = y * 10 + +b[j++];
+      if (x !== y) return x < y ? -1 : 1; continue;
+    }
+    const ca = a[i].toUpperCase(), cb = b[j].toUpperCase(); if (ca !== cb) return ca < cb ? -1 : 1; i++; j++;
+  }
+  return i < a.length ? 1 : j < b.length ? -1 : 0;
+}
 /**
- * ARRAY_TOOL::onDialogClosed.  Duplicate (o.arrange false): the selection is copied into every other cell of the array
- * (BOARD_ITEM::Duplicate / PCB_GROUP::DeepDuplicate, copies in a group join it), footprints reannotated unless
- * o.keepRefs; the originals take the first cell, which moves them only for a centred grid or a circular first angle.
- * "Create Array", the copies and the originals selected.  Arrange (o.arrange): the selected items, in order, go one
- * to a cell starting from the first one's position — "Arrange selection".  Returns { changes, ids, label }.
+ * BOARD_REANNOTATE_TOOL::ReannotateDuplicates as ARRAY_TOOL calls it, block by block: `blocks` holds, per array cell in
+ * the order the tool builds them, the block's footprints ({ key, ref, pos }); `used` maps a reference to the keys of
+ * the footprints that carry it (the board's, then every block already built).  A footprint whose reference another
+ * one carries counts up from its own number (UTIL::GetRefDesNumber, -1 without digits: 1 first) until it is free.
+ * `skip` blocks are not reannotated (the first block built, or all of them with "keep").  Returns key -> reference.
+ */
+export function reannotateBlocks(used: Map<string, Set<string>>, blocks: { skip: boolean; fps: { key: string; ref: string; pos: Pt }[] }[]) {
+  const out = new Map<string, string>(); const add = (ref: string, key: string) => { if (!used.has(ref)) used.set(ref, new Set()); used.get(ref)!.add(key); };
+  for (const b of blocks) {
+    if (!b.skip) {
+      const fps = b.fps.slice().sort((p, q) => strNumCmp(p.ref, q.ref) || (p.pos[1] === q.pos[1] ? p.pos[0] - q.pos[0] : q.pos[1] - p.pos[1]));
+      for (const fp of fps) {
+        const m = /^(.*?)(\d*)$/.exec(fp.ref)!; const stem = m[1]; let value = m[2] ? parseInt(m[2], 10) : -1, ref = fp.ref, duplicate = false;
+        while (used.has(ref)) {
+          for (const k of used.get(ref)!) if (k !== fp.key) { duplicate = true; break; }
+          if (!duplicate) break;
+          value = value < 0 ? 1 : value + 1; ref = stem + value;
+        }
+        if (duplicate) add(ref, fp.key);
+        fp.ref = ref;
+      }
+    }
+    for (const fp of b.fps) { add(fp.ref, fp.key); out.set(fp.key, fp.ref); }
+  }
+  return out;
+}
+/**
+ * ARRAY_TOOL::onDialogClosed.  Duplicate (o.arrange false): the tool runs the cells backwards so the originals go last:
+ * a copy of the selection (BOARD_ITEM::Duplicate / PCB_GROUP::DeepDuplicate, copies in a group join it) lands in each
+ * of the cells 0 … N-2 — the copy in cell 0 stays where the original was and keeps its reference — and the originals
+ * themselves move to the last cell (TransformItem( arraySize - 1 )).  Unless o.keepRefs, every block but the first one
+ * built is reannotated (ReannotateDuplicates), so the copies count up through the cells and the originals take the
+ * last numbers.  "Create Array", the copies and the originals selected.  Arrange (o.arrange): the selected items, in
+ * order, go one to a cell; each later item is first put where the first item now is (after its own transform), as
+ * item->SetPosition( firstItem->GetPosition() ) does — "Arrange selection".  Returns { changes, ids, label }.
  */
 export function arrayChanges(doc: BoardDoc, ids: string[], o: ArrayOpts) {
   const N = arraySize(o); const sel = new Set(ids); const out: { changes: PcbChange[]; ids: string[]; label: string } = { changes: [], ids: [], label: o.arrange ? "Arrange selection" : "Create Array" };
@@ -78,22 +121,38 @@ export function arrayChanges(doc: BoardDoc, ids: string[], o: ArrayOpts) {
   const roots = ids.map((id: string) => doc.items.get(id)).filter((it: KItem | undefined) => it && !coveredByGroup(it.id)) as KItem[];
   const moveRoot = (it: KItem, fn: (n: SNode, it: KItem) => unknown) => { const members = Array.from(expandGroups(doc, [it.id])); out.changes.push(...transformChanges(doc, members, fn)); };
   if (o.arrange) {
-    const first = roots[0]; if (!first) return out; const p0 = anchorOf(first);
+    const first = roots[0]; if (!first) return out; const p0 = anchorOf(first), t0 = arrayTransform(o, 0, p0);
     roots.slice(0, N).forEach((it: KItem, i: number) => {
-      const pos = anchorOf(it), t = arrayTransform(o, i, p0), d = [p0[0] - pos[0], p0[1] - pos[1]];
+      const base: Pt = i === 0 ? p0 : [p0[0] + t0.offset[0], p0[1] + t0.offset[1]];
+      const pos = anchorOf(it), t = i === 0 ? t0 : arrayTransform(o, i, base), d = [base[0] - pos[0], base[1] - pos[1]];
       if (!t.offset[0] && !t.offset[1] && !t.rot && !d[0] && !d[1]) return;
-      moveRoot(it, (n: SNode) => { translateNode(n, d[0], d[1]); arrayApply(n, t, p0); });
+      moveRoot(it, (n: SNode) => { translateNode(n, d[0], d[1]); arrayApply(n, t, base); });
     });
     out.ids = roots.map((it: KItem) => it.id);
     return out;
   }
   const posOf = new Map(roots.map((it: KItem) => [it.id, anchorOf(it)] as [string, Pt]));
-  for (let k = 1; k < N; k++) {
-    const r = duplicateChanges(doc, roots.map((it: KItem) => it.id), null, { annotations: o.keepRefs ? "keep" : "unique",
-      xform: (n, root) => { const pos = posOf.get(root.id)!; arrayApply(n, arrayTransform(o, k, pos), pos); } });
+  // the footprints of each block (a root footprint, or one inside a root group), cell by cell in the tool's order
+  const fpsOf = (it: KItem, acc: { fp: KItem; root: KItem }[], root: KItem) => { if (it.kind === "footprint") acc.push({ fp: it, root }); else if (it.kind === "group" || it.kind === "generated") for (const m of groupMembers(it.node)) { const c = doc.items.get(m); if (c) fpsOf(c, acc, root); } return acc; };
+  const fps = roots.flatMap((it) => fpsOf(it, [], it));
+  const used = new Map<string, Set<string>>(); for (const it of doc.items.values()) if (it.kind === "footprint") { const r = it.ref || ""; if (!used.has(r)) used.set(r, new Set()); used.get(r)!.add(it.id); }
+  const blocks: Parameters<typeof reannotateBlocks>[1] = [];
+  for (let k = 0; k < N; k++) blocks.push({ skip: !!o.keepRefs || k === 0, fps: fps.map(({ fp, root }) => {
+    const rp = posOf.get(root.id)!, t = arrayTransform(o, k, rp), a = anchorOf(fp); let p: Pt = [a[0] + t.offset[0], a[1] + t.offset[1]];
+    if (t.rot && fp !== root) { const [rx, ry] = rotator(t.rot)(p[0] - rp[0] - t.offset[0], p[1] - rp[1] - t.offset[1]); p = [rp[0] + t.offset[0] + rx, rp[1] + t.offset[1] + ry]; }
+    return { key: k === N - 1 ? fp.id : `${k}:${fp.id}`, ref: fp.ref || "", pos: p };   // the last cell holds the originals themselves
+  }) });
+  const refs = reannotateBlocks(used, blocks);
+  const setRef = (n: SNode, ref: string | undefined) => { if (ref === undefined || n[0] !== "footprint") return; const p = refProp(n); if (p && K.str(p[2]) !== ref) p[2] = ref; };
+  for (let k = 0; k < N - 1; k++) {
+    const r = duplicateChanges(doc, roots.map((it: KItem) => it.id), null, { annotations: "keep",
+      xform: (n, root, src) => { const pos = posOf.get(root.id)!; arrayApply(n, arrayTransform(o, k, pos), pos); if (src && src.kind === "footprint") setRef(n, refs.get(`${k}:${src.id}`)); } });
     out.changes.push(...r.changes); out.ids.push(...r.ids);
   }
-  for (const it of roots) { const pos = posOf.get(it.id)!, t = arrayTransform(o, 0, pos); if (t.offset[0] || t.offset[1] || t.rot) moveRoot(it, (n: SNode) => arrayApply(n, t, pos)); }
+  if (N >= 1) for (const it of roots) {
+    const pos = posOf.get(it.id)!, t = arrayTransform(o, N - 1, pos); const renamed = fpsOf(it, [], it).some(({ fp }) => refs.get(fp.id) !== (fp.ref || ""));
+    if (t.offset[0] || t.offset[1] || t.rot || renamed) moveRoot(it, (n: SNode, m: KItem) => { arrayApply(n, t, pos); if (m.kind === "footprint") setRef(n, refs.get(m.id)); });
+  }
   out.ids.push(...roots.map((it: KItem) => it.id));
   return out;
 }

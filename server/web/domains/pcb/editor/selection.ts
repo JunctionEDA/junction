@@ -217,7 +217,8 @@ export function setFilter(key: string, on?: unknown) {
   else f[key] = !!on;
   try { localStorage.setItem("kui.filter." + ed, JSON.stringify(f)); } catch (e) { /* no storage */ }
   store.set({ filter: Object.assign({}, selFilter()) });
-  E.selected = null; drawSelection(); renderProps();
+  // the filter decides what the next pick takes; what is selected stays (PANEL_SELECTION_FILTER and
+  // PANEL_SCH_SELECTION_FILTER::OnFilterChanged only store the options)
 }
 
 // ---- multi-selection: box / lasso, group move, group delete ----
@@ -251,28 +252,83 @@ export function scopeToEnteredGroup(items: KItem[]): void {
   let keep: Set<string>; try { keep = new Set(pcb.withinEnteredGroup(E.kdoc, items.map((it) => it.id))); } catch (e) { console.warn(e); return; }
   for (let i = items.length - 1; i >= 0; i--) if (!keep.has(items[i].id)) items.splice(i, 1);
 }
-/** PCB_SELECTION_TOOL::CollectMultiple over a box (start → cur): left to right what it encloses, right to left what it touches. */
+/** A selection area on the board: a box [x0, y0, x1, y1] or a polygon, taking what it contains or what it touches. */
+export interface BoardArea { box?: [number, number, number, number]; poly?: number[][]; contained: boolean }
+type AreaApi = { collectMultiple?: (d: KDoc, area: BoardArea, o: { hidden: Set<string>; filter: Record<string, boolean>; selectable: (it: KItem) => boolean }) => string[]; boxContains?: (sx: number, ex: number, mirrored?: boolean) => boolean; lassoContains?: (poly: number[][], mirrored?: boolean) => boolean };
+const areaApi = (): AreaApi | null => (window as unknown as { PcbTools?: AreaApi }).PcbTools || null;
+const boardFlipped = (): boolean => !!(E.renderOpts && E.renderOpts.flip);
+/**
+ * PCB_SELECTION_TOOL::CollectMultiple (pcb-tools box-select.ts): the candidates of an area as ids — items, a
+ * footprint's field on its own as "fp@field:Name", and pads as "fp#index" when nothing else was taken.  Only what is
+ * Selectable (visible) and passes the Selection Filter; groups whole; nothing outside an entered group.
+ */
+export function boardAreaIds(area: BoardArea): string[] {
+  const P = areaApi(); if (!P || !P.collectMultiple || !E.kdoc || isSch()) return [];
+  try { return P.collectMultiple(E.kdoc, area, { hidden: E.hiddenLayers, filter: selFilter(), selectable: (it: KItem) => !(E.objectHidden && E.objectHidden(it)) }); } catch (e) { console.warn(e); return []; }
+}
+/** DragSelectionArea: a box drawn left to right takes what it encloses, right to left what it touches — turned round in the flipped view. */
+export function boxArea(start: number[], cur: number[]): BoardArea {
+  const P = areaApi(), contained = P && P.boxContains ? P.boxContains(start[0], cur[0], boardFlipped()) : cur[0] >= start[0];
+  return { box: [Math.min(start[0], cur[0]), Math.min(start[1], cur[1]), Math.max(start[0], cur[0]), Math.max(start[1], cur[1])], contained };
+}
+/** PCB_SELECTION_TOOL::CollectMultiple over a box (start → cur): the items it takes (pads and fields on their own left out). */
 export function boxedBoardItems(start: number[], cur: number[]): KItem[] {
   const out: KItem[] = []; if (!E.kdoc || isSch()) return out;
-  const x0 = Math.min(start[0], cur[0]), x1 = Math.max(start[0], cur[0]), y0 = Math.min(start[1], cur[1]), y1 = Math.max(start[1], cur[1]), enclose = cur[0] >= start[0];
-  for (const it of E.kdoc.items.values()) {
-    if (!it.bbox || !filterAllows(it.kind, it) || !KiCadCanvas.itemVisible(it, E.hiddenLayers)) continue; const bb = it.bbox;
-    const inside = bb[0] >= x0 && bb[2] <= x1 && bb[1] >= y0 && bb[3] <= y1; let touches = bb[2] >= x0 && bb[0] <= x1 && bb[3] >= y0 && bb[1] <= y1;
-    if (touches && !inside && it.kind !== "footprint" && it.geom && it.geom.length) touches = KiCadCanvas.itemTouchesRect(it, x0, y0, x1, y1, E.hiddenLayers);
-    if (enclose ? inside : touches) out.push(it);
-  }
-  scopeToEnteredGroup(out);
+  for (const id of boardAreaIds(boxArea(start, cur))) { const it = id.includes("#") || id.includes("@field:") ? null : E.kdoc.items.get(id); if (it) out.push(it); }
   return out;
 }
 /** SHAPE_LINE_CHAIN::Area( false ) of the closed lasso: positive when it is drawn clockwise on screen (INSIDE_LASSO). */
 export function lassoSigned(pts: readonly (readonly number[])[]): number { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); return -a * 0.5; }
+/**
+ * PCB_SELECTION_TOOL::SelectMultiple on the board: the area's candidates replace the selection, join it (Shift, or a
+ * kept selection), toggle in it (Ctrl) or leave it (Ctrl+Shift).  Items go to the editor's set, pads to the board
+ * module's pad selection, fields to the field selection.
+ */
+export function applyBoardArea(ids: string[], b: { add?: boolean; mode?: string | null }): void {
+  if (!E.kdoc) return;
+  const ps = CollabTools.pcb && (CollabTools.pcb.state as unknown as { sel: Set<string>; padSel?: string | null; padAlso?: { anchor: string; keys: string[] } | null });
+  const fkey = (f: { id: string; name: string }) => `${f.id}@field:${f.name}`;
+  const cur = new Set<string>(E.selection); if (E.selected) cur.add(E.selected.id);
+  if (ps) { for (const id of ps.sel) cur.add(id); if (ps.padSel) { cur.add(ps.padSel); if (ps.padAlso && ps.padAlso.anchor === ps.padSel) for (const k of ps.padAlso.keys) cur.add(k); } }
+  for (const f of selectedFields()) cur.add(fkey(f));
+  let next: Set<string>;
+  if (b.mode === "remove") { next = cur; for (const id of ids) next.delete(id); }
+  else if (b.mode === "toggle") { next = cur; for (const id of ids) { if (next.has(id)) next.delete(id); else next.add(id); } }
+  else { next = b.add ? cur : new Set<string>(); for (const id of ids) next.add(id); }
+  const items: string[] = [], pads: string[] = [], fields: { id: string; name: string }[] = [];
+  for (const id of next) {
+    const fi = id.indexOf("@field:");
+    if (fi > 0) { if (E.kdoc.items.has(id.slice(0, fi))) fields.push({ id: id.slice(0, fi), name: id.slice(fi + 7) }); }
+    else if (id.includes("#")) { if (E.kdoc.items.has(id.slice(0, id.lastIndexOf("#")))) pads.push(id); }
+    else if (E.kdoc.items.has(id)) items.push(id);
+  }
+  const keep = E.selected && items.includes(E.selected.id) ? E.selected : null;
+  E.selPins = []; E.selection = b.mode === "remove" || b.mode === "toggle" ? new Set(items) : groupExpand(items);
+  if (ps) { ps.sel.clear(); ps.padSel = pads.length ? pads[pads.length - 1] : null; ps.padAlso = pads.length > 1 ? { anchor: pads[pads.length - 1], keys: pads.slice(0, -1) } : null; }
+  E.selField = fields.length ? fields[fields.length - 1] : null; E.selFields = fields.slice(0, -1);
+  const prim = ids.map((id) => E.items.find((f: ItemSummary) => f.id === id)).find((f) => f && E.selection.has(f.id));
+  E.selected = prim || keep || E.items.find((f: ItemSummary) => E.selection.has(f.id)) || null;
+  drawSelection(); renderProps(); renderObjects(); requestRender();
+  setStatusBar({ message: "" });
+}
+/** SelectPolyArea's double-click: the open board lasso closes; clockwise (as seen) takes what it contains, the other way what it touches. */
+export function finishBoardLasso(): void {
+  const b: BoxSel | null = E.boxSel; E.boxSel = null; requestRepaint(); if (!b || !E.kdoc || isSch()) return;
+  const pts: number[][] = []; for (const p of b.pts) { const q = pts[pts.length - 1]; if (!q || q[0] !== p[0] || q[1] !== p[1]) pts.push(p); }
+  if (pts.length < 3) return;
+  const P = areaApi(); const contained = P && P.lassoContains ? P.lassoContains(pts, boardFlipped()) : true;
+  applyBoardArea(boardAreaIds({ poly: pts, contained }), b);
+}
 export function finishBoxSel(ev: { clientX: number; clientY: number }) {
   const b: BoxSel | null = E.boxSel; E.boxSel = null; requestRepaint(); if (!b || !E.kdoc) return;
   const moved = Math.hypot(ev.clientX - b.startClient[0], ev.clientY - b.startClient[1]);
+  // a board lasso stays open after its first stroke: clicks add corners, a double-click closes it (finishBoardLasso)
+  if (b.lasso && !isSch() && (moved >= 4 || b.pts.length > 3)) { b.open = true; E.boxSel = b; requestRepaint(); return; }
   if (moved < 4 && !(b as BoxSel & { live?: boolean }).live) {
     if (b.clickHighlight) { const pm = CollabTools.pcb as unknown as { highlightNetAt?: (c: unknown, at: number[]) => unknown } | undefined; if (pm && pm.highlightNetAt) { pm.highlightNetAt(toolCtx(), b.start); requestRender(); } }
     return;
   }
+  if (!isSch()) { applyBoardArea(boardAreaIds(boxArea(b.start, b.cur)), b); return; }   // the board: CollectMultiple by each item's own HitTest
   const picked: KItem[] = [];
   // SelectMultiple: a line is taken by the box as a whole, or (contained mode) by one dangling end inside it
   const schM = isSch() ? (CollabTools.sch as unknown as { boxLineFlags?: (d: KDoc, it: KItem, box: [number, number, number, number], contained: boolean) => "whole" | 0 | 1 | null | undefined; putSelEnd?: (id: string, end: 0 | 1 | null) => void; state?: { selEnds?: Map<string, number> | null } }) : null;
