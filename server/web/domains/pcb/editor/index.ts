@@ -32,7 +32,7 @@ import { renderObjects, snapMm, syncItemsFromDoc, updateGridStatus, applyChanges
 import { $ } from "./dom";
 import { IS_MAC } from "../../../shared/keys";
 import { cancelLongPress, candidatesAt, moveLongPress, openClarifyMenu, openContextMenu, startLongPress } from "./contextmenu";
-import { DRAG_THRESHOLD_PX, cancelInteraction, clearAllSelection, markerUnder, rotateFieldMove, startFieldMove, copperUnderBeatsFootprint, installGestures, pinForClick, registerPointerUp, selectionChanged, selectionHooks, selectionIds, startMove, applyPickMode, selectedAnywhere, mergeBoardSelection, splitBoardSelection } from "./gestures";
+import { DRAG_THRESHOLD_PX, cancelInteraction, clearAllSelection, markerUnder, rotateFieldMove, startFieldMove, copperUnderBeatsFootprint, installGestures, interactionBusy, pinForClick, registerPointerUp, selectionChanged, selectionHooks, selectionIds, startMove, applyPickMode, selectedAnywhere, mergeBoardSelection, splitBoardSelection } from "./gestures";
 import { loadMe, navigate, route } from "./home";
 import { sendOp } from "./net";
 import { applyTheme, syncSchModes } from "./panes";
@@ -567,7 +567,9 @@ function stagePointerMove(ev: PointerEvent, mm: [number, number]): void {
     if (d) { zoomBy(Math.exp(d * speed * 0.001), z.cx, z.cy); breakFollow(); sendPresence(mm); }
     return;
   }
-  if (E.pan) { E.viewTouched = true; E.panX = ev.clientX - E.pan.x; E.panY = ev.clientY - E.pan.y; breakFollow(); applyView(); sendPresence(mm); return; }
+  // the view itself moved in gestures.ts (capture phase); an item being moved, dragged or routed goes on following
+  // the cursor while the view slides under it, as in KiCad
+  if (E.pan) { sendPresence(mm); if (!interactionBusy()) return; }
   // "Pan on mouse movement with key" (input.motion_pan_modifier): moving with the key held pans the view
   if (E.motionPanMod && (E.motionPanMod === "alt" ? ev.altKey : E.motionPanMod === "ctrl" ? (IS_MAC ? ev.metaKey : ev.ctrlKey) : ev.shiftKey) && !(ev.buttons & 1)) {
     if (E.metaPan) { E.viewTouched = true; E.panX += ev.clientX - E.metaPan[0]; E.panY += ev.clientY - E.metaPan[1]; breakFollow(); applyView(); }

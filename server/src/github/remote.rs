@@ -1105,16 +1105,103 @@ pub(super) struct Found {
     pub shared: Vec<(String, Option<String>, bool)>,
 }
 
-/// Every folder of a branch that holds a KiCad project, submodules included.
-pub(super) async fn scan(gh: &Gh, repo: &RepoRef, branch: &str) -> AppResult<(Remote, Vec<Found>)> {
+/// Another tool's design in the repository (EasyEDA, Altium, Eagle, ...), which Junction can convert into a KiCad
+/// project: one file, the files of one design side by side (an Eagle .sch and .brd, an Altium project's documents),
+/// or an unpacked EasyEDA Pro project folder (project.json with SHEET/, PCB/, ...).
+pub(super) struct Foreign {
+    /// The file, or the folder of a design kept as several files.
+    pub path: String,
+    pub name: String,
+    pub format: String,
+    /// Repository paths of every file that goes into the conversion.
+    pub files: Vec<String>,
+    pub size: u64,
+}
+
+/// A file's bytes when it is small enough to look into (4 MB).
+async fn small_blob(gh: &Gh, w: &Walker<'_>, f: &RemoteFile) -> Option<Vec<u8>> {
+    if f.size > 4 * 1024 * 1024 {
+        return None;
+    }
+    gh.blob(&w.sources[f.src].repo, &f.sha).await.ok()
+}
+
+/// The other tools' designs among `others` (the branch's files Junction does not sync).  `kicad_dirs` are folders
+/// that hold a KiCad project, where a .sch, .pcb, .lib or .dsn is KiCad's own (a legacy file, a Specctra export).
+async fn foreign_designs(gh: &Gh, w: &Walker<'_>, others: &[(String, RemoteFile)], kicad_dirs: &BTreeSet<String>) -> Vec<Foreign> {
+    use crate::nonkicad_import::{format_name, is_source_ext, is_std_json, is_source_text};
+    let ext = |p: &str| base_name(p).rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    let stem = |p: &str| base_name(p).rsplit_once('.').map(|(s, _)| s.to_ascii_lowercase()).unwrap_or_default();
+    // A legacy KiCad project (a .pro) keeps .sch and .lib files that are KiCad's too.
+    let legacy: BTreeSet<&str> = others.iter().filter(|(p, _)| ext(p) == "pro").map(|(p, _)| dir_of(p)).collect();
+    let mut out: Vec<Foreign> = Vec::new();
+    let mut taken: BTreeSet<&str> = BTreeSet::new();
+
+    // Unpacked EasyEDA Pro projects.
+    let mut pro_roots: Vec<String> = Vec::new();
+    for (p, f) in others.iter().filter(|(p, _)| base_name(p) == "project.json") {
+        if let Some(bytes) = small_blob(gh, w, f).await {
+            if is_source_text(p, &bytes) { pro_roots.push(dir_of(p).to_string()); }
+        }
+    }
+    for root in &pro_roots {
+        let pre = if root.is_empty() { String::new() } else { format!("{root}/") };
+        let files: Vec<&(String, RemoteFile)> = others.iter().filter(|(p, _)| p.starts_with(&pre)).take(400).collect();
+        files.iter().for_each(|(p, _)| { taken.insert(p.as_str()); });
+        let name = if root.is_empty() { w.sources[0].repo.name.clone() } else { base_name(root).to_string() };
+        out.push(Foreign { path: root.clone(), name, format: "EasyEDA Pro".into(),
+            size: files.iter().map(|(_, f)| f.size).sum(), files: files.iter().map(|(p, _)| p.clone()).collect() });
+    }
+
+    // Single files, grouped: an Altium project's documents by folder, the rest by folder and name.
+    let mut groups: BTreeMap<(String, String), Vec<&(String, RemoteFile)>> = BTreeMap::new();
+    let mut sniffed = 0;
+    for item in others {
+        let (p, f) = item;
+        if taken.contains(p.as_str()) { continue; }
+        let e = ext(p);
+        let dir = dir_of(p);
+        let design = if e == "json" {
+            // EasyEDA Standard documents: JSON with EasyEDA's header (only a few are looked into)
+            if sniffed >= 12 { false } else { sniffed += 1; small_blob(gh, w, f).await.is_some_and(|b| is_std_json(&b)) }
+        } else {
+            is_source_ext(p)
+                // pieces of an EasyEDA Pro project and libraries are not designs of their own
+                && !matches!(e.as_str(), "esch" | "epcb" | "esym" | "efoo" | "eblob" | "ecop" | "elibz" | "elibz2")
+                && !((kicad_dirs.contains(dir) || legacy.contains(dir)) && matches!(e.as_str(), "sch" | "pcb" | "prj" | "lib" | "dsn"))
+        };
+        if !design { continue; }
+        let altium = matches!(e.as_str(), "pcbdoc" | "schdoc" | "prjpcb" | "cmpcbdoc" | "cspcbdoc" | "cmschdoc" | "csschdoc");
+        let key = if altium { (dir.to_string(), "\0altium".to_string()) } else { (dir.to_string(), stem(p)) };
+        groups.entry(key).or_default().push(item);
+    }
+    for ((dir, key), files) in groups {
+        let single = files.len() == 1;
+        let path = if single { files[0].0.clone() } else { dir.clone() };
+        let name = if key.starts_with('\0') {
+            files.iter().find(|(p, _)| ext(p) == "prjpcb").map(|(p, _)| base_name(p).rsplit_once('.').map(|(s, _)| s).unwrap_or("")).unwrap_or(base_name(&dir)).to_string()
+        } else {
+            base_name(&files[0].0).rsplit_once('.').map(|(s, _)| s.to_string()).unwrap_or_default()
+        };
+        let named: Vec<(String, std::path::PathBuf)> = files.iter().map(|(p, _)| (p.clone(), std::path::PathBuf::new())).collect();
+        out.push(Foreign { path, name: if name.is_empty() { w.sources[0].repo.name.clone() } else { name }, format: format_name(&named),
+            size: files.iter().map(|(_, f)| f.size).sum(), files: files.iter().map(|(p, _)| p.clone()).collect() });
+    }
+    out.truncate(60);
+    out
+}
+
+/// Every folder of a branch that holds a KiCad project, submodules included, and the other tools' designs in it.
+pub(super) async fn scan(gh: &Gh, repo: &RepoRef, branch: &str) -> AppResult<(Remote, Vec<Found>, Vec<Foreign>)> {
     let Some(head) = gh.branch_head(repo, branch).await? else {
-        return Ok((Remote::default(), Vec::new()));
+        return Ok((Remote::default(), Vec::new(), Vec::new()));
     };
     let tree = gh.commit_tree(repo, &head).await?;
     let mut w = Walker::new(gh, repo, &head, &tree);
     let mut listed = Vec::new();
     w.list(0, &tree, "", "", &mut listed).await?;
-    let all: BTreeMap<String, RemoteFile> = listed.into_iter().filter(|(rel, _)| usable(rel)).collect();
+    let (usable_files, others): (Vec<_>, Vec<_>) = listed.into_iter().partition(|(rel, _)| usable(rel));
+    let all: BTreeMap<String, RemoteFile> = usable_files.into_iter().collect();
 
     // folder -> its project files
     let mut folders: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1123,6 +1210,8 @@ pub(super) async fn scan(gh: &Gh, repo: &RepoRef, branch: &str) -> AppResult<(Re
             folders.entry(dir_of(p).to_string()).or_default().push(stem.to_string());
         }
     }
+    let kicad_dirs: BTreeSet<String> = folders.keys().cloned().collect();
+    let foreign = foreign_designs(gh, &w, &others, &kicad_dirs).await;
     // KiCad files but no project file anywhere: offer the root as it is.
     if folders.is_empty() && !all.is_empty() {
         folders.insert(String::new(), vec![repo.name.clone()]);
@@ -1186,7 +1275,7 @@ pub(super) async fn scan(gh: &Gh, repo: &RepoRef, branch: &str) -> AppResult<(Re
         links: w.links,
         lfs: BTreeSet::new(),
     };
-    Ok((remote, found))
+    Ok((remote, found, foreign))
 }
 
 // ------------------------------------------------------------------ a folder that moved

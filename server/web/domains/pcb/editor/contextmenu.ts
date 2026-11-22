@@ -174,7 +174,7 @@ function dragTrack(free: boolean): Run | string {
 /** KiCad action → module action id, where the web's id differs. */
 const ALIAS: Record<Editor, Record<string, string>> = {
   sch: { rotateCCW: "rotateSelection", rotateCW: "rotateSelectionCW", mirrorH: "mirrorSelectionX", mirrorV: "mirrorSelectionY", autoplaceFields: "autoplace" },
-  pcb: { flip: "flipSelection", moveExact: "moveExactly", packAndMoveFootprints: "pack", rotateCcw: "rotateSelection", rotateCw: "rotateSelectionCw", highlightNetSelection: "highlightNet", groupEnter: "enterGroup", groupLeave: "leaveGroup" },
+  pcb: { flip: "flipSelection", moveExact: "moveExactly", packAndMoveFootprints: "pack", rotateCcw: "rotateSelection", rotateCw: "rotateSelectionCw", groupEnter: "enterGroup", groupLeave: "leaveGroup" },
 };
 /** Board entries whose short id collides with a handler that means something else here. */
 const NO_HANDLER = new Set(["PCB_ACTIONS::mirrorH", "PCB_ACTIONS::mirrorV"]);

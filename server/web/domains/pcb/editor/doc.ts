@@ -34,6 +34,7 @@ import type { GridDef } from "../../../shared/units";
 import type { ItemSummary, SheetEntry, SvgLayer, WireChange } from "./types";
 import { applyView, base, canvas, cmtG, cmtPanel, dragG, fitView, isSch, overlay, peersG, requestRender, selG, stage, world } from "./view";
 import { fontsForProject } from "./fonts";
+import { GITHUB_PULL, setAttention, watchAttention } from "./attention";
 import { githubPullNotice, pullGithubChanges, watchGithubChanges, type GithubPullResult } from "./github-pull";
 export const docNav = { list: [] as string[], idx: -1, lock: false };
 let stopGithubWatch: (() => void) | null = null;
@@ -457,12 +458,14 @@ export async function openEditor(id: string) {
         state.project = { ...state.project!, ...info }; applyProjectDocs(info.docs);
       }
       if (pulled.skipped.length) githubPullNotice(id, "Some GitHub changes need review before they can be pulled.");
+      setAttention(GITHUB_PULL, pulled.linked !== false && pulled.skipped.length ? `GitHub has ${pulled.skipped.length} change${pulled.skipped.length === 1 ? "" : "s"} to pull that need${pulled.skipped.length === 1 ? "s" : ""} your review on the GitHub sync page.` : null);
     } catch {
       githubPullNotice(id, "Couldn't pull from GitHub. The editor is showing the last online version.");
     }
     if (state.project?.projectId !== id || state.view !== "editor") return;
     stopGithubWatch = watchGithubChanges(id, refreshFromGithub);
   }
+  watchAttention();
   publishDocs();
   loadHistory();
   // ?fp=: the Footprint Editor on a footprint of the project, or on a private copy of a board footprint

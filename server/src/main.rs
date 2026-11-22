@@ -440,6 +440,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/github", get(github::connection).delete(github::disconnect))
         .route("/api/github/repos", get(github::list_repos))
         .route("/api/github/scan", get(github::scan_repo))
+        .route("/api/github/design-files", get(github::design_files))
         .route("/api/github/import", post(github::import_project))
         .route(
             "/api/projects/{id}/github",

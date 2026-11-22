@@ -7,7 +7,7 @@
 // editor bundles (it is reachable from the desktop app's browser hand-off too).
 
 import "../../shared/components/kselect";   // <k-select>, the themed drop-down the page uses in place of <select>
-import { askConfirm } from "../../shared/components/msgbox";
+import { askChoice, askConfirm } from "../../shared/components/msgbox";
 
 // ---------------------------------------------------------------- what the server sends (src/github.rs)
 interface GithubApp { name: string; slug: string; url: string }
@@ -36,7 +36,9 @@ interface ScanProject {
   /** The online project already linked to this folder. */
   online?: { projectId: string; name: string; isOwner?: boolean };
 }
-interface Scan { repo: string; branch: string; branches: string[]; projects: ScanProject[]; truncated: boolean; notes?: Note[] }
+/** Another tool's design in the repository (EasyEDA, Altium, Eagle, ...): one file, or the files of one design. */
+interface ForeignDesign { path: string; name: string; format: string; files: string[]; size: number }
+interface Scan { repo: string; branch: string; branches: string[]; projects: ScanProject[]; truncated: boolean; notes?: Note[]; foreign?: ForeignDesign[] }
 interface Imported { path: string; projectId?: string; name?: string; files?: number; shared?: number; existing?: boolean; error?: string; notes?: Note[] }
 interface LastAuto { ok: boolean; message?: string; at: string; by?: string; checkpoint?: string; commitUrl?: string | null }
 interface Link {
@@ -71,7 +73,7 @@ interface Status {
   /** Other online projects linked to the same folder of the same branch. */
   alsoLinked?: { projectId: string; name: string }[];
   /** Where the project was linked until it was unlinked. */
-  lastLink?: Where;
+  lastLink?: Where & { changed?: number };
   renamedRepo?: { from: string; to: string };
   /** Files a pull removed, kept so they can be put back. */
   removed?: Removed[];
@@ -349,12 +351,14 @@ async function scan(full: string, branch: string | null): Promise<void> {
         ${p.online ? `<span class="pill synced" title="This folder is already an online project">online</span>
           <a class="btn small" href="/p/${esc(p.online.projectId)}/github" data-open="${i}">Open sync</a>
           ${p.online.isOwner ? `<button type="button" class="btn small danger" data-unlink-scan="${i}">Unlink</button>` : ""}` : ""}</label>`).join("")
-      : `<div class="empty">No KiCad files on this branch.</div>`}</div>
+      : `<div class="empty">No KiCad files on this branch.${(s.foreign || []).length ? " There are designs from other tools below, to convert." : ""}</div>`}</div>
     ${fresh.length ? `<div class="row actions" style="margin-top:10px">
       ${fresh.length > 1 ? `<label class="muted" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pickAll"> Select all</label>` : ""}
       <span class="grow muted" id="pickNote">Each project becomes its own online project, linked to its folder.</span>
       <button class="btn primary" id="doImport" disabled>Bring online</button></div>` : ""}
-    <div id="imported"></div>`;
+    <div id="imported"></div>
+    ${foreignHtml(s)}`;
+  bindForeign(s);
   const pick = need<HTMLSelectElement>("#scanBranch");
   pick.onchange = () => scan(full, pick.value);
   const boxes = $$<HTMLInputElement>("[data-pick]", el);
@@ -395,6 +399,41 @@ async function scan(full: string, branch: string | null): Promise<void> {
             p.existing ? "was online already" : `${plural(p.files || 0, "file")}${p.shared ? `, ${p.shared} of them shared from outside its folder` : ""}`}${
             (p.notes || []).map((n) => `<div class="muted">${esc(n.message)}</div>`).join("")}</li>`).join("")}</ul></div>`;
   });
+}
+
+// ---------------------------------------------------------------- other tools' designs in a repository
+function foreignHtml(s: Scan): string {
+  const list = s.foreign || [];
+  if (!list.length) return "";
+  return `<h3 style="margin:16px 0 6px">Designs from other tools</h3>
+    <p class="muted" style="margin:0 0 8px">Junction converts each into a new KiCad project (as File › Import does). The new project is not linked to the repository; link it from its GitHub page to push the KiCad files.</p>
+    <div class="list" id="foreignList">${list.map((f, i) => `<div class="it">
+      <span class="what"><span class="line"><span class="nm">${esc(f.name)}</span><span class="muted mono">${esc(f.path || "/")}</span></span>
+        <div class="about muted">${esc(f.format)} · ${f.files.length > 1 ? `${plural(f.files.length, "file")}, ` : ""}${kb(f.size)}</div></span>
+      <span class="sp"></span><button type="button" class="btn small" data-convert="${i}">Convert to KiCad</button></div>`).join("")}</div>
+    <div id="converted"></div>`;
+}
+function bindForeign(s: Scan): void {
+  $$<HTMLButtonElement>("[data-convert]").forEach((b) => (b.onclick = () => busy(b, async () => {
+    const f = (s.foreign || [])[Number(b.dataset.convert)];
+    if (!f) return;
+    const r = await fetch(`/api/github/design-files?repo=${encodeURIComponent(s.repo)}&branch=${encodeURIComponent(s.branch)}&files=${encodeURIComponent(f.files.join("\n"))}`, { credentials: "same-origin" });
+    if (!r.ok) { let m = `Could not read the design from GitHub (${r.status})`; try { m = (await r.json()).message || m; } catch (_) { /* not json */ } throw new ApiError(m, r.status); }
+    const blob = await r.blob();
+    const form = new FormData();
+    form.append("name", f.name);
+    if (f.files.length === 1) form.append("file", blob, f.files[0].split("/").pop() || f.name);
+    else form.append("archive", blob, `${f.name}.zip`);
+    const up = await fetch("/api/projects", { method: "POST", body: form, credentials: "same-origin" });
+    let j: { projectId?: string; name?: string; message?: string; converted?: { format: string; notes: string[] } | null } = {};
+    try { j = await up.json(); } catch (_) { /* not json */ }
+    if (!up.ok || !j.projectId) throw new ApiError(j.message || `The conversion failed (${up.status})`, up.status);
+    const notes = (j.converted && j.converted.notes) || [];
+    need("#converted").innerHTML = `<div class="callout ok" style="margin-top:10px" id="convertResult">Converted <b>${esc(f.name)}</b> from ${esc(j.converted ? j.converted.format : f.format)} into the KiCad project
+      <a href="/p/${esc(j.projectId)}/edit"><b>${esc(j.name || f.name)}</b></a>. <a href="/p/${esc(j.projectId)}/github">Link it to a repository</a>.
+      ${notes.length ? `<ul>${notes.slice(0, 12).map((n) => `<li class="muted">${esc(n)}</li>`).join("")}</ul>` : ""}</div>`;
+    loadMine();
+  })));
 }
 
 function renderSignedOut(e: unknown): void {
@@ -747,8 +786,76 @@ async function doPull(force: boolean): Promise<void> {
   if (fp) fp.onclick = () => busy(fp, () => doPull(true));
 }
 
+// ---------------------------------------------------------------- linking somewhere else
+type LinkBody = { branch: string; path: string; repo?: string | null; create?: { name: string; private: boolean }; carry?: string };
+const cleanPath = (p: string): string => p.trim().replace(/^\/+|\/+$/g, "");
+
+/**
+ * Link to `body`, first asking what becomes of the edits made since the project was last synced, when it was linked
+ * somewhere else before and has such edits: move them to the new place (they show there as changes to push), keep
+ * them on the old branch (pushed there, then the project takes the new branch's files), or discard them (the project
+ * takes the new branch's files; what is replaced stays in History).
+ */
+async function linkCarrying(body: LinkBody): Promise<void> {
+  const last = st && st.lastLink;
+  const elsewhere = !!last && (!!body.create || (body.repo || "").toLowerCase() !== last.repo.toLowerCase()
+    || cleanPath(body.path) !== cleanPath(last.path) || (!!body.branch.trim() && body.branch.trim() !== last.branch));
+  const n = last && last.changed ? last.changed : 0;
+  if (!last || !elsewhere || !n) {
+    await api(`/api/projects/${projectId}/github`, { method: "PUT", body });
+    await loadStatus();
+    return;
+  }
+  const to = body.create ? `the new repository ${body.create.name}` : `${body.repo}${body.branch.trim() ? ` (${body.branch.trim()})` : ""}`;
+  const from = `${last.repo} (${last.branch})`;
+  const how = await askChoice("Link to another branch",
+    `${plural(n, "file")} changed online since the project was last synced with ${from}. What should happen to ${n === 1 ? "that change" : "those changes"}?`, [
+      { id: "move", label: `Move them to ${to}`, detail: "They show there as changes to push. Files the new branch changed too are merged or offered side by side." },
+      { id: "keep", label: `Keep them on ${from}`, detail: `They are pushed to ${last.branch} first; then the project takes ${to}'s files.` },
+      { id: "discard", label: "Discard them", detail: `The project takes ${to}'s files. What is replaced stays in History, to restore.` },
+    ], { ok: "Link" });
+  if (!how) return;
+  if (how === "move") {
+    await api(`/api/projects/${projectId}/github`, { method: "PUT", body: Object.assign({}, body, { carry: "move" }) });
+    flash = { kind: "ok", html: `Linked. The changes made online since the last sync are ready to push to <b>${esc(to)}</b>.` };
+    await loadStatus();
+    return;
+  }
+  if (how === "keep") {
+    // Back to the old place (which keeps its history), push there, and only go on when everything went.
+    await api(`/api/projects/${projectId}/github`, { method: "PUT", body: { repo: last.repo, branch: last.branch, path: last.path } });
+    const pushed = await api<PushResult>(`/api/projects/${projectId}/github/push`, { method: "POST",
+      body: { message: `Changes made online before moving to ${to}`, pullRequest: false } });
+    if ((pushed.blocked || []).length) {
+      lastResult = pushedHtml(pushed);
+      flash = { kind: "warn", html: `Some files could not be pushed to <b>${esc(last.branch)}</b>, so the project stays linked there. Settle them below, then link to ${esc(to)} again.` };
+      await loadStatus();
+      return;
+    }
+  }
+  await api(`/api/projects/${projectId}/github`, { method: "PUT", body });
+  await takeGithubFiles(how === "keep" ? `Your changes were pushed to <b>${esc(last.branch)}</b>. ` : "");
+}
+
+/** After linking without shared history: take the branch's version of every file both sides have. */
+async function takeGithubFiles(lead: string): Promise<void> {
+  const now = await api<Status>(`/api/projects/${projectId}/github`);
+  const res: Record<string, Resolution> = {};
+  now.files.filter((f) => f.state === "conflict").forEach((f) => { res[f.path] = "github"; });
+  let j: PullResult | null = null;
+  if (now.remote && now.remote.branchExists && now.files.some((f) => f.state === "conflict" || f.state === "pull")) {
+    j = await api<PullResult>(`/api/projects/${projectId}/github/pull`, { method: "POST", body: { resolve: res, prefer: "github", force: true } });
+  }
+  const onlineOnly = now.files.filter((f) => f.state === "push" && !f.deleted).length;
+  flash = { kind: "ok", html: `${lead}Linked, and the project now has the branch's files${j && j.checkpoint ? ` (the previous versions are in History as “${esc(j.checkpoint)}”)` : ""}.`
+    + (onlineOnly ? ` ${plural(onlineOnly, "file")} that only the online project has ${onlineOnly === 1 ? "is" : "are"} listed to push; push or delete ${onlineOnly === 1 ? "it" : "them"}.` : "") };
+  await loadStatus();
+}
+
 // ---------------------------------------------------------------- link form
+let linkName = "";   // the online project's name, to pick its folder in the repository when one matches
 function linkForm(p: ProjectInfo, gh: Connection, again = false): string {
+  linkName = p.name;
   // The app is not allowed to create repositories: a new one is made on GitHub and then chosen.
   const viaApp = gh.via === "app";
   return `<section class="box"><h2>${again ? "Or link it somewhere else" : "Link to a repository"}</h2><div class="in">
@@ -760,7 +867,7 @@ function linkForm(p: ProjectInfo, gh: Connection, again = false): string {
       <label class="f grow">Repository name <input type="text" id="newName" value="${esc(p.name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "kicad-project")}" autocapitalize="off" spellcheck="false"></label>
       <label class="f">Visibility <k-select id="newPrivate"><option value="1">Private</option><option value="0">Public</option></k-select></label></div></div>
     <div class="row" style="margin-top:12px">
-      <label class="f grow">Branch <input type="text" id="lBranch" placeholder="the repository's default branch" autocapitalize="off" spellcheck="false"></label>
+      <label class="f grow">Branch <span id="lBranchSlot"><input type="text" id="lBranch" placeholder="the repository's default branch" autocapitalize="off" spellcheck="false"></span></label>
       <label class="f grow">Folder in the repository <input type="text" id="lPath" placeholder="/ (the repository root)" autocapitalize="off" spellcheck="false"></label>
     </div>
     <div id="folders" class="muted" style="margin-top:8px"></div>
@@ -771,7 +878,8 @@ function linkForm(p: ProjectInfo, gh: Connection, again = false): string {
 function bindLinkForm(): void {
   let mode = "existing", picked: string | null = null;
   const btn = need<HTMLButtonElement>("#doLink");
-  const newName = need<HTMLInputElement>("#newName"), branch = need<HTMLInputElement>("#lBranch");
+  const newName = need<HTMLInputElement>("#newName");
+  const branchField = (): HTMLInputElement => need<HTMLInputElement>("#lBranch");
   const sync = () => { btn.disabled = mode === "existing" ? !picked : !newName.value.trim(); };
   $$("#mode button").forEach((b) => (b.onclick = () => {
     mode = b.dataset.v || "existing";
@@ -783,36 +891,58 @@ function bindLinkForm(): void {
   newName.oninput = sync;
   repoPicker(need("#picker"), (full, repo) => {
     picked = full;
-    if (repo && repo.defaultBranch) branch.placeholder = repo.defaultBranch + " (default)";
+    // a plain text box until the repository's branches are in: they come with the folder scan, as a drop-down
+    need("#lBranchSlot").innerHTML = `<input type="text" id="lBranch" placeholder="${esc(repo && repo.defaultBranch ? repo.defaultBranch + " (default)" : "the repository's default branch")}" autocapitalize="off" spellcheck="false">`;
     sync();
-    void suggestFolders(full);
+    void suggestFolders(full, true);
   });
   btn.onclick = () => busy(btn, async () => {
     const body: { branch: string; path: string; repo?: string | null; create?: { name: string; private: boolean } } =
-      { branch: branch.value, path: need<HTMLInputElement>("#lPath").value };
+      { branch: branchField().value, path: need<HTMLInputElement>("#lPath").value };
     if (mode === "existing") body.repo = picked;
     else body.create = { name: newName.value.trim(), private: need<HTMLSelectElement>("#newPrivate").value === "1" };
-    await api(`/api/projects/${projectId}/github`, { method: "PUT", body });
-    await loadStatus();
+    await linkCarrying(body);
   });
 }
 
-/** The KiCad project folders of the picked repository, to click instead of typing the folder. */
-async function suggestFolders(full: string): Promise<void> {
-  const el = $("#folders"), path = $<HTMLInputElement>("#lPath"), branch = $<HTMLInputElement>("#lBranch");
-  if (!el || !path || !branch) return;
+/**
+ * The picked repository's branches and KiCad project folders, as on the Bring a repository online page: the branch
+ * becomes a drop-down (the default branch chosen), and the folder fills itself in when one project there is plainly
+ * this one (same name, or the only project not linked yet).  Changing the branch looks again on that branch.
+ */
+async function suggestFolders(full: string, autofill: boolean): Promise<void> {
+  const el = $("#folders"), path = $<HTMLInputElement>("#lPath"), branchEl = $<HTMLInputElement>("#lBranch");
+  if (!el || !path || !branchEl) return;
   el.innerHTML = `<span class="spinner"></span> Looking for KiCad projects in ${esc(full)}…`;
+  const want = branchEl.value.trim();
   let s: Scan;
-  try { s = await api<Scan>(`/api/github/scan?repo=${encodeURIComponent(full)}${branch.value.trim() ? "&branch=" + encodeURIComponent(branch.value.trim()) : ""}`); }
+  try { s = await api<Scan>(`/api/github/scan?repo=${encodeURIComponent(full)}${want ? "&branch=" + encodeURIComponent(want) : ""}`); }
   catch { el.innerHTML = ""; return; }
   if (!$("#folders")) return;
-  if (!s.projects.length) { el.innerHTML = `No KiCad project in <b>${esc(s.repo)}</b> (${esc(s.branch)}) yet: the first push puts this one in the folder you name.`; return; }
-  el.innerHTML = `KiCad projects in <b>${esc(s.repo)}</b>, click one to use its folder: ` + s.projects.map((f, i) =>
+  // the branch list, the scanned branch selected
+  const branches = (s.branches.includes(s.branch) ? s.branches : [s.branch].concat(s.branches)).filter(Boolean);
+  const slot = $("#lBranchSlot");
+  if (slot && branches.length) {
+    slot.innerHTML = `<k-select id="lBranch">${branches.map((b) => `<option value="${esc(b)}"${b === s.branch ? " selected" : ""}>${esc(b)}</option>`).join("")}</k-select>`;
+    need<HTMLSelectElement>("#lBranch").onchange = () => { path.value = ""; void suggestFolders(full, true); };
+  }
+  const others = (s.foreign || []).length
+    ? ` It holds ${plural((s.foreign || []).length, "design")} from other tools (${esc(Array.from(new Set((s.foreign || []).map((f) => f.format))).join(", "))}); <a href="/github">convert them into KiCad projects</a> from the GitHub page.` : "";
+  if (!s.projects.length) { el.innerHTML = `No KiCad project in <b>${esc(s.repo)}</b> (${esc(s.branch)}) yet: the first push puts this one in the folder you name.${others}`; return; }
+  el.innerHTML = `KiCad projects in <b>${esc(s.repo)}</b> (${esc(s.branch)}), click one to use its folder: ` + s.projects.map((f, i) =>
     `<button type="button" class="btn small" data-folder="${i}" title="${f.online ? `Already linked to the online project ${esc(f.online.name)}` : `${plural(f.files, "file")}`}">${esc(f.path || "/")}${f.online ? " · linked" : ""}</button>`).join(" ");
-  $$<HTMLButtonElement>("[data-folder]", el).forEach((b) => (b.onclick = () => {
-    path.value = s.projects[Number(b.dataset.folder)].path;
-    $$("[data-folder]", el).forEach((x) => x.classList.toggle("on", x === b));
-  }));
+  const choose = (i: number): void => {
+    path.value = s.projects[i].path;
+    $$("[data-folder]", el).forEach((x) => x.classList.toggle("on", Number(x.dataset.folder) === i));
+  };
+  $$<HTMLButtonElement>("[data-folder]", el).forEach((b) => (b.onclick = () => choose(Number(b.dataset.folder))));
+  if (autofill && !path.value.trim()) {
+    const norm = (t: string): string => t.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const named = s.projects.findIndex((f) => !f.online && norm(f.name) === norm(linkName));
+    const free = s.projects.map((f, i) => (f.online ? -1 : i)).filter((i) => i >= 0);
+    const i = named >= 0 ? named : free.length === 1 ? free[0] : -1;
+    if (i >= 0) choose(i);
+  }
 }
 
 // ---------------------------------------------------------------- go

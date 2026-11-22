@@ -239,8 +239,10 @@ export function connLines(m: SelectMove, dx: number, dy: number) { return (m.con
 export function onStickyPointerDown(ev: PointerEvent) {
   const ctx = lastCtx; const m = S.move; if (!m || !m.sticky || !ctx || !isBoardLikeDoc()) return;
   if ((ev.target as Element).closest && ((ev.target as Element).closest("#pcbChip") || (ev.target as Element).closest("#cmtPanel"))) return;
-  ev.stopImmediatePropagation(); ev.preventDefault();
+  // the middle and right buttons go on to the view (gestures.ts): a middle drag pans and a right drag pans or opens
+  // the move's context menu while the selection keeps following the cursor, as in KiCad
   if (ev.button !== 0) return;
+  ev.stopImmediatePropagation(); ev.preventDefault();
   selectMoveTo(ctx, ctx.worldMm(ev)); S.stickyUp = true; finishSelectMove(ctx, true, !!(ev.ctrlKey || ev.metaKey));
 }
 export const DRAG_PX = 5;

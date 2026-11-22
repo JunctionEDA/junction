@@ -2776,7 +2776,7 @@ function buildSymbolGeom(doc2, item) {
       const nm4 = kid(p, "name");
       if (nm4 && str(nm4[1]) && (str(nm4[1]) !== "~" || (doc2.version || 0) >= TILDE_LITERAL_VERSION)) maxNameHalf = Math.max(maxNameHalf, effectsOf(nm4).size / 2);
     }
-    const sym2 = { nameOff, hideNames, hideNums, maxNameHalf, col, alpha, literalTilde: (doc2.version || 0) >= TILDE_LITERAL_VERSION, altIcons: schDisplay.pinAltIcons };
+    const sym = { nameOff, hideNames, hideNums, maxNameHalf, col, alpha, literalTilde: (doc2.version || 0) >= TILDE_LITERAL_VERSION, altIcons: schDisplay.pinAltIcons };
     const geomStart = item.geom.length;
     for (const sub2 of subs2) {
       const m = str(sub2[1]).match(/_(\d+)_(\d+)$/);
@@ -2818,10 +2818,10 @@ function buildSymbolGeom(doc2, item) {
         } else if (gk === "pin") {
           if (pinHidden(g2)) {
             const shadow = { geom: [], bbox: null };
-            buildPinGeom(shadow, g2, tf2, Object.assign({}, sym2, { col: () => SCH.hidden, showHidden: true }));
+            buildPinGeom(shadow, g2, tf2, Object.assign({}, sym, { col: () => SCH.hidden, showHidden: true }));
             if (shadow.geom.length) (item.hiddenGeom = item.hiddenGeom || []).push(...shadow.geom);
           } else {
-            buildPinGeom(item, g2, tf2, sym2);
+            buildPinGeom(item, g2, tf2, sym);
             take("pin");
           }
         }
@@ -2951,16 +2951,16 @@ function altPinModesIcon(item, x, y, size2, rotate, color2) {
   }
   G(item, { t: "poly", pts: arc, close: false, w, color: color2, layer: layer4, z: z2 });
 }
-function buildPinGeom(item, g2, tf2, sym2) {
+function buildPinGeom(item, g2, tf2, sym) {
   const type = str(g2[1]), shape3 = str(g2[2]);
   const [px, py, pr] = atOf(g2);
   const lenN = kid(g2, "length");
   const len = lenN ? num(lenN[1]) : 2.54;
-  if (pinHidden(g2) && !sym2.showHidden) return;
+  if (pinHidden(g2) && !sym.showHidden) return;
   const g0 = item.geom.length, numTag = kid(g2, "number");
   const tag = numTag ? str(numTag[1]) : "";
   try {
-    buildPinGeomInner(item, g2, tf2, sym2, type, shape3, px, py, pr, len);
+    buildPinGeomInner(item, g2, tf2, sym, type, shape3, px, py, pr, len);
   } finally {
     for (let i = g0; i < item.geom.length; i++) item.geom[i].pinNo = tag;
   }
@@ -2972,7 +2972,7 @@ function pinNumberLines(number, length, size2) {
   const inline = "[" + parts.join(",") + "]";
   return parts.length > 1 && textWidth(inline, size2, size2 / 8) > Math.max(length, 50 * MIL) ? parts : [inline];
 }
-function buildPinGeomInner(item, g2, tf2, sym2, type, shape3, px, py, pr, len) {
+function buildPinGeomInner(item, g2, tf2, sym, type, shape3, px, py, pr, len) {
   const dir = (Math.round(pr) % 360 + 360) % 360;
   const d = dir === 0 ? [1, 0] : dir === 90 ? [0, 1] : dir === 180 ? [-1, 0] : [0, -1];
   const pos = tf2(px, py), rootPt = tf2(px + d[0] * len, py + d[1] * len);
@@ -2983,7 +2983,7 @@ function buildPinGeomInner(item, g2, tf2, sym2, type, shape3, px, py, pr, len) {
   oy = Math.round(oy / ol);
   const orient = ox < 0 ? "R" : ox > 0 ? "L" : oy > 0 ? "U" : "D";
   const vertical = orient === "U" || orient === "D";
-  const color2 = sym2.col(SCH.pin);
+  const color2 = sym.col(SCH.pin);
   const w = SCH_PEN;
   const z2 = SCH_Z.pin, layer4 = "Pins";
   const nameN = kid(g2, "name"), numN = kid(g2, "number");
@@ -3033,16 +3033,16 @@ function buildPinGeomInner(item, g2, tf2, sym2, type, shape3, px, py, pr, len) {
   bboxAdd(item, pos[0], pos[1]);
   bboxAdd(item, p0[0], p0[1]);
   const pinName = nameN ? str(nameN[1]) : "", pinNum = numN ? str(numN[1]) : "";
-  const named = !!pinName && (pinName !== "~" || !!sym2.literalTilde);
-  const showName = named && !sym2.hideNames && !nameEf.hide;
-  const showNum = !!pinNum && !sym2.hideNums && !numEf.hide;
+  const named = !!pinName && (pinName !== "~" || !!sym.literalTilde);
+  const showName = named && !sym.hideNames && !nameEf.hide;
+  const showNum = !!pinNum && !sym.hideNums && !numEf.hide;
   const nameThick = Math.min(SCH_PEN, 0.18 * nameEf.size), numThick = Math.min(SCH_PEN, 0.18 * numEf.size);
   const clearance = PIN_TEXT_OFFSET + PIN_TEXT_MARGIN;
   const halfLen = len / 2;
-  const inside2 = sym2.nameOff > 0;
-  const both = named && !sym2.hideNames && !inside2;
+  const inside2 = sym.nameOff > 0;
+  const both = named && !sym.hideNames && !inside2;
   const alongX = orient === "L" ? pos[0] - halfLen : pos[0] + halfLen, alongY = orient === "D" ? pos[1] + halfLen : pos[1] - halfLen;
-  const nameColor = sym2.col(SCH.pinName), numColor = sym2.col(SCH.pinNum);
+  const nameColor = sym.col(SCH.pinName), numColor = sym.col(SCH.pinNum);
   if (showNum) {
     const size2 = numEf.size, lines = pinNumberLines(pinNum, len, size2), stacked = lines.length > 1;
     const pitch = 1.3 * size2, height = stacked ? lines.length * pitch : size2;
@@ -3072,23 +3072,23 @@ function buildPinGeomInner(item, g2, tf2, sym2, type, shape3, px, py, pr, len) {
       }
     }
   }
-  if (showName && sym2.altIcons && kids(g2, "alternate").length) {
+  if (showName && sym.altIcons && kids(g2, "alternate").length) {
     const icon2 = Math.min(nameEf.size, 1.5), nw = textWidth(pinName, nameEf.size, nameThick);
     const ux = -ox, uy = -oy;
-    const along2 = inside2 ? len + sym2.nameOff + nw + icon2 * 0.75 : halfLen - nw / 2 - icon2 * 0.75;
-    const perp = inside2 ? 0 : vertical ? clearance + nameEf.size / 2 + nameThick : sym2.maxNameHalf + clearance + nameThick;
+    const along2 = inside2 ? len + sym.nameOff + nw + icon2 * 0.75 : halfLen - nw / 2 - icon2 * 0.75;
+    const perp = inside2 ? 0 : vertical ? clearance + nameEf.size / 2 + nameThick : sym.maxNameHalf + clearance + nameThick;
     const cx = pos[0] + ux * along2 - (vertical ? perp : 0), cy = pos[1] + uy * along2 - (vertical ? 0 : perp);
     altPinModesIcon(item, cx, cy, icon2, vertical, nameColor);
   }
   if (showName) {
     if (inside2) {
-      const dd = len + sym2.nameOff;
+      const dd = len + sym.nameOff;
       const at5 = orient === "R" ? [pos[0] + dd, pos[1]] : orient === "L" ? [pos[0] - dd, pos[1]] : orient === "U" ? [pos[0], pos[1] - dd] : [pos[0], pos[1] + dd];
       textGeom(item, at5[0], at5[1], pinName, nameEf.size, nameColor, vertical ? 90 : 0, [orient === "R" || orient === "U" ? "left" : "right", "middle"], "Pin names", { z: SCH_Z.pinName, w: nameThick });
     } else if (vertical) {
       textGeom(item, pos[0] - (clearance + nameEf.size / 2 + nameThick), alongY, pinName, nameEf.size, nameColor, 90, ["center", "middle"], "Pin names", { z: SCH_Z.pinName, w: nameThick });
     } else {
-      textGeom(item, alongX, pos[1] - (sym2.maxNameHalf + clearance + nameThick), pinName, nameEf.size, nameColor, 0, ["center", "middle"], "Pin names", { z: SCH_Z.pinName, w: nameThick });
+      textGeom(item, alongX, pos[1] - (sym.maxNameHalf + clearance + nameThick), pinName, nameEf.size, nameColor, 0, ["center", "middle"], "Pin names", { z: SCH_Z.pinName, w: nameThick });
     }
   }
 }
@@ -6381,7 +6381,7 @@ function render(doc2, ctx, view, opts2) {
   const brightIds = isPcb && opts2.brightened && opts2.brightened.size ? opts2.brightened : null;
   const brightGeoms = brightIds ? /* @__PURE__ */ new Set() : null;
   const entered = isPcb && opts2.enteredGroup && opts2.enteredGroup.size ? opts2.enteredGroup : null;
-  const outsideOp = entered ? typeof opts2.outsideGroupOpacity === "number" ? opts2.outsideGroupOpacity : obj5 && obj5.opacity && typeof obj5.opacity.outsideGroup === "number" ? obj5.opacity.outsideGroup : 0.2 : 1;
+  const outsideOp = entered ? typeof opts2.outsideGroupOpacity === "number" ? opts2.outsideGroupOpacity : obj5 && obj5.opacity && typeof obj5.opacity.outsideGroup === "number" ? obj5.opacity.outsideGroup : 1 : 1;
   const outsideGeoms = entered && outsideOp < 1 ? /* @__PURE__ */ new Set() : null;
   const zoneA = objAlpha && typeof objAlpha.zones === "number" ? Math.max(0, Math.min(1, objAlpha.zones)) : ZONE_OPACITY;
   const trackA = objAlpha && typeof objAlpha.tracks === "number" ? Math.max(0, Math.min(1, objAlpha.tracks)) : 1;
@@ -10323,28 +10323,28 @@ function strNumCmp2(a, b) {
   }
   return i >= a.length && j < b.length ? -1 : i < a.length && j >= b.length ? 1 : 0;
 }
-function symbolFlags(sym2) {
+function symbolFlags(sym) {
   const out2 = {};
   for (const [key3, f2, inv] of SYM_KEYS) {
-    const k = kid2(sym2, key3);
+    const k = kid2(sym, key3);
     out2[f2] = inv ? !boolOf2(k, true) : boolOf2(k, false);
   }
   return out2;
 }
-function symbolInstancePaths(sym2) {
+function symbolInstancePaths(sym) {
   const out2 = [];
-  for (const proj of kids2(kid2(sym2, "instances"), "project")) for (const p of kids2(proj, "path")) out2.push(p);
+  for (const proj of kids2(kid2(sym, "instances"), "project")) for (const p of kids2(proj, "path")) out2.push(p);
   return out2;
 }
-function symbolInstance(sym2, path2) {
-  const all2 = symbolInstancePaths(sym2);
+function symbolInstance(sym, path2) {
+  const all2 = symbolInstancePaths(sym);
   return (path2 ? all2.find((p) => str2(p[1]) === path2) : null) || all2[0] || null;
 }
-function symbolVariant(sym2, name, path2, ver) {
+function symbolVariant(sym, name, path2, ver) {
   if (isDefaultVariant(name)) return null;
-  const v = symVariantIn(symbolInstance(sym2, path2), name);
+  const v = symVariantIn(symbolInstance(sym, path2), name);
   if (!v) return null;
-  const base2 = symbolFlags(sym2), flags = { ...base2 };
+  const base2 = symbolFlags(sym), flags = { ...base2 };
   for (const [key3, f2, inv] of variantKeys(ver)) {
     const k = kid2(v, key3);
     if (k) flags[f2] = inv ? !boolOf2(k, true) : boolOf2(k, false);
@@ -10356,19 +10356,19 @@ function symbolVariant(sym2, name, path2, ver) {
   }
   return { flags, fields };
 }
-function symbolFlagsForVariant(sym2, variant, path2, ver) {
-  const st = variant ? symbolVariant(sym2, variant, path2, ver) : null;
-  return st ? st.flags : symbolFlags(sym2);
+function symbolFlagsForVariant(sym, variant, path2, ver) {
+  const st = variant ? symbolVariant(sym, variant, path2, ver) : null;
+  return st ? st.flags : symbolFlags(sym);
 }
-function symbolViewForVariant(sym2, variant, path2, ver) {
-  const st = variant ? symbolVariant(sym2, variant, path2, ver) : null;
-  if (!st) return sym2;
-  const base2 = symbolFlags(sym2);
+function symbolViewForVariant(sym, variant, path2, ver) {
+  const st = variant ? symbolVariant(sym, variant, path2, ver) : null;
+  if (!st) return sym;
+  const base2 = symbolFlags(sym);
   if (!SYM_KEYS.some(([, f2]) => st.flags[f2] !== base2[f2]) && ![...st.fields].some(([k, v]) => {
-    const p = kids2(sym2, "property").find((q4) => str2(q4[1]) === k);
+    const p = kids2(sym, "property").find((q4) => str2(q4[1]) === k);
     return !!p && str2(p[2]) !== v;
-  })) return sym2;
-  const out2 = clone(sym2);
+  })) return sym;
+  const out2 = clone(sym);
   for (const [key3, f2, inv] of SYM_KEYS) {
     if (st.flags[f2] === base2[f2]) continue;
     const val = (inv ? !st.flags[f2] : st.flags[f2]) ? "yes" : "no";
@@ -10427,9 +10427,9 @@ function writeVariantRegistry(pro, reg) {
   for (const k of keys) delete sch[k];
   Object.assign(sch, rebuilt);
 }
-function renameSymbolVariants(sym2, from, to, copy = false) {
+function renameSymbolVariants(sym, from, to, copy = false) {
   let changed2 = false;
-  const out2 = clone(sym2);
+  const out2 = clone(sym);
   for (const inst of symbolInstancePaths(out2)) {
     const v = symVariantIn(inst, from);
     if (!v) continue;
@@ -10452,7 +10452,7 @@ function renameSymbolVariants(sym2, from, to, copy = false) {
       inst.splice(after ? inst.indexOf(after) + 1 : others.length ? inst.indexOf(others[0]) : inst.length, 0, nv);
     }
   }
-  return changed2 ? out2 : sym2;
+  return changed2 ? out2 : sym;
 }
 function insertVariantSorted(inst, node) {
   const others = kids2(inst, "variant"), name = variantName(node);
@@ -17171,8 +17171,8 @@ var require_pcb_tools = __commonJS({
         }
         tinf_build_tree(code_tree, lengths, 0, 19);
         for (num82 = 0; num82 < hlit + hdist; ) {
-          var sym2 = tinf_decode_symbol(d, code_tree);
-          switch (sym2) {
+          var sym = tinf_decode_symbol(d, code_tree);
+          switch (sym) {
             case 16:
               var prev = lengths[num82 - 1];
               for (length = tinf_read_bits(d, 2, 3); length; --length) {
@@ -17190,7 +17190,7 @@ var require_pcb_tools = __commonJS({
               }
               break;
             default:
-              lengths[num82++] = sym2;
+              lengths[num82++] = sym;
               break;
           }
         }
@@ -17199,17 +17199,17 @@ var require_pcb_tools = __commonJS({
       }
       function tinf_inflate_block_data(d, lt, dt) {
         while (1) {
-          var sym2 = tinf_decode_symbol(d, lt);
-          if (sym2 === 256) {
+          var sym = tinf_decode_symbol(d, lt);
+          if (sym === 256) {
             return TINF_OK;
           }
-          if (sym2 < 256) {
-            d.dest[d.destLen++] = sym2;
+          if (sym < 256) {
+            d.dest[d.destLen++] = sym;
           } else {
             var length, dist, offs2;
             var i;
-            sym2 -= 257;
-            length = tinf_read_bits(d, length_bits[sym2], length_base[sym2]);
+            sym -= 257;
+            length = tinf_read_bits(d, length_bits[sym], length_base[sym]);
             dist = tinf_decode_symbol(d, dt);
             offs2 = d.destLen - tinf_read_bits(d, dist_bits[dist], dist_base[dist]);
             for (i = offs2; i < offs2 + length; ++i) {
@@ -17575,7 +17575,7 @@ var require_pcb_tools = __commonJS({
           fail(message);
         }
       }
-      var check2 = { fail, argument, assert: argument };
+      var check3 = { fail, argument, assert: argument };
       var LIMIT16 = 32768;
       var LIMIT32 = 2147483648;
       var decode2 = {};
@@ -17587,7 +17587,7 @@ var require_pcb_tools = __commonJS({
         };
       }
       encode.BYTE = function(v) {
-        check2.argument(v >= 0 && v <= 255, "Byte value should be between 0 and 255.");
+        check3.argument(v >= 0 && v <= 255, "Byte value should be between 0 and 255.");
         return [v];
       };
       sizeOf.BYTE = constant(1);
@@ -17649,7 +17649,7 @@ var require_pcb_tools = __commonJS({
       };
       sizeOf.LONGDATETIME = constant(8);
       encode.TAG = function(v) {
-        check2.argument(v.length === 4, "Tag should be exactly 4 ASCII characters.");
+        check3.argument(v.length === 4, "Tag should be exactly 4 ASCII characters.");
         return [
           v.charCodeAt(0),
           v.charCodeAt(1),
@@ -17997,7 +17997,7 @@ var require_pcb_tools = __commonJS({
         var d = [];
         if (Array.isArray(type)) {
           for (var i = 0; i < type.length; i += 1) {
-            check2.argument(v.length === type.length, "Not enough arguments given for type" + type);
+            check3.argument(v.length === type.length, "Not enough arguments given for type" + type);
             d = d.concat(encode.OPERAND(v[i], type[i]));
           }
         } else {
@@ -18041,12 +18041,12 @@ var require_pcb_tools = __commonJS({
       };
       encode.OBJECT = function(v) {
         var encodingFunction = encode[v.type];
-        check2.argument(encodingFunction !== void 0, "No encoding function for type " + v.type);
+        check3.argument(encodingFunction !== void 0, "No encoding function for type " + v.type);
         return encodingFunction(v.value);
       };
       sizeOf.OBJECT = function(v) {
         var sizeOfFunction = sizeOf[v.type];
-        check2.argument(sizeOfFunction !== void 0, "No sizeOf function for type " + v.type);
+        check3.argument(sizeOfFunction !== void 0, "No sizeOf function for type " + v.type);
         return sizeOfFunction(v.value);
       };
       encode.TABLE = function(table2) {
@@ -18057,7 +18057,7 @@ var require_pcb_tools = __commonJS({
         for (var i = 0; i < length; i += 1) {
           var field22 = table2.fields[i];
           var encodingFunction = encode[field22.type];
-          check2.argument(encodingFunction !== void 0, "No encoding function for field type " + field22.type + " (" + field22.name + ")");
+          check3.argument(encodingFunction !== void 0, "No encoding function for field type " + field22.type + " (" + field22.name + ")");
           var value = table2[field22.name];
           if (value === void 0) {
             value = field22.value;
@@ -18074,7 +18074,7 @@ var require_pcb_tools = __commonJS({
         for (var i$1 = 0; i$1 < subtables.length; i$1 += 1) {
           var o = subtableOffsets[i$1];
           var offset = d.length;
-          check2.argument(offset < 65536, "Table " + table2.tableName + " too big.");
+          check3.argument(offset < 65536, "Table " + table2.tableName + " too big.");
           d[o] = offset >> 8;
           d[o + 1] = offset & 255;
           d = d.concat(subtables[i$1]);
@@ -18087,7 +18087,7 @@ var require_pcb_tools = __commonJS({
         for (var i = 0; i < length; i += 1) {
           var field22 = table2.fields[i];
           var sizeOfFunction = sizeOf[field22.type];
-          check2.argument(sizeOfFunction !== void 0, "No sizeOf function for field type " + field22.type + " (" + field22.name + ")");
+          check3.argument(sizeOfFunction !== void 0, "No sizeOf function for field type " + field22.type + " (" + field22.name + ")");
           var value = table2[field22.name];
           if (value === void 0) {
             value = field22.value;
@@ -18182,7 +18182,7 @@ var require_pcb_tools = __commonJS({
             }))
           );
         } else {
-          check2.assert(false, "Coverage format must be 1 or 2.");
+          check3.assert(false, "Coverage format must be 1 or 2.");
         }
       }
       Coverage.prototype = Object.create(Table.prototype);
@@ -18194,7 +18194,7 @@ var require_pcb_tools = __commonJS({
           recordList("scriptRecord", scriptListTable, function(scriptRecord, i) {
             var script = scriptRecord.script;
             var defaultLangSys = script.defaultLangSys;
-            check2.assert(!!defaultLangSys, "Unable to write GSUB: script " + scriptRecord.tag + " has no default language system.");
+            check3.assert(!!defaultLangSys, "Unable to write GSUB: script " + scriptRecord.tag + " has no default language system.");
             return [
               { name: "scriptTag" + i, type: "TAG", value: scriptRecord.tag },
               { name: "script" + i, type: "TABLE", value: new Table("scriptTable", [
@@ -18238,7 +18238,7 @@ var require_pcb_tools = __commonJS({
       function LookupList(lookupListTable, subtableMakers2) {
         Table.call(this, "lookupListTable", tableList("lookup", lookupListTable, function(lookupTable) {
           var subtableCallback = subtableMakers2[lookupTable.lookupType];
-          check2.assert(!!subtableCallback, "Unable to write GSUB lookup type " + lookupTable.lookupType + " tables.");
+          check3.assert(!!subtableCallback, "Unable to write GSUB lookup type " + lookupTable.lookupType + " tables.");
           return new Table("lookupTable", [
             { name: "lookupType", type: "USHORT", value: lookupTable.lookupType },
             { name: "lookupFlag", type: "USHORT", value: lookupTable.lookupFlag }
@@ -18715,7 +18715,7 @@ var require_pcb_tools = __commonJS({
       Parser.prototype.parseLookupList = function(lookupTableParsers) {
         return this.parsePointer(Parser.list(Parser.pointer(function() {
           var lookupType = this.parseUShort();
-          check2.argument(1 <= lookupType && lookupType <= 9, "GPOS/GSUB lookup type " + lookupType + " unknown.");
+          check3.argument(1 <= lookupType && lookupType <= 9, "GPOS/GSUB lookup type " + lookupType + " unknown.");
           var lookupFlag = this.parseUShort();
           var useMarkFilteringSet = lookupFlag & 16;
           return {
@@ -18730,7 +18730,7 @@ var require_pcb_tools = __commonJS({
         return this.parsePointer32(function() {
           var majorVersion = this.parseUShort();
           var minorVersion = this.parseUShort();
-          check2.argument(majorVersion === 1 && minorVersion < 1, "GPOS/GSUB feature variations table unknown.");
+          check3.argument(majorVersion === 1 && minorVersion < 1, "GPOS/GSUB feature variations table unknown.");
           var featureVariations = this.parseRecordList32({
             conditionSetOffset: Parser.offset32,
             featureTableSubstitutionOffset: Parser.offset32
@@ -18806,7 +18806,7 @@ var require_pcb_tools = __commonJS({
       function parseCmapTable(data, start) {
         var cmap2 = {};
         cmap2.version = parse2.getUShort(data, start);
-        check2.argument(cmap2.version === 0, "cmap table version should be 0.");
+        check3.argument(cmap2.version === 0, "cmap table version should be 0.");
         cmap2.numTables = parse2.getUShort(data, start + 2);
         var offset = -1;
         for (var i = cmap2.numTables - 1; i >= 0; i -= 1) {
@@ -20360,7 +20360,7 @@ var require_pcb_tools = __commonJS({
             currentContour = [];
           }
         }
-        check2.argument(currentContour.length === 0, "There are still points left in the current contour.");
+        check3.argument(currentContour.length === 0, "There are still points left in the current contour.");
         return contours22;
       };
       Glyph.prototype.getMetrics = function() {
@@ -21645,7 +21645,7 @@ var require_pcb_tools = __commonJS({
         head22.fontRevision = Math.round(p.parseFixed() * 1e3) / 1e3;
         head22.checkSumAdjustment = p.parseULong();
         head22.magicNumber = p.parseULong();
-        check2.argument(head22.magicNumber === 1594834165, "Font header has wrong magic number.");
+        check3.argument(head22.magicNumber === 1594834165, "Font header has wrong magic number.");
         head22.flags = p.parseUShort();
         head22.unitsPerEm = p.parseUShort();
         head22.created = p.parseLongDateTime();
@@ -21801,7 +21801,7 @@ var require_pcb_tools = __commonJS({
       function parseLtagTable(data, start) {
         var p = new parse2.Parser(data, start);
         var tableVersion = p.parseULong();
-        check2.argument(tableVersion === 1, "Unsupported ltag table version.");
+        check3.argument(tableVersion === 1, "Unsupported ltag table version.");
         p.skip("uLong", 1);
         var numTags = p.parseULong();
         var tags = [];
@@ -23183,11 +23183,11 @@ var require_pcb_tools = __commonJS({
             substitute: this.parseOffset16List()
           };
         }
-        check2.assert(false, "0x" + start.toString(16) + ": lookup type 1 format must be 1 or 2.");
+        check3.assert(false, "0x" + start.toString(16) + ": lookup type 1 format must be 1 or 2.");
       };
       subtableParsers[2] = function parseLookup2() {
         var substFormat = this.parseUShort();
-        check2.argument(substFormat === 1, "GSUB Multiple Substitution Subtable identifier-format must be 1");
+        check3.argument(substFormat === 1, "GSUB Multiple Substitution Subtable identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -23196,7 +23196,7 @@ var require_pcb_tools = __commonJS({
       };
       subtableParsers[3] = function parseLookup3() {
         var substFormat = this.parseUShort();
-        check2.argument(substFormat === 1, "GSUB Alternate Substitution Subtable identifier-format must be 1");
+        check3.argument(substFormat === 1, "GSUB Alternate Substitution Subtable identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -23205,7 +23205,7 @@ var require_pcb_tools = __commonJS({
       };
       subtableParsers[4] = function parseLookup4() {
         var substFormat = this.parseUShort();
-        check2.argument(substFormat === 1, "GSUB ligature table identifier-format must be 1");
+        check3.argument(substFormat === 1, "GSUB ligature table identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -23260,7 +23260,7 @@ var require_pcb_tools = __commonJS({
             lookupRecords: this.parseRecordList(substCount, lookupRecordDesc)
           };
         }
-        check2.assert(false, "0x" + start.toString(16) + ": lookup type 5 format must be 1, 2 or 3.");
+        check3.assert(false, "0x" + start.toString(16) + ": lookup type 5 format must be 1, 2 or 3.");
       };
       subtableParsers[6] = function parseLookup6() {
         var start = this.offset + this.relativeOffset;
@@ -23303,11 +23303,11 @@ var require_pcb_tools = __commonJS({
             lookupRecords: this.parseRecordList(lookupRecordDesc)
           };
         }
-        check2.assert(false, "0x" + start.toString(16) + ": lookup type 6 format must be 1, 2 or 3.");
+        check3.assert(false, "0x" + start.toString(16) + ": lookup type 6 format must be 1, 2 or 3.");
       };
       subtableParsers[7] = function parseLookup7() {
         var substFormat = this.parseUShort();
-        check2.argument(substFormat === 1, "GSUB Extension Substitution subtable identifier-format must be 1");
+        check3.argument(substFormat === 1, "GSUB Extension Substitution subtable identifier-format must be 1");
         var extensionLookupType = this.parseUShort();
         var extensionParser = new Parser(this.data, this.offset + this.parseULong());
         return {
@@ -23318,7 +23318,7 @@ var require_pcb_tools = __commonJS({
       };
       subtableParsers[8] = function parseLookup8() {
         var substFormat = this.parseUShort();
-        check2.argument(substFormat === 1, "GSUB Reverse Chaining Contextual Single Substitution Subtable identifier-format must be 1");
+        check3.argument(substFormat === 1, "GSUB Reverse Chaining Contextual Single Substitution Subtable identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -23331,7 +23331,7 @@ var require_pcb_tools = __commonJS({
         start = start || 0;
         var p = new Parser(data, start);
         var tableVersion = p.parseVersion(1);
-        check2.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GSUB table version.");
+        check3.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GSUB table version.");
         if (tableVersion === 1) {
           return {
             version: tableVersion,
@@ -23365,7 +23365,7 @@ var require_pcb_tools = __commonJS({
         }
       };
       subtableMakers[2] = function makeLookup2(subtable) {
-        check2.assert(subtable.substFormat === 1, "Lookup type 2 substFormat must be 1.");
+        check3.assert(subtable.substFormat === 1, "Lookup type 2 substFormat must be 1.");
         return new table.Table("substitutionTable", [
           { name: "substFormat", type: "USHORT", value: 1 },
           { name: "coverage", type: "TABLE", value: new table.Coverage(subtable.coverage) }
@@ -23374,7 +23374,7 @@ var require_pcb_tools = __commonJS({
         })));
       };
       subtableMakers[3] = function makeLookup3(subtable) {
-        check2.assert(subtable.substFormat === 1, "Lookup type 3 substFormat must be 1.");
+        check3.assert(subtable.substFormat === 1, "Lookup type 3 substFormat must be 1.");
         return new table.Table("substitutionTable", [
           { name: "substFormat", type: "USHORT", value: 1 },
           { name: "coverage", type: "TABLE", value: new table.Coverage(subtable.coverage) }
@@ -23383,7 +23383,7 @@ var require_pcb_tools = __commonJS({
         })));
       };
       subtableMakers[4] = function makeLookup4(subtable) {
-        check2.assert(subtable.substFormat === 1, "Lookup type 4 substFormat must be 1.");
+        check3.assert(subtable.substFormat === 1, "Lookup type 4 substFormat must be 1.");
         return new table.Table("substitutionTable", [
           { name: "substFormat", type: "USHORT", value: 1 },
           { name: "coverage", type: "TABLE", value: new table.Coverage(subtable.coverage) }
@@ -23412,7 +23412,7 @@ var require_pcb_tools = __commonJS({
           })));
           return returnTable;
         } else if (subtable.substFormat === 2) {
-          check2.assert(false, "lookup type 6 format 2 is not yet supported.");
+          check3.assert(false, "lookup type 6 format 2 is not yet supported.");
         } else if (subtable.substFormat === 3) {
           var tableData = [
             { name: "substFormat", type: "USHORT", value: subtable.substFormat }
@@ -23436,7 +23436,7 @@ var require_pcb_tools = __commonJS({
           var returnTable$1 = new table.Table("chainContextTable", tableData);
           return returnTable$1;
         }
-        check2.assert(false, "lookup type 6 format must be 1, 2 or 3.");
+        check3.assert(false, "lookup type 6 format must be 1, 2 or 3.");
       };
       function makeGsubTable(gsub2) {
         return new table.Table("GSUB", [
@@ -23450,7 +23450,7 @@ var require_pcb_tools = __commonJS({
       function parseMetaTable(data, start) {
         var p = new parse2.Parser(data, start);
         var tableVersion = p.parseULong();
-        check2.argument(tableVersion === 1, "Unsupported META table version.");
+        check3.argument(tableVersion === 1, "Unsupported META table version.");
         p.parseULong();
         p.parseULong();
         var numDataMaps = p.parseULong();
@@ -23530,13 +23530,13 @@ var require_pcb_tools = __commonJS({
         }
         for (var i = 0; i < tables2.length; i += 1) {
           var t = tables2[i];
-          check2.argument(t.tableName.length === 4, "Table name" + t.tableName + " is invalid.");
+          check3.argument(t.tableName.length === 4, "Table name" + t.tableName + " is invalid.");
           var tableLength = t.sizeOf();
           var tableRecord = makeTableRecord(t.tableName, computeCheckSum(t.encode()), offset, tableLength);
           recordFields.push({ name: tableRecord.tag + " Table Record", type: "RECORD", value: tableRecord });
           tableFields.push({ name: t.tableName + " table", type: "RECORD", value: t });
           offset += tableLength;
-          check2.argument(!isNaN(offset), "Something went wrong calculating the offset.");
+          check3.argument(!isNaN(offset), "Something went wrong calculating the offset.");
           while (offset % 4 !== 0) {
             offset += 1;
             tableFields.push({ name: "padding", type: "BYTE", value: 0 });
@@ -23959,7 +23959,7 @@ var require_pcb_tools = __commonJS({
             }
             if (create) {
               var index = allFeatures.length;
-              check2.assert(index === 0 || feature >= allFeatures[index - 1].tag, "Features must be added in alphabetical order.");
+              check3.assert(index === 0 || feature >= allFeatures[index - 1].tag, "Features must be added in alphabetical order.");
               featureRecord = {
                 tag: feature,
                 feature: { params: 0, lookupListIndexes: [] }
@@ -24248,7 +24248,7 @@ var require_pcb_tools = __commonJS({
           coverage: { format: 1, glyphs: [] },
           substitute: []
         });
-        check2.assert(subtable.coverage.format === 1, "Single: unable to modify coverage table format " + subtable.coverage.format);
+        check3.assert(subtable.coverage.format === 1, "Single: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = substitution.sub;
         var pos = this.binSearch(subtable.coverage.glyphs, coverageGlyph);
         if (pos < 0) {
@@ -24259,7 +24259,7 @@ var require_pcb_tools = __commonJS({
         subtable.substitute[pos] = substitution.by;
       };
       Substitution.prototype.addMultiple = function(feature, substitution, script, language) {
-        check2.assert(substitution.by instanceof Array && substitution.by.length > 1, 'Multiple: "by" must be an array of two or more ids');
+        check3.assert(substitution.by instanceof Array && substitution.by.length > 1, 'Multiple: "by" must be an array of two or more ids');
         var lookupTable = this.getLookupTables(script, language, feature, 2, true)[0];
         var subtable = getSubstFormat(lookupTable, 1, {
           // lookup type 2 subtable, format 1, coverage format 1
@@ -24267,7 +24267,7 @@ var require_pcb_tools = __commonJS({
           coverage: { format: 1, glyphs: [] },
           sequences: []
         });
-        check2.assert(subtable.coverage.format === 1, "Multiple: unable to modify coverage table format " + subtable.coverage.format);
+        check3.assert(subtable.coverage.format === 1, "Multiple: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = substitution.sub;
         var pos = this.binSearch(subtable.coverage.glyphs, coverageGlyph);
         if (pos < 0) {
@@ -24285,7 +24285,7 @@ var require_pcb_tools = __commonJS({
           coverage: { format: 1, glyphs: [] },
           alternateSets: []
         });
-        check2.assert(subtable.coverage.format === 1, "Alternate: unable to modify coverage table format " + subtable.coverage.format);
+        check3.assert(subtable.coverage.format === 1, "Alternate: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = substitution.sub;
         var pos = this.binSearch(subtable.coverage.glyphs, coverageGlyph);
         if (pos < 0) {
@@ -24307,7 +24307,7 @@ var require_pcb_tools = __commonJS({
           };
           lookupTable.subtables[0] = subtable;
         }
-        check2.assert(subtable.coverage.format === 1, "Ligature: unable to modify coverage table format " + subtable.coverage.format);
+        check3.assert(subtable.coverage.format === 1, "Ligature: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = ligature.sub[0];
         var ligComponents = ligature.sub.slice(1);
         var ligatureTable = {
@@ -24444,7 +24444,7 @@ var require_pcb_tools = __commonJS({
               }
             }
           }
-          check2.argument(flags2.length === numberOfCoordinates, "Bad flags.");
+          check3.argument(flags2.length === numberOfCoordinates, "Bad flags.");
           if (endPointIndices.length > 0) {
             var points2 = [];
             var point;
@@ -24556,7 +24556,7 @@ var require_pcb_tools = __commonJS({
             currentContour = [];
           }
         }
-        check2.argument(currentContour.length === 0, "There are still points left in the current contour.");
+        check3.argument(currentContour.length === 0, "There are still points left in the current contour.");
         return contours22;
       }
       function getPath2(points2) {
@@ -28644,7 +28644,7 @@ var require_pcb_tools = __commonJS({
       function parseFvarTable(data, start, names2) {
         var p = new parse2.Parser(data, start);
         var tableVersion = p.parseULong();
-        check2.argument(tableVersion === 65536, "Unsupported fvar table version.");
+        check3.argument(tableVersion === 65536, "Unsupported fvar table version.");
         var offsetToData = p.parseOffset16();
         p.skip("uShort", 1);
         var axisCount = p.parseUShort();
@@ -28671,7 +28671,7 @@ var require_pcb_tools = __commonJS({
       };
       var caretValue = function() {
         var format = this.parseUShort();
-        check2.argument(
+        check3.argument(
           format === 1 || format === 2 || format === 3,
           "Unsupported CaretValue table version."
         );
@@ -28700,7 +28700,7 @@ var require_pcb_tools = __commonJS({
         start = start || 0;
         var p = new Parser(data, start);
         var tableVersion = p.parseVersion(1);
-        check2.argument(
+        check3.argument(
           tableVersion === 1 || tableVersion === 1.2 || tableVersion === 1.3,
           "Unsupported GDEF table version."
         );
@@ -28734,12 +28734,12 @@ var require_pcb_tools = __commonJS({
             values: this.parseValueRecordList()
           };
         }
-        check2.assert(false, "0x" + start.toString(16) + ": GPOS lookup type 1 format must be 1 or 2.");
+        check3.assert(false, "0x" + start.toString(16) + ": GPOS lookup type 1 format must be 1 or 2.");
       };
       subtableParsers$1[2] = function parseLookup22() {
         var start = this.offset + this.relativeOffset;
         var posFormat = this.parseUShort();
-        check2.assert(posFormat === 1 || posFormat === 2, "0x" + start.toString(16) + ": GPOS lookup type 2 format must be 1 or 2.");
+        check3.assert(posFormat === 1 || posFormat === 2, "0x" + start.toString(16) + ": GPOS lookup type 2 format must be 1 or 2.");
         var coverage = this.parsePointer(Parser.coverage);
         var valueFormat1 = this.parseUShort();
         var valueFormat2 = this.parseUShort();
@@ -28807,7 +28807,7 @@ var require_pcb_tools = __commonJS({
         start = start || 0;
         var p = new Parser(data, start);
         var tableVersion = p.parseVersion(1);
-        check2.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GPOS table version " + tableVersion);
+        check3.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GPOS table version " + tableVersion);
         if (tableVersion === 1) {
           return {
             version: tableVersion,
@@ -28839,7 +28839,7 @@ var require_pcb_tools = __commonJS({
         var pairs = {};
         p.skip("uShort");
         var subtableVersion = p.parseUShort();
-        check2.argument(subtableVersion === 0, "Unsupported kern sub-table version.");
+        check3.argument(subtableVersion === 0, "Unsupported kern sub-table version.");
         p.skip("uShort", 2);
         var nPairs = p.parseUShort();
         p.skip("uShort", 3);
@@ -41373,9 +41373,9 @@ var require_pcb_tools = __commonJS({
         const m = S3.move;
         if (!m || !m.sticky || !ctx || !isBoardLikeDoc()) return;
         if (ev.target.closest && (ev.target.closest("#pcbChip") || ev.target.closest("#cmtPanel"))) return;
+        if (ev.button !== 0) return;
         ev.stopImmediatePropagation();
         ev.preventDefault();
-        if (ev.button !== 0) return;
         selectMoveTo(ctx, ctx.worldMm(ev));
         S3.stickyUp = true;
         finishSelectMove(ctx, true, !!(ev.ctrlKey || ev.metaKey));
@@ -41765,7 +41765,7 @@ var require_pcb_tools = __commonJS({
         const base2 = color2(layer4);
         const entered = enteredGroupIds(doc2);
         const ro = entered ? appGlobal(() => editorState().renderOpts || null, null) : null;
-        const outsideOp = !entered ? 1 : ro && typeof ro.outsideGroupOpacity === "number" ? ro.outsideGroupOpacity : ro && ro.objects && ro.objects.opacity && typeof ro.objects.opacity.outsideGroup === "number" ? ro.objects.opacity.outsideGroup : 0.2;
+        const outsideOp = !entered ? 1 : ro && typeof ro.outsideGroupOpacity === "number" ? ro.outsideGroupOpacity : ro && ro.objects && ro.objects.opacity && typeof ro.objects.opacity.outsideGroup === "number" ? ro.objects.opacity.outsideGroup : 1;
         for (const o of list) {
           c.globalAlpha = entered && !entered.has(o.id) && !sel.has(o.id) ? outsideOp : 1;
           let col = o.npth ? NPTH_COLOR : base2;
@@ -49320,14 +49320,14 @@ Press <esc> to cancel all; double-click to finish`;
       });
       var overrideLocks = () => !!appGlobal(() => editorState().overrideLocks, false);
       var LOCKED_WARNING = "Selection contains locked items. Enable 'Override locks' to operate on them.";
-      function unlockedIds(ctx, ids, quiet) {
+      function unlockedIds(ctx, ids, quiet2) {
         if (overrideLocks()) return ids;
         const locked = ids.some((id) => {
           const it = ctx.doc.items.get(id);
           return it && isLocked3(it.node);
         });
         if (!locked) return ids;
-        if (!quiet) ctx.toast(LOCKED_WARNING, 3500);
+        if (!quiet2) ctx.toast(LOCKED_WARNING, 3500);
         return [];
       }
       function cursorCandidates(ctx, mm5) {
@@ -50214,12 +50214,23 @@ Press <esc> to cancel all; double-click to finish`;
         ctx.requestRender();
         return true;
       });
-      function highlightNetAt(ctx, at5) {
+      function highlightNetAt(ctx, at5, useSelection = false) {
         bind(ctx);
         const nl = netlist2(ctx.doc);
-        let keys = at5 ? /* @__PURE__ */ new Set() : selectionNets(ctx, nl);
+        let keys = /* @__PURE__ */ new Set();
+        if (useSelection) for (const it of selectedItems(ctx)) {
+          if (it.kind !== "footprint" && K11.kid(it.node, "net")) {
+            const k = nl.table.key(netOf3(it.node));
+            if (k) keys.add(k);
+          }
+        }
+        if (useSelection && S3.padSel) {
+          const i = S3.padSel.lastIndexOf("#"), fp = ctx.doc.items.get(S3.padSel.slice(0, i)), pad2 = fp && padsOf(fp)[+S3.padSel.slice(i + 1)];
+          const k = pad2 && nl.table.key(pad2.net);
+          if (k) keys.add(k);
+        }
         if (!keys.size) {
-          const p = at5 || cursorPoint2(ctx);
+          const p = at5 || (ctx.cursor ? ctx.cursor.slice() : cursorPoint2(ctx));
           const k = nl.table.key(netUnder(ctx.doc, p[0], p[1], null));
           if (k) keys = /* @__PURE__ */ new Set([k]);
         }
@@ -50229,7 +50240,7 @@ Press <esc> to cancel all; double-click to finish`;
           return true;
         }
         const key3 = keys.values().next().value;
-        if (S3.highlightNet === key3) {
+        if (keys.size === 1 && S3.highlightNet === key3) {
           S3.highlightNet = null;
           highlightIds(ctx, null);
           return true;
@@ -50241,13 +50252,13 @@ Press <esc> to cancel all; double-click to finish`;
         return true;
       }
       act("highlightNet", "Highlight Net", "`", (ctx) => highlightNetAt(ctx));
+      act("highlightNetSelection", "Highlight Net of Selection", "", (ctx) => highlightNetAt(ctx, null, true));
       act("clearHighlight", "Clear Net Highlighting", "~", (ctx) => {
         S3.highlightNet = null;
         highlightIds(ctx, null);
         return true;
       });
       alias2("toggleNetHighlight", "highlightNet", "Toggle Last Net Highlight", "Alt+`");
-      alias2("highlightNetSelection", "highlightNet", "Highlight Net of Selection", "");
       act("group", "Group Items", "", (ctx) => {
         const ids = needSel(ctx, "Select items to group");
         if (!ids || !canEdit2(ctx)) return true;
@@ -56556,9 +56567,9 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
           beginCarryMove(ctx, { placing: ids.slice(), at: at5 });
           return true;
         },
-        unlockedIds(ctx, ids, quiet) {
+        unlockedIds(ctx, ids, quiet2) {
           bind(ctx);
-          return unlockedIds(ctx, ids, quiet);
+          return unlockedIds(ctx, ids, quiet2);
         },
         /** RequestSelection for an app-side action (Properties): { ids, items, hover } or null; opts as requestSelection. */
         requestSelection(ctx, opts2) {
@@ -58659,8 +58670,8 @@ var require_opentype = __commonJS({
         }
         tinf_build_tree(code_tree, lengths, 0, 19);
         for (num13 = 0; num13 < hlit + hdist; ) {
-          var sym2 = tinf_decode_symbol(d, code_tree);
-          switch (sym2) {
+          var sym = tinf_decode_symbol(d, code_tree);
+          switch (sym) {
             case 16:
               var prev = lengths[num13 - 1];
               for (length = tinf_read_bits(d, 2, 3); length; --length) {
@@ -58678,7 +58689,7 @@ var require_opentype = __commonJS({
               }
               break;
             default:
-              lengths[num13++] = sym2;
+              lengths[num13++] = sym;
               break;
           }
         }
@@ -58687,17 +58698,17 @@ var require_opentype = __commonJS({
       }
       function tinf_inflate_block_data(d, lt, dt) {
         while (1) {
-          var sym2 = tinf_decode_symbol(d, lt);
-          if (sym2 === 256) {
+          var sym = tinf_decode_symbol(d, lt);
+          if (sym === 256) {
             return TINF_OK;
           }
-          if (sym2 < 256) {
-            d.dest[d.destLen++] = sym2;
+          if (sym < 256) {
+            d.dest[d.destLen++] = sym;
           } else {
             var length, dist, offs2;
             var i;
-            sym2 -= 257;
-            length = tinf_read_bits(d, length_bits[sym2], length_base[sym2]);
+            sym -= 257;
+            length = tinf_read_bits(d, length_bits[sym], length_base[sym]);
             dist = tinf_decode_symbol(d, dt);
             offs2 = d.destLen - tinf_read_bits(d, dist_bits[dist], dist_base[dist]);
             for (i = offs2; i < offs2 + length; ++i) {
@@ -59063,7 +59074,7 @@ var require_opentype = __commonJS({
           fail(message);
         }
       }
-      var check2 = { fail, argument, assert: argument };
+      var check3 = { fail, argument, assert: argument };
       var LIMIT16 = 32768;
       var LIMIT32 = 2147483648;
       var decode2 = {};
@@ -59075,7 +59086,7 @@ var require_opentype = __commonJS({
         };
       }
       encode.BYTE = function(v) {
-        check2.argument(v >= 0 && v <= 255, "Byte value should be between 0 and 255.");
+        check3.argument(v >= 0 && v <= 255, "Byte value should be between 0 and 255.");
         return [v];
       };
       sizeOf.BYTE = constant(1);
@@ -59137,7 +59148,7 @@ var require_opentype = __commonJS({
       };
       sizeOf.LONGDATETIME = constant(8);
       encode.TAG = function(v) {
-        check2.argument(v.length === 4, "Tag should be exactly 4 ASCII characters.");
+        check3.argument(v.length === 4, "Tag should be exactly 4 ASCII characters.");
         return [
           v.charCodeAt(0),
           v.charCodeAt(1),
@@ -59485,7 +59496,7 @@ var require_opentype = __commonJS({
         var d = [];
         if (Array.isArray(type)) {
           for (var i = 0; i < type.length; i += 1) {
-            check2.argument(v.length === type.length, "Not enough arguments given for type" + type);
+            check3.argument(v.length === type.length, "Not enough arguments given for type" + type);
             d = d.concat(encode.OPERAND(v[i], type[i]));
           }
         } else {
@@ -59529,12 +59540,12 @@ var require_opentype = __commonJS({
       };
       encode.OBJECT = function(v) {
         var encodingFunction = encode[v.type];
-        check2.argument(encodingFunction !== void 0, "No encoding function for type " + v.type);
+        check3.argument(encodingFunction !== void 0, "No encoding function for type " + v.type);
         return encodingFunction(v.value);
       };
       sizeOf.OBJECT = function(v) {
         var sizeOfFunction = sizeOf[v.type];
-        check2.argument(sizeOfFunction !== void 0, "No sizeOf function for type " + v.type);
+        check3.argument(sizeOfFunction !== void 0, "No sizeOf function for type " + v.type);
         return sizeOfFunction(v.value);
       };
       encode.TABLE = function(table2) {
@@ -59545,7 +59556,7 @@ var require_opentype = __commonJS({
         for (var i = 0; i < length; i += 1) {
           var field2 = table2.fields[i];
           var encodingFunction = encode[field2.type];
-          check2.argument(encodingFunction !== void 0, "No encoding function for field type " + field2.type + " (" + field2.name + ")");
+          check3.argument(encodingFunction !== void 0, "No encoding function for field type " + field2.type + " (" + field2.name + ")");
           var value = table2[field2.name];
           if (value === void 0) {
             value = field2.value;
@@ -59562,7 +59573,7 @@ var require_opentype = __commonJS({
         for (var i$1 = 0; i$1 < subtables.length; i$1 += 1) {
           var o = subtableOffsets[i$1];
           var offset = d.length;
-          check2.argument(offset < 65536, "Table " + table2.tableName + " too big.");
+          check3.argument(offset < 65536, "Table " + table2.tableName + " too big.");
           d[o] = offset >> 8;
           d[o + 1] = offset & 255;
           d = d.concat(subtables[i$1]);
@@ -59575,7 +59586,7 @@ var require_opentype = __commonJS({
         for (var i = 0; i < length; i += 1) {
           var field2 = table2.fields[i];
           var sizeOfFunction = sizeOf[field2.type];
-          check2.argument(sizeOfFunction !== void 0, "No sizeOf function for field type " + field2.type + " (" + field2.name + ")");
+          check3.argument(sizeOfFunction !== void 0, "No sizeOf function for field type " + field2.type + " (" + field2.name + ")");
           var value = table2[field2.name];
           if (value === void 0) {
             value = field2.value;
@@ -59670,7 +59681,7 @@ var require_opentype = __commonJS({
             }))
           );
         } else {
-          check2.assert(false, "Coverage format must be 1 or 2.");
+          check3.assert(false, "Coverage format must be 1 or 2.");
         }
       }
       Coverage.prototype = Object.create(Table.prototype);
@@ -59682,7 +59693,7 @@ var require_opentype = __commonJS({
           recordList("scriptRecord", scriptListTable, function(scriptRecord, i) {
             var script = scriptRecord.script;
             var defaultLangSys = script.defaultLangSys;
-            check2.assert(!!defaultLangSys, "Unable to write GSUB: script " + scriptRecord.tag + " has no default language system.");
+            check3.assert(!!defaultLangSys, "Unable to write GSUB: script " + scriptRecord.tag + " has no default language system.");
             return [
               { name: "scriptTag" + i, type: "TAG", value: scriptRecord.tag },
               { name: "script" + i, type: "TABLE", value: new Table("scriptTable", [
@@ -59726,7 +59737,7 @@ var require_opentype = __commonJS({
       function LookupList(lookupListTable, subtableMakers2) {
         Table.call(this, "lookupListTable", tableList("lookup", lookupListTable, function(lookupTable) {
           var subtableCallback = subtableMakers2[lookupTable.lookupType];
-          check2.assert(!!subtableCallback, "Unable to write GSUB lookup type " + lookupTable.lookupType + " tables.");
+          check3.assert(!!subtableCallback, "Unable to write GSUB lookup type " + lookupTable.lookupType + " tables.");
           return new Table("lookupTable", [
             { name: "lookupType", type: "USHORT", value: lookupTable.lookupType },
             { name: "lookupFlag", type: "USHORT", value: lookupTable.lookupFlag }
@@ -60203,7 +60214,7 @@ var require_opentype = __commonJS({
       Parser.prototype.parseLookupList = function(lookupTableParsers) {
         return this.parsePointer(Parser.list(Parser.pointer(function() {
           var lookupType = this.parseUShort();
-          check2.argument(1 <= lookupType && lookupType <= 9, "GPOS/GSUB lookup type " + lookupType + " unknown.");
+          check3.argument(1 <= lookupType && lookupType <= 9, "GPOS/GSUB lookup type " + lookupType + " unknown.");
           var lookupFlag = this.parseUShort();
           var useMarkFilteringSet = lookupFlag & 16;
           return {
@@ -60218,7 +60229,7 @@ var require_opentype = __commonJS({
         return this.parsePointer32(function() {
           var majorVersion = this.parseUShort();
           var minorVersion = this.parseUShort();
-          check2.argument(majorVersion === 1 && minorVersion < 1, "GPOS/GSUB feature variations table unknown.");
+          check3.argument(majorVersion === 1 && minorVersion < 1, "GPOS/GSUB feature variations table unknown.");
           var featureVariations = this.parseRecordList32({
             conditionSetOffset: Parser.offset32,
             featureTableSubstitutionOffset: Parser.offset32
@@ -60294,7 +60305,7 @@ var require_opentype = __commonJS({
       function parseCmapTable(data, start) {
         var cmap2 = {};
         cmap2.version = parse2.getUShort(data, start);
-        check2.argument(cmap2.version === 0, "cmap table version should be 0.");
+        check3.argument(cmap2.version === 0, "cmap table version should be 0.");
         cmap2.numTables = parse2.getUShort(data, start + 2);
         var offset = -1;
         for (var i = cmap2.numTables - 1; i >= 0; i -= 1) {
@@ -61848,7 +61859,7 @@ var require_opentype = __commonJS({
             currentContour = [];
           }
         }
-        check2.argument(currentContour.length === 0, "There are still points left in the current contour.");
+        check3.argument(currentContour.length === 0, "There are still points left in the current contour.");
         return contours2;
       };
       Glyph.prototype.getMetrics = function() {
@@ -63133,7 +63144,7 @@ var require_opentype = __commonJS({
         head4.fontRevision = Math.round(p.parseFixed() * 1e3) / 1e3;
         head4.checkSumAdjustment = p.parseULong();
         head4.magicNumber = p.parseULong();
-        check2.argument(head4.magicNumber === 1594834165, "Font header has wrong magic number.");
+        check3.argument(head4.magicNumber === 1594834165, "Font header has wrong magic number.");
         head4.flags = p.parseUShort();
         head4.unitsPerEm = p.parseUShort();
         head4.created = p.parseLongDateTime();
@@ -63289,7 +63300,7 @@ var require_opentype = __commonJS({
       function parseLtagTable(data, start) {
         var p = new parse2.Parser(data, start);
         var tableVersion = p.parseULong();
-        check2.argument(tableVersion === 1, "Unsupported ltag table version.");
+        check3.argument(tableVersion === 1, "Unsupported ltag table version.");
         p.skip("uLong", 1);
         var numTags = p.parseULong();
         var tags = [];
@@ -64671,11 +64682,11 @@ var require_opentype = __commonJS({
             substitute: this.parseOffset16List()
           };
         }
-        check2.assert(false, "0x" + start.toString(16) + ": lookup type 1 format must be 1 or 2.");
+        check3.assert(false, "0x" + start.toString(16) + ": lookup type 1 format must be 1 or 2.");
       };
       subtableParsers[2] = function parseLookup2() {
         var substFormat = this.parseUShort();
-        check2.argument(substFormat === 1, "GSUB Multiple Substitution Subtable identifier-format must be 1");
+        check3.argument(substFormat === 1, "GSUB Multiple Substitution Subtable identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -64684,7 +64695,7 @@ var require_opentype = __commonJS({
       };
       subtableParsers[3] = function parseLookup3() {
         var substFormat = this.parseUShort();
-        check2.argument(substFormat === 1, "GSUB Alternate Substitution Subtable identifier-format must be 1");
+        check3.argument(substFormat === 1, "GSUB Alternate Substitution Subtable identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -64693,7 +64704,7 @@ var require_opentype = __commonJS({
       };
       subtableParsers[4] = function parseLookup4() {
         var substFormat = this.parseUShort();
-        check2.argument(substFormat === 1, "GSUB ligature table identifier-format must be 1");
+        check3.argument(substFormat === 1, "GSUB ligature table identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -64748,7 +64759,7 @@ var require_opentype = __commonJS({
             lookupRecords: this.parseRecordList(substCount, lookupRecordDesc)
           };
         }
-        check2.assert(false, "0x" + start.toString(16) + ": lookup type 5 format must be 1, 2 or 3.");
+        check3.assert(false, "0x" + start.toString(16) + ": lookup type 5 format must be 1, 2 or 3.");
       };
       subtableParsers[6] = function parseLookup6() {
         var start = this.offset + this.relativeOffset;
@@ -64791,11 +64802,11 @@ var require_opentype = __commonJS({
             lookupRecords: this.parseRecordList(lookupRecordDesc)
           };
         }
-        check2.assert(false, "0x" + start.toString(16) + ": lookup type 6 format must be 1, 2 or 3.");
+        check3.assert(false, "0x" + start.toString(16) + ": lookup type 6 format must be 1, 2 or 3.");
       };
       subtableParsers[7] = function parseLookup7() {
         var substFormat = this.parseUShort();
-        check2.argument(substFormat === 1, "GSUB Extension Substitution subtable identifier-format must be 1");
+        check3.argument(substFormat === 1, "GSUB Extension Substitution subtable identifier-format must be 1");
         var extensionLookupType = this.parseUShort();
         var extensionParser = new Parser(this.data, this.offset + this.parseULong());
         return {
@@ -64806,7 +64817,7 @@ var require_opentype = __commonJS({
       };
       subtableParsers[8] = function parseLookup8() {
         var substFormat = this.parseUShort();
-        check2.argument(substFormat === 1, "GSUB Reverse Chaining Contextual Single Substitution Subtable identifier-format must be 1");
+        check3.argument(substFormat === 1, "GSUB Reverse Chaining Contextual Single Substitution Subtable identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -64819,7 +64830,7 @@ var require_opentype = __commonJS({
         start = start || 0;
         var p = new Parser(data, start);
         var tableVersion = p.parseVersion(1);
-        check2.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GSUB table version.");
+        check3.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GSUB table version.");
         if (tableVersion === 1) {
           return {
             version: tableVersion,
@@ -64853,7 +64864,7 @@ var require_opentype = __commonJS({
         }
       };
       subtableMakers[2] = function makeLookup2(subtable) {
-        check2.assert(subtable.substFormat === 1, "Lookup type 2 substFormat must be 1.");
+        check3.assert(subtable.substFormat === 1, "Lookup type 2 substFormat must be 1.");
         return new table.Table("substitutionTable", [
           { name: "substFormat", type: "USHORT", value: 1 },
           { name: "coverage", type: "TABLE", value: new table.Coverage(subtable.coverage) }
@@ -64862,7 +64873,7 @@ var require_opentype = __commonJS({
         })));
       };
       subtableMakers[3] = function makeLookup3(subtable) {
-        check2.assert(subtable.substFormat === 1, "Lookup type 3 substFormat must be 1.");
+        check3.assert(subtable.substFormat === 1, "Lookup type 3 substFormat must be 1.");
         return new table.Table("substitutionTable", [
           { name: "substFormat", type: "USHORT", value: 1 },
           { name: "coverage", type: "TABLE", value: new table.Coverage(subtable.coverage) }
@@ -64871,7 +64882,7 @@ var require_opentype = __commonJS({
         })));
       };
       subtableMakers[4] = function makeLookup4(subtable) {
-        check2.assert(subtable.substFormat === 1, "Lookup type 4 substFormat must be 1.");
+        check3.assert(subtable.substFormat === 1, "Lookup type 4 substFormat must be 1.");
         return new table.Table("substitutionTable", [
           { name: "substFormat", type: "USHORT", value: 1 },
           { name: "coverage", type: "TABLE", value: new table.Coverage(subtable.coverage) }
@@ -64900,7 +64911,7 @@ var require_opentype = __commonJS({
           })));
           return returnTable;
         } else if (subtable.substFormat === 2) {
-          check2.assert(false, "lookup type 6 format 2 is not yet supported.");
+          check3.assert(false, "lookup type 6 format 2 is not yet supported.");
         } else if (subtable.substFormat === 3) {
           var tableData = [
             { name: "substFormat", type: "USHORT", value: subtable.substFormat }
@@ -64924,7 +64935,7 @@ var require_opentype = __commonJS({
           var returnTable$1 = new table.Table("chainContextTable", tableData);
           return returnTable$1;
         }
-        check2.assert(false, "lookup type 6 format must be 1, 2 or 3.");
+        check3.assert(false, "lookup type 6 format must be 1, 2 or 3.");
       };
       function makeGsubTable(gsub2) {
         return new table.Table("GSUB", [
@@ -64938,7 +64949,7 @@ var require_opentype = __commonJS({
       function parseMetaTable(data, start) {
         var p = new parse2.Parser(data, start);
         var tableVersion = p.parseULong();
-        check2.argument(tableVersion === 1, "Unsupported META table version.");
+        check3.argument(tableVersion === 1, "Unsupported META table version.");
         p.parseULong();
         p.parseULong();
         var numDataMaps = p.parseULong();
@@ -65018,13 +65029,13 @@ var require_opentype = __commonJS({
         }
         for (var i = 0; i < tables2.length; i += 1) {
           var t = tables2[i];
-          check2.argument(t.tableName.length === 4, "Table name" + t.tableName + " is invalid.");
+          check3.argument(t.tableName.length === 4, "Table name" + t.tableName + " is invalid.");
           var tableLength = t.sizeOf();
           var tableRecord = makeTableRecord(t.tableName, computeCheckSum(t.encode()), offset, tableLength);
           recordFields.push({ name: tableRecord.tag + " Table Record", type: "RECORD", value: tableRecord });
           tableFields.push({ name: t.tableName + " table", type: "RECORD", value: t });
           offset += tableLength;
-          check2.argument(!isNaN(offset), "Something went wrong calculating the offset.");
+          check3.argument(!isNaN(offset), "Something went wrong calculating the offset.");
           while (offset % 4 !== 0) {
             offset += 1;
             tableFields.push({ name: "padding", type: "BYTE", value: 0 });
@@ -65447,7 +65458,7 @@ var require_opentype = __commonJS({
             }
             if (create) {
               var index = allFeatures.length;
-              check2.assert(index === 0 || feature >= allFeatures[index - 1].tag, "Features must be added in alphabetical order.");
+              check3.assert(index === 0 || feature >= allFeatures[index - 1].tag, "Features must be added in alphabetical order.");
               featureRecord = {
                 tag: feature,
                 feature: { params: 0, lookupListIndexes: [] }
@@ -65736,7 +65747,7 @@ var require_opentype = __commonJS({
           coverage: { format: 1, glyphs: [] },
           substitute: []
         });
-        check2.assert(subtable.coverage.format === 1, "Single: unable to modify coverage table format " + subtable.coverage.format);
+        check3.assert(subtable.coverage.format === 1, "Single: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = substitution.sub;
         var pos = this.binSearch(subtable.coverage.glyphs, coverageGlyph);
         if (pos < 0) {
@@ -65747,7 +65758,7 @@ var require_opentype = __commonJS({
         subtable.substitute[pos] = substitution.by;
       };
       Substitution.prototype.addMultiple = function(feature, substitution, script, language) {
-        check2.assert(substitution.by instanceof Array && substitution.by.length > 1, 'Multiple: "by" must be an array of two or more ids');
+        check3.assert(substitution.by instanceof Array && substitution.by.length > 1, 'Multiple: "by" must be an array of two or more ids');
         var lookupTable = this.getLookupTables(script, language, feature, 2, true)[0];
         var subtable = getSubstFormat(lookupTable, 1, {
           // lookup type 2 subtable, format 1, coverage format 1
@@ -65755,7 +65766,7 @@ var require_opentype = __commonJS({
           coverage: { format: 1, glyphs: [] },
           sequences: []
         });
-        check2.assert(subtable.coverage.format === 1, "Multiple: unable to modify coverage table format " + subtable.coverage.format);
+        check3.assert(subtable.coverage.format === 1, "Multiple: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = substitution.sub;
         var pos = this.binSearch(subtable.coverage.glyphs, coverageGlyph);
         if (pos < 0) {
@@ -65773,7 +65784,7 @@ var require_opentype = __commonJS({
           coverage: { format: 1, glyphs: [] },
           alternateSets: []
         });
-        check2.assert(subtable.coverage.format === 1, "Alternate: unable to modify coverage table format " + subtable.coverage.format);
+        check3.assert(subtable.coverage.format === 1, "Alternate: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = substitution.sub;
         var pos = this.binSearch(subtable.coverage.glyphs, coverageGlyph);
         if (pos < 0) {
@@ -65795,7 +65806,7 @@ var require_opentype = __commonJS({
           };
           lookupTable.subtables[0] = subtable;
         }
-        check2.assert(subtable.coverage.format === 1, "Ligature: unable to modify coverage table format " + subtable.coverage.format);
+        check3.assert(subtable.coverage.format === 1, "Ligature: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = ligature.sub[0];
         var ligComponents = ligature.sub.slice(1);
         var ligatureTable = {
@@ -65932,7 +65943,7 @@ var require_opentype = __commonJS({
               }
             }
           }
-          check2.argument(flags.length === numberOfCoordinates, "Bad flags.");
+          check3.argument(flags.length === numberOfCoordinates, "Bad flags.");
           if (endPointIndices.length > 0) {
             var points2 = [];
             var point;
@@ -66044,7 +66055,7 @@ var require_opentype = __commonJS({
             currentContour = [];
           }
         }
-        check2.argument(currentContour.length === 0, "There are still points left in the current contour.");
+        check3.argument(currentContour.length === 0, "There are still points left in the current contour.");
         return contours2;
       }
       function getPath2(points2) {
@@ -69585,11 +69596,11 @@ var require_opentype = __commonJS({
         arabicSentenceCheck
       };
       function registerContextChecker(checkId) {
-        var check3 = this.contextChecks[checkId + "Check"];
+        var check4 = this.contextChecks[checkId + "Check"];
         return this.tokenizer.registerContextChecker(
           checkId,
-          check3.startCheck,
-          check3.endCheck
+          check4.startCheck,
+          check4.endCheck
         );
       }
       function tokenizeText() {
@@ -70132,7 +70143,7 @@ var require_opentype = __commonJS({
       function parseFvarTable(data, start, names2) {
         var p = new parse2.Parser(data, start);
         var tableVersion = p.parseULong();
-        check2.argument(tableVersion === 65536, "Unsupported fvar table version.");
+        check3.argument(tableVersion === 65536, "Unsupported fvar table version.");
         var offsetToData = p.parseOffset16();
         p.skip("uShort", 1);
         var axisCount = p.parseUShort();
@@ -70159,7 +70170,7 @@ var require_opentype = __commonJS({
       };
       var caretValue = function() {
         var format = this.parseUShort();
-        check2.argument(
+        check3.argument(
           format === 1 || format === 2 || format === 3,
           "Unsupported CaretValue table version."
         );
@@ -70188,7 +70199,7 @@ var require_opentype = __commonJS({
         start = start || 0;
         var p = new Parser(data, start);
         var tableVersion = p.parseVersion(1);
-        check2.argument(
+        check3.argument(
           tableVersion === 1 || tableVersion === 1.2 || tableVersion === 1.3,
           "Unsupported GDEF table version."
         );
@@ -70222,12 +70233,12 @@ var require_opentype = __commonJS({
             values: this.parseValueRecordList()
           };
         }
-        check2.assert(false, "0x" + start.toString(16) + ": GPOS lookup type 1 format must be 1 or 2.");
+        check3.assert(false, "0x" + start.toString(16) + ": GPOS lookup type 1 format must be 1 or 2.");
       };
       subtableParsers$1[2] = function parseLookup2() {
         var start = this.offset + this.relativeOffset;
         var posFormat = this.parseUShort();
-        check2.assert(posFormat === 1 || posFormat === 2, "0x" + start.toString(16) + ": GPOS lookup type 2 format must be 1 or 2.");
+        check3.assert(posFormat === 1 || posFormat === 2, "0x" + start.toString(16) + ": GPOS lookup type 2 format must be 1 or 2.");
         var coverage = this.parsePointer(Parser.coverage);
         var valueFormat1 = this.parseUShort();
         var valueFormat2 = this.parseUShort();
@@ -70295,7 +70306,7 @@ var require_opentype = __commonJS({
         start = start || 0;
         var p = new Parser(data, start);
         var tableVersion = p.parseVersion(1);
-        check2.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GPOS table version " + tableVersion);
+        check3.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GPOS table version " + tableVersion);
         if (tableVersion === 1) {
           return {
             version: tableVersion,
@@ -70327,7 +70338,7 @@ var require_opentype = __commonJS({
         var pairs = {};
         p.skip("uShort");
         var subtableVersion = p.parseUShort();
-        check2.argument(subtableVersion === 0, "Unsupported kern sub-table version.");
+        check3.argument(subtableVersion === 0, "Unsupported kern sub-table version.");
         p.skip("uShort", 2);
         var nPairs = p.parseUShort();
         p.skip("uShort", 3);
@@ -70728,12 +70739,12 @@ function bitsAt(src, base2, start, n2) {
 }
 function fseTable(norm3, log) {
   const size2 = 1 << log;
-  const sym2 = new Uint8Array(size2), bits2 = new Uint8Array(size2), base2 = new Uint32Array(size2);
+  const sym = new Uint8Array(size2), bits2 = new Uint8Array(size2), base2 = new Uint32Array(size2);
   let high = size2 - 1;
   const next = [];
   norm3.forEach((c, s2) => {
     if (c === -1) {
-      sym2[high--] = s2;
+      sym[high--] = s2;
       next[s2] = 1;
     } else next[s2] = c;
   });
@@ -70741,7 +70752,7 @@ function fseTable(norm3, log) {
   let pos = 0;
   norm3.forEach((c, s2) => {
     for (let i = 0; i < c; i++) {
-      sym2[pos] = s2;
+      sym[pos] = s2;
       do
         pos = pos + step & mask;
       while (pos > high);
@@ -70749,13 +70760,13 @@ function fseTable(norm3, log) {
   });
   if (pos !== 0) throw new Error("zstd: bad FSE table");
   for (let u = 0; u < size2; u++) {
-    const s2 = sym2[u];
+    const s2 = sym[u];
     const ns = next[s2]++;
     const nb = log - highBit(ns);
     bits2[u] = nb;
     base2[u] = (ns << nb) - size2;
   }
-  return { log, sym: sym2, bits: bits2, base: base2 };
+  return { log, sym, bits: bits2, base: base2 };
 }
 function readFse(src, at5, end, maxSym, maxLog) {
   let bit = 0;
@@ -70844,7 +70855,7 @@ function readHuffman(src, at5, end) {
   if (rest & rest - 1) throw new Error("zstd: bad Huffman weights");
   w.push(highBit(rest) + 1);
   if (maxBits > 11) throw new Error("zstd: Huffman depth too large");
-  const size2 = 1 << maxBits, sym2 = new Uint8Array(size2), bits2 = new Uint8Array(size2);
+  const size2 = 1 << maxBits, sym = new Uint8Array(size2), bits2 = new Uint8Array(size2);
   const count2 = new Array(maxBits + 2).fill(0);
   for (const x of w) if (x) count2[x]++;
   const start = [];
@@ -70857,12 +70868,12 @@ function readHuffman(src, at5, end) {
     if (!x) return;
     const n2 = 1 << x - 1;
     for (let i = 0; i < n2; i++) {
-      sym2[start[x] + i] = s2;
+      sym[start[x] + i] = s2;
       bits2[start[x] + i] = maxBits + 1 - x;
     }
     start[x] += n2;
   });
-  return [{ maxBits, sym: sym2, bits: bits2 }, used];
+  return [{ maxBits, sym, bits: bits2 }, used];
 }
 function huffStream(src, at5, len, h3, n2, out2, o) {
   const bs = new BackBits(src, at5, len);
@@ -71124,25 +71135,25 @@ var init_zstd = __esm({
 // web/domains/pcb/dialogs/zstd-compress.ts
 function fseCTable(norm3, log) {
   const size2 = 1 << log, mask = size2 - 1, step = (size2 >> 1) + (size2 >> 3) + 3;
-  const sym2 = new Uint8Array(size2), cumul = [0];
+  const sym = new Uint8Array(size2), cumul = [0];
   let high = size2 - 1;
   for (let u = 1; u <= norm3.length; u++) {
     if (norm3[u - 1] === -1) {
       cumul[u] = cumul[u - 1] + 1;
-      sym2[high--] = u - 1;
+      sym[high--] = u - 1;
     } else cumul[u] = cumul[u - 1] + norm3[u - 1];
   }
   let pos = 0;
   norm3.forEach((c, s2) => {
     for (let i = 0; i < c; i++) {
-      sym2[pos] = s2;
+      sym[pos] = s2;
       do
         pos = pos + step & mask;
       while (pos > high);
     }
   });
   const state2 = new Uint16Array(size2);
-  for (let u = 0; u < size2; u++) state2[cumul[sym2[u]]++] = size2 + u;
+  for (let u = 0; u < size2; u++) state2[cumul[sym[u]]++] = size2 + u;
   const deltaNb = new Int32Array(norm3.length), deltaFind = new Int32Array(norm3.length);
   let total2 = 0;
   norm3.forEach((c, s2) => {
@@ -71913,13 +71924,13 @@ async function kicadFootprint(fpid) {
 }
 async function vendorSymbol(vendor, id) {
   const part = await vendorPart(vendor, id);
-  const sym2 = part.cad && part.cad.symbol;
-  if (!sym2) throw new ToolError(`${vendor} part ${id} has no schematic symbol; use a KiCad library symbol with its Footprint and part number fields instead.`);
-  const node = K4().parse(sym2.sexpr);
+  const sym = part.cad && part.cad.symbol;
+  if (!sym) throw new ToolError(`${vendor} part ${id} has no schematic symbol; use a KiCad library symbol with its Footprint and part number fields instead.`);
+  const node = K4().parse(sym.sexpr);
   if (!node) throw new ToolError(`${vendor} part ${id}: its symbol could not be read.`);
-  node[1] = sym2.lib_id;
+  node[1] = sym.lib_id;
   const fields = Object.assign({}, part.fields, part.datasheet ? { Datasheet: part.datasheet } : {}, part.cad.footprint ? { Footprint: part.cad.footprint.fpid } : {});
-  return { libId: sym2.lib_id, node, fields, value: part.value || part.mpn || sym2.name };
+  return { libId: sym.lib_id, node, fields, value: part.value || part.mpn || sym.name };
 }
 function symbolFacts(libId, node) {
   const k = K4();
@@ -72079,7 +72090,7 @@ async function findParts(input) {
   return out2;
 }
 function briefPart(full3) {
-  const sym2 = (f2) => {
+  const sym = (f2) => {
     const units = (f2.units || []).map((u) => {
       const pins2 = {};
       for (const p of u.pins) pins2[p.number] = (p.name || "") + (p.type && p.type !== "passive" ? ` (${String(p.type).replace(/_/g, " ")})` : "");
@@ -72092,7 +72103,7 @@ function briefPart(full3) {
     const nums = Array.from(new Set((f2.pad_list || []).map((p) => p.number).filter((n2) => n2 !== void 0 && n2 !== "")));
     return { footprint: f2.footprint, pads: f2.pads, through_hole: f2.through_hole, size_mm: b ? [r32(b[2] - b[0]), r32(b[3] - b[1])] : void 0, pad_numbers: nums.length <= 80 ? nums.join(" ") : void 0 };
   };
-  if (full3 && full3.lib_id) return sym2(full3);
+  if (full3 && full3.lib_id) return sym(full3);
   if (full3 && full3.footprint && full3.pad_list) return fp(full3);
   if (full3 && full3.vendor) return {
     vendor: full3.vendor,
@@ -72102,7 +72113,7 @@ function briefPart(full3) {
     description: full3.description,
     package: full3.package,
     datasheet: full3.datasheet,
-    symbol: full3.symbol ? sym2(full3.symbol) : void 0,
+    symbol: full3.symbol ? sym(full3.symbol) : void 0,
     footprint: full3.footprint ? fp(full3.footprint) : void 0
   };
   return full3;
@@ -74710,14 +74721,14 @@ function withDocument(docId3, onJoined, timeoutMs = 15e3) {
     const done = (fn) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer3);
+      clearTimeout(timer4);
       try {
         if (sock) sock.close();
       } catch (e) {
       }
       fn();
     };
-    const timer3 = setTimeout(() => done(() => reject(new Error("the server did not answer"))), timeoutMs);
+    const timer4 = setTimeout(() => done(() => reject(new Error("the server did not answer"))), timeoutMs);
     const sendOp3 = (changes) => new Promise((ok2, fail) => {
       if (!sock || sock.readyState !== 1) {
         fail(new Error("not connected"));
@@ -76536,7 +76547,7 @@ function sideSession(docId3, changes) {
         return;
       }
       const opId = "web-side:" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      const timer3 = setTimeout(() => {
+      const timer4 = setTimeout(() => {
         try {
           sock.close();
         } catch (e) {
@@ -76544,7 +76555,7 @@ function sideSession(docId3, changes) {
         reject(new Error("no answer from the server"));
       }, 8e3);
       const done = (fn) => {
-        clearTimeout(timer3);
+        clearTimeout(timer4);
         sock.onmessage = null;
         sock.onerror = null;
         try {
@@ -77700,18 +77711,18 @@ function infoBar() {
   const x = h2("button", { class: "x", type: "button", title: "Hide this message." }, closeMark());
   const el4 = h2("div", { class: "pd-infobar", hidden: true, "data-k": "infobar" }, h2("span", { class: "pd-warnicon" }), msg, x);
   el4.firstChild.innerHTML = warningIcon().el.innerHTML;
-  let timer3 = 0;
+  let timer4 = 0;
   const hide = () => {
     el4.hidden = true;
-    if (timer3) clearTimeout(timer3);
-    timer3 = 0;
+    if (timer4) clearTimeout(timer4);
+    timer4 = 0;
   };
   x.addEventListener("click", hide);
   return { el: el4, hide, show(m, ms) {
     msg.textContent = m;
     el4.hidden = false;
-    if (timer3) clearTimeout(timer3);
-    timer3 = ms ? window.setTimeout(hide, ms) : 0;
+    if (timer4) clearTimeout(timer4);
+    timer4 = ms ? window.setTimeout(hide, ms) : 0;
   } };
 }
 function focusError(ctrl, row3, col) {
@@ -78769,10 +78780,10 @@ async function load2(id) {
     return null;
   }
 }
-async function preview(id, quiet = false) {
+async function preview(id, quiet2 = false) {
   const r = await load2(id);
   if (!r || !rows.some((x) => x.id === id) || r.docId !== docId()) return;
-  showPreview(asProposal(r), quiet);
+  showPreview(asProposal(r), quiet2);
   render2();
 }
 async function settle(id, status, reason = "") {
@@ -83498,8 +83509,8 @@ function schNetName(ids) {
     const l = items.find((it) => it.kind === kind);
     if (l) return KiCadCanvas.str(l.node[1]);
   }
-  const sym2 = items.find((it) => it.kind === "symbol" && it.ref && !it.ref.startsWith("#"));
-  return sym2 ? `Net-(${sym2.ref})` : "unnamed net";
+  const sym = items.find((it) => it.kind === "symbol" && it.ref && !it.ref.startsWith("#"));
+  return sym ? `Net-(${sym.ref})` : "unnamed net";
 }
 function netIds(a) {
   const d = kdoc2();
@@ -85186,8 +85197,8 @@ function symbolNodeOf(src, name) {
   if (head2(n2) !== "symbol") throw new Error("not a library symbol");
   return n2;
 }
-function propertyNamed(sym2, name) {
-  for (const p of kids4(sym2, "property")) if (text(p[1]) === name) return p;
+function propertyNamed(sym, name) {
+  for (const p of kids4(sym, "property")) if (text(p[1]) === name) return p;
   return null;
 }
 function flattenSymbol(symbol, parents = []) {
@@ -85227,14 +85238,14 @@ function firstIndex(n2, keys) {
   }
   return n2.length;
 }
-function insertProperty(sym2, prop2) {
+function insertProperty(sym, prop2) {
   let at5 = -1;
-  for (let i = 1; i < sym2.length; i++) {
-    const c = sym2[i];
+  for (let i = 1; i < sym.length; i++) {
+    const c = sym[i];
     if (isList8(c) && c[0] === "property") at5 = i;
   }
-  if (at5 < 0) at5 = firstIndex(sym2, ["symbol"]) - 1;
-  sym2.splice(at5 + 1, 0, prop2);
+  if (at5 < 0) at5 = firstIndex(sym, ["symbol"]) - 1;
+  sym.splice(at5 + 1, 0, prop2);
 }
 function unitOfSubSymbol(sub2) {
   const m = /_(\d+)_(\d+)$/.exec(sub2);
@@ -85347,8 +85358,8 @@ var init_core2 = __esm({
     mm2 = (v, digits = 4) => String(+(+v).toFixed(digits) || 0);
     MANDATORY_FIELDS = ["Reference", "Value", "Footprint", "Datasheet", "Description"];
     isMeta = (name) => name.startsWith("ki_");
-    propertyText = (sym2, name) => {
-      const p = propertyNamed(sym2, name);
+    propertyText = (sym, name) => {
+      const p = propertyNamed(sym, name);
       return p ? text(p[2]) : "";
     };
     FP_UUID_BEFORE_EFFECTS = /* @__PURE__ */ new Set(["property", "fp_text", "fp_text_box"]);
@@ -85570,16 +85581,16 @@ async function projectFetch(kind, id, docs) {
     const tree = K7().parse(await docText(d.docId));
     if (!tree) continue;
     const all2 = K7().kids(tree, "symbol"), byName2 = new Map(all2.map((s2) => [String(s2[1]), s2]));
-    const sym2 = byName2.get(name);
-    if (!sym2) continue;
+    const sym = byName2.get(name);
+    if (!sym) continue;
     const parents = [];
-    for (let e = K7().kid(sym2, "extends"); e && parents.length < 16; ) {
+    for (let e = K7().kid(sym, "extends"); e && parents.length < 16; ) {
       const p = byName2.get(String(e[1]));
       if (!p) break;
       parents.push(p);
       e = K7().kid(p, "extends");
     }
-    return { libId: id, symbol: K7().serialize(flattenSymbol(sym2, parents)) };
+    return { libId: id, symbol: K7().serialize(flattenSymbol(sym, parents)) };
   }
   throw new Error(`${lib} has no symbol ${name}`);
 }
@@ -85956,7 +85967,7 @@ function ensureCss3() {
 async function openLibTables(opts2) {
   const proj = appState2.project;
   if (!proj) return;
-  const kind = opts2.kind, sym2 = kind === "symbol", tableFile = tableFileName(kind);
+  const kind = opts2.kind, sym = kind === "symbol", tableFile = tableFileName(kind);
   const tableDoc = proj.docs.find((d) => d.path === tableFile);
   let projText = "";
   if (tableDoc) {
@@ -86016,7 +86027,7 @@ async function openLibTables(opts2) {
       { key: "status", label: " ", type: "icon", width: 24, icon: statusCell(p) },
       lock({ key: "enabled", label: "Enable", type: "bool", width: 52 })
     ];
-    if (sym2) cols.push(lock({ key: "visible", label: "Show", type: "bool", width: 46 }));
+    if (sym) cols.push(lock({ key: "visible", label: "Show", type: "bool", width: 46 }));
     cols.push(
       lock({ key: "nickname", label: "Nickname", width: 150 }),
       lock({ key: "uri", label: "Library Path", width: 300, button: p.readOnly ? void 0 : (r) => ({ icon: () => "small_folder", title: () => "Browse...", run: (_v, set2) => {
@@ -86032,7 +86043,7 @@ async function openLibTables(opts2) {
   };
   const browsePath = async (r, set2) => {
     const io = plugins(kind).find((x) => x.type === r.type);
-    const entry2 = { type: r.type, folder: !!(io && io.folder) || sym2 && r.type === "KiCad" && /\.kicad_symdir$|\/$/.test(r.uri) };
+    const entry2 = { type: r.type, folder: !!(io && io.folder) || sym && r.type === "KiCad" && /\.kicad_symdir$|\/$/.test(r.uri) };
     const cands = projectCandidates(kind, entry2, projectPaths());
     const cur0 = projectPath(r.uri);
     const got = await pickProjectPaths(r.type === TABLE_TYPE ? "Select Library Table" : `Select ${r.type} Library`, cands, { select: cur0 || void 0 });
@@ -86248,18 +86259,18 @@ async function openLibTables(opts2) {
     const g2 = pages[0];
     if (!g2) return;
     if (g2.rows.length && !await isOK("This action will reset your global library table on disk and cannot be undone.")) return;
-    await okBox("Message", `The global library table is the KiCad ${sym2 ? "symbol" : "footprint"} library set this server provides. It is already the default table.`);
+    await okBox("Message", `The global library table is the KiCad ${sym ? "symbol" : "footprint"} library set this server provides. It is already the default table.`);
   };
   const onMigrate = async () => {
     const p = pageOf();
     if (!p.grid || p.readOnly) return;
-    const skip = /* @__PURE__ */ new Set(["KiCad", TABLE_TYPE, ...sym2 ? ["Database", "HTTP"] : []]);
+    const skip = /* @__PURE__ */ new Set(["KiCad", TABLE_TYPE, ...sym ? ["Database", "HTTP"] : []]);
     const rows3 = p.grid.selectedRows().filter((i) => p.rows[i] && !skip.has(p.rows[i].type));
     if (!rows3.length) {
       await okBox("Message", "Select one or more rows containing libraries to save as current KiCad format.");
       return;
     }
-    const msg = rows3.length === 1 ? sym2 ? `Save '${p.rows[rows3[0]].nickname}' as current KiCad format (*.kicad_sym) and replace legacy entry in table?` : `Save '${p.rows[rows3[0]].nickname}' as current KiCad format and replace entry in table?` : sym2 ? `Save ${rows3.length} libraries as current KiCad format (*.kicad_sym) and replace legacy entries in table?` : `Save ${rows3.length} libraries as current KiCad format and replace entries in table?`;
+    const msg = rows3.length === 1 ? sym ? `Save '${p.rows[rows3[0]].nickname}' as current KiCad format (*.kicad_sym) and replace legacy entry in table?` : `Save '${p.rows[rows3[0]].nickname}' as current KiCad format and replace entry in table?` : sym ? `Save ${rows3.length} libraries as current KiCad format (*.kicad_sym) and replace legacy entries in table?` : `Save ${rows3.length} libraries as current KiCad format and replace entries in table?`;
     if (!await isOK(msg)) return;
     for (const i of rows3) {
       const r = p.rows[i];
@@ -86268,13 +86279,13 @@ async function openLibTables(opts2) {
         await okBox("Error", `Library '${r.uri}' not found.`);
         continue;
       }
-      const target2 = sym2 ? path2.replace(/\.[^./]*$/, "") + ".kicad_sym" : path2.replace(/\.[^./]*$/, "") + ".pretty";
+      const target2 = sym ? path2.replace(/\.[^./]*$/, "") + ".kicad_sym" : path2.replace(/\.[^./]*$/, "") + ".pretty";
       if (projectPaths().some((x) => x === target2 || x.startsWith(target2 + "/"))) {
-        const c = await choiceBox("Migrate Library", sym2 ? `File '${target2}' already exists. Do you want overwrite this file?` : `Folder '${target2}' already exists. Do you want overwrite any existing footprints?`, ["Cancel", "No", "Yes"], { def: 2, esc: 0 });
+        const c = await choiceBox("Migrate Library", sym ? `File '${target2}' already exists. Do you want overwrite this file?` : `Folder '${target2}' already exists. Do you want overwrite any existing footprints?`, ["Cancel", "No", "Yes"], { def: 2, esc: 0 });
         if (c.index === 0) return;
         if (c.index === 1) continue;
       }
-      await okBox("Error", (sym2 ? `Failed to save symbol library file '${target2}'.` : `Failed to save footprint library file '${target2}'.`) + `
+      await okBox("Error", (sym ? `Failed to save symbol library file '${target2}'.` : `Failed to save footprint library file '${target2}'.`) + `
 
 The web editor cannot read ${r.type} libraries; migrate this one in KiCad.`);
     }
@@ -86306,11 +86317,11 @@ The web editor cannot read ${r.type} libraries; migrate this one in KiCad.`);
         items.push({ label: "Deactivate Selected", run: setAll("enabled", false) });
         block = true;
       }
-      if (sym2 && anyHid) {
+      if (sym && anyHid) {
         items.push({ label: "Set Visible Flag", run: setAll("visible", true) });
         block = true;
       }
-      if (sym2 && anyVis) {
+      if (sym && anyVis) {
         items.push({ label: "Unset Visible Flag", run: setAll("visible", false) });
         block = true;
       }
@@ -86356,7 +86367,7 @@ The web editor cannot read ${r.type} libraries; migrate this one in KiCad.`);
     const sel = g2.selectedRows();
     if (!sel.length) return;
     try {
-      await navigator.clipboard.writeText(copyRows(sel.map((i) => p.rows[i]), sym2));
+      await navigator.clipboard.writeText(copyRows(sel.map((i) => p.rows[i]), sym));
     } catch {
     }
     if (cut && !p.readOnly) {
@@ -86384,7 +86395,7 @@ The web editor cannot read ${r.type} libraries; migrate this one in KiCad.`);
       if (row3 >= p.rows.length) row3 = p.rows.length;
       const startCol = focus && focus.dataset && focus.dataset.col ? Math.max(0, TEXT_COLS.indexOf(focus.dataset.col)) : TEXT_COLS.indexOf("nickname");
       const cells2 = pasteCells2(text3);
-      const cols = sym2 ? cells2 : cells2.map((l) => startCol <= 1 ? [...l.slice(0, 1 - startCol), "1", ...l.slice(1 - startCol)] : l);
+      const cols = sym ? cells2 : cells2.map((l) => startCol <= 1 ? [...l.slice(0, 1 - startCol), "1", ...l.slice(1 - startCol)] : l);
       applyPaste(p.rows, cols, row3, startCol, blankRow);
     }
     p.grid.refresh();
@@ -86394,7 +86405,7 @@ The web editor cannot read ${r.type} libraries; migrate this one in KiCad.`);
   const written = /* @__PURE__ */ new Set();
   const savePage = async (p) => {
     if (p.readOnly || !p.path) return true;
-    const v = verifyRows(p.rows, sym2);
+    const v = verifyRows(p.rows, sym);
     if (v.error) {
       select2(pages.indexOf(p));
       if (p.grid && v.row !== void 0) {
@@ -86426,7 +86437,7 @@ The web editor cannot read ${r.type} libraries; migrate this one in KiCad.`);
   const saveAll = async () => {
     for (const p of pages) {
       if (p.readOnly) continue;
-      const v = verifyRows(p.rows, sym2);
+      const v = verifyRows(p.rows, sym);
       if (v.error) {
         select2(pages.indexOf(p));
         p.rows.splice(0, p.rows.length, ...v.rows);
@@ -86447,11 +86458,11 @@ The web editor cannot read ${r.type} libraries; migrate this one in KiCad.`);
   let closing = false;
   let dlgApi = null;
   KD().open({
-    title: sym2 ? "Symbol Libraries" : "Footprint Libraries",
+    title: sym ? "Symbol Libraries" : "Footprint Libraries",
     width: 1e3,
     cls: "kd-wide kd-libtable kd-nowrap",
     readOnly: ro,
-    geomKey: sym2 ? "DIALOG_EDIT_LIBRARY_TABLES:sym" : "DIALOG_EDIT_LIBRARY_TABLES:fp",
+    geomKey: sym ? "DIALOG_EDIT_LIBRARY_TABLES:sym" : "DIALOG_EDIT_LIBRARY_TABLES:fp",
     build(body, a) {
       dlgApi = a;
       body.append(nb);
@@ -89856,6 +89867,160 @@ var init_fonts = __esm({
   }
 });
 
+// web/domains/pcb/editor/pcbdialogs/update-pcb.ts
+function rootSchematicOf2(docs) {
+  const sch = docs.filter((d) => d.docType === "kicad_sch");
+  if (!sch.length) return null;
+  const pro = docs.find((d) => d.docType === "kicad_pro");
+  const stem3 = (p) => p.replace(/\.[^./]+$/, "");
+  const board3 = docs.find((d) => d.docId === state.docId);
+  return pro && sch.find((d) => stem3(d.path) === stem3(pro.path)) || board3 && sch.find((d) => stem3(d.path) === stem3(board3.path)) || sch.slice().sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
+}
+async function projectNetlist() {
+  const docs = projectDocs2(), root5 = rootSchematicOf2(docs);
+  if (!root5) return { error: "This project has no schematic." };
+  const sch = CollabTools.sch;
+  const helpers2 = sch && sch._;
+  if (!helpers2 || !helpers2.symbolPins) return { error: "The schematic tools are not loaded." };
+  const files = /* @__PURE__ */ new Map();
+  await Promise.all(docs.filter((d) => d.docType === "kicad_sch").map(async (d) => {
+    try {
+      const live3 = await liveDocument(d.docId);
+      const doc2 = KiCadCanvas.parseDoc(live3.file, "kicad_sch");
+      for (const op of live3.ops) for (const c of op.changes || []) {
+        try {
+          KiCadCanvas.applyChange(doc2, c, SCH_IU2);
+        } catch (e) {
+        }
+      }
+      const m = /\(uuid\s+"?([0-9a-fA-F-]{36})"?\s*\)/.exec(live3.file.slice(0, 4e3));
+      files.set(d.path, { doc: doc2, uuid: m ? m[1] : "", file: d.path });
+    } catch (e) {
+    }
+  }));
+  let pro = null;
+  try {
+    const proDoc2 = docs.find((d) => d.docType === "kicad_pro");
+    const text3 = E.proSettings || (proDoc2 ? await fetch(`/api/docs/${proDoc2.docId}/content`).then((r) => r.ok ? r.text() : "") : "");
+    pro = text3 ? JSON.parse(text3) : null;
+  } catch (e) {
+    pro = null;
+  }
+  const tops = topLevelSheetsOf(pro, docs, docs).map((t) => ({ sheet: files.get(t.doc.path), name: t.name, uuid: t.uuid, path: t.doc.path })).filter((t) => !!t.sheet);
+  const rootFile = tops.length > 1 ? tops[0].sheet : files.get(root5.path);
+  if (!rootFile) return { error: "The root schematic could not be read." };
+  const resolve2 = (file, parent) => {
+    const dir = parent.file.split("/").slice(0, -1);
+    const parts = [...dir, ...file.split("/")].filter((p) => p && p !== ".");
+    const out2 = [];
+    for (const p of parts) {
+      if (p === "..") out2.pop();
+      else out2.push(p);
+    }
+    return files.get(out2.join("/")) || files.get(file) || null;
+  };
+  const netlist = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve2, { symbolPins: helpers2.symbolPins, isPower: (d, it) => helpers2.isPowerSymbol(d, String((KiCadCanvas.kid(it.node, "lib_id") || [])[1])) }, root5.path.split("/").pop().replace(/\.kicad_sch$/, ""));
+  return { netlist, root: tops.length > 1 ? tops[0].path : root5.path, files };
+}
+var SCH_IU2;
+var init_update_pcb = __esm({
+  "web/domains/pcb/editor/pcbdialogs/update-pcb.ts"() {
+    "use strict";
+    init_state();
+    init_appstore();
+    init_projectfile();
+    init_canvas();
+    init_bootpick();
+    init_ui();
+    SCH_IU2 = 1e4;
+  }
+});
+
+// web/domains/pcb/editor/attention.ts
+function setAttention(id, why2) {
+  const cur2 = store.get().attention || {};
+  if ((cur2[id] || null) === why2) return;
+  const next = Object.assign({}, cur2);
+  if (why2) next[id] = why2;
+  else delete next[id];
+  store.set({ attention: next });
+}
+async function pendingBoardUpdates(board3) {
+  const docs = projectDocs2();
+  if (!docs.some((d) => d.docType === "kicad_sch")) return null;
+  const target2 = NL().projectBoardPath(docs);
+  if (!target2.doc) return null;
+  let doc2 = board3 || null;
+  if (!doc2) {
+    const live3 = await liveDocument(target2.doc.docId);
+    doc2 = KiCadCanvas.parseDoc(live3.file, "kicad_pcb");
+    for (const op of live3.ops) for (const c of op.changes || []) {
+      try {
+        KiCadCanvas.applyChange(doc2, c, E.IU);
+      } catch (e) {
+      }
+    }
+  }
+  const res = await projectNetlist();
+  if ("error" in res) return null;
+  const plan2 = NL().planUpdate(doc2, res.netlist, { replaceFootprints: true, updateFields: true, footprintFor: () => null });
+  const blocked = plan2.report.filter((l) => /^Cannot (add|update) /.test(l.text) && !/no footprint assigned/.test(l.text)).length;
+  return plan2.modified.size + plan2.added.length + plan2.removed.length + blocked;
+}
+async function check2() {
+  if (running2 || document.hidden || state.view !== "editor" || !state.project) return;
+  running2 = true;
+  lastRun = Date.now();
+  try {
+    const onBoard = !!E.kdoc && E.kdoc.type === "pcb" && E.DOC_TYPE !== "footprint";
+    const n2 = await pendingBoardUpdates(onBoard ? E.kdoc : null);
+    setAttention(PCB_STALE, n2 ? `The schematic has ${n2} change${n2 === 1 ? "" : "s"} the board does not have yet. Run Update PCB from Schematic (F8).` : null);
+  } catch (e) {
+  } finally {
+    running2 = false;
+  }
+}
+function watchAttention() {
+  if (timer3) return;
+  timer3 = window.setInterval(() => {
+    if (state.view !== "editor" || !state.project) {
+      if (lastKey3) {
+        lastKey3 = "";
+        setAttention(PCB_STALE, null);
+      }
+      return;
+    }
+    const key3 = `${state.project.projectId}|${state.docId}|${E.editsSeen}`;
+    if (key3 !== lastKey3) {
+      lastKey3 = key3;
+      quiet = Date.now();
+      return;
+    }
+    if (quiet && Date.now() - quiet > 4e3 || Date.now() - lastRun > 6e4) {
+      quiet = 0;
+      void check2();
+    }
+  }, 2e3);
+}
+var PCB_STALE, GITHUB_PULL, timer3, quiet, lastKey3, lastRun, running2;
+var init_attention = __esm({
+  "web/domains/pcb/editor/attention.ts"() {
+    "use strict";
+    init_appstore();
+    init_state();
+    init_projectfile();
+    init_canvas();
+    init_update_pcb();
+    PCB_STALE = "updatePcbFromSchematic";
+    GITHUB_PULL = "githubPull";
+    timer3 = 0;
+    quiet = 0;
+    lastKey3 = "";
+    lastRun = 0;
+    running2 = false;
+  }
+});
+
 // web/domains/pcb/editor/github-pull.ts
 function pullGithubChanges(projectId4) {
   return api4(`/api/projects/${projectId4}/github/pull`, { method: "POST", body: JSON.stringify({ automatic: true }) });
@@ -89867,7 +90032,7 @@ function githubPullNotice(projectId4, message) {
 }
 function watchGithubChanges(projectId4, update) {
   let stopped = false, busy = false, linked = true, lastNotice = "";
-  const check2 = async (focused = false) => {
+  const check3 = async (focused = false) => {
     if (stopped || busy || document.hidden || !linked && !focused || state.view !== "editor" || state.project?.projectId !== projectId4 || !state.me || E.viewOnly || E.pendingOps.size || E.drag || E.tool !== "select" || E.history || document.querySelector(".kd-overlay, [role='dialog']")) return;
     busy = true;
     try {
@@ -89875,6 +90040,7 @@ function watchGithubChanges(projectId4, update) {
       if (stopped || state.project?.projectId !== projectId4) return;
       linked = result.linked !== false;
       if (result.updated.length) await update(result);
+      setAttention(GITHUB_PULL, linked && result.skipped.length ? `GitHub has ${result.skipped.length} change${result.skipped.length === 1 ? "" : "s"} to pull that need${result.skipped.length === 1 ? "s" : ""} your review on the GitHub sync page.` : null);
       const notice = result.skipped.map((s2) => `${s2.path}: ${s2.reason}`).join("\n");
       if (notice && notice !== lastNotice) githubPullNotice(projectId4, "Some GitHub changes need review before they can be pulled.");
       lastNotice = notice;
@@ -89886,16 +90052,17 @@ function watchGithubChanges(projectId4, update) {
     }
   };
   const focus = () => {
-    void check2(true);
+    void check3(true);
   };
-  const timer3 = setInterval(() => {
-    void check2();
+  const timer4 = setInterval(() => {
+    void check3();
   }, 6e4);
   window.addEventListener("focus", focus);
   document.addEventListener("visibilitychange", focus);
   return () => {
     stopped = true;
-    clearInterval(timer3);
+    clearInterval(timer4);
+    setAttention(GITHUB_PULL, null);
     window.removeEventListener("focus", focus);
     document.removeEventListener("visibilitychange", focus);
   };
@@ -89906,6 +90073,7 @@ var init_github_pull = __esm({
     init_appstore();
     init_state();
     init_util();
+    init_attention();
   }
 });
 
@@ -90411,12 +90579,14 @@ async function openEditor(id) {
         applyProjectDocs(info.docs);
       }
       if (pulled.skipped.length) githubPullNotice(id, "Some GitHub changes need review before they can be pulled.");
+      setAttention(GITHUB_PULL, pulled.linked !== false && pulled.skipped.length ? `GitHub has ${pulled.skipped.length} change${pulled.skipped.length === 1 ? "" : "s"} to pull that need${pulled.skipped.length === 1 ? "s" : ""} your review on the GitHub sync page.` : null);
     } catch {
       githubPullNotice(id, "Couldn't pull from GitHub. The editor is showing the last online version.");
     }
     if (state.project?.projectId !== id || state.view !== "editor") return;
     stopGithubWatch = watchGithubChanges(id, refreshFromGithub);
   }
+  watchAttention();
   publishDocs();
   loadHistory();
   const fp = fpParam();
@@ -91067,6 +91237,7 @@ var init_doc = __esm({
     init_pcbtools_loader();
     init_view();
     init_fonts();
+    init_attention();
     init_github_pull();
     docNav = { list: [], idx: -1, lock: false };
     stopGithubWatch = null;
@@ -91546,7 +91717,7 @@ function rotateSelected(delta) {
   drawSelection();
   renderProps();
 }
-function unlockedForEdit(ids, quiet = false) {
+function unlockedForEdit(ids, quiet2 = false) {
   if (isSch()) {
     const L = CollabTools.sch && CollabTools.sch._.isLockedItem, d = E.kdoc;
     return L && d ? ids.filter((id) => {
@@ -91557,7 +91728,7 @@ function unlockedForEdit(ids, quiet = false) {
   const m = CollabTools.pcb;
   if (!m || !m.unlockedIds || !E.kdoc) return ids;
   try {
-    return m.unlockedIds(toolCtx(), ids, quiet);
+    return m.unlockedIds(toolCtx(), ids, quiet2);
   } catch (e) {
     console.warn(e);
     return ids;
@@ -92828,6 +92999,27 @@ function rigid(id, vendor, nominal, inner, gaps, outer = 0.035) {
     source: vendor === "JLCPCB" ? jlc : pcbway
   };
 }
+function jlcBuild(id, rows3) {
+  const gaps = rows3.split("|").map((gap) => gap.split(",").map((sheet) => {
+    const [kind, t] = sheet.trim().split(" ");
+    const th = Number(t);
+    return kind === "c" ? core(th) : pp(kind, th, JLC_ER[kind]);
+  })).map((g2) => g2.length === 1 ? g2[0] : g2);
+  return { id, vendor: "JLCPCB", type: "rigid", nominal: 1.6, copper: [0.035, ...gaps.slice(1).map(() => 0.0152), 0.035], gaps, source: jlc };
+}
+function pcbway4(id, nominal, outer, inner, sheets2, c) {
+  const top2 = sheets2.map(([m, t, er]) => pp(m, t, er));
+  const gap = (g2) => g2.length === 1 ? g2[0] : g2;
+  return {
+    id,
+    vendor: "PCBWay",
+    type: "rigid",
+    nominal,
+    copper: [outer, inner, inner, outer],
+    gaps: [gap(top2), core(c), gap(top2.slice().reverse())],
+    source: pcbway
+  };
+}
 function applyFabStackup(build4, current) {
   const names2 = copperNames(build4.copper.length);
   const layers = [];
@@ -92837,8 +93029,11 @@ function applyFabStackup(build4, current) {
         layers.push({ name, type: "copper", thickness: build4.copper[index] });
         const gap = build4.gaps[index];
         if (gap) {
-          const [type, material2, thickness, epsilonR] = gap;
-          layers.push({ name: `dielectric ${index + 1}`, type, material: material2, thickness, epsilonR });
+          const sheets2 = Array.isArray(gap[0]) ? gap : [gap];
+          const [type, material2, thickness, epsilonR] = sheets2[0];
+          const layer4 = { name: `dielectric ${index + 1}`, type, material: material2, thickness, epsilonR };
+          if (sheets2.length > 1) layer4.subs = sheets2.slice(1).map(([kind, m, t, er]) => ({ thickness: t, material: m, epsilonR: er ?? 4.5, lossTangent: 0.02 }));
+          layers.push(layer4);
         }
       });
     }
@@ -92852,11 +93047,15 @@ function applyFabStackup(build4, current) {
   return layers;
 }
 function outer50Ohm(build4) {
-  const layers = applyFabStackup(build4, []).filter((l) => l.type === "copper" || l.name.startsWith("dielectric ")).map((l) => ({ name: l.name, copper: l.type === "copper", thickness: l.thickness ?? 0, er: l.epsilonR ?? 1 }));
+  const layers = applyFabStackup(build4, []).filter((l) => l.type === "copper" || l.name.startsWith("dielectric ")).map((l) => {
+    const sheets2 = [{ t: l.thickness ?? 0, er: l.epsilonR ?? 1 }, ...(l.subs || []).map((x) => ({ t: x.thickness, er: x.epsilonR }))];
+    const t = sheets2.reduce((a, x) => a + x.t, 0);
+    return { name: l.name, copper: l.type === "copper", thickness: t, er: t ? sheets2.reduce((a, x) => a + x.t * x.er, 0) / t : 1 };
+  });
   const trace = traceOn({ layers, assumed: false }, "F.Cu");
   return trace ? widthFor(trace, 50) : null;
 }
-var jlc, pcbway, jlcFlex, pcbwayFlex, BOARD_TYPES, core, pp, pi, sym, six, FAB_STACKUPS;
+var jlc, pcbway, jlcFlex, pcbwayFlex, BOARD_TYPES, core, pp, pi, six, JLC_ER, JLC_BUILDS, PCBWAY_BUILDS, FAB_STACKUPS;
 var init_fab_stackups = __esm({
   "web/domains/pcb/editor/pcbdialogs/fab-stackups.ts"() {
     "use strict";
@@ -92877,16 +93076,119 @@ var init_fab_stackups = __esm({
     core = (thickness) => ["core", "FR4", thickness, 4.6];
     pp = (material2, thickness, epsilonR) => ["prepreg", material2, thickness, epsilonR];
     pi = (thickness) => ["core", "Polyimide", thickness, 3.3];
-    sym = (outer, centre) => [outer, centre, outer];
     six = (outer, middle, centre) => [outer, middle, centre, middle, outer];
+    JLC_ER = { "7628": 4.4, "3313": 4.1, "1080": 3.91, "2116": 4.16, "2313": 4.5 };
+    JLC_BUILDS = [
+      ["JLC04161H-7628", "7628 0.2104 | c 1.065 | 7628 0.2104"],
+      ["JLC04161H-3313", "3313 0.0994 | c 1.265 | 3313 0.0994"],
+      ["JLC04161H-1080", "1080 0.0764 | c 1.265 | 1080 0.0764"],
+      ["JLC04161H-2116", "2116 0.1164 | c 1.265 | 2116 0.1164"],
+      ["JLC04161H-7628A", "7628 0.218, 1080 0.0764 | c 0.865 | 1080 0.0764, 7628 0.218"],
+      ["JLC04161H-3313A", "3313 0.107, 3313 0.0994 | c 1.065 | 3313 0.0994, 3313 0.107"],
+      ["JLC04161H-1080A", "1080 0.084, 1080 0.0764 | c 1.065 | 1080 0.0764, 1080 0.084"],
+      ["JLC04161H-7628B", "7628 0.218, 7628 0.218, 2116 0.1164 | c 0.4 | 2116 0.1164, 7628 0.218, 7628 0.218"],
+      ["JLC04161H-2116A", "2116 0.124, 7628 0.218, 2116 0.1164 | c 0.6 | 2116 0.1164, 7628 0.218, 2116 0.124"],
+      ["JLC04161H-2116B", "2116 0.124, 7628 0.2104 | c 0.865 | 7628 0.2104, 2116 0.124"],
+      ["JLC04161H-2116C", "2116 0.124, 1080 0.0764 | c 1.065 | 1080 0.0764, 2116 0.124"],
+      ["JLC04161H-1080B", "1080 0.084, 1080 0.084, 1080 0.0764 | c 1.065 | 1080 0.0764, 1080 0.084, 1080 0.084"],
+      ["JLC04161H-7628G", "7628 0.218, 7628 0.218, 1080 0.0764 | c 0.5 | 1080 0.0764, 7628 0.218, 7628 0.218"],
+      ["JLC04161H-7628E", "7628 0.218, 7628 0.2104 | c 0.6 | 7628 0.2104, 7628 0.218"],
+      ["JLC04161H-2116D", "2116 0.124, 7628 0.2104 | c 0.7 | 7628 0.2104, 2116 0.124"],
+      ["JLC04161H-7628F", "7628 0.218, 7628 0.218, 7628 0.2104 | c 0.25 | 7628 0.2104, 7628 0.218, 7628 0.218"],
+      ["JLC04161H-2116E", "2116 0.124, 2116 0.1164 | c 0.865 | 2116 0.1164, 2116 0.124"],
+      ["JLC04161H-7628C", "7628 0.218, 7628 0.218, 7628 0.2104 | c 0.15 | 7628 0.2104, 7628 0.218, 7628 0.218"],
+      ["JLC06161H-3313", "3313 0.0994 | c 0.55 | 2116 0.1088 | c 0.55 | 3313 0.0994"],
+      ["JLC06161H-3313A", "3313 0.0994 | c 0.55 | 2116 0.1088 | c 0.55 | 3313 0.0994"],
+      ["JLC06161H-7628", "7628 0.2104 | c 0.4 | 7628 0.2028 | c 0.4 | 7628 0.2104"],
+      ["JLC06161H-7628D", "7628 0.218, 7628 0.2104 | c 0.2 | 7628 0.2028 | c 0.2 | 7628 0.2104, 7628 0.218"],
+      ["JLC06161H-1080", "1080 0.0764 | c 0.55 | 7628 0.2104 | c 0.55 | 1080 0.0764"],
+      ["JLC06161H-2116A", "2116 0.1164 | c 0.13 | 2116 0.1164, c 0.7, 2116 0.1164 | c 0.13 | 2116 0.1164"],
+      ["JLC06161H-1080A", "1080 0.0764 | c 0.6 | 3313 0.0994 | c 0.6 | 1080 0.0764"],
+      ["JLC06161H-3313C", "3313 0.107, 1080 0.0764 | c 0.4 | 1080 0.0764, 1080 0.0764 | c 0.4 | 1080 0.0784, 3313 0.107"],
+      ["JLC06161H-1080B", "1080 0.0764 | c 0.1 | 7628 0.2104, c 0.7, 7628 0.2104 | c 0.1 | 1080 0.0764"],
+      ["JLC06161H-3313B", "3313 0.0994 | c 0.4 | 7628 0.2104, 7628 0.2104 | c 0.4 | 3313 0.0994"],
+      ["JLC06161H-3313E", "3313 0.0994 | c 0.1 | 7628 0.2104, c 0.7, 7628 0.2104 | c 0.1 | 3313 0.0994"],
+      ["JLC06161H-1080C", "1080 0.0764 | c 0.075 | 7628 0.2104, c 0.7, 7628 0.2104 | c 0.075 | 1080 0.0764"],
+      ["JLC06161H-2116B", "2116 0.1164 | c 0.5 | 1080 0.0764, 1080 0.0764 | c 0.5 | 2116 0.1164"],
+      ["JLC06161H-2116", "2116 0.127, 2313 0.0964 | c 0.3 | 7628 0.2084, 7628 0.2084 | c 0.3 | 2313 0.0964, 2116 0.127"],
+      ["JLC06161H-7628B", "7628 0.218, 1080 0.0764 | c 0.35 | 1080 0.0764, 1080 0.0764 | c 0.35 | 1080 0.0764, 7628 0.218"],
+      ["JLC06161H-3313D", "3313 0.107, 1080 0.0764 | c 0.25 | 7628 0.2104, 2116 0.124, 7628 0.2104 | c 0.25 | 1080 0.0764, 3313 0.107"],
+      ["JLC06161H-2116C", "2116 0.127, 2116 0.1194 | c 0.3 | 2116 0.1194, 2116 0.127, 2116 0.1194 | c 0.3 | 2116 0.1194, 2116 0.127"],
+      ["JLC06161H-7628A", "7628 0.218, 7628 0.218, 1080 0.0764 | c 0.1 | 2116 0.1164, 2116 0.1164 | c 0.1 | 1080 0.0764, 7628 0.218, 7628 0.218"]
+    ];
+    PCBWAY_BUILDS = [
+      ["PCBWay 4L #1 \xB7 70% residual copper", 1.6, 0.035, 0.035, [["7628 RC46%", 0.1855, 4.74]], 1.03],
+      ["PCBWay 4L #2 \xB7 50% residual copper", 1.6, 0.035, 0.035, [["7628 RC46%", 0.1785, 4.74]], 1.03],
+      ["PCBWay 4L #3 \xB7 30% residual copper", 1.6, 0.035, 0.035, [["7628 RC46%", 0.1715, 4.74]], 1.03],
+      ["PCBWay 4L #4 \xB7 70% residual copper", 1.6, 0.07, 0.035, [["7628 RC46%", 0.1855, 4.74]], 0.93],
+      ["PCBWay 4L #5 \xB7 50% residual copper", 1.6, 0.07, 0.035, [["7628 RC46%", 0.1785, 4.74]], 0.93],
+      ["PCBWay 4L #6 \xB7 30% residual copper", 1.6, 0.07, 0.035, [["7628 RC46%", 0.1715, 4.74]], 0.93],
+      ["PCBWay 4L #7 \xB7 70% residual copper", 1.6, 0.07, 0.0525, [["7628 RC46%", 0.1803, 4.74]], 0.895],
+      ["PCBWay 4L #8 \xB7 70% residual copper", 2.4, 0.035, 0.035, [["2116 RC58%", 0.1195, 4.45]], 1.93],
+      ["PCBWay 4L #9 \xB7 50% residual copper", 2.4, 0.035, 0.035, [["7628 RC46%", 0.1785, 4.74]], 1.87],
+      ["PCBWay 4L #10 \xB7 30% residual copper", 2.4, 0.035, 0.035, [["7628 RC46%", 0.1715, 4.74]], 1.87],
+      ["PCBWay 4L #11 \xB7 70% residual copper", 2, 0.035, 0.035, [["2116 RC58%", 0.1195, 4.45]], 1.53],
+      ["PCBWay 4L #12 \xB7 50% residual copper", 2, 0.035, 0.035, [["2116 RC58%", 0.1125, 4.45]], 1.53],
+      ["PCBWay 4L #13 \xB7 30% residual copper", 2, 0.035, 0.035, [["7628 RC46%", 0.1715, 4.74]], 1.43],
+      ["PCBWay 4L #14 \xB7 70% residual copper", 2, 0.07, 0.035, [["2116 RC58%", 0.1195, 4.45]], 1.53],
+      ["PCBWay 4L #15 \xB7 50% residual copper", 2, 0.07, 0.035, [["2116 RC58%", 0.1125, 4.45]], 1.53],
+      ["PCBWay 4L #16 \xB7 30% residual copper", 2, 0.07, 0.035, [["7628 RC46%", 0.1715, 4.74]], 1.43],
+      ["PCBWay 4L #17 \xB7 70% residual copper", 1.2, 0.035, 0.035, [["7628 RC46%", 0.1855, 4.74]], 0.63],
+      ["PCBWay 4L #18 \xB7 50% residual copper", 1.2, 0.035, 0.035, [["7628 RC46%", 0.1785, 4.74]], 0.63],
+      ["PCBWay 4L #19 \xB7 30% residual copper", 1.2, 0.035, 0.035, [["7628 RC46%", 0.1715, 4.74]], 0.63],
+      ["PCBWay 4L #20 \xB7 70% residual copper", 1.2, 0.07, 0.035, [["2116 RC58%", 0.1195, 4.45]], 0.73],
+      ["PCBWay 4L #21 \xB7 50% residual copper", 1.2, 0.07, 0.035, [["7628 RC46%", 0.1785, 4.74]], 0.63],
+      ["PCBWay 4L #22 \xB7 30% residual copper", 1.2, 0.07, 0.035, [["7628 RC46%", 0.1715, 4.74]], 0.63],
+      ["PCBWay 4L #23 \xB7 70% residual copper", 1, 0.035, 0.035, [["7628 RC46%", 0.1855, 4.74]], 0.43],
+      ["PCBWay 4L #24 \xB7 50% residual copper", 1, 0.035, 0.035, [["7628 RC46%", 0.1785, 4.74]], 0.43],
+      ["PCBWay 4L #25 \xB7 30% residual copper", 1, 0.035, 0.035, [["7628 RC46%", 0.1715, 4.74]], 0.43],
+      ["PCBWay 4L #26 \xB7 70% residual copper", 1, 0.07, 0.035, [["3313 RC58%", 0.0925, 4.45]], 0.53],
+      ["PCBWay 4L #27 \xB7 50% residual copper", 1, 0.07, 0.035, [["2116 RC58%", 0.1125, 4.45]], 0.53],
+      ["PCBWay 4L #28 \xB7 30% residual copper", 1, 0.07, 0.035, [["2116 RC58%", 0.1055, 4.45]], 0.53],
+      ["PCBWay 4L #29 \xB7 70% residual copper", 0.8, 0.035, 0.035, [["7628 RC46%", 0.1855, 4.74]], 0.23],
+      ["PCBWay 4L #30 \xB7 50% residual copper", 0.8, 0.035, 0.035, [["7628 RC46%", 0.1785, 4.74]], 0.23],
+      ["PCBWay 4L #31 \xB7 30% residual copper", 0.8, 0.035, 0.035, [["7628 RC46%", 0.1715, 4.74]], 0.23],
+      ["PCBWay 4L #32 \xB7 70% residual copper", 0.8, 0.07, 0.035, [["7628 RC46%", 0.1855, 4.74]], 0.23],
+      ["PCBWay 4L #33 \xB7 50% residual copper", 0.8, 0.07, 0.035, [["7628 RC46%", 0.1785, 4.74]], 0.23],
+      ["PCBWay 4L #34 \xB7 30% residual copper", 0.8, 0.07, 0.035, [["7628 RC46%", 0.1715, 4.74]], 0.23],
+      ["PCBWay 4L #35 \xB7 70% residual copper", 0.6, 0.035, 0.035, [["3313 RC58%", 0.0925, 4.45]], 0.23],
+      ["PCBWay 4L #36 \xB7 50% residual copper", 0.6, 0.035, 0.035, [["3313 RC58%", 0.0855, 4.45]], 0.23],
+      ["PCBWay 4L #37 \xB7 70% residual copper", 0.6, 0.07, 0.035, [["3313 RC58%", 0.0925, 4.45]], 0.13],
+      ["PCBWay 4L #38 \xB7 50% residual copper", 0.6, 0.07, 0.035, [["2116 RC58%", 0.1125, 4.45]], 0.13],
+      ["PCBWay 4L #39 \xB7 30% residual copper", 0.6, 0.07, 0.035, [["2116 RC58%", 0.1055, 4.45]], 0.13],
+      ["PCBWay 4L #40 \xB7 70% residual copper", 0.4, 0.035, 0.035, [["1080 RC68%", 0.0705, 4.21]], 0.065],
+      ["PCBWay 4L #41 \xB7 50% residual copper", 0.4, 0.035, 0.035, [["1080 RC68%", 0.0635, 4.21]], 0.065],
+      ["PCBWay 4L #42 \xB7 30% residual copper", 0.4, 0.035, 0.035, [["1080 RC68%", 0.0565, 4.21]], 0.065],
+      ["PCBWay 4L #43 \xB7 50% residual copper", 2.4, 0.07, 0.035, [["2116 RC58%", 0.1125, 4.45]], 1.93],
+      ["PCBWay 4L #44 \xB7 50% residual copper", 1.6, 0.07, 0.0525, [["2116 RC58%", 0.1169, 4.45], ["2116 RC58%", 0.1169, 4.45]], 0.795],
+      ["PCBWay 4L #45 \xB7 30% residual copper", 1.6, 0.07, 0.0525, [["1080 RC68%", 0.0703, 4.21], ["7628 RC46%", 0.17, 4.74]], 0.795],
+      ["PCBWay 4L #46 \xB7 70% residual copper", 1.6, 0.07, 0.07, [["2116 RC58%", 0.1216, 4.45], ["7628 RC46%", 0.1834, 4.74]], 0.63],
+      ["PCBWay 4L #47 \xB7 50% residual copper", 1.6, 0.07, 0.07, [["2116 RC58%", 0.116, 4.45], ["7628 RC46%", 0.175, 4.74]], 0.63],
+      ["PCBWay 4L #48 \xB7 30% residual copper", 1.6, 0.07, 0.07, [["7628 RC46%", 0.1715, 4.74], ["7628 RC46%", 0.1715, 4.74]], 0.63],
+      ["PCBWay 4L #49 \xB7 90% residual copper", 1.6, 0.105, 0.105, [["2116 RC58%", 0.1247, 4.45], ["2116 RC58%", 0.1247, 4.45]], 0.59],
+      ["PCBWay 4L #50 \xB7 90% residual copper", 1.6, 0.105, 0.105, [["7628 RC46%", 0.1908, 4.74], ["7628 RC46%", 0.1908, 4.74]], 0.34],
+      ["PCBWay 4L #51 \xB7 90% residual copper", 1.6, 0.105, 0.105, [["2116 RC58%", 0.1258, 4.45], ["7628 RC46%", 0.1897, 4.74]], 0.47],
+      ["PCBWay 4L #52 \xB7 90% residual copper", 1.6, 0.14, 0.14, [["7628 RC46%", 0.189, 4.74], ["7628 RC46%", 0.189, 4.74]], 0.23],
+      ["PCBWay 4L #53 \xB7 90% residual copper", 1.6, 0.14, 0.14, [["3313 RC58%", 0.0968, 4.45], ["2116 RC58%", 0.1222, 4.45]], 0.52],
+      ["PCBWay 4L #54 \xB7 90% residual copper", 1.6, 0.14, 0.14, [["2116 RC58%", 0.1244, 4.45], ["7628 RC46%", 0.1876, 4.74]], 0.32],
+      ["PCBWay 4L #55 \xB7 90% residual copper", 1.6, 0.175, 0.175, [["3313 RC58%", 0.1008, 4.45], ["7628 RC46%", 0.1847, 4.74]], 0.32],
+      ["PCBWay 4L #56 \xB7 90% residual copper", 1.6, 0.175, 0.175, [["3313 RC58%", 0.0993, 4.45], ["2116 RC58%", 0.1272, 4.45]], 0.45],
+      ["PCBWay 4L #58 \xB7 70% residual copper", 2.4, 0.07, 0.035, [["3313 RC58%", 0.0994, 4.45], ["7628 RC46%", 0.1891, 4.74]], 1.53],
+      ["PCBWay 4L #59 \xB7 50% residual copper", 2.4, 0.07, 0.035, [["2116 RC58%", 0.123, 4.45], ["7628 RC46%", 0.1855, 4.74]], 1.53],
+      ["PCBWay 4L #60 \xB7 30% residual copper", 2.4, 0.07, 0.035, [["2116 RC58%", 0.1202, 4.45], ["7628 RC46%", 0.1813, 4.74]], 1.53],
+      ["PCBWay 4L #61 \xB7 70% residual copper", 2.4, 0.07, 0.0525, [["7628 RC46%", 0.1882, 4.74], ["7628 RC46%", 0.1882, 4.74]], 1.395],
+      ["PCBWay 4L #62 \xB7 50% residual copper", 2.4, 0.07, 0.0525, [["7628 RC46%", 0.1829, 4.74], ["7628 RC46%", 0.1829, 4.74]], 1.395],
+      ["PCBWay 4L #63 \xB7 30% residual copper", 2.4, 0.07, 0.0525, [["2116 RC58%", 0.1154, 4.45], ["7628 RC46%", 0.1739, 4.74]], 1.535],
+      ["PCBWay 4L #64 \xB7 70% residual copper", 2.4, 0.07, 0.07, [["1080 RC68%", 0.0762, 4.21], ["1080 RC68%", 0.0762, 4.21], ["7628 RC46%", 0.1845, 4.74]], 1.4],
+      ["PCBWay 4L #65 \xB7 50% residual copper", 2.4, 0.07, 0.07, [["3313 RC58%", 0.0909, 4.45], ["7628 RC46%", 0.1731, 4.74]], 1.53],
+      ["PCBWay 4L #66 \xB7 30% residual copper", 2.4, 0.07, 0.07, [["1080 RC68%", 0.0699, 4.21], ["1080 RC68%", 0.0699, 4.21], ["7628 RC46%", 0.1692, 4.74]], 1.43],
+      ["PCBWay 4L #67 \xB7 90% residual copper", 2.4, 0.105, 0.105, [["1080 RC68%", 0.0779, 4.21], ["7628 RC46%", 0.1886, 4.74]], 1.39],
+      ["PCBWay 4L #68 \xB7 90% residual copper", 2.4, 0.105, 0.105, [["1080 RC68%", 0.077, 4.21], ["2116 RC58%", 0.1235, 4.45]], 1.52],
+      ["PCBWay 4L #69 \xB7 90% residual copper", 2.4, 0.14, 0.14, [["3313 RC58%", 0.0982, 4.45], ["7628 RC46%", 0.1868, 4.74]], 1.22]
+    ];
     FAB_STACKUPS = [
-      rigid("JLC04161H-7628", "JLCPCB", 1.6, 0.0152, sym(pp("7628", 0.2104, 4.4), core(1.065))),
-      rigid("JLC04161H-2116", "JLCPCB", 1.6, 0.0152, sym(pp("2116", 0.1164, 4.16), core(1.265))),
-      rigid("JLC04161H-3313", "JLCPCB", 1.6, 0.0152, sym(pp("3313", 0.0994, 4.1), core(1.265))),
-      rigid("JLC04161H-1080", "JLCPCB", 1.6, 0.0152, sym(pp("1080", 0.0764, 3.91), core(1.265))),
-      rigid("JLC06161H-3313", "JLCPCB", 1.6, 0.0152, six(pp("3313", 0.0994, 4.1), core(0.55), pp("2116", 0.1088, 4.16))),
-      rigid("PCBWay 4L #1 \xB7 70% residual copper", "PCBWay", 1.6, 0.035, sym(pp("7628 RC46%", 0.1855, 4.74), core(1.03))),
-      rigid("PCBWay 4L #2 \xB7 50% residual copper", "PCBWay", 1.6, 0.035, sym(pp("7628 RC46%", 0.1785, 4.74), core(1.03))),
+      ...JLC_BUILDS.map(([id, rows3]) => jlcBuild(id, rows3)),
+      ...PCBWAY_BUILDS.map((r) => pcbway4(...r)),
       rigid(
         "PCBWay 6L #4 \xB7 2 oz outer copper",
         "PCBWay",
@@ -93091,13 +93393,13 @@ async function openBoardSetup(ctx, startPage) {
     const cuNow = () => layerRows3.filter((r) => r.copper).length;
     const fromHeader = () => BS().stackupLayers(header ? BS().editSetup(header.setup, setupEdit.copper ? { copper: setupEdit.copper, boardThickness: setupEdit.boardThickness } : {}) : null);
     stack2 = fromHeader();
-    const count2 = selectField(cuNow(), counts, { ro: roBoard, key: "copperCount", onChange: (n2) => {
+    const setCount = (n2) => {
       const inner = layerRows3.filter((r) => r.copper).map((r) => r.name).slice(n2 - 1, -1);
       const busy = inner.filter((name) => E.kdoc && Array.from(E.kdoc.items.values()).some((it) => (it.geom || []).some((g2) => g2.layer === name)));
       if (busy.length) {
         setError("Physical Stackup", { msg: `Items have been found on ${busy.join(", ")}: move or delete them before removing the layer.`, ctrl: count2.input });
         count2.set(cuNow());
-        return;
+        return false;
       }
       layerRows3 = BS().setCopperCount(layerRows3, n2);
       layersTouched = true;
@@ -93105,9 +93407,14 @@ async function openBoardSetup(ctx, startPage) {
       setupEdit.boardThickness = header && header.general ? Number(KiCadCanvas.kid(header.general, "thickness")?.[1]) || 1.6 : 1.6;
       stack2 = fromHeader();
       touched = false;
+      count2.set(n2);
       if (refreshLayers) refreshLayers();
       draw2();
       showBuilds();
+      return true;
+    };
+    const count2 = selectField(cuNow(), counts, { ro: roBoard, key: "copperCount", onChange: (n2) => {
+      setCount(n2);
     } });
     count2.input.title = "Select the number of copper layers in the stackup";
     const st0 = header && header.setup ? KiCadCanvas.kid(header.setup, "stackup") : null;
@@ -93123,25 +93430,28 @@ async function openBoardSetup(ctx, startPage) {
     function showBuilds() {
       const name = vendor.get();
       const kind = BOARD_TYPES.find(([id]) => id === type.get()) || BOARD_TYPES[0];
-      const choices = FAB_STACKUPS.filter((b) => b.vendor === name && b.type === kind[0] && b.copper.length === cuNow());
+      const cu = cuNow();
+      const choices = FAB_STACKUPS.filter((b) => b.vendor === name && b.type === kind[0]).sort((a, b) => Number(a.copper.length !== cu) - Number(b.copper.length !== cu) || a.copper.length - b.copper.length || a.nominal - b.nominal || a.id.localeCompare(b.id));
       const source = name === "JLCPCB" ? kind[2] : kind[3];
       const list = selectField(
         "",
-        [["", "Choose a stackup"], ...choices.map((b) => [b.id, `${b.id} \xB7 ${b.nominal} mm nominal`])],
+        [["", "Choose a stackup"], ...choices.map((b) => [b.id, `${b.copper.length} layers \xB7 ${b.id} \xB7 ${b.nominal} mm nominal`])],
         { key: "stackup-build", ro: !choices.length }
       );
-      const hint = note2(choices.length ? "" : source ? `No preset for ${cuNow()} copper layers. Use the vendor\u2019s specifications for a custom stackup.` : `${name} does not list this board type.`);
+      const hint = note2(choices.length ? choices.some((b) => b.copper.length === cu) ? "" : `No ${name} preset for ${cu} copper layers. Picking one of these changes the copper layer count.` : source ? `${name} lists no preset for this board type. Use the vendor\u2019s specifications for a custom stackup.` : `${name} does not list this board type.`);
       const apply3 = h2("button", { type: "button", class: "btn", disabled: true }, "Apply stackup");
       const selected = () => choices.find((b) => b.id === list.get());
       list.input.addEventListener("change", () => {
         const build4 = selected();
         apply3.disabled = !build4 || roBoard;
         const width = build4 ? outer50Ohm(build4) : null;
-        hint.textContent = width === null ? "" : `Estimated 50 \u03A9 outer trace: ${width.toFixed(3)} mm over the adjacent plane, without mask or coverlay. Confirm with the manufacturer.`;
+        const other = build4 && build4.copper.length !== cuNow() ? `Applying it changes the board to ${build4.copper.length} copper layers. ` : "";
+        hint.textContent = other + (width === null ? "" : `Estimated 50 \u03A9 outer trace: ${width.toFixed(3)} mm over the adjacent plane, without mask or coverlay. Confirm with the manufacturer.`);
       });
       apply3.onclick = () => {
         const build4 = selected();
         if (!build4 || roBoard) return;
+        if (build4.copper.length !== cuNow() && !setCount(build4.copper.length)) return;
         stack2 = applyFabStackup(build4, stack2 || []);
         selRow = -1;
         touched = true;
@@ -93597,15 +93907,15 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
       for (const x of fields) if (x.key[0] !== "^" && typeof x.f.get() === "number") o[x.key] = x.f.get();
       return o;
     };
-    let timer3 = 0;
+    let timer4 = 0;
     const updateWarnings = () => {
       const v = values(), msgs = /* @__PURE__ */ new Map();
       for (const i of [...BS().validateDesignRules(v, currentUnits()), ...BS().designRuleWarnings(v, currentUnits())]) msgs.set(i.setting, (msgs.has(i.setting) ? msgs.get(i.setting) + "\n" : "") + i.message);
       for (const x of fields) if (x.warn) x.warn.set(msgs.get(x.key) || null);
     };
     el4.addEventListener("input", () => {
-      if (timer3) clearTimeout(timer3);
-      timer3 = window.setTimeout(updateWarnings, 250);
+      if (timer4) clearTimeout(timer4);
+      timer4 = window.setTimeout(updateWarnings, 250);
     });
     el4.addEventListener("change", updateWarnings);
     updateWarnings();
@@ -93906,7 +94216,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
       const tools = globalThis.PcbTools;
       return tools && tools.parseDru ? tools.parseDru(t) : null;
     };
-    const check2 = () => {
+    const check3 = () => {
       const errs = ruleErrors(rulesEd ? rulesEd.get() : "", compile);
       say(errs.length ? errs.map((e) => ({ severity: "error", text: e.message, line: e.line, col: e.col })) : []);
     };
@@ -93940,7 +94250,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
       say([{ severity: "info", text: `Rule '${name}': ${ids.length} matching item(s).` }]);
     };
     rulesEd = rulesEditor(druText, { ro, onShowMatching: showMatching });
-    if (dru) setTimeout(check2, 0);
+    if (dru) setTimeout(check3, 0);
     const help = h2("a", { href: "#", "data-k": "syntax-help", title: "Show syntax help window" }, "Syntax help");
     help.addEventListener("click", (ev) => {
       ev.preventDefault();
@@ -93951,7 +94261,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
         body.append(d);
       } });
     });
-    const btn = bitmapButton("drc", "Check rule syntax", check2);
+    const btn = bitmapButton("drc", "Check rule syntax", check3);
     btn.dataset.k = "checkSyntax";
     report3.style.flex = "1 1 auto";
     report3.style.minWidth = "0";
@@ -94982,10 +95292,10 @@ function resolve(act, c) {
   if (tid) return APP_TOOLS.includes(tid) || moduleTool(tid) ? { run: () => setTool(tid) } : { why: NOT_YET };
   return { why: DESKTOP };
 }
-function row2(act, check2, c) {
+function row2(act, check3, c) {
   const meta2 = metaOf(act), r = resolve(act, c);
   const it = { act, label: meta2 ? meta2.label : act.split("::").pop(), icon: meta2 && meta2.icon ? meta2.icon : void 0, key: r.key || meta2 && meta2.key || void 0 };
-  if (check2) {
+  if (check3) {
     it.check = true;
     it.checked = !!c.checks[act];
   }
@@ -95381,7 +95691,7 @@ var init_contextmenu = __esm({
     };
     ALIAS = {
       sch: { rotateCCW: "rotateSelection", rotateCW: "rotateSelectionCW", mirrorH: "mirrorSelectionX", mirrorV: "mirrorSelectionY", autoplaceFields: "autoplace" },
-      pcb: { flip: "flipSelection", moveExact: "moveExactly", packAndMoveFootprints: "pack", rotateCcw: "rotateSelection", rotateCw: "rotateSelectionCw", highlightNetSelection: "highlightNet", groupEnter: "enterGroup", groupLeave: "leaveGroup" }
+      pcb: { flip: "flipSelection", moveExact: "moveExactly", packAndMoveFootprints: "pack", rotateCcw: "rotateSelection", rotateCw: "rotateSelectionCw", groupEnter: "enterGroup", groupLeave: "leaveGroup" }
     };
     NO_HANDLER = /* @__PURE__ */ new Set(["PCB_ACTIONS::mirrorH", "PCB_ACTIONS::mirrorV"]);
     READ_ONLY_OK = /* @__PURE__ */ new Set([
@@ -96013,7 +96323,7 @@ function show(fab, ctx, focus) {
   const all2 = fab.plottableLayers(doc2);
   const colors = /* @__PURE__ */ new Map();
   for (const l of app2.get().document.layers || []) colors.set(l.key, l.color);
-  let pkg = null, selected = "", run2 = 0, timer3 = 0;
+  let pkg = null, selected = "", run2 = 0, timer4 = 0;
   let preset = fab.presetById(rememberedPreset());
   const copper = doc2.copper && doc2.copper.length ? doc2.copper : ["F.Cu", "B.Cu"];
   let layers = new Set(preset.layers(all2, copper));
@@ -96099,8 +96409,8 @@ function show(fab, ctx, focus) {
     ++run2;
     pkg = null;
     order.disabled = true;
-    window.clearTimeout(timer3);
-    timer3 = window.setTimeout(() => {
+    window.clearTimeout(timer4);
+    timer4 = window.setTimeout(() => {
       void generate();
     }, 120);
   }
@@ -96396,75 +96706,6 @@ var init_colorswatch = __esm({
     init_color_picker();
     CHECKER = "repeating-conic-gradient(#c0c0c0 0 25%, #ffffff 0 50%) 0 0 / 8px 8px";
     b2552 = (x) => Math.max(0, Math.min(255, Math.round(x * 255)));
-  }
-});
-
-// web/domains/pcb/editor/pcbdialogs/update-pcb.ts
-function rootSchematicOf2(docs) {
-  const sch = docs.filter((d) => d.docType === "kicad_sch");
-  if (!sch.length) return null;
-  const pro = docs.find((d) => d.docType === "kicad_pro");
-  const stem3 = (p) => p.replace(/\.[^./]+$/, "");
-  const board3 = docs.find((d) => d.docId === state.docId);
-  return pro && sch.find((d) => stem3(d.path) === stem3(pro.path)) || board3 && sch.find((d) => stem3(d.path) === stem3(board3.path)) || sch.slice().sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
-}
-async function projectNetlist() {
-  const docs = projectDocs2(), root5 = rootSchematicOf2(docs);
-  if (!root5) return { error: "This project has no schematic." };
-  const sch = CollabTools.sch;
-  const helpers2 = sch && sch._;
-  if (!helpers2 || !helpers2.symbolPins) return { error: "The schematic tools are not loaded." };
-  const files = /* @__PURE__ */ new Map();
-  await Promise.all(docs.filter((d) => d.docType === "kicad_sch").map(async (d) => {
-    try {
-      const live3 = await liveDocument(d.docId);
-      const doc2 = KiCadCanvas.parseDoc(live3.file, "kicad_sch");
-      for (const op of live3.ops) for (const c of op.changes || []) {
-        try {
-          KiCadCanvas.applyChange(doc2, c, SCH_IU2);
-        } catch (e) {
-        }
-      }
-      const m = /\(uuid\s+"?([0-9a-fA-F-]{36})"?\s*\)/.exec(live3.file.slice(0, 4e3));
-      files.set(d.path, { doc: doc2, uuid: m ? m[1] : "", file: d.path });
-    } catch (e) {
-    }
-  }));
-  let pro = null;
-  try {
-    const proDoc2 = docs.find((d) => d.docType === "kicad_pro");
-    const text3 = E.proSettings || (proDoc2 ? await fetch(`/api/docs/${proDoc2.docId}/content`).then((r) => r.ok ? r.text() : "") : "");
-    pro = text3 ? JSON.parse(text3) : null;
-  } catch (e) {
-    pro = null;
-  }
-  const tops = topLevelSheetsOf(pro, docs, docs).map((t) => ({ sheet: files.get(t.doc.path), name: t.name, uuid: t.uuid, path: t.doc.path })).filter((t) => !!t.sheet);
-  const rootFile = tops.length > 1 ? tops[0].sheet : files.get(root5.path);
-  if (!rootFile) return { error: "The root schematic could not be read." };
-  const resolve2 = (file, parent) => {
-    const dir = parent.file.split("/").slice(0, -1);
-    const parts = [...dir, ...file.split("/")].filter((p) => p && p !== ".");
-    const out2 = [];
-    for (const p of parts) {
-      if (p === "..") out2.pop();
-      else out2.push(p);
-    }
-    return files.get(out2.join("/")) || files.get(file) || null;
-  };
-  const netlist = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve2, { symbolPins: helpers2.symbolPins, isPower: (d, it) => helpers2.isPowerSymbol(d, String((KiCadCanvas.kid(it.node, "lib_id") || [])[1])) }, root5.path.split("/").pop().replace(/\.kicad_sch$/, ""));
-  return { netlist, root: tops.length > 1 ? tops[0].path : root5.path, files };
-}
-var SCH_IU2;
-var init_update_pcb = __esm({
-  "web/domains/pcb/editor/pcbdialogs/update-pcb.ts"() {
-    "use strict";
-    init_state();
-    init_appstore();
-    init_projectfile();
-    init_canvas();
-    init_bootpick();
-    init_ui();
-    SCH_IU2 = 1e4;
   }
 });
 
@@ -97888,7 +98129,7 @@ function savePrefs(key3, v) {
 function whenDialogsClosed(fn) {
   const initial = document.querySelector(".kd-overlay");
   let seen = false;
-  const check2 = () => {
+  const check3 = () => {
     const cur2 = document.querySelector(".kd-overlay");
     if (cur2 && cur2 !== initial) {
       seen = true;
@@ -97900,12 +98141,12 @@ function whenDialogsClosed(fn) {
       setTimeout(fn, 0);
     }
   };
-  const obs = new MutationObserver(check2);
+  const obs = new MutationObserver(check3);
   obs.observe(document.body, { childList: true });
   const t = setTimeout(() => {
     if (!seen) obs.disconnect();
   }, 15e3);
-  setTimeout(check2, 0);
+  setTimeout(check3, 0);
 }
 async function projectLastPlotPath() {
   try {
@@ -103067,7 +103308,7 @@ async function planFill(doc2, count2) {
     holeClearance: s2.holeClearance || 0,
     edgeClearance: s2.edgeClearance
   };
-  const quiet = { phase() {
+  const quiet2 = { phase() {
   }, advance() {
   }, cancelled: () => false, yield: () => Promise.resolve() };
   if (typeof k.loadFontsFor === "function") {
@@ -103076,7 +103317,7 @@ async function planFill(doc2, count2) {
     } catch {
     }
   }
-  return await F2.fillZones({ doc: doc2, setup: null }, rules, null, quiet) || [];
+  return await F2.fillZones({ doc: doc2, setup: null }, rules, null, quiet2) || [];
 }
 function inlineSymbol(e) {
   const k = K4();
@@ -104121,7 +104362,7 @@ function refreshPreview() {
     noScroll = false;
   }
 }
-function showPreview(p, quiet = false) {
+function showPreview(p, quiet2 = false) {
   clearPreview();
   const ed = ED();
   const doc2 = ed?.kdoc;
@@ -104194,7 +104435,7 @@ function showPreview(p, quiet = false) {
     r.setAttribute("rx", String(2 * px));
     g2.appendChild(r);
   }
-  if (boxes.length && !noScroll && !quiet) {
+  if (boxes.length && !noScroll && !quiet2) {
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
     for (const { b } of boxes) {
       bx0 = Math.min(bx0, b[0]);
@@ -107068,19 +107309,19 @@ var lowerCmp = (a, b) => {
   const x = a.toLowerCase(), y = b.toLowerCase();
   return x < y ? -1 : x > y ? 1 : 0;
 };
-function componentVariants(sym2, path2, ref, ver) {
-  const inst = symbolInstance(sym2, path2);
+function componentVariants(sym, path2, ref, ver) {
+  const inst = symbolInstance(sym, path2);
   if (!inst || str(inst[1]) !== path2) return [];
-  const base2 = symbolFlags(sym2), out2 = [];
+  const base2 = symbolFlags(sym), out2 = [];
   const fieldText2 = (k) => {
     if (k === "Reference") return ref;
-    const p = kids(sym2, "property").find((q4) => str(q4[1]) === k);
+    const p = kids(sym, "property").find((q4) => str(q4[1]) === k);
     return p ? str(p[2]) : "";
   };
   for (const v of kids(inst, "variant")) {
     const name = str((kid(v, "name") || [])[1]);
     if (!name || out2.some((o) => o.name.toLowerCase() === name.toLowerCase())) continue;
-    const eff = symbolFlagsForVariant(sym2, name, path2, ver), st = symbolVariant(sym2, name, path2, ver);
+    const eff = symbolFlagsForVariant(sym, name, path2, ver), st = symbolVariant(sym, name, path2, ver);
     const nv = { name, fields: /* @__PURE__ */ new Map() };
     if (eff.dnp !== base2.dnp) nv.dnp = eff.dnp;
     if (eff.excludedFromBOM !== base2.excludedFromBOM) nv.excludedFromBOM = eff.excludedFromBOM;
@@ -108874,15 +109115,15 @@ var yes5 = (n2, key3) => {
 };
 var tf = (x, y) => [x, -y];
 var IDENT = [1, 0, 0, 1];
-function pinSymOf(sym2, col, fileVersion = 0) {
+function pinSymOf(sym, col, fileVersion = 0) {
   const literalTilde = fileVersion >= TILDE_LITERAL_VERSION;
-  const pn = kid(sym2, "pin_names");
+  const pn = kid(sym, "pin_names");
   const nameOff = pn && kid(pn, "offset") ? num(kid(pn, "offset")[1]) : 0.508;
   const hideNames = !!(pn && (has(pn, "hide") || kid(pn, "hide") && str(kid(pn, "hide")[1]) === "yes"));
-  const pnu = kid(sym2, "pin_numbers");
+  const pnu = kid(sym, "pin_numbers");
   const hideNums = !!(pnu && (has(pnu, "hide") || kid(pnu, "hide") && str(kid(pnu, "hide")[1]) === "yes"));
   let maxNameHalf = 0;
-  for (const sub2 of kids(sym2, "symbol")) for (const p of kids(sub2, "pin")) {
+  for (const sub2 of kids(sym, "symbol")) for (const p of kids(sub2, "pin")) {
     const nm4 = kid(p, "name");
     if (nm4 && str(nm4[1]) && (str(nm4[1]) !== "~" || literalTilde)) maxNameHalf = Math.max(maxNameHalf, effectsOf(nm4).size / 2);
   }
@@ -108928,7 +109169,7 @@ function pinExtras(item, p, color2, showType) {
   else if (dir === 90) textGeom(item, px, py + off, label, size2, SCH.privateNotes, 90, ["right", "middle"], "Pins", { z: SCH_Z.pin, w: thick });
   else textGeom(item, px, py - off, label, size2, SCH.privateNotes, 90, ["left", "middle"], "Pins", { z: SCH_Z.pin, w: thick });
 }
-function parseLibSymbol(sym2, opts2) {
+function parseLibSymbol(sym, opts2) {
   opts2 = opts2 || {};
   const unit2 = opts2.unit || 1, body = opts2.bodyStyle || 1;
   const doc2 = newDoc("sch");
@@ -108972,9 +109213,9 @@ function parseLibSymbol(sym2, opts2) {
     }
   };
   if (opts2.parent) drawFrom(opts2.parent, true);
-  drawFrom(sym2, false);
-  const props = kids(sym2, "property");
-  const fieldOwner = props.length || !opts2.parent ? sym2 : opts2.parent;
+  drawFrom(sym, false);
+  const props = kids(sym, "property");
+  const fieldOwner = props.length || !opts2.parent ? sym : opts2.parent;
   for (let j = 1; j < fieldOwner.length; j++) {
     const p = fieldOwner[j];
     if (!isList(p) || p[0] !== "property") continue;
@@ -108991,7 +109232,7 @@ function parseLibSymbol(sym2, opts2) {
     const [x, y, r] = atOf(p);
     const sink = { geom: [], bbox: null };
     transformedText(sink, IDENT, x, -y, shownText, ef.size, color2, r, ef.just, isRV ? "Reference & value" : "Fields", { z: name === "Reference" ? SCH_Z.ref : name === "Value" ? SCH_Z.value : SCH_Z.fields, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, field: name, olKind: "field" });
-    add2("f:" + name, { kind: "field", sub: "", j, unit: 0, body: 0, inherited: fieldOwner !== sym2, name }, sink, "lib_field");
+    add2("f:" + name, { kind: "field", sub: "", j, unit: 0, body: 0, inherited: fieldOwner !== sym, name }, sink, "lib_field");
   }
   let bb = null;
   for (const it of doc2.items.values()) if (it.bbox) bb = boxUnion(bb, it.bbox[0], it.bbox[1], it.bbox[2], it.bbox[3]);
@@ -111646,8 +111887,8 @@ root.KiCadCanvas = api;
     if (hit5.kind !== "junction" && hit5.kind !== "no_connect" && pinExact && pinExact([mm4[0], mm4[1]])) return null;
     const symId = K11.hitTest(ctx.doc, mm4[0], mm4[1], 0.5);
     if (symId && !LINE_KINDS.has(hit5.kind)) {
-      const sym2 = ctx.doc.items.get(symId);
-      if (sym2 && area4(sym2.bbox) < area4(rectOf(hit5))) return null;
+      const sym = ctx.doc.items.get(symId);
+      if (sym && area4(sym.bbox) < area4(rectOf(hit5))) return null;
     }
     return hit5;
   }
@@ -114519,10 +114760,10 @@ ${body}
         if (label ? label.pinNo === name : Math.hypot(x - mm4[0], y - mm4[1]) <= pinTol) return { item: it, at: [x, y], pin: name };
       }
     }
-    const symId = K11.hitTest(doc2, mm4[0], mm4[1], tol), sym2 = symId ? doc2.items.get(symId) : null;
-    if (sym2 && sym2.kind === "symbol" && symbolIsPower(doc2, sym2)) {
-      const sp = symbolPins(doc2, sym2);
-      if (sp.length === 1) return { item: sym2, at: [sp[0].x, sp[0].y], pin: sp[0].number };
+    const symId = K11.hitTest(doc2, mm4[0], mm4[1], tol), sym = symId ? doc2.items.get(symId) : null;
+    if (sym && sym.kind === "symbol" && symbolIsPower(doc2, sym)) {
+      const sp = symbolPins(doc2, sym);
+      if (sp.length === 1) return { item: sym, at: [sp[0].x, sp[0].y], pin: sp[0].number };
     }
     return null;
   }
@@ -117715,29 +117956,29 @@ Link '${target2}' to this file?`)) return null;
   var VARIANT_IN_BOM_POSITIVE_VERSION2 = 20260306;
   var variantInBomPositive2 = (ver) => !ver || ver >= VARIANT_IN_BOM_POSITIVE_VERSION2;
   var variantKeys2 = (ver) => variantInBomPositive2(ver) ? SYM_KEYS2 : SYM_KEYS2.map(([k, f2, inv]) => [k, f2, k === "in_bom" ? false : inv]);
-  function symbolFlags2(sym2) {
+  function symbolFlags2(sym) {
     const out2 = {};
     for (const [key3, f2, inv] of SYM_KEYS2) {
-      const k = kid22(sym2, key3);
+      const k = kid22(sym, key3);
       out2[f2] = inv ? !boolOf3(k, true) : boolOf3(k, false);
     }
     return out2;
   }
-  function symbolInstancePaths2(sym2) {
+  function symbolInstancePaths2(sym) {
     const out2 = [];
-    for (const proj of kids32(kid22(sym2, "instances"), "project")) for (const p of kids32(proj, "path")) out2.push(p);
+    for (const proj of kids32(kid22(sym, "instances"), "project")) for (const p of kids32(proj, "path")) out2.push(p);
     return out2;
   }
-  function symbolInstance3(sym2, path2) {
-    const all2 = symbolInstancePaths2(sym2);
+  function symbolInstance3(sym, path2) {
+    const all2 = symbolInstancePaths2(sym);
     return (path2 ? all2.find((p) => str22(p[1]) === path2) : null) || all2[0] || null;
   }
   var symVariantIn2 = (inst, name) => kids32(inst, "variant").find((v) => str22((kid22(v, "name") || [])[1]) === name) || null;
-  function symbolVariant2(sym2, name, path2, ver) {
+  function symbolVariant2(sym, name, path2, ver) {
     if (isDefaultVariant3(name)) return null;
-    const v = symVariantIn2(symbolInstance3(sym2, path2), name);
+    const v = symVariantIn2(symbolInstance3(sym, path2), name);
     if (!v) return null;
-    const base2 = symbolFlags2(sym2), flags = { ...base2 };
+    const base2 = symbolFlags2(sym), flags = { ...base2 };
     for (const [key3, f2, inv] of variantKeys2(ver)) {
       const k = kid22(v, key3);
       if (k) flags[f2] = inv ? !boolOf3(k, true) : boolOf3(k, false);
@@ -117749,13 +117990,13 @@ Link '${target2}' to this file?`)) return null;
     }
     return { flags, fields };
   }
-  function symbolFlagsForVariant2(sym2, variant, path2, ver) {
-    const st = variant ? symbolVariant2(sym2, variant, path2, ver) : null;
-    return st ? st.flags : symbolFlags2(sym2);
+  function symbolFlagsForVariant2(sym, variant, path2, ver) {
+    const st = variant ? symbolVariant2(sym, variant, path2, ver) : null;
+    return st ? st.flags : symbolFlags2(sym);
   }
-  function setSymbolVariant2(sym2, name, patch, path2, ver) {
+  function setSymbolVariant2(sym, name, patch, path2, ver) {
     if (isDefaultVariant3(name)) throw new Error("Variant name cannot be empty or default.");
-    const out2 = clone5(sym2), inst = symbolInstance3(out2, path2);
+    const out2 = clone5(sym), inst = symbolInstance3(out2, path2);
     if (!inst) return out2;
     const keys = out2[0] === "sheet" ? variantKeys2(ver).filter(([k]) => k !== "on_board" && k !== "in_pos_files") : variantKeys2(ver);
     const base2 = symbolFlags2(out2), st = symbolVariant2(out2, name, str22(inst[1]), ver) || { flags: { ...base2 }, fields: /* @__PURE__ */ new Map() };
@@ -117956,7 +118197,7 @@ Link '${target2}' to this file?`)) return null;
     ctx.commit(changes, "clear annotation");
     return true;
   }
-  function editFieldPrompt(ctx, name, title, quiet) {
+  function editFieldPrompt(ctx, name, title, quiet2) {
     if (!editable(ctx)) return false;
     const it = selectedItems(ctx).find((x) => x.kind === "symbol");
     if (!it) return false;
@@ -122340,7 +122581,7 @@ function fanout(rows3, jobs, ctx, depth2 = 0, spread = 0) {
       }
       return null;
     };
-    const check2 = (j, o) => {
+    const check3 = (j, o) => {
       const h3 = segHit(j, o);
       if (h3 !== null) return h3;
       const e = o.end, len = geo.rs;
@@ -122360,7 +122601,7 @@ function fanout(rows3, jobs, ctx, depth2 = 0, spread = 0) {
           last3 = last3 || "lane taken";
           continue;
         }
-        const r = check2(j, o);
+        const r = check3(j, o);
         if (r === null) return [o, null];
         if (last3 === null || last3 === "lane taken") last3 = r;
       }
@@ -122389,7 +122630,7 @@ function fanout(rows3, jobs, ctx, depth2 = 0, spread = 0) {
         const s2 = shift2(j), turn = H - Math.abs(s2), p1 = at(j.pad.p, geo.n, turn), end = at(j.pad.p, geo.n, H, geo.t, s2);
         const segs = Math.abs(s2) < 1e-6 ? [[j.pad.p, end]] : [[j.pad.p, p1], [p1, end]];
         const o = { pad: j.pad, net: j.net, kind: "ring", segs, w: j.w, via: null, end, n: geo.n, lane: { t: tc(j.pad), lane: tc(j.pad) + s2, a: lvl(turn), b: lvl(H), w: j.w, cl: j.clr, real: true }, cost: turn + Math.abs(s2) * Math.SQRT2, a: 0, b: 0, d: Math.sign(s2), seq: 0 };
-        if (laneOK(o.lane, lanes(j.pad.name), geo.rs) && check2(j, o) === null) {
+        if (laneOK(o.lane, lanes(j.pad.name), geo.rs) && check3(j, o) === null) {
           put4(o);
           fanned.add(j.pad.name);
         }
@@ -124470,8 +124711,8 @@ var Router = class _Router {
       if (this.domains) {
         const o = typeof this.opts.separate === "object" ? this.opts.separate : {};
         const base2 = Math.max(this.s.clearance || 0.2, this.s.minClearance || 0);
-        const quiet = o.quiet !== void 0 ? o.quiet : Math.max(2 * base2, 0.3), noisy = o.noisy !== void 0 ? o.noisy : Math.max(3 * base2, 0.5);
-        this.sepGaps = { quiet, noisy };
+        const quiet2 = o.quiet !== void 0 ? o.quiet : Math.max(2 * base2, 0.3), noisy = o.noisy !== void 0 ? o.noisy : Math.max(3 * base2, 0.5);
+        this.sepGaps = { quiet: quiet2, noisy };
         const sens = (k2) => k2 === "analog" || k2 === "rf", loud = (k2) => k2 === "switching" || k2 === "fast";
         G5.kinds = new Proxy(/* @__PURE__ */ new Map(), { get: (_t, prop2) => prop2 === "get" ? (n2) => {
           const k2 = this.kindOf(n2);
@@ -124482,7 +124723,7 @@ var Router = class _Router {
           const reach = o.nearPads !== void 0 ? o.nearPads : 1.2;
           for (const list of G5.obstacles.values()) for (const ob of list) if (ob.pad) stamp(G5, near2, ob.shape, reach, 1);
         }
-        G5.sep = (a, b) => a === b || a === "supply" || b === "supply" ? 0 : sens(a) && sens(b) ? quiet : sens(a) ? loud(b) ? noisy : quiet : sens(b) ? loud(a) ? noisy : quiet : 0;
+        G5.sep = (a, b) => a === b || a === "supply" || b === "supply" ? 0 : sens(a) && sens(b) ? quiet2 : sens(a) ? loud(b) ? noisy : quiet2 : sens(b) ? loud(a) ? noisy : quiet2 : 0;
       }
     }
     if (!this.domains) return void 0;
@@ -141394,7 +141635,7 @@ function writeOdb(m, setup, o) {
   };
   const nm4 = (mm4) => Math.round(mm4 * 1e6);
   const data = (mm4) => fix(nm4(mm4) * scale / 1e6);
-  const sym2 = (mm4) => fix(nm4(mm4) * scale / 1e3);
+  const sym = (mm4) => fix(nm4(mm4) * scale / 1e3);
   const [ox, oy] = o.origin === "aux" ? m.settings.auxOrigin : o.origin === "grid" ? m.settings.gridOrigin : [0, 0];
   const X2 = (x) => data(x - ox), Y = (y) => data(oy - y);
   let maxUid = 0;
@@ -141443,10 +141684,10 @@ function writeOdb(m, setup, o) {
       return this.recs.length - 1;
     }
     line(x1, y1, x2, y2, w, pol = "P") {
-      return this.add(`L ${X2(x1)} ${Y(y1)} ${X2(x2)} ${Y(y2)} ${this.symbol("r" + sym2(w))} ${pol} 0`);
+      return this.add(`L ${X2(x1)} ${Y(y1)} ${X2(x2)} ${Y(y2)} ${this.symbol("r" + sym(w))} ${pol} 0`);
     }
     arc(x1, y1, x2, y2, cx, cy, w, cw, pol = "P") {
-      return this.add(`A ${X2(x1)} ${Y(y1)} ${X2(x2)} ${Y(y2)} ${X2(cx)} ${Y(cy)} ${this.symbol("r" + sym2(w))} ${pol} 0 ${cw ? "Y" : "N"}`);
+      return this.add(`A ${X2(x1)} ${Y(y1)} ${X2(x2)} ${Y(y2)} ${X2(cx)} ${Y(cy)} ${this.symbol("r" + sym(w))} ${pol} 0 ${cw ? "Y" : "N"}`);
     }
     /** a flash: `deg` is the pad's orientation as KiCad stores it; ODB++ turns clockwise */
     pad(x, y, symbol, deg, pol = "P") {
@@ -141468,13 +141709,13 @@ function writeOdb(m, setup, o) {
           return [this.arc(x1, y1, x2, y2, p.cx, p.cy, p.w, !p.acw, pol)];
         }
         case "circle":
-          return p.d > 0 ? [this.pad(p.x, p.y, "r" + sym2(p.d), 0, pol)] : [];
+          return p.d > 0 ? [this.pad(p.x, p.y, "r" + sym(p.d), 0, pol)] : [];
         case "rect":
-          return p.w > 0 && p.h > 0 ? [this.pad(p.x, p.y, `rect${sym2(p.w)}x${sym2(p.h)}`, p.rot, pol)] : [];
+          return p.w > 0 && p.h > 0 ? [this.pad(p.x, p.y, `rect${sym(p.w)}x${sym(p.h)}`, p.rot, pol)] : [];
         case "oval":
-          return p.w > 0 && p.h > 0 ? [this.pad(p.x, p.y, `oval${sym2(p.w)}x${sym2(p.h)}`, p.rot, pol)] : [];
+          return p.w > 0 && p.h > 0 ? [this.pad(p.x, p.y, `oval${sym(p.w)}x${sym(p.h)}`, p.rot, pol)] : [];
         case "roundrect":
-          return p.w > 0 && p.h > 0 ? [this.pad(p.x, p.y, `rect${sym2(p.w)}x${sym2(p.h)}xr${sym2(p.r)}`, p.rot, pol)] : [];
+          return p.w > 0 && p.h > 0 ? [this.pad(p.x, p.y, `rect${sym(p.w)}x${sym(p.h)}xr${sym(p.r)}`, p.rot, pol)] : [];
         case "td":
           return [];
         default: {
@@ -141925,7 +142166,7 @@ CMP ${pkg.index} ${X2(fp.x)} ${Y(fp.y)} ${fp.rot ? fix(norm360(360 - fp.rot)) : 
       const key3 = drillKey(r.drill);
       const tools = [];
       const tool2 = (type, type2, d2) => {
-        const size2 = sym2(d2);
+        const size2 = sym(d2);
         if (!tools.some((t) => t.type === type && t.type2 === type2 && t.size === size2)) tools.push({ type, type2, size: size2 });
       };
       const mine = hits2.filter((h3) => drillKey(h3) === key3);
@@ -141934,7 +142175,7 @@ CMP ${pkg.index} ${X2(fp.x)} ${Y(fp.y)} ${fp.rot ? fix(norm360(360 - fp.rot)) : 
         if (h3.slot) {
           const delta = Math.abs(h3.slot.w - h3.slot.h) / 2, half = rot2(h3.slot.w > h3.slot.h ? delta : 0, h3.slot.w > h3.slot.h ? 0 : delta, h3.slot.rot);
           i = F2.line(h3.x - half[0], h3.y - half[1], h3.x + half[0], h3.y + half[1], h3.d);
-        } else i = F2.pad(h3.x, h3.y, "r" + sym2(h3.d), 0);
+        } else i = F2.pad(h3.x, h3.y, "r" + sym(h3.d), 0);
         const rec = F2.recs[i].attrs;
         if (h3.via) {
           const v = h3.via, pr = protection(v);
@@ -142005,7 +142246,7 @@ USER_PARAMS=
     } else if (r.role === "aux" && r.aux) {
       const hole = r.aux.kind === "plugging" || r.aux.kind === "filling" || r.aux.kind === "capping";
       for (const v of auxVias.get(r) || []) {
-        const i = F2.pad(v.x, v.y, "r" + sym2(hole ? v.drill : v.sizes && v.sizes.get(r.aux.layer) || v.size), 0);
+        const i = F2.pad(v.x, v.y, "r" + sym(hole ? v.drill : v.sizes && v.sizes.get(r.aux.layer) || v.size), 0);
         const rec = F2.recs[i].attrs;
         if (hole) {
           fid(trackSub.get(v), "H", r.name, i);
@@ -144475,9 +144716,9 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       {
         const band = grow5(region, 1.2), bshape = rectShape(band), inner = rectShape(grow5(region, 0.05));
         const cut = /* @__PURE__ */ new Set();
-        const quiet = (n2) => !n2 || own.has(n2) || rfNets.includes(n2) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(n2);
+        const quiet2 = (n2) => !n2 || own.has(n2) || rfNets.includes(n2) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(n2);
         for (const c of S3.conds) {
-          if (c.kind === "zone" || quiet(c.net) || !hit4(c.bbox, band) || P.shapeGap(c.shape, bshape) > 0) continue;
+          if (c.kind === "zone" || quiet2(c.net) || !hit4(c.bbox, band) || P.shapeGap(c.shape, bshape) > 0) continue;
           if (c.kind === "pad") {
             const f2 = fps.find((q4) => q4.id === c.item.id);
             if (f2 && f2.id !== a.id) cut.add(`${f2.ref} (${bare(c.net)})`);
@@ -147225,14 +147466,14 @@ async function reviewBoard(doc2, path2) {
   r.source += " " + PHYSICS_SOURCE + " " + CRAFT_SOURCE;
   return r;
 }
-function report2(check2, path2, rules, findings, manual) {
+function report2(check3, path2, rules, findings, manual) {
   const order = { error: 0, warning: 1, note: 2 };
   const pos = new Map(rules.map((r, i) => [r.id, i]));
   findings.sort((a, b) => order[a.level] - order[b.level] || (pos.get(a.rule) || 0) - (pos.get(b.rule) || 0));
   const failed = new Set(findings.filter((f2) => f2.level !== "note").map((f2) => f2.rule));
   return {
     document: path2,
-    check: check2,
+    check: check3,
     errors: findings.filter((f2) => f2.level === "error").length,
     warnings: findings.filter((f2) => f2.level === "warning").length,
     notes: findings.filter((f2) => f2.level === "note").length,

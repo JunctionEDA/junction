@@ -69,7 +69,7 @@ const OBJECTS: ObjectDef[] = [
   { id: "zones", label: "Zones", tip: "Show copper zones", opacity: true, defaultOpacity: 0.6 },   // "board.opacity.zones" 0.6
   { id: "filledShapes", label: "Filled Shapes", tip: "Opacity of filled shapes", opacity: true, canHide: false },
   { id: "images", label: "Images", tip: "Show user images", opacity: true, defaultOpacity: 0.6 },   // "board.opacity.images" 0.6
-  { id: "outsideGroup", label: "Outside Group", tip: "Opacity of items outside the entered group", opacity: true, canHide: false, defaultOpacity: 0.2 },   // "board.opacity.outside_group" 0.2
+  { id: "outsideGroup", label: "Outside Group", tip: "Opacity of items outside the entered group", opacity: true, canHide: false, defaultOpacity: 1 },   // "board.opacity.outside_group": PROJECT_LOCAL_SETTINGS default 1.0 (no fading until the person lowers it)
   { id: "sp1", label: "", tip: "", spacer: true },
   { id: "fpFront", label: "Footprints Front", tip: "Show footprints that are on board's front" },
   { id: "fpBack", label: "Footprints Back", tip: "Show footprints that are on board's back" },

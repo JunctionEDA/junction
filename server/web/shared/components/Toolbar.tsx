@@ -73,11 +73,13 @@ function ActionButton({ item, a, main }: { item: ActionItem; a: Avail; main?: bo
   const why = unavailable(a, id) || ro;
   const on = tid ? tool === tid : isOn(id, toggles, panes);
   const menuHandled = a.handled.has(id + ":menu") && !ro;
+  const attn = useApp((s) => (s.attention ? s.attention[id] : undefined));   // editor/attention.ts: something waits on this action
   return (
     <button type="button" className={cx(KB, main && "kmain", why && "desk", on && "on")} data-uiact={id} data-ktool={tid || undefined} aria-disabled={ro ? true : undefined}
-      title={titleFor(a, id) + (ro ? "\n— " + ro : "")} onClick={(ev) => { if (!ro) runUiAction(a, id, ev.currentTarget); }}
+      title={titleFor(a, id) + (ro ? "\n— " + ro : "") + (attn ? "\n— " + attn : "")} onClick={(ev) => { if (!ro) runUiAction(a, id, ev.currentTarget); }}
       onContextMenu={menuHandled ? (ev) => { ev.preventDefault(); dispatch({ type: "action", id: id + ":menu", anchor: rectOf(ev.currentTarget) }); } : undefined}>
       <KIcon name={meta.icon || "options_generic"} />
+      {attn ? <span className="kattn absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-err ring-1 ring-bench animate-pulse pointer-events-none" data-attn={id} /> : null}
     </button>
   );
 }

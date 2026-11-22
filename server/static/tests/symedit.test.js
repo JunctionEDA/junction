@@ -38,13 +38,16 @@ test("prettify: short lists stay on one line, xy runs wrap, closing parens on th
   assert.ok(/\(pts\n\t+\(xy 0 0\) \(xy 1 1\)\n/.test(s), s);
   assert.ok(s.endsWith(")\n"));
 });
-test("saving keeps authored order and places a parent before its derived symbol", () => {
+test("saving orders symbols as the desktop does: inheritance depth, then name", () => {
   const lib = M.emptyLibrary();
   const base = M.createSymbol(Object.assign(M.defaultNewSymbolProps(), { name: "Z_base" }));
   const kid = M.createSymbol(Object.assign(M.defaultNewSymbolProps(), { name: "A_kid" }), base);
   lib.symbols.set("A_kid", kid); lib.symbols.set("Z_base", base); lib.symbols.set("M", M.createSymbol(Object.assign(M.defaultNewSymbolProps(), { name: "M" })));
-  assert.deepStrictEqual(M.saveOrder(lib), ["Z_base", "A_kid", "M"]);
-  assert.deepStrictEqual([...M.parseLibrary(M.serializeLibrary(lib)).symbols.keys()], ["Z_base", "A_kid", "M"]);
+  assert.deepStrictEqual(M.saveOrder(lib), ["M", "Z_base", "A_kid"]);
+  assert.deepStrictEqual([...M.parseLibrary(M.serializeLibrary(lib)).symbols.keys()], ["M", "Z_base", "A_kid"]);
+  // a library KiCad wrote is already in that order: a save moves nothing
+  const again = M.parseLibrary(M.serializeLibrary(lib));
+  assert.deepStrictEqual(M.saveOrder(again), [...again.symbols.keys()]);
   assert.ok(M.isDerived(kid)); assert.strictEqual(M.parentNameOf(kid), "Z_base");
 });
 test("New Symbol: mandatory fields, unit count, De Morgan body styles, power flags", () => {

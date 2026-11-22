@@ -281,6 +281,8 @@ export interface AppState {
   routing: RoutingState;
   /** the toolbar's "Current variant": this client's session choice ("" = default) and GetVariantNamesForUI */
   variant?: { current: string; names: string[]; sch: boolean };
+  /** things waiting on the person, action id -> why (editor/attention.ts): a red dot on that toolbar button and a pill in the menu bar */
+  attention?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------- actions (chrome → app.js)

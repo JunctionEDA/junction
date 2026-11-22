@@ -464,12 +464,15 @@ async fn save_link(
     branch: &str,
     subdir: &str,
     user_id: i64,
+    carry: bool,
 ) -> AppResult<()> {
     let mut tx = state.pool.begin().await?;
     // A new link starts with no shared history: whatever the old one remembered
     // describes a different folder.  Linking again to the very place the project was
     // linked to (now, or before it was unlinked) keeps it: an edit made in between is
-    // then a change to push, not two files that were never synced.
+    // then a change to push, not two files that were never synced.  `carry` keeps it for another place too (the
+    // person moving what they changed since the last sync to another branch): the files the new branch still has as
+    // they were then show as changes to push, as a rebase would carry them.
     let same: bool = sqlx::query_scalar(
         "SELECT EXISTS (
            SELECT 1 FROM (SELECT repo_owner, repo_name, branch, subdir FROM project_github WHERE project_id = $1
@@ -484,7 +487,7 @@ async fn save_link(
     .bind(subdir)
     .fetch_one(&mut *tx)
     .await?;
-    if !same {
+    if !same && !carry {
         sqlx::query("DELETE FROM project_github_files WHERE project_id = $1")
             .bind(project_id)
             .execute(&mut *tx)
@@ -572,6 +575,19 @@ async fn save_base(state: &AppState, project_id: Uuid, agreed: &[Agreed], commit
     }
     tx.commit().await?;
     Ok(())
+}
+
+/// How many files differ from what the last sync recorded (edited, added or deleted online since), counting a
+/// document with live edits not saved into its file yet.  Zero when nothing was ever synced.
+async fn changed_since_sync(state: &AppState, project_id: Uuid) -> AppResult<usize> {
+    let base = load_base(state, project_id).await?;
+    if base.is_empty() {
+        return Ok(0);
+    }
+    let local = local_files(state, project_id).await?;
+    let edited = local.iter().filter(|(p, f)| f.unsaved_ops > 0 || base.get(*p).map(|b| b.sha != f.sha).unwrap_or(true)).count();
+    let deleted = base.keys().filter(|p| !p.starts_with("../") && !local.contains_key(*p)).count();
+    Ok(edited + deleted)
 }
 
 /// Forget what the last sync recorded for these paths (a file that was deleted or renamed).
@@ -1302,7 +1318,7 @@ pub async fn scan_repo(
         .filter_map(|b| b["name"].as_str().map(str::to_string))
         .collect();
 
-    let (remote, found) = remote::scan(&gh, &repo, &branch).await?;
+    let (remote, found, foreign) = remote::scan(&gh, &repo, &branch).await?;
     let online = linked_here(&state, &user, &repo, &branch).await?;
     // which of them the caller owns (and so may unlink)
     let ids: Vec<Uuid> = online.values().map(|(pid, _)| *pid).collect();
@@ -1346,11 +1362,85 @@ pub async fn scan_repo(
         "branches": branches,
         "projects": projects,
         "truncated": remote.truncated,
+        // other tools' designs (EasyEDA, Altium, Eagle, ...) there, to convert into KiCad projects
+        "foreign": foreign.iter().map(|f| json!({ "path": f.path, "name": f.name, "format": f.format, "files": f.files, "size": f.size })).collect::<Vec<_>>(),
     });
     if !remote.notes.is_empty() {
         out["notes"] = json!(remote.notes);
     }
     Ok(Json(out).into_response())
+}
+
+// ------------------------------------------------------------------ another tool's design, to convert
+
+#[derive(Deserialize)]
+pub struct DesignFilesQuery {
+    pub repo: String,
+    pub branch: Option<String>,
+    /// Repository paths, one per line.
+    #[serde(default)]
+    pub files: String,
+}
+
+/// The files of another tool's design in a repository, for the browser to hand to the new-project upload (which
+/// converts it with kicad-cli): one file as it is, several as a zip of them relative to the folder they share.
+pub async fn design_files(
+    State(_state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Query(q): Query<DesignFilesQuery>,
+) -> AppResult<Response> {
+    let gh = Gh::for_user(&_state, &user).await?;
+    let repo = RepoRef::parse(&q.repo)?;
+    let branch = match q.branch.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
+        Some(b) => clean_branch(b)?,
+        None => gh.get(&format!("/repos/{}", repo.slug())).await?["default_branch"].as_str().unwrap_or("main").to_string(),
+    };
+    let wanted: Vec<String> = q.files.split('\n').map(str::trim).filter(|p| !p.is_empty()).map(str::to_string).collect();
+    if wanted.is_empty() || wanted.len() > 400 {
+        return Err(AppError::BadRequest("Name between 1 and 400 files.".into()));
+    }
+    let head = gh.branch_head(&repo, &branch).await?.ok_or(AppError::NotFound)?;
+    let tree = gh.commit_tree(&repo, &head).await?;
+    let (all, _) = gh.tree(&repo, &tree).await?;
+    let mut total = 0u64;
+    let mut got: Vec<(String, Vec<u8>)> = Vec::new();
+    for p in &wanted {
+        let (sha, size) = all.get(p).ok_or_else(|| AppError::BadRequest(format!("{p} is not on {branch}.")))?;
+        total += size;
+        if *size > MAX_FILE_BYTES || total > MAX_TOTAL_BYTES {
+            return Err(AppError::BadRequest(format!("{p} makes the design too large to convert.")));
+        }
+        got.push((p.clone(), gh.blob(&repo, sha).await?));
+    }
+    let attach = |name: &str| format!("attachment; filename=\"{}\"", name.replace(['"', '\\', '\r', '\n'], "_"));
+    if got.len() == 1 {
+        let (p, bytes) = got.pop().expect("one file");
+        let name = p.rsplit('/').next().unwrap_or(&p).to_string();
+        return Ok(([(header::CONTENT_TYPE, "application/octet-stream".to_string()), (header::CONTENT_DISPOSITION, attach(&name))], bytes).into_response());
+    }
+    // the folder every file is in
+    let mut common: Vec<&str> = wanted[0].split('/').collect();
+    common.pop();
+    for p in &wanted[1..] {
+        let parts: Vec<&str> = p.split('/').collect();
+        let n = common.iter().zip(parts.iter()).take_while(|(a, b)| a == b).count().min(parts.len() - 1);
+        common.truncate(n);
+    }
+    let pre = if common.is_empty() { String::new() } else { format!("{}/", common.join("/")) };
+    let zipped = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        for (p, bytes) in &got {
+            zip.start_file(p.strip_prefix(&pre).unwrap_or(p), opts).map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut zip, bytes).map_err(|e| e.to_string())?;
+        }
+        Ok(zip.finish().map_err(|e| e.to_string())?.into_inner())
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("zip: {e}"))?
+    .map_err(|e| anyhow::anyhow!("zip: {e}"))?;
+    let name = if common.is_empty() { repo.name.clone() } else { common.last().unwrap_or(&"design").to_string() };
+    Ok(([(header::CONTENT_TYPE, "application/zip".to_string()), (header::CONTENT_DISPOSITION, attach(&format!("{name}.zip")))], zipped).into_response())
 }
 
 // ------------------------------------------------------------------ import
@@ -1433,7 +1523,7 @@ async fn import_one(
         persist::insert_snapshot(&state.pool, doc.id, 0, content, None, Some(user.id)).await?;
         agreed.push((path.clone(), remote.files[path].sha.clone(), Some(doc.id)));
     }
-    save_link(state, project.id, repo, branch, subdir, user.id).await?;
+    save_link(state, project.id, repo, branch, subdir, user.id, false).await?;
     save_base(state, project.id, &agreed, Some(&head)).await?;
 
     let mut out = json!({ "projectId": project.id, "name": project.name, "files": contents.len(), "path": subdir });
@@ -1523,6 +1613,9 @@ pub struct LinkRequest {
     pub branch: Option<String>,
     #[serde(default)]
     pub path: String,
+    /// What happens to the edits made since the last sync when linking somewhere else: `move` carries them over as
+    /// changes to push there; anything else starts the new place with no shared history.
+    pub carry: Option<String>,
 }
 
 /// Point a project at a repository folder.  Owner only.  Nothing is written to
@@ -1577,7 +1670,7 @@ pub async fn link_project(
         Some(b) => clean_branch(b)?,
         None => info["default_branch"].as_str().unwrap_or("main").to_string(),
     };
-    save_link(&state, id, &repo, &branch, &subdir, user.id).await?;
+    save_link(&state, id, &repo, &branch, &subdir, user.id, req.carry.as_deref() == Some("move")).await?;
     Ok(Json(json!({ "ok": true, "repo": repo.slug(), "branch": branch, "path": subdir })).into_response())
 }
 
@@ -1651,7 +1744,10 @@ pub async fn project_status(
             .await?
         {
             let (owner, name): (String, String) = (r.get("repo_owner"), r.get("repo_name"));
-            out["lastLink"] = json!({ "repo": format!("{owner}/{name}"), "branch": r.get::<String, _>("branch"), "path": r.get::<String, _>("subdir") });
+            out["lastLink"] = json!({
+                "repo": format!("{owner}/{name}"), "branch": r.get::<String, _>("branch"), "path": r.get::<String, _>("subdir"),
+                "changed": changed_since_sync(&state, id).await?,
+            });
         }
         return Ok(Json(out).into_response());
     };

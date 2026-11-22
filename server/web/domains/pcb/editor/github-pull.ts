@@ -1,6 +1,7 @@
 import { state } from "./appstore";
 import { E } from "./state";
 import { api, toast } from "./util";
+import { GITHUB_PULL, setAttention } from "./attention";
 
 export interface GithubPullResult {
   linked?: boolean;
@@ -30,6 +31,8 @@ export function watchGithubChanges(projectId: string, update: (result: GithubPul
       if (stopped || state.project?.projectId !== projectId) return;
       linked = result.linked !== false;
       if (result.updated.length) await update(result);
+      // what could not come in on its own waits on the sync page: a red mark until it is dealt with
+      setAttention(GITHUB_PULL, linked && result.skipped.length ? `GitHub has ${result.skipped.length} change${result.skipped.length === 1 ? "" : "s"} to pull that need${result.skipped.length === 1 ? "s" : ""} your review on the GitHub sync page.` : null);
       const notice = result.skipped.map((s) => `${s.path}: ${s.reason}`).join("\n");
       if (notice && notice !== lastNotice) githubPullNotice(projectId, "Some GitHub changes need review before they can be pulled.");
       lastNotice = notice;
@@ -43,7 +46,7 @@ export function watchGithubChanges(projectId: string, update: (result: GithubPul
   window.addEventListener("focus", focus);
   document.addEventListener("visibilitychange", focus);
   return () => {
-    stopped = true; clearInterval(timer);
+    stopped = true; clearInterval(timer); setAttention(GITHUB_PULL, null);
     window.removeEventListener("focus", focus);
     document.removeEventListener("visibilitychange", focus);
   };

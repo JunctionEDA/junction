@@ -589,9 +589,51 @@ function onDownCapture(ev: PointerEvent): void {
     if (E.drag === g) revertAppDrag();
   }
 }
+/**
+ * A second button pressed or released while another is held is no pointerdown / pointerup in the browser (Pointer
+ * Events "chorded buttons"): it arrives as a pointermove whose `button` names the button that changed.  KiCad's
+ * WX_VIEW_CONTROLS sees every button on its own, so a middle (or right) drag pans while the left button drags an item,
+ * and letting go of the left button there drops the item.
+ */
+function chordedButton(ev: PointerEvent): boolean {
+  if (ev.pointerType !== "mouse" || ev.button < 0) return false;
+  const down = (bit: number) => (ev.buttons & bit) !== 0;
+  if (ev.button === 1) {
+    if (down(4) && !E.pan && E.middleDragPan !== false) startPan(ev, ev.clientX, ev.clientY, E.middleDrag === "zoom");
+    else if (!down(4) && E.pan) { E.pan = null; stage.classList.remove("panning"); }
+    return true;
+  }
+  if (ev.button === 2) {
+    if (down(2) && !E.pan && !E.rdown) E.rdown = { x: ev.clientX, y: ev.clientY, id: ev.pointerId };
+    else if (!down(2)) { if (E.rdown) E.rdown = null; else if (E.pan) { E.pan = null; stage.classList.remove("panning"); } }
+    return true;
+  }
+  if (ev.button === 0 && !down(1) && (E.pan || E.rdown) && interactionBusy()) {
+    // the left button let go while the view pans: every tool gets its release (the item drops where it is, a box
+    // selects), and the pan goes on
+    const pan = E.pan, rdown = E.rdown; E.pan = null; E.rdown = null;
+    try {
+      stage.dispatchEvent(new PointerEvent("pointerup", { clientX: ev.clientX, clientY: ev.clientY, button: 0, buttons: ev.buttons, pointerId: ev.pointerId,
+        pointerType: "mouse", isPrimary: true, bubbles: true, cancelable: true, shiftKey: ev.shiftKey, ctrlKey: ev.ctrlKey, metaKey: ev.metaKey, altKey: ev.altKey }));
+    } finally { if (!E.pan) E.pan = pan; if (!E.rdown) E.rdown = rdown; }
+    return true;
+  }
+  return false;
+}
+/**
+ * The pan is applied here, in the capture phase ahead of every tool's own pointermove, so a move, a drag, a route
+ * or a box that is under way sees the view where it now is and keeps its item under the cursor while the view
+ * slides (KiCad moves the view under a moving item the same way).
+ */
+function panMove(ev: PointerEvent): void {
+  if (!E.pan || E.pan.zoom) return;
+  E.viewTouched = true; E.panX = ev.clientX - E.pan.x; E.panY = ev.clientY - E.pan.y; breakFollow(); applyView();
+}
 function onMoveCapture(ev: PointerEvent): void {
   if (buttonLost(ev)) { cancelInteraction(); }
+  chordedButton(ev);
   if (E.rdown && !E.pan && E.rightDragPan !== false && Math.hypot(ev.clientX - E.rdown.x, ev.clientY - E.rdown.y) > DRAG_THRESHOLD_PX) { const r = E.rdown; E.rdown = null; startPan(ev, r.x, r.y, E.rightDrag === "zoom"); }
+  panMove(ev);
   queueHover(ev);
 }
 function onUpCapture(ev: PointerEvent): void {

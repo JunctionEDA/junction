@@ -139,7 +139,7 @@ export function drawClearanceOutlines(c: CanvasRenderingContext2D, ctx: PcbCtx, 
   // group edit mode: what is outside the entered group fades to the Outside Group opacity, unless selected
   const entered = enteredGroupIds(doc);
   const ro = entered ? appGlobal(() => (editorState() as unknown as { renderOpts?: { outsideGroupOpacity?: number; objects?: { opacity?: Record<string, number> } } }).renderOpts || null, null) : null;
-  const outsideOp = !entered ? 1 : ro && typeof ro.outsideGroupOpacity === "number" ? ro.outsideGroupOpacity : ro && ro.objects && ro.objects.opacity && typeof ro.objects.opacity.outsideGroup === "number" ? ro.objects.opacity.outsideGroup : 0.2;
+  const outsideOp = !entered ? 1 : ro && typeof ro.outsideGroupOpacity === "number" ? ro.outsideGroupOpacity : ro && ro.objects && ro.objects.opacity && typeof ro.objects.opacity.outsideGroup === "number" ? ro.objects.opacity.outsideGroup : 1;
   for (const o of list) {
     c.globalAlpha = entered && !entered.has(o.id) && !sel.has(o.id) ? outsideOp : 1;
     let col = o.npth ? NPTH_COLOR : base;

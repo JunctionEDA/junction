@@ -57,7 +57,7 @@ import { connectedCopperIds, netHighlightIds, netInspector, netItemIds, netlist,
 import { netOf } from "./nets";
 import { zoneLayers } from "./nodes";
 import { ARC_EDIT_ACTIONS, addCornerChanges, arcEditMode, canAddCorner, handleTol, nextArcEditMode, peSingleId, removeCornerChanges, setArcEditMode } from "./point-editor";
-import { netUnder } from "./route-geom";
+import { netUnder, padsOf } from "./route-geom";
 import { attemptFinish, continueFromEnd, selectLayerAndPlaceVia, setLayer, startWithVia, toggleViaPlacement, undoRouteLeg, viaSpan } from "./route-tool";
 import { CM_M45, CM_M90, CM_R45, CM_R90, RM_MARK, RM_SHOVE, RM_WALK, setRouterSettings } from "./router-settings";
 import { beginCarryMove, moveTransform } from "./select-move";
@@ -654,18 +654,26 @@ act("showRatsnest", "Show Ratsnest", "", (ctx: PcbCtx) => { S.showRatsnest = !S.
 act("localRatsnestTool", "Local Ratsnest (selected footprints only)", "", (ctx: PcbCtx) => { S.localRatsnest = !S.localRatsnest; ctx.toast(S.localRatsnest ? "Ratsnest: selected footprints only" : "Ratsnest: whole board"); ctx.requestRender(); return true; }, { toggle: () => !!S.localRatsnest });
 act("hideNetInRatsnest", "Hide Net in Ratsnest", "", (ctx: PcbCtx) => { const nl = netlist(ctx.doc); const keys = selectionNets(ctx, nl); for (const k of keys) S.hiddenNets.add(k); ctx.toast(keys.size ? `Hidden: ${Array.from(keys).join(", ")}` : "Select something on a net"); ctx.requestRender(); return true; });
 act("showNetInRatsnest", "Show Net in Ratsnest", "", (ctx: PcbCtx) => { const nl = netlist(ctx.doc); const keys = selectionNets(ctx, nl); if (!keys.size) S.hiddenNets.clear(); else for (const k of keys) S.hiddenNets.delete(k); ctx.requestRender(); return true; });
-/** BOARD_INSPECTION_TOOL::highlightNet: the selection's nets, else (or with a position, aUseSelection false) the net under the point. */
-export function highlightNetAt(ctx: PcbCtx, at?: Pt | null) {
+/**
+ * BOARD_INSPECTION_TOOL::highlightNet( aPosition, aUseSelection ).  Plain Highlight Net (`, Ctrl+click) takes the
+ * copper under the MOUSE (GetMousePosition: not the snapped cursor, which can sit on a neighbouring track), whatever
+ * is selected.  Highlight Net of Selection takes the nets of the selected connected items (pads, tracks, arcs, vias,
+ * zones, shapes): a footprint is no BOARD_CONNECTED_ITEM, so a selected footprint adds no nets and the mouse decides.
+ */
+export function highlightNetAt(ctx: PcbCtx, at?: Pt | null, useSelection = false) {
   bind(ctx);
-  const nl = netlist(ctx.doc); let keys = at ? new Set<string>() : selectionNets(ctx, nl);
-  if (!keys.size) { const p = at || cursorPoint(ctx); const k = nl.table.key(netUnder(ctx.doc, p[0], p[1], null)); if (k) keys = new Set([k]); }
+  const nl = netlist(ctx.doc); let keys = new Set<string>();
+  if (useSelection) for (const it of selectedItems(ctx)) { if (it.kind !== "footprint" && K.kid(it.node, "net")) { const k = nl.table.key(netOf(it.node)); if (k) keys.add(k); } }
+  if (useSelection && S.padSel) { const i = S.padSel.lastIndexOf("#"), fp = ctx.doc.items.get(S.padSel.slice(0, i)), pad = fp && padsOf(fp)[+S.padSel.slice(i + 1)]; const k = pad && nl.table.key(pad.net); if (k) keys.add(k); }
+  if (!keys.size) { const p = at || (ctx.cursor ? ctx.cursor.slice() as Pt : cursorPoint(ctx)); const k = nl.table.key(netUnder(ctx.doc, p[0], p[1], null)); if (k) keys = new Set([k]); }
   if (!keys.size) { highlightIds(ctx, null); S.highlightNet = null; return true; }
-  const key = keys.values().next().value; if (S.highlightNet === key) { S.highlightNet = null; highlightIds(ctx, null); return true; }
+  const key = keys.values().next().value; if (keys.size === 1 && S.highlightNet === key) { S.highlightNet = null; highlightIds(ctx, null); return true; }
   S.highlightNet = key!; const ids = new Set<string>(); for (const k of keys) for (const id of netHighlightIds(ctx.doc, k, nl)) ids.add(id); highlightIds(ctx, ids, keys); return true;   // no infobar: the net shows in the message panel
 }
 act("highlightNet", "Highlight Net", "`", (ctx: PcbCtx) => highlightNetAt(ctx));
+act("highlightNetSelection", "Highlight Net of Selection", "", (ctx: PcbCtx) => highlightNetAt(ctx, null, true));
 act("clearHighlight", "Clear Net Highlighting", "~", (ctx: PcbCtx) => { S.highlightNet = null; highlightIds(ctx, null); return true; });
-alias("toggleNetHighlight", "highlightNet", "Toggle Last Net Highlight", "Alt+`"); alias("highlightNetSelection", "highlightNet", "Highlight Net of Selection", "");
+alias("toggleNetHighlight", "highlightNet", "Toggle Last Net Highlight", "Alt+`");
 // groups and locks
 act("group", "Group Items", "", (ctx: PcbCtx) => { const ids = needSel(ctx, "Select items to group"); if (!ids || !canEdit(ctx)) return true; const ch = groupChanges(ctx.doc, ids, ""); if (!ch.length) { ctx.toast("Nothing to group"); return true; } ctx.commit(ch, "group"); ctx.toast(`Grouped ${plural(ids.size, "item")}`); return true; });
 act("ungroup", "Ungroup Items", "", (ctx: PcbCtx) => { const ids = needSel(ctx, "Select a group or a member"); if (!ids || !canEdit(ctx)) return true; return commitSel(ctx, ungroupChanges(ctx.doc, ids), "ungroup"); });

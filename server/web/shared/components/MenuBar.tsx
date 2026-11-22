@@ -484,6 +484,7 @@ export function MenuBar() {
         </>
       ) : null}
       <div className="spacer flex-1" />
+      {inEditor && project ? <AttentionPills /> : null}
       {inEditor && project ? <ChatButton /> : null}
       {inProject ? (
         <a id="aiConnect" className="ai-connect" href="/connect" target="_blank" rel="noopener" title="Design with AI: connect any AI model or service that speaks MCP (Claude, ChatGPT, Gemini, Copilot, Cursor, your own) to this project. It edits here live, with its own cursor.">
@@ -501,5 +502,29 @@ export function MenuBar() {
         ) : <a className="btn sm" id="signinBtn" href={`/auth/github/login?next=${next}`}>Sign in with GitHub</a>}
       </div>
     </div>
+  );
+}
+
+/* Things waiting on the person (editor/attention.ts): the schematic is ahead of the board, or GitHub has changes the
+   editor could not pull by itself.  A red pill that pulses until it is dealt with; a click runs what clears it. */
+const ATTENTION_PILLS: { id: string; label: string; action: string }[] = [
+  { id: "updatePcbFromSchematic", label: "Schematic changed: update PCB", action: "updatePcbFromSchematic" },
+  { id: "githubPull", label: "Changes to pull", action: "github" },
+];
+function AttentionPills() {
+  const attention = useApp((s) => s.attention);
+  if (!attention) return null;
+  const shown = ATTENTION_PILLS.filter((p) => attention[p.id]);
+  if (!shown.length) return null;
+  return (
+    <>
+      {shown.map((p) => (
+        <button key={p.id} type="button" id={"attn-" + p.id} title={attention[p.id]} onClick={() => dispatch({ type: "action", id: p.action })}
+          className="attn-pill mr-2 flex-none inline-flex items-center gap-1.5 h-5 px-2 rounded-full border border-err text-err bg-transparent text-xs font-semibold cursor-pointer max-[700px]:px-1.5">
+          <span className="w-2 h-2 rounded-full bg-err animate-pulse" aria-hidden="true" />
+          <span className="max-[900px]:hidden">{p.label}</span>
+        </button>
+      ))}
+    </>
   );
 }

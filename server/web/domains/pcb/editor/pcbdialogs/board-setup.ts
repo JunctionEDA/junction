@@ -168,16 +168,20 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     const cuNow = (): number => layerRows.filter((r) => r.copper).length;
     const fromHeader = (): StackupLayer[] => BS().stackupLayers(header ? BS().editSetup(header.setup, setupEdit.copper ? { copper: setupEdit.copper, boardThickness: setupEdit.boardThickness } : {}) : null);
     stack = fromHeader();
-    const count = selectField<number>(cuNow(), counts, { ro: roBoard, key: "copperCount", onChange: (n) => {
+    /** The copper layer count changes (the Copper layers choice, or a manufacturer stackup with another count). */
+    const setCount = (n: number): boolean => {
       const inner = layerRows.filter((r) => r.copper).map((r) => r.name).slice(n - 1, -1);   // the inner layers that go away
       const busy = inner.filter((name) => E.kdoc && Array.from((E.kdoc as KDoc).items.values()).some((it) => (it.geom || []).some((g) => g.layer === name)));
-      if (busy.length) { setError("Physical Stackup", { msg: `Items have been found on ${busy.join(", ")}: move or delete them before removing the layer.`, ctrl: count.input }); count.set(cuNow()); return; }
+      if (busy.length) { setError("Physical Stackup", { msg: `Items have been found on ${busy.join(", ")}: move or delete them before removing the layer.`, ctrl: count.input }); count.set(cuNow()); return false; }
       layerRows = BS().setCopperCount(layerRows, n); layersTouched = true;
       setupEdit.copper = layerRows.filter((r) => r.copper).map((r) => r.name);
       setupEdit.boardThickness = header && header.general ? Number((KiCadCanvas.kid(header.general, "thickness") as SNode | null)?.[1]) || 1.6 : 1.6;
       stack = fromHeader(); touched = false;
+      count.set(n);
       if (refreshLayers) refreshLayers(); draw(); showBuilds();
-    } });
+      return true;
+    };
+    const count = selectField<number>(cuNow(), counts, { ro: roBoard, key: "copperCount", onChange: (n) => { setCount(n); } });
     count.input.title = "Select the number of copper layers in the stackup";
     const st0 = header && header.setup ? (KiCadCanvas.kid(header.setup, "stackup") as SNode | null) : null;
     impedance = checkField(st0 ? String(((KiCadCanvas.kid(st0, "dielectric_constraints") as SNode | null) || [])[1]) === "yes" : false, "Impedance controlled", { ro: roBoard, key: "impedance", tip: "If Impedance Controlled option is set,\nLoss tangent and EpsilonR will be added to constraints.", onChange: () => { touched = true; } });
@@ -191,21 +195,27 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     function showBuilds(): void {
       const name = vendor.get();
       const kind = BOARD_TYPES.find(([id]) => id === type.get()) || BOARD_TYPES[0];
-      const choices = FAB_STACKUPS.filter((b) => b.vendor === name && b.type === kind[0] && b.copper.length === cuNow());
+      // every stackup the manufacturer publishes for this board type: the board's own copper count first, then the
+      // others (applying one of those sets the copper layer count too)
+      const cu = cuNow();
+      const choices = FAB_STACKUPS.filter((b) => b.vendor === name && b.type === kind[0])
+        .sort((a, b) => (Number(a.copper.length !== cu) - Number(b.copper.length !== cu)) || (a.copper.length - b.copper.length) || (a.nominal - b.nominal) || a.id.localeCompare(b.id));
       const source = name === "JLCPCB" ? kind[2] : kind[3];
-      const list = selectField("", [["", "Choose a stackup"], ...choices.map((b): [string, string] => [b.id, `${b.id} · ${b.nominal} mm nominal`])],
+      const list = selectField("", [["", "Choose a stackup"], ...choices.map((b): [string, string] => [b.id, `${b.copper.length} layers · ${b.id} · ${b.nominal} mm nominal`])],
         { key: "stackup-build", ro: !choices.length });
-      const hint = note(choices.length ? "" : source ? `No preset for ${cuNow()} copper layers. Use the vendor’s specifications for a custom stackup.` : `${name} does not list this board type.`);
+      const hint = note(choices.length ? (choices.some((b) => b.copper.length === cu) ? "" : `No ${name} preset for ${cu} copper layers. Picking one of these changes the copper layer count.`) : source ? `${name} lists no preset for this board type. Use the vendor’s specifications for a custom stackup.` : `${name} does not list this board type.`);
       const apply = h("button", { type: "button", class: "btn", disabled: true }, "Apply stackup") as HTMLButtonElement;
       const selected = () => choices.find((b) => b.id === list.get());
       list.input.addEventListener("change", () => {
         const build = selected();
         apply.disabled = !build || roBoard;
         const width = build ? outer50Ohm(build) : null;
-        hint.textContent = width === null ? "" : `Estimated 50 Ω outer trace: ${width.toFixed(3)} mm over the adjacent plane, without mask or coverlay. Confirm with the manufacturer.`;
+        const other = build && build.copper.length !== cuNow() ? `Applying it changes the board to ${build.copper.length} copper layers. ` : "";
+        hint.textContent = other + (width === null ? "" : `Estimated 50 Ω outer trace: ${width.toFixed(3)} mm over the adjacent plane, without mask or coverlay. Confirm with the manufacturer.`);
       });
       apply.onclick = () => {
         const build = selected(); if (!build || roBoard) return;
+        if (build.copper.length !== cuNow() && !setCount(build.copper.length)) return;
         stack = applyFabStackup(build, stack || []);
         selRow = -1; touched = true; draw();
       };

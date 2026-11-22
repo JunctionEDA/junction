@@ -1,6 +1,6 @@
 // symedit/model.ts — the Symbol Editor's library-symbol model, over s-expression nodes and free of the DOM so the
 // node tests run it.  The C++ it ports:
-//   - SCH_IO_KICAD_SEXPR_LIB_CACHE::Save / formatLibrary / SaveSymbol and
+//   - SCH_IO_KICAD_SEXPR_LIB_CACHE::Save / formatLibrary / SaveSymbol (ordering by inheritance depth then name) and
 //     KICAD_FORMAT::Prettify (common/io/kicad/kicad_io_utils.cpp) — a saved library diffs cleanly against a desktop save;
 //   - LIB_SYMBOL's units and body styles ("Name_u_b" sub-symbols, (unit_name …), (body_styles demorgan | names));
 //   - LIB_SYMBOL_LIBRARY_MANAGER::CreateSymbol (New Symbol / Derive from Existing Symbol), LIB_SYMBOL::Flatten,
@@ -128,22 +128,16 @@ export function parseLibrary(src: string): SymLib {
   return { head, version: v ? num(v[1]) : 0, symbols };
 }
 export function emptyLibrary(): SymLib { return parseLibrary(NEW_LIBRARY_TEXT); }
-/** Keep file order, moving a parent ahead of a derived symbol only when necessary. */
+/** The library's symbol names in the order SCH_IO_KICAD_SEXPR_LIB_CACHE::Save writes them: inheritance depth, then
+ *  name (wxString operator<, a code-unit comparison). A library KiCad or KiCad Nightly saved is already in this order,
+ *  so saving it here moves nothing; only a hand-ordered library is put in the order the desktop would write. */
 export function saveOrder(lib: SymLib): string[] {
-  const order: string[] = [], seen = new Set<string>();
-  for (const name of lib.symbols.keys()) {
-    const chain: string[] = [];
-    let next: string | undefined = name;
-    while (next && lib.symbols.has(next) && !seen.has(next)) {
-      seen.add(next); chain.push(next);
-      const parent = kid(lib.symbols.get(next)!, "extends");
-      next = parent ? str(parent[1]) : undefined;
-    }
-    order.push(...chain.reverse());
-  }
-  return order;
+  const names = Array.from(lib.symbols.keys());
+  const depth = (name: string): number => { let d = 0, cur = lib.symbols.get(name); const seen = new Set<string>(); while (cur && d < 32) { const e = kid(cur, "extends"); if (!e) break; const p = str(e[1]); if (seen.has(p)) break; seen.add(p); d++; cur = lib.symbols.get(p); } return d; };
+  const dep = new Map(names.map((n) => [n, depth(n)]));
+  return names.sort((a, b) => (dep.get(a)! - dep.get(b)!) || (a < b ? -1 : a > b ? 1 : 0));
 }
-/** Serialize the library header and symbols using KiCad's formatting. */
+/** The whole file, as the desktop writes it: header, symbols by inheritance depth then name, prettified. */
 export function serializeLibrary(lib: SymLib): string {
   let s = "(" + lib.head.slice(1).reduce((acc: string, c) => acc + " " + serialize(c), String(lib.head[0]));
   for (const name of saveOrder(lib)) s += " " + serialize(lib.symbols.get(name)!);

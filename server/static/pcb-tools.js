@@ -30663,9 +30663,9 @@
     const m = S.move;
     if (!m || !m.sticky || !ctx || !isBoardLikeDoc()) return;
     if (ev.target.closest && (ev.target.closest("#pcbChip") || ev.target.closest("#cmtPanel"))) return;
+    if (ev.button !== 0) return;
     ev.stopImmediatePropagation();
     ev.preventDefault();
-    if (ev.button !== 0) return;
     selectMoveTo(ctx, ctx.worldMm(ev));
     S.stickyUp = true;
     finishSelectMove(ctx, true, !!(ev.ctrlKey || ev.metaKey));
@@ -31059,7 +31059,7 @@
     const base = color(layer);
     const entered = enteredGroupIds(doc);
     const ro = entered ? appGlobal(() => editorState().renderOpts || null, null) : null;
-    const outsideOp = !entered ? 1 : ro && typeof ro.outsideGroupOpacity === "number" ? ro.outsideGroupOpacity : ro && ro.objects && ro.objects.opacity && typeof ro.objects.opacity.outsideGroup === "number" ? ro.objects.opacity.outsideGroup : 0.2;
+    const outsideOp = !entered ? 1 : ro && typeof ro.outsideGroupOpacity === "number" ? ro.outsideGroupOpacity : ro && ro.objects && ro.objects.opacity && typeof ro.objects.opacity.outsideGroup === "number" ? ro.objects.opacity.outsideGroup : 1;
     for (const o of list) {
       c.globalAlpha = entered && !entered.has(o.id) && !sel.has(o.id) ? outsideOp : 1;
       let col = o.npth ? NPTH_COLOR : base;
@@ -39572,12 +39572,23 @@ Press <esc> to cancel all; double-click to finish`;
     ctx.requestRender();
     return true;
   });
-  function highlightNetAt(ctx, at) {
+  function highlightNetAt(ctx, at, useSelection = false) {
     bind(ctx);
     const nl = netlist2(ctx.doc);
-    let keys = at ? /* @__PURE__ */ new Set() : selectionNets(ctx, nl);
+    let keys = /* @__PURE__ */ new Set();
+    if (useSelection) for (const it of selectedItems(ctx)) {
+      if (it.kind !== "footprint" && K.kid(it.node, "net")) {
+        const k = nl.table.key(netOf(it.node));
+        if (k) keys.add(k);
+      }
+    }
+    if (useSelection && S.padSel) {
+      const i = S.padSel.lastIndexOf("#"), fp = ctx.doc.items.get(S.padSel.slice(0, i)), pad = fp && padsOf(fp)[+S.padSel.slice(i + 1)];
+      const k = pad && nl.table.key(pad.net);
+      if (k) keys.add(k);
+    }
     if (!keys.size) {
-      const p = at || cursorPoint(ctx);
+      const p = at || (ctx.cursor ? ctx.cursor.slice() : cursorPoint(ctx));
       const k = nl.table.key(netUnder(ctx.doc, p[0], p[1], null));
       if (k) keys = /* @__PURE__ */ new Set([k]);
     }
@@ -39587,7 +39598,7 @@ Press <esc> to cancel all; double-click to finish`;
       return true;
     }
     const key = keys.values().next().value;
-    if (S.highlightNet === key) {
+    if (keys.size === 1 && S.highlightNet === key) {
       S.highlightNet = null;
       highlightIds(ctx, null);
       return true;
@@ -39599,13 +39610,13 @@ Press <esc> to cancel all; double-click to finish`;
     return true;
   }
   act("highlightNet", "Highlight Net", "`", (ctx) => highlightNetAt(ctx));
+  act("highlightNetSelection", "Highlight Net of Selection", "", (ctx) => highlightNetAt(ctx, null, true));
   act("clearHighlight", "Clear Net Highlighting", "~", (ctx) => {
     S.highlightNet = null;
     highlightIds(ctx, null);
     return true;
   });
   alias("toggleNetHighlight", "highlightNet", "Toggle Last Net Highlight", "Alt+`");
-  alias("highlightNetSelection", "highlightNet", "Highlight Net of Selection", "");
   act("group", "Group Items", "", (ctx) => {
     const ids = needSel(ctx, "Select items to group");
     if (!ids || !canEdit(ctx)) return true;
