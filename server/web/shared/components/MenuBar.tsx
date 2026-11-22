@@ -508,7 +508,6 @@ export function MenuBar() {
 /* Things waiting on the person (editor/attention.ts): the schematic is ahead of the board, or GitHub has changes the
    editor could not pull by itself.  A red pill that pulses until it is dealt with; a click runs what clears it. */
 const ATTENTION_PILLS: { id: string; label: string; action: string }[] = [
-  { id: "updatePcbFromSchematic", label: "Schematic changed: update PCB", action: "updatePcbFromSchematic" },
   { id: "githubPull", label: "Changes to pull", action: "github" },
 ];
 function AttentionPills() {

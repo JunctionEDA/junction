@@ -5839,7 +5839,7 @@ function padAt(doc2, x, y) {
       if (area4 >= bestArea) continue;
       bestArea = area4;
       const cx = g2.t === "poly" ? g2.pts.reduce((a, p) => a + p[0], 0) / g2.pts.length : g2.x, cy = g2.t === "poly" ? g2.pts.reduce((a, p) => a + p[1], 0) / g2.pts.length : g2.y;
-      best = { item: it, index: g2.padIndex, pad: kids(it.node, "pad")[g2.padIndex] || null, number: g2.padNumber, net: g2.net, netName: g2.netName, x: cx, y: cy };
+      best = { item: it, index: g2.padIndex, pad: kids(it.node, "pad")[g2.padIndex] || null, number: g2.padNumber, net: g2.net, netName: g2.netName, x: cx, y: cy, area: area4 };
     }
   }
   return best;
@@ -17575,7 +17575,7 @@ var require_pcb_tools = __commonJS({
           fail(message);
         }
       }
-      var check3 = { fail, argument, assert: argument };
+      var check4 = { fail, argument, assert: argument };
       var LIMIT16 = 32768;
       var LIMIT32 = 2147483648;
       var decode2 = {};
@@ -17587,7 +17587,7 @@ var require_pcb_tools = __commonJS({
         };
       }
       encode.BYTE = function(v) {
-        check3.argument(v >= 0 && v <= 255, "Byte value should be between 0 and 255.");
+        check4.argument(v >= 0 && v <= 255, "Byte value should be between 0 and 255.");
         return [v];
       };
       sizeOf.BYTE = constant(1);
@@ -17649,7 +17649,7 @@ var require_pcb_tools = __commonJS({
       };
       sizeOf.LONGDATETIME = constant(8);
       encode.TAG = function(v) {
-        check3.argument(v.length === 4, "Tag should be exactly 4 ASCII characters.");
+        check4.argument(v.length === 4, "Tag should be exactly 4 ASCII characters.");
         return [
           v.charCodeAt(0),
           v.charCodeAt(1),
@@ -17997,7 +17997,7 @@ var require_pcb_tools = __commonJS({
         var d = [];
         if (Array.isArray(type)) {
           for (var i = 0; i < type.length; i += 1) {
-            check3.argument(v.length === type.length, "Not enough arguments given for type" + type);
+            check4.argument(v.length === type.length, "Not enough arguments given for type" + type);
             d = d.concat(encode.OPERAND(v[i], type[i]));
           }
         } else {
@@ -18041,12 +18041,12 @@ var require_pcb_tools = __commonJS({
       };
       encode.OBJECT = function(v) {
         var encodingFunction = encode[v.type];
-        check3.argument(encodingFunction !== void 0, "No encoding function for type " + v.type);
+        check4.argument(encodingFunction !== void 0, "No encoding function for type " + v.type);
         return encodingFunction(v.value);
       };
       sizeOf.OBJECT = function(v) {
         var sizeOfFunction = sizeOf[v.type];
-        check3.argument(sizeOfFunction !== void 0, "No sizeOf function for type " + v.type);
+        check4.argument(sizeOfFunction !== void 0, "No sizeOf function for type " + v.type);
         return sizeOfFunction(v.value);
       };
       encode.TABLE = function(table2) {
@@ -18057,7 +18057,7 @@ var require_pcb_tools = __commonJS({
         for (var i = 0; i < length; i += 1) {
           var field22 = table2.fields[i];
           var encodingFunction = encode[field22.type];
-          check3.argument(encodingFunction !== void 0, "No encoding function for field type " + field22.type + " (" + field22.name + ")");
+          check4.argument(encodingFunction !== void 0, "No encoding function for field type " + field22.type + " (" + field22.name + ")");
           var value = table2[field22.name];
           if (value === void 0) {
             value = field22.value;
@@ -18074,7 +18074,7 @@ var require_pcb_tools = __commonJS({
         for (var i$1 = 0; i$1 < subtables.length; i$1 += 1) {
           var o = subtableOffsets[i$1];
           var offset = d.length;
-          check3.argument(offset < 65536, "Table " + table2.tableName + " too big.");
+          check4.argument(offset < 65536, "Table " + table2.tableName + " too big.");
           d[o] = offset >> 8;
           d[o + 1] = offset & 255;
           d = d.concat(subtables[i$1]);
@@ -18087,7 +18087,7 @@ var require_pcb_tools = __commonJS({
         for (var i = 0; i < length; i += 1) {
           var field22 = table2.fields[i];
           var sizeOfFunction = sizeOf[field22.type];
-          check3.argument(sizeOfFunction !== void 0, "No sizeOf function for field type " + field22.type + " (" + field22.name + ")");
+          check4.argument(sizeOfFunction !== void 0, "No sizeOf function for field type " + field22.type + " (" + field22.name + ")");
           var value = table2[field22.name];
           if (value === void 0) {
             value = field22.value;
@@ -18182,7 +18182,7 @@ var require_pcb_tools = __commonJS({
             }))
           );
         } else {
-          check3.assert(false, "Coverage format must be 1 or 2.");
+          check4.assert(false, "Coverage format must be 1 or 2.");
         }
       }
       Coverage.prototype = Object.create(Table.prototype);
@@ -18194,7 +18194,7 @@ var require_pcb_tools = __commonJS({
           recordList("scriptRecord", scriptListTable, function(scriptRecord, i) {
             var script = scriptRecord.script;
             var defaultLangSys = script.defaultLangSys;
-            check3.assert(!!defaultLangSys, "Unable to write GSUB: script " + scriptRecord.tag + " has no default language system.");
+            check4.assert(!!defaultLangSys, "Unable to write GSUB: script " + scriptRecord.tag + " has no default language system.");
             return [
               { name: "scriptTag" + i, type: "TAG", value: scriptRecord.tag },
               { name: "script" + i, type: "TABLE", value: new Table("scriptTable", [
@@ -18238,7 +18238,7 @@ var require_pcb_tools = __commonJS({
       function LookupList(lookupListTable, subtableMakers2) {
         Table.call(this, "lookupListTable", tableList("lookup", lookupListTable, function(lookupTable) {
           var subtableCallback = subtableMakers2[lookupTable.lookupType];
-          check3.assert(!!subtableCallback, "Unable to write GSUB lookup type " + lookupTable.lookupType + " tables.");
+          check4.assert(!!subtableCallback, "Unable to write GSUB lookup type " + lookupTable.lookupType + " tables.");
           return new Table("lookupTable", [
             { name: "lookupType", type: "USHORT", value: lookupTable.lookupType },
             { name: "lookupFlag", type: "USHORT", value: lookupTable.lookupFlag }
@@ -18715,7 +18715,7 @@ var require_pcb_tools = __commonJS({
       Parser.prototype.parseLookupList = function(lookupTableParsers) {
         return this.parsePointer(Parser.list(Parser.pointer(function() {
           var lookupType = this.parseUShort();
-          check3.argument(1 <= lookupType && lookupType <= 9, "GPOS/GSUB lookup type " + lookupType + " unknown.");
+          check4.argument(1 <= lookupType && lookupType <= 9, "GPOS/GSUB lookup type " + lookupType + " unknown.");
           var lookupFlag = this.parseUShort();
           var useMarkFilteringSet = lookupFlag & 16;
           return {
@@ -18730,7 +18730,7 @@ var require_pcb_tools = __commonJS({
         return this.parsePointer32(function() {
           var majorVersion = this.parseUShort();
           var minorVersion = this.parseUShort();
-          check3.argument(majorVersion === 1 && minorVersion < 1, "GPOS/GSUB feature variations table unknown.");
+          check4.argument(majorVersion === 1 && minorVersion < 1, "GPOS/GSUB feature variations table unknown.");
           var featureVariations = this.parseRecordList32({
             conditionSetOffset: Parser.offset32,
             featureTableSubstitutionOffset: Parser.offset32
@@ -18806,7 +18806,7 @@ var require_pcb_tools = __commonJS({
       function parseCmapTable(data, start) {
         var cmap2 = {};
         cmap2.version = parse2.getUShort(data, start);
-        check3.argument(cmap2.version === 0, "cmap table version should be 0.");
+        check4.argument(cmap2.version === 0, "cmap table version should be 0.");
         cmap2.numTables = parse2.getUShort(data, start + 2);
         var offset = -1;
         for (var i = cmap2.numTables - 1; i >= 0; i -= 1) {
@@ -20360,7 +20360,7 @@ var require_pcb_tools = __commonJS({
             currentContour = [];
           }
         }
-        check3.argument(currentContour.length === 0, "There are still points left in the current contour.");
+        check4.argument(currentContour.length === 0, "There are still points left in the current contour.");
         return contours22;
       };
       Glyph.prototype.getMetrics = function() {
@@ -21645,7 +21645,7 @@ var require_pcb_tools = __commonJS({
         head22.fontRevision = Math.round(p.parseFixed() * 1e3) / 1e3;
         head22.checkSumAdjustment = p.parseULong();
         head22.magicNumber = p.parseULong();
-        check3.argument(head22.magicNumber === 1594834165, "Font header has wrong magic number.");
+        check4.argument(head22.magicNumber === 1594834165, "Font header has wrong magic number.");
         head22.flags = p.parseUShort();
         head22.unitsPerEm = p.parseUShort();
         head22.created = p.parseLongDateTime();
@@ -21801,7 +21801,7 @@ var require_pcb_tools = __commonJS({
       function parseLtagTable(data, start) {
         var p = new parse2.Parser(data, start);
         var tableVersion = p.parseULong();
-        check3.argument(tableVersion === 1, "Unsupported ltag table version.");
+        check4.argument(tableVersion === 1, "Unsupported ltag table version.");
         p.skip("uLong", 1);
         var numTags = p.parseULong();
         var tags = [];
@@ -23183,11 +23183,11 @@ var require_pcb_tools = __commonJS({
             substitute: this.parseOffset16List()
           };
         }
-        check3.assert(false, "0x" + start.toString(16) + ": lookup type 1 format must be 1 or 2.");
+        check4.assert(false, "0x" + start.toString(16) + ": lookup type 1 format must be 1 or 2.");
       };
       subtableParsers[2] = function parseLookup2() {
         var substFormat = this.parseUShort();
-        check3.argument(substFormat === 1, "GSUB Multiple Substitution Subtable identifier-format must be 1");
+        check4.argument(substFormat === 1, "GSUB Multiple Substitution Subtable identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -23196,7 +23196,7 @@ var require_pcb_tools = __commonJS({
       };
       subtableParsers[3] = function parseLookup3() {
         var substFormat = this.parseUShort();
-        check3.argument(substFormat === 1, "GSUB Alternate Substitution Subtable identifier-format must be 1");
+        check4.argument(substFormat === 1, "GSUB Alternate Substitution Subtable identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -23205,7 +23205,7 @@ var require_pcb_tools = __commonJS({
       };
       subtableParsers[4] = function parseLookup4() {
         var substFormat = this.parseUShort();
-        check3.argument(substFormat === 1, "GSUB ligature table identifier-format must be 1");
+        check4.argument(substFormat === 1, "GSUB ligature table identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -23260,7 +23260,7 @@ var require_pcb_tools = __commonJS({
             lookupRecords: this.parseRecordList(substCount, lookupRecordDesc)
           };
         }
-        check3.assert(false, "0x" + start.toString(16) + ": lookup type 5 format must be 1, 2 or 3.");
+        check4.assert(false, "0x" + start.toString(16) + ": lookup type 5 format must be 1, 2 or 3.");
       };
       subtableParsers[6] = function parseLookup6() {
         var start = this.offset + this.relativeOffset;
@@ -23303,11 +23303,11 @@ var require_pcb_tools = __commonJS({
             lookupRecords: this.parseRecordList(lookupRecordDesc)
           };
         }
-        check3.assert(false, "0x" + start.toString(16) + ": lookup type 6 format must be 1, 2 or 3.");
+        check4.assert(false, "0x" + start.toString(16) + ": lookup type 6 format must be 1, 2 or 3.");
       };
       subtableParsers[7] = function parseLookup7() {
         var substFormat = this.parseUShort();
-        check3.argument(substFormat === 1, "GSUB Extension Substitution subtable identifier-format must be 1");
+        check4.argument(substFormat === 1, "GSUB Extension Substitution subtable identifier-format must be 1");
         var extensionLookupType = this.parseUShort();
         var extensionParser = new Parser(this.data, this.offset + this.parseULong());
         return {
@@ -23318,7 +23318,7 @@ var require_pcb_tools = __commonJS({
       };
       subtableParsers[8] = function parseLookup8() {
         var substFormat = this.parseUShort();
-        check3.argument(substFormat === 1, "GSUB Reverse Chaining Contextual Single Substitution Subtable identifier-format must be 1");
+        check4.argument(substFormat === 1, "GSUB Reverse Chaining Contextual Single Substitution Subtable identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -23331,7 +23331,7 @@ var require_pcb_tools = __commonJS({
         start = start || 0;
         var p = new Parser(data, start);
         var tableVersion = p.parseVersion(1);
-        check3.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GSUB table version.");
+        check4.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GSUB table version.");
         if (tableVersion === 1) {
           return {
             version: tableVersion,
@@ -23365,7 +23365,7 @@ var require_pcb_tools = __commonJS({
         }
       };
       subtableMakers[2] = function makeLookup2(subtable) {
-        check3.assert(subtable.substFormat === 1, "Lookup type 2 substFormat must be 1.");
+        check4.assert(subtable.substFormat === 1, "Lookup type 2 substFormat must be 1.");
         return new table.Table("substitutionTable", [
           { name: "substFormat", type: "USHORT", value: 1 },
           { name: "coverage", type: "TABLE", value: new table.Coverage(subtable.coverage) }
@@ -23374,7 +23374,7 @@ var require_pcb_tools = __commonJS({
         })));
       };
       subtableMakers[3] = function makeLookup3(subtable) {
-        check3.assert(subtable.substFormat === 1, "Lookup type 3 substFormat must be 1.");
+        check4.assert(subtable.substFormat === 1, "Lookup type 3 substFormat must be 1.");
         return new table.Table("substitutionTable", [
           { name: "substFormat", type: "USHORT", value: 1 },
           { name: "coverage", type: "TABLE", value: new table.Coverage(subtable.coverage) }
@@ -23383,7 +23383,7 @@ var require_pcb_tools = __commonJS({
         })));
       };
       subtableMakers[4] = function makeLookup4(subtable) {
-        check3.assert(subtable.substFormat === 1, "Lookup type 4 substFormat must be 1.");
+        check4.assert(subtable.substFormat === 1, "Lookup type 4 substFormat must be 1.");
         return new table.Table("substitutionTable", [
           { name: "substFormat", type: "USHORT", value: 1 },
           { name: "coverage", type: "TABLE", value: new table.Coverage(subtable.coverage) }
@@ -23412,7 +23412,7 @@ var require_pcb_tools = __commonJS({
           })));
           return returnTable;
         } else if (subtable.substFormat === 2) {
-          check3.assert(false, "lookup type 6 format 2 is not yet supported.");
+          check4.assert(false, "lookup type 6 format 2 is not yet supported.");
         } else if (subtable.substFormat === 3) {
           var tableData = [
             { name: "substFormat", type: "USHORT", value: subtable.substFormat }
@@ -23436,7 +23436,7 @@ var require_pcb_tools = __commonJS({
           var returnTable$1 = new table.Table("chainContextTable", tableData);
           return returnTable$1;
         }
-        check3.assert(false, "lookup type 6 format must be 1, 2 or 3.");
+        check4.assert(false, "lookup type 6 format must be 1, 2 or 3.");
       };
       function makeGsubTable(gsub2) {
         return new table.Table("GSUB", [
@@ -23450,7 +23450,7 @@ var require_pcb_tools = __commonJS({
       function parseMetaTable(data, start) {
         var p = new parse2.Parser(data, start);
         var tableVersion = p.parseULong();
-        check3.argument(tableVersion === 1, "Unsupported META table version.");
+        check4.argument(tableVersion === 1, "Unsupported META table version.");
         p.parseULong();
         p.parseULong();
         var numDataMaps = p.parseULong();
@@ -23530,13 +23530,13 @@ var require_pcb_tools = __commonJS({
         }
         for (var i = 0; i < tables2.length; i += 1) {
           var t = tables2[i];
-          check3.argument(t.tableName.length === 4, "Table name" + t.tableName + " is invalid.");
+          check4.argument(t.tableName.length === 4, "Table name" + t.tableName + " is invalid.");
           var tableLength = t.sizeOf();
           var tableRecord = makeTableRecord(t.tableName, computeCheckSum(t.encode()), offset, tableLength);
           recordFields.push({ name: tableRecord.tag + " Table Record", type: "RECORD", value: tableRecord });
           tableFields.push({ name: t.tableName + " table", type: "RECORD", value: t });
           offset += tableLength;
-          check3.argument(!isNaN(offset), "Something went wrong calculating the offset.");
+          check4.argument(!isNaN(offset), "Something went wrong calculating the offset.");
           while (offset % 4 !== 0) {
             offset += 1;
             tableFields.push({ name: "padding", type: "BYTE", value: 0 });
@@ -23959,7 +23959,7 @@ var require_pcb_tools = __commonJS({
             }
             if (create) {
               var index = allFeatures.length;
-              check3.assert(index === 0 || feature >= allFeatures[index - 1].tag, "Features must be added in alphabetical order.");
+              check4.assert(index === 0 || feature >= allFeatures[index - 1].tag, "Features must be added in alphabetical order.");
               featureRecord = {
                 tag: feature,
                 feature: { params: 0, lookupListIndexes: [] }
@@ -24248,7 +24248,7 @@ var require_pcb_tools = __commonJS({
           coverage: { format: 1, glyphs: [] },
           substitute: []
         });
-        check3.assert(subtable.coverage.format === 1, "Single: unable to modify coverage table format " + subtable.coverage.format);
+        check4.assert(subtable.coverage.format === 1, "Single: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = substitution.sub;
         var pos = this.binSearch(subtable.coverage.glyphs, coverageGlyph);
         if (pos < 0) {
@@ -24259,7 +24259,7 @@ var require_pcb_tools = __commonJS({
         subtable.substitute[pos] = substitution.by;
       };
       Substitution.prototype.addMultiple = function(feature, substitution, script, language) {
-        check3.assert(substitution.by instanceof Array && substitution.by.length > 1, 'Multiple: "by" must be an array of two or more ids');
+        check4.assert(substitution.by instanceof Array && substitution.by.length > 1, 'Multiple: "by" must be an array of two or more ids');
         var lookupTable = this.getLookupTables(script, language, feature, 2, true)[0];
         var subtable = getSubstFormat(lookupTable, 1, {
           // lookup type 2 subtable, format 1, coverage format 1
@@ -24267,7 +24267,7 @@ var require_pcb_tools = __commonJS({
           coverage: { format: 1, glyphs: [] },
           sequences: []
         });
-        check3.assert(subtable.coverage.format === 1, "Multiple: unable to modify coverage table format " + subtable.coverage.format);
+        check4.assert(subtable.coverage.format === 1, "Multiple: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = substitution.sub;
         var pos = this.binSearch(subtable.coverage.glyphs, coverageGlyph);
         if (pos < 0) {
@@ -24285,7 +24285,7 @@ var require_pcb_tools = __commonJS({
           coverage: { format: 1, glyphs: [] },
           alternateSets: []
         });
-        check3.assert(subtable.coverage.format === 1, "Alternate: unable to modify coverage table format " + subtable.coverage.format);
+        check4.assert(subtable.coverage.format === 1, "Alternate: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = substitution.sub;
         var pos = this.binSearch(subtable.coverage.glyphs, coverageGlyph);
         if (pos < 0) {
@@ -24307,7 +24307,7 @@ var require_pcb_tools = __commonJS({
           };
           lookupTable.subtables[0] = subtable;
         }
-        check3.assert(subtable.coverage.format === 1, "Ligature: unable to modify coverage table format " + subtable.coverage.format);
+        check4.assert(subtable.coverage.format === 1, "Ligature: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = ligature.sub[0];
         var ligComponents = ligature.sub.slice(1);
         var ligatureTable = {
@@ -24444,7 +24444,7 @@ var require_pcb_tools = __commonJS({
               }
             }
           }
-          check3.argument(flags2.length === numberOfCoordinates, "Bad flags.");
+          check4.argument(flags2.length === numberOfCoordinates, "Bad flags.");
           if (endPointIndices.length > 0) {
             var points2 = [];
             var point;
@@ -24556,7 +24556,7 @@ var require_pcb_tools = __commonJS({
             currentContour = [];
           }
         }
-        check3.argument(currentContour.length === 0, "There are still points left in the current contour.");
+        check4.argument(currentContour.length === 0, "There are still points left in the current contour.");
         return contours22;
       }
       function getPath2(points2) {
@@ -28644,7 +28644,7 @@ var require_pcb_tools = __commonJS({
       function parseFvarTable(data, start, names2) {
         var p = new parse2.Parser(data, start);
         var tableVersion = p.parseULong();
-        check3.argument(tableVersion === 65536, "Unsupported fvar table version.");
+        check4.argument(tableVersion === 65536, "Unsupported fvar table version.");
         var offsetToData = p.parseOffset16();
         p.skip("uShort", 1);
         var axisCount = p.parseUShort();
@@ -28671,7 +28671,7 @@ var require_pcb_tools = __commonJS({
       };
       var caretValue = function() {
         var format = this.parseUShort();
-        check3.argument(
+        check4.argument(
           format === 1 || format === 2 || format === 3,
           "Unsupported CaretValue table version."
         );
@@ -28700,7 +28700,7 @@ var require_pcb_tools = __commonJS({
         start = start || 0;
         var p = new Parser(data, start);
         var tableVersion = p.parseVersion(1);
-        check3.argument(
+        check4.argument(
           tableVersion === 1 || tableVersion === 1.2 || tableVersion === 1.3,
           "Unsupported GDEF table version."
         );
@@ -28734,12 +28734,12 @@ var require_pcb_tools = __commonJS({
             values: this.parseValueRecordList()
           };
         }
-        check3.assert(false, "0x" + start.toString(16) + ": GPOS lookup type 1 format must be 1 or 2.");
+        check4.assert(false, "0x" + start.toString(16) + ": GPOS lookup type 1 format must be 1 or 2.");
       };
       subtableParsers$1[2] = function parseLookup22() {
         var start = this.offset + this.relativeOffset;
         var posFormat = this.parseUShort();
-        check3.assert(posFormat === 1 || posFormat === 2, "0x" + start.toString(16) + ": GPOS lookup type 2 format must be 1 or 2.");
+        check4.assert(posFormat === 1 || posFormat === 2, "0x" + start.toString(16) + ": GPOS lookup type 2 format must be 1 or 2.");
         var coverage = this.parsePointer(Parser.coverage);
         var valueFormat1 = this.parseUShort();
         var valueFormat2 = this.parseUShort();
@@ -28807,7 +28807,7 @@ var require_pcb_tools = __commonJS({
         start = start || 0;
         var p = new Parser(data, start);
         var tableVersion = p.parseVersion(1);
-        check3.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GPOS table version " + tableVersion);
+        check4.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GPOS table version " + tableVersion);
         if (tableVersion === 1) {
           return {
             version: tableVersion,
@@ -28839,7 +28839,7 @@ var require_pcb_tools = __commonJS({
         var pairs = {};
         p.skip("uShort");
         var subtableVersion = p.parseUShort();
-        check3.argument(subtableVersion === 0, "Unsupported kern sub-table version.");
+        check4.argument(subtableVersion === 0, "Unsupported kern sub-table version.");
         p.skip("uShort", 2);
         var nPairs = p.parseUShort();
         p.skip("uShort", 3);
@@ -41157,9 +41157,9 @@ var require_pcb_tools = __commonJS({
         const dirs = angleSnapDirections(angleSnapMode());
         const sn = snapCursor(ctx, [mm5[0], mm5[1]], m.skip || new Set(m.orig.keys()), mods2 || m.mods, dirs.length ? { origin: m.start, dirs } : null);
         m.snapAt = sn.anchor;
-        const guide = sn.guide || null;
-        if (!sameGuide(m.guide, guide)) {
-          m.guide = guide;
+        const guide2 = sn.guide || null;
+        if (!sameGuide(m.guide, guide2)) {
+          m.guide = guide2;
           ctx.requestRender();
         }
         if (S3.moveSeq && S3.popup) S3.popup.at = [mm5[0], mm5[1]];
@@ -44164,19 +44164,19 @@ var require_pcb_tools = __commonJS({
         sPrev = seg2(index - 1);
         sNext = seg2(index + 1);
         dragged = seg2(index);
-        const guide = (p, d) => [p, [p[0] + DIRS8[d][0], p[1] + DIRS8[d][1]]];
+        const guide2 = (p, d) => [p, [p[0] + DIRS8[d][0], p[1] + DIRS8[d][1]]];
         const wide = (d) => {
           const a = dirAngle(d, dragDir);
           return a === 1 || a === 4;
         };
         let gA, gB;
-        if (aIndex === 0) gA = [guide(dragged[0], d45Right(dragDir)), guide(dragged[0], d45Left(dragDir))];
-        else if (wide(dirPrev)) gA = [guide(sPrev[0], d45Left(dragDir)), guide(sPrev[0], d45Right(dragDir))];
-        else gA = [guide(dragged[0], dirPrev), guide(dragged[0], dirPrev)];
-        if (aIndex === segs0 - 1) gB = [guide(dragged[1], d45Right(dragDir)), guide(dragged[1], d45Left(dragDir))];
-        else if (wide(dirNext)) gB = [guide(sNext[1], d45Left(dragDir)), guide(sNext[1], d45Right(dragDir))];
-        else gB = [guide(dragged[1], dirNext), guide(dragged[1], dirNext)];
-        const cur2 = guide(target2, dragDir);
+        if (aIndex === 0) gA = [guide2(dragged[0], d45Right(dragDir)), guide2(dragged[0], d45Left(dragDir))];
+        else if (wide(dirPrev)) gA = [guide2(sPrev[0], d45Left(dragDir)), guide2(sPrev[0], d45Right(dragDir))];
+        else gA = [guide2(dragged[0], dirPrev), guide2(dragged[0], dirPrev)];
+        if (aIndex === segs0 - 1) gB = [guide2(dragged[1], d45Right(dragDir)), guide2(dragged[1], d45Left(dragDir))];
+        else if (wide(dirNext)) gB = [guide2(sNext[1], d45Left(dragDir)), guide2(sNext[1], d45Right(dragDir))];
+        else gB = [guide2(dragged[1], dirNext), guide2(dragged[1], dirNext)];
+        const cur2 = guide2(target2, dragDir);
         let best = null, bestLen = Infinity;
         for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
           const ip1 = lineX(cur2[0], cur2[1], gA[i][0], gA[i][1]), ip2 = lineX(cur2[0], cur2[1], gB[j][0], gB[j][1]);
@@ -46605,7 +46605,7 @@ var require_pcb_tools = __commonJS({
         c.globalAlpha = 1;
         c.lineWidth = px;
         c.strokeStyle = colour;
-        const guide = (a, b, dim) => {
+        const guide2 = (a, b, dim) => {
           c.globalAlpha = dim ? 0.45 : 0.9;
           line2(c, mm5(a), mm5(b));
         };
@@ -46623,7 +46623,7 @@ var require_pcb_tools = __commonJS({
         if (g2.mode === ARC_CENTER_START_END) {
           const o = g2.getOrigin();
           anchor2 = mm5(o);
-          guide(o, g2.startRadiusEnd(), g2.getStep() > 1);
+          guide2(o, g2.startRadiusEnd(), g2.getStep() > 1);
           if (g2.getStep() === 1) {
             strs.push(dimensionLabel2("r", g2.radius / NM));
             let a = g2.startAngle();
@@ -46631,8 +46631,8 @@ var require_pcb_tools = __commonJS({
             while (a >= 360) a -= 360;
             strs.push(dimensionLabel2("\u03B8", a, true));
           } else {
-            guide(o, g2.endRadiusEnd(), false);
-            guide(o, g2.last, true);
+            guide2(o, g2.endRadiusEnd(), false);
+            guide2(o, g2.last, true);
             const sub3 = g2.subtended();
             let end = g2.startAngle() + sub3;
             end = ((end + 180) % 360 + 360) % 360 - 180;
@@ -46648,7 +46648,7 @@ var require_pcb_tools = __commonJS({
           const start = g2.startRadiusEnd(), sol = g2.sol;
           if (g2.mode === ARC_START_END_MID || g2.mode === ARC_START_END_CENTER) {
             const chordEnd = i === 1 ? g2.last : g2.pts[1], mid2 = [(start[0] + chordEnd[0]) / 2, (start[1] + chordEnd[1]) / 2];
-            guide(start, chordEnd, i > 1);
+            guide2(start, chordEnd, i > 1);
             anchor2 = mm5(mid2);
             if (i > 1 && sol.valid) {
               const marked = g2.mode === ARC_START_END_MID ? sol.mid : sol.center;
@@ -46656,8 +46656,8 @@ var require_pcb_tools = __commonJS({
               c.globalAlpha = 0.9;
               ring(c, mm5(marked), 4 * px);
               if (g2.mode === ARC_START_END_CENTER) {
-                guide(marked, sol.start, true);
-                guide(marked, sol.end, true);
+                guide2(marked, sol.start, true);
+                guide2(marked, sol.end, true);
               }
               strs.push(dimensionLabel2("r", sol.radius / NM));
               strs.push(dimensionLabel2("s", Math.hypot(sol.mid[0] - mid2[0], sol.mid[1] - mid2[1]) / NM));
@@ -46666,10 +46666,10 @@ var require_pcb_tools = __commonJS({
             const dir = g2.dir, L = Math.hypot(dir[0], dir[1]);
             if (L > 0) dashed22(start, vadd(start, vmul(dir, Math.max(L, 100 * px * NM) / L)));
             if (i === 1) {
-              guide(start, g2.last, true);
+              guide2(start, g2.last, true);
               strs.push(dimensionLabel2("\u03B8", degOf(dir), true));
             } else if (sol.valid) {
-              guide(start, sol.end, true);
+              guide2(start, sol.end, true);
               strs.push(dimensionLabel2("r", sol.radius / NM));
             }
           }
@@ -49463,14 +49463,14 @@ Press <esc> to cancel all; double-click to finish`;
       });
       var overrideLocks = () => !!appGlobal(() => editorState().overrideLocks, false);
       var LOCKED_WARNING = "Selection contains locked items. Enable 'Override locks' to operate on them.";
-      function unlockedIds(ctx, ids, quiet2) {
+      function unlockedIds(ctx, ids, quiet3) {
         if (overrideLocks()) return ids;
         const locked = ids.some((id) => {
           const it = ctx.doc.items.get(id);
           return it && isLocked3(it.node);
         });
         if (!locked) return ids;
-        if (!quiet2) ctx.toast(LOCKED_WARNING, 3500);
+        if (!quiet3) ctx.toast(LOCKED_WARNING, 3500);
         return [];
       }
       function cursorCandidates(ctx, mm5) {
@@ -56717,9 +56717,9 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
           beginCarryMove(ctx, { placing: ids.slice(), at: at5 });
           return true;
         },
-        unlockedIds(ctx, ids, quiet2) {
+        unlockedIds(ctx, ids, quiet3) {
           bind(ctx);
-          return unlockedIds(ctx, ids, quiet2);
+          return unlockedIds(ctx, ids, quiet3);
         },
         /** RequestSelection for an app-side action (Properties): { ids, items, hover } or null; opts as requestSelection. */
         requestSelection(ctx, opts2) {
@@ -59224,7 +59224,7 @@ var require_opentype = __commonJS({
           fail(message);
         }
       }
-      var check3 = { fail, argument, assert: argument };
+      var check4 = { fail, argument, assert: argument };
       var LIMIT16 = 32768;
       var LIMIT32 = 2147483648;
       var decode2 = {};
@@ -59236,7 +59236,7 @@ var require_opentype = __commonJS({
         };
       }
       encode.BYTE = function(v) {
-        check3.argument(v >= 0 && v <= 255, "Byte value should be between 0 and 255.");
+        check4.argument(v >= 0 && v <= 255, "Byte value should be between 0 and 255.");
         return [v];
       };
       sizeOf.BYTE = constant(1);
@@ -59298,7 +59298,7 @@ var require_opentype = __commonJS({
       };
       sizeOf.LONGDATETIME = constant(8);
       encode.TAG = function(v) {
-        check3.argument(v.length === 4, "Tag should be exactly 4 ASCII characters.");
+        check4.argument(v.length === 4, "Tag should be exactly 4 ASCII characters.");
         return [
           v.charCodeAt(0),
           v.charCodeAt(1),
@@ -59646,7 +59646,7 @@ var require_opentype = __commonJS({
         var d = [];
         if (Array.isArray(type)) {
           for (var i = 0; i < type.length; i += 1) {
-            check3.argument(v.length === type.length, "Not enough arguments given for type" + type);
+            check4.argument(v.length === type.length, "Not enough arguments given for type" + type);
             d = d.concat(encode.OPERAND(v[i], type[i]));
           }
         } else {
@@ -59690,12 +59690,12 @@ var require_opentype = __commonJS({
       };
       encode.OBJECT = function(v) {
         var encodingFunction = encode[v.type];
-        check3.argument(encodingFunction !== void 0, "No encoding function for type " + v.type);
+        check4.argument(encodingFunction !== void 0, "No encoding function for type " + v.type);
         return encodingFunction(v.value);
       };
       sizeOf.OBJECT = function(v) {
         var sizeOfFunction = sizeOf[v.type];
-        check3.argument(sizeOfFunction !== void 0, "No sizeOf function for type " + v.type);
+        check4.argument(sizeOfFunction !== void 0, "No sizeOf function for type " + v.type);
         return sizeOfFunction(v.value);
       };
       encode.TABLE = function(table2) {
@@ -59706,7 +59706,7 @@ var require_opentype = __commonJS({
         for (var i = 0; i < length; i += 1) {
           var field2 = table2.fields[i];
           var encodingFunction = encode[field2.type];
-          check3.argument(encodingFunction !== void 0, "No encoding function for field type " + field2.type + " (" + field2.name + ")");
+          check4.argument(encodingFunction !== void 0, "No encoding function for field type " + field2.type + " (" + field2.name + ")");
           var value = table2[field2.name];
           if (value === void 0) {
             value = field2.value;
@@ -59723,7 +59723,7 @@ var require_opentype = __commonJS({
         for (var i$1 = 0; i$1 < subtables.length; i$1 += 1) {
           var o = subtableOffsets[i$1];
           var offset = d.length;
-          check3.argument(offset < 65536, "Table " + table2.tableName + " too big.");
+          check4.argument(offset < 65536, "Table " + table2.tableName + " too big.");
           d[o] = offset >> 8;
           d[o + 1] = offset & 255;
           d = d.concat(subtables[i$1]);
@@ -59736,7 +59736,7 @@ var require_opentype = __commonJS({
         for (var i = 0; i < length; i += 1) {
           var field2 = table2.fields[i];
           var sizeOfFunction = sizeOf[field2.type];
-          check3.argument(sizeOfFunction !== void 0, "No sizeOf function for field type " + field2.type + " (" + field2.name + ")");
+          check4.argument(sizeOfFunction !== void 0, "No sizeOf function for field type " + field2.type + " (" + field2.name + ")");
           var value = table2[field2.name];
           if (value === void 0) {
             value = field2.value;
@@ -59831,7 +59831,7 @@ var require_opentype = __commonJS({
             }))
           );
         } else {
-          check3.assert(false, "Coverage format must be 1 or 2.");
+          check4.assert(false, "Coverage format must be 1 or 2.");
         }
       }
       Coverage.prototype = Object.create(Table.prototype);
@@ -59843,7 +59843,7 @@ var require_opentype = __commonJS({
           recordList("scriptRecord", scriptListTable, function(scriptRecord, i) {
             var script = scriptRecord.script;
             var defaultLangSys = script.defaultLangSys;
-            check3.assert(!!defaultLangSys, "Unable to write GSUB: script " + scriptRecord.tag + " has no default language system.");
+            check4.assert(!!defaultLangSys, "Unable to write GSUB: script " + scriptRecord.tag + " has no default language system.");
             return [
               { name: "scriptTag" + i, type: "TAG", value: scriptRecord.tag },
               { name: "script" + i, type: "TABLE", value: new Table("scriptTable", [
@@ -59887,7 +59887,7 @@ var require_opentype = __commonJS({
       function LookupList(lookupListTable, subtableMakers2) {
         Table.call(this, "lookupListTable", tableList("lookup", lookupListTable, function(lookupTable) {
           var subtableCallback = subtableMakers2[lookupTable.lookupType];
-          check3.assert(!!subtableCallback, "Unable to write GSUB lookup type " + lookupTable.lookupType + " tables.");
+          check4.assert(!!subtableCallback, "Unable to write GSUB lookup type " + lookupTable.lookupType + " tables.");
           return new Table("lookupTable", [
             { name: "lookupType", type: "USHORT", value: lookupTable.lookupType },
             { name: "lookupFlag", type: "USHORT", value: lookupTable.lookupFlag }
@@ -60364,7 +60364,7 @@ var require_opentype = __commonJS({
       Parser.prototype.parseLookupList = function(lookupTableParsers) {
         return this.parsePointer(Parser.list(Parser.pointer(function() {
           var lookupType = this.parseUShort();
-          check3.argument(1 <= lookupType && lookupType <= 9, "GPOS/GSUB lookup type " + lookupType + " unknown.");
+          check4.argument(1 <= lookupType && lookupType <= 9, "GPOS/GSUB lookup type " + lookupType + " unknown.");
           var lookupFlag = this.parseUShort();
           var useMarkFilteringSet = lookupFlag & 16;
           return {
@@ -60379,7 +60379,7 @@ var require_opentype = __commonJS({
         return this.parsePointer32(function() {
           var majorVersion = this.parseUShort();
           var minorVersion = this.parseUShort();
-          check3.argument(majorVersion === 1 && minorVersion < 1, "GPOS/GSUB feature variations table unknown.");
+          check4.argument(majorVersion === 1 && minorVersion < 1, "GPOS/GSUB feature variations table unknown.");
           var featureVariations = this.parseRecordList32({
             conditionSetOffset: Parser.offset32,
             featureTableSubstitutionOffset: Parser.offset32
@@ -60455,7 +60455,7 @@ var require_opentype = __commonJS({
       function parseCmapTable(data, start) {
         var cmap2 = {};
         cmap2.version = parse2.getUShort(data, start);
-        check3.argument(cmap2.version === 0, "cmap table version should be 0.");
+        check4.argument(cmap2.version === 0, "cmap table version should be 0.");
         cmap2.numTables = parse2.getUShort(data, start + 2);
         var offset = -1;
         for (var i = cmap2.numTables - 1; i >= 0; i -= 1) {
@@ -62009,7 +62009,7 @@ var require_opentype = __commonJS({
             currentContour = [];
           }
         }
-        check3.argument(currentContour.length === 0, "There are still points left in the current contour.");
+        check4.argument(currentContour.length === 0, "There are still points left in the current contour.");
         return contours2;
       };
       Glyph.prototype.getMetrics = function() {
@@ -63294,7 +63294,7 @@ var require_opentype = __commonJS({
         head4.fontRevision = Math.round(p.parseFixed() * 1e3) / 1e3;
         head4.checkSumAdjustment = p.parseULong();
         head4.magicNumber = p.parseULong();
-        check3.argument(head4.magicNumber === 1594834165, "Font header has wrong magic number.");
+        check4.argument(head4.magicNumber === 1594834165, "Font header has wrong magic number.");
         head4.flags = p.parseUShort();
         head4.unitsPerEm = p.parseUShort();
         head4.created = p.parseLongDateTime();
@@ -63450,7 +63450,7 @@ var require_opentype = __commonJS({
       function parseLtagTable(data, start) {
         var p = new parse2.Parser(data, start);
         var tableVersion = p.parseULong();
-        check3.argument(tableVersion === 1, "Unsupported ltag table version.");
+        check4.argument(tableVersion === 1, "Unsupported ltag table version.");
         p.skip("uLong", 1);
         var numTags = p.parseULong();
         var tags = [];
@@ -64832,11 +64832,11 @@ var require_opentype = __commonJS({
             substitute: this.parseOffset16List()
           };
         }
-        check3.assert(false, "0x" + start.toString(16) + ": lookup type 1 format must be 1 or 2.");
+        check4.assert(false, "0x" + start.toString(16) + ": lookup type 1 format must be 1 or 2.");
       };
       subtableParsers[2] = function parseLookup2() {
         var substFormat = this.parseUShort();
-        check3.argument(substFormat === 1, "GSUB Multiple Substitution Subtable identifier-format must be 1");
+        check4.argument(substFormat === 1, "GSUB Multiple Substitution Subtable identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -64845,7 +64845,7 @@ var require_opentype = __commonJS({
       };
       subtableParsers[3] = function parseLookup3() {
         var substFormat = this.parseUShort();
-        check3.argument(substFormat === 1, "GSUB Alternate Substitution Subtable identifier-format must be 1");
+        check4.argument(substFormat === 1, "GSUB Alternate Substitution Subtable identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -64854,7 +64854,7 @@ var require_opentype = __commonJS({
       };
       subtableParsers[4] = function parseLookup4() {
         var substFormat = this.parseUShort();
-        check3.argument(substFormat === 1, "GSUB ligature table identifier-format must be 1");
+        check4.argument(substFormat === 1, "GSUB ligature table identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -64909,7 +64909,7 @@ var require_opentype = __commonJS({
             lookupRecords: this.parseRecordList(substCount, lookupRecordDesc)
           };
         }
-        check3.assert(false, "0x" + start.toString(16) + ": lookup type 5 format must be 1, 2 or 3.");
+        check4.assert(false, "0x" + start.toString(16) + ": lookup type 5 format must be 1, 2 or 3.");
       };
       subtableParsers[6] = function parseLookup6() {
         var start = this.offset + this.relativeOffset;
@@ -64952,11 +64952,11 @@ var require_opentype = __commonJS({
             lookupRecords: this.parseRecordList(lookupRecordDesc)
           };
         }
-        check3.assert(false, "0x" + start.toString(16) + ": lookup type 6 format must be 1, 2 or 3.");
+        check4.assert(false, "0x" + start.toString(16) + ": lookup type 6 format must be 1, 2 or 3.");
       };
       subtableParsers[7] = function parseLookup7() {
         var substFormat = this.parseUShort();
-        check3.argument(substFormat === 1, "GSUB Extension Substitution subtable identifier-format must be 1");
+        check4.argument(substFormat === 1, "GSUB Extension Substitution subtable identifier-format must be 1");
         var extensionLookupType = this.parseUShort();
         var extensionParser = new Parser(this.data, this.offset + this.parseULong());
         return {
@@ -64967,7 +64967,7 @@ var require_opentype = __commonJS({
       };
       subtableParsers[8] = function parseLookup8() {
         var substFormat = this.parseUShort();
-        check3.argument(substFormat === 1, "GSUB Reverse Chaining Contextual Single Substitution Subtable identifier-format must be 1");
+        check4.argument(substFormat === 1, "GSUB Reverse Chaining Contextual Single Substitution Subtable identifier-format must be 1");
         return {
           substFormat,
           coverage: this.parsePointer(Parser.coverage),
@@ -64980,7 +64980,7 @@ var require_opentype = __commonJS({
         start = start || 0;
         var p = new Parser(data, start);
         var tableVersion = p.parseVersion(1);
-        check3.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GSUB table version.");
+        check4.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GSUB table version.");
         if (tableVersion === 1) {
           return {
             version: tableVersion,
@@ -65014,7 +65014,7 @@ var require_opentype = __commonJS({
         }
       };
       subtableMakers[2] = function makeLookup2(subtable) {
-        check3.assert(subtable.substFormat === 1, "Lookup type 2 substFormat must be 1.");
+        check4.assert(subtable.substFormat === 1, "Lookup type 2 substFormat must be 1.");
         return new table.Table("substitutionTable", [
           { name: "substFormat", type: "USHORT", value: 1 },
           { name: "coverage", type: "TABLE", value: new table.Coverage(subtable.coverage) }
@@ -65023,7 +65023,7 @@ var require_opentype = __commonJS({
         })));
       };
       subtableMakers[3] = function makeLookup3(subtable) {
-        check3.assert(subtable.substFormat === 1, "Lookup type 3 substFormat must be 1.");
+        check4.assert(subtable.substFormat === 1, "Lookup type 3 substFormat must be 1.");
         return new table.Table("substitutionTable", [
           { name: "substFormat", type: "USHORT", value: 1 },
           { name: "coverage", type: "TABLE", value: new table.Coverage(subtable.coverage) }
@@ -65032,7 +65032,7 @@ var require_opentype = __commonJS({
         })));
       };
       subtableMakers[4] = function makeLookup4(subtable) {
-        check3.assert(subtable.substFormat === 1, "Lookup type 4 substFormat must be 1.");
+        check4.assert(subtable.substFormat === 1, "Lookup type 4 substFormat must be 1.");
         return new table.Table("substitutionTable", [
           { name: "substFormat", type: "USHORT", value: 1 },
           { name: "coverage", type: "TABLE", value: new table.Coverage(subtable.coverage) }
@@ -65061,7 +65061,7 @@ var require_opentype = __commonJS({
           })));
           return returnTable;
         } else if (subtable.substFormat === 2) {
-          check3.assert(false, "lookup type 6 format 2 is not yet supported.");
+          check4.assert(false, "lookup type 6 format 2 is not yet supported.");
         } else if (subtable.substFormat === 3) {
           var tableData = [
             { name: "substFormat", type: "USHORT", value: subtable.substFormat }
@@ -65085,7 +65085,7 @@ var require_opentype = __commonJS({
           var returnTable$1 = new table.Table("chainContextTable", tableData);
           return returnTable$1;
         }
-        check3.assert(false, "lookup type 6 format must be 1, 2 or 3.");
+        check4.assert(false, "lookup type 6 format must be 1, 2 or 3.");
       };
       function makeGsubTable(gsub2) {
         return new table.Table("GSUB", [
@@ -65099,7 +65099,7 @@ var require_opentype = __commonJS({
       function parseMetaTable(data, start) {
         var p = new parse2.Parser(data, start);
         var tableVersion = p.parseULong();
-        check3.argument(tableVersion === 1, "Unsupported META table version.");
+        check4.argument(tableVersion === 1, "Unsupported META table version.");
         p.parseULong();
         p.parseULong();
         var numDataMaps = p.parseULong();
@@ -65179,13 +65179,13 @@ var require_opentype = __commonJS({
         }
         for (var i = 0; i < tables2.length; i += 1) {
           var t = tables2[i];
-          check3.argument(t.tableName.length === 4, "Table name" + t.tableName + " is invalid.");
+          check4.argument(t.tableName.length === 4, "Table name" + t.tableName + " is invalid.");
           var tableLength = t.sizeOf();
           var tableRecord = makeTableRecord(t.tableName, computeCheckSum(t.encode()), offset, tableLength);
           recordFields.push({ name: tableRecord.tag + " Table Record", type: "RECORD", value: tableRecord });
           tableFields.push({ name: t.tableName + " table", type: "RECORD", value: t });
           offset += tableLength;
-          check3.argument(!isNaN(offset), "Something went wrong calculating the offset.");
+          check4.argument(!isNaN(offset), "Something went wrong calculating the offset.");
           while (offset % 4 !== 0) {
             offset += 1;
             tableFields.push({ name: "padding", type: "BYTE", value: 0 });
@@ -65608,7 +65608,7 @@ var require_opentype = __commonJS({
             }
             if (create) {
               var index = allFeatures.length;
-              check3.assert(index === 0 || feature >= allFeatures[index - 1].tag, "Features must be added in alphabetical order.");
+              check4.assert(index === 0 || feature >= allFeatures[index - 1].tag, "Features must be added in alphabetical order.");
               featureRecord = {
                 tag: feature,
                 feature: { params: 0, lookupListIndexes: [] }
@@ -65897,7 +65897,7 @@ var require_opentype = __commonJS({
           coverage: { format: 1, glyphs: [] },
           substitute: []
         });
-        check3.assert(subtable.coverage.format === 1, "Single: unable to modify coverage table format " + subtable.coverage.format);
+        check4.assert(subtable.coverage.format === 1, "Single: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = substitution.sub;
         var pos = this.binSearch(subtable.coverage.glyphs, coverageGlyph);
         if (pos < 0) {
@@ -65908,7 +65908,7 @@ var require_opentype = __commonJS({
         subtable.substitute[pos] = substitution.by;
       };
       Substitution.prototype.addMultiple = function(feature, substitution, script, language) {
-        check3.assert(substitution.by instanceof Array && substitution.by.length > 1, 'Multiple: "by" must be an array of two or more ids');
+        check4.assert(substitution.by instanceof Array && substitution.by.length > 1, 'Multiple: "by" must be an array of two or more ids');
         var lookupTable = this.getLookupTables(script, language, feature, 2, true)[0];
         var subtable = getSubstFormat(lookupTable, 1, {
           // lookup type 2 subtable, format 1, coverage format 1
@@ -65916,7 +65916,7 @@ var require_opentype = __commonJS({
           coverage: { format: 1, glyphs: [] },
           sequences: []
         });
-        check3.assert(subtable.coverage.format === 1, "Multiple: unable to modify coverage table format " + subtable.coverage.format);
+        check4.assert(subtable.coverage.format === 1, "Multiple: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = substitution.sub;
         var pos = this.binSearch(subtable.coverage.glyphs, coverageGlyph);
         if (pos < 0) {
@@ -65934,7 +65934,7 @@ var require_opentype = __commonJS({
           coverage: { format: 1, glyphs: [] },
           alternateSets: []
         });
-        check3.assert(subtable.coverage.format === 1, "Alternate: unable to modify coverage table format " + subtable.coverage.format);
+        check4.assert(subtable.coverage.format === 1, "Alternate: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = substitution.sub;
         var pos = this.binSearch(subtable.coverage.glyphs, coverageGlyph);
         if (pos < 0) {
@@ -65956,7 +65956,7 @@ var require_opentype = __commonJS({
           };
           lookupTable.subtables[0] = subtable;
         }
-        check3.assert(subtable.coverage.format === 1, "Ligature: unable to modify coverage table format " + subtable.coverage.format);
+        check4.assert(subtable.coverage.format === 1, "Ligature: unable to modify coverage table format " + subtable.coverage.format);
         var coverageGlyph = ligature.sub[0];
         var ligComponents = ligature.sub.slice(1);
         var ligatureTable = {
@@ -66093,7 +66093,7 @@ var require_opentype = __commonJS({
               }
             }
           }
-          check3.argument(flags.length === numberOfCoordinates, "Bad flags.");
+          check4.argument(flags.length === numberOfCoordinates, "Bad flags.");
           if (endPointIndices.length > 0) {
             var points2 = [];
             var point;
@@ -66205,7 +66205,7 @@ var require_opentype = __commonJS({
             currentContour = [];
           }
         }
-        check3.argument(currentContour.length === 0, "There are still points left in the current contour.");
+        check4.argument(currentContour.length === 0, "There are still points left in the current contour.");
         return contours2;
       }
       function getPath2(points2) {
@@ -69746,11 +69746,11 @@ var require_opentype = __commonJS({
         arabicSentenceCheck
       };
       function registerContextChecker(checkId) {
-        var check4 = this.contextChecks[checkId + "Check"];
+        var check5 = this.contextChecks[checkId + "Check"];
         return this.tokenizer.registerContextChecker(
           checkId,
-          check4.startCheck,
-          check4.endCheck
+          check5.startCheck,
+          check5.endCheck
         );
       }
       function tokenizeText() {
@@ -70293,7 +70293,7 @@ var require_opentype = __commonJS({
       function parseFvarTable(data, start, names2) {
         var p = new parse2.Parser(data, start);
         var tableVersion = p.parseULong();
-        check3.argument(tableVersion === 65536, "Unsupported fvar table version.");
+        check4.argument(tableVersion === 65536, "Unsupported fvar table version.");
         var offsetToData = p.parseOffset16();
         p.skip("uShort", 1);
         var axisCount = p.parseUShort();
@@ -70320,7 +70320,7 @@ var require_opentype = __commonJS({
       };
       var caretValue = function() {
         var format = this.parseUShort();
-        check3.argument(
+        check4.argument(
           format === 1 || format === 2 || format === 3,
           "Unsupported CaretValue table version."
         );
@@ -70349,7 +70349,7 @@ var require_opentype = __commonJS({
         start = start || 0;
         var p = new Parser(data, start);
         var tableVersion = p.parseVersion(1);
-        check3.argument(
+        check4.argument(
           tableVersion === 1 || tableVersion === 1.2 || tableVersion === 1.3,
           "Unsupported GDEF table version."
         );
@@ -70383,12 +70383,12 @@ var require_opentype = __commonJS({
             values: this.parseValueRecordList()
           };
         }
-        check3.assert(false, "0x" + start.toString(16) + ": GPOS lookup type 1 format must be 1 or 2.");
+        check4.assert(false, "0x" + start.toString(16) + ": GPOS lookup type 1 format must be 1 or 2.");
       };
       subtableParsers$1[2] = function parseLookup2() {
         var start = this.offset + this.relativeOffset;
         var posFormat = this.parseUShort();
-        check3.assert(posFormat === 1 || posFormat === 2, "0x" + start.toString(16) + ": GPOS lookup type 2 format must be 1 or 2.");
+        check4.assert(posFormat === 1 || posFormat === 2, "0x" + start.toString(16) + ": GPOS lookup type 2 format must be 1 or 2.");
         var coverage = this.parsePointer(Parser.coverage);
         var valueFormat1 = this.parseUShort();
         var valueFormat2 = this.parseUShort();
@@ -70456,7 +70456,7 @@ var require_opentype = __commonJS({
         start = start || 0;
         var p = new Parser(data, start);
         var tableVersion = p.parseVersion(1);
-        check3.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GPOS table version " + tableVersion);
+        check4.argument(tableVersion === 1 || tableVersion === 1.1, "Unsupported GPOS table version " + tableVersion);
         if (tableVersion === 1) {
           return {
             version: tableVersion,
@@ -70488,7 +70488,7 @@ var require_opentype = __commonJS({
         var pairs = {};
         p.skip("uShort");
         var subtableVersion = p.parseUShort();
-        check3.argument(subtableVersion === 0, "Unsupported kern sub-table version.");
+        check4.argument(subtableVersion === 0, "Unsupported kern sub-table version.");
         p.skip("uShort", 2);
         var nPairs = p.parseUShort();
         p.skip("uShort", 3);
@@ -74715,6 +74715,618 @@ var init_util = __esm({
   }
 });
 
+// web/platform/documents/host.ts
+function documentEditorFor(docType) {
+  return (window.JunctionDocEditors || []).find((f2) => f2.docTypes.includes(docType));
+}
+var init_host = __esm({
+  "web/platform/documents/host.ts"() {
+    "use strict";
+  }
+});
+
+// web/domains/registry.ts
+function partStudioImporting(file, featureId) {
+  const sorted = (v) => Array.isArray(v) ? "[" + v.map(sorted).join(",") + "]" : v && typeof v === "object" ? "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + sorted(v[k])).join(",") + "}" : JSON.stringify(v);
+  const stem3 = file.name.replace(/\.[^.]+$/, "");
+  const format = /\.(brep|brp)$/i.test(file.path) ? "brep" : "step";
+  const items = [
+    { featureType: "import", id: featureId, name: stem3, order: "V", params: { file: { ...file, format }, split: "solids" }, type: "feature" },
+    { id: "studio", rollback: null, type: "studio", units: "mm" }
+  ].sort((a, b) => a.id < b.id ? -1 : 1);
+  return '{"junction":"part-studio","version":1,"items":[\n' + items.map(sorted).join(",\n") + "\n]}\n";
+}
+function documentKind(docType) {
+  return DOCUMENT_KINDS.find((k) => k.docType === docType);
+}
+var DOMAINS, DOCUMENT_KINDS;
+var init_registry = __esm({
+  "web/domains/registry.ts"() {
+    "use strict";
+    DOMAINS = [
+      {
+        id: "pcb",
+        title: "Electronics",
+        status: "shipped",
+        summary: "Schematics, symbols, footprints and circuit boards, through to fabrication outputs and SPICE.",
+        fileTypes: [".kicad_pro", ".kicad_sch", ".kicad_pcb", ".kicad_sym", ".kicad_mod", ".kicad_wks"],
+        reads: [],
+        documents: [
+          { docType: "kicad_sch", ext: ".kicad_sch", title: "Schematic", icon: '<path d="M3 12h5"/><path d="M16 12h5"/><rect x="8" y="8" width="8" height="8"/><path d="M12 4v4"/><path d="M12 16v4"/>' },
+          { docType: "kicad_pcb", ext: ".kicad_pcb", title: "Board", icon: '<rect x="4" y="5" width="16" height="14" rx="1.5"/><circle cx="8.5" cy="9.5" r="1.2"/><circle cx="15.5" cy="14.5" r="1.2"/><path d="M9.5 10.5l5 3"/>' }
+        ]
+      },
+      {
+        id: "mechanical",
+        title: "Mechanical CAD",
+        status: "in-progress",
+        summary: "Parametric solid parts: sketches, features and a history tree on a B-rep kernel.",
+        // .jpart is the part studio (web/domains/mechanical/CONTRACT.md); STEP and IGES are what it will import and export
+        fileTypes: [".jpart", ".step", ".stp", ".iges", ".igs"],
+        reads: [],
+        documents: [
+          {
+            docType: "part_studio",
+            ext: ".jpart",
+            title: "Part Studio",
+            bundle: "/static/dist/mechanical.js",
+            newName: "Part Studio",
+            tint: "teal",
+            cad: true,
+            icon: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5"/><path d="M12 12v9"/>',
+            // the same text as web/domains/mechanical/document/format.ts newPartStudioText() (a test compares them)
+            newText: '{"junction":"part-studio","version":1,"items":[\n{"id":"studio","rollback":null,"type":"studio","units":"mm"}\n]}\n',
+            // a STEP file opens as a part studio that imports it (web/domains/mechanical/features/import-file.ts)
+            fromFile: { title: "STEP file", accept: [".step", ".stp"], folder: "models", text: (f2) => partStudioImporting(f2, crypto.randomUUID()) }
+          }
+        ]
+      },
+      {
+        id: "assembly",
+        title: "Assemblies",
+        status: "in-progress",
+        summary: "Parts and boards put together with mates and joints, with interference checks and a bill of materials.",
+        fileTypes: [".jasm"],
+        reads: ["mechanical", "pcb"],
+        documents: [
+          {
+            docType: "assembly",
+            ext: ".jasm",
+            title: "Assembly",
+            bundle: "/static/dist/assembly.js",
+            newName: "Assembly",
+            tint: "copper",
+            cad: true,
+            icon: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/><path d="M11 7.5h5.5V13"/>',
+            // the same text as web/domains/assembly/document/format.ts newAssemblyText() (a test compares them)
+            newText: '{"junction":"assembly","version":1,"items":[\n{"id":"assembly","type":"assembly","units":"mm"}\n]}\n'
+          }
+        ]
+      },
+      {
+        id: "physics",
+        title: "Physics simulation",
+        status: "planned",
+        summary: "Structural, thermal and rigid-body analysis of parts and assemblies.",
+        fileTypes: [],
+        reads: ["mechanical", "assembly", "pcb"]
+      },
+      {
+        id: "silicon",
+        title: "IC and chip design",
+        status: "planned",
+        summary: "RTL, synthesis, place and route and layout of digital and analog chips on open PDKs.",
+        fileTypes: [".v", ".sv", ".vhd", ".gds", ".lef", ".def"],
+        reads: []
+      },
+      {
+        id: "robotics",
+        title: "Robotics simulation",
+        status: "planned",
+        summary: "Robots built from assemblies, with actuators, sensors and controllers simulated together.",
+        fileTypes: [".urdf", ".sdf", ".mjcf"],
+        reads: ["assembly", "pcb", "physics"]
+      },
+      {
+        id: "manufacturing",
+        title: "Manufacturing and CAM",
+        status: "planned",
+        summary: "Toolpaths for milling, turning and cutting, slicing for printing, and setup sheets.",
+        fileTypes: [".nc", ".gcode"],
+        reads: ["mechanical", "assembly", "pcb"]
+      }
+    ];
+    DOCUMENT_KINDS = DOMAINS.flatMap((d) => d.documents || []);
+  }
+});
+
+// web/shared/cad.ts
+function cadEnabled(state2) {
+  const s2 = state2 === void 0 && typeof window !== "undefined" && window.CollabApp ? window.CollabApp.getState() : state2;
+  return !!(s2 && s2.me && s2.me.cad);
+}
+function setCadEnabled(enabled) {
+  if (typeof window !== "undefined" && window.CollabApp) window.CollabApp.dispatch({ type: "setCad", on: enabled });
+}
+var CAD_OFF_NOTE;
+var init_cad = __esm({
+  "web/shared/cad.ts"() {
+    "use strict";
+    CAD_OFF_NOTE = "Turn on Mechanical CAD in your settings to open";
+  }
+});
+
+// web/domains/pcb/editor/dochost.ts
+function isHostedDoc(doc2) {
+  if (doc2 && isShellView(doc2.docType)) return true;
+  const kind = doc2 ? documentKind(doc2.docType) : void 0;
+  return !!kind && !!kind.bundle;
+}
+function isShellView(docType) {
+  return docType.startsWith("@");
+}
+function loadBundle(src) {
+  let p = loading.get(src);
+  if (!p) {
+    const v = window.__kcAssetV;
+    p = new Promise((resolve2, reject) => {
+      const tag = document.createElement("script");
+      tag.src = src + (v ? "?v=" + v : "");
+      tag.onload = () => resolve2();
+      tag.onerror = () => {
+        tag.parentNode?.removeChild(tag);
+        loading.delete(src);
+        reject(new Error(`could not load ${src}`));
+      };
+      document.head.appendChild(tag);
+    });
+    loading.set(src, p);
+  }
+  return p;
+}
+function cadOffNote(doc2, kind, toPcb) {
+  const box3 = document.createElement("div");
+  box3.dataset.cadOff = doc2.docId;
+  box3.style.cssText = "max-width:460px;margin:72px auto;padding:0 16px;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;color:var(--ink)";
+  const icon2 = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon2.setAttribute("viewBox", "0 0 24 24");
+  icon2.setAttribute("width", "32");
+  icon2.setAttribute("height", "32");
+  icon2.setAttribute("aria-hidden", "true");
+  icon2.setAttribute("fill", "none");
+  icon2.setAttribute("stroke", "currentColor");
+  icon2.setAttribute("stroke-width", "1.5");
+  icon2.setAttribute("stroke-linecap", "round");
+  icon2.setAttribute("stroke-linejoin", "round");
+  icon2.style.color = kind.tint ? `var(--${kind.tint})` : "var(--ink-2)";
+  icon2.innerHTML = kind.icon;
+  const title = document.createElement("h2");
+  title.style.cssText = "margin:0;font-size:var(--fs-lg);font-weight:600";
+  title.textContent = `${(doc2.path.split("/").pop() || doc2.path).replace(/\.[^.]+$/, "")} is ${/^[aeiou]/i.test(kind.title) ? "an" : "a"} ${kind.title.toLowerCase()}`;
+  const text3 = document.createElement("p");
+  text3.style.cssText = "margin:0;color:var(--ink-2)";
+  text3.textContent = `${CAD_OFF_NOTE} it. Part studios and assemblies are part of Mechanical CAD, which is off for you; the project keeps them as they are.`;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn primary";
+  button.dataset.cadTurnOn = "";
+  button.textContent = "Turn on Mechanical CAD and open";
+  button.addEventListener("click", () => {
+    button.disabled = true;
+    setCadEnabled(true);
+  });
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "btn";
+  back.dataset.cadOffPcb = "";
+  back.textContent = "Open the PCB instead";
+  back.addEventListener("click", () => {
+    if (toPcb) toPcb();
+  });
+  const note3 = document.createElement("p");
+  note3.style.cssText = "margin:0;color:var(--ink-3);font-size:var(--fs-sm)";
+  note3.textContent = "It can be turned off again in the account menu or the Junction menu.";
+  box3.append(icon2, title, text3, button);
+  if (toPcb) box3.append(back);
+  box3.append(note3);
+  return box3;
+}
+function closeHostedDoc() {
+  const was = open2;
+  open2 = null;
+  if (was && was.editor) {
+    try {
+      was.editor.close();
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+  const el4 = document.getElementById("cadHost");
+  if (el4) el4.replaceChildren();
+}
+async function openHostedDoc(doc2, showCad, openDocId2) {
+  closeHostedDoc();
+  const kind = documentKind(doc2.docType);
+  const what = kind ? kind.title.toLowerCase() : doc2.docType === "@bom" ? "bill of materials" : "page";
+  const mine = { docId: doc2.docId, editor: null };
+  open2 = mine;
+  showCad();
+  store.slice("connection", { status: "connecting", text: "opening\u2026", edits: 0 });
+  const el4 = document.getElementById("cadHost");
+  if (!el4) return;
+  el4.replaceChildren();
+  if (kind && kind.cad && !cadEnabled(store.get())) {
+    store.slice("connection", { status: "idle", text: "Mechanical CAD is off" });
+    const hasPcb = (state.project.allDocs || state.project.docs).some((d) => d.docType === "kicad_sch" || d.docType === "kicad_pcb");
+    el4.replaceChildren(cadOffNote(doc2, kind, hasPcb ? () => openDocId2("home") : null));
+    return;
+  }
+  try {
+    if (kind && kind.bundle) await loadBundle(kind.bundle);
+    for (let i = 0; i < 400 && isShellView(doc2.docType) && !documentEditorFor(doc2.docType) && open2 === mine; i++) await new Promise((r) => setTimeout(r, 25));
+    if (open2 !== mine) return;
+    const factory = documentEditorFor(doc2.docType);
+    if (!factory) throw new Error(`${kind ? kind.bundle : "the page"} did not register an editor for ${doc2.docType}`);
+    const ctx = {
+      el: el4,
+      project: { projectId: state.project.projectId, name: state.project.name },
+      doc: { docId: doc2.docId, path: doc2.path, docType: doc2.docType },
+      docs: (state.project.allDocs || state.project.docs).map((d) => ({ docId: d.docId, path: d.path, docType: d.docType })),
+      signedIn: !!state.me,
+      userId: state.me ? state.me.id : null,
+      setConnection: (s2, text3) => {
+        if (open2 === mine) store.slice("connection", { status: s2, text: text3 });
+      },
+      toast: (text3, ms) => toast(text3, ms),
+      openDoc: (id) => openDocId2(id)
+    };
+    const editor3 = await factory.open(ctx);
+    if (open2 !== mine) {
+      editor3.close();
+      return;
+    }
+    mine.editor = editor3;
+  } catch (e) {
+    console.warn(e);
+    if (open2 !== mine) return;
+    store.slice("connection", { status: "error", text: "could not open" });
+    const p = document.createElement("p");
+    p.className = "empty";
+    p.style.margin = "48px auto";
+    p.textContent = `This ${what} could not be opened. Reload the page to try again.`;
+    el4.replaceChildren(p);
+  }
+}
+var open2, loading;
+var init_dochost = __esm({
+  "web/domains/pcb/editor/dochost.ts"() {
+    "use strict";
+    init_host();
+    init_registry();
+    init_cad();
+    init_appstore();
+    init_util();
+    open2 = null;
+    loading = /* @__PURE__ */ new Map();
+  }
+});
+
+// web/domains/pcb/editor/dom.ts
+var $, $$, NS2;
+var init_dom = __esm({
+  "web/domains/pcb/editor/dom.ts"() {
+    "use strict";
+    $ = (s2, r = document) => r.querySelector(s2);
+    $$ = (s2, r = document) => Array.from(r.querySelectorAll(s2));
+    NS2 = "http://www.w3.org/2000/svg";
+  }
+});
+
+// web/shared/theme.ts
+function defaultThemeMode() {
+  let cad = false;
+  try {
+    cad = localStorage.getItem(CAD_HINT) === "1";
+  } catch (e) {
+  }
+  return cad ? "light" : "system";
+}
+function stored() {
+  let v = null;
+  try {
+    v = localStorage.getItem(KEY);
+  } catch (e) {
+  }
+  return v === "light" || v === "dark" || v === "system" ? v : defaultThemeMode();
+}
+function getThemeMode() {
+  const t = document.documentElement.dataset.theme;
+  return t === "light" || t === "dark" || t === "system" ? t : stored();
+}
+function effectiveTheme() {
+  const m = getThemeMode();
+  if (m !== "system") return m;
+  return typeof matchMedia === "function" && matchMedia(DARK_QUERY).matches ? "dark" : "light";
+}
+function apply2(mode) {
+  document.documentElement.dataset.theme = mode;
+}
+function setThemeMode(mode) {
+  try {
+    localStorage.setItem(KEY, mode);
+  } catch (e) {
+  }
+  apply2(mode);
+}
+function followCadSetting(on2) {
+  try {
+    if (on2) localStorage.setItem(CAD_HINT, "1");
+    else localStorage.removeItem(CAD_HINT);
+  } catch (e) {
+  }
+  apply2(stored());
+}
+function toggleTheme() {
+  setThemeMode(effectiveTheme() === "dark" ? "light" : "dark");
+}
+var KEY, CAD_HINT, DARK_QUERY;
+var init_theme = __esm({
+  "web/shared/theme.ts"() {
+    "use strict";
+    KEY = "kui.theme";
+    CAD_HINT = "kui.cad";
+    DARK_QUERY = "(prefers-color-scheme: dark)";
+  }
+});
+
+// web/domains/pcb/editor/home.ts
+function navigate(path2, replace) {
+  if (replace) history.replaceState(null, "", path2);
+  else history.pushState(null, "", path2);
+  route2();
+}
+function route2() {
+  const m = location.pathname.match(/^\/p\/([0-9a-f-]{36})(?:\/edit|\/live)?\/?$/i);
+  if (m) {
+    openEditor(m[1]);
+    return;
+  }
+  state.homeTab = location.pathname.startsWith("/gallery") ? "explore" : location.pathname.startsWith("/trash") ? "trash" : location.pathname.startsWith("/time") ? "time" : "projects";
+  showHome();
+}
+async function loadMe() {
+  try {
+    state.me = await (takeBoot("me") || api4("/api/me"));
+  } catch {
+    state.me = null;
+  }
+  store.set({ me: state.me });
+  followCadSetting(cadEnabled(state));
+}
+function showView(name) {
+  state.view = name;
+  $$(".view").forEach((v) => v.classList.toggle("active", v.id === name));
+  if (name !== "cad") closeHostedDoc();
+  if (name === "home") {
+    leaveEditor();
+    delete document.body.dataset.editor;
+    store.slice("document", { editor: null, docType: null, docId: null, doc: null });
+    store.set({ view: "home", project: null, role: null, popover: null });
+  } else store.set({ view: name });
+}
+function showHome() {
+  showView("home");
+  document.title = "Junction";
+  renderHome();
+}
+function renderHome() {
+  store.set({ homeTab: state.homeTab, homeTick: (store.get().homeTick || 0) + 1 });
+}
+var init_home = __esm({
+  "web/domains/pcb/editor/home.ts"() {
+    "use strict";
+    init_appstore();
+    init_doc();
+    init_dochost();
+    init_dom();
+    init_util();
+    init_cad();
+    init_theme();
+    window.CollabNav = { navigate, reloadMe: async () => {
+      await loadMe();
+      renderHome();
+    } };
+  }
+});
+
+// web/domains/pcb/editor/kicursors.generated.ts
+var KICURSOR_IMAGES;
+var init_kicursors_generated = __esm({
+  "web/domains/pcb/editor/kicursors.generated.ts"() {
+    "use strict";
+    KICURSOR_IMAGES = {
+      VOLTAGE_PROBE: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAdklEQVR42u2WWwoAIAgEu/+liz6CEHuQuhLsQvQTzZRBlsIwDBOQqgQK75McEIkZLk4fK3EChUlI8A4w1rkJaLXebe4q8PLQ3Mqwgt9sbJawwM0SHnDl8eLhKddOOOF/wNP/8pcPBtVM4OHwBjINHtKpGCRS0gDJxoeHj23dsQAAAABJRU5ErkJggg==", 1, 31],
+      CURRENT_PROBE: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAcUlEQVR42u2VUQrAIAxDe/9Lx6+BDHVSNRGWgB9C4RWbxgjLsqxzwutI4L07FU5rYua5oZ41TsORHM82OBY8kjJUdtWm61uFq/At+0wLmRpAh4+gtGSTwuOXcNnMoTbcV+BI/u9wA+zAkcGvCB268x8VMD+Ocin/yhgAAAAASUVORK5CYII=", 4, 27],
+      TUNE: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAV0lEQVR42u2VQQoAIAgE9/+fNoICCbo6kTvgeVZRlEwDYhUqR0LEpVB5SYggA1huueXP3DrWtceOPJm69zrBOk9yVQc45aLGbvn/8kDlG1TedunyDpQzAKfv2Sein4KTAAAAAElFTkSuQmCC", 1, 30],
+      PENCIL: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAbElEQVR42u2UwQoAIAhD/f+fLoKCCJUubhF7l6DL1rSZCSHET7QJTXwcywdNHG7CE4eZyMTLDUj8ybkjXs75dkswMgGN/TQBKZwz8n+rtm1E96Wxe8tGiRpqwIkWE3eyYAavVmoCWsKbHqikA0DGYK6k3QKyAAAAAElFTkSuQmCC", 4, 27],
+      MOVING: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAmElEQVR42t2XSw4AIQhDvf+lmY0mhOAnDrREdq58AqXSREQaM6QHFWBwUAFoEBqAAmEB4BAeABRiBgCDWAFAIHYA6RAnAKkQux6w8XYTqlfiAcZl8Mno1RaaBe+Cv1kIgb616TB7v5Ed1VmppqYVpEtglIWV8eycPsRsBtIkfWpiqT1BzUCJHiihgjKf2xI7RolVD1bzqPgApQQWB5uPNksAAAAASUVORK5CYII=", 1, 1],
+      WARNING: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA3UlEQVR42t2VUQ6EMAhEvf+lZ2OiWaTQUkBIJDHGn/IYpuMBAEdn4apWgJujFaANggK0QHCAcggJoBRCAyiDmAGUQKwAXoewALwKsfIAr2+bkExZD3A3K09GabelKkgNElRA+mp2RQ1D0NXg/LQdyK9sghJXcwOElhuIN/+fpkGAvME85PcEpKnGw/ikq+/96R9B9VRhCC9BAd86oCQjUQGeMkHw3UsAUOI7rMBgPAlAgEjzAHakHV0euwXS9KoCE0O6cwDzQ1YqxJJQm96yBgnCf++dT8rfMKn5Vv0ADC2Ln/TEX6sAAAAASUVORK5CYII=", 1, 1],
+      REMOVE: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAmklEQVR42u2WOw6AQAhEuf+lsbEgBPkojDEyyRZrIW+BIRAJsRC9oTPwzwBYyfjEkFeLQ/IOAahmYCw7mR7QGWuFiACsDLVCRGm3ygNxjhd8HCITfAxCNlxW7T1RBWiFUD/DQ+jA1VI8hvB8DwG4C6HLNmLFaCiNOcKDGB3THoRlVehkhAXP2BO20l10O36fhK5v1R1itVp9QgcyCm29liim4AAAAABJRU5ErkJggg==", 4, 4],
+      TEXT: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAgElEQVR42u2VSwrAMAhE3Rfm/ofIHe2qUIz9J6NQB1xF8PmJipwKKnGCLk00EKIA/gUA7e3J+4BMre09/PfBEIEVqCF8A0BpxxEAZg9kGgDvGvpflrqw0gBsA0gEgJMxmFVIBkCeg+vglJ1gy09qw50AmHuqgwHs8fniUyqVEmoFzfT+FTw1/u0AAAAASUVORK5CYII=", 7, 7],
+      MEASURE: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAc0lEQVR42u2WMQ7AIAwD8/9PpwuDFRFgwVaFT+pQlrjWoSYCSCAUjMGPBcjC5CgpXw1P4DslgLSBX0l4vZFV7egKvaHqBjXEQkzeFe1uyPUQZUjOoIboeLcJO2En7ISdOHWC9vdshkrXOs16J98tIYQxWz5Uwrljz1P76AAAAABJRU5ErkJggg==", 4, 4],
+      ADD: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAZ0lEQVR42u2VSwoAIAgF3Qfe/xDd0RZt+lEE0ZN6A65sMZqlyBQ1waEWohhQggJ/Caj1sZM/UGkb5Ylx/rAEsAMcQgq4FVhtQ8V3B9ShXHktcE1i/Gte3RlgAfgVuBhCF8+QEEIeIgFKaIexHC4lawAAAABJRU5ErkJggg==", 7, 7],
+      SUBTRACT: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAW0lEQVR42u2VQQoAIAgEvQf+/xH90a5REgTiSu2AJztMKipyRE1wqLUuBpSgwF8Canvc5AN+usb8ws8HSwArwCGkQFkB+DUsi7cT0irlb83UmwEWgLeAEELIgwzTxXXNTWQaKgAAAABJRU5ErkJggg==", 7, 7],
+      XOR: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAZElEQVR42u2W3QoAEAxGd6/2/g/hHedW/iKzke/USqgda4FoCAv5wRIiiaMEBP4SYKljZV3hpGXkO9rryhKOFUATQmBH4LjcOLljhfjknTCfvBybJ+/PmTem+cN13fcNAADAwySWsHtTKuDp2wAAAABJRU5ErkJggg==", 7, 7],
+      ZOOM_IN: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAc0lEQVR42u2VwQoAIAhD/f+frlNhsogCZ4c96BAetkSXGaA5jIkTnYdmJAgvpWGEIX5sEMXAuAfBHANI3BtINwHa38DhGaB3oHwGvtiCixzIDaZDEi619G7El6Jtof4VmzmRCZmoG8qYHXRxkB1CCCHEEx06mzXZkpc6tgAAAABJRU5ErkJggg==", 6, 6],
+      ZOOM_OUT: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAa0lEQVR42u2VwQrAMAhD/f+fdqeVVjJKB2Yw3gNPHhLFphGCnAgnk+gom5EivLRuIw7x7YL+Z6CKp6DVhJg+RfkM2DfAER7mQG8wbZJw6bVvo06qXov1r3i4E0xg4rujrNlhFxfZAQAA8IoL2Wsp5dOPpLQAAAAASUVORK5CYII=", 6, 6],
+      LABEL_NET: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAjElEQVR42u2WSwrAIAxEsy/M/Q/RO6arQrFp63cSqQNZKeQZx0SRV0HFT9BtF3WEWAD/AoDeo2S9w0nTuO6w1ztDOFZgmbAGgHIdTwAYbcgwANY0tJ8stWGFATgNSASAcWIwqxAMgOyD7+SUnpCWn3QNOQkwdlQ7A6TDp2XPLMp1fEnMBWD/AVtjKagOQSVcEXR+l3QAAAAASUVORK5CYII=", 7, 7],
+      LABEL_GLOBAL: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAs0lEQVR42u2WSw7AIAhE2TeZ+x+id6SrplWxRRljk0rCShaP36DIo0FlnkG3XXQixAL4FwC09JZ3Qqa53yPsdzLExAqsIVwAnwXIr6G1CR4fqBUeJ0GgEKd6ZVIjQdQA4MqYABEDIEBYAGjuewCCAxCAeAY4B9A7+R0QOQCMjNG0fo0QfIALggDQI0CBCiCsgsEZsMvvbUNwCzx9rscQdKAfgKiEnlObxgy8Be9GvYYj/gMHNEySw/X817QAAAAASUVORK5CYII=", 7, 7],
+      COMPONENT: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAqElEQVR42u1WQRKAIAjk3gz/f0R/pEOH1KDEVmlKZjip6+5CJNFlsFBcsCwrSSCJSeBfBFjO6VkHKC0z3aGvg0kEOjCbcBIYRaAJxzrkBYOKScFqAPd9vjOOwXUNag25RyRyNfdEOjlwANUQYYxyXU2eNhGA7WUd9brWlgbugF178EDTesDzGYIdsIGhDry4B8p+6HAxYg50IzD04pZ/wQAHwh4r9JXYAH7RMf6FR+oIAAAAAElFTkSuQmCC", 7, 7],
+      SELECT_LASSO: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAh0lEQVR42u2WQQrAMAgEvRf8/yP6R3sNrZSqG02ogqeYMMpqJHo1FqozluMkKYRogH8BsDzdcg7I9O5jhH4OhiiswDYi1KrgdSeApgWrhwEimQMB0jQ1BpcAIB8I3WfAEHIDsGAmoVMDoJZqgG01sEQX9CBaEiDlN7S15IR94MveOHUjasuxC6Dtd9gvmA/HAAAAAElFTkSuQmCC", 7, 7],
+      SELECT_WINDOW: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAjElEQVR42u2WTQqAQAhG3Qfe/xDd0bZDSemMf5WCK2V4yqcjwK0hQZ4hbTtQIkQD/AsA6eqauEGlZx8z+LgxRGIHXiNCrguzPgnAaUHrywArlRsChGlqTE4B0DzwJDJXABQIzQ0AhWp3AUDFyDXANzVQYgpK7IESmzAUIOQ3lN2OjveA5G50vYjaYuwAHhKY1gx0QfcAAAAASUVORK5CYII=", 7, 10],
+      LINE_BUS: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAYUlEQVR42u2WwQoAIAhD/f+fNgKDEOvWVrFBHTz0Vg7STPpdHqLB+z5s0OBwExUcZkJwwQUXXHDB3/9afRJluIjDSwhkvNoZAPbbsAHLWpT96I3TslyDpJ7yAgrhlQaQPW8B/g4PDYYB7wAAAABJRU5ErkJggg==", 5, 26],
+      LINE_WIRE: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAXklEQVR42u2WQQrAIAwE8/T+fIWiIMF6c1NhBoKQy6xR0AgAA5JUK3/eRWXyUdYQyJEjR44c+b1yTZS8612wFFnGvgvg/L/5AmjBR1tHd5wqcu9ogNIJcAl/GcB55g1FrIUhseqBdwAAAABJRU5ErkJggg==", 5, 26],
+      LINE_GRAPHIC: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAX0lEQVR42u2WMQ4AIAwC+/9P42KXRp0UjELSpcsRaKIRlvW6AEANh8REwnOoJm6Aa+Kv0O9id+fu3J27832wlORpXYEosUs/ERIDGGiyBuXC+0TdHTUgTcBHeKUBZucNp61uoFRqXB4AAAAASUVORK5CYII=", 5, 26],
+      LABEL_HIER: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAn0lEQVR42u2VQQ7AIAgEuTfZ/z+if6SHXoxSrHUtTcomnDQ6IiwirqASJ+i2iwZCJMC/AKBtjKwTXlpHucNeJ0MEZiCLMAE+CxA+DT+t1z3Bd85riCWgdwGwwr7tuWEfXnbRGQSIpwC01kZ1IQYBpiBgvBhOFtCtjyAAUgb6dUCtgf7lLQS1C+z0+99A8wEMm04JQXDCGYAlw2dmT6rVATZpTt1srgRlAAAAAElFTkSuQmCC", 7, 7],
+      PLACE: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAiElEQVR42u3X4QqAIAwE4D16b36BJCyZGcLuLDzw976aujIAMGVwRQqoDilAhvAACaIF0BERgIroAWiIJwAFMQKkI94AUhGjPdDm35vQPSUfUIvRb8aot9S3EBWQz4dlxvRscelHTil8WFm61ikAt9vSASjt8EV7K3+gKQHyFuxTsNzf1s6ncgLb/599z8vvqAAAAABJRU5ErkJggg==", 1, 1]
+    };
+  }
+});
+
+// web/domains/pcb/editor/selmodes.ts
+function detectWindows() {
+  if (typeof navigator === "undefined") return false;
+  const nav = navigator;
+  if (nav.platform) return /^Win/i.test(nav.platform);
+  const uad = nav.userAgentData && nav.userAgentData.platform;
+  if (uad) return /windows/i.test(uad);
+  return /Windows/.test(nav.userAgent || "");
+}
+function ctrlDown(ev, mac = IS_MAC) {
+  return mac ? !!ev.metaKey : !!ev.ctrlKey;
+}
+function modifiersState(ev, o = {}) {
+  const shift2 = !!ev.shiftKey, ctrl = ctrlDown(ev, o.mac ?? IS_MAC), alt = !!ev.altKey;
+  const hl = !!o.ctrlHighlights;
+  return {
+    subtractive: ctrl && shift2,
+    additive: !ctrl && shift2,
+    exclusiveOr: hl ? false : ctrl && !shift2,
+    highlight: hl ? ctrl && !shift2 : false,
+    // "Drag is more forgiving and allows either Ctrl+Drag or Shift+Drag to add to the selection"
+    dragAdditive: (ctrl || shift2) && !alt,
+    dragSubtractive: ctrl && shift2 && !alt,
+    skipHeuristics: o.windows ?? IS_WINDOWS ? false : alt
+  };
+}
+function areaFill(b, sch) {
+  if (b.lasso && !sch) return { additive: b.mode === "add", subtractive: b.mode === "remove" };
+  return { additive: !!b.add, subtractive: !!b.add && b.mode === "remove" };
+}
+function modifierCursorOf(s2) {
+  return s2.additive ? "ADD" : s2.subtractive ? "SUBTRACT" : s2.exclusiveOr ? "XOR" : null;
+}
+var IS_WINDOWS;
+var init_selmodes = __esm({
+  "web/domains/pcb/editor/selmodes.ts"() {
+    "use strict";
+    init_keys();
+    IS_WINDOWS = detectWindows();
+  }
+});
+
+// web/domains/pcb/editor/cursors.ts
+function kicursorCss(name) {
+  if (name === "ARROW" || name === "DEFAULT") return "default";
+  if (name === "HAND") return "pointer";
+  if (name === "BULLSEYE") return BULLSEYE;
+  const img = KICURSOR_IMAGES[name];
+  return img ? `url("${img[0]}") ${img[1]} ${img[2]}, default` : "";
+}
+function toolCursor(declared) {
+  if (!declared) return "";
+  const alias2 = declared === "crosshair" ? "PENCIL" : declared === "move" ? "MOVING" : declared === "text" ? "TEXT" : declared;
+  return kicursorCss(alias2) || declared;
+}
+function noteModifiers(ev) {
+  const c = ctrlDown(ev);
+  if (mods.shift === ev.shiftKey && mods.ctrl === c && mods.alt === ev.altKey) return;
+  mods.shift = ev.shiftKey;
+  mods.ctrl = c;
+  mods.alt = ev.altKey;
+  refreshCursor();
+}
+function modifierCursor(shift2, ctrl, ctrlHighlights = false) {
+  return modifierCursorOf(modifiersState({ shiftKey: shift2, ctrlKey: ctrl, metaKey: false }, { mac: false, ctrlHighlights }));
+}
+function currentCursor() {
+  if (override) return override;
+  const t = E.tool;
+  {
+    const m0 = activeModule();
+    const k = m0 && m0.state && m0.state.kicursor;
+    if (k) return k;
+  }
+  if (t === "select") {
+    const bs = E.boxSel;
+    if (bs) return bs.lasso || bs.cur[0] < bs.start[0] ? "SELECT_LASSO" : "SELECT_WINDOW";
+    const m2 = activeModule();
+    if (E.drag && E.drag.moved || E.fdrag && E.fdrag.moved) return "MOVING";
+    if (m2 && m2.cursorNow) {
+      try {
+        const c = m2.cursorNow(toolCtx());
+        if (c) return c;
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    const mc = modifierCursor(mods.shift, mods.ctrl, !isSch() && !!E.ctrlClickHighlight && E.DOC_TYPE !== "footprint");
+    if (mc) return mc;
+    const st = m2 && m2.state;
+    if (st && st.autoCursor) return st.autoCursor;
+    if (st && st.hyperHover || E.hyperHover) return "HAND";
+    if (stage.classList.contains("over-sel")) return "MOVING";
+    if (E.selMode === "lasso") return "SELECT_LASSO";
+    return "ARROW";
+  }
+  if (t === "zoomtool") return "ZOOM_IN";
+  if (t === "measure") return "MEASURE";
+  if (t === "pan") return "grab";
+  if (t === "comment") return "cell";
+  const m = activeModule();
+  if (m && moduleTool(t)) {
+    if (m.cursorNow) {
+      try {
+        const c = m.cursorNow(toolCtx());
+        if (c) return c;
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    const def = m.tools && m.tools.find((x) => x.id === t);
+    return def && def.cursor ? def.cursor : "PENCIL";
+  }
+  return "ARROW";
+}
+function refreshCursor() {
+  if (!stage) return;
+  const css = toolCursor(currentCursor());
+  if (stage.style.cursor !== css) stage.style.cursor = css;
+}
+var BULLSEYE, mods, override;
+var init_cursors = __esm({
+  "web/domains/pcb/editor/cursors.ts"() {
+    "use strict";
+    init_kicursors_generated();
+    init_state();
+    init_view();
+    init_selmodes();
+    init_tools();
+    BULLSEYE = 'url("data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#fff" stroke-width="3"/><circle cx="12" cy="12" r="9" fill="none" stroke="#000" stroke-width="1.2"/><circle cx="12" cy="12" r="5" fill="none" stroke="#fff" stroke-width="3"/><circle cx="12" cy="12" r="5" fill="none" stroke="#000" stroke-width="1.2"/><circle cx="12" cy="12" r="1.6" fill="#000"/></svg>') + '") 12 12, crosshair';
+    mods = { shift: false, ctrl: false, alt: false };
+    override = null;
+    if (typeof window !== "undefined") {
+      const onKey = (ev) => {
+        if (ev.key === "Shift" || ev.key === "Control" || ev.key === "Meta" || ev.key === "Alt") noteModifiers(ev);
+      };
+      window.addEventListener("keydown", onKey, true);
+      window.addEventListener("keyup", onKey, true);
+      window.addEventListener("blur", () => {
+        mods.shift = mods.ctrl = mods.alt = false;
+        refreshCursor();
+      });
+    }
+  }
+});
+
+// web/domains/pcb/editor/hypertext.ts
+var init_hypertext = __esm({
+  "web/domains/pcb/editor/hypertext.ts"() {
+    "use strict";
+    init_state();
+  }
+});
+
 // web/platform/review/names.ts
 var init_names = __esm({
   "web/platform/review/names.ts"() {
@@ -74801,937 +75413,428 @@ var init_msgbox = __esm({
   }
 });
 
-// web/domains/pcb/editor/dom.ts
-var $, $$, NS2;
-var init_dom = __esm({
-  "web/domains/pcb/editor/dom.ts"() {
-    "use strict";
-    $ = (s2, r = document) => r.querySelector(s2);
-    $$ = (s2, r = document) => Array.from(r.querySelectorAll(s2));
-    NS2 = "http://www.w3.org/2000/svg";
-  }
-});
-
-// web/domains/pcb/editor/kicursors.generated.ts
-var KICURSOR_IMAGES;
-var init_kicursors_generated = __esm({
-  "web/domains/pcb/editor/kicursors.generated.ts"() {
-    "use strict";
-    KICURSOR_IMAGES = {
-      VOLTAGE_PROBE: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAdklEQVR42u2WWwoAIAgEu/+liz6CEHuQuhLsQvQTzZRBlsIwDBOQqgQK75McEIkZLk4fK3EChUlI8A4w1rkJaLXebe4q8PLQ3Mqwgt9sbJawwM0SHnDl8eLhKddOOOF/wNP/8pcPBtVM4OHwBjINHtKpGCRS0gDJxoeHj23dsQAAAABJRU5ErkJggg==", 1, 31],
-      CURRENT_PROBE: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAcUlEQVR42u2VUQrAIAxDe/9Lx6+BDHVSNRGWgB9C4RWbxgjLsqxzwutI4L07FU5rYua5oZ41TsORHM82OBY8kjJUdtWm61uFq/At+0wLmRpAh4+gtGSTwuOXcNnMoTbcV+BI/u9wA+zAkcGvCB268x8VMD+Ocin/yhgAAAAASUVORK5CYII=", 4, 27],
-      TUNE: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAV0lEQVR42u2VQQoAIAgE9/+fNoICCbo6kTvgeVZRlEwDYhUqR0LEpVB5SYggA1huueXP3DrWtceOPJm69zrBOk9yVQc45aLGbvn/8kDlG1TedunyDpQzAKfv2Sein4KTAAAAAElFTkSuQmCC", 1, 30],
-      PENCIL: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAbElEQVR42u2UwQoAIAhD/f+fLoKCCJUubhF7l6DL1rSZCSHET7QJTXwcywdNHG7CE4eZyMTLDUj8ybkjXs75dkswMgGN/TQBKZwz8n+rtm1E96Wxe8tGiRpqwIkWE3eyYAavVmoCWsKbHqikA0DGYK6k3QKyAAAAAElFTkSuQmCC", 4, 27],
-      MOVING: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAmElEQVR42t2XSw4AIQhDvf+lmY0mhOAnDrREdq58AqXSREQaM6QHFWBwUAFoEBqAAmEB4BAeABRiBgCDWAFAIHYA6RAnAKkQux6w8XYTqlfiAcZl8Mno1RaaBe+Cv1kIgb616TB7v5Ed1VmppqYVpEtglIWV8eycPsRsBtIkfWpiqT1BzUCJHiihgjKf2xI7RolVD1bzqPgApQQWB5uPNksAAAAASUVORK5CYII=", 1, 1],
-      WARNING: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA3UlEQVR42t2VUQ6EMAhEvf+lZ2OiWaTQUkBIJDHGn/IYpuMBAEdn4apWgJujFaANggK0QHCAcggJoBRCAyiDmAGUQKwAXoewALwKsfIAr2+bkExZD3A3K09GabelKkgNElRA+mp2RQ1D0NXg/LQdyK9sghJXcwOElhuIN/+fpkGAvME85PcEpKnGw/ikq+/96R9B9VRhCC9BAd86oCQjUQGeMkHw3UsAUOI7rMBgPAlAgEjzAHakHV0euwXS9KoCE0O6cwDzQ1YqxJJQm96yBgnCf++dT8rfMKn5Vv0ADC2Ln/TEX6sAAAAASUVORK5CYII=", 1, 1],
-      REMOVE: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAmklEQVR42u2WOw6AQAhEuf+lsbEgBPkojDEyyRZrIW+BIRAJsRC9oTPwzwBYyfjEkFeLQ/IOAahmYCw7mR7QGWuFiACsDLVCRGm3ygNxjhd8HCITfAxCNlxW7T1RBWiFUD/DQ+jA1VI8hvB8DwG4C6HLNmLFaCiNOcKDGB3THoRlVehkhAXP2BO20l10O36fhK5v1R1itVp9QgcyCm29liim4AAAAABJRU5ErkJggg==", 4, 4],
-      TEXT: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAgElEQVR42u2VSwrAMAhE3Rfm/ofIHe2qUIz9J6NQB1xF8PmJipwKKnGCLk00EKIA/gUA7e3J+4BMre09/PfBEIEVqCF8A0BpxxEAZg9kGgDvGvpflrqw0gBsA0gEgJMxmFVIBkCeg+vglJ1gy09qw50AmHuqgwHs8fniUyqVEmoFzfT+FTw1/u0AAAAASUVORK5CYII=", 7, 7],
-      MEASURE: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAc0lEQVR42u2WMQ7AIAwD8/9PpwuDFRFgwVaFT+pQlrjWoSYCSCAUjMGPBcjC5CgpXw1P4DslgLSBX0l4vZFV7egKvaHqBjXEQkzeFe1uyPUQZUjOoIboeLcJO2En7ISdOHWC9vdshkrXOs16J98tIYQxWz5Uwrljz1P76AAAAABJRU5ErkJggg==", 4, 4],
-      ADD: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAZ0lEQVR42u2VSwoAIAgF3Qfe/xDd0RZt+lEE0ZN6A65sMZqlyBQ1waEWohhQggJ/Caj1sZM/UGkb5Ylx/rAEsAMcQgq4FVhtQ8V3B9ShXHktcE1i/Gte3RlgAfgVuBhCF8+QEEIeIgFKaIexHC4lawAAAABJRU5ErkJggg==", 7, 7],
-      SUBTRACT: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAW0lEQVR42u2VQQoAIAgEvQf+/xH90a5REgTiSu2AJztMKipyRE1wqLUuBpSgwF8Canvc5AN+usb8ws8HSwArwCGkQFkB+DUsi7cT0irlb83UmwEWgLeAEELIgwzTxXXNTWQaKgAAAABJRU5ErkJggg==", 7, 7],
-      XOR: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAZElEQVR42u2W3QoAEAxGd6/2/g/hHedW/iKzke/USqgda4FoCAv5wRIiiaMEBP4SYKljZV3hpGXkO9rryhKOFUATQmBH4LjcOLljhfjknTCfvBybJ+/PmTem+cN13fcNAADAwySWsHtTKuDp2wAAAABJRU5ErkJggg==", 7, 7],
-      ZOOM_IN: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAc0lEQVR42u2VwQoAIAhD/f+frlNhsogCZ4c96BAetkSXGaA5jIkTnYdmJAgvpWGEIX5sEMXAuAfBHANI3BtINwHa38DhGaB3oHwGvtiCixzIDaZDEi619G7El6Jtof4VmzmRCZmoG8qYHXRxkB1CCCHEEx06mzXZkpc6tgAAAABJRU5ErkJggg==", 6, 6],
-      ZOOM_OUT: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAa0lEQVR42u2VwQrAMAhD/f+fdqeVVjJKB2Yw3gNPHhLFphGCnAgnk+gom5EivLRuIw7x7YL+Z6CKp6DVhJg+RfkM2DfAER7mQG8wbZJw6bVvo06qXov1r3i4E0xg4rujrNlhFxfZAQAA8IoL2Wsp5dOPpLQAAAAASUVORK5CYII=", 6, 6],
-      LABEL_NET: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAjElEQVR42u2WSwrAIAxEsy/M/Q/RO6arQrFp63cSqQNZKeQZx0SRV0HFT9BtF3WEWAD/AoDeo2S9w0nTuO6w1ztDOFZgmbAGgHIdTwAYbcgwANY0tJ8stWGFATgNSASAcWIwqxAMgOyD7+SUnpCWn3QNOQkwdlQ7A6TDp2XPLMp1fEnMBWD/AVtjKagOQSVcEXR+l3QAAAAASUVORK5CYII=", 7, 7],
-      LABEL_GLOBAL: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAs0lEQVR42u2WSw7AIAhE2TeZ+x+id6SrplWxRRljk0rCShaP36DIo0FlnkG3XXQixAL4FwC09JZ3Qqa53yPsdzLExAqsIVwAnwXIr6G1CR4fqBUeJ0GgEKd6ZVIjQdQA4MqYABEDIEBYAGjuewCCAxCAeAY4B9A7+R0QOQCMjNG0fo0QfIALggDQI0CBCiCsgsEZsMvvbUNwCzx9rscQdKAfgKiEnlObxgy8Be9GvYYj/gMHNEySw/X817QAAAAASUVORK5CYII=", 7, 7],
-      COMPONENT: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAqElEQVR42u1WQRKAIAjk3gz/f0R/pEOH1KDEVmlKZjip6+5CJNFlsFBcsCwrSSCJSeBfBFjO6VkHKC0z3aGvg0kEOjCbcBIYRaAJxzrkBYOKScFqAPd9vjOOwXUNag25RyRyNfdEOjlwANUQYYxyXU2eNhGA7WUd9brWlgbugF178EDTesDzGYIdsIGhDry4B8p+6HAxYg50IzD04pZ/wQAHwh4r9JXYAH7RMf6FR+oIAAAAAElFTkSuQmCC", 7, 7],
-      SELECT_LASSO: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAh0lEQVR42u2WQQrAMAgEvRf8/yP6R3sNrZSqG02ogqeYMMpqJHo1FqozluMkKYRogH8BsDzdcg7I9O5jhH4OhiiswDYi1KrgdSeApgWrhwEimQMB0jQ1BpcAIB8I3WfAEHIDsGAmoVMDoJZqgG01sEQX9CBaEiDlN7S15IR94MveOHUjasuxC6Dtd9gvmA/HAAAAAElFTkSuQmCC", 7, 7],
-      SELECT_WINDOW: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAjElEQVR42u2WTQqAQAhG3Qfe/xDd0bZDSemMf5WCK2V4yqcjwK0hQZ4hbTtQIkQD/AsA6eqauEGlZx8z+LgxRGIHXiNCrguzPgnAaUHrywArlRsChGlqTE4B0DzwJDJXABQIzQ0AhWp3AUDFyDXANzVQYgpK7IESmzAUIOQ3lN2OjveA5G50vYjaYuwAHhKY1gx0QfcAAAAASUVORK5CYII=", 7, 10],
-      LINE_BUS: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAYUlEQVR42u2WwQoAIAhD/f+fNgKDEOvWVrFBHTz0Vg7STPpdHqLB+z5s0OBwExUcZkJwwQUXXHDB3/9afRJluIjDSwhkvNoZAPbbsAHLWpT96I3TslyDpJ7yAgrhlQaQPW8B/g4PDYYB7wAAAABJRU5ErkJggg==", 5, 26],
-      LINE_WIRE: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAXklEQVR42u2WQQrAIAwE8/T+fIWiIMF6c1NhBoKQy6xR0AgAA5JUK3/eRWXyUdYQyJEjR44c+b1yTZS8612wFFnGvgvg/L/5AmjBR1tHd5wqcu9ogNIJcAl/GcB55g1FrIUhseqBdwAAAABJRU5ErkJggg==", 5, 26],
-      LINE_GRAPHIC: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAX0lEQVR42u2WMQ4AIAwC+/9P42KXRp0UjELSpcsRaKIRlvW6AEANh8REwnOoJm6Aa+Kv0O9id+fu3J27832wlORpXYEosUs/ERIDGGiyBuXC+0TdHTUgTcBHeKUBZucNp61uoFRqXB4AAAAASUVORK5CYII=", 5, 26],
-      LABEL_HIER: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAn0lEQVR42u2VQQ7AIAgEuTfZ/z+if6SHXoxSrHUtTcomnDQ6IiwirqASJ+i2iwZCJMC/AKBtjKwTXlpHucNeJ0MEZiCLMAE+CxA+DT+t1z3Bd85riCWgdwGwwr7tuWEfXnbRGQSIpwC01kZ1IQYBpiBgvBhOFtCtjyAAUgb6dUCtgf7lLQS1C+z0+99A8wEMm04JQXDCGYAlw2dmT6rVATZpTt1srgRlAAAAAElFTkSuQmCC", 7, 7],
-      PLACE: ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAiElEQVR42u3X4QqAIAwE4D16b36BJCyZGcLuLDzw976aujIAMGVwRQqoDilAhvAACaIF0BERgIroAWiIJwAFMQKkI94AUhGjPdDm35vQPSUfUIvRb8aot9S3EBWQz4dlxvRscelHTil8WFm61ikAt9vSASjt8EV7K3+gKQHyFuxTsNzf1s6ncgLb/599z8vvqAAAAABJRU5ErkJggg==", 1, 1]
-    };
-  }
-});
-
-// web/domains/pcb/editor/pcbdialogs/canvas.ts
-var extras, BS, NL, PLOT;
-var init_canvas = __esm({
-  "web/domains/pcb/editor/pcbdialogs/canvas.ts"() {
-    "use strict";
-    extras = () => KiCadCanvas;
-    BS = () => extras().boardSetup;
-    NL = () => extras().pcbNetlist;
-    PLOT = () => KiCadCanvas.plot;
-  }
-});
-
-// web/domains/pcb/editor/projectfile.ts
-function projectDocs2() {
-  const st = appState();
-  const all2 = st.project && st.project.docs;
-  return all2 && all2.length ? all2 : st.docs || [];
+// web/domains/pcb/editor/comments.ts
+function describe(it) {
+  if (it.ref) return it.ref;
+  if (it.name) return it.name;
+  const names2 = CollabTools.props && CollabTools.props.KIND_NAMES || {};
+  const kind = names2[it.kind] || it.kind.replace(/^gr_/, "").replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+  const text3 = /label|text/.test(it.kind) ? KiCadCanvas.str(it.node[1]) : "";
+  return text3 ? `${kind} ${text3.length > 24 ? text3.slice(0, 23) + "\u2026" : text3}` : kind;
 }
-function withDocument(docId3, onJoined, timeoutMs = 15e3) {
-  return new Promise((resolve2, reject) => {
-    let sock = null, settled = false, role = "viewer";
-    const acks = /* @__PURE__ */ new Map();
-    const done = (fn) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer4);
-      try {
-        if (sock) sock.close();
-      } catch (e) {
-      }
-      fn();
-    };
-    const timer4 = setTimeout(() => done(() => reject(new Error("the server did not answer"))), timeoutMs);
-    const sendOp3 = (changes) => new Promise((ok2, fail) => {
-      if (!sock || sock.readyState !== 1) {
-        fail(new Error("not connected"));
-        return;
-      }
-      const clientOpId = `web-file:${Date.now().toString(36)}:${++sockN}`;
-      acks.set(clientOpId, { ok: ok2, fail });
-      sock.send(JSON.stringify({ type: "op", docId: docId3, clientOpId, baseSeq: null, changes }));
-    });
-    api4("/api/ws-ticket").then((ticket) => {
-      if (settled) return;
-      sock = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
-      const s2 = sock;
-      s2.onopen = () => s2.send(JSON.stringify({ type: "hello", proto: 1, token: ticket.token || "", clientId: "web-file-" + Math.random().toString(36).slice(2, 10), linkToken: null, client: "web" }));
-      s2.onerror = () => done(() => reject(new Error("connection failed")));
-      s2.onclose = () => done(() => reject(new Error("connection closed")));
-      s2.onmessage = (ev) => {
-        let msg;
-        try {
-          msg = JSON.parse(String(ev.data));
-        } catch (e) {
-          return;
-        }
-        if (msg.type === "hello_ok") s2.send(JSON.stringify({ type: "join_doc", docId: docId3 }));
-        else if (msg.type === "doc_info") role = msg.role || "viewer";
-        else if (msg.type === "snapshot" && typeof msg.file === "string") {
-          onJoined({ file: msg.file, seq: Number(msg.seq) || 0, ops: msg.thenOps || [], role }, sendOp3).then((v) => done(() => resolve2(v)), (e) => done(() => reject(e instanceof Error ? e : new Error(String(e)))));
-        } else if (msg.type === "ack" && msg.clientOpId && acks.has(msg.clientOpId)) {
-          const a = acks.get(msg.clientOpId);
-          acks.delete(msg.clientOpId);
-          if (a) a.ok(Number(msg.seq) || 0);
-        } else if (msg.type === "error") {
-          const a = msg.clientOpId ? acks.get(msg.clientOpId) : void 0;
-          if (a) a.fail(new Error(msg.code || "refused"));
-          else done(() => reject(new Error(msg.code || "refused")));
-        }
-      };
-    }).catch((e) => done(() => reject(e instanceof Error ? e : new Error(String(e)))));
-  });
-}
-function liveDocument(docId3) {
-  return withDocument(docId3, (live3) => Promise.resolve(live3));
-}
-function sendDocOps(docId3, changes) {
-  return withDocument(docId3, async (live3, sendOp3) => {
-    if (live3.role !== "editor") throw new Error("permission_denied");
-    return sendOp3(changes);
-  });
-}
-function withFileOps(text3, ops) {
-  const edits = [];
-  for (const op of ops) for (const c of op.changes || []) {
-    if (c.typeName !== "PROJECT_FILE") continue;
-    for (const p of c.properties || []) if (p.after && p.name) edits.push({ path: p.name.split("."), value: p.after.v });
-  }
-  if (!edits.length) return text3;
-  try {
-    return editProject(text3, edits).text;
-  } catch (e) {
-    return text3;
-  }
-}
-async function loadProjectFile() {
-  const pro = projectDoc("kicad_pro");
-  if (!pro) return null;
-  if (!appState().me) {
-    try {
-      const t = await api4(`/api/docs/${pro.docId}/content?v=${Date.now()}`);
-      return typeof t === "string" ? t : JSON.stringify(t);
-    } catch (e) {
-      return null;
-    }
-  }
-  try {
-    const live3 = await liveDocument(pro.docId);
-    return withFileOps(live3.file, live3.ops);
-  } catch (e) {
-    try {
-      const t = await api4(`/api/docs/${pro.docId}/content?v=${Date.now()}`);
-      return typeof t === "string" ? t : JSON.stringify(t);
-    } catch (e2) {
-      return null;
-    }
-  }
-}
-function saveTextDocument(docId3, text3, change) {
-  if (!canWriteProject()) return Promise.resolve(false);
-  return withDocument(docId3, async (live3, sendOp3) => {
-    if (live3.role !== "editor") return false;
-    const seq = await sendOp3([change]);
-    const r = await fetch(`/api/docs/${docId3}/snapshots?seq=${seq}`, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: text3 });
-    return r.ok;
-  }).catch(() => false);
-}
-function saveProjectFile(text3, edits) {
-  const pro = projectDoc("kicad_pro");
-  if (!pro) return Promise.resolve(false);
-  return saveTextDocument(pro.docId, text3, {
-    id: "project",
-    kind: "MODIFIED",
-    typeName: "PROJECT_FILE",
-    properties: edits.map((e) => ({ name: e.path.join("."), after: { type: "json", v: e.value } }))
-  });
-}
-function adoptProjectFile(text3) {
-  E.proSettings = text3;
-  const pcb = CollabTools.pcb;
-  if (pcb && pcb.setDesignSettings) {
-    try {
-      pcb.setDesignSettings(text3);
-    } catch (e) {
-    }
-  }
-  const sizes2 = KiCadCanvas.pcbSizes;
-  if (sizes2 && sizes2.state && sizes2.state.load) {
-    try {
-      sizes2.state.load(text3);
-      if (sizes2.state.emit) sizes2.state.emit();
-    } catch (e) {
-    }
-  }
-  try {
-    const j = JSON.parse(text3);
-    const w = j.board && j.board.design_settings && j.board.design_settings.defaults && j.board.design_settings.defaults.silk_line_width;
-    E.renderOpts.silkLineWidth = typeof w === "number" && w > 0 ? w : void 0;
-  } catch (e) {
-  }
-  if (E.kdoc) {
-    try {
-      const j = JSON.parse(text3);
-      E.kdoc.projectVars = j.text_variables && Object.keys(j.text_variables).length ? j.text_variables : null;
-    } catch (e) {
-    }
-  }
-  requestRender();
-}
-var appState, projectDoc, canWriteProject, sockN;
-var init_projectfile = __esm({
-  "web/domains/pcb/editor/projectfile.ts"() {
-    "use strict";
-    init_appstore();
-    init_state();
-    init_util();
-    init_view();
-    init_project_file();
-    appState = () => state;
-    projectDoc = (docType) => projectDocs2().find((d) => d.docType === docType) || null;
-    canWriteProject = () => !E.viewOnly && !!appState().me;
-    sockN = 0;
-  }
-});
-
-// web/domains/pcb/editor/schnets.ts
-async function readSheet(d) {
-  let text3 = null, ops = [];
-  if (state.me) {
-    try {
-      const live3 = await liveDocument(d.docId);
-      text3 = live3.file;
-      ops = live3.ops;
-    } catch (e) {
-      text3 = null;
-    }
-  }
-  const doc2 = text3 === null ? await readSavedSchematic(d.docId) : KiCadCanvas.parseDoc(text3, "kicad_sch");
-  if (!doc2) return null;
-  for (const op of ops) for (const c of op.changes || []) {
-    try {
-      KiCadCanvas.applyChange(doc2, c, SCH_IU);
-    } catch (e) {
-    }
-  }
-  return { doc: doc2, uuid: String(doc2.uuid || ""), file: d.path };
-}
-function loadSheets(force = false) {
-  if (sheetsProject !== projectKey()) {
-    sheets.clear();
-    sheetsProject = projectKey();
-  }
-  const now = Date.now(), cur2 = state.docId;
-  const want2 = schDocs().filter((d) => d.docId !== cur2 && (force || !sheets.has(d.docId) || now - sheets.get(d.docId).at > STALE_MS));
-  if (!want2.length) return Promise.resolve();
-  if (loading) return force ? loading.then(() => loadSheets(true)) : loading;
-  const pid = projectKey();
-  loading = Promise.all(want2.map(async (d) => {
-    const f2 = await readSheet(d);
-    if (f2 && pid === projectKey()) sheets.set(d.docId, { file: f2, at: Date.now() });
-  })).then(() => {
-    loading = null;
-    loadedVer++;
-    computed = null;
-    changed();
-  }, () => {
-    loading = null;
-  });
-  return loading;
-}
-function compute() {
-  const h3 = helpers();
-  const cur2 = curEntry(), doc2 = E.kdoc;
-  if (!h3 || !cur2 || !doc2 || doc2.type !== "sch") return null;
-  const topKey = topLevelSchematics().map((t) => t.doc.docId + ":" + t.name).join(",");
-  const key3 = `${projectKey()}|${cur2.docId}|${docGen}|${loadedVer}|${topKey}`;
-  if (computed && computed.key === key3) return computed;
-  const files = /* @__PURE__ */ new Map(), docs = /* @__PURE__ */ new Map();
-  for (const d of schDocs()) {
-    if (d.docId === cur2.docId) {
-      const c = sheets.get(d.docId);
-      files.set(d.path, { doc: doc2, uuid: String(doc2.uuid || (c ? c.file.uuid : "")), file: d.path });
-    } else {
-      const c = sheets.get(d.docId);
-      if (c) files.set(d.path, c.file);
-    }
-  }
-  if (!files.has(cur2.path)) files.set(cur2.path, { doc: doc2, uuid: String(doc2.uuid || ""), file: cur2.path });
-  for (const [p, f2] of files) docs.set(p, f2.doc);
-  const root5 = state.project ? rootSchematic() : null;
-  const rootFile = root5 && files.get(root5.path) || files.get(cur2.path);
-  const resolve2 = (file, parent) => {
-    const entry2 = findSheetDoc(file, parent.file);
-    return entry2 ? files.get(entry2.path) || null : null;
-  };
-  const stem3 = rootFile.file.split("/").pop().replace(/\.kicad_sch$/, "");
-  const pro = projectDocs2().find((d) => d.docType === "kicad_pro");
-  const project3 = pro ? pro.path.split("/").pop().replace(/\.kicad_pro$/, "") : stem3;
-  const tops = topLevelSchematics().map((t) => ({ sheet: files.get(t.doc.path), name: t.name, uuid: t.uuid })).filter((t) => !!t.sheet);
-  const nl = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve2, { symbolPins: h3.symbolPins, isPower: (d, it) => h3.isPowerSymbol(d, String((KiCadCanvas.kid(it.node, "lib_id") || [])[1])) }, project3);
-  const map = nl.netMap || /* @__PURE__ */ new Map(), instances = nl.instances || [];
-  computed = { map, instances, index: SN().nameIndex(map), rootName: stem3, docs, key: key3 };
-  return computed;
-}
-function netMap() {
-  try {
-    return compute();
-  } catch (e) {
-    console.warn(e);
-    return null;
-  }
-}
-function currentInstance(c = netMap()) {
-  const cur2 = curEntry();
-  if (!c || !cur2) return null;
-  const asked = preferHuman && c.instances.some((i) => i.file === cur2.path && i.human === preferHuman) ? preferHuman : null;
-  return SN().instanceFor(c.instances, cur2.path, asked || E.kdoc?.sheetPath || null);
-}
-function changed() {
-  for (const fn of listeners) {
-    try {
-      fn();
-    } catch (e) {
-      console.warn(e);
-    }
-  }
-}
-function applyHighlight(ctx = toolCtx()) {
-  const h3 = helpers();
-  if (!h3) return;
-  if (!HL.name) {
-    h3.setHighlight(ctx, null);
-    setStatusBar({ message: "" });
-    changed();
-    return;
-  }
-  const c = netMap(), inst = currentInstance(c);
-  const keys = c && inst ? SN().collectKeys(c.map, HL.name, inst.index, HL.busMembers) : /* @__PURE__ */ new Set();
-  h3.setHighlight(ctx, keys.size ? keys : null);
-  setStatusBar({ message: SN().highlightStatus(HL.name) });
-  changed();
-}
-function nameOfPick(pick) {
-  if (!pick || !pick.item) return null;
-  const c = netMap(), inst = currentInstance(c);
-  if (!c || !inst) return null;
-  const it = pick.item, K11 = KiCadCanvas;
-  let pin;
-  if (it.kind === "symbol") {
-    pin = pick.pin;
-    if (!pin) {
-      const h3 = helpers();
-      const pins2 = h3 ? h3.symbolPins(E.kdoc, it) : [];
-      let bd = Infinity;
-      const at5 = pick.at || [0, 0];
-      for (const p of pins2) {
-        const d = Math.hypot(p.x - at5[0], p.y - at5[1]);
-        if (d < bd) {
-          bd = d;
-          pin = p.number;
-        }
-      }
-    }
-  } else if (it.kind === "sheet" && pick.pin !== void 0) {
-    pin = pick.pin;
-  } else if (it.kind === "sheet") {
-    const at5 = pick.at || [0, 0];
-    let bd = Infinity;
-    for (const p of K11.kids(it.node, "pin")) {
-      const a = K11.atOf(p);
-      const d = Math.hypot(a[0] - at5[0], a[1] - at5[1]);
-      if (d < bd) {
-        bd = d;
-        pin = K11.str(p[1]);
-      }
-    }
-  }
-  const key3 = inst.index + "|" + it.id + (pin !== void 0 ? "#pin:" + pin : "");
-  return { name: c.index.get(key3) || null, inst: inst.index, id: it.id, pin };
-}
-function preferInstance(human) {
-  preferHuman = human;
-}
-function leaveSheet() {
-  const cur2 = curEntry();
-  const c = netMap(), inst = currentInstance(c);
-  if (c && inst) {
-    if (inst.uuidPath.length <= 1) {
-      toast("Already at the root sheet");
-      return;
-    }
-    const up = inst.uuidPath.slice(0, -1).join("/");
-    const parent = c.instances.find((i) => i.uuidPath.join("/") === up);
-    const d = parent ? schDocs().find((x) => x.path === parent.file) : null;
-    if (parent && d) {
-      preferInstance(parent.human);
-      if (!cur2 || d.docId !== cur2.docId) void openDoc(d);
-      else applyHighlight();
-      return;
-    }
-  }
-  const tops = topLevelSchematics();
-  if (cur2 && tops.some((t) => t.doc.docId === cur2.docId)) {
-    toast("Already at the root sheet");
-    return;
-  }
-  const r = rootSchematic();
-  if (r) void openDoc(r);
-}
-var SN, SCH_IU, schMod, helpers, HL, preferHuman, sheets, sheetsProject, loading, loadedVer, STALE_MS, projectKey, schDocs, curEntry, computed, docGen, listeners;
-var init_schnets = __esm({
-  "web/domains/pcb/editor/schnets.ts"() {
-    "use strict";
-    init_appstore();
-    init_comments();
-    init_doc();
-    init_util();
-    init_canvas();
-    init_projectfile();
-    init_state();
-    init_tools();
-    SN = () => KiCadCanvas.schNets;
-    SCH_IU = 1e4;
-    schMod = () => CollabTools.sch;
-    helpers = () => {
-      const m = schMod();
-      return m && m._ ? m._ : null;
-    };
-    HL = { name: null, busMembers: false, nav: null };
-    preferHuman = null;
-    sheets = /* @__PURE__ */ new Map();
-    sheetsProject = "";
-    loading = null;
-    loadedVer = 0;
-    STALE_MS = 3e4;
-    projectKey = () => {
-      const p = state.project;
-      return p && p.projectId || "";
-    };
-    schDocs = () => projectDocs2().filter((d) => d.docType === "kicad_sch");
-    curEntry = () => state.doc || null;
-    computed = null;
-    docGen = 0;
-    listeners = /* @__PURE__ */ new Set();
-  }
-});
-
-// web/domains/pcb/editor/variant.ts
-function currentVariant() {
-  return byEditor[editorOf()] || "";
-}
-function publish() {
-  const ed = editorOf();
-  E.currentVariant = byEditor[ed] || "";
-  store.set({ variant: { current: byEditor[ed] || "", names: names[ed].slice(), sch: ed === "sch" } });
-}
-function boardVariantsNode() {
-  const d = E.kdoc;
+function netOfItem(it, near2) {
+  const d = kdoc();
   if (!d) return null;
-  return d.boardSetup && d.boardSetup.variants || d.variantsNode || null;
-}
-function proVariants(pro) {
-  const sch = pro && typeof pro.schematic === "object" ? pro.schematic : null;
-  const list = sch && Array.isArray(sch.variants) ? sch.variants : [];
-  return list.filter((e) => !!e && typeof e === "object" && typeof e.name === "string").map((e) => ({ name: e.name, description: typeof e.description === "string" ? e.description : "" }));
-}
-function refreshVariantNames(schNames) {
-  const ed = editorOf();
-  if (ed === "pcb") {
-    const v = boardVariantsNode();
-    names.pcb = boardVariantNamesForUI(v);
-    descriptions.pcb = {};
-    for (const n2 of names.pcb.slice(1)) descriptions.pcb[n2] = boardVariantDescription(v, n2);
-  } else {
-    let pro = null;
-    try {
-      pro = E.proSettings ? JSON.parse(E.proSettings) : null;
-    } catch (e) {
-      pro = null;
-    }
-    const reg = proVariants(pro);
-    const set2 = new Set(schNames ? schNames.filter((n2) => !isDefaultVariant(n2)) : []);
-    if (!schNames && E.kdoc) for (const it of E.kdoc.items.values()) {
-      if (it.kind !== "symbol" && it.kind !== "sheet") continue;
-      for (const p of symbolInstancePaths(it.node)) for (const c of p) if (Array.isArray(c) && c[0] === "variant") {
-        const nm4 = c.find((x) => Array.isArray(x) && x[0] === "name");
-        if (nm4 && nm4[1]) set2.add(String(nm4[1]));
-      }
-    }
-    for (const r of reg) set2.add(r.name);
-    names.sch = [DEFAULT_VARIANT_NAME, ...[...set2].sort(strNumCmp2)];
-    descriptions.sch = {};
-    for (const r of reg) descriptions.sch[r.name] = r.description;
+  if (d.type === "pcb") {
+    let name = "";
+    if (it.kind === "footprint") {
+      if (!near2) return null;
+      const pad2 = KiCadCanvas.padAt(d, near2[0], near2[1]);
+      if (pad2 && pad2.item === it) name = pad2.netName || (pad2.pad ? KiCadCanvas.netNameOf(d, pad2.pad) : "");
+    } else name = KiCadCanvas.netNameOf(d, it.node);
+    return name ? { name, ids: boardNetIds(name) } : null;
   }
-  if (byEditor[ed] && !names[ed].some((n2) => n2.toLowerCase() === byEditor[ed].toLowerCase())) {
-    setCurrentVariant("");
-    return;
-  }
-  publish();
-}
-function variantNamesForUI() {
-  return names[editorOf()].slice();
-}
-function variantDescription(name) {
-  return descriptions[editorOf()][name] || "";
-}
-function applyVariantToDoc(doc2) {
-  if (!doc2) return;
-  const d = doc2;
-  const ed = doc2.type === "sch" ? "sch" : "pcb", v = byEditor[ed] || "";
-  d.variantName = v;
-  d.variantDesc = v ? descriptions[ed][v] || "" : "";
-}
-function setCurrentVariant(name) {
-  const ed = editorOf();
-  const v = isDefaultVariant(name) ? "" : name;
-  const changed2 = (byEditor[ed] || "") !== v;
-  byEditor[ed] = v;
-  variantCache.clear();
-  lastView = null;
-  publish();
-  if (!changed2) return;
-  const doc2 = E.kdoc;
-  if (doc2) {
-    applyVariantToDoc(doc2);
-    for (const it of doc2.items.values()) {
-      try {
-        KiCadCanvas.buildGeom(doc2, it);
-      } catch (e) {
-      }
-    }
-  }
-  requestRender();
+  const sch = CollabTools.sch;
+  if (!sch || !/^(wire|bus|junction|label|global_label|hierarchical_label|bus_entry)$/.test(it.kind)) return null;
+  let ids;
   try {
-    if (CollabTools.props && CollabTools.props.refresh) CollabTools.props.refresh();
-  } catch (e) {
-    console.warn(e);
-  }
-  const bump = store.get().document;
-  store.slice("document", { version: (bump.version || 0) + 1 });
-}
-function currentSheetPath() {
-  if (!E.kdoc || E.kdoc.type !== "sch") return null;
-  try {
-    const inst = currentInstance();
-    return inst && inst.uuidPath.length ? "/" + inst.uuidPath.join("/") : null;
-  } catch (e) {
+    ids = Array.from(sch.netItems(d, it, near2));
+  } catch {
     return null;
   }
+  if (!ids.length) return null;
+  return { name: schNetName(ids), ids };
 }
-function shownItem(doc2, it, variant, path2) {
-  if (it.kind !== "footprint" && it.kind !== "symbol") return it;
-  const c = variantCache.get(it.id);
-  if (c && c.node === it.node && c.variant === variant && c.path === path2) return c.item;
-  const node = it.kind === "footprint" ? footprintViewForVariant(it.node, variant) : symbolViewForVariant(it.node, variant, path2, doc2.version);
-  let item = it;
-  if (node !== it.node) {
-    item = Object.assign({}, it, { node, geom: [], bbox: it.bbox });
-    try {
-      KiCadCanvas.buildGeom(doc2, item);
-    } catch (e) {
-      item = it;
-    }
-  }
-  variantCache.set(it.id, { node: it.node, variant, path: path2, item });
-  return item;
-}
-function variantView(doc2) {
-  const v = currentVariant();
-  if (!doc2 || !v) return doc2;
-  const path2 = doc2.type === "sch" ? currentSheetPath() : null;
-  let same = !!lastView && lastView.doc === doc2 && lastView.variant === v && lastView.path === path2 && lastView.items.size === doc2.items.size;
-  const items = /* @__PURE__ */ new Map();
-  for (const [id, it] of doc2.items) {
-    const s2 = shownItem(doc2, it, v, path2);
-    items.set(id, s2);
-    if (same && lastView.items.get(id) !== s2) same = false;
-  }
-  if (same) return lastView.view;
-  const view = Object.create(doc2);
-  view.items = items;
-  lastView = { doc: doc2, variant: v, path: path2, items, view };
-  return view;
-}
-var editorOf, byEditor, names, descriptions, variantCache, lastView;
-var init_variant = __esm({
-  "web/domains/pcb/editor/variant.ts"() {
-    "use strict";
-    init_state();
-    init_appstore();
-    init_view();
-    init_variant_model();
-    init_schnets();
-    editorOf = () => E.kdoc && E.kdoc.type === "sch" ? "sch" : "pcb";
-    byEditor = { pcb: "", sch: "" };
-    names = { pcb: [DEFAULT_VARIANT_NAME], sch: [DEFAULT_VARIANT_NAME] };
-    descriptions = { pcb: {}, sch: {} };
-    E.currentVariantOf = currentVariant;
-    variantCache = /* @__PURE__ */ new Map();
-    lastView = null;
-    E.currentSheetPathOf = currentSheetPath;
-  }
-});
-
-// web/domains/pcb/editor/msgpanel.ts
-function updateMsgPanel() {
-  const doc2 = E.kdoc;
-  const P = window.PcbTools;
-  if (doc2) for (const h3 of msgHooks) {
-    let hi = null;
-    try {
-      hi = h3(E.units);
-    } catch (e) {
-      console.warn(e);
-    }
-    if (!hi) continue;
-    const k = "hook\xA7" + JSON.stringify(hi);
-    if (k !== lastKey) {
-      lastKey = k;
-      store.set({ msgPanel: { items: hi } });
-    }
-    return;
-  }
-  if (doc2 && isSch()) {
-    updateSchMsgPanel(doc2);
-    return;
-  }
-  if (!doc2 || !P || !P.msgPanelInfo) {
-    if (lastKey) {
-      lastKey = "";
-      store.set({ msgPanel: { items: [] } });
-    }
-    return;
-  }
-  const pcb = CollabTools.pcb && CollabTools.pcb.state;
-  const rt = pcb ? pcb.route || null : null;
-  const pad2 = pcb && pcb.padSel ? pcb.padSel : null;
-  const ids = pad2 ? [pad2] : selectionIds();
-  const ver = store.get().document.version;
-  const key3 = [ver, E.currentVariant || "", E.units, ids.join(","), rt ? `${rt.netKey}|${rt.width}|${rt.layer}` : "", doc2.items.size, pcb && pcb.highlightNet ? pcb.highlightNet : ""].join("\xA7");
-  if (key3 === lastKey) return;
-  lastKey = key3;
-  const src = E.proSettings;
-  if (src !== settingsSrc) {
-    settingsSrc = src;
-    settings = P.designSettings ? P.designSettings(src || null) : null;
-  }
-  let items = [];
-  if (doc2.fpEditor && !ids.length && !rt) {
-    store.set({ msgPanel: { items: footprintMsgPanel(doc2) } });
-    return;
-  }
-  try {
-    items = P.msgPanelInfo(variantView(doc2), ids, { settings, units: E.units, route: rt && rt.width ? rt : null, net: pcb && pcb.highlightNet && E.highlightIds ? pcb.highlightNet : null });
-  } catch (e) {
-    console.warn(e);
-  }
-  if (doc2.fpEditor && !items.length) items = footprintMsgPanel(doc2);
-  store.set({ msgPanel: { items } });
-}
-function schSingleSelection() {
-  const pins2 = E.selPins;
-  if (pins2.length) return pins2.length === 1 ? { id: pins2[0].id, pin: pins2[0].number } : null;
-  const f2 = E.selField;
-  if (f2) return { id: f2.id, field: f2.name };
-  const ids = selectionIds();
-  return ids.length === 1 ? { id: ids[0] } : null;
-}
-function ellipsize(s2) {
-  const el4 = typeof document !== "undefined" ? document.getElementById("msgpanel") : null;
-  const w = el4 ? el4.clientWidth : typeof window !== "undefined" ? window.innerWidth : 1200;
-  const limit = Math.min(w, 800) * 0.3 + Math.max(w - 800, 0) * 0.6;
-  if (!measureCtx2 && typeof document !== "undefined") {
-    const c = document.createElement("canvas");
-    measureCtx2 = c.getContext("2d");
-  }
-  if (!measureCtx2) return s2;
-  measureCtx2.font = el4 ? getComputedStyle(el4).font : "12px sans-serif";
-  if (measureCtx2.measureText(s2).width <= limit) return s2;
-  let lo = 0, hi = s2.length;
-  while (lo < hi) {
-    const k = Math.ceil((lo + hi) / 2), t = s2.slice(0, Math.ceil(k / 2)) + "..." + s2.slice(s2.length - Math.floor(k / 2));
-    if (measureCtx2.measureText(t).width <= limit) lo = k;
-    else hi = k - 1;
-  }
-  return s2.slice(0, Math.ceil(lo / 2)) + "..." + s2.slice(s2.length - Math.floor(lo / 2));
-}
-function updateSchMsgPanel(doc2) {
-  const M = CollabTools.sch;
-  const mk = selectedErcMarker();
-  if (mk) {
-    const key4 = ["marker", E.markers.indexOf(mk), mk.severity, mk.comment || "", E.units].join("\xA7");
-    if (key4 !== lastKey) {
-      lastKey = key4;
-      store.set({ msgPanel: { items: markerMsgPanel(doc2, mk) } });
-    }
-    return;
-  }
-  const sel = schSingleSelection();
-  const ver = store.get().document.version;
-  const sheetPath = doc2.sheetPath || "/";
-  const key3 = ["sch", ver, E.units, sel ? `${sel.id}|${sel.pin ?? ""}|${sel.field ?? ""}` : "", sheetPath, E.proSettings ? E.proSettings.length : 0].join("\xA7");
-  if (key3 === lastKey) return;
-  lastKey = key3;
-  let items = [];
-  if (sel && M && M.msgPanelInfo) {
-    try {
-      items = M.msgPanelInfo(doc2, sel, { units: E.units, sheetPath, ellipsize, connection: (it, pin) => connectionOf(it, pin) });
-    } catch (e) {
-      console.warn(e);
-    }
-  }
-  store.set({ msgPanel: { items } });
-}
-function selectedErcMarker() {
-  return (E.markers || []).find((m) => m && m.selected) || null;
-}
-function markerMsgPanel(doc2, m) {
-  const D = CollabTools.sch;
-  const desc = (id) => id && D && D.itemDescription && doc2.items.has(id) ? D.itemDescription(doc2, id, E.units) : "";
-  const excluded = m.severity === "exclusion", sev = excluded ? m.base || "warning" : m.severity;
-  const un = KiCadCanvas.unescapeText, text3 = un ? un(m.text) : m.text;
-  const out2 = [{ title: "Type", value: "Marker" }, { title: "Violation", value: text3 }];
-  if (sev === "warning") out2.push({ title: "Severity", value: "Warning" });
-  else if (sev === "error") out2.push({ title: "Severity", value: "Error" });
-  else if (sev === "ignore") out2.push({ title: "Severity", value: "Ignore" });
-  out2.push({ title: desc(m.ids[0]), value: desc(m.ids[1]) });
-  if (excluded) out2.push({ title: "Excluded", value: m.comment || "" });
+function boardNetIds(name) {
+  const d = kdoc(), out2 = [];
+  if (!d) return out2;
+  const netNameOf3 = KiCadCanvas.netNameOf;
+  for (const it of d.items.values()) if ((it.kind === "segment" || it.kind === "arc" || it.kind === "via" || it.kind === "zone") && netNameOf3(d, it.node) === name) out2.push(it.id);
   return out2;
 }
-function connectionOf(it, pin) {
-  const r = nameOfPick({ item: it, pin });
-  if (!r || !r.name) return null;
-  const c = netMap();
-  const e = c ? c.map.get(r.name) : null;
-  const bus = !!(e && e.bus);
-  let netclass = "Default";
-  if (!bus) {
-    const PS = KiCadCanvas.pcbSizes;
-    if (PS) {
-      try {
-        if (sizesSrc !== E.proSettings) {
-          sizesSrc = E.proSettings;
-          sizes = PS.boardSizes(E.proSettings || null);
-        }
-        netclass = PS.effectiveNetclass(sizes, r.name).name || "Default";
-      } catch (e2) {
-      }
+function schNetName(ids) {
+  const d = kdoc();
+  if (!d) return "";
+  const items = ids.map((id) => d.items.get(id)).filter((x) => !!x);
+  for (const kind of ["global_label", "hierarchical_label", "label"]) {
+    const l = items.find((it) => it.kind === kind);
+    if (l) return KiCadCanvas.str(l.node[1]);
+  }
+  const sym = items.find((it) => it.kind === "symbol" && it.ref && !it.ref.startsWith("#"));
+  return sym ? `Net-(${sym.ref})` : "unnamed net";
+}
+function netIds(a) {
+  const d = kdoc();
+  if (!d) return [];
+  if (d.type === "pcb") return boardNetIds(a.id);
+  const sch = CollabTools.sch;
+  if (!sch) return [];
+  const from = a.item && d.items.get(a.item) || Array.from(d.items.values()).find((it) => /label$/.test(it.kind) && KiCadCanvas.str(it.node[1]) === a.id);
+  if (!from) return [];
+  try {
+    return Array.from(sch.netItems(d, from));
+  } catch {
+    return [];
+  }
+}
+function pinOf(c) {
+  const d = kdoc(), sx = c.x / IU(), sy = c.y / IU(), a = c.anchor;
+  if (!a || !d) return { x: sx, y: sy, found: true };
+  const it = d.items.get(a.kind === "item" ? a.id : a.item || "");
+  if (!it || !it.bbox) return { x: sx, y: sy, found: a.kind === "net" ? netIds(a).length > 0 : false };
+  const b = it.bbox;
+  if (a.kind === "item" && PARTS.has(it.kind)) return { x: b[2], y: b[1], found: true };
+  const slack = 0.6;
+  if (sx >= b[0] - slack && sx <= b[2] + slack && sy >= b[1] - slack && sy <= b[3] + slack) return { x: sx, y: sy, found: true };
+  return { x: (b[0] + b[2]) / 2, y: (b[1] + b[3]) / 2, found: true };
+}
+function renderThreads() {
+  store.set({ comments: comments().slice() });
+}
+async function loadComments() {
+  const id = docId();
+  if (!id) return;
+  try {
+    E.comments = (await request(`/api/docs/${id}/comments`)).comments || [];
+  } catch {
+    E.comments = [];
+  }
+  if (docId() !== id) return;
+  drawComments();
+  renderThreads();
+  void loadProjectComments();
+  const want2 = E.pendingThread;
+  if (want2 !== null && want2 !== void 0) {
+    E.pendingThread = null;
+    if (comments().some((c) => c.id === want2)) openThreadAction(want2);
+  }
+}
+async function loadProjectComments() {
+  const p = project();
+  if (!p) return;
+  const n2 = ++projectLoad;
+  try {
+    const j = await request(`/api/projects/${p.projectId}/comments`);
+    if (n2 !== projectLoad) return;
+    const others = j.docs.filter((d) => d.docId !== docId()).map((d) => ({ docId: d.docId, path: d.path, comments: j.comments.filter((c) => c.docId === d.docId) })).filter((d) => d.comments.length);
+    store.set({ otherComments: others });
+  } catch {
+    store.set({ otherComments: [] });
+  }
+}
+function noteCommentMsg(msg) {
+  const c = msg.comment || {}, inner = c.comment;
+  if (!inner) return;
+  let list = comments();
+  if (c.action === "deleted") list = list.filter((x) => x.id !== inner.id && x.parentId !== inner.id);
+  else if (c.action === "updated") list = list.map((x) => x.id === inner.id ? inner : x);
+  else if (c.action === "added" && !list.some((x) => x.id === inner.id)) list = [...list, inner];
+  E.comments = list;
+  drawComments();
+  renderThreads();
+  if (E.openThread !== null) {
+    if (!list.some((x) => x.id === E.openThread)) closeThread();
+    else if (!panel.querySelector("textarea.editing")) showThread(E.openThread, true);
+  }
+}
+function svg(tag, attrs) {
+  const el4 = document.createElementNS(NS2, tag);
+  for (const k of Object.keys(attrs)) el4.setAttribute(k, String(attrs[k]));
+  return el4;
+}
+function drawComments() {
+  pins.replaceChildren();
+  if (!kdoc() && !comments().length) return;
+  const s2 = pxPerMm();
+  const list = comments();
+  for (const c of list) {
+    if (c.parentId || c.resolved) continue;
+    const p = pinOf(c), r = 9 / s2, open4 = E.openThread === c.id;
+    const g2 = svg("g", { cursor: "pointer", "data-thread": c.id, "data-anchor": c.anchor ? c.anchor.kind : "spot" });
+    const fill3 = p.found ? "#ffb43a" : "#8a939c";
+    if (open4) g2.appendChild(svg("circle", { cx: p.x, cy: p.y, r: r + 3.5 / s2, fill: "none", stroke: "#4d7fc4", "stroke-width": 2 / s2 }));
+    if (c.anchor && c.anchor.kind === "net") g2.appendChild(svg("rect", { x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r, rx: 3 / s2, fill: fill3, stroke: "#001023", "stroke-width": 1.5 / s2 }));
+    else g2.appendChild(svg("circle", { cx: p.x, cy: p.y, r, fill: fill3, stroke: "#001023", "stroke-width": 1.5 / s2 }));
+    const glyph = svg("text", { x: p.x, y: p.y + 3.4 / s2, "text-anchor": "middle", fill: "#001023", "font-size": 10 / s2, "font-family": "system-ui, sans-serif", "font-weight": 700 });
+    glyph.textContent = String(list.filter((x) => x.id === c.id || x.parentId === c.id).length);
+    g2.appendChild(glyph);
+    const title = svg("title", {});
+    title.textContent = `${c.anchor ? c.anchor.label + ": " : ""}${c.body.slice(0, 80)}`;
+    g2.appendChild(title);
+    g2.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+    g2.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      showThread(c.id);
+    });
+    pins.appendChild(g2);
+  }
+}
+function centerOn(xMm, yMm) {
+  const w = worldEl.clientWidth, h3 = w * mmH() / mmW();
+  E.panX = stageEl.clientWidth / 2 - (xMm - mmX0()) / mmW() * w * E.zoom;
+  E.panY = stageEl.clientHeight / 2 - (yMm - mmY0()) / mmH() * h3 * E.zoom;
+  applyView();
+}
+function panelAt(xMm, yMm) {
+  const wr = worldEl.getBoundingClientRect(), sr = stageEl.getBoundingClientRect();
+  const px = wr.left - sr.left + (xMm - mmX0()) / mmW() * wr.width;
+  const py = wr.top - sr.top + (yMm - mmY0()) / mmH() * wr.height;
+  panel.classList.add("open");
+  const pw = panel.offsetWidth || 320, ph = panel.offsetHeight || 200;
+  const left = px + 16 + pw <= sr.width ? px + 16 : Math.max(8, px - 16 - pw);
+  panel.style.left = Math.max(8, Math.min(left, sr.width - pw - 8)) + "px";
+  panel.style.top = Math.max(8, Math.min(py - 14, sr.height - ph - 8)) + "px";
+}
+function el(tag, cls, text3) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text3 !== void 0) e.textContent = text3;
+  return e;
+}
+function chip(a, found, onClick) {
+  const label = a ? a.kind === "net" ? `Net ${a.label || a.id}` : a.label || "Item" : "On the sheet";
+  const c = el(onClick ? "button" : "span", `cmt-anchor ${a ? a.kind : "spot"}${found ? "" : " gone"}`);
+  if (onClick) {
+    c.type = "button";
+    c.addEventListener("click", onClick);
+  }
+  c.appendChild(el("i"));
+  c.appendChild(document.createTextNode(label));
+  c.title = !a ? "Pinned to a place on the sheet" : !found ? `${label} is no longer on this ${E.DOC_TYPE === "kicad_sch" ? "sheet" : "board"}` : a.kind === "net" ? "Highlight this net" : "Select this item";
+  c.dataset.anchor = a ? a.kind : "spot";
+  return c;
+}
+function head(a, found, stateText, onChip) {
+  const h3 = el("div", "cmt-head");
+  h3.appendChild(chip(a, found, onChip));
+  if (stateText) h3.appendChild(el("span", "cmt-state", stateText));
+  const x = el("button", "cmt-x");
+  x.appendChild(closeMark());
+  x.type = "button";
+  x.title = "Close";
+  x.id = "closeBtn";
+  x.addEventListener("click", closeThread);
+  h3.appendChild(x);
+  return h3;
+}
+function submitOnCtrlEnter(ta, go) {
+  ta.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
+      ev.preventDefault();
+      go();
     }
+    ev.stopPropagation();
+  });
+}
+async function call(path2, method, body) {
+  try {
+    await request(path2, { method, body: body === void 0 ? void 0 : JSON.stringify(body) });
+    return true;
+  } catch (e) {
+    toast(`That did not go through: ${e.message.replace(/^\d+ /, "").slice(0, 120)}`, 4e3);
+    return false;
   }
-  return { name: r.name, bus, netclass };
 }
-function footprintMsgPanel(doc2) {
-  const FD2 = KiCadCanvas.footprintDoc;
-  const f2 = FD2.footprintFields(doc2);
-  const header = KiCadCanvas.parse(FD2.footprintHeaderSexpr(doc2)) || ["footprint", ""];
-  const kidText = (k) => {
-    const c = KiCadCanvas.kid(header, k);
-    return c ? String(c[1] ?? "") : "";
-  };
-  const path2 = state.doc && state.doc.docId && !state.doc.docId.startsWith("board:") ? state.doc.path : "";
-  const lib = path2 ? (path2.split("/").slice(-2, -1)[0] || "").replace(/\.pretty$/i, "") : "";
-  const nums = /* @__PURE__ */ new Set();
-  for (const it of doc2.items.values()) if (it.kind === "pad") {
-    const t = String(it.node[2]);
-    const n2 = String(it.node[1] ?? "");
-    const ls = (KiCadCanvas.kid(it.node, "layers") || []).slice(1).map(String);
-    const aperture = t === "smd" && !ls.some((l) => /\.Cu$/.test(l));
-    if (n2 && t !== "np_thru_hole" && !aperture) nums.add(n2);
-  }
-  return [
-    { title: f2.Reference || "", value: f2.Value || "" },
-    { title: "Library", value: lib },
-    { title: "Footprint Name", value: String(header[1] ?? "") },
-    { title: "Pads", value: String(nums.size) },
-    { title: `Doc: ${kidText("descr")}`, value: `Keywords: ${kidText("tags")}` }
-  ];
-}
-var msgHooks, lastKey, settingsSrc, settings, measureCtx2, sizesSrc, sizes;
-var init_msgpanel = __esm({
-  "web/domains/pcb/editor/msgpanel.ts"() {
-    "use strict";
-    init_appstore();
-    init_state();
-    init_view();
-    init_gestures();
-    init_schnets();
-    init_variant();
-    msgHooks = [];
-    lastKey = "";
-    settingsSrc = void 0;
-    settings = null;
-    measureCtx2 = null;
-    sizesSrc = void 0;
-    sizes = null;
-  }
-});
-
-// web/domains/pcb/editor/panels/core.ts
-function pcbTools() {
-  return window.PcbTools || null;
-}
-function esc3(s2) {
-  return s2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-function textEntry(title, message, value, opts2) {
-  return new Promise((resolve2) => {
-    const D = window.KDialogs;
-    if (!D) {
-      resolve2(null);
-      return;
+function focusAnchor(c) {
+  const d = kdoc(), a = c.anchor;
+  if (!d || !a) return;
+  if (a.kind === "net") {
+    const ids = netIds(a);
+    if (ids.length) {
+      ownHighlight = new Set(ids);
+      E.highlightIds = ownHighlight;
+      requestRender();
     }
-    let done = false;
-    const finish = (v) => {
-      if (!done) {
-        done = true;
-        resolve2(v);
-      }
-    };
-    D.open({
-      title,
-      width: 360,
-      build(body) {
-        body.innerHTML = `<p style="margin:0 0 8px;white-space:pre-line">${esc3(message)}</p><input id="kd-entry" type="text" value="${esc3(value)}" style="width:100%">`;
-        const inp = body.querySelector("#kd-entry");
-        if (inp && opts2?.alnum) inp.addEventListener("input", () => {
-          const bad = /[^\p{L}\p{N}]/gu;
-          if (!bad.test(inp.value)) return;
-          const at5 = inp.selectionStart ?? inp.value.length, before = inp.value.slice(0, at5).replace(bad, "").length;
-          inp.value = inp.value.replace(bad, "");
-          inp.setSelectionRange(before, before);
+    return;
+  }
+  if (!d.items.has(a.id)) return;
+  clearAllSelection(false);
+  selectItemId(a.id);
+  selectionChanged();
+}
+function dropHighlight() {
+  if (ownHighlight && E.highlightIds === ownHighlight) {
+    E.highlightIds = null;
+    requestRender();
+  }
+  ownHighlight = null;
+}
+function closeThread() {
+  panel.classList.remove("open");
+  panel.replaceChildren();
+  const had = E.openThread !== null || !!draft;
+  E.openThread = null;
+  draft = null;
+  dropHighlight();
+  if (had) {
+    drawComments();
+    store.set({ openThread: null });
+  }
+}
+function showThread(rootId, keepPlace = false) {
+  const list = comments(), root5 = list.find((c) => c.id === rootId);
+  if (!root5) {
+    closeThread();
+    return;
+  }
+  const was = E.openThread;
+  E.openThread = rootId;
+  draft = null;
+  const p = pinOf(root5), user = me(), owner = project()?.ownerId, write = canComment();
+  const thread = [root5, ...list.filter((c) => c.parentId === rootId)];
+  panel.replaceChildren();
+  panel.dataset.thread = String(rootId);
+  panel.appendChild(head(root5.anchor, p.found, root5.resolved ? "resolved" : "", root5.anchor && p.found ? () => {
+    focusAnchor(root5);
+    centerOn(p.x, p.y);
+  } : void 0));
+  if (root5.anchor && !p.found) {
+    const what = root5.anchor.kind === "net" ? `Net ${root5.anchor.label || root5.anchor.id}` : root5.anchor.label || "The item";
+    panel.appendChild(el("div", "cmt-gone", `${what} is no longer on this ${E.DOC_TYPE === "kicad_sch" ? "sheet" : "board"}. The thread stays where it was.`));
+  }
+  const listEl = el("div", "cmt-list");
+  for (const c of thread) {
+    const item = el("div", "cmt-item");
+    item.dataset.comment = String(c.id);
+    const meta2 = el("div", "meta");
+    meta2.appendChild(el("b", "", c.authorLogin));
+    meta2.appendChild(el("span", "", ago(c.createdAt) + (c.editedAt ? " \xB7 edited" : "")));
+    const body = el("div", "cbody", c.body);
+    if (write && user && (c.authorId === user.id || owner === user.id)) {
+      const acts = el("span", "acts");
+      if (c.authorId === user.id) {
+        const edit = el("button", "", "Edit");
+        edit.type = "button";
+        edit.dataset.edit = "";
+        edit.addEventListener("click", () => {
+          const ta = el("textarea", "editing");
+          ta.value = c.body;
+          ta.rows = 3;
+          ta.dataset.editText = "";
+          const row3 = el("div", "row"), save2 = el("button", "btn sm primary", "Save"), cancel = el("button", "btn sm", "Cancel");
+          save2.type = "button";
+          cancel.type = "button";
+          save2.dataset.editSave = "";
+          const done = async () => {
+            const text3 = ta.value.trim();
+            if (!text3) return;
+            if (text3 === c.body || await call(`/api/comments/${c.id}`, "PATCH", { body: text3 })) showThread(rootId, true);
+          };
+          save2.addEventListener("click", () => {
+            void done();
+          });
+          cancel.addEventListener("click", () => showThread(rootId, true));
+          submitOnCtrlEnter(ta, () => {
+            void done();
+          });
+          row3.append(save2, cancel);
+          body.replaceWith(ta, row3);
+          acts.remove();
+          ta.focus();
         });
-      },
-      ok() {
-        const inp = document.querySelector("#kd-entry");
-        finish(inp ? inp.value : null);
-      },
-      cancel() {
-        finish(null);
+        acts.appendChild(edit);
       }
-    });
-  });
-}
-function listPick(title, label, header, items) {
-  return new Promise((resolve2) => {
-    const D = window.KDialogs;
-    if (!D) {
-      resolve2(null);
-      return;
+      const del = el("button", "del", "Delete");
+      del.type = "button";
+      del.addEventListener("click", () => {
+        const whole2 = c.id === rootId && thread.length > 1;
+        void askConfirm("Delete Comment", whole2 ? "Delete this thread and its replies?" : "Delete this comment?", { ok: "Delete", danger: true }).then((yes7) => {
+          if (yes7) void call(`/api/comments/${c.id}`, "DELETE");
+        });
+      });
+      acts.appendChild(del);
+      meta2.appendChild(acts);
     }
-    let done = false;
-    const finish = (v) => {
-      if (!done) {
-        done = true;
-        resolve2(v);
-      }
+    item.append(meta2, body);
+    listEl.appendChild(item);
+  }
+  panel.appendChild(listEl);
+  if (write) {
+    const form3 = el("div", "cmt-form"), ta = el("textarea");
+    ta.id = "replyText";
+    ta.rows = 2;
+    ta.placeholder = "Reply\u2026";
+    const row3 = el("div", "row"), reply = el("button", "btn sm primary", "Reply"), resolve2 = el("button", "btn sm", root5.resolved ? "Reopen" : "Resolve");
+    reply.type = "button";
+    reply.id = "replyBtn";
+    resolve2.type = "button";
+    resolve2.id = "resolveBtn";
+    const send3 = async () => {
+      const text3 = ta.value.trim();
+      if (!text3) return;
+      reply.disabled = true;
+      if (await call(`/api/docs/${root5.docId}/comments`, "POST", { body: text3, parentId: rootId })) ta.value = "";
+      reply.disabled = false;
     };
-    D.open({
-      title,
-      width: 360,
-      build(body) {
-        body.innerHTML = `<p style="margin:0 0 8px">${esc3(label)}</p><k-select id="kd-list" size="${Math.max(4, Math.min(10, items.length + 1))}" style="width:100%">
-          <optgroup label="${esc3(header)}">${items.map((n2, i) => `<option${i === 0 ? " selected" : ""}>${esc3(n2)}</option>`).join("")}</optgroup></k-select>`;
-      },
-      ok() {
-        const sel = document.querySelector("#kd-list");
-        finish(sel && sel.value ? sel.value : null);
-      },
-      cancel() {
-        finish(null);
-      }
+    reply.addEventListener("click", () => {
+      void send3();
     });
-  });
+    submitOnCtrlEnter(ta, () => {
+      void send3();
+    });
+    resolve2.addEventListener("click", () => {
+      void call(`/api/comments/${rootId}`, "PATCH", { resolved: !root5.resolved });
+    });
+    row3.append(reply, resolve2);
+    form3.append(ta, row3);
+    panel.appendChild(form3);
+  } else if (!user) {
+    const form3 = el("div", "cmt-form");
+    form3.appendChild(el("span", "hint", "Sign in to reply."));
+    panel.appendChild(form3);
+  }
+  if (!(keepPlace && was === rootId)) panelAt(p.x, p.y);
+  else panel.classList.add("open");
+  listEl.scrollTop = listEl.scrollHeight;
+  if (was !== rootId) {
+    dropHighlight();
+    if (root5.anchor && root5.anchor.kind === "net") focusAnchor(root5);
+    drawComments();
+    store.set({ openThread: rootId });
+  }
 }
-var EMPTY_APPEARANCE, S2, subs, panelStore, projectId, projectName, openDocs, currentDocId, kdoc, isSchDoc, KC;
-var init_core = __esm({
-  "web/domains/pcb/editor/panels/core.ts"() {
+function openThreadAction(id) {
+  const c = comments().find((x) => x.id === id);
+  if (!c) return;
+  const p = pinOf(c);
+  centerOn(p.x, p.y);
+  showThread(c.id);
+  if (c.anchor && c.anchor.kind === "item") focusAnchor(c);
+}
+var comments, kdoc, IU, me, docId, project, canComment, panel, pins, stageEl, worldEl, request, draft, ownHighlight, PARTS, projectLoad;
+var init_comments = __esm({
+  "web/domains/pcb/editor/comments.ts"() {
     "use strict";
+    init_names();
+    init_msgbox();
     init_appstore();
+    init_keys();
+    init_dom();
+    init_gestures();
     init_state();
     init_tools();
-    init_kselect();
-    EMPTY_APPEARANCE = {
-      layers: [],
-      active: "",
-      objects: [],
-      nets: [],
-      netClasses: [],
-      inactive: "normal",
-      flip: false,
-      netColorMode: "ratsnest",
-      ratsnestMode: "all",
-      presets: [],
-      builtinPresets: [],
-      preset: null,
-      viewports: [],
-      viewport: null
+    init_util();
+    init_view();
+    init_kicon_dom();
+    comments = () => E.comments;
+    kdoc = () => E.kdoc;
+    IU = () => E.IU;
+    me = () => state.me;
+    docId = () => {
+      const id = state.docId;
+      return id && !id.startsWith("board:") && !id.startsWith("lib:") ? id : null;
     };
-    S2 = { appearance: EMPTY_APPEARANCE, hierarchy: { root: null, version: 0 }, netNav: { root: null, version: 0 }, selVersion: 0 };
-    subs = /* @__PURE__ */ new Set();
-    panelStore = {
-      get: () => S2,
-      set(patch) {
-        S2 = Object.assign({}, S2, patch);
-        for (const fn of Array.from(subs)) {
-          try {
-            fn();
-          } catch (e) {
-            console.warn(e);
-          }
-        }
-      },
-      subscribe(fn) {
-        subs.add(fn);
-        return () => {
-          subs.delete(fn);
-        };
-      }
-    };
-    projectId = () => state.project && state.project.projectId || "";
-    projectName = () => state.project && state.project.name || "";
-    openDocs = () => state.docs || [];
-    currentDocId = () => state.docId || null;
-    kdoc = () => E.kdoc || null;
-    isSchDoc = () => E.DOC_TYPE === "kicad_sch";
-    KC = () => window.KiCadCanvas;
+    project = () => state.project;
+    canComment = () => !!E.canComment;
+    panel = cmtPanel;
+    pins = cmtG;
+    stageEl = stage;
+    worldEl = world;
+    request = api4;
+    draft = null;
+    ownHighlight = null;
+    PARTS = /* @__PURE__ */ new Set(["symbol", "footprint", "sheet"]);
+    projectLoad = 0;
   }
 });
 
@@ -76318,7 +76421,7 @@ var init_peers = __esm({
 // web/domains/pcb/editor/chat.ts
 async function loadChat(force = false) {
   hookOnce();
-  const pid = projectId2();
+  const pid = projectId();
   if (!pid) {
     store.set({ chat: EMPTY });
     return;
@@ -76330,8 +76433,8 @@ async function loadChat(force = false) {
   const n2 = ++loadN;
   store.set({ chat: Object.assign({}, EMPTY, { projectId: pid, loading: true }) });
   try {
-    const j = await request(`/api/projects/${pid}/chat?limit=100`);
-    if (n2 !== loadN || projectId2() !== pid) return;
+    const j = await request2(`/api/projects/${pid}/chat?limit=100`);
+    if (n2 !== loadN || projectId() !== pid) return;
     setChat({ messages: j.messages || [], more: !!j.more, lastReadId: j.lastReadId || 0, unread: j.unread || 0, canWrite: !!j.canWrite, loading: false });
   } catch (e) {
     if (n2 !== loadN) return;
@@ -76350,7 +76453,7 @@ function noteChatMsg(msg) {
   else if (msg.action === "added") {
     if (list.some((x) => x.id === m.id)) return;
     list = [...list, m];
-    const mine = me() && m.authorId === me().id;
+    const mine = me2() && m.authorId === me2().id;
     if (!mine) {
       setChat({ messages: list, unread: c.unread + 1 });
       if (!watching()) toast(`${m.authorName || m.authorLogin}: ${m.body.length > 90 ? m.body.slice(0, 89) + "\u2026" : m.body}`, 5e3, { text: "Open Chat", run: () => openChat() });
@@ -76362,7 +76465,7 @@ function noteChatMsg(msg) {
 }
 function maybeMarkRead() {
   const c = chat();
-  if (!c.projectId || !me() || !watching()) return;
+  if (!c.projectId || !me2() || !watching()) return;
   const last3 = c.messages.filter((m) => m.id > 0).reduce((a, m) => Math.max(a, m.id), 0);
   if (!c.unread && last3 <= c.lastReadId) return;
   setChat({ unread: 0 });
@@ -76374,7 +76477,7 @@ function maybeMarkRead() {
     const upTo = cc.messages.filter((m) => m.id > 0).reduce((a, m) => Math.max(a, m.id), 0);
     if (upTo <= cc.lastReadId) return;
     try {
-      const j = await request(`/api/projects/${pid}/chat/read`, { method: "POST", body: JSON.stringify({ id: upTo }) });
+      const j = await request2(`/api/projects/${pid}/chat/read`, { method: "POST", body: JSON.stringify({ id: upTo }) });
       if (chat().projectId === pid) setChat({ lastReadId: j.lastReadId, unread: watching() ? 0 : j.unread });
     } catch {
     }
@@ -76482,7 +76585,7 @@ function refreshLink() {
   if (JSON.stringify(next) !== JSON.stringify(chat().link)) setChat({ link: next });
 }
 async function send(body, link) {
-  const c = chat(), pid = c.projectId, u = me();
+  const c = chat(), pid = c.projectId, u = me2();
   if (!pid) return false;
   const text3 = body.trim();
   if (!text3) return false;
@@ -76493,7 +76596,7 @@ async function send(body, link) {
   const temp = { id: -++pendingId, projectId: pid, authorId: u.id, authorLogin: u.login, authorName: u.name, authorAvatar: u.avatarUrl, body: text3, link, createdAt: (/* @__PURE__ */ new Date()).toISOString(), pending: true };
   setChat({ messages: [...c.messages, temp] });
   try {
-    const made = await request(`/api/projects/${pid}/chat`, { method: "POST", body: JSON.stringify({ body: text3, link: link || void 0 }) });
+    const made = await request2(`/api/projects/${pid}/chat`, { method: "POST", body: JSON.stringify({ body: text3, link: link || void 0 }) });
     if (chat().projectId !== pid) return true;
     const list = chat().messages.filter((m) => m.id !== temp.id && m.id !== made.id);
     setChat({ messages: [...list, made].sort((a, b) => (a.id < 0 ? Infinity : a.id) - (b.id < 0 ? Infinity : b.id)), lastReadId: Math.max(chat().lastReadId, made.id) });
@@ -76511,8 +76614,8 @@ function setSay(text3) {
 }
 function startCursorChat() {
   if (state.view !== "editor" || !state.docId || !E.kdoc) return false;
-  if (!E.canComment || !me()) {
-    toast(me() ? "You can view this project but not write in its chat" : "Sign in to chat");
+  if (!E.canComment || !me2()) {
+    toast(me2() ? "You can view this project but not write in its chat" : "Sign in to chat");
     return true;
   }
   closeCursorChat(false);
@@ -76553,7 +76656,7 @@ function startCursorChat() {
         return;
       }
       const did = state.docId;
-      void send(text3, { docId: did, path: docPath(did), kind: "spot", id: "", label: "", x: Math.round(mm4[0] * IU()), y: Math.round(mm4[1] * IU()) });
+      void send(text3, { docId: did, path: docPath(did), kind: "spot", id: "", label: "", x: Math.round(mm4[0] * IU2()), y: Math.round(mm4[1] * IU2()) });
       closeCursorChat(false);
       sayClear = setTimeout(() => {
         sayClear = 0;
@@ -76591,7 +76694,7 @@ function leaveCursorChat() {
   }
   E.chatSay = null;
 }
-var request, EMPTY, me, projectId2, chat, setChat, attach, pendingId, loadN, chatOpen, watching, readTimer, wasOpen, hooked, IU, docPath, refOf2, nm3, bubble, sayClear;
+var request2, EMPTY, me2, projectId, chat, setChat, attach, pendingId, loadN, chatOpen, watching, readTimer, wasOpen, hooked, IU2, docPath, refOf2, nm3, bubble, sayClear;
 var init_chat = __esm({
   "web/domains/pcb/editor/chat.ts"() {
     "use strict";
@@ -76603,10 +76706,10 @@ var init_chat = __esm({
     init_state();
     init_util();
     init_view();
-    request = api4;
+    request2 = api4;
     EMPTY = { projectId: null, messages: [], loading: false, more: false, error: null, lastReadId: 0, unread: 0, canWrite: false, link: null };
-    me = () => state.me;
-    projectId2 = () => state.project ? state.project.projectId : null;
+    me2 = () => state.me;
+    projectId = () => state.project ? state.project.projectId : null;
     chat = () => store.get().chat || EMPTY;
     setChat = (patch) => store.set({ chat: Object.assign({}, chat(), patch) });
     attach = false;
@@ -76617,20 +76720,254 @@ var init_chat = __esm({
     readTimer = 0;
     wasOpen = false;
     hooked = false;
-    IU = () => E.IU;
+    IU2 = () => E.IU;
     docPath = (id) => ((state.docs || []).find((d) => d.docId === id) || { path: "" }).path;
     refOf2 = (id) => {
       const it = E.kdoc ? E.kdoc.items.get(id) : null;
       return it && (it.ref || it.name) || "Part";
     };
-    nm3 = (v) => Math.round(v * IU());
+    nm3 = (v) => Math.round(v * IU2());
     bubble = null;
     sayClear = 0;
   }
 });
 
+// web/domains/pcb/editor/pcbdialogs/canvas.ts
+var extras, BS, NL, PLOT;
+var init_canvas = __esm({
+  "web/domains/pcb/editor/pcbdialogs/canvas.ts"() {
+    "use strict";
+    extras = () => KiCadCanvas;
+    BS = () => extras().boardSetup;
+    NL = () => extras().pcbNetlist;
+    PLOT = () => KiCadCanvas.plot;
+  }
+});
+
+// web/domains/pcb/editor/schnets.ts
+async function readSheet(d) {
+  let text3 = null, ops = [];
+  if (state.me) {
+    try {
+      const live3 = await liveDocument(d.docId);
+      text3 = live3.file;
+      ops = live3.ops;
+    } catch (e) {
+      text3 = null;
+    }
+  }
+  const doc2 = text3 === null ? await readSavedSchematic(d.docId) : KiCadCanvas.parseDoc(text3, "kicad_sch");
+  if (!doc2) return null;
+  for (const op of ops) for (const c of op.changes || []) {
+    try {
+      KiCadCanvas.applyChange(doc2, c, SCH_IU);
+    } catch (e) {
+    }
+  }
+  return { doc: doc2, uuid: String(doc2.uuid || ""), file: d.path };
+}
+function loadSheets(force = false) {
+  if (sheetsProject !== projectKey()) {
+    sheets.clear();
+    sheetsProject = projectKey();
+  }
+  const now = Date.now(), cur2 = state.docId;
+  const want2 = schDocs().filter((d) => d.docId !== cur2 && (force || !sheets.has(d.docId) || now - sheets.get(d.docId).at > STALE_MS));
+  if (!want2.length) return Promise.resolve();
+  if (loading2) return force ? loading2.then(() => loadSheets(true)) : loading2;
+  const pid = projectKey();
+  loading2 = Promise.all(want2.map(async (d) => {
+    const f2 = await readSheet(d);
+    if (f2 && pid === projectKey()) sheets.set(d.docId, { file: f2, at: Date.now() });
+  })).then(() => {
+    loading2 = null;
+    loadedVer++;
+    computed = null;
+    changed();
+  }, () => {
+    loading2 = null;
+  });
+  return loading2;
+}
+function compute() {
+  const h3 = helpers();
+  const cur2 = curEntry(), doc2 = E.kdoc;
+  if (!h3 || !cur2 || !doc2 || doc2.type !== "sch") return null;
+  const topKey = topLevelSchematics().map((t) => t.doc.docId + ":" + t.name).join(",");
+  const key3 = `${projectKey()}|${cur2.docId}|${docGen}|${loadedVer}|${topKey}`;
+  if (computed && computed.key === key3) return computed;
+  const files = /* @__PURE__ */ new Map(), docs = /* @__PURE__ */ new Map();
+  for (const d of schDocs()) {
+    if (d.docId === cur2.docId) {
+      const c = sheets.get(d.docId);
+      files.set(d.path, { doc: doc2, uuid: String(doc2.uuid || (c ? c.file.uuid : "")), file: d.path });
+    } else {
+      const c = sheets.get(d.docId);
+      if (c) files.set(d.path, c.file);
+    }
+  }
+  if (!files.has(cur2.path)) files.set(cur2.path, { doc: doc2, uuid: String(doc2.uuid || ""), file: cur2.path });
+  for (const [p, f2] of files) docs.set(p, f2.doc);
+  const root5 = state.project ? rootSchematic() : null;
+  const rootFile = root5 && files.get(root5.path) || files.get(cur2.path);
+  const resolve2 = (file, parent) => {
+    const entry2 = findSheetDoc(file, parent.file);
+    return entry2 ? files.get(entry2.path) || null : null;
+  };
+  const stem3 = rootFile.file.split("/").pop().replace(/\.kicad_sch$/, "");
+  const pro = projectDocs2().find((d) => d.docType === "kicad_pro");
+  const project3 = pro ? pro.path.split("/").pop().replace(/\.kicad_pro$/, "") : stem3;
+  const tops = topLevelSchematics().map((t) => ({ sheet: files.get(t.doc.path), name: t.name, uuid: t.uuid })).filter((t) => !!t.sheet);
+  const nl = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve2, { symbolPins: h3.symbolPins, isPower: (d, it) => h3.isPowerSymbol(d, String((KiCadCanvas.kid(it.node, "lib_id") || [])[1])) }, project3);
+  const map = nl.netMap || /* @__PURE__ */ new Map(), instances = nl.instances || [];
+  computed = { map, instances, index: SN().nameIndex(map), rootName: stem3, docs, key: key3 };
+  return computed;
+}
+function netMap() {
+  try {
+    return compute();
+  } catch (e) {
+    console.warn(e);
+    return null;
+  }
+}
+function currentInstance(c = netMap()) {
+  const cur2 = curEntry();
+  if (!c || !cur2) return null;
+  const asked = preferHuman && c.instances.some((i) => i.file === cur2.path && i.human === preferHuman) ? preferHuman : null;
+  return SN().instanceFor(c.instances, cur2.path, asked || E.kdoc?.sheetPath || null);
+}
+function changed() {
+  for (const fn of listeners) {
+    try {
+      fn();
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+}
+function applyHighlight(ctx = toolCtx()) {
+  const h3 = helpers();
+  if (!h3) return;
+  if (!HL.name) {
+    h3.setHighlight(ctx, null);
+    setStatusBar({ message: "" });
+    changed();
+    return;
+  }
+  const c = netMap(), inst = currentInstance(c);
+  const keys = c && inst ? SN().collectKeys(c.map, HL.name, inst.index, HL.busMembers) : /* @__PURE__ */ new Set();
+  h3.setHighlight(ctx, keys.size ? keys : null);
+  setStatusBar({ message: SN().highlightStatus(HL.name) });
+  changed();
+}
+function nameOfPick(pick) {
+  if (!pick || !pick.item) return null;
+  const c = netMap(), inst = currentInstance(c);
+  if (!c || !inst) return null;
+  const it = pick.item, K11 = KiCadCanvas;
+  let pin;
+  if (it.kind === "symbol") {
+    pin = pick.pin;
+    if (!pin) {
+      const h3 = helpers();
+      const pins2 = h3 ? h3.symbolPins(E.kdoc, it) : [];
+      let bd = Infinity;
+      const at5 = pick.at || [0, 0];
+      for (const p of pins2) {
+        const d = Math.hypot(p.x - at5[0], p.y - at5[1]);
+        if (d < bd) {
+          bd = d;
+          pin = p.number;
+        }
+      }
+    }
+  } else if (it.kind === "sheet" && pick.pin !== void 0) {
+    pin = pick.pin;
+  } else if (it.kind === "sheet") {
+    const at5 = pick.at || [0, 0];
+    let bd = Infinity;
+    for (const p of K11.kids(it.node, "pin")) {
+      const a = K11.atOf(p);
+      const d = Math.hypot(a[0] - at5[0], a[1] - at5[1]);
+      if (d < bd) {
+        bd = d;
+        pin = K11.str(p[1]);
+      }
+    }
+  }
+  const key3 = inst.index + "|" + it.id + (pin !== void 0 ? "#pin:" + pin : "");
+  return { name: c.index.get(key3) || null, inst: inst.index, id: it.id, pin };
+}
+function preferInstance(human) {
+  preferHuman = human;
+}
+function leaveSheet() {
+  const cur2 = curEntry();
+  const c = netMap(), inst = currentInstance(c);
+  if (c && inst) {
+    if (inst.uuidPath.length <= 1) {
+      toast("Already at the root sheet");
+      return;
+    }
+    const up = inst.uuidPath.slice(0, -1).join("/");
+    const parent = c.instances.find((i) => i.uuidPath.join("/") === up);
+    const d = parent ? schDocs().find((x) => x.path === parent.file) : null;
+    if (parent && d) {
+      preferInstance(parent.human);
+      if (!cur2 || d.docId !== cur2.docId) void openDoc(d);
+      else applyHighlight();
+      return;
+    }
+  }
+  const tops = topLevelSchematics();
+  if (cur2 && tops.some((t) => t.doc.docId === cur2.docId)) {
+    toast("Already at the root sheet");
+    return;
+  }
+  const r = rootSchematic();
+  if (r) void openDoc(r);
+}
+var SN, SCH_IU, schMod, helpers, HL, preferHuman, sheets, sheetsProject, loading2, loadedVer, STALE_MS, projectKey, schDocs, curEntry, computed, docGen, listeners;
+var init_schnets = __esm({
+  "web/domains/pcb/editor/schnets.ts"() {
+    "use strict";
+    init_appstore();
+    init_comments();
+    init_doc();
+    init_util();
+    init_canvas();
+    init_projectfile();
+    init_state();
+    init_tools();
+    SN = () => KiCadCanvas.schNets;
+    SCH_IU = 1e4;
+    schMod = () => CollabTools.sch;
+    helpers = () => {
+      const m = schMod();
+      return m && m._ ? m._ : null;
+    };
+    HL = { name: null, busMembers: false, nav: null };
+    preferHuman = null;
+    sheets = /* @__PURE__ */ new Map();
+    sheetsProject = "";
+    loading2 = null;
+    loadedVer = 0;
+    STALE_MS = 3e4;
+    projectKey = () => {
+      const p = state.project;
+      return p && p.projectId || "";
+    };
+    schDocs = () => projectDocs2().filter((d) => d.docType === "kicad_sch");
+    curEntry = () => state.doc || null;
+    computed = null;
+    docGen = 0;
+    listeners = /* @__PURE__ */ new Set();
+  }
+});
+
 // web/domains/pcb/dialogs/editor.ts
-var E2, toolCtx2, toast2, api5, isSch2, requestRender2, applySheetContext2, appState2;
+var E2, toolCtx2, toast2, api5, isSch2, requestRender2, applySheetContext2, appState;
 var init_editor = __esm({
   "web/domains/pcb/dialogs/editor.ts"() {
     "use strict";
@@ -76649,13 +76986,13 @@ var init_editor = __esm({
     isSch2 = isSch;
     requestRender2 = requestRender;
     applySheetContext2 = applySheetContext;
-    appState2 = state;
+    appState = state;
   }
 });
 
 // web/domains/pcb/dialogs/project.ts
 function proDoc() {
-  return appState2.project ? appState2.project.docs.find((d) => d.docType === "kicad_pro") || null : null;
+  return appState.project ? appState.project.docs.find((d) => d.docType === "kicad_pro") || null : null;
 }
 function projectJson() {
   try {
@@ -76697,7 +77034,7 @@ function sideSession(docId3, changes) {
         return;
       }
       const opId = "web-side:" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      const timer4 = setTimeout(() => {
+      const timer5 = setTimeout(() => {
         try {
           sock.close();
         } catch (e) {
@@ -76705,7 +77042,7 @@ function sideSession(docId3, changes) {
         reject(new Error("no answer from the server"));
       }, 8e3);
       const done = (fn) => {
-        clearTimeout(timer4);
+        clearTimeout(timer5);
         sock.onmessage = null;
         sock.onerror = null;
         try {
@@ -76894,7 +77231,7 @@ __export(dom_exports, {
   checkbox: () => checkbox,
   confirmBox: () => confirmBox,
   download: () => download,
-  esc: () => esc5,
+  esc: () => esc4,
   form: () => form,
   h: () => h,
   popupMenu: () => popupMenu,
@@ -76956,17 +77293,17 @@ function form(rows3, cols = 2) {
 function promptText(title, label, initial = "", validate) {
   return new Promise((resolve2) => {
     const input = h("input", { type: "text", value: initial, id: "kd-prompt-input" });
-    let busy = false;
+    let busy2 = false;
     const done = (v) => {
       if (v === null || !validate) {
         ov.remove();
         resolve2(v);
         return;
       }
-      if (busy) return;
-      busy = true;
+      if (busy2) return;
+      busy2 = true;
       void Promise.resolve(validate(v)).then((good) => {
-        busy = false;
+        busy2 = false;
         if (good) {
           ov.remove();
           resolve2(v);
@@ -77159,7 +77496,7 @@ function download(name, text3, type = "text/csv;charset=utf-8") {
     a.remove();
   }, 1e3);
 }
-var esc5;
+var esc4;
 var init_dom2 = __esm({
   "web/domains/pcb/dialogs/dom.ts"() {
     "use strict";
@@ -77168,7 +77505,7 @@ var init_dom2 = __esm({
     init_menufit();
     init_kicon_dom();
     init_keys();
-    esc5 = (s2) => String(s2 ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    esc4 = (s2) => String(s2 ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 });
 
@@ -77861,18 +78198,18 @@ function infoBar() {
   const x = h2("button", { class: "x", type: "button", title: "Hide this message." }, closeMark());
   const el4 = h2("div", { class: "pd-infobar", hidden: true, "data-k": "infobar" }, h2("span", { class: "pd-warnicon" }), msg, x);
   el4.firstChild.innerHTML = warningIcon().el.innerHTML;
-  let timer4 = 0;
+  let timer5 = 0;
   const hide = () => {
     el4.hidden = true;
-    if (timer4) clearTimeout(timer4);
-    timer4 = 0;
+    if (timer5) clearTimeout(timer5);
+    timer5 = 0;
   };
   x.addEventListener("click", hide);
   return { el: el4, hide, show(m, ms) {
     msg.textContent = m;
     el4.hidden = false;
-    if (timer4) clearTimeout(timer4);
-    timer4 = ms ? window.setTimeout(hide, ms) : 0;
+    if (timer5) clearTimeout(timer5);
+    timer5 = ms ? window.setTimeout(hide, ms) : 0;
   } };
 }
 function focusError(ctrl, row3, col) {
@@ -78135,7 +78472,7 @@ function listDialog(title, headers, items, onPick, opts2) {
     });
   }
   let api6 = null;
-  let busy = false;
+  let busy2 = false;
   const row3 = () => {
     const i = g2.selected();
     return i >= 0 ? shown2[i] || null : null;
@@ -78148,19 +78485,19 @@ function listDialog(title, headers, items, onPick, opts2) {
       onPick(r);
       return true;
     }
-    if (busy) return false;
+    if (busy2) return false;
     const v = opts2.validate ? opts2.validate(r, name) : true;
     const finish = (ok2) => {
-      busy = false;
+      busy2 = false;
       if (!ok2) return;
       if (opts2.onOk) opts2.onOk(r, name);
       else if (r) onPick(r);
       if (api6) api6.close();
     };
     if (v instanceof Promise) {
-      busy = true;
+      busy2 = true;
       v.then(finish, () => {
-        busy = false;
+        busy2 = false;
       });
       return false;
     }
@@ -78514,10 +78851,10 @@ var init_drawingsheet_model = __esm({
 
 // web/domains/pcb/editor/drawingsheet.ts
 function load(docId3) {
-  if (loading2.has(docId3)) return;
-  loading2.add(docId3);
+  if (loading3.has(docId3)) return;
+  loading3.add(docId3);
   fetch(`/api/docs/${docId3}/content?v=${Date.now()}`, { credentials: "same-origin", cache: "no-store" }).then((r) => r.ok ? r.text() : "").then((t) => {
-    loading2.delete(docId3);
+    loading3.delete(docId3);
     const was = cache3.get(docId3);
     if (was && was.text === t) return;
     let sheet = null;
@@ -78533,7 +78870,7 @@ function load(docId3) {
     }
     for (const fn of listeners3) fn();
   }, () => {
-    loading2.delete(docId3);
+    loading3.delete(docId3);
     if (!cache3.has(docId3)) cache3.set(docId3, { text: "", sheet: null });
   });
 }
@@ -78551,7 +78888,7 @@ function applyDrawingSheet(d) {
   const ws = resolveWorksheet(drawingSheetName(E.proSettings, sch), projectWorksheets2());
   d.drawingSheet = ws ? sheetOf(ws.docId) : null;
 }
-var projectWorksheets2, cache3, loading2, listeners3;
+var projectWorksheets2, cache3, loading3, listeners3;
 var init_drawingsheet = __esm({
   "web/domains/pcb/editor/drawingsheet.ts"() {
     "use strict";
@@ -78562,7 +78899,7 @@ var init_drawingsheet = __esm({
     init_drawingsheet_model();
     projectWorksheets2 = () => projectWorksheets(state.docs || []);
     cache3 = /* @__PURE__ */ new Map();
-    loading2 = /* @__PURE__ */ new Set();
+    loading3 = /* @__PURE__ */ new Set();
     listeners3 = /* @__PURE__ */ new Set();
     if (typeof window !== "undefined") {
       window.addEventListener("kc-doc-saved", ((ev) => {
@@ -78673,6 +79010,137 @@ var init_sheet_pages = __esm({
   }
 });
 
+// web/domains/pcb/editor/panels/core.ts
+function pcbTools() {
+  return window.PcbTools || null;
+}
+function esc5(s2) {
+  return s2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function textEntry(title, message, value, opts2) {
+  return new Promise((resolve2) => {
+    const D = window.KDialogs;
+    if (!D) {
+      resolve2(null);
+      return;
+    }
+    let done = false;
+    const finish = (v) => {
+      if (!done) {
+        done = true;
+        resolve2(v);
+      }
+    };
+    D.open({
+      title,
+      width: 360,
+      build(body) {
+        body.innerHTML = `<p style="margin:0 0 8px;white-space:pre-line">${esc5(message)}</p><input id="kd-entry" type="text" value="${esc5(value)}" style="width:100%">`;
+        const inp = body.querySelector("#kd-entry");
+        if (inp && opts2?.alnum) inp.addEventListener("input", () => {
+          const bad = /[^\p{L}\p{N}]/gu;
+          if (!bad.test(inp.value)) return;
+          const at5 = inp.selectionStart ?? inp.value.length, before = inp.value.slice(0, at5).replace(bad, "").length;
+          inp.value = inp.value.replace(bad, "");
+          inp.setSelectionRange(before, before);
+        });
+      },
+      ok() {
+        const inp = document.querySelector("#kd-entry");
+        finish(inp ? inp.value : null);
+      },
+      cancel() {
+        finish(null);
+      }
+    });
+  });
+}
+function listPick(title, label, header, items) {
+  return new Promise((resolve2) => {
+    const D = window.KDialogs;
+    if (!D) {
+      resolve2(null);
+      return;
+    }
+    let done = false;
+    const finish = (v) => {
+      if (!done) {
+        done = true;
+        resolve2(v);
+      }
+    };
+    D.open({
+      title,
+      width: 360,
+      build(body) {
+        body.innerHTML = `<p style="margin:0 0 8px">${esc5(label)}</p><k-select id="kd-list" size="${Math.max(4, Math.min(10, items.length + 1))}" style="width:100%">
+          <optgroup label="${esc5(header)}">${items.map((n2, i) => `<option${i === 0 ? " selected" : ""}>${esc5(n2)}</option>`).join("")}</optgroup></k-select>`;
+      },
+      ok() {
+        const sel = document.querySelector("#kd-list");
+        finish(sel && sel.value ? sel.value : null);
+      },
+      cancel() {
+        finish(null);
+      }
+    });
+  });
+}
+var EMPTY_APPEARANCE, S2, subs, panelStore, projectId2, projectName, openDocs, currentDocId, kdoc2, isSchDoc, KC;
+var init_core = __esm({
+  "web/domains/pcb/editor/panels/core.ts"() {
+    "use strict";
+    init_appstore();
+    init_state();
+    init_tools();
+    init_kselect();
+    EMPTY_APPEARANCE = {
+      layers: [],
+      active: "",
+      objects: [],
+      nets: [],
+      netClasses: [],
+      inactive: "normal",
+      flip: false,
+      netColorMode: "ratsnest",
+      ratsnestMode: "all",
+      presets: [],
+      builtinPresets: [],
+      preset: null,
+      viewports: [],
+      viewport: null
+    };
+    S2 = { appearance: EMPTY_APPEARANCE, hierarchy: { root: null, version: 0 }, netNav: { root: null, version: 0 }, selVersion: 0 };
+    subs = /* @__PURE__ */ new Set();
+    panelStore = {
+      get: () => S2,
+      set(patch) {
+        S2 = Object.assign({}, S2, patch);
+        for (const fn of Array.from(subs)) {
+          try {
+            fn();
+          } catch (e) {
+            console.warn(e);
+          }
+        }
+      },
+      subscribe(fn) {
+        subs.add(fn);
+        return () => {
+          subs.delete(fn);
+        };
+      }
+    };
+    projectId2 = () => state.project && state.project.projectId || "";
+    projectName = () => state.project && state.project.name || "";
+    openDocs = () => state.docs || [];
+    currentDocId = () => state.docId || null;
+    kdoc2 = () => E.kdoc || null;
+    isSchDoc = () => E.DOC_TYPE === "kicad_sch";
+    KC = () => window.KiCadCanvas;
+  }
+});
+
 // web/domains/pcb/editor/panels/hierarchy.ts
 function sheetsOf(doc2) {
   const out2 = [];
@@ -78681,7 +79149,7 @@ function sheetsOf(doc2) {
 }
 function entry(docId3) {
   if (docId3 === currentDocId()) {
-    const d = kdoc();
+    const d = kdoc2();
     if (!d || !isSchDoc()) return null;
     live = { docId: docId3, doc: d };
     return { doc: d, sheets: sheetsOf(d), page: String(d.pageNumber || "1") };
@@ -78692,23 +79160,23 @@ function schDocs2() {
   return openDocs().filter((d) => d.docType === "kicad_sch");
 }
 async function loadSheets2(stale2, remote2 = false) {
-  if (cacheProject !== projectId()) {
+  if (cacheProject !== projectId2()) {
     cache4.clear();
     pending.clear();
-    cacheProject = projectId();
+    cacheProject = projectId2();
   }
   if (stale2) {
     pending.delete(stale2);
     if (!remote2 && live && live.docId === stale2 && stale2 !== currentDocId()) cache4.set(stale2, { doc: live.doc, sheets: sheetsOf(live.doc), page: String(live.doc.pageNumber || "1") });
     else cache4.delete(stale2);
   }
-  const pid = projectId();
+  const pid = projectId2();
   const want2 = schDocs2().filter((d) => d.docId !== currentDocId() && !cache4.has(d.docId));
   await Promise.all(want2.map(({ docId: docId3 }) => {
     const inFlight = pending.get(docId3);
     if (inFlight) return inFlight;
     const request4 = readSavedSchematic(docId3).then((doc2) => {
-      if (doc2 && pid === projectId() && pending.get(docId3) === request4) {
+      if (doc2 && pid === projectId2() && pending.get(docId3) === request4) {
         cache4.set(docId3, { doc: doc2, sheets: sheetsOf(doc2), page: String(doc2.pageNumber || "1") });
       }
     }).catch(() => {
@@ -78805,7 +79273,7 @@ function publishHierarchy() {
   } catch (e) {
     console.warn(e);
   }
-  const d = kdoc(), cur2 = root5 && root5.virtual ? root5.children.find((c) => c.current) : null;
+  const d = kdoc2(), cur2 = root5 && root5.virtual ? root5.children.find((c) => c.current) : null;
   if (d && cur2 && cur2.page && d.pageNumber !== cur2.page) {
     d.pageNumber = cur2.page;
     requestRender();
@@ -78856,1343 +79324,6 @@ var init_hierarchy = __esm({
       publishHierarchy();
       void loadSheets2();
     });
-  }
-});
-
-// web/domains/pcb/editor/proposals.ts
-function el2(tag, cls, text3) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text3 !== void 0) e.textContent = text3;
-  return e;
-}
-function panel() {
-  let p = document.getElementById("propPanel");
-  if (!p) {
-    const host2 = document.getElementById("cmtPanel")?.parentElement;
-    if (!host2) return null;
-    p = el2("div");
-    p.id = "propPanel";
-    host2.appendChild(p);
-    for (const type of ["pointerdown", "pointerup", "pointermove", "mousedown", "mouseup", "click", "dblclick", "wheel", "contextmenu", "keydown"]) p.addEventListener(type, (ev) => ev.stopPropagation());
-  }
-  return p;
-}
-async function loadProposals() {
-  const id = docId();
-  rows = [];
-  full.clear();
-  rejecting = null;
-  clearPreview();
-  render2();
-  if (!id || !state.me) return;
-  try {
-    const j = await request2(`/api/docs/${id}/proposals?status=pending`);
-    if (docId() !== id) return;
-    rows = (j.proposals || []).reverse();
-  } catch {
-    rows = [];
-  }
-  render2();
-}
-function noteProposalMsg(msg) {
-  const p = msg.proposal;
-  if (!p || p.docId !== docId()) return;
-  if (msg.action === "added") {
-    if (!rows.some((r) => r.id === p.id)) rows.push(p);
-    open2 = true;
-    render2();
-    if (!previewing()) void preview(p.id, true);
-    return;
-  }
-  const had = rows.some((r) => r.id === p.id);
-  rows = rows.filter((r) => r.id !== p.id);
-  full.delete(p.id);
-  if (previewing() === p.id) clearPreview();
-  if (rejecting === p.id) rejecting = null;
-  render2();
-  if (!had) return;
-  const who = nameOf(p.decidedBy);
-  if (p.status === "accepted") toast(`${who} accepted "${p.title}"`, 3500);
-  else if (p.status === "rejected") toast(`${who} rejected "${p.title}"`, 3500);
-  else if (p.status === "withdrawn") toast(`"${p.title}" was withdrawn`, 3500);
-}
-async function load2(id) {
-  const have = full.get(id);
-  if (have) return have;
-  try {
-    const r = await request2(`/api/proposals/${id}`);
-    if (!r.body) return null;
-    full.set(id, r);
-    return r;
-  } catch {
-    toast("This proposal could not be loaded");
-    return null;
-  }
-}
-async function preview(id, quiet2 = false) {
-  const r = await load2(id);
-  if (!r || !rows.some((x) => x.id === id) || r.docId !== docId()) return;
-  showPreview(asProposal(r), quiet2);
-  render2();
-}
-async function settle(id, status, reason = "") {
-  try {
-    await request2(`/api/proposals/${id}`, { method: "PATCH", body: JSON.stringify({ status, reason }) });
-    return true;
-  } catch (e) {
-    toast(/409/.test(String(e)) ? "Someone else has already decided this proposal" : "The decision could not be saved. Try again.");
-    void loadProposals();
-    return false;
-  }
-}
-async function accept(id) {
-  if (E.viewOnly) {
-    toast("You have view-only access to this project");
-    return;
-  }
-  const r = await load2(id);
-  if (!r) return;
-  const p = asProposal(r), stale2 = staleReason(p);
-  if (stale2) {
-    toast(stale2 + " Ask the assistant to propose it again.", 5e3);
-    render2();
-    return;
-  }
-  if (!await settle(id, "accepted")) return;
-  if (p.rules) {
-    const rules = p.rules;
-    try {
-      await saveProject((pro) => writeRules(pro, rules), "board rules");
-    } catch (e) {
-      console.warn("board rules were not saved:", e);
-      toast("The board rules of this proposal could not be saved");
-    }
-  }
-  if (p.changes.length) commitChanges(p.changes, "AI: " + p.title);
-  clearPreview();
-}
-function card(r) {
-  const c = el2("div", "prop-card" + (previewing() === r.id ? " shown" : ""));
-  c.dataset.proposal = r.id;
-  const meta2 = el2("div", "meta");
-  meta2.append(el2("b", "", author(r)), el2("span", "", ago(r.createdAt)));
-  c.append(meta2, el2("div", "prop-title", r.title));
-  if (r.rationale) c.appendChild(el2("div", "prop-why", r.rationale));
-  const list = el2("ul", "prop-lines"), shown2 = r.lines.slice(0, 8);
-  for (const l of shown2) {
-    const li = el2("li", l.kind, l.text);
-    list.appendChild(li);
-  }
-  if (r.lines.length > shown2.length) list.appendChild(el2("li", "more", `and ${r.lines.length - shown2.length} more`));
-  c.appendChild(list);
-  if (r.connectivity && r.connectivity.length) c.appendChild(el2("div", "prop-warn", `Changes connections: ${r.connectivity.slice(0, 3).join("; ")}${r.connectivity.length > 3 ? ` and ${r.connectivity.length - 3} more` : ""}`));
-  if (r.rules) c.appendChild(el2("div", "prop-note", "Also changes the board rules in the project file."));
-  const have = full.get(r.id), stale2 = have ? staleReason(asProposal(have)) : null;
-  if (stale2) c.appendChild(el2("div", "prop-warn", stale2));
-  const row3 = el2("div", "row");
-  const show6 = el2("button", "btn sm", previewing() === r.id ? "Hide" : "Show");
-  show6.type = "button";
-  show6.dataset.act = "show";
-  show6.title = "Draw this change over the design without applying it";
-  show6.addEventListener("click", () => {
-    if (previewing() === r.id) {
-      clearPreview();
-      render2();
-    } else void preview(r.id);
-  });
-  if (E.viewOnly) {
-    row3.append(show6, el2("span", "hint", "Only editors can accept or reject."));
-    c.appendChild(row3);
-    return c;
-  }
-  if (rejecting === r.id) {
-    const why2 = el2("input");
-    why2.type = "text";
-    why2.placeholder = "Why (optional, the assistant reads it)";
-    why2.maxLength = 300;
-    why2.dataset.act = "why";
-    const send3 = el2("button", "btn sm", "Reject"), back = el2("button", "btn sm", "Cancel");
-    send3.type = "button";
-    back.type = "button";
-    send3.dataset.act = "reject-send";
-    const go = () => {
-      void settle(r.id, "rejected", why2.value.trim());
-    };
-    send3.addEventListener("click", go);
-    why2.addEventListener("keydown", (ev) => {
-      ev.stopPropagation();
-      if (ev.key === "Enter") go();
-      if (ev.key === "Escape") {
-        rejecting = null;
-        render2();
-      }
-    });
-    back.addEventListener("click", () => {
-      rejecting = null;
-      render2();
-    });
-    row3.append(why2, send3, back);
-    c.appendChild(row3);
-    setTimeout(() => why2.focus(), 0);
-    return c;
-  }
-  const ok2 = el2("button", "btn sm primary", "Accept"), no = el2("button", "btn sm", stale2 ? "Dismiss" : "Reject");
-  ok2.type = "button";
-  no.type = "button";
-  ok2.dataset.act = "accept";
-  no.dataset.act = "reject";
-  ok2.disabled = !!stale2;
-  ok2.title = "Apply this change to the design as one undo step";
-  ok2.addEventListener("click", () => {
-    ok2.disabled = true;
-    void accept(r.id).finally(() => {
-      ok2.disabled = false;
-    });
-  });
-  no.addEventListener("click", () => {
-    if (stale2) void settle(r.id, "stale", stale2);
-    else {
-      rejecting = r.id;
-      render2();
-    }
-  });
-  row3.append(ok2, no, el2("span", "grow"), show6);
-  c.appendChild(row3);
-  return c;
-}
-function render2() {
-  const p = panel();
-  if (!p) return;
-  p.replaceChildren();
-  if (!rows.length) {
-    p.classList.remove("open");
-    return;
-  }
-  p.classList.add("open");
-  const head3 = el2("div", "prop-head"), fold = el2("button", "prop-fold");
-  fold.appendChild(treeExpander(open2));
-  fold.type = "button";
-  fold.title = open2 ? "Fold" : "Unfold";
-  const toggle = () => {
-    open2 = !open2;
-    if (!open2) clearPreview();
-    render2();
-  };
-  fold.addEventListener("click", toggle);
-  const title = el2("span", "prop-heading", rows.length === 1 ? "1 proposed change" : `${rows.length} proposed changes`);
-  title.addEventListener("click", toggle);
-  head3.append(fold, title);
-  p.appendChild(head3);
-  if (!open2) return;
-  const list = el2("div", "prop-list");
-  for (const r of rows) list.appendChild(card(r));
-  p.appendChild(list);
-}
-var rows, open2, rejecting, full, docId, request2, nameOf, author, asProposal;
-var init_proposals = __esm({
-  "web/domains/pcb/editor/proposals.ts"() {
-    "use strict";
-    init_proposals2();
-    init_project();
-    init_appstore();
-    init_state();
-    init_tools();
-    init_util();
-    init_kicon_dom();
-    rows = [];
-    open2 = true;
-    rejecting = null;
-    full = /* @__PURE__ */ new Map();
-    docId = () => {
-      const id = state.docId;
-      return id && !id.startsWith("board:") && !id.startsWith("lib:") ? id : null;
-    };
-    request2 = api4;
-    nameOf = (w) => w ? w.name || w.login : "Someone";
-    author = (r) => `${nameOf(r.by)}'s assistant${r.app ? ` (${r.app})` : ""}`;
-    asProposal = (r) => ({
-      id: r.id,
-      title: r.title,
-      rationale: r.rationale,
-      docId: r.docId,
-      docPath: r.docPath,
-      lines: r.lines.map((l) => ({ kind: l.kind, text: l.text, ids: [] })),
-      changes: r.body?.changes || [],
-      basis: r.body?.basis || {},
-      status: "pending",
-      rules: r.body?.rules || void 0
-    });
-  }
-});
-
-// web/platform/documents/host.ts
-function documentEditorFor(docType) {
-  return (window.JunctionDocEditors || []).find((f2) => f2.docTypes.includes(docType));
-}
-var init_host = __esm({
-  "web/platform/documents/host.ts"() {
-    "use strict";
-  }
-});
-
-// web/domains/registry.ts
-function partStudioImporting(file, featureId) {
-  const sorted = (v) => Array.isArray(v) ? "[" + v.map(sorted).join(",") + "]" : v && typeof v === "object" ? "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + sorted(v[k])).join(",") + "}" : JSON.stringify(v);
-  const stem3 = file.name.replace(/\.[^.]+$/, "");
-  const format = /\.(brep|brp)$/i.test(file.path) ? "brep" : "step";
-  const items = [
-    { featureType: "import", id: featureId, name: stem3, order: "V", params: { file: { ...file, format }, split: "solids" }, type: "feature" },
-    { id: "studio", rollback: null, type: "studio", units: "mm" }
-  ].sort((a, b) => a.id < b.id ? -1 : 1);
-  return '{"junction":"part-studio","version":1,"items":[\n' + items.map(sorted).join(",\n") + "\n]}\n";
-}
-function documentKind(docType) {
-  return DOCUMENT_KINDS.find((k) => k.docType === docType);
-}
-var DOMAINS, DOCUMENT_KINDS;
-var init_registry = __esm({
-  "web/domains/registry.ts"() {
-    "use strict";
-    DOMAINS = [
-      {
-        id: "pcb",
-        title: "Electronics",
-        status: "shipped",
-        summary: "Schematics, symbols, footprints and circuit boards, through to fabrication outputs and SPICE.",
-        fileTypes: [".kicad_pro", ".kicad_sch", ".kicad_pcb", ".kicad_sym", ".kicad_mod", ".kicad_wks"],
-        reads: [],
-        documents: [
-          { docType: "kicad_sch", ext: ".kicad_sch", title: "Schematic", icon: '<path d="M3 12h5"/><path d="M16 12h5"/><rect x="8" y="8" width="8" height="8"/><path d="M12 4v4"/><path d="M12 16v4"/>' },
-          { docType: "kicad_pcb", ext: ".kicad_pcb", title: "Board", icon: '<rect x="4" y="5" width="16" height="14" rx="1.5"/><circle cx="8.5" cy="9.5" r="1.2"/><circle cx="15.5" cy="14.5" r="1.2"/><path d="M9.5 10.5l5 3"/>' }
-        ]
-      },
-      {
-        id: "mechanical",
-        title: "Mechanical CAD",
-        status: "in-progress",
-        summary: "Parametric solid parts: sketches, features and a history tree on a B-rep kernel.",
-        // .jpart is the part studio (web/domains/mechanical/CONTRACT.md); STEP and IGES are what it will import and export
-        fileTypes: [".jpart", ".step", ".stp", ".iges", ".igs"],
-        reads: [],
-        documents: [
-          {
-            docType: "part_studio",
-            ext: ".jpart",
-            title: "Part Studio",
-            bundle: "/static/dist/mechanical.js",
-            newName: "Part Studio",
-            tint: "teal",
-            cad: true,
-            icon: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5"/><path d="M12 12v9"/>',
-            // the same text as web/domains/mechanical/document/format.ts newPartStudioText() (a test compares them)
-            newText: '{"junction":"part-studio","version":1,"items":[\n{"id":"studio","rollback":null,"type":"studio","units":"mm"}\n]}\n',
-            // a STEP file opens as a part studio that imports it (web/domains/mechanical/features/import-file.ts)
-            fromFile: { title: "STEP file", accept: [".step", ".stp"], folder: "models", text: (f2) => partStudioImporting(f2, crypto.randomUUID()) }
-          }
-        ]
-      },
-      {
-        id: "assembly",
-        title: "Assemblies",
-        status: "in-progress",
-        summary: "Parts and boards put together with mates and joints, with interference checks and a bill of materials.",
-        fileTypes: [".jasm"],
-        reads: ["mechanical", "pcb"],
-        documents: [
-          {
-            docType: "assembly",
-            ext: ".jasm",
-            title: "Assembly",
-            bundle: "/static/dist/assembly.js",
-            newName: "Assembly",
-            tint: "copper",
-            cad: true,
-            icon: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/><path d="M11 7.5h5.5V13"/>',
-            // the same text as web/domains/assembly/document/format.ts newAssemblyText() (a test compares them)
-            newText: '{"junction":"assembly","version":1,"items":[\n{"id":"assembly","type":"assembly","units":"mm"}\n]}\n'
-          }
-        ]
-      },
-      {
-        id: "physics",
-        title: "Physics simulation",
-        status: "planned",
-        summary: "Structural, thermal and rigid-body analysis of parts and assemblies.",
-        fileTypes: [],
-        reads: ["mechanical", "assembly", "pcb"]
-      },
-      {
-        id: "silicon",
-        title: "IC and chip design",
-        status: "planned",
-        summary: "RTL, synthesis, place and route and layout of digital and analog chips on open PDKs.",
-        fileTypes: [".v", ".sv", ".vhd", ".gds", ".lef", ".def"],
-        reads: []
-      },
-      {
-        id: "robotics",
-        title: "Robotics simulation",
-        status: "planned",
-        summary: "Robots built from assemblies, with actuators, sensors and controllers simulated together.",
-        fileTypes: [".urdf", ".sdf", ".mjcf"],
-        reads: ["assembly", "pcb", "physics"]
-      },
-      {
-        id: "manufacturing",
-        title: "Manufacturing and CAM",
-        status: "planned",
-        summary: "Toolpaths for milling, turning and cutting, slicing for printing, and setup sheets.",
-        fileTypes: [".nc", ".gcode"],
-        reads: ["mechanical", "assembly", "pcb"]
-      }
-    ];
-    DOCUMENT_KINDS = DOMAINS.flatMap((d) => d.documents || []);
-  }
-});
-
-// web/shared/cad.ts
-function cadEnabled(state2) {
-  const s2 = state2 === void 0 && typeof window !== "undefined" && window.CollabApp ? window.CollabApp.getState() : state2;
-  return !!(s2 && s2.me && s2.me.cad);
-}
-function setCadEnabled(enabled) {
-  if (typeof window !== "undefined" && window.CollabApp) window.CollabApp.dispatch({ type: "setCad", on: enabled });
-}
-var CAD_OFF_NOTE;
-var init_cad = __esm({
-  "web/shared/cad.ts"() {
-    "use strict";
-    CAD_OFF_NOTE = "Turn on Mechanical CAD in your settings to open";
-  }
-});
-
-// web/domains/pcb/editor/dochost.ts
-function isHostedDoc(doc2) {
-  if (doc2 && isShellView(doc2.docType)) return true;
-  const kind = doc2 ? documentKind(doc2.docType) : void 0;
-  return !!kind && !!kind.bundle;
-}
-function isShellView(docType) {
-  return docType.startsWith("@");
-}
-function loadBundle(src) {
-  let p = loading3.get(src);
-  if (!p) {
-    const v = window.__kcAssetV;
-    p = new Promise((resolve2, reject) => {
-      const tag = document.createElement("script");
-      tag.src = src + (v ? "?v=" + v : "");
-      tag.onload = () => resolve2();
-      tag.onerror = () => {
-        tag.parentNode?.removeChild(tag);
-        loading3.delete(src);
-        reject(new Error(`could not load ${src}`));
-      };
-      document.head.appendChild(tag);
-    });
-    loading3.set(src, p);
-  }
-  return p;
-}
-function cadOffNote(doc2, kind, toPcb) {
-  const box3 = document.createElement("div");
-  box3.dataset.cadOff = doc2.docId;
-  box3.style.cssText = "max-width:460px;margin:72px auto;padding:0 16px;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;color:var(--ink)";
-  const icon2 = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  icon2.setAttribute("viewBox", "0 0 24 24");
-  icon2.setAttribute("width", "32");
-  icon2.setAttribute("height", "32");
-  icon2.setAttribute("aria-hidden", "true");
-  icon2.setAttribute("fill", "none");
-  icon2.setAttribute("stroke", "currentColor");
-  icon2.setAttribute("stroke-width", "1.5");
-  icon2.setAttribute("stroke-linecap", "round");
-  icon2.setAttribute("stroke-linejoin", "round");
-  icon2.style.color = kind.tint ? `var(--${kind.tint})` : "var(--ink-2)";
-  icon2.innerHTML = kind.icon;
-  const title = document.createElement("h2");
-  title.style.cssText = "margin:0;font-size:var(--fs-lg);font-weight:600";
-  title.textContent = `${(doc2.path.split("/").pop() || doc2.path).replace(/\.[^.]+$/, "")} is ${/^[aeiou]/i.test(kind.title) ? "an" : "a"} ${kind.title.toLowerCase()}`;
-  const text3 = document.createElement("p");
-  text3.style.cssText = "margin:0;color:var(--ink-2)";
-  text3.textContent = `${CAD_OFF_NOTE} it. Part studios and assemblies are part of Mechanical CAD, which is off for you; the project keeps them as they are.`;
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "btn primary";
-  button.dataset.cadTurnOn = "";
-  button.textContent = "Turn on Mechanical CAD and open";
-  button.addEventListener("click", () => {
-    button.disabled = true;
-    setCadEnabled(true);
-  });
-  const back = document.createElement("button");
-  back.type = "button";
-  back.className = "btn";
-  back.dataset.cadOffPcb = "";
-  back.textContent = "Open the PCB instead";
-  back.addEventListener("click", () => {
-    if (toPcb) toPcb();
-  });
-  const note3 = document.createElement("p");
-  note3.style.cssText = "margin:0;color:var(--ink-3);font-size:var(--fs-sm)";
-  note3.textContent = "It can be turned off again in the account menu or the Junction menu.";
-  box3.append(icon2, title, text3, button);
-  if (toPcb) box3.append(back);
-  box3.append(note3);
-  return box3;
-}
-function closeHostedDoc() {
-  const was = open3;
-  open3 = null;
-  if (was && was.editor) {
-    try {
-      was.editor.close();
-    } catch (e) {
-      console.warn(e);
-    }
-  }
-  const el4 = document.getElementById("cadHost");
-  if (el4) el4.replaceChildren();
-}
-async function openHostedDoc(doc2, showCad, openDocId2) {
-  closeHostedDoc();
-  const kind = documentKind(doc2.docType);
-  const what = kind ? kind.title.toLowerCase() : doc2.docType === "@bom" ? "bill of materials" : "page";
-  const mine = { docId: doc2.docId, editor: null };
-  open3 = mine;
-  showCad();
-  store.slice("connection", { status: "connecting", text: "opening\u2026", edits: 0 });
-  const el4 = document.getElementById("cadHost");
-  if (!el4) return;
-  el4.replaceChildren();
-  if (kind && kind.cad && !cadEnabled(store.get())) {
-    store.slice("connection", { status: "idle", text: "Mechanical CAD is off" });
-    const hasPcb = (state.project.allDocs || state.project.docs).some((d) => d.docType === "kicad_sch" || d.docType === "kicad_pcb");
-    el4.replaceChildren(cadOffNote(doc2, kind, hasPcb ? () => openDocId2("home") : null));
-    return;
-  }
-  try {
-    if (kind && kind.bundle) await loadBundle(kind.bundle);
-    for (let i = 0; i < 400 && isShellView(doc2.docType) && !documentEditorFor(doc2.docType) && open3 === mine; i++) await new Promise((r) => setTimeout(r, 25));
-    if (open3 !== mine) return;
-    const factory = documentEditorFor(doc2.docType);
-    if (!factory) throw new Error(`${kind ? kind.bundle : "the page"} did not register an editor for ${doc2.docType}`);
-    const ctx = {
-      el: el4,
-      project: { projectId: state.project.projectId, name: state.project.name },
-      doc: { docId: doc2.docId, path: doc2.path, docType: doc2.docType },
-      docs: (state.project.allDocs || state.project.docs).map((d) => ({ docId: d.docId, path: d.path, docType: d.docType })),
-      signedIn: !!state.me,
-      userId: state.me ? state.me.id : null,
-      setConnection: (s2, text3) => {
-        if (open3 === mine) store.slice("connection", { status: s2, text: text3 });
-      },
-      toast: (text3, ms) => toast(text3, ms),
-      openDoc: (id) => openDocId2(id)
-    };
-    const editor3 = await factory.open(ctx);
-    if (open3 !== mine) {
-      editor3.close();
-      return;
-    }
-    mine.editor = editor3;
-  } catch (e) {
-    console.warn(e);
-    if (open3 !== mine) return;
-    store.slice("connection", { status: "error", text: "could not open" });
-    const p = document.createElement("p");
-    p.className = "empty";
-    p.style.margin = "48px auto";
-    p.textContent = `This ${what} could not be opened. Reload the page to try again.`;
-    el4.replaceChildren(p);
-  }
-}
-var open3, loading3;
-var init_dochost = __esm({
-  "web/domains/pcb/editor/dochost.ts"() {
-    "use strict";
-    init_host();
-    init_registry();
-    init_cad();
-    init_appstore();
-    init_util();
-    open3 = null;
-    loading3 = /* @__PURE__ */ new Map();
-  }
-});
-
-// web/shared/theme.ts
-function defaultThemeMode() {
-  let cad = false;
-  try {
-    cad = localStorage.getItem(CAD_HINT) === "1";
-  } catch (e) {
-  }
-  return cad ? "light" : "system";
-}
-function stored() {
-  let v = null;
-  try {
-    v = localStorage.getItem(KEY);
-  } catch (e) {
-  }
-  return v === "light" || v === "dark" || v === "system" ? v : defaultThemeMode();
-}
-function getThemeMode() {
-  const t = document.documentElement.dataset.theme;
-  return t === "light" || t === "dark" || t === "system" ? t : stored();
-}
-function effectiveTheme() {
-  const m = getThemeMode();
-  if (m !== "system") return m;
-  return typeof matchMedia === "function" && matchMedia(DARK_QUERY).matches ? "dark" : "light";
-}
-function apply2(mode) {
-  document.documentElement.dataset.theme = mode;
-}
-function setThemeMode(mode) {
-  try {
-    localStorage.setItem(KEY, mode);
-  } catch (e) {
-  }
-  apply2(mode);
-}
-function followCadSetting(on2) {
-  try {
-    if (on2) localStorage.setItem(CAD_HINT, "1");
-    else localStorage.removeItem(CAD_HINT);
-  } catch (e) {
-  }
-  apply2(stored());
-}
-function toggleTheme() {
-  setThemeMode(effectiveTheme() === "dark" ? "light" : "dark");
-}
-var KEY, CAD_HINT, DARK_QUERY;
-var init_theme = __esm({
-  "web/shared/theme.ts"() {
-    "use strict";
-    KEY = "kui.theme";
-    CAD_HINT = "kui.cad";
-    DARK_QUERY = "(prefers-color-scheme: dark)";
-  }
-});
-
-// web/domains/pcb/editor/home.ts
-function navigate(path2, replace) {
-  if (replace) history.replaceState(null, "", path2);
-  else history.pushState(null, "", path2);
-  route2();
-}
-function route2() {
-  const m = location.pathname.match(/^\/p\/([0-9a-f-]{36})(?:\/edit|\/live)?\/?$/i);
-  if (m) {
-    openEditor(m[1]);
-    return;
-  }
-  state.homeTab = location.pathname.startsWith("/gallery") ? "explore" : location.pathname.startsWith("/trash") ? "trash" : location.pathname.startsWith("/time") ? "time" : "projects";
-  showHome();
-}
-async function loadMe() {
-  try {
-    state.me = await (takeBoot("me") || api4("/api/me"));
-  } catch {
-    state.me = null;
-  }
-  store.set({ me: state.me });
-  followCadSetting(cadEnabled(state));
-}
-function showView(name) {
-  state.view = name;
-  $$(".view").forEach((v) => v.classList.toggle("active", v.id === name));
-  if (name !== "cad") closeHostedDoc();
-  if (name === "home") {
-    leaveEditor();
-    delete document.body.dataset.editor;
-    store.slice("document", { editor: null, docType: null, docId: null, doc: null });
-    store.set({ view: "home", project: null, role: null, popover: null });
-  } else store.set({ view: name });
-}
-function showHome() {
-  showView("home");
-  document.title = "Junction";
-  renderHome();
-}
-function renderHome() {
-  store.set({ homeTab: state.homeTab, homeTick: (store.get().homeTick || 0) + 1 });
-}
-var init_home = __esm({
-  "web/domains/pcb/editor/home.ts"() {
-    "use strict";
-    init_appstore();
-    init_doc();
-    init_dochost();
-    init_dom();
-    init_util();
-    init_cad();
-    init_theme();
-    window.CollabNav = { navigate, reloadMe: async () => {
-      await loadMe();
-      renderHome();
-    } };
-  }
-});
-
-// web/platform/history/request.ts
-var init_request = __esm({
-  "web/platform/history/request.ts"() {
-    "use strict";
-  }
-});
-
-// web/domains/pcb/editor/versions.ts
-async function call(path2, method = "GET", body) {
-  const r = await fetch(path2, { method, credentials: "same-origin", headers: body === void 0 ? {} : { "content-type": "application/json" }, body: body === void 0 ? void 0 : JSON.stringify(body) });
-  let json = null;
-  try {
-    json = await r.json();
-  } catch (e) {
-  }
-  if (!r.ok) {
-    const j = json;
-    const err = new Error(j && j.message || `the server answered ${r.status}`);
-    err.code = j && j.error || void 0;
-    err.status = r.status;
-    throw err;
-  }
-  return json;
-}
-async function loadVersions() {
-  const p = app().project;
-  if (!p) return;
-  const n2 = ++loadN2, pid = p.projectId;
-  put2({ loading: true });
-  try {
-    const [tl, br] = await Promise.all([
-      call(`/api/projects/${pid}/timeline`),
-      app().me ? call(`/api/projects/${pid}/branches`).catch(() => null) : Promise.resolve(null)
-    ]);
-    if (n2 !== loadN2 || !app().project || app().project.projectId !== pid) return;
-    put2({
-      loading: false,
-      error: null,
-      list: tl.versions,
-      runs: tl.runs,
-      docs: tl.docs,
-      parentId: tl.parentId,
-      branchName: tl.branchName,
-      branches: br ? br.branches : [],
-      main: br ? br.main : null
-    });
-    store.set({ history: { groups: tl.versions.filter((v2) => v2.kind === "named").map((v2) => ({ name: v2.name || "", at: v2.createdAt, docs: v2.docs.length })), loading: false, error: null } });
-    const v = slice().view;
-    if (v) {
-      const d = tl.docs.find((x) => x.docId === v.docId);
-      if (d && d.head !== v.head) {
-        indexes.delete(v.docId);
-        put2({ view: { ...v, head: d.head, marks: marksFor(v.docId) } });
-        void loadIndex(v.docId);
-      } else put2({ view: { ...v, marks: marksFor(v.docId), versionId: versionAt(v.docId, v.seq) } });
-    }
-  } catch (e) {
-    if (n2 !== loadN2) return;
-    put2({ loading: false, error: why(e) });
-  }
-}
-function onVersionsNotice(msg) {
-  const p = app().project;
-  if (!p || msg.projectId && msg.projectId !== p.projectId) return;
-  if (msg.what === "branch_deleted") {
-    const parent = slice().parentId;
-    toast("This branch was deleted. Back to the main line.", 4e3);
-    if (parent) navigate(`/p/${parent}/edit`, false);
-    return;
-  }
-  clearTimeout(noticeTimer);
-  noticeTimer = window.setTimeout(() => {
-    void loadVersions();
-  }, 120);
-}
-function noteEdit() {
-  clearTimeout(editTimer);
-  editTimer = window.setTimeout(() => {
-    if (app().view === "editor" && app().project) void loadVersions();
-  }, 1500);
-}
-function marksFor(docId3) {
-  const out2 = [];
-  for (const v of slice().list) {
-    const d = v.docs.find((x) => x.docId === docId3);
-    if (d) out2.push({ seq: d.seq, name: v.name || "Kept automatically", named: v.kind === "named" });
-  }
-  return out2;
-}
-function versionAt(docId3, seq) {
-  const hit5 = slice().list.find((v) => v.docs.some((d) => d.docId === docId3 && d.seq === seq));
-  return hit5 ? hit5.id : null;
-}
-function describe2(docId3, seq) {
-  const ix = indexes.get(docId3);
-  if (!ix) return { at: null, who: null };
-  let lo = 0, hi = ix.seqs.length - 1, k = -1;
-  while (lo <= hi) {
-    const mid2 = lo + hi >> 1;
-    if (ix.seqs[mid2] <= seq) {
-      k = mid2;
-      lo = mid2 + 1;
-    } else hi = mid2 - 1;
-  }
-  if (k < 0) return { at: ix.floorAt, who: null };
-  const p = ix.people[ix.who[k]];
-  return { at: ix.times[k], who: p ? p.name || p.login || null : null };
-}
-async function loadIndex(docId3) {
-  if (indexes.has(docId3)) return;
-  try {
-    const ix = await call(`/api/docs/${docId3}/history`);
-    indexes.set(docId3, ix);
-    const v = slice().view;
-    if (v && v.docId === docId3) put2({ view: { ...v, floor: ix.floor, head: Math.max(v.head, ix.head), ...describe2(docId3, v.seq) } });
-  } catch (e) {
-  }
-}
-function stopPlay() {
-  if (playTimer) {
-    clearInterval(playTimer);
-    playTimer = 0;
-  }
-  const v = slice().view;
-  if (v && v.playing) put2({ view: { ...v, playing: false } });
-}
-function dropHistoryView() {
-  stopPlay();
-  want = null;
-  shown = null;
-  if (E.history) {
-    E.viewOnly = !!E.history.viewOnly;
-    E.history = null;
-    store.set({ viewOnly: E.viewOnly });
-  }
-  if (slice().view) put2({ view: null });
-}
-function holdViewOnly(v) {
-  if (!E.history) return false;
-  E.history.viewOnly = !!v;
-  return true;
-}
-function canEdit() {
-  const role = store.get().role;
-  if (role === "editor") return true;
-  toast(app().me ? "Only editors can do that" : "Sign in to do that");
-  return false;
-}
-function saveVersionDialog() {
-  if (!app().project) return;
-  if (!canEdit()) return;
-  const v = slice().view;
-  openDialog3(v && v.seq < v.head ? { kind: "save", at: { docId: v.docId, seq: v.seq } } : { kind: "save" });
-}
-var app, slice, put2, why, loadN2, noticeTimer, editTimer, indexes, shown, want, playTimer, historyActive, openDialog3;
-var init_versions = __esm({
-  "web/domains/pcb/editor/versions.ts"() {
-    "use strict";
-    init_appstore();
-    init_doc();
-    init_dochost();
-    init_home();
-    init_net();
-    init_state();
-    init_util();
-    init_request();
-    app = () => state;
-    slice = () => store.get().versions;
-    put2 = (patch) => {
-      store.slice("versions", patch);
-    };
-    why = (e) => e instanceof Error ? e.message : String(e);
-    loadN2 = 0;
-    noticeTimer = 0;
-    editTimer = 0;
-    indexes = /* @__PURE__ */ new Map();
-    shown = null;
-    want = null;
-    playTimer = 0;
-    historyActive = () => !!E.history;
-    openDialog3 = (dialog) => put2({ dialog });
-  }
-});
-
-// web/domains/pcb/editor/title.ts
-function frameTitle() {
-  const s2 = store.get();
-  if (s2.view !== "editor" || !state.doc || document.documentElement.dataset.symedit !== void 0) return null;
-  const docType = state.doc.docType;
-  if (E.DOC_TYPE === "footprint" || docType !== "kicad_sch" && docType !== "kicad_pcb") return null;
-  let modified2 = false;
-  for (const op of E.pendingOps.values()) if (op.docId === state.docId) {
-    modified2 = true;
-    break;
-  }
-  const ro = E.viewOnly ? " [Read Only]" : "";
-  if (docType === "kicad_pcb") return `${modified2 ? "*" : ""}${stem(state.doc.path)}${ro} \u2014 PCB Editor`;
-  const name = stem(state.doc.path);
-  const rootId = s2.document.rootDocId;
-  const root5 = rootId ? s2.document.docs.find((d) => d.docId === rootId) : null;
-  const kdoc3 = E.kdoc;
-  const sub2 = kdoc3 && kdoc3.sheetPath && kdoc3.sheetPath !== "/" ? kdoc3.sheetPath.replace(/^\/|\/$/g, "") : "";
-  let sheetPath = (root5 ? stem(root5.path) : name) + (sub2 ? "/" + sub2 : "");
-  const tops = topLevelSchematics();
-  if (tops.length > 1 && sub2) {
-    const segs = sub2.split("/"), top2 = tops.find((t) => t.name === segs[0]);
-    if (top2) sheetPath = stem(top2.doc.path) + (segs.length > 1 ? "/" + segs.slice(1).join("/") : "");
-  }
-  return `${modified2 ? "*" : ""}${name}${sheetPath !== name ? ` [${sheetPath}]` : ""}${ro} \u2014 Schematic Editor`;
-}
-function updateTitle() {
-  const t = frameTitle();
-  if (t === null || t === last && document.title === t) return;
-  last = t;
-  document.title = t;
-}
-var stem, last;
-var init_title = __esm({
-  "web/domains/pcb/editor/title.ts"() {
-    "use strict";
-    init_doc();
-    init_appstore();
-    init_state();
-    stem = (path2) => (path2 || "").split("/").pop().replace(/\.kicad_(sch|pcb)$/, "");
-    last = "";
-    store.subscribe(() => updateTitle());
-  }
-});
-
-// web/platform/doctabs/roomapi.ts
-function parseDocsNotice(msg) {
-  const m = msg;
-  if (!m || m.type !== "docs" || typeof m.n !== "string" || typeof m.projectId !== "string" || !m.doc || typeof m.doc.path !== "string") return null;
-  if (m.change !== "added" && m.change !== "renamed" && m.change !== "deleted") return null;
-  const name = m.change === "renamed" && typeof m.from === "string" ? `${stem2(m.from)} to ${stem2(m.doc.path)}` : stem2(m.doc.path);
-  const login = m.by && typeof m.by.login === "string" ? m.by.login : "";
-  return { n: m.n, projectId: m.projectId, note: { what: m.change, name: name.slice(0, 120) }, by: { userId: m.by && typeof m.by.userId === "number" ? m.by.userId : 0, login, name: m.by && typeof m.by.name === "string" && m.by.name || login || "Someone" } };
-}
-function tellDocsChanged(msg) {
-  const notice = parseDocsNotice(msg);
-  if (!notice || told.includes(notice.n) || typeof window === "undefined") return;
-  told.push(notice.n);
-  if (told.length > 50) told.shift();
-  window.dispatchEvent(new CustomEvent(DOCS_EVENT, { detail: notice }));
-}
-var DOCS_EVENT, stem2, told;
-var init_roomapi = __esm({
-  "web/platform/doctabs/roomapi.ts"() {
-    "use strict";
-    DOCS_EVENT = "junction-project-docs";
-    stem2 = (path2) => (path2.split("/").pop() || path2).replace(/\.[^.]+$/, "");
-    told = [];
-  }
-});
-
-// web/domains/pcb/editor/net.ts
-function setConn(cls, text3) {
-  store.slice("connection", { status: cls === "live" ? "live" : cls === "err" ? "error" : "offline", text: text3 || (cls === "live" ? "live" : "offline") });
-}
-function setRole(role) {
-  const was = state.role;
-  state.role = role;
-  const vo = !state.me || role !== "editor";
-  if (!holdViewOnly(vo)) E.viewOnly = vo;
-  E.canComment = !!state.me && (role === "editor" || role === "commenter");
-  const can = { ...store.get().can || { copy: true, share: false, manage: false }, edit: !E.viewOnly, comment: E.canComment };
-  store.set({ role, viewOnly: E.viewOnly, canComment: E.canComment, can });
-  return was;
-}
-function liveLabel() {
-  return (E.history ? E.history.viewOnly : E.viewOnly) ? E.canComment ? "live \xB7 comment-only" : "live \xB7 view-only" : "live";
-}
-async function connect() {
-  const gen = ++E.connectGen;
-  setConn("err", E.retries ? `reconnecting\u2026` : "connecting\u2026");
-  let ticket;
-  try {
-    ticket = state.me ? (await api4("/api/ws-ticket")).token || "" : "";
-  } catch (e) {
-    if (gen !== E.connectGen) return;
-    if (/^40[13] /.test(String(e && e.message))) {
-      setConn("err", "sign-in expired \u2014 reload to reconnect");
-      return;
-    }
-    const delay = Math.min(15e3, 1e3 * Math.pow(2, E.retries++));
-    setConn("err", `reconnecting in ${Math.round(delay / 1e3)}s`);
-    setTimeout(() => {
-      if (state.view === "editor" && gen === E.connectGen) connect().catch(() => {
-      });
-    }, delay);
-    return;
-  }
-  if (gen !== E.connectGen || state.view !== "editor") return;
-  E.wsToken = ticket;
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  let sock;
-  try {
-    sock = new WebSocket(`${proto}://${location.host}/ws`);
-  } catch (e) {
-    setConn("err", "connection blocked (VPN or proxy?)");
-    return;
-  }
-  E.ws = sock;
-  E.joinedDocId = null;
-  let handshakeDone = false;
-  const watchdog = setTimeout(() => {
-    if (E.ws !== sock || handshakeDone) return;
-    console.warn("collab socket: no answer to hello within 8s (VPN/proxy?)");
-    setConn("err", "no answer from server (VPN or proxy?) \u2014 retrying");
-    sock.close();
-  }, 8e3);
-  sock.onopen = () => {
-    if (E.ws !== sock) return;
-    if (!E.myClientId) E.myClientId = "web-" + Math.random().toString(36).slice(2, 10);
-    sock.send(JSON.stringify({ type: "hello", proto: 1, token: E.wsToken, clientId: E.myClientId, linkToken: null, client: "web" }));
-  };
-  sock.onclose = (ev) => {
-    clearTimeout(watchdog);
-    console.warn(`collab socket closed: code=${ev.code} clean=${ev.wasClean} reason=${JSON.stringify(ev.reason || "")}`);
-    if (E.ws !== sock || gen !== E.connectGen) return;
-    E.ws = null;
-    E.joinedDocId = null;
-    peersG.replaceChildren();
-    clearPeerCursors();
-    E.peerState = {};
-    renderPeers();
-    const delay = Math.min(15e3, 1e3 * Math.pow(2, E.retries++));
-    setConn("err", `reconnecting in ${Math.round(delay / 1e3)}s`);
-    setTimeout(() => {
-      if (state.view === "editor" && gen === E.connectGen) connect().catch(() => {
-      });
-    }, delay);
-  };
-  sock.onmessage = (ev) => {
-    if (E.ws !== sock) return;
-    const msg = JSON.parse(ev.data);
-    if (msg.type === "error") console.warn("collab server error:", msg.code, msg.docId || "");
-    if (msg.type === "hello_ok") {
-      handshakeDone = true;
-      clearTimeout(watchdog);
-      E.retries = 0;
-      if (msg.clientId) E.myClientId = msg.clientId;
-      sock.send(JSON.stringify({ type: "join_doc", docId: state.docId }));
-      let pinger;
-      const ping = () => {
-        if (E.ws !== sock || sock.readyState !== 1) {
-          clearInterval(pinger);
-          return;
-        }
-        sock.send(JSON.stringify({ type: "ping", t: performance.now() }));
-      };
-      if (Array.isArray(msg.caps) && msg.caps.includes("ping")) {
-        pinger = setInterval(ping, 2e3);
-        ping();
-        setTimeout(ping, 300);
-      }
-    }
-    if (msg.type === "pong" && typeof msg.t === "number") {
-      noteRtt(performance.now() - msg.t);
-      return;
-    }
-    if (msg.type === "error" && (msg.code === "bad_message" || msg.code === "unsupported_protocol") && msg.message !== "presence state too large") {
-      setConn("err", `server refused the session (${msg.code}) \u2014 reload`);
-    }
-    if (msg.type === "error" && msg.code === "auth_failed") {
-      sock.onclose = null;
-      sock.close();
-      if (E.ws === sock) E.ws = null;
-      setConn("err", "sign-in expired \u2014 reload to reconnect");
-    }
-    if (msg.type === "doc_info") {
-      E.peerState = {};
-      E.joinedDocId = msg.docId || state.docId;
-      if (typeof msg.role === "string") setRole(msg.role);
-      setConn("live", liveLabel());
-      renderPeers();
-      startPresenceKeepalive();
-    }
-    if (msg.type === "presence") {
-      let full3 = false, roster = false;
-      for (const [cid, e] of Object.entries(msg.peers || {})) {
-        if (cid === E.myClientId || cid.endsWith(":" + E.myClientId)) continue;
-        const old = E.peerState[cid];
-        if (e === null) {
-          if (old) {
-            delete E.peerState[cid];
-            full3 = roster = true;
-          }
-          continue;
-        }
-        if (!old || peerName(old) !== peerName(e) || (old.user && old.user.color) !== (e.user && e.user.color)) roster = full3 = true;
-        else if (!onlyPointerMoved(old.state, e.state)) full3 = true;
-        E.peerState[cid] = e;
-        const presenting = e.state?.presenting === true;
-        if (old?.state?.presenting === true !== presenting) {
-          roster = true;
-          if (presenting && !E.presenting) {
-            followAction(cid, false, true);
-            toast(`Following ${peerName(e)}. Pan or zoom to stop.`, 5e3);
-          } else if (!presenting && E.followPeer === cid && E.followPresentation) {
-            followAction(null);
-          }
-        }
-      }
-      if (full3) drawPeers(E.peerState);
-      else movePeerCursors(E.peerState);
-      if (E.followPeer) applyFollowWeb(E.peerState);
-      if (roster) renderPeers();
-    }
-    if (msg.type === "peer_left" && msg.clientId) {
-      delete E.peerState[msg.clientId];
-      drawPeers(E.peerState);
-      applyFollowWeb(E.peerState);
-      renderPeers();
-    }
-    if (msg.type === "ack" && msg.clientOpId) {
-      E.pendingOps.delete(msg.clientOpId);
-      E.lastSeq = Math.max(E.lastSeq, Number(msg.seq) || 0);
-      updateTitle();
-    }
-    if (msg.type === "error" && (msg.code === "permission_denied" || msg.code === "bad_op" || msg.code === "internal" || msg.code === "not_found")) onOpRejected(sock, msg);
-    if (msg.type === "error" && msg.code === "desynced") requestResync(sock, true);
-    if (msg.type === "error" && msg.code === "no_desktop") toast("Nobody has this board open in the desktop app, so zones keep their last fill. They refill as soon as someone opens it there.", 5e3);
-    if (msg.type === "error" && msg.code === "request_refused") toast("Only editors can ask for a refill");
-    if (msg.type === "role" && typeof msg.role === "string" && (!msg.docId || msg.docId === state.docId)) {
-      const was = setRole(msg.role);
-      if (E.viewOnly) {
-        E.drag = null;
-        dragG.replaceChildren();
-        if (E.tool !== "select" && E.tool !== "pan") setTool("select");
-      }
-      if (!E.canComment && E.tool === "comment") setTool("select");
-      setConn("live", liveLabel());
-      renderProps();
-      if (was !== msg.role) toast(msg.role === "editor" ? "You can now edit this project" : msg.role === "commenter" ? "You can now comment on this project, but not change it" : "You now have view-only access to this project", 4500);
-    }
-    if (msg.type === "comment") noteCommentMsg(msg);
-    if (msg.type === "chat") noteChatMsg(msg);
-    if (msg.type === "proposal") noteProposalMsg(msg);
-    if (msg.type === "versions") onVersionsNotice(msg);
-    if (msg.type === "docs") tellDocsChanged(msg);
-    if (msg.type === "saved") window.dispatchEvent(new CustomEvent("kc-doc-saved", { detail: msg }));
-    if (msg.type === "docs") void refreshDocs().then((added2) => {
-      if (!added2) void loadSheets2(typeof msg.addedDocId === "string" ? msg.addedDocId : null);
-    });
-    if (msg.type === "hierarchy" && typeof msg.parentDocId === "string") {
-      const parent = msg.parentDocId;
-      void refreshDocs().then(() => Promise.all([loadSheets2(parent, true), loadSheets(true)]));
-    }
-    if (historyActive() && (msg.type === "snapshot" || msg.type === "op" || msg.type === "ops" || msg.type === "reset")) {
-      if (msg.type === "op") {
-        E.editsSeen++;
-        bumpEdits();
-      }
-      return;
-    }
-    if (msg.type === "snapshot" && msg.docId === state.docId && typeof msg.file === "string") {
-      const same = E.loadedText !== null && E.loadedText === msg.file && E.loadedOpN === E.opN && !!E.kdoc;
-      E.loadedText = null;
-      const then = msg.thenOps || [];
-      const flat = (ops) => {
-        const out2 = [];
-        for (const op of ops) for (const c of op.changes || []) out2.push(c);
-        return out2;
-      };
-      let ok2 = true;
-      if (same) applyChanges(flat(then.filter((op) => !(Number(op.seq) <= E.loadedSeq))));
-      else ok2 = setDocFromText(msg.file, flat(then));
-      if (ok2) {
-        E.lastSeq = then.length ? Number(then[then.length - 1].seq) || Number(msg.seq) || 0 : Number(msg.seq) || 0;
-        if (!same) for (const op of E.pendingOps.values()) {
-          if (op.docId === state.docId) applyChanges(op.changes);
-        }
-        replayPending(sock);
-      }
-    }
-    if (msg.type === "op") {
-      if (noteSeq(msg.seq, sock) !== "apply") return;
-      E.editsSeen++;
-      if (E.kdoc) {
-        applyRemoteChanges(msg.changes);
-        reapplyPending(msg.changes);
-      } else noteRemoteOp(msg);
-      bumpEditsSoon();
-      if (!E.kdoc) scheduleRenderRefresh();
-    }
-    if (msg.type === "ops") {
-      for (const op of msg.ops || []) {
-        const step = noteSeq(op.seq, sock);
-        if (step === "gap") break;
-        if (step === "skip") continue;
-        E.editsSeen++;
-        if (E.kdoc) {
-          applyRemoteChanges(op.changes);
-          reapplyPending(op.changes);
-        } else noteRemoteOp(op);
-      }
-      bumpEditsSoon();
-      if (!E.kdoc) scheduleRenderRefresh();
-    }
-    if (msg.type === "reset" && msg.docId === state.docId) requestResync(sock, true);
-  };
-}
-function noteSeq(seq, sock) {
-  const n2 = Number(seq);
-  if (!n2) return "apply";
-  if (E.lastSeq && n2 <= E.lastSeq) return "skip";
-  if (E.lastSeq && n2 > E.lastSeq + 1) {
-    if (sock) requestResync(sock);
-    return "gap";
-  }
-  E.lastSeq = n2;
-  return "apply";
-}
-function requestResync(sock, force) {
-  const ws = sock || E.ws;
-  if (!ws || ws.readyState !== 1 || !state.docId) return;
-  if (!force && Date.now() - E.resyncAt < 3e3) return;
-  E.resyncAt = Date.now();
-  ws.send(JSON.stringify({ type: "resync", docId: state.docId }));
-}
-function onOpRejected(sock, msg) {
-  if (msg.clientOpId) {
-    E.pendingOps.delete(msg.clientOpId);
-    if (msg.code === "permission_denied" && typeof msg.role === "string") {
-      setRole(msg.role);
-      setConn("live", liveLabel());
-      renderProps();
-    }
-    toast(msg.code === "permission_denied" ? E.canComment ? "That edit was not saved: you can comment here, but not edit" : "That edit was not saved: you have view-only access" : "The server refused an edit; reloading it");
-    requestResync(sock);
-    return;
-  }
-  if (msg.code === "not_joined") {
-    E.joinedDocId = null;
-    sock.send(JSON.stringify({ type: "join_doc", docId: msg.docId || state.docId }));
-    return;
-  }
-  if (msg.code !== "permission_denied") {
-    toast("The server could not open this document here");
-    setConn("err", "join refused");
-    return;
-  }
-  E.viewOnly = true;
-  E.canComment = false;
-  store.set({ viewOnly: true, canComment: false });
-  E.drag = null;
-  dragG.replaceChildren();
-  setConn("err", "no access");
-  renderProps();
-  toast("You no longer have access to this project", 5e3);
-}
-function replayPending(sock) {
-  const ws = sock || E.ws;
-  if (!ws || ws.readyState !== 1) return;
-  for (const [clientOpId, op] of E.pendingOps) {
-    if (op.docId !== state.docId) continue;
-    ws.send(JSON.stringify({ type: "op", docId: op.docId, clientOpId, baseSeq: null, changes: op.changes }));
-  }
-}
-function reapplyPending(remote2) {
-  if (!E.pendingOps.size || !remote2 || !remote2.length) return;
-  const touched = /* @__PURE__ */ new Set();
-  let docLevel = false;
-  for (const c of remote2) {
-    if (c && c.id) touched.add(String(c.id));
-    else docLevel = true;
-  }
-  for (const op of E.pendingOps.values()) {
-    if (op.docId !== state.docId) continue;
-    const again2 = (op.changes || []).filter((c) => c && c.id ? touched.has(String(c.id)) : docLevel);
-    if (again2.length) applyChanges(again2);
-  }
-}
-function bumpEditsSoon() {
-  if (!editsTimer) editsTimer = window.setTimeout(() => {
-    editsTimer = 0;
-    bumpEdits();
-  }, 100);
-}
-function bumpEdits() {
-  store.slice("connection", { edits: E.editsSeen });
-  noteEdit();
-}
-function noteRemoteOp(msg) {
-  for (const c of msg.changes || []) {
-    if (c.typeName !== E.ITEM_TYPE) continue;
-    if (c.kind === "REMOVED") {
-      E.items = E.items.filter((f2) => f2.id !== c.id);
-      E.selection.delete(c.id);
-      if (E.selected && E.selected.id === c.id) {
-        E.selected = null;
-        renderProps();
-      }
-      continue;
-    }
-    const fp = E.items.find((f2) => f2.id === c.id);
-    if (!fp || c.kind !== "MODIFIED") continue;
-    for (const p of c.properties || []) {
-      if (p.name === "Position X" && p.after) fp.x = p.after.v;
-      if (p.name === "Position Y" && p.after) fp.y = p.after.v;
-      if (p.name === "Orientation" && p.after) fp.rot = p.after.v;
-    }
-    if (E.selected && E.selected.id === fp.id) renderProps();
-  }
-  drawSelection();
-  renderObjects();
-}
-function sendOp(changes, transient) {
-  if (historyActive()) {
-    if (!transient) toast("This is an earlier version. Leave the timeline to edit.");
-    return;
-  }
-  if (state.docId && (state.docId.startsWith("board:") || state.docId.startsWith("lib:"))) {
-    E.editsSeen++;
-    bumpEdits();
-    return;
-  }
-  const clientOpId = `web:${++E.opN}`;
-  if (!transient) {
-    E.pendingOps.set(clientOpId, { docId: state.docId, changes });
-    updateTitle();
-  }
-  if (E.ws && E.ws.readyState === 1 && E.joinedDocId === state.docId) {
-    E.ws.send(JSON.stringify({ type: "op", docId: state.docId, clientOpId, baseSeq: null, changes }));
-  } else if (!transient && (!E.ws || E.ws.readyState !== 1)) {
-    toast("Not connected \u2014 the change is kept and sent when the connection is back");
-  }
-  E.editsSeen++;
-  bumpEdits();
-  if (!E.kdoc) scheduleRenderRefresh();
-}
-var editsTimer;
-var init_net = __esm({
-  "web/domains/pcb/editor/net.ts"() {
-    "use strict";
-    init_appstore();
-    init_comments();
-    init_chat();
-    init_doc();
-    init_schnets();
-    init_hierarchy();
-    init_peers();
-    init_peercursors();
-    init_selection();
-    init_state();
-    init_tools();
-    init_util();
-    init_proposals();
-    init_versions();
-    init_view();
-    init_title();
-    init_roomapi();
-    editsTimer = 0;
   }
 });
 
@@ -80705,7 +79836,7 @@ var init_tables = __esm({
       { id: "pan", tool: "pan", name: "Pan the view", key: "", glyph: "<path d='M8 13V6a1.5 1.5 0 013 0v5M11 11V4a1.5 1.5 0 013 0v7M14 11V6a1.5 1.5 0 013 0v8a5 5 0 01-10 0v-2a1.5 1.5 0 013 0'/>" }
     ];
     COLLAB_FILE = ["collabStartSession", "collabJoinSession", "collabCopyLink", "collabComments", "collabFollow", "collabHistory", "collabCompare", "collabGithub", "collabVendorParts", "collabLeaveSession"];
-    HELP_MENU = ["help", "gettingStarted", "listHotKeys", "getInvolved", "reportBug", "-", "about"];
+    HELP_MENU = ["help", "gettingStarted", "ledTutorial", "listHotKeys", "getInvolved", "reportBug", "-", "about"];
     LANG_MENU = ["Set Language", ["languageEnglish"]];
     PLUGINS_MENU = ["External Plugins", ["pluginsReload", "pluginsShowFolder"]];
     MENUS = {
@@ -81535,6 +80666,1769 @@ var init_selection = __esm({
   }
 });
 
+// web/domains/pcb/editor/proposals.ts
+function el3(tag, cls, text3) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text3 !== void 0) e.textContent = text3;
+  return e;
+}
+function panel2() {
+  let p = document.getElementById("propPanel");
+  if (!p) {
+    const host2 = document.getElementById("cmtPanel")?.parentElement;
+    if (!host2) return null;
+    p = el3("div");
+    p.id = "propPanel";
+    host2.appendChild(p);
+    for (const type of ["pointerdown", "pointerup", "pointermove", "mousedown", "mouseup", "click", "dblclick", "wheel", "contextmenu", "keydown"]) p.addEventListener(type, (ev) => ev.stopPropagation());
+  }
+  return p;
+}
+async function loadProposals() {
+  const id = docId2();
+  rows = [];
+  full.clear();
+  rejecting = null;
+  clearPreview();
+  render2();
+  if (!id || !state.me) return;
+  try {
+    const j = await request3(`/api/docs/${id}/proposals?status=pending`);
+    if (docId2() !== id) return;
+    rows = (j.proposals || []).reverse();
+  } catch {
+    rows = [];
+  }
+  render2();
+}
+function noteProposalMsg(msg) {
+  const p = msg.proposal;
+  if (!p || p.docId !== docId2()) return;
+  if (msg.action === "added") {
+    if (!rows.some((r) => r.id === p.id)) rows.push(p);
+    open3 = true;
+    render2();
+    if (!previewing()) void preview(p.id, true);
+    return;
+  }
+  const had = rows.some((r) => r.id === p.id);
+  rows = rows.filter((r) => r.id !== p.id);
+  full.delete(p.id);
+  if (previewing() === p.id) clearPreview();
+  if (rejecting === p.id) rejecting = null;
+  render2();
+  if (!had) return;
+  const who = nameOf(p.decidedBy);
+  if (p.status === "accepted") toast(`${who} accepted "${p.title}"`, 3500);
+  else if (p.status === "rejected") toast(`${who} rejected "${p.title}"`, 3500);
+  else if (p.status === "withdrawn") toast(`"${p.title}" was withdrawn`, 3500);
+}
+async function load2(id) {
+  const have = full.get(id);
+  if (have) return have;
+  try {
+    const r = await request3(`/api/proposals/${id}`);
+    if (!r.body) return null;
+    full.set(id, r);
+    return r;
+  } catch {
+    toast("This proposal could not be loaded");
+    return null;
+  }
+}
+async function preview(id, quiet3 = false) {
+  const r = await load2(id);
+  if (!r || !rows.some((x) => x.id === id) || r.docId !== docId2()) return;
+  showPreview(asProposal(r), quiet3);
+  render2();
+}
+async function settle(id, status, reason = "") {
+  try {
+    await request3(`/api/proposals/${id}`, { method: "PATCH", body: JSON.stringify({ status, reason }) });
+    return true;
+  } catch (e) {
+    toast(/409/.test(String(e)) ? "Someone else has already decided this proposal" : "The decision could not be saved. Try again.");
+    void loadProposals();
+    return false;
+  }
+}
+async function accept(id) {
+  if (E.viewOnly) {
+    toast("You have view-only access to this project");
+    return;
+  }
+  const r = await load2(id);
+  if (!r) return;
+  const p = asProposal(r), stale2 = staleReason(p);
+  if (stale2) {
+    toast(stale2 + " Ask the assistant to propose it again.", 5e3);
+    render2();
+    return;
+  }
+  if (!await settle(id, "accepted")) return;
+  if (p.rules) {
+    const rules = p.rules;
+    try {
+      await saveProject((pro) => writeRules(pro, rules), "board rules");
+    } catch (e) {
+      console.warn("board rules were not saved:", e);
+      toast("The board rules of this proposal could not be saved");
+    }
+  }
+  if (p.changes.length) commitChanges(p.changes, "AI: " + p.title);
+  clearPreview();
+}
+function card(r) {
+  const c = el3("div", "prop-card" + (previewing() === r.id ? " shown" : ""));
+  c.dataset.proposal = r.id;
+  const meta2 = el3("div", "meta");
+  meta2.append(el3("b", "", author(r)), el3("span", "", ago(r.createdAt)));
+  c.append(meta2, el3("div", "prop-title", r.title));
+  if (r.rationale) c.appendChild(el3("div", "prop-why", r.rationale));
+  const list = el3("ul", "prop-lines"), shown2 = r.lines.slice(0, 8);
+  for (const l of shown2) {
+    const li = el3("li", l.kind, l.text);
+    list.appendChild(li);
+  }
+  if (r.lines.length > shown2.length) list.appendChild(el3("li", "more", `and ${r.lines.length - shown2.length} more`));
+  c.appendChild(list);
+  if (r.connectivity && r.connectivity.length) c.appendChild(el3("div", "prop-warn", `Changes connections: ${r.connectivity.slice(0, 3).join("; ")}${r.connectivity.length > 3 ? ` and ${r.connectivity.length - 3} more` : ""}`));
+  if (r.rules) c.appendChild(el3("div", "prop-note", "Also changes the board rules in the project file."));
+  const have = full.get(r.id), stale2 = have ? staleReason(asProposal(have)) : null;
+  if (stale2) c.appendChild(el3("div", "prop-warn", stale2));
+  const row3 = el3("div", "row");
+  const show6 = el3("button", "btn sm", previewing() === r.id ? "Hide" : "Show");
+  show6.type = "button";
+  show6.dataset.act = "show";
+  show6.title = "Draw this change over the design without applying it";
+  show6.addEventListener("click", () => {
+    if (previewing() === r.id) {
+      clearPreview();
+      render2();
+    } else void preview(r.id);
+  });
+  if (E.viewOnly) {
+    row3.append(show6, el3("span", "hint", "Only editors can accept or reject."));
+    c.appendChild(row3);
+    return c;
+  }
+  if (rejecting === r.id) {
+    const why2 = el3("input");
+    why2.type = "text";
+    why2.placeholder = "Why (optional, the assistant reads it)";
+    why2.maxLength = 300;
+    why2.dataset.act = "why";
+    const send3 = el3("button", "btn sm", "Reject"), back = el3("button", "btn sm", "Cancel");
+    send3.type = "button";
+    back.type = "button";
+    send3.dataset.act = "reject-send";
+    const go = () => {
+      void settle(r.id, "rejected", why2.value.trim());
+    };
+    send3.addEventListener("click", go);
+    why2.addEventListener("keydown", (ev) => {
+      ev.stopPropagation();
+      if (ev.key === "Enter") go();
+      if (ev.key === "Escape") {
+        rejecting = null;
+        render2();
+      }
+    });
+    back.addEventListener("click", () => {
+      rejecting = null;
+      render2();
+    });
+    row3.append(why2, send3, back);
+    c.appendChild(row3);
+    setTimeout(() => why2.focus(), 0);
+    return c;
+  }
+  const ok2 = el3("button", "btn sm primary", "Accept"), no = el3("button", "btn sm", stale2 ? "Dismiss" : "Reject");
+  ok2.type = "button";
+  no.type = "button";
+  ok2.dataset.act = "accept";
+  no.dataset.act = "reject";
+  ok2.disabled = !!stale2;
+  ok2.title = "Apply this change to the design as one undo step";
+  ok2.addEventListener("click", () => {
+    ok2.disabled = true;
+    void accept(r.id).finally(() => {
+      ok2.disabled = false;
+    });
+  });
+  no.addEventListener("click", () => {
+    if (stale2) void settle(r.id, "stale", stale2);
+    else {
+      rejecting = r.id;
+      render2();
+    }
+  });
+  row3.append(ok2, no, el3("span", "grow"), show6);
+  c.appendChild(row3);
+  return c;
+}
+function render2() {
+  const p = panel2();
+  if (!p) return;
+  p.replaceChildren();
+  if (!rows.length) {
+    p.classList.remove("open");
+    return;
+  }
+  p.classList.add("open");
+  const head3 = el3("div", "prop-head"), fold = el3("button", "prop-fold");
+  fold.appendChild(treeExpander(open3));
+  fold.type = "button";
+  fold.title = open3 ? "Fold" : "Unfold";
+  const toggle = () => {
+    open3 = !open3;
+    if (!open3) clearPreview();
+    render2();
+  };
+  fold.addEventListener("click", toggle);
+  const title = el3("span", "prop-heading", rows.length === 1 ? "1 proposed change" : `${rows.length} proposed changes`);
+  title.addEventListener("click", toggle);
+  head3.append(fold, title);
+  p.appendChild(head3);
+  if (!open3) return;
+  const list = el3("div", "prop-list");
+  for (const r of rows) list.appendChild(card(r));
+  p.appendChild(list);
+}
+var rows, open3, rejecting, full, docId2, request3, nameOf, author, asProposal;
+var init_proposals = __esm({
+  "web/domains/pcb/editor/proposals.ts"() {
+    "use strict";
+    init_proposals2();
+    init_project();
+    init_appstore();
+    init_state();
+    init_tools();
+    init_util();
+    init_kicon_dom();
+    rows = [];
+    open3 = true;
+    rejecting = null;
+    full = /* @__PURE__ */ new Map();
+    docId2 = () => {
+      const id = state.docId;
+      return id && !id.startsWith("board:") && !id.startsWith("lib:") ? id : null;
+    };
+    request3 = api4;
+    nameOf = (w) => w ? w.name || w.login : "Someone";
+    author = (r) => `${nameOf(r.by)}'s assistant${r.app ? ` (${r.app})` : ""}`;
+    asProposal = (r) => ({
+      id: r.id,
+      title: r.title,
+      rationale: r.rationale,
+      docId: r.docId,
+      docPath: r.docPath,
+      lines: r.lines.map((l) => ({ kind: l.kind, text: l.text, ids: [] })),
+      changes: r.body?.changes || [],
+      basis: r.body?.basis || {},
+      status: "pending",
+      rules: r.body?.rules || void 0
+    });
+  }
+});
+
+// web/platform/history/request.ts
+var init_request = __esm({
+  "web/platform/history/request.ts"() {
+    "use strict";
+  }
+});
+
+// web/domains/pcb/editor/versions.ts
+async function call2(path2, method = "GET", body) {
+  const r = await fetch(path2, { method, credentials: "same-origin", headers: body === void 0 ? {} : { "content-type": "application/json" }, body: body === void 0 ? void 0 : JSON.stringify(body) });
+  let json = null;
+  try {
+    json = await r.json();
+  } catch (e) {
+  }
+  if (!r.ok) {
+    const j = json;
+    const err = new Error(j && j.message || `the server answered ${r.status}`);
+    err.code = j && j.error || void 0;
+    err.status = r.status;
+    throw err;
+  }
+  return json;
+}
+async function loadVersions() {
+  const p = app().project;
+  if (!p) return;
+  const n2 = ++loadN2, pid = p.projectId;
+  put2({ loading: true });
+  try {
+    const [tl, br] = await Promise.all([
+      call2(`/api/projects/${pid}/timeline`),
+      app().me ? call2(`/api/projects/${pid}/branches`).catch(() => null) : Promise.resolve(null)
+    ]);
+    if (n2 !== loadN2 || !app().project || app().project.projectId !== pid) return;
+    put2({
+      loading: false,
+      error: null,
+      list: tl.versions,
+      runs: tl.runs,
+      docs: tl.docs,
+      parentId: tl.parentId,
+      branchName: tl.branchName,
+      branches: br ? br.branches : [],
+      main: br ? br.main : null
+    });
+    store.set({ history: { groups: tl.versions.filter((v2) => v2.kind === "named").map((v2) => ({ name: v2.name || "", at: v2.createdAt, docs: v2.docs.length })), loading: false, error: null } });
+    const v = slice().view;
+    if (v) {
+      const d = tl.docs.find((x) => x.docId === v.docId);
+      if (d && d.head !== v.head) {
+        indexes.delete(v.docId);
+        put2({ view: { ...v, head: d.head, marks: marksFor(v.docId) } });
+        void loadIndex(v.docId);
+      } else put2({ view: { ...v, marks: marksFor(v.docId), versionId: versionAt(v.docId, v.seq) } });
+    }
+  } catch (e) {
+    if (n2 !== loadN2) return;
+    put2({ loading: false, error: why(e) });
+  }
+}
+function onVersionsNotice(msg) {
+  const p = app().project;
+  if (!p || msg.projectId && msg.projectId !== p.projectId) return;
+  if (msg.what === "branch_deleted") {
+    const parent = slice().parentId;
+    toast("This branch was deleted. Back to the main line.", 4e3);
+    if (parent) navigate(`/p/${parent}/edit`, false);
+    return;
+  }
+  clearTimeout(noticeTimer);
+  noticeTimer = window.setTimeout(() => {
+    void loadVersions();
+  }, 120);
+}
+function noteEdit() {
+  clearTimeout(editTimer);
+  editTimer = window.setTimeout(() => {
+    if (app().view === "editor" && app().project) void loadVersions();
+  }, 1500);
+}
+function marksFor(docId3) {
+  const out2 = [];
+  for (const v of slice().list) {
+    const d = v.docs.find((x) => x.docId === docId3);
+    if (d) out2.push({ seq: d.seq, name: v.name || "Kept automatically", named: v.kind === "named" });
+  }
+  return out2;
+}
+function versionAt(docId3, seq) {
+  const hit5 = slice().list.find((v) => v.docs.some((d) => d.docId === docId3 && d.seq === seq));
+  return hit5 ? hit5.id : null;
+}
+function describe2(docId3, seq) {
+  const ix = indexes.get(docId3);
+  if (!ix) return { at: null, who: null };
+  let lo = 0, hi = ix.seqs.length - 1, k = -1;
+  while (lo <= hi) {
+    const mid2 = lo + hi >> 1;
+    if (ix.seqs[mid2] <= seq) {
+      k = mid2;
+      lo = mid2 + 1;
+    } else hi = mid2 - 1;
+  }
+  if (k < 0) return { at: ix.floorAt, who: null };
+  const p = ix.people[ix.who[k]];
+  return { at: ix.times[k], who: p ? p.name || p.login || null : null };
+}
+async function loadIndex(docId3) {
+  if (indexes.has(docId3)) return;
+  try {
+    const ix = await call2(`/api/docs/${docId3}/history`);
+    indexes.set(docId3, ix);
+    const v = slice().view;
+    if (v && v.docId === docId3) put2({ view: { ...v, floor: ix.floor, head: Math.max(v.head, ix.head), ...describe2(docId3, v.seq) } });
+  } catch (e) {
+  }
+}
+function stopPlay() {
+  if (playTimer) {
+    clearInterval(playTimer);
+    playTimer = 0;
+  }
+  const v = slice().view;
+  if (v && v.playing) put2({ view: { ...v, playing: false } });
+}
+function dropHistoryView() {
+  stopPlay();
+  want = null;
+  shown = null;
+  if (E.history) {
+    E.viewOnly = !!E.history.viewOnly;
+    E.history = null;
+    store.set({ viewOnly: E.viewOnly });
+  }
+  if (slice().view) put2({ view: null });
+}
+function holdViewOnly(v) {
+  if (!E.history) return false;
+  E.history.viewOnly = !!v;
+  return true;
+}
+function canEdit() {
+  const role = store.get().role;
+  if (role === "editor") return true;
+  toast(app().me ? "Only editors can do that" : "Sign in to do that");
+  return false;
+}
+function saveVersionDialog() {
+  if (!app().project) return;
+  if (!canEdit()) return;
+  const v = slice().view;
+  openDialog3(v && v.seq < v.head ? { kind: "save", at: { docId: v.docId, seq: v.seq } } : { kind: "save" });
+}
+var app, slice, put2, why, loadN2, noticeTimer, editTimer, indexes, shown, want, playTimer, historyActive, openDialog3;
+var init_versions = __esm({
+  "web/domains/pcb/editor/versions.ts"() {
+    "use strict";
+    init_appstore();
+    init_doc();
+    init_dochost();
+    init_home();
+    init_net();
+    init_state();
+    init_util();
+    init_request();
+    app = () => state;
+    slice = () => store.get().versions;
+    put2 = (patch) => {
+      store.slice("versions", patch);
+    };
+    why = (e) => e instanceof Error ? e.message : String(e);
+    loadN2 = 0;
+    noticeTimer = 0;
+    editTimer = 0;
+    indexes = /* @__PURE__ */ new Map();
+    shown = null;
+    want = null;
+    playTimer = 0;
+    historyActive = () => !!E.history;
+    openDialog3 = (dialog) => put2({ dialog });
+  }
+});
+
+// web/domains/pcb/editor/title.ts
+function frameTitle() {
+  const s2 = store.get();
+  if (s2.view !== "editor" || !state.doc || document.documentElement.dataset.symedit !== void 0) return null;
+  const docType = state.doc.docType;
+  if (E.DOC_TYPE === "footprint" || docType !== "kicad_sch" && docType !== "kicad_pcb") return null;
+  let modified2 = false;
+  for (const op of E.pendingOps.values()) if (op.docId === state.docId) {
+    modified2 = true;
+    break;
+  }
+  const ro = E.viewOnly ? " [Read Only]" : "";
+  if (docType === "kicad_pcb") return `${modified2 ? "*" : ""}${stem(state.doc.path)}${ro} \u2014 PCB Editor`;
+  const name = stem(state.doc.path);
+  const rootId = s2.document.rootDocId;
+  const root5 = rootId ? s2.document.docs.find((d) => d.docId === rootId) : null;
+  const kdoc3 = E.kdoc;
+  const sub2 = kdoc3 && kdoc3.sheetPath && kdoc3.sheetPath !== "/" ? kdoc3.sheetPath.replace(/^\/|\/$/g, "") : "";
+  let sheetPath = (root5 ? stem(root5.path) : name) + (sub2 ? "/" + sub2 : "");
+  const tops = topLevelSchematics();
+  if (tops.length > 1 && sub2) {
+    const segs = sub2.split("/"), top2 = tops.find((t) => t.name === segs[0]);
+    if (top2) sheetPath = stem(top2.doc.path) + (segs.length > 1 ? "/" + segs.slice(1).join("/") : "");
+  }
+  return `${modified2 ? "*" : ""}${name}${sheetPath !== name ? ` [${sheetPath}]` : ""}${ro} \u2014 Schematic Editor`;
+}
+function updateTitle() {
+  const t = frameTitle();
+  if (t === null || t === last && document.title === t) return;
+  last = t;
+  document.title = t;
+}
+var stem, last;
+var init_title = __esm({
+  "web/domains/pcb/editor/title.ts"() {
+    "use strict";
+    init_doc();
+    init_appstore();
+    init_state();
+    stem = (path2) => (path2 || "").split("/").pop().replace(/\.kicad_(sch|pcb)$/, "");
+    last = "";
+    store.subscribe(() => updateTitle());
+  }
+});
+
+// web/platform/doctabs/roomapi.ts
+function parseDocsNotice(msg) {
+  const m = msg;
+  if (!m || m.type !== "docs" || typeof m.n !== "string" || typeof m.projectId !== "string" || !m.doc || typeof m.doc.path !== "string") return null;
+  if (m.change !== "added" && m.change !== "renamed" && m.change !== "deleted") return null;
+  const name = m.change === "renamed" && typeof m.from === "string" ? `${stem2(m.from)} to ${stem2(m.doc.path)}` : stem2(m.doc.path);
+  const login = m.by && typeof m.by.login === "string" ? m.by.login : "";
+  return { n: m.n, projectId: m.projectId, note: { what: m.change, name: name.slice(0, 120) }, by: { userId: m.by && typeof m.by.userId === "number" ? m.by.userId : 0, login, name: m.by && typeof m.by.name === "string" && m.by.name || login || "Someone" } };
+}
+function tellDocsChanged(msg) {
+  const notice = parseDocsNotice(msg);
+  if (!notice || told.includes(notice.n) || typeof window === "undefined") return;
+  told.push(notice.n);
+  if (told.length > 50) told.shift();
+  window.dispatchEvent(new CustomEvent(DOCS_EVENT, { detail: notice }));
+}
+var DOCS_EVENT, stem2, told;
+var init_roomapi = __esm({
+  "web/platform/doctabs/roomapi.ts"() {
+    "use strict";
+    DOCS_EVENT = "junction-project-docs";
+    stem2 = (path2) => (path2.split("/").pop() || path2).replace(/\.[^.]+$/, "");
+    told = [];
+  }
+});
+
+// web/domains/pcb/editor/net.ts
+function setConn(cls, text3) {
+  store.slice("connection", { status: cls === "live" ? "live" : cls === "err" ? "error" : "offline", text: text3 || (cls === "live" ? "live" : "offline") });
+}
+function setRole(role) {
+  const was = state.role;
+  state.role = role;
+  const vo = !state.me || role !== "editor";
+  if (!holdViewOnly(vo)) E.viewOnly = vo;
+  E.canComment = !!state.me && (role === "editor" || role === "commenter");
+  const can = { ...store.get().can || { copy: true, share: false, manage: false }, edit: !E.viewOnly, comment: E.canComment };
+  store.set({ role, viewOnly: E.viewOnly, canComment: E.canComment, can });
+  return was;
+}
+function liveLabel() {
+  return (E.history ? E.history.viewOnly : E.viewOnly) ? E.canComment ? "live \xB7 comment-only" : "live \xB7 view-only" : "live";
+}
+async function connect() {
+  const gen = ++E.connectGen;
+  setConn("err", E.retries ? `reconnecting\u2026` : "connecting\u2026");
+  let ticket;
+  try {
+    ticket = state.me ? (await api4("/api/ws-ticket")).token || "" : "";
+  } catch (e) {
+    if (gen !== E.connectGen) return;
+    if (/^40[13] /.test(String(e && e.message))) {
+      setConn("err", "sign-in expired \u2014 reload to reconnect");
+      return;
+    }
+    const delay = Math.min(15e3, 1e3 * Math.pow(2, E.retries++));
+    setConn("err", `reconnecting in ${Math.round(delay / 1e3)}s`);
+    setTimeout(() => {
+      if (state.view === "editor" && gen === E.connectGen) connect().catch(() => {
+      });
+    }, delay);
+    return;
+  }
+  if (gen !== E.connectGen || state.view !== "editor") return;
+  E.wsToken = ticket;
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  let sock;
+  try {
+    sock = new WebSocket(`${proto}://${location.host}/ws`);
+  } catch (e) {
+    setConn("err", "connection blocked (VPN or proxy?)");
+    return;
+  }
+  E.ws = sock;
+  E.joinedDocId = null;
+  let handshakeDone = false;
+  const watchdog = setTimeout(() => {
+    if (E.ws !== sock || handshakeDone) return;
+    console.warn("collab socket: no answer to hello within 8s (VPN/proxy?)");
+    setConn("err", "no answer from server (VPN or proxy?) \u2014 retrying");
+    sock.close();
+  }, 8e3);
+  sock.onopen = () => {
+    if (E.ws !== sock) return;
+    if (!E.myClientId) E.myClientId = "web-" + Math.random().toString(36).slice(2, 10);
+    sock.send(JSON.stringify({ type: "hello", proto: 1, token: E.wsToken, clientId: E.myClientId, linkToken: null, client: "web" }));
+  };
+  sock.onclose = (ev) => {
+    clearTimeout(watchdog);
+    console.warn(`collab socket closed: code=${ev.code} clean=${ev.wasClean} reason=${JSON.stringify(ev.reason || "")}`);
+    if (E.ws !== sock || gen !== E.connectGen) return;
+    E.ws = null;
+    E.joinedDocId = null;
+    peersG.replaceChildren();
+    clearPeerCursors();
+    E.peerState = {};
+    renderPeers();
+    const delay = Math.min(15e3, 1e3 * Math.pow(2, E.retries++));
+    setConn("err", `reconnecting in ${Math.round(delay / 1e3)}s`);
+    setTimeout(() => {
+      if (state.view === "editor" && gen === E.connectGen) connect().catch(() => {
+      });
+    }, delay);
+  };
+  sock.onmessage = (ev) => {
+    if (E.ws !== sock) return;
+    const msg = JSON.parse(ev.data);
+    if (msg.type === "error") console.warn("collab server error:", msg.code, msg.docId || "");
+    if (msg.type === "hello_ok") {
+      handshakeDone = true;
+      clearTimeout(watchdog);
+      E.retries = 0;
+      if (msg.clientId) E.myClientId = msg.clientId;
+      sock.send(JSON.stringify({ type: "join_doc", docId: state.docId }));
+      let pinger;
+      const ping = () => {
+        if (E.ws !== sock || sock.readyState !== 1) {
+          clearInterval(pinger);
+          return;
+        }
+        sock.send(JSON.stringify({ type: "ping", t: performance.now() }));
+      };
+      if (Array.isArray(msg.caps) && msg.caps.includes("ping")) {
+        pinger = setInterval(ping, 2e3);
+        ping();
+        setTimeout(ping, 300);
+      }
+    }
+    if (msg.type === "pong" && typeof msg.t === "number") {
+      noteRtt(performance.now() - msg.t);
+      return;
+    }
+    if (msg.type === "error" && (msg.code === "bad_message" || msg.code === "unsupported_protocol") && msg.message !== "presence state too large") {
+      setConn("err", `server refused the session (${msg.code}) \u2014 reload`);
+    }
+    if (msg.type === "error" && msg.code === "auth_failed") {
+      sock.onclose = null;
+      sock.close();
+      if (E.ws === sock) E.ws = null;
+      setConn("err", "sign-in expired \u2014 reload to reconnect");
+    }
+    if (msg.type === "doc_info") {
+      E.peerState = {};
+      E.joinedDocId = msg.docId || state.docId;
+      if (typeof msg.role === "string") setRole(msg.role);
+      setConn("live", liveLabel());
+      renderPeers();
+      startPresenceKeepalive();
+    }
+    if (msg.type === "presence") {
+      let full3 = false, roster = false;
+      for (const [cid, e] of Object.entries(msg.peers || {})) {
+        if (cid === E.myClientId || cid.endsWith(":" + E.myClientId)) continue;
+        const old = E.peerState[cid];
+        if (e === null) {
+          if (old) {
+            delete E.peerState[cid];
+            full3 = roster = true;
+          }
+          continue;
+        }
+        if (!old || peerName(old) !== peerName(e) || (old.user && old.user.color) !== (e.user && e.user.color)) roster = full3 = true;
+        else if (!onlyPointerMoved(old.state, e.state)) full3 = true;
+        E.peerState[cid] = e;
+        const presenting = e.state?.presenting === true;
+        if (old?.state?.presenting === true !== presenting) {
+          roster = true;
+          if (presenting && !E.presenting) {
+            followAction(cid, false, true);
+            toast(`Following ${peerName(e)}. Pan or zoom to stop.`, 5e3);
+          } else if (!presenting && E.followPeer === cid && E.followPresentation) {
+            followAction(null);
+          }
+        }
+      }
+      if (full3) drawPeers(E.peerState);
+      else movePeerCursors(E.peerState);
+      if (E.followPeer) applyFollowWeb(E.peerState);
+      if (roster) renderPeers();
+    }
+    if (msg.type === "peer_left" && msg.clientId) {
+      delete E.peerState[msg.clientId];
+      drawPeers(E.peerState);
+      applyFollowWeb(E.peerState);
+      renderPeers();
+    }
+    if (msg.type === "ack" && msg.clientOpId) {
+      E.pendingOps.delete(msg.clientOpId);
+      E.lastSeq = Math.max(E.lastSeq, Number(msg.seq) || 0);
+      updateTitle();
+    }
+    if (msg.type === "error" && (msg.code === "permission_denied" || msg.code === "bad_op" || msg.code === "internal" || msg.code === "not_found")) onOpRejected(sock, msg);
+    if (msg.type === "error" && msg.code === "desynced") requestResync(sock, true);
+    if (msg.type === "error" && msg.code === "no_desktop") toast("Nobody has this board open in the desktop app, so zones keep their last fill. They refill as soon as someone opens it there.", 5e3);
+    if (msg.type === "error" && msg.code === "request_refused") toast("Only editors can ask for a refill");
+    if (msg.type === "role" && typeof msg.role === "string" && (!msg.docId || msg.docId === state.docId)) {
+      const was = setRole(msg.role);
+      if (E.viewOnly) {
+        E.drag = null;
+        dragG2.replaceChildren();
+        if (E.tool !== "select" && E.tool !== "pan") setTool("select");
+      }
+      if (!E.canComment && E.tool === "comment") setTool("select");
+      setConn("live", liveLabel());
+      renderProps();
+      if (was !== msg.role) toast(msg.role === "editor" ? "You can now edit this project" : msg.role === "commenter" ? "You can now comment on this project, but not change it" : "You now have view-only access to this project", 4500);
+    }
+    if (msg.type === "comment") noteCommentMsg(msg);
+    if (msg.type === "chat") noteChatMsg(msg);
+    if (msg.type === "proposal") noteProposalMsg(msg);
+    if (msg.type === "versions") onVersionsNotice(msg);
+    if (msg.type === "docs") tellDocsChanged(msg);
+    if (msg.type === "saved") window.dispatchEvent(new CustomEvent("kc-doc-saved", { detail: msg }));
+    if (msg.type === "docs") void refreshDocs().then((added2) => {
+      if (!added2) void loadSheets2(typeof msg.addedDocId === "string" ? msg.addedDocId : null);
+    });
+    if (msg.type === "hierarchy" && typeof msg.parentDocId === "string") {
+      const parent = msg.parentDocId;
+      void refreshDocs().then(() => Promise.all([loadSheets2(parent, true), loadSheets(true)]));
+    }
+    if (historyActive() && (msg.type === "snapshot" || msg.type === "op" || msg.type === "ops" || msg.type === "reset")) {
+      if (msg.type === "op") {
+        E.editsSeen++;
+        bumpEdits();
+      }
+      return;
+    }
+    if (msg.type === "snapshot" && msg.docId === state.docId && typeof msg.file === "string") {
+      const same = E.loadedText !== null && E.loadedText === msg.file && E.loadedOpN === E.opN && !!E.kdoc;
+      E.loadedText = null;
+      const then = msg.thenOps || [];
+      const flat = (ops) => {
+        const out2 = [];
+        for (const op of ops) for (const c of op.changes || []) out2.push(c);
+        return out2;
+      };
+      let ok2 = true;
+      if (same) applyChanges(flat(then.filter((op) => !(Number(op.seq) <= E.loadedSeq))));
+      else ok2 = setDocFromText(msg.file, flat(then));
+      if (ok2) {
+        E.lastSeq = then.length ? Number(then[then.length - 1].seq) || Number(msg.seq) || 0 : Number(msg.seq) || 0;
+        if (!same) for (const op of E.pendingOps.values()) {
+          if (op.docId === state.docId) applyChanges(op.changes);
+        }
+        replayPending(sock);
+      }
+    }
+    if (msg.type === "op") {
+      if (noteSeq(msg.seq, sock) !== "apply") return;
+      E.editsSeen++;
+      if (E.kdoc) {
+        applyRemoteChanges(msg.changes);
+        reapplyPending(msg.changes);
+      } else noteRemoteOp(msg);
+      bumpEditsSoon();
+      if (!E.kdoc) scheduleRenderRefresh();
+    }
+    if (msg.type === "ops") {
+      for (const op of msg.ops || []) {
+        const step = noteSeq(op.seq, sock);
+        if (step === "gap") break;
+        if (step === "skip") continue;
+        E.editsSeen++;
+        if (E.kdoc) {
+          applyRemoteChanges(op.changes);
+          reapplyPending(op.changes);
+        } else noteRemoteOp(op);
+      }
+      bumpEditsSoon();
+      if (!E.kdoc) scheduleRenderRefresh();
+    }
+    if (msg.type === "reset" && msg.docId === state.docId) requestResync(sock, true);
+  };
+}
+function noteSeq(seq, sock) {
+  const n2 = Number(seq);
+  if (!n2) return "apply";
+  if (E.lastSeq && n2 <= E.lastSeq) return "skip";
+  if (E.lastSeq && n2 > E.lastSeq + 1) {
+    if (sock) requestResync(sock);
+    return "gap";
+  }
+  E.lastSeq = n2;
+  return "apply";
+}
+function requestResync(sock, force) {
+  const ws = sock || E.ws;
+  if (!ws || ws.readyState !== 1 || !state.docId) return;
+  if (!force && Date.now() - E.resyncAt < 3e3) return;
+  E.resyncAt = Date.now();
+  ws.send(JSON.stringify({ type: "resync", docId: state.docId }));
+}
+function onOpRejected(sock, msg) {
+  if (msg.clientOpId) {
+    E.pendingOps.delete(msg.clientOpId);
+    if (msg.code === "permission_denied" && typeof msg.role === "string") {
+      setRole(msg.role);
+      setConn("live", liveLabel());
+      renderProps();
+    }
+    toast(msg.code === "permission_denied" ? E.canComment ? "That edit was not saved: you can comment here, but not edit" : "That edit was not saved: you have view-only access" : "The server refused an edit; reloading it");
+    requestResync(sock);
+    return;
+  }
+  if (msg.code === "not_joined") {
+    E.joinedDocId = null;
+    sock.send(JSON.stringify({ type: "join_doc", docId: msg.docId || state.docId }));
+    return;
+  }
+  if (msg.code !== "permission_denied") {
+    toast("The server could not open this document here");
+    setConn("err", "join refused");
+    return;
+  }
+  E.viewOnly = true;
+  E.canComment = false;
+  store.set({ viewOnly: true, canComment: false });
+  E.drag = null;
+  dragG2.replaceChildren();
+  setConn("err", "no access");
+  renderProps();
+  toast("You no longer have access to this project", 5e3);
+}
+function replayPending(sock) {
+  const ws = sock || E.ws;
+  if (!ws || ws.readyState !== 1) return;
+  for (const [clientOpId, op] of E.pendingOps) {
+    if (op.docId !== state.docId) continue;
+    ws.send(JSON.stringify({ type: "op", docId: op.docId, clientOpId, baseSeq: null, changes: op.changes }));
+  }
+}
+function reapplyPending(remote2) {
+  if (!E.pendingOps.size || !remote2 || !remote2.length) return;
+  const touched = /* @__PURE__ */ new Set();
+  let docLevel = false;
+  for (const c of remote2) {
+    if (c && c.id) touched.add(String(c.id));
+    else docLevel = true;
+  }
+  for (const op of E.pendingOps.values()) {
+    if (op.docId !== state.docId) continue;
+    const again2 = (op.changes || []).filter((c) => c && c.id ? touched.has(String(c.id)) : docLevel);
+    if (again2.length) applyChanges(again2);
+  }
+}
+function bumpEditsSoon() {
+  if (!editsTimer) editsTimer = window.setTimeout(() => {
+    editsTimer = 0;
+    bumpEdits();
+  }, 100);
+}
+function bumpEdits() {
+  store.slice("connection", { edits: E.editsSeen });
+  noteEdit();
+}
+function noteRemoteOp(msg) {
+  for (const c of msg.changes || []) {
+    if (c.typeName !== E.ITEM_TYPE) continue;
+    if (c.kind === "REMOVED") {
+      E.items = E.items.filter((f2) => f2.id !== c.id);
+      E.selection.delete(c.id);
+      if (E.selected && E.selected.id === c.id) {
+        E.selected = null;
+        renderProps();
+      }
+      continue;
+    }
+    const fp = E.items.find((f2) => f2.id === c.id);
+    if (!fp || c.kind !== "MODIFIED") continue;
+    for (const p of c.properties || []) {
+      if (p.name === "Position X" && p.after) fp.x = p.after.v;
+      if (p.name === "Position Y" && p.after) fp.y = p.after.v;
+      if (p.name === "Orientation" && p.after) fp.rot = p.after.v;
+    }
+    if (E.selected && E.selected.id === fp.id) renderProps();
+  }
+  drawSelection();
+  renderObjects();
+}
+function sendOp(changes, transient) {
+  if (historyActive()) {
+    if (!transient) toast("This is an earlier version. Leave the timeline to edit.");
+    return;
+  }
+  if (state.docId && (state.docId.startsWith("board:") || state.docId.startsWith("lib:"))) {
+    E.editsSeen++;
+    bumpEdits();
+    return;
+  }
+  const clientOpId = `web:${++E.opN}`;
+  if (!transient) {
+    E.pendingOps.set(clientOpId, { docId: state.docId, changes });
+    updateTitle();
+  }
+  if (E.ws && E.ws.readyState === 1 && E.joinedDocId === state.docId) {
+    E.ws.send(JSON.stringify({ type: "op", docId: state.docId, clientOpId, baseSeq: null, changes }));
+  } else if (!transient && (!E.ws || E.ws.readyState !== 1)) {
+    toast("Not connected \u2014 the change is kept and sent when the connection is back");
+  }
+  E.editsSeen++;
+  bumpEdits();
+  if (!E.kdoc) scheduleRenderRefresh();
+}
+var editsTimer;
+var init_net = __esm({
+  "web/domains/pcb/editor/net.ts"() {
+    "use strict";
+    init_appstore();
+    init_comments();
+    init_chat();
+    init_doc();
+    init_schnets();
+    init_hierarchy();
+    init_peers();
+    init_peercursors();
+    init_selection();
+    init_state();
+    init_tools();
+    init_util();
+    init_proposals();
+    init_versions();
+    init_view();
+    init_title();
+    init_roomapi();
+    editsTimer = 0;
+  }
+});
+
+// web/domains/pcb/editor/wheel-model.ts
+var init_wheel_model = __esm({
+  "web/domains/pcb/editor/wheel-model.ts"() {
+    "use strict";
+  }
+});
+
+// web/domains/pcb/editor/gestures.ts
+function selectionIds() {
+  const d = doc();
+  if (!d) return [];
+  const ids = new Set(E.selection);
+  if (E.selected) ids.add(E.selected.id);
+  if (isSch()) {
+    const s2 = schState();
+    if (s2 && s2.sel) ids.add(s2.sel);
+  } else {
+    const p = pcbState();
+    if (p && p.sel) for (const id of p.sel) ids.add(id);
+  }
+  return [...ids].filter((id) => d.items.has(id));
+}
+function selectionItems() {
+  const d = doc();
+  return d ? selectionIds().map((id) => d.items.get(id)) : [];
+}
+function selectionChanged() {
+  drawSelection();
+  renderProps();
+  renderObjects();
+  requestRender();
+  for (const f2 of selectionHooks) f2();
+}
+function clearAllSelection(publish2 = true) {
+  clearSelection();
+  if (isSch() && (E.markers || []).some((m) => m && m.selected)) {
+    for (const m of E.markers) if (m) delete m.selected;
+    requestRender();
+  }
+  const p = pcbState();
+  if (p && p.sel && p.sel.size) p.sel.clear();
+  const s2 = schState();
+  if (s2) {
+    s2.sel = null;
+    s2.hover = null;
+    s2.selEnds = null;
+  }
+  E.hoverId = null;
+  if (publish2) selectionChanged();
+}
+function pinUnder(mm4, exact2) {
+  const m = CollabTools.sch, d = doc();
+  if (!isSch() || !m || !d || !m._) return null;
+  const f2 = selFilter();
+  if (f2.pins === false) return null;
+  const pinAt = m._.pinAt;
+  if (!pinAt) return null;
+  try {
+    const h3 = pinAt(d, mm4, exact2 ? 0 : 5 / Math.max(1e-6, pxPerMm()), !!(E.renderOpts && E.renderOpts.showHiddenPins));
+    if (!h3 || f2.lockedItems === false && h3.item.node && KiCadCanvas.kid(h3.item.node, "locked")) return null;
+    return { id: h3.item.id, number: h3.pin.number };
+  } catch {
+    return null;
+  }
+}
+function selectItemId(id) {
+  const d = doc();
+  const it = d && d.items.get(id);
+  if (!it) return;
+  const fp = E.items.find((f2) => f2.id === id);
+  if (fp) {
+    E.selected = fp;
+    return;
+  }
+  if (isSch()) {
+    if (CollabTools.sch) CollabTools.sch.select(id);
+  } else {
+    const p = pcbState();
+    if (p) p.sel = /* @__PURE__ */ new Set([id]);
+  }
+}
+function applyPickMode(id, mode, end = null) {
+  const d = doc();
+  if (!d || !d.items.has(id)) return;
+  E.selField = null;
+  E.selPins = [];
+  const sch = isSch(), s2 = sch ? schState() : null, p = sch ? null : pcbState();
+  if (s2 && s2.sel) {
+    if (d.items.has(s2.sel)) E.selection.add(s2.sel);
+    s2.sel = null;
+  }
+  if (p && p.padSel && mode !== "add") p.padSel = null;
+  if (E.selected) E.selection.add(E.selected.id);
+  const fp = E.items.find((f2) => f2.id === id);
+  const set2 = !sch && !fp && p && !E.selection.has(id) ? p.sel : E.selection;
+  const on2 = mode === "add" ? true : mode === "remove" ? false : !set2.has(id);
+  if (on2) set2.add(id);
+  else set2.delete(id);
+  if (!sch) mergeBoardSelection();
+  const m = sch ? CollabTools.sch : null;
+  if (m && m.putSelEnd) m.putSelEnd(id, on2 ? end : null);
+  if (on2 && fp) E.selected = fp;
+  else if (E.selected && !E.selection.has(E.selected.id)) E.selected = null;
+  if (!E.selected) for (const sid of E.selection) {
+    const f2 = E.items.find((q4) => q4.id === sid);
+    if (f2) {
+      E.selected = f2;
+      break;
+    }
+  }
+  selectionChanged();
+}
+function mergeBoardSelection() {
+  if (isSch()) return;
+  const p = pcbState();
+  if (!p || !p.sel || !p.sel.size) return;
+  if (E.selected) E.selection.add(E.selected.id);
+  if (!E.selection.size) return;
+  const d = doc();
+  for (const id of p.sel) if (!d || d.items.has(id)) E.selection.add(id);
+  p.sel.clear();
+}
+function selectedAnywhere() {
+  const out2 = new Set(E.selection);
+  if (E.selected) out2.add(E.selected.id);
+  if (isSch()) {
+    const s2 = schState();
+    if (s2 && s2.sel) out2.add(s2.sel);
+  } else {
+    const p = pcbState();
+    if (p) {
+      for (const id of p.sel) out2.add(id);
+      const ps = p.padSel;
+      if (ps) out2.add(ps);
+    }
+  }
+  return out2;
+}
+function hitsAt(mm4) {
+  const d = doc();
+  if (!d) return [];
+  const [x, y] = mm4, tol = isSch() ? Math.max(0.1, 3 / Math.max(1, pxPerMm())) : HIT_PX / Math.max(1, pxPerMm()), hidden = E.hiddenLayers;
+  const geomHit2 = KiCadCanvas.geomHit;
+  const out2 = [];
+  for (const it of d.items.values()) {
+    const b = it.bbox;
+    if (!b || x < b[0] - tol || x > b[2] + tol || y < b[1] - tol || y > b[3] + tol) continue;
+    if (!filterAllows(it.kind, it)) continue;
+    let hit5 = false;
+    if (it.kind === "symbol" || it.kind === "sheet") hit5 = true;
+    else for (const g2 of it.geom) {
+      if (g2.layer && hidden.has(g2.layer)) continue;
+      if (g2.padText || g2.padNum || g2.noBox) continue;
+      if (it.kind === "zone" && g2.fill) continue;
+      const t = it.kind === "footprint" && g2.t === "text" ? 0 : tol;
+      try {
+        if (geomHit2(g2, x, y, t)) {
+          hit5 = true;
+          break;
+        }
+      } catch {
+      }
+    }
+    if (hit5) out2.push(it);
+  }
+  const area4 = (it) => it.bbox ? (it.bbox[2] - it.bbox[0]) * (it.bbox[3] - it.bbox[1]) : 0;
+  return out2.sort((a, b) => area4(a) - area4(b));
+}
+function interactionBusy() {
+  if (E.drag || E.fdrag || E.boxSel || E.zoomRect || E.measure && E.measure.set) return true;
+  if (isSch()) {
+    const s2 = schState();
+    return !!(s2 && (s2.drag || s2.pending));
+  }
+  const p = pcbState();
+  return !!(p && (p.move || p.pending || p.drag && p.drag.bySelect));
+}
+function revertAppDrag() {
+  const g2 = E.drag;
+  E.drag = null;
+  dragG3.replaceChildren();
+  if (!g2) return;
+  const d = doc();
+  if (g2.engine) {
+    if (CollabTools.sch && CollabTools.sch.cancelDrag) {
+      try {
+        CollabTools.sch.cancelDrag(toolCtx3());
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    if (g2.moved && g2.fp && g2.curMm) sendOp([moveOp2({ id: g2.fp.id, x: Math.round(g2.curMm[0] * E.IU), y: Math.round(g2.curMm[1] * E.IU) }, g2.fp.x, g2.fp.y)], true);
+  } else if (g2.group) {
+    if (g2.moved && d) {
+      const back = [];
+      for (const m of g2.group) {
+        back.push(moveOp2({ id: m.fp.id, x: m.fp.x, y: m.fp.y }, m.ox, m.oy));
+        KiCadCanvas.applyChange(d, moveOp2(m.fp, m.ox, m.oy), E.IU);
+        m.fp.x = m.ox;
+        m.fp.y = m.oy;
+      }
+      sendOp(back, true);
+    }
+  } else if (g2.moved && d && g2.fp) {
+    const cx = Math.round(g2.curMm[0] * E.IU), cy = Math.round(g2.curMm[1] * E.IU);
+    KiCadCanvas.applyChange(d, moveOp2({ id: g2.fp.id, x: cx, y: cy }, g2.fp.x, g2.fp.y), E.IU);
+    for (const w of g2.wires || []) {
+      const p = KiCadCanvas.ptsOf(w.item.node);
+      p[w.index] = w.orig;
+      KiCadCanvas.setPts(w.item.node, p);
+      w.item.geom = [];
+      w.item.bbox = null;
+      KiCadCanvas.replaceChange(d, w.item);
+    }
+    sendOp([moveOp2({ id: g2.fp.id, x: cx, y: cy }, g2.fp.x, g2.fp.y)], true);
+  }
+  sendPresence(E.lastCursorMm, []);
+  if (d) syncItemsFromDoc();
+}
+function startFieldMove(mm4) {
+  const d = doc(), sf = E.selField;
+  if (!d || !sf) return false;
+  if (E.viewOnly) {
+    toast("View-only access");
+    return true;
+  }
+  const it = d.items.get(sf.id);
+  if (!it || !isSch() && it.kind !== "footprint") return false;
+  const K11 = window.KDialogs;
+  const pn = K11 && K11._.fieldNode ? K11._.fieldNode(it.node, sf.name) : null, at5 = pn && KiCadCanvas.kid(pn, "at");
+  if (!at5) return false;
+  const g2 = isSch() ? null : it.geom.find((q4) => q4.t === "text" && q4.field === sf.name && q4.textPos);
+  const pos = isSch() ? [KiCadCanvas.num(at5[1]), KiCadCanvas.num(at5[2])] : g2 && g2.textPos ? [g2.textPos[0], g2.textPos[1]] : [mm4[0], mm4[1]];
+  E.fdrag = { id: it.id, name: sf.name, startMm: [mm4[0], mm4[1]], orig: [KiCadCanvas.num(at5[1]), KiCadCanvas.num(at5[2])], origAt: at5.slice(), moved: false, sticky: true, origin: pos, more: isSch() ? fieldDragMore(sf) : [] };
+  return true;
+}
+function revertFieldDrag() {
+  const fd = E.fdrag;
+  E.fdrag = null;
+  if (!fd) return;
+  const d = doc(), it = d && d.items.get(fd.id);
+  const K11 = window.KDialogs;
+  const pn = it && K11 && K11._.fieldNode ? K11._.fieldNode(it.node, fd.name) : null, at5 = pn && KiCadCanvas.kid(pn, "at");
+  if (d && it && at5 && fd.moved) {
+    if (fd.origAt) at5.splice(0, at5.length, ...fd.origAt);
+    else {
+      at5[1] = fd.orig[0];
+      at5[2] = fd.orig[1];
+    }
+    KiCadCanvas.replaceChange(d, it);
+  }
+  if (d && fd.moved) for (const m of fd.more || []) {
+    const it2 = d.items.get(m.id), p2 = it2 && K11 && K11._.fieldNode ? K11._.fieldNode(it2.node, m.name) : null, a2 = p2 && KiCadCanvas.kid(p2, "at");
+    if (it2 && a2) {
+      a2.splice(0, a2.length, ...m.origAt);
+      KiCadCanvas.replaceChange(d, it2);
+    }
+  }
+}
+function cancelInteraction() {
+  let took = false;
+  if (E.rdown) {
+    E.rdown = null;
+  }
+  if (E.pan) {
+    E.pan = null;
+    stage2.classList.remove("panning");
+    took = true;
+  }
+  if (E.zoomRect) {
+    E.zoomRect = null;
+    took = true;
+  }
+  if (E.boxSel) {
+    E.boxSel = null;
+    took = true;
+  }
+  if (E.measure && E.measure.set) {
+    E.measure = null;
+    took = true;
+  }
+  if (E.fdrag) {
+    revertFieldDrag();
+    took = true;
+  }
+  if (E.drag) {
+    revertAppDrag();
+    took = true;
+  }
+  const s2 = schState();
+  if (s2 && isSch() && (s2.drag || s2.pending)) {
+    s2.pending = null;
+    if (s2.drag && CollabTools.sch && CollabTools.sch.cancelDrag) {
+      try {
+        CollabTools.sch.cancelDrag(toolCtx3());
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    took = true;
+  }
+  const p = pcbState(), pm = CollabTools.pcb;
+  if (p && !isSch() && (p.move || p.pending || p.drag && p.drag.bySelect)) {
+    p.pending = null;
+    if (pm && pm.cancel) {
+      try {
+        pm.cancel();
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    took = true;
+  }
+  if (took) {
+    drawSelection();
+    renderProps();
+    requestRender();
+  }
+  return took;
+}
+function startMove(mode) {
+  const d = doc();
+  if (!d || E.viewOnly) return false;
+  cancelInteraction();
+  const mm4 = [E.lastCursorMm[0], E.lastCursorMm[1]];
+  if (isSch()) {
+    const m = CollabTools.sch;
+    if (!m) return false;
+    const items = selectionItems();
+    if (!items.length) return false;
+    const back = String(m.state.mouseDragMode || "drag");
+    try {
+      m.setDragMode(toolCtx3(), mode, true);
+      const dr = m.beginDrag(toolCtx3(), items.length === 1 ? items[0] : items, mm4, false);
+      if (dr) dr.restoreMode = back;
+      else m.setDragMode(toolCtx3(), back);
+      return !!dr;
+    } catch (e) {
+      console.warn(e);
+      m.setDragMode(toolCtx3(), back);
+      return false;
+    }
+  }
+  if (E.selField && !selectionIds().length && mode === "move") return startFieldMove(mm4);
+  if (CollabTools.pcb) return runModuleAction("move");
+  const all2 = selectionIds();
+  if (!all2.length) return false;
+  const fps = unlockedForEdit(all2).map((id) => E.items.find((f2) => f2.id === id)).filter(Boolean);
+  if (!fps.length) return true;
+  const fp = fps[0];
+  if (fps.length === 1) E.drag = { fp, startMm: mm4, curMm: [fp.x / E.IU, fp.y / E.IU], moved: false, grabOff: [mm4[0] - fp.x / E.IU, mm4[1] - fp.y / E.IU], wires: [], engine: false, sticky: true };
+  else E.drag = { fp, group: fps.map((f2) => ({ fp: f2, ox: f2.x, oy: f2.y })), startMm: mm4, grab: snapMm(mm4), curMm: [fp.x / E.IU, fp.y / E.IU], moved: false, last: [0, 0], sticky: true };
+  return true;
+}
+function handoffAppDrag() {
+  const g2 = E.drag;
+  const pm = CollabTools.pcb;
+  const PT7 = window.PcbTools;
+  if (!g2 || isSch() || g2.engine || !g2.startMm || !pm || !pm.beginMove || !PT7 || !PT7.selectMoveTo || !E.kdoc) return false;
+  const ids = g2.group ? g2.group.map((m) => m.fp.id) : g2.fp ? [g2.fp.id] : [];
+  if (!ids.length) return false;
+  const start = [g2.startMm[0], g2.startMm[1]], cur2 = [E.lastCursorMm[0], E.lastCursorMm[1]], sticky = !!g2.sticky;
+  revertAppDrag();
+  toolCtx3().setSelection(ids);
+  const c2 = toolCtx3();
+  if (!pm.beginMove(c2, start, sticky)) return false;
+  PT7.selectMoveTo(c2, cur2);
+  return true;
+}
+function drawHover(ctx, view) {
+  const d = doc(), id = E.hoverId;
+  if (!d || !id || !d.items.has(id)) return;
+  if (!E.hoverPinned || !isSch()) return;
+  const dpr = view.dpr || 1, s2 = view.ppm * view.zoom * dpr;
+  const drawHalo2 = KiCadCanvas.drawHalo;
+  ctx.save();
+  try {
+    KiCadCanvas.setViewTransform(ctx, view);
+    drawHalo2(ctx, d, /* @__PURE__ */ new Set([id]), s2, dpr, E.hiddenLayers, { color: KiCadCanvas.SCH.selection, alpha: 1, extraPx: 2, extraMm: 2 * 0.0254, strokesOnly: true });
+  } catch (e) {
+    console.warn(e);
+  } finally {
+    ctx.restore();
+  }
+}
+function toolChanging(next) {
+  if (interactionBusy() || E.pan || E.rdown) cancelInteraction();
+  if (E.hoverId) {
+    E.hoverId = null;
+    stage2.classList.remove("over-sel");
+  }
+  if (!KEEPS_SELECTION.has(next) && (selectionIds().length || E.selField || E.selPins.length)) clearAllSelection();
+}
+function resetInteraction() {
+  E.selField = null;
+  E.selPins = [];
+  E.fdrag = null;
+  E.pan = null;
+  E.rdown = null;
+  E.zoomRect = null;
+  E.boxSel = null;
+  E.hoverId = null;
+  E.hoverPinned = false;
+  stage2.classList.remove("panning", "over-sel");
+  const p = pcbState();
+  if (p && p.sel) p.sel.clear();
+  const s2 = schState();
+  if (s2) {
+    s2.sel = null;
+    s2.hover = null;
+    s2.pending = null;
+  }
+  if (E.contextMenuOpen || store.get().contextMenu) {
+    E.contextMenuOpen = false;
+    store.set({ contextMenu: null });
+  }
+  if (E.tool !== "select") {
+    try {
+      setTool("select");
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+}
+function pruneSelection() {
+  const d = doc();
+  if (!d) return;
+  const sel = E.selection;
+  for (const id of [...sel]) if (!d.items.has(id)) sel.delete(id);
+  if (E.selected && !d.items.has(E.selected.id)) E.selected = null;
+  if (E.selField && !d.items.has(E.selField.id)) E.selField = null;
+  if (E.selPins.length) E.selPins = E.selPins.filter((p) => d.items.has(p.id));
+  if (E.fdrag && !d.items.has(E.fdrag.id)) E.fdrag = null;
+  if (E.hoverId && !d.items.has(E.hoverId)) E.hoverId = null;
+  const g2 = E.drag;
+  if (g2) {
+    const gone = g2.group ? g2.group.some((m) => !d.items.has(m.fp.id)) : !d.items.has(g2.fp.id);
+    if (gone) {
+      if (g2.group) g2.group = g2.group.filter((m) => d.items.has(m.fp.id));
+      if (g2.group && g2.group.length) revertAppDrag();
+      else {
+        E.drag = null;
+        dragG3.replaceChildren();
+        if (g2.engine && CollabTools.sch && CollabTools.sch.cancelDrag) {
+          try {
+            CollabTools.sch.cancelDrag(toolCtx3());
+          } catch (e) {
+            console.warn(e);
+          }
+        }
+      }
+    }
+  }
+}
+var toolCtx3, stage2, moveOp2, dragG3, schState, pcbState, doc, selectionHooks, KEEPS_SELECTION;
+var init_gestures = __esm({
+  "web/domains/pcb/editor/gestures.ts"() {
+    "use strict";
+    init_cursors();
+    init_hypertext();
+    init_appstore();
+    init_crosshair();
+    init_doc();
+    init_net();
+    init_peers();
+    init_selection();
+    init_state();
+    init_tools();
+    init_view();
+    init_util();
+    init_wheel_model();
+    init_keys();
+    toolCtx3 = toolCtx;
+    stage2 = stage;
+    moveOp2 = moveOp;
+    dragG3 = dragG2;
+    schState = () => CollabTools.sch ? CollabTools.sch.state : null;
+    pcbState = () => CollabTools.pcb ? CollabTools.pcb.state : null;
+    doc = () => E.kdoc;
+    selectionHooks = [];
+    E.pinExactAt = (mm4) => !!pinUnder(mm4, true);
+    E.hooks.handoffDrag = () => handoffAppDrag();
+    E.hooks.busy = () => interactionBusy();
+    E.hooks.selectedIds = () => selectionIds();
+    KEEPS_SELECTION = /* @__PURE__ */ new Set(["select", "pan", "zoomtool", "measure", "comment", "highlight", "follow", "drag", "place", "power", "image"]);
+  }
+});
+
+// web/domains/pcb/editor/variant.ts
+function currentVariant() {
+  return byEditor[editorOf()] || "";
+}
+function publish() {
+  const ed = editorOf();
+  E.currentVariant = byEditor[ed] || "";
+  store.set({ variant: { current: byEditor[ed] || "", names: names[ed].slice(), sch: ed === "sch" } });
+}
+function boardVariantsNode() {
+  const d = E.kdoc;
+  if (!d) return null;
+  return d.boardSetup && d.boardSetup.variants || d.variantsNode || null;
+}
+function proVariants(pro) {
+  const sch = pro && typeof pro.schematic === "object" ? pro.schematic : null;
+  const list = sch && Array.isArray(sch.variants) ? sch.variants : [];
+  return list.filter((e) => !!e && typeof e === "object" && typeof e.name === "string").map((e) => ({ name: e.name, description: typeof e.description === "string" ? e.description : "" }));
+}
+function refreshVariantNames(schNames) {
+  const ed = editorOf();
+  if (ed === "pcb") {
+    const v = boardVariantsNode();
+    names.pcb = boardVariantNamesForUI(v);
+    descriptions.pcb = {};
+    for (const n2 of names.pcb.slice(1)) descriptions.pcb[n2] = boardVariantDescription(v, n2);
+  } else {
+    let pro = null;
+    try {
+      pro = E.proSettings ? JSON.parse(E.proSettings) : null;
+    } catch (e) {
+      pro = null;
+    }
+    const reg = proVariants(pro);
+    const set2 = new Set(schNames ? schNames.filter((n2) => !isDefaultVariant(n2)) : []);
+    if (!schNames && E.kdoc) for (const it of E.kdoc.items.values()) {
+      if (it.kind !== "symbol" && it.kind !== "sheet") continue;
+      for (const p of symbolInstancePaths(it.node)) for (const c of p) if (Array.isArray(c) && c[0] === "variant") {
+        const nm4 = c.find((x) => Array.isArray(x) && x[0] === "name");
+        if (nm4 && nm4[1]) set2.add(String(nm4[1]));
+      }
+    }
+    for (const r of reg) set2.add(r.name);
+    names.sch = [DEFAULT_VARIANT_NAME, ...[...set2].sort(strNumCmp2)];
+    descriptions.sch = {};
+    for (const r of reg) descriptions.sch[r.name] = r.description;
+  }
+  if (byEditor[ed] && !names[ed].some((n2) => n2.toLowerCase() === byEditor[ed].toLowerCase())) {
+    setCurrentVariant("");
+    return;
+  }
+  publish();
+}
+function variantNamesForUI() {
+  return names[editorOf()].slice();
+}
+function variantDescription(name) {
+  return descriptions[editorOf()][name] || "";
+}
+function applyVariantToDoc(doc2) {
+  if (!doc2) return;
+  const d = doc2;
+  const ed = doc2.type === "sch" ? "sch" : "pcb", v = byEditor[ed] || "";
+  d.variantName = v;
+  d.variantDesc = v ? descriptions[ed][v] || "" : "";
+}
+function setCurrentVariant(name) {
+  const ed = editorOf();
+  const v = isDefaultVariant(name) ? "" : name;
+  const changed2 = (byEditor[ed] || "") !== v;
+  byEditor[ed] = v;
+  variantCache.clear();
+  lastView = null;
+  publish();
+  if (!changed2) return;
+  const doc2 = E.kdoc;
+  if (doc2) {
+    applyVariantToDoc(doc2);
+    for (const it of doc2.items.values()) {
+      try {
+        KiCadCanvas.buildGeom(doc2, it);
+      } catch (e) {
+      }
+    }
+  }
+  requestRender();
+  try {
+    if (CollabTools.props && CollabTools.props.refresh) CollabTools.props.refresh();
+  } catch (e) {
+    console.warn(e);
+  }
+  const bump = store.get().document;
+  store.slice("document", { version: (bump.version || 0) + 1 });
+}
+function currentSheetPath() {
+  if (!E.kdoc || E.kdoc.type !== "sch") return null;
+  try {
+    const inst = currentInstance();
+    return inst && inst.uuidPath.length ? "/" + inst.uuidPath.join("/") : null;
+  } catch (e) {
+    return null;
+  }
+}
+function shownItem(doc2, it, variant, path2) {
+  if (it.kind !== "footprint" && it.kind !== "symbol") return it;
+  const c = variantCache.get(it.id);
+  if (c && c.node === it.node && c.variant === variant && c.path === path2) return c.item;
+  const node = it.kind === "footprint" ? footprintViewForVariant(it.node, variant) : symbolViewForVariant(it.node, variant, path2, doc2.version);
+  let item = it;
+  if (node !== it.node) {
+    item = Object.assign({}, it, { node, geom: [], bbox: it.bbox });
+    try {
+      KiCadCanvas.buildGeom(doc2, item);
+    } catch (e) {
+      item = it;
+    }
+  }
+  variantCache.set(it.id, { node: it.node, variant, path: path2, item });
+  return item;
+}
+function variantView(doc2) {
+  const v = currentVariant();
+  if (!doc2 || !v) return doc2;
+  const path2 = doc2.type === "sch" ? currentSheetPath() : null;
+  let same = !!lastView && lastView.doc === doc2 && lastView.variant === v && lastView.path === path2 && lastView.items.size === doc2.items.size;
+  const items = /* @__PURE__ */ new Map();
+  for (const [id, it] of doc2.items) {
+    const s2 = shownItem(doc2, it, v, path2);
+    items.set(id, s2);
+    if (same && lastView.items.get(id) !== s2) same = false;
+  }
+  if (same) return lastView.view;
+  const view = Object.create(doc2);
+  view.items = items;
+  lastView = { doc: doc2, variant: v, path: path2, items, view };
+  return view;
+}
+var editorOf, byEditor, names, descriptions, variantCache, lastView;
+var init_variant = __esm({
+  "web/domains/pcb/editor/variant.ts"() {
+    "use strict";
+    init_state();
+    init_appstore();
+    init_view();
+    init_variant_model();
+    init_schnets();
+    editorOf = () => E.kdoc && E.kdoc.type === "sch" ? "sch" : "pcb";
+    byEditor = { pcb: "", sch: "" };
+    names = { pcb: [DEFAULT_VARIANT_NAME], sch: [DEFAULT_VARIANT_NAME] };
+    descriptions = { pcb: {}, sch: {} };
+    E.currentVariantOf = currentVariant;
+    variantCache = /* @__PURE__ */ new Map();
+    lastView = null;
+    E.currentSheetPathOf = currentSheetPath;
+  }
+});
+
+// web/domains/pcb/editor/msgpanel.ts
+function updateMsgPanel() {
+  const doc2 = E.kdoc;
+  const P = window.PcbTools;
+  if (doc2) for (const h3 of msgHooks) {
+    let hi = null;
+    try {
+      hi = h3(E.units);
+    } catch (e) {
+      console.warn(e);
+    }
+    if (!hi) continue;
+    const k = "hook\xA7" + JSON.stringify(hi);
+    if (k !== lastKey) {
+      lastKey = k;
+      store.set({ msgPanel: { items: hi } });
+    }
+    return;
+  }
+  if (doc2 && isSch()) {
+    updateSchMsgPanel(doc2);
+    return;
+  }
+  if (!doc2 || !P || !P.msgPanelInfo) {
+    if (lastKey) {
+      lastKey = "";
+      store.set({ msgPanel: { items: [] } });
+    }
+    return;
+  }
+  const pcb = CollabTools.pcb && CollabTools.pcb.state;
+  const rt = pcb ? pcb.route || null : null;
+  const pad2 = pcb && pcb.padSel ? pcb.padSel : null;
+  const ids = pad2 ? [pad2] : selectionIds();
+  const ver = store.get().document.version;
+  const key3 = [ver, E.currentVariant || "", E.units, ids.join(","), rt ? `${rt.netKey}|${rt.width}|${rt.layer}` : "", doc2.items.size, pcb && pcb.highlightNet ? pcb.highlightNet : ""].join("\xA7");
+  if (key3 === lastKey) return;
+  lastKey = key3;
+  const src = E.proSettings;
+  if (src !== settingsSrc) {
+    settingsSrc = src;
+    settings = P.designSettings ? P.designSettings(src || null) : null;
+  }
+  let items = [];
+  if (doc2.fpEditor && !ids.length && !rt) {
+    store.set({ msgPanel: { items: footprintMsgPanel(doc2) } });
+    return;
+  }
+  try {
+    items = P.msgPanelInfo(variantView(doc2), ids, { settings, units: E.units, route: rt && rt.width ? rt : null, net: pcb && pcb.highlightNet && E.highlightIds ? pcb.highlightNet : null });
+  } catch (e) {
+    console.warn(e);
+  }
+  if (doc2.fpEditor && !items.length) items = footprintMsgPanel(doc2);
+  store.set({ msgPanel: { items } });
+}
+function schSingleSelection() {
+  const pins2 = E.selPins;
+  if (pins2.length) return pins2.length === 1 ? { id: pins2[0].id, pin: pins2[0].number } : null;
+  const f2 = E.selField;
+  if (f2) return { id: f2.id, field: f2.name };
+  const ids = selectionIds();
+  return ids.length === 1 ? { id: ids[0] } : null;
+}
+function ellipsize(s2) {
+  const el4 = typeof document !== "undefined" ? document.getElementById("msgpanel") : null;
+  const w = el4 ? el4.clientWidth : typeof window !== "undefined" ? window.innerWidth : 1200;
+  const limit = Math.min(w, 800) * 0.3 + Math.max(w - 800, 0) * 0.6;
+  if (!measureCtx2 && typeof document !== "undefined") {
+    const c = document.createElement("canvas");
+    measureCtx2 = c.getContext("2d");
+  }
+  if (!measureCtx2) return s2;
+  measureCtx2.font = el4 ? getComputedStyle(el4).font : "12px sans-serif";
+  if (measureCtx2.measureText(s2).width <= limit) return s2;
+  let lo = 0, hi = s2.length;
+  while (lo < hi) {
+    const k = Math.ceil((lo + hi) / 2), t = s2.slice(0, Math.ceil(k / 2)) + "..." + s2.slice(s2.length - Math.floor(k / 2));
+    if (measureCtx2.measureText(t).width <= limit) lo = k;
+    else hi = k - 1;
+  }
+  return s2.slice(0, Math.ceil(lo / 2)) + "..." + s2.slice(s2.length - Math.floor(lo / 2));
+}
+function updateSchMsgPanel(doc2) {
+  const M = CollabTools.sch;
+  const mk = selectedErcMarker();
+  if (mk) {
+    const key4 = ["marker", E.markers.indexOf(mk), mk.severity, mk.comment || "", E.units].join("\xA7");
+    if (key4 !== lastKey) {
+      lastKey = key4;
+      store.set({ msgPanel: { items: markerMsgPanel(doc2, mk) } });
+    }
+    return;
+  }
+  const sel = schSingleSelection();
+  const ver = store.get().document.version;
+  const sheetPath = doc2.sheetPath || "/";
+  const key3 = ["sch", ver, E.units, sel ? `${sel.id}|${sel.pin ?? ""}|${sel.field ?? ""}` : "", sheetPath, E.proSettings ? E.proSettings.length : 0].join("\xA7");
+  if (key3 === lastKey) return;
+  lastKey = key3;
+  let items = [];
+  if (sel && M && M.msgPanelInfo) {
+    try {
+      items = M.msgPanelInfo(doc2, sel, { units: E.units, sheetPath, ellipsize, connection: (it, pin) => connectionOf(it, pin) });
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+  store.set({ msgPanel: { items } });
+}
+function selectedErcMarker() {
+  return (E.markers || []).find((m) => m && m.selected) || null;
+}
+function markerMsgPanel(doc2, m) {
+  const D = CollabTools.sch;
+  const desc = (id) => id && D && D.itemDescription && doc2.items.has(id) ? D.itemDescription(doc2, id, E.units) : "";
+  const excluded = m.severity === "exclusion", sev = excluded ? m.base || "warning" : m.severity;
+  const un = KiCadCanvas.unescapeText, text3 = un ? un(m.text) : m.text;
+  const out2 = [{ title: "Type", value: "Marker" }, { title: "Violation", value: text3 }];
+  if (sev === "warning") out2.push({ title: "Severity", value: "Warning" });
+  else if (sev === "error") out2.push({ title: "Severity", value: "Error" });
+  else if (sev === "ignore") out2.push({ title: "Severity", value: "Ignore" });
+  out2.push({ title: desc(m.ids[0]), value: desc(m.ids[1]) });
+  if (excluded) out2.push({ title: "Excluded", value: m.comment || "" });
+  return out2;
+}
+function connectionOf(it, pin) {
+  const r = nameOfPick({ item: it, pin });
+  if (!r || !r.name) return null;
+  const c = netMap();
+  const e = c ? c.map.get(r.name) : null;
+  const bus = !!(e && e.bus);
+  let netclass = "Default";
+  if (!bus) {
+    const PS = KiCadCanvas.pcbSizes;
+    if (PS) {
+      try {
+        if (sizesSrc !== E.proSettings) {
+          sizesSrc = E.proSettings;
+          sizes = PS.boardSizes(E.proSettings || null);
+        }
+        netclass = PS.effectiveNetclass(sizes, r.name).name || "Default";
+      } catch (e2) {
+      }
+    }
+  }
+  return { name: r.name, bus, netclass };
+}
+function footprintMsgPanel(doc2) {
+  const FD2 = KiCadCanvas.footprintDoc;
+  const f2 = FD2.footprintFields(doc2);
+  const header = KiCadCanvas.parse(FD2.footprintHeaderSexpr(doc2)) || ["footprint", ""];
+  const kidText = (k) => {
+    const c = KiCadCanvas.kid(header, k);
+    return c ? String(c[1] ?? "") : "";
+  };
+  const path2 = state.doc && state.doc.docId && !state.doc.docId.startsWith("board:") ? state.doc.path : "";
+  const lib = path2 ? (path2.split("/").slice(-2, -1)[0] || "").replace(/\.pretty$/i, "") : "";
+  const nums = /* @__PURE__ */ new Set();
+  for (const it of doc2.items.values()) if (it.kind === "pad") {
+    const t = String(it.node[2]);
+    const n2 = String(it.node[1] ?? "");
+    const ls = (KiCadCanvas.kid(it.node, "layers") || []).slice(1).map(String);
+    const aperture = t === "smd" && !ls.some((l) => /\.Cu$/.test(l));
+    if (n2 && t !== "np_thru_hole" && !aperture) nums.add(n2);
+  }
+  return [
+    { title: f2.Reference || "", value: f2.Value || "" },
+    { title: "Library", value: lib },
+    { title: "Footprint Name", value: String(header[1] ?? "") },
+    { title: "Pads", value: String(nums.size) },
+    { title: `Doc: ${kidText("descr")}`, value: `Keywords: ${kidText("tags")}` }
+  ];
+}
+var msgHooks, lastKey, settingsSrc, settings, measureCtx2, sizesSrc, sizes;
+var init_msgpanel = __esm({
+  "web/domains/pcb/editor/msgpanel.ts"() {
+    "use strict";
+    init_appstore();
+    init_state();
+    init_view();
+    init_gestures();
+    init_schnets();
+    init_variant();
+    msgHooks = [];
+    lastKey = "";
+    settingsSrc = void 0;
+    settings = null;
+    measureCtx2 = null;
+    sizesSrc = void 0;
+    sizes = null;
+  }
+});
+
 // web/domains/pcb/editor/paint.ts
 function ensureLayer(w, h3) {
   if (!layer2) {
@@ -82283,48 +83177,6 @@ var init_ruler = __esm({
   }
 });
 
-// web/domains/pcb/editor/selmodes.ts
-function detectWindows() {
-  if (typeof navigator === "undefined") return false;
-  const nav = navigator;
-  if (nav.platform) return /^Win/i.test(nav.platform);
-  const uad = nav.userAgentData && nav.userAgentData.platform;
-  if (uad) return /windows/i.test(uad);
-  return /Windows/.test(nav.userAgent || "");
-}
-function ctrlDown(ev, mac = IS_MAC) {
-  return mac ? !!ev.metaKey : !!ev.ctrlKey;
-}
-function modifiersState(ev, o = {}) {
-  const shift2 = !!ev.shiftKey, ctrl = ctrlDown(ev, o.mac ?? IS_MAC), alt = !!ev.altKey;
-  const hl = !!o.ctrlHighlights;
-  return {
-    subtractive: ctrl && shift2,
-    additive: !ctrl && shift2,
-    exclusiveOr: hl ? false : ctrl && !shift2,
-    highlight: hl ? ctrl && !shift2 : false,
-    // "Drag is more forgiving and allows either Ctrl+Drag or Shift+Drag to add to the selection"
-    dragAdditive: (ctrl || shift2) && !alt,
-    dragSubtractive: ctrl && shift2 && !alt,
-    skipHeuristics: o.windows ?? IS_WINDOWS ? false : alt
-  };
-}
-function areaFill(b, sch) {
-  if (b.lasso && !sch) return { additive: b.mode === "add", subtractive: b.mode === "remove" };
-  return { additive: !!b.add, subtractive: !!b.add && b.mode === "remove" };
-}
-function modifierCursorOf(s2) {
-  return s2.additive ? "ADD" : s2.subtractive ? "SUBTRACT" : s2.exclusiveOr ? "XOR" : null;
-}
-var IS_WINDOWS;
-var init_selmodes = __esm({
-  "web/domains/pcb/editor/selmodes.ts"() {
-    "use strict";
-    init_keys();
-    IS_WINDOWS = detectWindows();
-  }
-});
-
 // web/domains/pcb/editor/overlays.ts
 function backgroundDark(bg) {
   const m = /^#?([0-9a-f]{6})/i.exec(bg);
@@ -82372,12 +83224,12 @@ function drawRuler(ctx, view, sch, origin, end) {
   const K11 = globalThis.KiCadCanvas;
   const dpr = view.dpr || 1, s2 = view.ppm * view.zoom;
   const cv = ctx.canvas, W12 = cv.width / dpr, H = cv.height / dpr;
-  const toMm = (p) => [p[0] / IU2, p[1] / IU2];
+  const toMm = (p) => [p[0] / IU3, p[1] / IU3];
   const rv = {
-    scale: s2 / IU2,
-    toScreen: (p) => [(p[0] / IU2 - view.x0) * s2 + view.panX, (p[1] / IU2 - view.y0) * s2 + view.panY],
+    scale: s2 / IU3,
+    toScreen: (p) => [(p[0] / IU3 - view.x0) * s2 + view.panX, (p[1] / IU3 - view.y0) * s2 + view.panY],
     screen: [W12, H],
-    viewport: [(view.x0 - view.panX / s2) * IU2, (view.y0 - view.panY / s2) * IU2, (view.x0 + (W12 - view.panX) / s2) * IU2, (view.y0 + (H - view.panY) / s2) * IU2],
+    viewport: [(view.x0 - view.panX / s2) * IU3, (view.y0 - view.panY / s2) * IU3, (view.x0 + (W12 - view.panX) / s2) * IU3, (view.y0 + (H - view.panY) / s2) * IU3],
     textWidth: (t, size2, pen) => K11.strokeLineWidth(t) * size2 + pen
   };
   const units = E.units === "in" || E.units === "mil" ? E.units : "mm";
@@ -82392,14 +83244,14 @@ function drawRuler(ctx, view, sch, origin, end) {
     if (op.kind === "line") {
       const a = toMm(op.a), b = toMm(op.b);
       ctx.strokeStyle = c;
-      ctx.lineWidth = Math.max(op.w / IU2, minPen);
+      ctx.lineWidth = Math.max(op.w / IU3, minPen);
       ctx.beginPath();
       ctx.moveTo(a[0], a[1]);
       ctx.lineTo(b[0], b[1]);
       ctx.stroke();
     } else {
       const at5 = toMm(op.at);
-      K11.drawStrokeText(ctx, base2, { x: at5[0], y: at5[1], text: op.text, size: op.size / IU2, rot: op.rot, mirror: false, h: op.h, v: "center", pen: op.pen / IU2, italic: false, dy: 0 }, c, minPen);
+      K11.drawStrokeText(ctx, base2, { x: at5[0], y: at5[1], text: op.text, size: op.size / IU3, rot: op.rot, mirror: false, h: op.h, v: "center", pen: op.pen / IU3, italic: false, dy: 0 }, c, minPen);
     }
   }
 }
@@ -82447,7 +83299,7 @@ function drawFieldUmbilical(ctx, px) {
   ctx.stroke();
   ctx.restore();
 }
-var overlayHooks, IU2, SCHEMES;
+var overlayHooks, IU3, SCHEMES;
 var init_overlays = __esm({
   "web/domains/pcb/editor/overlays.ts"() {
     "use strict";
@@ -82455,7 +83307,7 @@ var init_overlays = __esm({
     init_selmodes();
     init_state();
     overlayHooks = [];
-    IU2 = 1e6;
+    IU3 = 1e6;
     SCHEMES = [
       { normal: "rgba(77,77,179,0.3)", additive: "rgba(77,179,77,0.3)", subtract: "rgba(179,77,77,0.3)", exclusiveOr: "rgba(179,77,77,0.3)", l2r: "rgb(255,255,102)", r2l: "rgb(102,102,255)" },
       { normal: "rgba(128,77,255,0.5)", additive: "rgba(128,255,128,0.5)", subtract: "rgba(255,128,128,0.5)", exclusiveOr: "rgba(255,128,128,0.5)", l2r: "rgb(179,179,0)", r2l: "rgb(26,26,255)" }
@@ -82785,14 +83637,14 @@ function fitBox(box3, margin) {
   world.style.width = sw + "px";
   const ppm = sw / mmW();
   const [bx, by, bw, bh] = box3;
-  E.zoom = Math.min(zoomLimits()[1], Math.max(1e-4, Math.min(sw / (bw * ppm), sh / (bh * ppm)) * (margin || 1)));
+  E.zoom = Math.min(zoomLimits2()[1], Math.max(1e-4, Math.min(sw / (bw * ppm), sh / (bh * ppm)) * (margin || 1)));
   E.panX = sw / 2 - (bx - mmX0() + bw / 2) * ppm * E.zoom;
   E.panY = sh / 2 - (by - mmY0() + bh / 2) * ppm * E.zoom;
   E.lastStageW = sw;
   E.lastStageH = sh;
   applyView();
 }
-function zoomLimits() {
+function zoomLimits2() {
   const ppm = stage.clientWidth / mmW();
   if (!(ppm > 0)) return [0.2, 400];
   const z1 = Number(KiCadCanvas.PX_PER_MM_ZOOM1) || 3.58;
@@ -82805,7 +83657,7 @@ function zoomBy(factor, cx, cy) {
     cx = stage.clientWidth / 2;
     cy = stage.clientHeight / 2;
   }
-  const [lo, hi] = zoomLimits();
+  const [lo, hi] = zoomLimits2();
   const next = Math.min(Math.max(hi, E.zoom), Math.max(Math.min(lo, E.zoom), E.zoom * factor));
   E.panX = cx - (cx - E.panX) * (next / E.zoom);
   E.panY = cy - (cy - E.panY) * (next / E.zoom);
@@ -82966,7 +83818,7 @@ function scheduleRenderRefresh() {
     await loadBase(false);
   }, 8e3);
 }
-var stage, world, base, overlay, peersG, selG, dragG, cmtG, cmtPanel, mmW, mmH, mmX0, mmY0, isSch, canvas2, cctx, peerNetCache;
+var stage, world, base, overlay, peersG, selG, dragG2, cmtG, cmtPanel, mmW, mmH, mmX0, mmY0, isSch, canvas2, cctx, peerNetCache;
 var init_view = __esm({
   "web/domains/pcb/editor/view.ts"() {
     "use strict";
@@ -82994,7 +83846,7 @@ var init_view = __esm({
     overlay = $("#overlay");
     peersG = $("#peersG");
     selG = $("#selG");
-    dragG = $("#dragG");
+    dragG2 = $("#dragG");
     cmtG = $("#cmtG");
     cmtPanel = $("#cmtPanel");
     mmW = () => E.vb[2] / E.vbPerMm;
@@ -83012,1028 +83864,525 @@ var init_view = __esm({
   }
 });
 
-// web/domains/pcb/editor/cursors.ts
-function kicursorCss(name) {
-  if (name === "ARROW" || name === "DEFAULT") return "default";
-  if (name === "HAND") return "pointer";
-  if (name === "BULLSEYE") return BULLSEYE;
-  const img = KICURSOR_IMAGES[name];
-  return img ? `url("${img[0]}") ${img[1]} ${img[2]}, default` : "";
+// web/domains/pcb/editor/projectfile.ts
+function projectDocs2() {
+  const st = appState2();
+  const all2 = st.project && st.project.docs;
+  return all2 && all2.length ? all2 : st.docs || [];
 }
-function toolCursor(declared) {
-  if (!declared) return "";
-  const alias2 = declared === "crosshair" ? "PENCIL" : declared === "move" ? "MOVING" : declared === "text" ? "TEXT" : declared;
-  return kicursorCss(alias2) || declared;
-}
-function noteModifiers(ev) {
-  const c = ctrlDown(ev);
-  if (mods.shift === ev.shiftKey && mods.ctrl === c && mods.alt === ev.altKey) return;
-  mods.shift = ev.shiftKey;
-  mods.ctrl = c;
-  mods.alt = ev.altKey;
-  refreshCursor();
-}
-function modifierCursor(shift2, ctrl, ctrlHighlights = false) {
-  return modifierCursorOf(modifiersState({ shiftKey: shift2, ctrlKey: ctrl, metaKey: false }, { mac: false, ctrlHighlights }));
-}
-function currentCursor() {
-  if (override) return override;
-  const t = E.tool;
-  {
-    const m0 = activeModule();
-    const k = m0 && m0.state && m0.state.kicursor;
-    if (k) return k;
-  }
-  if (t === "select") {
-    const bs = E.boxSel;
-    if (bs) return bs.lasso || bs.cur[0] < bs.start[0] ? "SELECT_LASSO" : "SELECT_WINDOW";
-    const m2 = activeModule();
-    if (E.drag && E.drag.moved || E.fdrag && E.fdrag.moved) return "MOVING";
-    if (m2 && m2.cursorNow) {
+function withDocument(docId3, onJoined, timeoutMs = 15e3) {
+  return new Promise((resolve2, reject) => {
+    let sock = null, settled = false, role = "viewer";
+    const acks = /* @__PURE__ */ new Map();
+    const done = (fn) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer5);
       try {
-        const c = m2.cursorNow(toolCtx());
-        if (c) return c;
+        if (sock) sock.close();
       } catch (e) {
-        console.warn(e);
       }
-    }
-    const mc = modifierCursor(mods.shift, mods.ctrl, !isSch() && !!E.ctrlClickHighlight && E.DOC_TYPE !== "footprint");
-    if (mc) return mc;
-    const st = m2 && m2.state;
-    if (st && st.autoCursor) return st.autoCursor;
-    if (st && st.hyperHover || E.hyperHover) return "HAND";
-    if (stage.classList.contains("over-sel")) return "MOVING";
-    if (E.selMode === "lasso") return "SELECT_LASSO";
-    return "ARROW";
-  }
-  if (t === "zoomtool") return "ZOOM_IN";
-  if (t === "measure") return "MEASURE";
-  if (t === "pan") return "grab";
-  if (t === "comment") return "cell";
-  const m = activeModule();
-  if (m && moduleTool(t)) {
-    if (m.cursorNow) {
-      try {
-        const c = m.cursorNow(toolCtx());
-        if (c) return c;
-      } catch (e) {
-        console.warn(e);
+      fn();
+    };
+    const timer5 = setTimeout(() => done(() => reject(new Error("the server did not answer"))), timeoutMs);
+    const sendOp3 = (changes) => new Promise((ok2, fail) => {
+      if (!sock || sock.readyState !== 1) {
+        fail(new Error("not connected"));
+        return;
       }
-    }
-    const def = m.tools && m.tools.find((x) => x.id === t);
-    return def && def.cursor ? def.cursor : "PENCIL";
-  }
-  return "ARROW";
-}
-function refreshCursor() {
-  if (!stage) return;
-  const css = toolCursor(currentCursor());
-  if (stage.style.cursor !== css) stage.style.cursor = css;
-}
-var BULLSEYE, mods, override;
-var init_cursors = __esm({
-  "web/domains/pcb/editor/cursors.ts"() {
-    "use strict";
-    init_kicursors_generated();
-    init_state();
-    init_view();
-    init_selmodes();
-    init_tools();
-    BULLSEYE = 'url("data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#fff" stroke-width="3"/><circle cx="12" cy="12" r="9" fill="none" stroke="#000" stroke-width="1.2"/><circle cx="12" cy="12" r="5" fill="none" stroke="#fff" stroke-width="3"/><circle cx="12" cy="12" r="5" fill="none" stroke="#000" stroke-width="1.2"/><circle cx="12" cy="12" r="1.6" fill="#000"/></svg>') + '") 12 12, crosshair';
-    mods = { shift: false, ctrl: false, alt: false };
-    override = null;
-    if (typeof window !== "undefined") {
-      const onKey = (ev) => {
-        if (ev.key === "Shift" || ev.key === "Control" || ev.key === "Meta" || ev.key === "Alt") noteModifiers(ev);
-      };
-      window.addEventListener("keydown", onKey, true);
-      window.addEventListener("keyup", onKey, true);
-      window.addEventListener("blur", () => {
-        mods.shift = mods.ctrl = mods.alt = false;
-        refreshCursor();
-      });
-    }
-  }
-});
-
-// web/domains/pcb/editor/hypertext.ts
-var init_hypertext = __esm({
-  "web/domains/pcb/editor/hypertext.ts"() {
-    "use strict";
-    init_state();
-  }
-});
-
-// web/domains/pcb/editor/wheel-model.ts
-var init_wheel_model = __esm({
-  "web/domains/pcb/editor/wheel-model.ts"() {
-    "use strict";
-  }
-});
-
-// web/domains/pcb/editor/gestures.ts
-function selectionIds() {
-  const d = doc();
-  if (!d) return [];
-  const ids = new Set(E.selection);
-  if (E.selected) ids.add(E.selected.id);
-  if (isSch()) {
-    const s2 = schState();
-    if (s2 && s2.sel) ids.add(s2.sel);
-  } else {
-    const p = pcbState();
-    if (p && p.sel) for (const id of p.sel) ids.add(id);
-  }
-  return [...ids].filter((id) => d.items.has(id));
-}
-function selectionItems() {
-  const d = doc();
-  return d ? selectionIds().map((id) => d.items.get(id)) : [];
-}
-function selectionChanged() {
-  drawSelection();
-  renderProps();
-  renderObjects();
-  requestRender();
-  for (const f2 of selectionHooks) f2();
-}
-function clearAllSelection(publish2 = true) {
-  clearSelection();
-  if (isSch() && (E.markers || []).some((m) => m && m.selected)) {
-    for (const m of E.markers) if (m) delete m.selected;
-    requestRender();
-  }
-  const p = pcbState();
-  if (p && p.sel && p.sel.size) p.sel.clear();
-  const s2 = schState();
-  if (s2) {
-    s2.sel = null;
-    s2.hover = null;
-    s2.selEnds = null;
-  }
-  E.hoverId = null;
-  if (publish2) selectionChanged();
-}
-function pinUnder(mm4, exact2) {
-  const m = CollabTools.sch, d = doc();
-  if (!isSch() || !m || !d || !m._) return null;
-  const f2 = selFilter();
-  if (f2.pins === false) return null;
-  const pinAt = m._.pinAt;
-  if (!pinAt) return null;
-  try {
-    const h3 = pinAt(d, mm4, exact2 ? 0 : 5 / Math.max(1e-6, pxPerMm()), !!(E.renderOpts && E.renderOpts.showHiddenPins));
-    if (!h3 || f2.lockedItems === false && h3.item.node && KiCadCanvas.kid(h3.item.node, "locked")) return null;
-    return { id: h3.item.id, number: h3.pin.number };
-  } catch {
-    return null;
-  }
-}
-function selectItemId(id) {
-  const d = doc();
-  const it = d && d.items.get(id);
-  if (!it) return;
-  const fp = E.items.find((f2) => f2.id === id);
-  if (fp) {
-    E.selected = fp;
-    return;
-  }
-  if (isSch()) {
-    if (CollabTools.sch) CollabTools.sch.select(id);
-  } else {
-    const p = pcbState();
-    if (p) p.sel = /* @__PURE__ */ new Set([id]);
-  }
-}
-function applyPickMode(id, mode, end = null) {
-  const d = doc();
-  if (!d || !d.items.has(id)) return;
-  E.selField = null;
-  E.selPins = [];
-  const sch = isSch(), s2 = sch ? schState() : null, p = sch ? null : pcbState();
-  if (s2 && s2.sel) {
-    if (d.items.has(s2.sel)) E.selection.add(s2.sel);
-    s2.sel = null;
-  }
-  if (p && p.padSel && mode !== "add") p.padSel = null;
-  if (E.selected) E.selection.add(E.selected.id);
-  const fp = E.items.find((f2) => f2.id === id);
-  const set2 = !sch && !fp && p && !E.selection.has(id) ? p.sel : E.selection;
-  const on2 = mode === "add" ? true : mode === "remove" ? false : !set2.has(id);
-  if (on2) set2.add(id);
-  else set2.delete(id);
-  if (!sch) mergeBoardSelection();
-  const m = sch ? CollabTools.sch : null;
-  if (m && m.putSelEnd) m.putSelEnd(id, on2 ? end : null);
-  if (on2 && fp) E.selected = fp;
-  else if (E.selected && !E.selection.has(E.selected.id)) E.selected = null;
-  if (!E.selected) for (const sid of E.selection) {
-    const f2 = E.items.find((q4) => q4.id === sid);
-    if (f2) {
-      E.selected = f2;
-      break;
-    }
-  }
-  selectionChanged();
-}
-function mergeBoardSelection() {
-  if (isSch()) return;
-  const p = pcbState();
-  if (!p || !p.sel || !p.sel.size) return;
-  if (E.selected) E.selection.add(E.selected.id);
-  if (!E.selection.size) return;
-  const d = doc();
-  for (const id of p.sel) if (!d || d.items.has(id)) E.selection.add(id);
-  p.sel.clear();
-}
-function selectedAnywhere() {
-  const out2 = new Set(E.selection);
-  if (E.selected) out2.add(E.selected.id);
-  if (isSch()) {
-    const s2 = schState();
-    if (s2 && s2.sel) out2.add(s2.sel);
-  } else {
-    const p = pcbState();
-    if (p) {
-      for (const id of p.sel) out2.add(id);
-      const ps = p.padSel;
-      if (ps) out2.add(ps);
-    }
-  }
-  return out2;
-}
-function hitsAt(mm4) {
-  const d = doc();
-  if (!d) return [];
-  const [x, y] = mm4, tol = isSch() ? Math.max(0.1, 3 / Math.max(1, pxPerMm())) : HIT_PX / Math.max(1, pxPerMm()), hidden = E.hiddenLayers;
-  const geomHit2 = KiCadCanvas.geomHit;
-  const out2 = [];
-  for (const it of d.items.values()) {
-    const b = it.bbox;
-    if (!b || x < b[0] - tol || x > b[2] + tol || y < b[1] - tol || y > b[3] + tol) continue;
-    if (!filterAllows(it.kind, it)) continue;
-    let hit5 = false;
-    if (it.kind === "symbol" || it.kind === "sheet") hit5 = true;
-    else for (const g2 of it.geom) {
-      if (g2.layer && hidden.has(g2.layer)) continue;
-      if (g2.padText || g2.padNum || g2.noBox) continue;
-      if (it.kind === "zone" && g2.fill) continue;
-      const t = it.kind === "footprint" && g2.t === "text" ? 0 : tol;
-      try {
-        if (geomHit2(g2, x, y, t)) {
-          hit5 = true;
-          break;
-        }
-      } catch {
-      }
-    }
-    if (hit5) out2.push(it);
-  }
-  const area4 = (it) => it.bbox ? (it.bbox[2] - it.bbox[0]) * (it.bbox[3] - it.bbox[1]) : 0;
-  return out2.sort((a, b) => area4(a) - area4(b));
-}
-function interactionBusy() {
-  if (E.drag || E.fdrag || E.boxSel || E.zoomRect || E.measure && E.measure.set) return true;
-  if (isSch()) {
-    const s2 = schState();
-    return !!(s2 && (s2.drag || s2.pending));
-  }
-  const p = pcbState();
-  return !!(p && (p.move || p.pending || p.drag && p.drag.bySelect));
-}
-function revertAppDrag() {
-  const g2 = E.drag;
-  E.drag = null;
-  dragG3.replaceChildren();
-  if (!g2) return;
-  const d = doc();
-  if (g2.engine) {
-    if (CollabTools.sch && CollabTools.sch.cancelDrag) {
-      try {
-        CollabTools.sch.cancelDrag(toolCtx3());
-      } catch (e) {
-        console.warn(e);
-      }
-    }
-    if (g2.moved && g2.fp && g2.curMm) sendOp([moveOp2({ id: g2.fp.id, x: Math.round(g2.curMm[0] * E.IU), y: Math.round(g2.curMm[1] * E.IU) }, g2.fp.x, g2.fp.y)], true);
-  } else if (g2.group) {
-    if (g2.moved && d) {
-      const back = [];
-      for (const m of g2.group) {
-        back.push(moveOp2({ id: m.fp.id, x: m.fp.x, y: m.fp.y }, m.ox, m.oy));
-        KiCadCanvas.applyChange(d, moveOp2(m.fp, m.ox, m.oy), E.IU);
-        m.fp.x = m.ox;
-        m.fp.y = m.oy;
-      }
-      sendOp(back, true);
-    }
-  } else if (g2.moved && d && g2.fp) {
-    const cx = Math.round(g2.curMm[0] * E.IU), cy = Math.round(g2.curMm[1] * E.IU);
-    KiCadCanvas.applyChange(d, moveOp2({ id: g2.fp.id, x: cx, y: cy }, g2.fp.x, g2.fp.y), E.IU);
-    for (const w of g2.wires || []) {
-      const p = KiCadCanvas.ptsOf(w.item.node);
-      p[w.index] = w.orig;
-      KiCadCanvas.setPts(w.item.node, p);
-      w.item.geom = [];
-      w.item.bbox = null;
-      KiCadCanvas.replaceChange(d, w.item);
-    }
-    sendOp([moveOp2({ id: g2.fp.id, x: cx, y: cy }, g2.fp.x, g2.fp.y)], true);
-  }
-  sendPresence(E.lastCursorMm, []);
-  if (d) syncItemsFromDoc();
-}
-function startFieldMove(mm4) {
-  const d = doc(), sf = E.selField;
-  if (!d || !sf) return false;
-  if (E.viewOnly) {
-    toast("View-only access");
-    return true;
-  }
-  const it = d.items.get(sf.id);
-  if (!it || !isSch() && it.kind !== "footprint") return false;
-  const K11 = window.KDialogs;
-  const pn = K11 && K11._.fieldNode ? K11._.fieldNode(it.node, sf.name) : null, at5 = pn && KiCadCanvas.kid(pn, "at");
-  if (!at5) return false;
-  const g2 = isSch() ? null : it.geom.find((q4) => q4.t === "text" && q4.field === sf.name && q4.textPos);
-  const pos = isSch() ? [KiCadCanvas.num(at5[1]), KiCadCanvas.num(at5[2])] : g2 && g2.textPos ? [g2.textPos[0], g2.textPos[1]] : [mm4[0], mm4[1]];
-  E.fdrag = { id: it.id, name: sf.name, startMm: [mm4[0], mm4[1]], orig: [KiCadCanvas.num(at5[1]), KiCadCanvas.num(at5[2])], origAt: at5.slice(), moved: false, sticky: true, origin: pos, more: isSch() ? fieldDragMore(sf) : [] };
-  return true;
-}
-function revertFieldDrag() {
-  const fd = E.fdrag;
-  E.fdrag = null;
-  if (!fd) return;
-  const d = doc(), it = d && d.items.get(fd.id);
-  const K11 = window.KDialogs;
-  const pn = it && K11 && K11._.fieldNode ? K11._.fieldNode(it.node, fd.name) : null, at5 = pn && KiCadCanvas.kid(pn, "at");
-  if (d && it && at5 && fd.moved) {
-    if (fd.origAt) at5.splice(0, at5.length, ...fd.origAt);
-    else {
-      at5[1] = fd.orig[0];
-      at5[2] = fd.orig[1];
-    }
-    KiCadCanvas.replaceChange(d, it);
-  }
-  if (d && fd.moved) for (const m of fd.more || []) {
-    const it2 = d.items.get(m.id), p2 = it2 && K11 && K11._.fieldNode ? K11._.fieldNode(it2.node, m.name) : null, a2 = p2 && KiCadCanvas.kid(p2, "at");
-    if (it2 && a2) {
-      a2.splice(0, a2.length, ...m.origAt);
-      KiCadCanvas.replaceChange(d, it2);
-    }
-  }
-}
-function cancelInteraction() {
-  let took = false;
-  if (E.rdown) {
-    E.rdown = null;
-  }
-  if (E.pan) {
-    E.pan = null;
-    stage2.classList.remove("panning");
-    took = true;
-  }
-  if (E.zoomRect) {
-    E.zoomRect = null;
-    took = true;
-  }
-  if (E.boxSel) {
-    E.boxSel = null;
-    took = true;
-  }
-  if (E.measure && E.measure.set) {
-    E.measure = null;
-    took = true;
-  }
-  if (E.fdrag) {
-    revertFieldDrag();
-    took = true;
-  }
-  if (E.drag) {
-    revertAppDrag();
-    took = true;
-  }
-  const s2 = schState();
-  if (s2 && isSch() && (s2.drag || s2.pending)) {
-    s2.pending = null;
-    if (s2.drag && CollabTools.sch && CollabTools.sch.cancelDrag) {
-      try {
-        CollabTools.sch.cancelDrag(toolCtx3());
-      } catch (e) {
-        console.warn(e);
-      }
-    }
-    took = true;
-  }
-  const p = pcbState(), pm = CollabTools.pcb;
-  if (p && !isSch() && (p.move || p.pending || p.drag && p.drag.bySelect)) {
-    p.pending = null;
-    if (pm && pm.cancel) {
-      try {
-        pm.cancel();
-      } catch (e) {
-        console.warn(e);
-      }
-    }
-    took = true;
-  }
-  if (took) {
-    drawSelection();
-    renderProps();
-    requestRender();
-  }
-  return took;
-}
-function startMove(mode) {
-  const d = doc();
-  if (!d || E.viewOnly) return false;
-  cancelInteraction();
-  const mm4 = [E.lastCursorMm[0], E.lastCursorMm[1]];
-  if (isSch()) {
-    const m = CollabTools.sch;
-    if (!m) return false;
-    const items = selectionItems();
-    if (!items.length) return false;
-    const back = String(m.state.mouseDragMode || "drag");
-    try {
-      m.setDragMode(toolCtx3(), mode, true);
-      const dr = m.beginDrag(toolCtx3(), items.length === 1 ? items[0] : items, mm4, false);
-      if (dr) dr.restoreMode = back;
-      else m.setDragMode(toolCtx3(), back);
-      return !!dr;
-    } catch (e) {
-      console.warn(e);
-      m.setDragMode(toolCtx3(), back);
-      return false;
-    }
-  }
-  if (E.selField && !selectionIds().length && mode === "move") return startFieldMove(mm4);
-  if (CollabTools.pcb) return runModuleAction("move");
-  const all2 = selectionIds();
-  if (!all2.length) return false;
-  const fps = unlockedForEdit(all2).map((id) => E.items.find((f2) => f2.id === id)).filter(Boolean);
-  if (!fps.length) return true;
-  const fp = fps[0];
-  if (fps.length === 1) E.drag = { fp, startMm: mm4, curMm: [fp.x / E.IU, fp.y / E.IU], moved: false, grabOff: [mm4[0] - fp.x / E.IU, mm4[1] - fp.y / E.IU], wires: [], engine: false, sticky: true };
-  else E.drag = { fp, group: fps.map((f2) => ({ fp: f2, ox: f2.x, oy: f2.y })), startMm: mm4, grab: snapMm(mm4), curMm: [fp.x / E.IU, fp.y / E.IU], moved: false, last: [0, 0], sticky: true };
-  return true;
-}
-function handoffAppDrag() {
-  const g2 = E.drag;
-  const pm = CollabTools.pcb;
-  const PT7 = window.PcbTools;
-  if (!g2 || isSch() || g2.engine || !g2.startMm || !pm || !pm.beginMove || !PT7 || !PT7.selectMoveTo || !E.kdoc) return false;
-  const ids = g2.group ? g2.group.map((m) => m.fp.id) : g2.fp ? [g2.fp.id] : [];
-  if (!ids.length) return false;
-  const start = [g2.startMm[0], g2.startMm[1]], cur2 = [E.lastCursorMm[0], E.lastCursorMm[1]], sticky = !!g2.sticky;
-  revertAppDrag();
-  toolCtx3().setSelection(ids);
-  const c2 = toolCtx3();
-  if (!pm.beginMove(c2, start, sticky)) return false;
-  PT7.selectMoveTo(c2, cur2);
-  return true;
-}
-function drawHover(ctx, view) {
-  const d = doc(), id = E.hoverId;
-  if (!d || !id || !d.items.has(id)) return;
-  if (!E.hoverPinned || !isSch()) return;
-  const dpr = view.dpr || 1, s2 = view.ppm * view.zoom * dpr;
-  const drawHalo2 = KiCadCanvas.drawHalo;
-  ctx.save();
-  try {
-    KiCadCanvas.setViewTransform(ctx, view);
-    drawHalo2(ctx, d, /* @__PURE__ */ new Set([id]), s2, dpr, E.hiddenLayers, { color: KiCadCanvas.SCH.selection, alpha: 1, extraPx: 2, extraMm: 2 * 0.0254, strokesOnly: true });
-  } catch (e) {
-    console.warn(e);
-  } finally {
-    ctx.restore();
-  }
-}
-function toolChanging(next) {
-  if (interactionBusy() || E.pan || E.rdown) cancelInteraction();
-  if (E.hoverId) {
-    E.hoverId = null;
-    stage2.classList.remove("over-sel");
-  }
-  if (!KEEPS_SELECTION.has(next) && (selectionIds().length || E.selField || E.selPins.length)) clearAllSelection();
-}
-function resetInteraction() {
-  E.selField = null;
-  E.selPins = [];
-  E.fdrag = null;
-  E.pan = null;
-  E.rdown = null;
-  E.zoomRect = null;
-  E.boxSel = null;
-  E.hoverId = null;
-  E.hoverPinned = false;
-  stage2.classList.remove("panning", "over-sel");
-  const p = pcbState();
-  if (p && p.sel) p.sel.clear();
-  const s2 = schState();
-  if (s2) {
-    s2.sel = null;
-    s2.hover = null;
-    s2.pending = null;
-  }
-  if (E.contextMenuOpen || store.get().contextMenu) {
-    E.contextMenuOpen = false;
-    store.set({ contextMenu: null });
-  }
-  if (E.tool !== "select") {
-    try {
-      setTool("select");
-    } catch (e) {
-      console.warn(e);
-    }
-  }
-}
-function pruneSelection() {
-  const d = doc();
-  if (!d) return;
-  const sel = E.selection;
-  for (const id of [...sel]) if (!d.items.has(id)) sel.delete(id);
-  if (E.selected && !d.items.has(E.selected.id)) E.selected = null;
-  if (E.selField && !d.items.has(E.selField.id)) E.selField = null;
-  if (E.selPins.length) E.selPins = E.selPins.filter((p) => d.items.has(p.id));
-  if (E.fdrag && !d.items.has(E.fdrag.id)) E.fdrag = null;
-  if (E.hoverId && !d.items.has(E.hoverId)) E.hoverId = null;
-  const g2 = E.drag;
-  if (g2) {
-    const gone = g2.group ? g2.group.some((m) => !d.items.has(m.fp.id)) : !d.items.has(g2.fp.id);
-    if (gone) {
-      if (g2.group) g2.group = g2.group.filter((m) => d.items.has(m.fp.id));
-      if (g2.group && g2.group.length) revertAppDrag();
-      else {
-        E.drag = null;
-        dragG3.replaceChildren();
-        if (g2.engine && CollabTools.sch && CollabTools.sch.cancelDrag) {
-          try {
-            CollabTools.sch.cancelDrag(toolCtx3());
-          } catch (e) {
-            console.warn(e);
-          }
-        }
-      }
-    }
-  }
-}
-var toolCtx3, stage2, moveOp2, dragG3, schState, pcbState, doc, selectionHooks, KEEPS_SELECTION;
-var init_gestures = __esm({
-  "web/domains/pcb/editor/gestures.ts"() {
-    "use strict";
-    init_cursors();
-    init_hypertext();
-    init_appstore();
-    init_crosshair();
-    init_doc();
-    init_net();
-    init_peers();
-    init_selection();
-    init_state();
-    init_tools();
-    init_view();
-    init_util();
-    init_wheel_model();
-    init_keys();
-    toolCtx3 = toolCtx;
-    stage2 = stage;
-    moveOp2 = moveOp;
-    dragG3 = dragG;
-    schState = () => CollabTools.sch ? CollabTools.sch.state : null;
-    pcbState = () => CollabTools.pcb ? CollabTools.pcb.state : null;
-    doc = () => E.kdoc;
-    selectionHooks = [];
-    E.pinExactAt = (mm4) => !!pinUnder(mm4, true);
-    E.hooks.handoffDrag = () => handoffAppDrag();
-    E.hooks.busy = () => interactionBusy();
-    E.hooks.selectedIds = () => selectionIds();
-    KEEPS_SELECTION = /* @__PURE__ */ new Set(["select", "pan", "zoomtool", "measure", "comment", "highlight", "follow", "drag", "place", "power", "image"]);
-  }
-});
-
-// web/domains/pcb/editor/comments.ts
-function describe(it) {
-  if (it.ref) return it.ref;
-  if (it.name) return it.name;
-  const names2 = CollabTools.props && CollabTools.props.KIND_NAMES || {};
-  const kind = names2[it.kind] || it.kind.replace(/^gr_/, "").replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
-  const text3 = /label|text/.test(it.kind) ? KiCadCanvas.str(it.node[1]) : "";
-  return text3 ? `${kind} ${text3.length > 24 ? text3.slice(0, 23) + "\u2026" : text3}` : kind;
-}
-function netOfItem(it, near2) {
-  const d = kdoc2();
-  if (!d) return null;
-  if (d.type === "pcb") {
-    let name = "";
-    if (it.kind === "footprint") {
-      if (!near2) return null;
-      const pad2 = KiCadCanvas.padAt(d, near2[0], near2[1]);
-      if (pad2 && pad2.item === it) name = pad2.netName || (pad2.pad ? KiCadCanvas.netNameOf(d, pad2.pad) : "");
-    } else name = KiCadCanvas.netNameOf(d, it.node);
-    return name ? { name, ids: boardNetIds(name) } : null;
-  }
-  const sch = CollabTools.sch;
-  if (!sch || !/^(wire|bus|junction|label|global_label|hierarchical_label|bus_entry)$/.test(it.kind)) return null;
-  let ids;
-  try {
-    ids = Array.from(sch.netItems(d, it, near2));
-  } catch {
-    return null;
-  }
-  if (!ids.length) return null;
-  return { name: schNetName(ids), ids };
-}
-function boardNetIds(name) {
-  const d = kdoc2(), out2 = [];
-  if (!d) return out2;
-  const netNameOf3 = KiCadCanvas.netNameOf;
-  for (const it of d.items.values()) if ((it.kind === "segment" || it.kind === "arc" || it.kind === "via" || it.kind === "zone") && netNameOf3(d, it.node) === name) out2.push(it.id);
-  return out2;
-}
-function schNetName(ids) {
-  const d = kdoc2();
-  if (!d) return "";
-  const items = ids.map((id) => d.items.get(id)).filter((x) => !!x);
-  for (const kind of ["global_label", "hierarchical_label", "label"]) {
-    const l = items.find((it) => it.kind === kind);
-    if (l) return KiCadCanvas.str(l.node[1]);
-  }
-  const sym = items.find((it) => it.kind === "symbol" && it.ref && !it.ref.startsWith("#"));
-  return sym ? `Net-(${sym.ref})` : "unnamed net";
-}
-function netIds(a) {
-  const d = kdoc2();
-  if (!d) return [];
-  if (d.type === "pcb") return boardNetIds(a.id);
-  const sch = CollabTools.sch;
-  if (!sch) return [];
-  const from = a.item && d.items.get(a.item) || Array.from(d.items.values()).find((it) => /label$/.test(it.kind) && KiCadCanvas.str(it.node[1]) === a.id);
-  if (!from) return [];
-  try {
-    return Array.from(sch.netItems(d, from));
-  } catch {
-    return [];
-  }
-}
-function pinOf(c) {
-  const d = kdoc2(), sx = c.x / IU3(), sy = c.y / IU3(), a = c.anchor;
-  if (!a || !d) return { x: sx, y: sy, found: true };
-  const it = d.items.get(a.kind === "item" ? a.id : a.item || "");
-  if (!it || !it.bbox) return { x: sx, y: sy, found: a.kind === "net" ? netIds(a).length > 0 : false };
-  const b = it.bbox;
-  if (a.kind === "item" && PARTS.has(it.kind)) return { x: b[2], y: b[1], found: true };
-  const slack = 0.6;
-  if (sx >= b[0] - slack && sx <= b[2] + slack && sy >= b[1] - slack && sy <= b[3] + slack) return { x: sx, y: sy, found: true };
-  return { x: (b[0] + b[2]) / 2, y: (b[1] + b[3]) / 2, found: true };
-}
-function renderThreads() {
-  store.set({ comments: comments().slice() });
-}
-async function loadComments() {
-  const id = docId2();
-  if (!id) return;
-  try {
-    E.comments = (await request3(`/api/docs/${id}/comments`)).comments || [];
-  } catch {
-    E.comments = [];
-  }
-  if (docId2() !== id) return;
-  drawComments();
-  renderThreads();
-  void loadProjectComments();
-  const want2 = E.pendingThread;
-  if (want2 !== null && want2 !== void 0) {
-    E.pendingThread = null;
-    if (comments().some((c) => c.id === want2)) openThreadAction(want2);
-  }
-}
-async function loadProjectComments() {
-  const p = project();
-  if (!p) return;
-  const n2 = ++projectLoad;
-  try {
-    const j = await request3(`/api/projects/${p.projectId}/comments`);
-    if (n2 !== projectLoad) return;
-    const others = j.docs.filter((d) => d.docId !== docId2()).map((d) => ({ docId: d.docId, path: d.path, comments: j.comments.filter((c) => c.docId === d.docId) })).filter((d) => d.comments.length);
-    store.set({ otherComments: others });
-  } catch {
-    store.set({ otherComments: [] });
-  }
-}
-function noteCommentMsg(msg) {
-  const c = msg.comment || {}, inner = c.comment;
-  if (!inner) return;
-  let list = comments();
-  if (c.action === "deleted") list = list.filter((x) => x.id !== inner.id && x.parentId !== inner.id);
-  else if (c.action === "updated") list = list.map((x) => x.id === inner.id ? inner : x);
-  else if (c.action === "added" && !list.some((x) => x.id === inner.id)) list = [...list, inner];
-  E.comments = list;
-  drawComments();
-  renderThreads();
-  if (E.openThread !== null) {
-    if (!list.some((x) => x.id === E.openThread)) closeThread();
-    else if (!panel2.querySelector("textarea.editing")) showThread(E.openThread, true);
-  }
-}
-function svg(tag, attrs) {
-  const el4 = document.createElementNS(NS2, tag);
-  for (const k of Object.keys(attrs)) el4.setAttribute(k, String(attrs[k]));
-  return el4;
-}
-function drawComments() {
-  pins.replaceChildren();
-  if (!kdoc2() && !comments().length) return;
-  const s2 = pxPerMm();
-  const list = comments();
-  for (const c of list) {
-    if (c.parentId || c.resolved) continue;
-    const p = pinOf(c), r = 9 / s2, open4 = E.openThread === c.id;
-    const g2 = svg("g", { cursor: "pointer", "data-thread": c.id, "data-anchor": c.anchor ? c.anchor.kind : "spot" });
-    const fill3 = p.found ? "#ffb43a" : "#8a939c";
-    if (open4) g2.appendChild(svg("circle", { cx: p.x, cy: p.y, r: r + 3.5 / s2, fill: "none", stroke: "#4d7fc4", "stroke-width": 2 / s2 }));
-    if (c.anchor && c.anchor.kind === "net") g2.appendChild(svg("rect", { x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r, rx: 3 / s2, fill: fill3, stroke: "#001023", "stroke-width": 1.5 / s2 }));
-    else g2.appendChild(svg("circle", { cx: p.x, cy: p.y, r, fill: fill3, stroke: "#001023", "stroke-width": 1.5 / s2 }));
-    const glyph = svg("text", { x: p.x, y: p.y + 3.4 / s2, "text-anchor": "middle", fill: "#001023", "font-size": 10 / s2, "font-family": "system-ui, sans-serif", "font-weight": 700 });
-    glyph.textContent = String(list.filter((x) => x.id === c.id || x.parentId === c.id).length);
-    g2.appendChild(glyph);
-    const title = svg("title", {});
-    title.textContent = `${c.anchor ? c.anchor.label + ": " : ""}${c.body.slice(0, 80)}`;
-    g2.appendChild(title);
-    g2.addEventListener("pointerdown", (ev) => ev.stopPropagation());
-    g2.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      showThread(c.id);
+      const clientOpId = `web-file:${Date.now().toString(36)}:${++sockN}`;
+      acks.set(clientOpId, { ok: ok2, fail });
+      sock.send(JSON.stringify({ type: "op", docId: docId3, clientOpId, baseSeq: null, changes }));
     });
-    pins.appendChild(g2);
-  }
-}
-function centerOn(xMm, yMm) {
-  const w = worldEl.clientWidth, h3 = w * mmH() / mmW();
-  E.panX = stageEl.clientWidth / 2 - (xMm - mmX0()) / mmW() * w * E.zoom;
-  E.panY = stageEl.clientHeight / 2 - (yMm - mmY0()) / mmH() * h3 * E.zoom;
-  applyView();
-}
-function panelAt(xMm, yMm) {
-  const wr = worldEl.getBoundingClientRect(), sr = stageEl.getBoundingClientRect();
-  const px = wr.left - sr.left + (xMm - mmX0()) / mmW() * wr.width;
-  const py = wr.top - sr.top + (yMm - mmY0()) / mmH() * wr.height;
-  panel2.classList.add("open");
-  const pw = panel2.offsetWidth || 320, ph = panel2.offsetHeight || 200;
-  const left = px + 16 + pw <= sr.width ? px + 16 : Math.max(8, px - 16 - pw);
-  panel2.style.left = Math.max(8, Math.min(left, sr.width - pw - 8)) + "px";
-  panel2.style.top = Math.max(8, Math.min(py - 14, sr.height - ph - 8)) + "px";
-}
-function el3(tag, cls, text3) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text3 !== void 0) e.textContent = text3;
-  return e;
-}
-function chip(a, found, onClick) {
-  const label = a ? a.kind === "net" ? `Net ${a.label || a.id}` : a.label || "Item" : "On the sheet";
-  const c = el3(onClick ? "button" : "span", `cmt-anchor ${a ? a.kind : "spot"}${found ? "" : " gone"}`);
-  if (onClick) {
-    c.type = "button";
-    c.addEventListener("click", onClick);
-  }
-  c.appendChild(el3("i"));
-  c.appendChild(document.createTextNode(label));
-  c.title = !a ? "Pinned to a place on the sheet" : !found ? `${label} is no longer on this ${E.DOC_TYPE === "kicad_sch" ? "sheet" : "board"}` : a.kind === "net" ? "Highlight this net" : "Select this item";
-  c.dataset.anchor = a ? a.kind : "spot";
-  return c;
-}
-function head(a, found, stateText, onChip) {
-  const h3 = el3("div", "cmt-head");
-  h3.appendChild(chip(a, found, onChip));
-  if (stateText) h3.appendChild(el3("span", "cmt-state", stateText));
-  const x = el3("button", "cmt-x");
-  x.appendChild(closeMark());
-  x.type = "button";
-  x.title = "Close";
-  x.id = "closeBtn";
-  x.addEventListener("click", closeThread);
-  h3.appendChild(x);
-  return h3;
-}
-function submitOnCtrlEnter(ta, go) {
-  ta.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
-      ev.preventDefault();
-      go();
-    }
-    ev.stopPropagation();
+    api4("/api/ws-ticket").then((ticket) => {
+      if (settled) return;
+      sock = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+      const s2 = sock;
+      s2.onopen = () => s2.send(JSON.stringify({ type: "hello", proto: 1, token: ticket.token || "", clientId: "web-file-" + Math.random().toString(36).slice(2, 10), linkToken: null, client: "web" }));
+      s2.onerror = () => done(() => reject(new Error("connection failed")));
+      s2.onclose = () => done(() => reject(new Error("connection closed")));
+      s2.onmessage = (ev) => {
+        let msg;
+        try {
+          msg = JSON.parse(String(ev.data));
+        } catch (e) {
+          return;
+        }
+        if (msg.type === "hello_ok") s2.send(JSON.stringify({ type: "join_doc", docId: docId3 }));
+        else if (msg.type === "doc_info") role = msg.role || "viewer";
+        else if (msg.type === "snapshot" && typeof msg.file === "string") {
+          onJoined({ file: msg.file, seq: Number(msg.seq) || 0, ops: msg.thenOps || [], role }, sendOp3).then((v) => done(() => resolve2(v)), (e) => done(() => reject(e instanceof Error ? e : new Error(String(e)))));
+        } else if (msg.type === "ack" && msg.clientOpId && acks.has(msg.clientOpId)) {
+          const a = acks.get(msg.clientOpId);
+          acks.delete(msg.clientOpId);
+          if (a) a.ok(Number(msg.seq) || 0);
+        } else if (msg.type === "error") {
+          const a = msg.clientOpId ? acks.get(msg.clientOpId) : void 0;
+          if (a) a.fail(new Error(msg.code || "refused"));
+          else done(() => reject(new Error(msg.code || "refused")));
+        }
+      };
+    }).catch((e) => done(() => reject(e instanceof Error ? e : new Error(String(e)))));
   });
 }
-async function call2(path2, method, body) {
+function liveDocument(docId3) {
+  return withDocument(docId3, (live3) => Promise.resolve(live3));
+}
+function sendDocOps(docId3, changes) {
+  return withDocument(docId3, async (live3, sendOp3) => {
+    if (live3.role !== "editor") throw new Error("permission_denied");
+    return sendOp3(changes);
+  });
+}
+function withFileOps(text3, ops) {
+  const edits = [];
+  for (const op of ops) for (const c of op.changes || []) {
+    if (c.typeName !== "PROJECT_FILE") continue;
+    for (const p of c.properties || []) if (p.after && p.name) edits.push({ path: p.name.split("."), value: p.after.v });
+  }
+  if (!edits.length) return text3;
   try {
-    await request3(path2, { method, body: body === void 0 ? void 0 : JSON.stringify(body) });
-    return true;
+    return editProject(text3, edits).text;
   } catch (e) {
-    toast(`That did not go through: ${e.message.replace(/^\d+ /, "").slice(0, 120)}`, 4e3);
-    return false;
+    return text3;
   }
 }
-function focusAnchor(c) {
-  const d = kdoc2(), a = c.anchor;
-  if (!d || !a) return;
-  if (a.kind === "net") {
-    const ids = netIds(a);
-    if (ids.length) {
-      ownHighlight = new Set(ids);
-      E.highlightIds = ownHighlight;
-      requestRender();
+async function loadProjectFile() {
+  const pro = projectDoc("kicad_pro");
+  if (!pro) return null;
+  if (!appState2().me) {
+    try {
+      const t = await api4(`/api/docs/${pro.docId}/content?v=${Date.now()}`);
+      return typeof t === "string" ? t : JSON.stringify(t);
+    } catch (e) {
+      return null;
     }
-    return;
   }
-  if (!d.items.has(a.id)) return;
-  clearAllSelection(false);
-  selectItemId(a.id);
-  selectionChanged();
-}
-function dropHighlight() {
-  if (ownHighlight && E.highlightIds === ownHighlight) {
-    E.highlightIds = null;
-    requestRender();
-  }
-  ownHighlight = null;
-}
-function closeThread() {
-  panel2.classList.remove("open");
-  panel2.replaceChildren();
-  const had = E.openThread !== null || !!draft;
-  E.openThread = null;
-  draft = null;
-  dropHighlight();
-  if (had) {
-    drawComments();
-    store.set({ openThread: null });
-  }
-}
-function showThread(rootId, keepPlace = false) {
-  const list = comments(), root5 = list.find((c) => c.id === rootId);
-  if (!root5) {
-    closeThread();
-    return;
-  }
-  const was = E.openThread;
-  E.openThread = rootId;
-  draft = null;
-  const p = pinOf(root5), user = me2(), owner = project()?.ownerId, write = canComment();
-  const thread = [root5, ...list.filter((c) => c.parentId === rootId)];
-  panel2.replaceChildren();
-  panel2.dataset.thread = String(rootId);
-  panel2.appendChild(head(root5.anchor, p.found, root5.resolved ? "resolved" : "", root5.anchor && p.found ? () => {
-    focusAnchor(root5);
-    centerOn(p.x, p.y);
-  } : void 0));
-  if (root5.anchor && !p.found) {
-    const what = root5.anchor.kind === "net" ? `Net ${root5.anchor.label || root5.anchor.id}` : root5.anchor.label || "The item";
-    panel2.appendChild(el3("div", "cmt-gone", `${what} is no longer on this ${E.DOC_TYPE === "kicad_sch" ? "sheet" : "board"}. The thread stays where it was.`));
-  }
-  const listEl = el3("div", "cmt-list");
-  for (const c of thread) {
-    const item = el3("div", "cmt-item");
-    item.dataset.comment = String(c.id);
-    const meta2 = el3("div", "meta");
-    meta2.appendChild(el3("b", "", c.authorLogin));
-    meta2.appendChild(el3("span", "", ago(c.createdAt) + (c.editedAt ? " \xB7 edited" : "")));
-    const body = el3("div", "cbody", c.body);
-    if (write && user && (c.authorId === user.id || owner === user.id)) {
-      const acts = el3("span", "acts");
-      if (c.authorId === user.id) {
-        const edit = el3("button", "", "Edit");
-        edit.type = "button";
-        edit.dataset.edit = "";
-        edit.addEventListener("click", () => {
-          const ta = el3("textarea", "editing");
-          ta.value = c.body;
-          ta.rows = 3;
-          ta.dataset.editText = "";
-          const row3 = el3("div", "row"), save2 = el3("button", "btn sm primary", "Save"), cancel = el3("button", "btn sm", "Cancel");
-          save2.type = "button";
-          cancel.type = "button";
-          save2.dataset.editSave = "";
-          const done = async () => {
-            const text3 = ta.value.trim();
-            if (!text3) return;
-            if (text3 === c.body || await call2(`/api/comments/${c.id}`, "PATCH", { body: text3 })) showThread(rootId, true);
-          };
-          save2.addEventListener("click", () => {
-            void done();
-          });
-          cancel.addEventListener("click", () => showThread(rootId, true));
-          submitOnCtrlEnter(ta, () => {
-            void done();
-          });
-          row3.append(save2, cancel);
-          body.replaceWith(ta, row3);
-          acts.remove();
-          ta.focus();
-        });
-        acts.appendChild(edit);
-      }
-      const del = el3("button", "del", "Delete");
-      del.type = "button";
-      del.addEventListener("click", () => {
-        const whole2 = c.id === rootId && thread.length > 1;
-        void askConfirm("Delete Comment", whole2 ? "Delete this thread and its replies?" : "Delete this comment?", { ok: "Delete", danger: true }).then((yes7) => {
-          if (yes7) void call2(`/api/comments/${c.id}`, "DELETE");
-        });
-      });
-      acts.appendChild(del);
-      meta2.appendChild(acts);
+  try {
+    const live3 = await liveDocument(pro.docId);
+    return withFileOps(live3.file, live3.ops);
+  } catch (e) {
+    try {
+      const t = await api4(`/api/docs/${pro.docId}/content?v=${Date.now()}`);
+      return typeof t === "string" ? t : JSON.stringify(t);
+    } catch (e2) {
+      return null;
     }
-    item.append(meta2, body);
-    listEl.appendChild(item);
-  }
-  panel2.appendChild(listEl);
-  if (write) {
-    const form3 = el3("div", "cmt-form"), ta = el3("textarea");
-    ta.id = "replyText";
-    ta.rows = 2;
-    ta.placeholder = "Reply\u2026";
-    const row3 = el3("div", "row"), reply = el3("button", "btn sm primary", "Reply"), resolve2 = el3("button", "btn sm", root5.resolved ? "Reopen" : "Resolve");
-    reply.type = "button";
-    reply.id = "replyBtn";
-    resolve2.type = "button";
-    resolve2.id = "resolveBtn";
-    const send3 = async () => {
-      const text3 = ta.value.trim();
-      if (!text3) return;
-      reply.disabled = true;
-      if (await call2(`/api/docs/${root5.docId}/comments`, "POST", { body: text3, parentId: rootId })) ta.value = "";
-      reply.disabled = false;
-    };
-    reply.addEventListener("click", () => {
-      void send3();
-    });
-    submitOnCtrlEnter(ta, () => {
-      void send3();
-    });
-    resolve2.addEventListener("click", () => {
-      void call2(`/api/comments/${rootId}`, "PATCH", { resolved: !root5.resolved });
-    });
-    row3.append(reply, resolve2);
-    form3.append(ta, row3);
-    panel2.appendChild(form3);
-  } else if (!user) {
-    const form3 = el3("div", "cmt-form");
-    form3.appendChild(el3("span", "hint", "Sign in to reply."));
-    panel2.appendChild(form3);
-  }
-  if (!(keepPlace && was === rootId)) panelAt(p.x, p.y);
-  else panel2.classList.add("open");
-  listEl.scrollTop = listEl.scrollHeight;
-  if (was !== rootId) {
-    dropHighlight();
-    if (root5.anchor && root5.anchor.kind === "net") focusAnchor(root5);
-    drawComments();
-    store.set({ openThread: rootId });
   }
 }
-function openThreadAction(id) {
-  const c = comments().find((x) => x.id === id);
-  if (!c) return;
-  const p = pinOf(c);
-  centerOn(p.x, p.y);
-  showThread(c.id);
-  if (c.anchor && c.anchor.kind === "item") focusAnchor(c);
+function saveTextDocument(docId3, text3, change) {
+  if (!canWriteProject()) return Promise.resolve(false);
+  return withDocument(docId3, async (live3, sendOp3) => {
+    if (live3.role !== "editor") return false;
+    const seq = await sendOp3([change]);
+    const r = await fetch(`/api/docs/${docId3}/snapshots?seq=${seq}`, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: text3 });
+    return r.ok;
+  }).catch(() => false);
 }
-var comments, kdoc2, IU3, me2, docId2, project, canComment, panel2, pins, stageEl, worldEl, request3, draft, ownHighlight, PARTS, projectLoad;
-var init_comments = __esm({
-  "web/domains/pcb/editor/comments.ts"() {
+function saveProjectFile(text3, edits) {
+  const pro = projectDoc("kicad_pro");
+  if (!pro) return Promise.resolve(false);
+  return saveTextDocument(pro.docId, text3, {
+    id: "project",
+    kind: "MODIFIED",
+    typeName: "PROJECT_FILE",
+    properties: edits.map((e) => ({ name: e.path.join("."), after: { type: "json", v: e.value } }))
+  });
+}
+function adoptProjectFile(text3) {
+  E.proSettings = text3;
+  const pcb = CollabTools.pcb;
+  if (pcb && pcb.setDesignSettings) {
+    try {
+      pcb.setDesignSettings(text3);
+    } catch (e) {
+    }
+  }
+  const sizes2 = KiCadCanvas.pcbSizes;
+  if (sizes2 && sizes2.state && sizes2.state.load) {
+    try {
+      sizes2.state.load(text3);
+      if (sizes2.state.emit) sizes2.state.emit();
+    } catch (e) {
+    }
+  }
+  try {
+    const j = JSON.parse(text3);
+    const w = j.board && j.board.design_settings && j.board.design_settings.defaults && j.board.design_settings.defaults.silk_line_width;
+    E.renderOpts.silkLineWidth = typeof w === "number" && w > 0 ? w : void 0;
+  } catch (e) {
+  }
+  if (E.kdoc) {
+    try {
+      const j = JSON.parse(text3);
+      E.kdoc.projectVars = j.text_variables && Object.keys(j.text_variables).length ? j.text_variables : null;
+    } catch (e) {
+    }
+  }
+  requestRender();
+}
+var appState2, projectDoc, canWriteProject, sockN;
+var init_projectfile = __esm({
+  "web/domains/pcb/editor/projectfile.ts"() {
     "use strict";
-    init_names();
-    init_msgbox();
     init_appstore();
-    init_keys();
-    init_dom();
-    init_gestures();
     init_state();
-    init_tools();
     init_util();
     init_view();
-    init_kicon_dom();
-    comments = () => E.comments;
-    kdoc2 = () => E.kdoc;
-    IU3 = () => E.IU;
-    me2 = () => state.me;
-    docId2 = () => {
-      const id = state.docId;
-      return id && !id.startsWith("board:") && !id.startsWith("lib:") ? id : null;
+    init_project_file();
+    appState2 = () => state;
+    projectDoc = (docType) => projectDocs2().find((d) => d.docType === docType) || null;
+    canWriteProject = () => !E.viewOnly && !!appState2().me;
+    sockN = 0;
+  }
+});
+
+// web/domains/pcb/editor/bootpick.ts
+function editorDocs(docs) {
+  return docs.filter((d) => d.docType === "kicad_pcb" || d.docType === "kicad_sch").sort((a, b) => (a.docType === "kicad_pcb" ? 0 : 1) - (b.docType === "kicad_pcb" ? 0 : 1) || a.path.localeCompare(b.path));
+}
+function rootSchematicOf(shown2, all2) {
+  const sch = shown2.filter((d) => d.docType === "kicad_sch");
+  const pro = all2.find((d) => d.docType === "kicad_pro");
+  const stem3 = pro && pro.path.split("/").pop().replace(/\.kicad_pro$/, "");
+  return sch.find((d) => d.path.split("/").pop() === stem3 + ".kicad_sch") || sch.sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
+}
+function firstDoc(shown2, all2, wanted2) {
+  return shown2.find((d) => d.docId === wanted2) || rootSchematicOf(shown2, all2) || shown2.find((d) => d.docType === "kicad_pcb") || null;
+}
+function topLevelSheetsOf(pro, shown2, all2) {
+  const sch = pro && typeof pro === "object" ? pro.schematic : void 0;
+  const list = sch && Array.isArray(sch.top_level_sheets) ? sch.top_level_sheets : [];
+  const proDoc2 = all2.find((d) => d.docType === "kicad_pro");
+  const dir = proDoc2 ? proDoc2.path.split("/").slice(0, -1).join("/") : "";
+  const out2 = [];
+  for (const e of list) {
+    if (!e || typeof e.filename !== "string" || !e.filename) continue;
+    const parts = [...dir ? dir.split("/") : [], ...e.filename.replace(/\\/g, "/").split("/")].filter((p) => p && p !== ".");
+    const norm3 = [];
+    for (const p of parts) {
+      if (p === "..") norm3.pop();
+      else norm3.push(p);
+    }
+    const path2 = norm3.join("/");
+    const doc2 = shown2.find((d) => d.docType === "kicad_sch" && d.path === path2);
+    if (!doc2 || out2.some((o) => o.doc === doc2)) continue;
+    out2.push({ doc: doc2, name: typeof e.name === "string" ? e.name : "", uuid: typeof e.uuid === "string" && e.uuid !== NIL_UUID ? e.uuid : "" });
+  }
+  if (out2.length) return out2;
+  const root5 = rootSchematicOf(shown2, all2);
+  return root5 ? [{ doc: root5, name: "Root", uuid: "" }] : [];
+}
+var BOARD_HINT, NIL_UUID;
+var init_bootpick = __esm({
+  "web/domains/pcb/editor/bootpick.ts"() {
+    "use strict";
+    BOARD_HINT = "kui.boardDocs";
+    NIL_UUID = "00000000-0000-0000-0000-000000000000";
+  }
+});
+
+// web/domains/pcb/editor/pcbdialogs/update-pcb.ts
+function rootSchematicOf2(docs) {
+  const sch = docs.filter((d) => d.docType === "kicad_sch");
+  if (!sch.length) return null;
+  const pro = docs.find((d) => d.docType === "kicad_pro");
+  const stem3 = (p) => p.replace(/\.[^./]+$/, "");
+  const board3 = docs.find((d) => d.docId === state.docId);
+  return pro && sch.find((d) => stem3(d.path) === stem3(pro.path)) || board3 && sch.find((d) => stem3(d.path) === stem3(board3.path)) || sch.slice().sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
+}
+async function projectNetlist() {
+  const docs = projectDocs2(), root5 = rootSchematicOf2(docs);
+  if (!root5) return { error: "This project has no schematic." };
+  const sch = CollabTools.sch;
+  const helpers2 = sch && sch._;
+  if (!helpers2 || !helpers2.symbolPins) return { error: "The schematic tools are not loaded." };
+  const files = /* @__PURE__ */ new Map();
+  await Promise.all(docs.filter((d) => d.docType === "kicad_sch").map(async (d) => {
+    try {
+      const live3 = await liveDocument(d.docId);
+      const doc2 = KiCadCanvas.parseDoc(live3.file, "kicad_sch");
+      for (const op of live3.ops) for (const c of op.changes || []) {
+        try {
+          KiCadCanvas.applyChange(doc2, c, SCH_IU2);
+        } catch (e) {
+        }
+      }
+      const m = /\(uuid\s+"?([0-9a-fA-F-]{36})"?\s*\)/.exec(live3.file.slice(0, 4e3));
+      files.set(d.path, { doc: doc2, uuid: m ? m[1] : "", file: d.path });
+    } catch (e) {
+    }
+  }));
+  let pro = null;
+  try {
+    const proDoc2 = docs.find((d) => d.docType === "kicad_pro");
+    const text3 = E.proSettings || (proDoc2 ? await fetch(`/api/docs/${proDoc2.docId}/content`).then((r) => r.ok ? r.text() : "") : "");
+    pro = text3 ? JSON.parse(text3) : null;
+  } catch (e) {
+    pro = null;
+  }
+  const tops = topLevelSheetsOf(pro, docs, docs).map((t) => ({ sheet: files.get(t.doc.path), name: t.name, uuid: t.uuid, path: t.doc.path })).filter((t) => !!t.sheet);
+  const rootFile = tops.length > 1 ? tops[0].sheet : files.get(root5.path);
+  if (!rootFile) return { error: "The root schematic could not be read." };
+  const resolve2 = (file, parent) => {
+    const dir = parent.file.split("/").slice(0, -1);
+    const parts = [...dir, ...file.split("/")].filter((p) => p && p !== ".");
+    const out2 = [];
+    for (const p of parts) {
+      if (p === "..") out2.pop();
+      else out2.push(p);
+    }
+    return files.get(out2.join("/")) || files.get(file) || null;
+  };
+  const netlist = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve2, { symbolPins: helpers2.symbolPins, isPower: (d, it) => helpers2.isPowerSymbol(d, String((KiCadCanvas.kid(it.node, "lib_id") || [])[1])) }, root5.path.split("/").pop().replace(/\.kicad_sch$/, ""));
+  return { netlist, root: tops.length > 1 ? tops[0].path : root5.path, files };
+}
+var SCH_IU2;
+var init_update_pcb = __esm({
+  "web/domains/pcb/editor/pcbdialogs/update-pcb.ts"() {
+    "use strict";
+    init_state();
+    init_appstore();
+    init_projectfile();
+    init_canvas();
+    init_bootpick();
+    init_ui();
+    SCH_IU2 = 1e4;
+  }
+});
+
+// web/domains/pcb/editor/attention.ts
+function setAttention(id, why2) {
+  const cur2 = store.get().attention || {};
+  if ((cur2[id] || null) === why2) return;
+  const next = Object.assign({}, cur2);
+  if (why2) next[id] = why2;
+  else delete next[id];
+  store.set({ attention: next });
+}
+async function projectBoard() {
+  if (E.kdoc && E.kdoc.type === "pcb" && E.DOC_TYPE !== "footprint") return E.kdoc;
+  const target2 = NL().projectBoardPath(projectDocs2());
+  if (!target2.doc) return null;
+  const live3 = await liveDocument(target2.doc.docId);
+  const doc2 = KiCadCanvas.parseDoc(live3.file, "kicad_pcb");
+  for (const op of live3.ops) for (const c of op.changes || []) {
+    try {
+      KiCadCanvas.applyChange(doc2, c, E.IU);
+    } catch (e) {
+    }
+  }
+  return doc2;
+}
+async function pendingBoardUpdates(board3) {
+  const docs = projectDocs2();
+  if (!docs.some((d) => d.docType === "kicad_sch")) return null;
+  const doc2 = board3 || await projectBoard();
+  if (!doc2) return null;
+  const res = await projectNetlist();
+  if ("error" in res) return null;
+  const plan2 = NL().planUpdate(doc2, res.netlist, { replaceFootprints: true, updateFields: false, footprintFor: () => null });
+  return plan2.report.filter((l) => !/^Total warnings/.test(l.text) && !/no footprint assigned/.test(l.text)).length;
+}
+async function check2() {
+  if (running2 || document.hidden || state.view !== "editor" || !state.project) return;
+  running2 = true;
+  lastRun = Date.now();
+  try {
+    const onBoard = !!E.kdoc && E.kdoc.type === "pcb" && E.DOC_TYPE !== "footprint";
+    const n2 = await pendingBoardUpdates(onBoard ? E.kdoc : null);
+    setAttention(PCB_STALE, n2 ? `The schematic has ${n2} change${n2 === 1 ? "" : "s"} the board does not have yet. Run Update PCB from Schematic (F8).` : null);
+  } catch (e) {
+  } finally {
+    running2 = false;
+  }
+}
+function watchAttention() {
+  if (timer2) return;
+  timer2 = window.setInterval(() => {
+    if (state.view !== "editor" || !state.project) {
+      if (lastKey2) {
+        lastKey2 = "";
+        setAttention(PCB_STALE, null);
+      }
+      return;
+    }
+    const key3 = `${state.project.projectId}|${state.docId}|${E.editsSeen}`;
+    if (key3 !== lastKey2) {
+      lastKey2 = key3;
+      quiet = Date.now();
+      return;
+    }
+    if (quiet && Date.now() - quiet > 4e3 || Date.now() - lastRun > 6e4) {
+      quiet = 0;
+      void check2();
+    }
+  }, 2e3);
+}
+var PCB_STALE, GITHUB_PULL, timer2, quiet, lastKey2, lastRun, running2;
+var init_attention = __esm({
+  "web/domains/pcb/editor/attention.ts"() {
+    "use strict";
+    init_appstore();
+    init_state();
+    init_projectfile();
+    init_canvas();
+    init_update_pcb();
+    PCB_STALE = "updatePcbFromSchematic";
+    GITHUB_PULL = "githubPull";
+    timer2 = 0;
+    quiet = 0;
+    lastKey2 = "";
+    lastRun = 0;
+    running2 = false;
+  }
+});
+
+// web/domains/pcb/editor/tutorial.ts
+function guide() {
+  try {
+    const g2 = JSON.parse(localStorage.getItem(KEY4) || "null");
+    return g2 && typeof g2.projectId === "string" ? g2 : null;
+  } catch {
+    return null;
+  }
+}
+async function startLedTutorial() {
+  if (!state.me) {
+    toast("Sign in to start the tutorial");
+    return;
+  }
+  try {
+    const r = await fetch("/api/projects/blank", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: `LED board ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}`, template: "pcb" })
+    });
+    const j = await r.json();
+    if (!r.ok || !j.projectId) throw new Error(j.message || `HTTP ${r.status}`);
+    try {
+      localStorage.setItem(KEY4, JSON.stringify({ projectId: j.projectId, from: "home", kind: "led", done: {} }));
+    } catch {
+    }
+    window.dispatchEvent(new CustomEvent("kc:guide"));
+    navigate(`/p/${j.projectId}/edit`);
+  } catch (e) {
+    toast("Could not start the tutorial: " + e.message, 4e3);
+  }
+}
+async function tutorialFacts() {
+  const res = await projectNetlist();
+  if ("error" in res) return null;
+  const comps = res.netlist.components.filter((c) => !c.ref.startsWith("#"));
+  const r = comps.find((c) => isR(c.libId, c.ref)), led = comps.find((c) => isLed(c.libId, c.ref)), conn = comps.find((c) => isConn(c.libId, c.ref));
+  const parts = [r, led, conn].filter((c) => !!c);
+  const reach = /* @__PURE__ */ new Map();
+  for (const [net, pins2] of res.netlist.nets) reach.set(net, new Set(pins2.map((p) => p.ref)));
+  const wiredPart = (c) => {
+    const pins2 = Array.from(c.pins.values());
+    if (pins2.length < 2) return false;
+    const nets = pins2.map((p) => p.net);
+    return nets.every((n2) => !!n2 && (reach.get(n2)?.size || 0) >= 2) && new Set(nets).size === nets.length;
+  };
+  const facts = {
+    r: !!r,
+    led: !!led,
+    conn: !!conn,
+    wired: parts.filter(wiredPart).length,
+    named: parts.length === 3 && parts.every((c) => !c.ref.includes("?")),
+    footprints: parts.length === 3 && parts.every((c) => !!c.footprint),
+    onBoard: 0,
+    stale: false,
+    outline: false,
+    inside: 0,
+    open: null
+  };
+  const board3 = await projectBoard().catch(() => null);
+  if (!board3) return facts;
+  const fps = Array.from(board3.items.values()).filter((it) => it.kind === "footprint");
+  const want2 = new Set(parts.map((c) => c.ref));
+  const mine = fps.filter((it) => it.ref && want2.has(it.ref));
+  facts.onBoard = mine.length;
+  facts.stale = !!await pendingBoardUpdates(board3).catch(() => null);
+  const layerOf2 = (it) => {
+    if (it.layer) return it.layer;
+    const l = KiCadCanvas.kid(it.node, "layer");
+    return l ? String(l[1]) : "";
+  };
+  const edges = Array.from(board3.items.values()).filter((it) => it.kind !== "footprint" && it.bbox && layerOf2(it) === "Edge.Cuts");
+  if (edges.length) {
+    const box3 = edges.reduce((b, it) => [Math.min(b[0], it.bbox[0]), Math.min(b[1], it.bbox[1]), Math.max(b[2], it.bbox[2]), Math.max(b[3], it.bbox[3])], [Infinity, Infinity, -Infinity, -Infinity]);
+    facts.outline = box3[2] - box3[0] > 1 && box3[3] - box3[1] > 1;
+    const inBox3 = (it) => {
+      const b = it.bbox;
+      const x = it.x ?? (b ? (b[0] + b[2]) / 2 : NaN), y = it.y ?? (b ? (b[1] + b[3]) / 2 : NaN);
+      return x > box3[0] && x < box3[2] && y > box3[1] && y < box3[3];
     };
-    project = () => state.project;
-    canComment = () => !!E.canComment;
-    panel2 = cmtPanel;
-    pins = cmtG;
-    stageEl = stage;
-    worldEl = world;
-    request3 = api4;
-    draft = null;
-    ownHighlight = null;
-    PARTS = /* @__PURE__ */ new Set(["symbol", "footprint", "sheet"]);
-    projectLoad = 0;
+    facts.inside = facts.outline ? mine.filter(inBox3).length : 0;
+  }
+  const tools = window.PcbTools;
+  try {
+    if (tools && mine.length) facts.open = tools.ratsnest(board3).length;
+  } catch {
+  }
+  return facts;
+}
+async function check3() {
+  if (busy || document.hidden) return;
+  busy = true;
+  lastRun2 = Date.now();
+  try {
+    const f2 = await tutorialFacts();
+    if (f2 && running3()) store.set({ tutorial: f2 });
+  } catch (e) {
+  } finally {
+    busy = false;
+  }
+}
+function watchTutorial() {
+  if (timer3) return;
+  timer3 = window.setInterval(() => {
+    if (state.view !== "editor" || !running3()) {
+      if (store.get().tutorial) store.set({ tutorial: void 0 });
+      lastKey3 = "";
+      return;
+    }
+    const key3 = `${state.project.projectId}|${state.docId}|${E.editsSeen}`;
+    if (key3 !== lastKey3) {
+      lastKey3 = key3;
+      quiet2 = Date.now();
+      return;
+    }
+    if (quiet2 && Date.now() - quiet2 > 1200 || Date.now() - lastRun2 > 15e3) {
+      quiet2 = 0;
+      void check3();
+    }
+  }, 600);
+}
+var KEY4, running3, isR, isLed, isConn, timer3, lastKey3, quiet2, lastRun2, busy;
+var init_tutorial = __esm({
+  "web/domains/pcb/editor/tutorial.ts"() {
+    "use strict";
+    init_appstore();
+    init_state();
+    init_home();
+    init_util();
+    init_attention();
+    init_update_pcb();
+    KEY4 = "kc.guide";
+    running3 = () => {
+      const g2 = guide();
+      return !!g2 && g2.kind === "led" && !!state.project && g2.projectId === state.project.projectId;
+    };
+    isR = (libId, ref) => /(^|:)R(_|$)/.test(libId) || /^R[0-9?]*$/.test(ref);
+    isLed = (libId, ref) => /LED/i.test(libId) || /^D[0-9?]*$/.test(ref) && /LED/i.test(libId);
+    isConn = (libId, ref) => /^Connector/i.test(libId) || /^(J|P)[0-9?]*$/.test(ref);
+    timer3 = 0;
+    lastKey3 = "";
+    quiet2 = 0;
+    lastRun2 = 0;
+    busy = false;
   }
 });
 
@@ -84166,14 +84515,14 @@ async function send2() {
   }
 }
 function notePreviewDirty() {
-  if (timer2) clearTimeout(timer2);
+  if (timer4) clearTimeout(timer4);
   const wait = Math.max(QUIET_MS, MIN_GAP_MS - (Date.now() - lastSent2));
-  timer2 = window.setTimeout(() => {
-    timer2 = 0;
+  timer4 = window.setTimeout(() => {
+    timer4 = 0;
     void send2();
   }, lastSent2 ? wait : 2500);
 }
-var LONG_SIDE, QUIET_MS, MIN_GAP_MS, timer2, lastSent2, sending, again, sentAt, toBase64;
+var LONG_SIDE, QUIET_MS, MIN_GAP_MS, timer4, lastSent2, sending, again, sentAt, toBase64;
 var init_thumbpush = __esm({
   "web/domains/pcb/editor/thumbpush.ts"() {
     "use strict";
@@ -84183,7 +84532,7 @@ var init_thumbpush = __esm({
     LONG_SIDE = 960;
     QUIET_MS = 5e3;
     MIN_GAP_MS = 2e4;
-    timer2 = 0;
+    timer4 = 0;
     lastSent2 = 0;
     sending = false;
     again = false;
@@ -84207,7 +84556,7 @@ function read2(key3) {
   }
 }
 function loadPinnedLibs(kind) {
-  const s2 = new Set(read2(KEY4(kind)));
+  const s2 = new Set(read2(KEY5(kind)));
   const old = read2(OLD[kind]);
   if (old.length) {
     for (const n2 of old) s2.add(n2);
@@ -84221,7 +84570,7 @@ function loadPinnedLibs(kind) {
 }
 function savePinnedLibs(kind, s2) {
   try {
-    localStorage.setItem(KEY4(kind), JSON.stringify([...s2]));
+    localStorage.setItem(KEY5(kind), JSON.stringify([...s2]));
   } catch {
   }
 }
@@ -84232,11 +84581,11 @@ function setLibPinned(kind, nick, on2) {
   savePinnedLibs(kind, s2);
   return s2;
 }
-var KEY4, OLD;
+var KEY5, OLD;
 var init_pinned = __esm({
   "web/domains/pcb/library/pinned.ts"() {
     "use strict";
-    KEY4 = (k) => "kui.libtree.pinned." + k;
+    KEY5 = (k) => "kui.libtree.pinned." + k;
     OLD = { symbol: "kui.symedit.pinned", footprint: "kui.fpedit.pinned" };
   }
 });
@@ -85923,7 +86272,7 @@ async function firstSnapshot(docId3, text3) {
   return saveTextDocument(docId3, text3, { id: "lib", kind: "MODIFIED", typeName: "LIB_SAVED", properties: [] });
 }
 async function writeProjectText(path2, text3) {
-  const proj = appState2.project;
+  const proj = appState.project;
   if (!proj) return null;
   const d = proj.docs.find((x) => x.path === path2);
   if (d) return await saveTextDocument(d.docId, text3, { id: "table", kind: "MODIFIED", typeName: "LIB_TABLE", properties: [{ name: "text", after: { type: "string", v: text3 } }] }) ? d.docId : null;
@@ -86115,7 +86464,7 @@ function ensureCss3() {
   document.head.append(h("style", { id: "kd-libtable-css" }, CSS4));
 }
 async function openLibTables(opts2) {
-  const proj = appState2.project;
+  const proj = appState.project;
   if (!proj) return;
   const kind = opts2.kind, sym = kind === "symbol", tableFile = tableFileName(kind);
   const tableDoc = proj.docs.find((d) => d.path === tableFile);
@@ -86650,7 +86999,7 @@ The web editor cannot read ${r.type} libraries; migrate this one in KiCad.`);
   });
 }
 function serverEnvValues(refs) {
-  const proj = appState2.project;
+  const proj = appState.project;
   return {
     KIPRJMOD: proj ? `${proj.name} (this project's files)` : "",
     KICAD10_SYMBOL_DIR: `gitlab.com/kicad/libraries/kicad-symbols${refs.symbol ? " @ " + refs.symbol : ""}`,
@@ -86702,7 +87051,7 @@ var init_lib_tables = __esm({
     init_editor();
     blankRow = () => ({ enabled: true, visible: true, nickname: "", uri: "", type: "KiCad", options: "", descr: "" });
     rowsKey = (rows3) => JSON.stringify(rows3.map((r) => [r.enabled, r.visible, r.nickname, r.uri, r.type, r.options, r.descr]));
-    projectDocs4 = () => appState2.project ? appState2.project.docs : [];
+    projectDocs4 = () => appState.project ? appState.project.docs : [];
     projectPaths = () => projectDocs4().map((d) => d.path);
     okBox = (title, message) => choiceBox(title, message, ["OK"]);
     isOK = async (message) => (await choiceBox("Confirmation", message, ["Cancel", "OK"])).index === 1;
@@ -89376,11 +89725,11 @@ async function canLeaveFootprint() {
 function rememberFootprint(projectId4, docId3) {
   if (docId3.startsWith("board:")) return;
   try {
-    localStorage.setItem(lastKey2(projectId4), docId3);
+    localStorage.setItem(lastKey4(projectId4), docId3);
   } catch {
   }
 }
-var W8, FD, PT4, str7, NEW_FILE_VERSION, FP, isFpEdit, isFpPrivate, isFpReadOnlyLib, libCopyId, boardCopyId, libTableCache, libTableDoc, official, treeSel, fpParam, bc, tabId, reqN, waiting2, offered, FP_NAME_INVALID, copiedFootprint, readOnlyError, lastKey2, handlersRef, fpEditApi;
+var W8, FD, PT4, str7, NEW_FILE_VERSION, FP, isFpEdit, isFpPrivate, isFpReadOnlyLib, libCopyId, boardCopyId, libTableCache, libTableDoc, official, treeSel, fpParam, bc, tabId, reqN, waiting2, offered, FP_NAME_INVALID, copiedFootprint, readOnlyError, lastKey4, handlersRef, fpEditApi;
 var init_fpedit = __esm({
   "web/domains/pcb/editor/fpedit.ts"() {
     "use strict";
@@ -89608,7 +89957,7 @@ var init_fpedit = __esm({
         toast("", 1);
       }
     });
-    lastKey2 = (projectId4) => `kc.fpedit.last.${projectId4}`;
+    lastKey4 = (projectId4) => `kc.fpedit.last.${projectId4}`;
     handlersRef = null;
     window.addEventListener("kc-libtable-changed", ((ev) => {
       if (ev.detail && ev.detail.kind === "footprint") void libTableRows2(true).then(() => publishLibs());
@@ -89666,51 +90015,6 @@ var init_fpedit = __esm({
       }
     };
     window.KiCadFpEdit = fpEditApi;
-  }
-});
-
-// web/domains/pcb/editor/bootpick.ts
-function editorDocs(docs) {
-  return docs.filter((d) => d.docType === "kicad_pcb" || d.docType === "kicad_sch").sort((a, b) => (a.docType === "kicad_pcb" ? 0 : 1) - (b.docType === "kicad_pcb" ? 0 : 1) || a.path.localeCompare(b.path));
-}
-function rootSchematicOf(shown2, all2) {
-  const sch = shown2.filter((d) => d.docType === "kicad_sch");
-  const pro = all2.find((d) => d.docType === "kicad_pro");
-  const stem3 = pro && pro.path.split("/").pop().replace(/\.kicad_pro$/, "");
-  return sch.find((d) => d.path.split("/").pop() === stem3 + ".kicad_sch") || sch.sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
-}
-function firstDoc(shown2, all2, wanted2) {
-  return shown2.find((d) => d.docId === wanted2) || rootSchematicOf(shown2, all2) || shown2.find((d) => d.docType === "kicad_pcb") || null;
-}
-function topLevelSheetsOf(pro, shown2, all2) {
-  const sch = pro && typeof pro === "object" ? pro.schematic : void 0;
-  const list = sch && Array.isArray(sch.top_level_sheets) ? sch.top_level_sheets : [];
-  const proDoc2 = all2.find((d) => d.docType === "kicad_pro");
-  const dir = proDoc2 ? proDoc2.path.split("/").slice(0, -1).join("/") : "";
-  const out2 = [];
-  for (const e of list) {
-    if (!e || typeof e.filename !== "string" || !e.filename) continue;
-    const parts = [...dir ? dir.split("/") : [], ...e.filename.replace(/\\/g, "/").split("/")].filter((p) => p && p !== ".");
-    const norm3 = [];
-    for (const p of parts) {
-      if (p === "..") norm3.pop();
-      else norm3.push(p);
-    }
-    const path2 = norm3.join("/");
-    const doc2 = shown2.find((d) => d.docType === "kicad_sch" && d.path === path2);
-    if (!doc2 || out2.some((o) => o.doc === doc2)) continue;
-    out2.push({ doc: doc2, name: typeof e.name === "string" ? e.name : "", uuid: typeof e.uuid === "string" && e.uuid !== NIL_UUID ? e.uuid : "" });
-  }
-  if (out2.length) return out2;
-  const root5 = rootSchematicOf(shown2, all2);
-  return root5 ? [{ doc: root5, name: "Root", uuid: "" }] : [];
-}
-var BOARD_HINT, NIL_UUID;
-var init_bootpick = __esm({
-  "web/domains/pcb/editor/bootpick.ts"() {
-    "use strict";
-    BOARD_HINT = "kui.boardDocs";
-    NIL_UUID = "00000000-0000-0000-0000-000000000000";
   }
 });
 
@@ -90017,160 +90321,6 @@ var init_fonts = __esm({
   }
 });
 
-// web/domains/pcb/editor/pcbdialogs/update-pcb.ts
-function rootSchematicOf2(docs) {
-  const sch = docs.filter((d) => d.docType === "kicad_sch");
-  if (!sch.length) return null;
-  const pro = docs.find((d) => d.docType === "kicad_pro");
-  const stem3 = (p) => p.replace(/\.[^./]+$/, "");
-  const board3 = docs.find((d) => d.docId === state.docId);
-  return pro && sch.find((d) => stem3(d.path) === stem3(pro.path)) || board3 && sch.find((d) => stem3(d.path) === stem3(board3.path)) || sch.slice().sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
-}
-async function projectNetlist() {
-  const docs = projectDocs2(), root5 = rootSchematicOf2(docs);
-  if (!root5) return { error: "This project has no schematic." };
-  const sch = CollabTools.sch;
-  const helpers2 = sch && sch._;
-  if (!helpers2 || !helpers2.symbolPins) return { error: "The schematic tools are not loaded." };
-  const files = /* @__PURE__ */ new Map();
-  await Promise.all(docs.filter((d) => d.docType === "kicad_sch").map(async (d) => {
-    try {
-      const live3 = await liveDocument(d.docId);
-      const doc2 = KiCadCanvas.parseDoc(live3.file, "kicad_sch");
-      for (const op of live3.ops) for (const c of op.changes || []) {
-        try {
-          KiCadCanvas.applyChange(doc2, c, SCH_IU2);
-        } catch (e) {
-        }
-      }
-      const m = /\(uuid\s+"?([0-9a-fA-F-]{36})"?\s*\)/.exec(live3.file.slice(0, 4e3));
-      files.set(d.path, { doc: doc2, uuid: m ? m[1] : "", file: d.path });
-    } catch (e) {
-    }
-  }));
-  let pro = null;
-  try {
-    const proDoc2 = docs.find((d) => d.docType === "kicad_pro");
-    const text3 = E.proSettings || (proDoc2 ? await fetch(`/api/docs/${proDoc2.docId}/content`).then((r) => r.ok ? r.text() : "") : "");
-    pro = text3 ? JSON.parse(text3) : null;
-  } catch (e) {
-    pro = null;
-  }
-  const tops = topLevelSheetsOf(pro, docs, docs).map((t) => ({ sheet: files.get(t.doc.path), name: t.name, uuid: t.uuid, path: t.doc.path })).filter((t) => !!t.sheet);
-  const rootFile = tops.length > 1 ? tops[0].sheet : files.get(root5.path);
-  if (!rootFile) return { error: "The root schematic could not be read." };
-  const resolve2 = (file, parent) => {
-    const dir = parent.file.split("/").slice(0, -1);
-    const parts = [...dir, ...file.split("/")].filter((p) => p && p !== ".");
-    const out2 = [];
-    for (const p of parts) {
-      if (p === "..") out2.pop();
-      else out2.push(p);
-    }
-    return files.get(out2.join("/")) || files.get(file) || null;
-  };
-  const netlist = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve2, { symbolPins: helpers2.symbolPins, isPower: (d, it) => helpers2.isPowerSymbol(d, String((KiCadCanvas.kid(it.node, "lib_id") || [])[1])) }, root5.path.split("/").pop().replace(/\.kicad_sch$/, ""));
-  return { netlist, root: tops.length > 1 ? tops[0].path : root5.path, files };
-}
-var SCH_IU2;
-var init_update_pcb = __esm({
-  "web/domains/pcb/editor/pcbdialogs/update-pcb.ts"() {
-    "use strict";
-    init_state();
-    init_appstore();
-    init_projectfile();
-    init_canvas();
-    init_bootpick();
-    init_ui();
-    SCH_IU2 = 1e4;
-  }
-});
-
-// web/domains/pcb/editor/attention.ts
-function setAttention(id, why2) {
-  const cur2 = store.get().attention || {};
-  if ((cur2[id] || null) === why2) return;
-  const next = Object.assign({}, cur2);
-  if (why2) next[id] = why2;
-  else delete next[id];
-  store.set({ attention: next });
-}
-async function pendingBoardUpdates(board3) {
-  const docs = projectDocs2();
-  if (!docs.some((d) => d.docType === "kicad_sch")) return null;
-  const target2 = NL().projectBoardPath(docs);
-  if (!target2.doc) return null;
-  let doc2 = board3 || null;
-  if (!doc2) {
-    const live3 = await liveDocument(target2.doc.docId);
-    doc2 = KiCadCanvas.parseDoc(live3.file, "kicad_pcb");
-    for (const op of live3.ops) for (const c of op.changes || []) {
-      try {
-        KiCadCanvas.applyChange(doc2, c, E.IU);
-      } catch (e) {
-      }
-    }
-  }
-  const res = await projectNetlist();
-  if ("error" in res) return null;
-  const plan2 = NL().planUpdate(doc2, res.netlist, { replaceFootprints: true, updateFields: true, footprintFor: () => null });
-  const blocked = plan2.report.filter((l) => /^Cannot (add|update) /.test(l.text) && !/no footprint assigned/.test(l.text)).length;
-  return plan2.modified.size + plan2.added.length + plan2.removed.length + blocked;
-}
-async function check2() {
-  if (running2 || document.hidden || state.view !== "editor" || !state.project) return;
-  running2 = true;
-  lastRun = Date.now();
-  try {
-    const onBoard = !!E.kdoc && E.kdoc.type === "pcb" && E.DOC_TYPE !== "footprint";
-    const n2 = await pendingBoardUpdates(onBoard ? E.kdoc : null);
-    setAttention(PCB_STALE, n2 ? `The schematic has ${n2} change${n2 === 1 ? "" : "s"} the board does not have yet. Run Update PCB from Schematic (F8).` : null);
-  } catch (e) {
-  } finally {
-    running2 = false;
-  }
-}
-function watchAttention() {
-  if (timer3) return;
-  timer3 = window.setInterval(() => {
-    if (state.view !== "editor" || !state.project) {
-      if (lastKey3) {
-        lastKey3 = "";
-        setAttention(PCB_STALE, null);
-      }
-      return;
-    }
-    const key3 = `${state.project.projectId}|${state.docId}|${E.editsSeen}`;
-    if (key3 !== lastKey3) {
-      lastKey3 = key3;
-      quiet = Date.now();
-      return;
-    }
-    if (quiet && Date.now() - quiet > 4e3 || Date.now() - lastRun > 6e4) {
-      quiet = 0;
-      void check2();
-    }
-  }, 2e3);
-}
-var PCB_STALE, GITHUB_PULL, timer3, quiet, lastKey3, lastRun, running2;
-var init_attention = __esm({
-  "web/domains/pcb/editor/attention.ts"() {
-    "use strict";
-    init_appstore();
-    init_state();
-    init_projectfile();
-    init_canvas();
-    init_update_pcb();
-    PCB_STALE = "updatePcbFromSchematic";
-    GITHUB_PULL = "githubPull";
-    timer3 = 0;
-    quiet = 0;
-    lastKey3 = "";
-    lastRun = 0;
-    running2 = false;
-  }
-});
-
 // web/domains/pcb/editor/github-pull.ts
 function pullGithubChanges(projectId4) {
   return api4(`/api/projects/${projectId4}/github/pull`, { method: "POST", body: JSON.stringify({ automatic: true }) });
@@ -90181,10 +90331,10 @@ function githubPullNotice(projectId4, message) {
   } });
 }
 function watchGithubChanges(projectId4, update) {
-  let stopped = false, busy = false, linked = true, lastNotice = "";
-  const check3 = async (focused = false) => {
-    if (stopped || busy || document.hidden || !linked && !focused || state.view !== "editor" || state.project?.projectId !== projectId4 || !state.me || E.viewOnly || E.pendingOps.size || E.drag || E.tool !== "select" || E.history || document.querySelector(".kd-overlay, [role='dialog']")) return;
-    busy = true;
+  let stopped = false, busy2 = false, linked = true, lastNotice = "";
+  const check4 = async (focused = false) => {
+    if (stopped || busy2 || document.hidden || !linked && !focused || state.view !== "editor" || state.project?.projectId !== projectId4 || !state.me || E.viewOnly || E.pendingOps.size || E.drag || E.tool !== "select" || E.history || document.querySelector(".kd-overlay, [role='dialog']")) return;
+    busy2 = true;
     try {
       const result = await pullGithubChanges(projectId4);
       if (stopped || state.project?.projectId !== projectId4) return;
@@ -90198,20 +90348,20 @@ function watchGithubChanges(projectId4, update) {
       if (!stopped && lastNotice !== "error") githubPullNotice(projectId4, "Couldn't check GitHub for changes. You can retry on the sync page.");
       lastNotice = "error";
     } finally {
-      busy = false;
+      busy2 = false;
     }
   };
   const focus = () => {
-    void check3(true);
+    void check4(true);
   };
-  const timer4 = setInterval(() => {
-    void check3();
+  const timer5 = setInterval(() => {
+    void check4();
   }, 6e4);
   window.addEventListener("focus", focus);
   document.addEventListener("visibilitychange", focus);
   return () => {
     stopped = true;
-    clearInterval(timer4);
+    clearInterval(timer5);
     setAttention(GITHUB_PULL, null);
     window.removeEventListener("focus", focus);
     document.removeEventListener("visibilitychange", focus);
@@ -90737,6 +90887,7 @@ async function openEditor(id) {
     stopGithubWatch = watchGithubChanges(id, refreshFromGithub);
   }
   watchAttention();
+  watchTutorial();
   publishDocs();
   loadHistory();
   const fp = fpParam();
@@ -91057,7 +91208,7 @@ function leaveDoc() {
   peersG.replaceChildren();
   clearPeerCursors();
   selG.replaceChildren();
-  dragG.replaceChildren();
+  dragG2.replaceChildren();
   cmtG.replaceChildren();
   closeThread();
   leaveCursorChat();
@@ -91356,6 +91507,7 @@ var docNav, stopGithubWatch, GRID_CHOICES, sheetNames, sheetPages, ROOT_SHEET_NA
 var init_doc = __esm({
   "web/domains/pcb/editor/doc.ts"() {
     "use strict";
+    init_tutorial();
     init_appstore();
     init_comments();
     init_chat();
@@ -91867,7 +92019,7 @@ function rotateSelected(delta) {
   drawSelection();
   renderProps();
 }
-function unlockedForEdit(ids, quiet2 = false) {
+function unlockedForEdit(ids, quiet3 = false) {
   if (isSch()) {
     const L = CollabTools.sch && CollabTools.sch._.isLockedItem, d = E.kdoc;
     return L && d ? ids.filter((id) => {
@@ -91878,7 +92030,7 @@ function unlockedForEdit(ids, quiet2 = false) {
   const m = CollabTools.pcb;
   if (!m || !m.unlockedIds || !E.kdoc) return ids;
   try {
-    return m.unlockedIds(toolCtx(), ids, quiet2);
+    return m.unlockedIds(toolCtx(), ids, quiet3);
   } catch (e) {
     console.warn(e);
     return ids;
@@ -93545,9 +93697,9 @@ async function openBoardSetup(ctx, startPage) {
     stack2 = fromHeader();
     const setCount = (n2) => {
       const inner = layerRows3.filter((r) => r.copper).map((r) => r.name).slice(n2 - 1, -1);
-      const busy = inner.filter((name) => E.kdoc && Array.from(E.kdoc.items.values()).some((it) => (it.geom || []).some((g2) => g2.layer === name)));
-      if (busy.length) {
-        setError("Physical Stackup", { msg: `Items have been found on ${busy.join(", ")}: move or delete them before removing the layer.`, ctrl: count2.input });
+      const busy2 = inner.filter((name) => E.kdoc && Array.from(E.kdoc.items.values()).some((it) => (it.geom || []).some((g2) => g2.layer === name)));
+      if (busy2.length) {
+        setError("Physical Stackup", { msg: `Items have been found on ${busy2.join(", ")}: move or delete them before removing the layer.`, ctrl: count2.input });
         count2.set(cuNow());
         return false;
       }
@@ -94057,15 +94209,15 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
       for (const x of fields) if (x.key[0] !== "^" && typeof x.f.get() === "number") o[x.key] = x.f.get();
       return o;
     };
-    let timer4 = 0;
+    let timer5 = 0;
     const updateWarnings = () => {
       const v = values(), msgs = /* @__PURE__ */ new Map();
       for (const i of [...BS().validateDesignRules(v, currentUnits()), ...BS().designRuleWarnings(v, currentUnits())]) msgs.set(i.setting, (msgs.has(i.setting) ? msgs.get(i.setting) + "\n" : "") + i.message);
       for (const x of fields) if (x.warn) x.warn.set(msgs.get(x.key) || null);
     };
     el4.addEventListener("input", () => {
-      if (timer4) clearTimeout(timer4);
-      timer4 = window.setTimeout(updateWarnings, 250);
+      if (timer5) clearTimeout(timer5);
+      timer5 = window.setTimeout(updateWarnings, 250);
     });
     el4.addEventListener("change", updateWarnings);
     updateWarnings();
@@ -94366,7 +94518,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
       const tools = globalThis.PcbTools;
       return tools && tools.parseDru ? tools.parseDru(t) : null;
     };
-    const check3 = () => {
+    const check4 = () => {
       const errs = ruleErrors(rulesEd ? rulesEd.get() : "", compile);
       say(errs.length ? errs.map((e) => ({ severity: "error", text: e.message, line: e.line, col: e.col })) : []);
     };
@@ -94400,7 +94552,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
       say([{ severity: "info", text: `Rule '${name}': ${ids.length} matching item(s).` }]);
     };
     rulesEd = rulesEditor(druText, { ro, onShowMatching: showMatching });
-    if (dru) setTimeout(check3, 0);
+    if (dru) setTimeout(check4, 0);
     const help = h2("a", { href: "#", "data-k": "syntax-help", title: "Show syntax help window" }, "Syntax help");
     help.addEventListener("click", (ev) => {
       ev.preventDefault();
@@ -94411,7 +94563,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
         body.append(d);
       } });
     });
-    const btn = bitmapButton("drc", "Check rule syntax", check3);
+    const btn = bitmapButton("drc", "Check rule syntax", check4);
     btn.dataset.k = "checkSyntax";
     report3.style.flex = "1 1 auto";
     report3.style.minWidth = "0";
@@ -95442,10 +95594,10 @@ function resolve(act, c) {
   if (tid) return APP_TOOLS.includes(tid) || moduleTool(tid) ? { run: () => setTool(tid) } : { why: NOT_YET };
   return { why: DESKTOP };
 }
-function row2(act, check3, c) {
+function row2(act, check4, c) {
   const meta2 = metaOf(act), r = resolve(act, c);
   const it = { act, label: meta2 ? meta2.label : act.split("::").pop(), icon: meta2 && meta2.icon ? meta2.icon : void 0, key: r.key || meta2 && meta2.key || void 0 };
-  if (check3) {
+  if (check4) {
     it.check = true;
     it.checked = !!c.checks[act];
   }
@@ -95930,7 +96082,7 @@ var init_contextmenu = __esm({
 
 // web/domains/pcb/dialogs/sch-hierarchy.ts
 async function sheetList() {
-  const S3 = appState2;
+  const S3 = appState;
   const tops = topLevelSchematics2();
   if (!tops.length) return [];
   const multi = tops.length > 1;
@@ -96002,7 +96154,7 @@ async function sheetList() {
   return list;
 }
 function withSheetContext(s2, count2) {
-  const S3 = appState2;
+  const S3 = appState;
   const d = Object.create(s2.doc);
   d.fileName = s2.path.split("/").pop();
   d.filePath = s2.path;
@@ -96456,6 +96608,7 @@ function drawLayer(cv, fab, pkg, layer4, color2) {
   }
 }
 function openFabOutputs(focus = "gerber") {
+  window.dispatchEvent(new CustomEvent("kc:action", { detail: { id: "fabPackage" } }));
   if (!boardDoc()) {
     toast("Fabrication outputs are made from a board: open the PCB editor first");
     return;
@@ -96473,7 +96626,7 @@ function show(fab, ctx, focus) {
   const all2 = fab.plottableLayers(doc2);
   const colors = /* @__PURE__ */ new Map();
   for (const l of app2.get().document.layers || []) colors.set(l.key, l.color);
-  let pkg = null, selected = "", run2 = 0, timer4 = 0;
+  let pkg = null, selected = "", run2 = 0, timer5 = 0;
   let preset = fab.presetById(rememberedPreset());
   const copper = doc2.copper && doc2.copper.length ? doc2.copper : ["F.Cu", "B.Cu"];
   let layers = new Set(preset.layers(all2, copper));
@@ -96559,8 +96712,8 @@ function show(fab, ctx, focus) {
     ++run2;
     pkg = null;
     order.disabled = true;
-    window.clearTimeout(timer4);
-    timer4 = window.setTimeout(() => {
+    window.clearTimeout(timer5);
+    timer5 = window.setTimeout(() => {
       void generate();
     }, 120);
   }
@@ -98279,7 +98432,7 @@ function savePrefs(key3, v) {
 function whenDialogsClosed(fn) {
   const initial = document.querySelector(".kd-overlay");
   let seen = false;
-  const check3 = () => {
+  const check4 = () => {
     const cur2 = document.querySelector(".kd-overlay");
     if (cur2 && cur2 !== initial) {
       seen = true;
@@ -98291,12 +98444,12 @@ function whenDialogsClosed(fn) {
       setTimeout(fn, 0);
     }
   };
-  const obs = new MutationObserver(check3);
+  const obs = new MutationObserver(check4);
   obs.observe(document.body, { childList: true });
   const t = setTimeout(() => {
     if (!seen) obs.disconnect();
   }, 15e3);
-  setTimeout(check3, 0);
+  setTimeout(check4, 0);
 }
 async function projectLastPlotPath() {
   try {
@@ -98356,7 +98509,7 @@ async function openGendrill(o = {}) {
   show2(fab, ctx, p, stored2, version3);
 }
 function show2(fab, ctx, p, stored2, version3) {
-  const pref = loadPrefs(KEY5, DEFAULTS2);
+  const pref = loadPrefs(KEY6, DEFAULTS2);
   const outDir = textField(p.outputDirectory, { key: "outputDir" });
   const rbExcellon = h2("input", { type: "radio", name: "gd-fmt", checked: !pref.gerber, "data-k": "excellon" }), rbGerber = h2("input", { type: "radio", name: "gd-fmt", checked: pref.gerber, "data-k": "gerberX2" });
   const mirror = checkField(pref.mirror, "Mirror Y axis", { key: "mirror", tip: "Not recommended.\nUsed mostly by users who make the boards themselves." });
@@ -98395,7 +98548,7 @@ function show2(fab, ctx, p, stored2, version3) {
   }
   rbExcellon.addEventListener("change", update);
   rbGerber.addEventListener("change", update);
-  const remember = () => savePrefs(KEY5, { gerber: rbGerber.checked, mirror: mirror.get(), minimal: minimal.get(), merge: merge2.get(), altOval: altOval.get(), tenting: tenting.get(), genMap: genMap.get(), mapFormat: mapFmt.get(), metric: units.get() === 0, zeros: zeros.get() });
+  const remember = () => savePrefs(KEY6, { gerber: rbGerber.checked, mirror: mirror.get(), minimal: minimal.get(), merge: merge2.get(), altOval: altOval.get(), tenting: tenting.get(), genMap: genMap.get(), mapFormat: mapFmt.get(), metric: units.get() === 0, zeros: zeros.get() });
   const updateConfig = () => {
     remember();
     p.outputDirectory = outDir.get().replace(/\\/g, "/");
@@ -98499,7 +98652,7 @@ function show2(fab, ctx, p, stored2, version3) {
     }
   });
 }
-var KEY5, DEFAULTS2, ZEROS, MAP_FORMATS, MAP_PLOT;
+var KEY6, DEFAULTS2, ZEROS, MAP_FORMATS, MAP_PLOT;
 var init_gendrill = __esm({
   "web/domains/pcb/editor/pcbdialogs/gendrill.ts"() {
     "use strict";
@@ -98511,7 +98664,7 @@ var init_gendrill = __esm({
     init_plot();
     init_plot_out();
     init_ui();
-    KEY5 = "kicad.gendrill";
+    KEY6 = "kicad.gendrill";
     DEFAULTS2 = { gerber: false, mirror: false, minimal: false, merge: false, altOval: false, tenting: false, genMap: false, mapFormat: 1, metric: true, zeros: 0 };
     ZEROS = ["decimal", "suppress_leading", "suppress_trailing", "keep"];
     MAP_FORMATS = [[0, "Postscript"], [1, "Gerber X2"], [2, "DXF"], [3, "SVG"], [4, "PDF"]];
@@ -98873,15 +99026,15 @@ function show3(fab, ctx, p, stored2, version3, user, maskAlert, opts2, variants,
     }
     return t;
   }
-  let busy = false;
+  let busy2 = false;
   async function plot() {
-    if (busy) return;
+    if (busy2) return;
     const t = applyPlotSettings();
     if (!t.layerSelection.length) {
       errorMessage("No layer selected, Nothing to plot");
       return;
     }
-    busy = true;
+    busy2 = true;
     try {
       await saving;
       if (user.checkZones && !ro && zoneFillsDirty() && [...doc2.items.values()].some((it) => it.kind === "zone")) {
@@ -98919,7 +99072,7 @@ function show3(fab, ctx, p, stored2, version3, user, maskAlert, opts2, variants,
       console.error(e);
       say("error", "Plot failed: " + (e instanceof Error ? e.message : String(e)));
     } finally {
-      busy = false;
+      busy2 = false;
       status.textContent = "";
     }
   }
@@ -99111,7 +99264,7 @@ async function openPosFile() {
   show4(fab, outDir, plotAux, variants);
 }
 function show4(fab, boardOutDir, plotAux, variants) {
-  const pref = loadPrefs(KEY6, DEFAULTS3);
+  const pref = loadPrefs(KEY7, DEFAULTS3);
   const cur2 = String(E.currentVariant || "");
   const variant = selectField(cur2 && variants.includes(cur2) ? cur2 : variants[0], variants.map((v) => [v, v]), { key: "variant" });
   const selectedVariant = () => variant.get() !== variants[0] ? variant.get() : "";
@@ -99142,7 +99295,7 @@ function show4(fab, boardOutDir, plotAux, variants) {
     en(smdOnly, !gerber);
     en(excludeTH, !gerber);
   }
-  const remember = () => savePrefs(KEY6, { format: format.get(), mm: units.get() === 1, smdOnly: smdOnly.get(), excludeTH: excludeTH.get(), excludeDnp: excludeDnp.get(), excludeBom: excludeBom.get(), boardEdge: boardEdge.get(), auxOrigin: auxOrigin.get(), negateX: negateX.get(), single: single.get(), outputDir: outDir.get() });
+  const remember = () => savePrefs(KEY7, { format: format.get(), mm: units.get() === 1, smdOnly: smdOnly.get(), excludeTH: excludeTH.get(), excludeDnp: excludeDnp.get(), excludeBom: excludeBom.get(), boardEdge: boardEdge.get(), auxOrigin: auxOrigin.get(), negateX: negateX.get(), single: single.get(), outputDir: outDir.get() });
   async function generate() {
     remember();
     const fctx = await fabContext();
@@ -99240,7 +99393,7 @@ function show4(fab, boardOutDir, plotAux, variants) {
     }
   });
 }
-var KEY6, DEFAULTS3;
+var KEY7, DEFAULTS3;
 var init_posfile = __esm({
   "web/domains/pcb/editor/pcbdialogs/posfile.ts"() {
     "use strict";
@@ -99251,7 +99404,7 @@ var init_posfile = __esm({
     init_canvas();
     init_plot_out();
     init_ui();
-    KEY6 = "kicad.posfile";
+    KEY7 = "kicad.posfile";
     DEFAULTS3 = { format: 0, mm: true, smdOnly: false, excludeTH: false, excludeDnp: false, excludeBom: false, boardEdge: false, auxOrigin: true, negateX: false, single: true, outputDir: null };
   }
 });
@@ -99274,7 +99427,7 @@ async function openOdbpp() {
   const first2 = await fabContext();
   if (!first2) return;
   const board3 = first2.projectName || "board";
-  const pref = loadPrefs(KEY7, DEFAULTS4);
+  const pref = loadPrefs(KEY8, DEFAULTS4);
   const out2 = textField(`${board3}-odb${EXT2[pref.compress] || ""}`, { key: "outputFile" });
   const withExt = (c) => {
     out2.set(out2.get().replace(/\.(zip|tgz)$/i, "") + EXT2[c]);
@@ -99294,7 +99447,7 @@ async function openOdbpp() {
   const read3 = () => ({ inch: units.get() === 1, precision: clamp(), compress: compress.get(), origin: origin.get(), product: product.get().trim() });
   async function run2(close) {
     const p = read3();
-    savePrefs(KEY7, p);
+    savePrefs(KEY8, p);
     const name = out2.get().trim().replace(/\\/g, "/").split("/").pop() || `${board3}-odb`;
     const fctx = await fabContext();
     if (!fctx) return;
@@ -99332,7 +99485,7 @@ ${e instanceof Error ? e.message : String(e)}`);
         void run2(closeDlg);
       } }
     ],
-    cancel: () => savePrefs(KEY7, read3()),
+    cancel: () => savePrefs(KEY8, read3()),
     build(body) {
       ensureCss2();
       body.append(
@@ -99347,7 +99500,7 @@ ${e instanceof Error ? e.message : String(e)}`);
     }
   });
 }
-var KEY7, DEFAULTS4, ORIGINS, minPrecision, MAX_PRECISION, EXT2;
+var KEY8, DEFAULTS4, ORIGINS, minPrecision, MAX_PRECISION, EXT2;
 var init_odbpp = __esm({
   "web/domains/pcb/editor/pcbdialogs/odbpp.ts"() {
     "use strict";
@@ -99356,7 +99509,7 @@ var init_odbpp = __esm({
     init_fab_outputs();
     init_plot_out();
     init_ui();
-    KEY7 = "kicad.odbpp";
+    KEY8 = "kicad.odbpp";
     DEFAULTS4 = { inch: false, precision: 6, compress: 1, origin: 0, product: "" };
     ORIGINS = ["absolute", "aux", "grid"];
     minPrecision = (inch) => inch ? 4 : 3;
@@ -99394,7 +99547,7 @@ async function openIpc2581() {
   if (!first2) return;
   const S3 = fab.ipc2581Sections;
   const board3 = first2.projectName || "board";
-  const pref = loadPrefs(KEY8, DEFAULTS5);
+  const pref = loadPrefs(KEY9, DEFAULTS5);
   const fieldNames2 = [];
   for (const it of first2.doc.items.values()) if (it.kind === "footprint") {
     for (const c of it.node) if (Array.isArray(c) && c[0] === "property" && typeof c[1] === "string" && !["Reference", "Value", "Footprint", "Datasheet", "Description"].includes(c[1]) && !fieldNames2.includes(c[1])) fieldNames2.push(c[1]);
@@ -99485,7 +99638,7 @@ async function openIpc2581() {
   const read3 = () => ({ inch: units.get() === 1, precision: precision.get(), rev: version3.get(), compress: compress.get(), mode: mode(), sections, anonymize: netNames2.get() === 1, omitRefDes: refDes.get() === 1, ...bomFields });
   async function run2() {
     const p = read3();
-    savePrefs(KEY8, p);
+    savePrefs(KEY9, p);
     const lines = [];
     const name = (out2.get().trim().replace(/\\/g, "/").split("/").pop() || "").trim();
     if (!name) {
@@ -99591,11 +99744,11 @@ ${e instanceof Error ? e.message : String(e)}` }]);
       return false;
     },
     cancel() {
-      savePrefs(KEY8, read3());
+      savePrefs(KEY9, read3());
     }
   });
 }
-var SECTION_ROWS, DATA_SETS, KEY8, DEFAULTS5;
+var SECTION_ROWS, DATA_SETS, KEY9, DEFAULTS5;
 var init_ipc2581 = __esm({
   "web/domains/pcb/editor/pcbdialogs/ipc2581.ts"() {
     "use strict";
@@ -99625,7 +99778,7 @@ var init_ipc2581 = __esm({
       ["Y", "physical netlist", "PhyNetGroup"]
     ];
     DATA_SETS = [["USERDEF", "All data (user-defined)"], ["BOM", "Bill of materials"], ["STACKUP", "Stackup"], ["FABRICATION", "Fabrication"], ["ASSEMBLY", "Assembly"], ["TEST", "Test"], ["STENCIL", "Stencil"]];
-    KEY8 = "kicad.ipc2581";
+    KEY9 = "kicad.ipc2581";
     DEFAULTS5 = { inch: false, precision: 6, rev: "C", compress: false, mode: "USERDEF", sections: null, anonymize: false, omitRefDes: false, id: "", mpn: "", mfg: "", distPn: "", dist: "N/A", bomRev: "" };
   }
 });
@@ -100735,7 +100888,7 @@ function docForVariant(doc2, uuidPath, variant) {
   return copy || doc2;
 }
 function show5(fab, variants) {
-  const pref = loadPrefs(KEY9, SCH_PLOT_DEFAULTS);
+  const pref = loadPrefs(KEY10, SCH_PLOT_DEFAULTS);
   const pro = projectJson();
   const cur2 = String(E2.currentVariant || "");
   const variantSel = selectField(cur2 && variants.includes(cur2) ? cur2 : variants[0], variants.map((v) => [v, v]), { key: "variant" });
@@ -100810,7 +100963,7 @@ function show5(fab, variants) {
   });
   async function plot(all2) {
     const o = prefsNow();
-    savePrefs(KEY9, o);
+    savePrefs(KEY10, o);
     const lines = [];
     const say = (severity, text3) => {
       lines.push({ severity, text: text3 });
@@ -100826,7 +100979,7 @@ function show5(fab, variants) {
     } catch (e) {
       sheets2 = [];
     }
-    const S3 = appState2;
+    const S3 = appState;
     const current = sheets2.find((s2) => s2.docId === S3.docId) || null;
     const list = all2 ? sheets2 : current ? [current] : [];
     if (!list.length) {
@@ -100891,7 +101044,7 @@ function show5(fab, variants) {
       } },
       { label: "Close", close: true, id: "close" }
     ],
-    cancel: () => savePrefs(KEY9, prefsNow()),
+    cancel: () => savePrefs(KEY10, prefsNow()),
     build(body) {
       ensureCss2();
       body.append(
@@ -100986,7 +101139,7 @@ async function saveDirectory(dir) {
     console.warn("plot directory not saved", e);
   }
 }
-var KEY9, SCH_PLOT_DEFAULTS, FORMATS2, EXT3, lastReport2;
+var KEY10, SCH_PLOT_DEFAULTS, FORMATS2, EXT3, lastReport2;
 var init_plot_schematic = __esm({
   "web/domains/pcb/dialogs/plot-schematic.ts"() {
     "use strict";
@@ -101000,7 +101153,7 @@ var init_plot_schematic = __esm({
     init_project();
     init_sch_hierarchy();
     init_sch_variants();
-    KEY9 = "kicad.plot.schematic";
+    KEY10 = "kicad.plot.schematic";
     SCH_PLOT_DEFAULTS = { format: 1, pageSize: 0, frame: true, color: true, theme: "default", background: false, minWidth: 0.1524, popups: true, links: true, metadata: true, dxfInch: false, dpi: 300, antialias: true, openAfter: false };
     FORMATS2 = ["Postscript", "PDF", "SVG", "DXF", "PNG"];
     EXT3 = ["ps", "pdf", "svg", "dxf", "png"];
@@ -102374,6 +102527,7 @@ var init_actions = __esm({
     init_doc();
     init_history();
     init_home();
+    init_tutorial();
     init_pcbrouting();
     init_panes();
     init_contextmenu();
@@ -102606,6 +102760,9 @@ var init_actions = __esm({
       collabStartSession: (a) => runAction("share", a),
       collabJoinSession: () => runAction("joinLink"),
       collabGithub: (a) => runAction("github", a),
+      ledTutorial: () => {
+        void startLedTutorial();
+      },
       collabVendorParts: () => {
         if (!runModuleAction("vendorParts")) toast("Vendor parts are not loaded yet");
       },
@@ -103458,7 +103615,7 @@ async function planFill(doc2, count2) {
     holeClearance: s2.holeClearance || 0,
     edgeClearance: s2.edgeClearance
   };
-  const quiet2 = { phase() {
+  const quiet3 = { phase() {
   }, advance() {
   }, cancelled: () => false, yield: () => Promise.resolve() };
   if (typeof k.loadFontsFor === "function") {
@@ -103467,7 +103624,7 @@ async function planFill(doc2, count2) {
     } catch {
     }
   }
-  return await F2.fillZones({ doc: doc2, setup: null }, rules, null, quiet2) || [];
+  return await F2.fillZones({ doc: doc2, setup: null }, rules, null, quiet3) || [];
 }
 function inlineSymbol(e) {
   const k = K4();
@@ -104519,7 +104676,7 @@ function refreshPreview() {
     noScroll = false;
   }
 }
-function showPreview(p, quiet2 = false) {
+function showPreview(p, quiet3 = false) {
   clearPreview();
   const ed = ED();
   const doc2 = ed?.kdoc;
@@ -104592,7 +104749,7 @@ function showPreview(p, quiet2 = false) {
     r.setAttribute("rx", String(2 * px));
     g2.appendChild(r);
   }
-  if (boxes.length && !noScroll && !quiet2) {
+  if (boxes.length && !noScroll && !quiet3) {
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
     for (const { b } of boxes) {
       bx0 = Math.min(bx0, b[0]);
@@ -118423,7 +118580,7 @@ Link '${target2}' to this file?`)) return null;
     ctx.commit(changes, "clear annotation");
     return true;
   }
-  function editFieldPrompt(ctx, name, title, quiet2) {
+  function editFieldPrompt(ctx, name, title, quiet3) {
     if (!editable(ctx)) return false;
     const it = selectedItems(ctx).find((x) => x.kind === "symbol");
     if (!it) return false;
@@ -118877,10 +119034,10 @@ Link '${target2}' to this file?`)) return null;
     if (ctx.viewOnly) return false;
     const lower22 = key3.length === 1 ? key3.toLowerCase() : key3;
     const armTool = (id, kind) => {
-      const busy = busyMessage();
-      if (busy) {
+      const busy2 = busyMessage();
+      if (busy2) {
         if (id === S3.tool) syntheticClick(ctx);
-        else ctx.toast(busy);
+        else ctx.toast(busy2);
         return true;
       }
       ctx.setTool(id);
@@ -119291,6 +119448,8 @@ Link '${target2}' to this file?`)) return null;
     ev.stopImmediatePropagation();
     ev.preventDefault();
     const already = S3.sel === hit5.id;
+    const ed = globalThis.CollabEditor;
+    const nothingSelected = !S3.sel && !(ctx.selection && ctx.selection.size) && !(ed && (ed.selected || ed.selPins && ed.selPins.length || ed.selField));
     S3.sel = hit5.id;
     S3.hover = null;
     if (ctx.selection && ctx.selection.size && ctx.setSelection) {
@@ -119299,7 +119458,7 @@ Link '${target2}' to this file?`)) return null;
       S3.selEnds = keepEnds;
     } else ctx.setSelected(null);
     if (!already) setSelEnd(hit5.id, lineEndAt(hit5, mm4, selectThreshold(ctx)));
-    S3.pending = { item: hit5, mm: mm4 };
+    S3.pending = { item: hit5, mm: mm4, box: nothingSelected, client: [ev.clientX, ev.clientY] };
     try {
       ctx.stage.setPointerCapture(ev.pointerId);
     } catch (e) {
@@ -119364,6 +119523,15 @@ Link '${target2}' to this file?`)) return null;
       if (Math.hypot(mm4[0] - S3.pending.mm[0], mm4[1] - S3.pending.mm[1]) > 0.4) {
         const p = S3.pending;
         S3.pending = null;
+        const ed = globalThis.CollabEditor;
+        if (p.box && ed) {
+          S3.sel = null;
+          setSelEnd(null, null);
+          S3.autoPress = null;
+          ed.boxSel = { start: p.mm, cur: mm4, pts: [p.mm, mm4], lasso: ed.selMode === "lasso", add: false, startClient: p.client || [ev.clientX, ev.clientY] };
+          ctx.requestRender();
+          return;
+        }
         if (beginDrag(ctx, p.item, p.mm, true)) moveDrag(ctx, mm4);
       }
       return;
@@ -119503,10 +119671,10 @@ Link '${target2}' to this file?`)) return null;
     } else if (ev.key === "H" && ev.shiftKey && !ctx.viewOnly) {
       ev.stopImmediatePropagation();
       ev.preventDefault();
-      const busy = busyMessage();
-      if (busy) {
+      const busy2 = busyMessage();
+      if (busy2) {
         if (S3.tool === "hlabel") syntheticClick(ctx);
-        else ctx.toast(busy);
+        else ctx.toast(busy2);
         return;
       }
       ctx.setTool("hlabel");
@@ -122810,7 +122978,7 @@ function fanout(rows3, jobs, ctx, depth2 = 0, spread = 0) {
       }
       return null;
     };
-    const check3 = (j, o) => {
+    const check4 = (j, o) => {
       const h3 = segHit(j, o);
       if (h3 !== null) return h3;
       const e = o.end, len = geo.rs;
@@ -122830,7 +122998,7 @@ function fanout(rows3, jobs, ctx, depth2 = 0, spread = 0) {
           last3 = last3 || "lane taken";
           continue;
         }
-        const r = check3(j, o);
+        const r = check4(j, o);
         if (r === null) return [o, null];
         if (last3 === null || last3 === "lane taken") last3 = r;
       }
@@ -122859,7 +123027,7 @@ function fanout(rows3, jobs, ctx, depth2 = 0, spread = 0) {
         const s2 = shift2(j), turn = H - Math.abs(s2), p1 = at(j.pad.p, geo.n, turn), end = at(j.pad.p, geo.n, H, geo.t, s2);
         const segs = Math.abs(s2) < 1e-6 ? [[j.pad.p, end]] : [[j.pad.p, p1], [p1, end]];
         const o = { pad: j.pad, net: j.net, kind: "ring", segs, w: j.w, via: null, end, n: geo.n, lane: { t: tc(j.pad), lane: tc(j.pad) + s2, a: lvl(turn), b: lvl(H), w: j.w, cl: j.clr, real: true }, cost: turn + Math.abs(s2) * Math.SQRT2, a: 0, b: 0, d: Math.sign(s2), seq: 0 };
-        if (laneOK(o.lane, lanes(j.pad.name), geo.rs) && check3(j, o) === null) {
+        if (laneOK(o.lane, lanes(j.pad.name), geo.rs) && check4(j, o) === null) {
           put4(o);
           fanned.add(j.pad.name);
         }
@@ -124738,7 +124906,7 @@ var Router = class _Router {
         return "#" + i;
       };
       const parts = isPair ? clusters.map((_, i) => partOf2(i)) : null;
-      const isConn = (r) => /^(J|P|CN|USB|X)\d/i.test(r);
+      const isConn2 = (r) => /^(J|P|CN|USB|X)\d/i.test(r);
       const near2 = (i, j) => {
         let best = null;
         for (const a of clusters[i]) for (const b of clusters[j]) {
@@ -124756,7 +124924,7 @@ var Router = class _Router {
         }
         return best;
       };
-      const cost = (i, j, e) => !parts ? e[0] : parts[i] === parts[j] ? e[0] * 0.01 : e[0] + (isConn(parts[i]) || isConn(parts[j]) ? 5 : 0);
+      const cost = (i, j, e) => !parts ? e[0] : parts[i] === parts[j] ? e[0] * 0.01 : e[0] + (isConn2(parts[i]) || isConn2(parts[j]) ? 5 : 0);
       const inTree = clusters.map(() => false);
       const bestTo = clusters.map(() => null);
       const bestCost = clusters.map(() => Infinity);
@@ -125024,8 +125192,8 @@ var Router = class _Router {
       if (this.domains) {
         const o = typeof this.opts.separate === "object" ? this.opts.separate : {};
         const base2 = Math.max(this.s.clearance || 0.2, this.s.minClearance || 0);
-        const quiet2 = o.quiet !== void 0 ? o.quiet : Math.max(2 * base2, 0.3), noisy = o.noisy !== void 0 ? o.noisy : Math.max(3 * base2, 0.5);
-        this.sepGaps = { quiet: quiet2, noisy };
+        const quiet3 = o.quiet !== void 0 ? o.quiet : Math.max(2 * base2, 0.3), noisy = o.noisy !== void 0 ? o.noisy : Math.max(3 * base2, 0.5);
+        this.sepGaps = { quiet: quiet3, noisy };
         const sens = (k2) => k2 === "analog" || k2 === "rf", loud = (k2) => k2 === "switching" || k2 === "fast";
         G5.kinds = new Proxy(/* @__PURE__ */ new Map(), { get: (_t, prop2) => prop2 === "get" ? (n2) => {
           const k2 = this.kindOf(n2);
@@ -125036,7 +125204,7 @@ var Router = class _Router {
           const reach = o.nearPads !== void 0 ? o.nearPads : 1.2;
           for (const list of G5.obstacles.values()) for (const ob of list) if (ob.pad) stamp(G5, near2, ob.shape, reach, 1);
         }
-        G5.sep = (a, b) => a === b || a === "supply" || b === "supply" ? 0 : sens(a) && sens(b) ? quiet2 : sens(a) ? loud(b) ? noisy : quiet2 : sens(b) ? loud(a) ? noisy : quiet2 : 0;
+        G5.sep = (a, b) => a === b || a === "supply" || b === "supply" ? 0 : sens(a) && sens(b) ? quiet3 : sens(a) ? loud(b) ? noisy : quiet3 : sens(b) ? loud(a) ? noisy : quiet3 : 0;
       }
     }
     if (!this.domains) return void 0;
@@ -145257,9 +145425,9 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       {
         const band = grow5(region, 1.2), bshape = rectShape(band), inner = rectShape(grow5(region, 0.05));
         const cut = /* @__PURE__ */ new Set();
-        const quiet2 = (n2) => !n2 || own.has(n2) || rfNets.includes(n2) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(n2);
+        const quiet3 = (n2) => !n2 || own.has(n2) || rfNets.includes(n2) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(n2);
         for (const c of S3.conds) {
-          if (c.kind === "zone" || quiet2(c.net) || !hit4(c.bbox, band) || P.shapeGap(c.shape, bshape) > 0) continue;
+          if (c.kind === "zone" || quiet3(c.net) || !hit4(c.bbox, band) || P.shapeGap(c.shape, bshape) > 0) continue;
           if (c.kind === "pad") {
             const f2 = fps.find((q4) => q4.id === c.item.id);
             if (f2 && f2.id !== a.id) cut.add(`${f2.ref} (${bare(c.net)})`);
@@ -146570,7 +146738,7 @@ var fieldOf3 = (p, re) => {
 function reviewCircuit(c) {
   const { parts, nets, byRef: byRef2, netPins, supplyNets, pinNet, railV, isIc, isGround: isGround2, add: add2 } = c;
   const live3 = parts.filter((p) => !p.dnp);
-  const isR = (p) => !!p && /^R\d/i.test(p.ref) && p.pins.length === 2, isC = (p) => !!p && /^C\d/i.test(p.ref) && p.pins.length === 2;
+  const isR2 = (p) => !!p && /^R\d/i.test(p.ref) && p.pins.length === 2, isC = (p) => !!p && /^C\d/i.test(p.ref) && p.pins.length === 2;
   const other = (p, pin) => p.pins.find((q4) => q4 !== pin && q4.number !== pin.number);
   const across = (net, kind) => (netPins.get(net) || []).map((q4) => ({ pin: q4, part: byRef2.get(q4.ref) })).filter((x) => kind(x.part) && !x.part.dnp).map((x) => ({ part: x.part, far: pinNet(other(x.part, x.pin)) }));
   const capsToGround = (net) => across(net, isC).filter((x) => isGround2(x.far));
@@ -146602,7 +146770,7 @@ function reviewCircuit(c) {
     for (const n2 of nets) {
       const i2c = /(^|[_/])(SDA|SCL)\d*$/i.test(n2.name) || n2.pins.some((q4) => /^(SDA|SCL|I2C\d*_?(SDA|SCL))\d*$/i.test(q4.name));
       if (!i2c || supplyNets.has(n2.name)) continue;
-      const ups = across(n2.name, isR).filter((x) => supplyNets.has(x.far) && !isGround2(x.far));
+      const ups = across(n2.name, isR2).filter((x) => supplyNets.has(x.far) && !isGround2(x.far));
       if (!ups.length) continue;
       const vals = ups.map((x) => ohms(x.part.value)).filter((v2) => v2 !== null && v2 > 0);
       const par = vals.length ? 1 / vals.reduce((a, v2) => a + 1 / v2, 0) : null;
@@ -146665,7 +146833,7 @@ function reviewCircuit(c) {
             const o = byRef2.get(q4.ref);
             return o && o !== p && isIc(o);
           })) continue;
-          const rs = across(n3, isR);
+          const rs = across(n3, isR2);
           const down = rs.filter((x) => isGround2(x.far)), up = rs.filter((x) => supplyNets.has(x.far) && !isGround2(x.far));
           if (!down.length && !up.length) {
             cc.push(`${p.ref}.${nm4} (${n3}) has no resistor: 5.1k to ground makes it a device that takes power, 56k, 22k or 10k to VBUS a source`);
@@ -146704,7 +146872,7 @@ function reviewCircuit(c) {
       for (const [what, n2] of [["input", vin], ["output", vout]]) if (n2 && !isGround2(n2) && !capsToGround(n2).length) noCap.push(`${p.ref} ${p.value}: no capacitor on its ${what} (${n2})`);
       let setV = null, outNet = vout;
       if (fb && fb !== vout && !isGround2(fb)) {
-        const rs = across(fb, isR);
+        const rs = across(fb, isR2);
         const bottom = rs.filter((x) => isGround2(x.far)), top2 = rs.filter((x) => !isGround2(x.far) && x.far !== fb);
         if (bottom.length === 1 && top2.length === 1) {
           const rt = ohms(top2[0].part.value), rb = ohms(bottom[0].part.value);
@@ -146751,7 +146919,7 @@ function reviewCircuit(c) {
       if (!ends[0] || !ends[1]) continue;
       let res = null, rail = "", drive = "";
       for (let i = 0; i < 2; i++) {
-        const r5 = across(ends[i], isR).filter((x) => x.part.ref !== p.ref);
+        const r5 = across(ends[i], isR2).filter((x) => x.part.ref !== p.ref);
         if (r5.length && (netPins.get(ends[i]) || []).length <= 3) {
           res = r5[0];
           rail = r5[0].far;
@@ -147394,7 +147562,7 @@ async function reviewSchematic(doc2, path2) {
   const rails = Array.from(supplyNets).filter((n2) => !isGround(n2));
   const isPassive = (p) => p.pins.length <= 2 && /^(R|C|L|FB|D|F|JP|SB|TP)\d/i.test(p.ref);
   const isIc = (p) => /^(U|IC)\d/i.test(p.ref) || p.pins.length >= 5 && !/^(J|P|CN|X|SW|K|RN)\d/i.test(p.ref) && p.pins.some((q4) => q4.type === "power_in");
-  const isConn = (p) => /^(J|P|CN|X)\d/i.test(p.ref) && /conn|usb|jack|header|socket|terminal|barrel/i.test(p.lib + " " + p.value) || /^Connector/i.test(p.lib);
+  const isConn2 = (p) => /^(J|P|CN|X)\d/i.test(p.ref) && /conn|usb|jack|header|socket|terminal|barrel/i.test(p.lib + " " + p.value) || /^Connector/i.test(p.lib);
   const isTp = (p) => /^TP\d/i.test(p.ref) || /test ?point/i.test(p.lib + " " + p.value);
   const netPins = /* @__PURE__ */ new Map();
   for (const p of parts) for (const q4 of p.pins) {
@@ -147502,7 +147670,7 @@ async function reviewSchematic(doc2, path2) {
     for (const n2 of nets) {
       if (supplyNets.has(n2.name) || n2.pins.length < 2 || n2.pins.some((p) => {
         const q4 = byRef2.get(p.ref);
-        return q4 && isConn(q4) && q4.pins.length >= 8;
+        return q4 && isConn2(q4) && q4.pins.length >= 8;
       })) continue;
       const groups = new Set(n2.pins.map((p) => {
         const q4 = byRef2.get(p.ref);
@@ -147532,10 +147700,10 @@ async function reviewSchematic(doc2, path2) {
         total2++;
       }
     }
-    const busy = segs.filter((_, i) => cross[i] > 3).map((g2) => `(${r25(g2[0])}, ${r25(g2[1])}) to (${r25(g2[2])}, ${r25(g2[3])}) is crossed ${cross[segs.indexOf(g2)]} times`);
+    const busy2 = segs.filter((_, i) => cross[i] > 3).map((g2) => `(${r25(g2[0])}, ${r25(g2[1])}) to (${r25(g2[2])}, ${r25(g2[3])}) is crossed ${cross[segs.indexOf(g2)]} times`);
     if (slanted.length) add2("wires.straight", "warning", "Wires run in the four cardinal directions; these are at an angle.", slanted);
     if (off.length) add2("wires.straight", "warning", "These parts have pins off the 1.27 mm grid, so wires to them need small jogs.", off.sort(refSort));
-    if (busy.length) add2("wires.straight", "warning", `A wire should not be crossed more than three times (the sheet has ${total2} crossings in all). Reorder the pins, move the part, or use a label or a bus here.`, busy);
+    if (busy2.length) add2("wires.straight", "warning", `A wire should not be crossed more than three times (the sheet has ${total2} crossings in all). Reorder the pins, move the part, or use a label or a bus here.`, busy2);
     const at5 = /* @__PURE__ */ new Map();
     for (const p of parts) for (const q4 of p.pins) {
       const l = at5.get(key3(q4.x, q4.y));
@@ -147589,7 +147757,7 @@ async function reviewSchematic(doc2, path2) {
   {
     const pack = [], sides = [], libSides = [], untyped = [];
     for (const p of parts) {
-      if (p.pins.length < 6 || isConn(p) || /^(RN|SW|K|T|TR)\d/i.test(p.ref)) continue;
+      if (p.pins.length < 6 || isConn2(p) || /^(RN|SW|K|T|TR)\d/i.test(p.ref)) continue;
       const lr = p.pins.filter((q4) => q4.side === "left" || q4.side === "right");
       const nums = p.pins.every((q4) => /^\d+$/.test(q4.number));
       if (nums && lr.length === p.pins.length) {
@@ -147710,7 +147878,7 @@ async function reviewSchematic(doc2, path2) {
       if (supplyNets.has(n2.name) || n2.pins.length < 2 && !n2.named) continue;
       const ic = n2.pins.filter((q4) => {
         const p = byRef2.get(q4.ref);
-        return p && (isIc(p) || isConn(p));
+        return p && (isIc(p) || isConn2(p));
       });
       const tx = ic.filter((q4) => /(^|[^A-Z])TXD?\d*($|[^A-Z])|UART\d*_?TX/i.test(q4.name)), rx = ic.filter((q4) => /(^|[^A-Z])RXD?\d*($|[^A-Z])|UART\d*_?RX/i.test(q4.name));
       const icOnly = (l) => l.filter((q4) => isIc(byRef2.get(q4.ref)));
@@ -147729,7 +147897,7 @@ async function reviewSchematic(doc2, path2) {
   }
   {
     const tpNets = /* @__PURE__ */ new Set();
-    for (const p of parts) if (isTp(p) || isConn(p)) for (const q4 of p.pins) {
+    for (const p of parts) if (isTp(p) || isConn2(p)) for (const q4 of p.pins) {
       const n2 = pinNet(q4);
       if (n2) tpNets.add(n2);
     }
@@ -147744,7 +147912,7 @@ async function reviewSchematic(doc2, path2) {
     const unreachable = prog.filter((n2) => !tpNets.has(n2.name)).map((n2) => `${n2.name} (${n2.pins.filter((q4) => isIc(byRef2.get(q4.ref) || { pins: [], ref: "" })).map((q4) => `${q4.ref}.${q4.name}`).join(", ")})`);
     if (unreachable.length) add2("test.points", "error", "These programming and debug pins reach no connector or pad, so the IC cannot be programmed on the board.", unreachable);
     if (parts.some(isIc) && !parts.some((p) => /led/i.test(p.lib + " " + p.value)) && !parts.some(isTp)) add2("test.points", "note", "The board has no LED and no test point. Add something to debug with: a status LED, a UART header, a scope probe point.");
-    const feeds = (p) => p && isConn(p) && /usb|barrel|jack|batt|terminal|screw|jst|dc|power|pwr/i.test(p.lib + " " + p.value);
+    const feeds = (p) => p && isConn2(p) && /usb|barrel|jack|batt|terminal|screw|jst|dc|power|pwr/i.test(p.lib + " " + p.value);
     const entry2 = rails.filter((n2) => (netPins.get(n2) || []).some((q4) => feeds(byRef2.get(q4.ref))) && !(netPins.get(n2) || []).some((q4) => /^(F|D|Q|TVS|FB)\d/i.test(q4.ref) || q4.type === "power_out" || /^(Battery_Management|Power_Protection):|(^|:)(BQ2\d|TPS2\d|TPD\d|LTC4\d|MCP73|TP40|STBC|MAX1[45]\d\d)/i.test(((byRef2.get(q4.ref) || { lib: "" }).lib || "") + ":" + ((byRef2.get(q4.ref) || { value: "" }).value || ""))));
     if (entry2.length) add2("fail.safe", "warning", "These supplies come in through a connector with no fuse, diode, TVS or MOSFET on them. Add over-voltage and reverse polarity protection where a user can get it wrong.", entry2);
     const regs = parts.filter((p) => isIc(p) && p.pins.some((q4) => q4.type === "power_out"));
@@ -148007,14 +148175,14 @@ async function reviewBoard(doc2, path2) {
   r.source += " " + PHYSICS_SOURCE + " " + CRAFT_SOURCE;
   return r;
 }
-function report2(check3, path2, rules, findings, manual) {
+function report2(check4, path2, rules, findings, manual) {
   const order = { error: 0, warning: 1, note: 2 };
   const pos = new Map(rules.map((r, i) => [r.id, i]));
   findings.sort((a, b) => order[a.level] - order[b.level] || (pos.get(a.rule) || 0) - (pos.get(b.rule) || 0));
   const failed = new Set(findings.filter((f2) => f2.level !== "note").map((f2) => f2.rule));
   return {
     document: path2,
-    check: check3,
+    check: check4,
     errors: findings.filter((f2) => f2.level === "error").length,
     warnings: findings.filter((f2) => f2.level === "warning").length,
     notes: findings.filter((f2) => f2.level === "note").length,

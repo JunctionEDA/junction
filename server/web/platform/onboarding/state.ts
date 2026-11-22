@@ -5,13 +5,19 @@
 // so closing the tab and coming back picks up at the same step.  Nothing here touches the design.
 import { createFromTemplate } from "../home/api";
 
-export type StepId = "schematic" | "board" | "route" | "check" | "share";
+export type StepId = "schematic" | "board" | "route" | "check" | "share"
+  | "ledSchematic" | "ledParts" | "ledWire" | "ledFootprints" | "ledUpdate" | "ledOutline" | "ledPlace" | "ledRoute" | "ledCheck" | "ledFab";
 export const STEPS: StepId[] = ["schematic", "board", "route", "check", "share"];
+/** Help > Make an LED Board: a blank project taken from an empty schematic to a board ready for a board house. */
+export const LED_STEPS: StepId[] = ["ledSchematic", "ledParts", "ledWire", "ledFootprints", "ledUpdate", "ledOutline", "ledPlace", "ledRoute", "ledCheck", "ledFab"];
+export const stepsOf = (g: GuideState): StepId[] => (g.kind === "led" ? LED_STEPS : STEPS);
 
 export interface GuideState {
   projectId: string;
   /** where it was started: the projects home, or the small editor on the home page */
   from: "home" | "mini";
+  /** which walkthrough: the guided first project (the default), or the LED board tutorial */
+  kind?: "first" | "led";
   /** the template it was made from (older guides have none: the blinker) */
   template?: string;
   /** steps finished or skipped */
@@ -50,11 +56,15 @@ export function markStep(id: StepId, how: "done" | "skipped" = "done"): void {
   setGuide({ ...g, done: { ...g.done, [id]: how } });
 }
 export function subscribeGuide(fn: () => void): () => void { listeners.add(fn); return () => { listeners.delete(fn); }; }
-// Another tab finishing a step, or starting a new guide, shows here too.
-if (typeof window !== "undefined") window.addEventListener("storage", (ev) => { if (ev.key === KEY) { current = read(); listeners.forEach((fn) => fn()); } });
+// Another tab finishing a step, or starting a new guide, shows here too; so does the editor's bundle starting one in
+// this tab (Help > Make an LED Board writes the record, then sends kc:guide).
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (ev) => { if (ev.key === KEY) { current = read(); listeners.forEach((fn) => fn()); } });
+  window.addEventListener("kc:guide", () => { current = read(); listeners.forEach((fn) => fn()); });
+}
 
-export const nextStep = (g: GuideState): StepId | null => STEPS.find((s) => !g.done[s]) || null;
-export const stepsDone = (g: GuideState): number => STEPS.filter((s) => g.done[s]).length;
+export const nextStep = (g: GuideState): StepId | null => stepsOf(g).find((s) => !g.done[s]) || null;
+export const stepsDone = (g: GuideState): number => stepsOf(g).filter((s) => g.done[s]).length;
 
 /** The board left by the home page's small editor, if there is one and it is recent enough to still be wanted. */
 export function miniBoard(): { board: string; template: string } | null {

@@ -8989,6 +8989,8 @@ Link '${target}' to this file?`)) return null;
     ev.stopImmediatePropagation();
     ev.preventDefault();
     const already = S.sel === hit.id;
+    const ed = globalThis.CollabEditor;
+    const nothingSelected = !S.sel && !(ctx.selection && ctx.selection.size) && !(ed && (ed.selected || ed.selPins && ed.selPins.length || ed.selField));
     S.sel = hit.id;
     S.hover = null;
     if (ctx.selection && ctx.selection.size && ctx.setSelection) {
@@ -8997,7 +8999,7 @@ Link '${target}' to this file?`)) return null;
       S.selEnds = keepEnds;
     } else ctx.setSelected(null);
     if (!already) setSelEnd(hit.id, lineEndAt(hit, mm, selectThreshold(ctx)));
-    S.pending = { item: hit, mm };
+    S.pending = { item: hit, mm, box: nothingSelected, client: [ev.clientX, ev.clientY] };
     try {
       ctx.stage.setPointerCapture(ev.pointerId);
     } catch (e) {
@@ -9062,6 +9064,15 @@ Link '${target}' to this file?`)) return null;
       if (Math.hypot(mm[0] - S.pending.mm[0], mm[1] - S.pending.mm[1]) > 0.4) {
         const p = S.pending;
         S.pending = null;
+        const ed = globalThis.CollabEditor;
+        if (p.box && ed) {
+          S.sel = null;
+          setSelEnd(null, null);
+          S.autoPress = null;
+          ed.boxSel = { start: p.mm, cur: mm, pts: [p.mm, mm], lasso: ed.selMode === "lasso", add: false, startClient: p.client || [ev.clientX, ev.clientY] };
+          ctx.requestRender();
+          return;
+        }
         if (beginDrag(ctx, p.item, p.mm, true)) moveDrag(ctx, mm);
       }
       return;

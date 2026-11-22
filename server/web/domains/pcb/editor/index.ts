@@ -32,7 +32,7 @@ import { renderObjects, snapMm, syncItemsFromDoc, updateGridStatus, applyChanges
 import { $ } from "./dom";
 import { IS_MAC } from "../../../shared/keys";
 import { cancelLongPress, candidatesAt, moveLongPress, openClarifyMenu, openContextMenu, startLongPress } from "./contextmenu";
-import { DRAG_THRESHOLD_PX, cancelInteraction, clearAllSelection, markerUnder, rotateFieldMove, startFieldMove, copperUnderBeatsFootprint, installGestures, interactionBusy, pinForClick, registerPointerUp, selectionChanged, selectionHooks, selectionIds, startMove, applyPickMode, selectedAnywhere, mergeBoardSelection, splitBoardSelection } from "./gestures";
+import { DRAG_THRESHOLD_PX, cancelInteraction, clearAllSelection, markerUnder, rotateFieldMove, startFieldMove, copperUnderBeatsFootprint, copperUnderBeatsPad, installGestures, interactionBusy, pinForClick, registerPointerUp, selectionChanged, selectionHooks, selectionIds, startMove, applyPickMode, selectedAnywhere, mergeBoardSelection, splitBoardSelection } from "./gestures";
 import { loadMe, navigate, route } from "./home";
 import { sendOp } from "./net";
 import { applyTheme, syncSchModes } from "./panes";
@@ -369,7 +369,8 @@ stage.addEventListener("pointerdown", (ev) => {
     const f = store.get().filter as Record<string, boolean>;
     if (pad && pad.item && pad.index !== undefined && f.pads !== false && selectedSet()!.has(pad.item.id)) padClick = `${pad.item.id}#${pad.index}`;
   }
-  if (!isSch() && E.tool === "select" && mod && mod.selectPadAt && !padClick && !gripSelected) {
+  // a track or via much smaller than the pad under it is what the click is after (GuessSelectionCandidates' size rule)
+  if (!isSch() && E.tool === "select" && mod && mod.selectPadAt && !padClick && !gripSelected && !copperUnderBeatsPad([x, y])) {
     const ps = CollabTools.pcb && CollabTools.pcb.state;
     let r: unknown = false;
     try { r = mod.selectPadAt(ev, [x, y], toolCtx()); } catch (e) { console.warn(e); }

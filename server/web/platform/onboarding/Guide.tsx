@@ -5,7 +5,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { dispatch, useApp } from "../../shared/store";
 import { Ic } from "../home/ui";
-import { STEPS, getGuide, markStep, nextStep, patchGuide, setGuide, stepsDone, subscribeGuide, type GuideState, type StepId } from "./state";
+import { getGuide, markStep, nextStep, patchGuide, setGuide, stepsDone, stepsOf, subscribeGuide, type GuideState, type StepId } from "./state";
+import { LedBodies } from "./LedSteps";
 
 interface BoardTools { ratsnest(doc: unknown): { name: string }[] }
 const boardTools = () => (window as unknown as { PcbTools?: BoardTools }).PcbTools;
@@ -17,6 +18,16 @@ const TITLES: Record<StepId, string> = {
   route: "Route what is left",
   check: "Check the board",
   share: "Share it",
+  ledSchematic: "Open the schematic",
+  ledParts: "Place the parts",
+  ledWire: "Wire them up",
+  ledFootprints: "Name the parts, pick footprints",
+  ledUpdate: "Bring them onto the board",
+  ledOutline: "Draw the board outline",
+  ledPlace: "Place the footprints",
+  ledRoute: "Route the tracks",
+  ledCheck: "Check the board",
+  ledFab: "Make the fabrication files",
 };
 
 /** Connections on the open board that still need a track, or null while no board is open. */
@@ -82,8 +93,37 @@ function Panel({ guide }: { guide: GuideState }) {
   const started = useRef<number | null>(null);
   if (open !== null && started.current === null) started.current = open;
 
+  // The LED tutorial: each step is done once the project shows it (editor/tutorial.ts works the facts out).
+  const facts = useApp((s) => s.tutorial);
+  useEffect(() => {
+    if (guide.kind !== "led" || !current) return;
+    const f = facts;
+    const ok: Partial<Record<StepId, boolean>> = {
+      ledSchematic: editor === "sch",
+      ledParts: !!f && f.r && f.led && f.conn,
+      ledWire: !!f && f.wired === 3,
+      ledFootprints: !!f && f.named && f.footprints,
+      ledUpdate: !!f && f.onBoard === 3 && !f.stale,
+      ledOutline: !!f && f.outline,
+      ledPlace: !!f && f.inside === 3,
+      ledRoute: !!f && f.onBoard === 3 && f.open === 0,
+    };
+    if (ok[current]) markStep(current);
+  }, [guide, current, editor, facts]);
+  useEffect(() => {
+    if (guide.kind !== "led") return;
+    const on = (ev: Event) => {
+      const id = (ev as CustomEvent<{ id?: string }>).detail?.id || "";
+      const now = nextStep(getGuide() || guide);
+      if (now === "ledCheck" && /runDRC/.test(id)) markStep("ledCheck");
+      else if (now === "ledFab" && /fabPackage|generateGerbers|plot|gendrill|generateDrillFiles/.test(id)) markStep("ledFab");
+    };
+    window.addEventListener("kc:action", on);
+    return () => window.removeEventListener("kc:action", on);
+  }, [guide]);
   // What the editor shows decides the first three steps; the last two are things the person runs.
   useEffect(() => {
+    if (guide.kind === "led") return;
     if (current === "schematic" && editor === "sch" && picked && picked.ref && !picked.ref.startsWith("#")) markStep("schematic");
     else if (current === "board" && editor === "pcb") markStep("board");
     else if (current === "route" && editor === "pcb" && open === 0) markStep("route");
@@ -102,7 +142,9 @@ function Panel({ guide }: { guide: GuideState }) {
   const done = stepsDone(guide), finished = !current;
   const stm32 = guide.template === "stm32-usbc-devboard";
 
-  const body: Record<StepId, ReactNode> = {
+  const led = guide.kind === "led";
+  const STEPS = stepsOf(guide);
+  const firstBody: Partial<Record<StepId, ReactNode>> = {
     schematic: (
       <>
         <p>Every board starts as a schematic: what is connected to what. {stm32 ? "This one is a small STM32 board that plugs into a breadboard and takes power and data from USB-C." : "This one is a 555 timer that blinks an LED about once a second."}</p>
@@ -147,12 +189,14 @@ function Panel({ guide }: { guide: GuideState }) {
     ),
   };
 
+  const body: Partial<Record<StepId, ReactNode>> = led ? LedBodies({ editor, sch: sch?.docId, pcb: pcb?.docId, viewOnly }) : firstBody;
+
   if (guide.folded) {
     return (
       <aside className="kg kg-folded" style={corner ? { left: corner.left, bottom: corner.bottom } : undefined} aria-label="Guided first project">
         <button type="button" className="kg-unfold" onClick={() => patchGuide({ folded: false })} aria-expanded="false">
           <span className="kg-ring" style={{ ["--kg-done" as string]: String(done / STEPS.length) }} aria-hidden="true" />
-          <span>{finished ? "First board: done" : `First board: ${TITLES[current!]}`}</span>
+          <span>{finished ? `${led ? "LED board" : "First board"}: done` : `${led ? "LED board" : "First board"}: ${TITLES[current!]}`}</span>
           <span className="kg-n">{done}/{STEPS.length}</span>
         </button>
       </aside>
@@ -162,14 +206,21 @@ function Panel({ guide }: { guide: GuideState }) {
   return (
     <aside className="kg" style={corner} aria-label="Guided first project">
       <header className="kg-h">
-        <b>Your first board</b>
+        <b>{led ? "Make an LED board" : "Your first board"}</b>
         <span className="kg-n">{done} of {STEPS.length}</span>
         <button type="button" className="kg-x" title="Fold away" aria-label="Fold the guide away" onClick={() => patchGuide({ folded: true })}><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 4.5L6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.4" /></svg></button>
         <button type="button" className="kg-x" title="Close the guide" aria-label="Close the guide" onClick={() => patchGuide({ closed: true })}><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" fill="none" stroke="currentColor" strokeWidth="1.4" /></svg></button>
       </header>
       <div className="kg-bar" role="progressbar" aria-valuemin={0} aria-valuemax={STEPS.length} aria-valuenow={done}><i style={{ width: `${(done / STEPS.length) * 100}%` }} /></div>
       {!done && guide.from === "mini" ? <p className="kg-lead">This is the board you were routing on the home page. It is a real project of yours now, with its schematic.</p> : null}
-      {finished ? (
+      {finished && led ? (
+        <div className="kg-done">
+          <h3>Your LED board is ready to order</h3>
+          <p>You drew a schematic, gave the parts footprints, laid out and routed a board, checked it and made the files a board house needs. Send the Gerber zip to one, or keep going: add a second LED, a button, or a USB-C connector for power.</p>
+          <div className="kg-acts"><a className="btn primary sm" href="/">Your projects</a></div>
+          <button type="button" className="kg-skip" onClick={() => setGuide(null)}>Close the guide</button>
+        </div>
+      ) : finished ? (
         <div className="kg-done">
           <h3>That is the whole loop</h3>
           <p>You read a schematic, routed a board, checked it and know how to share it. This project stays in your list, so keep going with it, or start your own.</p>

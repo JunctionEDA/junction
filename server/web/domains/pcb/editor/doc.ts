@@ -1,4 +1,5 @@
 // editor — GENERATED SOURCE MODULE (split from the former static/app.js; static/dist/editor.js is the esbuild output of web/domains/pcb/editor/index.ts — edit these modules, not the bundle).
+import { watchTutorial } from "./tutorial";
 import { KICAD_LAYERS, SCH_LAYERS, setStatusBar, setToggle, state, store } from "./appstore";
 import { centerOn, closeThread, drawComments, loadComments, renderThreads } from "./comments";
 import { leaveCursorChat, loadChat } from "./chat";
@@ -466,6 +467,7 @@ export async function openEditor(id: string) {
     stopGithubWatch = watchGithubChanges(id, refreshFromGithub);
   }
   watchAttention();
+  watchTutorial();
   publishDocs();
   loadHistory();
   // ?fp=: the Footprint Editor on a footprint of the project, or on a private copy of a board footprint

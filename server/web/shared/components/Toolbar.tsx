@@ -79,7 +79,13 @@ function ActionButton({ item, a, main }: { item: ActionItem; a: Avail; main?: bo
       title={titleFor(a, id) + (ro ? "\n— " + ro : "") + (attn ? "\n— " + attn : "")} onClick={(ev) => { if (!ro) runUiAction(a, id, ev.currentTarget); }}
       onContextMenu={menuHandled ? (ev) => { ev.preventDefault(); dispatch({ type: "action", id: id + ":menu", anchor: rectOf(ev.currentTarget) }); } : undefined}>
       <KIcon name={meta.icon || "options_generic"} />
-      {attn ? <span className="kattn absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-err ring-1 ring-bench animate-pulse pointer-events-none" data-attn={id} /> : null}
+      {attn ? (
+        // a notification badge over the icon's corner: a solid red dot with a ring pinging out of it
+        <span className="kattn absolute -top-0.5 -right-0.5 w-2.5 h-2.5 pointer-events-none" data-attn={id}>
+          <span className="absolute inset-0 rounded-full bg-err opacity-75 animate-ping" />
+          <span className="absolute inset-0 rounded-full bg-err ring-1 ring-bench animate-pulse" />
+        </span>
+      ) : null}
     </button>
   );
 }

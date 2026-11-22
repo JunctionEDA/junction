@@ -51,7 +51,7 @@ export type MenuEntry = string | [string, MenuEntry[]];
 // File's collaboration block, as this fork's KiCad menus have it (eeschema/menubar.cpp:151-161, menubar_pcb_editor.cpp:199-209)
 const COLLAB_FILE: MenuEntry[] = ["collabStartSession", "collabJoinSession", "collabCopyLink", "collabComments", "collabFollow", "collabHistory", "collabCompare", "collabGithub", "collabVendorParts", "collabLeaveSession"];
 // EDA_BASE_FRAME::AddStandardHelpMenu
-const HELP_MENU: MenuEntry[] = ["help", "gettingStarted", "listHotKeys", "getInvolved", "reportBug", "-", "about"];
+const HELP_MENU: MenuEntry[] = ["help", "gettingStarted", "ledTutorial", "listHotKeys", "getInvolved", "reportBug", "-", "about"];
 const LANG_MENU: MenuEntry = ["Set Language", ["languageEnglish"]];
 // Tools > External Plugins: the plugins' own actions join it above a separator (plugins/PluginUi.tsx, AddApiPluginMenuItems)
 const PLUGINS_MENU: MenuEntry = ["External Plugins", ["pluginsReload", "pluginsShowFolder"]];
@@ -289,7 +289,7 @@ export const HOME_MENUS: [string, MenuEntry[]][] = [];
 
 /** Labels for entries that are ours rather than KiCad TOOL_ACTIONs. */
 export const LOCAL_LABELS: Record<string, string> = {
-  github: "GitHub Sync...", fabPackage: "Fabrication Package...", drillResetOrigin: "Reset Drill Origin", gridResetOrigin: "Reset Grid Origin",
+  ledTutorial: "Tutorial: Make an LED Board...", github: "GitHub Sync...", fabPackage: "Fabrication Package...", drillResetOrigin: "Reset Drill Origin", gridResetOrigin: "Reset Grid Origin",
   collabCopyLink: "Copy Invite Link", collabComments: "Comments...", collabFollow: "Follow Next Peer", collabHistory: "History",
   collabLeave: "Leave Session", close: "Close", archive: "Download Project (.zip)", clone: "Clone to My Account", openInKicad: "Open in Junction...", home: "Back to Projects",
   showSelectionFilter: "Selection Filter", showHistory: "History", showPeers: "Collaborators", showComments: "Comments", showAppearance: "Appearance",

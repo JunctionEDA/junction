@@ -148,11 +148,16 @@ export function onDownCapture(ev: PointerEvent) {
   // already selected keeps the selection as it is, so a drag moves what was selected (SCH_SELECTION_TOOL::Main only
   // re-selects on a click, which onUpCapture does)
   const already = S.sel === hit.id;
+  // MOUSE_DRAG_ACTION::DRAG_SELECTED (KiCad's default left drag): with nothing selected a drag draws a selection box,
+  // even one that starts on a wire or a label; only what is already selected moves.  The press still selects, as the
+  // click would (the editor does the same for symbols)
+  const ed = (globalThis as unknown as { CollabEditor?: { selected?: unknown; selPins?: unknown[]; selField?: unknown } }).CollabEditor;
+  const nothingSelected = !S.sel && !(ctx.selection && ctx.selection.size) && !(ed && (ed.selected || (ed.selPins && ed.selPins.length) || ed.selField));
   S.sel = hit.id; S.hover = null;
   // selectPoint without a modifier: ClearSelection() first, so symbols (or other items) selected with it go
   if (ctx.selection && ctx.selection.size && ctx.setSelection) { const keepEnds = S.selEnds; ctx.setSelection([]); S.selEnds = keepEnds; } else ctx.setSelected(null);
   if (!already) setSelEnd(hit.id, lineEndAt(hit, mm, selectThreshold(ctx)));
-  S.pending = { item: hit, mm };
+  S.pending = { item: hit, mm, box: nothingSelected, client: [ev.clientX, ev.clientY] };
   try { ctx.stage.setPointerCapture(ev.pointerId); } catch (e) { /* not a real pointer */ }
   ctx.requestRender();
 }
@@ -205,7 +210,18 @@ export function onMoveCapture(ev: PointerEvent) {
   if (S.pedit) { pointEditMove(ctx, mm, ev); return; }
   if (S.drag) { moveDrag(ctx, mm); return; }
   if (S.pending) {
-    if (Math.hypot(mm[0] - S.pending.mm[0], mm[1] - S.pending.mm[1]) > 0.4) { const p = S.pending; S.pending = null; if (beginDrag(ctx, p.item, p.mm, true)) moveDrag(ctx, mm); }
+    if (Math.hypot(mm[0] - S.pending.mm[0], mm[1] - S.pending.mm[1]) > 0.4) {
+      const p = S.pending; S.pending = null;
+      const ed = (globalThis as unknown as { CollabEditor?: { boxSel?: unknown; selMode?: string } }).CollabEditor;
+      if (p.box && ed) {
+        // the editor draws the box from here on (its own pointermove and pointerup); the press's pick is undone
+        S.sel = null; setSelEnd(null, null); S.autoPress = null;
+        ed.boxSel = { start: p.mm, cur: mm, pts: [p.mm, mm], lasso: ed.selMode === "lasso", add: false, startClient: p.client || [ev.clientX, ev.clientY] };
+        ctx.requestRender();
+        return;
+      }
+      if (beginDrag(ctx, p.item, p.mm, true)) moveDrag(ctx, mm);
+    }
     return;
   }
   const tool = curTool();

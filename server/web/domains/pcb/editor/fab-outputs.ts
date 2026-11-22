@@ -120,6 +120,7 @@ function drawLayer(cv: HTMLCanvasElement, fab: KiCadFabApi, pkg: FabPackage, lay
 
 /** File → Fabrication Outputs → Gerbers / Drill Files / Component Placement / Bill of Materials. */
 export function openFabOutputs(focus: FabFocus = "gerber"): void {
+  window.dispatchEvent(new CustomEvent("kc:action", { detail: { id: "fabPackage" } }));   // the LED tutorial's last step watches for it
   if (!boardDoc()) { toast("Fabrication outputs are made from a board: open the PCB editor first"); return; }
   Promise.all([loadFab(), fabContext()]).then(([fab, ctx]) => { if (ctx) show(fab, ctx, focus); })
     .catch((e: unknown) => { console.warn(e); toast("The fabrication output writers could not be loaded"); });

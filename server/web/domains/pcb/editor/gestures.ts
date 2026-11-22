@@ -95,14 +95,53 @@ function pcbPick(mm: Mm): KItem | null {
   return it && filterAllows(it.kind, it) ? it : null;
 }
 /**
- * A footprint was hit on its silkscreen, courtyard or text — not on a pad — while the cursor is inside a track,
- * via or graphic: KiCad's GuessSelectionCandidates drops the (much larger) footprint and takes the item.
+ * GetCoverageArea of a track, arc or via, mm²: a via counts as r² of its drill (GuessSelectionCandidates: vias rarely
+ * hide anything and should not defer to short tracks under them), a track or arc as its length times its width plus
+ * the round ends, anything else by its bounding box.
+ */
+function coverageArea(it: KItem): number {
+  const n = it.node, num = (k: string, i = 1): number => { const c = KiCadCanvas.kid(n, k); return c ? Number(c[i]) : NaN; };
+  if (it.kind === "via") { const dr = num("drill"); return isFinite(dr) ? (dr / 2) * (dr / 2) : 0.01; }
+  const w = num("width");
+  if ((it.kind === "segment" || it.kind === "arc") && isFinite(w)) {
+    const s = KiCadCanvas.kid(n, "start"), e = KiCadCanvas.kid(n, "end"), m = KiCadCanvas.kid(n, "mid");
+    if (s && e) {
+      const P = (c: SNode): [number, number] => [Number(c[1]), Number(c[2])];
+      const len = m ? Math.hypot(P(s)[0] - P(m)[0], P(s)[1] - P(m)[1]) + Math.hypot(P(m)[0] - P(e)[0], P(m)[1] - P(e)[1]) : Math.hypot(P(s)[0] - P(e)[0], P(s)[1] - P(e)[1]);
+      return len * w + Math.PI * (w / 2) * (w / 2);
+    }
+  }
+  const b = it.bbox; return b ? Math.max(1e-4, (b[2] - b[0]) * (b[3] - b[1])) : Infinity;
+}
+/** The track, via or graphic exactly under the cursor (no slop), as the selection filter allows it. */
+function itemUnder(mm: Mm): KItem | null {
+  const d = doc(), t = pcbTools(); if (!d || !t || isSch()) return null;
+  const it = t.hitTestItem(d, mm[0], mm[1], 0);
+  return it && filterAllows(it.kind, it) ? it : null;
+}
+/**
+ * GuessSelectionCandidates' size rule: of the items under the cursor, one more than 1.5 times the area of a smaller one
+ * is dropped ("if the user clicked on a small item within a much larger one then it's pretty clear they're trying to
+ * select the smaller one").  The footprint the click reached (its silkscreen, courtyard, text, body or pad) against
+ * the track, via or graphic under the cursor: true when that item is the smaller one and so wins.
  */
 export function copperUnderBeatsFootprint(mm: Mm): boolean {
-  const d = doc(), t = pcbTools(), h = E.lastFpHit as { onGeom?: boolean; cls?: number } | null;
-  if (!d || !t || isSch() || !h || !h.onGeom || !(Number(h.cls) > 0)) return false;
-  const it = t.hitTestItem(d, mm[0], mm[1], 0);
-  return !!it && filterAllows(it.kind, it);
+  const d = doc(), h = E.lastFpHit as { id?: string; onGeom?: boolean; cls?: number } | null;
+  if (!d || isSch() || !h) return false;
+  const it = itemUnder(mm); if (!it) return false;
+  if (h.onGeom && Number(h.cls) > 0) return true;   // silkscreen, courtyard or text: always the larger
+  const fp = h.id ? d.items.get(h.id) : null, b = fp && fp.bbox;
+  let theirs = b ? (b[2] - b[0]) * (b[3] - b[1]) : Infinity;
+  try { const pad = KiCadCanvas.padAt ? KiCadCanvas.padAt(d, mm[0], mm[1]) as { area?: number } | null : null; if (pad && pad.area) theirs = Math.min(theirs, pad.area); } catch { /* no pad */ }
+  return coverageArea(it) * 1.5 < theirs;
+}
+/** A pad under the cursor and a track (or via) much smaller than it: the track is what the click picks, not the pad. */
+export function copperUnderBeatsPad(mm: Mm): boolean {
+  const d = doc(); if (!d || isSch()) return false;
+  let pad: { area?: number } | null = null;
+  try { pad = KiCadCanvas.padAt ? KiCadCanvas.padAt(d, mm[0], mm[1]) as { area?: number } | null : null; } catch { pad = null; }
+  if (!pad || !pad.area) return false;
+  const it = itemUnder(mm); return !!it && coverageArea(it) * 1.5 < pad.area;
 }
 function schPick(mm: Mm): KItem | null {
   const m = CollabTools.sch; if (!m || E.viewOnly) return null;

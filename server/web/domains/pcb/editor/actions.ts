@@ -7,6 +7,7 @@ import { saveVersionDialog, versionsCommand } from "./versions";
 import { enterSheet, navigateDocs, openDoc, openDocId, rootSchematic, setProjectDocs, selectItemAction, setActiveLayer, setGridPitch, setLayerVisible, switchEditor, updateGridStatus } from "./doc";
 import { loadHistory, restoreCheckpoint } from "./history";
 import { navigate } from "./home";
+import { startLedTutorial } from "./tutorial";
 import { chooseTrackWidth, chooseViaSize, chooseViaStack } from "./pcbrouting";
 import { setCrosshair, setTheme, setUnitsAction, showPane, syncSchModes, toggleTheme } from "./panes";
 import { contextMenuAction, openArcEditModeMenu, openGridButtonMenu, openZoneButtonMenu, openRouterModeMenu } from "./contextmenu";
@@ -149,6 +150,7 @@ export const HANDLERS: Record<string, ActionHandler> = {
   // File's collaboration block (this fork's SCH_ACTIONS / PCB_ACTIONS::collab*): Add Collaborators opens the
   // share dialog, Join Shared Project the home's join box, Vendor Parts the parts window (web/domains/pcb/parts)
   collabStartSession: (a) => runAction("share", a), collabJoinSession: () => runAction("joinLink"), collabGithub: (a) => runAction("github", a),
+  ledTutorial: () => { void startLedTutorial(); },
   collabVendorParts: () => { if (!runModuleAction("vendorParts")) toast("Vendor parts are not loaded yet"); }, collabLeaveSession: () => navigate("/"), close: () => navigate("/"),
   // Tools > External Plugins: Refresh Plugins reloads the installed list, Open Plugin Directory shows it (the plugin manager)
   pluginsReload: () => { const P = (window as unknown as { KcPlugins?: { refresh?: () => Promise<void> } }).KcPlugins; if (P && P.refresh) void P.refresh(); },

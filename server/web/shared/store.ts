@@ -206,6 +206,20 @@ export interface FpLibRow {
   /** kept at the top of the tree (Pin Library) */
   pinned?: boolean;
 }
+/** Help > Make an LED Board: what the open project has so far, worked out by the editor (editor/tutorial.ts). */
+export interface TutorialFacts {
+  /** a resistor, an LED and a connector are on the schematic */
+  r: boolean; led: boolean; conn: boolean;
+  /** how many of those three have every pin wired to another part (each pin on its own net) */
+  wired: number;
+  /** all three annotated (no "?") and with a footprint */
+  named: boolean; footprints: boolean;
+  /** how many of them the board has; the schematic holds changes the board lacks */
+  onBoard: number; stale: boolean;
+  /** an outline on Edge.Cuts; how many of the three footprints sit inside it; connections left to route */
+  outline: boolean; inside: number; open: number | null;
+}
+
 export interface AppState {
   /** "editor" is KiCad's frame (schematic, board); "cad" is a document a domain's own editor draws (web/platform/documents/host.ts) */
   view: "home" | "editor" | "cad";
@@ -283,6 +297,8 @@ export interface AppState {
   variant?: { current: string; names: string[]; sch: boolean };
   /** things waiting on the person, action id -> why (editor/attention.ts): a red dot on that toolbar button and a pill in the menu bar */
   attention?: Record<string, string>;
+  /** what the LED board tutorial watches for in the open project (editor/tutorial.ts), while it runs */
+  tutorial?: TutorialFacts;
 }
 
 // ---------------------------------------------------------------- actions (chrome → app.js)

@@ -139,7 +139,7 @@ test("board Tools: Drill Groups, Multi-Channel and External Plugins; no catch-al
 });
 test("Help menu and the File menus end like KiCad's (Close, not a web Home entry)", () => {
   // Donate (KiCad's donation page) was taken out of Junction's Help menu on purpose; the rest is KiCad's order
-  assert.deepEqual(flat(menu("sch", "help")).filter((x) => x !== "-"), ["help", "gettingStarted", "listHotKeys", "getInvolved", "reportBug", "about"]);
+  assert.deepEqual(flat(menu("sch", "help")).filter((x) => x !== "-"), ["help", "gettingStarted", "ledTutorial", "listHotKeys", "getInvolved", "reportBug", "about"]);
   assert.equal(flat(menu("sch", "file")).pop(), "close");
   assert.equal(flat(menu("pcb", "file")).pop(), "close");
 });

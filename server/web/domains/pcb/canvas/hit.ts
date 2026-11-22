@@ -11,7 +11,7 @@ export interface MovableInfo { id: string; kind: string; x?: number; y?: number;
 /** hitTestDetail's answer: the item, whether its own geometry was hit, the rank class, the layer hit and the visible box. */
 export interface HitDetail { id: string; onGeom: boolean; cls: number; layer: string | null; box: Box; score: number }
 /** padAt's answer. */
-export interface PadHit { item: Item; index: number; pad: SNode | null; number?: string; net?: number; netName?: string; x: number; y: number }
+export interface PadHit { item: Item; index: number; pad: SNode | null; number?: string; net?: number; netName?: string; x: number; y: number; /** the pad's copper area, mm² */ area?: number }
 // ---------------------------------------------------------------- queries
 export function movableItems(doc: Doc): MovableInfo[] {
   const out: MovableInfo[] = [];
@@ -250,7 +250,7 @@ export function padAt(doc: Doc, x: number, y: number): PadHit | null {
       if (area >= bestArea) continue;
       bestArea = area;
       const cx = g.t === "poly" ? g.pts.reduce((a, p) => a + p[0], 0) / g.pts.length : g.x, cy = g.t === "poly" ? g.pts.reduce((a, p) => a + p[1], 0) / g.pts.length : g.y;
-      best = { item: it, index: g.padIndex, pad: kids(it.node, "pad")[g.padIndex] || null, number: g.padNumber, net: g.net, netName: g.netName, x: cx, y: cy };
+      best = { item: it, index: g.padIndex, pad: kids(it.node, "pad")[g.padIndex] || null, number: g.padNumber, net: g.net, netName: g.netName, x: cx, y: cy, area };
     }
   }
   return best;
