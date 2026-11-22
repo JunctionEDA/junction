@@ -185,3 +185,30 @@ class RoutingPlan(Boards):
         self.assertEqual((got["before"], got["after"], got["tried"]), (10, 10, []), got)
         self.assertEqual(b.info()["unrouted_connections"], 10)
 
+
+class Untangle(Boards):
+    """board.untangle(): an open end is laid again locally, only the nets taken up near it are routed again."""
+
+    def test_pair_partners(self):
+        nets = {"/DP", "/DN", "/USB_D+", "/USB_D-", "/LVDS_P", "/LVDS_N", "/GPIO9"}
+        self.assertEqual(craft._partner("/DP", nets), "/DN")
+        self.assertEqual(craft._partner("/USB_D-", nets), "/USB_D+")
+        self.assertEqual(craft._partner("/LVDS_P", nets), "/LVDS_N")
+        self.assertIsNone(craft._partner("/GPIO9", nets))
+
+    def test_an_open_end_is_closed_locally_and_far_copper_stays(self):
+        b = self.open(edge(BOX), part("R1", (5, 15), [("1", 0, 0, 1.0, 1.0, "S")]), part("R2", (15, 15), [("1", 0, 0, 1.0, 1.0, "S")]),
+                      part("R3", (30, 2), [("1", 0, 0, 1.0, 1.0, "W")]), part("R4", (30, 28), [("1", 0, 0, 1.0, 1.0, "W")]),
+                      track("W", [(30, 2), (30, 28)]))
+        far = {it["id"] for it in b._all_items(["segment"])}
+        got = b.untangle(budget_s=120, time_s=5, nets=["S"])
+        self.assertEqual((got["before"], got["after"]), (1, 0), got)
+        self.assertEqual(len(got["kept"]), 1, got["tried"])
+        self.assertTrue(far <= {it["id"] for it in b._all_items(["segment"])}, "copper far from the open end is never taken up")
+
+    def test_nothing_open_nothing_tried(self):
+        b = self.open(edge(BOX), part("R1", (5, 15), [("1", 0, 0, 1.0, 1.0, "S")]), part("R2", (15, 15), [("1", 0, 0, 1.0, 1.0, "S")]),
+                      track("S", [(5, 15), (15, 15)]))
+        got = b.untangle(budget_s=30)
+        self.assertEqual((got["before"], got["after"], got["tried"]), (0, 0, []), got)
+

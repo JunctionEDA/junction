@@ -8090,6 +8090,8 @@ def _escape(self, spec: dict, width: float | None = None) -> dict:
     - "U4:S" (a whole side, named as board.channels names it): "via stagger" gives every pin of that side whose net leaves the chip area and is
       still open a via, in two staggered rows (0.5 and 1.1 mm past the pads; "via stagger3" adds a row at 1.7), the
       person's dogbone ring; "out" a stub each.
+    - "small" after any of them: the via is 0.4 on 0.2 mm where the rules allow it (what fits beside a 0.4 mm pitch
+      row: the AI's Ember U9 ring), not the net class's.
     Each escape is checked against the rules first (board.fits); a spot that does not fit is moved out 0.15 mm at a
     time (up to 1 mm), and a pin with no legal spot is skipped and named with what is in the way.  Ground and supply
     pins are never escaped by a side rule.  Returns {"laid": n, "skipped": {pin: why}, "moved": [nets taken up]}.  Lay them after taking up the
@@ -8102,6 +8104,9 @@ def _escape(self, spec: dict, width: float | None = None) -> dict:
     open_nets = set(self.unrouted())
     jobs = []      # (ref, pad, n, kind, depth, turn, to)
     clear = set()      # pins whose escape may take up the tracks and vias in its way (their nets go in out["moved"])
+    small = set()      # pins whose via is the smallest that fits a 0.4 mm pitch row (0.4 / 0.2 mm) where the rules allow it
+    vmin, dmin = float(rules.get("min_via_diameter") or 0), float(rules.get("min_via_drill") or 0)
+    small_via = (max(0.4, vmin), max(0.2, dmin)) if vmin <= 0.4 + 1e-9 and float(nc.get("via_diameter") or 0) > 0.4 + 1e-9 else None
     for key, val in spec.items():
         if ":" in key:
             ref, side = key.split(":", 1)
@@ -8123,6 +8128,8 @@ def _escape(self, spec: dict, width: float | None = None) -> dict:
                         j += 1
                         continue
                     kind = "out" if words and words[0] == "out" else "via"
+                    if "small" in words:
+                        small.add(f"{ref}.{q[0]}")
                     dep = deps[j % len(deps)] if "stagger" in str(val) else (float(words[1]) if len(words) > 1 and _isnum(words[1]) else (0.6 if kind == "via" else 0.5))
                     jobs.append((ref, q, normals[k], kind, dep, "thin", None))
                     j += 1
@@ -8159,6 +8166,8 @@ def _escape(self, spec: dict, width: float | None = None) -> dict:
         turn = next((w.upper() for w in words[1:] if w.upper() in _COMPASS), "thin" if "thin" in words else None)
         if "clear" in words:
             clear.add(f"{ref}.{q[0]}")
+        if "small" in words:
+            small.add(f"{ref}.{q[0]}")
         jobs.append((ref, q, n, kind, dep, turn, None))
     out = {"laid": 0, "skipped": {}, "moved": []}
     thin = max(0.1, float(rules.get("min_track_width") or 0))
@@ -8192,18 +8201,19 @@ def _escape(self, spec: dict, width: float | None = None) -> dict:
                         for sg in (1, -1):
                             tries.append([p, exit_, (exit_[0] + (n[0] - sg * n[1]) * L, exit_[1] + (n[1] + sg * n[0]) * L)])
         why = None; cheapest = None
+        vs = small_via if pin in small and small_via else (None, None)
         for i_, pts in enumerate(tries):
             pts = [(round(x, 4), round(y, 4)) for x, y in pts]
             try:
                 ft = self.fits(net, track=list(pts), layer=layer, width=w_)
-                fv = self.fits(net, via=pts[-1]) if kind == "via" else {"fits": True}
+                fv = self.fits(net, via=pts[-1], size=vs[0], drill=vs[1]) if kind == "via" else {"fits": True}
             except HarnessError as e:
                 why = str(e)[:120]
                 continue
             if ft.get("fits") and fv.get("fits"):
                 self.track(net, [list(x) for x in pts], layer=layer, width=w_)
                 if kind == "via":
-                    self.via(net, list(pts[-1]))
+                    self.via(net, list(pts[-1]), size=vs[0], drill=vs[1])
                 self.flush()
                 out["laid"] += 1
                 why = None
@@ -8225,7 +8235,7 @@ def _escape(self, spec: dict, width: float | None = None) -> dict:
             self.flush()
             self.track(net, [list(x) for x in pts], layer=layer, width=w_)
             if kind == "via":
-                self.via(net, list(pts[-1]))
+                self.via(net, list(pts[-1]), size=vs[0], drill=vs[1])
             self.flush()
             out["laid"] += 1
             why = None
@@ -8262,8 +8272,9 @@ def _unbox(self, refs: list | None = None, budget_s: float = 900, time_s: float 
     - the pin alone, to a via 0.6 then 1.0 mm out (straight, or a 45-degree leg), clearing its way;
     - when the open gap lies away from the pin (between two pieces of the net's copper), the net taken up whole and
       laid again from a trio;
-    then every open net and every net that was taken up is routed again (board.route(plan={"escapes": ..., "order":
-    [the pin's net first]}, ripup="ladder")).  A try stays when fewer connections are open (at the same count, fewer
+    then only the try's own nets are routed again, the pin's first: the trio's nets, what an escape took up and what
+    the try left open (board.route(nets=..., plan={"escapes": ..., "order": [...]}, ripup="ladder")); the other open
+    nets stay as they are, so a try on a large board costs seconds of routing, not a whole-board pass.  A try stays when fewer connections are open (at the same count, fewer
     rules errors); up to \`sideways\` tries that leave as many open, no more than two errors more, and a set of open
     nets never seen before also stay, so the next try can work on the pin the blockage moved to.  Neighbours on ground,
     a supply, a differential pair, a crystal or an antenna line are left alone, and so is their copper.
@@ -8328,7 +8339,7 @@ def _unbox(self, refs: list | None = None, budget_s: float = 900, time_s: float 
                     if esc.get("take up"):
                         self.unroute(esc["take up"])
                     with contextlib.suppress(HarnessError):
-                        self.route(nets=sorted(self.unrouted()), fill=False, keep_rules=keep_rules, layers=layers, ground_vias=False, time_s=time_s,
+                        self.route(nets=sorted(set(order) | (set(self.unrouted()) - left)), fill=False, keep_rules=keep_rules, layers=layers, ground_vias=False, time_s=time_s,
                                    ripup="ladder", plan={"escapes": esc_, "order": order})
                     now = _standing(self); shape = frozenset(self.unrouted())
                     tr.keep = now[0] < best[0] or (now[0] == best[0] and now[1] < best[1])
@@ -8356,6 +8367,185 @@ def _sup_name(net: str) -> bool:
     return bool(_SUPPLY.match(net) or _SUPPLY.match(net.lstrip("/")))
 
 
+def _partner(net: str, nets) -> str | None:
+    """The other line of a differential pair (DP / DN, D+ / D-, X_P / X_N), when the board has it."""
+    for a, c in (("DP", "DN"), ("D+", "D-"), ("_P", "_N"), ("P", "N")):
+        for x, y in ((a, c), (c, a)):
+            if net.endswith(x) and net[: -len(x)] + y in nets:
+                return net[: -len(x)] + y
+    return None
+
+
+# the tries board.untangle() makes round one open end, the least disturbance first: (radius mm, what may come up
+# besides signals within the radius: "supplies" (their copper there too), "pairs" (a differential pair in reach, whole,
+# laid again coupled), "net" (the open net whole: a piece left dangling elsewhere comes up too); the escape laid for
+# the open pin or None)
+UNTANGLE_TIERS = (
+    (1.0, "", None),
+    (1.5, "supplies", None),
+    (1.5, "supplies net", None),
+    (1.5, "supplies pairs", None),
+    (1.5, "supplies net", "via 0.6 clear small"),
+    (1.5, "supplies net", "via 1.1 clear small"),
+    (2.5, "supplies pairs net", None),
+    (2.5, "supplies net", "via 0.8 clear small"),
+)
+
+
+def _open_ends(self) -> list:
+    """Every open connection as the rules check reports it: (net, x, y, refs)."""
+    out = []
+    for v in self._call("run_checks").get("violations", []):
+        if v.get("code") != "unconnected_items":
+            continue
+        m = re.search(r"net '((?:[^'\\\\]|\\\\.)*)'", v.get("message", ""))
+        if m and v.get("x") is not None:
+            out.append((m.group(1), float(v["x"]), float(v["y"]), list(v.get("refs") or [])))
+    return out
+
+
+def _untangle(self, nets: list | None = None, refs: list | None = None, budget_s: float = 600, time_s: float = 8, tiers=None,
+              sideways: int = 2, follow: int = 2, keep_rules: bool = True, layers: list | None = None, ripup: str | None = None, log=None) -> dict:
+    """Close the connections a finished board still leaves open by laying the copper round each open end again,
+    locally: a try takes up only the copper within a few mm of the open end and routes only the nets it took up (and
+    the open one, first), so it costs seconds, not a whole-board route (Ember: 15 to 40 s a try against 100 s).
+
+    For each open end (the rules check's spot; refs= or nets= narrow it), the tries in UNTANGLE_TIERS, the least
+    disturbance first: the signal copper within 1 mm; within 1.5 mm with the supplies' escapes too (a supply's stub
+    and via between two signal pins is what boxes them in on a 0.4 mm QFN: Cyberboard's SWDIO between +3.3V and the
+    USB pair); the same with a differential pair in reach taken up whole and laid again coupled; the open pin's own
+    escape to a via 0.6 or 1.1 mm out, clearing what is in the way (board.escape "via D clear"); then 2.5 mm.  Ground
+    copper never comes up.  Each try runs in board.trial() and stays only when fewer connections are open (at the same
+    count, fewer rules errors); up to \`sideways\` tries that leave as many open but a set of open nets not seen before
+    also stay, so the next pass works on where the blockage moved.  Rules errors are counted (a DRC, ~10 s) only for a
+    try that is not already worse.  It loops until a pass keeps nothing or budget_s is spent.
+
+    tiers=[(radius, "" | "supplies" | "pairs", escape or None), ...] replaces the default tries.  time_s is the
+    router's budget per try (work done, not the clock).  Returns {"before", "after", "tried": [one line per try],
+    "kept": [...]}; call board.fix_corners() and board.finish() after it, as after any routing."""
+    import time as _t
+    t0 = _t.time()
+    tiers = list(tiers or UNTANGLE_TIERS)
+    say = log or (lambda s: None)
+    all_nets = set(self.nets())
+    want_nets = {self._net(n) for n in nets} if nets else None
+
+    def count():
+        with contextlib.suppress(HarnessError):
+            self.fill()
+        return int(self.info().get("unrouted_connections") or 0)
+
+    def errors():
+        by = (self.check(limit=0, refill=False) or {}).get("by_kind") or {}
+        return sum(v for k, v in by.items() if k != "unconnected_items")
+
+    def ends_of(net, x, y, rs):
+        """The open end the check names, then the net's other pads on the parts it names within 4 mm (a connection
+        between two pins of one chip is open at both): [(x, y, pin or None)], the spot first."""
+        pads = []
+        for r in rs:
+            with contextlib.suppress(HarnessError):
+                pads += [(math.hypot(q["x"] - x, q["y"] - y), q["x"], q["y"], f"{r}.{q['number']}") for q in self.pads(r) if q.get("net") == net]
+        pads.sort()
+        out = [(x, y, pads[0][3] if pads and pads[0][0] < 0.5 else None)]
+        out += [(px, py, pin) for d, px, py, pin in pads if 0.5 <= d <= 4.0][:2]
+        return out
+
+    def lay_round(net, x, y, pin, radius, extra, esc, protect=()):
+        """One local try: take up the copper round (x, y) (what \`extra\` allows), lay \`esc\` for the pin, route the nets
+        taken up with \`net\` first.  Returns (nets routed, nets taken up whole, ids removed)."""
+        taken, whole, ids = {net}, set(), []
+        for it in self.whats_at((x, y), radius=radius):
+            n = it.get("net")
+            if it["kind"] not in ("segment", "arc", "via") or not n or _GROUNDISH.match(n) or n in protect:
+                continue
+            if _PAIR.search(n):
+                if "pairs" in extra:
+                    whole.add(n)
+                    if _partner(n, all_nets):
+                        whole.add(_partner(n, all_nets))
+                continue
+            if _kept_net(n) and not ("supplies" in extra and _sup_name(n)):
+                continue
+            ids.append(it["id"]); taken.add(n)
+        for i in ids:
+            with contextlib.suppress(HarnessError):
+                self._edit({"op": "remove", "id": i})
+        self.flush()
+        if "net" in extra and not _kept_net(net):
+            whole.add(net)
+        if whole:
+            self.unroute(*sorted(whole), keep=())
+            taken |= whole
+        if esc and pin:
+            with contextlib.suppress(HarnessError):
+                taken |= set(_escape(self, {pin: esc}).get("moved") or [])
+        with contextlib.suppress(HarnessError):
+            self.route(nets=sorted(taken), order=sorted(whole - {net}) + [net], fill=False, keep_rules=keep_rules, layers=layers,
+                       ground_vias=False, time_s=time_s, ripup=ripup)
+        return taken, whole, ids
+
+    start = best = (count(), errors())
+    seen = {frozenset(self.unrouted())}
+    tried, kept, done = [], [], set()
+    while _t.time() - t0 < budget_s:
+        moved = False
+        for net, x, y, rs in _open_ends(self):
+            if _GROUNDISH.match(net) or (want_nets and net not in want_nets) or (refs and not set(rs) & set(refs)):
+                continue
+            shape0 = frozenset(self.unrouted())
+            for (x, y, pin), (radius, extra, esc) in ((e, t) for e in ends_of(net, x, y, rs) for t in tiers):
+                if _t.time() - t0 > budget_s:
+                    break
+                if esc and not pin:
+                    continue
+                key = (shape0, net, round(x, 2), round(y, 2), radius, extra, esc)
+                if key in done:
+                    continue
+                done.add(key)
+                t1 = _t.time()
+                try:
+                    with self.trial() as tr:
+                        taken, whole, ids = lay_round(net, x, y, pin, radius, extra, esc, protect=())
+                        # what the try left open that was routed before gets one follow-up of its own (its end, 1 mm,
+                        # signals and supplies, the net this try freed left alone): a depth-two search, still local
+                        for _ in range(follow):
+                            fresh = set(self.unrouted()) - shape0
+                            if not fresh:
+                                break
+                            for n2, x2, y2, rs2 in _open_ends(self):
+                                if n2 in fresh:
+                                    t2, w2, i2 = lay_round(n2, x2, y2, None, 1.0, "supplies", None, protect={net})
+                                    ids += i2; taken |= t2
+                                    break
+                        n_open = count()
+                        shape = frozenset(self.unrouted())
+                        now = (n_open, errors() if n_open <= best[0] else None)
+                        better = now[1] is not None and (now[0] < best[0] or (now[0] == best[0] and now[1] < best[1]))
+                        side = (not better and sideways > 0 and now[1] is not None and now[0] == best[0] and now[1] <= best[1] + 1 and shape not in seen)
+                        tr.keep = better or side
+                        line = (f"{net} at ({x:g}, {y:g}){' ' + pin if pin else ''}: {radius:g} mm{' + ' + extra if extra else ''}{', ' + esc if esc else ''}, "
+                                f"{len(ids)} items{' + ' + ','.join(sorted(whole)) if whole else ''} up, {len(taken)} nets routed: open {best[0]} -> {now[0]}"
+                                f"{' (' + ','.join(sorted(shape)) + ')' if shape and len(shape) <= 4 else ''}"
+                                f", errors {best[1]} -> {now[1] if now[1] is not None else '-'}{' (sideways)' if side else ''} ({round(_t.time() - t1)} s)")
+                        tried.append(line); say(line)
+                except Exception as e:      # noqa: BLE001  a try that fails is taken back by the trial
+                    tried.append(f"{net} {radius} {extra} {esc}: failed, taken back ({type(e).__name__}: {str(e)[:120]})")
+                    say(tried[-1])
+                    continue
+                if tr.keep:
+                    if side:
+                        sideways -= 1
+                    kept.append(line); best = (now[0], now[1]); seen.add(shape); moved = True
+                    break
+            if moved:
+                break      # the open list changed: read it again
+        if not moved:
+            break
+    self.project.note(f"board: untangled open ends locally, open connections {start[0]} -> {best[0]}")
+    return {"before": start[0], "after": best[0], "tried": tried, "kept": kept}
+
+
 def install(Board) -> None:
     Board.design = _design
     Board.brief = _brief
@@ -8364,6 +8554,7 @@ def install(Board) -> None:
     Board.channels = _channels
     Board.escape = _escape
     Board.unbox = _unbox
+    Board.untangle = _untangle
 `;var w=`"""Small parts in front of the pins they serve.
 
 A resistor, capacitor, inductor or diode with two pads that hangs on one pin of a chip or a connector (a pull-down on a
