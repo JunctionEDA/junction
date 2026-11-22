@@ -1,4 +1,4 @@
-import type { SchCtx } from "./types";
+import type { Pt, SchCtx } from "./types";
 import { annotate, clearAnnotation, cycleBodyStyle, editFieldPrompt, placeNextUnit, showDatasheet, stepUnit, toggleSymbolFlag } from "./annotate";
 import { autoplaceSelection } from "./autoplace";
 import { copyAsText, copySelection, cutSelection, duplicateSelection, pasteSelection, pasteSpecial } from "./clipboard";
@@ -9,6 +9,7 @@ import { openFieldsTable } from "./fields-table";
 import { clearHighlight, highlightNetNow } from "./highlight";
 import { selectConnection, selectNode, stepNetItem, unselectAll } from "./netwalk";
 import { incrementSelection, repeatLast } from "./repeat";
+import { addCorner, cycleArcEditMode, removeCorner } from "./point-edit";
 import { orientSelected } from "./selection-edits";
 import { S } from "./state";
 import { ARC_MODE_ACTIONS } from "../arc-geom";
@@ -60,6 +61,10 @@ export const ACTION_LIST = [
   act("placeNextSymbolUnit", "Place Next Symbol Unit", "", (ctx: SchCtx) => placeNextUnit(ctx)),
   act("cycleBodyStyle", "Cycle Body Style", "", (ctx: SchCtx) => cycleBodyStyle(ctx)),
   act("showDatasheet", "Show Datasheet", "D", (ctx: SchCtx) => showDatasheet(ctx)),
+  // SCH_POINT_EDITOR: the corner entries act at the cursor (the menu's position), Ctrl+Space walks the arc editing modes
+  act("pointEditorAddCorner", "Create Corner", "", (ctx: SchCtx) => addCorner(ctx, ctx.cursor as Pt | null)),
+  act("pointEditorRemoveCorner", "Remove Corner", "", (ctx: SchCtx) => removeCorner(ctx, ctx.cursor as Pt | null)),
+  act("cycleArcEditMode", "Cycle Arc Editing Mode", "Ctrl+Space", (ctx: SchCtx) => cycleArcEditMode(ctx)),
   act("annotate", "Annotate Schematic...", "", (ctx: SchCtx, opts?: Parameters<typeof annotate>[1]) => annotate(ctx, opts)),
   act("clearAnnotation", "Clear Annotation", "", (ctx: SchCtx, opts?: Parameters<typeof clearAnnotation>[1]) => clearAnnotation(ctx, opts)),
   act("toggleAnnotateAuto", "Annotate Automatically", "", (ctx: SchCtx) => { S.annotateAuto = !S.annotateAuto; if (ctx && ctx.toast) ctx.toast("Automatic annotation " + (S.annotateAuto ? "on" : "off")); return true; }),

@@ -126,8 +126,10 @@ const SCH_SWAPPABLE = set(...SCH_SHAPES, "rule_area", "text", "text_box", ...SCH
 const SCH_ATTRIB = set("symbol", "sheet", "rule_area");
 const SCH_FIELD_OWNERS = set("symbol", "sheet", ...SCH_LABELS);
 const SCH_ALL_TEXT = set("label", "netclass_flag", "directive_label", "global_label", "hierarchical_label", "text", "text_box");
-const SCH_EXPANDABLE = set("no_connect", "symbol", "wire", "bus", "bus_entry", "junction", ...SCH_LABELS);
-const SCH_CONNECTED = set("wire", "bus", "bus_entry", "junction", ...SCH_LABELS);
+// expandConnectionGraphTypes: no-connects, symbols, pins, wires, buses, bus entries, labels, sheet pins, junctions,
+// graphic lines and shapes; connectedTypes: power symbols, pins, wires, buses, bus entries, labels, sheet pins, junctions
+const SCH_EXPANDABLE = set("no_connect", "symbol", "pin", "sheet_pin", "wire", "bus", "bus_entry", "junction", ...SCH_LABELS, ...SCH_LINES, ...SCH_SHAPES);
+const SCH_CONNECTED = set("wire", "bus", "bus_entry", "junction", "pin", "sheet_pin", ...SCH_LABELS);
 const SCH_CAN_COPY_TEXT = set("text", "text_box", "field", ...SCH_LABELS, "table");
 const SCH_PROPS_SINGLE = set("symbol", "sheet", "text", "text_box", "table", ...SCH_LABELS, "rule_area", "field", ...SCH_SHAPES, "image", "group");
 
@@ -210,6 +212,7 @@ const allPins: Cond = (c) => c.kinds.length > 0 && c.kinds.every((k) => k === "p
 function schSelectionMenu(): CondMenu {
   const m = new CondMenu();
   // SCH_SELECTION_TOOL::Init
+  m.item("ACTIONS::groupEnter", (c) => !!c.groupSelected, 1).item("ACTIONS::groupLeave", (c) => !!c.inGroup, 1);
   m.item("SCH_ACTIONS::clearHighlight", and(haveHighlight, idle), 1).sep(and(haveHighlight, idle), 1);
   m.item("SCH_ACTIONS::selectConnection", and(hasTypes(SCH_EXPANDABLE), idle), 2);
   addTableSelectItems(m, and(tableCellSelection, idle));
@@ -253,6 +256,9 @@ function schSelectionMenu(): CondMenu {
   m.item("ACTIONS::showDatasheet", and(schSingleSymbol, idle), 220);
   // SCH_EDIT_TABLE_TOOL::Init
   addTableMenus(m);
+  // SCH_POINT_EDITOR::Init
+  m.item("SCH_ACTIONS::pointEditorAddCorner", and(count(1), (c) => !!c.canAddCorner)).item("SCH_ACTIONS::pointEditorRemoveCorner", and(count(1), (c) => !!c.canRemoveCorner));
+  m.item("ACTIONS::cycleArcEditMode", and(count(1), onlyTypes(set("arc"))));
   return m;
 }
 

@@ -1,5 +1,5 @@
 import type { SchCtx, Pt, Box } from "./types";
-import { editable, selectedItems } from "./commands";
+import { carried, editable, selectedItems } from "./commands";
 import { isPowerSymbol } from "./dom";
 import { isLockedNode } from "./lock";
 import { isNetLine } from "./drag";
@@ -271,9 +271,47 @@ export function autoplaceNode(doc: KDoc, item: KItem, opts?: { manual?: boolean 
 }
 export function autoplaceSelection(ctx: SchCtx, opts?: { manual?: boolean } | null) {
   if (!editable(ctx)) return false;
+  const cr = carried(ctx);   // the symbol being placed
+  if (cr) { if (cr.item.kind !== "symbol") return false; const n = autoplaceNode(ctx.doc, cr.item, opts || { manual: true }); if (n) cr.write(n); return !!n; }
   const changes: KChange[] = [];
   // SCH_EDIT_TOOL::AutoplaceFields skips the items that IsLocked()
   for (const it of selectedItems(ctx)) { if (it.kind !== "symbol" || isLockedNode(it.node)) continue; const n = autoplaceNode(ctx.doc, it, opts || { manual: true }); if (n) changes.push(modChange(ctx.doc, it, n)); }
   if (!changes.length) return false;
   ctx.commit(changes, "autoplace fields"); return true;
+}
+
+/**
+ * SCH_LABEL_BASE::AutoplaceFields (a label dropped by TwoClickPlace, AUTOPLACE_AUTO): every field takes the angle and
+ * the horizontal justification of the label's spin style; the Intersheetrefs field goes beside the body (labelLen, the
+ * longer side of the body box, plus twice the text offset), any other field half a text height (and, on a global
+ * label, its frame) to the side.  Null when the label has no fields.
+ */
+export function autoplaceLabelNode(kind: string, src: SNode, labelLen = 0): SNode | null {
+  if (!kids(src, "property").length) return null;
+  const node = deep(src), [lx, ly, lr] = atOf(node);
+  const ef = kid(node, "effects"), f = ef && kid(ef, "font"), sz = f && kid(f, "size");
+  const textH = toIU(sz ? num(sz[1], 1.27) : 1.27);
+  const margin = kiround(K.schFormat.textOffsetRatio * textH) * 2, len = toIU(labelLen);
+  let accumulated = idiv(textH, 2);
+  if (kind === "global_label") accumulated += margin + textPenIU(node) + margin;
+  const spin = ((Math.round(lr || 0) % 360) + 360) % 360;   // 0 right, 90 up, 180 left, 270 bottom
+  for (const p of kids(node, "property")) {
+    const pf = kid(p, "effects"), pfont = pf && kid(pf, "font"), ps = pfont && kid(pfont, "size");
+    const fh = toIU(ps ? num(ps[1], 1.27) : 1.27), inter = /^intersheet ?refs$/i.test(str(p[1]));
+    let ox = 0, oy = 0, angle = 0, hj = "left";
+    if (spin === 90) { angle = 90; hj = "left"; if (inter) oy = -(len + margin); else ox = accumulated + idiv(fh, 2); }
+    else if (spin === 0) { angle = 0; hj = "left"; if (inter) ox = len + margin; else oy = accumulated + idiv(fh, 2); }
+    else if (spin === 270) { angle = 90; hj = "right"; if (inter) oy = len + margin; else ox = accumulated + idiv(fh, 2); }
+    else { angle = 0; hj = "right"; if (inter) ox = -(len + margin); else oy = accumulated + idiv(fh, 2); }
+    const a = kid(p, "at"), keep = a ? a.slice(4) : [];
+    replaceKid(p, ["at", mmOf(toIU(lx) + ox), mmOf(toIU(ly) + oy), angle, ...keep]);
+    let e = kid(p, "effects"); if (!e) { e = ["effects", fontNode(1.27)]; p.push(e); }
+    const cur = kid(e, "justify"), rest = cur ? cur.slice(1).filter((t) => t !== "left" && t !== "right") : [];
+    replaceKid(e, ["justify", hj, ...rest]);
+    if (inter) accumulated += fh + margin;
+  }
+  dropKid(node, "fields_autoplaced");
+  const ui = node.findIndex((c) => Array.isArray(c) && c[0] === "uuid");
+  node.splice(ui >= 0 ? ui : node.length, 0, ["fields_autoplaced", "yes"]);
+  return node;
 }

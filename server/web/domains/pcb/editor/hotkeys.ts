@@ -23,7 +23,7 @@ import { activeModule, moduleTool, runModuleAction, setTool, toolCtx } from "./t
 import { isSch } from "./view";
 
 type Handler = import("./types").ActionHandler;
-interface ToolModule { actions?: Record<string, unknown>; onKey?: (key: string, ev: unknown, ctx: unknown) => unknown }
+interface ToolModule { actions?: Record<string, unknown>; onKey?: (key: string, ev: unknown, ctx: unknown) => unknown; hotkeyTool?: (id: string, ctx: unknown) => unknown }
 
 const NAMED: Record<string, string> = { Delete: "Del", Escape: "Esc", " ": "Space", Insert: "Ins", PageUp: "PgUp", PageDown: "PgDn", ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right" };
 
@@ -68,7 +68,7 @@ const editorKind = (): EditorKind => (isSch() ? "sch" : "pcb");
 const fpEditAllows = (id: string): boolean => (E.DOC_TYPE === "footprint" ? !FPEDIT_BLOCKED.has(id) : !FPEDIT_ONLY.has(id));
 
 /** Run the web's implementation of one KiCad action; false when there is none (or the module declined it). */
-export function runKicadAction(id: string): boolean {
+export function runKicadAction(id: string, viaHotkey = false): boolean {
   if (!fpEditAllows(id)) return false;
   const ed = editorKind(); const mod = activeModule() as ToolModule | null;
   const alias = MODULE_ALIAS[ed][id];
@@ -79,6 +79,8 @@ export function runKicadAction(id: string): boolean {
   const tid = toolFor(ed, id);
   if (tid && ((store.get().tool.appTools as string[]).includes(tid) || moduleTool(tid))) {
     if (E.viewOnly && moduleTool(tid) && tid !== "highlight") return false;
+    // a hotkey event carries the cursor position: the module starts the tool primed there (TOOL_MANAGER::PrimeTool)
+    if (viaHotkey && mod && mod.hotkeyTool && moduleTool(tid)) { try { mod.hotkeyTool(tid, toolCtx()); } catch (e) { console.warn(e); } return true; }
     setTool(tid); return true;
   }
   return false;
@@ -99,9 +101,9 @@ export function kicadActionAvailable(id: string): boolean {
 export function runSpecHotkey(ev: KeyboardEvent): boolean {
   if (!E.kdoc) return false;
   const combo = comboOf(ev); if (!combo) return false;
-  for (const id of hotkeyOwners(editorKind(), combo)) if (runKicadAction(id)) return true;
+  for (const id of hotkeyOwners(editorKind(), combo)) if (runKicadAction(id, true)) return true;
   const alt = shiftedPunctCombo(ev);
-  if (alt) for (const id of hotkeyOwners(editorKind(), alt)) if (runKicadAction(id)) return true;
+  if (alt) for (const id of hotkeyOwners(editorKind(), alt)) if (runKicadAction(id, true)) return true;
   return false;
 }
 

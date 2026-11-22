@@ -1,6 +1,6 @@
 import type { SchCtx, Pt } from "./types";
 import { S } from "./state";
-import { r4 } from "./util";
+import { ghost, r4 } from "./util";
 
 // ================================================================ commands (CollabTools.sch.actions)
 // Everything below is KiCad's non-tool command set: clipboard, select connection, repeat, type
@@ -29,6 +29,16 @@ export function selectedItems(ctx: SchCtx) {
   else take(S.sel);
   return out;
 }
+/**
+ * The item riding the cursor.  While it is being placed SCH_DRAWING_TOOLS passes the body style, the attribute
+ * flags, Autoplace Fields and Increment on to it (PlaceSymbol / TwoClickPlace: evt->SetPassEvent, ACTIONS::increment):
+ * those commands edit it in place of the selection, and `write` puts the edited node back on the cursor.
+ */
+export function carried(ctx: SchCtx): { item: KItem; write(node: SNode): void } | null {
+  const c = S.carry; if (!c) return null;
+  const item = c.item || ghost(ctx.doc, c.node); if (!item) return null;
+  return { item, write(node: SNode) { c.node = node; c.item = ghost(ctx.doc, node); ctx.requestRender(); } };
+}
 export function setSelectionIds(ctx: SchCtx, ids: Iterable<string> | null) {
   ids = Array.from(ids || []).filter((id) => ctx.doc.items.has(id));
   S.sel = null; S.hover = null; S.pending = null; S.selEnds = null;
@@ -44,18 +54,19 @@ export function cursorOf(ctx: SchCtx): Pt { return ctx.cursor || S.cursor || [ct
 export function snapCursor(ctx: SchCtx) { const c = cursorOf(ctx); return ctx.snap([c[0], c[1]]).map(r4); }
 export function editable(ctx: SchCtx) { if (ctx.viewOnly) { ctx.toast("View-only access"); return false; } return true; }
 export const CLIP = { text: "" };         // internal buffer when the page has no clipboard access
-export function clipWrite(ctx: SchCtx, text: string) {
+// `ids`: the copied items, for the picture of them the clipboard also gets (doCopy's PNG, HTML and SVG data)
+export function clipWrite(ctx: SchCtx, text: string, ids?: string[]) {
   CLIP.text = text;
-  if (ctx.clipboard && typeof ctx.clipboard.set === "function") { try { ctx.clipboard.set(text); } catch (e) { /* buffer only */ } }
+  if (ctx.clipboard && typeof ctx.clipboard.set === "function") { try { if (ids) ctx.clipboard.set(text, ids); else ctx.clipboard.set(text); } catch (e) { /* buffer only */ } }
   else if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => {});
 }
 export function clipRead(ctx: SchCtx): string | Promise<string> {           // a string, or a Promise of one when the browser clipboard must be asked
   // the system clipboard first: what was copied in another tab, by another person's session on this machine or
   // by the desktop application is what Ctrl+V pastes; the editor's own buffer is the fallback when it is denied
-  if (ctx.clipboard && typeof ctx.clipboard.read === "function") { try { const v = ctx.clipboard.read(); if (v && typeof v.then === "function") return v.then((t) => t || CLIP.text, () => CLIP.text); } catch (e) { /* fall through */ } }
+  if (ctx.clipboard && typeof ctx.clipboard.read === "function") { try { const v = ctx.clipboard.read(); if (v && typeof v.then === "function") return v.then((t) => (t === "" ? "" : t || CLIP.text), () => CLIP.text); } catch (e) { /* fall through */ } }   // "": no text there, but a picture
   if (ctx.clipboard && typeof ctx.clipboard.get === "function") { try { const v = ctx.clipboard.get(); if (v !== undefined && v !== null) return v; } catch (e) { /* fall through */ } }
   if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.readText) return navigator.clipboard.readText().then((t) => t || CLIP.text, () => CLIP.text);
   return CLIP.text;
 }
 export const PASTE_KINDS = new Set(["symbol", "wire", "bus", "polyline", "junction", "no_connect", "bus_entry", "label", "global_label", "hierarchical_label", "netclass_flag", "directive_label",
-  "text", "text_box", "rectangle", "circle", "arc", "bezier", "rule_area", "sheet", "table", "image"]);
+  "text", "text_box", "rectangle", "circle", "arc", "bezier", "rule_area", "sheet", "table", "image", "group"]);

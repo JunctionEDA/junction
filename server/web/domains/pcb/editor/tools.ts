@@ -11,18 +11,46 @@ import { clearSelection, drawSelection, filterAllows, groupExpand, renderProps, 
 import { E } from "./state";
 import { subSheetDocs } from "./subsheets";
 import { api, toast } from "./util";
+import { openDatasheet } from "../dialogs/browse-cells";
+import { clonePrefs, savePrefs } from "../dialogs/prefs";
 import type { CommitOpts, ItemSummary, UndoEntry } from "./types";
 import { dragG, isSch, pxPerMm, requestRender, requestRepaint, stage, worldMm } from "./view";
    // ERC/DRC markers handed over by the tool modules; the project's .kicad_pro text (design rules)
 // KiCad's clipboard is s-expression text: the modules write it here and to the system clipboard when allowed.
-// read() takes the system clipboard when it holds any s-expression (a lone (text …), (bus …), (sheet …) is one too).
+// read() takes whatever text the system clipboard holds (plain text is pasted as a text item); the buffer answers only when it is empty or denied ("" when it holds a picture and no text).
 // The buffer is also kept in this browser's storage, so Copy in the schematic's tab can be pasted in the board's tab
 // (and read by a plugin there) without the browser's clipboard permission.
 const CLIP_KEY = "kui.clipboard";
 const clipStored = () => { try { return localStorage.getItem(CLIP_KEY) || ""; } catch (e) { return ""; } };
+/**
+ * SCH_EDITOR_CONTROL::doCopy's other clipboard formats: a PNG of the selection (300 ppi, at most 4096 px, transparent,
+ * the selection box inflated by 2 %), an HTML fragment embedding that PNG and the SVG, so a copy can be pasted into a
+ * document or an image editor.  The text is already on the clipboard; this replaces it with the full set when the
+ * browser lets a page write images (and leaves the text alone when it does not).
+ */
+async function writeRichClipboard(text: string, ids: string[]): Promise<void> {
+  const doc = E.kdoc as KDoc | null, CI = (window as unknown as { ClipboardItem?: { new(items: Record<string, Blob>): ClipboardItem; supports?(type: string): boolean } }).ClipboardItem;
+  if (!doc || !isSch() || !CI || !navigator.clipboard || !navigator.clipboard.write) return;
+  let b: number[] | null = null;
+  for (const id of ids) { const it = doc.items.get(id), r = it && it.bbox; if (r) b = b ? [Math.min(b[0], r[0]), Math.min(b[1], r[1]), Math.max(b[2], r[2]), Math.max(b[3], r[3])] : [r[0], r[1], r[2], r[3]]; }
+  if (!b || !(b[2] > b[0]) || !(b[3] > b[1])) return;
+  const ix = (b[2] - b[0]) * 0.02, iy = (b[3] - b[1]) * 0.02, box = [b[0] - ix, b[1] - iy, b[2] + ix, b[3] + iy];
+  const opts = Object.assign({}, E.renderOpts, { ids: new Set(ids), bbox: box, margin: 0, background: false, frame: false, hidden: E.hiddenLayers });
+  const dpi = Math.min(300, 4096 * 25.4 / Math.max(box[2] - box[0], box[3] - box[1]));
+  const png = await KiCadCanvas.renderPng(doc, Object.assign({}, opts, { dpi }));
+  const bytes = new Uint8Array(await png.arrayBuffer()); let bin = ""; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const types: Record<string, Blob> = { "text/plain": new Blob([text], { type: "text/plain" }), "image/png": png, "text/html": new Blob([`<img src="data:image/png;base64,${btoa(bin)}" />`], { type: "text/html" }) };
+  if (CI.supports && CI.supports("image/svg+xml")) { try { types["image/svg+xml"] = new Blob([KiCadCanvas.renderSvg(doc, opts)], { type: "image/svg+xml" }); } catch (e) { /* the picture goes without its SVG */ } }
+  if (appClipboard.text !== text) return;                                 // something else was copied meanwhile
+  await navigator.clipboard.write([new CI(types)]);
+}
+/** No text on the system clipboard but a picture: Paste places it as an image (SCH_EDITOR_CONTROL::Paste, GetImageFromClipboard). */
+async function clipboardHasImage(): Promise<boolean> {
+  try { if (!navigator.clipboard.read) return false; const list = await navigator.clipboard.read(); return list.some((i) => i.types.some((t) => t === "image/png" || t === "image/jpeg")); } catch (e) { return false; }
+}
 export const appClipboard = { text: "", get() { return appClipboard.text || clipStored(); },
-  set(t: unknown) { appClipboard.text = String(t || ""); try { if (appClipboard.text.length <= 2_000_000) localStorage.setItem(CLIP_KEY, appClipboard.text); else localStorage.removeItem(CLIP_KEY); } catch (e) { /* storage full or blocked: this tab still has it */ } if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(appClipboard.text).catch(() => {}); },
-  async read() { try { if (navigator.clipboard && navigator.clipboard.readText) { const t = await navigator.clipboard.readText(); if (t && /^\s*\(\s*[a-z_]+[\s("]/i.test(t)) return t; } } catch (e) { /* permission denied: use the buffer */ } return appClipboard.get(); } };
+  set(t: unknown, ids?: string[]) { appClipboard.text = String(t || ""); try { if (appClipboard.text.length <= 2_000_000) localStorage.setItem(CLIP_KEY, appClipboard.text); else localStorage.removeItem(CLIP_KEY); } catch (e) { /* storage full or blocked: this tab still has it */ } if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(appClipboard.text).catch(() => {}); if (ids && ids.length) writeRichClipboard(appClipboard.text, ids).catch(() => {}); },
+  async read() { try { if (navigator.clipboard && navigator.clipboard.readText) { const t = await navigator.clipboard.readText(); if (t) return t; if (await clipboardHasImage()) return ""; } } catch (e) { /* permission denied: use the buffer */ } return appClipboard.get(); } };
 if (typeof window !== "undefined") window.addEventListener("storage", (ev) => { if (ev.key === CLIP_KEY) appClipboard.text = ev.newValue || ""; });
 
 export const undoStack: UndoEntry[] = [], redoStack: UndoEntry[] = [];
@@ -41,15 +69,28 @@ export function toolCtx(extra?: Record<string, unknown>) {
     cursor: E.lastCursorMm, clipboard: appClipboard, designSettings: E.proSettings, customRules: E.druText,
     setSelection(ids: Iterable<string> | null) { E.selection = new Set([...(ids || [])].filter((id) => E.kdoc && E.kdoc.items.has(id))); E.selected = null; E.selField = null; E.selPins = []; for (const id of E.selection) { const f = E.items.find((x: ItemSummary) => x.id === id); if (f) { E.selected = f; break; } } store.slice("selection", { ids: [...E.selection], primary: E.selected ? E.selected.id : null, version: (state.selection ? state.selection.version || 0 : 0) + 1 }); drawSelection(); renderProps(); renderObjects(); requestRender(); },
     setMarkers(list: unknown) { E.markers = Array.isArray(list) ? list : []; E.renderOpts.markers = E.markers.length ? E.markers : undefined; store.slice("viewport", { renderOpts: Object.assign({}, E.renderOpts) }); requestRender(); if (E.markers.length) toast(`${E.markers.length} marker${E.markers.length === 1 ? "" : "s"}`); },
+    // one field of a symbol or sheet as the selection (Find selects the matching SCH_FIELD itself)
+    selectField(id: string, name: string) { clearSelection(); E.selField = { id, name }; drawSelection(); renderProps(); renderObjects(); requestRender(); },
     setSelected(fp: { id: string } | null) { E.selected = fp ? (E.items.find((f: ItemSummary) => f.id === fp.id) || fp) : null; drawSelection(); renderProps(); renderObjects(); requestRender(); },
     // opts.amend folds the change into the previous undo step (a paste and the move that places it are one step)
     commit(changes: KChange[], label?: string, opts?: CommitOpts) { commitChanges(changes, label, opts); },
     undo() { undoLast(); },
     applyLocal(changes: KChange[]) { applyChanges(changes); },
     requestRender: requestRepaint, toast, enterSheet, setTool,
+    // SCH_INSPECTION_TOOL::ShowDatasheet's filesStack: the schematic, the symbol's library copy, the symbol itself
+    openDatasheet(value: string, item?: KItem) {
+      const doc = E.kdoc as (KDoc & { embeddedFiles?: SNode | null }) | null, files: (SNode | null | undefined)[] = [doc ? doc.embeddedFiles : null];
+      if (doc && item) { const ln = KiCadCanvas.kid(item.node, "lib_name") || KiCadCanvas.kid(item.node, "lib_id"); files.push(ln ? KiCadCanvas.resolveLib(doc, String(ln[1])) : null, item.node); }
+      openDatasheet(value, { files });
+    },
+    setArcEditMode(mode: "center" | "endpoints" | "radius") { const p = clonePrefs(); p.schEditing.arcEditMode = mode; savePrefs(p); },
     // the sub-sheets the open page's sheet symbols name (Place Sheet Pins, the ERC's sheet pin checks)
     sheetDocs: subSheetDocs,
+    // every sheet path as files from the root down and the sheets read so far (a pasted sheet's recursion test, its page number)
+    sheetHierarchy(): { paths: string[][]; docs: Map<string, KDoc> } | null { const f = E.hooks && (E.hooks as { sheetHierarchy?: () => { paths: string[][]; docs: Map<string, KDoc> } | null }).sheetHierarchy; return f ? f() : null; },
     loadSheetDoc(sheet: KItem): Promise<KDoc | null> { const f = E.hooks && (E.hooks as { loadSheetDoc?: (s: KItem) => Promise<KDoc | null> }).loadSheetDoc; return f ? f(sheet) : Promise.resolve(null); },
+    // SCH_MOVE_TOOL::moveSelectionToSheet: the items a move dropped on a sheet symbol are added to its sub-sheet
+    dropIntoSheet(sheet: KItem, label: string, build: (sub: KDoc) => KChange[]) { const f = E.hooks && (E.hooks as { dropIntoSheet?: (s: KItem, l: string, b: (sub: KDoc) => KChange[]) => void }).dropIntoSheet; if (f) f(sheet, label, build); },
     // PCB_BASE_FRAME::SelectToolbarAction: a toolbar group shows the given action (the arc tool's drawing mode)
     setGroupCurrent(group: string, id: string) { if (store.get().groupCurrent[group] !== id) setGroupCurrent(group, id); },
     // PCB_SELECTION_TOOL's hover selection: the Clarify Selection candidates under a point, the popup that asks
@@ -108,7 +149,7 @@ export function commitChanges(changes: KChange[] | null | undefined, label?: str
     undoStack.push(entry); if (undoStack.length > 200) undoStack.shift();
   }
   redoStack.length = 0; publishUndo();
-  if (isSch() && label === "sheet") publishDocs();   // a new sheet file joined the project
+  if (isSch() && opts && opts.newSheet) publishDocs();   // a new sheet file joined the project
   for (const f of commitObservers) { try { f("after", changes, label, opts); } catch (e) { console.error(e); } }
 }
 
@@ -252,7 +293,7 @@ export function deleteSelected() {
     const m = activeModule(); let changes: KChange[] | null = null;
     if (m && m.deleteChanges) { try { changes = m.deleteChanges(E.kdoc, [doomed]); } catch (e) { console.warn(e); } }
     if (!changes) changes = [KiCadCanvas.removeChange(doomed)];
-    clearSelection(); commitChanges(changes, "delete"); drawSelection(); renderProps(); renderObjects(); requestRender();   // EDIT_TOOL::Remove says nothing
+    clearSelection(); commitChanges(changes, isSch() ? "Delete" : "delete"); drawSelection(); renderProps(); renderObjects(); requestRender();   // EDIT_TOOL::Remove says nothing
     return;
   }
   sendOp([{ id: E.selected.id, typeName: E.ITEM_TYPE, kind: "REMOVED", properties: [] }]);
@@ -306,5 +347,5 @@ export function deleteSelection() {
   const m = activeModule(); let changes: KChange[] | null = null;
   if (m && m.deleteChanges) { try { changes = m.deleteChanges(E.kdoc, its); } catch (e) { console.warn(e); } }
   if (!changes) changes = its.map((it) => KiCadCanvas.removeChange(it));
-  clearSelection(); commitChanges(changes, "delete"); drawSelection(); renderProps(); renderObjects();
+  clearSelection(); commitChanges(changes, isSch() ? "Delete" : "delete"); drawSelection(); renderProps(); renderObjects();
 }

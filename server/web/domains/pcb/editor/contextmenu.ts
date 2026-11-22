@@ -19,7 +19,7 @@ import { FP } from "./fpedit";
 import { ARC_EDIT_MODE_MENU, evaluate, GRID_ORIGIN, menuFor, type MenuCtx, type MenuDef, type Resolved } from "./ctxmenus";
 import { activeModuleTool, applyPickMode, clearAllSelection, hitsAt, markerUnder, interactionBusy, pcbState, pickAt, schState, selectAt, selectionBox, selectionChanged, selectionIds, selectionItems, selectItemId, stage, startFieldMove, startMove, toolCtx, worldMm, zoomBy } from "./gestures";
 import { E } from "./state";
-import { HIT_PX, nearestFootprint } from "./selection";
+import { HIT_PX, nearestFootprint, schCands } from "./selection";
 import { activeModule, deleteSelection, moduleTool, runModuleAction, selectAll, setTool } from "./tools";
 import { isSch, kicadZoom, pxPerMm, requestRender } from "./view";
 import { openSelectionProperties } from "./pointer";
@@ -91,8 +91,11 @@ function menuCtx(): MenuCtx {
   // PCB_POINT_EDITOR's corner conditions, asked of the module for the one selected item at the cursor
   const P = (window as unknown as { PcbTools?: { canAddCorner?: (it: unknown) => boolean; canRemoveCorner?: (d: KDoc, id: string, at: number[] | null) => boolean } }).PcbTools;
   const one = !sch && items.length === 1 ? items[0] : null;
-  const canAddCorner = !!(one && P && P.canAddCorner && P.canAddCorner(one));
-  const canRemoveCorner = !!(one && P && P.canRemoveCorner && E.kdoc && P.canRemoveCorner(E.kdoc as KDoc, one.id, (E.lastCursorMm as number[] | null) || null));
+  // SCH_POINT_EDITOR's, asked of the schematic module for its edited item at the cursor
+  const SP = sch ? (CollabTools as unknown as { sch?: { canAddCorner?: (ctx: unknown, at: number[] | null) => boolean; canRemoveCorner?: (ctx: unknown, at: number[] | null) => boolean } }).sch : null;
+  const schCorner = (fn?: (ctx: unknown, at: number[] | null) => boolean): boolean => { try { return !!(fn && items.length === 1 && E.kdoc && fn(toolCtx(), (E.lastCursorMm as number[] | null) || null)); } catch (e) { return false; } };
+  const canAddCorner = sch ? schCorner(SP ? SP.canAddCorner : undefined) : !!(one && P && P.canAddCorner && P.canAddCorner(one));
+  const canRemoveCorner = sch ? schCorner(SP ? SP.canRemoveCorner : undefined) : !!(one && P && P.canRemoveCorner && E.kdoc && P.canRemoveCorner(E.kdoc as KDoc, one.id, (E.lastCursorMm as number[] | null) || null));
   return {
     editor: editor(), kinds, tool: E.tool, drawingLine, routing,
     fpEditor: !sch && !!(E.kdoc && E.kdoc.fpEditor), padEdit: !sch && !!FP.padEdit,
@@ -102,7 +105,8 @@ function menuCtx(): MenuCtx {
     pinAlts: !!(E.selPins.length === 1 && E.kdoc && schPins() && schPins()!.pinAlternates(E.kdoc as KDoc, E.selPins[0])),   // ALT_PIN_FUNCTION_MENU: one pin only
     highlight: !!E.highlightIds, belowRoot: !!root && !topLevelSchematics().some((t) => t.doc === (state as { doc?: unknown }).doc),
     hasLocked: items.some((it) => isLocked(it.node)), hasUnlocked: items.some((it) => !isLocked(it.node)),
-    groupSelected: boardGroupSelected(), inGroup: !sch && !!(CollabTools.pcb && (CollabTools.pcb.state as { enteredGroup?: string | null }).enteredGroup),
+    groupSelected: sch ? schGroupSelected(items) : boardGroupSelected(),
+    inGroup: sch ? !!((CollabTools.sch as unknown as { enteredGroupId?: () => string | null } | undefined)?.enteredGroupId?.()) : !!(CollabTools.pcb && (CollabTools.pcb.state as { enteredGroup?: string | null }).enteredGroup),
     hasItems: !!E.kdoc && E.kdoc.items.size > 0, checks: attributeChecks(items),
     overDrawingSheet: sch && !items.length && overDrawingSheet(),
     cells: cells ? { block: cells.block, merged: cells.merged, structure: cells.structure } : null,
@@ -173,7 +177,7 @@ function dragTrack(free: boolean): Run | string {
 
 /** KiCad action → module action id, where the web's id differs. */
 const ALIAS: Record<Editor, Record<string, string>> = {
-  sch: { rotateCCW: "rotateSelection", rotateCW: "rotateSelectionCW", mirrorH: "mirrorSelectionX", mirrorV: "mirrorSelectionY", autoplaceFields: "autoplace" },
+  sch: { rotateCCW: "rotateSelection", rotateCW: "rotateSelectionCW", mirrorH: "mirrorSelectionX", mirrorV: "mirrorSelectionY", autoplaceFields: "autoplace", groupEnter: "enterGroup", groupLeave: "leaveGroup" },
   pcb: { flip: "flipSelection", moveExact: "moveExactly", packAndMoveFootprints: "pack", rotateCcw: "rotateSelection", rotateCw: "rotateSelectionCw", groupEnter: "enterGroup", groupLeave: "leaveGroup" },
 };
 /** Board entries whose short id collides with a handler that means something else here. */
@@ -182,6 +186,14 @@ const NO_HANDLER = new Set(["PCB_ACTIONS::mirrorH", "PCB_ACTIONS::mirrorV"]);
 const READ_ONLY_OK = new Set(["cancelInteractive", "selectAll", "unselectAll", "properties", "enterSheet", "leaveSheet", "clearHighlight", "highlightNetSelection", "highlightNet",
   "selectConnection", "selectNet", "selectNode", "selectSameSheet", "selectUnconnected", "filterSelection", "copy", "copyAsText", "showDatasheet", "selectColumns", "selectRows", "selectTable", "exportTableCSV", "editTable", "inspectClearance", "showNetInRatsnest", "hideNetInRatsnest"]);
 
+/** SCH_SELECTION_TOOL's groupEnterCondition: the selection is one SCH_GROUP (held here as the group with its members). */
+function schGroupSelected(items: KItem[]): boolean {
+  const groups = items.filter((it) => it.kind === "group"); if (!groups.length) return false;
+  const sm = CollabTools.sch as unknown as { expandGroups?: (d: KDoc, ids: string[]) => string[] } | undefined; if (!sm || !sm.expandGroups || !E.kdoc) return groups.length === 1 && items.length === 1;
+  // one top-level group: every selected item is that group or one of its (nested) members
+  for (const g of groups) { let all: Set<string>; try { all = new Set(sm.expandGroups(E.kdoc as KDoc, [g.id])); } catch (e) { continue; } if (items.every((it) => all.has(it.id))) return true; }
+  return false;
+}
 /** PCB_SELECTION_TOOL's groupEnterCondition: the selection is one group. */
 function boardGroupSelected(): boolean {
   if (isSch() || !CollabTools.pcb || !CollabTools.pcb.selectedTopGroup) return false;
@@ -200,6 +212,10 @@ function resolve(act: string, c: MenuCtx): { run?: Run; why?: string; key?: stri
   const h = (HANDLERS as Record<string, ((a: unknown) => void) | undefined>)[sid];
   if (h && !NO_HANDLER.has(act)) return { run: () => h(null) };
   const tid = toolFor(ed, sid);
+  // a context-menu action carries the position the menu was opened at (ACTION_MENU::OnMenuEvent): a schematic tool
+  // started from it is primed there, so Add Junction places at once and the label entries open their dialog
+  const primed = ed === "sch" && moduleTool(tid || "") ? (m as unknown as { hotkeyTool?: (id: string, ctx: unknown, at?: number[] | null) => unknown }).hotkeyTool : undefined;
+  if (tid && primed) return { run: () => { primed(tid, toolCtx(), (E.lastCursorMm as number[] | null) || null); } };
   if (tid) return (APP_TOOLS as string[]).includes(tid) || moduleTool(tid) ? { run: () => setTool(tid) } : { why: NOT_YET };
   return { why: DESKTOP };
 }
@@ -326,7 +342,14 @@ function describe(it: KItem | string): string {
   const P = (window as unknown as { PcbTools?: { itemDescription?: (d: KDoc, id: string, u: string) => string } }).PcbTools;
   if (!isSch() && P && P.itemDescription && E.kdoc) { const t = P.itemDescription(E.kdoc as KDoc, typeof it === "string" ? it : it.id, E.units); if (t) return t; }
   const S = CollabTools.sch as unknown as { itemDescription?: (d: KDoc, id: string, u: string) => string } | undefined;
-  if (isSch() && S && S.itemDescription && E.kdoc) { const t = S.itemDescription(E.kdoc as KDoc, typeof it === "string" ? it : it.id, E.units); if (t) return t; }
+  if (isSch() && S && S.itemDescription && E.kdoc) {
+    // a collected pin ("id#pin:N") or field ("id@field:Name") is described as SCH_PIN / SCH_FIELD::GetItemDescription
+    const key = typeof it === "string" ? it : it.id, pi = key.indexOf("#pin:"), fi = key.indexOf("@field:");
+    const t = pi > 0 ? (S.itemDescription as (d: KDoc, id: string, u: string, sub?: { field?: string; pin?: string }) => string)(E.kdoc as KDoc, key.slice(0, pi), E.units, { pin: key.slice(pi + 5) })
+      : fi > 0 ? (S.itemDescription as (d: KDoc, id: string, u: string, sub?: { field?: string; pin?: string }) => string)(E.kdoc as KDoc, key.slice(0, fi), E.units, { field: key.slice(fi + 7) })
+      : S.itemDescription(E.kdoc as KDoc, key, E.units);
+    if (t) return t;
+  }
   if (typeof it === "string") return it;
   const names = (CollabTools.props && CollabTools.props.KIND_NAMES) || {};
   const kind = names[it.kind] || it.kind.replace(/^gr_/, "").replace(/_/g, " ").replace(/^./, (ch) => ch.toUpperCase());
@@ -339,6 +362,9 @@ function describe(it: KItem | string): string {
  * ("footprintId#padIndex", ahead of its footprint), as PCB_SELECTION_TOOL's collector lists PCB_PAD_T.
  */
 export function candidatesAt(mm: Mm, withFields = false): string[] {
+  // schematic: disambiguateCursor's SelectPoint with m_skip_heuristics: every collected item, pin and field that is
+  // Selectable and passes the filter
+  if (isSch() && E.kdoc && CollabTools.sch && CollabTools.sch._ && (CollabTools.sch._ as { clickCandidates?: unknown }).clickCandidates) return schCands(mm, { skip: true }).cands.map((c) => c.key);
   const hits = hitsAt(mm); const ids = hits.map((it) => it.id);
   if (isSch() || !E.kdoc) return ids;
   // FOOTPRINT::HitTest: a footprint is hit inside its bounding hull, not only on its drawn shapes (as a left click's pickAt)
@@ -362,6 +388,11 @@ const candidateHover = (id: string): string => (id.includes("#") ? id.slice(0, i
 function selectCandidate(id: string): void {
   const fi = id.indexOf("@field:");
   if (fi > 0 && !isSch()) { E.selField = { id: id.slice(0, fi), name: id.slice(fi + 7) }; requestRender(); return; }
+  if (isSch()) {   // a symbol's field or pin picked from the list is the selection on its own
+    const pi = id.indexOf("#pin:");
+    if (fi > 0) { E.selField = { id: id.slice(0, fi), name: id.slice(fi + 7) }; requestRender(); return; }
+    if (pi > 0) { E.selPins = [{ id: id.slice(0, pi), number: id.slice(pi + 5) }]; requestRender(); return; }
+  }
   const hash = id.indexOf("#");
   if (hash > 0 && !isSch()) { const ps = pcbState() as unknown as { padSel?: string | null } | null; if (ps) ps.padSel = id; requestRender(); return; }
   selectItemId(id);
@@ -373,6 +404,8 @@ function selectCandidate(id: string): void {
  */
 type Guess = (d: KDoc, ids: string[], where: Mm, o: { px: number; hidden: Set<string>; viewport: [number, number] }) => string[];
 function ambiguousAt(mm: Mm, withFields = false): string[] {
+  // schematic: what SCH_SELECTION_TOOL::GuessSelectionCandidates leaves of the collector (sch-tools guess.ts)
+  if (isSch() && E.kdoc && CollabTools.sch && CollabTools.sch._ && (CollabTools.sch._ as { clickCandidates?: unknown }).clickCandidates) return schCands(mm).cands.map((c) => c.key);
   const ids = candidatesAt(mm, withFields); if (isSch() || !E.kdoc) return ids;
   const P = (window as unknown as { PcbTools?: { guessCandidates?: Guess } }).PcbTools;
   if (P && P.guessCandidates) {
@@ -502,6 +535,8 @@ function clarifyPopup(ev: { clientX: number; clientY: number }, ids: string[], t
   const pick = (list: string[]): void => {
     const items = list.filter((id) => !id.includes("#") && !id.includes("@field:"));
     if (mode && items.length === list.length) { for (const id of items) applyPickMode(id, mode); if (then) then(); return; }
+    // schematic "Select All": every listed item joins one selection (pins and fields stay out of a multi-selection)
+    if (isSch() && list.length > 1 && items.length) { clearAllSelection(false); for (const id of items) applyPickMode(id, "add"); if (then) then(); return; }
     clearAllSelection(false); for (const id of list) selectCandidate(id); selectionChanged(); if (then) then();
   };
   const items: CtxItem[] = ids.map((id, i): CtxItem => ({ label: i < 9 && !IS_MAC ? `${i + 1}  ${describe(id)}` : describe(id), key: i < 9 ? String(i + 1) : undefined, icon: menuImage(id), hover: hoverOf(id), run: runRow(() => pick([id])) }));
@@ -578,12 +613,32 @@ function show(x: number, y: number, mm: Mm, clarify: boolean): void {
     let at = items.length; while (at > 0 && (items[at - 1].sub || items[at - 1].sep)) at--;
     items.splice(at, 0, ...(at > 0 && !items[at - 1].sep ? [{ sep: true } as CtxItem] : []), ...review);
   }
-  if (clarify && (E.tool === "select" || E.tool === "highlight")) { const cl = clarifyRows(mm); if (cl) items.unshift(cl, { sep: true }); }
+  if (clarify && !isSch() && (E.tool === "select" || E.tool === "highlight")) { const cl = clarifyRows(mm); if (cl) items.unshift(cl, { sep: true }); }
   E.contextMenuOpen = true; E.hoverId = null; stage.classList.remove("over-sel");
   store.set({ contextMenu: { id: ++menuId, x, y, items } });
   requestRender();
 }
 
+/** SELECTION::GetBoundingBox of the selected pins and fields (their own boxes) together with any selected items. */
+function schSubSelectionBox(): [number, number, number, number] | null {
+  let b = selectionBox(); const d = E.kdoc as KDoc | null; if (!d) return b;
+  const add = (q: number[] | null | undefined) => { if (q) b = b ? [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])] : [q[0], q[1], q[2], q[3]]; };
+  const m = CollabTools.sch as unknown as { _?: { candOfKey?: (d: KDoc, key: string, hidden?: Set<string> | null) => unknown; candBox?: (d: KDoc, c: unknown) => number[]; pinKey?: (id: string, n: string) => string; fieldKey?: (id: string, n: string) => string } } | undefined;
+  if (!m || !m._ || !m._.candOfKey || !m._.candBox) return b;
+  const keys: string[] = [];
+  for (const p of E.selPins as PinRef[]) keys.push(m._.pinKey!(p.id, p.number));
+  for (const f of [E.selField, ...((E.selFields || []) as { id: string; name: string }[])]) if (f) keys.push(m._.fieldKey!(f.id, f.name));
+  for (const k of keys) { try { const c = m._.candOfKey(d, k, E.hiddenLayers as Set<string>); if (c) add(m._.candBox(d, c)); } catch (e) { /* gone */ } }
+  return b;
+}
+/**
+ * SCH_SELECTION_TOOL::selectPoint on a plain click that leaves more than one candidate: the Clarify Selection popup
+ * at the pointer; a pick replaces the selection, closing it without one leaves the selection as it was.
+ */
+export function schClarifyClick(ev: { clientX: number; clientY: number }, keys: string[], all: string[]): void {
+  if (!E.kdoc || state.view !== "editor") return;
+  clarifyPopup(ev, keys, null, all);
+}
 /**
  * A right click at a client position.  SCH_SELECTION_TOOL / PCB_SELECTION_TOOL: with nothing selected
  * the item under the cursor is selected first; with a selection, a click away from it (outside its
@@ -602,16 +657,16 @@ export function openContextMenu(ev: { clientX: number; clientY: number }): void 
     if (!mk.selected) { clearAllSelection(false); const hk = E.hooks as { ercSelectMarker?: (m: unknown) => void }; if (hk.ercSelectMarker) hk.ercSelectMarker(mk); selectionChanged(); }
   }
   else if ((E.tool === "select" || E.tool === "highlight") && !interactionBusy()) {
-    if (E.selPins.length) {
-      const hit = pickAt(mm);
-      if (!(hit && hit.pin && (E.selPins as PinRef[]).some((p) => p.id === hit.pin!.id && p.number === hit.pin!.number))) selectAt(mm);
-    } else if (E.selField) {
-      const hit = pickAt(mm);
-      if (!(hit && hit.field && hit.field.id === E.selField.id && hit.field.name === E.selField.name)) selectAt(mm);
+    if (E.selPins.length || E.selField) {
+      // SCH_SELECTION_TOOL: a selection of any kind (pins and fields too) changes only when the cursor is outside its
+      // bounding box grown by a grid square and something else is under it; otherwise the menu is for the selection
+      const b = schSubSelectionBox(), g = Math.max(E.gridPitch || 0, 0.5);
+      const outside = !b || mm[0] < b[0] - g || mm[0] > b[2] + g || mm[1] < b[1] - g || mm[1] > b[3] + g;
+      if (outside && pickAt(mm)) selectAt(mm);
     } else if (!selectionIds().length && !(pcbState() as unknown as { padSel?: string | null } | null)?.padSel) {
       // PCB_SELECTION_TOOL::selectPoint on a right-click with nothing selected: more than one candidate left after the
       // heuristics opens the stand-alone Clarify Selection popup, and the context menu follows the pick
-      const amb = isSch() ? [] : ambiguousAt(mm, true);
+      const amb = ambiguousAt(mm, true);
       if (amb.length > 1) { clarifyPopup(ev, amb.slice(0, 100), () => show(ev.clientX, ev.clientY, mm, false), candidatesAt(mm, true)); return; }
       if (amb.length === 1 && (amb[0].includes("#") || amb[0].includes("@field:"))) { clearAllSelection(false); selectCandidate(amb[0]); selectionChanged(); }
       else if (amb.length || isSch()) selectAt(mm);

@@ -86,7 +86,7 @@ export function setupEditorChrome() {
   // each KiCad application keeps its own system.units and system.last_imperial_units
   const us = loadUnits(unitsAppFor(E.DOC_TYPE)); E.units = us.units; E.lastImperial = us.lastImperial;
   renderModuleTools();
-  store.set({ document: Object.assign({}, store.get().document, { editor: ed, docType: E.DOC_TYPE }), panes: Object.assign({}, E.panes), filter: Object.assign({}, filters[ed]) });
+  store.set({ document: Object.assign({}, store.get().document, { editor: ed, docType: E.DOC_TYPE }), panes: Object.assign({}, E.panes), filter: Object.assign(ed === "sch" && !(filters[ed] && filters[ed].lockedItems !== undefined) ? { lockedItems: false } : {}, filters[ed]) });   // the schematic's Locked items box starts off (SCH_SELECTION_FILTER_OPTIONS)
   setRadio("Units", ({ mm: "millimetersUnits", in: "inchesUnits", mil: "milsUnits" } as Record<string, string>)[E.units]);
   setRadio("Selection modes", E.selMode === "lasso" ? "selectSetLasso" : "selectSetRect");
   setRadio("Crosshair modes", E.crosshairMode === "full" ? "cursorFullCrosshairs" : E.crosshairMode === "45" ? "cursor45Crosshairs" : "cursorSmallCrosshairs");

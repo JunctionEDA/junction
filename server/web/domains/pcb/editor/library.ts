@@ -76,7 +76,7 @@ const cursorMm = (): Pt => { const c = (E.lastCursorMm as Pt) || [0, 0]; const s
 
 // ---------------------------------------------------------------- schematic: a library symbol on the cursor
 
-interface SymbolSession { libId: string; lib: SNode; fields?: Record<string, string>; unit: number; units: number; bodyStyle: number; keep: boolean; allUnits: boolean; reference: string; nodeId: string; doc: KDoc }
+interface SymbolSession { libId: string; lib: SNode; libName?: string; fields?: Record<string, string>; unit: number; units: number; bodyStyle: number; keep: boolean; allUnits: boolean; reference: string; nodeId: string; doc: KDoc }
 let session: SymbolSession | null = null;
 
 function schReady(): { ctx: ToolCtx; doc: KDoc; sch: SchToolModule; h: SchHelpers } {
@@ -96,9 +96,8 @@ function instanceHome(doc: KDoc, h: SchHelpers): { project: string; path: string
   return { project, path: found.path || (uuid ? "/" + uuid : "") };
 }
 
-function carrySymbol(s: SymbolSession, sameReference: boolean): void {
-  const { ctx, doc, sch, h } = schReady();
-  const at = cursorMm();
+/** Every reference in use in the schematic (SCH_SHEET_LIST::GetSymbols): this sheet's symbols and what is known of the other sheets'. */
+function usedReferences(doc: KDoc, sch: SchToolModule): (string | core.RefHolder)[] {
   // the other sheets' references are taken too: by their units when known, so a unit can join a package held there
   const other = sch.state as { otherRefs?: Set<string>; otherUnits?: core.RefHolder[] };
   const knownElsewhere = new Set((other.otherUnits || []).map((u) => u.ref));
@@ -106,16 +105,12 @@ function carrySymbol(s: SymbolSession, sameReference: boolean): void {
   const valueOf = (node: SNode): string => { const p = (node as SNode[]).find((c) => Array.isArray(c) && c[0] === "property" && c[1] === "Value"); return p ? String(p[2]) : ""; };
   const kidAtom = (node: SNode, key: string): string => { const c = (node as SNode[]).find((x) => Array.isArray(x) && x[0] === key) as SNode[] | undefined; return c ? String(c[1]) : ""; };
   for (const it of doc.items.values()) if (it.kind === "symbol" && it.ref) used.push({ ref: it.ref, lib: kidAtom(it.node, "lib_id"), value: valueOf(it.node), unit: Number(kidAtom(it.node, "unit")) || 1 });
-  // a unit of a multi-unit symbol joins a package of the same symbol and value that leaves its unit free
-  const me = s.units > 1 ? { lib: s.libId, value: (s.fields && s.fields.Value !== undefined) ? s.fields.Value : (core.symbolInfo(s.lib).fields.find((f) => f.name === "Value") || { value: "" }).value, unit: s.unit } : null;
-  if (!sameReference) s.reference = core.nextReference(core.symbolInfo(s.lib).reference, used, !!sch.state.annotateAuto, me);
-  const home = instanceHome(doc, h);
-  let node = core.symbolInstance({ libId: s.libId, symbol: s.lib, at, unit: s.unit, bodyStyle: s.bodyStyle, fields: s.fields, reference: s.reference, project: home.project, path: home.path });
-  // SCH_DRAWING_TOOLS::PlaceSymbol autoplaces the fields of a new symbol
-  try {
-    const ghost = K().addItem(doc, node);
-    if (ghost) { doc.items.delete(ghost.id); const placed = h.autoplaceNode(doc, ghost); if (placed) node = placed; }
-  } catch (e) { console.warn("autoplace failed", e); }
+  return used;
+}
+/** Put a symbol node on the cursor as the Place Symbol tool's carry. */
+function rideCursor(s: SymbolSession, node: SNode): void {
+  const { ctx, doc, sch, h } = schReady();
+  const at = cursorMm();
   s.nodeId = K().uuidOf(node); s.doc = doc;
   const carry: SchCarry = { kind: "symbol", node, item: null, pos: null };
   (sch.state as Record<string, unknown>).carry = carry;                  // onActivate sees the carry and opens no chooser
@@ -129,6 +124,31 @@ function carrySymbol(s: SymbolSession, sameReference: boolean): void {
   h.placeCarry(ctxNow(), at);
   ctx.requestRender();
 }
+/** The reference of the next package of this session's symbol (annotate()). */
+function sessionReference(s: SymbolSession, doc: KDoc, sch: SchToolModule): string {
+  const me = s.units > 1 ? { lib: s.libId, value: (s.fields && s.fields.Value !== undefined) ? s.fields.Value : (core.symbolInfo(s.lib).fields.find((f) => f.name === "Value") || { value: "" }).value, unit: s.unit } : null;
+  return core.nextReference(core.symbolInfo(s.lib).reference, usedReferences(doc, sch), !!sch.state.annotateAuto, me);
+}
+
+function carrySymbol(s: SymbolSession, sameReference: boolean): void {
+  const { doc, sch, h } = schReady();
+  const at = cursorMm();
+  // a unit of a multi-unit symbol joins a package of the same symbol and value that leaves its unit free
+  if (!sameReference) s.reference = sessionReference(s, doc, sch);
+  const home = instanceHome(doc, h);
+  let node = core.symbolInstance({ libId: s.libId, symbol: s.lib, at, unit: s.unit, bodyStyle: s.bodyStyle, fields: s.fields, reference: s.reference, project: home.project, path: home.path });
+  // the sheet's library holds this symbol under another name (a power symbol converted by the preference beside the library's own copy)
+  if (s.libName) (node as SNode[]).splice(1, 0, ["lib_name", s.libName] as SNode);
+  // SCH_DRAWING_TOOLS::PlaceSymbol autoplaces the fields of a new symbol when m_AutoplaceFields.enable is on
+  const ap = (sch.state as { autoplace?: { enable?: boolean } }).autoplace;
+  if (!ap || ap.enable !== false) {
+    try {
+      const ghost = K().addItem(doc, node);
+      if (ghost) { doc.items.delete(ghost.id); const placed = h.autoplaceNode(doc, ghost); if (placed) node = placed; }
+    } catch (e) { console.warn("autoplace failed", e); }
+  }
+  rideCursor(s, node);
+}
 
 /** Embed the symbol in the sheet's library and carry a new instance of it on the cursor. */
 export async function placeSymbol(req: PlaceSymbolRequest): Promise<void> {
@@ -136,11 +156,23 @@ export async function placeSymbol(req: PlaceSymbolRequest): Promise<void> {
   if (!req || typeof req.libId !== "string" || !req.libId.includes(":")) throw new Error('placeSymbol needs libId "Library:Name"');
   if (typeof req.symbol !== "string" || !req.symbol.trim()) throw new Error("placeSymbol needs the symbol's s-expression");
   let lib = doc.lib.has(req.libId) ? K().resolveLib(doc, req.libId) : null;      // the sheet's own copy wins, as on paste
+  let libName = "";
+  // m_Drawing.new_power_symbols: a power symbol is placed global or local as the preference says (never a non-power one)
+  const powerPref = (window.CollabTools.sch!.state as { newPowerSymbols?: string }).newPowerSymbols;
+  const converted = core.powerPreferenceSymbol(lib || core.embedSymbol(req.libId, core.flattenSymbol(core.symbolNodeOf(req.symbol, core.parseLibId(req.libId).name))), powerPref);
+  if (converted && !lib) { lib = converted; doc.lib.set(req.libId, lib); }
+  else if (converted) {
+    // the sheet already holds the other kind under this name: the converted copy joins it as "<name>_<n>" (SCH_SCREEN::Append)
+    const item = core.parseLibId(req.libId).name, body = (n: SNode): string => JSON.stringify((n as unknown[]).slice(2)), want = body(converted);
+    for (const [name, l] of doc.lib) if (name.startsWith(item + "_") && /^\d+$/.test(name.slice(item.length + 1)) && body(l) === want) libName = name;
+    if (!libName) { let k = 1; while (doc.lib.has(`${item}_${k}`)) k++; libName = `${item}_${k}`; (converted as unknown[])[1] = libName; doc.lib.set(libName, converted); }
+    lib = doc.lib.get(libName)!;
+  }
   if (!lib) { lib = core.embedSymbol(req.libId, core.flattenSymbol(core.symbolNodeOf(req.symbol, core.parseLibId(req.libId).name))); doc.lib.set(req.libId, lib); }
   const units = core.symbolInfo(lib).units;
   const unit = Math.min(units, Math.max(1, Math.round(req.unit || 1)));
   const bodyStyle = Math.min(Math.max(1, core.symbolInfo(lib).bodyStyles), Math.max(1, Math.round(req.bodyStyle || 1)));
-  session = { libId: req.libId, lib, fields: req.fields, unit, units, bodyStyle, keep: !!req.keep, allUnits: !!req.allUnits && units > 1, reference: "", nodeId: "", doc };
+  session = { libId: req.libId, lib, libName, fields: req.fields, unit, units, bodyStyle, keep: !!req.keep, allUnits: !!req.allUnits && units > 1, reference: "", nodeId: "", doc };
   carrySymbol(session, false);
 }
 
@@ -149,8 +181,21 @@ function afterPlace(_ctx: ToolCtx, item: KItem | null): void {
   const s = session;
   if (!s || !item || item.id !== s.nodeId || E.kdoc !== s.doc) { session = null; return; }
   try {
-    if (s.allUnits && s.unit < s.units) { s.unit++; carrySymbol(s, true); return; }
-    if (s.keep) { if (s.allUnits) s.unit = 1; carrySymbol(s, false); return; }
+    // PlaceSymbol after a placement: with "place all units" the next unit this reference does not hold yet (past the
+    // last one: unit 1 of the next package); the next symbol is a duplicate of the one just placed, so it keeps the
+    // orientation, the mirror and the edited fields, and only a unit 1 is annotated again
+    const { doc, sch } = schReady();
+    let unit = s.unit;
+    if (s.allUnits) {
+      const holders = usedReferences(doc, sch).filter((u): u is core.RefHolder => typeof u !== "string");
+      unit = core.nextFreeUnit(unit, s.units, item.ref || s.reference, s.libId, holders);
+    }
+    if (s.keep || unit > 1) {
+      s.unit = unit;
+      if (unit === 1) s.reference = sessionReference(s, doc, sch);
+      rideCursor(s, core.duplicatePlaced(item.node, unit, unit === 1 ? s.reference : null));
+      return;
+    }
   } catch (e) { toast(message(e), 3500); }
   session = null;
 }

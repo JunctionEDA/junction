@@ -15,7 +15,7 @@ export type NodeOrNull = SNode | null;
 export interface SchDocEntry { docId: string; path: string; docType: string; [k: string]: unknown }
 
 /** The clipboard bridge app.js may hand over: the system clipboard, read sync or async. */
-export interface SchClipboard { set?(text: string): void; get?(): string | null | undefined; read?(): Promise<string | null | undefined> | null | undefined }
+export interface SchClipboard { set?(text: string, ids?: string[]): void; get?(): string | null | undefined; read?(): Promise<string | null | undefined> | null | undefined }
 
 /** An ERC finding (app.js renders the markers). */
 export interface ErcMarker { x: number; y: number; severity: string; text: string; ids: string[]; code: string; [k: string]: unknown }
@@ -48,6 +48,12 @@ export interface SchCtx extends ToolCtx {
   parentSheetPins?: unknown;
   /** the sub-sheet document a sheet symbol names, read from the project (the editor caches it in sheetDocs) */
   loadSheetDoc?(sheet: KItem): Promise<KDoc | null>;
+  /**
+   * SCH_MOVE_TOOL::moveSelectionToSheet's other half: the sub-sheet a sheet symbol names is read, `build` returns the
+   * changes that add the dropped items to it, and they are submitted to that document as part of the undo step the
+   * open sheet's commit just pushed.
+   */
+  dropIntoSheet?(sheet: KItem, label: string, build: (sub: KDoc) => KChange[]): void;
   pageNumber?: number;
   docPath?: string;
   cursor?: Pt;
@@ -69,10 +75,23 @@ export interface BreakJob { mode: string; label: string; orig: Map<string, SNode
  * A line selected by one end (SCH_MOVE_TOOL): that end moves; `attach` is what holds its other end (the
  * m_lineConnectionCache orthoLineDrag reads): the lines ending there, a junction, a pin or anything else.
  */
-export interface PartialLine {
-  item: KItem; index: number; orig: Pt[];
-  attach?: { lines: LineEnd[]; junction: boolean; pin: boolean; any: boolean };
+export interface PartialLine { item: KItem; index: number; orig: Pt[] }
+/** One entry of m_lineConnectionCache: a line, a junction, a label on the line, or anything else attached (all unset). */
+export interface OrthoConn { line?: OrthoLine; junction?: boolean; label?: KItem }
+/**
+ * A line of the drag simulation (SCH_MOVE_TOOL::orthoLineDrag): a document line (`item`, `orig` its points before the
+ * drag) or one the drag created (`isNew`).  `sel` is the end that follows the drag (STARTPOINT 0 / ENDPOINT 1, -1 none),
+ * `stored` the vector StoreAngle kept, `cache` its m_lineConnectionCache entry (null: no entry), `off` how far the
+ * selected end has gone from `p0`, `target` where the drag wants it for a total offset.
+ */
+export interface OrthoLine {
+  item: KItem | null; kind: string; pts: Pt[]; orig: Pt[] | null; sel: number; isNew: boolean; stored: Pt;
+  cache: OrthoConn[] | null; cache0: OrthoConn[] | null; dead?: boolean; p0: Pt; off: Pt; target?: (dx: number, dy: number) => Pt;
 }
+/** SPECIAL_CASE_LABEL_INFO: a label kept on the line a drag stretches. */
+export interface OrthoLabel { item: KItem; orig: Pt; pos: Pt; line: OrthoLine; line0: OrthoLine; ls: Pt; le: Pt; track: boolean; owner: OrthoLine }
+/** The state orthoLineDrag keeps between mouse events (the moves are incremental and path dependent). */
+export interface OrthoSim { src: Anchor[]; lines: OrthoLine[]; drag: OrthoLine[]; labels: OrthoLabel[]; byId: Map<string, OrthoLine>; at: Pt; map?: (p: Pt) => Pt; grid: number }
 export interface SchDrag {
   /** orig: the node before the drag; base: orig turned / mirrored by R / X / Y pressed during the drag (handleMoveToolActions) */
   items: { item: KItem; kind: string; orig: SNode; base?: SNode }[];
@@ -90,6 +109,8 @@ export interface SchDrag {
   /** a paste / duplicate in flight: the ids of the items that only exist on this client */
   local?: Set<string>;
   pasted?: boolean; libs?: string[]; label?: string;
+  /** a Duplicate of a hover selection: the placed copy is not left selected */
+  hover?: boolean;
   /** the lines selected by one end only: SCH_MOVE_TOOL moves that end alone (index into the point list) */
   ends?: PartialLine[];
   /** the turns and mirrors taken during the drag, as one point map about the drag's reference point (pre-drag frame) */
@@ -98,6 +119,20 @@ export interface SchDrag {
   touched0?: Pt[];
   /** the arrow keys' axis lock (tools/axis-lock.ts) */
   axis?: import("../axis-lock").AxisLockState;
+  /** the orthoLineDrag state of the stretched lines, built on the first move */
+  sim?: OrthoSim | null;
+  /** the connectable grid pitch (mm): how far before the moved end a bend is put */
+  grid?: number;
+  /** the unselected labels lying on a line the drag stretches (m_specialCaseLabels) */
+  onLine?: { item: KItem; orig: Pt; line: KItem }[];
+  /** the junctions the move made redundant (recordRedundantJunctions): hidden while it lasts, migrated at the end */
+  hiddenJunctions?: { item: KItem; line: KItem; index: number }[];
+  /** MOVE mode: the sheet the selection would be dropped into (findTargetSheet) */
+  hoverSheet?: KItem | null;
+  /** whether Ctrl was down at the last pointer move (a graphics-only selection drops into a sheet only with Ctrl) */
+  lastCtrl?: boolean;
+  /** Ctrl was down when the paste began: the grid stays on until it is released (SCH_MOVE_TOOL's gridSnapDisabled rule) */
+  ctrlAtStart?: boolean;
 }
 /** S.wire: the wire / bus / line being drawn. */
 export interface SchWire { kind: string; segs: Pt[][]; cur: Pt; quitOnDraw: boolean; stroke: SNode | null }
@@ -106,6 +141,8 @@ export interface SchCarry { kind: string; node: SNode; item: KItem | null; pos: 
 /** S.draw: a graphic shape being drawn (pts are the fixed clicks, cur the cursor); await while a dialog is up. */
 export interface SchDraw {
   shape: string; pts: Pt[]; cur: Pt; await?: boolean;
+  /** a sheet started by a pointer press: where (client px), so a release after a drag ends it (startedWithDrag) */
+  press?: Pt | null;
   /** an arc: its ARC_GEOM_MANAGER, whether the first click happened, whether its start came from a tangent seed, the last click (nm) */
   arc?: import("../arc-geom").ArcGeom; started?: boolean; chainSeeded?: boolean; clickSeeded?: boolean; lastClick?: Pt;
 }
@@ -115,6 +152,8 @@ export interface EditPoints { pts: Pt[]; lines: number[][]; guides: number[][]; 
 export interface EditFollower { item: KItem; orig: SNode; end?: number; at?: Pt; index?: number }
 /** S.pedit: a point-editor drag in flight. */
 export interface PointEdit { item: KItem; ep: EditPoints; idx: number; orig: SNode; followers: EditFollower[]; start: Pt; moved: boolean; last: Pt;
+  /** the cursor itself (not snapped) at the last move: the arc's mid handle follows it */
+  raw?: Pt;
   /** a reference image's transform origin offset when the edit began (REFERENCE_IMAGE::m_transformOriginOffset) */
   imgOrigin0?: Pt;
   /** the image's unrotated size (mm) when the edit began */
@@ -143,6 +182,7 @@ export type SchState = {
   dragMode: string; mouseDragMode: string; lineMode: string; posture: boolean;
   /** eeschema input.esc_clears_net_highlight (default on) */ escClearsNetHighlight?: boolean;
   autoStartWires: boolean; autoPress?: { mm: Pt; client: Pt; mods: { shiftKey?: boolean; ctrlKey?: boolean; altKey?: boolean; metaKey?: boolean } } | null; autoCursor?: string | null;
+  /** the anchor the magnetic snap holds (EE_GRID_HELPER m_snapItem): kept until the cursor leaves its snap-out range */ snapItem?: Pt | null;
   dragEndedAt?: number; wireEndedAt?: number; forceFollow?: boolean; internalSwitch?: boolean; multi?: Set<string> | null; otherRefs?: Iterable<string> | null; /** the other sheets' annotated units (reference, library symbol, value, unit), so a unit can join a package another sheet holds */ otherUnits?: { ref: string; lib: string; value: string; unit: number }[] | null;
   showDangling?: boolean; docGen: number;
   /** the lines selected by one end only (STARTPOINT / ENDPOINT): id -> that end's index, 0 start, 1 end */
@@ -154,6 +194,14 @@ export type SchState = {
   /** the stage cursor the drag-collision WARNING cursor replaced */
   collisionCursor?: string | null;
   labelQueue?: SNode[] | null;
+  /** COMMON_SETTINGS input.immediate_actions (on unless "First hotkey selects tool" is ticked); a tool being started by its hotkey */
+  immediateActions?: boolean; viaHotkey?: boolean;
+  /** Place Next Symbol Unit (placeOneOnly): the uuid of the carried symbol whose drop ends the Place Symbol tool */
+  placeOne?: string | null;
+  /** EESCHEMA_SETTINGS m_Drawing: new_power_symbols, default_sheet_border_color / default_sheet_background_color, default_line_thickness (mils) */
+  /** m_Drawing.arc_edit_mode (ARC_EDIT_MODE): keep centre adjust radius / keep endpoints or start direction / keep centre and radius */
+  arcEditMode?: "center" | "endpoints" | "radius";
+  newPowerSymbols?: "default" | "global" | "local"; sheetBorder?: string; sheetBackground?: string; defaultLineThickness?: number;
   /** Place Sheet Pins: the sheet the tool works on (the selected one, else the first clicked) and the pin on the cursor */
   pinSheet?: string | null; pinPlace?: SheetPinPlace | null;
   lastLabelShape?: string; lastFlagShape?: string; lastAutoRotate?: boolean; autoRotateIds?: Set<string>;
@@ -161,6 +209,8 @@ export type SchState = {
   // commands
   markers: ErcMarker[]; markersDoc: KDoc | null; lastPlaced: Placed[] | null; repeatOffset: Pt; repeatIncrement: number;
   annotateAuto: boolean; autoplace?: { enable: boolean; justify: boolean; align: boolean }; unfold: UnfoldJob | null; docRef: KDoc | null;
+  /** busUnfoldPersistentSettings.label_spin_style: the rotation (0 / 90 / 180 / 270) the next bus unfold's label gets */
+  unfoldSpin?: number;
 };
 
 /** The modifier keys of a pointer or key event (a synthetic one may carry only some). */

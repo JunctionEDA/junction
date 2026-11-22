@@ -8,6 +8,8 @@ import { addNode, deep, modChange, r4, removeChange, replaceKid, same, segDist, 
 import { type Seg, mergeOverlap, segNull, simplifyWireList, twoSegments, wireNode } from "./wire";
 
 // ---------------------------------------------------------------- JUNCTION_HELPERS::AnalyzePoint (eeschema/junction_helpers.cpp)
+/** the stroke a new line gets (nodes.ts lineNode), serialized the way analyzePoint compares strokes */
+const DEFAULT_STROKE = K.serialize(["stroke", ["width", 0], ["type", "default"]]);
 export const angleKey = (from: Pt, to: Pt) => Math.round(Math.atan2(to[1] - from[1], to[0] - from[0]) * 1800 / Math.PI);
 export const BUS_TEXT = /\[.*\.\..*\]|\{.*\}/;
 /**
@@ -19,16 +21,23 @@ export const BUS_TEXT = /\[.*\.\..*\]|\{.*\}/;
  */
 export function analyzePoint(doc: KDoc, p: Pt, breakCrossings: boolean, extra?: PreviewLine[] | null, skip?: Set<string> | null) {
   const info = { isJunction: false, hasDot: false, hasBusEntry: false, hasBusAtPoint: false, multiWires: false, multiBuses: false, allows: false };
-  const lines: { layer: string; a: Pt; b: Pt }[] = [], others: KItem[] = [];
+  const lines: { layer: string; a: Pt; b: Pt; stroke: string }[] = [], others: KItem[] = [];
+  const strokeOf = (it: KItem) => K.serialize(kid(it.node, "stroke") || []);
   const onLine = (a: Pt, b: Pt) => segDist(p, a, b) <= 1e-3;
   for (const it of doc.items.values()) {
     if (skip && skip.has(it.id)) continue;
-    if (it.kind === "wire" || it.kind === "bus") { for (const [a, b] of segs(it)) if (onLine(a, b)) lines.push({ layer: it.kind, a, b }); }
+    if (it.kind === "wire" || it.kind === "bus") { for (const [a, b] of segs(it)) if (onLine(a, b)) lines.push({ layer: it.kind, a, b, stroke: strokeOf(it) }); }
     else if (it.kind === "junction") { if (same(atOf(it.node), p)) { info.hasDot = true; } }
-    else if (it.kind === "bus_entry") { if (connPoints(doc, it).some((q) => same(q, p))) { info.hasBusEntry = true; others.push(it); } }
+    else if (it.kind === "bus_entry") {
+      // aItems.Overlapping( aPosition ): any entry whose bounding box (inflated by half its pen width + 1 IU) holds the
+      // point sets hasBusEntry, connected or not; only one that ends here adds exits
+      const c = connPoints(doc, it), st = kid(it.node, "stroke"), w = st ? num((kid(st, "width") || [])[1]) : 0, m = (w > 0 ? w : 0.1524) / 2 + 1e-4;
+      if (p[0] >= Math.min(c[0][0], c[1][0]) - m && p[0] <= Math.max(c[0][0], c[1][0]) + m && p[1] >= Math.min(c[0][1], c[1][1]) - m && p[1] <= Math.max(c[0][1], c[1][1]) + m) info.hasBusEntry = true;
+      if (c.some((q) => same(q, p))) { info.hasBusEntry = true; others.push(it); }
+    }
     else if (it.kind === "symbol" || it.kind === "sheet" || it.kind === "label" || it.kind === "global_label" || it.kind === "hierarchical_label") others.push(it);
   }
-  for (const e of extra || []) if ((e.kind === "wire" || e.kind === "bus") && !same(e.a, e.b) && onLine(e.a, e.b)) lines.push({ layer: e.kind, a: e.a, b: e.b });
+  for (const e of extra || []) if ((e.kind === "wire" || e.kind === "bus") && !same(e.a, e.b) && onLine(e.a, e.b)) lines.push({ layer: e.kind, a: e.a, b: e.b, stroke: DEFAULT_STROKE });
   const isEnd = (l: { a: Pt; b: Pt }) => same(l.a, p) || same(l.b, p);
   const pre: Record<string, Set<number>> = { wire: new Set(), bus: new Set() };
   for (const l of lines) if (!same(l.a, l.b) && isEnd(l)) pre[l.layer].add(angleKey(p, same(l.a, p) ? l.b : l.a));
@@ -37,9 +46,9 @@ export function analyzePoint(doc: KDoc, p: Pt, breakCrossings: boolean, extra?: 
     for (let merged = true; merged;) {
       merged = false;
       for (let i = 0; i < lines.length && !merged; i++) for (let j = i + 1; j < lines.length; j++) {
-        if (lines[i].layer !== lines[j].layer) continue;
+        if (lines[i].layer !== lines[j].layer || lines[i].stroke !== lines[j].stroke) continue;   // SCH_LINE::MergeOverlap refuses another layer or stroke
         const m = mergeOverlap([lines[i].a, lines[i].b], [lines[j].a, lines[j].b], null);
-        if (m) { lines[i] = { layer: lines[i].layer, a: m[0], b: m[1] }; lines.splice(j, 1); merged = true; break; }
+        if (m) { lines[i] = { layer: lines[i].layer, a: m[0], b: m[1], stroke: lines[i].stroke }; lines.splice(j, 1); merged = true; break; }
       }
     }
   }
@@ -75,12 +84,14 @@ export function screenConnections(doc: KDoc) {
   return out;
 }
 // JUNCTION_HELPERS::PreviewJunctions: where junction dots would appear if the preview lines were committed.
-export function previewJunctions(doc: KDoc, lines: PreviewLine[], skip?: Set<string> | null) {
+// `points` are the connection points of the other preview items (the symbols, labels and sheets a move carries).
+export function previewJunctions(doc: KDoc, lines: PreviewLine[], skip?: Set<string> | null, points?: Pt[] | null) {
   const extra = lines.filter((l) => !same(l.a, l.b)), pts: Pt[] = [], seen = new Set<string>();
-  if (!extra.length) return [];
+  if (!extra.length && !(points && points.length)) return [];
   const conns = screenConnections(doc);
   const push = (p: Pt) => { const k = r4(p[0]) + "," + r4(p[1]); if (!seen.has(k)) { seen.add(k); pts.push(p); } };
   for (const l of extra) { push(l.a); push(l.b); for (const c of conns) if (segDist(c, l.a, l.b) <= 1e-3) push(c); }
+  for (const p of points || []) push(p);
   return pts.filter((p) => analyzePoint(doc, p, false, extra, skip).allows);
 }
 
@@ -157,6 +168,52 @@ export function txnCleanUp(t: EditTxn, doc: KDoc, seed: Iterable<string>, points
   }
   return live;
 }
+/**
+ * SCHEMATIC::CleanUp over the whole sheet: every junction that is no longer allowed goes (the ones in `keep`, the
+ * selection, stay), duplicate junctions and no-connects at one position go, null lines go, identical lines go and
+ * every two parallel lines of a layer with the same stroke that overlap or touch (not across a junction) are merged.
+ */
+export function txnCleanUpAll(t: EditTxn, doc: KDoc, keep?: Set<string> | null) {
+  const junctions: KItem[] = [], drop: KItem[] = [], ncs: KItem[] = [];
+  for (const it of doc.items.values()) {
+    if (it.kind === "junction") { if (!explicitJunctionAllowed(doc, atOf(it.node))) { if (!(keep && keep.has(it.id))) drop.push(it); } else junctions.push(it); }
+    else if (it.kind === "no_connect") ncs.push(it);
+  }
+  for (const it of drop) t.remove(it);
+  for (const list of [junctions, ncs]) {
+    const at = new Set<string>();
+    for (const it of list) { const a = atOf(it.node), k = r4(a[0]) + "," + r4(a[1]); if (at.has(k)) t.remove(it); else at.add(k); }
+  }
+  const minX = (s: Seg) => Math.min(s[0][0], s[1][0]), maxX = (s: Seg) => Math.max(s[0][0], s[1][0]), minY = (s: Seg) => Math.min(s[0][1], s[1][1]), maxY = (s: Seg) => Math.max(s[0][1], s[1][1]);
+  for (let changed = true, guard = 0; changed && guard < 10000; guard++) {
+    changed = false;
+    const lines: { it: KItem; s: Seg; stroke: string }[] = [];
+    for (const it of doc.items.values()) { if (!isNetLine(it.kind)) continue; const s = segOf(it); if (s) lines.push({ it, s, stroke: K.serialize(kid(it.node, "stroke") || []) }); }
+    lines.sort((a, b) => minX(a.s) - minX(b.s));
+    const gone = new Set<string>();
+    for (let i = 0; i < lines.length; i++) {
+      const A = lines[i]; if (gone.has(A.it.id)) continue;
+      if (same(A.s[0], A.s[1])) { t.remove(A.it); gone.add(A.it.id); changed = true; continue; }
+      const right = maxX(A.s);
+      for (let j = i + 1; j < lines.length; j++) {
+        const B = lines[j];
+        if (minX(B.s) > right + 1e-6) break;                                     // impossible to overlap the remaining lines
+        if (Math.max(minY(A.s), minY(B.s)) > Math.min(maxY(A.s), maxY(B.s)) + 1e-6) continue;
+        if (gone.has(B.it.id) || B.it.kind !== A.it.kind || B.stroke !== A.stroke) continue;
+        const cross = (A.s[1][0] - A.s[0][0]) * (B.s[1][1] - B.s[0][1]) - (A.s[1][1] - A.s[0][1]) * (B.s[1][0] - B.s[0][0]);
+        if (Math.abs(cross) > 1e-6 || same(B.s[0], B.s[1])) continue;            // IsParallel
+        if ((same(A.s[0], B.s[0]) && same(A.s[1], B.s[1])) || (same(A.s[0], B.s[1]) && same(A.s[1], B.s[0]))) { t.remove(B.it); gone.add(B.it.id); changed = true; continue; }
+        const m = mergeOverlap(B.s, A.s, (q: Pt) => isJunctionPoint(doc, q) || !!junctionAt(doc, q[0], q[1]));
+        if (!m) continue;
+        // KiCad replaces both by a new line; here one of them stays: a selected one, else the one already on the sheet
+        const aStays = keep && keep.has(A.it.id) ? true : keep && keep.has(B.it.id) ? false : !(t.isNew(A.it.id) && !t.isNew(B.it.id));
+        const [keepIt, dropIt] = aStays ? [A.it, B.it] : [B.it, A.it];
+        const n = deep(keepIt.node); setPts(n, m); t.remove(dropIt); t.modify(keepIt, n);
+        gone.add(A.it.id); gone.add(B.it.id); changed = true; break;
+      }
+    }
+  }
+}
 // SCH_EDIT_FRAME::TrimWire: a wire drawn across both pins of a two-pin symbol loses the part between them.
 export function txnTrimWire(t: EditTxn, doc: KDoc, a: Pt, b: Pt, only: Set<string> | null) {
   if (same(a, b)) return false;
@@ -196,11 +253,11 @@ export function finishWire(ctx: SchCtx) {
   }
   try {
     if (w.kind !== "polyline") {
-      const live = txnCleanUp(t, doc, added, []);
+      txnCleanUpAll(t, doc, null);                           // Schematic().CleanUp( &aCommit ): the whole screen
       for (const it of Array.from(doc.items.values())) {
         if (it.kind !== "symbol") continue;
         const pts = connPoints(doc, it); if (pts.length > 2) continue;
-        for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) txnTrimWire(t, doc, pts[i], pts[j], live);
+        for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) txnTrimWire(t, doc, pts[i], pts[j], null);
       }
       const seen = new Set<string>();
       for (const p of newEnds) {

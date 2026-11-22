@@ -64,8 +64,12 @@ export function isDocPropsChange(c: unknown): c is DocPropsChange { const o = c 
 export function isoDate(d: Date): string { const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
 
 // ---------------------------------------------------------------- find / replace
-export interface FindOpts { query: string; matchCase?: boolean; wholeWord?: boolean; regex?: boolean; pins?: boolean; hiddenFields?: boolean; netNames?: boolean; selectionOnly?: boolean; replaceRefs?: boolean }
-export interface FindHit { id: string; kind: string; what: string; field?: string; text: string; replaceable: boolean; x: number; y: number }
+export interface FindOpts { query: string; matchCase?: boolean; wholeWord?: boolean; regex?: boolean; pins?: boolean; hiddenFields?: boolean; netNames?: boolean; selectionOnly?: boolean; replaceRefs?: boolean;
+  /** EDA_SEARCH_DATA::searchAndReplace: the dialog is Find and Replace */
+  searchAndReplace?: boolean }
+export interface FindHit { id: string; kind: string; what: string; field?: string; text: string; replaceable: boolean; x: number; y: number;
+  /** a sheet pin hit: its index among the sheet's pins */
+  sub?: number }
 const reEsc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** EDA_ITEM::Matches: whole word = the whole text; a regular expression; wildcards (* ?) as wxMatchWild; else a substring. */
 export function matcher(o: FindOpts): ((text: string) => boolean) | null {
@@ -106,15 +110,18 @@ type LibResolver = (doc: FindDoc, name: string) => SNode | null;
 /** The texts of one item that KiCad's find looks at (SCH_SYMBOL / SCH_FIELD / SCH_LABEL / SCH_TEXT / SCH_SHEET ::Matches). */
 export function searchableTexts(doc: FindDoc, it: KItem, o: FindOpts, resolveLib?: LibResolver): Omit<FindHit, "id" | "kind">[] {
   const out: Omit<FindHit, "id" | "kind">[] = [], n = it.node, [x, y] = at(n);
-  const push = (what: string, text: string, replaceable: boolean, field?: string, px = x, py = y) => out.push({ what, field, text, replaceable, x: px, y: py });
+  const push = (what: string, text: string, replaceable: boolean, field?: string, px = x, py = y, sub?: number) => out.push(sub === undefined ? { what, field, text, replaceable, x: px, y: py } : { what, field, text, replaceable, x: px, y: py, sub });
   if (it.kind === "symbol" || it.kind === "sheet") {
     for (const p of kids(n, "property")) {
       const name = str(p[1]); if (name.startsWith("ki_")) continue;
-      if (!o.hiddenFields && hidden(p) && name !== "Reference" && name !== "Value") continue;
+      // SCH_FIELD::Matches: a hidden field needs "Include hidden fields"; in replace mode a reference designator is
+      // only looked at with "Replace matches in reference designators"
+      if (!o.hiddenFields && hidden(p)) continue;
+      if (name === "Reference" && it.kind === "symbol" && o.searchAndReplace && !o.replaceRefs) continue;
       const [fx, fy] = at(p);
       push(name, str(p[2]), name === "Reference" ? !!o.replaceRefs : !(it.kind === "sheet" && name === "Sheetfile"), name, fx, fy);
     }
-    if (it.kind === "sheet") for (const p of kids(n, "pin")) { const [px, py] = at(p); push("Sheet Pin", str(p[1]), false, undefined, px, py); }
+    if (it.kind === "sheet") kids(n, "pin").forEach((p, i) => { const [px, py] = at(p); push("Sheet Pin", str(p[1]), true, undefined, px, py, i); });   // SCH_SHEET_PIN::IsReplaceable
     if (it.kind === "symbol" && o.pins) {
       const lid = kid(n, "lib_name") || kid(n, "lib_id"); const lib = lid ? (resolveLib ? resolveLib(doc, str(lid[1])) : doc.lib.get(str(lid[1])) || null) : null;
       for (const pin of libPins(lib)) { if (pin.name && pin.name !== "~") push("Pin Name", pin.name, false); if (pin.number) push("Pin Number", pin.number, false); }
@@ -122,10 +129,13 @@ export function searchableTexts(doc: FindDoc, it: KItem, o: FindOpts, resolveLib
   } else if (LABEL_KINDS.has(it.kind)) {
     push("Label", str(n[1]), true);
     if (o.netNames && it.kind === "label") push("Net Name", "/" + str(n[1]), false);
-    if (o.hiddenFields || it.kind === "global_label") for (const p of kids(n, "property")) { if (!o.hiddenFields && hidden(p)) continue; push(str(p[1]), str(p[2]), false, str(p[1])); }
+    // a label's fields (SCH_FIELD::Matches / IsReplaceable): hidden ones need the option, Intersheetrefs is never replaced
+    for (const p of kids(n, "property")) { if (!o.hiddenFields && hidden(p)) continue; const [fx, fy] = at(p); push(str(p[1]), str(p[2]), str(p[1]) !== "Intersheetrefs", str(p[1]), fx, fy); }
   } else if (it.kind === "text" || it.kind === "text_box") push("Text", str(n[1]), true);
   return out;
 }
+/** SCH_FIND_REPLACE_TOOL::nextMatch's order: each searched item (a field, a sheet pin, the item) by its own x, then y, then uuid. */
+export const hitOrder = (a: Pick<FindHit, "x" | "y" | "id">, b: Pick<FindHit, "x" | "y" | "id">): number => a.x - b.x || a.y - b.y || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 /** All hits on a sheet in KiCad's search order (left to right, then top to bottom). */
 export function findHits(doc: FindDoc, o: FindOpts, selection?: Set<string> | null, resolveLib?: LibResolver): FindHit[] {
   const m = matcher(o); if (!m) return [];
@@ -134,13 +144,12 @@ export function findHits(doc: FindDoc, o: FindOpts, selection?: Set<string> | nu
     if (o.selectionOnly && selection && !selection.has(it.id)) continue;
     for (const t of searchableTexts(doc, it, o, resolveLib)) if (m(t.text)) hits.push(Object.assign({ id: it.id, kind: it.kind }, t));
   }
-  const pos = new Map<string, [number, number]>(); for (const h of hits) if (!pos.has(h.id)) { const it = doc.items.get(h.id)!; pos.set(h.id, at(it.node)); }
-  hits.sort((a, b) => { const pa = pos.get(a.id)!, pb = pos.get(b.id)!; return pa[0] - pb[0] || pa[1] - pb[1] || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0); });
-  return hits;
+  return hits.map((h, i) => ({ h, i })).sort((a, b) => hitOrder(a.h, b.h) || a.i - b.i).map((e) => e.h);
 }
 /** Apply a replacement to a cloned node for one hit; false when the hit is not replaceable or nothing changed. */
-export function replaceInNode(node: SNode, hit: Pick<FindHit, "what" | "field" | "replaceable" | "kind">, o: FindOpts, replacement: string): boolean {
+export function replaceInNode(node: SNode, hit: Pick<FindHit, "what" | "field" | "replaceable" | "kind" | "sub">, o: FindOpts, replacement: string): boolean {
   if (!hit.replaceable) return false;
+  if (hit.sub !== undefined) { const p = kids(node, "pin")[hit.sub]; if (!p) return false; const r = replaceText(str(p[1]), o, replacement); if (r === null) return false; p[1] = r; return true; }
   if (hit.field) { const p = kids(node, "property").find((q) => str(q[1]) === hit.field); if (!p) return false; const r = replaceText(str(p[2]), o, replacement); if (r === null) return false; p[2] = r; return true; }
   const r = replaceText(str(node[1]), o, replacement); if (r === null) return false; node[1] = r; return true;
 }

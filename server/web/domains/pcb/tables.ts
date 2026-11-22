@@ -172,7 +172,8 @@ export const MENU_CHECKS = new Set(["showProperties", "showSearch", "showHierarc
  */
 export const MODULE_ALIAS: Record<Editor, Record<string, string>> = {
   sch: { rotateCCW: "rotateSelection", rotateCW: "rotateSelectionCW", mirrorH: "mirrorSelectionX", mirrorV: "mirrorSelectionY", repeatDrawItem: "repeatLast", autoplaceFields: "autoplace",
-    editSymbolFields: "fieldsTable" },   // syncAllSheetsPins is the dialog (dialogs/sync-pins.ts), not the module's quick sync of the selected sheet
+    editSymbolFields: "fieldsTable",
+    showDatasheet: "showDatasheet" },   // the schematic's Show Datasheet is the module's (the board's and the Footprint Editor's handler is not asked)   // syncAllSheetsPins is the dialog (dialogs/sync-pins.ts), not the module's quick sync of the selected sheet
   pcb: { flip: "flipSelection", rotateCcw: "rotateSelection", rotateCw: "rotateSelectionCw", mirrorH: "mirrorH", mirrorV: "mirrorV", moveExact: "moveExactly", showNetInspector: "netInspector",
     distributeHorizontallyGaps: "distributeH", distributeVerticallyGaps: "distributeV", distributeHorizontallyCenters: "distributeHCenters", distributeVerticallyCenters: "distributeVCenters" },
 };
@@ -188,6 +189,7 @@ export const MODULE_DUPLICATES: Record<Editor, string[]> = {
     "rotateSelection", "rotateSelectionCW", "mirrorSelectionX", "mirrorSelectionY", "swap", "moveExactly",
     "alignToGrid", "alignTop", "alignBottom", "alignLeft", "alignRight", "alignCenterX", "alignCenterY",
     "editReference", "editValue", "editFootprint", "autoplace", "showDatasheet", "nextUnit", "previousUnit", "placeNextSymbolUnit", "cycleBodyStyle",
+    "pointEditorAddCorner", "pointEditorRemoveCorner", "cycleArcEditMode",   // SCH_POINT_EDITOR's context menu entries
     "toLabel", "toGLabel", "toHLabel", "toDLabel", "toText", "toTextBox", "breakWire", "slice", "unfoldBus", "syncSheetPins", "cleanupSheetPins",
     "lock", "unlock", "toggleLock", "clearHighlight",
     // the ERC dialog's Delete All Markers button (DIALOG_ERC::OnDeleteAllClick); eeschema's Inspect menu has no entry

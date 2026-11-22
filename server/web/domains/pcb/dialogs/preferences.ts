@@ -270,6 +270,10 @@ export function openPreferences(page?: string, staged?: Staged): void {
             const dim = h("input", { type: "number", min: "0", max: "1", step: "0.1", value: String(p.common.hcDimming), id: "kd-pref-hcdim", style: "width:80px" }) as HTMLInputElement;
             dim.addEventListener("change", () => { const v = Math.max(0, Math.min(1, +dim.value)); if (isFinite(v)) { p.common.hcDimming = v; dim.value = String(v); } });
             ap.append(h("div", { class: "kd-row" }, h("label", { style: "color:var(--ink-2)" }, "High-contrast mode dimming factor:"), dim));
+            // panel_common_settings' Editing box: m_NonImmediateActions (input.immediate_actions is its inverse)
+            const edt = KD().staticBox(pg, "Editing");
+            edt.append(checkbox("First hotkey selects tool", p.common.immediateActions === false, (on) => { p.common.immediateActions = !on; },
+              { id: "kd-pref-nonimmediate", title: "If not checked, hotkeys will immediately perform an action even if the relevant tool was not previously selected." }));
           } },
           { label: "Mouse and Touchpad", build(pg) { mousePage(pg, p); } },
           { label: "Hotkeys", build(pg) { hk = hotkeysPanel(pg, staged && staged.hotkeys); } },

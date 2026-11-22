@@ -69,7 +69,9 @@ export function fieldOf(item: Pick<KItem, "node">, name: string) { return window
 
 // KiCad's selection filter categories for an item kind.
 export function filterKey(kind: string, it?: KItem | null) {
-  if (isSch()) return kind === "symbol" ? "symbols" : (kind === "wire" || kind === "bus") ? "wires" : /label|netclass_flag/.test(kind) ? "labels" : kind === "image" ? "images" : (kind === "text" || kind === "text_box") ? "text" : kind === "rule_area" ? "ruleAreas" : /rectangle|circle|arc|polyline|bezier/.test(kind) ? "graphics" : "other";
+  // SCH_SELECTION_TOOL::itemPassesFilter: sheets go with symbols, junctions with wires, tables with text; only the
+  // local, global and hierarchical labels are "labels" (a directive label, a bus entry, a no-connect are "other")
+  if (isSch()) return (kind === "symbol" || kind === "sheet") ? "symbols" : (kind === "wire" || kind === "bus" || kind === "junction") ? "wires" : (kind === "label" || kind === "global_label" || kind === "hierarchical_label") ? "labels" : kind === "image" ? "images" : (kind === "text" || kind === "text_box" || kind === "table") ? "text" : kind === "rule_area" ? "ruleAreas" : /^(rectangle|circle|arc|polyline|bezier|ellipse|ellipse_arc)$/.test(kind) ? "graphics" : "other";
   return kind === "footprint" ? "footprints" : (kind === "segment" || kind === "arc") ? "tracks" : kind === "via" ? "vias" : kind === "zone" ? (it && it.node && KiCadCanvas.kid(it.node, "keepout") ? "keepouts" : "zones") : kind === "dimension" ? "dimensions" : (kind === "gr_text" || kind === "gr_text_box") ? "text" : /^gr_|image|table/.test(kind) ? "graphics" : "other";
 }
 
@@ -77,13 +79,51 @@ export function filterKey(kind: string, it?: KItem | null) {
 export function itemLocked(it: KItem | null | undefined) { const n = it && it.node; if (!n) return false; const l = KiCadCanvas.kid(n, "locked"); return l ? KiCadCanvas.str(l[1]) !== "no" : n.indexOf("locked") > 0; }
 
 /** The selection filter's verdict on an item kind; with the item itself also "Locked items" and Rule Areas (a keepout zone). */
-export function filterAllows(kind: string, it?: KItem | null) { const f = selFilter(); if (it && f.lockedItems === false && itemLocked(it)) return false; const k = filterKey(kind, it); return f[k] !== false; }
+export function filterAllows(kind: string, it?: KItem | null) { const f = selFilter(); if (it && f.lockedItems === false && itemLocked(it)) return false; if (it && !schSelectable(it)) return false; const k = filterKey(kind, it); return f[k] !== false; }
+/** SCH_SELECTION_TOOL::Selectable: a directive label (and a rule area that only carries them) while directive labels are hidden is not. */
+export function schSelectable(it: KItem): boolean {
+  if (!isSch() || !E.kdoc || !E.renderOpts || E.renderOpts.showDirectiveLabels !== false) return true;
+  const m = CollabTools.sch as unknown as { _?: { selectableItem?: (d: KDoc, it: KItem) => boolean } } | undefined;
+  try { return !(m && m._ && m._.selectableItem) || m._.selectableItem(E.kdoc, it); } catch (e) { return true; }
+}
+/** One collected candidate of a schematic click (sch-tools guess.ts): an item, a symbol's pin or a symbol's field. */
+export interface SchCand { key: string; kind: "item" | "pin" | "field"; item: KItem; pin?: { number: string }; field?: string }
+/**
+ * SCH_SELECTION_TOOL::CollectHits + narrowSelection at a point: the candidates GuessSelectionCandidates leaves (the
+ * closest first), how many the collector held before the filter, and the filter categories that rejected them all.
+ * `itemsOnly` scans document items alone (RequestSelection( MovableItems ): no pins), `skip` leaves the heuristics out.
+ */
+export function schCands(mm: readonly number[], opts?: { skip?: boolean; itemsOnly?: boolean }): { cands: SchCand[]; pre: number; rejected: string[] } {
+  const none = { cands: [] as SchCand[], pre: 0, rejected: [] as string[] };
+  const m = CollabTools.sch as unknown as { _?: { clickCandidates?: (c: unknown, mm: number[], skip?: boolean, itemsOnly?: boolean) => { cands: SchCand[]; pre: number; rejected: string[] } } } | undefined;
+  if (!isSch() || !E.kdoc || !m || !m._ || !m._.clickCandidates) return none;
+  try { return m._.clickCandidates(toolCtx(), [mm[0], mm[1]], !!(opts && opts.skip), !!(opts && opts.itemsOnly)); } catch (e) { console.warn(e); return none; }
+}
+/** The one candidate a click at mm picks first (the closest after the heuristics), or null. */
+export function schWinner(mm: readonly number[], itemsOnly?: boolean): SchCand | null { return schCands(mm, { itemsOnly }).cands[0] || null; }
+// the collector asks the Selection Filter here: the rejecting category's key, "-" for an item the Objects pane hides
+E.schCandRejects = (kind: "item" | "pin" | "field", it: KItem): string | null => {
+  const f = selFilter() as Record<string, boolean>;
+  if (it && f.lockedItems === false && itemLocked(it)) return "lockedItems";
+  if (kind === "pin") return f.pins === false ? "pins" : null;
+  if (kind === "field") return f.text === false ? "text" : null;
+  const k = filterKey(it.kind, it); if (f[k] === false) return k;
+  return E.pickAllowed && !E.pickAllowed(it) ? "-" : null;
+};
 
 /** Hit-test options: hidden layers never count and the active layer's side is preferred (KiCad's candidate rules). */
 export function hitOpts() { return { hidden: E.hiddenLayers, side: !isSch() && E.activeLayer && /^B\./.test(E.activeLayer) ? "B" : "F" }; }
 
    // {id, onGeom} of the latest nearestFootprint() call
+/** hitAny's scan: document items only (a hover selection for Move / Rotate / Delete never takes a pin or a field). */
+let nearestItemsOnly = false;
 export function nearestFootprint(x: number, y: number, radiusMm: number): ItemSummary | SheetEntry | null {
+  if (E.kdoc && isSch()) {
+    // the symbol or sheet the click's collector leaves first (SCH_SYMBOL::HitTest: the body box grown by threshold / 2)
+    const c = schWinner([x, y], nearestItemsOnly), it = c && c.kind === "item" && (c.item.kind === "symbol" || c.item.kind === "sheet") ? c.item : null;
+    E.lastFpHit = it ? { id: it.id, onGeom: true } : null;
+    return it ? E.items.find((f2: ItemSummary) => f2.id === it.id) || E.sheets.find((sh: SheetEntry) => sh.id === it.id) || null : null;
+  }
   if (E.kdoc) { const f = selFilter(); if ((isSch() && f.symbols === false) || (!isSch() && f.footprints === false)) return null; E.lastFpHit = KiCadCanvas.hitTestDetail(E.kdoc, x, y, Math.min(radiusMm, (isSch() ? 3 : HIT_PX) / Math.max(1, pxPerMm())) /* KiCad's hit accuracy: GENERAL_COLLECTOR's 5 px on a board */, hitOpts()); const id = E.lastFpHit ? E.lastFpHit.id : null; const hitIt = id ? E.kdoc.items.get(id) : null; if (hitIt && !filterAllows(hitIt.kind, hitIt)) return null; return id ? E.items.find((f2: ItemSummary) => f2.id === id) || E.sheets.find((sh: SheetEntry) => sh.id === id) /* a hierarchical sheet is picked like a symbol */ || null : null; }
   let best: ItemSummary | null = null, bestD = radiusMm;
   for (const fp of E.items) { const d = Math.hypot(fp.x / E.IU - x, fp.y / E.IU - y); if (d < bestD) { best = fp; bestD = d; } }
@@ -167,7 +207,8 @@ export const FILTER_KEYS: Record<"sch" | "pcb", string[]> = { sch: ["symbols", "
 // Remembered per editor (kui.filter.<editor>), as KiCad keeps it in the project's local settings.
 export const filters = (() => { const out: Record<string, Record<string, boolean>> = {}; for (const ed of ["sch", "pcb"]) { try { const v = JSON.parse(localStorage.getItem("kui.filter." + ed) || "null"); if (v && typeof v === "object") out[ed] = v; } catch (e) { /* no storage */ } } return out; })();
 
-export function selFilter() { return filters[editorId()] || {}; }
+/** The schematic's "Locked items" box is off until ticked (SCH_SELECTION_FILTER_OPTIONS: lockedItems = false). */
+export function selFilter(): Record<string, boolean> { const ed = editorId(), f = filters[ed] || {}; return ed === "sch" && f.lockedItems === undefined ? Object.assign({ lockedItems: false }, f) : f; }
 
 export function setFilter(key: string, on?: unknown) {
   const ed = editorId(); const f = filters[ed] = filters[ed] || {};
@@ -175,16 +216,16 @@ export function setFilter(key: string, on?: unknown) {
   else if (key.startsWith("only:")) { for (const k of FILTER_KEYS[ed]) f[k] = k === key.slice(5); }   // the right-click "Only …" entry
   else f[key] = !!on;
   try { localStorage.setItem("kui.filter." + ed, JSON.stringify(f)); } catch (e) { /* no storage */ }
-  store.set({ filter: Object.assign({}, f) });
+  store.set({ filter: Object.assign({}, selFilter()) });
   E.selected = null; drawSelection(); renderProps();
 }
 
 // ---- multi-selection: box / lasso, group move, group delete ----
 export function hitAny(mm: [number, number], preferNoConnect = false): { id: string; kind: string; fp?: ItemSummary | SheetEntry; item?: KItem } | null {
-  const fp = nearestFootprint(mm[0], mm[1], 5 / Math.max(1, E.zoom * 0.6));
+  nearestItemsOnly = true; let fp: ItemSummary | SheetEntry | null; try { fp = nearestFootprint(mm[0], mm[1], 5 / Math.max(1, E.zoom * 0.6)); } finally { nearestItemsOnly = false; }
   if (fp && !preferNoConnect) return { id: fp.id, kind: isSch() ? "symbol" : "footprint", fp };
-  const m = activeModule(); const pick = m && m._ && (m._.pickNonSymbol as ((ctx: ToolCtx, mm: [number, number]) => KItem | null) | undefined);
-  if (pick) { try { const it = pick(toolCtx(), mm); if (it && (!fp || it.kind === "no_connect") && filterAllows(it.kind, it)) return { id: it.id, kind: it.kind, item: it }; } catch (e) { /* module without pick */ } }
+  const m = activeModule(); const pick = m && m._ && (m._.pickNonSymbol as ((ctx: ToolCtx, mm: [number, number], itemsOnly?: boolean) => KItem | null) | undefined);
+  if (pick) { try { const it = pick(toolCtx(), mm, true); if (it && (!fp || it.kind === "no_connect") && filterAllows(it.kind, it)) return { id: it.id, kind: it.kind, item: it }; } catch (e) { /* module without pick */ } }
   return fp ? { id: fp.id, kind: isSch() ? "symbol" : "footprint", fp } : null;
 }
 
@@ -198,6 +239,14 @@ export function drawBoxSel() { requestRepaint(); }
 // KiCad: dragging left-to-right selects what the box encloses, right-to-left what it touches; the lasso takes what it contains.
 /** PCB_SELECTION_TOOL::FilterCollectorForHierarchy: with a board group entered, items outside it are dropped (in place). */
 export function scopeToEnteredGroup(items: KItem[]): void {
+  if (isSch() && E.kdoc) {   // SCH_SELECTION_TOOL::FilterCollectorForHierarchy: SCH_GROUP::WithinScope( item, m_enteredGroup )
+    const sm = CollabTools.sch as unknown as { enteredGroupId?: () => string | null } | undefined, g = sm && sm.enteredGroupId ? sm.enteredGroupId() : null;
+    const top = g ? E.kdoc.items.get(g) : null; if (!top) return;
+    const inside = new Set<string>(), walk = (it: KItem) => { for (const id of (KiCadCanvas.groupMemberIds as (n: SNode) => string[])(it.node)) { if (inside.has(id)) continue; inside.add(id); const m = E.kdoc.items.get(id); if (m && m.kind === "group") walk(m); } };
+    walk(top);
+    for (let i = items.length - 1; i >= 0; i--) if (!inside.has(items[i].id)) items.splice(i, 1);
+    return;
+  }
   const pcb = !isSch() && CollabTools.pcb; if (!pcb || !pcb.withinEnteredGroup || !E.kdoc) return;
   let keep: Set<string>; try { keep = new Set(pcb.withinEnteredGroup(E.kdoc, items.map((it) => it.id))); } catch (e) { console.warn(e); return; }
   for (let i = items.length - 1; i >= 0; i--) if (!keep.has(items[i].id)) items.splice(i, 1);
@@ -215,10 +264,12 @@ export function boxedBoardItems(start: number[], cur: number[]): KItem[] {
   scopeToEnteredGroup(out);
   return out;
 }
+/** SHAPE_LINE_CHAIN::Area( false ) of the closed lasso: positive when it is drawn clockwise on screen (INSIDE_LASSO). */
+export function lassoSigned(pts: readonly (readonly number[])[]): number { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); return -a * 0.5; }
 export function finishBoxSel(ev: { clientX: number; clientY: number }) {
   const b: BoxSel | null = E.boxSel; E.boxSel = null; requestRepaint(); if (!b || !E.kdoc) return;
   const moved = Math.hypot(ev.clientX - b.startClient[0], ev.clientY - b.startClient[1]);
-  if (moved < 4) {
+  if (moved < 4 && !(b as BoxSel & { live?: boolean }).live) {
     if (b.clickHighlight) { const pm = CollabTools.pcb as unknown as { highlightNetAt?: (c: unknown, at: number[]) => unknown } | undefined; if (pm && pm.highlightNetAt) { pm.highlightNetAt(toolCtx(), b.start); requestRender(); } }
     return;
   }
@@ -226,7 +277,20 @@ export function finishBoxSel(ev: { clientX: number; clientY: number }) {
   // SelectMultiple: a line is taken by the box as a whole, or (contained mode) by one dangling end inside it
   const schM = isSch() ? (CollabTools.sch as unknown as { boxLineFlags?: (d: KDoc, it: KItem, box: [number, number, number, number], contained: boolean) => "whole" | 0 | 1 | null | undefined; putSelEnd?: (id: string, end: 0 | 1 | null) => void; state?: { selEnds?: Map<string, number> | null } }) : null;
   const partEnds = new Map<string, 0 | 1>();
-  if (b.lasso) { for (const it of E.kdoc.items.values()) { if (!it.bbox || !filterAllows(it.kind, it)) continue; const c = itemBoxCentre(it); if (c && pointInPoly(c, b.pts)) picked.push(it); } }
+  // schematic: SCH_SELECTION_TOOL::SelectMultiple (sch-tools guess.ts areaCandidates): every item by its own HitTest
+  // against the rectangle or the lasso (a symbol by its body box, a shape by its outline), the fields and pins of
+  // symbols that are not taken themselves; a lasso drawn clockwise takes what it contains, anticlockwise what it touches
+  let schFields: { id: string; name: string }[] = [], schPins: { id: string; number: string }[] = [];
+  const schArea = isSch() ? (CollabTools.sch as unknown as { _?: { areaCandidates?: (c: unknown, a: { box?: number[]; poly?: number[][]; contained: boolean }) => { items: { item: KItem; end: "whole" | 0 | 1 }[]; fields: { id: string; name: string }[]; pins: { id: string; number: string }[] } } })._?.areaCandidates : undefined;
+  if (schArea) {
+    let r: ReturnType<NonNullable<typeof schArea>> | null = null;
+    try {
+      if (b.lasso) { const poly = (b as BoxSel & { live?: boolean }).live ? [...b.pts, b.cur] : b.pts; r = poly.length > 2 ? schArea(toolCtx(), { poly, contained: lassoSigned(poly) > 0 }) : null; }
+      else r = schArea(toolCtx(), { box: [Math.min(b.start[0], b.cur[0]), Math.min(b.start[1], b.cur[1]), Math.max(b.start[0], b.cur[0]), Math.max(b.start[1], b.cur[1])], contained: b.cur[0] >= b.start[0] });
+    } catch (e) { console.warn(e); }
+    if (r) { for (const q of r.items) { picked.push(q.item); if (q.end !== "whole") partEnds.set(q.item.id, q.end); } schFields = r.fields; schPins = r.pins; }
+  }
+  else if (b.lasso) { for (const it of E.kdoc.items.values()) { if (!it.bbox || !filterAllows(it.kind, it)) continue; const c = itemBoxCentre(it); if (c && pointInPoly(c, b.pts)) picked.push(it); } }
   else {
     const x0 = Math.min(b.start[0], b.cur[0]), x1 = Math.max(b.start[0], b.cur[0]), y0 = Math.min(b.start[1], b.cur[1]), y1 = Math.max(b.start[1], b.cur[1]), enclose = b.cur[0] >= b.start[0];
     const board = !isSch();
@@ -265,10 +329,16 @@ export function finishBoxSel(ev: { clientX: number; clientY: number }) {
   // top-level parent, which this selection holds as the parent's id with all its members
   // PCB_SELECTION_TOOL's one m_selection: the board module's own picks a kept selection held join the boxed items
   if (!isSch() && pcbSel && pcbSel.size && E.selection.size) { for (const id of pcbSel) if (E.kdoc.items.has(id)) E.selection.add(id); pcbSel.clear(); }
-  if (!isSch()) E.selection = groupExpand(E.selection);
+  // FilterCollectorForHierarchy: a boxed group member brings its top-level group (on the schematic too)
+  E.selection = groupExpand(E.selection);
+  // fields (and, when nothing else was boxed, pins) the box covered on their own are the selection: SCH_FIELD_T / SCH_PIN_T
+  if (isSch() && !picked.length && !E.selection.size && !E.selected) {
+    if (schFields.length) { E.selField = schFields[schFields.length - 1]; E.selFields = schFields.slice(0, -1); E.selPins = []; }
+    else if (schPins.length) { E.selField = null; E.selFields = []; E.selPins = schPins; }
+  }
   const prim = picked.find((it) => it.kind === "symbol" || it.kind === "footprint");
   E.selected = prim ? (E.items.find((f: ItemSummary) => f.id === prim.id) || E.selected) : (b.add ? E.selected : null);
   if (CollabTools.sch && CollabTools.sch.select) CollabTools.sch.select(null);
   drawSelection(); renderProps(); renderObjects();
-  setStatusBar({ message: E.selection.size ? `${E.selection.size} item${E.selection.size === 1 ? "" : "s"} selected` : "" });
+  { const n = E.selection.size || (E.selField ? 1 + (E.selFields || []).length : 0) || E.selPins.length; setStatusBar({ message: n ? `${n} item${n === 1 ? "" : "s"} selected` : "" }); }
 }

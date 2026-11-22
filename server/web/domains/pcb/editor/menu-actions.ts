@@ -12,12 +12,13 @@ import { matchProperties, matchPropertiesSettings } from "./match-properties";
 import { leaveSheet } from "./schnets";
 import type { ActionHandler } from "./types";
 import { cursorClick, cursorStep, panStep } from "./crosshair";
-import { gridIndex, gridList, navigateDocs, openDoc, rootSchematic, setActiveLayer, setGridIndex } from "./doc";
+import { gridIndex, gridList, navigateDocs, rootSchematic, setActiveLayer, setGridIndex } from "./doc";
 import { HANDLERS, toggleRenderOpt } from "./actions";
 import { setToggle, state, store } from "./appstore";
 import { openAbout, openHotkeyList } from "./help-dialogs";
 import { setCrosshair, setUnitsAction, toggleAlwaysShowCursor } from "./panes";
 import { cycleInactiveMode, layerAlphaStep, toggleInactiveMode } from "./panels/appearance";
+import { stepSheetPage } from "./panels/hierarchy";
 import { openSelectionProperties } from "./pointer";
 import { E } from "./state";
 import { KICAD_BASE_VERSION } from "../canvas/version";
@@ -109,11 +110,8 @@ function resetLocalCoords(): void {
   store.slice("viewport", { origin: E.localOrigin.slice() });
 }
 
-function stepSheet(dir: number): void {
-  const sheets = (st.docs || []).filter((d) => d.docType === "kicad_sch"); if (sheets.length < 2) { toast("This schematic has one sheet"); return; }
-  const i = sheets.findIndex((d) => d.docId === st.docId);
-  openDoc(sheets[(i + dir + sheets.length) % sheets.length]);
-}
+/** SCH_NAVIGATE_TOOL::Previous / Next: by virtual page number over the hierarchy; no wrap at either end. */
+function stepSheet(dir: number): void { stepSheetPage(dir); }
 
 function stepLayer(dir: number): void {
   const cu = (store.get().document.copperLayers || []) as LayerRow[]; if (!cu.length) return;

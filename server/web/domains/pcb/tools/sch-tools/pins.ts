@@ -4,6 +4,7 @@
 // Edit Main Fields actions edit the parent's fields, and the selection menu offers the Pin Function (alternates)
 // and Pin Helpers (PIN_TRICKS_MENU: Wire, No Connect, Net Label, Hierarchical Label, Global Label) sub-menus.
 import type { SchCtx, Pt } from "./types";
+import { root } from "../root";
 import { symbolPins, type SymPin } from "./autoplace";
 import { lineNode, labelNode, noConnectNode } from "./nodes";
 import type { Anchor, BreakJob } from "./types";
@@ -136,7 +137,10 @@ export const PIN_HELPERS: { id: PinHelper; label: string; icon: string }[] = [
  */
 export function pinHelper(ctx: SchCtx, pins: PinRef[], what: PinHelper, sheetRef?: (it: KItem) => string): string[] {
   const doc = ctx.doc, changes: KChange[] = [], ids: string[] = [];
-  const grid = ctx.gridPitch > 0 ? ctx.gridPitch : 1.27;
+  // grid.GetGridSize( GRID_HELPER_GRIDS::GRID_WIRES ): the Wires grid override when grid overrides are on
+  const ed = root.CollabEditor as unknown as { gridForClass?: (cls: string) => number } | undefined;
+  let grid = ctx.gridPitch > 0 ? ctx.gridPitch : 1.27;
+  try { const g = ed && ed.gridForClass ? ed.gridForClass("wires") : 0; if (g > 0) grid = g; } catch (e) { /* no preferences */ }
   for (const r of pins) {
     const h = pinOf(doc, r); if (!h) continue;
     const p: Pt = [h.pin.x, h.pin.y], side = h.pin.side;

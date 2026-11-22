@@ -86,6 +86,9 @@ test("placement without Auto keeps the spin", () => {
 test("a move ends with the flagged label re-spun for where it lands; an unflagged one keeps its spin", () => {
   const doc = K.parseDoc(SHEET), ctx = makeCtx(doc);
   sch.onActivate("select", ctx);
+  // MOVE: the label goes alone.  (A DRAG takes the wire it sat on along, orthoLineDrag leaves that wire's last grid at
+  // the label and GetLabelOrientationForPoint then sees two lines there.)
+  sch.setMouseDragMode(ctx, "move");
   _.setAutoRotate("g1", true);
   const g = doc.items.get("g1");
   assert.ok(_.beginDrag(ctx, g, [76.2, 50.8], true)); _.moveDrag(ctx, [101.6, 76.2]); _.endDrag(ctx, true);
@@ -93,6 +96,7 @@ test("a move ends with the flagged label re-spun for where it lands; an unflagge
   _.setAutoRotate("g1", false);
   assert.ok(_.beginDrag(ctx, after, [101.6, 76.2], true)); _.moveDrag(ctx, [50.8, 50.8]); _.endDrag(ctx, true);
   assert.strictEqual(atOf(doc.items.get("g1").node)[2], 270);
+  sch.setMouseDragMode(ctx, "drag");
 });
 
 test("Repeat Item (Insert) copies the Auto flag to the repeated label (SCH_ITEM::Duplicate copies m_autoRotateOnPlacement)", () => {

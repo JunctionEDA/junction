@@ -753,7 +753,8 @@ export async function openDoc(doc: DocEntry) {
   E.ITEM_TYPE = isSch() ? "SCH_SYMBOL" : "FOOTPRINT";
   // DRAWING_TOOL::Reset( MODEL_RELOAD ) writes the constraint field from the angle snap mode; eeschema never writes it
   setStatusBar({ mode: "", constraint: isSch() ? "" : boardConstraintMsg() });
-  if (!docNav.lock) { docNav.list.length = docNav.idx + 1; docNav.list.push(doc.docId); docNav.idx = docNav.list.length - 1; }
+  // SCH_NAVIGATE_TOOL::pushToHistory: the forward entries go, a sheet already on top is not pushed again; only sheets are history
+  if (!docNav.lock && doc.docType === "kicad_sch") { docNav.list.length = docNav.idx + 1; if (docNav.list[docNav.list.length - 1] !== doc.docId) docNav.list.push(doc.docId); docNav.idx = docNav.list.length - 1; }
   setupEditorChrome(); publishDocs();
   // the address names the document whenever the project has more than one thing to open
   const several = state.docs!.length > 1 || !!(boundPcb() && boundPcb()!.dir) || (shellOn() && allDocs().some((d) => isHostedDoc(d)));
@@ -957,7 +958,7 @@ export function setProjectDocs(docs: DocEntry[], open?: string) {
 }
 
 export function navigateDocs(dir: number) {
-  const i = docNav.idx + dir; if (i < 0 || i >= docNav.list.length) { toast(dir < 0 ? "No previous sheet" : "No next sheet"); return; }
+  const i = docNav.idx + dir; if (i < 0 || i >= docNav.list.length) return;   // CanGoBack / CanGoForward false: KiCad only rings the bell
   docNav.lock = true; docNav.idx = i; try { openDocId(docNav.list[i]); } finally { docNav.lock = false; }
 }
 

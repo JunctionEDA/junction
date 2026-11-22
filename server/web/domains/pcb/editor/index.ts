@@ -31,8 +31,8 @@ import { IS_WINDOWS, clickMode, dragKeeps, dragModifier, hasModifier, modifiersS
 import { renderObjects, snapMm, syncItemsFromDoc, updateGridStatus, applyChanges, enterSheet, openDoc } from "./doc";
 import { $ } from "./dom";
 import { IS_MAC } from "../../../shared/keys";
-import { cancelLongPress, candidatesAt, moveLongPress, openClarifyMenu, openContextMenu, startLongPress } from "./contextmenu";
-import { DRAG_THRESHOLD_PX, cancelInteraction, clearAllSelection, markerUnder, rotateFieldMove, startFieldMove, copperUnderBeatsFootprint, copperUnderBeatsPad, installGestures, interactionBusy, pinForClick, registerPointerUp, selectionChanged, selectionHooks, selectionIds, startMove, applyPickMode, selectedAnywhere, mergeBoardSelection, splitBoardSelection } from "./gestures";
+import { cancelLongPress, candidatesAt, moveLongPress, openClarifyMenu, openContextMenu, schClarifyClick, startLongPress } from "./contextmenu";
+import { DRAG_THRESHOLD_PX, cancelInteraction, clearAllSelection, markerUnder, rotateFieldMove, startFieldMove, copperUnderBeatsFootprint, copperUnderBeatsPad, installGestures, interactionBusy, pinForClick, fieldForClick, schSelectionContains, registerPointerUp, selectionChanged, selectionHooks, selectionIds, startMove, applyPickMode, selectedAnywhere, mergeBoardSelection, splitBoardSelection } from "./gestures";
 import { loadMe, navigate, route } from "./home";
 import { sendOp } from "./net";
 import { applyTheme, syncSchModes } from "./panes";
@@ -41,7 +41,7 @@ import { installPcbRouting, pcbLayerKey } from "./pcbrouting";
 import { installProjectWatch } from "./projectwatch";
 import { breakFollow, sendPresence } from "./peers";
 import { collapseSelectionTo, drawDrag, drawZoomRect, finishGroupDrag, finishZoomRect, measureCopy, measureDown, measureMove, measureUp, moveGroupDrag, openSelectionProperties, startGroupDrag } from "./pointer";
-import { clearSelection, fieldDragMore, pickField, selectedFields, selectedSet, drawBoxSel, drawSelection, fieldLocalDelta, fieldOf, finishBoxSel, groupExpand, hitAny, nearestFootprint, renderProps, renderPropsInto, hitOpts } from "./selection";
+import { clearSelection, fieldDragMore, pickField, selectedFields, selectedSet, drawBoxSel, drawSelection, fieldLocalDelta, fieldOf, finishBoxSel, groupExpand, hitAny, nearestFootprint, schCands, renderProps, renderPropsInto, hitOpts } from "./selection";
 import { E } from "./state";
 import "./panels/index";
 import { activeModule, commitChanges, commitObservers, deleteSelected, deleteSelection, moduleTool, moveOp, publishUndo, redoLast, redoStack, rotateSelected, runModuleHotkey, selectAll, setTool, toolCtx, undoLast, undoStack, unlockedForEdit } from "./tools";
@@ -223,7 +223,107 @@ window.addEventListener("pointerup", (ev) => {
   }, 0);
 }, true);
 
+// SCH_SELECTION_TOOL on IsClick( BUT_LEFT ): CollectHits + narrowSelection.  More than one candidate left after the
+// heuristics opens Clarify Selection (selectPoint -> ACTIONS::selectionMenu) and, closed without a pick, leaves the
+// selection as it was; hits the Selection Filter rejected all of flash the boxes responsible (HighlightSelectionFilter).
+let clarifyPress: { keys: string[]; all: string[]; rejected: string[]; x: number; y: number; id: number; sel: Set<string>; selected: unknown; selField: unknown; selFields: unknown; selPins: unknown; schSel: string | null; schEnds: Map<string, number> | null } | null = null;
+window.addEventListener("pointerdown", (ev) => {
+  clarifyPress = null;
+  if (ev.button !== 0 || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey || E.tool !== "select" || !isSch() || !E.kdoc || state.view !== "editor" || E.hyperHover) return;
+  if (!(ev.target instanceof Element) || !stage.contains(ev.target) || ev.target.closest("#cmtPanel") || ev.target.closest("[data-schtools]")) return;
+  const sch = CollabTools.sch as unknown as { state: { drag?: unknown; carry?: unknown; wire?: unknown; pedit?: unknown; sel?: string | null; selEnds?: Map<string, number> | null } } | undefined;
+  if (!sch || sch.state.drag || sch.state.carry || sch.state.wire || E.fdrag || E.boxSel) return;
+  const r = schCands(worldMm(ev));
+  const rejected = !r.cands.length && r.pre > 0 ? r.rejected : [];
+  if (r.cands.length < 2 && !rejected.length) return;
+  clarifyPress = { keys: r.cands.map((c) => c.key), all: r.cands.length > 1 ? schCands(worldMm(ev), { skip: true }).cands.map((c) => c.key) : [], rejected, x: ev.clientX, y: ev.clientY, id: ev.pointerId,
+    sel: new Set(E.selection), selected: E.selected, selField: E.selField, selFields: E.selFields, selPins: E.selPins, schSel: sch.state.sel || null, schEnds: sch.state.selEnds ? new Map(sch.state.selEnds) : null };
+}, true);
+window.addEventListener("pointermove", (ev) => {
+  if (clarifyPress && ev.pointerId === clarifyPress.id && Math.hypot(ev.clientX - clarifyPress.x, ev.clientY - clarifyPress.y) > DRAG_THRESHOLD_PX) clarifyPress = null;   // IsDrag
+}, true);
+window.addEventListener("pointercancel", () => { clarifyPress = null; }, true);
+window.addEventListener("pointerup", (ev) => {
+  const cp = clarifyPress; clarifyPress = null;
+  if (!cp || ev.button !== 0 || ev.pointerId !== cp.id || Math.hypot(ev.clientX - cp.x, ev.clientY - cp.y) > DRAG_THRESHOLD_PX) return;
+  const sch = CollabTools.sch as unknown as { state: { drag?: unknown; carry?: unknown; wire?: unknown; pedit?: unknown; sel?: string | null; selEnds?: Map<string, number> | null }; select(id: string | null): void } | undefined;
+  if (!sch || sch.state.pedit) return;   // the point editor took the press (HasPoint without a modifier)
+  if (cp.rejected.length) { store.set({ filterFlash: { keys: cp.rejected, at: Date.now() } }); return; }
+  cancelLongPress();
+  // after the release has run its course, and after a wire the click auto-started (which cancels the selection)
+  setTimeout(() => setTimeout(() => {
+    if (sch.state.wire || sch.state.drag || sch.state.carry || E.tool !== "select" || !E.kdoc) return;
+    E.boxSel = null; E.drag = null;
+    clearSelection(); for (const id of cp.sel) if (E.kdoc.items.has(id)) E.selection.add(id);
+    E.selected = cp.selected as typeof E.selected; E.selField = cp.selField as typeof E.selField; E.selFields = cp.selFields as typeof E.selFields; E.selPins = cp.selPins as typeof E.selPins;
+    if (cp.schSel && E.kdoc.items.has(cp.schSel)) { sch.select(cp.schSel); sch.state.selEnds = cp.schEnds; }
+    drawSelection(); renderProps(); renderObjects(); requestRender();
+    schClarifyClick({ clientX: cp.x, clientY: cp.y }, cp.keys, cp.all);
+  }, 0), 0);
+}, true);
+
+// SCH_SELECTION_TOOL: BUT_AUX1 (the mouse's back button) runs navigateBack, BUT_AUX2 navigateForward
 stage.addEventListener("pointerdown", (ev) => {
+  if ((ev.button !== 3 && ev.button !== 4) || !isSch() || E.tool !== "select" || !E.kdoc || state.view !== "editor") return;
+  ev.preventDefault(); ev.stopImmediatePropagation();
+  runKicadAction(ev.button === 3 ? "navigateBack" : "navigateForward");
+}, true);
+// the browser's own history must not move with them
+for (const t of ["mouseup", "auxclick", "mousedown"] as const) stage.addEventListener(t, (ev) => { if ((ev.button === 3 || ev.button === 4) && isSch() && E.kdoc && state.view === "editor") ev.preventDefault(); }, true);
+// a live lasso owns the pointer and the keys until it is finished or cancelled
+stage.addEventListener("pointerdown", (ev) => {
+  const b = E.boxSel as (BoxSelLive | null); if (!b || !b.live) return;
+  ev.stopImmediatePropagation(); ev.preventDefault();
+  if (ev.button === 0) { const mm = worldMm(ev); b.pts.push(mm); b.cur = mm; drawBoxSel(); }
+}, true);
+stage.addEventListener("dblclick", (ev) => {
+  const b = E.boxSel as (BoxSelLive | null); if (!b || !b.live) return;
+  ev.stopImmediatePropagation(); ev.preventDefault();
+  finishBoxSel(ev); requestRender();
+}, true);
+window.addEventListener("keydown", (ev) => {
+  const b = E.boxSel as (BoxSelLive | null); if (!b || !b.live) return;
+  const t = ev.target as HTMLElement | null; if (t && t.closest && t.closest("input, textarea, select, [contenteditable]")) return;
+  const undo = (ev.ctrlKey || ev.metaKey) && !ev.shiftKey && ev.key.toLowerCase() === "z";
+  if (ev.key === "Backspace" || ev.key === "Delete" || undo) { if (b.pts.length) b.pts.pop(); drawBoxSel(); }   // doDelete / undo: the last point goes
+  else if (ev.key === "End" || ev.key === "Enter") { finishBoxSel({ clientX: 0, clientY: 0 }); requestRender(); }   // finishInteractive / cursorDblClick
+  else if (ev.key === "Escape") { E.boxSel = null; requestRepaint(); }
+  else return;
+  ev.stopImmediatePropagation(); ev.preventDefault();
+}, true);
+type BoxSelLive = { live?: boolean; pts: number[][]; cur: number[] };
+
+/** The schematic selection's grip press (selectionContains( DragOrigin ) without the pressed item being selected). */
+function schGripPress(ev: PointerEvent, mm: [number, number]): boolean {
+  if (!isSch() || (E.leftDrag || "dragSelected") !== "dragSelected" || !E.kdoc) return false;
+  const ids = selectionIds(); if (!ids.length) return false;
+  const w = schCands(mm).cands[0] || null;
+  // the press's own pick is selected (or is a pin / field of a selected symbol): the ordinary press paths move it
+  if (w && w.kind !== "field" && ids.includes(w.item.id)) return false;
+  if (!schSelectionContains(mm)) return false;
+  const sm = CollabTools.sch as unknown as { state: { sel?: string | null; drag?: unknown }; _?: { pointEditStart?: (c: unknown, mm: number[], ev: unknown) => boolean } } | undefined;
+  if (!sm) return false;
+  ev.stopImmediatePropagation(); ev.preventDefault();
+  // SCH_POINT_EDITOR runs ahead of the selection tool: a press on an edit point of the selected item edits it
+  try { if (sm._ && sm._.pointEditStart && sm._.pointEditStart(toolCtx(), mm, ev)) return true; } catch (e) { console.warn(e); }
+  // one selection for the drag: the module's own pick and the primary symbol join the set
+  if (sm.state.sel) { if (E.kdoc.items.has(sm.state.sel)) E.selection.add(sm.state.sel); sm.state.sel = null; }
+  if (E.selected) E.selection.add(E.selected.id);
+  E.selField = null; E.selFields = []; E.selPins = [];
+  const id = ids[0], it = E.kdoc.items.get(id)!, fp = (E.items as ItemSummary[]).find((f) => f.id === id);
+  startGroupDrag(fp ? { id, fp } : { id, item: it }, mm, ev);
+  // IsClick instead of IsDrag: selectPoint at the press (or the wire the click auto-starts)
+  if (E.drag) { E.drag.clickId = null; E.drag.clickAt = mm; }
+  else { stage.setPointerCapture(ev.pointerId); }
+  return true;
+}
+
+stage.addEventListener("pointerdown", (ev) => {
+  if (ev.button === 0 && E.tool === "select" && E.kdoc && !E.viewOnly && isSch() && !(ev.target as Element).closest("#cmtPanel") && !(ev.target as Element).closest("[data-schtools]") && !hasModifier(modifiersState(ev, modOpts()))
+    && CollabTools.sch && !CollabTools.sch.state.drag && !CollabTools.sch.state.carry && !CollabTools.sch.state.wire && !(E.fdrag && E.fdrag.sticky) && E.ws && E.ws.readyState === 1) {
+    if (schGripPress(ev, worldMm(ev))) return;
+  }
+  if (isSch() && E.leftDrag === "select") return;   // MOUSE_DRAG_ACTION::SELECT: a drag always draws a selection box
   if (ev.button !== 0 || E.tool !== "select" || !E.kdoc || E.selection.size < 2 || E.viewOnly) return;
   { const ms = modifiersState(ev, modOpts()); if (hasModifier(ms) || ms.highlight) return; }   // a modifier edits the selection (or highlights)
   if (isSch() && CollabTools.sch && CollabTools.sch.state.drag) return;   // a Move / paste is following the cursor: this click drops it (sch-tools)
@@ -298,12 +398,14 @@ stage.addEventListener("pointerdown", (ev) => {
     stage.setPointerCapture(ev.pointerId); ev.preventDefault(); return;
   }
   if (E.tool === "select" && E.kdoc && window.KDialogs) {   // KiCad: a click on a field selects (and drags) the field, not its symbol
-    const f = KiCadCanvas.fieldAt(E.kdoc, x, y, E.hiddenLayers);
+    const f = isSch() ? fieldForClick([x, y]) : KiCadCanvas.fieldAt(E.kdoc, x, y, E.hiddenLayers);
     const won = f && !isSch() && E.hooks.fieldWins ? E.hooks.fieldWins([x, y], f.item.id, f.name, ev) : "field";
     if (won === "menu") { const pst = CollabTools.pcb && (CollabTools.pcb.state as { downHandled?: unknown } | undefined); if (pst) pst.downHandled = ev; ev.preventDefault(); return; }   // doSelectionMenu: the pick comes from the menu
     if (f && won === "field") {
-      const wasField = selectedFields().some((g) => g.id === f.item.id && g.name === f.name);   // DRAG_SELECTED: only a selected field drags
-      if (!wasField) { clearSelection(); E.selField = { id: f.item.id, name: f.name }; }   // a press on one of several selected fields drags them all
+      const wasFieldSel = selectedFields().some((g) => g.id === f.item.id && g.name === f.name);   // DRAG_SELECTED: only a selected field drags
+      if (!wasFieldSel && isSch() && E.leftDrag === "dragAny") { clearSelection(); E.selField = { id: f.item.id, name: f.name }; }   // DRAG_ANY: the field under the cursor is picked and dragged
+      const wasField = isSch() && E.leftDrag === "select" ? false : isSch() && E.leftDrag === "dragAny" ? true : wasFieldSel;
+      if (!wasField && !wasFieldSel) { clearSelection(); E.selField = { id: f.item.id, name: f.name }; }   // a press on one of several selected fields drags them all
       const pst = !isSch() && CollabTools.pcb && (CollabTools.pcb.state as { downHandled?: unknown } | undefined); if (pst) pst.downHandled = ev;   // one item per click: the board module does not pick what lies under the field
       drawSelection(); renderProps(); renderObjects(); requestRender();
       const pn = fieldOf(f.item, f.name), at = pn && KiCadCanvas.kid(pn, "at");
@@ -322,6 +424,11 @@ stage.addEventListener("pointerdown", (ev) => {
       // (released where it was pressed) selects the pin on its own
       const symSel = !was && (E.selection.has(pin.id) || (!!E.selected && E.selected.id === pin.id));
       if (symSel) { pinPromote = pin; pinClick = pin; }
+      else if (!was && E.leftDrag === "dragAny" && (E.items as ItemSummary[]).some((f) => f.id === pin.id)) {
+        // DRAG_ANY: RequestSelection finds no movable item under a pin, so the pin is promoted to its symbol and the drag
+        // moves that; the click (no drag) still selects the pin
+        clearSelection(); E.selected = (E.items as ItemSummary[]).find((f) => f.id === pin.id)!; pinPromote = pin; pinClick = pin;
+      }
       else if (!was) {
         clearSelection(); E.selPins = [pin]; drawSelection(); renderProps(); renderObjects(); requestRender();
         E.boxSel = { start: [x, y], cur: [x, y], pts: [[x, y]], lasso: E.selMode === "lasso", add: false, startClient: [ev.clientX, ev.clientY] }; stage.setPointerCapture(ev.pointerId);
@@ -396,11 +503,14 @@ stage.addEventListener("pointerdown", (ev) => {
   // KiCad's default left drag (MOUSE_DRAG_ACTION::DRAG_SELECTED): with nothing selected a drag draws a selection
   // box even when it starts on a part; only an existing selection moves.  The press still selects, as the click would.
   const hadSelection = !!selectedSet() || padWasSelected;
+  // schematic (SCH_SELECTION_TOOL, IsDrag): DRAG_SELECTED moves only when the drag starts on the selection, so a press
+  // on a symbol that is not selected draws a box whatever else is selected; SELECT always boxes; DRAG_ANY always drags
+  const schBox = isSch() && (E.leftDrag === "select" || (E.leftDrag !== "dragAny" && !pinPromote && !selectedSet()?.has(best.id)));
   if (!E.selection.has(best.id)) E.selection.clear();
   E.selected = best;
   { const g = groupExpand([best.id]); if (g.size > 1) for (const id of g) E.selection.add(id); }   // a click on a group member selects its group (KiCad)
   drawSelection(); renderProps(); renderObjects();
-  if (!hadSelection && E.tool === "select") { E.boxSel = { start: [x, y], cur: [x, y], pts: [[x, y]], lasso: E.selMode === "lasso", add: false, startClient: [ev.clientX, ev.clientY] }; stage.setPointerCapture(ev.pointerId); ev.preventDefault(); return; }
+  if ((isSch() ? schBox : !hadSelection) && E.tool === "select") { E.boxSel = { start: [x, y], cur: [x, y], pts: [[x, y]], lasso: E.selMode === "lasso", add: false, startClient: [ev.clientX, ev.clientY] }; stage.setPointerCapture(ev.pointerId); ev.preventDefault(); return; }
   if (E.viewOnly || !E.ws || E.ws.readyState !== 1) return;
   if (!isSch() && !unlockedForEdit([best.id], true).length) return;   // a locked footprint is selected by the click but does not follow a drag
   { const g = groupExpand([best.id]); if (g.size > 1) { E.selection = g; drawSelection(); renderObjects(); startGroupDrag({ id: best.id, fp: best }, [x, y], ev); return; } }   // a group member moves its group
@@ -466,7 +576,7 @@ function modifierClick(mm: [number, number], mc: ModClick): void {
     // a symbol's field with nothing but fields selected: the field itself joins / leaves the selection (a plain press picks
     // a field ahead of what lies under it, so the modifier click does too)
     if (!E.selection.size && !E.selected && !E.selPins.length && !(sm && sm.state && sm.state.sel)) {
-      const f = KiCadCanvas.fieldAt(E.kdoc, x, y, E.hiddenLayers);
+      const f = fieldForClick([x, y]);
       if (f) { pickField({ id: f.item.id, name: f.name }, mode); selectionChanged(); return; }
     }
     // the module's items (wires, labels, junctions, text, graphics, sheets' pins ...) come first, as its own press does
@@ -560,7 +670,8 @@ function forcedCursor(): number[] | null {
 }
 function stagePointerMove(ev: PointerEvent, mm: [number, number]): void {
   if (E.zoomRect) { drawZoomRect(ev); return; }
-  if (E.boxSel) { E.boxSel.cur = mm; if (E.boxSel.lasso) E.boxSel.pts.push(mm); boxSelModifiers(ev); drawBoxSel(); return; }
+  // selectLasso appends a point on IsDrag and on a click; with the button up the cursor only stretches the closing edge
+  if (E.boxSel) { E.boxSel.cur = mm; if (E.boxSel.lasso && (!E.boxSel.live || (ev.buttons & 1))) E.boxSel.pts.push(mm); boxSelModifiers(ev); drawBoxSel(); return; }
   if (E.measure && E.measure.set) { measureMove(snapMm(mm), ev.shiftKey); }
   if (E.pan && E.pan.zoom) {   // MOUSE_DRAG_ACTION::ZOOM: scale = exp( dy × zoom_speed × 0.001 ), up zooms in
     const z = E.pan.zoom, d = z.lastY - ev.clientY; z.lastY = ev.clientY;
@@ -640,6 +751,9 @@ const onPointerUp = (ev: PointerEvent) => {
     if (mc.ev.altKey && !IS_WINDOWS && openClarifyMenu(mc.ev, mc.mode)) return;   // Alt (m_skip_heuristics): every candidate in Clarify Selection
     modifierClick(b.start as [number, number], mc); return;   // IsClick: selectPoint with the modifiers
   }
+  // SCH_SELECTION_TOOL::selectLasso: the lasso outlives the button: clicks add points, a double click (or End) selects,
+  // Backspace / Delete take the last point back, Esc cancels
+  if (E.boxSel && E.boxSel.lasso && isSch() && (E.boxSel.live || Math.hypot(ev.clientX - E.boxSel.startClient[0], ev.clientY - E.boxSel.startClient[1]) >= 4)) { E.boxSel.live = true; try { stage.releasePointerCapture(ev.pointerId); } catch (e) { /* not captured */ } drawBoxSel(); return; }
   if (E.boxSel) { finishBoxSel(ev); return; }
   if (E.tool === "measure" && ev.button === 0) { measureUp(ev); return; }
   const modU = activeModule();
@@ -647,11 +761,17 @@ const onPointerUp = (ev: PointerEvent) => {
   if (ev.button !== 0 || !E.drag) return;
   if (E.drag.group) { finishGroupDrag(); return; }
   if (E.drag.engine) {
-    const fpE = E.drag.fp, cur = E.drag.curMm, clickId = E.drag.moved ? null : E.drag.clickId, clickPin = E.drag.moved ? null : E.drag.clickPin; E.drag = null; dragG.replaceChildren();
+    const fpE = E.drag.fp, cur = E.drag.curMm, clickId = E.drag.moved ? null : E.drag.clickId, clickPin = E.drag.moved ? null : E.drag.clickPin, clickAtE = E.drag.moved ? null : (E.drag.clickAt as [number, number] | null) || null; E.drag = null; dragG.replaceChildren();
     if (CollabTools.sch!.state.drag) { try { CollabTools.sch!.endDrag(toolCtx(), true); } catch (e) { console.warn(e); } }
     sendPresence(cur, []);
     if (clickId) { collapseSelectionTo(clickId); return; }
     if (clickPin) { selectPinOnly(clickPin); return; }
+    if (clickAtE) {   // a grip press released where it was pressed: the click's own selectPoint, or the wire it auto-starts
+      const as = CollabTools.sch!._ && (CollabTools.sch!._ as unknown as { autostartAt?: (c: unknown, mm: number[], ev: unknown) => boolean }).autostartAt;
+      let started = false; try { started = !!as && as(toolCtx(), clickAtE, { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false }); } catch (e) { started = false; }
+      if (started) { clearAllSelection(false); selectionChanged(); } else clickSelectAt(clickAtE);
+      return;
+    }
     if (E.kdoc) syncItemsFromDoc(); E.selected = E.items.find((f: ItemSummary) => f.id === fpE.id) || E.selected; drawSelection(); renderProps(); requestRender();
     return;
   }
@@ -747,6 +867,8 @@ function hoverSelect(ev: KeyboardEvent): void {
   if (HOVER_SYMBOL_ONLY.has(combo) && hit.kind !== "symbol") return;
   if (hit.fp || !CollabTools.sch) toolCtx().setSelection([hit.id]);
   else { CollabTools.sch.select(hit.id); requestRender(); }                    // wires, labels and the rest live in the module's own selection
+  // m_duplicateIsHoverSelection: the copy of a hover selection is not left selected once it is placed
+  if (combo === "Ctrl+D" && S) { (S as unknown as { dupHover?: boolean }).dupHover = true; setTimeout(() => { (S as unknown as { dupHover?: boolean }).dupHover = false; }, 0); }
   if (HOVER_RELEASE.has(combo)) setTimeout(() => releaseHover(hit.id), 0);
   else if (HOVER_HOLD.has(combo)) releaseHoverWhenDone(hit.id, combo);
 }

@@ -14,7 +14,6 @@ import type { schNets } from "../canvas/sch-nets";
 import { setStatusBar, state } from "./appstore";
 import { centerOn } from "./comments";
 import { findSheetDoc, openDoc, readSavedSchematic, rootSchematic, topLevelSchematics } from "./doc";
-import { toast } from "./util";
 import { NL } from "./pcbdialogs/canvas";
 import { liveDocument, projectDocs, type ProjectDocInfo } from "./projectfile";
 import { E } from "./state";
@@ -199,7 +198,7 @@ export function leaveSheet(): void {
   const cur = curEntry();
   const c = netMap(), inst = currentInstance(c);
   if (c && inst) {
-    if (inst.uuidPath.length <= 1) { toast("Already at the root sheet"); return; }
+    if (inst.uuidPath.length <= 1) return;   // CanGoUp false: KiCad only rings the bell
     const up = inst.uuidPath.slice(0, -1).join("/");
     const parent = c.instances.find((i) => i.uuidPath.join("/") === up);
     const d = parent ? schDocs().find((x) => x.path === parent.file) : null;
@@ -207,7 +206,7 @@ export function leaveSheet(): void {
   }
   // the hierarchy is not read yet: the root sheet, unless this is a top-level sheet already
   const tops = topLevelSchematics();
-  if (cur && tops.some((t) => t.doc.docId === cur.docId)) { toast("Already at the root sheet"); return; }
+  if (cur && tops.some((t) => t.doc.docId === cur.docId)) return;
   const r = rootSchematic(); if (r) void openDoc(r);
 }
 
@@ -251,3 +250,14 @@ export function netsOfItems(ids: string[]): (NetEntry | null)[] {
 }
 /** Every net name of the schematic (GetNetClassAssignmentCandidates). */
 export function allNetNames(): string[] { const c = netMap(); return c ? SN().netNames(c.map) : []; }
+/**
+ * The hierarchy for the tools (ctx.sheetHierarchy): every sheet path as the files from the root down, and the
+ * sheets read so far by file (SCH_SHEET_LIST for the paste's recursion test and its page numbers).
+ */
+export function sheetHierarchy(): { paths: string[][]; docs: Map<string, KDoc> } | null {
+  const c = netMap(); if (!c) return null;
+  const byPath = new Map<string, string>(); for (const i of c.instances) byPath.set(i.uuidPath.join("/"), i.file);
+  const paths = c.instances.map((i) => i.uuidPath.map((_u, n) => byPath.get(i.uuidPath.slice(0, n + 1).join("/")) || "").filter(Boolean));
+  return { paths, docs: c.docs };
+}
+(E as unknown as { hooks: Record<string, unknown> }).hooks.sheetHierarchy = sheetHierarchy;

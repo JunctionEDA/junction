@@ -26,7 +26,9 @@ export interface SchMsgOpts {
   /** the image's PPI and pixel size (SCH_BITMAP), read by the caller from its data */
   imageInfo?: (item: KItem) => { ppi: number; px: [number, number] } | null;
 }
-export interface SchMsgSel { id: string; pin?: string; field?: string }
+export interface SchMsgSel { id: string; pin?: string; field?: string;
+  /** the item itself when it is not in the document: the one on the cursor (SetMsgPanel( item ) while placing) */
+  item?: KItem }
 
 const yes = (n: SNode | null | undefined): boolean => !!n && str(n[1]) !== "no";
 const flag = (node: SNode, key: string): boolean => { const k = kid(node, key); return k ? str(k[1] ?? "yes") !== "no" : node.includes(key); };
@@ -285,7 +287,7 @@ export function imageInfoOf(node: SNode): { ppi: number; px: [number, number] } 
  * (`sel.pin`), a symbol or sheet field (`sel.field`) or any other schematic item.  [] when it shows nothing.
  */
 export function msgPanelInfo(doc: KDoc, sel: SchMsgSel, o: SchMsgOpts): MsgItem[] {
-  const it = doc.items.get(sel.id); if (!it) return [];
+  const it = sel.item || doc.items.get(sel.id); if (!it) return [];
   if (sel.pin !== undefined && it.kind === "symbol") return pinRows(doc, it, sel.pin, o);
   if (sel.field !== undefined) return fieldRows(it, sel.field, o);
   switch (it.kind) {

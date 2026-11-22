@@ -1,6 +1,6 @@
 import type { SchCtx, SchWire, Pt } from "./types";
 import { junctionAt, lineEndsAt, lineMidsAt, pinsAt } from "./connect";
-import { busEntriesAt, labelsAt, sheetPinsAt } from "./drag";
+import { busEntriesAt, connPoints, labelsAt, sheetPinsAt } from "./drag";
 import { finishWire, unfoldFollow } from "./junction";
 import { lineNode } from "./nodes";
 import { S, atOf, kid, kids, ptsOf } from "./state";
@@ -106,10 +106,13 @@ export function wireNode(w: Pick<SchWire, "kind" | "stroke">, a: Pt, b: Pt) {
 }
 // SCH_SCREEN::IsTerminalPoint: where a click ends the wire by itself.
 export function isTerminalPoint(doc: KDoc, p: Pt, kind: string) {
-  if (kind === "polyline") { for (const it of doc.items.values()) if (it.kind === "polyline" && segs(it).some(([a, b]) => segDist(p, a, b) <= 1e-3)) return true; return false; }
+  // SCH_SCREEN::IsTerminalPoint, LAYER_NOTES: GetLine( aPosition ), a two-point SCH_LINE only (a longer polyline is a shape)
+  if (kind === "polyline") { for (const it of doc.items.values()) if (it.kind === "polyline" && ptsOf(it.node).length === 2 && segs(it).some(([a, b]) => segDist(p, a, b) <= 1e-3)) return true; return false; }
   const lineAt = (k: string) => lineEndsAt(doc, p[0], p[1], k).length > 0 || lineMidsAt(doc, p[0], p[1], k).length > 0;
   if (kind === "bus") return lineAt("bus") || sheetPinsAt(doc, p).length > 0 || labelsAt(doc, p).some((l) => l.kind !== "netclass_flag" && l.kind !== "directive_label");
-  if (busEntriesAt(doc, p).length || junctionAt(doc, p[0], p[1]) || pinsAt(doc, p[0], p[1]).length || lineAt("wire")) return true;
+  // GetItem( aPosition, 1, SCH_BUS_WIRE_ENTRY_T ) is a hit test on the entry's segment, not on its two ends only
+  const onEntry = () => { for (const it of doc.items.values()) if (it.kind === "bus_entry") { const c = connPoints(doc, it); if (segDist(p, c[0], c[1]) <= 1e-3) return true; } return false; };
+  if (onEntry() || junctionAt(doc, p[0], p[1]) || pinsAt(doc, p[0], p[1]).length || lineAt("wire")) return true;
   return labelsAt(doc, p).length > 0 || sheetPinsAt(doc, p).length > 0;
 }
 export function wireClick(ctx: SchCtx, p: Pt, dbl: boolean) {

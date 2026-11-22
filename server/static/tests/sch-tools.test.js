@@ -184,7 +184,7 @@ test("labels: prompt text lands as KiCad's (label …) shape; global/hierarchica
   sch.setPrompt((title, initial, client, done) => { assert.strictEqual(title, "Net label"); done("NET_X"); });
   sch.onActivate("label", ctx);
   assert.ok(sch.onPointerDown(ev(10, 10), [88.95, 76.1], ctx));
-  const c = lastCommit(ctx); assert.strictEqual(c.label, "label");
+  const c = lastCommit(ctx); assert.strictEqual(c.label, "Add Label");
   const n = fragItem(c.changes[0]);
   assert.deepStrictEqual(n.slice(0, 4), ["label", "NET_X", ["at", 88.9, 76.2, 0], ["effects", ["font", ["size", 1.27, 1.27]], ["justify", "left", "bottom"]]]);
   assert.strictEqual(n[4][0], "uuid");
@@ -237,7 +237,7 @@ test("rotate (R) steps 0→90→180→270 and carries fields around the anchor; 
   const refAt = () => atOf(kids(doc.items.get("s1").node, "property")[0]).slice(0, 2);
   assert.deepStrictEqual(refAt(), [27.432, 99.06]);
   assert.ok(sch.onKey("r", {}, ctx));
-  let c = lastCommit(ctx); assert.strictEqual(c.label, "rotate"); assert.strictEqual(c.changes[0].kind, "MODIFIED"); assert.strictEqual(c.changes[0].typeName, "SCH_SYMBOL");
+  let c = lastCommit(ctx); assert.strictEqual(c.label, "Rotate"); assert.strictEqual(c.changes[0].kind, "MODIFIED"); assert.strictEqual(c.changes[0].typeName, "SCH_SYMBOL");
   assert.ok(/\(at 25\.4 100\.33 0\)/.test(c.before[0]), "commit still sees the unrotated original for its undo record");
   const n = fragItem(c.changes[0]); assert.deepStrictEqual(atOf(n), [25.4, 100.33, 90]); assert.strictEqual(kid(n, "mirror"), null);
   assert.deepStrictEqual(refAt(), [24.13, 98.298], "reference offset (2.032,-1.27) rotated CCW on screen -> (-1.27,-2.032)");
@@ -274,7 +274,7 @@ test("mirror: KiCad's Y (Mirror Vertically) writes (mirror x), X (Mirror Horizon
 });
 
 test("labels rotate through 0/90/180/270 with matching justify", () => {
-  const id = ctx.log.find((c) => c.label === "label").changes[0].id;
+  const id = ctx.log.find((c) => c.label === "Add Label").changes[0].id;
   ctx.selected = null; sch.select(id);
   const seen = [];
   for (let i = 0; i < 4; i++) { assert.ok(sch.onKey("r", {}, ctx)); const n = fragItem(lastCommit(ctx).changes[0]); seen.push([atOf(n)[2], kid(kid(n, "effects"), "justify").slice(1).join(" ")]); }
@@ -341,8 +341,10 @@ test("hit testing picks wires, labels and junctions; symbols stay with app.js", 
 test("delete removes the selected wire and the junction it alone justified", () => {
   ctx.selected = null; sch.select(ctx.tWire);
   assert.ok(sch.onKey("Delete", {}, ctx));
-  const c = lastCommit(ctx); assert.strictEqual(c.label, "delete");
-  assert.deepStrictEqual(c.changes.map((x) => [x.kind, x.id]).sort(), [["REMOVED", ctx.tJunction], ["REMOVED", ctx.tWire]].sort());
+  const c = lastCommit(ctx); assert.strictEqual(c.label, "Delete");
+  assert.deepStrictEqual(c.changes.slice(0, 2).map((x) => [x.kind, x.id]).sort(), [["REMOVED", ctx.tJunction], ["REMOVED", ctx.tWire]].sort());
+  // SCH_EDIT_FRAME::DeleteJunction: the two halves of the bar that ended on the junction merge into one wire
+  assert.deepStrictEqual(c.changes.slice(2).map((x) => x.kind).sort(), ["MODIFIED", "REMOVED"]);
   assert.ok(!doc.items.has(ctx.tWire) && !doc.items.has(ctx.tJunction));
   assert.strictEqual(sch.state.sel, null);
   assert.strictEqual(sch.onKey("Delete", {}, ctx), false, "nothing selected -> app.js keeps the key");
@@ -379,7 +381,7 @@ test("power (P): the picker offers power symbols only; with none in the sheet th
   _.pickSymbol(ctx, "power:GND");
   assert.ok(sch.state.carry && sch.state.carry.kind === "symbol", "picked symbol rides on the cursor");
   sch.onPointerMove(ev(), [88.95, 114.25], ctx); sch.onPointerDown(ev(), [88.95, 114.25], ctx);
-  const c = lastCommit(ctx); assert.strictEqual(c.label, "place #PWR?"); assert.strictEqual(c.changes[0].typeName, "SCH_SYMBOL");
+  const c = lastCommit(ctx); assert.strictEqual(c.label, "Place Symbol"); assert.strictEqual(c.changes[0].typeName, "SCH_SYMBOL");
   const n = fragItem(c.changes[0]); assert.deepStrictEqual(atOf(n), [88.9, 114.3, 0]);
   assert.deepStrictEqual(kids(n, "property").slice(0, 2).map((p) => [p[1], p[2]]), [["Reference", "#PWR?"], ["Value", "GND"]]);
   assert.ok(c.changes[0].sexpr.includes("(lib_symbols (symbol \"power:GND"), "fragment embeds the power symbol");
@@ -526,7 +528,7 @@ test("delete tool: clicks remove wires (with the junction they alone justified),
   sch.onActivate("delete", ctx); assert.strictEqual(sch.state.tool, "delete");
   sch.onPointerMove(ev(), [70, 63.55], ctx); assert.strictEqual(sch.state.hover, "w2", "hover shows what the click removes");
   assert.ok(sch.onPointerDown(ev(), [70, 63.55], ctx));
-  let c = lastCommit(ctx); assert.strictEqual(c.label, "delete");
+  let c = lastCommit(ctx); assert.strictEqual(c.label, "Delete");
   assert.deepStrictEqual(c.changes.map((x) => [x.kind, x.id]).sort(), [["REMOVED", "j1"], ["REMOVED", "w2"]], "j1 only joined w1/w2/w3 at a T");
   assert.ok(/\(wire \(pts \(xy 63\.5 63\.5\) \(xy 76\.2 63\.5\)\)/.test(c.before[c.changes.findIndex((x) => x.id === "w2")]), "commit saw the untouched original for its undo record");
   assert.ok(!doc.items.has("w2") && !doc.items.has("j1"));
@@ -563,17 +565,6 @@ test("dragging a no-connect from a pin leaves a wire to the pin", () => {
   assert.deepStrictEqual(atOf(d.items.get(flag.id).node).slice(0, 2), to);
 });
 
-test("bendPath: 90° keeps the wire on its axis and adds the perpendicular bend; free stretches", () => {
-  assert.deepStrictEqual(_.bendPath([0, 0], [10, 0], [10, 5], "90"), [[0, 0], [10, 0], [10, 5]]);
-  assert.deepStrictEqual(_.bendPath([0, 0], [10, 0], [15, 5], "90"), [[0, 0], [15, 0], [15, 5]]);
-  assert.deepStrictEqual(_.bendPath([0, 0], [10, 0], [0, 5], "90"), [[0, 0], [0, 5]], "collapsed run leaves just the bend");
-  assert.deepStrictEqual(_.bendPath([0, 0], [10, 0], [12, 0], "90"), [[0, 0], [12, 0]], "on-axis drag just stretches");
-  assert.deepStrictEqual(_.bendPath([0, 0], [0, 10], [5, 15], "90"), [[0, 0], [0, 15], [5, 15]]);
-  assert.deepStrictEqual(_.bendPath([0, 0], [10, 0], [15, 5], "free"), [[0, 0], [15, 5]]);
-  assert.deepStrictEqual(_.bendPath([0, 0], [10, 10], [15, 5], "90"), [[0, 0], [15, 5]], "a diagonal wire stretches");
-  assert.deepStrictEqual(_.bendPath([0, 0], [10, 0], [15, 5], "45"), [[0, 0], [10, 0], [15, 5]], "45°: the jog leaves at 45°");
-});
-
 test("pin on pin (the GND case): dragging the symbol away spawns a wire between the two pins", () => {
   const { d, c } = fresh();
   const r2 = addR(d, [25.4, 107.95]);                              // pin 1 lands on R1's pin 2 at (25.4, 104.14)
@@ -583,7 +574,7 @@ test("pin on pin (the GND case): dragging the symbol away spawns a wire between 
   assert.deepStrictEqual(sch.state.drag.preview, [{ kind: "wire", pts: [[25.4, 104.14], [25.4, 111.76]] }], "the stub is previewed while dragging");
   assert.deepStrictEqual(atOf(r2.node).slice(0, 2), [25.4, 115.57], "live preview moves the symbol");
   _.endDrag(c, true);
-  const cm = lastCommit(c); assert.strictEqual(cm.label, "drag");
+  const cm = lastCommit(c); assert.strictEqual(cm.label, "Drag");
   assert.ok(/\(at 25\.4 107\.95 0\)/.test(cm.before[cm.changes.findIndex((x) => x.id === r2.id)]), "original restored before commit (undo)");
   assert.deepStrictEqual(atOf(fragItem(cm.changes.find((x) => x.id === r2.id))).slice(0, 2), [25.4, 115.57]);
   assert.deepStrictEqual(linesOf(cm, "ADDED"), [[[25.4, 104.14], [25.4, 111.76]]]);
@@ -612,26 +603,27 @@ test("move (M) is KiCad's plain move: the symbol goes, the connection is left be
   assert.ok(_.beginDrag(c, r2, [25.4, 107.95], true)); _.moveDrag(c, [25.4, 115.57]);
   assert.deepStrictEqual(sch.state.drag.preview, []);
   _.endDrag(c, true);
-  const cm = lastCommit(c); assert.strictEqual(cm.label, "move");
+  const cm = lastCommit(c); assert.strictEqual(cm.label, "Move");
   assert.deepStrictEqual(cm.changes.map((x) => [x.kind, x.id]), [["MODIFIED", r2.id]]);
   assert.strictEqual(sch.state.dragMode, "move");
 });
 
-test("attached wire: 90° bends (wire stays on its axis + new bend segment), 45° jogs, free stretches diagonally", () => {
-  let { d, c } = fresh();
-  let w = addWire(d, [12.7, 96.52], [25.4, 96.52]);               // horizontal wire into R1 pin 1
-  let cm = dragItem(c, d.items.get("s1"), [25.4, 100.33], [38.1, 113.03]);
-  assert.deepStrictEqual(ptsOf(fragItem(cm.changes.find((x) => x.id === w.id))), [[12.7, 96.52], [38.1, 96.52]]);
-  assert.deepStrictEqual(linesOf(cm, "ADDED"), [[[38.1, 96.52], [38.1, 109.22]]]);
-  assert.strictEqual(ofType(cm, "SCH_JUNCTION").length, 0, "a corner needs no junction");
-  ({ d, c } = fresh()); w = addWire(d, [12.7, 96.52], [25.4, 96.52]);
-  sch.setLineMode(c, "45");
-  cm = dragItem(c, d.items.get("s1"), [25.4, 100.33], [38.1, 113.03]);
-  assert.deepStrictEqual(ptsOf(fragItem(cm.changes.find((x) => x.id === w.id))), [[12.7, 96.52], [25.4, 96.52]]);
-  assert.deepStrictEqual(linesOf(cm, "ADDED"), [[[25.4, 96.52], [38.1, 109.22]]]);
-  ({ d, c } = fresh()); w = addWire(d, [12.7, 96.52], [25.4, 96.52]);
+test("attached wire: 90° and 45° bend one grid before the moved pin (orthoLineDrag), free stretches diagonally", () => {
+  // SCH_MOVE_TOOL::orthoLineDrag: `a` runs from the far end along the old axis to one grid short of the moved end,
+  // `b` goes across by the move and the original wire is what is left at the pin
+  for (const mode of ["90", "45"]) {
+    const { d, c } = fresh();
+    const w = addWire(d, [12.7, 96.52], [25.4, 96.52]);             // horizontal wire into R1 pin 1
+    sch.setLineMode(c, mode);
+    const cm = dragItem(c, d.items.get("s1"), [25.4, 100.33], [38.1, 113.03]);
+    assert.deepStrictEqual(ptsOf(fragItem(cm.changes.find((x) => x.id === w.id))), [[36.83, 109.22], [38.1, 109.22]], mode);
+    assert.deepStrictEqual(linesOf(cm, "ADDED").map((l) => JSON.stringify(l)).sort(), [[[36.83, 96.52], [12.7, 96.52]], [[36.83, 109.22], [36.83, 96.52]]].map((l) => JSON.stringify(l)).sort(), mode);
+    assert.strictEqual(ofType(cm, "SCH_JUNCTION").length, 0, "a corner needs no junction");
+    sch.setLineMode(c, "90");
+  }
+  const { d, c } = fresh(), w = addWire(d, [12.7, 96.52], [25.4, 96.52]);
   sch.setLineMode(c, "free");
-  cm = dragItem(c, d.items.get("s1"), [25.4, 100.33], [38.1, 113.03]);
+  const cm = dragItem(c, d.items.get("s1"), [25.4, 100.33], [38.1, 113.03]);
   assert.deepStrictEqual(ptsOf(fragItem(cm.changes.find((x) => x.id === w.id))), [[12.7, 96.52], [38.1, 109.22]]);
   assert.strictEqual(linesOf(cm, "ADDED").length, 0);
   assert.strictEqual(sch.cycleLineMode(c), "90");
@@ -691,7 +683,7 @@ test("drag (G) of a wire segment: attached ends stretch, riders come along, Esca
   assert.deepStrictEqual(ptsOf(d2.items.get("w6").node), [[139.7, 50.8], [139.7, 63.5]], "…and the attached end springs back");
   assert.ok(sch.onKey("g", {}, c2));
   _.endDrag(c2, true);
-  const c = lastCommit(c2); assert.strictEqual(c.label, "drag");
+  const c = lastCommit(c2); assert.strictEqual(c.label, "Drag");
   assert.ok(/\(xy 127 50\.8\)/.test(c.before[c.changes.findIndex((x) => x.id === "w5")]), "originals restored before commit, so undo is right");
   const w5 = fragItem(c.changes.find((x) => x.id === "w5")), w6 = fragItem(c.changes.find((x) => x.id === "w6"));
   assert.deepStrictEqual(ptsOf(w5), [[127, 53.34], [139.7, 53.34]]); assert.deepStrictEqual(ptsOf(w6), [[139.7, 53.34], [139.7, 63.5]]);
@@ -849,8 +841,8 @@ test("rule area: a closed polygon as (rule_area (polyline …)) — dashed, the 
   const { d, c } = fresh();
   sch.onActivate("rulearea", c);
   for (const p of [[152.4, 25.4], [165.1, 25.4], [165.1, 38.1], [152.4, 38.1]]) sch.onPointerDown(ev(), p, c);
-  sch.onPointerDown(ev(), [152.4, 38.1], c);                         // a click on the last point ends it
-  const cm = lastCommit(c); assert.strictEqual(cm.label, "rule area"); assert.strictEqual(cm.changes[0].typeName, "SCH_RULE_AREA"); assert.strictEqual(cm.changes[0].kind, "ADDED");
+  sch.onPointerDown(ev(), [152.4, 25.4], c);                         // a click back on the first corner ends it (NewPointClosesOutline)
+  const cm = lastCommit(c); assert.strictEqual(cm.label, "Draw Rule Area"); assert.strictEqual(cm.changes[0].typeName, "SCH_RULE_AREA"); assert.strictEqual(cm.changes[0].kind, "ADDED");
   const n = fragItem(cm.changes[0]);
   assert.deepStrictEqual(n.slice(0, 5), ["rule_area", ["exclude_from_sim", "no"], ["in_bom", "yes"], ["on_board", "yes"], ["dnp", "no"]]);
   const pl = n[5]; assert.strictEqual(n.length, 6);
@@ -872,7 +864,7 @@ test("image: the picked file rides on the cursor and lands as (image (at) (uuid)
   assert.ok(sch.state.carry && sch.state.carry.kind === "image"); assert.deepStrictEqual(sch.state.carry.size.map((v) => +v.toFixed(4)), [0.0847, 0.0847], "1 px at 300 PPI");
   sch.onPointerMove(ev(), [50.9, 76.1], c); assert.deepStrictEqual(atOf(sch.state.carry.node).slice(0, 2), [50.8, 76.2]);
   assert.ok(sch.onPointerDown(ev(), [50.9, 76.1], c));
-  const cm = lastCommit(c); assert.strictEqual(cm.label, "image"); assert.strictEqual(cm.changes[0].typeName, "SCH_BITMAP");
+  const cm = lastCommit(c); assert.strictEqual(cm.label, "Place Image"); assert.strictEqual(cm.changes[0].typeName, "SCH_BITMAP");
   const n = fragItem(cm.changes[0]);
   assert.deepStrictEqual(n.slice(0, 2), ["image", ["at", 50.8, 76.2]]); assert.strictEqual(n[2][0], "uuid"); assert.strictEqual(n[3][0], "data"); assert.strictEqual(n.length, 4);
   assert.strictEqual(kid(n, "scale"), null, "scale 1 is not written (saveBitmap)");
@@ -933,7 +925,7 @@ test("multi-item drag: an array moves together — the wire between two moved pi
   assert.deepStrictEqual(ptsOf(between.node), [[165.1, 105.41], [165.1, 123.19]], "live preview moves the spanning wire whole");
   assert.deepStrictEqual(ptsOf(feed.node), [[139.7, 97.79], [165.1, 97.79]], "the feed stretches on its axis");
   _.endDrag(c, true);
-  const cm = lastCommit(c); assert.strictEqual(cm.label, "drag");
+  const cm = lastCommit(c); assert.strictEqual(cm.label, "Drag");
   assert.deepStrictEqual(Object.fromEntries(cm.changes.map((x) => [x.id, x.kind])), { [ra.id]: "MODIFIED", [rb.id]: "MODIFIED", [between.id]: "MODIFIED", [feed.id]: "MODIFIED" });
   assert.deepStrictEqual(atOf(fragItem(cm.changes.find((x) => x.id === rb.id))).slice(0, 2), [165.1, 127]);
   assert.deepStrictEqual(ptsOf(fragItem(cm.changes.find((x) => x.id === between.id))), [[165.1, 105.41], [165.1, 123.19]]);
@@ -1002,10 +994,10 @@ test("paste: fresh uuids, no instances, offset to the snapped cursor, junction c
   const { d, c } = fresh(); sch.state.annotateAuto = true;
   c.clip = cs.clip; c.cursor = [101.7, 127.1]; const before = d.items.size;
   assert.ok(sch.runAction("paste", c));
-  const cm = lastCommit(c); assert.strictEqual(cm.label, "paste");
+  const cm = lastCommit(c); assert.strictEqual(cm.label, "Paste");
   const added = cm.changes.filter((x) => x.kind === "ADDED"); assert.strictEqual(added.length, 3); assert.strictEqual(d.items.size, before + 3);
   const sym = added.find((x) => x.typeName === "SCH_SYMBOL"), sn = fragItem(sym);
-  assert.notStrictEqual(sym.id, "s1"); assert.ok(kids(sn, "pin").every((p) => !["p1", "p2"].includes(K.uuidOf(p))), "pins renewed"); assert.strictEqual(kid(sn, "instances"), null);
+  assert.notStrictEqual(sym.id, "s1"); assert.ok(kids(sn, "pin").every((p) => !["p1", "p2"].includes(K.uuidOf(p))), "pins renewed"); { const paths = kids(kid(kid(sn, "instances"), "project"), "path"); assert.strictEqual(paths.length, 1, "updatePastedSymbol: one instance for the paste path"); assert.strictEqual(paths[0][1], "/root-uuid", "this sheet's path"); }
   assert.deepStrictEqual(atOf(sn).slice(0, 2), [101.6, 127], "the symbol's anchor lands on the snapped cursor");
   assert.strictEqual(kids(sn, "property")[0][2], "R2", "R1 already lives on the sheet: automatic annotation (on by default) picks the next free number");
   assert.ok(sym.sexpr.includes("(lib_symbols (symbol \"Device:R"), "fragment embeds the library symbol");
@@ -1024,7 +1016,7 @@ test("paste: fresh uuids, no instances, offset to the snapped cursor, junction c
   // a (kicad_sch …) document pastes too; garbage does not
   const { d: d4, c: c4 } = fresh(); c4.clip = sch.clipboardText(src, [src.items.get("l1")], { wrap: true }); c4.cursor = [10, 10];
   assert.ok(sch.runAction("paste", c4)); assert.strictEqual(fragItem(lastCommit(c4).changes[0])[1], "NETA");
-  c4.clip = "not a schematic"; c4.toasts.length = 0; const n4 = c4.log.length; assert.strictEqual(sch.runAction("paste", c4), false); assert.strictEqual(c4.log.length, n4); assert.ok(c4.toasts.some((m) => /no schematic items/.test(m)));
+  c4.clip = "not a schematic"; assert.strictEqual(sch.runAction("paste", c4), true); { const t4 = lastCommit(c4).changes; assert.deepStrictEqual(t4.map((x) => [x.kind, x.typeName]), [["ADDED", "SCH_TEXT"]], "plain text is pasted as a text item"); assert.strictEqual(fragItem(t4[0])[1], "not a schematic"); }
   // pasteSpecial keeps annotations; automatic annotation numbers the copy instead of R?
   const { c: c5 } = fresh(); c5.clip = cs.clip; c5.cursor = [10, 10]; assert.ok(sch.runAction("pasteSpecial", c5));
   assert.strictEqual(kids(fragItem(lastCommit(c5).changes.find((x) => x.typeName === "SCH_SYMBOL")), "property")[0][2], "R1");
@@ -1039,32 +1031,43 @@ test("cut removes the selection (with junction cleanup) after copying it; duplic
   c.selection = new Set(["w1", "w2"]);
   assert.ok(sch.runAction("cut", c));
   assert.ok(c.clip.includes("(wire (pts (xy 50.8 63.5)"));
-  const cm = lastCommit(c); assert.strictEqual(cm.label, "cut");
+  const cm = lastCommit(c); assert.strictEqual(cm.label, "Delete");
   assert.deepStrictEqual(cm.changes.map((x) => [x.kind, x.id]).sort(), [["REMOVED", "j1"], ["REMOVED", "w1"], ["REMOVED", "w2"]].sort(), "j1 only marked the T");
   assert.ok(!d.items.has("w1") && !d.items.has("j1")); assert.deepStrictEqual(c.lastSelection, []);
   const { d: d2, c: c2 } = fresh();
   c2.selection = new Set(["s1", "l1"]); c2.cursor = [76.2, 127];
   assert.ok(sch.runAction("duplicate", c2));
-  const dm = lastCommit(c2); assert.strictEqual(dm.label, "duplicate"); assert.strictEqual(dm.changes.filter((x) => x.kind === "ADDED").length, 2);
-  assert.deepStrictEqual(atOf(fragItem(dm.changes.find((x) => x.typeName === "SCH_SYMBOL"))).slice(0, 2), [76.2, 127]); assert.strictEqual(d2.items.size, 11);
+  const dm = lastCommit(c2); assert.strictEqual(dm.label, "Paste"); assert.strictEqual(dm.changes.filter((x) => x.kind === "ADDED").length, 2);
+  assert.deepStrictEqual(atOf(fragItem(dm.changes.find((x) => x.typeName === "SCH_SYMBOL"))).slice(0, 2), [76.2, 123.19], "the connection point nearest the cursor (pin 2) lands on it"); assert.strictEqual(d2.items.size, 11);
   c2.selection.clear(); c2.selected = { id: "s1" }; assert.ok(sch.runAction("duplicate", c2));
   const one = fragItem(lastCommit(c2).changes.find((x) => x.typeName === "SCH_SYMBOL"));
   assert.notStrictEqual(kids(one, "property")[0][2], "R1", "a duplicated symbol never repeats its reference (Paste's UNIQUE_ANNOTATIONS)");
   assert.strictEqual(kids(one, "property")[0][2], "R3");
   sch.onActivate("select", c2);
-  c2.selected = null; c2.selection = new Set(["s1", "l1"]); assert.ok(sch.runAction("copyAsText", c2)); assert.strictEqual(c2.clip, "R1 10k\nNETA");
+  c2.selected = null; c2.selection = new Set(["s1", "l1"]); assert.ok(sch.runAction("copyAsText", c2)); assert.strictEqual(c2.clip, "NETA", "GetSchItemAsText: a symbol gives nothing");
 });
 
-test("select connection (Ctrl+4): the whole net of the selection, or of what is under the cursor; Tab walks it", () => {
+test("select connection (Ctrl+4) grows in stages (to the junctions, to the pins, the whole net) from the selection or the cursor; Tab walks the highlighted net", () => {
   const { c } = fresh();
   sch.select("w1");
+  // SCH_SELECTION_TOOL::SelectConnection: STOP_AT_JUNCTION adds nothing new to w1 (it ends on the junction), so STOP_AT_PIN runs
+  assert.ok(sch.runAction("selectConnection", c)); assert.deepStrictEqual(c.lastSelection.slice().sort(), ["j1", "w1", "w2", "w3"]);
+  // pressed again: the first two stages add nothing new, STOP_NEVER takes the whole net (the label on the wire too)
+  sch.select(null); c.selection = new Set(["j1", "w1", "w2", "w3"]);
   assert.ok(sch.runAction("selectConnection", c)); assert.deepStrictEqual(c.lastSelection.slice().sort(), ["j1", "l1", "w1", "w2", "w3"]);
   c.selection.clear(); c.selected = null; sch.select(null); c.cursor = [70, 63.55];
-  assert.ok(sch.runAction("selectConnection", c)); assert.deepStrictEqual(c.lastSelection.slice().sort(), ["j1", "l1", "w1", "w2", "w3"]);
+  assert.ok(sch.runAction("selectConnection", c)); assert.deepStrictEqual(c.lastSelection.slice().sort(), ["j1", "w1", "w2", "w3"], "the hover selection grows the same way");
   c.cursor = [200, 200]; c.selection.clear(); c.selected = null; assert.strictEqual(sch.runAction("selectConnection", c), false);
-  c.selection = new Set(["w1"]); assert.ok(sch.runAction("nextNetItem", c)); assert.deepStrictEqual(c.lastSelection, ["w2"]);
-  assert.ok(sch.runAction("previousNetItem", c)); assert.deepStrictEqual(c.lastSelection, ["w1"]);
+  // SelectNext / SelectPrevious: only while the selected item is on the highlighted net
+  c.selection = new Set(["w1"]); sch.state.highlight = null;
+  assert.strictEqual(sch.runAction("nextNetItem", c), false, "no net highlighted: nothing happens");
+  sch.state.highlight = new Set(["j1", "l1", "w1", "w2", "w3"]);
+  assert.ok(sch.runAction("nextNetItem", c)); const next = c.lastSelection[0]; assert.ok(next !== "w1" && sch.state.highlight.has(next));
+  c.selection = new Set([next]); assert.ok(sch.runAction("previousNetItem", c)); assert.deepStrictEqual(c.lastSelection, ["w1"]);
+  sch.state.highlight = null;
   c.cursor = [70, 63.55]; assert.ok(sch.runAction("selectNode", c)); assert.deepStrictEqual(c.lastSelection, ["w2"]);
+  c.cursor = [63.5, 63.5]; assert.ok(sch.runAction("selectNode", c)); assert.deepStrictEqual(c.lastSelection, ["j1"], "connectedTypes: a junction is picked too");
+  c.cursor = [57, 62.6]; assert.ok(sch.runAction("selectNode", c)); assert.deepStrictEqual(c.lastSelection, ["l1"], "and a label");
   assert.ok(sch.runAction("unselectAll", c)); assert.deepStrictEqual(c.lastSelection, []); assert.strictEqual(sch.state.sel, null);
 });
 
@@ -1337,7 +1340,7 @@ test("swap (Alt+S): positions swap pairwise in selection order; same-lib symbols
   const la = K.createItem(d, _.labelNode("label", "A", [10.16, 10.16], 0)), lb = K.createItem(d, _.labelNode("label", "B", [30.48, 20.32], 180));
   c.selection = new Set([la.id, lb.id]);
   assert.ok(sch.runAction("swap", c));
-  const cm = lastCommit(c); assert.strictEqual(cm.label, "swap");
+  const cm = lastCommit(c); assert.strictEqual(cm.label, "Swap");
   const na = fragItem(cm.changes.find((x) => x.id === la.id)), nb = fragItem(cm.changes.find((x) => x.id === lb.id));
   assert.deepStrictEqual([atOf(na), atOf(nb)], [[30.48, 20.32, 180], [10.16, 10.16, 0]]);
   assert.deepStrictEqual(kid(kid(na, "effects"), "justify"), ["justify", "right", "bottom"]);
@@ -1345,7 +1348,7 @@ test("swap (Alt+S): positions swap pairwise in selection order; same-lib symbols
   const nodes = _.swapNodes([ra, rb]);
   assert.deepStrictEqual([atOf(nodes[0]), atOf(nodes[1])], [[76.2, 63.5, 90], [50.8, 50.8, 0]], "positions and orientations swapped");
   assert.deepStrictEqual(atOf(kids(nodes[0], "property")[0]).slice(0, 2), [76.2 + 2.032, 63.5], "fields moved with their symbol");
-  c.selection = new Set([la.id]); c.toasts.length = 0; assert.strictEqual(sch.runAction("swap", c), false); assert.ok(c.toasts.some((m) => /two or more/.test(m)));
+  c.selection = new Set([la.id]); c.toasts.length = 0; assert.strictEqual(sch.runAction("swap", c), false); assert.deepStrictEqual(c.toasts, [], "SCH_EDIT_TOOL::Swap returns silently with fewer than two items");
   // three items rotate through the list like KiCad's sequential swaps
   const l3 = K.createItem(d, _.labelNode("label", "C", [40.64, 40.64], 0)); const three = _.swapNodes([d.items.get(la.id), d.items.get(lb.id), l3]);
   assert.deepStrictEqual(three.map((n) => atOf(n).slice(0, 2)), [[10.16, 10.16], [40.64, 40.64], [30.48, 20.32]]);
@@ -1356,11 +1359,12 @@ test("align to grid and edge alignment: pins, ends and anchors land on the grid 
   const off = K.createItem(d, _.symbolNode(d, "Device:R", [50.9, 50.7], 0, "")), lw = K.createItem(d, _.lineNode("wire", [60.1, 50.7], [70.2, 50.8])), lab = K.createItem(d, _.labelNode("label", "OFF", [80.1, 80.1], 0));
   c.selection = new Set([off.id, lw.id, lab.id]);
   assert.ok(sch.runAction("alignToGrid", c));
-  const cm = lastCommit(c); assert.strictEqual(cm.label, "align to grid");
+  const cm = lastCommit(c); assert.strictEqual(cm.label, "Align Items to Grid");
   assert.deepStrictEqual(atOf(fragItem(cm.changes.find((x) => x.id === off.id))).slice(0, 2), [50.8, 50.8]);
   assert.deepStrictEqual(ptsOf(fragItem(cm.changes.find((x) => x.id === lw.id))), [[59.69, 50.8], [69.85, 50.8]]);
   assert.deepStrictEqual(atOf(fragItem(cm.changes.find((x) => x.id === lab.id))).slice(0, 2), [80.01, 80.01]);
-  assert.strictEqual(sch.runAction("alignToGrid", c), true); assert.ok(c.toasts.some((m) => /Already on the grid/.test(m)));
+  const nLog = c.log.length;
+  assert.strictEqual(sch.runAction("alignToGrid", c), true); assert.strictEqual(c.log.length, nLog, "nothing to do: no commit"); assert.ok(!c.toasts.some((m) => /Already on the grid/.test(m)), "KiCad shows no message");
   const s2 = K.createItem(d, _.sheetNode([100.1, 100.1], [120.3, 110.2], "S", "S.kicad_sch")); c.selection = new Set([s2.id]); assert.ok(sch.runAction("alignToGrid", c));
   const sn = fragItem(lastCommit(c).changes[0]); assert.deepStrictEqual([atOf(sn).slice(0, 2), kid(sn, "size").slice(1)], [[100.33, 100.33], [20.32, 10.16]]);
   const t1 = K.createItem(d, _.labelNode("label", "T1", [10.16, 30.48], 0)), t2 = K.createItem(d, _.labelNode("label", "T2", [40.64, 20.32], 0)), t3 = K.createItem(d, _.labelNode("label", "T3", [25.4, 40.64], 0));
@@ -1391,17 +1395,17 @@ test("group rotate / mirror: a multi-selection turns about its half-grid centre 
   c.selection = new Set(["s1", lab.id, wire.id]);
   const items = [d.items.get("s1"), lab, wire], C = _.selectionCentre(items); assert.strictEqual(C[0] % 0.635 < 1e-9 || Math.abs(C[0] % 0.635 - 0.635) < 1e-9, true, "half-grid centre");
   assert.ok(sch.onKey("r", {}, c));
-  const cm = lastCommit(c); assert.strictEqual(cm.label, "rotate");
+  const cm = lastCommit(c); assert.strictEqual(cm.label, "Rotate");
   const sn = fragItem(cm.changes.find((x) => x.id === "s1")), ln = fragItem(cm.changes.find((x) => x.id === lab.id)), wn = fragItem(cm.changes.find((x) => x.id === wire.id));
   const rot = (p) => [+(C[0] + (p[1] - C[1])).toFixed(4), +(C[1] - (p[0] - C[0])).toFixed(4)];   // counterclockwise on screen
   assert.deepStrictEqual(atOf(sn), [...rot([25.4, 100.33]), 90]); assert.deepStrictEqual(atOf(ln), [...rot([38.1, 100.33]), 90]);
   assert.deepStrictEqual(ptsOf(wn), [rot([25.4, 96.52]), rot([38.1, 96.52])]);
   assert.deepStrictEqual(K.pinPoints(d, d.items.get("s1")).map((p) => [+p.x.toFixed(4), +p.y.toFixed(4)])[0], rot([25.4, 96.52]), "the wire still ends on the pin");
-  assert.ok(sch.onKey("x", {}, c)); const mm = lastCommit(c); assert.strictEqual(mm.label, "mirror");
+  assert.ok(sch.onKey("x", {}, c)); const mm = lastCommit(c); assert.strictEqual(mm.label, "Mirror");
   const s2 = fragItem(mm.changes.find((x) => x.id === "s1")); assert.deepStrictEqual(kid(s2, "mirror") || null, kid(s2, "mirror"), "mirror written like the transform search says");
   assert.strictEqual(+(2 * C[0] - atOf(sn)[0]).toFixed(4), atOf(s2)[0], "X flips x about the centre");
   assert.ok(sch.runAction("mirrorSelectionY", c)); assert.strictEqual(+(2 * C[1] - atOf(s2)[1]).toFixed(4), atOf(fragItem(lastCommit(c).changes.find((x) => x.id === "s1")))[1], "Y flips y about the centre");
-  assert.ok(sch.runAction("rotateSelectionCW", c)); assert.strictEqual(lastCommit(c).label, "rotate");
+  assert.ok(sch.runAction("rotateSelectionCW", c)); assert.strictEqual(lastCommit(c).label, "Rotate");
   // a single rectangle (no orientation of its own) turns about its half-grid box centre; a bus entry, a text box and a directive label turn too
   const r = K.createItem(d, _.rectangleNode([101.6, 101.6], [114.3, 106.68])); c.selection = new Set(); c.selected = null; sch.select(r.id);
   assert.ok(sch.onKey("r", {}, c)); const rn = fragItem(lastCommit(c).changes[0]); assert.deepStrictEqual([kid(rn, "start").slice(1), kid(rn, "end").slice(1)], [[105.41, 97.79], [110.49, 110.49]]);
@@ -1411,7 +1415,8 @@ test("group rotate / mirror: a multi-selection turns about its half-grid centre 
   const sh = K.createItem(d, _.sheetNode([160, 160], [180, 170], "S", "S.kicad_sch")); _.placeSheetPin(c, sh, "P", [160, 165.1], "left"); c.selected = { id: sh.id }; sch.select(null);
   assert.ok(sch.onKey("r", {}, c)); const shn = fragItem(lastCommit(c).changes[0]); assert.deepStrictEqual(kid(shn, "size").slice(1), [10, 20]);
   const pin = kids(shn, "pin")[0]; assert.strictEqual(atOf(pin)[2], 270, "the left pin is now on the bottom edge"); assert.strictEqual(atOf(pin)[1], atOf(shn)[1] + 20);
-  assert.deepStrictEqual(atOf(kids(shn, "property")[0]).slice(0, 2), [atOf(shn)[0], +(atOf(shn)[1] - _.SHEET_NAME_OFF).toFixed(4)], "Sheetname re-autoplaced above the new top-left");
+  assert.deepStrictEqual(atOf(kids(shn, "property")[0]), [+(atOf(shn)[0] - 0.7116).toFixed(4), atOf(shn)[1] + 20, 90], "pins on the bottom edge only: SCH_SHEET::AutoplaceFields puts the name beside the left edge, reading upwards");
+  assert.deepStrictEqual(atOf(kids(shn, "property")[1]), [+(atOf(shn)[0] + 10 + 0.5846).toFixed(4), atOf(shn)[1] + 20, 90], "and the file name beside the right edge");
 });
 
 test("symbol fields table: every symbol's fields as rows; edits (including a new custom field and the reference) commit as one change set", () => {
@@ -1444,9 +1449,17 @@ test("bus unfolding: member names from bus vectors and groups; an entry and the 
   assert.ok(sch.runAction("unfoldBus", c, { member: "DATA1" }));
   assert.strictEqual(c.log.length, commits, "nothing is committed while the unfold is in flight (IS_NEW)");
   const u = sch.state.unfold, en = d.items.get(u.entryId).node, ln = d.items.get(u.labelId).node;
-  assert.deepStrictEqual(en.slice(1, 3), [["at", 127, 127], ["size", 2.54, -2.54]], "the entry leaves the bus toward the cursor's side");
-  assert.deepStrictEqual([ln[1], atOf(ln)], ["DATA1", [129.54, 124.46, 90]], "member label at the entry's end, standing away from a horizontal bus");
-  assert.strictEqual(sch.state.tool, "wire"); assert.deepStrictEqual(sch.state.wire && sch.state.wire.segs[0][0], [129.54, 124.46], "the wire starts at the entry end");
+  // SCH_BUS_WIRE_ENTRY( pos ) is (+100 mil, +100 mil) until the first motion flips it; the label has
+  // busUnfoldPersistentSettings' spin style (RIGHT at first) whatever the bus direction; the crosshair is on the entry's end
+  assert.deepStrictEqual(en.slice(1, 3), [["at", 127, 127], ["size", 2.54, 2.54]], "the entry starts unflipped");
+  assert.deepStrictEqual([ln[1], atOf(ln)], ["DATA1", [129.54, 129.54, 0]], "member label at the entry's end, spin style RIGHT");
+  assert.strictEqual(sch.state.tool, "wire"); assert.deepStrictEqual(sch.state.wire && sch.state.wire.segs[0][0], [129.54, 129.54], "the wire starts at the entry end");
+  assert.deepStrictEqual(sch.state.cursor, [129.54, 129.54], "SetCrossHairCursorPosition( entry->GetEnd() )");
+  // R during the unfold turns the label 90° counterclockwise and the next unfold starts with that spin style
+  assert.strictEqual(sch.onKey("r", {}, c), true); assert.strictEqual(atOf(d.items.get(u.labelId).node)[2], 90);
+  assert.strictEqual(sch.state.unfoldSpin, 90);
+  assert.strictEqual(sch.onKey("R", { shiftKey: true }, c), true); assert.strictEqual(atOf(d.items.get(u.labelId).node)[2], 0, "Shift+R turns it back clockwise");
+  assert.strictEqual(sch.state.unfoldSpin, 0);
   // Esc: doDrawSegments' cleanup() takes the entry and the label away again
   _.cancelWire(c);
   assert.strictEqual(sch.state.unfold, null); assert.strictEqual(d.items.size, before, "Esc leaves nothing behind"); assert.strictEqual(c.log.length, commits);
@@ -1470,7 +1483,7 @@ test("bus unfolding: member names from bus vectors and groups; an entry and the 
   // a vertical bus, a group bus label, no member option -> the first member; nothing to unfold without a bus label
   const vb = K.createItem(d, _.lineNode("bus", [190.5, 25.4], [190.5, 76.2])); K.createItem(d, _.labelNode("global_label", "CTRL{EN RST}", [190.5, 30], 90));
   sch.onActivate("select", c); c.selection = new Set([vb.id]); c.cursor = [180, 50.8]; assert.ok(sch.runAction("unfoldBus", c));
-  const vn = d.items.get(sch.state.unfold.labelId).node; assert.deepStrictEqual([vn[1], atOf(vn)], ["CTRL.EN", [187.96, 53.34, 180]], "reads away from a vertical bus");
+  const vn = d.items.get(sch.state.unfold.labelId).node; assert.deepStrictEqual([vn[1], atOf(vn)], ["CTRL.EN", [193.04, 53.34, 0]], "the same start for a vertical bus: entry (+100, +100) mil, the persistent spin style");
   _.cancelWire(c); sch.onActivate("select", c);
   const nb = K.createItem(d, _.lineNode("bus", [10, 10], [30, 10])); c.selection = new Set([nb.id]); c.toasts.length = 0; assert.strictEqual(sch.runAction("unfoldBus", c), false, "BUS_UNFOLD_MENU: \"Bus has no members\"");
   c.selection = new Set(); c.selected = null; sch.select(null); c.cursor = [200, 200]; assert.strictEqual(sch.runAction("unfoldBus", c), false);
@@ -1502,7 +1515,7 @@ test("duplicate / paste in flight (SCH_MOVE_TOOL on IS_NEW items): nothing reach
     key("y", { ctrlKey: true }); key("d", { ctrlKey: true }); assert.ok(sch.state.drag && sch.state.drag.local, "still in flight"); assert.strictEqual(c.log.length, n0);
     // the click: one "duplicate" step, the copy where it landed with a fresh reference, junctions only where it landed
     sch.moveDrag(c, [50.8, 100.33]); sch.endDrag(c, true);
-    assert.strictEqual(c.log.length, n0 + 1); const cm = lastCommit(c); assert.strictEqual(cm.label, "duplicate");
+    assert.strictEqual(c.log.length, n0 + 1); const cm = lastCommit(c); assert.strictEqual(cm.label, "Paste");
     assert.deepStrictEqual(cm.changes.map((x) => [x.kind, x.typeName]), [["ADDED", "SCH_SYMBOL"]], "no junction at the original pin");
     const sy = fragItem(cm.changes[0]); assert.deepStrictEqual(atOf(sy).slice(0, 2), [50.8, 100.33]);
     assert.strictEqual(str(kids(sy, "property")[0][2]), "R2");
@@ -1544,6 +1557,7 @@ test("break / slice in flight: Esc before a click restores with no commit; each 
 test("with an item on the cursor Ctrl+Y beeps and Del cancels it (TwoClickPlace / PlaceSymbol)", () => {
   const { d, c } = fresh();
   const key = (k, mods) => { let eaten = false; _.onKeyCapture(Object.assign({ key: k, target: null, stopImmediatePropagation() { eaten = true; }, preventDefault() {} }, mods || {})); return eaten; };
+  sch.setPrompt((t, i, cl, done) => done(null));                    // the tool chosen without a hotkey opens its dialog at once (immediate actions)
   sch.onActivate("label", c); sch.state.carry = { kind: "label", node: _.labelNode("label", "FOO", [10, 10], 0), item: null, pos: [10, 10] };
   assert.ok(key("y", { ctrlKey: true }), "redo is swallowed"); assert.ok(sch.state.carry, "the label stays on the cursor");
   assert.ok(key("Delete")); assert.strictEqual(sch.state.carry, null, "Del drops it"); void d;
@@ -1694,7 +1708,7 @@ await testAsync("sheet: two corners, name and file prompts, the file created on 
   assert.ok(K.uuidOf(snap).length > 10); assert.deepStrictEqual(kid(snap, "paper"), ["paper", "A4"]); assert.deepStrictEqual(kid(snap, "lib_symbols"), ["lib_symbols"]);
   assert.deepStrictEqual(kid(snap, "sheet_instances"), ["sheet_instances", ["path", "/", ["page", "1"]]]); assert.strictEqual(K.parseDoc(c.apiCalls[1].opts.body).items.size, 0);
   assert.ok(c.docs.some((x) => x.docId === "doc-2" && x.path === "Power.kicad_sch"), "the new doc joined ctx.docs");
-  const cm = lastCommit(c); assert.strictEqual(cm.label, "sheet"); assert.strictEqual(cm.changes[0].typeName, "SCH_SHEET"); assert.strictEqual(cm.changes[0].kind, "ADDED");
+  const cm = lastCommit(c); assert.strictEqual(cm.label, "Draw Sheet"); assert.strictEqual(cm.changes[0].typeName, "SCH_SHEET"); assert.strictEqual(cm.changes[0].kind, "ADDED");
   const n = fragItem(cm.changes[0]);
   assert.deepStrictEqual(n.slice(0, 10), ["sheet", ["at", 101.6, 88.9], ["size", 25.4, 12.7], ["exclude_from_sim", "no"], ["in_bom", "yes"], ["on_board", "yes"], ["dnp", "no"], ["fields_autoplaced", "yes"], ["stroke", ["width", 0.1524], ["type", "solid"]], ["fill", ["color", 0, 0, 0, 0]]]);
   assert.strictEqual(n[10][0], "uuid");
@@ -1831,7 +1845,7 @@ test("point editor: corners, edges and centre of a rectangle; circle radius; arc
   assert.deepStrictEqual(kid(n, "mid").slice(1), [63.5, 147.32], "the same side as before");
   const rr = K.createItem(d, _.rectangleNode([0, 0], [10.16, 6.35])); kid(rr.node, "end"); rr.node.splice(rr.node.indexOf(kid(rr.node, "end")) + 1, 0, ["radius", 1.27]); K.replaceChange(d, rr);
   assert.deepStrictEqual(_.editPoints(d, rr).pts[5], [8.89, 0], "RECT_RADIUS sits at ( right - radius, top )");
-  ch = pe(rr.id, [8.89, 0], [2.54, 2.54]); n = fragItem(ch[0]);
+  c.pxPerMm = 40; ch = pe(rr.id, [8.89, 0], [2.54, 2.54]); c.pxPerMm = 4; n = fragItem(ch[0]);   // zoomed in: at 4 px/mm the corner 1.27 mm away is found first (EDIT_POINTS::FindPoint)
   assert.strictEqual(kid(n, "radius")[1], 3.175, "clamped to half the shorter side");
   assert.ok(n.indexOf(kid(n, "radius")) === n.indexOf(kid(n, "end")) + 1, "(radius) right after (end), as the writer puts it");
   ch = pe(rr.id, [10.16 - 3.175, 0], [12.7, 0]); n = fragItem(ch[0]); assert.ok(!kid(n, "radius"), "radius 0: no (radius) token");
@@ -1839,11 +1853,13 @@ test("point editor: corners, edges and centre of a rectangle; circle radius; arc
   _.pointEditStart(c, kid(n, "start").slice(1), {}); _.pointEditEnd(c, true); assert.strictEqual(c.log.length, before, "a click without a move commits nothing");
 });
 
-test("point editor: wire ends, joined graphic lines follow, a sheet's pins stay on their edges with their wires", () => {
+test("point editor: no handles on wires, joined graphic lines follow, a sheet's pins stay on their edges with their wires", () => {
   const { d, c } = fresh(); sch.onActivate("select", c);
   const pe = (id, at, to) => { sch.state.sel = id; c.selected = null; assert.ok(_.pointEditStart(c, at, {}), "a handle at " + at); _.pointEditMove(c, to, {}); return _.pointEditEnd(c, true); };
-  let ch = pe("w4", [101.6, 76.2], [109.22, 76.2]);
-  assert.deepStrictEqual(ch.map((x) => [x.id, ptsOf(fragItem(x))]), [["w4", [[101.6, 50.8], [109.22, 76.2]]]], "only the wire: KiCad's line editor drags notes-layer lines alone");
+  sch.state.sel = "w4"; c.selected = null;
+  assert.strictEqual(_.editPoints(d, d.items.get("w4")), null, "pointEditorTypes: a wire has no edit points");
+  assert.ok(!_.pointEditStart(c, [101.6, 76.2], {}), "a wire end is not a handle");
+  let ch;
   const l1 = K.createItem(d, _.lineNode("polyline", [10.16, 170.18], [20.32, 170.18])), l2 = K.createItem(d, _.lineNode("polyline", [20.32, 170.18], [20.32, 180.34]));
   ch = pe(l1.id, [20.32, 170.18], [22.86, 167.64]);
   assert.deepStrictEqual(ch.map((x) => ptsOf(fragItem(x))).sort(), [[[10.16, 170.18], [22.86, 167.64]], [[22.86, 167.64], [20.32, 180.34]]].sort(), "the joined graphic line keeps the joint");

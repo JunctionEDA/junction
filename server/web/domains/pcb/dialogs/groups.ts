@@ -138,6 +138,7 @@ export function installGroups(): void {
   add("group", "Group Items", "", group); add("ungroup", "Ungroup Items", "", ungroup); add("enterGroup", "Enter Group", "", enterGroup); add("leaveGroup", "Leave Group", "", leaveGroup);
   add("removeFromGroup", "Remove Items", "", removeFromGroup); add("groupProperties", "Group Properties...", "", renameGroup);
   sch.expandGroups = schExpandGroups;
+  (sch as unknown as { enteredGroupId?: () => string | null }).enteredGroupId = () => enteredGroup();   // the box selection scopes itself to the entered group
   (sch as unknown as { enterGroupAt?: typeof enterGroupAt }).enterGroupAt = enterGroupAt;
   // Esc, or a click outside the entered group's box, leaves the group (SCH_SELECTION_TOOL::ExitGroup)
   (sch as unknown as { exitGroup?: () => boolean }).exitGroup = () => { if (!enteredGroup()) return false; entered = null; setStatusBar({ mode: "" }); requestRender(); return true; };

@@ -38,15 +38,17 @@ test("selectPoint's threshold is max( 5 px, |grid| / 2 ) and only the two ends o
   assert.strictEqual(_.lineEndAt(poly, [0, 0], thr), null, "a multi-point shape is not a SCH_LINE");
 });
 
-test("a line selected by its start: the painter key names that end, the drag moves it alone and undo restores it exactly", () => {
+test("a line selected by its start: the painter key names that end, MOVE moves both ends (SCH_MOVE_TOOL::moveItem) and undo restores it exactly", () => {
   const doc = K.parseDoc(HEAD + W("w1", [0, 0], [25.4, 0]) + W("w2", [25.4, 0], [25.4, 12.7]) + ")"), c = makeCtx(doc); sch.onDocChanged(c); sch.setDragMode(c, "move");
   const w = doc.items.get("w1"), before = K.serializeItem(doc, w);
   sch.state.sel = "w1"; sch.putSelEnd("w1", 0);
   assert.deepStrictEqual(sch.selEndKeys(["w1", "w2"]), ["w1#end:0"]);
   assert.ok(_.beginDrag(c, w, [0, 0], true)); _.moveDrag(c, [0, 5.08]); _.endDrag(c, true);
   const com = c.log[c.log.length - 1]; assert.ok(com, "committed");
-  assert.deepStrictEqual(pts(doc.items.get("w1")), [[0, 5.08], [25.4, 0]], "the start moved, the end stayed");
-  assert.deepStrictEqual(pts(doc.items.get("w2")), [[25.4, 0], [25.4, 12.7]], "the other wire untouched");
+  assert.deepStrictEqual(pts(doc.items.get("w1")), [[0, 5.08], [25.4, 5.08]], "In MOVE mode, both endpoints always move");
+  // the moved end now sits on the middle of w2: AddJunctionsIfNeeded puts a junction there and breaks w2 at it
+  assert.deepStrictEqual(pts(doc.items.get("w2")), [[25.4, 0], [25.4, 5.08]], "the other wire is broken at the new junction");
+  assert.ok([...doc.items.values()].some((it) => it.kind === "junction" && +K.kid(it.node, "at")[1] === 25.4 && +K.kid(it.node, "at")[2] === 5.08), "junction");
   // undo: the inverse of each change restores the line
   const i = com.changes.findIndex((ch) => ch.id === "w1"); assert.strictEqual(com.before[i], before);
 });
@@ -63,18 +65,20 @@ test("drag mode: a wire end attached at the moved end stretches with it; a fully
   assert.deepStrictEqual(pts(d2.items.get("w1")), [[0, 2.54], [12.7, 2.54]]);
 });
 
-test("a label on the moved end follows it in drag mode only (getConnectedDragItems); move mode leaves it", () => {
-  for (const mode of ["drag", "move"]) {
-    const doc = K.parseDoc(HEAD + W("w1", [0, 0], [12.7, 0]) + '(label "N" (at 12.7 0 0) (effects (font (size 1.27 1.27))) (uuid "l1")))'), c = makeCtx(doc); sch.onDocChanged(c); sch.setDragMode(c, mode);
+test("a label on the moved end is kept on the line in drag mode (m_specialCaseLabels); move mode leaves it", () => {
+  // drag, free line mode: the label keeps its place while it is on the line, else goes to the nearest point of the line
+  // drag, 90: the bend is made, the label was on the moved end and tracks it;  move: the whole line goes, the label stays
+  for (const [mode, lm, end, lab] of [["drag", "free", [12.7, 5.08], [10.9483, 4.3793]], ["drag", "90", [12.7, 5.08], [12.7, 5.08]], ["move", "90", [12.7, 5.08], [12.7, 0]]]) {
+    const doc = K.parseDoc(HEAD + W("w1", [0, 0], [12.7, 0]) + '(label "N" (at 12.7 0 0) (effects (font (size 1.27 1.27))) (uuid "l1")))'), c = makeCtx(doc); sch.onDocChanged(c); sch.setDragMode(c, mode); sch.setLineMode(c, lm);
     sch.state.selEnds = null; sch.putSelEnd("w1", 1);
     assert.ok(_.beginDrag(c, doc.items.get("w1"), [12.7, 0], true)); _.moveDrag(c, [12.7, 5.08]); _.endDrag(c, true);
-    assert.deepStrictEqual(pts(doc.items.get("w1"))[1], [12.7, 5.08], mode);
-    const at = K.kid(doc.items.get("l1").node, "at"); assert.deepStrictEqual([+at[1], +at[2]], mode === "drag" ? [12.7, 5.08] : [12.7, 0], mode);
+    assert.deepStrictEqual(pts(doc.items.get("w1"))[1], end, mode + lm);
+    const at = K.kid(doc.items.get("l1").node, "at"); assert.deepStrictEqual([+at[1], +at[2]], lab, mode + lm);
   }
-  sch.state.selEnds = null;
+  sch.state.selEnds = null; sch.setLineMode(makeCtx(K.parseDoc(HEAD + ")")), "90");
 });
 
-test("orthoLineDrag: DRAG in 90 mode keeps an attached orthogonal line orthogonal; a free far end just follows", () => {
+test("orthoLineDrag: DRAG in 90 mode keeps an attached orthogonal line orthogonal; with nothing attached the whole line moves", () => {
   const run = (extra, to) => {
     const doc = K.parseDoc(HEAD + W("w1", [0, 0], [12.7, 0]) + extra + ")"), c = makeCtx(doc); sch.onDocChanged(c); sch.setDragMode(c, "drag"); sch.setLineMode(c, "90");
     sch.state.selEnds = null; sch.putSelEnd("w1", 1);
@@ -82,16 +86,16 @@ test("orthoLineDrag: DRAG in 90 mode keeps an attached orthogonal line orthogona
     const lines = [...doc.items.values()].filter((it) => it.kind === "wire").map((it) => pts(it));
     return { doc, lines, w1: doc.items.get("w1") ? pts(doc.items.get("w1")) : null, com: c.log[c.log.length - 1] };
   };
-  // nothing at the far end: the end just moves (a diagonal line)
-  assert.deepStrictEqual(run("", [15.24, 5.08]).w1, [[0, 0], [15.24, 5.08]]);
+  // nothing at the far end: "Original line has no attachments, just move the unselected end" for the part across it
+  assert.deepStrictEqual(run("", [15.24, 5.08]).w1, [[0, 5.08], [15.24, 5.08]]);
   // a vertical wire at the far end runs the way of the move: it stretches and the whole line shifts down
   const r = run(W("w2", [0, -10.16], [0, 0]), [15.24, 5.08]);
   assert.deepStrictEqual(r.w1, [[0, 5.08], [15.24, 5.08]]);
   assert.deepStrictEqual(pts(r.doc.items.get("w2")), [[0, -10.16], [0, 5.08]]);
-  // a label at the far end: the line stays and gets a bend at the moved end
+  // a label at the far end: two new lines make the bend one grid before the moved end, the line is what is left there
   const b = run('(label "N" (at 0 0 0) (effects (font (size 1.27 1.27))) (uuid "l1"))', [15.24, 5.08]);
-  assert.deepStrictEqual(b.w1, [[0, 0], [15.24, 0]]);
-  assert.ok(b.lines.some((l) => JSON.stringify(l) === JSON.stringify([[15.24, 0], [15.24, 5.08]])), JSON.stringify(b.lines));
+  assert.deepStrictEqual(b.w1, [[13.97, 5.08], [15.24, 5.08]]);
+  for (const want of [[[13.97, 0], [0, 0]], [[13.97, 5.08], [13.97, 0]]]) assert.ok(b.lines.some((l) => JSON.stringify(l) === JSON.stringify(want)), JSON.stringify(b.lines));
   // a junction alone: a new wire from the old far end to the shifted one
   const j = run(W("w3", [0, 0], [-5.08, 0]) + W("w4", [0, 0], [0, -5.08]) + '(junction (at 0 0) (diameter 0) (color 0 0 0 0) (uuid "j1"))', [12.7, 2.54]);
   assert.deepStrictEqual(j.w1, [[0, 2.54], [12.7, 2.54]]);

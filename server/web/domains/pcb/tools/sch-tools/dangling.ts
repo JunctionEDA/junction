@@ -6,6 +6,7 @@ import { BUS_TEXT, previewJunctions } from "./junction";
 import { anchorOf } from "./orient";
 import { outline, paint } from "./overlay";
 import { drawEditPoints } from "./point-edit";
+import { ruleAreaLeader } from "./shapes";
 import { collisionCursor, collisionMarkers, drawCollision } from "./collision";
 import { snapAnchor, snapConn } from "./snap";
 import { drawSchArcPreview } from "./arcs";
@@ -153,6 +154,8 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: SchCt
   if (S.showDangling !== false) drawDangling(c, doc, px);
   // no rollover in any tool but the delete tool (SCH_TOOL_BASE::InteractiveDelete), which brightens the item a click
   // would remove: LAYER_BRIGHTENED with its 0.15-alpha shadow (BrightenItem), the rest of the sheet as it is
+  // the sheet a move would drop the selection into is BRIGHTENED (SCH_MOVE_TOOL's hoverSheet)
+  if (S.drag && S.drag.hoverSheet) { const it = doc.items.get(S.drag.hoverSheet.id); if (it) paintItems(c, view, doc, [it], { highlight: new Set([it.id]) }); }
   if (S.hover && !S.drag && curTool() === "delete") { const it = doc.items.get(S.hover); if (it) paintItems(c, view, doc, [it], { highlight: new Set([it.id]) }); }
   // the selected item gets KiCad's selection shadow from the canvas pass (the host adds S.sel to the selection)
   if (curTool() === "select" && !S.drag) drawEditPoints(c, ctx, px);
@@ -192,7 +195,7 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: SchCt
   if (d) {
     c.save(); c.strokeStyle = K.SCH.notes; c.lineWidth = Math.max(0.1524, 2 * px); c.lineCap = "round"; c.lineJoin = "round"; c.globalAlpha = 0.85;
     const cur = d.await ? d.pts[1] : d.cur, p0 = d.pts[0];
-    if (d.shape === "sheet") c.strokeStyle = K.SCH.sheet; else if (d.shape === "rulearea") { c.strokeStyle = K.SCH.ruleArea; c.setLineDash([4 * px, 3 * px]); }
+    if (d.shape === "sheet") c.strokeStyle = K.SCH.sheet; else if (d.shape === "rulearea") c.strokeStyle = K.SCH.ruleArea;
     if (d.shape === "table") { c.beginPath(); for (const l of drawTableLines(p0, cur, S.ctx ? S.ctx.gridPitch : 1.27, labelDefaults().textSize)) { c.moveTo(l[0], l[1]); c.lineTo(l[2], l[3]); } c.stroke(); }
     else if (d.shape === "sheet") {
       // the preview is the sheet itself (a Clone with "Untitled Sheet" / "untitled.kicad_sch"), sized by sizeSheet
@@ -216,6 +219,17 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: SchCt
       const ctrl = n === 1 ? [p0, cur, cur, cur] : n === 2 ? [p0, d.pts[1], cur, cur] : [p0, d.pts[1], [2 * e[0] - cur[0], 2 * e[1] - cur[1]], e];
       const bp = K.bezierPts(ctrl, 24); c.beginPath(); c.moveTo(bp[0][0], bp[0][1]); for (let i = 1; i < bp.length; i++) c.lineTo(bp[i][0], bp[i][1]); c.stroke();
       c.save(); c.setLineDash([2 * px, 2 * px]); c.globalAlpha = 0.5; c.beginPath(); c.moveTo(ctrl[0][0], ctrl[0][1]); c.lineTo(ctrl[1][0], ctrl[1][1]); c.moveTo(ctrl[3][0], ctrl[3][1]); c.lineTo(ctrl[2][0], ctrl[2][1]); c.stroke(); c.restore();
+    } else if (d.shape === "rulearea") {
+      // KIGFX::PREVIEW::POLYGON_ITEM: the locked corners and the leader stroked one pixel wide in the rule-area colour,
+      // the outline they make with the loop line filled at alpha 0.2 (RULE_AREA_CREATE_HELPER::OnFirstPoint)
+      const { leader, loop } = ruleAreaLeader(d.pts, cur), ring = d.pts.concat(leader, loop);
+      c.lineWidth = px; c.globalAlpha = 1;
+      c.beginPath(); c.moveTo(p0[0], p0[1]); for (let i = 1; i < d.pts.length; i++) c.lineTo(d.pts[i][0], d.pts[i][1]);
+      if (leader.length >= 2) { c.moveTo(leader[0][0], leader[0][1]); for (let i = 1; i < leader.length; i++) c.lineTo(leader[i][0], leader[i][1]); }
+      c.stroke();
+      c.fillStyle = K.SCH.ruleArea; c.globalAlpha = 0.2;
+      c.beginPath(); c.moveTo(ring[0][0], ring[0][1]); for (let i = 1; i < ring.length; i++) c.lineTo(ring[i][0], ring[i][1]); c.closePath(); c.fill();
+      c.globalAlpha = 0.85;
     } else {
       c.beginPath(); c.moveTo(p0[0], p0[1]); for (let i = 1; i < d.pts.length; i++) c.lineTo(d.pts[i][0], d.pts[i][1]); c.lineTo(cur[0], cur[1]);
       if (d.shape !== "lines" && d.pts.length >= 2) c.closePath();   // polygons and rule areas close back to the first point
@@ -276,7 +290,12 @@ export function dragJunctions(doc: KDoc, d: NonNullable<typeof S.drag>): Pt[] {
   const line = (it: KItem) => { if ((it.kind === "wire" || it.kind === "bus") && !skip.has(it.id) && doc.items.get(it.id)) { skip.add(it.id); add(it.kind, ptsOf(doc.items.get(it.id)!.node)); } };
   for (const e of d.items || []) if (e.item) line(e.item);
   for (const a of d.anchors || []) for (const e of a.ends || []) line(e.item);
+  if (d.sim) for (const l of d.sim.lines) if (l.item) line(l.item);
   for (const s of d.preview || []) add(s.kind, s.pts);
-  if (!lines.length) return [];
-  try { return previewJunctions(doc, lines, skip); } catch (e) { return []; }
+  // every moved item counts (a symbol, label or sheet in flight): a pin hovering over the middle of a wire shows its dot
+  const pins: Pt[] = [];
+  for (const e of d.items || []) if (e.item && e.kind !== "wire" && e.kind !== "bus") pins.push(...connPoints(doc, e.item));
+  for (const r of d.riders || []) if (r.item.kind !== "junction") pins.push(...connPoints(doc, r.item));
+  if (!lines.length && !pins.length) return [];
+  try { return previewJunctions(doc, lines, skip, pins); } catch (e) { return []; }
 }

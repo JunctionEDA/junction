@@ -40,3 +40,19 @@ export function repairPageNumbers(list: PageSheet[]): { pages: string[]; order: 
   }
   return { pages, order };
 }
+
+/** A node of the sheet tree (the hierarchy navigator's): its name, page number and children; `virtual` marks the hidden project root. */
+export interface PageTreeNode<T> { name: string; page: string; children: T[]; virtual?: boolean }
+/**
+ * SCHEMATIC::Hierarchy(): every sheet instance in the walk's order, sorted by page number
+ * (SCH_SHEET_LIST::SortByPageNumbers: ComparePageNum, then the virtual page number).  `human` is the instance's path.
+ */
+export function sheetsByPage<T extends PageTreeNode<T>>(tree: T | null): { node: T; human: string }[] {
+  const list: { node: T; human: string }[] = [], chain: string[] = [];
+  const walk = (n: T): void => {
+    if (!n.virtual) list.push({ node: n, human: "/" + chain.map((x) => x + "/").join("") });
+    for (const c of n.children) { chain.push(c.name); walk(c); chain.pop(); }
+  };
+  if (tree) walk(tree);
+  return list.map((x, i) => ({ x, i })).sort((a, b) => comparePageNum(a.x.node.page || "", b.x.node.page || "") || a.i - b.i).map((e) => e.x);
+}

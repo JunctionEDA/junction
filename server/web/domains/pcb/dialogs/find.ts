@@ -4,7 +4,8 @@
 // (when allowed), values, fields, labels and text as ordinary collab changes.
 import { E, appState, applyView, centerOn, openDocId, pushUndoFor, toolCtx, cloneNode } from "./editor";
 import { KD, checkbox, h, textInput, type DlgApi } from "./dom";
-import { findHits, replaceInNode, str, pushFindHistory, type FindHit, type FindOpts } from "./logic";
+import { findHits, hitOrder, replaceInNode, str, pushFindHistory, type FindHit, type FindOpts } from "./logic";
+import { sheetList } from "./sch-hierarchy";
 import { comboBox } from "../../../shared/components/kcombo";
 import { projectDocs, readDoc, submitDocOp } from "./project";
 import { keyName } from "../../../shared/keys";
@@ -13,7 +14,8 @@ interface FindState extends FindOpts { replacement: string; backward: boolean; c
 const F: FindState = { query: "", replacement: "", backward: false, matchCase: false, wholeWord: false, regex: false, pins: false, hiddenFields: false, currentSheetOnly: false, selectionOnly: false, replaceRefs: false, netNames: false };
 /** FindNext's searchAllSheets: !searchCurrentSheetOnly (Find Next Marker shares the dialog's search data). */
 export const findSearchesAllSheets = (): boolean => !F.currentSheetOnly && !F.selectionOnly;
-let last: { docId: string | null; key: string } | null = null;   // the hit the cursor sits on
+interface Last { docId: string | null; key: string; x: number; y: number; id: string }
+let last: Last | null = null;   // the hit the cursor sits on (m_afterItem)
 let api: DlgApi | null = null, statusEl: HTMLElement | null = null;
 const otherDocs = new Map<string, KDoc>();
 // The Search for / Replace with history (EDA_DRAW_FRAME::m_findStringHistoryList / m_replaceStringHistoryList), kept per
@@ -29,46 +31,78 @@ function remember(): void {
   try { localStorage.setItem(HIST_KEY, JSON.stringify(hist)); } catch { /* no storage */ }
 }
 const resolveLib = (d: Pick<KDoc, "items" | "lib">, name: string) => KiCadCanvas.resolveLib(d as KDoc, name);
-const keyOf = (hit: FindHit) => `${hit.id}\u0000${hit.what}\u0000${hit.field || ""}`;
+const keyOf = (hit: FindHit) => `${hit.id}\u0000${hit.what}\u0000${hit.field || ""}\u0000${hit.sub === undefined ? "" : hit.sub}`;
 const S = appState;
-function setStatus(text: string, bad = false): void { if (statusEl) { statusEl.textContent = text; statusEl.style.color = bad ? "var(--err)" : "var(--ink-2)"; } }
+let statusTimer: ReturnType<typeof setTimeout> | null = null;
+/** ShowFindReplaceStatus( msg, ms ): the dialog's status line; with a time it clears itself. */
+function setStatus(text: string, bad = false, ms = 0): void {
+  if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
+  if (statusEl) { statusEl.textContent = text; statusEl.style.color = bad ? "var(--err)" : "var(--ink-2)"; }
+  if (ms && text) statusTimer = setTimeout(() => { statusTimer = null; if (statusEl) statusEl.textContent = ""; }, ms);
+}
 function hitsHere(): FindHit[] { return E.kdoc ? findHits(E.kdoc, F, F.selectionOnly ? new Set<string>(E.selection) : null, resolveLib) : []; }
-function describe(hit: FindHit): string { const it = E.kdoc && E.kdoc.items.get(hit.id); const ref = it && it.ref ? it.ref + " " : ""; return `${ref}${hit.what}: ${hit.text}`; }
 
+/**
+ * SCH_FIND_REPLACE_TOOL::FindNext's tail: the matching item itself is selected (a field of a symbol or sheet, else
+ * the item; a selection-only search leaves the selection alone) and the view centred on it, the zoom unchanged.
+ */
 function focusHit(hit: FindHit): void {
-  const ctx = toolCtx(); ctx.setSelection([hit.id]);
-  if (E.zoom < 2) { E.zoom = 3; E.viewTouched = true; applyView(); }
+  if (!F.selectionOnly) {
+    const ctx = toolCtx() as ReturnType<typeof toolCtx> & { selectField?: (id: string, name: string) => void };
+    if (hit.field && (hit.kind === "symbol" || hit.kind === "sheet") && ctx.selectField) ctx.selectField(hit.id, hit.field); else ctx.setSelection([hit.id]);
+  }
   centerOn(hit.x, hit.y);
 }
-async function otherSheetWithHits(dir: 1 | -1): Promise<{ docId: string; hits: FindHit[] } | null> {
-  const sheets = projectDocs().filter((d) => d.docType === "kicad_sch"); const i = sheets.findIndex((d) => d.docId === S.docId); if (sheets.length < 2) return null;
-  for (let k = 1; k < sheets.length; k++) {
-    const d = sheets[((i + dir * k) % sheets.length + sheets.length) % sheets.length];
-    let od = otherDocs.get(d.docId); if (!od) { try { od = await readDoc(d.docId, "kicad_sch"); otherDocs.set(d.docId, od); } catch (e) { continue; } }
-    const hits = findHits(od, F, null, resolveLib); if (hits.length) return { docId: d.docId, hits };
-  }
-  return null;
+/** The project's sheets in page order (SCH_SHEET_LIST::SortByPageNumbers), each file once. */
+async function sheetOrder(): Promise<string[]> {
+  let ids: string[] = [];
+  try { for (const s of await sheetList()) if (!ids.includes(s.docId)) ids.push(s.docId); } catch { ids = []; }
+  for (const d of projectDocs()) if (d.docType === "kicad_sch" && !ids.includes(d.docId)) ids.push(d.docId);
+  return ids;
+}
+async function hitsOn(docId: string): Promise<FindHit[]> {
+  if (docId === S.docId) return hitsHere();
+  let od = otherDocs.get(docId); if (!od) { try { od = await readDoc(docId, "kicad_sch"); otherDocs.set(docId, od); } catch (e) { return []; } }
+  return findHits(od, F, null, resolveLib);
 }
 function whenDocOpen(docId: string): Promise<boolean> {
   return new Promise((resolve) => { const t0 = Date.now(); const tick = () => { if (S.docId === docId && E.kdoc && E.kdoc.items.size) resolve(true); else if (Date.now() - t0 > 8000) resolve(false); else setTimeout(tick, 100); }; tick(); });
 }
+/** nextMatch( screen, sheet, aAfter ): the first hit past `after` in the search order (before it when reversed). */
+function nextHit(hits: FindHit[], after: Last | null, rev: boolean): FindHit | null {
+  if (!after) return hits[rev ? hits.length - 1 : 0] || null;
+  const i = hits.findIndex((x) => keyOf(x) === after.key);
+  if (i >= 0) return hits[i + (rev ? -1 : 1)] || null;
+  // the item no longer matches (it was replaced): the search goes on from where it sits
+  const past = hits.filter((x) => (rev ? hitOrder(x, after) < 0 : hitOrder(x, after) > 0));
+  return past[rev ? past.length - 1 : 0] || null;
+}
 export async function findNext(reverse = false): Promise<FindHit | null> {
   // SCH_FIND_REPLACE_TOOL::FindNext with nothing to look for: FindAndReplace( ACTIONS::find )
   if (!F.query) { setStatus(""); if (!findIsOpen()) openFind(false); return null; }
-  const dir: 1 | -1 = F.backward !== reverse ? -1 : 1, hits = hitsHere();
-  let i = last && last.docId === S.docId ? hits.findIndex((x) => keyOf(x) === last!.key) : -1;
-  let next = i < 0 ? (dir > 0 ? 0 : hits.length - 1) : i + dir;
-  if (next < 0 || next >= hits.length) {
-    if (!F.currentSheetOnly && !F.selectionOnly) {
-      setStatus("Searching other sheets…");
-      const o = await otherSheetWithHits(dir);
-      if (o) { openDocId(o.docId); if (await whenDocOpen(o.docId)) { const hs = hitsHere(); const hit = hs[dir > 0 ? 0 : hs.length - 1]; if (hit) { last = { docId: S.docId, key: keyOf(hit) }; focusHit(hit); setStatus(`${describe(hit)}  (${dir > 0 ? 1 : hs.length} of ${hs.length} on this sheet)`); return hit; } } }
+  const rev = F.backward !== reverse, searchAll = findSearchesAllSheets();
+  if (last && last.docId !== S.docId) last = null;   // m_afterItemScreen is not the screen shown
+  let hit: FindHit | null = null, wrapped = false, onDoc: string | null = null;
+  for (let attempt = 0; attempt < 2 && !hit; attempt++) {
+    if (attempt === 1) { if (!last) break; last = null; wrapped = true; }   // nothing past the last match: once more from the start
+    const fresh = !last;
+    if (attempt === 0 || !searchAll) { hit = nextHit(hitsHere(), last, rev); if (hit) onDoc = S.docId; }
+    if (!hit && searchAll) {
+      const order = await sheetOrder(); if (rev) order.reverse();
+      let skipping = attempt === 0 && (rev || !fresh);   // only the sheets past the one shown
+      for (const id of order) {
+        if (skipping) { if (id === S.docId) skipping = false; continue; }
+        const hs = await hitsOn(id); if (hs.length) { hit = hs[rev ? hs.length - 1 : 0]; onDoc = id; break; }
+      }
     }
-    if (!hits.length) { last = null; setStatus(`'${F.query}' not found`, true); return null; }
-    next = dir > 0 ? 0 : hits.length - 1;   // wrap around, as KiCad does after "Reached end of schematic"
   }
-  const hit = hits[next]; last = { docId: S.docId, key: keyOf(hit) }; focusHit(hit);
-  setStatus(`${describe(hit)}  (${next + 1} of ${hits.length} on this sheet)`);
+  if (hit && onDoc && onDoc !== S.docId) {
+    openDocId(onDoc);
+    hit = (await whenDocOpen(onDoc)) ? nextHit(hitsHere(), null, rev) : null;
+  }
+  if (!hit) { last = null; setStatus("No matches found.", false, 2000); return null; }
+  last = { docId: S.docId, key: keyOf(hit), x: hit.x, y: hit.y, id: hit.id }; focusHit(hit);
+  if (wrapped) setStatus(searchAll ? "Reached end of schematic." : "Reached end of sheet.", false, 2000); else setStatus("");
   return hit;
 }
 /** MODIFIED changes replacing every replaceable hit of `hits` on `doc`. */
@@ -84,30 +118,32 @@ function replaceChanges(doc: KDoc, hits: FindHit[]): KChange[] {
 }
 export async function replaceOne(): Promise<void> {
   if (E.viewOnly) { setStatus("View-only access", true); return; }
-  const hits = hitsHere(); let cur = last && last.docId === S.docId ? hits.find((x) => keyOf(x) === last!.key) : undefined;
-  if (!cur || !cur.replaceable) { const n = await findNext(); if (!n) return; if (!n.replaceable) { setStatus(`${describe(n)} cannot be replaced`, true); } return; }
-  const ch = E.kdoc ? replaceChanges(E.kdoc, [cur]) : []; if (ch.length) toolCtx().commit(ch, "replace");
+  // ReplaceAndFindNext: nothing to look for opens Find; only a current match ( HasMatch ) is replaced, then the next is found
+  if (!F.query) { if (!findIsOpen()) openFind(false); return; }
+  const hits = hitsHere(), cur = last && last.docId === S.docId ? hits.find((x) => keyOf(x) === last!.key) : undefined;
+  if (!cur) return;
+  const ch = E.kdoc ? replaceChanges(E.kdoc, [cur]) : []; if (ch.length) toolCtx().commit(ch, "Find and Replace");
   await findNext();
 }
 export async function replaceAll(): Promise<void> {
   if (E.viewOnly) { setStatus("View-only access", true); return; }
-  const here = E.kdoc ? replaceChanges(E.kdoc, hitsHere()) : []; if (here.length) toolCtx().commit(here, "replace all");
-  let total = here.length, sheets = here.length ? 1 : 0;
-  if (!F.currentSheetOnly && !F.selectionOnly) {
+  if (!F.query) { if (!findIsOpen()) openFind(false); return; }
+  const here = E.kdoc ? replaceChanges(E.kdoc, hitsHere()) : []; if (here.length) toolCtx().commit(here, "Find and Replace All");
+    if (!F.currentSheetOnly && !F.selectionOnly) {
     for (const d of projectDocs().filter((x) => x.docType === "kicad_sch" && x.docId !== S.docId)) {
       try { const od = await readDoc(d.docId, "kicad_sch"); otherDocs.delete(d.docId); const ch = replaceChanges(od, findHits(od, F, null, resolveLib)); if (ch.length) {
           // the step is undoable on that sheet: its Ctrl+Z puts the texts back (KiCad undoes all sheets at once; here each sheet has its own list)
           const inverse = ch.map((c) => { const it = od.items.get(c.id); return it ? KiCadCanvas.replaceChange(od, it) : null; }).filter(Boolean) as KChange[];
-          await submitDocOp(d.docId, ch); pushUndoFor(d.docId, { label: "replace all", changes: ch, inverse }); total += ch.length; sheets++;
+          await submitDocOp(d.docId, ch); pushUndoFor(d.docId, { label: "Find and Replace All", changes: ch, inverse });
         } }
       catch (e) { setStatus(`Could not replace in ${d.path}: ${(e as Error).message}`, true); return; }
     }
   }
-  last = null; setStatus(total ? `Replaced matches in ${total} item${total === 1 ? "" : "s"}${sheets > 1 ? ` on ${sheets} sheets` : ""}` : `'${F.query}' not found`, !total);
+  last = null; setStatus("");   // ReplaceAll shows no status
 }
 
 export function openFind(replace: boolean): void {
-  otherDocs.clear();
+  otherDocs.clear(); F.searchAndReplace = replace; last = null;
   const ro = !!E.viewOnly;
   api = KD().open({ title: replace ? "Find and Replace" : "Find", width: 560, modeless: true, cls: "kd-find", buttons: [],
     build(body, a) {

@@ -1,6 +1,6 @@
 import type { Box, Pt } from "./types";
 import { tFrom } from "./orient";
-import { K, atOf, kid, kids, str } from "./state";
+import { K, S, atOf, kid, kids, str } from "./state";
 import { deep, r4 } from "./util";
 
 // ---------------------------------------------------------------- node builders (KiCad 9 file shapes)
@@ -87,10 +87,19 @@ export function sheetCorner(p0: Pt, cur: Pt, grid: number): Pt {
   if (gy - p0[1] < minH - 1e-9) gy += g;
   return [r4(gx), r4(gy)];
 }
+/** A "#RRGGBB" / "#RRGGBBAA" preference colour as the file's (color r g b a); null when unset (COLOR4D::UNSPECIFIED). */
+export function hexColorNode(hex: string | null | undefined): SNode | null {
+  const m = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(String(hex || "").trim()); if (!m) return null;
+  const v = parseInt(m[1], 16), a = m[2] ? parseInt(m[2], 16) / 255 : 1;
+  return ["color", (v >> 16) & 255, (v >> 8) & 255, v & 255, +a.toFixed(4)];
+}
 export function sheetNode(a: Pt, b: Pt, name: string, file: string): SNode {
   const [x0, y0, x1, y1] = corners(a, b);
+  // DrawSheet: SetBorderColor( default_sheet_border_color ), SetBackgroundColor( default_sheet_background_color ):
+  // Preferences > Schematic Editor > Editing Options > Defaults for New Objects (unset: the theme's)
+  const border = hexColorNode(S.sheetBorder), back = hexColorNode(S.sheetBackground);
   return ["sheet", ["at", x0, y0], ["size", r4(x1 - x0), r4(y1 - y0)], ["exclude_from_sim", "no"], ["in_bom", "yes"], ["on_board", "yes"], ["dnp", "no"], ["fields_autoplaced", "yes"],
-    ["stroke", ["width", SHEET_BORDER], ["type", "solid"]], ["fill", ["color", 0, 0, 0, 0]], ["uuid", K.newUuid()],
+    ["stroke", ["width", SHEET_BORDER], ["type", "solid"], ...(border ? [border] : [])], ["fill", back || ["color", 0, 0, 0, 0]], ["uuid", K.newUuid()],
     ["property", "Sheetname", name, ["at", x0, r4(y0 - SHEET_NAME_OFF), 0], ["effects", fontNode(1.27), ["justify", "left", "bottom"]]],
     ["property", "Sheetfile", file, ["at", x0, r4(y1 + SHEET_FILE_OFF), 0], ["effects", fontNode(1.27), ["justify", "left", "top"]]]];
 }

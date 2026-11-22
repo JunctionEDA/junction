@@ -1,13 +1,14 @@
 import type { SAtom, SchCtx, Pt } from "./types";
 import { root } from "../root";
 import { cursorOf, editable, selectedItems } from "./commands";
+import { labelDefaults } from "./dom";
 import { netItems } from "./highlight";
 import { switchTool } from "./junction";
 import { busEntryNode, labelNode } from "./nodes";
 import { mmPerPx } from "./snap";
-import { S, str } from "./state";
+import { S, kid, str } from "./state";
 import { closestOnSeg } from "./transforms";
-import { addNode, r4, segs } from "./util";
+import { addNode, r4, replaceKid, segs } from "./util";
 import { startWire } from "./wire";
 
 // ---------------------------------------------------------------- unfold bus (SCH_LINE_WIRE_BUS_TOOL::UnfoldBus)
@@ -80,18 +81,20 @@ export function busForUnfolding(ctx: SchCtx): KItem | null {
 }
 export function unfoldMembers(doc: KDoc, bus: KItem) { const seen = new Set<string>(), out: string[] = []; for (const b of busLabelsOf(doc, bus)) for (const m of b.members) if (!seen.has(m)) { seen.add(m); out.push(m); } return out; }
 export function nearestOnLine(item: KItem, p: Pt) { let best: Pt | null = null, bd = Infinity; for (const [a, b] of segs(item)) { const q = closestOnSeg(p, a, b), d = Math.hypot(q[0] - p[0], q[1] - p[1]); if (d < bd) { bd = d; best = q; } } return best; }
-// Bus entry at the point, the member label on its far end (spun away from the bus like
-// SCH_SCREEN::GetLabelOrientationForPoint), then the wire tool takes over from that end.
+// SCH_LINE_WIRE_BUS_TOOL::doUnfoldBus: a bus entry at the point (SCH_BUS_WIRE_ENTRY( pos ): +100 mil, +100 mil; it
+// flips towards the cursor with the first motion), the member label on its far end with the default text size and the
+// spin style the last unfold left (busUnfoldPersistentSettings, RIGHT at first; R / Shift+R turn it), the crosshair on
+// the entry's end, then the wire tool takes over from there.
 export function unfoldBus(ctx: SchCtx, bus: KItem, member: string, at: Pt) {
   const doc = ctx.doc, c = at || cursorOf(ctx), snapped = ctx.snap([c[0], c[1]]).map(r4);
   const p = nearestOnLine(bus, snapped); if (!p) return null;
-  const seg = segs(bus)[0], horizontal = Math.abs(seg[0][1] - seg[1][1]) < 1e-6, vertical = Math.abs(seg[0][0] - seg[1][0]) < 1e-6;
-  const sx = c[0] < p[0] ? -1 : 1, sy = c[1] < p[1] ? -1 : 1;
-  const dx = 2.54 * sx, dy = 2.54 * sy, end = [r4(p[0] + dx), r4(p[1] + dy)];
-  let rot = 0; if (vertical) rot = end[0] < p[0] ? 180 : 0; else if (horizontal) rot = end[1] < p[1] ? 90 : 270;
-  const entry = addNode(doc, busEntryNode(p, r4(dx), r4(dy))), label = addNode(doc, labelNode("label", member, end, rot));   // IS_NEW: not committed yet
+  const dx = 2.54, dy = 2.54, end = [r4(p[0] + dx), r4(p[1] + dy)];
+  const lnode = labelNode("label", member, end, S.unfoldSpin || 0), size = labelDefaults().textSize;
+  replaceKid(kid(kid(lnode, "effects")!, "font")!, ["size", size, size]);
+  const entry = addNode(doc, busEntryNode(p, r4(dx), r4(dy))), label = addNode(doc, lnode);   // IS_NEW: not committed yet
   switchTool(ctx, "wire");
   startWire(ctx, "wire", end);
+  S.cursor = end.slice(); if (typeof ctx.warpCursor === "function") ctx.warpCursor(end);   // SetCrossHairCursorPosition( entry->GetEnd() )
   S.unfold = { labelId: label.item.id, entryId: entry.item.id, origin: p, placed: false };
   ctx.requestRender();
   return { entry: entry.item, label: label.item, start: end };

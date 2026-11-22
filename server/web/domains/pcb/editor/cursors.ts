@@ -10,6 +10,7 @@
 // the stock cursors (GetStockCursor).
 import { KICURSOR_IMAGES } from "./kicursors.generated";
 import { E } from "./state";
+import { lassoSigned } from "./selection";
 import { isSch, stage } from "./view";
 import { ctrlDown, modifierCursorOf, modifiersState } from "./selmodes";
 import { activeModule, moduleTool, toolCtx } from "./tools";
@@ -65,6 +66,9 @@ export function currentCursor(): string {
   { const m0 = activeModule() as { state?: { kicursor?: string | null } } | null; const k = m0 && m0.state && m0.state.kicursor; if (k) return k; }
   if (t === "select") {
     const bs = E.boxSel as { start: number[]; cur: number[]; lasso: boolean } | null;
+    // SCH_SELECTION_TOOL::selectLasso: a lasso drawn clockwise is INSIDE_LASSO and shows SELECT_WINDOW, anticlockwise
+    // (TOUCHING_LASSO) SELECT_LASSO
+    if (bs && bs.lasso && isSch()) { const lp = (bs as unknown as { live?: boolean; pts: number[][] }).live ? [...(bs as unknown as { pts: number[][] }).pts, bs.cur] : (bs as unknown as { pts: number[][] }).pts; return lassoSigned(lp) > 0 ? "SELECT_WINDOW" : "SELECT_LASSO"; }
     if (bs) return bs.lasso || bs.cur[0] < bs.start[0] ? "SELECT_LASSO" : "SELECT_WINDOW";
     const m = activeModule() as CursorModule | null;
     if ((E.drag && E.drag.moved) || (E.fdrag && E.fdrag.moved)) return "MOVING";

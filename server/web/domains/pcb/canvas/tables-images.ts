@@ -203,7 +203,8 @@ export function base64Bytes(b64: unknown, limit?: number): Uint8Array {
   return new Uint8Array(0);
 }
 
-/** Pixel size, MIME type and PPI from a PNG (IHDR / pHYs) or JPEG (SOFn / JFIF density) header: BITMAP_BASE::updatePPI rules, 300 PPI default. */
+/** Pixel size, MIME type and PPI from a PNG (IHDR / pHYs), JPEG (SOFn / JFIF density), BMP (BITMAPINFOHEADER) or GIF
+ *  (logical screen) header — the types KiCad's image dialog offers: BITMAP_BASE::updatePPI rules, 300 PPI default. */
 export function imageInfo(bytes: ArrayLike<number>): { mime: string; w: number; h: number; ppi: number } {
   const info = { mime: "image/png", w: 0, h: 0, ppi: 300 };
   const be32 = (i: number) => ((bytes[i] << 24) | (bytes[i + 1] << 16) | (bytes[i + 2] << 8) | bytes[i + 3]) >>> 0, be16 = (i: number) => (bytes[i] << 8) | bytes[i + 1];
@@ -214,6 +215,8 @@ export function imageInfo(bytes: ArrayLike<number>): { mime: string; w: number; 
       if (type === "IDAT" || type === "IEND") break;
       // pHYs in pixels per metre: wx reports px/cm, KiCad rounds px/cm × 2.54
       if (type === "pHYs" && p + 17 <= bytes.length && bytes[p + 16] === 1) { const dpcm = be32(p + 8) / 100; if (dpcm > 1) info.ppi = Math.round(dpcm * 2.54); }
+      // a pHYs without a unit: wx hands the number over as it is and KiCad takes it for pixels per inch
+      else if (type === "pHYs" && p + 17 <= bytes.length && bytes[p + 16] === 0) { const d = be32(p + 8); if (d > 1) info.ppi = d; }
       p += 12 + len;
     }
   } else if (bytes.length >= 4 && bytes[0] === 0xFF && bytes[1] === 0xD8) {
@@ -226,12 +229,19 @@ export function imageInfo(bytes: ArrayLike<number>): { mime: string; w: number; 
       const len = be16(p + 2);
       if (m === 0xE0 && len >= 14 && bytes[p + 4] === 0x4A && bytes[p + 5] === 0x46 && bytes[p + 6] === 0x49 && bytes[p + 7] === 0x46) {
         const units = bytes[p + 11], xd = be16(p + 12);   // JFIF density: 1 = dots/inch, 2 = dots/cm
-        if (units === 2 && xd > 0) info.ppi = Math.round(xd * 2.54); else if (xd > 1) info.ppi = xd;
+        if (xd > 1) info.ppi = units === 2 ? Math.round(xd * 2.54) : xd;
       }
       if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) { info.h = be16(p + 5); info.w = be16(p + 7); break; }
       if (m === 0xDA || m === 0xD9) break;
       p += 2 + len;
     }
+  } else if (bytes.length >= 30 && bytes[0] === 0x42 && bytes[1] === 0x4D) {
+    // BMP: little-endian width / height (negative: top-down) and pixels per metre; wxBMPHandler reports whole pixels per cm
+    const le32 = (i: number) => (bytes[i] | (bytes[i + 1] << 8) | (bytes[i + 2] << 16) | (bytes[i + 3] << 24));
+    info.mime = "image/bmp"; info.w = Math.abs(le32(18)); info.h = Math.abs(le32(22));
+    if (bytes.length >= 42) { const dpcm = Math.trunc(le32(38) / 100); if (dpcm > 1) info.ppi = Math.round(dpcm * 2.54); }
+  } else if (bytes.length >= 10 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
+    info.mime = "image/gif"; info.w = bytes[6] | (bytes[7] << 8); info.h = bytes[8] | (bytes[9] << 8);   // no resolution: 300 PPI
   }
   return info;
 }

@@ -1,10 +1,11 @@
 import type { PtrEvent, SchCtx, Pt } from "./types";
 import { breakLinesAt, junctionAt, junctionChanges } from "./connect";
 import { autoRotateNode, setAutoRotate, supportsAutoRotate } from "./autorotate";
+import { autoplaceLabelNode } from "./autoplace";
 import { editTxn, explicitJunctionAllowed, switchTool, txnAddJunction } from "./junction";
 import { labelNode } from "./nodes";
 import { anchorOf, cloneNode, shiftNode } from "./orient";
-import { rememberPlaced } from "./repeat";
+import { rememberPlaced, txnTrimOverlapping } from "./repeat";
 import { snapConn } from "./snap";
 import { K, LINE_KINDS, S, SHAPE_KINDS, TEXT_KINDS, atOf, ptsOf, uuidOf } from "./state";
 import { addNode, deep, ghost, r4, removeChange, same } from "./util";
@@ -34,12 +35,32 @@ export function dropCarry(ctx: SchCtx) {
   const auto = supportsAutoRotate(c.kind) && !!S.lastAutoRotate;
   if (auto) { const n = autoRotateNode(doc, c.kind, c.node, uuidOf(c.node) || null, true); if (n) c.node = n; }
   if (c.kind === "junction" && junctionAt(doc, p[0], p[1])) { ctx.toast("There is already a junction here"); ctx.requestRender(); return null; }
-  const { item, change } = addNode(doc, c.node); const changes = [change];
+  // TwoClickPlace: item->AutoplaceFields( screen, AUTOPLACE_AUTO ) on the label that lands
+  if (c.kind === "label" || c.kind === "global_label" || c.kind === "hierarchical_label") {
+    const g = ghost(doc, c.node), body = g && c.kind === "global_label" ? (g.geom as { t: string; close?: boolean; pts?: Pt[] }[]).find((q) => q.t === "poly" && q.close && q.pts) : null;
+    const xs = body ? body.pts!.map((q) => q[0]) : [0], ys = body ? body.pts!.map((q) => q[1]) : [0];
+    const n = autoplaceLabelNode(c.kind, c.node, Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)));
+    if (n) c.node = n;
+  }
+  const { item, change } = addNode(doc, c.node); let changes = [change];
   if (auto) setAutoRotate(item.id, true);
-  if (c.kind === "symbol") changes.push(...junctionChanges(doc, K.pinPoints(doc, item).map((q) => [q.x, q.y]), "wire"));
+  if (c.kind === "symbol") {
+    // PlaceSymbol: TrimOverLappingWires then AddJunctionsIfNeeded, in the placement's own commit: a wire running
+    // through two of the new symbol's pins is cut between them
+    const t = editTxn(doc, ctx.IU);
+    try { txnTrimOverlapping(t, doc, [item]); } finally { t.restore(); }
+    const trims = t.changes();
+    if (trims.length) {
+      // the junction analysis sees the trimmed wires
+      for (const ch of trims) K.applyChange(doc, ch, ctx.IU || 1e4);
+      let jc: KChange[] = [];
+      try { jc = junctionChanges(doc, K.pinPoints(doc, item).map((q) => [q.x, q.y]), "wire"); } finally { t.restore(); }
+      changes = changes.concat(trims, jc);
+    } else changes.push(...junctionChanges(doc, K.pinPoints(doc, item).map((q) => [q.x, q.y]), "wire"));
+  }
   else if (LINE_KINDS.has(c.kind) && c.kind !== "polyline") changes.push(...junctionChanges(doc, ptsOf(c.node), c.kind));
   else if (c.kind === "junction") changes.push(...breakLinesAt(doc, p, "wire"), ...breakLinesAt(doc, p, "bus"));
-  ctx.commit(changes, c.kind === "symbol" ? "place " + (item.ref || "symbol") : c.kind.replace("_", " "));
+  ctx.commit(changes, placeLabel(c.kind));
   rememberPlaced(item.kind, item.node);
   if (c.kind === "symbol" || c.kind === "sheet") ctx.setSelected({ id: item.id }); else { S.sel = item.id; ctx.setSelected(null); }
   // the dialog's multiple-label list: the next label rides on the cursor (itemsToPlace)
@@ -78,10 +99,15 @@ export function singleClickPlace(ctx: SchCtx, toolId: string, dbl: boolean) {
   ctx.requestRender();
   return placed;
 }
+/** The undo description of a placement: KiCad's commit messages (PlaceSymbol, PlaceImage, TwoClickPlace). */
+export function placeLabel(kind: string) {
+  return kind === "symbol" ? "Place Symbol" : kind === "image" ? "Place Image" : kind === "text" ? "Add Text" : kind === "hierarchical_label" ? "Add Hierarchical Label"
+    : kind === "label" || kind === "global_label" || kind === "netclass_flag" || kind === "directive_label" ? "Add Label" : kind.replace("_", " ");
+}
 // Create a label/text straight away at p (the inline prompt's Enter).
 export function placeText(ctx: SchCtx, kind: string, text: string, p: Pt, rot: number) {
   const doc = ctx.doc; const { item, change } = addNode(doc, labelNode(kind, text, p, rot || 0));
-  ctx.commit([change], kind.replace("_", " "));
+  ctx.commit([change], placeLabel(kind));
   rememberPlaced(item.kind, item.node);
   S.sel = item.id; ctx.setSelected(null); ctx.requestRender();
   return item;

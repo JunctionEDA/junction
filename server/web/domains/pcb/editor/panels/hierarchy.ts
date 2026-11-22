@@ -10,11 +10,11 @@ import { enterSheet, findSheetDoc, readSavedSchematic, openDoc, publishDocs, roo
 import { E } from "../state";
 import { api, toast } from "../util";
 import { selectionIds } from "../gestures";
-import { applyHighlight, preferInstance } from "../schnets";
+import { applyHighlight, currentInstance, preferInstance } from "../schnets";
 import { loadProject, onProjectChanged, projectJson, saveProject, sub } from "../../dialogs/project";
 import { confirmBox } from "../../dialogs/dom";
 import { commitRootPage } from "../../dialogs/page-settings";
-import { repairPageNumbers, type PageSheet } from "../../sim/sheet-pages";
+import { repairPageNumbers, sheetsByPage, type PageSheet } from "../../sim/sheet-pages";
 import { KC, currentDocId, isSchDoc, kdoc, openDocs, panelStore, projectId, projectName, textEntry, type DocEntryLite, tctx } from "./core";
 
 interface SheetRef { id: string; name: string; file: string; page: string }
@@ -305,6 +305,23 @@ export function sheetOfPage(page: string): { docId: string; human: string } | nu
   walk(t);
   const h = hit as HierNode | null;
   return h && h.docId ? { docId: h.docId, human: "/" + names.map((x) => x + "/").join("") } : null;
+}
+
+/**
+ * SCH_NAVIGATE_TOOL::Previous / Next: the sheet instance one virtual page before / after the one shown.  At the
+ * first / last page nothing happens (KiCad only rings the bell).  True when a sheet was opened.
+ */
+export function stepSheetPage(dir: number): boolean {
+  let tree: HierNode | null = null; try { tree = build(); } catch { tree = null; }
+  const order = sheetsByPage(tree || panelStore.get().hierarchy.root), cur = currentDocId();
+  let inst: { human?: string } | null = null; try { inst = currentInstance(); } catch { inst = null; }
+  let i = inst && inst.human ? order.findIndex((o) => o.node.docId === cur && o.human === inst!.human) : -1;
+  if (i < 0) i = order.findIndex((o) => o.node.docId === cur);
+  const to = i < 0 ? null : order[i + dir]; if (!to || !to.node.docId) return false;
+  preferInstance(to.human);
+  if (to.node.docId !== cur) { const d = schDocs().find((x) => x.docId === to.node.docId); if (!d) return false; void openDoc(d); }
+  else applyHighlight();   // the same file as another instance
+  return true;
 }
 
 // ---------------------------------------------------------------- top-level sheets (HIERARCHY_PANE::onContextMenu)

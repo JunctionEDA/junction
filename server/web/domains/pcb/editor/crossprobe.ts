@@ -85,7 +85,21 @@ export function receiveProbe(p: Probe): void {
     E.selection = new Set(hits.map((h) => h.id));
     lastSent = selectedRefs().join(" ");
     selectionChanged();
-    if (hits.length && (opts.center || opts.zoom)) {
+    if (sch) {
+      // SCH_SELECTION_TOOL::SyncSelection: nothing moves unless "centre on items" is set; with "zoom to fit" as well
+      // the scale follows ZoomFitCrossProbeBBox (a small symbol is not blown up to fill the window, and a ratio
+      // within 0.5 .. 1 keeps the zoom), then the view centres on the selection's box (FocusOnLocation)
+      const sm = CollabTools.sch as unknown as { _?: { candBox?: (d: KDoc, c: unknown) => number[]; crossProbeZoomRatio?: (w: number, h: number, vw: number, vh: number) => number | null } } | undefined;
+      let b: number[] | null = null;
+      for (const h of hits) { let q: number[] | null | undefined = h.bbox; try { if (sm && sm._ && sm._.candBox) q = sm._.candBox(E.kdoc as KDoc, { key: h.id, kind: "item", item: h }); } catch { q = h.bbox; } if (q) b = b ? [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])] : q.slice(); }
+      if (b && b[2] - b[0] !== 0 && b[3] - b[1] !== 0 && opts.center) {
+        const ppm = pxPerMm(); let w = stage.clientWidth / ppm, h = stage.clientHeight / ppm;
+        const ratio = opts.zoom && sm && sm._ && sm._.crossProbeZoomRatio ? sm._.crossProbeZoomRatio(b[2] - b[0], b[3] - b[1], w, h) : null;
+        if (ratio) { w *= ratio; h *= ratio; }
+        const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2; fitBox([cx - w / 2, cy - h / 2, w, h]);
+      }
+    }
+    else if (hits.length && (opts.center || opts.zoom)) {
       const b = hits.reduce((a, h) => (h.bbox ? [Math.min(a[0], h.bbox[0]), Math.min(a[1], h.bbox[1]), Math.max(a[2], h.bbox[2]), Math.max(a[3], h.bbox[3])] : a), [Infinity, Infinity, -Infinity, -Infinity]);
       if (isFinite(b[0])) {
         if (opts.zoom) { const pad = Math.max(b[2] - b[0], b[3] - b[1]) * 0.12 + (sch ? 8 : 2); fitBox([b[0] - pad, b[1] - pad, b[2] - b[0] + 2 * pad, b[3] - b[1] + 2 * pad]); }   // fitBox takes x, y, width, height

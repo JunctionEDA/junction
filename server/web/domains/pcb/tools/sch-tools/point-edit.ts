@@ -1,14 +1,15 @@
 import type { EditFollower, EditPoints, PointEdit, PtrEvent, SchCtx, Pt, Box } from "./types";
 import { restoreNode } from "./drag";
 import { TEXTBOX_MARGIN } from "./nodes";
-import { mmPerPx, snapConn } from "./snap";
+import { mmPerPx } from "./snap";
 import { K, S, atOf, kid, kids, num, ptsOf, setPts, str } from "./state";
 import { deep, modChange, r4, same } from "./util";
 import { EDIT_BORDER_PX, EDIT_POINT_PX, editPointColors } from "../edit-point-style";
 export { EDIT_BORDER_PX, EDIT_POINT_PX, editPointColors };
 
 // ---------------------------------------------------------------- point editor (eeschema/tools/sch_point_editor.cpp)
-// A single selected line, shape, text box, sheet or rule area shows KiCad's edit points; dragging one reshapes
+// A single selected graphic line, shape, text box, sheet or rule area shows KiCad's edit points (pointEditorTypes:
+// wires and buses get none, they are edited by dragging); dragging one reshapes
 // the item ("Move Point").  Rectangles, text boxes and sheets also get the four edge handles (EDIT_LINE midpoints)
 // that move one side; a rectangle's centre point moves it whole.  Graphic lines drag the graphic line joined at
 // the edited end (LINE_POINT_EDIT_BEHAVIOR, notes layer only); a sheet's pins stay on their edges
@@ -37,7 +38,7 @@ export const kp = (n: SNode, key: string): Pt | null => { const k = kid(n, key);
 export function editPoints(doc: KDoc, item: KItem): EditPoints | null {
   if (!item) return null;
   const k = item.kind, n = item.node;
-  if (k === "wire" || k === "bus" || k === "polyline" || k === "bezier") {
+  if (k === "polyline" || k === "bezier") {
     const pts = ptsOf(n); if (pts.length < 2) return null;
     // a graphic polyline of more than two points is a SHAPE_T::POLY: EDA_POLYGON_POINT_EDIT_BEHAVIOR gives it edge handles
     if (k === "polyline" && pts.length > 2) return { pts, lines: polyLines(pts.length), guides: [] };
@@ -237,6 +238,60 @@ export function textBoxMinSize(node: SNode): Pt {
   const rot = Math.round(num((kid(node, "at") || [])[3], 0)) % 180;
   return rot === 90 ? [r4(h + m[0] + m[2]), 0] : [0, r4(h + m[1] + m[3])];
 }
+const crossZ = (a: Pt, b: Pt) => a[0] * b[1] - a[1] * b[0], unit2 = (v: Pt): Pt => { const l = Math.hypot(v[0], v[1]); return l ? [v[0] / l, v[1] / l] : [0, 0]; };
+/**
+ * EDA_ARC_POINT_EDIT_BEHAVIOR::UpdateItem for the two modes that differ from "Keep center, adjust radius"
+ * (ARC_EDIT_MODE): `pts` are ARC_START, ARC_MID, ARC_END, ARC_CENTER, `p` the snapped cursor, `raw` the cursor itself.
+ * Returns the new [start, mid, end], or null where the mode edits as "center" does (the caller's path) .
+ *   radius    (KEEP_CENTER_ENDS_ADJUST_ANGLE): an end slides round the circle (editArcEndpointKeepCenterAndRadius)
+ *   endpoints (KEEP_ENDPOINTS_OR_START_DIRECTION): the centre slides on the chord's bisector
+ *             (editArcCenterKeepEndpoints), the mid along its ray from the chord (editArcMidKeepEndpoints), an end
+ *             keeps the other end and the tangent there (editArcEndpointKeepTangent)
+ */
+export function arcEditPoints(pts: Pt[], idx: number, p: Pt, raw: Pt, mode: string): [Pt, Pt, Pt] | null {
+  if (mode !== "radius" && mode !== "endpoints") return null;
+  let [s, m, e] = pts; const c = pts[3];
+  // the arc as EDA_SHAPE holds it here: from start to end the polar angle grows; the handle stays the one under the cursor
+  const swap = crossZ(sub2(m, s), sub2(e, m)) < 0; let key = idx;
+  if (swap) { [s, e] = [e, s]; key = idx === 0 ? 2 : idx === 2 ? 0 : idx; }
+  const from = (cc: Pt, a: Pt, b: Pt): [Pt, Pt, Pt] => {
+    const r = Math.hypot(a[0] - cc[0], a[1] - cc[1]), a0 = Math.atan2(a[1] - cc[1], a[0] - cc[0]);
+    let sw = Math.atan2(b[1] - cc[1], b[0] - cc[0]) - a0; while (sw <= 0) sw += 2 * Math.PI;
+    return [a, [cc[0] + r * Math.cos(a0 + sw / 2), cc[1] + r * Math.sin(a0 + sw / 2)], b];
+  };
+  const out = (g: [Pt, Pt, Pt] | null): [Pt, Pt, Pt] | null => (g && swap ? [g[2], g[1], g[0]] : g);
+  const keep: [Pt, Pt, Pt] = [s, m, e];
+  if (mode === "radius") {
+    if (key !== 0 && key !== 2) return null;
+    const v = unit2(sub2(p, c)), r = Math.hypot(s[0] - c[0], s[1] - c[1]); if (!v[0] && !v[1]) return out(keep);
+    const n1: Pt = [c[0] + v[0] * r, c[1] + v[1] * r];
+    return out(key === 0 ? from(c, n1, e) : from(c, s, n1));
+  }
+  if (key === 3) {
+    const mid: Pt = [(s[0] + e[0]) / 2, (s[1] + e[1]) / 2], n = unit2([-(e[1] - s[1]), e[0] - s[0]]);
+    const t = dot2(sub2(p, mid), n); return out(from([mid[0] + n[0] * t, mid[1] + n[1] * t], s, e));
+  }
+  if (key === 1) {
+    const ch: Pt = [(s[0] + e[0]) / 2, (s[1] + e[1]) / 2], u = unit2(sub2(m, ch)), justOff = Math.hypot(s[0] - e[0], s[1] - e[1]) / 100;
+    const A: Pt = [ch[0] + u[0] * justOff, ch[1] + u[1] * justOff], t = Math.max(0, dot2(sub2(raw, A), u));
+    const nm: Pt = [A[0] + u[0] * t, A[1] + u[1] * t]; if (Math.abs(crossZ(sub2(nm, s), sub2(e, s))) < 1e-12) return out(keep);
+    return out([s, nm, e]);
+  }
+  const movingStart = key === 0, p1 = movingStart ? e : s;
+  let v1 = sub2(p1, c), v2 = sub2(p, c); const v3 = sub2(m, c);
+  if (!Math.hypot(v1[0], v1[1]) || !Math.hypot(v2[0], v2[1])) return out(keep);
+  const u1 = unit2(v1), d13 = dot2(u1, v3), u2 = unit2([v3[0] - u1[0] * d13, v3[1] - u1[1] * d13]);
+  const det = u1[0] * u2[1] - u2[0] * u1[1]; if (!det) return out(keep);
+  v1 = [(v1[0] * u2[1] - v1[1] * u2[0]) / det, (-v1[0] * u1[1] + v1[1] * u1[0]) / det];
+  v2 = [(v2[0] * u2[1] - v2[1] * u2[0]) / det, (-v2[0] * u1[1] + v2[1] * u1[0]) / det];
+  const R = Math.hypot(v1[0], v1[1]); if (v2[0] === R) return out(keep);   // a straight line: nothing changes
+  let flip = false; if (v2[0] > R) { flip = true; v2[0] = 2 * R - v2[0]; }
+  const delta = (R * R - v2[0] * v2[0] - v2[1] * v2[1]) / (2 * v2[0] - 2 * R);
+  if (Math.abs(v2[1] / (R - v2[0])) > 50 || !isFinite(delta)) return out(keep);   // ADVANCED_CFG m_DrawArcCenterMaxAngle
+  const v4: Pt = flip ? [2 * R + delta, 0] : [-delta, 0];
+  const nc: Pt = [c[0] + v4[0] * u1[0] + v4[1] * u2[0], c[1] + v4[0] * u1[1] + v4[1] * u2[1]];
+  return out(movingStart ? from(nc, p, e) : from(nc, s, p));
+}
 // Apply a dragged edit point: mutates the item's node (and its followers') in place, from the originals in pe.
 export function applyPointEdit(doc: KDoc, pe: PointEdit, p: Pt) {
   const item = pe.item, n = item.node, k = item.kind, ep = pe.ep, idx = pe.idx;
@@ -245,7 +300,7 @@ export function applyPointEdit(doc: KDoc, pe: PointEdit, p: Pt) {
   if ((k === "polyline" || k === "rule_area") && idx >= ep.pts.length) {
     const pts = polygonEdgeDrag(ep.pts, idx - ep.pts.length, p).map((q) => [r4(q[0]), r4(q[1])]);
     setPts(k === "rule_area" ? kid(n, "polyline")! : n, pts);
-  } else if (k === "wire" || k === "bus" || k === "polyline" || k === "bezier") {
+  } else if (k === "polyline" || k === "bezier") {
     const pts = ep.pts.map((q: Pt) => q.slice()); pts[idx] = [r4(p[0]), r4(p[1])]; setPts(n, pts);
     for (const f of pe.followers) if (f.end === idx) { const q: Pt[] = ptsOf(f.item.node); q[f.index!] = pts[idx].slice(); setPts(f.item.node, q); touched.push(f.item); }
   } else if (k === "rule_area") {
@@ -299,7 +354,9 @@ export function applyPointEdit(doc: KDoc, pe: PointEdit, p: Pt) {
   } else if (k === "arc") {
     const [s, m, e, c] = ep.pts, ccw = normA(Math.atan2(m[1] - c[1], m[0] - c[0]) - Math.atan2(s[1] - c[1], s[0] - c[0])) < normA(Math.atan2(e[1] - c[1], e[0] - c[0]) - Math.atan2(s[1] - c[1], s[0] - c[0]));
     let ns = s, ne = e, cc = c;
-    if (idx === 3) { const dx = p[0] - c[0], dy = p[1] - c[1]; ns = [s[0] + dx, s[1] + dy]; ne = [e[0] + dx, e[1] + dy]; cc = p; }
+    const alt = arcEditPoints(ep.pts, idx, p, pe.raw || p, S.arcEditMode || "center");
+    if (alt) { ns = alt[0]; ne = alt[2]; }
+    else if (idx === 3) { const dx = p[0] - c[0], dy = p[1] - c[1]; ns = [s[0] + dx, s[1] + dy]; ne = [e[0] + dx, e[1] + dy]; cc = p; }
     else if (idx === 1) { const r = Math.max(PE_MIN, Math.hypot(p[0] - c[0], p[1] - c[1])); ns = resize(c, [s[0] - c[0], s[1] - c[1]], r); ne = resize(c, [e[0] - c[0], e[1] - c[1]], r); }   // EditArcMidKeepCenter
     else {                                                                                                                                            // EditArcEndpointKeepCenter
       const mv = idx === 0 ? s : e, other = idx === 0 ? e : s;
@@ -308,7 +365,7 @@ export function applyPointEdit(doc: KDoc, pe: PointEdit, p: Pt) {
       const r = Math.max(PE_MIN, Math.hypot(v1[0], v1[1])), p1 = resize(c, v1, r), p2 = resize(c, v2, r);
       if (idx === 0) { ns = p1; ne = p2; } else { ns = p2; ne = p1; }
     }
-    const nm = arcMid(cc, ns, ne, ccw);
+    const nm = alt ? alt[1] : arcMid(cc, ns, ne, ccw);
     for (const [key, q] of [["start", ns], ["mid", nm], ["end", ne]] as [string, Pt][]) { const kk = kid(n, key)!; kk[1] = r4(q[0]); kk[2] = r4(q[1]); }
   } else if (k === "rectangle" && idx === 5 && ep.pts.length === 6) {
     const r = r4(rectRadiusFor(boxOf({ kind: k, node: pe.orig }), p[0]));
@@ -368,6 +425,84 @@ export function editFollowers(doc: KDoc, item: KItem, ep: EditPoints) {
   }
   return out;
 }
+/**
+ * EDIT_POINTS::FindPoint: the points in creation order, then the edge handles; the first whose box of
+ * +/- POINT_SIZE screen pixels strictly holds the location wins.  -1 when none does.
+ */
+export function findEditPoint(ep: EditPoints, mm: Pt, mmPx: number): number {
+  const size = EDIT_POINT_PX * mmPx;
+  return editHandles(ep).findIndex((h) => Math.abs(mm[0] - h[0]) < size && Math.abs(mm[1] - h[1]) < size);
+}
+/** IncrementArcEditMode: keep centre -> keep centre and radius -> keep endpoints -> keep centre. */
+export const nextArcEditMode = (m: string | null | undefined) => (m === "radius" ? "endpoints" : m === "endpoints" ? "center" : "radius");
+/** ACTIONS::cycleArcEditMode (SCH_POINT_EDITOR::changeArcEditMode): the next mode, stored in the preferences. */
+export function cycleArcEditMode(ctx: SchCtx) {
+  S.arcEditMode = nextArcEditMode(S.arcEditMode);
+  if (ctx.setArcEditMode) ctx.setArcEditMode(S.arcEditMode);
+  return true;
+}
+const distSeg = (p: Pt, a: Pt, b: Pt) => {
+  const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+};
+/** The outline of a schematic polygon (a graphic polyline of more than two points) or a rule area, or null. */
+function cornerOutline(item: KItem | null | undefined): { holder: SNode; pts: Pt[] } | null {
+  if (!item) return null;
+  if (item.kind === "polyline") { const pts = ptsOf(item.node); return pts.length > 2 ? { holder: item.node, pts } : null; }
+  if (item.kind === "rule_area") { const pl = kid(item.node, "polyline"); return pl ? { holder: pl, pts: ptsOf(pl) } : null; }
+  return null;
+}
+/**
+ * SCH_POINT_EDITOR::addCornerCondition: the edited item is a polygon and the cursor hits it within POINT_SIZE pixels
+ * (its outline; a filled shape's inside too, a rule area is never filled for hit testing).
+ */
+export function canAddCorner(ctx: SchCtx, at: Pt | null | undefined): boolean {
+  const t = pointEditTarget(ctx), o = t && cornerOutline(t.item); if (!o || !at || !o.pts.length) return false;
+  const thr = EDIT_POINT_PX * mmPerPx(ctx), n = o.pts.length;
+  for (let i = 0; i < n; i++) if (distSeg(at, o.pts[i], o.pts[(i + 1) % n]) <= thr) return true;
+  if (t!.item.kind !== "polyline") return false;
+  const fill = kid(t!.item.node, "fill"), ft = fill && kid(fill, "type"); if (!ft || str(ft[1]) === "none") return false;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) { const a = o.pts[i], b = o.pts[j]; if ((a[1] > at[1]) !== (b[1] > at[1]) && at[0] < (b[0] - a[0]) * (at[1] - a[1]) / (b[1] - a[1]) + a[0]) inside = !inside; }
+  return inside;
+}
+/** The corner under the cursor (the edited point, EDIT_POINTS::FindPoint) of the edited polygon, or -1. */
+function cornerAt(ctx: SchCtx, at: Pt | null | undefined): number {
+  const t = pointEditTarget(ctx), o = t && cornerOutline(t.item); if (!o || !at) return -1;
+  const i = findEditPoint(t!.ep, at, mmPerPx(ctx)); return i >= 0 && i < o.pts.length ? i : -1;
+}
+/** SCH_POINT_EDITOR::removeCornerCondition: a corner is under the cursor; a shape keeps 2 points, a rule area 3. */
+export function canRemoveCorner(ctx: SchCtx, at: Pt | null | undefined): boolean {
+  const t = pointEditTarget(ctx), o = t && cornerOutline(t.item); if (!o) return false;
+  if (o.pts.length <= (t!.item.kind === "rule_area" ? 3 : 2)) return false;
+  return cornerAt(ctx, at) >= 0;
+}
+/**
+ * SCH_POINT_EDITOR::addCorner: the cursor (on the grid unless Ctrl is held) goes in after the start of the
+ * closest outline segment, the closing one included.  "Add Corner".
+ */
+export function addCorner(ctx: SchCtx, at: Pt | null | undefined, noSnap = false) {
+  if (ctx.viewOnly || !at) return false;
+  const t = pointEditTarget(ctx), o = t && cornerOutline(t.item); if (!o || !o.pts.length) return false;
+  const cursor: Pt = noSnap ? [r4(at[0]), r4(at[1])] : ctx.snap([at[0], at[1]]).map(r4), n = o.pts.length;
+  let min = Infinity, start = 0;
+  for (let i = 0; i < n; i++) { const d = distSeg(cursor, o.pts[i], o.pts[(i + 1) % n]); if (d < min) { min = d; start = i; } }
+  const node = deep(t!.item.node), pts = o.pts.map((q) => q.slice()); pts.splice(start + 1, 0, cursor);
+  setPts(t!.item.kind === "rule_area" ? kid(node, "polyline")! : node, pts);
+  ctx.commit([modChange(ctx.doc, t!.item, node)], "Add Corner"); ctx.requestRender();
+  return true;
+}
+/** SCH_POINT_EDITOR::removeCorner: the corner under the cursor goes.  "Remove Corner". */
+export function removeCorner(ctx: SchCtx, at: Pt | null | undefined) {
+  if (ctx.viewOnly || !canRemoveCorner(ctx, at)) return false;
+  const t = pointEditTarget(ctx)!, o = cornerOutline(t.item)!, idx = cornerAt(ctx, at), last = o.pts.length - 1;
+  const node = deep(t.item.node), pts = o.pts.map((q) => q.slice());
+  if (idx === 0 && same(pts[0], pts[last])) { pts.splice(0, 1); pts[last - 1] = pts[0].slice(); }   // an explicitly closed outline stays closed
+  else pts.splice(idx, 1);
+  setPts(t.item.kind === "rule_area" ? kid(node, "polyline")! : node, pts);
+  ctx.commit([modChange(ctx.doc, t.item, node)], "Remove Corner"); ctx.requestRender();
+  return true;
+}
 // The one item the point editor works on: a single selection of an editable kind.
 export function pointEditTarget(ctx: SchCtx) {
   if (S.multi && S.multi.size > 1) return null;
@@ -379,9 +514,7 @@ export function pointEditTarget(ctx: SchCtx) {
 export function pointEditStart(ctx: SchCtx, mm: Pt, ev?: PtrEvent | null) {
   if (ctx.viewOnly || S.drag || S.wire || S.carry) return false;
   const t = pointEditTarget(ctx); if (!t) return false;
-  const tol = (EDIT_POINT_PX / 2 + 2) * mmPerPx(ctx), hs = editHandles(t.ep);
-  let best = -1, bd = Infinity;
-  hs.forEach((h, i) => { const d = Math.max(Math.abs(h[0] - mm[0]), Math.abs(h[1] - mm[1])); if (d <= tol && d < bd) { bd = d; best = i; } });
+  const hs = editHandles(t.ep), best = findEditPoint(t.ep, mm, mmPerPx(ctx));
   if (best < 0) return false;
   S.pedit = { item: t.item, ep: t.ep, idx: best, orig: deep(t.item.node), followers: editFollowers(ctx.doc, t.item, t.ep), start: hs[best], moved: false, last: hs[best] };
   if (t.item.kind === "image") { S.pedit.imgOrigin0 = imageOriginOffset(t.item.id); S.pedit.imgSize0 = [t.item.w || 10, t.item.h || 10]; }
@@ -390,8 +523,6 @@ export function pointEditStart(ctx: SchCtx, mm: Pt, ev?: PtrEvent | null) {
   return true;
 }
 export function pointEditSnap(ctx: SchCtx, mm: Pt, ev?: PtrEvent | null): Pt {
-  const pe = S.pedit!, k = pe.item.kind;
-  if (k === "wire" || k === "bus") return snapConn(ctx, mm, k, ev);
   if (ev && (ev.ctrlKey || ev.metaKey)) return [r4(mm[0]), r4(mm[1])];
   return ctx.snap([mm[0], mm[1]]).map(r4);
 }
@@ -399,7 +530,7 @@ export function pointEditMove(ctx: SchCtx, mm: Pt, ev?: PtrEvent | null) {
   const pe = S.pedit; if (!pe) return;
   const p = pointEditSnap(ctx, mm, ev);
   if (!pe.moved && same(p, pe.start)) return;
-  pe.moved = true; pe.last = p;
+  pe.moved = true; pe.last = p; pe.raw = [mm[0], mm[1]];
   applyPointEdit(ctx.doc, pe, p); ctx.requestRender();
 }
 export function pointEditEnd(ctx: SchCtx, commit: boolean) {

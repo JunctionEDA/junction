@@ -21,7 +21,7 @@ import { placeCrosshair } from "./crosshair";
 import { renderObjects, snapMm, syncItemsFromDoc } from "./doc";
 import { sendOp } from "./net";
 import { breakFollow, sendPresence } from "./peers";
-import { HIT_PX, clearSelection, drawSelection, fieldDragMore, filterAllows, nearestFootprint, renderProps, selFilter } from "./selection";
+import { HIT_PX, clearSelection, drawSelection, fieldDragMore, filterAllows, itemLocked, nearestFootprint, renderProps, schWinner, selFilter } from "./selection";
 import { E } from "./state";
 import { activeModule, moveOp as moveOpRaw, runModuleAction, setTool, toolCtx as toolCtxRaw, unlockedForEdit } from "./tools";
 import { applyView, canvas as canvasRaw, dragG as dragGRaw, isSch, pxPerMm, requestRender, requestRepaint, requestZoomEnd, stage as stageRaw, worldMm as worldMmRaw, zoomBy as zoomByRaw, zoomLimits } from "./view";
@@ -161,7 +161,7 @@ export function pinUnder(mm: Mm, exact?: boolean): { id: string; number: string 
   if (!pinAt) return null;
   try {
     const h = pinAt(d, mm, exact ? 0 : 5 / Math.max(1e-6, pxPerMm()), !!(E.renderOpts && E.renderOpts.showHiddenPins));
-    if (!h || (f.lockedItems === false && h.item.node && KiCadCanvas.kid(h.item.node, "locked"))) return null;
+    if (!h || (f.lockedItems === false && itemLocked(h.item))) return null;
     return { id: h.item.id, number: h.pin.number };
   } catch { return null; }
 }
@@ -178,17 +178,32 @@ function symbolBodyHit(d: KDoc, id: string, mm: Mm): boolean {
  * within the pixel threshold loses to an exact hit on a symbol's body.
  */
 export function pinForClick(mm: Mm): { id: string; number: string } | null {
+  // schematic: the pin is what the click's collector leaves first (SCH_SELECTION_TOOL::narrowSelection)
+  if (isSch() && CollabTools.sch && CollabTools.sch._ && (CollabTools.sch._ as { clickCandidates?: unknown }).clickCandidates) { const c = schWinner(mm); return c && c.kind === "pin" ? { id: c.item.id, number: c.pin!.number } : null; }
   const exact = pinUnder(mm, true); if (exact) return exact;
   const pin = pinUnder(mm); if (!pin) return null;
   const d = doc(); if (!d) return pin;
   const best = nearestFootprint(mm[0], mm[1], clickSlop()) as { id: string } | null;
   return best && symbolBodyHit(d, best.id, mm) ? null : pin;
 }
+/** The field a plain click at `mm` picks: on a schematic the collector's first candidate when it is a field (the Selection Filter's Text off: none). */
+export function fieldForClick(mm: Mm): { item: KItem; name: string } | null {
+  const d = doc(); if (!d) return null;
+  if (isSch() && CollabTools.sch && CollabTools.sch._ && (CollabTools.sch._ as { clickCandidates?: unknown }).clickCandidates) { const c = schWinner(mm); return c && c.kind === "field" ? { item: c.item, name: c.field! } : null; }
+  return (KiCadCanvas.fieldAt as (d: KDoc, x: number, y: number, hidden: Set<string>) => { item: KItem; name: string } | null)(d, mm[0], mm[1], E.hiddenLayers);
+}
 /** What a plain left click at `mm` selects, without touching the selection: the field, movable item or module item. */
 export function pickAt(mm: Mm): { field?: { id: string; name: string }; pin?: { id: string; number: string }; movable?: { id: string }; item?: KItem } | null {
   const d = doc(); if (!d) return null;
   const [x, y] = mm;
-  // schematic: the tool module's capture handler sees a click first, so a wire, label or junction under the cursor wins
+  // schematic: CollectHits + narrowSelection, one candidate list for items, pins and fields; the closest is the pick
+  if (isSch() && CollabTools.sch && CollabTools.sch._ && (CollabTools.sch._ as { clickCandidates?: unknown }).clickCandidates) {
+    const c = schWinner(mm); if (!c) return null;
+    if (c.kind === "field") return { field: { id: c.item.id, name: c.field! } };
+    if (c.kind === "pin") return { pin: { id: c.item.id, number: c.pin!.number } };
+    const mv = (E.items as { id: string }[]).find((f) => f.id === c.item.id) || (E.sheets as { id: string }[]).find((f) => f.id === c.item.id);
+    return mv ? { movable: mv } : { item: c.item };
+  }
   if (isSch()) { const it = schPick(mm); if (it) return { item: it }; }
   if (window.KDialogs) {
     const f = (KiCadCanvas.fieldAt as (d: KDoc, x: number, y: number, hidden: Set<string>) => { item: KItem; name: string } | null)(d, x, y, E.hiddenLayers);
@@ -283,6 +298,21 @@ export function selectedAnywhere(): Set<string> {
   return out;
 }
 
+/**
+ * SCH_SELECTION_TOOL::selectionContains: the point lies in the bounding box of a selected item grown by the 20 px
+ * grip margin.  A drag that starts there moves the selection (DRAG_SELECTED) and the cursor shows MOVING.
+ */
+export function schSelectionContains(mm: Mm): boolean {
+  const d = doc(); if (!isSch() || !d) return false;
+  const m = 20 / Math.max(1e-9, pxPerMm());
+  const sm = CollabTools.sch as unknown as { _?: { candBox?: (d: KDoc, c: unknown) => number[] } } | undefined;
+  for (const it of selectionItems()) {
+    let b: number[] | null | undefined = it.bbox;
+    try { if (sm && sm._ && sm._.candBox) b = sm._.candBox(d, { key: it.id, kind: "item", item: it }); } catch { b = it.bbox; }   // GetBoundingBox: a symbol without its fields
+    if (b && mm[0] >= b[0] - m && mm[0] <= b[2] + m && mm[1] >= b[1] - m && mm[1] <= b[3] + m) return true;
+  }
+  return false;
+}
 /** Union bbox (mm) of the selection, or null. */
 export function selectionBox(): [number, number, number, number] | null {
   let b: [number, number, number, number] | null = null;
@@ -507,6 +537,8 @@ function computeHover(): void {
     if (hit && hit.movable) id = hit.movable.id; else if (hit && hit.item && !isSch()) id = hit.item.id;
     const under = hit && (hit.movable ? hit.movable.id : hit.item ? hit.item.id : null);
     over = !!under && !E.viewOnly && selectionIds().includes(under);
+    // SCH_SELECTION_TOOL: the move / drag prediction is selectionContains( pos ) under DRAG_SELECTED, grip margin included
+    if (isSch()) over = !E.viewOnly && (E.leftDrag || "dragSelected") === "dragSelected" && schSelectionContains(at);
   }
   if (id !== E.hoverId) { E.hoverId = id; requestRepaint(); }
   if (setRollover(roll, heldModifiers(), at, rollField)) requestRender();
@@ -549,7 +581,13 @@ function onWheel(ev: WheelEvent): void {
   // "Native gestures": two-finger movement on a touchpad pans (a pixel-precise delta on both axes, or a fraction)
   if (s.touchpadMode === "native" && ev.deltaMode === 0 && !ev.shiftKey && !ctrl && !ev.altKey && (dx !== 0 && dy !== 0 || dy % 1 !== 0 || dx % 1 !== 0)) { panBy(-dx, -dy, mm); return; }
   const act = wheelAction({ deltaX: dx, deltaY: dy, shiftKey: ev.shiftKey, ctrlKey: ctrl, altKey: ev.altKey }, s, r.width, r.height);
-  if (!act) return;                                                          // KiCad forwards multi-modifier scrolls to the tools
+  if (!act) {                                                                // KiCad forwards multi-modifier scrolls to the tools
+    // SCH_SELECTION_TOOL: Shift+Alt+wheel runs ACTIONS::increment on the primary part (field 0), Ctrl+Alt+wheel on the secondary
+    const field = ev.shiftKey && ev.altKey && !ctrl ? 0 : ctrl && ev.altKey && !ev.shiftKey ? 1 : -1;
+    const inc = CollabTools.sch && CollabTools.sch._ && (CollabTools.sch._ as unknown as { incrementSelection?: (c: unknown, delta: number, field?: number) => unknown }).incrementSelection;
+    if (field >= 0 && isSch() && E.tool === "select" && !E.viewOnly && inc && dy !== 0) { try { inc(toolCtx(), dy < 0 ? 1 : -1, field); requestRender(); } catch (e) { console.warn(e); } }
+    return;
+  }
   if (act.kind === "pan") { panBy(act.dx, act.dy, mm); return; }
   if (!E.zoomController || E.zoomControllerFor !== E.wheel) { E.zoomController = makeZoomController(s, IS_MAC ? "mac" : /Win/.test(navigator.platform || navigator.userAgent || "") ? "win" : "linux"); E.zoomControllerFor = E.wheel; }
   // macOS reports a scroll distance rather than notches (wheelDelta 0); elsewhere a notch is 120

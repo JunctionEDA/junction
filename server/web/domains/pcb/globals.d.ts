@@ -135,6 +135,8 @@ interface KiCadCanvasApi {
   setSchDisplay(o: { pinAltIcons?: boolean }, doc?: KDoc | null): void;
   setIntersheetRefs(refs: { show: boolean; ownPage: boolean; short: boolean; prefix: string; suffix: string; pages: Record<string, number[]>; names: Record<number, string>; current: number } | null, doc?: KDoc | null): void;
   setSchFormatting(o: { textOffsetRatio?: number; labelSizeRatio?: number; pinSymbolSize?: number; showDnpMarkers?: boolean; lineWidth?: number; overbarHeight?: number; hopOverChoice?: number }, doc?: KDoc | null): boolean;
+  /** pixel size, MIME type and PPI of a PNG / JPEG / BMP / GIF header (BITMAP_BASE::updatePPI) */
+  imageInfo(bytes: ArrayLike<number>): { mime: string; w: number; h: number; ppi: number };
   schFormat: { textOffsetRatio: number; labelSizeRatio: number; pinSymbolSize: number; showDnpMarkers: boolean; overbarHeight: number; hopOverChoice: number };
   withSchTheme<T>(id: string, fn: () => T): T;
   ORIENT: unknown;
@@ -184,10 +186,14 @@ interface ToolCtx {
   docs: unknown[]; project: unknown; api(path: string, opts?: RequestInit): Promise<unknown>; docId: string | null;
   setHighlight(ids: Set<string> | null, nets?: Iterable<string>): void;
   setSelected(fp: { id: string } | null): void;
-  commit(changes: KChange[], label?: string, opts?: { amend?: boolean }): void;
+  commit(changes: KChange[], label?: string, opts?: { amend?: boolean; newSheet?: boolean }): void;
   undo?(): void;
   applyLocal(changes: KChange[]): void;
   requestRender(): void; toast(msg: string, ms?: number): void; enterSheet(file: string): void; setTool(t: string): void; setStatus(text: string): void;
+  /** GetAssociatedDocument for a symbol's (shown) Datasheet text: project text variables, web links, kicad-embed:// files of the item's embedded-files stack */
+  openDatasheet?(value: string, item?: KItem): void;
+  /** Stores the schematic's arc editing mode in the preferences (SCH_POINT_EDITOR::changeArcEditMode) */
+  setArcEditMode?(mode: "center" | "endpoints" | "radius"): void;
 }
 
 interface ToolModuleTool { id: string; label: string; key?: string; icon?: string; cursor?: string }

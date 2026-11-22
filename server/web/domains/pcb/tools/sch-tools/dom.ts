@@ -151,8 +151,13 @@ export function onDownCapture(ev: PointerEvent) {
   // MOUSE_DRAG_ACTION::DRAG_SELECTED (KiCad's default left drag): with nothing selected a drag draws a selection box,
   // even one that starts on a wire or a label; only what is already selected moves.  The press still selects, as the
   // click would (the editor does the same for symbols)
-  const ed = (globalThis as unknown as { CollabEditor?: { selected?: unknown; selPins?: unknown[]; selField?: unknown } }).CollabEditor;
-  const nothingSelected = !S.sel && !(ctx.selection && ctx.selection.size) && !(ed && (ed.selected || (ed.selPins && ed.selPins.length) || ed.selField));
+  // (SCH_SELECTION_TOOL, IsDrag: with a selection the drag moves it only when it starts on the selection, so a press on
+  // an item that is not selected boxes whatever else is selected).  input.mouse_left: SELECT always draws a box,
+  // DRAG_ANY always drags what is under the cursor.
+  const ed = (globalThis as unknown as { CollabEditor?: { leftDrag?: string } }).CollabEditor;
+  const leftDrag = (ed && ed.leftDrag) || "dragSelected";
+  const wasSelected = already || !!(ctx.selection && ctx.selection.has(hit.id));
+  const nothingSelected = leftDrag === "select" ? true : leftDrag === "dragAny" ? false : !wasSelected;
   S.sel = hit.id; S.hover = null;
   // selectPoint without a modifier: ClearSelection() first, so symbols (or other items) selected with it go
   if (ctx.selection && ctx.selection.size && ctx.setSelection) { const keepEnds = S.selEnds; ctx.setSelection([]); S.selEnds = keepEnds; } else ctx.setSelected(null);
@@ -200,6 +205,7 @@ export function cursorPos(): Pt | null {
   return null;
 }
 export function cursorNow(): string | null {
+  if (S.drag && S.drag.hoverSheet) return "PLACE";              // KICURSOR::PLACE over the sheet a move would drop into
   if (S.drag && (S.drag as { moved?: boolean }).moved !== false) return "MOVING";
   if (S.carry) return PLACE_KINDS.has(S.carry.kind) ? "PLACE" : "MOVING";
   return null;
@@ -208,7 +214,7 @@ export function onMoveCapture(ev: PointerEvent) {
   const ctx = S.ctx; if (!ctx || !schActive()) return;
   const mm = ctx.worldMm(ev); S.cursor = mm; S.cursorClient = [ev.clientX, ev.clientY];
   if (S.pedit) { pointEditMove(ctx, mm, ev); return; }
-  if (S.drag) { moveDrag(ctx, mm); return; }
+  if (S.drag) { moveDrag(ctx, mm, ev); return; }
   if (S.pending) {
     if (Math.hypot(mm[0] - S.pending.mm[0], mm[1] - S.pending.mm[1]) > 0.4) {
       const p = S.pending; S.pending = null;

@@ -867,6 +867,6 @@ export function overDrawingSheet(p: [number, number]): boolean {
 /** Hook the dialogs into kicad-dialogs.js (called once from dialogs/index.ts). */
 export function installSchItemDialogs(): void {
   const kd = (window as unknown as { KDialogs?: Record<string, unknown> }).KDialogs; if (!kd) return;
-  kd.schItemDialog = schItemDialog; kd.schFieldDialog = schFieldDialog; kd.schSheetPinAt = schSheetPinAt; kd.confirm = confirmBox; kd.schProperties = schProperties; kd.overDrawingSheet = overDrawingSheet;
+  kd.schItemDialog = schItemDialog; kd.schFieldDialog = schFieldDialog; kd.schSheetPinAt = schSheetPinAt; kd.confirm = confirmBox; kd.messageBox = messageBox; kd.schProperties = schProperties; kd.overDrawingSheet = overDrawingSheet;
   void HL;
 }

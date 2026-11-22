@@ -13,20 +13,27 @@ const CB_INPUT = "m-0 accent-blue";
 export function SelectionFilterPane() {
   const editor = useApp((s) => s.document.editor);
   const filter = useApp((s) => s.filter);
+  const flash = useApp((s) => s.filterFlash);
   const menu = useContextMenu();
+  // PANEL_SCH_SELECTION_FILTER::flashCheckbox: the boxes that rejected a click fade from the highlight colour back to
+  // the panel in ten 50 ms steps; the key restarts the animation on every rejected click
+  const flashing = (k: string) => !!flash && flash.keys.includes(k);
+  const flKey = (k: string) => (flashing(k) ? k + ":" + flash!.at : k);
+  const flStyle = (k: string) => (flashing(k) ? { animation: "kfilter-flash 500ms steps(10, end)" } : undefined);
   const list = editor ? FILTERS[editor] : [];
   const all = list.every(([k]) => filter[k] !== false);
   return (
     <div className="kbody kfilter overflow-auto min-h-0 flex-auto bg-paper px-2 py-1.5 text-sm">
       <div className="kfgrid d-grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-x-2 gap-y-0.5">
         <label className={`${CB} all`} title="All items"><input type="checkbox" className={CB_INPUT} data-f="all" checked={all} onChange={(ev) => dispatch({ type: "setFilter", key: "all", on: ev.target.checked })} /> All</label>
-        <label className={`${CB} locked`} title="Allow selection of locked items"><input type="checkbox" className={CB_INPUT} data-f="lockedItems" checked={filter.lockedItems !== false} onChange={(ev) => dispatch({ type: "setFilter", key: "lockedItems", on: ev.target.checked })} /> Locked</label>
+        <label className={`${CB} locked`} title="Allow selection of locked items" key={flKey("lockedItems")} style={flStyle("lockedItems")}><input type="checkbox" className={CB_INPUT} data-f="lockedItems" checked={filter.lockedItems !== false} onChange={(ev) => dispatch({ type: "setFilter", key: "lockedItems", on: ev.target.checked })} /> Locked</label>
         {list.map(([k, l]) => (
-          <label className={CB} key={k} onContextMenu={(ev) => menu.open(ev, [{ label: `Only ${l.toLowerCase()}`, run: () => dispatch({ type: "setFilter", key: "only:" + k, on: true }) }])}>
+          <label className={CB} key={flKey(k)} style={flStyle(k)} onContextMenu={(ev) => menu.open(ev, [{ label: `Only ${l.toLowerCase()}`, run: () => dispatch({ type: "setFilter", key: "only:" + k, on: true }) }])}>
             <input type="checkbox" className={CB_INPUT} data-f={k} checked={filter[k] !== false} onChange={(ev) => dispatch({ type: "setFilter", key: k, on: ev.target.checked })} /> {l}
           </label>
         ))}
       </div>
+      <style>{"@keyframes kfilter-flash { from { background-color: var(--blue, Highlight); } to { background-color: transparent; } }"}</style>
       <ContextMenu at={menu.at} onClose={menu.close} />
     </div>
   );

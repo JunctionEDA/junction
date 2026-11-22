@@ -52,7 +52,7 @@ export function updateMsgPanel(): void {
 }
 
 type SchSel = { id: string; pin?: string; field?: string };
-type SchMsgApi = { msgPanelInfo?: (doc: KDoc, sel: SchSel, o: Record<string, unknown>) => MsgItem[] };
+type SchMsgApi = { msgPanelInfo?: (doc: KDoc, sel: SchSel & { item?: KItem }, o: Record<string, unknown>) => MsgItem[]; msgPanelSubject?: () => { item: KItem; key: string } | null };
 
 /** The one selected schematic item (a pin, a field or an item), or null when nothing or several are selected. */
 function schSingleSelection(): SchSel | null {
@@ -92,10 +92,12 @@ function updateSchMsgPanel(doc: KDoc): void {
     if (key !== lastKey) { lastKey = key; store.set({ msgPanel: { items: markerMsgPanel(doc, mk) } }); }
     return;
   }
-  const sel = schSingleSelection();
+  // the item a tool holds (on the cursor, or being point-edited) is the subject while the tool runs
+  let subj: { item: KItem; key: string } | null = null; try { subj = M && M.msgPanelSubject ? M.msgPanelSubject() : null; } catch (e) { subj = null; }
+  const sel: (SchSel & { item?: KItem }) | null = subj ? { id: subj.item.id, item: subj.item } : schSingleSelection();
   const ver = (store.get() as { document: { version: number } }).document.version;
   const sheetPath = ((doc as KDoc & { sheetPath?: string }).sheetPath) || "/";
-  const key = ["sch", ver, E.units, sel ? `${sel.id}|${sel.pin ?? ""}|${sel.field ?? ""}` : "", sheetPath, E.proSettings ? E.proSettings.length : 0].join("§");
+  const key = ["sch", ver, E.units, sel ? `${sel.id}|${sel.pin ?? ""}|${sel.field ?? ""}` : "", subj ? subj.key : "", sheetPath, E.proSettings ? E.proSettings.length : 0].join("§");
   if (key === lastKey) return; lastKey = key;
   let items: MsgItem[] = [];
   if (sel && M && M.msgPanelInfo) {

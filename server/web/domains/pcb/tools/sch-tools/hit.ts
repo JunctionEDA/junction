@@ -2,7 +2,8 @@ import type { Box, SchCtx, SchGeom, Pt } from "./types";
 import { root } from "../root";
 import { mmPerPx } from "./snap";
 import { K, LINE_KINDS, SHAPE_KINDS, TEXT_KINDS, atOf, kid, num, str } from "./state";
-import { area, segDist, segs } from "./util";
+import { segDist, segs } from "./util";
+import { NO_CONNECT_HALF, clickCandidates, junctionRadius, shapeDist, shapeFilled } from "./guess";
 
 // ---------------------------------------------------------------- hit testing for non-symbol items
 export function fontSize(node: SNode) { const e = kid(node, "effects"), f = e && kid(e, "font"), s = f && kid(f, "size"); return s ? num(s[2], num(s[1], 1.27)) : 1.27; }
@@ -43,30 +44,31 @@ export function hitNonSymbol(doc: KDoc, x: number, y: number, tol: number, kinds
     if (kinds && !kinds.has(it.kind)) continue;
     let d: number;
     if (LINE_KINDS.has(it.kind)) { d = Infinity; for (const [a, b] of segs(it)) d = Math.min(d, segDist([x, y], a, b)); d += 0.01; }   // small things on a line win ties
-    else if (SHAPE_KINDS.has(it.kind) || it.kind === "bezier" || it.kind === "rule_area") { d = Infinity; for (const g of it.geom as SchGeom[]) if (!g.noStroke) d = Math.min(d, geomDist(g, x, y)); d += 0.01; }
+    // EDA_SHAPE::hitTest: the outline within accuracy + width / 2, and anywhere inside a solid fill (IsFilledForHitTesting);
+    // a filled shape is "dominating" (GuessSelectionCandidates): it never beats another candidate under the cursor
+    else if (SHAPE_KINDS.has(it.kind) || it.kind === "bezier" || it.kind === "rule_area") { let w = 0; for (const g of it.geom as SchGeom[]) if (!g.noStroke && (g.w || 0) > w) w = g.w || 0; const sd = shapeDist(it, [x, y]); d = sd === 0 && shapeFilled(it) ? tol : Math.max(0, sd - w / 2) + 0.01; }
     else if (it.kind === "text_box" || it.kind === "netclass_flag" || it.kind === "directive_label" || it.kind === "table" || it.kind === "image") d = boxDist(it.bbox, x, y);
     else if (it.kind === "bus_entry") { const [ax, ay] = atOf(it.node), s = kid(it.node, "size"); d = segDist([x, y], [ax, ay], [ax + (s ? num(s[1]) : 2.54), ay + (s ? num(s[2]) : 2.54)]); }
-    else if (it.kind === "junction" || it.kind === "no_connect") { const [ax, ay] = atOf(it.node); d = Math.max(0, Math.hypot(ax - x, ay - y) - 0.6); }
+    // SCH_JUNCTION::HitTest: its effective circle; SCH_NO_CONNECT::HitTest: a square of half side ( pen + size ) / 2
+    else if (it.kind === "junction") { const [ax, ay] = atOf(it.node); d = Math.max(0, Math.hypot(ax - x, ay - y) - junctionRadius(it)); }
+    else if (it.kind === "no_connect") { const [ax, ay] = atOf(it.node); d = Math.max(0, Math.max(Math.abs(ax - x), Math.abs(ay - y)) - NO_CONNECT_HALF); }
     else if (TEXT_KINDS.has(it.kind)) { const b = textBox(it); d = Math.max(b[0] - x, x - b[2], b[1] - y, y - b[3], 0); }
     else continue;
     if (d <= tol && d < bd) { bd = d; best = it; }
   }
   return best;
 }
-// Our pick for the select tool; null hands the click back to app.js (symbols, empty space).
-export function pickNonSymbol(ctx: SchCtx, mm: Pt) {
-  const hit = hitNonSymbol(ctx.doc, mm[0], mm[1], Math.max(0.3, 5 * mmPerPx(ctx))); if (!hit) return null;
-  const allowed = root.CollabEditor && root.CollabEditor.pickAllowed; if (allowed && !allowed(hit)) return null;   // the Selection Filter pane
-  // A junction or no-connect marker at a pin can be dragged independently.
-  const pinExact = root.CollabEditor && root.CollabEditor.pinExactAt;
-  if (hit.kind !== "junction" && hit.kind !== "no_connect" && pinExact && pinExact([mm[0], mm[1]])) return null;
-  const symId = K.hitTest(ctx.doc, mm[0], mm[1], 0.5);
-  if (symId && !LINE_KINDS.has(hit.kind)) { const sym = ctx.doc.items.get(symId); if (sym && area(sym.bbox) < area(rectOf(hit))) return null; }
-  return hit;
+// Our pick for the select tool; null hands the click back to app.js (symbols, sheets, pins, fields, empty space).
+// SCH_SELECTION_TOOL::CollectHits + narrowSelection: the candidate GuessSelectionCandidates leaves first, when it is
+// one of this module's items (a wire, a label, a junction, a shape ...).
+export function pickNonSymbol(ctx: SchCtx, mm: Pt, itemsOnly?: boolean) {
+  const c = clickCandidates(ctx, mm, false, itemsOnly).cands[0];
+  if (!c || c.kind !== "item" || c.item.kind === "symbol" || c.item.kind === "sheet") return null;
+  return c.item;
 }
 // Anything under the cursor: our own items first, then the symbols and sheets app.js selects (K.hitTest).
 export function pickAny(ctx: SchCtx, mm: Pt) {
-  const hit = pickNonSymbol(ctx, mm); if (hit) return hit;
+  const hit = pickNonSymbol(ctx, mm, true); if (hit) return hit;
   const id = K.hitTest(ctx.doc, mm[0], mm[1], Math.max(0.3, 5 * mmPerPx(ctx)));
   return id ? ctx.doc.items.get(id) || null : null;
 }

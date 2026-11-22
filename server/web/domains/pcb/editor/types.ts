@@ -46,6 +46,7 @@ export type SheetEntry = import("../../../shared/store").SheetSummary & { page?:
 
 /** A box / lasso selection in progress (E.boxSel). */
 export interface BoxSel { start: number[]; cur: number[]; startClient: number[]; lasso?: boolean; pts: number[][]; add?: boolean; mode?: string;
+  /** a schematic lasso after the button came up: clicks add points until a double click finishes it */ live?: boolean;
   /** a Ctrl press with m_CtrlClickHighlight: released without a drag it highlights the net under the press */ clickHighlight?: boolean;
   /** a press with a modifier: released without a drag it runs selectPoint with that mode (index.ts modifierClick) */ modClick?: { mode: "add" | "toggle" | "remove"; ev: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey?: boolean; clientX: number; clientY: number; button: number; pointerId: number; pointerType: string } } }
 
@@ -59,7 +60,8 @@ export interface UndoEntry {
 }
 
 /** A change commit's options (tools.ts commitChanges). */
-export interface CommitOpts { amend?: boolean; discard?: boolean; tentative?: boolean }
+/** newSheet: the commit adds a sheet whose file joined the project (Draw Sheet / Import Sheet Copy). */
+export interface CommitOpts { amend?: boolean; discard?: boolean; tentative?: boolean; newSheet?: boolean }
 
 /** An op of ours the server has not acknowledged yet (E.pendingOps, keyed by clientOpId). */
 export interface PendingOp { docId: string | null; changes: KChange[] }

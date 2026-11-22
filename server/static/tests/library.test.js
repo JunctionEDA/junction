@@ -213,4 +213,40 @@ ok("search: every term must match; the name outranks keywords and description", 
   assert.deepStrictEqual(rank("zzz"), []);
 });
 
+ok("PlaceSymbol: power symbols are always annotated and follow the Global / Local preference; the next unit and copy duplicate the placed symbol", () => {
+  // SCH_REFERENCE::AlwaysAnnotate: "#" references are numbered even with automatic annotation off
+  assert.strictEqual(L.nextReference("#PWR", ["#PWR01", "#PWR1"], false), "#PWR2");
+  assert.strictEqual(L.nextReference("#FLG", [], false), "#FLG1");
+  assert.strictEqual(L.nextReference("R", [], false), "R?");
+  // m_Drawing.new_power_symbols
+  const gnd = K.parse(`(symbol "power:GND" (power global) (property "Reference" "#PWR" (at 0 0 0)) (property "Description" "Power symbol creates a global label with name \\"GND\\"" (at 0 0 0)) (property "ki_keywords" "global power" (at 0 0 0)))`);
+  assert.strictEqual(L.powerPreferenceSymbol(gnd, "default"), null);
+  assert.strictEqual(L.powerPreferenceSymbol(gnd, "global"), null, "already global");
+  const local = L.powerPreferenceSymbol(gnd, "local");
+  assert.deepStrictEqual(kid(local, "power"), ["power", "local"]);
+  assert.ok(str(kids(local, "property").find((p) => p[1] === "Description")[2]).includes("local label"));
+  assert.strictEqual(str(kids(local, "property").find((p) => p[1] === "ki_keywords")[2]), "local power");
+  assert.deepStrictEqual(kid(gnd, "power"), ["power", "global"], "the library copy is not touched");
+  assert.deepStrictEqual(kid(L.powerPreferenceSymbol(local, "global"), "power"), ["power", "global"]);
+  assert.strictEqual(L.powerPreferenceSymbol(K.parse(`(symbol "power:GND" (power) (property "Reference" "#PWR" (at 0 0 0)))`), "global"), null, "a bare (power) is global");
+  assert.strictEqual(L.powerPreferenceSymbol(K.parse(`(symbol "Device:R" (property "Reference" "R" (at 0 0 0)))`), "local"), null, "never a symbol that is not a power symbol");
+  // place all units: the next unit the reference does not hold yet; past the last, unit 1 of the next package
+  const held = [{ ref: "U1", lib: "Amp:OPA", value: "V", unit: 1 }, { ref: "U1", lib: "Amp:OPA", value: "V", unit: 2 }];
+  assert.strictEqual(L.nextFreeUnit(1, 4, "U1", "Amp:OPA", held), 3, "unit B is already on the schematic");
+  assert.strictEqual(L.nextFreeUnit(1, 2, "U1", "Amp:OPA", held), 1, "all placed: the next package");
+  const un = [{ ref: "U?", lib: "Amp:OPA", value: "V", unit: 1 }, { ref: "U?", lib: "Other:X", value: "V", unit: 2 }];
+  assert.strictEqual(L.nextFreeUnit(1, 4, "U?", "Amp:OPA", un), 2, "unannotated: only units of the same library symbol count");
+  // SCH_SYMBOL::Duplicate: orientation, mirror and the edited fields stay
+  const placed = K.parse(`(symbol (lib_id "Amp:OPA") (at 10 10 90) (mirror x) (unit 1) (uuid "a") (property "Reference" "U1" (at 12 8 90)) (property "Value" "edited" (at 12 12 90))
+    (pin "1" (uuid "p1")) (instances (project "t" (path "/r" (reference "U1") (unit 1)))))`);
+  const d = L.duplicatePlaced(placed, 2);
+  assert.deepStrictEqual(K.atOf(d), [10, 10, 90]); assert.deepStrictEqual(kid(d, "mirror"), ["mirror", "x"]);
+  assert.strictEqual(K.num(kid(d, "unit")[1]), 2); assert.notStrictEqual(K.uuidOf(d), "a"); assert.notStrictEqual(str(kid(kids(d, "pin")[0], "uuid")[1]), "p1");
+  assert.strictEqual(str(kids(d, "property")[1][2]), "edited"); assert.deepStrictEqual(K.atOf(kids(d, "property")[1]), [12, 12, 90]);
+  assert.ok(K.serialize(d).includes('(reference "U1") (unit 2)'), "the unit is set on every instance, the reference kept");
+  const e = L.duplicatePlaced(placed, 1, "U2");
+  assert.strictEqual(str(kids(e, "property")[0][2]), "U2"); assert.ok(K.serialize(e).includes('(reference "U2") (unit 1)'));
+  assert.strictEqual(K.uuidOf(placed), "a", "the placed node is not modified");
+});
+
 console.log(`library.test.js: ${n} groups passed`);

@@ -3,12 +3,12 @@ import * as VM from "../../canvas/variant-model";
 import { root } from "../root";
 import { symbolLibId } from "./autoplace";
 import { refField, setReference, unannotated } from "./clipboard";
-import { editable, selectedItems } from "./commands";
+import { carried, editable, selectedItems } from "./commands";
 import { promptImpl } from "./dom";
 import { switchTool } from "./junction";
 import { fontNode } from "./nodes";
 import { anchorOf, cloneNode } from "./orient";
-import { K, S, atOf, kid, kids, num, str } from "./state";
+import { K, S, atOf, kid, kids, num, str, uuidOf } from "./state";
 import { deep, ghost, modChange, replaceKid } from "./util";
 
 // ---------------------------------------------------------------- annotation (sch_reference_list.cpp Annotate / sortByXPosition)
@@ -201,6 +201,9 @@ export function toggleSymbolFlag(ctx: SchCtx, which: string) {
   if (!editable(ctx)) return false;
   const [key, onVal, offVal] = FLAG_KEYS[which];
   const kinds = which === "setExcludeFromPosFiles" ? ["symbol"] : ["symbol", "sheet", "rule_area"];
+  // the symbol on the cursor takes the flag itself
+  const cr = carried(ctx);
+  if (cr) { if (cr.item.kind !== "symbol") return false; const k = kid(cr.item.node, key); cr.write(withFlag(cr.item.node, key, k && str(k[1]) === onVal ? offVal : onVal)); return true; }
   const items = selectedItems(ctx).filter((it) => kinds.includes(it.kind)); if (!items.length) return false;
   // KiCad's defaults when the token is missing: in the BOM, on the board and in the position files; not DNP or excluded from simulation
   // with a current variant (the toolbar's) the symbol's instance variant takes the flag (SCH_EDIT_TOOL::SetAttribute
@@ -239,27 +242,77 @@ export function stepUnit(ctx: SchCtx, dir: number) {
 }
 export function cycleBodyStyle(ctx: SchCtx) {
   if (!editable(ctx)) return false;
-  const it = selectedItems(ctx).find((x) => x.kind === "symbol"); if (!it) return false;
+  const cr = carried(ctx);
+  const it = cr ? (cr.item.kind === "symbol" ? cr.item : undefined) : selectedItems(ctx).find((x) => x.kind === "symbol"); if (!it) return false;
   const { styles } = libUnits(ctx.doc, it.node); if (styles < 2) { ctx.toast("Symbol has no alternate body style"); return false; }
   const cur = kid(it.node, "body_style") ? num(kid(it.node, "body_style")![1], 1) : 1;
   const node = deep(it.node); replaceKid(node, ["body_style", (cur % styles) + 1]);
+  if (cr) { cr.write(node); return true; }   // the symbol being placed: no commit, it is not in the document yet
   ctx.commit([modChange(ctx.doc, it, node)], "body style"); return true;
 }
-export function placeNextUnit(ctx: SchCtx) {
+/**
+ * GetUnplacedUnitsForSymbol: the units of the symbol's package no symbol holds, over the whole hierarchy (this sheet's
+ * symbols and the other sheets' units the editor publishes).  An unannotated reference ("U?") only counts the units
+ * of the same library symbol.
+ */
+export function unplacedUnits(doc: KDoc, it: KItem): number[] {
+  const { units } = libUnits(doc, it.node), ref = it.ref || "", unannotated = ref.endsWith("?"), lib = symbolLibId(it.node);
+  const missing = new Set<number>(); for (let u = 1; u <= units; u++) missing.add(u);
+  for (const o of doc.items.values()) {
+    if (o.kind !== "symbol" || o.ref !== ref) continue;
+    if (unannotated && symbolLibId(o.node) !== lib) continue;
+    missing.delete(kid(o.node, "unit") ? num(kid(o.node, "unit")![1], 1) : 1);
+  }
+  for (const h of S.otherUnits || []) { if (h.ref !== ref || (unannotated && h.lib !== lib)) continue; missing.delete(h.unit); }
+  return [...missing].sort((a, b) => a - b);
+}
+/** SCH_DRAWING_TOOLS::PlaceNextSymbolUnit: the lowest missing unit (or the requested one) of the one selected symbol rides on the cursor; the tool ends with its placement. */
+export function placeNextUnit(ctx: SchCtx, opts?: { unit?: number } | null) {
   if (!editable(ctx)) return false;
-  const it = selectedItems(ctx).find((x) => x.kind === "symbol"); if (!it) return false;
-  const { units } = libUnits(ctx.doc, it.node); if (units < 2) { ctx.toast("Symbol has a single unit"); return false; }
-  const inUse = new Set<number>(); for (const o of ctx.doc.items.values()) if (o.kind === "symbol" && o.ref === it.ref) inUse.add(kid(o.node, "unit") ? num(kid(o.node, "unit")![1], 1) : 1);
-  let next = 1; while (inUse.has(next) && next <= units) next++;
-  if (next > units) { ctx.toast("All units of " + it.ref + " are placed"); return false; }
-  const node = cloneNode(it); replaceKid(node, ["unit", next]);
+  const syms = selectedItems(ctx).filter((x) => x.kind === "symbol");
+  if (syms.length !== 1) { ctx.toast("Select a single symbol to place the next unit."); return false; }
+  const it = syms[0];
+  const { units } = libUnits(ctx.doc, it.node); if (units < 2) { ctx.toast("This symbol has only one unit."); return false; }
+  const missing = unplacedUnits(ctx.doc, it);
+  if (!missing.length) { ctx.toast("All units of this symbol are already placed."); return false; }
+  const want = opts && opts.unit && opts.unit > 0 ? opts.unit : 0;
+  if (want && !missing.includes(want)) { ctx.toast("Requested unit already placed."); return false; }
+  const next = want || missing[0];
+  // a copy of the symbol (SCH_SYMBOL( *symbol )): it keeps the reference and the instance data, the unit set on every instance
+  const node = deep(it.node); replaceKid(node, ["uuid", K.newUuid()]);
+  for (const pin of kids(node, "pin")) replaceKid(pin, ["uuid", K.newUuid()]);
+  replaceKid(node, ["unit", next]);
+  for (const inst of kids(node, "instances")) for (const pr of kids(inst, "project")) for (const pa of kids(pr, "path")) { const u = kid(pa, "unit"); if (u) u[1] = next; }
   S.carry = { kind: "symbol", node, item: ghost(ctx.doc, node), pos: anchorOf("symbol", node) };
+  S.placeOne = uuidOf(node);                       // placeOneOnly: the drop returns to the selection tool
   S.sel = null; ctx.setSelected(null); switchTool(ctx, "place"); ctx.requestRender(); return true;
 }
+/**
+ * SCH_SYMBOL::ResolveTextVar for a field's shown text: ${REFERENCE}, ${VALUE}, ${FOOTPRINT}, ${DATASHEET},
+ * ${DESCRIPTION} and ${<field name>} (as written or in capitals) are the symbol's own fields; anything else is left
+ * for the project (EDA_TEXT::GetShownText expands again while something changes).
+ */
+export function symbolShownText(node: SNode, raw: string): string {
+  const fields = kids(node, "property");
+  let out = raw;
+  for (let depth = 0; depth < 10 && out.includes("${"); depth++) {
+    const next = out.replace(/\$\{([^{}]+)\}/g, (all, token: string) => {
+      const f = fields.find((p) => str(p[1]) === token || str(p[1]).toUpperCase() === token);
+      return f ? str(f[2]) : all;
+    });
+    if (next === out) break; out = next;
+  }
+  return out;
+}
+/** SCH_INSPECTION_TOOL::ShowDatasheet: the shown text of the selected symbol's Datasheet field, opened as an associated document. */
 export function showDatasheet(ctx: SchCtx) {
   const it = selectedItems(ctx).find((x) => x.kind === "symbol"); if (!it) return false;
-  const p = kids(it.node, "property").find((q) => str(q[1]) === "Datasheet"); const url = p ? str(p[2]).trim() : "";
-  if (!url || url === "~") { ctx.toast("No datasheet defined"); return false; }
+  const p = kids(it.node, "property").find((q) => str(q[1]) === "Datasheet");
+  const url = p ? symbolShownText(it.node, str(p[2])).trim() : "";
+  if (!url || url === "~") { ctx.toast("No datasheet defined."); return false; }
+  // the editor's GetAssociatedDocument: project text variables, a web link in a new tab, a kicad-embed:// file of
+  // the schematic's, the library symbol's or the symbol's embedded files
+  if (ctx.openDatasheet) { ctx.openDatasheet(url, it); return true; }
   if (typeof window !== "undefined" && window.open && /^https?:/i.test(url)) window.open(url, "_blank"); else ctx.toast("Datasheet: " + url);
   return true;
 }

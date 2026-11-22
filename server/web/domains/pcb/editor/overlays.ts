@@ -105,7 +105,9 @@ export function drawAppOverlays(ctx: CanvasRenderingContext2D, view: OverlayView
   const bs = E.boxSel as { start: Pt; cur: Pt; pts: Pt[]; lasso: boolean; add?: boolean; mode?: string | null } | null;
   if (bs) {
     const { additive, subtractive } = areaFill(bs, sch);   // SELECTION_AREA::ViewDraw
-    if (bs.lasso) drawSelectionArea(ctx, px, dark, { poly: bs.pts, inside: lassoArea(bs.pts) > 0, additive, subtractive });
+    // a lasso kept alive after the button came up (selectLasso): its points, then the cursor
+    const lp = bs.lasso && (bs as { live?: boolean }).live ? [...bs.pts, bs.cur] : bs.pts;
+    if (bs.lasso) drawSelectionArea(ctx, px, dark, { poly: lp, inside: lassoArea(lp) > 0, additive, subtractive });
     else drawSelectionArea(ctx, px, dark, { rect: [bs.start, bs.cur], inside: bs.cur[0] >= bs.start[0], additive, subtractive });
   }
   const zr = E.zoomRect as { a?: Pt; b?: Pt } | null;

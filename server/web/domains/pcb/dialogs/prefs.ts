@@ -78,7 +78,8 @@ export interface Prefs {
   /** EESCHEMA_SETTINGS drawing.field_names: the global Field Name Templates (Preferences > Schematic Editor) */
   schFieldNames: { name: string; visible: boolean; url: boolean }[];
   /** COMMON_SETTINGS appearance.hicontrast_dimming_factor (0.8) */
-  common: { hcDimming: number };
+  /** immediateActions: COMMON_SETTINGS input.immediate_actions (on unless "First hotkey selects tool" is ticked) */
+  common: { hcDimming: number; immediateActions: boolean };
   /** PCB Editor > Origins & Axes (PCBNEW_SETTINGS m_Display.m_DisplayOrigin, m_DisplayInvertXAxis / YAxis) */
   pcbOrigin: { origin: "page" | "aux" | "grid"; invertX: boolean; invertY: boolean };
   /**
@@ -113,13 +114,13 @@ export const DEFAULT_PREFS: Prefs = {
     highlightNetclass: true, colorHighlightThickness: 15, colorHighlightOpacity: 60, crossProbeSelect: true, crossProbeCenter: true, crossProbeZoom: true, crossProbeHighlight: true, crossProbeFlash: false },
   sim: SIM_MOUSE_DEFAULTS,
   schEditing: { lineMode: "90", mouseDragIsDrag: true, autoAnnotate: true, autoStartWires: true, escClearsNetHighlight: true, repeatX: 0, repeatY: 100 * 0.0254, repeatIncrement: 1,
-    arcEditMode: "center", autoPlaceSheetPins: true, unconstrainedPinSwaps: false, sheetBorder: "", sheetBackground: "", newPowerSymbols: "default", pinSelectsSymbol: true,
+    arcEditMode: "center", autoPlaceSheetPins: true, unconstrainedPinSwaps: false, sheetBorder: "", sheetBackground: "", newPowerSymbols: "default", pinSelectsSymbol: false,
     autoplaceFields: true, autoplaceJustify: true, autoplaceAlign: true, footprintPreview: true, neverShowRescue: false },
   schColors: { theme: "default", followDark: false, user: [] },
   pcbDisplay: { showPadNumbers: true, showNetNames: true, showPageLimits: true, netNamesMode: 3, trackClearance: 2, padClearance: true,
     viaColorForTHPads: false, forceShowFieldsWhenFPSelected: true, live3DRefresh: false,
     crossProbing: { onSelection: true, centerOnItems: true, zoomToFit: true, autoHighlight: true, flashSelection: false } },
-  common: { hcDimming: 0.8 },
+  common: { hcDimming: 0.8, immediateActions: true },
   symDisplay: { showHiddenPins: true, showHiddenFields: true, showETypes: true, showAltIcons: true },
   symEditing: { lineWidth: 0, textSize: 50 * 0.0254, pinLength: 100 * 0.0254, pinNumSize: 50 * 0.0254, pinNameSize: 50 * 0.0254, pinPitch: 100 * 0.0254, labelDelta: 1, dragPinsWithEdges: true },
   symColors: { useSch: true, theme: "default" },
@@ -287,7 +288,10 @@ export function applyPrefs(full = true): void {
   E.middleDragPan = m.middleDrag !== "none"; E.rightDragPan = m.rightDrag !== "none";
   E.middleDrag = m.middleDrag; E.rightDrag = m.rightDrag; E.leftDrag = m.leftDrag; E.motionPanMod = m.motionPanMod;
   E.autoPan = m.autoPan; E.autoPanSpeed = m.autoPanSpeed;
+  E.pinSelectsSymbol = !!p.schEditing.pinSelectsSymbol;   // selection.select_pin_selects_symbol (the click collector reads it)
   E.gridFor = activeGridPitch;
+  // EE_GRID_HELPER::GetGridSize( grid class ) for the schematic tools (Pin Helpers' wire stub uses GRID_WIRES)
+  (E as unknown as { gridForClass?: (cls: string) => number }).gridForClass = (cls: string) => gridPitchFor(cls as Parameters<typeof gridPitchFor>[0], prefs().grids.sch.overrides, E.gridPitch as number);
   applyColorTheme(p);
   E.pcbOrigin = p.pcbOrigin; publishUserOrigin();
   const ed = editorId(), g = p.grids[ed];
@@ -307,7 +311,10 @@ export function applyPrefs(full = true): void {
       const sch = CollabTools.sch;
       if (sch) { try { const ctx = toolCtx(); sch.setLineMode(ctx, p.schEditing.lineMode); (sch.setMouseDragMode || sch.setDragMode)(ctx, p.schEditing.mouseDragIsDrag ? "drag" : "move"); const st = sch.state as { annotateAuto: boolean; autoStartWires: boolean; escClearsNetHighlight?: boolean; repeatOffset: [number, number]; repeatIncrement: number };
           st.annotateAuto = p.schEditing.autoAnnotate; (st as { autoplace?: unknown }).autoplace = { enable: p.schEditing.autoplaceFields !== false, justify: p.schEditing.autoplaceJustify !== false, align: p.schEditing.autoplaceAlign !== false }; st.autoStartWires = p.schEditing.autoStartWires; st.escClearsNetHighlight = p.schEditing.escClearsNetHighlight;
-          st.repeatOffset = [p.schEditing.repeatX, p.schEditing.repeatY]; st.repeatIncrement = p.schEditing.repeatIncrement; syncSchModes(); } catch (e) { console.warn(e); } }
+          st.repeatOffset = [p.schEditing.repeatX, p.schEditing.repeatY]; st.repeatIncrement = p.schEditing.repeatIncrement;
+          // input.immediate_actions and m_Drawing's new_power_symbols / default sheet colours / arc edit mode, read by the drawing tools
+          Object.assign(st, { immediateActions: p.common.immediateActions !== false, newPowerSymbols: p.schEditing.newPowerSymbols || "default", sheetBorder: p.schEditing.sheetBorder || "", sheetBackground: p.schEditing.sheetBackground || "", arcEditMode: p.schEditing.arcEditMode || "center" });
+          syncSchModes(); } catch (e) { console.warn(e); } }
     } else {
       E.renderOpts.padNumbers = p.pcbDisplay.showPadNumbers; E.renderOpts.netNames = p.pcbDisplay.showNetNames; E.renderOpts.pageLimits = p.pcbDisplay.showPageLimits;
       E.renderOpts.netNamesMode = p.pcbDisplay.netNamesMode;

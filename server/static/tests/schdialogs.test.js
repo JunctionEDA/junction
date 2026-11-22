@@ -77,6 +77,33 @@ test("replace: text, value field; references only on request", () => {
   assert.strictEqual(rh.replaceable, false, "references are not replaced unless asked");
   assert.strictEqual(L.findHits(doc, { query: "R1", replaceRefs: true }).find((h) => h.id === "s1" && h.field === "Reference").replaceable, true);
 });
+test("find follows SCH_FIELD / SCH_LABEL / SCH_SHEET_PIN rules: hidden fields, references in replace mode, label fields, sheet pins, the order", () => {
+  const FX = "(effects (font (size 1.27 1.27)))";
+  const doc = K.parseDoc(`(kicad_sch (version 20250114) (generator "eeschema") (uuid "root") (paper "A4") (lib_symbols)
+    (symbol (lib_id "Device:R") (at 100 50 0) (unit 1) (uuid "a")
+      (property "Reference" "NET7" (at 90 40 0) ${FX}) (property "Value" "NET1" (at 60 45 0) (hide yes) ${FX}) (property "MPN" "NET2" (at 10 80 0) ${FX}))
+    (global_label "NET3" (shape input) (at 30 20 0) ${FX} (uuid "g")
+      (property "Intersheetrefs" "NET4" (at 31 20 0) ${FX}) (property "Netclass" "NET5" (at 20 10 0) ${FX}))
+    (sheet (at 150 30) (size 20 20) (uuid "sh")
+      (property "Sheetname" "Sub" (at 150 29 0) ${FX}) (property "Sheetfile" "sub.kicad_sch" (at 150 51 0) ${FX})
+      (pin "NET6" input (at 150 35 180) ${FX} (uuid "sp")))
+    (text "NET8" (at 10 80 0) ${FX} (uuid "0t")))`, "kicad_sch");
+  const keys = (o) => L.findHits(doc, o).map((h) => h.text);
+  assert.deepStrictEqual(keys({ query: "NET" }), ["NET8", "NET2", "NET5", "NET3", "NET4", "NET7", "NET6"],
+    "each field, sheet pin and item by its own x, then y, then uuid; a hidden Value needs the option");
+  assert.deepStrictEqual(keys({ query: "NET", hiddenFields: true }), ["NET8", "NET2", "NET5", "NET3", "NET4", "NET1", "NET7", "NET6"]);
+  assert.ok(!keys({ query: "NET", searchAndReplace: true }).includes("NET7"), "replace mode: a reference designator is not searched");
+  assert.ok(keys({ query: "NET", searchAndReplace: true, replaceRefs: true }).includes("NET7"));
+  const by = (t) => L.findHits(doc, { query: "NET" }).find((h) => h.text === t);
+  assert.strictEqual(by("NET5").replaceable, true, "a label's field is replaceable");
+  assert.strictEqual(by("NET4").replaceable, false, "Intersheetrefs is not");
+  assert.strictEqual(by("NET6").replaceable, true, "SCH_SHEET_PIN::IsReplaceable");
+  const sn = K.cloneNode(doc.items.get("sh").node); assert.ok(L.replaceInNode(sn, by("NET6"), { query: "NET" }, "SIG"));
+  assert.strictEqual(K.kids(sn, "pin")[0][1], "SIG6"); assert.strictEqual(K.kid(sn, "at")[1], 150, "only the pin's name changed");
+  const gn = K.cloneNode(doc.items.get("g").node); assert.ok(L.replaceInNode(gn, by("NET5"), { query: "NET" }, "CLS"));
+  assert.ok(/"Netclass","CLS5"/.test(JSON.stringify(gn)));
+  assert.ok(L.hitOrder({ x: 1, y: 5, id: "b" }, { x: 1, y: 5, id: "a" }) > 0 && L.hitOrder({ x: 0, y: 9, id: "z" }, { x: 1, y: 0, id: "a" }) < 0);
+});
 test("BOM: reference sorting and ranges", () => {
   assert.deepStrictEqual(["R10", "R2", "C1", "R1"].sort(L.refCmp), ["C1", "R1", "R2", "R10"]);
   assert.strictEqual(L.refShorthand(["R3", "R1", "R2", "R10"], ",", "-"), "R1-R3,R10");

@@ -34,14 +34,32 @@ export function setTextRot(kind: string, node: SNode, rot: number) {
   let ef = kid(node, "effects"); if (!ef) { ef = ["effects", fontNode(1.27)]; node.push(ef); }
   replaceKid(ef, labelJustify(kind, rot));
 }
+/** EDA_TEXT::FlipHJustify on a node's (effects (justify …)): left <-> right; centred text stays centred. */
+export function flipHJustify(node: SNode) {
+  const ef = kid(node, "effects"), j = ef && kid(ef, "justify"); if (!j) return;
+  const i = j.findIndex((t, k) => k > 0 && (t === "left" || t === "right")); if (i > 0) j[i] = j[i] === "left" ? "right" : "left";
+}
+const textVertical = (node: SNode) => { const r = atOf(node)[2] || 0; return r === 90 || r === 270; };
+/**
+ * SCH_TEXT::Rotate90 (free text, not a label): the angle only toggles between horizontal and vertical, and the
+ * horizontal justification flips going horizontal -> vertical clockwise or vertical -> horizontal counter-clockwise.
+ */
+export function rotateText90(node: SNode, cw: boolean) {
+  const v = textVertical(node); if ((!v && cw) || (v && !cw)) flipHJustify(node);
+  const a = kid(node, "at"); if (!a) return; if (a.length >= 4) a[3] = v ? 0 : 90; else a.push(v ? 0 : 90);
+}
+/** SCH_TEXT::MirrorSpinStyle( aLeftRight ): the horizontal justification flips when the mirror runs along the text. */
+export function mirrorTextSpin(node: SNode, leftRight: boolean) { const v = textVertical(node); if ((!v && leftRight) || (v && !leftRight)) flipHJustify(node); }
 export function rotateNode(kind: string, node: SNode, cw: boolean) {
   if (kind === "symbol") return orientSymbol(node, cw ? "cw" : "ccw");
+  if (kind === "text") { rotateText90(node, cw); return true; }
   if (kind === "bus_entry") { const s = kid(node, "size"); if (!s) return; const [dx, dy] = SCREEN_OP[cw ? "cw" : "ccw"](num(s[1]), num(s[2])); s[1] = r4(dx); s[2] = r4(dy); return true; }
   if (TEXT_KINDS.has(kind)) { setTextRot(kind, node, atOf(node)[2] + (cw ? 270 : 90)); return true; }
   return false;
 }
 export function mirrorNode(kind: string, node: SNode, axis: string) {
   if (kind === "symbol") return orientSymbol(node, axis);
+  if (kind === "text") { mirrorTextSpin(node, axis === "y"); return true; }
   if (kind === "bus_entry") { const s = kid(node, "size"); if (!s) return; const [dx, dy] = SCREEN_OP[axis](num(s[1]), num(s[2])); s[1] = r4(dx); s[2] = r4(dy); return true; }
   if (TEXT_KINDS.has(kind)) {   // labels flip their reading direction instead
     const rot = atOf(node)[2]; const flip: Record<number, number> = axis === "y" ? { 0: 180, 180: 0 } : { 90: 270, 270: 90 };

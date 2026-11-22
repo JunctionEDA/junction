@@ -2,22 +2,23 @@ import type { SchCtx, Pt, Mods, PtrEvent } from "./types";
 import { root } from "../root";
 import { editFieldPrompt, showDatasheet } from "./annotate";
 import { autoplaceSelection } from "./autoplace";
-import { dropCarry, placeCarry, singleClickPlace, startCarry } from "./carry";
-import { closePicker, closePrompt, curTool, installDom, openPicker, openPowerPicker, promptClassLabel, promptFor } from "./dom";
+import { cancelCarry, dropCarry, placeCarry, singleClickPlace, startCarry } from "./carry";
+import { CLICK_PX, closePicker, closePrompt, curTool, installDom, openPicker, openPowerPicker, promptClassLabel, promptFor } from "./dom";
 import { announceModes, beginDrag, cycleLineMode, endDrag, setDragMode } from "./drag";
 import { clearHighlight, highlightClick, highlightNetNow, pickNet, setHighlight } from "./highlight";
 import { pickAny, pickNonSymbol } from "./hit";
 import { openImagePicker } from "./images";
-import { finishWire } from "./junction";
+import { finishWire, switchTool } from "./junction";
 import { busEntryNode, junctionNode, noConnectNode } from "./nodes";
 import { repeatLast } from "./repeat";
 import { deleteAt, deleteSelected, orientSelected } from "./selection-edits";
-import { finishSchArc, showSchArcMode, schArcBackup, schArcDrawMode, schArcMove, schArcPosture, switchSchArcMode } from "./arcs";
+import { setTextRot } from "./orient";
+import { finishSchArc, showSchArcMode, schArcBackup, schArcDrawMode, schArcMove, schArcPosture, switchSchArcMode, schArcUndo } from "./arcs";
 import { cancelDraw, drawClick, drawPoint, finishDraw, undoDrawPoint } from "./shapes";
-import { movePinPlace, sheetAt, sheetPinClick } from "./sheets";
+import { cancelPinPlace, movePinPlace, sheetAt, sheetPinClick } from "./sheets";
 import { mmPerPx, snapConn } from "./snap";
-import { DRAW_TOOLS, S, TEXT_KINDS, toolOf } from "./state";
-import { restoreBreak } from "./transforms";
+import { DRAW_TOOLS, K, S, TEXT_KINDS, atOf, toolOf, uuidOf } from "./state";
+import { breakAgain, restoreBreak } from "./transforms";
 import { ghost, same } from "./util";
 import { startWire, switchPosture, undoSegment, wireClick, wireFollow } from "./wire";
 
@@ -75,7 +76,44 @@ export function onActivate(toolId: string, ctx: SchCtx, before: string[] = []) {
   else if (toolId === "place" && !S.carry) openPicker(ctx, S.cursorClient);
   else if (toolId === "power" && !S.carry) openPowerPicker(ctx, S.cursorClient);
   else if (toolId === "image" && !S.carry) openImagePicker(ctx);
+  // TwoClickPlace: chosen from a toolbar or a menu (an activation without a position) the label / text tools are primed
+  // at once when input.immediate_actions is on, so their dialog opens straight away; a hotkey primes through primeTool
+  else if (!S.viaHotkey && !S.internalSwitch && S.immediateActions !== false && !ctx.viewOnly) {
+    const t = toolOf(toolId), at = S.cursor || [ctx.doc.page[0] / 2, ctx.doc.page[1] / 2];
+    if (t && TEXT_KINDS.has(t.kind as string)) promptFor(ctx, t.kind as string, at, S.cursorClient);
+    else if (toolId === "classlabel") promptClassLabel(ctx, at, S.cursorClient);
+  }
   ctx.requestRender();
+}
+/**
+ * TOOL_MANAGER::PrimeTool: a tool started by its hotkey takes a click at the cursor at once (a hotkey event carries the
+ * cursor position): J / Q / Z place their item, the label and text tools open their dialog, a wire, a sheet, a table,
+ * a rule area and the graphic shapes take their first point.  The sheet pin tool is never primed (SCH_SHEET_PIN_T),
+ * and with input.immediate_actions off ("First hotkey selects tool") only a tool that was already current is.
+ */
+export function primeTool(ctx: SchCtx, id: string, wasCurrent = false) {
+  if (S.immediateActions === false && !wasCurrent) return false;
+  const t = toolOf(id); if (!t || S.tool !== id || !S.cursor || ctx.viewOnly) return false;
+  const kind = t.kind as string | undefined;
+  if (kind === "wire" || kind === "bus" || kind === "polyline") { if (!S.wire) startWire(ctx, kind, snapConn(ctx, S.cursor, kind)); return true; }   // KiCad starts drawing under the cursor
+  if (TEXT_KINDS.has(kind as string)) { if (!S.carry) promptFor(ctx, kind as string, S.cursor, S.cursorClient); return true; }
+  if (id === "classlabel") { if (!S.carry) promptClassLabel(ctx, S.cursor, S.cursorClient); return true; }
+  if (id === "junction" || id === "noconnect" || id === "busentry" || DRAW_TOOLS.has(id)) return onPointerDown({ button: 0, synthetic: true }, S.cursor, ctx);
+  return false;
+}
+/** A tool's hotkey: mid-operation the tool's own key is a click at the cursor and any other tool is refused (doDrawSegments); otherwise the tool starts, primed. */
+export function hotkeyTool(ctx: SchCtx, id: string, at?: Pt | null) {
+  S.ctx = ctx;
+  if (at) S.cursor = [at[0], at[1]];             // a context-menu entry: the position the menu was opened at
+  else if (!S.cursor && ctx.cursor) S.cursor = [ctx.cursor[0], ctx.cursor[1]];
+  const busy = busyMessage();
+  if (busy) { if (id === S.tool) syntheticClick(ctx); else ctx.toast(busy); return true; }
+  if (S.draw && id === S.tool && !S.draw.await) { syntheticClick(ctx); return true; }   // isSyntheticClick: the shape in progress takes its next point
+  const wasCurrent = S.tool === id;
+  S.viaHotkey = true;
+  try { ctx.setTool(id); } finally { S.viaHotkey = false; }
+  primeTool(ctx, id, wasCurrent);
+  return true;
 }
 // pointerdown carries no click count in every browser (Chrome reports 0): count it here like the OS double-click (500 ms, 4 px)
 let lastDown: { t: number; x: number; y: number; n: number } | null = null;
@@ -109,7 +147,13 @@ export function onPointerDown(ev: DownEvent, mm: Pt, ctx: SchCtx) {
     return true;
   }
   if (t.id === "place" || t.id === "power") {
-    if (S.carry) { placeCarry(ctx, mm); const placed = dropCarry(ctx); if (root.KiCadLibrary && root.KiCadLibrary.afterPlace) root.KiCadLibrary.afterPlace(ctx, placed, t.id); }
+    if (S.carry) {
+      const one = !!S.placeOne && uuidOf(S.carry.node) === S.placeOne;
+      placeCarry(ctx, mm); const placed = dropCarry(ctx);
+      // PlaceNextSymbolUnit (placeOneOnly): the tool ends with the one placement
+      if (one) { S.placeOne = null; if (placed) switchTool(ctx, "select"); }
+      else if (root.KiCadLibrary && root.KiCadLibrary.afterPlace) root.KiCadLibrary.afterPlace(ctx, placed, t.id);
+    }
     else if (t.id === "place") openPicker(ctx, S.cursorClient);
     else openPowerPicker(ctx, S.cursorClient);
     return true;
@@ -122,7 +166,11 @@ export function onPointerDown(ev: DownEvent, mm: Pt, ctx: SchCtx) {
   if (DRAW_TOOLS.has(t.id)) {
     if (S.draw && S.draw.await) return true;
     if (t.id === "arc" && dbl && S.draw && S.draw.arc) { finishSchArc(ctx); return true; }   // drawManagedShape: IsDblClick keeps what is drawn
-    drawClick(ctx, t.id, drawPoint(ctx, mm)); return true;
+    const fresh = !S.draw;
+    drawClick(ctx, t.id, drawPoint(ctx, mm), dbl);
+    // a sheet started by a press: releasing it after a drag is the second click (startedWithDrag && IsMouseUp)
+    if (fresh && S.draw && t.id === "sheet" && !ev.synthetic && ev.clientX !== undefined) S.draw.press = [ev.clientX, ev.clientY!];
+    return true;
   }
   if (t.id === "delete") { deleteAt(ctx, mm); return true; }   // an empty click is ours too: the tool stays armed
   return false;
@@ -149,7 +197,36 @@ export function onPointerMove(ev: PtrEvent | null | undefined, mm: Pt, ctx: SchC
   }
   if (toolOf(S.tool)) ctx.requestRender();        // cursor marker
 }
-export function onPointerUp() { /* clicks are handled on pointerdown, drags in the capture hooks */ }
+/** Clicks are handled on pointerdown and drags in the capture hooks; a sheet drawn by press-drag-release ends here. */
+export function onPointerUp(ev: PtrEvent | null | undefined, mm: Pt, ctx: SchCtx) {
+  const d = S.draw; if (!d || !d.press) return;
+  const press = d.press; d.press = null;
+  if (!ctx || !mm || !ev || ev.clientX === undefined || d.shape !== "sheet" || d.await || d.pts.length !== 1) return;
+  if (Math.hypot(ev.clientX - press[0], ev.clientY! - press[1]) < CLICK_PX) return;   // a click: the second click ends it
+  drawClick(ctx, "sheet", drawPoint(ctx, mm));
+}
+/**
+ * ACTIONS::undo / redo while a tool has something in flight never reach the document (Edit > Undo, the toolbar and
+ * the keys alike): a wire takes back its last segment, a rule area its last corner, a sheet, a table, a shape, a move
+ * or an item on the cursor is cancelled, and redo only beeps.  An idle label / text / sheet pin tool (TwoClickPlace)
+ * leaves on undo and beeps on redo.  True when the action was taken here.
+ */
+export function undoRedo(ctx: SchCtx, which: string) {
+  S.ctx = ctx;
+  const undo = which === "undo";
+  if (S.wire) return wireKey(ctx, undo ? "Ctrl+Z" : "Ctrl+Y");
+  if (S.draw && S.draw.arc) { if (!S.draw.started) return false; if (undo) schArcUndo(ctx); return true; }
+  if (S.draw) {
+    if (undo && !S.draw.await) { if (S.draw.shape === "rulearea" || S.draw.shape === "polygon" || S.draw.shape === "lines") undoDrawPoint(ctx); else cancelDraw(ctx); }
+    return true;
+  }
+  if (S.drag && !S.pedit) { if (undo) { S.drag.cancel = "undo"; endDrag(ctx, false); } return true; }
+  if (S.pinPlace) { if (undo) cancelPinPlace(ctx); return true; }
+  if (S.carry && busyMessage()) { if (undo) cancelCarry(ctx); return true; }
+  const t = toolOf(S.tool);
+  if (t && (TEXT_KINDS.has(t.kind as string) || t.id === "classlabel" || t.id === "sheetpin")) { if (undo) { S.carry = null; switchTool(ctx, "select"); } return true; }
+  return false;
+}
 /**
  * Keys while a wire is being drawn (doDrawSegments): '/' switches the posture, End finishes (Enter is a click at the
  * cursor, the editor's cursorClick),
@@ -169,16 +246,15 @@ export function onKey(key: string, ev: Mods | null | undefined, ctx: SchCtx) {
   S.ctx = ctx; installDom(ctx);
   if (ctx.viewOnly) return false;
   const lower = key.length === 1 ? key.toLowerCase() : key;
-  const armTool = (id: string, kind?: string) => {
-    // mid-operation the tool's own hotkey is a click at the cursor; any other tool is refused (doDrawSegments)
-    const busy = busyMessage();
-    if (busy) { if (id === S.tool) syntheticClick(ctx); else ctx.toast(busy); return true; }
-    ctx.setTool(id);
-    if (S.cursor && (kind === "wire" || kind === "bus" || kind === "polyline")) startWire(ctx, kind, snapConn(ctx, S.cursor, kind));   // KiCad starts drawing under the cursor
-    else if (S.cursor && TEXT_KINDS.has(kind as string)) promptFor(ctx, kind as string, S.cursor, S.cursorClient);   // undefined is never a text kind
-    return true;
-  };
+  const armTool = (id: string, _kind?: string) => hotkeyTool(ctx, id);
   if (S.wire && wireKey(ctx, key === "Backspace" ? "Backspace" : key === "Delete" ? "Del" : key)) return true;
+  if (S.wire && lower === "r") {
+    // doDrawSegments: rotateCW / rotateCCW turn the label of a bus unfold in progress and that spin style is what the
+    // next unfold starts with (busUnfoldPersistentSettings); with no unfold KiCad only rings the bell
+    const lb = S.unfold ? ctx.doc.items.get(S.unfold.labelId) : null;
+    if (lb) { setTextRot(lb.kind, lb.node, atOf(lb.node)[2] + (key === "R" && ev && ev.shiftKey ? 270 : 90)); S.unfoldSpin = atOf(lb.node)[2] || 0; K.replaceChange(ctx.doc, lb); ctx.requestRender(); }
+    return true;
+  }
   if (S.draw && S.draw.arc) {   // EE_GRAPHIC_TOOL::drawManagedShape with an ARC_MODE_SESSION
     if (key === "End") { finishSchArc(ctx); return true; }   // finishInteractive; Enter is a click at the cursor (arcSession.PlacePoint)
     // deleteLastPoint (Backspace) always backs up; doDelete (Del) only once the arc is started, before that it is the
@@ -190,10 +266,14 @@ export function onKey(key: string, ev: Mods | null | undefined, ctx: SchCtx) {
   if (S.draw && !S.draw.await) {
     if (key === "End") {   // finishInteractive; Enter is a click at the cursor (another corner)
       const sh = S.draw.shape, n = S.draw.pts.length;
-      if ((sh === "lines" && n >= 2) || ((sh === "polygon" || sh === "rulearea") && n >= 3)) finishDraw(ctx); else cancelDraw(ctx);
+      // a sheet, a table and the two-point shapes: finishInteractive completes the item exactly like the second click
+      if (sh === "sheet" || sh === "table" || sh === "rect" || sh === "circle" || sh === "textbox" || sh === "ellipse") { if (n === 1) drawClick(ctx, sh, S.draw.cur.slice()); }
+      else if ((sh === "lines" && n >= 2) || ((sh === "polygon" || sh === "rulearea") && n >= 3)) finishDraw(ctx); else cancelDraw(ctx);
       return true;
     }
-    if (key === "Backspace") { undoDrawPoint(ctx); return true; }
+    // deleteLastPoint: the sheet and table tools do not take it; a rule area takes doDelete too
+    if (key === "Backspace") { if (S.draw.shape !== "sheet" && S.draw.shape !== "table") undoDrawPoint(ctx); return true; }
+    if (key === "Delete" && S.draw.shape === "rulearea") { undoDrawPoint(ctx); return true; }
     if (key === "Escape") { cancelDraw(ctx); return true; }
   }
   switch (key) {
@@ -221,11 +301,19 @@ export function onKey(key: string, ev: Mods | null | undefined, ctx: SchCtx) {
   case "v": case "V": return editFieldPrompt(ctx, "Value", "Value", true);
   case "~": if (!S.highlight && !(S.netHL && S.netHL.active())) return false; clearHighlight(ctx); return true;
   case "g": case "G": case "m": case "M": {
-    if (S.drag) { setDragMode(ctx, lower === "m" ? "move" : "drag"); return true; }   // switched mid-drag: the preview re-resolved
+    if (S.drag) {
+      // SCH_MOVE_TOOL::Main while a move is in progress: the hotkey of the running family (M for a move; G for a drag,
+      // break or slice) places the moving items (ACTIONS::cursorClick); the other one restarts the operation in the
+      // new mode, but never for new items (a paste)
+      const want = lower === "m" ? "move" : "drag", running = S.drag.brk ? "drag" : S.dragMode;
+      if (want === running) { if (!(S.drag.brk && breakAgain(ctx))) endDrag(ctx, true); }
+      else if (!S.drag.local && !S.drag.brk) setDragMode(ctx, want);
+      return true;
+    }
     if (!S.cursor) return false;
     let it = S.sel ? ctx.doc.items.get(S.sel) : null;
     if (!it && !ctx.selected && !ctx.selection?.size) {
-      const hovered = pickNonSymbol(ctx, S.cursor);
+      const hovered = pickNonSymbol(ctx, S.cursor, true);
       if (hovered?.kind === "no_connect") it = hovered;
     }
     if (!it) return false;

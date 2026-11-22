@@ -257,7 +257,8 @@ export interface RefHolder { ref: string; lib: string; value: string; unit: numb
  */
 export function nextReference(prefix: string, used: Iterable<string | RefHolder>, auto: boolean, me?: { lib: string; value: string; unit: number } | null): string {
   prefix = prefix || "U";
-  if (!auto) return prefix + "?";
+  // SCH_REFERENCE::AlwaysAnnotate: power symbols and the other "#" references are numbered even with automatic annotation off
+  if (!auto && !prefix.startsWith("#")) return prefix + "?";
   const holders = new Map<string, RefHolder[]>();
   for (const u of used) {
     const h: RefHolder = typeof u === "string" ? { ref: u, lib: "", value: "", unit: -1 } : u;
@@ -268,6 +269,64 @@ export function nextReference(prefix: string, used: Iterable<string | RefHolder>
     if (!hs || !hs.length) return prefix + n;
     if (me && hs.every((h) => h.unit >= 0 && h.unit !== me.unit && h.lib === me.lib && h.value === me.value)) return prefix + n;
   }
+}
+
+/**
+ * SCH_DRAWING_TOOLS::PlaceSymbol's m_Drawing.new_power_symbols: a power symbol that is not local becomes local with
+ * "Local" (its keywords and description say "local power" / "local label"), one that is not global becomes global with
+ * "Global"; "Default" follows the library and a symbol that is not a power symbol is never touched.  The converted
+ * copy, or null when the symbol stays as it is.
+ */
+export function powerPreferenceSymbol(lib: SNode, pref: string | null | undefined): SNode | null {
+  const pw = kid(lib, "power"); if (!pw) return null;
+  const local = text(pw[1]) === "local";
+  if (pref === "local" && !local) {
+    const out = JSON.parse(JSON.stringify(lib)) as SNode;
+    (out as SNode[])[(out as SNode[]).findIndex((c) => isList(c) && c[0] === "power")] = ["power", "local"];
+    for (const p of kids(out, "property")) {
+      const name = text(p[1]);
+      if (name === "ki_keywords" && text(p[2]).includes("global power")) p[2] = text(p[2]).replace("global power", "local power");
+      if ((name === "Description" || name === "ki_description") && text(p[2]).includes("global label")) p[2] = text(p[2]).replace("global label", "local label");
+    }
+    return out;
+  }
+  if (pref === "global" && local) {
+    const out = JSON.parse(JSON.stringify(lib)) as SNode;
+    (out as SNode[])[(out as SNode[]).findIndex((c) => isList(c) && c[0] === "power")] = ["power", "global"];
+    return out;
+  }
+  return null;
+}
+
+/**
+ * PlaceSymbol's "place all units" step: from the unit just placed, the next unit no symbol holds — with an annotated
+ * reference a unit of the same reference anywhere in the schematic, with an unannotated one ("U?") a unit of the same
+ * reference and library symbol (IsUnannotatedUnitOccupied).  Past the last unit it wraps to 1 (the next package).
+ */
+export function nextFreeUnit(unit: number, units: number, reference: string, libId: string, holders: Iterable<RefHolder>): number {
+  const unannotated = reference.endsWith("?"), list = [...holders];
+  const occupied = (u: number) => list.some((h) => h.ref === reference && h.unit === u && (!unannotated || h.lib === libId));
+  while (unit <= units && occupied(unit)) unit++;
+  return unit > units ? 1 : unit;
+}
+
+/**
+ * SCH_SYMBOL::Duplicate for the next symbol on the cursor (the next unit, or the next repeated copy): the placed symbol
+ * as it is — orientation, mirror, field values and positions — with fresh uuids, the given unit in the symbol and in
+ * every instance, and, when given, a new reference.
+ */
+export function duplicatePlaced(node: SNode, unit: number, reference?: string | null): SNode {
+  const out = JSON.parse(JSON.stringify(node)) as SNode[];
+  const set = (n: SNode[], key: string, v: unknown) => { const i = n.findIndex((c) => isList(c) && c[0] === key); if (i >= 0) n[i] = [key, v] as SNode; else n.push([key, v] as SNode); };
+  set(out, "uuid", K().newUuid());
+  for (const pin of kids(out, "pin")) set(pin as SNode[], "uuid", K().newUuid());
+  set(out, "unit", unit);
+  for (const inst of kids(out, "instances")) for (const pr of kids(inst, "project")) for (const pa of kids(pr, "path")) {
+    const u = kid(pa, "unit"); if (u) u[1] = unit;
+    const r = kid(pa, "reference"); if (r && reference) r[1] = reference;
+  }
+  if (reference) { const rp = kids(out, "property").find((p) => text(p[1]) === "Reference"); if (rp) rp[2] = reference; }
+  return out;
 }
 
 // ---------------------------------------------------------------- a library footprint on the board

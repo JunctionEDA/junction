@@ -89,6 +89,7 @@ export function sheetInstance(ctx: SchCtx, doc: KDoc, page: number) {
 // Place a sheet: make sure its file is a project doc, then commit the sheet node.  One at a time;
 // clicks are ignored while the request is out, and a document switch drops the result.
 export function placeSheet(ctx: SchCtx, a: Pt, b: Pt, name: string, file: string) {
+  const label = "Draw Sheet";
   if (S.sheetJob) { ctx.toast("Still creating the previous sheet…"); return S.sheetJob.promise; }
   const doc = ctx.doc, job: SheetJob = { doc, promise: null }; S.sheetJob = job;
   job.promise = (async () => {
@@ -98,7 +99,7 @@ export function placeSheet(ctx: SchCtx, a: Pt, b: Pt, name: string, file: string
       const node = sheetNode(a, b, name, ref.file);
       const inst = sheetInstance(ctx, doc, nextPage(ctx, doc)); if (inst) node.push(inst);
       const { item, change } = addNode(doc, node);
-      ctx.commit([change], "sheet");
+      ctx.commit([change], label, { newSheet: true });
       rememberPlaced(item.kind, item.node);
       ctx.setSelected({ id: item.id });
       return item;
@@ -108,7 +109,7 @@ export function placeSheet(ctx: SchCtx, a: Pt, b: Pt, name: string, file: string
   return job.promise;
 }
 // The sheet from DIALOG_SHEET_PROPERTIES: its file is linked (after asking, when it exists) or created, then the sheet is added.
-export function placeSheetNode(ctx: SchCtx, node: SNode, file: string) {
+export function placeSheetNode(ctx: SchCtx, node: SNode, file: string, label = "Draw Sheet") {
   if (S.sheetJob) { ctx.toast("Still creating the previous sheet…"); return S.sheetJob.promise; }
   const doc = ctx.doc, job: SheetJob = { doc, promise: null }; S.sheetJob = job;
   job.promise = (async () => {
@@ -121,7 +122,7 @@ export function placeSheetNode(ctx: SchCtx, node: SNode, file: string) {
       if (S.sheetJob !== job || ctx.doc !== doc) return null;
       const fp = kids(node, "property").find((q) => /^Sheet ?file$/i.test(str(q[1]))); if (fp) fp[2] = ref.file;
       const { item, change } = addNode(doc, node);
-      ctx.commit([change], "sheet");
+      ctx.commit([change], label, { newSheet: true });
       rememberPlaced(item.kind, item.node);
       ctx.setSelected({ id: item.id });
       return item;
@@ -247,7 +248,7 @@ export function placeSheetPin(ctx: SchCtx, sheet: KItem, name: string, p: Pt, si
   const node = deep(sheet.node), pin = sheetPinNode(name, p, side);
   const at = node.findIndex((c) => Array.isArray(c) && c[0] === "instances");
   if (at >= 0) node.splice(at, 0, pin); else node.push(pin);
-  ctx.commit([modChange(ctx.doc, sheet, node)], "sheet pin");
+  ctx.commit([modChange(ctx.doc, sheet, node)], "Add Sheet Pin");
   ctx.requestRender();
   return pin;
 }
