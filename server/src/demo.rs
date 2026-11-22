@@ -124,12 +124,7 @@ async fn copy_into(
         .bind(doc_type_for(path))
         .fetch_one(&mut **tx)
         .await?;
-        sqlx::query("INSERT INTO snapshots (doc_id, seq, content, uploader_id) VALUES ($1, 0, $2, $3)")
-            .bind(doc)
-            .bind(content.as_slice())
-            .bind(user_id)
-            .execute(&mut **tx)
-            .await?;
+        crate::persist::insert_snapshot_in(&mut **tx, doc, 0, content.as_slice(), Some(user_id)).await?;
     }
     Ok(project)
 }
@@ -168,19 +163,41 @@ pub async fn open(
 
 /// Reconnect affected demo copies on the server. Existing snapshots and history stay available.
 pub async fn repair_split_ground(state: &AppState) -> anyhow::Result<()> {
-    let candidates: Vec<(Uuid, Uuid, i64)> = sqlx::query_as(
-        "SELECT d.id, p.id, p.owner_id FROM projects p JOIN documents d ON d.project_id = p.id
-         JOIN LATERAL (SELECT seq, content FROM snapshots WHERE doc_id = d.id ORDER BY seq DESC LIMIT 1) s ON true
+    // A board whose newest stored file names the split net, or whose later edits do.  A file kept as a
+    // blob cannot be searched in SQL, so it is read here, once per distinct file (most copies share one).
+    let rows: Vec<(Uuid, Uuid, i64, Option<Vec<u8>>, bool)> = sqlx::query_as(
+        "SELECT d.id, p.id, p.owner_id, s.blob,
+                (COALESCE(position(convert_to($2, 'UTF8') in s.content) > 0, false) OR EXISTS (
+                    SELECT 1 FROM ops o WHERE o.doc_id = d.id AND o.seq > s.seq AND o.changes::text LIKE '%/GND%'
+                ))
+         FROM projects p JOIN documents d ON d.project_id = p.id
+         JOIN LATERAL (SELECT seq, content, blob FROM snapshots WHERE doc_id = d.id ORDER BY seq DESC LIMIT 1) s ON true
          WHERE p.name = $1 AND p.deleted_at IS NULL AND d.path = 'Devboard_Demo.kicad_pcb'
-           AND d.doc_type = 'kicad_pcb'
-           AND (position(convert_to($2, 'UTF8') in s.content) > 0 OR EXISTS (
-               SELECT 1 FROM ops o WHERE o.doc_id = d.id AND o.seq > s.seq AND o.changes::text LIKE '%/GND%'
-           ))",
+           AND d.doc_type = 'kicad_pcb'",
     )
     .bind(NAME)
     .bind("\"/GND\"")
     .fetch_all(&state.pool)
     .await?;
+    let mut named: std::collections::HashMap<Vec<u8>, bool> = std::collections::HashMap::new();
+    let mut candidates: Vec<(Uuid, Uuid, i64)> = Vec::new();
+    for (board, project, owner, blob, mut hit) in rows {
+        if let (false, Some(hash)) = (hit, blob) {
+            hit = match named.get(&hash) {
+                Some(known) => *known,
+                None => {
+                    const NEEDLE: &[u8] = b"\"/GND\"";
+                    let file = crate::persist::snapshot_bytes(&state.pool, board, crate::persist::Which::Newest).await?;
+                    let found = file.is_some_and(|(_, bytes)| bytes.windows(NEEDLE.len()).any(|w| w == NEEDLE));
+                    named.insert(hash, found);
+                    found
+                }
+            };
+        }
+        if hit {
+            candidates.push((board, project, owner));
+        }
+    }
 
     let count = candidates.len();
     let mut repaired = 0;

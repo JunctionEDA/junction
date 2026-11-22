@@ -142,7 +142,12 @@ try {
   check('…and says where the previous versions went', /kept in History/.test(result));
   await page.waitForFunction(() => document.querySelector('.chip.push b')?.textContent === '2');
   await shot(page, '05-pulled');
-  const merged = (await db.query('SELECT content FROM snapshots WHERE doc_id = $1 ORDER BY seq DESC LIMIT 1', [docs['preamp.kicad_pcb']])).rows[0].content.toString();
+  // the newest stored file, through the API: the database keeps it as a compressed blob
+  const stored = async (docId) => {
+    const { seq } = (await db.query('SELECT seq FROM snapshots WHERE doc_id = $1 ORDER BY seq DESC LIMIT 1', [docId])).rows[0];
+    return { seq, text: await page.evaluate(async (u) => (await fetch(u)).text(), `/api/docs/${docId}/snapshots/${seq}`) };
+  };
+  const merged = (await stored(docs['preamp.kicad_pcb'])).text;
   check('the merged board has both sides\' changes', merged === PCB0.replace('"4k7"', '"5k1"').replace('(at 100 50)', '(at 1 1)').replace('(at 110 50)', '(at 120 60)'), merged);
 
   // ---- push
@@ -275,8 +280,8 @@ try {
   await page.check('#autoPush');
   await page.waitForFunction(() => document.querySelector('#autoPush')?.checked && !document.querySelector('#autoPush').disabled);
   const pcbDoc = (await db.query(`SELECT id FROM documents WHERE project_id = $1 AND path LIKE '%.kicad_pcb' LIMIT 1`, [pid])).rows[0].id;
-  const curPcb = (await db.query('SELECT content, seq FROM snapshots WHERE doc_id = $1 ORDER BY seq DESC LIMIT 1', [pcbDoc])).rows[0];
-  await db.query('INSERT INTO snapshots (doc_id, seq, content) VALUES ($1, $2, $3)', [pcbDoc, curPcb.seq + 1, Buffer.from(curPcb.content.toString().replace('"10k"', '"12k"'))]);
+  const curPcb = await stored(pcbDoc);
+  await db.query('INSERT INTO snapshots (doc_id, seq, content) VALUES ($1, $2, $3)', [pcbDoc, curPcb.seq + 1, Buffer.from(curPcb.text.replace('"10k"', '"12k"'))]);
   const cp = await page.evaluate(async (id) => (await fetch(`/api/projects/${id}/checkpoints`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Rev B release' }) })).json(), pid);
   check('saving a checkpoint starts a push to GitHub', cp.githubPush === true, JSON.stringify(cp));
   await page.waitForTimeout(800);

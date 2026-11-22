@@ -172,6 +172,23 @@ the ops up to a sequence number, so nothing has to be stored to make history
 scrubbable: `GET /api/docs/{id}/at/{seq}` hands a client the snapshot and the
 ops to lay over it.
 
+A snapshot row does not hold its file. It points at a **blob** (`blobs`,
+`src/blobs.rs`, migration 0260) named by the SHA-256 of the file, so the same
+file under many snapshots (a copy, a clone, a branch, every account's Devboard
+Demo) is stored once. A blob is zstd-compressed, either whole or as a
+difference from the whole blob the document's earlier snapshot is based on; a
+file that has drifted from its base is stored whole and becomes the next base,
+so any file is read from at most two rows. Every blob is decoded and compared
+with the file before it is written. Blobs nothing points at are swept by the
+daily prune. Rows from before blobs still carry `snapshots.content` and are
+read as they are; `/admin` → Storage → **Compact storage**
+(`POST /api/admin/storage/compact`) moves them, checking each file byte for
+byte before its old copy is cleared, packs old board previews and returns the
+freed space. `POST /api/admin/storage/expand` puts every whole file back in
+`content` (for a rollback to a server from before blobs). Read a stored file
+through `persist::snapshot_bytes`, never from the column. Test:
+`node scripts/blobs-e2e.mjs`.
+
 - A **version** pins one point per document of the project (`versions`,
   `version_docs`). Somebody saves one with a name; the server keeps one by
   itself before every restore, merge and GitHub pull, so each of those can be

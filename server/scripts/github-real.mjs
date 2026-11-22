@@ -81,7 +81,11 @@ const call = async (method, p, body) => {
 const status = async (pid) => (await call('GET', `/api/projects/${pid}/github`)).j;
 const states = (st) => Object.fromEntries(st.files.map((f) => [f.path, f.state]));
 const docIds = async (pid) => Object.fromEntries((await db.query('SELECT id, path FROM documents WHERE project_id = $1', [pid])).rows.map((r) => [r.path, r.id]));
-const online = async (docId) => (await db.query('SELECT content FROM snapshots WHERE doc_id = $1 ORDER BY seq DESC LIMIT 1', [docId])).rows[0].content.toString();
+// the newest stored file, through the API: the database keeps it as a compressed blob
+const online = async (docId) => {
+  const { seq } = (await db.query('SELECT seq FROM snapshots WHERE doc_id = $1 ORDER BY seq DESC LIMIT 1', [docId])).rows[0];
+  return (await fetch(`${BASE}/api/docs/${docId}/snapshots/${seq}`, { headers: { Authorization: `Bearer ${jwt}` } })).text();
+};
 async function saveOnline(docId, content) {
   const { rows } = await db.query(`SELECT GREATEST(COALESCE((SELECT MAX(seq) FROM ops WHERE doc_id = $1), 0),
     COALESCE((SELECT MAX(seq) FROM snapshots WHERE doc_id = $1), 0)) AS head`, [docId]);

@@ -287,9 +287,51 @@ async fn storage(pool: &PgPool) -> AppResult<Value> {
     .await?;
     let snaps = counts(pool, "SELECT count(*), count(DISTINCT doc_id) FROM snapshots", &["snapshots", "documents"]).await?;
     Ok(json!({
+        "files": crate::blobs::status(pool).await?,
         "databaseBytes": db,
         "tables": tables.into_iter().map(|(t, b, rows)| json!({ "name": t, "bytes": b, "rows": rows })).collect::<Vec<_>>(),
         "snapshots": snaps["snapshots"],
         "snapshotDocs": snaps["documents"],
     }))
+}
+
+fn admin_only(user: &crate::persist::User) -> AppResult<()> {
+    if crate::plugins::is_admin(&user.login) {
+        Ok(())
+    } else {
+        Err(AppError::Api(StatusCode::FORBIDDEN, "not_admin", "only this server's administrators can do this".into()))
+    }
+}
+
+/// GET /api/admin/storage: how far the move of stored files to blobs has come.
+pub async fn storage_status(State(state): State<AppState>, AuthUser(user): AuthUser) -> AppResult<Json<Value>> {
+    admin_only(&user)?;
+    Ok(Json(crate::blobs::status(&state.pool).await?))
+}
+
+/// POST /api/admin/storage/compact: move every snapshot that still carries its whole file to a blob
+/// (deduplicated, compressed, later files as differences), in the background.  Each file is checked byte
+/// for byte before its old copy is cleared.  POST /api/admin/storage/expand is the way back.
+pub async fn storage_compact(State(state): State<AppState>, AuthUser(user): AuthUser) -> AppResult<Json<Value>> {
+    admin_only(&user)?;
+    let pool = state.pool.clone();
+    tokio::spawn(async move {
+        if let Err(e) = crate::blobs::compact(&pool).await {
+            tracing::error!("moving stored files to blobs failed: {e}");
+        }
+    });
+    Ok(Json(json!({ "started": true })))
+}
+
+/// POST /api/admin/storage/expand: give every snapshot its whole file back in the old column.
+pub async fn storage_expand(State(state): State<AppState>, AuthUser(user): AuthUser) -> AppResult<Json<Value>> {
+    admin_only(&user)?;
+    let pool = state.pool.clone();
+    tokio::spawn(async move {
+        match crate::blobs::expand(&pool).await {
+            Ok(n) => tracing::info!("{n} snapshots given their whole file back"),
+            Err(e) => tracing::error!("expanding stored files failed: {e}"),
+        }
+    });
+    Ok(Json(json!({ "started": true })))
 }

@@ -1063,11 +1063,29 @@ async fn store_change(state: &AppState, caller: &Caller, p: &ProjectCtx, record:
     .bind(&caller.client)
     .fetch_one(&state.pool)
     .await?;
-    // An undo is for the recent past; the record of what was changed stays.
-    sqlx::query("UPDATE mcp_changes SET undo = NULL WHERE undo IS NOT NULL AND created_at < now() - interval '30 days'")
-        .execute(&state.pool)
-        .await?;
+    trim_undo(&state.pool).await?;
     Ok(id)
+}
+
+/// How many of a person's newest changes to a project can still be taken back, and for how long.
+const UNDO_KEPT: i64 = 20;
+const UNDO_DAYS: i32 = 7;
+
+/// An undo is for the recent past; the record of what was changed stays.  A whole-board change keeps
+/// about a megabyte of undo, so only each person's newest changes to a project hold theirs.
+pub(crate) async fn trim_undo(pool: &sqlx::PgPool) -> sqlx::Result<u64> {
+    let done = sqlx::query(
+        "UPDATE mcp_changes SET undo = NULL
+         WHERE undo IS NOT NULL
+           AND (created_at < now() - make_interval(days => $2)
+                OR id IN (SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY user_id, project_id ORDER BY id DESC) AS n
+                                          FROM mcp_changes) newest WHERE n > $1))",
+    )
+    .bind(UNDO_KEPT)
+    .bind(UNDO_DAYS)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected())
 }
 
 /// SVG to PNG, the longest side `longest` pixels.  The picture carries its text as paths

@@ -15,7 +15,7 @@ interface Stats {
   collaboration: { edits30d: number; multiplayerProjects30d: number; sharedProjects: number; pendingInvites: number; activeLinks: number; threads: number; openThreads: number; comments30d: number; versions: number; versions30d: number; edits: Day[] };
   ai: { requests30d: number; inputTokens30d: number; outputTokens30d: number; users30d: number; ownKeys: number; mcpUsers: number; mcpGrantsUsed30d: number; mcpChanges30d: number; mcpUndone30d: number; requests: Day[]; mcpClients: Pair[] };
   integrations: { githubProjects: number; githubUsers: number; githubAppUsers: number; registryPlugins: number; openPluginReports: number; wakatimeUsers: number };
-  storage: { databaseBytes: number; tables: { name: string; bytes: number; rows: number }[]; snapshots: number; snapshotDocs: number };
+  storage: { files: Files; databaseBytes: number; tables: { name: string; bytes: number; rows: number }[]; snapshots: number; snapshotDocs: number };
 }
 
 const app = document.getElementById("app") as HTMLElement;
@@ -24,6 +24,8 @@ const stamp = document.getElementById("stamp") as HTMLElement;
 let range = 30;
 let data: Stats | null = null;
 try { if (localStorage.getItem("admin.range") === "90") range = 90; } catch { /* no storage */ }
+
+type Files = { waiting: number; moved: number; blobs: number; deltas: number; storedBytes: number; fileBytes: number; running: boolean };
 
 // ---- formatting ----
 const nf = new Intl.NumberFormat();
@@ -273,9 +275,46 @@ function render(): void {
 
     box("Storage", `${bytes(d.storage.databaseBytes)} in the database`,
       ranked(d.storage.tables.map((t) => [`${t.name} · ${compact(t.rows)} rows`, t.bytes] as Pair), bytes, "No tables."),
-      h("p", { class: "note" }, `${num(d.storage.snapshots)} snapshots across ${num(d.storage.snapshotDocs)} documents. Row counts are Postgres statistics and can lag.`)),
+      h("p", { class: "note" }, `${num(d.storage.snapshots)} snapshots across ${num(d.storage.snapshotDocs)} documents. Row counts are Postgres statistics and can lag.`),
+      filesRow(d.storage.files)),
   );
   stamp.textContent = `Updated ${new Date(d.generatedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+// Stored files: identical files are kept once, compressed, and later snapshots as differences.  Files
+// written before that are moved over on request; each is checked byte for byte before its old copy goes.
+function filesText(f: Files): string {
+  const kept = f.moved > 0
+    ? `${num(f.moved)} snapshots are ${num(f.blobs)} stored files (${num(f.deltas)} as differences): ${bytes(f.fileBytes)} kept in ${bytes(f.storedBytes)}.`
+    : "No snapshot is stored compactly yet.";
+  const left = f.waiting > 0 ? ` ${num(f.waiting)} older snapshot${f.waiting === 1 ? " or preview is" : "s and previews are"} still stored whole.` : "";
+  return kept + left;
+}
+function filesRow(f: Files): HTMLElement {
+  const text = h("span", {}, filesText(f));
+  const row = h("p", { class: "note" }, text);
+  let timer = 0;
+  const poll = async (): Promise<void> => {
+    try {
+      const r = await fetch("/api/admin/storage", { credentials: "same-origin" });
+      if (!r.ok) return;
+      const now = (await r.json()) as Files;
+      text.textContent = (now.running ? "Compacting… " : "") + filesText(now);
+      if (!now.running) { clearInterval(timer); void load(); }
+    } catch { /* next tick */ }
+  };
+  if (f.waiting > 0 || f.running) {
+    const btn = h("button", { class: "btn", type: "button", style: "margin-left:8px" }, "Compact storage") as HTMLButtonElement;
+    btn.disabled = f.running;
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      await fetch("/api/admin/storage/compact", { method: "POST", credentials: "same-origin" });
+      timer = window.setInterval(() => void poll(), 2000);
+    });
+    row.append(btn);
+    if (f.running) timer = window.setInterval(() => void poll(), 2000);
+  }
+  return row;
 }
 
 async function load(): Promise<void> {

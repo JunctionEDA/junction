@@ -399,7 +399,7 @@ pub async fn files(
                 o.created_at AS op_at, ou.login AS op_login, ou.name AS op_name,
                 EXISTS (SELECT 1 FROM doc_previews p WHERE p.doc_id = d.id) AS has_preview
            FROM documents d
-           LEFT JOIN LATERAL (SELECT octet_length(content) AS bytes, created_at, uploader_id FROM snapshots
+           LEFT JOIN LATERAL (SELECT COALESCE(size, octet_length(content))::int AS bytes, created_at, uploader_id FROM snapshots
                                WHERE doc_id = d.id ORDER BY seq DESC LIMIT 1) s ON true
            LEFT JOIN users su ON su.id = s.uploader_id
            LEFT JOIN LATERAL (SELECT created_at, author_id FROM ops WHERE doc_id = d.id ORDER BY seq DESC LIMIT 1) o ON true

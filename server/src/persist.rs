@@ -872,21 +872,47 @@ pub async fn insert_snapshot(
     name: Option<&str>,
     uploader_id: Option<i64>,
 ) -> DbResult<()> {
+    let mut tx = pool.begin().await?;
+    let blob = crate::blobs::put(&mut tx, content, Some(doc_id)).await?;
     sqlx::query(
-        "INSERT INTO snapshots (doc_id, seq, content, name, uploader_id)
-         VALUES ($1, $2, $3, $4, $5)
+        "INSERT INTO snapshots (doc_id, seq, blob, size, name, uploader_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (doc_id, seq) DO UPDATE
-           SET content = EXCLUDED.content,
+           SET blob = EXCLUDED.blob,
+               size = EXCLUDED.size,
+               content = NULL,
                name = COALESCE(EXCLUDED.name, snapshots.name),
                uploader_id = EXCLUDED.uploader_id",
     )
     .bind(doc_id)
     .bind(seq)
-    .bind(content)
+    .bind(&blob)
+    .bind(content.len() as i64)
     .bind(name)
     .bind(uploader_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// A snapshot row written inside a caller's transaction (no name, never replaces a row).
+pub async fn insert_snapshot_in(
+    conn: &mut sqlx::PgConnection,
+    doc_id: Uuid,
+    seq: i64,
+    content: &[u8],
+    uploader_id: Option<i64>,
+) -> DbResult<()> {
+    let blob = crate::blobs::put(&mut *conn, content, Some(doc_id)).await?;
+    sqlx::query("INSERT INTO snapshots (doc_id, seq, blob, size, uploader_id) VALUES ($1, $2, $3, $4, $5)")
+        .bind(doc_id)
+        .bind(seq)
+        .bind(&blob)
+        .bind(content.len() as i64)
+        .bind(uploader_id)
+        .execute(&mut *conn)
+        .await?;
     Ok(())
 }
 
@@ -901,28 +927,59 @@ pub async fn insert_snapshot_new(
     content: &[u8],
     uploader_id: Option<i64>,
 ) -> DbResult<bool> {
+    let taken: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM snapshots WHERE doc_id = $1 AND seq = $2)")
+        .bind(doc_id)
+        .bind(seq)
+        .fetch_one(pool)
+        .await?;
+    if taken {
+        return Ok(false);
+    }
+    let mut tx = pool.begin().await?;
+    let blob = crate::blobs::put(&mut tx, content, Some(doc_id)).await?;
     let res = sqlx::query(
-        "INSERT INTO snapshots (doc_id, seq, content, name, uploader_id)
-         VALUES ($1, $2, $3, NULL, $4)
+        "INSERT INTO snapshots (doc_id, seq, blob, size, name, uploader_id)
+         VALUES ($1, $2, $3, $4, NULL, $5)
          ON CONFLICT (doc_id, seq) DO NOTHING",
     )
     .bind(doc_id)
     .bind(seq)
-    .bind(content)
+    .bind(&blob)
+    .bind(content.len() as i64)
     .bind(uploader_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(res.rows_affected() > 0)
 }
 
+/// A stored file at `seq`, or the document's first (`Oldest`) or newest one, whichever column holds it.
+pub async fn snapshot_bytes<'e, E: sqlx::PgExecutor<'e>>(ex: E, doc_id: Uuid, which: Which) -> DbResult<Option<(i64, Vec<u8>)>> {
+    let pick = match which {
+        Which::At(_) => "AND s.seq = $2",
+        Which::Newest => "AND $2 = $2 ORDER BY s.seq DESC LIMIT 1",
+        Which::Oldest => "AND $2 = $2 ORDER BY s.seq LIMIT 1",
+    };
+    let sql = format!("SELECT s.seq, {} FROM snapshots s {} WHERE s.doc_id = $1 {pick}", crate::blobs::COLS, crate::blobs::JOIN);
+    let row = sqlx::query(&sql)
+        .bind(doc_id)
+        .bind(match which { Which::At(seq) => seq, _ => 0 })
+        .fetch_optional(ex)
+        .await?;
+    match row {
+        Some(r) => Ok(Some((r.get("seq"), crate::blobs::content_of(&r)?))),
+        None => Ok(None),
+    }
+}
+
+pub enum Which {
+    At(i64),
+    Newest,
+    Oldest,
+}
+
 pub async fn latest_snapshot(pool: &PgPool, doc_id: Uuid) -> DbResult<Option<(i64, Vec<u8>)>> {
-    let row = sqlx::query(
-        "SELECT seq, content FROM snapshots WHERE doc_id = $1 ORDER BY seq DESC LIMIT 1",
-    )
-    .bind(doc_id)
-    .fetch_optional(pool)
-    .await?;
-    Ok(row.map(|r| (r.get("seq"), repair_private_properties(r.get("content")))))
+    Ok(snapshot_bytes(pool, doc_id, Which::Newest).await?.map(|(seq, content)| (seq, repair_private_properties(content))))
 }
 
 /// A library symbol's private field is `(property private "Name" "Value" …)`, the keyword a bare token.
@@ -982,9 +1039,12 @@ pub fn repair_private_properties(content: Vec<u8>) -> Vec<u8> {
 /// quoted keyword is rewritten in place with only those quote marks removed.  Runs once at start-up; a store
 /// with nothing to repair costs one query.  Returns how many snapshots changed.
 pub async fn repair_stored_private_properties(pool: &PgPool) -> DbResult<usize> {
+    // Files already moved to blobs were repaired before they moved, and every read repairs anyway; only
+    // rows that still carry their whole file can be searched in SQL.
     let rows = sqlx::query(
         "SELECT s.doc_id, s.seq FROM snapshots s JOIN documents d ON d.id = s.doc_id
-         WHERE (d.path LIKE '%.kicad_sch' OR d.path LIKE '%.kicad_sym') AND position($1::bytea in s.content) > 0
+         WHERE (d.path LIKE '%.kicad_sch' OR d.path LIKE '%.kicad_sym') AND s.content IS NOT NULL
+           AND position($1::bytea in s.content) > 0
          ORDER BY s.doc_id, s.seq",
     )
     .bind(&b"(property \"private\""[..])
@@ -993,18 +1053,16 @@ pub async fn repair_stored_private_properties(pool: &PgPool) -> DbResult<usize> 
     let mut changed = 0;
     for r in rows {
         let (doc_id, seq): (Uuid, i64) = (r.get("doc_id"), r.get("seq"));
-        let Some(row) = sqlx::query("SELECT content FROM snapshots WHERE doc_id = $1 AND seq = $2")
+        let before: Option<Vec<u8>> = sqlx::query_scalar("SELECT content FROM snapshots WHERE doc_id = $1 AND seq = $2")
             .bind(doc_id)
             .bind(seq)
             .fetch_optional(pool)
             .await?
-        else {
-            continue;
-        };
-        let before: Vec<u8> = row.get("content");
+            .flatten();
+        let Some(before) = before else { continue };
         let after = repair_private_properties(before.clone());
         if after != before {
-            sqlx::query("UPDATE snapshots SET content = $3 WHERE doc_id = $1 AND seq = $2")
+            sqlx::query("UPDATE snapshots SET content = $3 WHERE doc_id = $1 AND seq = $2 AND content IS NOT NULL")
                 .bind(doc_id)
                 .bind(seq)
                 .bind(&after)
@@ -1065,7 +1123,7 @@ pub async fn upsert_preview(
     .bind(doc_id)
     .bind(fit)
     .bind(seq)
-    .bind(svg)
+    .bind(crate::blobs::pack(svg))
     .execute(pool)
     .await?;
     Ok(())
@@ -1077,7 +1135,7 @@ pub async fn get_preview(pool: &PgPool, doc_id: Uuid, fit: bool) -> DbResult<Opt
         .bind(fit)
         .fetch_optional(pool)
         .await?;
-    Ok(row.map(|r| (r.get("seq"), r.get("svg"))))
+    Ok(row.map(|r| (r.get("seq"), crate::blobs::unpack(r.get("svg")))))
 }
 
 pub async fn head_seq(pool: &PgPool, doc_id: Uuid) -> DbResult<i64> {
@@ -1308,12 +1366,7 @@ pub async fn list_share_links(pool: &PgPool, project_id: Uuid) -> DbResult<Vec<A
 }
 
 pub async fn snapshot_at(pool: &PgPool, doc_id: Uuid, seq: i64) -> DbResult<Option<Vec<u8>>> {
-    let row = sqlx::query("SELECT content FROM snapshots WHERE doc_id = $1 AND seq = $2")
-        .bind(doc_id)
-        .bind(seq)
-        .fetch_optional(pool)
-        .await?;
-    Ok(row.map(|r| r.get("content")))
+    Ok(snapshot_bytes(pool, doc_id, Which::At(seq)).await?.map(|(_, content)| content))
 }
 
 /// Prune ops and unnamed snapshots that are safely behind snapshot coverage.
@@ -1356,6 +1409,9 @@ pub async fn prune(pool: &PgPool) -> DbResult<()> {
     )
     .execute(pool)
     .await?;
+    // files nothing points at any more
+    crate::blobs::sweep(pool).await?;
+    crate::mcp::trim_undo(pool).await?;
     Ok(())
 }
 

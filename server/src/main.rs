@@ -8,6 +8,7 @@ mod kicadlib;
 mod modelgen;
 mod models3d;
 mod auth;
+mod blobs;
 mod chat;
 mod compact;
 mod doc_actor;
@@ -431,6 +432,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/github/installed", get(github_app::installed))
         .route("/admin", get(admin::page))
         .route("/api/admin/stats", get(admin::stats))
+        .route("/api/admin/storage", get(admin::storage_status))
+        .route("/api/admin/storage/compact", post(admin::storage_compact))
+        .route("/api/admin/storage/expand", post(admin::storage_expand))
         .route("/static/dist/admin.js", get(admin::js))
         .route("/admin/github-app", get(github_app::admin_page))
         .route("/admin/github-app/created", get(github_app::admin_created))

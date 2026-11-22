@@ -532,13 +532,7 @@ async fn reset_doc(
         }
         let at = head + 1;
         let written: Result<i64, sqlx::Error> = async {
-            sqlx::query("INSERT INTO snapshots (doc_id, seq, content, uploader_id) VALUES ($1, $2, $3, $4)")
-                .bind(dst)
-                .bind(at)
-                .bind(content)
-                .bind(user_id)
-                .execute(&mut *tx)
-                .await?;
+            persist::insert_snapshot_in(&mut tx, dst, at, content, Some(user_id)).await?;
             sqlx::query(
                 "INSERT INTO ops (doc_id, seq, author_id, client_id, client_op_id, changes)
                  VALUES ($1, $2, $3, $4, $5, '[]'::jsonb)",
@@ -1115,13 +1109,14 @@ pub async fn list_branches(
 async fn copy_doc(pool: &PgPool, src: &Document, p: &Point, into: Uuid) -> AppResult<Document> {
     let content = persist::snapshot_at(pool, src.id, p.snap_seq).await?.ok_or(AppError::NotFound)?;
     let new = persist::create_document(pool, into, &src.path, &src.doc_type).await?;
-    sqlx::query("INSERT INTO snapshots (doc_id, seq, content, uploader_id) SELECT $1, $2, $3, uploader_id FROM snapshots WHERE doc_id = $4 AND seq = $2")
-        .bind(new.id)
-        .bind(p.snap_seq)
-        .bind(&content)
+    let uploader: Option<i64> = sqlx::query_scalar("SELECT uploader_id FROM snapshots WHERE doc_id = $1 AND seq = $2")
         .bind(src.id)
-        .execute(pool)
-        .await?;
+        .bind(p.snap_seq)
+        .fetch_optional(pool)
+        .await?
+        .flatten();
+    // the same file as the source's: stored once, both rows point at it
+    persist::insert_snapshot(pool, new.id, p.snap_seq, &content, None, uploader).await?;
     sqlx::query(
         "INSERT INTO ops (doc_id, seq, author_id, client_id, client_op_id, base_seq, changes, created_at)
          SELECT $1, seq, author_id, client_id, client_op_id, base_seq, changes, created_at
@@ -1590,10 +1585,7 @@ pub async fn merge(
                 if a != b {
                     let branch_doc = if into_main { src.id } else { dst.id };
                     let base: Option<Vec<u8>> = match step.pair.since {
-                        Some(_) => sqlx::query_scalar("SELECT content FROM snapshots WHERE doc_id = $1 ORDER BY seq LIMIT 1")
-                            .bind(branch_doc)
-                            .fetch_optional(pool)
-                            .await?,
+                        Some(_) => persist::snapshot_bytes(pool, branch_doc, persist::Which::Oldest).await?.map(|(_, c)| c),
                         None => None,
                     };
                     if base.is_some() && a == base {
