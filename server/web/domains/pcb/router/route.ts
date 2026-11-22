@@ -41,7 +41,7 @@ const FAN_ROWS_MM = [0.8, 1.5, 2.2], FAN_FAR_MM = 4;
 // 75.0 / 11 / 478 / 3700 s.  The second run costs the time (+75 to 85 %).  Before, with every fine-pitch row escaped
 // up front and the spreading fan, Ledify fell 94.9 -> 74.0 (0 -> 5 open).
 const ESCAPES: Escapes = true, SPREAD = 0;   // the spreading fan (ours, not Copper's) is off unless a run asks: { spread: 1.5 }
-export type Escapes = boolean | number | { depth?: number; spread?: number };
+export type Escapes = boolean | number | { depth?: number; spread?: number; small?: boolean };   // small: every via escape at the smallest via the rules allow (the AI's Ember U9 ring), not only where the class's fits nowhere
 // Global planning before routing (globalplan.ts, after Copper): coarse paths on a tile graph with negotiated
 // congestion and layers assigned along them.  The connections the negotiation fought over are laid first in their
 // tier and taken up first when a route is blocked, and only those it moved off their direct path are steered by their
@@ -660,7 +660,9 @@ export class Router {
       for (const o of e.other) { const d = Math.hypot(o.p[0] - pad.p[0], o.p[1] - pad.p[1]); if (d < near) { near = d; partner = o.p; } if (o.layers.includes(pad.layer)) off = false; }
       const a = Array.from(e.anchors)[0]; const crowd = (net.anchors || []).filter((x) => x.cluster === a.cluster).length > 1;
       if (pairName(c.net) || this.kindOf(c.net) === "rf" || crowd || net.guide.allowed) near = 0;   // leaving supply pins out too cost Ember 3 (17 -> 20 open)
-      jobs.set(pad.name, { pad, net: c.net, w: Math.min(cls.width, pad.across), clr: cls.clr, viaD: cls.viaD, viaDrill: cls.viaDrill, partner, near, offLayer: off && net.guide.allowVias && this.allowVias });
+      // the smallest via the rules allow, for a pin the class's via cannot leave (0.4 / 0.2 mm beside a 0.4 mm pitch row)
+      const small = this.opts.smallVias !== false ? this.smallVia(cls.viaD, cls.viaDrill) || undefined : undefined;
+      jobs.set(pad.name, { pad, net: c.net, w: Math.min(cls.width, pad.across), clr: cls.clr, viaD: cls.viaD, viaDrill: cls.viaDrill, partner, near, offLayer: off && net.guide.allowVias && this.allowVias, small });
       at.set(pad.name, key(pad.p));
     }
     const live = new Map<Escape, Obstacle[]>();
@@ -682,13 +684,13 @@ export class Router {
       },
       place: (e: Escape) => {
         const j = jobs.get(e.pad.name)!; const obs: Obstacle[] = e.segs.map(([a, b]) => ({ net: e.net, layers: [e.pad.layer], shape: { t: "seg", a, b, r: e.w / 2 } as Shape, clr: j.clr }));
-        if (e.via) obs.push({ net: e.net, layers: all, shape: { t: "circle", x: e.via[0], y: e.via[1], r: j.viaD / 2 } as Shape, clr: Math.max(j.clr, (G.holeClr || 0) + HOLE_SLACK - (j.viaD - j.viaDrill) / 2), thru: e.via });
+        if (e.via) obs.push({ net: e.net, layers: all, shape: { t: "circle", x: e.via[0], y: e.via[1], r: j.viaD / 2 } as Shape, clr: Math.max(j.clr, (G.holeClr || 0) + HOLE_SLACK - (j.viaD - j.viaDrill) / 2), thru: e.via, drill: j.viaDrill });
         for (const o of obs) add(o); live.set(e, obs); this.oidx = null;
       },
       unplace: (e: Escape) => { const obs = live.get(e) || []; const l = G.obstacles.get(e.net); if (l) G.obstacles.set(e.net, l.filter((o) => !obs.includes(o))); live.delete(e); this.oidx = null; },
     };
-    const want = this.opts.escapes ?? ESCAPES; const o = typeof want === "object" ? want : { depth: typeof want === "number" ? want : 0 };
-    const { escapes, boxed } = fanout(rows, jobs, ctx, o.depth || 0, o.spread ?? SPREAD);
+    const want = this.opts.escapes ?? ESCAPES; const o: { depth?: number; spread?: number; small?: boolean } = typeof want === "object" ? want : { depth: typeof want === "number" ? want : 0 };
+    const { escapes, boxed } = fanout(rows, jobs, ctx, o.depth || 0, o.spread ?? SPREAD, o.small === true);
     // the escapes are board copper of their nets from here on, and their ends are where the connections start
     for (const e of escapes) {
       const obs = live.get(e)!; this.escapeObs.push(...obs); for (const c of G.classes.values()) for (const o of obs) stampClass(G, c, o, 1, true);
@@ -722,13 +724,19 @@ export class Router {
     let viaD = viaD0, viaDrill = Math.max(nc.via_drill !== undefined ? nc.via_drill : s.viaDrill, s.minThroughDrill || 0);
     // The smallest via Board Setup permits, for a connection the class's own via cannot serve (a ball in a grid
     // array has no room for it).  Only when the board states its minimums; the hole keeps its annular ring.
-    if (smallVia && s.minViaDiameter > 0 && s.minThroughDrill > 0 && s.minViaDiameter < viaD0 - 1e-6) { const d = Math.max(s.minViaDiameter, s.minThroughDrill + 2 * (s.minViaAnnular || 0.05)); if (d < viaD0 - 1e-6) { viaD = d; viaDrill = Math.min(viaDrill, s.minThroughDrill); } }
+    const sm = smallVia ? this.smallVia(viaD0, viaDrill) : null; if (sm) { viaD = sm.viaD; viaDrill = sm.viaDrill; }
     const kind = this.relax ? undefined : this.kindFor(netKey);
     const open = !G.quiet || this.xtalNets.has(netKey) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(netKey);
     const feed = this.feedNets.has(netKey);   // an antenna's clear area takes its feed and nothing else, not even ground (no pour reaches there to join it)
     const key = `${width}/${clr}/${viaD}/${viaDrill}` + (kind ? "/" + kind : "") + (open ? "" : "/q") + (feed ? "/f" : ""); let c = G.classes.get(key);
     if (!c) { c = buildClass(G, key, width, clr, viaD, viaDrill, kind, open, feed); if (this.conns.length) for (const o of this.conns) if (o.nodes) for (const sh of o.shapes) stampClass(G, c, sh, 1, false); }
     return c;
+  }
+  /** The smallest via Board Setup's constraints permit (its hole keeps the minimum annular ring), when it is smaller
+   *  than `viaD`; null when the board states no minimums or its via is already that small. */
+  smallVia(viaD: number, viaDrill: number): { viaD: number; viaDrill: number } | null {
+    const s = this.s; if (!(s.minViaDiameter > 0 && s.minThroughDrill > 0 && s.minViaDiameter < viaD - 1e-6)) return null;
+    const d = Math.max(s.minViaDiameter, s.minThroughDrill + 2 * (s.minViaAnnular || 0.05)); return d < viaD - 1e-6 ? { viaD: d, viaDrill: Math.min(viaDrill, s.minThroughDrill) } : null;
   }
   relax = false; relaxed = new Set<string>(); pairNets = new Set<string>(); private kindMemo = new Map<string, NetKind>(); private domains: boolean | null = null;
   /** The net's kind, as planned or by name. */
@@ -2489,7 +2497,7 @@ export class Router {
     for (const { e, anchors, obs } of this.laid) {
       const c = this.conns.find((c) => c.nodes && [c.a, c.b, ...(c.ends || [])].some((a) => anchors.includes(a))); if (!c) continue; used++; const net = this.netOf(e.net).obj;
       for (const o of obs) { const sh = o.shape as any; if (sh.t === "seg") { items.push({ kind: "segment", node: P.segmentNode(doc, sh.a, sh.b, +(sh.r * 2).toFixed(4), G.layers[o.layers[0]], net), net, netName: e.net, conn: c.id }); segments++; length += Math.hypot(sh.a[0] - sh.b[0], sh.a[1] - sh.b[1]); }
-        else { items.push({ kind: "via", node: P.viaNode(doc, sh.x, sh.y, +(sh.r * 2).toFixed(4), c.cls.viaDrill, net, span), net, netName: e.net, conn: c.id }); vias++; } }
+        else { items.push({ kind: "via", node: P.viaNode(doc, sh.x, sh.y, +(sh.r * 2).toFixed(4), o.drill ?? c.cls.viaDrill, net, span), net, netName: e.net, conn: c.id }); vias++; } }
     }
     if (this.fanReport) this.fanReport.used = used;
     for (const v of this.fenceVias) { items.push({ kind: "via", node: P.viaNode(doc, v.p[0], v.p[1], v.cls.viaD, v.cls.viaDrill, v.obj, span), net: v.obj, netName: v.net, conn: -1 }); vias++; }

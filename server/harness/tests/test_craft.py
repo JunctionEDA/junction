@@ -1,6 +1,10 @@
 """Workshop practice (review-craft.ts): each rule on a board that states exactly the copper it is about, and the
 short review and one-call layout of craft.py.  Needs Node and the built engine; skipped when they are missing."""
+import json
+import os
 import unittest
+
+import kicad_harness as kh
 
 from kicad_harness import craft
 from test_physics import Boards, edge, part, track, via, zone
@@ -178,6 +182,43 @@ class RoutingPlan(Boards):
         res = b.route(nets=["S1", "S2"], fill=False, time_s=20, plan={"paths": {"S1": [[17.0, 12.75, "F.Cu"], [4.0, 12.75, "F.Cu"]]}, "order": ["S2"]})
         self.assertEqual(res["plan"]["given"], 1, res.get("plan"))
         self.assertEqual(res["left_of_asked"], {}, res)
+
+    def test_an_escape_blocked_out_where_asked_takes_a_nearer_spot_and_the_small_via(self):
+        # U1.3's way west is shut 0.7 mm past its pad by a wall of another net; the via asked 0.6 mm out comes in to
+        # the pad, and the net class's 0.8 mm via does not fit there while the rules' smallest (0.4 / 0.2 mm) does
+        nets = {"3": "S3"}
+        b = self.open(edge(BOX), chip("U1", (20, 15), nets, pitch=0.5, n=10), part("J1", (2, 4), [("1", 0, 0, 1.0, 1.0, "S3")]),
+                      track("W", [(17.2, 10), (17.2, 20)], width=0.2), part("R9", (2, 20), [("1", 0, 0, 1.0, 1.0, "W")]))
+        self.project.close()      # Board Setup's constraints: vias down to 0.4 / 0.2 mm (0.1 mm ring); the class's via is 0.8 / 0.4
+        with open(os.path.join(self.dir, "p.kicad_pro"), "w", encoding="utf-8") as f:
+            json.dump({"meta": {"filename": "p.kicad_pro", "version": 3}, "net_settings": {"classes": [{"name": "Default", "clearance": 0.2, "track_width": 0.2, "via_diameter": 0.8, "via_drill": 0.4}], "meta": {"version": 4}},
+                       "board": {"design_settings": {"rules": {"min_via_diameter": 0.4, "min_through_hole_diameter": 0.2, "min_via_annular_width": 0.1}}}}, f)
+        self.project = kh.open(self.dir)
+        b = self.project.board()
+        rules = b.rules()
+        if float(rules.get("min_via_diameter") or 0) > 0.4 or float(rules.get("min_via_drill") or 0) > 0.2:
+            self.skipTest(f"the board's rules allow no 0.4 / 0.2 mm via: {rules}")
+        esc = b.escape({"U1.3": "via 0.6"})
+        self.assertEqual(esc["laid"], 1, esc)
+        self.assertEqual(esc.get("small"), ["U1.3"], esc)
+        v = [it for it in b._all_items(["via"])]
+        self.assertEqual(len(v), 1)
+        self.assertIn("(size 0.4)", v[0]["sexpr"])
+        at = [float(x) for x in v[0]["sexpr"].split("(at ")[1].split(")")[0].split()]
+        self.assertLess(18.1 - at[0], 0.45, at)      # nearer the pad end (x = 18.1) than the 0.6 mm asked
+
+    def test_mend_joins_two_loose_ends_of_a_net_on_different_layers_with_a_via(self):
+        # S runs from J1 on F.Cu and from J2 down a via on B.Cu; the via that joined the two ends was taken up, so an
+        # F.Cu end and a B.Cu end lie 0.2 mm apart and the connection is open
+        b = self.open(edge(BOX), part("J1", (5, 10), [("1", 0, 0, 1.0, 1.0, "S")]), part("J2", (20, 10), [("1", 0, 0, 1.0, 1.0, "S")]),
+                      track("S", [(5, 10), (10, 10)], width=0.2), track("S", [(20, 10), (14, 10)], width=0.2),
+                      via("S", (14, 10)), track("S", [(14, 10), (10.2, 10)], layer="B.Cu", width=0.2))
+        self.assertEqual(b.info()["unrouted_connections"], 1)
+        got = b.mend()
+        self.assertEqual(len(got["joined"]), 1, got)
+        self.assertEqual(b.info().get("vias"), 2)
+        self.assertEqual(b.info()["unrouted_connections"], 0)
+        self.assertEqual(b.mend(nets=["S"]), {"joined": [], "left": []}, "nothing left to join")
 
     def test_unbox_leaves_a_board_without_a_fine_pitch_chip_as_it_was(self):
         b = self.board()        # ten pins a side: not a chip unbox works on

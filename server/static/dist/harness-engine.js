@@ -104651,7 +104651,7 @@ function build3(input) {
           const fence = e.fence === false ? false : e.fence && typeof e.fence === "object" ? { spacing: num13(e.fence.spacing), nets: Array.isArray(e.fence.nets) ? e.fence.nets.map((n2) => boardNet2(doc2, text2(n2, "net")).name) : void 0, returnVias: e.fence.return_vias === false ? false : void 0 } : void 0;
           const planPaths = e.plan && typeof e.plan === "object" && e.plan.paths && typeof e.plan.paths === "object" ? Object.fromEntries(Object.entries(e.plan.paths).filter(([, v]) => Array.isArray(v)).map(([n2, v]) => [boardNet2(doc2, n2).name, v.filter(Array.isArray)])) : void 0;
           const view = e.view && typeof e.view === "object" ? { ref: typeof e.view.ref === "string" ? e.view.ref : void 0, box: Array.isArray(e.view.box) && e.view.box.length === 4 ? e.view.box.map(Number) : void 0, depths: Array.isArray(e.view.depths) ? e.view.depths.map(Number).filter((v) => isFinite(v) && v >= 0) : void 0, margin: num13(e.view.margin) } : void 0;
-          const res = R2.route(k, P, doc2, P.designSettings(ed.proSettings || null), { separate, fence, nets, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : void 0, timeMs: Math.round(1e3 * Math.min(900, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : void 0, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : void 0, planes: e.planes === true ? true : void 0, criticalFirst: e.critical_first === false ? false : void 0, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : void 0, escapes: e.escapes === true || e.escapes === false ? e.escapes : typeof e.escapes === "number" && e.escapes >= 0 ? e.escapes : e.escapes && typeof e.escapes === "object" ? { depth: num13(e.escapes.depth), spread: num13(e.escapes.spread) } : void 0, plan: e.plan === true || e.plan === false ? e.plan : e.plan && typeof e.plan === "object" ? { tile: num13(e.plan.tile), iters: num13(e.plan.iters), layerCost: num13(e.plan.layer_cost), outside: num13(e.plan.outside), mask: e.plan.mask === true ? true : void 0, vias: e.plan.vias === true ? true : void 0, open: num13(e.plan.open), steer: e.plan.steer === "all" || e.plan.steer === "none" || e.plan.steer === "moved" ? e.plan.steer : void 0, order: e.plan.order === false ? false : void 0, rip: e.plan.rip === false ? false : void 0, paths: planPaths, ring: num13(e.plan.ring) } : void 0, view, ripup: e.ripup === "mincut" || e.ripup === "near" || e.ripup === "ladder" ? e.ripup : void 0, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : void 0 });
+          const res = R2.route(k, P, doc2, P.designSettings(ed.proSettings || null), { separate, fence, nets, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : void 0, timeMs: Math.round(1e3 * Math.min(900, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : void 0, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : void 0, planes: e.planes === true ? true : void 0, criticalFirst: e.critical_first === false ? false : void 0, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : void 0, escapes: e.escapes === true || e.escapes === false ? e.escapes : typeof e.escapes === "number" && e.escapes >= 0 ? e.escapes : e.escapes && typeof e.escapes === "object" ? { depth: num13(e.escapes.depth), spread: num13(e.escapes.spread), small: e.escapes.small === true ? true : void 0 } : void 0, plan: e.plan === true || e.plan === false ? e.plan : e.plan && typeof e.plan === "object" ? { tile: num13(e.plan.tile), iters: num13(e.plan.iters), layerCost: num13(e.plan.layer_cost), outside: num13(e.plan.outside), mask: e.plan.mask === true ? true : void 0, vias: e.plan.vias === true ? true : void 0, open: num13(e.plan.open), steer: e.plan.steer === "all" || e.plan.steer === "none" || e.plan.steer === "moved" ? e.plan.steer : void 0, order: e.plan.order === false ? false : void 0, rip: e.plan.rip === false ? false : void 0, paths: planPaths, ring: num13(e.plan.ring) } : void 0, view, ripup: e.ripup === "mincut" || e.ripup === "near" || e.ripup === "ladder" ? e.ripup : void 0, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : void 0 });
           const failed = (res.failed || []).map((f2) => ({ net: f2.net, from: f2.a.map(r44), to: f2.b.map(r44) }));
           if (view) {
             details.push({ autoroute: { view: res.view, connections: res.total, plan: res.plan ? { given: res.plan.given, given_missed: res.plan.givenMissed, overflow_mm: res.plan.overflow, ms: res.plan.ms } : void 0 } });
@@ -126354,9 +126354,15 @@ function minCostFlow(n2, edges, s2, t, want2) {
   }
   return edges.map(([, , c], i) => c - cap[2 * i]);
 }
-function fanout(rows3, jobs, ctx, depth2 = 0, spread = 0) {
+function fanout(rows3, jobs, ctx, depth2 = 0, spread = 0, small = false) {
   const book = /* @__PURE__ */ new Map();
   const boxed = [];
+  if (small) {
+    for (const j of jobs.values()) if (j.small && j.small.viaD < j.viaD - 1e-9) {
+      j.viaD = j.small.viaD;
+      j.viaDrill = j.small.viaDrill;
+    }
+  }
   for (const row3 of rows3) {
     const rj = row3.pads.map((p) => jobs.get(p.name)).filter(Boolean);
     if (!rj.length) continue;
@@ -126437,7 +126443,7 @@ function fanout(rows3, jobs, ctx, depth2 = 0, spread = 0) {
     const short2 = geo.R[0] + 2 * geo.rs;
     const active = rj.filter((j) => j.near >= short2).sort((a, b) => tc(a.pad) - tc(b.pad));
     const viaFirst = active.filter((j) => j.offLayer);
-    const viaDone = viaEscape(viaFirst, row3, geo, jobs, book, ctx, put4);
+    const viaDone = viaSmall(viaFirst, viaEscape(viaFirst, row3, geo, jobs, book, ctx, put4), row3, geo, jobs, book, ctx, put4);
     const ringJobs = active.filter((j) => !viaDone.has(j.pad.name));
     const fanned = /* @__PURE__ */ new Set();
     if (spread > 1 && ringJobs.length > 1) {
@@ -126494,13 +126500,27 @@ function fanout(rows3, jobs, ctx, depth2 = 0, spread = 0) {
       if (o) put4(o);
     }
     const late = stuck.filter((j) => !j.offLayer);
-    const got = viaEscape(late, row3, geo, jobs, book, ctx, put4);
+    const got = viaSmall(late, viaEscape(late, row3, geo, jobs, book, ctx, put4), row3, geo, jobs, book, ctx, put4);
     for (const j of stuck) if (!book.has(j.pad.name) && !got.has(j.pad.name)) {
       const bl = j.blocker && !["lane taken", "dead end"].includes(j.blocker) ? [j.blocker] : [];
       boxed.push({ pad: j.pad.name, net: j.net, reason: j.blocker === "lane taken" ? "every lane out is another pin's" : j.blocker === "dead end" ? "no way on past the escape" : "no legal escape", blockedBy: bl });
     }
   }
   return { escapes: Array.from(book.values()), boxed };
+}
+function viaSmall(js, done, row3, geo, jobs, book, ctx, put4) {
+  const left = js.filter((j) => !done.has(j.pad.name) && j.small && j.small.viaD < j.viaD - 1e-9);
+  if (!left.length) return done;
+  const was = new Map(left.map((j) => [j, { viaD: j.viaD, viaDrill: j.viaDrill, blocker: j.blocker }]));
+  for (const j of left) {
+    j.viaD = j.small.viaD;
+    j.viaDrill = j.small.viaDrill;
+    j.blocker = void 0;
+  }
+  const got = viaEscape(left, row3, geo, jobs, book, ctx, put4);
+  for (const j of left) if (got.has(j.pad.name)) done.add(j.pad.name);
+  else Object.assign(j, was.get(j));
+  return done;
 }
 function viaEscape(js, row3, geo, jobs, book, ctx, put4) {
   const done = /* @__PURE__ */ new Set();
@@ -128456,7 +128476,8 @@ var Router = class _Router {
       const a = Array.from(e.anchors)[0];
       const crowd = (net.anchors || []).filter((x) => x.cluster === a.cluster).length > 1;
       if (pairName(c.net) || this.kindOf(c.net) === "rf" || crowd || net.guide.allowed) near2 = 0;
-      jobs.set(pad2.name, { pad: pad2, net: c.net, w: Math.min(cls.width, pad2.across), clr: cls.clr, viaD: cls.viaD, viaDrill: cls.viaDrill, partner, near: near2, offLayer: off && net.guide.allowVias && this.allowVias });
+      const small = this.opts.smallVias !== false ? this.smallVia(cls.viaD, cls.viaDrill) || void 0 : void 0;
+      jobs.set(pad2.name, { pad: pad2, net: c.net, w: Math.min(cls.width, pad2.across), clr: cls.clr, viaD: cls.viaD, viaDrill: cls.viaDrill, partner, near: near2, offLayer: off && net.guide.allowVias && this.allowVias, small });
       at5.set(pad2.name, key3(pad2.p));
     }
     const live3 = /* @__PURE__ */ new Map();
@@ -128495,7 +128516,7 @@ var Router = class _Router {
       place: (e) => {
         const j = jobs.get(e.pad.name);
         const obs = e.segs.map(([a, b]) => ({ net: e.net, layers: [e.pad.layer], shape: { t: "seg", a, b, r: e.w / 2 }, clr: j.clr }));
-        if (e.via) obs.push({ net: e.net, layers: all2, shape: { t: "circle", x: e.via[0], y: e.via[1], r: j.viaD / 2 }, clr: Math.max(j.clr, (G5.holeClr || 0) + HOLE_SLACK - (j.viaD - j.viaDrill) / 2), thru: e.via });
+        if (e.via) obs.push({ net: e.net, layers: all2, shape: { t: "circle", x: e.via[0], y: e.via[1], r: j.viaD / 2 }, clr: Math.max(j.clr, (G5.holeClr || 0) + HOLE_SLACK - (j.viaD - j.viaDrill) / 2), thru: e.via, drill: j.viaDrill });
         for (const o2 of obs) add2(o2);
         live3.set(e, obs);
         this.oidx = null;
@@ -128510,7 +128531,7 @@ var Router = class _Router {
     };
     const want2 = this.opts.escapes ?? ESCAPES;
     const o = typeof want2 === "object" ? want2 : { depth: typeof want2 === "number" ? want2 : 0 };
-    const { escapes, boxed } = fanout(rows3, jobs, ctx, o.depth || 0, o.spread ?? SPREAD);
+    const { escapes, boxed } = fanout(rows3, jobs, ctx, o.depth || 0, o.spread ?? SPREAD, o.small === true);
     for (const e of escapes) {
       const obs = live3.get(e);
       this.escapeObs.push(...obs);
@@ -128556,12 +128577,10 @@ var Router = class _Router {
     const clr = Math.max(P.netClearance(s2, netKey), s2.minClearance || 0);
     const viaD0 = Math.max(nc.via_diameter !== void 0 ? nc.via_diameter : s2.viaDiameter, s2.minViaDiameter || 0);
     let viaD = viaD0, viaDrill = Math.max(nc.via_drill !== void 0 ? nc.via_drill : s2.viaDrill, s2.minThroughDrill || 0);
-    if (smallVia && s2.minViaDiameter > 0 && s2.minThroughDrill > 0 && s2.minViaDiameter < viaD0 - 1e-6) {
-      const d = Math.max(s2.minViaDiameter, s2.minThroughDrill + 2 * (s2.minViaAnnular || 0.05));
-      if (d < viaD0 - 1e-6) {
-        viaD = d;
-        viaDrill = Math.min(viaDrill, s2.minThroughDrill);
-      }
+    const sm = smallVia ? this.smallVia(viaD0, viaDrill) : null;
+    if (sm) {
+      viaD = sm.viaD;
+      viaDrill = sm.viaDrill;
     }
     const kind = this.relax ? void 0 : this.kindFor(netKey);
     const open4 = !G5.quiet || this.xtalNets.has(netKey) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(netKey);
@@ -128575,6 +128594,14 @@ var Router = class _Router {
       }
     }
     return c;
+  }
+  /** The smallest via Board Setup's constraints permit (its hole keeps the minimum annular ring), when it is smaller
+   *  than `viaD`; null when the board states no minimums or its via is already that small. */
+  smallVia(viaD, viaDrill) {
+    const s2 = this.s;
+    if (!(s2.minViaDiameter > 0 && s2.minThroughDrill > 0 && s2.minViaDiameter < viaD - 1e-6)) return null;
+    const d = Math.max(s2.minViaDiameter, s2.minThroughDrill + 2 * (s2.minViaAnnular || 0.05));
+    return d < viaD - 1e-6 ? { viaD: d, viaDrill: Math.min(viaDrill, s2.minThroughDrill) } : null;
   }
   /** The net's kind, as planned or by name. */
   kindOf(netKey) {
@@ -132061,7 +132088,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
           segments++;
           length += Math.hypot(sh.a[0] - sh.b[0], sh.a[1] - sh.b[1]);
         } else {
-          items.push({ kind: "via", node: P.viaNode(doc2, sh.x, sh.y, +(sh.r * 2).toFixed(4), c.cls.viaDrill, net, span), net, netName: e.net, conn: c.id });
+          items.push({ kind: "via", node: P.viaNode(doc2, sh.x, sh.y, +(sh.r * 2).toFixed(4), o.drill ?? c.cls.viaDrill, net, span), net, netName: e.net, conn: c.id });
           vias++;
         }
       }
@@ -133562,7 +133589,7 @@ function openPlace(ctx) {
 }
 
 // web/domains/pcb/router/index.ts
-var api2 = { route, routeRuns, boardSquareCorners, findSquareCorners, Router, isSupply, pairName, netKind, impedance: { stackupOf, traceOn, z0, zdiff, widthFor, usualImpedance }, place, placementChanges, evaluate, autoplace, openPlace, placeSummaryText, autoroute, open, summaryText, probe, featuresOf, costOf, DEFAULT_WEIGHTS, TRAINED, PROVENANCE };
+var api2 = { route, routeRuns, fanout, padRows, boardSquareCorners, findSquareCorners, Router, isSupply, pairName, netKind, impedance: { stackupOf, traceOn, z0, zdiff, widthFor, usualImpedance }, place, placementChanges, evaluate, autoplace, openPlace, placeSummaryText, autoroute, open, summaryText, probe, featuresOf, costOf, DEFAULT_WEIGHTS, TRAINED, PROVENANCE };
 globalThis.PcbAutoRouter = api2;
 install();
 

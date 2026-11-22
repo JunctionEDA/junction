@@ -16,7 +16,8 @@ import type { Pt, Shape } from "./grid";
 
 export interface FanPad { name: string; p: Pt; len: number; across: number; layer: number }
 export interface FanRow { n: Pt; t: Pt; pads: FanPad[] }            // pads sorted along t; n points out of the part
-export interface FanJob { pad: FanPad; net: string; w: number; clr: number; viaD: number; viaDrill: number; partner: Pt; near: number; offLayer: boolean; blocker?: string }
+export interface FanJob { pad: FanPad; net: string; w: number; clr: number; viaD: number; viaDrill: number; partner: Pt; near: number; offLayer: boolean; blocker?: string;
+  small?: { viaD: number; viaDrill: number } }   // the smallest via the rules allow, tried where the class's via fits nowhere
 interface Lane { t: number; lane: number; a: number; b: number; w: number; cl: number; real: boolean }
 export interface Escape { pad: FanPad; net: string; kind: "ring" | "via"; segs: [Pt, Pt][]; w: number; via: Pt | null; end: Pt; n: Pt; lane: Lane | null; cost: number }
 export interface Boxed { pad: string; net: string; reason: string; blockedBy: string[] }
@@ -110,9 +111,11 @@ interface Option extends Escape { a: number; b: number; d: number; bin?: string;
 /** Escape the jobs' pads of each row.  `depth` is how far past the pad's end the first ring lies (at least one
  *  track pitch).  `spread` > 1 (ours, not Copper's; route.ts leaves it off) first tries a spreading fan: the slots of
  *  the row end `spread` times the pad pitch apart (each pin straight out, then a 45-degree leg away from the middle of
- *  the row, the outer pins turning first so the legs nest).  Returns the escapes laid (already handed to ctx.place) and the pads that got none. */
-export function fanout(rows: FanRow[], jobs: Map<string, FanJob>, ctx: FanCtx, depth = 0, spread = 0): { escapes: Escape[]; boxed: Boxed[] } {
+ *  the row, the outer pins turning first so the legs nest).  Returns the escapes laid (already handed to ctx.place) and the pads that got none.
+ *  `small`: every job that has a smaller via (job.small) uses it from the start, not only where its own fits nowhere. */
+export function fanout(rows: FanRow[], jobs: Map<string, FanJob>, ctx: FanCtx, depth = 0, spread = 0, small = false): { escapes: Escape[]; boxed: Boxed[] } {
   const book = new Map<string, Escape>(); const boxed: Boxed[] = [];
+  if (small) for (const j of jobs.values()) if (j.small && j.small.viaD < j.viaD - 1e-9) { j.viaD = j.small.viaD; j.viaDrill = j.small.viaDrill; }   // every via escape small, as the AI's hand fan-out of a 0.4 mm QFN has it
   for (const row of rows) {
     const rj = row.pads.map((p) => jobs.get(p.name)).filter(Boolean) as FanJob[]; if (!rj.length) continue;
     // the row's usual track pitch sets the rings: one wide supply pin must not push every slot outwards
@@ -145,7 +148,7 @@ export function fanout(rows: FanRow[], jobs: Map<string, FanJob>, ctx: FanCtx, d
     const short = geo.R[0] + 2 * geo.rs;
     const active = rj.filter((j) => j.near >= short).sort((a, b) => tc(a.pad) - tc(b.pad));
     // the pads that must change layer try a via first (Copper's auto style); the rest, and those without a via, the ring
-    const viaFirst = active.filter((j) => j.offLayer); const viaDone = viaEscape(viaFirst, row, geo, jobs, book, ctx, put);
+    const viaFirst = active.filter((j) => j.offLayer); const viaDone = viaSmall(viaFirst, viaEscape(viaFirst, row, geo, jobs, book, ctx, put), row, geo, jobs, book, ctx, put);
     const ringJobs = active.filter((j) => !viaDone.has(j.pad.name));
     // pass 0, the spreading fan.  At the pad pitch two neighbours' tracks can only run on straight out side by side
     // (a 0.4 mm row at 0.2 / 0.15 mm), and off a part turned 45 degrees not even that on a routing grid; spread to
@@ -185,13 +188,25 @@ export function fanout(rows: FanRow[], jobs: Map<string, FanJob>, ctx: FanCtx, d
     const order = straight.filter((x) => x[1] < 0).sort((x, y) => tc(x[0].pad) - tc(y[0].pad)).concat(straight.filter((x) => x[1] > 0).sort((x, y) => tc(y[0].pad) - tc(x[0].pad)));
     for (const [j, d] of order) { const [o] = tryRing(j, [[1, 3, d], [2, 3, d], [1, 2, d]]); if (o) put(o); }
     // the last resort for a pad the ring cannot serve: a via
-    const late = stuck.filter((j) => !j.offLayer); const got = viaEscape(late, row, geo, jobs, book, ctx, put);
+    const late = stuck.filter((j) => !j.offLayer); const got = viaSmall(late, viaEscape(late, row, geo, jobs, book, ctx, put), row, geo, jobs, book, ctx, put);
     for (const j of stuck) if (!book.has(j.pad.name) && !got.has(j.pad.name)) {
       const bl = j.blocker && !["lane taken", "dead end"].includes(j.blocker) ? [j.blocker] : [];
       boxed.push({ pad: j.pad.name, net: j.net, reason: j.blocker === "lane taken" ? "every lane out is another pin's" : j.blocker === "dead end" ? "no way on past the escape" : "no legal escape", blockedBy: bl });
     }
   }
   return { escapes: Array.from(book.values()), boxed };
+}
+
+/** The pads of `js` that got no via with their class's try again with the smallest via the rules allow (job.small),
+ *  as people drop a 0.4 / 0.2 mm via beside a 0.4 mm pitch row where the usual one does not fit; a pad that still
+ *  gets none goes back to its own via.  Returns `done` with the pads that got one now. */
+function viaSmall(js: FanJob[], done: Set<string>, row: FanRow, geo: Geo, jobs: Map<string, FanJob>, book: Map<string, Escape>, ctx: FanCtx, put: (e: Escape) => void): Set<string> {
+  const left = js.filter((j) => !done.has(j.pad.name) && j.small && j.small.viaD < j.viaD - 1e-9); if (!left.length) return done;
+  const was = new Map(left.map((j) => [j, { viaD: j.viaD, viaDrill: j.viaDrill, blocker: j.blocker }]));
+  for (const j of left) { j.viaD = j.small!.viaD; j.viaDrill = j.small!.viaDrill; j.blocker = undefined; }
+  const got = viaEscape(left, row, geo, jobs, book, ctx, put);
+  for (const j of left) if (got.has(j.pad.name)) done.add(j.pad.name); else Object.assign(j, was.get(j));
+  return done;
 }
 
 /** Via escapes for some pads of a row, matched to via sites by min-cost flow.  An outward via never closes the lane

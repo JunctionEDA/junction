@@ -10,7 +10,7 @@ import type { Weights } from "./weights";
 export type Shape = any;                 // PcbTools' copper shapes: circle | seg | path | rect | poly
 export type Pt = [number, number];
 
-export interface Obstacle { net: string; layers: number[]; shape: Shape; clr: number; edge?: boolean; thru?: Pt; pad?: boolean }
+export interface Obstacle { net: string; layers: number[]; shape: Shape; clr: number; edge?: boolean; thru?: Pt; pad?: boolean; drill?: number }   // drill: an escape via's own hole (a small via's may differ from its class's)
 
 export interface RuleClass {
   key: string; width: number; clr: number; viaD: number; viaDrill: number; kind?: string;

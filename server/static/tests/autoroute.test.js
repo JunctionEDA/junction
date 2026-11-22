@@ -608,3 +608,20 @@ test("view: the router looks at a chip's rows instead of routing: pins, free tra
   const f = s.channels["F.Cu"]; assert.equal(f.length, 2); assert.ok(f[1][1] >= 8, "an empty board has room for every pin at 2 mm: " + JSON.stringify(f));
   assert.equal(v.open.length, 8); assert.ok(v.open.every((o) => (o.from.startsWith("U1.") || o.to.startsWith("U1.")) && o.plan.length >= 2), JSON.stringify(v.open[0]));
 });
+
+test("fan-out: a pin whose net must change layer, where the class's via fits nowhere, takes the smallest via the rules allow", () => {
+  // a 0.4 mm row of five pads; the middle three must change layer.  The check says no to any via larger than 0.45 mm
+  // (as a crowded 0.4 mm QFN does to a 0.6 mm one): those pins get the small via, at its own hole
+  const pads = [0, 1, 2, 3, 4].map((i) => ({ name: "U1." + (i + 1), p: [100 + i * 0.4, 50], len: 0.8, across: 0.2, layer: 0 }));
+  const rows = [{ n: [0, -1], t: [1, 0], pads }];
+  const job = (q, viaD, viaDrill) => ({ pad: q, net: "S" + q.name, w: 0.2, clr: 0.15, viaD, viaDrill, partner: [q.p[0], 40], near: 10, offLayer: true, small: { viaD: 0.4, viaDrill: 0.2 } });
+  const jobs = new Map(pads.slice(1, 4).map((q) => [q.name, job(q, 0.6, 0.3)]));
+  const ctx = { hit: () => null, viaHit: (p, j) => (j.viaD > 0.45 ? "+3.3V" : null), place: () => {}, unplace: () => {} };
+  const { escapes, boxed } = R.fanout(rows, jobs, ctx, 0, 0);
+  assert.deepEqual(boxed, []); assert.equal(escapes.filter((e) => e.via).length, 3, JSON.stringify(escapes.map((e) => [e.pad.name, e.kind])));
+  for (const j of jobs.values()) { assert.equal(j.viaD, 0.4); assert.equal(j.viaDrill, 0.2); }
+  // where the class's via fits, it stays
+  const jobs2 = new Map(pads.slice(1, 4).map((q) => [q.name, job(q, 0.45, 0.2)]));
+  const got = R.fanout(rows, jobs2, ctx, 0, 0);
+  assert.equal(got.escapes.filter((e) => e.via).length, 3); for (const j of jobs2.values()) assert.equal(j.viaD, 0.45);
+});
