@@ -202,6 +202,19 @@ export function scopeToEnteredGroup(items: KItem[]): void {
   let keep: Set<string>; try { keep = new Set(pcb.withinEnteredGroup(E.kdoc, items.map((it) => it.id))); } catch (e) { console.warn(e); return; }
   for (let i = items.length - 1; i >= 0; i--) if (!keep.has(items[i].id)) items.splice(i, 1);
 }
+/** PCB_SELECTION_TOOL::CollectMultiple over a box (start → cur): left to right what it encloses, right to left what it touches. */
+export function boxedBoardItems(start: number[], cur: number[]): KItem[] {
+  const out: KItem[] = []; if (!E.kdoc || isSch()) return out;
+  const x0 = Math.min(start[0], cur[0]), x1 = Math.max(start[0], cur[0]), y0 = Math.min(start[1], cur[1]), y1 = Math.max(start[1], cur[1]), enclose = cur[0] >= start[0];
+  for (const it of E.kdoc.items.values()) {
+    if (!it.bbox || !filterAllows(it.kind, it) || !KiCadCanvas.itemVisible(it, E.hiddenLayers)) continue; const bb = it.bbox;
+    const inside = bb[0] >= x0 && bb[2] <= x1 && bb[1] >= y0 && bb[3] <= y1; let touches = bb[2] >= x0 && bb[0] <= x1 && bb[3] >= y0 && bb[1] <= y1;
+    if (touches && !inside && it.kind !== "footprint" && it.geom && it.geom.length) touches = KiCadCanvas.itemTouchesRect(it, x0, y0, x1, y1, E.hiddenLayers);
+    if (enclose ? inside : touches) out.push(it);
+  }
+  scopeToEnteredGroup(out);
+  return out;
+}
 export function finishBoxSel(ev: { clientX: number; clientY: number }) {
   const b: BoxSel | null = E.boxSel; E.boxSel = null; requestRepaint(); if (!b || !E.kdoc) return;
   const moved = Math.hypot(ev.clientX - b.startClient[0], ev.clientY - b.startClient[1]);

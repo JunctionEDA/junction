@@ -8,6 +8,7 @@
 //            units (remembered), reset local coordinates, Show Hidden Fields, sheet navigation
 //   Route    layer switching (board)
 //   Help     List Hotkeys, About (help-dialogs.ts)
+import { matchProperties, matchPropertiesSettings } from "./match-properties";
 import { leaveSheet } from "./schnets";
 import type { ActionHandler } from "./types";
 import { cursorClick, cursorStep, panStep } from "./crosshair";
@@ -144,6 +145,8 @@ export const MENU_HANDLERS: Record<string, ActionHandler> = {
   // ACTIONS::finishInteractive first, which the tools take themselves (a wire, a shape, a route): when none is in
   // progress KiCad's tools ignore it, so the key does nothing here either.
   cursorClick: () => cursorClick(1), cursorDblClick: () => cursorClick(2), finishInteractive: () => {},
+  // MATCH_PROPERTIES_TOOL (match-properties.ts): the source is the one selected item; Ctrl+, only inside the tool
+  matchProperties: () => { matchProperties(); }, matchPropertiesSettings: () => { matchPropertiesSettings(); },
   // COMMON_CONTROL::ShowHelp / GetInvolved / ReportBug: the online manual of this editor (help_name), Getting Started,
   // the source repository and a new issue carrying the version, each in a new browser tab as wxLaunchDefaultBrowser
   help: () => openUrl(`${DOCS}${docsVersion()}/en/${isSch() ? "eeschema" : "pcbnew"}/`),

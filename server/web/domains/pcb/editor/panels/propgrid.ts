@@ -902,6 +902,37 @@ function show(def: PropDef, raw: Raw): string {
 function defsOf(it: KItem, doc: KDoc, single: boolean): PropDef[] { try { return isSchDoc() ? schProps(it, doc).concat(customPropDefs(it)) : pcbProps(it, doc, single).concat(it.kind === "generated" ? [] : customPropDefs(it)); } catch (e) { console.warn(e); return []; } }
 const defId = (d: PropDef) => d.group + "/" + d.name;
 
+/**
+ * MATCH_PROPERTIES_CATALOG::Copy over this grid's properties: each [source name, target name, optional] pair read off
+ * the source and staged on a clone of the target (a property the source cannot write, or the target does not have or
+ * cannot take, is skipped; across kinds an optional one that will not go is dropped, otherwise it is an error).  The
+ * change replaces the target with the clone; changed counts the values that differed.
+ */
+export function copyItemProps(source: KItem, target: KItem, pairs: [string, string, boolean][]): { changed: number; error?: string; change?: KChange } {
+  const doc = kdoc(); if (!doc) return { changed: 0 };
+  const byName = (it: KItem) => { const m = new Map<string, PropDef>(); for (const d of defsOf(it, doc, true)) if (!m.has(d.name)) m.set(d.name, d); return m; };
+  const sd = byName(source), td = byName(target);
+  const node = K().cloneNode(target.node), staged = Object.assign({}, target, { node }) as KItem;
+  let changed = 0;
+  for (const [sn, tn, optional] of pairs) {
+    const s = sd.get(sn), t = td.get(tn); if (!s || !t || !s.set || !t.set || s.local || t.local) continue;
+    if ((s.avail && !s.avail(source)) || (s.canWrite && !s.canWrite(source))) continue;
+    if ((t.avail && !t.avail(staged)) || (t.canWrite && !t.canWrite(staged))) continue;
+    if (s.type !== t.type) { if (optional) continue; return { changed: 0, error: `Could not apply property '${tn}' to the target item.` }; }
+    let v: Raw; try { v = s.get(source); } catch (e) { continue; }
+    if (v === null && !s.optional) continue;   // IsIndeterminate: nothing single to copy
+    let cur: Raw = null; try { cur = t.get(staged); } catch (e) { cur = null; }
+    if (t.type === "bool" ? !!cur === !!v : show(t, cur) === show(t, v)) continue;
+    let res: boolean | void = false; try { res = t.set(node, v, staged); } catch (e) { res = false; }
+    if (res === false) { if (optional) continue; return { changed: 0, error: `Could not apply property '${tn}' to the target item.` }; }
+    changed++;
+  }
+  if (!changed) return { changed: 0 };
+  return { changed, change: K().replaceChange(doc, Object.assign({}, target, { node, geom: [], bbox: null })) };
+}
+/** The names of the properties this grid shows for an item. */
+export function itemPropNames(it: KItem): Set<string> { const doc = kdoc(); return new Set(doc ? defsOf(it, doc, true).filter((d) => d.set && !d.local).map((d) => d.name) : []); }
+
 interface Resolved { items: KItem[]; defs: Map<string, PropDef>[]; shared: PropDef[] }
 /** A selected tuning pattern is its generator with its members: KiCad's selection holds the one PCB_GENERATOR. */
 function patternSelection(items: KItem[]): KItem | null {
