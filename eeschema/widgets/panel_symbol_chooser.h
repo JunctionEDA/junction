@@ -27,7 +27,14 @@
 #include <footprint_info.h>
 #include <widgets/html_window.h>
 
+#include <atomic>
+#include <map>
+#include <memory>
+#include <nlohmann/json.hpp>
+
 class wxPanel;
+class wxListView;
+class wxListEvent;
 class wxTimer;
 class wxChoice;
 class wxSplitterWindow;
@@ -114,7 +121,28 @@ public:
 
     void Regenerate();
 
+    /**
+     * Before the dialog closes with OK: when a vendor part (LCSC, Mouser, DigiKey) is the
+     * selection, keep it in the project's vendor library so GetSelectedLibId() names it.
+     *
+     * @return false, having said why, when the part could not be kept (the dialog stays open).
+     */
+    bool AcceptVendorPart();
+
 protected:
+    // Vendor parts: the collaboration server's search of LCSC, Mouser and DigiKey, listed under
+    // the libraries while a search is typed (as the web editor's Choose Symbol has them)
+    void buildVendorSection( wxWindow* aParent, wxSizer* aSizer );
+    void onSearchText( wxCommandEvent& aEvent );
+    void onVendorTimer( wxTimerEvent& aEvent );
+    void showVendorStatus( const wxString& aText );
+    void showVendorResults( const nlohmann::json& aAnswer );
+    void onVendorSelected( wxListEvent& aEvent );
+    void onVendorActivated( wxListEvent& aEvent );
+    void showVendorPart( const nlohmann::json& aPart );
+    void clearVendorSelection();
+    std::string vendorKey( int aRow ) const;
+
     static constexpr int DBLCLICK_DELAY = 100; // milliseconds
 
     wxPanel* constructRightPanel( wxWindow* aParent );
@@ -197,6 +225,20 @@ protected:
     std::vector<std::pair<FIELD_T, wxString>>  m_field_edits;
 
     SYMBOL_COMPAT_FUNC        m_compatCallback;
+
+    wxStaticText*             m_vendorHeader = nullptr;
+    wxListView*               m_vendorList = nullptr;
+    wxTimer*                  m_vendorTimer = nullptr;
+    std::shared_ptr<std::atomic<bool>> m_vendorAlive;
+    unsigned                  m_vendorGeneration = 0;
+    wxString                  m_vendorQuery;          ///< what the list shows results for
+    wxString                  m_vendorNickname;       ///< the project's vendor library
+    nlohmann::json            m_vendorResults;        ///< the search answer's "results"
+    std::map<std::string, nlohmann::json> m_vendorParts; ///< fetched parts, by vendor:id
+    int                       m_vendorRow = -1;       ///< the selected row, or -1
+    bool                      m_vendorAcceptWhenFetched = false;
+    LIB_ID                    m_vendorLibId;          ///< the kept part, after AcceptVendorPart()
+    std::unique_ptr<LIB_SYMBOL> m_vendorPreview;
 };
 
 #endif /* PANEL_SYMBOL_CHOOSER_H */

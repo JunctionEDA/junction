@@ -921,8 +921,8 @@ void EDA_BASE_FRAME::AddStandardHelpMenu( wxMenuBar* aMenuBar )
     helpMenu->Add( ACTIONS::help );
     helpMenu->Add( ACTIONS::gettingStarted );
     helpMenu->Add( ACTIONS::listHotKeys );
+    // Junction: its own source and issue tracker; KiCad's donation page is not ours to send people to
     helpMenu->Add( ACTIONS::getInvolved );
-    helpMenu->Add( ACTIONS::donate );
     helpMenu->Add( ACTIONS::reportBug );
 
     helpMenu->AppendSeparator();

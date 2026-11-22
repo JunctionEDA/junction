@@ -1229,7 +1229,14 @@ void PCB_EDIT_FRAME::setupUIConditions()
 #define CHECK( x )  ACTION_CONDITIONS().Check( x )
 // clang-format off
 
-    mgr->SetConditions( PCB_ACTIONS::collabStartSession, ENABLE( collabIdle ) );
+    // Add Collaborators puts an idle project online, and copies an invite link for a live one
+    auto collabCanInvite =
+            [collabIdle, collabLive]( const SELECTION& aSel )
+            {
+                return collabIdle( aSel ) || collabLive( aSel );
+            };
+
+    mgr->SetConditions( PCB_ACTIONS::collabStartSession, ENABLE( collabCanInvite ) );
     mgr->SetConditions( PCB_ACTIONS::collabJoinSession,  ENABLE( collabIdle ) );
     mgr->SetConditions( PCB_ACTIONS::collabLeaveSession, ENABLE( collabLive ) );
 

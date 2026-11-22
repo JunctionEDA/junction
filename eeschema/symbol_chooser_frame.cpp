@@ -170,6 +170,10 @@ void SYMBOL_CHOOSER_FRAME::OnPaint( wxPaintEvent& aEvent )
 
 void SYMBOL_CHOOSER_FRAME::OnOK( wxCommandEvent& aEvent )
 {
+    // A vendor part is kept in the project first; when it cannot be, the chooser stays open
+    if( !m_chooserPanel->AcceptVendorPart() )
+        return;
+
     LIB_ID libId = m_chooserPanel->GetSelectedLibId();
 
     if( libId.IsValid() )

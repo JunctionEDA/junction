@@ -1072,57 +1072,56 @@ static void buildKicadAboutBanner( EDA_BASE_FRAME* aParent, ABOUT_APP_INFO& aInf
                 << wxT( "</u></b>" ); // bold & underlined font for caption
 
     description << wxT( "<p>" )
-                << _( "The KiCad EDA Suite is a set of open source applications for the "
-                      "creation of electronic schematics and printed circuit boards." )
+                << wxString::Format( _( "%s is an open source suite for designing electronic "
+                                        "schematics and printed circuit boards together, live: "
+                                        "everyone in a project sees each other's cursors and edits "
+                                        "as they happen, on the desktop or in the browser." ),
+                                     KICAD_COLLAB_PRODUCT_NAME )
+                << wxT( "</p>" );
+
+    description << wxT( "<p>" )
+                << wxString::Format( _( "%s is based on KiCad %s. The KiCad developers, "
+                                        "librarians, artists and translators credited in the "
+                                        "other tabs wrote the editors it is built on." ),
+                                     KICAD_COLLAB_PRODUCT_NAME, KICAD_COLLAB_BASE_KICAD )
                 << wxT( "</p>" );
 
     description << wxT( "</p>" );
 
     /* websites */
     description << wxT( "<p><b><u>" )
-                << _( "KiCad on the web" )
+                << wxString::Format( _( "%s on the web" ), KICAD_COLLAB_PRODUCT_NAME )
                 << wxT( "</u></b>" ); // bold & underlined font for caption
 
     // bullet-ed list with some http links
     description << wxT( "<ul>" );
     description << wxT( "<li>" )
-                << _( "The official KiCad website - " )
-                << HtmlHyperlink( wxS( "http://www.kicad.org" ) )
+                << _( "Website - " )
+                << HtmlHyperlink( KICAD_COLLAB_PRODUCT_SITE )
                 << wxT( "</li>" );
     description << wxT( "<li>" )
-                << _( "Developer website - " )
-                << HtmlHyperlink( wxS( "https://go.kicad.org/dev" ) )
+                << _( "Source code - " )
+                << HtmlHyperlink( KICAD_COLLAB_PRODUCT_REPO )
                 << wxT( "</li>" );
+    description << wxT( "<li>" )
+                << _( "Report or examine bugs - " )
+                << HtmlHyperlink( wxString( KICAD_COLLAB_PRODUCT_REPO ) + wxS( "/issues" ) )
+                << wxT( "</li>" );
+    description << wxT( "</ul></p>" );
 
+    description << wxT( "<p><b><u>" )
+                << _( "KiCad, the project it is based on" )
+                << wxT( "</u></b>" ); // bold & underlined font caption
+
+    description << wxT( "<ul>" );
+    description << wxT( "<li>" )
+                << _( "The official KiCad website - " )
+                << HtmlHyperlink( wxS( "https://www.kicad.org" ) )
+                << wxT( "</li>" );
     description << wxT( "<li>" )
                 << _("Official KiCad library repositories - " )
                 << HtmlHyperlink( wxS( "https://go.kicad.org/libraries" ) )
                 << wxT( "</li>" );
-
-    description << wxT( "</ul></p>" );
-
-    description << wxT( "<p><b><u>" )
-                << _( "Bug tracker" )
-                << wxT( "</u></b>" ); // bold & underlined font caption
-
-    // bullet-ed list with some http links
-    description << wxT( "<ul>" );
-    description << wxT( "<li>" )
-                << _( "Report or examine bugs - " )
-                << HtmlHyperlink( wxS( "https://go.kicad.org/bugs" ) )
-                << wxT( "</li>" );
-    description << wxT( "</ul></p>" );
-
-    description << wxT( "<p><b><u>" )
-                << _( "KiCad users group and community" )
-                << wxT( "</u></b>" ); // bold & underlined font caption
-
-    description << wxT( "<ul>" );
-    description << wxT( "<li>" )
-                << _( "KiCad forum - " )
-                << HtmlHyperlink( wxS( "https://go.kicad.org/forum" ) )
-                << wxT( "</li>" );
-
     description << wxT( "</ul></p>" );
 
     aInfo.SetDescription( description );
@@ -1133,7 +1132,8 @@ static void buildKicadAboutBanner( EDA_BASE_FRAME* aParent, ABOUT_APP_INFO& aInf
     license
         << wxT( "<div align='center'>" )
         << HtmlNewline( 4 )
-        << _( "The complete KiCad EDA Suite is released under the" ) << HtmlNewline( 2 )
+        << wxString::Format( _( "%s, like the KiCad EDA Suite it is based on, is released under the" ),
+                             KICAD_COLLAB_PRODUCT_NAME ) << HtmlNewline( 2 )
         << HtmlHyperlink( wxS( "http://www.gnu.org/licenses" ),
                           _( "GNU General Public License (GPL) version 3 or any later version" ) )
         << wxT( "</div>" );

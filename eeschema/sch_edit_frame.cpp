@@ -937,7 +937,14 @@ void SCH_EDIT_FRAME::setupUIConditions()
     mgr->SetConditions( ACTIONS::toggleGrid,               CHECK( cond.GridVisible() ) );
     mgr->SetConditions( ACTIONS::toggleGridOverrides,      CHECK( cond.GridOverrides() ) );
 
-    mgr->SetConditions( SCH_ACTIONS::collabStartSession, ENABLE( collabIdle ) );
+    // Add Collaborators puts an idle project online, and copies an invite link for a live one
+    auto collabCanInvite =
+            [collabIdle, collabLive]( const SELECTION& aSel )
+            {
+                return collabIdle( aSel ) || collabLive( aSel );
+            };
+
+    mgr->SetConditions( SCH_ACTIONS::collabStartSession, ENABLE( collabCanInvite ) );
     mgr->SetConditions( SCH_ACTIONS::collabJoinSession,  ENABLE( collabIdle ) );
     mgr->SetConditions( SCH_ACTIONS::collabLeaveSession, ENABLE( collabLive ) );
 
@@ -2049,6 +2056,12 @@ bool SCH_EDIT_FRAME::RecalculateConnections( SCH_COMMIT* aCommit, SCH_CLEANUP_FL
             {
                 itemsChanged = true;
                 GetCanvas()->GetView()->Update( aChangedItem, KIGFX::REPAINT );
+
+                if( aChangedItem->Type() == SCH_PIN_T || aChangedItem->Type() == SCH_SHEET_PIN_T )
+                {
+                    if( EDA_ITEM* parent = aChangedItem->GetParent() )
+                        GetCanvas()->GetView()->Update( parent, KIGFX::REPAINT );
+                }
 
                 if( ADVANCED_CFG::GetCfg().m_ConnectivityEngine )
                     return;

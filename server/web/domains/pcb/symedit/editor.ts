@@ -651,7 +651,7 @@ export class SymbolEditor {
       ["Inspect", [a("showDatasheet", () => has() && !!M.fieldValue(this.symbol()!, "Datasheet")), S, a("checkSymbol", has)]],
       ["Preferences", [a("configurePaths"), a("showSymbolLibTable", () => !!appState.project), a("openPreferences"), S, { label: "Set Language" }]],
       // EDA_BASE_FRAME::AddStandardHelpMenu, with the app's own entries (HELP_MENU)
-      ["Help", [link("help"), link("gettingStarted"), a("listHotKeys"), link("getInvolved"), link("donate"), link("reportBug"), S,
+      ["Help", [link("help"), link("gettingStarted"), a("listHotKeys"), link("getInvolved"), link("reportBug"), S,
         { id: "about", label: LOCAL_LABELS.about || "About", icon: "about", run: () => { const app = window.CollabApp; if (app) app.dispatch({ type: "action", id: "about", anchor: null }); }, enabled: () => true }]],
     ];
   }

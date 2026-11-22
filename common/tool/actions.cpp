@@ -1431,7 +1431,7 @@ TOOL_ACTION ACTIONS::help( TOOL_ACTION_ARGS()
 TOOL_ACTION ACTIONS::about( TOOL_ACTION_ARGS()
         .Name( "common.SuiteControl.about" )
         .Scope( AS_GLOBAL )
-        .FriendlyName( _( "About KiCad" ) )
+        .FriendlyName( _( "About Junction" ) )
         .UIId( wxID_ABOUT )
         .Icon( BITMAPS::about ) );
 
@@ -1447,8 +1447,8 @@ TOOL_ACTION ACTIONS::listHotKeys( TOOL_ACTION_ARGS()
 TOOL_ACTION ACTIONS::getInvolved( TOOL_ACTION_ARGS()
         .Name( "common.SuiteControl.getInvolved" )
         .Scope( AS_GLOBAL )
-        .FriendlyName( _( "Get Involved" ) )
-        .Tooltip( _( "Open \"Contribute to KiCad\" in a web browser" ) )
+        .FriendlyName( _( "Source Code on GitHub" ) )
+        .Tooltip( _( "Open Junction's source code and contribution guide in a web browser" ) )
         .Icon( BITMAPS::info ) );
 
 TOOL_ACTION ACTIONS::donate( TOOL_ACTION_ARGS()
@@ -1461,7 +1461,7 @@ TOOL_ACTION ACTIONS::reportBug( TOOL_ACTION_ARGS()
         .Name( "common.SuiteControl.reportBug" )
         .Scope( AS_GLOBAL )
         .FriendlyName( _( "Report Bug" ) )
-        .Tooltip( _( "Report a problem with KiCad" ) )
+        .Tooltip( _( "Report a problem with Junction" ) )
         .Icon( BITMAPS::bug ) );
 
 TOOL_ACTION ACTIONS::ddAddLibrary( TOOL_ACTION_ARGS()

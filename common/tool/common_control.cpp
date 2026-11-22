@@ -49,16 +49,16 @@
 #include <confirm.h>
 #include <reporter.h>
 #include <widgets/kistatusbar.h>
+#include <collab/collab_product.h>
 
-#define URL_GET_INVOLVED wxS( "https://go.kicad.org/contribute/" )
+#define URL_GET_INVOLVED KICAD_COLLAB_PRODUCT_REPO
 #define URL_DONATE wxS( "https://go.kicad.org/app-donate" )
 #define URL_DOCUMENTATION wxS( "https://go.kicad.org/docs/" )
 
 
 /// URL to launch a new issue with pre-populated description
 wxString COMMON_CONTROL::m_bugReportUrl =
-        wxS( "https://gitlab.com/kicad/code/kicad/-/issues/new?issuable_template=bare&issue"
-             "[description]=%s" );
+        wxString( KICAD_COLLAB_PRODUCT_REPO ) + wxS( "/issues/new?body=%s" );
 
 
 /// Issue template to use for reporting bugs (this should not be translated)
@@ -384,9 +384,9 @@ int COMMON_CONTROL::GetInvolved( const TOOL_EVENT& aEvent )
     {
         wxString msg;
         msg.Printf( _( "Could not launch the default browser.\n"
-                       "For information on how to help the KiCad project, visit %s" ),
+                       "Junction's source code is at %s" ),
                     URL_GET_INVOLVED );
-        wxMessageBox( msg, _( "Get involved with KiCad" ), wxOK, m_frame );
+        wxMessageBox( msg, _( "Junction on GitHub" ), wxOK, m_frame );
     }
 
     return 0;

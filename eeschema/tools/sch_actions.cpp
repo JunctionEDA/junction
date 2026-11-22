@@ -2050,8 +2050,8 @@ TOOL_ACTION SCH_ACTIONS::copyVariant( TOOL_ACTION_ARGS()
 TOOL_ACTION SCH_ACTIONS::collabStartSession( TOOL_ACTION_ARGS()
         .Name( "eeschema.Collab.startSession" )
         .Scope( AS_GLOBAL )
-        .FriendlyName( _( "Start Collaboration Session..." ) )
-        .Tooltip( _( "Upload this project to the collaboration server and copy a share link" ) )
+        .FriendlyName( _( "Add Collaborators..." ) )
+        .Tooltip( _( "Put this project online and copy an invite link, so others can design it with you live" ) )
         .Icon( BITMAPS::library_archive ) );
 
 TOOL_ACTION SCH_ACTIONS::collabJoinSession( TOOL_ACTION_ARGS()
@@ -2076,8 +2076,8 @@ TOOL_ACTION SCH_ACTIONS::collabHistory( TOOL_ACTION_ARGS()
 TOOL_ACTION SCH_ACTIONS::collabCopyLink( TOOL_ACTION_ARGS()
         .Name( "eeschema.Collab.copyLink" )
         .Scope( AS_GLOBAL )
-        .FriendlyName( _( "Copy Share Link" ) )
-        .Tooltip( _( "Copy an invite link for the current collaboration session" ) ) );
+        .FriendlyName( _( "Copy Invite Link" ) )
+        .Tooltip( _( "Copy a link that lets someone join this shared project" ) ) );
 
 TOOL_ACTION SCH_ACTIONS::collabVendorParts( TOOL_ACTION_ARGS()
         .Name( "eeschema.Collab.vendorParts" )

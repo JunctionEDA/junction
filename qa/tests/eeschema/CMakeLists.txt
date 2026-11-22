@@ -285,6 +285,7 @@ set( QA_EESCHEMA_SRCS
     test_remote_symbol_download_security.cpp
     test_remote_symbol_import.cpp
     test_remote_symbol_load_from_payload.cpp
+    test_vendor_parts.cpp
     test_backannotate_unit_swap.cpp
     test_netlist_exporter_xml_chain_gating.cpp
     test_netlist_exporter_xml_stacked.cpp

@@ -266,6 +266,10 @@ void PCB_COLLAB_TOOL::Reset( RESET_REASON aReason )
 
 int PCB_COLLAB_TOOL::StartSession( const TOOL_EVENT& aEvent )
 {
+    // File > Add Collaborators...: a project already live here only needs an invite link
+    if( sessionActive() )
+        return CopyShareLink( aEvent );
+
     withSignIn(
             [this]( const wxString& aToken )
             {
@@ -881,7 +885,7 @@ int PCB_COLLAB_TOOL::OpenCompare( const TOOL_EVENT& aEvent )
     if( m_projectId.IsEmpty() || m_docId.IsEmpty() )
     {
         frame<PCB_EDIT_FRAME>()->ShowInfoBarMsg(
-                _( "No collaboration session; start or join one first." ) );
+                _( "This project is not shared yet; use File > Add Collaborators... first." ) );
         return 0;
     }
 
@@ -909,7 +913,7 @@ int PCB_COLLAB_TOOL::OpenGithubSync( const TOOL_EVENT& aEvent )
     if( m_projectId.IsEmpty() )
     {
         frame<PCB_EDIT_FRAME>()->ShowInfoBarMsg(
-                _( "No collaboration session; start or join one first." ) );
+                _( "This project is not shared yet; use File > Add Collaborators... first." ) );
         return 0;
     }
 
@@ -938,7 +942,7 @@ int PCB_COLLAB_TOOL::CopyShareLink( const TOOL_EVENT& aEvent )
     if( m_projectId.IsEmpty() )
     {
         frame<PCB_EDIT_FRAME>()->ShowInfoBarMsg(
-                _( "No collaboration session; start or join one first." ) );
+                _( "This project is not shared yet; use File > Add Collaborators... first." ) );
         return 0;
     }
 

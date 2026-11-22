@@ -51,6 +51,15 @@
 #include <wx/choice.h>
 #include <wx/stattext.h>
 #include <lib_symbol.h>
+#include <collab/collab_auth.h>
+#include <collab/collab_rest.h>
+#include <collab/collab_session.h>
+#include <collab/sch_vendor_parts.h>
+#include <confirm.h>
+#include <wx/app.h>
+#include <wx/listctrl.h>
+#include <wx/utils.h>
+#include <thread>
 
 
 wxString PANEL_SYMBOL_CHOOSER::g_symbolSearchString;
@@ -239,6 +248,11 @@ PANEL_SYMBOL_CHOOSER::PANEL_SYMBOL_CHOOSER( SCH_BASE_FRAME* aFrame, wxWindow* aP
                            LIB_TREE::FLAGS::ALL_WIDGETS, m_details );
 
     treeSizer->Add( m_tree, 1, wxALL | wxEXPAND, 5 );
+
+    // Power symbols are KiCad's own; vendors sell parts
+    if( !m_showPower )
+        buildVendorSection( treePanel, treeSizer );
+
     treePanel->Layout();
     treeSizer->Fit( treePanel );
 
@@ -276,6 +290,9 @@ PANEL_SYMBOL_CHOOSER::PANEL_SYMBOL_CHOOSER( SCH_BASE_FRAME* aFrame, wxWindow* aP
     if( m_details )
         m_details->Bind( wxEVT_CHAR_HOOK, &PANEL_SYMBOL_CHOOSER::OnDetailsCharHook, this );
 
+    if( m_vendorList )
+        Bind( wxEVT_TEXT, &PANEL_SYMBOL_CHOOSER::onSearchText, this );
+
     // Open the user's previously opened libraries on timer expiration.
     // This is done on a timer because we need a gross hack to keep GTK from garbling the
     // display. Must be longer than the search debounce timer.
@@ -290,6 +307,17 @@ PANEL_SYMBOL_CHOOSER::~PANEL_SYMBOL_CHOOSER()
     Unbind( wxEVT_TIMER, &PANEL_SYMBOL_CHOOSER::onCloseTimer, this );
     Unbind( EVT_LIBITEM_SELECTED, &PANEL_SYMBOL_CHOOSER::onSymbolSelected, this );
     Unbind( EVT_LIBITEM_CHOSEN, &PANEL_SYMBOL_CHOOSER::onSymbolChosen, this );
+
+    // Vendor searches still on their way must not reach this panel
+    if( m_vendorAlive )
+        m_vendorAlive->store( false );
+
+    if( m_vendorTimer )
+    {
+        m_vendorTimer->Stop();
+        delete m_vendorTimer;
+        m_vendorTimer = nullptr;
+    }
 
     // Stop the timer during destruction early to avoid potential race conditions (that do happen)
     m_dbl_click_timer->Stop();
@@ -529,6 +557,18 @@ void PANEL_SYMBOL_CHOOSER::SetPreselect( const LIB_ID& aPreselect )
 
 LIB_ID PANEL_SYMBOL_CHOOSER::GetSelectedLibId( int* aUnit, int* aBodyStyle ) const
 {
+    if( m_vendorRow >= 0 )
+    {
+        // A vendor part, kept in the project's vendor library by AcceptVendorPart()
+        if( aUnit )
+            *aUnit = 0;
+
+        if( aBodyStyle )
+            *aBodyStyle = 1;
+
+        return m_vendorLibId;
+    }
+
     LIB_ID id = m_tree->GetSelectedLibId( aUnit );
 
     if( aBodyStyle )
@@ -570,6 +610,14 @@ void PANEL_SYMBOL_CHOOSER::onSelectBodyStyle( wxCommandEvent& aEvent )
         return;
 
     m_selectedBodyStyle = selection + 1;
+
+    if( m_vendorRow >= 0 )
+    {
+        if( m_vendorPreview )
+            m_symbol_preview->DisplayPart( m_vendorPreview.get(), 1, m_selectedBodyStyle );
+
+        return;
+    }
 
     LIB_TREE_NODE* node = m_tree->GetCurrentTreeNode();
 
@@ -744,6 +792,13 @@ void PANEL_SYMBOL_CHOOSER::onSymbolSelected( wxCommandEvent& aEvent )
     LIB_TREE_NODE* node = m_tree->GetCurrentTreeNode();
     bool           sameSymbolDifferentUnit = false;
 
+    // A library symbol picked after a vendor part takes over; the tree losing its selection
+    // because a vendor part was picked leaves the vendor part's preview alone.
+    if( node && node->m_LibId.IsValid() )
+        clearVendorSelection();
+    else if( m_vendorRow >= 0 )
+        return;
+
     if( node && node->m_LibId.IsValid() )
     {
         if( node->m_LibId == m_curSymbolId )
@@ -831,4 +886,436 @@ void PANEL_SYMBOL_CHOOSER::Regenerate()
 
     if( savedSelection.IsValid() )
         m_tree->CenterLibId( savedSelection );
+}
+
+
+// ---------------------------------------------------------------------------------- vendor parts
+
+
+void PANEL_SYMBOL_CHOOSER::buildVendorSection( wxWindow* aParent, wxSizer* aSizer )
+{
+    m_vendorAlive = std::make_shared<std::atomic<bool>>( true );
+
+    m_vendorHeader = new wxStaticText( aParent, wxID_ANY, _( "Vendor parts" ) );
+    m_vendorHeader->SetToolTip( _( "LCSC, Mouser and DigiKey parts matching the search, through Junction.  "
+                                   "A part you pick is kept in the project's vendor library with its "
+                                   "footprint." ) );
+
+    m_vendorList = new wxListView( aParent, wxID_ANY, wxDefaultPosition, aParent->FromDIP( wxSize( -1, 150 ) ),
+                                   wxLC_REPORT | wxLC_SINGLE_SEL );
+    m_vendorList->AppendColumn( _( "Part" ), wxLIST_FORMAT_LEFT, aParent->FromDIP( 110 ) );
+    m_vendorList->AppendColumn( _( "Manufacturer Part" ), wxLIST_FORMAT_LEFT, aParent->FromDIP( 150 ) );
+    m_vendorList->AppendColumn( _( "Description" ), wxLIST_FORMAT_LEFT, aParent->FromDIP( 260 ) );
+    m_vendorList->AppendColumn( _( "Stock" ), wxLIST_FORMAT_RIGHT, aParent->FromDIP( 70 ) );
+
+    aSizer->Add( m_vendorHeader, 0, wxLEFT | wxRIGHT | wxTOP, 5 );
+    aSizer->Add( m_vendorList, 0, wxALL | wxEXPAND, 5 );
+
+    m_vendorHeader->Hide();
+    m_vendorList->Hide();
+
+    m_vendorTimer = new wxTimer( this );
+    Bind( wxEVT_TIMER, &PANEL_SYMBOL_CHOOSER::onVendorTimer, this, m_vendorTimer->GetId() );
+    m_vendorList->Bind( wxEVT_LIST_ITEM_SELECTED, &PANEL_SYMBOL_CHOOSER::onVendorSelected, this );
+    m_vendorList->Bind( wxEVT_LIST_ITEM_ACTIVATED, &PANEL_SYMBOL_CHOOSER::onVendorActivated, this );
+
+    // The search box may already hold the last search
+    m_vendorTimer->StartOnce( 400 );
+}
+
+
+void PANEL_SYMBOL_CHOOSER::onSearchText( wxCommandEvent& aEvent )
+{
+    aEvent.Skip();
+
+    // Other text boxes (the footprint picker) land here too; the timer only searches again
+    // when the library search text changed
+    if( m_vendorTimer )
+        m_vendorTimer->StartOnce( 500 );
+}
+
+
+void PANEL_SYMBOL_CHOOSER::showVendorStatus( const wxString& aText )
+{
+    m_vendorHeader->SetLabel( aText );
+    m_vendorHeader->Show();
+    m_vendorHeader->GetParent()->Layout();
+}
+
+
+void PANEL_SYMBOL_CHOOSER::onVendorTimer( wxTimerEvent& aEvent )
+{
+    wxString query = m_tree->GetSearchString();
+    query.Trim().Trim( false );
+
+    if( query == m_vendorQuery )
+        return;
+
+    m_vendorQuery = query;
+    ++m_vendorGeneration;
+    clearVendorSelection();
+    m_vendorList->DeleteAllItems();
+    m_vendorResults = nlohmann::json::array();
+
+    if( query.length() < 2 )
+    {
+        m_vendorHeader->Hide();
+        m_vendorList->Hide();
+        m_vendorHeader->GetParent()->Layout();
+        return;
+    }
+
+    wxString server = COLLAB_SESSION::ServerUrl();
+    wxString token = COLLAB_AUTH::StoredToken( server );
+
+    if( token.IsEmpty() )
+    {
+        m_vendorList->Hide();
+        showVendorStatus( _( "Vendor parts: sign in to Junction (File > Add Collaborators...) to search "
+                             "LCSC, Mouser and DigiKey" ) );
+        return;
+    }
+
+    m_vendorList->Show();
+    showVendorStatus( wxString::Format( _( "Vendor parts: searching LCSC, Mouser and DigiKey for \"%s\"..." ),
+                                        query ) );
+
+    std::shared_ptr<std::atomic<bool>> alive = m_vendorAlive;
+    unsigned                           generation = m_vendorGeneration;
+
+    std::thread(
+            [this, alive, generation, server, token, query]()
+            {
+                COLLAB_REST::ERROR_INFO       error;
+                std::optional<nlohmann::json> answer = COLLAB_REST::SearchParts( server, token, query, 25, &error );
+
+                wxTheApp->CallAfter(
+                        [this, alive, generation, answer, error]()
+                        {
+                            if( !alive->load() || generation != m_vendorGeneration )
+                                return;
+
+                            if( !answer )
+                                showVendorStatus( wxString::Format( _( "Vendor parts: %s" ),
+                                                                    COLLAB_REST::DescribeError( error ) ) );
+                            else
+                                showVendorResults( *answer );
+                        } );
+            } )
+            .detach();
+}
+
+
+void PANEL_SYMBOL_CHOOSER::showVendorResults( const nlohmann::json& aAnswer )
+{
+    m_vendorResults = aAnswer.value( "results", nlohmann::json::array() );
+
+    if( !m_vendorResults.is_array() )
+        m_vendorResults = nlohmann::json::array();
+
+    auto text = []( const nlohmann::json& aObj, const char* aKey ) -> wxString
+    {
+        auto it = aObj.find( aKey );
+        return it != aObj.end() && it->is_string() ? wxString::FromUTF8( it->get<std::string>() ) : wxString();
+    };
+
+    m_vendorList->Freeze();
+    m_vendorList->DeleteAllItems();
+
+    long row = 0;
+
+    for( const nlohmann::json& hit : m_vendorResults )
+    {
+        if( !hit.is_object() )
+            continue;
+
+        wxString mpn = text( hit, "mpn" );
+        wxString maker = text( hit, "manufacturer" );
+
+        if( !maker.IsEmpty() )
+            mpn << wxS( " (" ) << maker << wxS( ")" );
+
+        wxString stock;
+
+        if( hit.contains( "stock" ) && hit["stock"].is_number_integer() )
+            stock = wxString::Format( wxS( "%lld" ), hit["stock"].get<long long>() );
+
+        long item = m_vendorList->InsertItem( row, SCH_VENDOR_PARTS::ResultTitle( hit ) );
+        m_vendorList->SetItem( item, 1, mpn );
+        m_vendorList->SetItem( item, 2, text( hit, "description" ) );
+        m_vendorList->SetItem( item, 3, stock );
+        m_vendorList->SetItemData( item, row );
+        ++row;
+    }
+
+    m_vendorList->Thaw();
+
+    wxString errors;
+
+    if( nlohmann::json errs = aAnswer.value( "errors", nlohmann::json::array() ); errs.is_array() )
+    {
+        for( const nlohmann::json& e : errs )
+        {
+            if( e.is_object() && !text( e, "message" ).IsEmpty() )
+                errors << wxS( "  " ) << text( e, "message" );
+        }
+    }
+
+    if( row == 0 )
+        showVendorStatus( wxString::Format( _( "Vendor parts: nothing found for \"%s\"." ), m_vendorQuery ) + errors );
+    else
+        showVendorStatus( wxString::Format( _( "Vendor parts (%ld): pick one to keep it in the project" ), row )
+                          + errors );
+}
+
+
+std::string PANEL_SYMBOL_CHOOSER::vendorKey( int aRow ) const
+{
+    if( aRow < 0 || !m_vendorResults.is_array() || aRow >= (int) m_vendorResults.size() )
+        return std::string();
+
+    const nlohmann::json& hit = m_vendorResults[aRow];
+    return hit.value( "vendor", std::string() ) + ":" + hit.value( "vendor_id", std::string() );
+}
+
+
+void PANEL_SYMBOL_CHOOSER::clearVendorSelection()
+{
+    if( m_vendorRow < 0 )
+        return;
+
+    if( m_vendorList && m_vendorRow < m_vendorList->GetItemCount() )
+        m_vendorList->Select( m_vendorRow, false );
+
+    m_vendorRow = -1;
+    m_vendorLibId = LIB_ID();
+    m_vendorAcceptWhenFetched = false;
+}
+
+
+void PANEL_SYMBOL_CHOOSER::onVendorSelected( wxListEvent& aEvent )
+{
+    int row = (int) aEvent.GetData();
+
+    if( vendorKey( row ).empty() )
+        return;
+
+    m_vendorRow = row;
+    m_vendorLibId = LIB_ID();
+    m_vendorAcceptWhenFetched = false;
+    m_curSymbolId = LIB_ID();
+    m_field_edits.clear();
+    m_tree->Unselect();
+
+    if( m_vendorNickname.IsEmpty() )
+        m_vendorNickname = SCH_VENDOR_PARTS::LibraryNickname( m_frame->Prj() );
+
+    std::string key = vendorKey( row );
+
+    if( auto it = m_vendorParts.find( key ); it != m_vendorParts.end() )
+    {
+        showVendorPart( it->second );
+        return;
+    }
+
+    m_symbol_preview->SetStatusText( _( "Fetching the part's drawings..." ) );
+
+    if( m_fp_preview && m_fp_preview->IsInitialized() )
+        m_fp_preview->SetStatusText( wxEmptyString );
+
+    const nlohmann::json& hit = m_vendorResults[row];
+    wxString vendor = wxString::FromUTF8( hit.value( "vendor", std::string() ) );
+    wxString id = wxString::FromUTF8( hit.value( "vendor_id", std::string() ) );
+    wxString server = COLLAB_SESSION::ServerUrl();
+    wxString token = COLLAB_AUTH::StoredToken( server );
+    wxString nickname = m_vendorNickname;
+
+    std::shared_ptr<std::atomic<bool>> alive = m_vendorAlive;
+
+    std::thread(
+            [this, alive, key, vendor, id, server, token, nickname]()
+            {
+                COLLAB_REST::ERROR_INFO       error;
+                std::optional<nlohmann::json> part = COLLAB_REST::GetPart( server, token, vendor, id, nickname, &error );
+
+                wxTheApp->CallAfter(
+                        [this, alive, key, part, error]()
+                        {
+                            if( !alive->load() )
+                                return;
+
+                            if( part )
+                                m_vendorParts[key] = *part;
+
+                            // Only the row still selected is shown
+                            if( vendorKey( m_vendorRow ) != key )
+                                return;
+
+                            if( !part )
+                            {
+                                m_symbol_preview->SetStatusText( COLLAB_REST::DescribeError( error ) );
+                                m_vendorAcceptWhenFetched = false;
+                                return;
+                            }
+
+                            showVendorPart( *part );
+
+                            if( m_vendorAcceptWhenFetched )
+                            {
+                                m_vendorAcceptWhenFetched = false;
+
+                                if( AcceptVendorPart() )
+                                    m_acceptHandler();
+                            }
+                        } );
+            } )
+            .detach();
+}
+
+
+void PANEL_SYMBOL_CHOOSER::showVendorPart( const nlohmann::json& aPart )
+{
+    wxString error;
+    m_vendorPreview = SCH_VENDOR_PARTS::SymbolFromPart( aPart, m_vendorNickname, error );
+
+    updateBodyStyleChoice( m_vendorPreview.get() );
+
+    if( m_vendorPreview )
+        m_symbol_preview->DisplayPart( m_vendorPreview.get(), 1, m_selectedBodyStyle );
+    else
+        m_symbol_preview->SetStatusText( error );
+
+    if( m_fp_preview && m_fp_preview->IsInitialized() )
+    {
+        wxString fpid = m_vendorPreview ? m_vendorPreview->GetFootprintField().GetText() : wxString();
+
+        // A vendor footprint is only in the project once the part is kept; a standard one
+        // (passives) is in KiCad's libraries already.
+        if( fpid.IsEmpty() )
+            m_fp_preview->SetStatusText( _( "No footprint specified" ) );
+        else if( fpid.StartsWith( m_vendorNickname + wxS( ":" ) ) )
+            m_fp_preview->SetStatusText( wxString::Format( _( "Footprint %s comes with the part" ), fpid ) );
+        else
+            showFootprint( fpid );
+    }
+
+    if( m_fp_sel_ctrl )
+    {
+        // The part's own footprint; another one can be chosen after placing, as for any symbol
+        m_fp_sel_ctrl->ClearFilters();
+        m_fp_sel_ctrl->SetDefaultFootprint( m_vendorPreview ? m_vendorPreview->GetFootprintField().GetText()
+                                                            : wxString() );
+        m_fp_sel_ctrl->UpdateList();
+        m_fp_sel_ctrl->Disable();
+    }
+
+    if( m_details && m_vendorRow >= 0 )
+    {
+        const nlohmann::json& hit = m_vendorResults[m_vendorRow];
+
+        auto text = []( const nlohmann::json& aObj, const char* aKey ) -> wxString
+        {
+            auto it = aObj.find( aKey );
+            return it != aObj.end() && it->is_string() ? wxString::FromUTF8( it->get<std::string>() ) : wxString();
+        };
+
+        wxString html;
+        html << wxS( "<b>" ) << EscapeHTML( SCH_VENDOR_PARTS::ResultTitle( hit ) ) << wxS( "</b><br>" );
+        html << EscapeHTML( text( aPart, "mpn" ) ) << wxS( " &nbsp; " ) << EscapeHTML( text( aPart, "manufacturer" ) )
+             << wxS( "<br>" );
+        html << EscapeHTML( text( aPart, "description" ) ) << wxS( "<br>" );
+
+        if( !text( aPart, "package" ).IsEmpty() )
+            html << _( "Package:" ) << wxS( " " ) << EscapeHTML( text( aPart, "package" ) ) << wxS( "<br>" );
+
+        if( !text( aPart, "url" ).IsEmpty() )
+        {
+            html << wxS( "<a href=\"" ) << EscapeHTML( text( aPart, "url" ) ) << wxS( "\">" )
+                 << _( "Vendor page" ) << wxS( "</a><br>" );
+        }
+
+        if( m_vendorPreview )
+        {
+            html << wxS( "<br>" )
+                 << wxString::Format( _( "Kept in the project as %s when you place it." ),
+                                      EscapeHTML( m_vendorPreview->GetLibId().Format().wx_str() ) );
+        }
+
+        m_details->SetPage( html );
+    }
+}
+
+
+void PANEL_SYMBOL_CHOOSER::onVendorActivated( wxListEvent& aEvent )
+{
+    if( vendorKey( m_vendorRow ).empty() )
+        return;
+
+    // Still on its way: place it when it lands
+    if( !m_vendorParts.count( vendorKey( m_vendorRow ) ) )
+    {
+        m_vendorAcceptWhenFetched = true;
+        return;
+    }
+
+    if( AcceptVendorPart() )
+        m_acceptHandler();
+}
+
+
+bool PANEL_SYMBOL_CHOOSER::AcceptVendorPart()
+{
+    if( m_vendorRow < 0 )
+        return true;
+
+    if( m_vendorLibId.IsValid() )
+        return true;
+
+    std::string key = vendorKey( m_vendorRow );
+
+    if( key.empty() )
+        return true;
+
+    auto it = m_vendorParts.find( key );
+
+    if( it == m_vendorParts.end() )
+    {
+        // OK before the drawings arrived: fetch them now
+        wxBusyCursor            busy;
+        const nlohmann::json&   hit = m_vendorResults[m_vendorRow];
+        wxString                server = COLLAB_SESSION::ServerUrl();
+        COLLAB_REST::ERROR_INFO error;
+
+        std::optional<nlohmann::json> part =
+                COLLAB_REST::GetPart( server, COLLAB_AUTH::StoredToken( server ),
+                                      wxString::FromUTF8( hit.value( "vendor", std::string() ) ),
+                                      wxString::FromUTF8( hit.value( "vendor_id", std::string() ) ),
+                                      m_vendorNickname, &error );
+
+        if( !part )
+        {
+            DisplayErrorMessage( this, _( "The vendor part could not be fetched." ),
+                                 COLLAB_REST::DescribeError( error ) );
+            return false;
+        }
+
+        it = m_vendorParts.emplace( key, *part ).first;
+    }
+
+    wxString error;
+    LIB_ID   id;
+
+    {
+        wxBusyCursor busy;
+        id = SCH_VENDOR_PARTS::Install( m_frame->Prj(), it->second, m_vendorNickname, error );
+    }
+
+    if( !id.IsValid() )
+    {
+        DisplayErrorMessage( this, _( "The vendor part could not be added to the project." ), error );
+        return false;
+    }
+
+    m_vendorLibId = id;
+    return true;
 }

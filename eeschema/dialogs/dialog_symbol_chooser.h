@@ -85,6 +85,7 @@ public:
     PANEL_SYMBOL_CHOOSER* GetChooserPanel() const { return m_chooserPanel; }
 
     bool TransferDataToWindow() override;
+    bool TransferDataFromWindow() override;
 
 public:
     static std::mutex         g_Mutex;

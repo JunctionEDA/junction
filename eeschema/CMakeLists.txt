@@ -564,6 +564,7 @@ set( EESCHEMA_SRCS
 
     collab/sch_collab_sync.cpp
     collab/sch_collab_tool.cpp
+    collab/sch_vendor_parts.cpp
 
     netlist_exporters/netlist_exporter_allegro.cpp
     netlist_exporters/netlist_exporter_base.cpp

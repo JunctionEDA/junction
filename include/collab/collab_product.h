@@ -40,3 +40,7 @@
  * Display only: never use it for file formats or settings paths.
  */
 #define KICAD_COLLAB_BASE_KICAD       wxS( "10" )
+
+/// Where people read about Junction, see its source and report problems (About dialog, Help menu).
+#define KICAD_COLLAB_PRODUCT_SITE     wxS( "https://junctioneda.com" )
+#define KICAD_COLLAB_PRODUCT_REPO     wxS( "https://github.com/JunctionEDA/junction" )

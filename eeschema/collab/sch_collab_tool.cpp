@@ -477,6 +477,10 @@ void SCH_COLLAB_TOOL::unlinkFromOnline()
 
 int SCH_COLLAB_TOOL::StartSession( const TOOL_EVENT& aEvent )
 {
+    // File > Add Collaborators...: a project already live here only needs an invite link
+    if( sessionActive() )
+        return CopyShareLink( aEvent );
+
     withSignIn(
             [this]( const wxString& aToken )
             {
@@ -1924,7 +1928,7 @@ int SCH_COLLAB_TOOL::OpenCompare( const TOOL_EVENT& aEvent )
     if( m_projectId.IsEmpty() || docId.IsEmpty() )
     {
         m_frame->ShowInfoBarMsg(
-                _( "No collaboration session; start or join one first." ) );
+                _( "This project is not shared yet; use File > Add Collaborators... first." ) );
         return 0;
     }
 
@@ -1952,7 +1956,7 @@ int SCH_COLLAB_TOOL::OpenGithubSync( const TOOL_EVENT& aEvent )
     if( m_projectId.IsEmpty() )
     {
         m_frame->ShowInfoBarMsg(
-                _( "No collaboration session; start or join one first." ) );
+                _( "This project is not shared yet; use File > Add Collaborators... first." ) );
         return 0;
     }
 
@@ -1984,7 +1988,7 @@ int SCH_COLLAB_TOOL::CopyShareLink( const TOOL_EVENT& aEvent )
 
     if( projectId.IsEmpty() )
     {
-        m_frame->ShowInfoBarMsg( _( "No collaboration session; start or join one first." ) );
+        m_frame->ShowInfoBarMsg( _( "This project is not shared yet; use File > Add Collaborators... first." ) );
         return 0;
     }
 

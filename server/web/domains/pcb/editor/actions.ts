@@ -146,7 +146,7 @@ export const HANDLERS: Record<string, ActionHandler> = {
   compareSchematicWithFile: () => openCompare({ pickFile: true }), compareBoardWithFile: () => openCompare({ pickFile: true }),
   // File > Import > Non-KiCad Board File... / Non-KiCad Schematic...: EasyEDA files become a new online project
   openNonKicadBoard: () => importNonKicad("board"), importNonKicadSchematic: () => importNonKicad("schematic"),
-  // File's collaboration block (this fork's SCH_ACTIONS / PCB_ACTIONS::collab*): Start Collaboration Session opens the
+  // File's collaboration block (this fork's SCH_ACTIONS / PCB_ACTIONS::collab*): Add Collaborators opens the
   // share dialog, Join Shared Project the home's join box, Vendor Parts the parts window (web/domains/pcb/parts)
   collabStartSession: (a) => runAction("share", a), collabJoinSession: () => runAction("joinLink"), collabGithub: (a) => runAction("github", a),
   collabVendorParts: () => { if (!runModuleAction("vendorParts")) toast("Vendor parts are not loaded yet"); }, collabLeaveSession: () => navigate("/"), close: () => navigate("/"),

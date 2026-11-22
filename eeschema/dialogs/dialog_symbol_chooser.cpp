@@ -119,6 +119,13 @@ bool DIALOG_SYMBOL_CHOOSER::TransferDataToWindow()
 }
 
 
+bool DIALOG_SYMBOL_CHOOSER::TransferDataFromWindow()
+{
+    // OK with a vendor part selected keeps it in the project first
+    return m_chooserPanel->AcceptVendorPart();
+}
+
+
 LIB_ID DIALOG_SYMBOL_CHOOSER::GetSelectedLibId( int* aUnit, int* aBodyStyle ) const
 {
     return m_chooserPanel->GetSelectedLibId( aUnit, aBodyStyle );

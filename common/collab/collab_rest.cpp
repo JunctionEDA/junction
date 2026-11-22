@@ -330,6 +330,39 @@ std::optional<std::string> COLLAB_REST::DownloadPartModel( const wxString& aServ
 }
 
 
+std::optional<nlohmann::json> COLLAB_REST::SearchParts( const wxString& aServerUrl, const wxString& aToken,
+                                                        const wxString& aQuery, int aLimit, ERROR_INFO* aError )
+{
+    KICAD_CURL_EASY curl;
+    setupRequest( curl,
+                  wxString::Format( wxS( "%s/api/parts/search?vendor=all&limit=%d&q=%s" ), aServerUrl, aLimit,
+                                    wxString::FromUTF8( curl.Escape( aQuery.ToStdString( wxConvUTF8 ) ) ) ),
+                  aToken );
+    curl.SetTimeout( 30 );
+
+    return performJson( curl, aError );
+}
+
+
+std::optional<nlohmann::json> COLLAB_REST::GetPart( const wxString& aServerUrl, const wxString& aToken,
+                                                    const wxString& aVendor, const wxString& aId,
+                                                    const wxString& aLibrary, ERROR_INFO* aError )
+{
+    KICAD_CURL_EASY curl;
+    wxString        url = wxString::Format( wxS( "%s/api/parts/part?vendor=%s&id=%s" ), aServerUrl,
+                                     wxString::FromUTF8( curl.Escape( aVendor.ToStdString( wxConvUTF8 ) ) ),
+                                     wxString::FromUTF8( curl.Escape( aId.ToStdString( wxConvUTF8 ) ) ) );
+
+    if( !aLibrary.IsEmpty() )
+        url << wxS( "&lib=" ) << wxString::FromUTF8( curl.Escape( aLibrary.ToStdString( wxConvUTF8 ) ) );
+
+    setupRequest( curl, url, aToken );
+    curl.SetTimeout( 45 );
+
+    return performJson( curl, aError );
+}
+
+
 static wxString fontFileUrl( KICAD_CURL_EASY& aCurl, const wxString& aServerUrl,
                              const wxString& aProjectId, const wxString& aFamily, bool aBold,
                              bool aItalic )

@@ -615,9 +615,30 @@ void SCH_COMMIT::pushSchEdit( const wxString& aMessage, int aCommitFlags )
         // undo), so take the schematic-level path for a full, cleanup-free rebuild.
         if( aCommitFlags & SKIP_CLEANUP )
         {
+            // Without a change handler the pins whose wires a remote edit connected or cut kept
+            // their old "unconnected" circle (the symbol caches its drawing) until something else
+            // repainted the symbol, such as selecting it.  Repaint what connectivity reports, and
+            // the symbol or sheet that draws a reported pin.
+            KIGFX::SCH_VIEW* schView = frame && frame->GetCanvas() ? frame->GetCanvas()->GetView() : nullptr;
+
+            std::function<void( SCH_ITEM* )> repaint =
+                    [schView]( SCH_ITEM* aChangedItem )
+                    {
+                        schView->Update( aChangedItem, KIGFX::REPAINT );
+
+                        if( aChangedItem->Type() == SCH_PIN_T || aChangedItem->Type() == SCH_SHEET_PIN_T )
+                        {
+                            if( EDA_ITEM* parent = aChangedItem->GetParent() )
+                                schView->Update( parent, KIGFX::REPAINT );
+                        }
+                    };
+
             if( schematic )
-                schematic->RecalculateConnections( this, NO_CLEANUP, m_toolMgr, nullptr, nullptr, nullptr,
-                                                   nullptr, true );
+                schematic->RecalculateConnections( this, NO_CLEANUP, m_toolMgr, nullptr, schView,
+                                                   schView ? &repaint : nullptr, nullptr, true );
+
+            if( schView )
+                frame->GetCanvas()->Refresh();
         }
         else if( frame )
         {

@@ -109,6 +109,11 @@ DIALOG_ABOUT::DIALOG_ABOUT( EDA_BASE_FRAME *aParent, ABOUT_APP_INFO& aAppInfo ) 
     m_staticTextLibVersion->SetLabel( m_info.GetLibVersion() + extraInfo );
 
     SetTitle( wxString::Format( _( "About %s" ), m_titleName ) );
+
+    // Junction: Report Bug opens Junction's issue tracker; KiCad's donation page is not ours
+    // to send people to from here.
+    m_btReportBug->SetToolTip( _( "Report a problem with Junction" ) );
+    m_btDonate->Hide();
     createNotebooks();
 
     SetEvtHandlerEnabled( true );

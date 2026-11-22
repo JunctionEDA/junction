@@ -33,6 +33,7 @@
 #include <wx/filename.h>
 #include <wx/intl.h>
 #include <wx/uri.h>
+#include <wx/time.h>
 #include <wx/utils.h>
 #include <wx/wfstream.h>
 #include <wx/zipstrm.h>

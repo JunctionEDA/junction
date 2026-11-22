@@ -33,8 +33,8 @@ everyone at once, and the owner can restore it, with its history, comments and
 sharing, for 30 days. After that it is removed for good.
 
 **Share a project.** From a project's menu on the web home, from the Online
-Projects dialog (**Share…**), or in either editor: **File → Start Collaboration
-Session…**. Sharing offers:
+Projects dialog (**Share…**), or in either editor: **File → Add Collaborators…** (on a
+project that is already shared it copies an invite link). Sharing offers:
 
 - a **share link** (editor or viewer role) copied to your clipboard, and
 - **direct invites** by GitHub username or email, with typeahead search — like

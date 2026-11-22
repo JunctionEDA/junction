@@ -111,6 +111,20 @@ KICOMMON_API std::optional<std::string> DownloadPartModel( const wxString& aServ
                                                            const wxString& aForm,
                                                            bool* aNoAnswer = nullptr );
 
+/// GET /api/parts/search?q=&vendor=all&limit= -> { query, results: [ { vendor, vendor_id, vendor_name, mpn,
+/// manufacturer, description, package, stock, ... } ], errors: [ { vendor, code, message } ] }: vendor parts
+/// (LCSC, Mouser, DigiKey) matching the words or part number.  Short timeout: someone is typing.
+KICOMMON_API std::optional<nlohmann::json> SearchParts( const wxString& aServerUrl, const wxString& aToken,
+                                                        const wxString& aQuery, int aLimit = 25,
+                                                        ERROR_INFO* aError = nullptr );
+
+/// GET /api/parts/part?vendor=&id=&lib= -> one vendor part with its KiCad drawings: { ..., value, fields,
+/// cad: { lib, reference, symbol: { name, lib_id, sexpr }, footprint: { name, fpid, sexpr } } }, the symbol
+/// and footprint named in library aLibrary (the server's "LCSC" when empty).
+KICOMMON_API std::optional<nlohmann::json> GetPart( const wxString& aServerUrl, const wxString& aToken,
+                                                    const wxString& aVendor, const wxString& aId,
+                                                    const wxString& aLibrary, ERROR_INFO* aError = nullptr );
+
 /// PUT /api/projects/{id}/fonts/file?family=&bold=&italic=&index=&name= with the font file:
 /// keep a font of this computer with the project.  Refused (403, with the reason) when the
 /// font's embedding permission forbids it.
