@@ -355,6 +355,7 @@ async function scan(full: string, branch: string | null): Promise<void> {
     ${fresh.length ? `<div class="row actions" style="margin-top:10px">
       ${fresh.length > 1 ? `<label class="muted" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pickAll"> Select all</label>` : ""}
       <span class="grow muted" id="pickNote">Each project becomes its own online project, linked to its folder.</span>
+      <label class="muted" style="display:flex;gap:6px;align-items:center" title="Unticked, the new projects are public: listed in Explore, anyone can view them, only people you share them with can edit. You can change this later in Share."><input type="checkbox" id="importPrivate"> Private</label>
       <button class="btn primary" id="doImport" disabled>Bring online</button></div>` : ""}
     <div id="imported"></div>
     ${foreignHtml(s)}`;
@@ -386,7 +387,7 @@ async function scan(full: string, branch: string | null): Promise<void> {
   sync();
   if (go) go.onclick = () => busy(go, async () => {
     const picks = chosen();
-    const j = await api<{ projects: Imported[] }>("/api/github/import", { method: "POST", body: { repo: s.repo, branch: s.branch, paths: picks.map((p) => p.path) } });
+    const j = await api<{ projects: Imported[] }>("/api/github/import", { method: "POST", body: { repo: s.repo, branch: s.branch, paths: picks.map((p) => p.path), private: !!$<HTMLInputElement>("#importPrivate")?.checked } });
     const made = j.projects.filter((p) => p.projectId && !p.error);
     // One project with nothing to tell: straight to it.
     if (j.projects.length === 1 && made.length === 1 && !(made[0].notes || []).length) { location.href = `/p/${made[0].projectId}/github`; return; }

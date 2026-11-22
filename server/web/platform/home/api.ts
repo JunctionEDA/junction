@@ -79,7 +79,7 @@ export const listTrash = () => api<{ projects: Trashed[] }>("/api/trash").then((
 export const setStar = (id: string, on: boolean) => api(`/api/projects/${id}/star`, { method: on ? "PUT" : "DELETE" });
 export const transferProject = (id: string, userId: number) => api(`/api/projects/${id}/transfer`, { method: "POST", json: { userId } });
 /** A new project: with Mechanical CAD on an empty one (it opens on its Home tab; PCBs, part studios and assemblies are added there), else a schematic and a board (server/src/http.rs create_blank_project decides by the person's setting). */
-export const createBlank = (name: string) => api<UploadResult>("/api/projects/blank", { method: "POST", json: { name } });
+export const createBlank = (name: string, isPrivate = false) => api<UploadResult>("/api/projects/blank", { method: "POST", json: { name, private: isPrivate } });
 /** A starter template (server/src/templates.rs): a finished KiCad project a new one can begin from. */
 export interface Template {
   id: string; title: string; summary: string; detail: string; level: string; tags: string[];
@@ -92,7 +92,7 @@ export interface Template {
 let templates: Promise<Template[]> | null = null;
 /** The list does not change while the page is open, so it is asked for once. */
 export const listTemplates = () => (templates ||= api<{ templates: Template[] }>("/api/templates").then((j) => j.templates).catch((e) => { templates = null; throw e; }));
-export const createFromTemplate = (req: { template: string; name?: string; guided?: boolean; board?: string }) =>
+export const createFromTemplate = (req: { template: string; name?: string; guided?: boolean; board?: string; private?: boolean }) =>
   api<UploadResult & { template: string }>("/api/projects/from-template", { method: "POST", json: req });
 export const leaveProject = (id: string) => api(`/api/projects/${id}/leave`, { method: "POST" });
 export const cloneProject = (id: string) => api<{ projectId: string; name: string }>(`/api/projects/${id}/clone`, { method: "POST" });
@@ -148,9 +148,11 @@ export async function addProjectFile(projectId: string, path: string, file: Blob
 }
 
 /** POST /api/projects with upload progress (fetch has none): a single .zip goes as `archive`, anything else as loose `file` parts. */
-export function uploadProject(name: string, files: UploadFile[], onProgress: (fraction: number) => void): { promise: Promise<UploadResult>; abort: () => void } {
+export function uploadProject(name: string, files: UploadFile[], onProgress: (fraction: number) => void, isPrivate = false): { promise: Promise<UploadResult>; abort: () => void } {
   const form = new FormData();
   if (name.trim()) form.append("name", name.trim());
+  // new projects are public unless "Private" was ticked (server/src/http.rs create_project)
+  if (isPrivate) form.append("private", "1");
   if (files.length === 1 && /\.zip$/i.test(files[0].path)) form.append("archive", files[0].file, files[0].path);
   else for (const f of files) form.append("file", f.file, f.path);
   const xhr = new XMLHttpRequest();

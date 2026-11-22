@@ -112,6 +112,11 @@ pub struct FromTemplateRequest {
     /// A board to use in place of the template's: the one the visitor routed on the home page.
     #[serde(default)]
     pub board: Option<String>,
+    /// "Private" ticked at creation; new projects are public otherwise.
+    #[serde(default)]
+    pub private: Option<bool>,
+    #[serde(default)]
+    pub public: Option<bool>,
 }
 
 /// The template's files under the new project's file name. A KiCad project names itself in three places:
@@ -183,7 +188,7 @@ pub async fn create(
         _ => t.pcb,
     };
 
-    let project = persist::create_project(&state.pool, user.id, &name).await?;
+    let project = persist::create_project(&state.pool, user.id, &name, persist::public_unless_private(req.private, req.public)).await?;
     let mut docs = Vec::new();
     for (path, content) in renamed(t, &stem, board) {
         let doc = persist::create_document(&state.pool, project.id, &path, doc_type_for(&path)).await?;

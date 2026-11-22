@@ -494,12 +494,20 @@ pub async fn delete_pending_invite(
     Ok(res.rows_affected() > 0)
 }
 
-pub async fn create_project(pool: &PgPool, owner_id: i64, name: &str) -> DbResult<Project> {
+/// Whether a new project is public: it is unless the request says `private: true` (or `public: false`).
+pub fn public_unless_private(private: Option<bool>, public: Option<bool>) -> bool {
+    !(private.unwrap_or(false) || public == Some(false))
+}
+
+/// A new project.  Projects are public (listed in Explore, visitors may only look) unless the creator
+/// ticked "Private"; see `public_unless_private`.
+pub async fn create_project(pool: &PgPool, owner_id: i64, name: &str, public: bool) -> DbResult<Project> {
     sqlx::query_as::<_, Project>(
-        "INSERT INTO projects (owner_id, name) VALUES ($1, $2)\n         RETURNING id, owner_id, name, public, description",
+        "INSERT INTO projects (owner_id, name, public) VALUES ($1, $2, $3)\n         RETURNING id, owner_id, name, public, description",
     )
     .bind(owner_id)
     .bind(name)
+    .bind(public)
     .fetch_one(pool)
     .await
 }
@@ -1361,4 +1369,19 @@ pub async fn docs_with_previews(pool: &PgPool, doc_ids: &[Uuid]) -> DbResult<Vec
     .fetch_all(pool)
     .await?;
     Ok(rows)
+}
+
+#[cfg(test)]
+mod new_project_visibility {
+    use super::public_unless_private;
+
+    #[test]
+    fn public_unless_private_was_ticked() {
+        assert!(public_unless_private(None, None));
+        assert!(public_unless_private(Some(false), None));
+        assert!(public_unless_private(None, Some(true)));
+        assert!(!public_unless_private(Some(true), None));
+        assert!(!public_unless_private(None, Some(false)));
+        assert!(!public_unless_private(Some(true), Some(true)));
+    }
 }

@@ -71,6 +71,8 @@ export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy 
   // A phone has no drag and drop, and iOS cannot pick a folder: one "choose files" button, worded for that.
   const touch = useMedia(PHONE) || !("webkitdirectory" in HTMLInputElement.prototype);
   const [blankName, setBlankName] = useState("");
+  // New projects are public (listed in Explore, visitors can only view) unless this is ticked.
+  const [priv, setPriv] = useState(false);
   const [creating, setCreating] = useState(false);
   const [files, setFiles] = useState<UploadFile[]>(initial || []);
   const [name, setName] = useState("");
@@ -136,13 +138,13 @@ export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy 
   const createEmpty = async () => {
     if (creating || !blankName.trim()) return;
     setCreating(true); setError(null);
-    try { onBlank(await createBlank(blankName.trim())); } catch (e) { setCreating(false); setError(e instanceof Error ? e.message : String(e)); }
+    try { onBlank(await createBlank(blankName.trim(), priv)); } catch (e) { setCreating(false); setError(e instanceof Error ? e.message : String(e)); }
   };
   const go = () => {
     if (mode === "blank") { createEmpty(); return; }
     if (busy || problem || !kept.length) return;
     setError(null); setProgress(0);
-    const up = uploadProject(name, kept, setProgress);
+    const up = uploadProject(name, kept, setProgress, priv);
     abort.current = up.abort;
     up.promise.then((r) => { if (r.missing?.length || r.converted?.notes?.length) { setProgress(null); setLeft(r.missing || []); setDone(r); } else onDone(r); }).catch((e) => { setProgress(null); setError(e instanceof Error ? e.message : String(e)); });
   };
@@ -246,6 +248,10 @@ export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy 
       ) : eda ? <p className="hp-note">The files are converted on the server with KiCad's own importers (the desktop's File &gt; Import Non-KiCad Project), into a KiCad schematic, board and the libraries they use. Nothing on your {touch ? "device" : "computer"} changes.</p>
       : <p className="hp-note">Your files are copied to the server; nothing on your {touch ? "device" : "computer"} changes. You can also publish straight from the desktop app with File &gt; Publish Project Online, or <a href="/github">import a repository from GitHub</a>.</p>}
       </>)}
+      {mode === "blank" || files.length ? (
+        <label className="hp-private"><input type="checkbox" checked={priv} disabled={busy || creating} onChange={(ev) => setPriv(ev.target.checked)} />
+          <span><b>Private</b><small>{priv ? "Only you and the people you share it with can open it." : "Unticked, the project is public: it is listed in Explore and anyone can view it, but only people you share it with can edit. You can change this later in Share."}</small></span></label>
+      ) : null}
       {mode === "upload" && problem ? <p className="hp-note err" role="alert">{problem}</p> : null}
       {error ? <p className="hp-note err" role="alert">{error}</p> : null}
       {busy ? <div className="hp-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((progress || 0) * 100)}><i style={{ width: `${Math.round((progress || 0) * 100)}%` }} /></div> : null}

@@ -192,6 +192,8 @@ pub async fn create_project(
     let mut archive: Option<std::path::PathBuf> = None;
     let mut archive_name: Option<String> = None;
     let mut name: Option<String> = None;
+    // "Private" ticked at creation (a `private` part of "1"/"true"/"on"); else the project is public.
+    let mut private = false;
     // Files that may be another tool's design (EasyEDA, Altium, Eagle, ... by extension, or a .json / .xml / .txt /
     // .zip whose content decides); converted to a KiCad project below when the upload holds no KiCad design.
     let mut easyeda: Vec<(String, std::path::PathBuf)> = Vec::new();
@@ -219,6 +221,9 @@ pub async fn create_project(
                 }
             }
             Some("name") => name = field.text().await.ok(),
+            Some("private") => {
+                private = matches!(field.text().await.unwrap_or_default().trim(), "1" | "true" | "on" | "yes")
+            }
             Some("file") => {
                 let raw = field.file_name().unwrap_or("").to_string();
                 let Some(path) = safe_zip_name(&raw) else {
@@ -431,7 +436,7 @@ pub async fn create_project(
         .unwrap_or_else(|| "untitled".to_string());
     let project_name: String = project_name.chars().take(MAX_NAME_CHARS).collect();
 
-    let project = persist::create_project(&state.pool, user.id, &project_name).await?;
+    let project = persist::create_project(&state.pool, user.id, &project_name, !private).await?;
     let mut docs = Vec::new();
     // Libraries and 3D models the project names as its own and did not bring along.
     let mut lacking = crate::projectlibs::MissingScan::default();
@@ -589,7 +594,8 @@ pub async fn clone_project(
     }
 
     let name = format!("{} (copy)", project.name);
-    let clone = persist::create_project(&state.pool, user.id, &name).await?;
+    // A copy is as public as what it was copied from: a private project's copy stays private.
+    let clone = persist::create_project(&state.pool, user.id, &name, project.public).await?;
 
     if !project.description.is_empty() {
         persist::update_project(&state.pool, clone.id, None, None, Some(&project.description))
@@ -1452,6 +1458,11 @@ pub struct BlankProjectRequest {
     /// as the creator's Mechanical CAD setting says (`blank_template`).
     #[serde(default)]
     pub template: Option<String>,
+    /// "Private" ticked at creation; new projects are public otherwise.
+    #[serde(default)]
+    pub private: Option<bool>,
+    #[serde(default)]
+    pub public: Option<bool>,
 }
 
 /// A name that is safe as the stem of the project's files.
@@ -1541,7 +1552,7 @@ pub async fn create_blank_project(
         "pcb" => pcb_stub_files(&file_stem_for(name)),
         other => return Err(AppError::BadRequest(format!("unknown template: {other}"))),
     };
-    let project = persist::create_project(&state.pool, user.id, name).await?;
+    let project = persist::create_project(&state.pool, user.id, name, persist::public_unless_private(req.private, req.public)).await?;
     let mut docs = Vec::new();
     for (path, content) in files {
         let doc = persist::create_document(&state.pool, project.id, &path, doc_type_for(&path)).await?;

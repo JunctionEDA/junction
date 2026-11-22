@@ -223,6 +223,11 @@ textarea.hp-input { resize: vertical; min-height: 72px; }
 .hp-field { display: block; margin: 0 0 12px; }
 .hp-field > span { display: flex; justify-content: space-between; color: var(--ink-2); font-size: 12px; margin-bottom: 4px; }
 .hp-field small { color: var(--ink-3); font: 10px var(--mono); }
+/* "Private" at creation (UploadDialog): new projects are public unless it is ticked */
+.hp-private { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0 8px; cursor: pointer; }
+.hp-private input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin: 1px 1px 0; }
+.hp-private > span { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.hp-private small { color: var(--ink-3); font-size: 11px; line-height: 1.4; }
 
 .hp-invite-row { display: flex; gap: 8px; align-items: flex-start; }
 .hp-combo { position: relative; flex: 1; min-width: 0; }

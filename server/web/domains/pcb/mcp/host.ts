@@ -948,7 +948,7 @@ async function createProject(req: Request): Promise<Reply> {
   if (!req.canWrite) throw new ToolError("This connection was allowed to read only.");
   if (typeof req.args.name !== "string" || !req.args.name.trim()) throw new ToolError("name is required.");
   // a project with a KiCad project at its root: one schematic sheet and one board (the route's default is an empty project)
-  const r = await post("/api/projects/blank", { name: req.args.name.trim(), template: "pcb" });
+  const r = await post("/api/projects/blank", { name: req.args.name.trim(), template: "pcb", private: req.args.private === true });
   return { result: { project_id: r.projectId, name: r.name || req.args.name.trim(), documents: (r.docs || []).map((d: any) => d.path), url: `${req.args.__site || conn.base}/p/${r.projectId}/edit`,
     note: "An empty project: one schematic sheet and one board. Design it with run_python (sch.build for the schematic, then board.sync, autoplace and route), or edit by edit with apply_changes." } };
 }

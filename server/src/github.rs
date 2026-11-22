@@ -1457,6 +1457,11 @@ pub struct ImportRequest {
     /// Bring a folder online again although a project the caller can open is linked to it.
     #[serde(default)]
     pub duplicate: bool,
+    /// "Private" ticked at creation; new projects are public otherwise.
+    #[serde(default)]
+    pub private: Option<bool>,
+    #[serde(default)]
+    pub public: Option<bool>,
 }
 
 /// Download files of the GitHub side, a few at a time, in the order asked for.
@@ -1481,6 +1486,7 @@ async fn import_one(
     branch: &str,
     subdir: &str,
     name: Option<&str>,
+    public: bool,
 ) -> AppResult<Value> {
     let remote = remote::read(&state.pool, gh, repo, branch, subdir, &[]).await?;
     let head = remote.head.clone().ok_or_else(|| {
@@ -1516,7 +1522,7 @@ async fn import_one(
         .or_else(|| pros.iter().find(|p| Some(**p) == folder).or(pros.first()).map(|p| p.to_string()))
         .unwrap_or_else(|| folder.unwrap_or(&repo.name).to_string());
 
-    let project = persist::create_project(&state.pool, user.id, &name).await?;
+    let project = persist::create_project(&state.pool, user.id, &name, public).await?;
     let mut agreed = Vec::new();
     for (path, content) in paths.iter().zip(&contents) {
         let doc = persist::create_document(&state.pool, project.id, path, doc_type_for(path)).await?;
@@ -1546,6 +1552,7 @@ pub async fn import_project(
 ) -> AppResult<Response> {
     let gh = Gh::for_user(&state, &user).await?;
     let repo = RepoRef::parse(&req.repo)?;
+    let public = persist::public_unless_private(req.private, req.public);
     let branch = match req.branch.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
         Some(b) => clean_branch(b)?,
         None => gh.get(&format!("/repos/{}", repo.slug())).await?["default_branch"]
@@ -1565,7 +1572,7 @@ pub async fn import_project(
                 format!("That folder is already online as \"{name}\". Open that project instead of making a second copy."),
             ));
         }
-        let out = import_one(&state, &user, &gh, &repo, &branch, &subdir, req.name.as_deref()).await?;
+        let out = import_one(&state, &user, &gh, &repo, &branch, &subdir, req.name.as_deref(), public).await?;
         return Ok(Json(out).into_response());
     };
 
@@ -1583,7 +1590,7 @@ pub async fn import_project(
             results.push(json!({ "path": subdir, "projectId": pid, "name": name, "existing": true }));
             continue;
         }
-        match import_one(&state, &user, &gh, &repo, &branch, &subdir, None).await {
+        match import_one(&state, &user, &gh, &repo, &branch, &subdir, None, public).await {
             Ok(v) => results.push(v),
             Err(e) => results.push(json!({ "path": subdir, "error": e.to_string() })),
         }

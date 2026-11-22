@@ -34,7 +34,8 @@
     "input_schema": {
       "type": "object",
       "properties": {
-        "name": { "type": "string", "description": "The project's name, for example \"usb-c-breakout\"." }
+        "name": { "type": "string", "description": "The project's name, for example \"usb-c-breakout\"." },
+        "private": { "type": "boolean", "description": "Keep the project private. New projects are public (listed in Explore; anyone can view, only collaborators edit) unless the person asks for a private one." }
       },
       "required": ["name"],
       "additionalProperties": false
