@@ -49,13 +49,24 @@ const inverseOf = (doc: KDoc, ch: KChange[]): KChange[] => ch.map((c) => { const
  */
 let refreshing = 0;
 export async function refreshOtherRefs(): Promise<void> {
-  const S = (window as unknown as { CollabTools?: { sch?: { state: { otherRefs?: Set<string> } } } }).CollabTools?.sch; if (!S || !E.kdoc || E.kdoc.type !== "sch") return;
-  const mine = ++refreshing, set = new Set<string>();
+  type Unit = { ref: string; lib: string; value: string; unit: number };
+  const S = (window as unknown as { CollabTools?: { sch?: { state: { otherRefs?: Set<string>; otherUnits?: Unit[] } } } }).CollabTools?.sch; if (!S || !E.kdoc || E.kdoc.type !== "sch") return;
+  const mine = ++refreshing, set = new Set<string>(), units: Unit[] = [];
   for (const d of projectDocs().filter((x) => x.docType === "kicad_sch" && x.docId !== appState.docId)) {
-    try { for (const r of usedRefs(await readDoc(d.docId, "kicad_sch"))) set.add(r); } catch (e) { /* unreadable sheet: its references stay unknown */ }
+    try {
+      const doc = await readDoc(d.docId, "kicad_sch");
+      for (const r of usedRefs(doc)) set.add(r);
+      // which unit of which symbol holds each reference: a unit pasted or placed here may join that package
+      for (const it of doc.items.values()) {
+        if (it.kind !== "symbol" || !it.ref || /\?$/.test(it.ref)) continue;
+        const n = it.node as SNode[], kidOf = (k: string) => n.find((c) => Array.isArray(c) && c[0] === k) as SNode[] | undefined;
+        const v = n.find((c) => Array.isArray(c) && c[0] === "property" && c[1] === "Value") as SNode[] | undefined, u = kidOf("unit");
+        units.push({ ref: it.ref, lib: String((kidOf("lib_id") || [])[1] || ""), value: v ? String(v[2]) : "", unit: u ? Number(u[1]) || 1 : 1 });
+      }
+    } catch (e) { /* unreadable sheet: its references stay unknown */ }
     if (mine !== refreshing) return;   // a newer refresh (another sheet opened) supersedes this one
   }
-  S.state.otherRefs = set;
+  S.state.otherRefs = set; S.state.otherUnits = units;
 }
 
 let api: DlgApi | null = null;   // the dialog this module opened last (KDialogs keeps one dialog at a time)

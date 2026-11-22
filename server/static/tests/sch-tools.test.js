@@ -1226,6 +1226,29 @@ test("annotate reset: units keep their packages unless Regroup symbol units is o
   assert.deepStrictEqual(refs({ keep: false, regroup: true }), ["U1", "U1"]);
 });
 
+test("paste (UNIQUE_ANNOTATIONS, ReannotateDuplicates): a cut unit comes back as itself, a copy takes the next package", () => {
+  const { d, c } = fresh();
+  d.lib.set("T:DUAL", K.parse(`(symbol "T:DUAL" (pin_names (offset 0)) (exclude_from_sim no) (in_bom yes) (on_board yes) (property "Reference" "U" (at 0 0 0) (effects (font (size 1.27 1.27)))) (property "Value" "DUAL" (at 0 0 0) (effects (font (size 1.27 1.27))))
+    (symbol "DUAL_1_1" (pin input line (at 0 0 0) (length 2.54) (name "A" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27))))))
+    (symbol "DUAL_2_1" (pin input line (at 0 0 0) (length 2.54) (name "B" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27)))))))`));
+  const withUnit = (it, u) => { kid(it.node, "unit")[1] = u; return it; };
+  const refOf = (n) => str(kids(n, "property").find((p) => str(p[1]) === "Reference")[2]);
+  const a = withUnit(place(c, "T:DUAL", [20.32, 76.2], "U1"), 1), b = withUnit(place(c, "T:DUAL", [40.64, 76.2], "U1"), 2);
+  const text = sch.clipboardText(d, [b]);
+  const paste = () => { const { ids } = sch._.pasteChanges(d, sch.parseClipboard(text), [100, 100], { pasteMode: "unique" }); const n = d.items.get(ids[0]).node; return refOf(n) + ":" + kid(n, "unit")[1]; };
+  // copy: U1B is still there, so the copy is unit B of the next package
+  assert.strictEqual(paste(), "U2:2", "a copy of U1B is U2B");
+  // cut: U1B is gone; pasting it back keeps U1B (U1A holds only unit A of the same symbol and value)
+  for (const it of [...d.items.values()]) if (it.kind === "symbol" && it.id !== a.id) d.items.delete(it.id);
+  assert.strictEqual(paste(), "U1:2", "a cut and pasted U1B is U1B again");
+  // a one-unit symbol keeps its number when free, else the next free one after it
+  const r5 = place(c, "Device:R", [20.32, 120], "R5"); const rText = sch.clipboardText(d, [r5]);
+  const pasteR = () => { const { ids } = sch._.pasteChanges(d, sch.parseClipboard(rText), [100, 130], { pasteMode: "unique" }); return refOf(d.items.get(ids[0]).node); };
+  assert.strictEqual(pasteR(), "R6", "a copy of R5 is R6");
+  d.items.delete(r5.id); for (const it of [...d.items.values()]) if (it.ref === "R6") d.items.delete(it.id);
+  assert.strictEqual(pasteR(), "R5", "a cut R5 stays R5");
+});
+
 test("ERC on the embedded sheet: unconnected pins, dangling wires, then the fixes and the other findings", () => {
   const { d, c } = fresh();
   assert.ok(sch.runAction("runERC", c));

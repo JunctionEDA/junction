@@ -110,6 +110,58 @@ function resetAnnotation(nodes: SNode[], used: Set<string>): void {
     setReference(s.n, s.prefix + n);
   }
 }
+/** How many units the sheet's library symbol for a placed symbol has. */
+function unitCountOf(doc: KDoc, node: SNode): number {
+  const lib = K.resolveLib(doc, str((kid(node, "lib_id") || [])[1])); let n = 1;
+  if (lib) for (const sub of kids(lib, "symbol")) { const m = str(sub[1]).match(/_(\d+)_(\d+)$/); if (m) n = Math.max(n, +m[1]); }
+  return n;
+}
+const valueOf = (node: SNode): string => { const p = kids(node, "property").find((q) => str(q[1]) === "Value"); return p ? str(p[2]) : ""; };
+const unitOf = (node: SNode): number => { const u = kid(node, "unit"); return u ? +u[1] || 1 : 1; };
+/**
+ * SCH_EDITOR_CONTROL::Paste in UNIQUE_ANNOTATIONS mode: SCH_REFERENCE_LIST::ReannotateDuplicates over the pasted
+ * symbols against the references already in the schematic.  Every annotated pasted symbol is reannotated starting
+ * at its own number (aStartAtCurrent), with the pasted units of one reference locked together:
+ *  - a one-unit symbol keeps its number when nothing holds it, else takes the next number that is free;
+ *  - a multi-unit package keeps its number when the symbols holding that number are the same library symbol with
+ *    the same value and none of them is one of the pasted units (REFDES_TRACKER::areUnitsAvailable), so a cut and
+ *    pasted U1B is U1B again, while a copy of it (U1B still there) becomes the next free package, U2B;
+ *  - an unannotated "U?" unit joins the first package that leaves its unit free, else a new number.
+ * The project's other sheets count with their units (S.otherUnits); a reference known only by name is held outright.
+ */
+export function annotatePastedUnique(doc: KDoc, nodes: SNode[]): void {
+  interface Holder { lib: string; value: string; unit: number }
+  const held = new Map<string, Holder[]>();        // full reference ("U1") -> who holds it
+  const hold = (ref: string, h: Holder) => { const l = held.get(ref); if (l) l.push(h); else held.set(ref, [h]); };
+  // the other sheets: their units when known (a package may span sheets), else the bare reference, held outright
+  const known = new Set<string>();
+  for (const u of S.otherUnits || []) { known.add(u.ref); hold(u.ref, { lib: u.lib, value: u.value, unit: u.unit }); }
+  for (const r of S.otherRefs || []) if (!known.has(r)) hold(r, { lib: "", value: "", unit: -1 });
+  for (const it of doc.items.values()) {
+    if (it.kind !== "symbol") continue;
+    const p = refField(it.node); const ref = p ? str(p[2]) : ""; if (!ref || /\?$/.test(ref)) continue;
+    hold(ref, { lib: str((kid(it.node, "lib_id") || [])[1]), value: valueOf(it.node), unit: unitOf(it.node) });
+  }
+  // SortByReferenceOnly, then the pasted units of one reference annotated as one locked package
+  const syms = nodes.filter((n) => n[0] === "symbol" && refField(n)).map((n) => ({ n, ref: str(refField(n)![2]), lib: str((kid(n, "lib_id") || [])[1]), value: valueOf(n), unit: unitOf(n), multi: unitCountOf(doc, n) > 1 }));
+  syms.sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
+  const done = new Set<typeof syms[number]>();
+  for (const s of syms) {
+    if (done.has(s)) continue;
+    const prefix = refPrefix(s.ref), current = /\?$/.test(s.ref) ? -1 : refNumber(s.ref);
+    // the locked package: the pasted units that carry this same reference, library symbol and value
+    const pkg = current >= 0 && s.multi ? syms.filter((o) => !done.has(o) && o.ref === s.ref && o.lib === s.lib && o.value === s.value) : [s];
+    const units = new Set(pkg.map((o) => o.unit));
+    const fits = (n: number): boolean => {
+      const hs = held.get(prefix + n);
+      if (!hs || !hs.length) return true;
+      return s.multi && hs.every((h) => h.unit >= 0 && h.lib === s.lib && h.value === s.value && !units.has(h.unit));
+    };
+    let n = Math.max(1, current);
+    while (!fits(n)) n++;
+    for (const o of pkg) { done.add(o); setReference(o.n, prefix + n); hold(prefix + n, { lib: o.lib, value: o.value, unit: o.unit }); }
+  }
+}
 // Junctions the new items need: every connection point of every new item (items must be in the doc).
 export function junctionsForNew(doc: KDoc, items: KItem[]) {
   const out: KChange[] = [], seen = new Set<string>();
@@ -140,10 +192,10 @@ export function pasteChanges(doc: KDoc, parsed: Clip, at: Pt, opts?: PasteOpts |
   // SCH_EDITOR_CONTROL::Paste: UNIQUE_ANNOTATIONS when annotation is automatic (the default), else REMOVE_ANNOTATIONS
   const mode = (opts && (opts.pasteMode || (opts.keepAnnotations ? "keep" : null))) || (S.annotateAuto ? "unique" : "remove");
   if (mode === "reset") resetAnnotation(fresh, used);
+  else if (mode === "unique") annotatePastedUnique(doc, fresh);
   for (const n of fresh) {
-    if (n[0] !== "symbol" || mode === "keep" || mode === "reset") continue;
+    if (n[0] !== "symbol" || mode === "keep" || mode === "reset" || mode === "unique") continue;
     if (mode === "remove") { const p = refField(n); if (p) setReference(n, unannotated(str(p[2]))); continue; }
-    if (mode === "unique") { const auto = S.annotateAuto; S.annotateAuto = true; try { assignPastedRef(doc, n, used); } finally { S.annotateAuto = auto; } continue; }
     assignPastedRef(doc, n, used);
   }
   const lead = fresh.find((n) => n[0] === "symbol") || fresh[0], a = anchorOf(lead[0] as string, lead);

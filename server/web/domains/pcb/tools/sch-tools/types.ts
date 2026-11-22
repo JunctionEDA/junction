@@ -142,7 +142,7 @@ export type SchState = {
   dragMode: string; mouseDragMode: string; lineMode: string; posture: boolean;
   /** eeschema input.esc_clears_net_highlight (default on) */ escClearsNetHighlight?: boolean;
   autoStartWires: boolean; autoPress?: { mm: Pt; client: Pt; mods: { shiftKey?: boolean; ctrlKey?: boolean; altKey?: boolean; metaKey?: boolean } } | null; autoCursor?: string | null;
-  dragEndedAt?: number; wireEndedAt?: number; forceFollow?: boolean; internalSwitch?: boolean; multi?: Set<string> | null; otherRefs?: Iterable<string> | null;
+  dragEndedAt?: number; wireEndedAt?: number; forceFollow?: boolean; internalSwitch?: boolean; multi?: Set<string> | null; otherRefs?: Iterable<string> | null; /** the other sheets' annotated units (reference, library symbol, value, unit), so a unit can join a package another sheet holds */ otherUnits?: { ref: string; lib: string; value: string; unit: number }[] | null;
   showDangling?: boolean; docGen: number;
   /** the lines selected by one end only (STARTPOINT / ENDPOINT): id -> that end's index, 0 start, 1 end */
   selEnds?: Map<string, number> | null;

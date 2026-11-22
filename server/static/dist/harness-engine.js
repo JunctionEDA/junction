@@ -113861,6 +113861,65 @@ ${body}
       setReference(s2.n, s2.prefix + n2);
     }
   }
+  function unitCountOf(doc2, node) {
+    const lib = K11.resolveLib(doc2, str9((kid8(node, "lib_id") || [])[1]));
+    let n2 = 1;
+    if (lib) for (const sub3 of kids7(lib, "symbol")) {
+      const m = str9(sub3[1]).match(/_(\d+)_(\d+)$/);
+      if (m) n2 = Math.max(n2, +m[1]);
+    }
+    return n2;
+  }
+  var valueOf = (node) => {
+    const p = kids7(node, "property").find((q4) => str9(q4[1]) === "Value");
+    return p ? str9(p[2]) : "";
+  };
+  var unitOf = (node) => {
+    const u = kid8(node, "unit");
+    return u ? +u[1] || 1 : 1;
+  };
+  function annotatePastedUnique(doc2, nodes) {
+    const held = /* @__PURE__ */ new Map();
+    const hold = (ref, h3) => {
+      const l = held.get(ref);
+      if (l) l.push(h3);
+      else held.set(ref, [h3]);
+    };
+    const known = /* @__PURE__ */ new Set();
+    for (const u of S3.otherUnits || []) {
+      known.add(u.ref);
+      hold(u.ref, { lib: u.lib, value: u.value, unit: u.unit });
+    }
+    for (const r of S3.otherRefs || []) if (!known.has(r)) hold(r, { lib: "", value: "", unit: -1 });
+    for (const it of doc2.items.values()) {
+      if (it.kind !== "symbol") continue;
+      const p = refField(it.node);
+      const ref = p ? str9(p[2]) : "";
+      if (!ref || /\?$/.test(ref)) continue;
+      hold(ref, { lib: str9((kid8(it.node, "lib_id") || [])[1]), value: valueOf(it.node), unit: unitOf(it.node) });
+    }
+    const syms = nodes.filter((n2) => n2[0] === "symbol" && refField(n2)).map((n2) => ({ n: n2, ref: str9(refField(n2)[2]), lib: str9((kid8(n2, "lib_id") || [])[1]), value: valueOf(n2), unit: unitOf(n2), multi: unitCountOf(doc2, n2) > 1 }));
+    syms.sort((a, b) => a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0);
+    const done = /* @__PURE__ */ new Set();
+    for (const s2 of syms) {
+      if (done.has(s2)) continue;
+      const prefix = refPrefix2(s2.ref), current = /\?$/.test(s2.ref) ? -1 : refNumber(s2.ref);
+      const pkg = current >= 0 && s2.multi ? syms.filter((o) => !done.has(o) && o.ref === s2.ref && o.lib === s2.lib && o.value === s2.value) : [s2];
+      const units = new Set(pkg.map((o) => o.unit));
+      const fits = (n22) => {
+        const hs = held.get(prefix + n22);
+        if (!hs || !hs.length) return true;
+        return s2.multi && hs.every((h3) => h3.unit >= 0 && h3.lib === s2.lib && h3.value === s2.value && !units.has(h3.unit));
+      };
+      let n2 = Math.max(1, current);
+      while (!fits(n2)) n2++;
+      for (const o of pkg) {
+        done.add(o);
+        setReference(o.n, prefix + n2);
+        hold(prefix + n2, { lib: o.lib, value: o.value, unit: o.unit });
+      }
+    }
+  }
   function junctionsForNew(doc2, items) {
     const out2 = [], seen = /* @__PURE__ */ new Set();
     for (const it of items) {
@@ -113893,21 +113952,12 @@ ${body}
     const used = usedReferences(doc2);
     const mode2 = opts2 && (opts2.pasteMode || (opts2.keepAnnotations ? "keep" : null)) || (S3.annotateAuto ? "unique" : "remove");
     if (mode2 === "reset") resetAnnotation(fresh, used);
+    else if (mode2 === "unique") annotatePastedUnique(doc2, fresh);
     for (const n2 of fresh) {
-      if (n2[0] !== "symbol" || mode2 === "keep" || mode2 === "reset") continue;
+      if (n2[0] !== "symbol" || mode2 === "keep" || mode2 === "reset" || mode2 === "unique") continue;
       if (mode2 === "remove") {
         const p = refField(n2);
         if (p) setReference(n2, unannotated(str9(p[2])));
-        continue;
-      }
-      if (mode2 === "unique") {
-        const auto = S3.annotateAuto;
-        S3.annotateAuto = true;
-        try {
-          assignPastedRef(doc2, n2, used);
-        } finally {
-          S3.annotateAuto = auto;
-        }
         continue;
       }
       assignPastedRef(doc2, n2, used);
@@ -116326,7 +116376,7 @@ Link '${target2}' to this file?`)) return null;
   };
   var canvasCurves = () => globalThis.KiCadCanvas;
   var vsubA = (a, b) => [a[0] - b[0], a[1] - b[1]];
-  var unitOf = (v) => {
+  var unitOf2 = (v) => {
     const l = Math.hypot(v[0], v[1]);
     return l === 0 ? null : [v[0] / l, v[1] / l];
   };
@@ -116340,13 +116390,13 @@ Link '${target2}' to this file?`)) return null;
   function tangentAtEndpoint(sh, p) {
     const atStart = p[0] === sh.start[0] && p[1] === sh.start[1];
     if (!atStart && (p[0] !== sh.end[0] || p[1] !== sh.end[1])) return null;
-    if (sh.t === "seg") return unitOf(atStart ? vsubA(sh.start, sh.end) : vsubA(sh.end, sh.start));
+    if (sh.t === "seg") return unitOf2(atStart ? vsubA(sh.start, sh.end) : vsubA(sh.end, sh.start));
     if (sh.t !== "arc") return null;
     const turn = crossZ(sh.mid[0] - sh.start[0], sh.mid[1] - sh.start[1], sh.end[0] - sh.mid[0], sh.end[1] - sh.mid[1]);
     if (turn === 0) return null;
     let t = perp(vsubA(p, sh.center));
     if (turn > 0 === atStart) t = [-t[0], -t[1]];
-    return unitOf(t);
+    return unitOf2(t);
   }
   function arcTangentSeedNear(sh, near2) {
     const end = nearestEnd(sh.start, sh.end, near2);
@@ -116367,7 +116417,7 @@ Link '${target2}' to this file?`)) return null;
       const end = nearestEnd(vs[0], vs[n2 - 1], p, tol);
       if (end) {
         const inner = end === vs[0] ? vs[1] : vs[n2 - 2];
-        const d = unitOf(vsubA(end, inner));
+        const d = unitOf2(vsubA(end, inner));
         return d ? { start: end.slice(), dir: d, axis: false } : null;
       }
     }
@@ -116380,7 +116430,7 @@ Link '${target2}' to this file?`)) return null;
       }
     }
     if (!best) return null;
-    const ax = unitOf(vsubA(best.b, best.a));
+    const ax = unitOf2(vsubA(best.b, best.a));
     return ax ? { start: best.q, dir: ax, axis: true } : null;
   }
   function arcTangentSeedAt(sh, p, tol, geo = canvasCurves()) {
@@ -116397,7 +116447,7 @@ Link '${target2}' to this file?`)) return null;
         const atStart = seed.start[0] === sh.start[0] && seed.start[1] === sh.start[1];
         const end = atStart ? sh.start : sh.end, others = atStart ? [sh.c1, sh.c2, sh.end] : [sh.c2, sh.c1, sh.start];
         for (const c of others) {
-          const d = unitOf(vsubA(end, c));
+          const d = unitOf2(vsubA(end, c));
           if (d) {
             seed.dir = d;
             break;
@@ -116417,7 +116467,7 @@ Link '${target2}' to this file?`)) return null;
       const c = sh.center, ang = Math.atan2(p[1] - c[1], p[0] - c[0]), r = a.r * NM;
       const q4 = [kiRound(c[0] + r * Math.cos(ang)), kiRound(c[1] + r * Math.sin(ang))];
       if (!arcContainsAngle(a, ang) || Math.hypot(q4[0] - p[0], q4[1] - p[1]) > tol) return null;
-      const ax = unitOf(perp(vsubA(q4, c)));
+      const ax = unitOf2(perp(vsubA(q4, c)));
       return ax ? { start: q4, dir: ax, axis: true } : null;
     }
     if (sh.t === "poly") return polylineSeedAt(sh.pts, true, p, tol);
@@ -118226,11 +118276,11 @@ Link '${target2}' to this file?`)) return null;
     }
     refs.sort((a, b) => a.prefix.localeCompare(b.prefix) || (order === "x" ? a.x - b.x || a.y - b.y : a.y - b.y || a.x - b.x) || (a.item.id < b.item.id ? -1 : 1));
     const used = /* @__PURE__ */ new Map();
-    const valueOf = (node) => {
+    const valueOf2 = (node) => {
       const p = kids7(node, "property").find((q4) => str9(q4[1]) === "Value");
       return p ? str9(p[2]) : "";
     };
-    const holder = (r) => ({ lib: symbolLibId(r.item.node), value: valueOf(r.item.node), unit: r.unit });
+    const holder = (r) => ({ lib: symbolLibId(r.item.node), value: valueOf2(r.item.node), unit: r.unit });
     const put4 = (prefix, n2, h3) => {
       if (!used.has(prefix)) used.set(prefix, /* @__PURE__ */ new Map());
       const m = used.get(prefix);

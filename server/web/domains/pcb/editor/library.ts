@@ -99,7 +99,10 @@ function instanceHome(doc: KDoc, h: SchHelpers): { project: string; path: string
 function carrySymbol(s: SymbolSession, sameReference: boolean): void {
   const { ctx, doc, sch, h } = schReady();
   const at = cursorMm();
-  const used: (string | core.RefHolder)[] = [...((sch.state as { otherRefs?: Set<string> }).otherRefs || [])];   // the other sheets' references are taken too
+  // the other sheets' references are taken too: by their units when known, so a unit can join a package held there
+  const other = sch.state as { otherRefs?: Set<string>; otherUnits?: core.RefHolder[] };
+  const knownElsewhere = new Set((other.otherUnits || []).map((u) => u.ref));
+  const used: (string | core.RefHolder)[] = [...(other.otherUnits || []), ...[...(other.otherRefs || [])].filter((r) => !knownElsewhere.has(r))];
   const valueOf = (node: SNode): string => { const p = (node as SNode[]).find((c) => Array.isArray(c) && c[0] === "property" && c[1] === "Value"); return p ? String(p[2]) : ""; };
   const kidAtom = (node: SNode, key: string): string => { const c = (node as SNode[]).find((x) => Array.isArray(x) && x[0] === key) as SNode[] | undefined; return c ? String(c[1]) : ""; };
   for (const it of doc.items.values()) if (it.kind === "symbol" && it.ref) used.push({ ref: it.ref, lib: kidAtom(it.node, "lib_id"), value: valueOf(it.node), unit: Number(kidAtom(it.node, "unit")) || 1 });
