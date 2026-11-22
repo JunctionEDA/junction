@@ -23,6 +23,7 @@ pub mod easyeda;
 pub mod standard;
 pub mod step_fit;
 pub mod tidy;
+pub mod passive;
 pub mod transistor;
 pub mod value;
 pub mod vendors;

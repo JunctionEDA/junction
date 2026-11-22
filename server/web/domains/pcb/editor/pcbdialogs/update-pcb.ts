@@ -132,7 +132,10 @@ export async function openUpdatePcb(ctx: ToolCtx): Promise<void> {
     busy = true;
     try {
       const have = boardFootprintIds(doc);
-      await fetchFootprints(Array.from(new Set(netlist.components.map((c) => c.footprint).filter((f) => f && !have.has(f)))));
+      const wanted = Array.from(new Set(netlist.components.map((c) => c.footprint).filter((f) => f && !have.has(f))));
+      const toLoad = wanted.filter((f) => !libCache.has(f)).length;
+      if (toLoad) report.set([{ severity: "info", text: `Loading ${toLoad} footprint${toLoad === 1 ? "" : "s"} from the libraries…`, busy: true }]);
+      await fetchFootprints(wanted);
       // planned against a copy of nothing: planUpdate reads the document and returns new nodes
       plan = NL().planUpdate(doc, netlist, options());
       report.set(plan.report);
@@ -151,7 +154,7 @@ export async function openUpdatePcb(ctx: ToolCtx): Promise<void> {
       const syncDb = (): void => { if (!tg.get()) { db.set(false); remembered.applyDesignBlockLayouts = false; } db.input.disabled = !!E.viewOnly || !tg.get(); db.el.classList.toggle("disabled", db.input.disabled); };
       tg.input.addEventListener("change", syncDb); syncDb();
       body.append(groups[0], h("div", { class: "pd-cols2" }, groups[1], groups[2]), report.el);
-      report.set([{ severity: "info", text: "Reading the schematic…" }]);
+      report.set([{ severity: "info", text: "Reading the schematic…", busy: true }]);
     },
     ok() {
       if (!plan || E.viewOnly) return false;

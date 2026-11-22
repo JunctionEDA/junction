@@ -78080,7 +78080,7 @@ function reportPanel(height, opts2) {
     for (const l of lines) {
       const key3 = l.severity === "error" ? "Errors" : l.severity === "warning" ? "Warnings" : l.severity === "action" ? "Actions" : "Infos";
       if (!filters2.All.get() && !filters2[key3].get()) continue;
-      list.append(h2("div", { class: "ln " + l.severity }, l.text));
+      list.append(l.busy ? h2("div", { class: "ln busy " + l.severity }, h2("span", { class: "pd-spin" }), l.text) : h2("div", { class: "ln " + l.severity }, l.text));
     }
     if (!list.childElementCount) list.append(h2("div", { class: "ln info" }, lines.length ? "" : opts2 && opts2.empty !== void 0 ? opts2.empty : "No changes to be made."));
     const count2 = (s2) => lines.filter((l) => l.severity === s2).length;
@@ -78195,6 +78195,9 @@ var init_ui = __esm({
 .pd-report .ln.warning { color: var(--warn); }
 .pd-report .ln.action { color: var(--ink); }
 .pd-report .ln.info { color: var(--ink-2); }
+.pd-report .ln.busy { display: flex; align-items: center; }
+.pd-spin { flex: none; display: inline-block; width: 10px; height: 10px; margin: 0 7px 0 1px; border: 2px solid color-mix(in srgb, var(--ink) 25%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: pd-spin .7s linear infinite; }
+@keyframes pd-spin { to { transform: rotate(360deg); } }
 .pd-sev { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; }
 .pd-sev.error { background: var(--err); border-radius: 50%; }
 .pd-sev.warning { width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid var(--warn); }

@@ -403,11 +403,22 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
       fetchItem(kind, it, ctx).then((got) => {
         if (closed || token !== previewToken) return;
         shown = { row, got }; mainMsg.textContent = "";
+        if (isSym) noteUnits(it, got);
         try {
           if (isSym) { fillBodyStyles(got); renderSymbolPreview(mainCanvas, got.libId || it.id, got.symbol || "", row.unit || 1, currentBodyStyle()); renderDetails(it, row.unit, got); showDefaultFootprint(got, token); }
           else renderFootprintPreview(mainCanvas, got.fpid || it.id, got.footprint || "");
         } catch (e) { clearPreview(mainCanvas, kind); mainMsg.textContent = "Cannot draw this " + kind + ": " + ((e as Error).message || e); }
       }, (e: Error) => { if (closed || token !== previewToken) return; clearPreview(mainCanvas, kind); mainMsg.textContent = e.message || String(e); });
+    }
+    /** A vendor (or other source) item tells its unit count only once its symbol is fetched: the item learns it, so
+     *  "Place all units" turns on and the tree offers the units, as for a library symbol. */
+    function noteUnits(it: LibItem, got: FetchedItem): number {
+      let n = it.units || 1;
+      try { if (got && got.symbol) n = Math.max(n, symbolInfo(got.symbol).units || 1); } catch { /* keeps what the item said */ }
+      if (n > (it.units || 1)) { it.units = n; queueRefresh(); }
+      const row = selectedRow();
+      if (unitsBox && row && row.item === it) { const multi = n > 1; unitsBox.disabled = !multi; unitsBox.parentElement!.classList.toggle("off", !multi); }
+      return n;
     }
     // PANEL_SYMBOL_CHOOSER::populateBodyStyleChoice
     function fillBodyStyles(got: FetchedItem | null): void {
@@ -535,7 +546,8 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
       const it = row.item;
       if (opts.history) rememberRecent(kind, it);
       const finish = (got: FetchedItem) => close({ kind, item: it, libId: got.libId || (isSym ? it.id : undefined), fpid: got.fpid || (isSym ? undefined : it.id), symbol: got.symbol, footprint: got.footprint,
-        fields: got.fields, unit: row.unit || 1, bodyStyle: isSym ? currentBodyStyle() : undefined, keep: !!(keepBox && keepBox.checked), allUnits: !!(unitsBox && unitsBox.checked && !unitsBox.disabled) });
+        fields: got.fields, unit: row.unit || 1, bodyStyle: isSym ? currentBodyStyle() : undefined, keep: !!(keepBox && keepBox.checked),
+        allUnits: !!(unitsBox && unitsBox.checked && isSym && noteUnits(it, got) > 1) });
       if (shown && shown.row.key === row.key) { finish(shown.got); return; }
       okBtn.disabled = true; status.textContent = "Loading " + it.name + "…";
       fetchItem(kind, it, ctx).then((got) => { if (!closed) finish(got); }, (e: Error) => { if (closed) return; okBtn.disabled = false; status.textContent = e.message || String(e); });

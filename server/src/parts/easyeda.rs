@@ -48,6 +48,8 @@ pub struct SymbolOut {
     pub tidied: bool,
     /// The drawing was replaced by KiCad's transistor symbol of this kind ([`super::transistor`]).
     pub transistor: Option<super::transistor::Kind>,
+    /// The drawing was replaced by KiCad's `Device` passive symbol of this kind ([`super::passive`]).
+    pub passive: Option<super::passive::Kind>,
 }
 
 #[derive(Debug, Clone)]
@@ -772,7 +774,18 @@ fn convert_symbol(name: &str, prefix: &str, units: &[&Value], tidy: bool, hint: 
             transistor = Some(t.kind);
         }
     }
+    let mut passive = None;
     if tidy && n_units == 1 && transistor.is_none() {
+        // a resistor, capacitor, inductor, diode, LED or crystal: KiCad's own Device symbol
+        if let Some(p) = super::passive::redraw(&stats.pins, &stats.tris, prefix, hint) {
+            body = format!("\t\t(symbol {}\n{}\t\t)\n\t\t(symbol {}\n{}\t\t)\n", q(&format!("{name}_0_1")), p.art, q(&format!("{name}_1_1")), p.pins);
+            bbox = BBox::empty();
+            bbox.add(p.bbox[0], p.bbox[1]);
+            bbox.add(p.bbox[2], p.bbox[3]);
+            passive = Some(p.kind);
+        }
+    }
+    if tidy && n_units == 1 && transistor.is_none() && passive.is_none() {
         if let Some(t) = super::tidy::arrange(&stats.pins, &stats.art, prefix) {
             body = format!("\t\t(symbol {}\n{}\t\t)\n", q(&format!("{name}_1_1")), t.unit);
             bbox = BBox::empty();
@@ -781,10 +794,11 @@ fn convert_symbol(name: &str, prefix: &str, units: &[&Value], tidy: bool, hint: 
             tidied = true;
         }
     }
-    let is_q = transistor.is_some();
+    let is_q = transistor.is_some() || passive.is_some();
     Some(SymbolOut {
         tidied,
         transistor,
+        passive,
         name: name.to_string(),
         body,
         units: n_units,
@@ -1342,7 +1356,11 @@ pub fn symbol_sexpr(sym: &SymbolOut, reference: &str, value: &str, footprint: &s
     if sym.hide_pin_numbers {
         o.push_str("\t\t(pin_numbers (hide yes))\n");
     }
-    o.push_str(&format!("\t\t(pin_names (offset {}){})\n", if sym.transistor.is_some() { "0" } else { "1.016" }, if sym.hide_pin_names { " (hide yes)" } else { "" }));
+    if let Some(k) = sym.passive {
+        o.push_str(&format!("\t\t{}\n", super::passive::pin_names(k)));
+    } else {
+        o.push_str(&format!("\t\t(pin_names (offset {}){})\n", if sym.transistor.is_some() { "0" } else { "1.016" }, if sym.hide_pin_names { " (hide yes)" } else { "" }));
+    }
     o.push_str("\t\t(exclude_from_sim no)\n\t\t(in_bom yes)\n\t\t(on_board yes)\n");
     let prop = |name: &str, val: &str, y: f64, hide: bool| {
         format!(
@@ -1355,7 +1373,13 @@ pub fn symbol_sexpr(sym: &SymbolOut, reference: &str, value: &str, footprint: &s
     };
     // 50 mil grid, clear of the body
     let snap = |v: f64| (v / 1.27).round() * 1.27;
-    if sym.transistor.is_some() {
+    if let Some(k) = sym.passive {
+        // where KiCad's Device symbol has them
+        for ((at, justify), (key, val)) in super::passive::field_at(k).into_iter().zip([("Reference", reference), ("Value", value)]) {
+            let j = if justify.is_empty() { String::new() } else { format!(" {justify}") };
+            o.push_str(&format!("\t\t(property {} {} (at {at}) (effects (font (size 1.27 1.27)){j}))\n", q(key), q(val)));
+        }
+    } else if sym.transistor.is_some() {
         // beside the symbol, as KiCad's Device:Q_* have them
         for (k, v, y) in [("Reference", reference, 1.27), ("Value", value, -1.27)] {
             o.push_str(&format!("\t\t(property {} {} (at 5.08 {} 0) (effects (font (size 1.27 1.27)) (justify left)))\n", q(k), q(v), fnum(y)));
@@ -1570,9 +1594,17 @@ mod fixture_tests {
         let s = c.symbol.as_ref().unwrap();
         assert_eq!((s.units, s.pins), (1, 2));
         assert!(s.hide_pin_names, "a resistor's pin names are hidden");
-        // two pins 40 units (10.16 mm) apart, facing each other, on the 1.27 mm grid
-        assert!(sym.contains("(pin passive line (at 5.08 0 180) (length 2.54) (name \"2\""), "{sym}");
-        assert!(sym.contains("(pin passive line (at -5.08 0 0) (length 2.54) (name \"1\""), "{sym}");
+        // redrawn as KiCad's Device:R, the vendor's pin numbers on its pins
+        assert_eq!(s.passive, Some(super::super::passive::Kind::Resistor));
+        assert!(sym.contains("(pin passive line (at 0 3.81 270) (length 1.27) (name \"\" (effects (font (size 1.27 1.27)))) (number \"1\""), "{sym}");
+        assert!(sym.contains("(pin passive line (at 0 -3.81 90) (length 1.27) (name \"\" (effects (font (size 1.27 1.27)))) (number \"2\""), "{sym}");
+        assert!(sym.contains("(rectangle (start -1.016 -2.54) (end 1.016 2.54)"), "{sym}");
+        assert!(sym.contains("(property \"Reference\" \"R\" (at 2.032 0 90)"), "{sym}");
+        // the vendor's own drawing when redrawing is off: two pins 40 units (10.16 mm) apart, on the 1.27 mm grid
+        let raw = convert_with(&load("C25804"), false).unwrap();
+        let raw = symbol_sexpr(raw.symbol.as_ref().unwrap(), "R", "x", "LCSC:X", "", "", &[]);
+        assert!(raw.contains("(pin passive line (at 5.08 0 180) (length 2.54) (name \"2\""), "{raw}");
+        assert!(raw.contains("(pin passive line (at -5.08 0 0) (length 2.54) (name \"1\""), "{raw}");
         let f = c.footprint.as_ref().unwrap();
         assert_eq!((f.pads, f.through_hole), (2, false));
         // pads 0.8065 × 0.864 mm centred ±0.7534 mm

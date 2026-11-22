@@ -247,13 +247,27 @@ export function symbolInstance(o: SymbolInstanceOpts): SNode {
   return parseOne(out.join(" ") + ")");
 }
 
-/** The designator a new symbol gets: "R?" — or, with automatic annotation, the first free number. */
-export function nextReference(prefix: string, used: Iterable<string>, auto: boolean): string {
+/** A placed unit that holds a reference: its library symbol, value and unit (unit -1: held outright). */
+export interface RefHolder { ref: string; lib: string; value: string; unit: number }
+/**
+ * The designator a new symbol gets: "R?" — or, with automatic annotation, the first free number.  `used` lists the
+ * references in use; a holder entry ({ ref, lib, value, unit }) lets a unit of a multi-unit symbol (`me`) share a
+ * number whose holders are all the same library symbol with the same value and leave its unit free
+ * (REFDES_TRACKER::GetNextRefDesForUnits / areUnitsAvailable), so unit B placed after U1A becomes U1B.
+ */
+export function nextReference(prefix: string, used: Iterable<string | RefHolder>, auto: boolean, me?: { lib: string; value: string; unit: number } | null): string {
   prefix = prefix || "U";
   if (!auto) return prefix + "?";
-  const taken = new Set(used); let n = 1;
-  while (taken.has(prefix + n)) n++;
-  return prefix + n;
+  const holders = new Map<string, RefHolder[]>();
+  for (const u of used) {
+    const h: RefHolder = typeof u === "string" ? { ref: u, lib: "", value: "", unit: -1 } : u;
+    const l = holders.get(h.ref); if (l) l.push(h); else holders.set(h.ref, [h]);
+  }
+  for (let n = 1; ; n++) {
+    const hs = holders.get(prefix + n);
+    if (!hs || !hs.length) return prefix + n;
+    if (me && hs.every((h) => h.unit >= 0 && h.unit !== me.unit && h.lib === me.lib && h.value === me.value)) return prefix + n;
+  }
 }
 
 // ---------------------------------------------------------------- a library footprint on the board

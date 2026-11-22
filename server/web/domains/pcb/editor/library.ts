@@ -99,9 +99,13 @@ function instanceHome(doc: KDoc, h: SchHelpers): { project: string; path: string
 function carrySymbol(s: SymbolSession, sameReference: boolean): void {
   const { ctx, doc, sch, h } = schReady();
   const at = cursorMm();
-  const used: string[] = [...((sch.state as { otherRefs?: Set<string> }).otherRefs || [])];   // the other sheets' references are taken too
-  for (const it of doc.items.values()) if (it.kind === "symbol" && it.ref) used.push(it.ref);
-  if (!sameReference) s.reference = core.nextReference(core.symbolInfo(s.lib).reference, used, !!sch.state.annotateAuto);
+  const used: (string | core.RefHolder)[] = [...((sch.state as { otherRefs?: Set<string> }).otherRefs || [])];   // the other sheets' references are taken too
+  const valueOf = (node: SNode): string => { const p = (node as SNode[]).find((c) => Array.isArray(c) && c[0] === "property" && c[1] === "Value"); return p ? String(p[2]) : ""; };
+  const kidAtom = (node: SNode, key: string): string => { const c = (node as SNode[]).find((x) => Array.isArray(x) && x[0] === key) as SNode[] | undefined; return c ? String(c[1]) : ""; };
+  for (const it of doc.items.values()) if (it.kind === "symbol" && it.ref) used.push({ ref: it.ref, lib: kidAtom(it.node, "lib_id"), value: valueOf(it.node), unit: Number(kidAtom(it.node, "unit")) || 1 });
+  // a unit of a multi-unit symbol joins a package of the same symbol and value that leaves its unit free
+  const me = s.units > 1 ? { lib: s.libId, value: (s.fields && s.fields.Value !== undefined) ? s.fields.Value : (core.symbolInfo(s.lib).fields.find((f) => f.name === "Value") || { value: "" }).value, unit: s.unit } : null;
+  if (!sameReference) s.reference = core.nextReference(core.symbolInfo(s.lib).reference, used, !!sch.state.annotateAuto, me);
   const home = instanceHome(doc, h);
   let node = core.symbolInstance({ libId: s.libId, symbol: s.lib, at, unit: s.unit, bodyStyle: s.bodyStyle, fields: s.fields, reference: s.reference, project: home.project, path: home.path });
   // SCH_DRAWING_TOOLS::PlaceSymbol autoplaces the fields of a new symbol

@@ -309,6 +309,7 @@ fn generic_symbol(name: &str, pads: &[String]) -> SymbolOut {
         hide_pin_numbers: false,
         tidied: false,
         transistor: None,
+        passive: None,
     }
 }
 

@@ -92,6 +92,9 @@ const CSS = `
 .pd-report .ln.warning { color: var(--warn); }
 .pd-report .ln.action { color: var(--ink); }
 .pd-report .ln.info { color: var(--ink-2); }
+.pd-report .ln.busy { display: flex; align-items: center; }
+.pd-spin { flex: none; display: inline-block; width: 10px; height: 10px; margin: 0 7px 0 1px; border: 2px solid color-mix(in srgb, var(--ink) 25%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: pd-spin .7s linear infinite; }
+@keyframes pd-spin { to { transform: rotate(360deg); } }
 .pd-sev { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; }
 .pd-sev.error { background: var(--err); border-radius: 50%; }
 .pd-sev.warning { width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid var(--warn); }
@@ -784,7 +787,8 @@ export function gridButtons(g: GridApi, make: () => Record<string, CellValue>, o
 }
 
 // ---------------------------------------------------------------- report panel
-export interface ReportLine { severity: string; text: string }
+/** `busy`: work still running; the line shows a spinner (like the vendor search in Choose Symbol). */
+export interface ReportLine { severity: string; text: string; busy?: boolean }
 /** WX_HTML_REPORT_PANEL: the message list with its "Show:" filter row. */
 export function reportPanel(height?: string, opts?: { fileName?: string; empty?: string }): { el: HTMLElement; set(lines: ReportLine[]): void } {
   ensureCss();
@@ -793,7 +797,7 @@ export function reportPanel(height?: string, opts?: { fileName?: string; empty?:
   const filters: Record<string, Field<boolean>> = {};
   const draw = (): void => {
     list.replaceChildren();
-    for (const l of lines) { const key = l.severity === "error" ? "Errors" : l.severity === "warning" ? "Warnings" : l.severity === "action" ? "Actions" : "Infos"; if (!filters.All.get() && !filters[key].get()) continue; list.append(h("div", { class: "ln " + l.severity }, l.text)); }
+    for (const l of lines) { const key = l.severity === "error" ? "Errors" : l.severity === "warning" ? "Warnings" : l.severity === "action" ? "Actions" : "Infos"; if (!filters.All.get() && !filters[key].get()) continue; list.append(l.busy ? h("div", { class: "ln busy " + l.severity }, h("span", { class: "pd-spin" }), l.text) : h("div", { class: "ln " + l.severity }, l.text)); }
     if (!list.childElementCount) list.append(h("div", { class: "ln info" }, lines.length ? "" : opts && opts.empty !== undefined ? opts.empty : "No changes to be made."));
     const count = (s: string): number => lines.filter((l) => l.severity === s).length;
     (filters.Errors.el.lastChild as Text).textContent = `Errors (${count("error")})`; (filters.Warnings.el.lastChild as Text).textContent = `Warnings (${count("warning")})`;

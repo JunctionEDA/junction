@@ -8,7 +8,7 @@ import type { Part } from "./api";
 import { footprintExtent } from "./preview";
 
 interface LibraryApi {
-  placeSymbol(a: { libId: string; symbol: string; fields?: Record<string, string>; unit?: number }): Promise<void>;
+  placeSymbol(a: { libId: string; symbol: string; fields?: Record<string, string>; unit?: number; allUnits?: boolean }): Promise<void>;
   placeFootprint(a: { fpid: string; footprint: string; fields?: Record<string, string> }): Promise<void>;
   registerSource?(src: unknown): void;
 }
@@ -100,7 +100,7 @@ export async function placePart(ctx: ToolCtx, part: Part): Promise<boolean> {
 
   if (ctx.isSch) {
     const sym = cad.symbol!;
-    if (W.KiCadLibrary && W.KiCadLibrary.placeSymbol) { await W.KiCadLibrary.placeSymbol({ libId: sym.lib_id, symbol: sym.sexpr, fields: { Value: part.value || part.mpn || sym.name, Footprint: cad.footprint ? cad.footprint.fpid : "", ...fields } }); return true; }
+    if (W.KiCadLibrary && W.KiCadLibrary.placeSymbol) { await W.KiCadLibrary.placeSymbol({ libId: sym.lib_id, symbol: sym.sexpr, allUnits: true, fields: { Value: part.value || part.mpn || sym.name, Footprint: cad.footprint ? cad.footprint.fpid : "", ...fields } }); return true; }
     const sch = W.CollabTools && W.CollabTools.sch; const h = sch && (sch._ as Record<string, (...a: unknown[]) => unknown>);
     if (!h || !h.symbolNode || !h.startCarry) { ctx.toast("Placing symbols is not available in this editor build.", 3500); return false; }
     // In a sheet's lib_symbols the top symbol is named by its library id; its units keep the bare name.

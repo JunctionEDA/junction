@@ -164,6 +164,12 @@ ok("power symbols and annotation", () => {
   assert.strictEqual(L.nextReference("R", ["R1", "R2", "R4"], false), "R?");
   assert.strictEqual(L.nextReference("R", ["R1", "R2", "R4"], true), "R3");
   assert.strictEqual(L.nextReference("", [], false), "U?");
+  // REFDES_TRACKER::GetNextRefDesForUnits: a unit joins a package of the same symbol and value that leaves it free
+  const held = [{ ref: "U1", lib: "LCSC:FPGA", value: "LFE5U", unit: 1 }, { ref: "U2", lib: "LCSC:MCU", value: "X", unit: 1 }];
+  assert.strictEqual(L.nextReference("U", held, true, { lib: "LCSC:FPGA", value: "LFE5U", unit: 2 }), "U1");
+  assert.strictEqual(L.nextReference("U", held, true, { lib: "LCSC:FPGA", value: "LFE5U", unit: 1 }), "U3", "unit A is taken in U1");
+  assert.strictEqual(L.nextReference("U", held, true, { lib: "LCSC:FPGA", value: "other", unit: 2 }), "U3", "another value is another chip");
+  assert.strictEqual(L.nextReference("U", ["U1", ...held.slice(1)], true, { lib: "LCSC:FPGA", value: "LFE5U", unit: 2 }), "U3", "a bare reference (another sheet) is taken outright");
   assert.ok(L.isPowerRow({ power: true })); assert.ok(L.isPowerRow({ reference: "#PWR" })); assert.ok(!L.isPowerRow({ reference: "R" }));
 });
 
