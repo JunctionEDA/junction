@@ -1,6 +1,6 @@
 // kicad-canvas — GENERATED SOURCE MODULE (split from the former static/kicad-canvas.js; static/kicad-canvas.js is now the esbuild output of web/domains/pcb/canvas/index.ts — edit these modules, not the bundle).
 import { schTheme, withSchTheme } from "./colors";
-import { buildPcbGeom } from "./geom-pcb";
+import { buildPcbGeom, bumpGeomGen } from "./geom-pcb";
 import { buildSchGeom } from "./geom-sch";
 import { flipH, flipV, justOf, rotator, str, splitLines } from "./sexpr";
 import { INTERLINE, parseMarkup, strokeTextBox, unescapeText } from "./text";
@@ -35,7 +35,7 @@ export function G<T extends Geom>(item: GeomSink, g: T): T {
 
 
 export function buildGeom(doc: Doc, item: Item): void {
-  item.geom = []; item.bbox = null; item.hiddenGeom = null;
+  item.geom = []; item.bbox = null; item.hiddenGeom = null; item.hatchSrcs = undefined; bumpGeomGen();
   if (doc.type === "sch") { item.schTheme = schTheme(); buildSchGeom(doc, item); } else buildPcbGeom(doc, item);
   // text in an outline face is laid out with the face's metrics: noted so it is laid out again when a face arrives
   const hasFace = (gs: Geom[] | null | undefined): boolean => !!gs && gs.some((g) => g.t === "text" && !!g.face);

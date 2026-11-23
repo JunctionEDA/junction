@@ -6,8 +6,8 @@ import { DRAG_KINDS, connPoints, junctionMerges } from "./drag";
 import { pickAny } from "./hit";
 import { switchTool } from "./junction";
 import { anchorOf, cloneNode, mirrorNode, rotateNode, shiftNode } from "./orient";
-import { LINE_KINDS, S, atOf, ptsOf, setPts } from "./state";
-import { afterOrient, loneLinePivot, orientDrag, rotationCentre, transformNode, transformSelected } from "./transforms";
+import { LINE_KINDS, S, atOf, ptsOf, setPts, uuidOf } from "./state";
+import { afterOrient, flipInFlight, loneLinePivot, orientDrag, rotationCentre, transformNode, transformSelected } from "./transforms";
 import { deep, ghost, modChange, r4, removeChange, same } from "./util";
 import { isLockedItem, unlockedSelection } from "./lock";
 
@@ -23,6 +23,8 @@ export function orientSelected(ctx: SchCtx, op: string) {
     const ok = op === "x" || op === "y" ? mirrorNode(c.kind, c.node, op) : rotateNode(c.kind, c.node, op === "cw"); if (ok === false) transformNode(c.kind, c.node, op, anchorOf(c.kind, c.node), true);
     // the item on the cursor is `moving` to SCH_EDIT_TOOL::Rotate / Mirror: its fields are autoplaced again or released
     const g = c.kind === "symbol" || c.kind === "sheet" ? ghost(ctx.doc, c.node) : null; if (g) afterOrient(ctx.doc, g, c.node, op, false);
+    // an image on the cursor: its picture flips as well, once the browser has the flipped raster
+    if (c.kind === "image" && (op === "x" || op === "y")) flipInFlight(ctx, uuidOf(c.node) || "", op, () => (S.carry === c ? c.node : null), () => refreshCarry(ctx));
     refreshCarry(ctx); return true;
   }
   const items = unlockedSelection(ctx);   // FilterSelectionForLockedItems

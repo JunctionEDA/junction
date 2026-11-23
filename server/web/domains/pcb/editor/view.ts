@@ -190,7 +190,9 @@ export function drawCanvas() {
   if (E.selPins.length && CollabTools.sch && CollabTools.sch._) {
     // the selected pins drawn in the selection colour over their symbols
     const of = (CollabTools.sch._ as unknown as { pinOf?: (d: KDoc, r: unknown) => { pin: { x: number; y: number; root: [number, number] } } | null }).pinOf;
-    const found = E.selPins.map((p: unknown) => (of ? of(E.kdoc, p) : null));
+    // a sheet pin (SCH_SHEET_PIN) is held as { sheet id, pin name }: it stays while its sheet has a pin of that name
+    const sheetPin = (p: { id: string; number: string }) => { const it = E.kdoc.items.get(p.id); return !!it && it.kind === "sheet" && (KiCadCanvas.kids(it.node, "pin") as SNode[]).some((q) => KiCadCanvas.str(q[1]) === p.number); };
+    const found = E.selPins.map((p: { id: string; number: string }) => (sheetPin(p) ? true : of ? of(E.kdoc, p) : null));
     if (found.some((h: unknown) => !h)) E.selPins = E.selPins.filter((_p: unknown, i: number) => !!found[i]);
     // their selection shadow is drawn by the canvas pass (canvasSelection adds "id#pin:N")
   }
@@ -352,6 +354,15 @@ export function worldMm(ev: { clientX: number; clientY: number }): [number, numb
 
 export function pxPerMm() { const r = world.getBoundingClientRect(); return r.width > 0 ? r.width / mmW() : 4; }
 
+/**
+ * The visible rectangle in document coordinates (nm): VIEW::GetViewport, whose world box is unmirrored in a flipped
+ * board view (the mirror is part of the view matrix).  What peers are told and follow.
+ */
+export function visibleRectDocNm() {
+  const r = visibleRectNm(); if (!r || !viewFlipped()) return r;
+  const x0 = flipMmX(r[0] / E.IU), x1 = flipMmX((r[0] + r[2]) / E.IU);
+  return [Math.round(Math.min(x0, x1) * E.IU), r[1], r[2], r[3]];
+}
 export function visibleRectNm() {
   const wr = world.getBoundingClientRect(), sr = stage.getBoundingClientRect();
   if (wr.width <= 0) return null;
@@ -415,7 +426,7 @@ function peerCursorSpec(cid: string, p: PeerEntry): PeerCursorSpec | null {
   const ai = st.ai && typeof st.ai === "object" ? st.ai : null;
   const note = ai && typeof ai.note === "string" ? ai.note.trim().slice(0, 140) : "";
   const say = typeof st.say === "string" ? st.say.trim().slice(0, 200) : "";
-  return { cid, name: peerName(p), color: (p.user && p.user.color) || "#4477ee", note, say, following: E.followPeer === cid, at: [st.cursor[0] / E.IU, st.cursor[1] / E.IU], ts: typeof st.ts === "number" ? st.ts : 0 };
+  return { cid, name: peerName(p), color: (p.user && p.user.color) || "#4477ee", note, say, following: E.followPeer === cid, at: [flipMmX(st.cursor[0] / E.IU), st.cursor[1] / E.IU], ts: typeof st.ts === "number" ? st.ts : 0 };
 }
 
 /** Only pointers moved: move them, and leave the rest of the peer overlay (and the canvas) alone. */
@@ -457,7 +468,7 @@ export function drawPeers(peers: Record<string, PeerEntry>) {
     }
     for (const g of st.ghost || []) {
       const line = document.createElementNS(NS, "line");
-      line.setAttribute("x1", mm(g[0])); line.setAttribute("y1", mm(g[1])); line.setAttribute("x2", mm(g[2])); line.setAttribute("y2", mm(g[3]));
+      line.setAttribute("x1", flipMmX(mm(g[0]))); line.setAttribute("y1", mm(g[1])); line.setAttribute("x2", flipMmX(mm(g[2]))); line.setAttribute("y2", mm(g[3]));   // drawn where the flipped view shows that place
       line.setAttribute("stroke", color); line.setAttribute("stroke-opacity", "0.55");
       line.setAttribute("stroke-width", Math.max(mm(g[4] || 0), 2 / s)); line.setAttribute("stroke-linecap", "round");
       peersG.appendChild(line);

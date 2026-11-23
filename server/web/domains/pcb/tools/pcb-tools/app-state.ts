@@ -93,7 +93,7 @@ export function routerHover(ctx: PcbCtx, mm: Pt, mods: Mods | null): Hover {
   const align = (q: Pt): Pt => (ctrl ? q : ctx.snap(q)); const g = align(mm.slice());
   const out: Hover = { x: g[0], y: g[1], snap: null };
   const hidden = appGlobal(() => editorState()!.hiddenLayers as Set<string> | null, null);
-  const copper = copperOf(ctx.doc); const slop = ctx.gridPitch || 0;
+  const copper = copperOf(ctx.doc); const slop = Math.max(ctx.gridPitch || 0, ctx.gridPitchY || 0);   // maxSlopRadius: max( GetGrid().x, GetGrid().y )
   const top = (rt && rt.placingVia ? sizesOf(ctx).activeLayer : null) || S.layer;
   const o = { top, copper, shown: hidden ? (l: string) => !hidden.has(l) : null, allowNetless: S.rs.mode === RM_MARK };
   if (!rt) {

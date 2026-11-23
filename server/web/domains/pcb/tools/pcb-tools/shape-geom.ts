@@ -11,7 +11,9 @@ export type ShapeGeom =
   | { kind: "line"; start: Pt; end: Pt }
   | { kind: "arc"; start: Pt; mid: Pt; end: Pt }
   | { kind: "circle"; center: Pt; end: Pt }
-  | { kind: "bezier"; pts: [Pt, Pt, Pt, Pt] };
+  | { kind: "bezier"; pts: [Pt, Pt, Pt, Pt] }
+  | { kind: "ellipse"; center: Pt; major: number; minor: number; rotation: number }
+  | { kind: "ellipse_arc"; center: Pt; major: number; minor: number; rotation: number; start: number; end: number };
 export type GeomFieldKind = "x" | "y" | "len" | "angle";
 /** AddXYPointToSizer (a titled X / Y pair; `size` makes it a width / height pair) or AddFieldToSizer. */
 export type GeomGroup = { title: string; x: string; y: string; size?: boolean } | { title: string; field: string; kind: "len" | "angle" };
@@ -89,6 +91,16 @@ export function geomPages(kind: ShapeGeom["kind"]): GeomPage[] {
       { title: "Bezier Control Points", groups: [{ title: "Start Point", x: "sx", y: "sy" }, { title: "End Point", x: "ex", y: "ey" }, { title: "Control Point 1", x: "c1x", y: "c1y" }, { title: "Control Point 2", x: "c2x", y: "c2y" }],
         get: (g) => { const p = (g as Extract<ShapeGeom, { kind: "bezier" }>).pts; return { sx: p[0][0], sy: p[0][1], c1x: p[1][0], c1y: p[1][1], c2x: p[2][0], c2y: p[2][1], ex: p[3][0], ey: p[3][1] }; },
         set: (v) => ({ kind: "bezier", pts: [P(v.sx, v.sy), P(v.c1x, v.c1y), P(v.c2x, v.c2y), P(v.ex, v.ey)] }) }];
+    // ELLIPSE_GEOM_SYNCER / ELLIPSE_ARC_GEOM_SYNCER: centre, radii (at least one nanometre once applied) and angles
+    case "ellipse": case "ellipse_arc": {
+      const arc = kind === "ellipse_arc";
+      const groups: GeomGroup[] = [{ title: "Center", x: "cx", y: "cy" }, { title: "Major Radius", field: "major", kind: "len" }, { title: "Minor Radius", field: "minor", kind: "len" }, { title: "Rotation", field: "rot", kind: "angle" }];
+      if (arc) groups.push({ title: "Start Angle", field: "sa", kind: "angle" }, { title: "End Angle", field: "ea", kind: "angle" });
+      return [{ title: arc ? "Elliptical Arc" : "Ellipse", groups,
+        get: (g) => { const e = g as Extract<ShapeGeom, { kind: "ellipse_arc" }>; const o: Record<string, number> = { cx: e.center[0], cy: e.center[1], major: e.major, minor: e.minor, rot: r6(e.rotation) }; if (arc) { o.sa = r6(e.start); o.ea = r6(e.end); } return o; },
+        set: (v) => { const base = { center: P(v.cx, v.cy), major: Math.max(1e-6, r6(v.major)), minor: Math.max(1e-6, r6(v.minor)), rotation: v.rot }; return arc ? { kind: "ellipse_arc", ...base, start: v.sa, end: v.ea } : { kind: "ellipse", ...base }; },
+        validate: (v) => (!(Math.round(v.major * 1e6) > 0) ? "Major radius must be greater than 0" : !(Math.round(v.minor * 1e6) > 0) ? "Minor radius must be greater than 0" : null) }];
+    }
   }
 }
 
@@ -100,6 +112,7 @@ export function validateShapeGeom(g: ShapeGeom): string | null {
   const nm = (v: number): number => Math.round(v * 1e6);   // internal units
   const same = (a: Pt, b: Pt): boolean => nm(a[0]) === nm(b[0]) && nm(a[1]) === nm(b[1]);
   if (g.kind === "rect") return same(g.start, g.end) ? "Rectangle cannot be zero-sized." : null;
+  if (g.kind === "ellipse" || g.kind === "ellipse_arc") return !(nm(g.major) > 0) ? "Major radius must be greater than 0" : !(nm(g.minor) > 0) ? "Minor radius must be greater than 0" : null;
   if (g.kind === "circle") return !(nm(Math.hypot(g.end[0] - g.center[0], g.end[1] - g.center[1])) > 0) ? "Radius must be greater than 0" : null;
   if (g.kind === "arc") {
     if (same(g.start, g.mid) || same(g.mid, g.end)) return "Arc must have at least 2 distinct points";
@@ -123,6 +136,11 @@ export function shapeGeomOf(n: SNode): ShapeGeom | null {
     case "arc": return { kind: "arc", start: p("start"), mid: p("mid"), end: p("end") };
     case "circle": return { kind: "circle", center: p("center"), end: p("end") };
     case "curve": { const pts = K.ptsOf(n) as Pt[]; return pts.length === 4 ? { kind: "bezier", pts: [pts[0], pts[1], pts[2], pts[3]] } : null; }
+    case "ellipse": case "ellipse_arc": {
+      const c = K.kid(n, "center"), v = (k: string, d = 0): number => { const x = K.kid(n, k); return x ? K.num(x[1], d) : d; };
+      const base = { center: (c ? [K.num(c[1]), K.num(c[2])] : [0, 0]) as Pt, major: v("major_radius"), minor: v("minor_radius"), rotation: v("rotation_angle") };
+      return /arc$/.test(String(n[0])) ? { kind: "ellipse_arc", ...base, start: v("start_angle"), end: v("end_angle", 360) } : { kind: "ellipse", ...base };
+    }
   }
   return null;
 }
@@ -131,6 +149,12 @@ export function setShapeGeom(n: SNode, g: ShapeGeom): void {
   const set = (k: string, v: Pt): void => { const c = K.kid(n, k); if (c) { c[1] = r6(v[0]); c[2] = r6(v[1]); } };
   if (g.kind === "rect" || g.kind === "line") { set("start", g.start); set("end", g.end); }
   else if (g.kind === "circle") { set("center", g.center); set("end", g.end); }
+  else if (g.kind === "ellipse" || g.kind === "ellipse_arc") {
+    const ang = (v: number): number => { const x = Number((+v).toPrecision(10)); return x === 0 ? 0 : x; };   // FormatAngle "{:.10g}"
+    const put = (k: string, v: number): void => { const c = K.kid(n, k); if (c) c[1] = v; };
+    set("center", g.center); put("major_radius", r6(g.major)); put("minor_radius", r6(g.minor)); put("rotation_angle", ang(g.rotation));
+    if (g.kind === "ellipse_arc") { put("start_angle", ang(g.start)); put("end_angle", ang(g.end)); }
+  }
   else if (g.kind === "arc") {
     let { start, end } = g; const m = g.mid;
     if ((m[0] - start[0]) * (end[1] - m[1]) - (m[1] - start[1]) * (end[0] - m[0]) < 0) [start, end] = [end, start];

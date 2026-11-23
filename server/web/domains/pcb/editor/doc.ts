@@ -336,8 +336,20 @@ export function updateGridStatus() {
  * web: the overrides keep one size), else the current grid's X and Y.
  */
 export function gridSizeNow(): [number, number] {
+  // EE_GRID_HELPER / PCB_GRID_HELPER::GetGridSize: an override names a grid of the list, with its own X and Y
+  const o = E.gridForXY ? E.gridForXY() : null;
+  if (o) return o;
   const p = E.gridFor ? E.gridFor() : E.gridPitch;
   return p === E.gridPitch ? [E.gridPitch, E.gridPitchY > 0 ? E.gridPitchY : E.gridPitch] : [p, p];
+}
+/**
+ * GAL::GetGridSnapping: the window's grid.snap (Preferences > Snapping > Snap to grid) is ALWAYS, WITH_GRID (only
+ * while the grid is shown) or NEVER; the grid's own snap toggle has to be on as well.
+ */
+export function gridSnapEnabled(): boolean {
+  if (!E.snapOn) return false;
+  const m = E.gridSnap;
+  return m === "never" ? false : m === "withGrid" ? !!E.gridOn : true;
 }
 
 /**
@@ -374,7 +386,7 @@ if (typeof window !== "undefined") window.addEventListener("kc:constraint-msg", 
 export function snapMm(mm: [number, number]): [number, number];
 export function snapMm(mm: number[]): number[];
 export function snapMm(mm: number[]): number[] {
-  if (!E.snapOn) return mm;
+  if (!gridSnapEnabled()) return mm;
   const [p, py] = gridSizeNow();   // the grid override of the active tool (Preferences > Grids), else the grid's X and Y
   if (!isSch()) return KiCadCanvas.pcbSizes.state.snapToGrid(mm as [number, number], p, py);   // the board's grid starts at its grid origin
   return [KiCadCanvas.snap(mm[0], p), KiCadCanvas.snap(mm[1], py)];

@@ -8,8 +8,9 @@ import { breakLinesAt, junctionAt, lineEndsAt, lineMidsAt, pinsAt } from "./conn
 import { analyzePoint, editTxn, explicitJunctionNeeded, screenConnections, txnAddJunction, txnCleanUpAll } from "./junction";
 import { lineNode } from "./nodes";
 import { txnTrimOverlapping } from "./repeat";
+import { pastedSheetRecursion } from "./clipboard";
 import { anchorOf, shiftNode } from "./orient";
-import { mmPerPx } from "./snap";
+import { bestDragOrigin, mmPerPx, resolveSnap, selectionSnapKind } from "./snap";
 import { K, LINE_KINDS, POINT_KINDS, S, atOf, kid, kids, num, ptsOf, setPts, str, uuidOf } from "./state";
 import { endBreak } from "./transforms";
 import { addNode, deep, itemSexpr, modChange, r4, same, segDist, segs, typeNameFor } from "./util";
@@ -185,7 +186,7 @@ function simCache(doc: KDoc, sim: OrthoSim, L: OrthoLine, whole: Set<string>, li
 }
 /** The simulation for a drag, built while the document still has everything where it was. */
 function simBuild(doc: KDoc, d: SchDrag): OrthoSim {
-  const sim: OrthoSim = { src: d.anchors, lines: [], drag: [], labels: [], byId: new Map(), at: [0, 0], grid: d.grid || 1.27 };
+  const sim: OrthoSim = { src: d.anchors, lines: [], drag: [], labels: [], byId: new Map(), at: [0, 0], grid: d.grid || 1.27, gridY: d.gridY || d.grid || 1.27 };
   const lineOf = (item: KItem, pts?: Pt[]): OrthoLine => {
     let l = sim.byId.get(item.id);
     if (!l) {
@@ -251,8 +252,8 @@ export function orthoLineDrag(sim: OrthoSim, line: OrthoLine, s: Pt, bend: { x: 
     // nothing to lengthen but the zero-length original line itself: the caller's move of the selected end does it
   } else if (attached && (Math.abs(U[0] - Sel[0]) <= 1e-5 || Math.abs(U[1] - Sel[1]) <= 1e-5)) {
     // two new lines keep the unselected end connected: `a` along the old axis, `b` across by the move
-    const g = sim.grid;
-    const xMove = r4((Math.abs(U[0] - Sel[0]) - bend.x * g) * sgn(Sel[0] - U[0])), yMove = r4((Math.abs(U[1] - Sel[1]) - bend.y * g) * sgn(Sel[1] - U[1]));
+    const g = sim.grid, gY = sim.gridY || g;   // lineGrid.x / lineGrid.y
+    const xMove = r4((Math.abs(U[0] - Sel[0]) - bend.x * g) * sgn(Sel[0] - U[0])), yMove = r4((Math.abs(U[1] - Sel[1]) - bend.y * gY) * sgn(Sel[1] - U[1]));
     const a = fresh([r4(U[0] + xMove), r4(U[1] + yMove)], U);
     const b = fresh(plus(a.pts[0], s), a.pts[0]);
     bend.x += s[1] ? 1 : 0; bend.y += s[0] ? 1 : 0;
@@ -349,9 +350,17 @@ export function beginDrag(ctx: SchCtx, items: KItem | KItem[], mm: Pt, byPointer
   if (!list.length && !partial.length) return null;
   if (S.drag) endDrag(ctx, false);
   if (byPointer) S.dragMode = S.mouseDragMode || "drag";   // a mouse drag follows the preference, whatever G / M did last
-  const item = list[0] || partial[0].item, anchor0 = list.length ? anchorOf(item.kind, item.node) : partial[0].orig[partial[0].index].slice();
+  const item = list[0] || partial[0].item;
+  // SCH_MOVE_TOOL::prepareMove: with GetMoveWarpsCursor the grab point is EE_GRID_HELPER::BestDragOrigin of the
+  // selection (from m_cursor, the grid-snapped cursor, which it falls back to), and the cursor is warped there (the
+  // software crosshair here); one item not movable from its anchor point (a sheet; a symbol with a pin off the 25 mil
+  // lattice), or the warp turned off, grabs at the grid-snapped cursor
+  const whole = list.length && !partial.length && !(opts && opts.plain), cur = ctx.snap([mm[0], mm[1]]).map(r4) as Pt;
+  const bdo = whole && S.moveWarpsCursor !== false && !(list.length === 1 && !movableFromAnchorPoint(doc, list[0]));
+  const anchor0 = bdo ? bestDragOrigin(ctx, list, cur) : whole ? cur : list.length ? anchorOf(item.kind, item.node) : partial[0].orig[partial[0].index].slice();
+  if (bdo && typeof ctx.warpCursor === "function") ctx.warpCursor(anchor0);
   const d: SchDrag = { items: list.map((it) => ({ item: it, kind: it.kind, orig: deep(it.node) })), item, kind: item.kind, orig: null, anchor0, grab: [mm[0] - anchor0[0], mm[1] - anchor0[1]],
-    last: [0, 0], applied: [0, 0], moved: false, byPointer: !!byPointer, riders: [], anchors: [], preview: [], grid: ctx.gridPitch || 1.27 };
+    last: [0, 0], applied: [0, 0], moved: false, byPointer: !!byPointer, riders: [], anchors: [], preview: [], grid: ctx.gridPitch || 1.27, gridY: ctx.gridPitchY || ctx.gridPitch || 1.27 };
   if (partial.length) d.ends = partial;
   const onLine = new Map<string, { item: KItem; orig: Pt; line: KItem }>();   // the labels kept on a stretched line
   d.orig = d.items.length ? d.items[0].orig : deep(item.node);
@@ -472,20 +481,25 @@ export function restorePristine(doc: KDoc, d: SchDrag) {
   }
   if (d.sim) simWrite(doc, d, d.sim, true);
 }
-/** The connection point of an item that is not moving nearest to p within the snap range (EE_GRID_HELPER's anchors). */
-export function dragSnapAnchor(ctx: SchCtx, d: SchDrag, p: Pt): Pt | null {
-  const r = Math.max((ctx.gridPitch || 1.27) * 0.45, 6 * mmPerPx(ctx)), moving = new Set<string>();
+/** The items a move carries (the moved ones, riders, stretched ends and lines, the simulated drag lines). */
+export function movingIds(d: SchDrag): Set<string> {
+  const moving = new Set<string>();
   for (const e of d.items) moving.add(e.item.id); for (const x of d.riders) moving.add(x.item.id); for (const e of d.ends || []) moving.add(e.item.id);
   for (const a of d.anchors) { for (const e of a.ends) moving.add(e.item.id); for (const f of a.followers) moving.add(f.item.id); }
   for (const l of d.onLine || []) moving.add(l.item.id);
   if (d.sim) for (const l of d.sim.lines) if (l.item) moving.add(l.item.id);
-  let best: Pt | null = null, bd = r;
-  for (const it of ctx.doc.items.values()) {
-    if (moving.has(it.id)) continue;
-    if (it.bbox && (p[0] < it.bbox[0] - r || p[0] > it.bbox[2] + r || p[1] < it.bbox[1] - r || p[1] > it.bbox[3] + r)) continue;
-    for (const c of connPoints(ctx.doc, it)) { const dist = Math.hypot(c[0] - p[0], c[1] - p[1]); if (dist < bd) { bd = dist; best = c; } }
-  }
-  return best ? [r4(best[0]), r4(best[1])] : null;
+  return moving;
+}
+/**
+ * SCH_SYMBOL::IsMovableFromAnchorPoint (every pin a multiple of 25 mil from the symbol's position) and
+ * SCH_SHEET::IsMovableFromAnchorPoint (never); any other item can be moved from its anchor.
+ */
+export function movableFromAnchorPoint(doc: KDoc, it: KItem): boolean {
+  if (it.kind === "sheet") return false;
+  if (it.kind !== "symbol") return true;
+  const [x, y] = atOf(it.node), off = (v: number) => Math.round(v * 10000) % 6350 !== 0;   // 25 mil in 100 nm units
+  for (const p of K.pinPoints(doc, it)) if (off(p.x - x) || off(p.y - y)) return false;
+  return true;
 }
 /**
  * The pointer moved.  As in SCH_MOVE_TOOL's loop, Shift turns the snap to other items' anchors off
@@ -497,11 +511,8 @@ export function moveDrag(ctx: SchCtx, mm: Pt, ev?: Mods | null) {
   if (d.pasted && d.ctrlAtStart === undefined) d.ctrlAtStart = true;
   if (d.ctrlAtStart && ev && !ctrl) d.ctrlAtStart = false;
   const raw: Pt = [mm[0] - d.grab[0], mm[1] - d.grab[1]];
-  const snapped = (): Pt => {
-    const hit = ev && !ev.shiftKey ? dragSnapAnchor(ctx, d, raw) : null;
-    if (hit) return hit;
-    return ctrl && !d.ctrlAtStart ? [r4(raw[0]), r4(raw[1])] : ctx.snap(raw);
-  };
+  // grid.BestSnapAnchor( mousePos, snapLayer, selection ): EE_GRID_HELPER::ResolveSnap with the moving items left out
+  const snapped = (): Pt => resolveSnap(ctx, raw, selectionSnapKind(d.items.map((e) => e.item)), { shiftKey: !!(ev && ev.shiftKey), ctrlKey: ctrl && !d.ctrlAtStart, metaKey: false, altKey: !!(ev && ev.altKey) } as Mods, movingIds(d)).p;
   // an arrow key locks the move to its axis, for the mouse too, until the opposite key (tools/axis-lock.ts)
   const key = keyboardCursorKey(); if (key) d.axis = axisLockKey(d.axis || newAxisLock(), key);
   const prev = [d.anchor0[0] + d.last[0], d.anchor0[1] + d.last[1]];
@@ -545,8 +556,10 @@ export function findTargetSheet(ctx: SchCtx, d: SchDrag, cursor: Pt, ctrl: boole
   if (!sheet) return null;
   const pins = kids(sheet.node, "pin").map((p) => atOf(p));
   for (const it of sel) for (const p of connPoints(doc, it)) if (pins.some((q) => same(q, p))) return null;
-  // dropWouldRecurse: a moved sheet that shows the destination's own file would put the file inside itself
-  for (const it of sel) if (it.kind === "sheet" && it.file && it.file === sheet.file) return null;
+  // dropWouldRecurse: SCH_SHEET_LIST::TestForRecursion( movedHierarchy, destScreen->GetFileName() ) for each moved
+  // sheet: its file or a sub-sheet's file is the target's file or one of the target's parents in the hierarchy
+  const destFile = sheet.file;
+  if (destFile) for (const it of sel) if (it.kind === "sheet" && it.file && (it.file === destFile || pastedSheetRecursion(ctx, it.file, destFile))) return null;
   if (sel.every((it) => GRAPHIC_DROP.has(it.kind)) && !ctrl) return null;
   return sheet;
 }

@@ -34,6 +34,7 @@ test("selectPoint's threshold is max( 5 px, |grid| / 2 ) and only the two ends o
   assert.strictEqual(_.lineEndAt(w, [0.5, 0.2], thr), 0);
   assert.strictEqual(_.lineEndAt(w, [24.9, 0], thr), 1);
   assert.strictEqual(_.lineEndAt(w, [12, 0], thr), null);
+  c.gridPitchY = 3.81; assert.ok(Math.abs(_.selectThreshold(c) - Math.max(5 / 4, Math.hypot(1.27, 3.81) / 2)) < 1e-9, "GetGridSize().EuclideanNorm() of a non-square grid"); delete c.gridPitchY;
   const poly = K.parseDoc(HEAD + '(polyline (pts (xy 0 0) (xy 5 0) (xy 5 5)) (stroke (width 0) (type default)) (uuid "p1")))').items.get("p1");
   assert.strictEqual(_.lineEndAt(poly, [0, 0], thr), null, "a multi-point shape is not a SCH_LINE");
 });

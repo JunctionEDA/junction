@@ -11,6 +11,7 @@ import { K, S } from "./state";
 import { r6, samePt } from "./util";
 import type { RuleItem } from "./dru";
 import { customRouteClearance } from "./rule-resolver";
+import { mergeFull } from "./optimize-selected";
 import type { RoutedItem } from "./rule-resolver";
 
 // ---------------------------------------------------------------- interactive router: KiCad's default Walk around mode
@@ -184,100 +185,464 @@ export function clipPts(O: ObstacleIndex, pts: Pt[], r: number) {
   for (let n = 0; n < 24; n++) { const m = (lo + hi) / 2; if (clearTo(m)) lo = m; else hi = m; }
   const { i, p } = alongPts(pts, lo); return simplifyPts(pts.slice(0, i + 1).concat([[r6(p[0]), r6(p[1])]]));
 }
-/**
- * WALKAROUND: a 45° line from `start` to `goal` that keeps clear of every obstacle.  The posture line comes first;
- * when it is blocked the walk turns at the corners of the obstacles' octagonal hulls (both ways round, the shorter
- * wins), growing the set of obstacles it walks around until the goal is reached.  Returns the points or null.
- */
-export const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
-export function walkTo(O: ObstacleIndex, start: Pt, goal: Pt, r: number, diagFirst: boolean, lastDir: number, deadline: number, legFn?: LegFn | null): Pt[] | null {
-  deadline = deadline || now() + 40; const legPts = legFn || legPts45;
-  const first = legPts(start, goal, diagFirst); if (pathClear(O, first, r)) return first;
-  const second = legPts(start, goal, !diagFirst); if (pathClear(O, second, r)) return second;
-  const active = new Set(pathHits(O, first, r).concat(pathHits(O, second, r)));
-  const legMemo = new Map<string, { pts: Pt[] | null; hits: Obstacle[] }>();   // clear legs between two points (either posture), shared by the rounds
-  for (let round = 0; round < 8 && active.size; round++) {
-    const nodes = [start, goal];
-    for (const ob of active) for (const v of hullOf(ob, r)) if (!segHit(O, v, v, r)) nodes.push(v);
-    if (nodes.length > 400) break;
-    const blockers = new Set<Obstacle>();
-    const leg = (i: number, j: number) => {   // the clear leg between two nodes (either posture), or null
-      const a = nodes[Math.min(i, j)], b = nodes[Math.max(i, j)]; const key = a[0] + "," + a[1] + ":" + b[0] + "," + b[1];
-      let m = legMemo.get(key);
-      if (!m) {
-        m = { pts: null, hits: [] } as { pts: Pt[] | null; hits: Obstacle[] };
-        for (const df of [false, true]) {
-          const pts = legPts(a, b, df); let hit: Obstacle | null = null;
-          for (let k = 0; k + 1 < pts.length && !hit; k++) hit = segHit(O, pts[k], pts[k + 1], r);
-          if (!hit) { m.pts = pts; break; } m.hits.push(hit);
-        }
-        legMemo.set(key, m);
-      }
-      for (const h of m.hits) blockers.add(h);
-      return m.pts && (i < j ? m.pts : m.pts.slice().reverse());
-    };
-    // lazy A* over the hull corners (octile lengths): a node's leg from its parent is only checked when it is taken
-    const n = nodes.length, g = new Float64Array(n).fill(Infinity), from = new Int32Array(n).fill(-1), done = new Uint8Array(n);
-    g[0] = 0; let found = false; const closed: number[] = [];
-    for (let iter = 0; iter < 4 * n; iter++) {
-      if (now() > deadline) return null;
-      let u = -1, bf = Infinity; for (let i = 0; i < n; i++) if (!done[i] && g[i] < Infinity) { const f = g[i] + octile(nodes[i], goal); if (f < bf) { bf = f; u = i; } }
-      if (u < 0) break;
-      if (u !== 0 && !leg(from[u], u)) {   // its optimistic parent cannot see it: the best closed node that can, if any
-        let bp = -1, bc = Infinity;
-        const order = closed.filter((c) => c !== from[u]).sort((x, y) => (g[x] + octile(nodes[x], nodes[u])) - (g[y] + octile(nodes[y], nodes[u])));
-        for (const c of order.slice(0, 12)) if (leg(c, u)) { bp = c; bc = g[c] + octile(nodes[c], nodes[u]) + 1e-3; break; }
-        if (bp < 0) { g[u] = Infinity; from[u] = -1; continue; }
-        from[u] = bp; g[u] = bc;
-      }
-      done[u] = 1; closed.push(u); if (u === 1) { found = true; break; }
-      for (let v = 1; v < n; v++) { if (done[v]) continue; const c = g[u] + octile(nodes[u], nodes[v]) + 1e-3; if (c < g[v]) { g[v] = c; from[v] = u; } }
-    }
-    if (found) {
-      let seq: number[] = []; for (let v = 1; v >= 0; v = from[v]) seq.unshift(v);
-      // pull the line tight (the optimizer's MERGE_SEGMENTS): skip corners a direct leg can do without
-      const tight = [seq[0]]; let i = 0;
-      while (i < seq.length - 1) { let j = seq.length - 1; while (j > i + 1 && !leg(seq[i], seq[j])) j--; tight.push(seq[j]); i = j; }
-      // each leg in the posture that continues the previous segment best
-      let pts = [start.slice()], prev = lastDir;
-      for (let k = 0; k + 1 < tight.length; k++) {
-        const a = nodes[tight[k]], b = nodes[tight[k + 1]]; const cands: Pt[][] = [];
-        for (const df of (k === 0 ? [diagFirst, !diagFirst] : [false, true])) { const p = legPts(a, b, df); if (pathClear(O, p, r)) cands.push(p); }
-        if (!cands.length) { cands.push(leg(tight[k], tight[k + 1])!); }
-        let best = cands[0];
-        if (prev >= 0 && cands.length > 1) { const score = (p: Pt[]) => dirAngle(prev, dir8(p[0], p[1])); if (score(cands[1]) < score(cands[0])) best = cands[1]; }
-        pts = pts.concat(best.slice(1)); prev = dir8(best[best.length - 2], best[best.length - 1]);
-      }
-      return simplifyPts(pts);
-    }
-    let grew = false; for (const b of blockers) if (!active.has(b)) { active.add(b); grew = true; }
-    if (!grew) break;
+// ================================================================ SHAPE_LINE_CHAIN in whole nanometres
+// The walkaround works on KiCad's integer coordinates: points are rounded to the nanometre (mm × 1e6) going in and
+// come back as mm, so the exact point comparisons, Split / Find / PointOnEdge thresholds and the hull graph behave as
+// in pns_line.cpp.  A closed chain (a hull) has a closing segment from its last point back to the first.
+export type NmPt = number[];
+export const toNm = (p: Pt): NmPt => [Math.round(p[0] * 1e6), Math.round(p[1] * 1e6)];
+export const fromNm = (p: NmPt): Pt => [r6(p[0] / 1e6) + 0, r6(p[1] / 1e6) + 0];
+const ieq = (a: NmPt, b: NmPt) => a[0] === b[0] && a[1] === b[1];
+const peqPt = (a: Pt, b: Pt) => Math.abs(a[0] - b[0]) < 5e-7 && Math.abs(a[1] - b[1]) < 5e-7;
+const segCount = (c: NmPt[], closed: boolean) => (c.length < 2 ? 0 : closed ? c.length : c.length - 1);
+/** CSegment( i ) of a chain; a negative index counts from the end. */
+const cseg = (c: NmPt[], closed: boolean, i: number): [NmPt, NmPt] => { const n = segCount(c, closed); if (i < 0) i += n; return [c[i], c[(i + 1) % c.length]]; };
+/** SEG::SquaredDistance. */
+export function segSqDist(a: NmPt, b: NmPt, p: NmPt) {
+  const abx = b[0] - a[0], aby = b[1] - a[1], apx = p[0] - a[0], apy = p[1] - a[1]; const e = apx * abx + apy * aby;
+  if (e <= 0) return apx * apx + apy * apy;
+  const f = abx * abx + aby * aby;
+  if (e >= f) { const bx = p[0] - b[0], by = p[1] - b[1]; return bx * bx + by * by; }
+  const cr = abx * apy - aby * apx; return Math.round(cr * cr / f);
+}
+const segContains = (a: NmPt, b: NmPt, p: NmPt) => segSqDist(a, b, p) <= 3;
+/** SEG::Side: the sign of ( B - A ) × ( p - A ). */
+export const segSide = (a: NmPt, b: NmPt, p: NmPt) => { const d = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]); return d < 0 ? -1 : d > 0 ? 1 : 0; };
+/** SEG::Collinear: both ends of c..d within 1 of the line a..b in its canonical coefficients. */
+function segCollinear(a: NmPt, b: NmPt, c: NmPt, d: NmPt) {
+  const qa = a[1] - b[1], qb = b[0] - a[0];
+  return Math.abs(qa * (c[0] - a[0]) + qb * (c[1] - a[1])) <= 1 && Math.abs(qa * (d[0] - a[0]) + qb * (d[1] - a[1])) <= 1;
+}
+/** SEG::Intersect( aSeg ) of two non-parallel segments, ends included (parallel ones never cross here). */
+function segCross(a1: NmPt, b1: NmPt, a2: NmPt, b2: NmPt): NmPt | null {
+  if (Math.max(a1[0], b1[0]) < Math.min(a2[0], b2[0]) || Math.max(a2[0], b2[0]) < Math.min(a1[0], b1[0]) || Math.max(a1[1], b1[1]) < Math.min(a2[1], b2[1]) || Math.max(a2[1], b2[1]) < Math.min(a1[1], b1[1])) return null;
+  const d1x = b1[0] - a1[0], d1y = b1[1] - a1[1], d2x = b2[0] - a2[0], d2y = b2[1] - a2[1], ox = a2[0] - a1[0], oy = a2[1] - a1[1];
+  const det = d2x * d1y - d2y * d1x; if (det === 0) return null;
+  const p2 = d2x * oy - d2y * ox, p1 = d1x * oy - d1y * ox;
+  if (det > 0 ? (p1 < 0 || p1 > det || p2 < 0 || p2 > det) : (p1 > 0 || p1 < det || p2 > 0 || p2 < det)) return null;
+  return [a2[0] + Math.round(p1 * d2x / det), a2[1] + Math.round(p1 * d2y / det)];
+}
+/** SEG::NearestPoint. */
+export function segNearestNm(a: NmPt, b: NmPt, p: NmPt): NmPt {
+  const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy; if (!l2) return a.slice();
+  const t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2; if (t <= 0) return a.slice(); if (t >= 1) return b.slice();
+  return [a[0] + Math.round(t * dx), a[1] + Math.round(t * dy)];
+}
+const nmLen = (a: NmPt, b: NmPt) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+/** SHAPE_LINE_CHAIN::Length (of an open chain). */
+export const chainLength = (c: NmPt[]) => { let L = 0; for (let i = 0; i + 1 < c.length; i++) L += nmLen(c[i], c[i + 1]); return L; };
+/** SHAPE_LINE_CHAIN_BASE::PointOnEdge( p, accuracy 0 ): within one nanometre of an edge. */
+export function chainOnEdge(c: NmPt[], closed: boolean, p: NmPt) {
+  if (!c.length) return false; if (c.length === 1) { const dx = c[0][0] - p[0], dy = c[0][1] - p[1]; return dx * dx + dy * dy <= 1; }
+  for (let i = 0; i < segCount(c, closed); i++) { const [a, b] = cseg(c, closed, i); if (ieq(a, p) || ieq(b, p) || segSqDist(a, b, p) <= 1) return true; }
+  return false;
+}
+/** SHAPE_LINE_CHAIN::PointInside of a closed chain (the ray test; a point on the outline may go either way). */
+export function chainInside(c: NmPt[], p: NmPt) {
+  if (c.length < 3) return false; let inside = false;
+  for (let i = 0; i < c.length; i++) {
+    const p1 = c[i], p2 = c[(i + 1) % c.length]; const dx = p2[0] - p1[0], dy = p2[1] - p1[1]; if (dy === 0) continue;
+    const d = Math.round(dx * (p[1] - p1[1]) / dy);
+    if ((p1[1] >= p[1]) !== (p2[1] >= p[1]) && p[0] - p1[0] < d) inside = !inside;
+  }
+  return inside;
+}
+/** SHAPE_LINE_CHAIN::Find: the index of the point (within aThreshold nm), or -1. */
+export function chainFind(c: NmPt[], p: NmPt, thr = 0) { for (let i = 0; i < c.length; i++) if (thr === 0 ? ieq(c[i], p) : nmLen(c[i], p) <= thr) return i; return -1; }
+/** SHAPE_LINE_CHAIN::Split( p ): a vertex at p on the segment it lies on (within 2 nm); its index, or -1. */
+export function chainSplit(c: NmPt[], closed: boolean, p: NmPt) {
+  const found = chainFind(c, p); let ii = -1, minD = 2;
+  for (let s = 0; s < segCount(c, closed); s++) {
+    const [a, b] = cseg(c, closed, s); const d = Math.round(Math.sqrt(segSqDist(a, b, p)));
+    if (d < minD && !ieq(a, p) && !ieq(b, p)) { minD = d; if (found < 0 || s < found) ii = s; }
+  }
+  if (ii < 0) ii = found; if (ii < 0) return -1;
+  if (ieq(c[ii], p)) return ii;
+  c.splice(ii + 1, 0, p.slice()); return ii + 1;
+}
+/** SHAPE_LINE_CHAIN::PathLength( p, index ): the length along the chain up to p on segment `index`. */
+function chainPathLength(c: NmPt[], p: NmPt, index: number) {
+  let sum = 0; const n = segCount(c, false);
+  for (let i = 0; i < n; i++) { const match = index === n ? i === n - 1 : i === index; if (match) return sum + Math.round(nmLen(c[i], p)); sum += Math.round(nmLen(c[i], c[i + 1])); }
+  return -1;
+}
+/** SHAPE_LINE_CHAIN::Simplify2( aRemoveColinear ): duplicate points out, then (optionally) the colinear ones. */
+export function chainSimplify2(c: NmPt[], removeColinear = true): NmPt[] {
+  if (c.length < 3) return c.map((p) => p.slice());
+  if (c.length === 3) { const out = c.map((p) => p.slice()); if (ieq(out[0], out[1]) || ieq(out[1], out[2])) out.splice(1, 1); return out; }
+  const u: NmPt[] = []; for (const p of c) if (!u.length || !ieq(u[u.length - 1], p)) u.push(p.slice());
+  const np = u.length, out: NmPt[] = []; let i = 0;
+  const lineDist = (a: NmPt, b: NmPt, p: NmPt) => { const L = nmLen(a, b); return L ? Math.abs((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])) / L : nmLen(a, p); };
+  while (i < np - 2) {
+    const p0 = u[i]; let n = i;
+    if (removeColinear) while (n < np - 2 && (lineDist(p0, u[n + 2], u[n + 1]) <= 1 || segCollinear(p0, u[n + 2], p0, u[n + 1]))) n++;
+    out.push(p0); if (n > i) i = n;
+    if (n === np - 2) { out.push(u[np - 1]); return out; }
+    i++;
+  }
+  if (np > 1) out.push(u[np - 2]); out.push(u[np - 1]);
+  return out;
+}
+/** SHAPE_LINE_CHAIN::SelfIntersecting of an open chain: the first place two of its segments meet, or null. */
+function chainSelfIntersecting(c: NmPt[]): NmPt | null {
+  const n = segCount(c, false); if (n < 2) return null;
+  for (let s1 = 0; s1 < n; s1++) for (let s2 = s1 + 1; s2 < n; s2++) {
+    const a1 = c[s1], b1 = c[s1 + 1], a2 = c[s2], b2 = c[s2 + 1];
+    if (s1 + 1 !== s2 && segContains(a1, b1, a2)) return a2.slice();
+    if (segContains(a1, b1, b2)) return b2.slice();
+    const p = segCross(a1, b1, a2, b2);
+    if (p) { const ends = (ieq(p, a1) || ieq(p, b1)) && (ieq(p, a2) || ieq(p, b2)); if (!ends) return p; }   // Intersect( seg, aIgnoreEndpoints = true )
   }
   return null;
 }
+/** One crossing of a hull (ours, closed) and a line (theirs): SHAPE_LINE_CHAIN::INTERSECTION. */
+interface ChainIP { p: NmPt; our: number; their: number; cOur: boolean; cTheir: boolean }
+/** SHAPE_LINE_CHAIN::Intersect( chain ) for a closed hull against an open line, colinear overlaps as corner points. */
+function chainIntersect(hull: NmPt[], line: NmPt[]): ChainIP[] {
+  const out: ChainIP[] = []; const nh = segCount(hull, true), nl = segCount(line, false);
+  for (let s1 = 0; s1 < nh; s1++) {
+    const [a, b] = cseg(hull, true, s1);
+    for (let s2 = 0; s2 < nl; s2++) {
+      const c = line[s2], d = line[s2 + 1];
+      if (segCollinear(a, b, c, d)) {
+        if (segContains(a, b, c)) out.push({ p: c.slice(), our: s1, their: s2, cOur: false, cTheir: true });
+        if (segContains(a, b, d)) out.push({ p: d.slice(), our: s1, their: s2 + 1, cOur: false, cTheir: true });
+        if (segContains(c, d, a)) out.push({ p: a.slice(), our: s1, their: s2, cOur: true, cTheir: false });
+        if (segContains(c, d, b)) out.push({ p: b.slice(), our: s1 + 1, their: s2, cOur: true, cTheir: false });
+        continue;
+      }
+      const p = segCross(a, b, c, d); if (!p) continue;
+      const ip: ChainIP = { p, our: s1, their: s2, cOur: false, cTheir: false };
+      if (ieq(p, a)) ip.cOur = true;
+      if (ieq(p, b)) { ip.cOur = true; ip.our++; }
+      if (ieq(p, c)) ip.cTheir = true;
+      if (ieq(p, d)) { ip.cTheir = true; ip.their++; }
+      out.push(ip);
+    }
+  }
+  return out;
+}
+/** HullIntersection (pns_utils.cpp): the line's crossings of the hull, a touch at a corner only when the line goes inside. */
+export function hullIntersection(hull: NmPt[], line: NmPt[]): ChainIP[] {
+  const ips: ChainIP[] = []; if (line.length < 2) return ips; const nh = segCount(hull, true);
+  for (const p0 of chainIntersect(hull, line)) {
+    if (!p0.cOur && !p0.cTheir) { ips.push(p0); continue; }
+    const p = Object.assign({}, p0); if (p.our >= nh) p.our -= nh;
+    const d1: [NmPt, NmPt][] = p.cOur ? [cseg(hull, true, p.our), cseg(hull, true, p.our - 1)] : [cseg(hull, true, p.our)];
+    const d2: NmPt[] = [];
+    if (p.cTheir) { if (p.their > 0) d2.push(line[p.their - 1]); if (p.their < line.length - 1) d2.push(line[p.their + 1]); }
+    else { d2.push(line[p.their], line[p.their + 1]); }
+    let valid = false; for (const [a, b] of d1) for (const q of d2) if (segSide(a, b, q) > 0) valid = true;
+    if (valid) ips.push(p0);
+  }
+  return ips;
+}
+
+// ================================================================ LINE::Walkaround (pns_line.cpp)
 /**
- * LINE_PLACER::routeHead in Walk around: the clear line towards the cursor.  An unreachable cursor (inside another
- * net's clearance, or walled in) gives the reachable point nearest to it.  { pts, reached }.
+ * The line `path` (nm) walked round the convex hull `hull` (clockwise in y-down screen coordinates, as KiCad's hulls
+ * are): the line's and the hull's vertices with every crossing split into both make a graph that is walked from the
+ * line's first point, along the line while outside the hull and along the hull (in its order for cw, against it
+ * otherwise) while the line is inside.  When the line ends inside the hull the walk stops at the hull point nearest the
+ * end.  null when it cannot be walked (the line starts inside the hull, or the graph leads nowhere).
  */
-export function walkHead(O: ObstacleIndex, start: Pt, goal: Pt, r: number, diagFirst: boolean, lastDir: number, legFn?: LegFn | null) {
+export function lineWalkaround(path: NmPt[], hull: NmPt[], cw: boolean): NmPt[] | null {
+  if (path.length < 2) return null;
+  const pFirst = path[0], last = path[path.length - 1];
+  if (chainInside(hull, pFirst) && !chainOnEdge(hull, true, pFirst)) return null;
+  const ips = hullIntersection(hull, path);
+  const pnew = path.map((p) => p.slice()); let hnew = hull.map((p) => p.slice());
+  const si = chainSelfIntersecting(pnew); if (si && !ieq(si, pnew[pnew.length - 1])) chainSplit(pnew, false, si);
+  for (const ip of ips) { if (chainFind(pnew, ip.p, 1) < 0) chainSplit(pnew, false, ip.p); if (chainFind(hnew, ip.p, 1) < 0) chainSplit(hnew, true, ip.p); }
+  for (let i = 0; i < pnew.length; i++) { const p = pnew[i]; if (!chainOnEdge(hnew, true, p)) continue; if (chainFind(hnew, p) < 0) chainSplit(hnew, true, p); }
+  if (!cw) hnew = hnew.slice().reverse();
+  const INSIDE = 0, OUTSIDE = 1, ON_EDGE = 2;
+  interface V { type: number; isHull: boolean; pos: NmPt; nb: V[]; ip: number; ih: number; visited: boolean }
+  const vts: V[] = [];
+  const findV = (p: NmPt) => { for (const v of vts) if (ieq(v.pos, p)) return v; return null; };
+  for (let i = 0; i < pnew.length; i++) {
+    const p = pnew[i]; const onEdge = chainOnEdge(hnew, true, p), inside = chainInside(hnew, p);
+    vts.push({ type: inside && !onEdge ? INSIDE : onEdge ? ON_EDGE : OUTSIDE, isHull: false, pos: p, nb: [], ip: i, ih: -1, visited: false });
+  }
+  for (let i = 0; i < pnew.length - 1; i++) vts[i].nb.push(vts[i + 1]);
+  for (let i = 1; i < pnew.length; i++) vts[i].nb.push(vts[i - 1]);
+  for (let i = 0; i < hnew.length; i++) { const vn = findV(hnew[i]); if (vn) { vn.isHull = true; vn.ih = i; } else vts.push({ type: ON_EDGE, isHull: true, pos: hnew[i], nb: [], ip: -1, ih: i, visited: false }); }
+  for (let i = 0; i < hnew.length; i++) { const vc = findV(hnew[i]), vnext = findV(hnew[(i + 1) % hnew.length]); if (vc && vnext) vc.nb.push(vnext); }
+  const neighbours = (x: number, y: number, max: number) => (x > 0 && x - 1 === y) || (x < max - 1 && x + 1 === y);
+  const inLast = chainInside(hull, last) && !chainOnEdge(hull, true, last); let appendV = true, lastDst = Infinity;
+  let v: V | null = vts[0], vPrev: V | null = null; const out: NmPt[] = []; let iterLimit = 1000;
+  while (v!.ip !== pnew.length - 1) {
+    if (--iterLimit === 0) return null;
+    if (v!.visited) break;
+    out.push(v!.pos.slice());
+    let vNext: V | null = null;
+    if (v!.type === OUTSIDE) {
+      out.push(v!.pos.slice()); let fallback: V | null = null;
+      for (const vn of v!.nb) if (neighbours(vn.ip, v!.ip, pnew.length) && vn.type !== INSIDE) { if (!vn.visited) { vNext = vn; break; } else if (vn !== vPrev) fallback = vn; }
+      if (!vNext) vNext = fallback;
+      if (!vNext) return null;
+    } else if (v!.type === ON_EDGE) {
+      for (const vn of v!.nb) if (vn.type === OUTSIDE && !vn.visited) { vNext = vn; break; }
+      if (!vNext) for (const vn of v!.nb) if (vn.type === ON_EDGE && !vn.isHull && neighbours(vn.ip, v!.ip, pnew.length) && vn.ih === (v!.ih + 1) % hnew.length) { vNext = vn; break; }
+      if (!vNext) {
+        for (const vn of v!.nb) if (vn.type === ON_EDGE && vn.ih === (v!.ih + 1) % hnew.length) { vNext = vn; break; }
+        if (vNext) for (const vt of vts) if (vt.isHull) vt.visited = false;
+        if (inLast && vNext) {
+          const dx = vNext.pos[0] - last[0], dy = vNext.pos[1] - last[1], d = dx * dx + dy * dy;
+          if (d < lastDst) lastDst = d;
+          else { out.push(segNearestNm(v!.pos, vNext.pos, last)); appendV = false; break; }
+        }
+      }
+    }
+    v!.visited = true; vPrev = v; v = vNext;
+    if (!v) return null;
+  }
+  if (appendV) out.push(v!.pos.slice());
+  return chainSimplify2(out, false);
+}
+
+// ================================================================ WALKAROUND (pns_walkaround.cpp)
+export const WP_CW = 0, WP_CCW = 1, WP_SHORTEST = 2;
+export const ST_IN_PROGRESS = 0, ST_ALMOST_DONE = 1, ST_DONE = 2, ST_STUCK = 3, ST_NONE = 4;
+/** ADVANCED_CFG::m_PNSProcessClusterTimeout: a cluster that is not walked round within this many ms gives up. */
+export const PNS_PROCESS_CLUSTER_TIMEOUT = 100;
+/** WALKAROUND's options: the policies, iteration limit (WalkaroundIterationLimit), length limit and corner mode. */
+export interface WalkOpts { policies: number[]; iterLimit?: number; lengthLimit?: boolean; lengthFactor?: number; anyComplete?: boolean; cornerMode?: number; filter?: ((ob: Obstacle) => boolean) | null }
+export interface WalkResult { status: number[]; lines: NmPt[][] }
+/** HullCache( item, clearance, width ) as the walk uses it, in nm; the 90° corner modes walk round its bounding box. */
+export function walkHull(ob: Obstacle, r: number, cm?: number): NmPt[] {
+  const key = r.toFixed(6) + "|" + (cm === 2 || cm === 3 ? 1 : 0);
+  if (ob.whKey === key) return ob.wh as NmPt[];
+  // the octagon of hullOf at exactly the clearance (SegmentHull / OctagonalHull put their edges at clearance + half
+  // width; a line on an edge keeps the clearance, the collision test's epsilon absorbs the nanometre rounding)
+  const core = shapeCorePts(ob.shape), off = (ob.kind === "keepout" ? 0 : shapeOffset(ob.shape) + ob.clr) + r;
+  const hd = DIRS8.map((u) => { let m = -Infinity; for (const p of core) m = Math.max(m, p[0] * u[0] + p[1] * u[1]); return m + off; });
+  let h: NmPt[] = [];
+  for (let k = 0; k < 8; k++) { const u0 = DIRS8[k], u1 = DIRS8[(k + 1) % 8], h0 = hd[k], h1 = hd[(k + 1) % 8]; const det = u0[0] * u1[1] - u0[1] * u1[0]; h.push(toNm([(h0 * u1[1] - h1 * u0[1]) / det, (u0[0] * h1 - u1[0] * h0) / det])); }
+  if (cm === 2 || cm === 3) {   // MITERED_90 / ROUNDED_90: BBox() of the hull, clockwise from the top left
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const p of h) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }
+    h = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+  }
+  ob.whKey = key; ob.wh = h; return h;
+}
+const nmPathHits = (O: ObstacleIndex, line: NmPt[], r: number, filter?: ((ob: Obstacle) => boolean) | null) => { const hs = pathHits(O, line.map(fromNm), r); return filter ? hs.filter(filter) : hs; };
+/**
+ * NODE::NearestObstacle( line ): of the obstacles the line collides with, the one whose hull it crosses first along
+ * its length (the first colliding one when no crossing is found).
+ */
+export function walkNearestObstacle(O: ObstacleIndex, line: NmPt[], r: number, cm?: number, filter?: ((ob: Obstacle) => boolean) | null): Obstacle | null {
+  const obs = nmPathHits(O, line, r, filter); if (!obs.length) return null;
+  let best: Obstacle | null = null, bd = Infinity;
+  for (const ob of obs) {
+    let d = Infinity;
+    for (const ip of hullIntersection(walkHull(ob, r, cm), line)) { const L = chainPathLength(line, ip.p, ip.their); if (L >= 0 && L < d) d = L; }
+    if (d < bd) { bd = d; best = ob; if (d === 0) break; }
+  }
+  return best || obs[0];
+}
+/**
+ * TOPOLOGY::AssembleCluster: the obstacle and everything that touches it within `margin` (2 × its clearance + the line
+ * width), transitively, on the layer — two tracks of different nets never join a cluster through each other.
+ */
+export function walkCluster(O: ObstacleIndex, seed: Obstacle, margin: number): Obstacle[] {
+  const out: Obstacle[] = [seed], seen = new Set<Obstacle>([seed]), pending: Obstacle[] = [seed];
+  while (pending.length) {
+    const top = pending.shift()!;
+    obstaclesNear(O, top.bbox, margin, (ob) => {
+      if (seen.has(ob)) return false;
+      if (ob.net !== top.net && ob.kind === "segment" && top.kind === "segment") return false;   // trackOnTrack
+      let g: number; try { g = shapeGap(top.shape, ob.shape); } catch { g = Infinity; }
+      if (!(g < margin)) return false;
+      seen.add(ob); out.push(ob); pending.push(ob); return false;
+    });
+  }
+  return out;
+}
+/**
+ * WALKAROUND::Route( initialPath ): each enabled policy (clockwise, counter-clockwise, shortest) walks its own copy of
+ * the line: the nearest obstacle's cluster is walked round item by item (LINE::Walkaround on each hull), until nothing
+ * collides (ST_DONE), a walk fails (ST_STUCK), the iteration limit runs out or the line grows past lengthFactor times
+ * its first length (ST_ALMOST_DONE).  A line that no longer starts at the start is stuck; one that no longer ends at the
+ * end is almost done.
+ */
+export function walkaroundRoute(O: ObstacleIndex, init: NmPt[], r: number, wo: WalkOpts): WalkResult {
+  const iterLimit = wo.iterLimit || 40, lengthLimit = wo.lengthLimit !== false, factor = wo.lengthFactor || 10, cm = wo.cornerMode, filter = wo.filter || null;
+  const en = [false, false, false]; for (const p of wo.policies) en[p] = true;
+  const res: WalkResult = { status: [ST_NONE, ST_NONE, ST_NONE], lines: [[], [], []] };
+  for (let p = 0; p < 3; p++) { res.status[p] = ST_IN_PROGRESS; res.lines[p] = init.map((q) => q.slice()); }
+  const initLen = chainLength(init); const processed = new Set<Obstacle>();
+  const processCluster = (cluster: Obstacle[], line: NmPt[], cw: boolean): NmPt[] | null => {
+    const t0 = now(); let cur = line;
+    for (const ob of cluster) {
+      if (now() - t0 > PNS_PROCESS_CLUSTER_TIMEOUT) return null;
+      const hull = walkHull(ob, r, cm); cur = chainSimplify2(cur);
+      const w = lineWalkaround(cur, hull, cw); if (!w) return null; cur = w;
+    }
+    return cur;
+  };
+  for (let iter = 0; iter < iterLimit; iter++) {
+    const pending: (Obstacle[] | null)[] = [null, null, null];
+    for (let i = 0; i < 3; i++) {
+      if (!en[i] || res.status[i] !== ST_IN_PROGRESS) continue;
+      const ob = walkNearestObstacle(O, res.lines[i], r, cm, filter);
+      if (!ob) { res.status[i] = ST_DONE; continue; }
+      pending[i] = walkCluster(O, ob, 2 * ob.clr + 2 * r);
+    }
+    for (const pol of [WP_CW, WP_CCW]) {
+      if (!en[pol] || !pending[pol]) continue;
+      const w = processCluster(pending[pol]!, res.lines[pol], pol === WP_CW); if (!w) res.status[pol] = ST_STUCK; else res.lines[pol] = w;
+    }
+    if (en[WP_SHORTEST] && pending[WP_SHORTEST]) {
+      const line = res.lines[WP_SHORTEST]; const cwP = processCluster(pending[WP_SHORTEST]!, line, true), ccwP = processCluster(pending[WP_SHORTEST]!, line, false);
+      const coll = (l: NmPt[]) => nmPathHits(O, l, r, filter).length > 0;
+      const cwC = cwP ? coll(cwP) : false, ccwC = ccwP ? coll(ccwP) : false;
+      let shortest: NmPt[] | null = null, alt: NmPt[] | null = null;
+      if (cwP && ccwP) {
+        if ((!cwC && !ccwC) || (cwC && ccwC)) { if (chainLength(cwP) > chainLength(ccwP)) { shortest = ccwP; alt = cwP; } else { shortest = cwP; alt = ccwP; } }
+        else if (!cwC) shortest = cwP; else if (!ccwC) shortest = ccwP;
+      } else if (ccwP) shortest = ccwP; else if (cwP) shortest = cwP;
+      if (shortest && processed.size && nmPathHits(O, shortest, r, filter).some((ob) => processed.has(ob))) shortest = alt;
+      if (!shortest) res.status[WP_SHORTEST] = ST_STUCK; else res.lines[WP_SHORTEST] = shortest;
+      for (const ob of pending[WP_SHORTEST]!) processed.add(ob);
+    }
+    let still = false, finished = false;
+    for (let p = 0; p < 3; p++) {
+      if (!en[p]) continue;
+      if (res.status[p] === ST_DONE && wo.anyComplete) { finished = true; break; }
+      const lf = initLen ? chainLength(res.lines[p]) / initLen : Infinity;
+      if (lengthLimit && res.status[p] !== ST_DONE && lf > factor) res.status[p] = ST_ALMOST_DONE;
+      if (res.status[p] === ST_IN_PROGRESS) still = true;
+    }
+    if (!still || finished) break;
+  }
+  for (let p = 0; p < 3; p++) {
+    const ln = res.lines[p];
+    if (res.status[p] === ST_IN_PROGRESS) res.status[p] = ST_ALMOST_DONE;
+    if (ln.length < 2 || !ieq(ln[0], init[0])) res.status[p] = ST_STUCK;
+    if (ln.length > 0 && !ieq(ln[ln.length - 1], init[init.length - 1])) res.status[p] = ST_ALMOST_DONE;
+  }
+  return res;
+}
+
+// ================================================================ LINE_PLACER's walk (pns_line_placer.cpp)
+/** LINE_PLACER::splitHeadTail: a walked line (tail + head) cut back into the part that keeps the old tail and the new head. */
+export function splitHeadTail(line: Pt[], oldTail: Pt[]): { head: Pt[]; tail: Pt[] } {
+  const l2 = line.map(toNm); const n = l2.length;
+  if (n > 1 && oldTail.length > 1) {
+    const ot = oldTail.map(toNm); const tl = ot[ot.length - 1];
+    if (chainOnEdge(l2, false, tl)) chainSplit(l2, false, tl);
+    let i: number, found = false;
+    for (i = 0; i < ot.length; i++) if (chainFind(l2, ot[i]) < 0) { found = true; break; }
+    if (!found) i--;
+    if (i >= l2.length) i = l2.length - 1;
+    return { tail: i === 0 ? [] : l2.slice(0, i + 1).map(fromNm), head: l2.slice(i).map(fromNm) };
+  }
+  return { tail: [], head: line.map((p) => p.slice()) };
+}
+/** clipAndCheckCollisions: the line up to aP when it is longer than the best so far and clear; { out, dist } or null. */
+function clipAndCheck(O: ObstacleIndex, r: number, aP: NmPt, L: NmPt[], threshold: number): { out: NmPt[]; dist: number } | null {
+  const l = L.map((p) => p.slice()); const idx = chainSplit(l, false, aP); if (idx < 0) return null;
+  const l2 = l.slice(0, idx + 1); const dist = Math.round(chainLength(l2));
+  if (dist < threshold) return null;
+  if (nmPathHits(O, l2, r).length) return null;
+  return { out: l2, dist };
+}
+/**
+ * LINE_PLACER::cursorDistMinimum: of the walked line's vertices (and the points nearest the cursor on its segments)
+ * within lengthThreshold of its start, the one nearest the cursor — the line clipped there when that is clear, else the
+ * longest clear clip at any of them.  null when none is clear.
+ */
+export function cursorDistMinimum(O: ObstacleIndex, r: number, L: NmPt[], cursor: NmPt, lengthThreshold: number): NmPt[] | null {
+  if (!L.length) return null;
+  const dists: number[] = [], pts: NmPt[] = []; let lastP = L[L.length - 1], acc = 0;
+  for (let i = 0; i + 1 < L.length; i++) {
+    const a = L[i], b = L[i + 1];
+    dists.push(Math.round(nmLen(cursor, a))); pts.push(a);
+    const pn = segNearestNm(a, b, cursor); if (!ieq(pn, a) && !ieq(pn, b)) { dists.push(Math.round(nmLen(pn, cursor))); pts.push(pn); }
+    acc += Math.round(nmLen(a, b));
+    if (acc > lengthThreshold) { lastP = b; break; }
+  }
+  dists.push(Math.round(nmLen(cursor, lastP))); pts.push(lastP);
+  let minG = Infinity, pG = -1; for (let i = 0; i < dists.length; i++) if (dists[i] < minG) { minG = dists[i]; pG = i; }
+  const pref = clipAndCheck(O, r, pts[pG], L, 0); if (pref) return pref.out;
+  let thr = 0, out: NmPt[] | null = null;
+  for (const p of pts) { const c = clipAndCheck(O, r, p, L, thr); if (c) { out = c.out; thr = c.dist; } }
+  return out;
+}
+/** What rhWalkBase needs from the placer: the tail, where the head starts, its initial line and the optimizer. */
+export interface WalkBaseOpts {
+  /** the tail as it is when the initial line has been built (buildInitialLine may drop it) */
+  tail(): Pt[]; cursor: Pt; r: number; cornerMode?: number; iterLimit?: number; hugThreshold?: number; placingVia?: boolean;
+  /** what a clipped walk is checked against (m_currentNode->CheckColliding: every item, also when the walk is for the solids only) */
+  checkO?: ObstacleIndex;
+  /** buildInitialLine( p ): the head's initial line towards p (with the carried via pushed out of what it meets) */
+  initial(p: Pt, round: number): Pt[];
+  /** OPTIMIZER::Optimize( line, MERGE_SEGMENTS ) against the walk's obstacles */
+  optimize(pts: Pt[]): Pt[];
+}
+/**
+ * LINE_PLACER::rhWalkBase: the tail and the initial head walked round everything in O both ways (WP_CCW, WP_CW).  A
+ * walk that completes is optimized (MERGE_SEGMENTS on the whole line, then on its head); the shorter one is taken when
+ * it is under 2 × hug threshold × the initial length.  Otherwise each walk is clipped where it comes closest to the
+ * cursor within hug threshold × the initial length (cursorDistMinimum) and the nearer clip wins.  With a via in hand
+ * the walk is done twice, the second time towards where the first one ended.  The walked line (tail + head), or null.
+ */
+export function rhWalkBase(O: ObstacleIndex, wb: WalkBaseOpts): Pt[] | null {
+  let walkFull: Pt[] | null = null; let walkP = wb.cursor.slice(); let round = 0; const aP = toNm(wb.cursor);
+  do {
+    round++;
+    const l1 = wb.initial(walkP, round); const tail = wb.tail();
+    const initTrack = simplifyPts(tail.length && l1.length && peqPt(tail[tail.length - 1], l1[0]) ? tail.concat(l1.slice(1)) : tail.concat(l1)).map(toNm);
+    const initialLength = chainLength(initTrack), thr = wb.hugThreshold || 1.5;
+    const hugLen = initialLength * thr, hugLenComplete = 2 * initialLength * thr;
+    if (initTrack.length < 2) { walkFull = initTrack.map(fromNm); walkP = walkFull[walkFull.length - 1]; continue; }
+    const wr = walkaroundRoute(O, initTrack, wb.r, { policies: [WP_CCW, WP_CW], iterLimit: wb.iterLimit, cornerMode: wb.cornerMode });
+    let best: NmPt[] | null = null;
+    let lenCw = wr.status[WP_CW] !== ST_STUCK ? Math.round(chainLength(wr.lines[WP_CW])) : Infinity, lenCcw = wr.status[WP_CCW] !== ST_STUCK ? Math.round(chainLength(wr.lines[WP_CCW])) : Infinity;
+    const finish = (pol: number) => {
+      let full = wb.optimize(wr.lines[pol].map(fromNm));
+      const sp = splitHeadTail(full, tail); full = simplifyPts(sp.tail.concat(wb.optimize(sp.head)));
+      wr.lines[pol] = full.map(toNm); return Math.round(chainLength(wr.lines[pol]));
+    };
+    if (wr.status[WP_CW] === ST_DONE) { lenCw = finish(WP_CW); best = wr.lines[WP_CW]; }
+    if (wr.status[WP_CCW] === ST_DONE) { lenCcw = finish(WP_CCW); if (lenCcw < lenCw) best = wr.lines[WP_CCW]; }
+    const bestLength = Math.min(lenCw, lenCcw);
+    if (bestLength < hugLenComplete && best) { walkFull = best.map(fromNm); walkP = walkFull[walkFull.length - 1]; continue; }
+    let lCw: NmPt[] | null = null, lCcw: NmPt[] | null = null, dCw = Infinity, dCcw = Infinity;
+    if (wr.status[WP_CW] !== ST_STUCK) { lCw = cursorDistMinimum(wb.checkO || O, wb.r, wr.lines[WP_CW], aP, hugLen); if (lCw) dCw = Math.round(nmLen(aP, lCw[lCw.length - 1])); }
+    if (wr.status[WP_CCW] !== ST_STUCK) { lCcw = cursorDistMinimum(wb.checkO || O, wb.r, wr.lines[WP_CCW], aP, hugLen); if (lCcw) dCcw = Math.round(nmLen(aP, lCcw[lCcw.length - 1])); }
+    if (dCw < dCcw && lCw) walkFull = lCw.map(fromNm);
+    else if (lCcw) walkFull = lCcw.map(fromNm);
+    else return null;
+    walkP = walkFull[walkFull.length - 1];
+  } while (round < 2 && wb.placingVia);
+  return walkFull;
+}
+export const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+/** The router settings the walk reads: corner mode, WalkaroundIterationLimit, WalkaroundHugLengthThreshold. */
+const walkSettings = () => ({ cornerMode: S.rs.corner_mode, iterLimit: S.rs.walkaround_iteration_limit || 40, hugThreshold: S.rs.walkaround_hug_length_threshold || 1.5 });
+/**
+ * WALKAROUND of the initial leg start → goal (both ways round, WP_CW and WP_CCW): the shorter walk that reaches the goal
+ * clear of everything in O, or null.
+ */
+export function walkTo(O: ObstacleIndex, start: Pt, goal: Pt, r: number, diagFirst: boolean, _lastDir?: number, _deadline?: number, legFn?: LegFn | null): Pt[] | null {
+  const legPts = legFn || legPts45; const first = legPts(start, goal, diagFirst); if (pathClear(O, first, r)) return first;
+  const ws = walkSettings(); const wr = walkaroundRoute(O, first.map(toNm), r, { policies: [WP_CW, WP_CCW], iterLimit: ws.iterLimit, cornerMode: ws.cornerMode });
+  let best: NmPt[] | null = null;
+  for (const pol of [WP_CW, WP_CCW]) if (wr.status[pol] === ST_DONE && (!best || chainLength(wr.lines[pol]) < chainLength(best))) best = wr.lines[pol];
+  return best ? simplifyPts(best.map(fromNm)) : null;
+}
+/**
+ * LINE_PLACER::rhWalkOnly for a head without a tail: rhWalkBase from `start` towards the cursor, refused when the
+ * result collides; the head optimized per the Optimizer effort (OE_LOW: not at all, else MERGE_SEGMENTS).  A head that
+ * cannot be walked stays at its start.  { pts, reached }.
+ */
+export function walkHead(O: ObstacleIndex, start: Pt, goal: Pt, r: number, diagFirst: boolean, _lastDir?: number, legFn?: LegFn | null) {
   const legPts = legFn || legPts45;
-  const deadline = now() + 35;   // a mouse move must stay interactive: past this the head just stops short
   if (samePt(start, goal)) return { pts: [start.slice()], reached: true };
-  if (segHit(O, start, start, r)) return { pts: [start.slice()], reached: false };
-  if (!segHit(O, goal, goal, r)) { const p = walkTo(O, start, goal, r, diagFirst, lastDir, deadline, legFn); if (p) return { pts: p, reached: true }; }
-  // the cursor sits in a clearance zone (or no walk reaches it): try the hull edges nearest to it, then clip
-  const cands: Pt[] = [];
-  obstaclesNear(O, [goal[0], goal[1], goal[0], goal[1]], r, (ob) => {
-    if (!obstacleHit(ob, goal, goal, r)) return false; const H = hullOf(ob, r);
-    for (let i = 0; i < 8; i++) { const a = H[i], b = H[(i + 1) % 8]; const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy; const k = l2 > 0 ? Math.max(0, Math.min(1, ((goal[0] - a[0]) * dx + (goal[1] - a[1]) * dy) / l2)) : 0; cands.push([a[0] + k * dx, a[1] + k * dy]); }
-    return false;
-  });
-  const options: Pt[][] = [];
-  const clip = clipPts(O, legPts(start, goal, diagFirst), r); options.push(clip);
-  cands.sort((p, q) => Math.hypot(p[0] - goal[0], p[1] - goal[1]) - Math.hypot(q[0] - goal[0], q[1] - goal[1]));
-  let tried = 0;
-  for (const c of cands) { if (tried >= 2 || now() > deadline) break; if (segHit(O, c, c, r)) continue; tried++; const p = walkTo(O, start, [r6(c[0]), r6(c[1])], r, diagFirst, lastDir, deadline, legFn); if (p) options.push(p); }
-  const dist = (p: Pt[]) => { const e = p[p.length - 1]; return Math.hypot(e[0] - goal[0], e[1] - goal[1]); };
-  options.sort((a, b) => dist(a) - dist(b) || ptsLength(a) - ptsLength(b));
-  return { pts: options[0], reached: false };
+  const ws = walkSettings(); const merge = (pts: Pt[]) => mergeFull(O, pts, r, { obtuse: false });
+  const w = rhWalkBase(O, { tail: () => [], cursor: goal, r, cornerMode: ws.cornerMode, iterLimit: ws.iterLimit, hugThreshold: ws.hugThreshold, initial: (p) => legPts(start, p, diagFirst), optimize: merge });
+  if (!w || w.length < 1 || !pathClear(O, w, r)) return { pts: [start.slice()], reached: false };
+  const pts = simplifyPts((S.rs.effort as number) === 0 ? w : merge(w));
+  return { pts, reached: samePt(pts[pts.length - 1], goal) };
 }

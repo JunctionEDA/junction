@@ -328,7 +328,7 @@ type BoxSelLive = { live?: boolean; pts: number[][]; cur: number[] };
 /** The schematic selection's grip press (selectionContains( DragOrigin ) without the pressed item being selected). */
 function schGripPress(ev: PointerEvent, mm: [number, number]): boolean {
   if (!isSch() || (E.leftDrag || "dragSelected") !== "dragSelected" || !E.kdoc) return false;
-  const ids = selectionIds(); if (!ids.length) return false;
+  const ids = selectionIds(); if (!ids.length) return schSubGripPress(ev, mm);
   const w = schCands(mm).cands[0] || null;
   // the press's own pick is selected (or is a pin / field of a selected symbol): the ordinary press paths move it
   if (w && w.kind !== "field" && ids.includes(w.item.id)) return false;
@@ -347,6 +347,44 @@ function schGripPress(ev: PointerEvent, mm: [number, number]): boolean {
   // IsClick instead of IsDrag: selectPoint at the press (or the wire the click auto-starts)
   if (E.drag) { E.drag.clickId = null; E.drag.clickAt = mm; }
   else { stage.setPointerCapture(ev.pointerId); }
+  return true;
+}
+
+/**
+ * selectionContains( DragOrigin ) for a selection of fields or pins alone: each one's HitTest( point, 20 px grip
+ * margin ).  A press there (off the sub-item itself) drags it as a press on it would: a field moves, a sheet pin rides
+ * its sheet's edge, symbol pins move their symbols (RequestSelection( MovableItems ) promotes them).
+ */
+function schSubGripPress(ev: PointerEvent, mm: [number, number]): boolean {
+  const fields = selectedFields(), pins = E.selPins as { id: string; number: string }[];
+  if (!fields.length && !pins.length) return false;
+  const sm = CollabTools.sch as unknown as { _?: { candOfKey?: (d: KDoc, k: string) => unknown; candBox?: (d: KDoc, c: unknown) => number[]; beginSheetPinMove?: (c: unknown, id: string, name: string, mm: number[], byPointer: boolean, drag?: boolean) => boolean }; state: { mouseDragMode?: string } } | undefined;
+  if (!sm || !sm._ || !sm._.candOfKey || !sm._.candBox) return false;
+  const w = schCands(mm).cands[0] || null;
+  const own = (k: string) => !!w && w.key === k;
+  const m = 20 / Math.max(1e-9, pxPerMm()), within = (b: number[] | null | undefined) => !!b && mm[0] >= b[0] - m && mm[0] <= b[2] + m && mm[1] >= b[1] - m && mm[1] <= b[3] + m;
+  const boxOf = (k: string) => { const c = sm._!.candOfKey!(E.kdoc, k); return c ? sm._!.candBox!(E.kdoc, c) : null; };
+  // the press's own pick is one of them: the ordinary press paths take it
+  if (fields.some((f) => own(f.id + "@field:" + f.name)) || pins.some((p) => own(p.id + "#pin:" + p.number))) return false;
+  const f = fields.find((g) => within(boxOf(g.id + "@field:" + g.name)));
+  const p = f ? undefined : pins.find((q) => within(boxOf(q.id + "#pin:" + q.number)));
+  if (!f && !p) return false;
+  ev.stopImmediatePropagation(); ev.preventDefault();
+  if (f) {
+    const it = E.kdoc.items.get(f.id), pn = it && fieldOf(it, f.name), at = pn && KiCadCanvas.kid(pn, "at"); if (!at || !E.ws || E.ws.readyState !== 1) return true;
+    E.fdrag = { id: f.id, name: f.name, startMm: mm, orig: [KiCadCanvas.num(at[1]), KiCadCanvas.num(at[2])], origAt: at.slice(), moved: false, more: fieldDragMore(f) };
+    stage.setPointerCapture(ev.pointerId); return true;
+  }
+  const pin = p!;
+  if (E.kdoc.items.get(pin.id)?.kind === "sheet") {
+    if (sm._.beginSheetPinMove && sm._.beginSheetPinMove(toolCtx(), pin.id, pin.number, mm, true, sm.state.mouseDragMode !== "move")) stage.setPointerCapture(ev.pointerId);
+    return true;
+  }
+  const parents = Array.from(new Set(pins.map((q) => q.id))).filter((id) => E.kdoc.items.has(id) && E.kdoc.items.get(id)!.kind === "symbol");
+  const fp = (E.items as ItemSummary[]).find((x) => x.id === pin.id); if (!fp) return true;
+  E.selPins = []; E.selField = null; E.selFields = []; E.selection = new Set(parents); E.selected = fp; drawSelection(); renderProps(); renderObjects();
+  startGroupDrag({ id: pin.id, fp }, mm, ev);
+  if (E.drag) { E.drag.clickId = null; E.drag.clickAt = mm; } else stage.setPointerCapture(ev.pointerId);
   return true;
 }
 
@@ -412,7 +450,7 @@ window.addEventListener("pointercancel", () => { boardPress = null; }, true);
  * A drag of pads on their own (m_AllowFreePads): each pad's position inside its footprint follows the cursor by the
  * snapped delta; the release commits one change per footprint (padDragEnd), Escape puts them back.
  */
-type PadDrag = { startMm: number[]; moved: boolean; pads: { id: string; index: number; orig: SNode }[] };
+type PadDrag = { startMm: number[]; moved: boolean; pads: { id: string; index: number; orig: SNode }[]; /** a Move (M): follows the cursor with no button, the next click drops it */ sticky?: boolean };
 function padNode(id: string, index: number): SNode | null {
   const it = E.kdoc && E.kdoc.items.get(id); const P = (window as unknown as { PcbTools?: { padsOf?: (it: KItem) => { node: SNode }[] } }).PcbTools;
   const p = it && P && P.padsOf ? P.padsOf(it)[index] : null; return p ? p.node : null;
@@ -459,6 +497,9 @@ function padDragEnd(commit: boolean): void {
   requestRender();
 }
 E.hooks.cancelPadDrag = (): boolean => { if (!E.pdrag) return false; padDragEnd(false); return true; };
+// EDIT_TOOL::Move (M) on pads picked on their own with "Allow free pads" on: the pads move inside their footprint,
+// following the cursor until the next click (FilterCollectorForFreePads keeps the pads instead of their footprint)
+E.hooks.startPadMove = (keys: string[], mm: number[]): boolean => { if (!startPadDrag(keys, mm)) return false; (E.pdrag as PadDrag).sticky = true; return true; };
 /** MOUSE_DRAG_ACTION (Preferences > Mouse and Touchpad > Left button drag): SELECT, DRAG_SELECTED (the default) or DRAG_ANY. */
 function boardDragStart(bp: { mm: [number, number]; client: [number, number]; pointerId: number }, ev: PointerEvent): void {
   const mm = bp.mm, action = (E.leftDrag as string) || "dragSelected";
@@ -532,6 +573,7 @@ stage.addEventListener("pointerdown", (ev) => {
   }
   if (ev.button !== 0) return;
   if (E.fdrag && E.fdrag.sticky) { commitFieldDrag(); ev.preventDefault(); return; }   // the click that drops a field's Move
+  if (E.pdrag && (E.pdrag as PadDrag).sticky) { padDragEnd(true); ev.preventDefault(); return; }   // the click that drops a pad Move
   if (E.tool === "zoomtool") { E.zoomRect = { start: [ev.clientX, ev.clientY] }; stage.setPointerCapture(ev.pointerId); ev.preventDefault(); return; }
   if (E.tool === "measure") { measureDown(measurePoint(worldMm(ev), ev), ev); return; }
   if (E.tool === "comment") { placeComment(ev); return; }
@@ -589,7 +631,16 @@ stage.addEventListener("pointerdown", (ev) => {
   if (E.tool === "select" && E.kdoc && isSch() && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
     // SCH_SELECTION_TOOL: a pin under the cursor is selected on its own, ahead of its symbol's body
     const pin = pinForClick([x, y]);
-    if (pin) {
+    // a sheet pin (SCH_SHEET_PIN) is movable itself: a press on it when selected (or any press with DRAG_ANY) carries
+    // it along its sheet's edge while the button is held; otherwise the press selects it
+    if (pin && E.kdoc.items.get(pin.id)?.kind === "sheet" && !E.selection.has(pin.id) && !(E.selected && E.selected.id === pin.id)) {
+      const was = (E.selPins as { id: string; number: string }[]).some((p) => p.id === pin.id && p.number === pin.number);
+      if (!was) { clearSelection(); E.selPins = [pin]; drawSelection(); renderProps(); renderObjects(); requestRender(); }
+      const mv = CollabTools.sch && (CollabTools.sch._ as { beginSheetPinMove?: (c: unknown, id: string, name: string, mm: number[], byPointer: boolean, drag?: boolean) => boolean }).beginSheetPinMove;
+      if ((was || E.leftDrag === "dragAny") && E.leftDrag !== "select" && mv && !E.viewOnly && mv(toolCtx(), pin.id, pin.number, [x, y], true, (CollabTools.sch!.state as { mouseDragMode?: string }).mouseDragMode !== "move")) { stage.setPointerCapture(ev.pointerId); ev.preventDefault(); return; }
+      if (!was) { E.boxSel = { start: [x, y], cur: [x, y], pts: [[x, y]], lasso: E.selMode === "lasso", add: false, startClient: [ev.clientX, ev.clientY] }; stage.setPointerCapture(ev.pointerId); ev.preventDefault(); return; }
+    }
+    if (pin && E.kdoc.items.get(pin.id)?.kind !== "sheet") {
       const was = (E.selPins as { id: string; number: string }[]).some((p) => p.id === pin.id && p.number === pin.number);
       // its symbol is already selected: a drag moves the selection (RequestSelection( MovableItems )), only a click
       // (released where it was pressed) selects the pin on its own
@@ -943,7 +994,7 @@ function stagePointerMove(ev: PointerEvent, mm: [number, number]): void {
 
 const onPointerUp = (ev: PointerEvent) => {
   if (E.pan) { E.pan = null; return; }
-  if (E.pdrag) { padDragEnd(true); return; }
+  if (E.pdrag) { if (!(E.pdrag as PadDrag).sticky) padDragEnd(true); return; }
   if (E.fdrag) { if (!E.fdrag.sticky) commitFieldDrag(); return; }   // a Move (M) drops on the next click instead
   if (E.zoomRect) { finishZoomRect(ev); return; }
   if (E.boxSel && E.boxSel.open) return;   // SelectPolyArea: the polygon stays open until a double-click closes it
@@ -1077,9 +1128,16 @@ function hoverSelect(ev: KeyboardEvent): void {
 // A lone selected pin: Properties and Edit Main Fields act on its parent symbol (SCH_EDIT_TOOL::Properties, EditField),
 // which stays the pin's afterwards; Move and Drag take the parent symbol as the selection (SCH_MOVE_TOOL).
 const PIN_PROMOTE = new Set(["E", "U", "V", "F", "M", "G"]);
-function promotePin(ev: KeyboardEvent): void {
+function promotePin(ev: KeyboardEvent): boolean | void {
   if (!isSch() || E.selPins.length !== 1 || !E.kdoc || E.tool !== "select") return;
   const combo = comboOf(ev); if (!PIN_PROMOTE.has(combo)) return;
+  // a selected sheet pin is moved itself (SCH_MOVE_TOOL: Move / Drag), riding its sheet's edge
+  const sp = E.selPins[0] as { id: string; number: string };
+  if (E.kdoc.items.get(sp.id)?.kind === "sheet") {
+    const mv = CollabTools.sch && (CollabTools.sch._ as { beginSheetPinMove?: (c: unknown, id: string, name: string, mm: number[], byPointer: boolean, drag?: boolean) => boolean }).beginSheetPinMove;
+    if ((combo === "M" || combo === "G") && mv && mv(toolCtx(), sp.id, sp.number, (E.lastCursorMm || [0, 0]) as number[], false, combo === "G")) { ev.preventDefault(); return true; }
+    return;
+  }
   const pin = E.selPins[0] as { id: string; number: string }, fp = (E.items as ItemSummary[]).find((f) => f.id === pin.id); if (!fp) return;
   E.selPins = []; E.selected = fp;
   if (combo === "M" || combo === "G") { drawSelection(); renderProps(); return; }
@@ -1125,7 +1183,7 @@ document.addEventListener("keydown", (ev) => {
     if ((k === "Delete" || k === "Backspace") && deleteSelectedField()) { ev.preventDefault(); return; }
     if ((k === "m" || k === "M" || k === "g" || k === "G") && !ev.shiftKey && !E.fdrag && startFieldMove((E.lastCursorMm || [0, 0]) as [number, number])) { ev.preventDefault(); return; }
   }
-  promotePin(ev);
+  if (promotePin(ev)) return;
   hoverSelect(ev);                                                      // SCH_SELECTION_TOOL::RequestSelection: nothing selected -> the item under the cursor
   if ((k === "Delete" || (k === "Backspace" && isSch())) && E.selection.size > 1 && !E.viewOnly) { ev.preventDefault(); deleteSelection(); return; }   // a board's Backspace is Unroute Segment first (the module)
   if ((ev.metaKey || ev.ctrlKey) && (k === "a" || k === "A")) { ev.preventDefault(); selectAll(); return; }

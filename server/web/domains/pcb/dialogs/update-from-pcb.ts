@@ -12,8 +12,9 @@ import { liveDocument, projectDocs } from "../editor/projectfile";
 import { projectNetlist } from "../editor/pcbdialogs/update-pcb";
 import { NL } from "../editor/pcbdialogs/canvas";
 import { reportPanel, type ReportLine } from "../editor/pcbdialogs/ui";
-import { backAnnotate, fpData, libUnitPins, swapLibPins, type BaOptions, type FpData, type SymRef, type SymUnit } from "./update-from-pcb-logic";
+import { backAnnotate, fpData, libUnitPins, orientLabel, swapLibPins, type BaOptions, type DriverRef, type FpData, type PinConn, type SymRef, type SymUnit } from "./update-from-pcb-logic";
 import { prefs } from "./prefs";
+import { labelDefaults } from "../editor/schnets";
 import type { NetComponent, NetEntry, SheetFile, SheetInstance } from "../canvas/pcb-netlist";
 
 type N = SNode;
@@ -25,6 +26,8 @@ const remembered: BaOptions & { unitSwaps: boolean; pinSwaps: boolean } = { reli
 
 interface Loaded {
   syms: SymRef[]; fps: FpData[];
+  /** orientLabel of a symbol pin driver */
+  spinOf: (d: DriverRef) => number;
   /** symbol path -> where its item is */
   where: Map<string, { file: string; id: string; instPath: string }>;
   files: Map<string, SheetFile>; netMap: Map<string, NetEntry> | undefined; instFiles: string[];
@@ -51,6 +54,12 @@ async function load(): Promise<Loaded | { error: string }> {
   const pro = docs.find((d) => d.docType === "kicad_pro"), project = pro ? pro.path.split("/").pop()!.replace(/\.kicad_pro$/, "") : "";
   const compOf = new Map<string, NetComponent>(); for (const c of res.netlist.components) for (const pth of c.paths) compOf.set(pth, c);
   const instByPath = new Map(insts.map((i) => [i.uuidPath.join("/"), i] as [string, SheetInstance]));
+  // each placed unit's pins on its sheet instance with their drivers (the netlist's pin drivers by symbol path)
+  const pinConns = new Map<string, Map<string, PinConn>>();
+  for (const [k, pd] of res.netlist.pinDrivers || []) {
+    const at = k.indexOf("#"), path = k.slice(0, at);
+    let m = pinConns.get(path); if (!m) pinConns.set(path, m = new Map()); m.set(k.slice(at + 1), pd);
+  }
   // GetSheetNamesFromPaths: the sheet names along an instance path joined by "/", else the readable path
   const friendly = (path: string): string => {
     const u = path.split("/").filter(Boolean), names: string[] = [];
@@ -83,14 +92,28 @@ async function load(): Promise<Loaded | { error: string }> {
       const self: SymUnit = { key, unit: ir.unit, ...info, shared: paths.size > 1, sharedSheets, sharedProjects: [...others].sort() };
       syms.push({ key, keys: [key], ref: ir.ref, power: false, multi: info.unitPins.size > 1, sheetPath: inst.uuidPath.slice(), uuid: sv(u[1]),
         value: prop("Value"), footprint: prop("Footprint"), dnp: flag("dnp", false), inBom: flag("in_bom", true), inPos: flag("in_pos_files", true), onBoard: flag("on_board", true), exSim: flag("exclude_from_sim", false),
-        fields, pins, self });
+        fields, pins, self, pinNumbers: lib ? new Set(info.pinTypes.keys()) : undefined, pinDrivers: pinConns.get(key) || new Map() });
     }
   }
   // GetMultiUnitSymbols: the units of a multi-unit symbol, grouped by reference
   const groups = new Map<string, SymRef[]>();
   for (const s of syms) if (s.multi) { if (!groups.has(s.ref)) groups.set(s.ref, []); groups.get(s.ref)!.push(s); }
   for (const g of groups.values()) { const keys = g.map((s) => s.key), units = g.map((s) => s.self!); for (const s of g) { s.keys = keys; s.units = units; } }
-  return { syms, fps, where, files: res.files, netMap: res.netlist.netMap, instFiles: insts.map((i) => i.file), board: { docId: pcb.docId, doc: bdoc } };
+  // orientLabel: the library pin's orientation turned and mirrored as its symbol is
+  const spinOf = (d: DriverRef): number => {
+    const inst = insts[d.inst], f = inst ? res.files.get(inst.file) : undefined, it = f ? f.doc.items.get(d.id) : undefined;
+    if (!f || !it) return 0;
+    const lib = f.doc.lib.get(libKey(it.node)), un = K().kid(it.node, "unit") as N | null, unit = un ? Number(sv(un[1])) || 1 : 1;
+    let pinAngle = 0;
+    if (lib) for (const sub of K().kids(lib, "symbol") as N[]) {
+      const m = /_(\d+)_(\d+)$/.exec(sv(sub[1])); if (m && +m[1] !== 0 && +m[1] !== unit) continue;
+      const pn = (K().kids(sub, "pin") as N[]).find((p) => sv(((K().kid(p, "number") as N | null) || [])[1]) === d.pin);
+      if (pn) { const a = K().kid(pn, "at") as N | null; pinAngle = a ? Number(sv(a[3])) || 0 : 0; break; }
+    }
+    const at = K().kid(it.node, "at") as N | null, mi = K().kid(it.node, "mirror") as N | null;
+    return orientLabel(pinAngle, at ? Number(sv(at[3])) || 0 : 0, mi ? sv(mi[1]) : "");
+  };
+  return { syms, fps, spinOf, where, files: res.files, netMap: res.netlist.netMap, instFiles: insts.map((i) => i.file), board: { docId: pcb.docId, doc: bdoc } };
 }
 
 const setProp = (node: N, name: string, val: string): void => { const p = (K().kids(node, "property") as N[]).find((x) => sv(x[1]) === name); if (p) p[2] = val; };
@@ -108,7 +131,7 @@ export function openUpdateFromPcb(): void {
   const refresh = async (): Promise<void> => {
     if (!report) return;
     if (!data) { const d = await load(); if ("error" in d) { report.set([{ severity: "error", text: d.error }]); return; } data = d; }
-    const r = backAnnotate(data.syms, data.fps, { ...o, allowPinSwaps: !!prefs().schEditing.unconstrainedPinSwaps, annotated: await relinkReady() });
+    const r = backAnnotate(data.syms, data.fps, { ...o, allowPinSwaps: !!prefs().schEditing.unconstrainedPinSwaps, annotated: await relinkReady(), spinOf: data.spinOf });
     report.set(r.lines.slice() as ReportLine[]);
     // updateData: OK is enabled whenever BackAnnotateSymbols ran
     const ok = document.getElementById("kd-ufp-update") as HTMLButtonElement | null;
@@ -122,7 +145,7 @@ export function openUpdateFromPcb(): void {
   };
   const run = async (): Promise<void> => {
     if (!data || E.viewOnly) return;
-    const r = backAnnotate(data.syms, data.fps, { ...o, allowPinSwaps: !!prefs().schEditing.unconstrainedPinSwaps, annotated: await relinkReady() });
+    const r = backAnnotate(data.syms, data.fps, { ...o, allowPinSwaps: !!prefs().schEditing.unconstrainedPinSwaps, annotated: await relinkReady(), spinOf: data.spinOf });
     const per = new Map<string, { changes: KChange[]; inverse: KChange[] }>();
     const editItem = (file: string, id: string, fn: (n: N) => void): void => {
       const f = data!.files.get(file); if (!f) return;
@@ -191,14 +214,27 @@ export function openUpdateFromPcb(): void {
       ch.sexpr = "(lib_symbols " + K().serialize(le.lib) + ") " + ch.sexpr;
       inv.sexpr = "(lib_symbols " + K().serialize(le.orig) + ") " + inv.sexpr;
     }
-    // net names: the labels that name the old net take the board's name
-    if (data.netMap) for (const l of r.labels) {
-      const entry = data.netMap.get(l.from); if (!entry) continue;
-      const short = l.to.slice(l.to.lastIndexOf("/") + 1);
-      for (const m of entry.members) {
-        if (m.kind !== "label" && m.kind !== "global_label" && m.kind !== "hierarchical_label") continue;
-        const file = data.instFiles[m.inst]; if (!file) continue;
-        editItem(file, m.id, (n) => { n[1] = short; });
+    // processNetNameChange: the driving label or sheet pin takes the board's name, a power symbol its value, or a new
+    // label (default text size, oriented away from the pin) goes on the pin
+    const I = (CollabTools.sch as unknown as { _: { labelNode(kind: string, text: string, p: [number, number], rot: number): N; itemSexpr(doc: KDoc, kind: string, node: N): string } })._;
+    const SPIN_ROT = [180, 90, 0, 270];   // SPIN_STYLE LEFT, UP, RIGHT, BOTTOM as a label's angle
+    for (const l of r.labels) {
+      const file = data.instFiles[l.inst]; if (!file) continue;
+      if (l.op === "text") editItem(file, l.id, (n) => {
+        if (l.kind !== "sheet_pin") { n[1] = l.text; return; }
+        const pin = (K().kids(n, "pin") as N[]).find((p) => sv(p[1]) === l.sheetPin); if (pin) pin[1] = l.text;
+      });
+      else if (l.op === "value") editItem(file, l.id, (n) => setProp(n, "Value", l.text));
+      else {
+        const f = data.files.get(file); if (!f) continue;
+        const cur = file === currentPath() ? (E.kdoc as KDoc) : f.doc, size = labelDefaults().textSize;
+        const node = I.labelNode("label", l.text, [l.x, l.y], SPIN_ROT[l.spin] ?? 0);
+        const font = K().kid(K().kid(node, "effects") as N, "font") as N | null, sz = font ? K().kid(font, "size") as N | null : null;
+        if (sz) { sz[1] = size; sz[2] = size; }
+        const id = K().newUuid(); node.push(["uuid", id] as unknown as N);
+        const acc = per.get(file) || { changes: [], inverse: [] }; per.set(file, acc);
+        acc.changes.push({ id, kind: "ADDED", typeName: "SCH_LABEL", sexpr: I.itemSexpr(cur, "label", node) } as KChange);
+        acc.inverse.push({ id, kind: "REMOVED", typeName: "SCH_LABEL", properties: [] } as unknown as KChange);
       }
     }
     const label = "Update Schematic from PCB";

@@ -17,7 +17,7 @@ import { E, appState, api } from "../dialogs/editor";
 import { comboOf } from "../editor/hotkeys";
 import { keyName } from "../../../shared/keys";
 import { clickMode, hasModifier, modifiersState } from "../editor/selmodes";
-import { fmtCoord, unitName, messageText, unitsMsg, gridChoiceText, loadUnits, saveUnits } from "../../../shared/units";
+import { fmtCoord, unitName, messageText, gridMessageText, unitsMsg, gridChoiceText, loadUnits, saveUnits } from "../../../shared/units";
 import { toolCursor } from "../editor/cursors";
 import { ensureStyle, icon, meta, showMenu, closeMenus, type MenuEntry } from "./ui";
 import { fitMenu } from "../../../shared/menufit";
@@ -40,8 +40,8 @@ import { saveToSchematic } from "./schematic";
 import { mergeSymbolText } from "./merge";
 import { SYM_FILTER_ROWS, defaultSymFilter, symAllChecked, symPasses, symSetFilter, type SymFilterKey, type SymSelFilter } from "./selfilter";
 import { openPreferences } from "../dialogs/preferences";
-import { GRID_PAGE, clonePrefs, defaultGrid, gridDefs, prefs, rememberCursor, rememberGrid, savePrefs } from "../dialogs/prefs";
-import { gridPitchFor, type GridClass } from "../dialogs/logic";
+import { GRID_PAGE, clonePrefs, defaultGrid, defaultGridIndex, gridDefs, prefs, rememberCursor, rememberGrid, savePrefs } from "../dialogs/prefs";
+import { gridPitchFor, gridPitchForXY, type GridClass } from "../dialogs/logic";
 import { loadPinnedLibs, setLibPinned } from "../library/pinned";
 import { RECT_HANDLES, dragRectHandle, rectBox, rectHandles } from "./rect-edit";
 import { EDIT_BORDER_PX, EDIT_POINT_PX, editPointColors } from "../tools/edit-point-style";
@@ -58,6 +58,8 @@ export interface Tab { lib: string; name: string; origin?: Origin; scratch?: M.N
 const TOOL_ACTIONS: Record<string, ToolId> = { selectionTool: "select", placeSymbolPin: "pin", placeSymbolText: "text", drawSymbolTextBox: "textbox", drawRectangle: "rectangle", drawCircle: "circle", drawEllipse: "ellipse", drawEllipseArc: "ellipse_arc", drawArc: "arc", drawArcCenter: "arc", drawArcStartEndMid: "arc", drawArcStartEndCenter: "arc", drawArcTangent: "arc", drawArcStartDirEnd: "arc", drawBezier: "bezier", drawSymbolLines: "polyline", drawSymbolPolygon: "polygon", placeSymbolAnchor: "anchor", deleteTool: "delete", zoomTool: "zoom" };
 /** The Symbol Editor's grid list: its own window settings (Preferences > Symbol Editor > Grids), 100/50/25/10 mil by default. */
 const symGrids = (): number[] => prefs().grids.sym.sizes;
+/** GRID::y of the grid of that X (at `idx` when given): the Symbol Editor's grids need not be square. */
+const symGridY = (mm: number, idx?: number): number => { const g = prefs().grids.sym; const i = idx !== undefined && Math.abs((g.sizes[idx] ?? NaN) - mm) < 1e-9 ? idx : g.sizes.findIndex((x) => Math.abs(x - mm) < 1e-9); return (i >= 0 && g.ys && g.ys[i] > 0) ? g.ys[i] : mm; };
 const ANCHOR = "#0000FF";   // LAYER_SCHEMATIC_ANCHOR
 
 const K = (): KiCadCanvasApi => window.KiCadCanvas;
@@ -102,6 +104,8 @@ export class SymbolEditor {
   private groupCurrent: Record<string, string> = {};
   /** grid.last_size of the symbol editor's window settings, in mm */
   gridMm = 50 * M.MIL;
+  /** GRID::y of the grid in use (gridMm is its X) */
+  gridMmY = 50 * M.MIL;
   /** the schematic editor's units while this frame is up: the symbol editor keeps its own (symbol_editor system.units) */
   private hostUnits: { units: string; lastImperial: string } | null = null;
   /** BASE_SCREEN::m_LocalOrigin (file coordinates) */
@@ -164,7 +168,7 @@ export class SymbolEditor {
     if (!this.hostUnits) {
       this.hostUnits = { units: E.units, lastImperial: String(E.lastImperial || "mil") };
       const us = loadUnits("symbol_editor"); E.units = us.units; E.lastImperial = us.lastImperial;
-      this.gridMm = defaultGrid("sym");
+      this.gridMm = defaultGrid("sym"); this.gridMmY = symGridY(this.gridMm);
       window.addEventListener("kc:prefs", this.prefsHook);
       this.applySymPrefs();
     }
@@ -495,7 +499,24 @@ export class SymbolEditor {
   /** client px → doc mm (Y down). */
   toDoc(cx: number, cy: number): [number, number] { const r = this.cv!.getBoundingClientRect(); const v = this.view(); return [(cx - r.left - v.px) / v.s, (cy - r.top - v.py) / v.s]; }
   /** doc mm → snapped library coordinates (Y up). */
-  snapFile(x: number, y: number): [number, number] { const g = this.snapGrid(); return [+M.fmt(Math.round(x / g) * g), +M.fmt(-Math.round(y / g) * g)]; }
+  snapFile(x: number, y: number): [number, number] {
+    // GAL::GetGridSnapping: Preferences > Symbol Editor > Snapping's "Snap to grid" (Always / When grid shown / Never)
+    const m = prefs().snapping.sym.grid;
+    if (m === "never" || (m === "withGrid" && !this.showGrid)) return [+M.fmt(x), +M.fmt(-y)];
+    const [gx, gy] = this.snapGridXY(); return [+M.fmt(Math.round(x / gx) * gx), +M.fmt(-Math.round(y / gy) * gy)];
+  }
+  /** snapGrid as the grid's X and Y: the override names a grid of the list, with its own Y (EE_GRID_HELPER::GetGridSize). */
+  snapGridXY(): [number, number] {
+    const g = this.snapGrid(); if (g === this.gridMm && !this.overrideClass()) return [this.gridMm, this.gridMmY];
+    return gridPitchForXY(this.overrideClass(), prefs().grids.sym.overrides, [this.gridMm, this.gridMmY]);
+  }
+  private overrideClass(): GridClass {
+    const o = prefs().grids.sym.overrides; if (!o.enabled) return null;
+    let cls: GridClass = this.tool !== "select" && this.tool !== "zoom" ? SYM_GRID_CLASS[this.tool] || null : null;
+    const t = this.tab, sym = this.symbol();
+    if (!cls && t && sym && t.sel.size) { const id = [...t.sel][0]; const n = nodeOf(sym, id); cls = id.startsWith("f:") ? "text" : n ? SYM_GRID_CLASS[String(n[0])] || null : null; }
+    return cls && o[cls] && o[(cls + "Mm") as "connectedMm"] > 0 ? cls : null;
+  }
   /** The pitch the cursor snaps to: the grid, or the override of the class of what is drawn or carried (Grid Overrides). */
   snapGrid(): number {
     const o = prefs().grids.sym.overrides; if (!o.enabled) return this.gridMm;
@@ -549,7 +570,7 @@ export class SymbolEditor {
     const sel = new Set([...t.sel].filter((id) => doc.items.has(id)));
     // the selection shadow is drawn by the canvas pass, under the items (SCH_PAINTER's LAYER_SELECTION_SHADOWS)
     const ga = prefs().gal.sym;   // PANEL_GAL_OPTIONS of the Symbol Editor (Preferences > Symbol Editor > Display Options)
-    K().render(doc, ctx, view, { grid: this.showGrid ? this.gridMm : 0, gridStyle: ga.style, gridMinSpacing: ga.minSpacing, gridLineWidth: ga.lineWidth, gridShowMajor: ga.showMajor, gridAxes: true, frame: false, showHiddenPins: this.showHiddenPins, selected: sel.size ? sel : undefined } as KRenderOpts);
+    K().render(doc, ctx, view, { grid: this.showGrid ? this.gridMm : 0, gridY: this.showGrid ? this.gridMmY : 0, gridStyle: ga.style, gridMinSpacing: ga.minSpacing, gridLineWidth: ga.lineWidth, gridShowMajor: ga.showMajor, gridAxes: true, frame: false, showHiddenPins: this.showHiddenPins, selected: sel.size ? sel : undefined } as KRenderOpts);
     const s = K().setViewTransform(ctx, view);
     // the symbol anchor (LAYER_SCHEMATIC_ANCHOR cross at the origin)
     const a = 6 * dpr / s; ctx.strokeStyle = ANCHOR; ctx.lineWidth = dpr / s; ctx.beginPath(); ctx.moveTo(-a, 0); ctx.lineTo(a, 0); ctx.moveTo(0, -a); ctx.lineTo(0, a); ctx.stroke();
@@ -1214,7 +1235,7 @@ export class SymbolEditor {
       // EDA_DRAW_FRAME::DisplayGridMsg / DisplayUnitsMsg: plain text, the grid is changed from the menus and hotkeys
       el.append(h("span", { id: "se-zoom" }), h("span", { id: "se-xy" }), h("span", { id: "se-dxy" }), h("span", { id: "se-grid" }), h("span", { id: "se-units" }), h("span", { id: "se-tool" }));
     }
-    el.querySelector("#se-grid")!.textContent = `grid ${messageText(this.gridMm, this.units, "sch", false)}`;
+    el.querySelector("#se-grid")!.textContent = `grid ${gridMessageText(this.gridMm, this.gridMmY, this.units, "sch", false)}`;
     el.querySelector("#se-zoom")!.textContent = `Z ${(v / 12).toFixed(2)}`;
     // eeschema shows internal coordinates: Y grows downward (the file's library Y is up)
     el.querySelector("#se-xy")!.textContent = `X ${fmtCoord(fx, this.units, true)}  Y ${fmtCoord(-fy || 0, this.units, true)}`;   // the short form (SCH_IU_PER_MM)
@@ -1294,11 +1315,11 @@ export class SymbolEditor {
   /** COMMON_TOOLS::GridNext / GridPrev / GridPreset: the index wraps around the grid list. */
   setGridIdx(i: number): void {
     const l = symGrids(), n = l.length; if (!n) return; const k = ((i % n) + n) % n;
-    this.setGrid(l[k]);
+    this.setGrid(l[k], undefined, k);
   }
   /** COMMON_TOOLS::GridPreset: the grid picked from the Grid menu, remembered as the window's grid.last_size. */
-  setGrid(mm: number): void { this.gridMm = mm; rememberGrid(mm, "sym"); this.renderStatus(); this.paint(); }
-  gridIdx(): number { return symGrids().findIndex((mm) => Math.abs(mm - this.gridMm) < 1e-9); }
+  setGrid(mm: number, my?: number, idx?: number): void { this.gridMm = mm; this.gridMmY = my && my > 0 ? my : symGridY(mm, idx); rememberGrid(mm, "sym", idx); this.renderStatus(); this.paint(); }
+  gridIdx(): number { const g = prefs().grids.sym; return g.sizes.findIndex((mm, i) => Math.abs(mm - this.gridMm) < 1e-9 && Math.abs(((g.ys && g.ys[i]) || mm) - this.gridMmY) < 1e-9); }
   /** Preferences saved: the grid list may have changed; the window's grid.last_size is the grid in use. */
   /**
    * SYMBOL_EDITOR_SETTINGS as Preferences > Symbol Editor leaves them: the display switches, the defaults of new
@@ -1325,11 +1346,11 @@ export class SymbolEditor {
     const p = clonePrefs(); p.symDisplay = { showHiddenPins: this.showHiddenPins, showHiddenFields: this.showHiddenFields, showETypes: this.showETypes, showAltIcons: this.showAltIcons };
     savePrefs(p);
   }
-  private prefsHook = (): void => { if (!this.isOpen) return; this.applySymPrefs(); const mm = defaultGrid("sym"); if (Math.abs(mm - this.gridMm) > 1e-9) { this.gridMm = mm; this.renderStatus(); this.paint(); } };
+  private prefsHook = (): void => { if (!this.isOpen) return; this.applySymPrefs(); const mm = defaultGrid("sym"), my = symGridY(mm, defaultGridIndex("sym")); if (Math.abs(mm - this.gridMm) > 1e-9 || Math.abs(my - this.gridMmY) > 1e-9) { this.gridMm = mm; this.gridMmY = my; this.renderStatus(); this.paint(); } };
   /** GRID_MENU (EDA_DRAW_FRAME::AddStandardSubMenus): every grid as GRID_MENU::BuildChoiceList writes it, the one in use checked. */
   private gridMenu(): MenuEntry {
     const u = this.units, li = (E.lastImperial === "in" ? "in" : "mil") as Units;
-    return { label: "Grid", icon: "grid_select", sub: gridDefs(prefs().grids.sym).map((g) => ({ label: gridChoiceText(g, u, li, "sch"), check: () => Math.abs(g.mm - this.gridMm) < 1e-9, enabled: () => true, run: () => this.setGrid(g.mm) })) };
+    return { label: "Grid", icon: "grid_select", sub: gridDefs(prefs().grids.sym).map((g) => ({ label: gridChoiceText(g, u, li, "sch"), check: () => Math.abs(g.mm - this.gridMm) < 1e-9 && Math.abs((g.my || g.mm) - this.gridMmY) < 1e-9, enabled: () => true, run: () => this.setGrid(g.mm, g.my || g.mm) })) };
   }
   /** COMMON_TOOLS::PanControl: the view centre moves by ten grid steps. */
   pan(dx: number, dy: number): void {
@@ -1471,7 +1492,9 @@ export class SymbolEditor {
     const ids = [...t.sel];
     if (ids.length !== 1) { void D.symbolProperties(this); return; }
     const n = nodeOf(sym, ids[0]); if (!n) return;
-    if (n[0] === "pin") void D.editPin(this, ids[0]);
+    // SYMBOL_EDITOR_EDIT_TOOL::Properties: the mouse (not the cursor) over the pin's number box (PIN_LAYOUT_CACHE::
+    // GetPinNumberBBox) opens the dialog on the number
+    if (n[0] === "pin") void D.editPin(this, ids[0], this.mouseOverPinNumber(ids[0]));
     else if (n[0] === "property") void D.editField(this, ids[0]);
     else if (n[0] === "text" || n[0] === "text_box") void D.editText(this, ids[0]);
     else void D.editShape(this, ids[0]);
@@ -1617,6 +1640,12 @@ export class SymbolEditor {
     wrap.addEventListener("pointerup", (ev) => this.onUp(ev));
     wrap.addEventListener("dblclick", (ev) => this.onDbl(ev));
     void cv;
+  }
+  /** The mouse is inside the pin's number box: the box of its drawn number text (a stacked block: the whole block). */
+  mouseOverPinNumber(id: string): boolean {
+    const doc = this.kdoc(); const it = doc && doc.items.get(id); if (!it) return false;
+    const box = M.pinNumberBox(it.geom as unknown[]);
+    return !!box && this.mouse.x >= box[0] && this.mouse.x <= box[2] && this.mouse.y >= box[1] && this.mouse.y <= box[3];
   }
   private hitAt(x: number, y: number): string | null {
     const doc = this.kdoc(); if (!doc) return null; const v = this.view();
@@ -1972,3 +2001,4 @@ const norm = (k: string) => k.replace(/\s/g, "").toLowerCase().replace("delete",
 
 export const editor = new SymbolEditor();
 export { download };
+

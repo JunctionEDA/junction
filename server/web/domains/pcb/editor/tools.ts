@@ -3,7 +3,7 @@ import { hotkeyKey } from "../../../shared/keys";
 import { setGroupCurrent, setStatusBar, state, store } from "./appstore";
 import { refreshCrosshair } from "./crosshair";
 import { refreshCursor } from "./cursors";
-import { applyChanges, enterSheet, publishDocs, renderObjects, setLayerVisible, snapMm } from "./doc";
+import { applyChanges, enterSheet, publishDocs, renderObjects, setLayerVisible, snapMm, gridSnapEnabled } from "./doc";
 import { selectionIds, toolChanging } from "./gestures";
 import { sendOp } from "./net";
 import { cycleFollow, sendPresence } from "./peers";
@@ -60,7 +60,7 @@ export function activeModule(): SchToolModule | PcbToolModule | null | undefined
 
 export function toolCtx(extra?: Record<string, unknown>) {
   return Object.assign({
-    K: KiCadCanvas, doc: E.kdoc, IU: E.IU, isSch: isSch(), fpEditor: !!(E.kdoc && E.kdoc.fpEditor), zoom: E.zoom, pxPerMm: pxPerMm(), gridPitch: E.gridPitch, snapOn: E.snapOn, snap: snapMm, tool: E.tool, selFilter: selFilter(), activeLayer: E.activeLayer,
+    K: KiCadCanvas, doc: E.kdoc, IU: E.IU, isSch: isSch(), fpEditor: !!(E.kdoc && E.kdoc.fpEditor), zoom: E.zoom, pxPerMm: pxPerMm(), gridPitch: E.gridPitch, gridPitchY: E.gridPitchY > 0 ? E.gridPitchY : E.gridPitch, snapOn: gridSnapEnabled(), snap: snapMm, tool: E.tool, selFilter: selFilter(), activeLayer: E.activeLayer,
     selected: E.selected, items: E.items, sheets: E.sheets, viewOnly: E.viewOnly, live: !!(E.ws && E.ws.readyState === 1), stage, worldMm, selection: E.selection, docs: state.docs!, project: state.project, api, docId: state.docId,
     setHighlight(ids: Set<string> | null, nets?: Iterable<string>) {
       E.highlightIds = ids?.size ? new Set(ids) : null;
@@ -74,6 +74,8 @@ export function toolCtx(extra?: Record<string, unknown>) {
     setMarkers(list: unknown) { E.markers = Array.isArray(list) ? list : []; E.renderOpts.markers = E.markers.length ? E.markers : undefined; store.slice("viewport", { renderOpts: Object.assign({}, E.renderOpts) }); requestRender(); if (E.markers.length) toast(`${E.markers.length} marker${E.markers.length === 1 ? "" : "s"}`); },
     // one field of a symbol or sheet as the selection (Find selects the matching SCH_FIELD itself)
     selectField(id: string, name: string) { clearSelection(); E.selField = { id, name }; drawSelection(); renderProps(); renderObjects(); requestRender(); },
+    /** select pins themselves (SCH_PIN items: a symbol pin by its number, a sheet pin by its name) */
+    selectPins(pins: { id: string; number: string }[]) { clearSelection(); E.selPins = pins.map((p) => ({ id: p.id, number: p.number })) as typeof E.selPins; drawSelection(); renderProps(); renderObjects(); requestRender(); },
     setSelected(fp: { id: string } | null) { E.selected = fp ? (E.items.find((f: ItemSummary) => f.id === fp.id) || fp) : null; drawSelection(); renderProps(); renderObjects(); requestRender(); },
     // opts.amend folds the change into the previous undo step (a paste and the move that places it are one step)
     commit(changes: KChange[], label?: string, opts?: CommitOpts) { commitChanges(changes, label, opts); },
@@ -98,6 +100,7 @@ export function toolCtx(extra?: Record<string, unknown>) {
     localOrigin(): number[] { return (E.localOrigin as number[]).slice(); },
     setLocalOrigin(p: number[]) { E.localOrigin = p.slice(); store.slice("viewport", { origin: E.localOrigin.slice() }); },
     showLayer(layer: string) { if (E.kdoc && E.hiddenLayers.has(layer)) setLayerVisible(layer, true); },
+    showObject(id: string) { appearanceDispatch({ t: "objVisible", id, on: true }); },
     // PCB_BASE_FRAME::SelectToolbarAction: a toolbar group shows the given action (the arc tool's drawing mode)
     setGroupCurrent(group: string, id: string) { if (store.get().groupCurrent[group] !== id) setGroupCurrent(group, id); },
     // PCB_SELECTION_TOOL's hover selection: the Clarify Selection candidates under a point, the popup that asks

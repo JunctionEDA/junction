@@ -252,7 +252,8 @@ test("MULTI_DRAGGER: dragging one segment of a pair takes its coupled partner al
 
 test("Keep coupling off: only the grabbed line moves", () => {
   const { subs, P_y, N_y } = dragPair(false);
-  assert.equal(subs, 1); assert.deepEqual(P_y, [12]); assert.deepEqual(N_y, [10.45]);
+  // WALKAROUND (WP_SHORTEST) cannot take P through N: it is walked round N's hull, hugging it at the clearance
+  assert.equal(subs, 1); assert.deepEqual(P_y, [10.05]); assert.deepEqual(N_y, [10.45]);
 });
 
 test("dpCoupledSegment: the parallel partner at the pair's gap; nothing for a net without a partner", () => {

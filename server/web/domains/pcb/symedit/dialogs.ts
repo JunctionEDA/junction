@@ -48,7 +48,7 @@ const lenOf = (i: HTMLInputElement, fallback: number): number => { const v = par
 /** s_alternatesTurndownOpen: the alternates pane stays open for the next dialog once opened. */
 let altPaneOpen = false;
 /** DIALOG_PIN_PROPERTIES for a new pin (pin = null) or an existing one; resolves with the edited pin, or null. */
-export function pinDialog(se: SymbolEditor, p: M.PinInfo, existing: M.Node | null): Promise<M.PinInfo | null> {
+export function pinDialog(se: SymbolEditor, p: M.PinInfo, existing: M.Node | null, focusNumber = false): Promise<M.PinInfo | null> {
   return new Promise((resolve) => {
     const sym = se.symbol()!; const root = se.rootSym(sym);
     const multiUnit = M.unitCount(root) > 1, multiBody = M.bodyStyles(root).count > 1;
@@ -118,7 +118,7 @@ export function pinDialog(se: SymbolEditor, p: M.PinInfo, existing: M.Node | nul
             { key: "shape", label: "Graphic Style", type: "choice", options: M.PIN_SHAPES.map(([a, l]) => [a, l] as [string, string]), width: 160 },
           ], alts, { height: 120, buttons: { add: () => ({ name: "", type: type.value, shape: shape.value }), remove: true } });
         }
-        requestAnimationFrame(() => { preview(); name.focus(); name.select(); });
+        requestAnimationFrame(() => { preview(); const f = focusNumber ? number : name; f.focus(); f.select(); });   // DIALOG_PIN_PROPERTIES( aFocusPinNumber )
       },
       ok() {
         void altGrid;
@@ -138,11 +138,11 @@ export function pinDialog(se: SymbolEditor, p: M.PinInfo, existing: M.Node | nul
   });
 }
 /** Edit an existing pin (EditPinProperties + SynchronizeOtherUnits). */
-export async function editPin(se: SymbolEditor, id: string): Promise<void> {
+export async function editPin(se: SymbolEditor, id: string, focusNumber = false): Promise<void> {
   const t = se.tab; const sym = se.symbol(); if (!t || !sym) return;
   const n = nodeOf(sym, id); if (!n) return; const ref = M.findRef(sym, n)!;
   const before = M.pinInfo(n, ref.unit, ref.body);
-  const res = await pinDialog(se, before, n); if (!res || se.readOnly()) return;
+  const res = await pinDialog(se, before, n, focusNumber); if (!res || se.readOnly()) return;
   M.rememberPin(se.lastPin, res);
   se.edit("Edit Pin Properties", (s) => {
     let pin = nodeOf(s, id); if (!pin) return false;

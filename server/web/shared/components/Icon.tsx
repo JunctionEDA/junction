@@ -10,6 +10,9 @@ loadIconPack();
 
 /* `kicon` / `lt` / `dk` stay as plain hooks; the sizing and the light/dark swap are the utilities. */
 const ICON = "kicon block w-6 h-6";
+/* Preferences > Common > Icon theme: Automatic follows the window's dark mode; Light / Dark (the root's k-icons-light / k-icons-dark) pin one set. */
+const LT = "lt dark:hidden [.k-icons-light_&]:inline [.k-icons-dark_&]:hidden";
+const DK = "dk hidden dark:inline [.k-icons-light_&]:hidden [.k-icons-dark_&]:inline";
 
 export function KIcon({ name, size }: { name: string | null | undefined; size?: number }) {
   // the icons of the menu entries the toolbars do not use come from the lazily fetched pack (iconpack.ts)
@@ -27,8 +30,8 @@ export function KIcon({ name, size }: { name: string | null | undefined; size?: 
   }
   return (
     <svg className={size ? "kicon block" : ICON} viewBox={ic.vb || "0 0 24 24"} aria-hidden="true" width={size} height={size}>
-      <g className="lt dark:hidden" dangerouslySetInnerHTML={{ __html: markup ? markup.lt : "" }} />
-      <g className="dk hidden dark:inline" dangerouslySetInnerHTML={{ __html: markup ? markup.dk : "" }} />
+      <g className={LT} dangerouslySetInnerHTML={{ __html: markup ? markup.lt : "" }} />
+      <g className={DK} dangerouslySetInnerHTML={{ __html: markup ? markup.dk : "" }} />
     </svg>
   );
 }

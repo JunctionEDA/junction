@@ -14,8 +14,8 @@ import { same, segDist, segs } from "./util";
 
 /** SCH_SELECTION_TOOL::CollectHits' threshold: max( 5 px, the grid size's Euclidean norm / 2 ). */
 export function selectThreshold(ctx: SchCtx): number {
-  const g = ctx.gridPitch || 1.27;
-  return Math.max(5 * mmPerPx(ctx), Math.hypot(g, g) / 2);
+  const g = ctx.gridPitch || 1.27, gy = ctx.gridPitchY && ctx.gridPitchY > 0 ? ctx.gridPitchY : g;   // GetGridSize().EuclideanNorm()
+  return Math.max(5 * mmPerPx(ctx), Math.hypot(g, gy) / 2);
 }
 /** A two-point SCH_LINE (wire, bus, graphic line): selectPoint's flags for a click at mm, 0 / 1 for one end, null for both. */
 export function lineEndAt(it: KItem, mm: Pt, threshold: number): 0 | 1 | null {

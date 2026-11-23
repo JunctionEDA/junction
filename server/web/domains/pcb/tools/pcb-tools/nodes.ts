@@ -61,19 +61,19 @@ export function textBoxNode(text: string, a: Pt, b: Pt, layer: string): SNode {
 // DRAWING_TOOL::DrawTable, on every motion: the table hangs from the first click; one column per 15 text widths and one
 // row per 3 text heights of the drag (integer division in nm, so a drag up or left gives one), cells at least 5 × 3 text
 // sizes, each rounded to the grid.
-export function tableGrid(origin: Pt, cursor: Pt, layer: string, grid: number) {
-  const { size } = textStyle(layer); const fs = Math.round(size * 1e6), g = Math.round((grid || 0) * 1e6);
+export function tableGrid(origin: Pt, cursor: Pt, layer: string, grid: number, gridY?: number) {
+  const { size } = textStyle(layer); const fs = Math.round(size * 1e6), g = Math.round((grid || 0) * 1e6), gy = g > 0 && gridY && gridY > 0 ? Math.round(gridY * 1e6) : g;   // gridSize.x / gridSize.y
   const rx = Math.round((cursor[0] - origin[0]) * 1e6), ry = Math.round((cursor[1] - origin[1]) * 1e6);
   const cols = Math.max(1, Math.trunc(rx / (fs * 15))), rows = Math.max(1, Math.trunc(ry / (fs * 3)));
   let cw = Math.max(fs * 5, Math.trunc(rx / cols)), ch = Math.max(fs * 3, Math.trunc(ry / rows));
-  if (g > 0) { cw = Math.round(cw / g) * g; ch = Math.round(ch / g) * g; }
+  if (g > 0) { cw = Math.round(cw / g) * g; ch = Math.round(ch / gy) * gy; }
   return { x: origin[0], y: origin[1], cw: r6(cw / 1e6), ch: r6(ch / 1e6), rows, cols };
 }
 // PCB_TABLE with PCB_TABLECELLs as the drawing tool creates them, in PCB_IO_KICAD_SEXPR::format( PCB_TABLE ) order (uuid,
 // layer, then formatTableData): borders and separators in the layer's line width, every cell empty with the text box
 // constructor's margins and EDA_TEXT's own 1.27 size (auto thickness), left / middle, mirrored on a back layer.
-export function tableNode(origin: Pt, cursor: Pt, layer: string, grid: number): SNode {
-  const L = tableGrid(origin, cursor, layer, grid); const w = gfxWidth(layer); const cells: SNode = ["cells"];
+export function tableNode(origin: Pt, cursor: Pt, layer: string, grid: number, gridY?: number): SNode {
+  const L = tableGrid(origin, cursor, layer, grid, gridY); const w = gfxWidth(layer); const cells: SNode = ["cells"];
   const just = ["justify", "left"]; if (isBack(layer)) just.push("mirror");
   for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) {
     const x = r6(L.x + c * L.cw), y = r6(L.y + r * L.ch);

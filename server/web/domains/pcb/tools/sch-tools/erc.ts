@@ -10,7 +10,8 @@ import { sheetPinNode } from "./nodes";
 import { baseName } from "./sheets";
 import { K, S, atOf, kid, kids, num, ptsOf, str } from "./state";
 import { deep, modChange, onSegMid, r4, same, segs } from "./util";
-import { hierarchyTests, sheetTests } from "./erc-tests";
+import { busTests, hierarchyTests, sheetTests } from "./erc-tests";
+import { busAliasesOf } from "./unfold";
 
 // ---------------------------------------------------------------- ERC (eeschema/erc/erc.cpp subset)
 export const PIN_TYPES = ["input", "output", "bidirectional", "tri_state", "passive", "free", "unspecified", "power_in", "power_out", "open_collector", "open_emitter", "no_connect"];
@@ -71,6 +72,8 @@ export interface ErcOpts {
   /** runERC shows no summary (the ERC dialog reports the run itself) */ silent?: boolean;
   /** the net name KiCad gives a pin of a sheet instance (the hierarchy's net map), for the tests that compare and print names */
   netName?(inst: number, symbolId: string, pin: string): string | undefined;
+  /** the net an item of this sheet is on in the hierarchy's net map (net_not_bus_member compares a bus entry's net with its bus's members) */
+  netOfItem?(id: string): { name: string; bus: boolean; prio: number; members: string[] } | undefined;
 }
 /** ctx.sheetDocs: Sheetfile (or docId / path) -> parsed doc or its text. */
 export type SheetDocs = NonNullable<SchCtx["sheetDocs"]>;
@@ -272,6 +275,8 @@ export function ercCheck(doc: KDoc, opts?: ErcOpts | null) {
   }
   // the ERC_TESTER tests of one sheet, and (alone on this sheet unless the caller checks the hierarchy) the ones across sheets
   sheetTests(doc, nets, mark, itemRef, pinItemRef, opts);
+  // the connectivity engine's island tests (bus / net mixes, bus members, wired hidden power inputs)
+  busTests(doc, mark, itemRef, pinItemRef, { busAliases: busAliasesOf(doc), netOfItem: opts.netOfItem });
   if (opts.crossSheet !== false) {
     markers.push(...hierarchyTests([{ doc, key: "", nets }], itemRef, pinItemRef)[0]);
     markers.push(...netTests([{ doc, key: "", info, root: opts.root }], opts)[0]);

@@ -46,15 +46,15 @@ import { collisionInit, collisionMarkers } from "./collision";
 import { EDIT_BORDER_PX, applyPointEdit, editFollowers, editHandles, editPointColors, editPoints, ellipseAngleAt, imageBoundingSize, imageOriginOffset, polygonEdgeDrag, rectRadiusFor, pointEditEnd, pointEditMove, pointEditStart, textBoxMinSize, addCorner, arcEditPoints, canAddCorner, canRemoveCorner, cycleArcEditMode, findEditPoint, nextArcEditMode, removeCorner } from "./point-edit";
 import { incrementLabelNode, incrementSelection, incrementStringPart, incrementText, rememberPlaced, repeatLast } from "./repeat";
 import { deleteAt, deleteChanges, deleteSelected, duplicateSelected, orientSelected } from "./selection-edits";
-import { build45Leader, cancelDraw, drawClick, finishDraw, ruleAreaLeader, ruleAreaOutline } from "./shapes";
-import { currentDoc, emptySheetDoc, ensureSheetDoc, nextPage, placeSheet, placeSheetPin, relPath, sheetEdgeAt, sheetInstance, sheetPathHere, sheetPinClick, sheetPinPoint } from "./sheets";
-import { snapAnchors, snapConn, snapRanges } from "./snap";
+import { build45Leader, cancelDraw, drawClick, drawPreviewNode, finishDraw, ruleAreaLeader, ruleAreaOutline } from "./shapes";
+import { currentDoc, emptySheetDoc, ensureSheetDoc, nextPage, placeSheet, placeSheetPin, relPath, sheetEdgeAt, sheetInstance, sheetPathHere, sheetPinClick, sheetPinPoint, beginSheetPinMove, movedPinNode } from "./sheets";
+import { snapAnchors, snapConn, snapRanges, bestDragOrigin, resolveSnap, schConstruction } from "./snap";
 import { DELETE_CURSOR, S, TOOLS, K } from "./state";
 import { alignEdgeChanges, alignEdges, alignToGrid, alignToGridChanges, breakAgain, breakWire, breakWireChanges, endBreak, halfGrid, moveExactChanges, moveExactly, rotationCentre, selectionCentre, swapChanges, swapNodes, swapSelection, transformChanges, transformNode, transformSelected, itemPosition, setImageFlipImpl, sheetAutoplaceFields } from "./transforms";
 import { busForUnfolding, busLabelsOf, busMembers, printBusForUI, unfoldAction, unfoldBus, unfoldEntries, unfoldMembers } from "./unfold";
-import { itemSexpr, modChange, ruleAreaId, typeNameFor } from "./util";
+import { ghost, itemSexpr, modChange, ruleAreaId, typeNameFor } from "./util";
 import { schArcDrawMode } from "./arcs";
-import { PIN_HELPERS, labelShapeForPin, pinAltFunction, pinAlternates, pinAt, pinBox, pinHelper, pinOf, pinProperties, setAltPinFunction, singleNetLabelForPin, swapPinLabels } from "./pins";
+import { PIN_HELPERS, labelShapeForPin, pinAltFunction, pinAlternates, pinAt, pinBox, pinHelper, pinOf, pinProperties, setAltPinFunction, singleNetLabelForPin, swapPinLabels, swapPins, swapUnitLabels, sameSymbolMultiUnitSelection } from "./pins";
 import { autoRotateChanges, autoRotateNode, autoRotateOf, labelOrientationForPoint, setAutoRotate, setSpinOfNode, spinOfNode } from "./autorotate";
 import { itemDescription, msgPanelInfo } from "./msgpanel";
 import { computeBreakPoint, isTerminalPoint, mergeOverlap, simplify, simplifyWireList, sourceLine, startWire, switchPosture, undoSegment, wireClick, wireFollow, wirePoints } from "./wire";
@@ -82,6 +82,9 @@ const sch = {
   msgPanelSubject(): { item: KItem; key: string } | null {
     const c = S.carry; if (c && c.item) return { item: c.item, key: "carry|" + K.serialize(c.node) };
     const pe = S.pedit; if (pe) return { item: pe.item, key: "pedit|" + K.serialize(pe.item.node) };
+    // EE_GRAPHIC_TOOL / SCH_DRAWING_TOOLS: SetMsgPanel( item ) for the shape, sheet, table or rule area being drawn
+    const ctx = S.ctx, dn = ctx && S.draw ? drawPreviewNode(ctx) : null;
+    if (ctx && dn) { const it = ghost(ctx.doc, dn); if (it) return { item: it, key: "draw|" + K.serialize(dn).replace(/\(uuid "[^"]*"\)/g, "") }; }
     return null;
   },
   // KiCad's non-tool commands: { id: { id, label, key, run(ctx, opts) -> handled } }; app.js binds menus and keys to them
@@ -98,23 +101,23 @@ const sch = {
   },
   // SCH_EDIT_FRAME::CheckAnnotate( handler, ANNOTATE_ALL ) over the hierarchy's sheets: the number of annotation errors
   checkAnnotate, annotateChanges, annotateHierarchy, clearAnnotationHierarchy, replaceDuplicateIds, checkAnnotation, sheetReferences, inferredSelection, serializeTracker, deserializeTracker, annotateMessages, clearAnnotationChanges, fieldsTableRows, fieldsTableChanges, busMembers,
-  _: { setFollow(on: boolean) { S.forceFollow = !!on; }, junctionMerges, sheetAutoplaceFields, annotatePastedUnique, annotationSettings, pastedSheetRecursion, schItemAsText, itemPosition, setImageFlipImpl, pasteSpecial, pasteSelection, isGroundName, stackedPinNotationValid, normalizeSimilar, letterSubReference, pinErrorAt, pinErrorSeverity, stackedPins, strNumCmp, isLockedNode, isLockedItem, setLockedNode, modifyLock, lineEndAt, lineEndDangling, selectThreshold, danglingLabelIds, dragJunctions, schArcDrawMode, pinAt, pinBox, pinAltFunction, pinOf, pinProperties, pinHelper, PIN_HELPERS, swapPinLabels, singleNetLabelForPin, labelShapeForPin, pinAlternates, setAltPinFunction, labelOrientationForPoint, autoRotateNode, autoRotateChanges, autoRotateOf, setAutoRotate, setSpinOfNode, spinOfNode, textBoxMinSize, globalPowerPin, breakAgain, sourceLine, danglingEnds, endBreak, onKeyCapture, onUpCapture, onDownCapture, selectedItems, setSelectionIds, cursorOf, pasteChanges, pasteText, cutSelection, copySelection, duplicateSelection, copyAsText, incrementText, incrementLabelNode, repeatLast, rememberPlaced,
+  _: { setFollow(on: boolean) { S.forceFollow = !!on; }, junctionMerges, sheetAutoplaceFields, annotatePastedUnique, annotationSettings, pastedSheetRecursion, schItemAsText, itemPosition, setImageFlipImpl, pasteSpecial, pasteSelection, isGroundName, stackedPinNotationValid, normalizeSimilar, letterSubReference, pinErrorAt, pinErrorSeverity, stackedPins, strNumCmp, isLockedNode, isLockedItem, setLockedNode, modifyLock, lineEndAt, lineEndDangling, selectThreshold, danglingLabelIds, dragJunctions, schArcDrawMode, pinAt, pinBox, pinAltFunction, pinOf, pinProperties, pinHelper, PIN_HELPERS, swapPinLabels, swapPins, swapUnitLabels, sameSymbolMultiUnitSelection, singleNetLabelForPin, labelShapeForPin, pinAlternates, setAltPinFunction, labelOrientationForPoint, autoRotateNode, autoRotateChanges, autoRotateOf, setAutoRotate, setSpinOfNode, spinOfNode, textBoxMinSize, globalPowerPin, breakAgain, sourceLine, danglingEnds, endBreak, onKeyCapture, onUpCapture, onDownCapture, selectedItems, setSelectionIds, cursorOf, pasteChanges, pasteText, cutSelection, copySelection, duplicateSelection, copyAsText, incrementText, incrementLabelNode, repeatLast, rememberPlaced,
     convertNode, convertSelection, validNetname, symbolPins, bodyBox, fieldExtent, autoplaceNode, autoplaceSelection, splitRef, setReference, assignPastedRef, annotate, clearAnnotation, compareRef, newSymbolMinRef, subReference, sheetOf, setInstanceOn, instanceOn, refOn, unitOn,
     ercNets, runERC, subsheetDoc, syncSheetPins, cleanupSheetPins, autoPlaceSheetPinsNode, transformNode, transformChanges, transformSelected, selectionCentre, halfGrid, swapNodes, swapChanges, swapSelection,
     alignToGridChanges, alignToGrid, alignEdgeChanges, alignEdges, moveExactChanges, moveExactly, rotationCentre, breakWireChanges, breakWire, openFieldsTable, unfoldMembers, unfoldEntries, busForUnfolding, printBusForUI, busLabelsOf, unfoldBus, unfoldAction,
     areaCandidates, candInPoly, crossProbeZoomRatio, polyArea, clickCandidates, collectHits, guessCandidates, narrowCands, candOfKey, candInBox, candBox, candHit, pinKey, fieldKey, sheetBody, bodyAndPinsBox, selectableItem, shapeFilled,
-    selectConnection, selectNode, stepNetItem, expandConnectionWithGraph, expandConnectionGraphically, incrementSelection, incrementStringPart, snapAnchors, snapRanges, editFieldPrompt, toggleSymbolFlag, stepUnit, cycleBodyStyle, placeNextUnit, libUnits, showDatasheet, CLIP, clipWrite, clipRead,
+    selectConnection, selectNode, stepNetItem, expandConnectionWithGraph, expandConnectionGraphically, incrementSelection, incrementStringPart, snapAnchors, snapRanges, resolveSnap, bestDragOrigin, schConstruction, editFieldPrompt, toggleSymbolFlag, stepUnit, cycleBodyStyle, placeNextUnit, libUnits, showDatasheet, CLIP, clipWrite, clipRead,
     lineNode, junctionNode, noConnectNode, busEntryNode, labelNode, symbolNode, orientSymbol, rotateNode, mirrorNode, cloneNode, shiftNode,
     tFrom, orientOf, mul, RCCW, MX, MY, needsJunction, junctionAt, pinsAt, snapConn, simplify, simplifyWireList, computeBreakPoint, collisionInit, collisionMarkers, editPoints, addCorner, removeCorner, arcEditPoints, cycleArcEditMode, findEditPoint, nextArcEditMode, editHandles, editPointColors, EDIT_BORDER_PX, polygonEdgeDrag, ellipseAngleAt, imageBoundingSize, imageOriginOffset, rectRadiusFor, applyPointEdit, editFollowers, pointEditStart, pointEditMove, pointEditEnd, wireFollow, wireClick, wirePoints, undoSegment, switchPosture, wireKey, isTerminalPoint, mergeOverlap,
     analyzePoint, autostartKind, autostartAt, explicitJunctionNeeded, explicitJunctionAllowed, previewJunctions, editTxn, txnCleanUp, txnTrimWire, singleClickPlace, busyMessage, vetoTool, startWire, cancelWire, hitNonSymbol, textRect, pickNonSymbol,
     beginDrag, moveDrag, endDrag, placeText, orthoLineDrag, connPoints, makeAnchor, ridersOf, cleanupAt, foldChanges, startCarry, placeCarry, dropCarry, finishWire, deleteSelected, duplicateSelected, orientSelected, modChange,
     // graphic shapes, directive labels, power symbols and the delete tool
     rectangleNode, circleNode, arcNode, polylineNode, textBoxNode, classLabelNode, placeFlagFields, placeClassLabel, isPowerSymbol, powerSymbols, pickSymbol,
-    drawClick, finishDraw, cancelDraw, deleteChanges, deleteAt, pickAny, geomDist, anchorOf, DELETE_CURSOR,
+    drawClick, finishDraw, cancelDraw, drawPreviewNode, deleteChanges, deleteAt, pickAny, geomDist, anchorOf, DELETE_CURSOR,
     // sheets, sheet pins, tables, curves, polygons, rule areas, images and net highlighting
     build45Leader, ruleAreaLeader, ruleAreaOutline, placeLabel, autoplaceLabelNode, unplacedUnits, symbolShownText, IMAGE_ACCEPT,
     sheetNode, sheetCorner, sheetPinNode, ellipseFromBox, ellipseArcAngles, ellipseNode, tableNode, drawTableNode, drawTableSize, bezierNode, polygonNode, ruleAreaNode, imageNode, imageData, imageSize, bytesToBase64, base64ToBytes,
-    placeSheet, ensureSheetDoc, sheetInstance, sheetPathHere, nextPage, emptySheetDoc, relPath, currentDoc, sheetEdgeAt, sheetPinPoint, sheetPinClick, placeSheetPin,
+    placeSheet, ensureSheetDoc, sheetInstance, sheetPathHere, nextPage, emptySheetDoc, relPath, currentDoc, sheetEdgeAt, sheetPinPoint, sheetPinClick, placeSheetPin, beginSheetPinMove, movedPinNode,
     openImagePicker, netItems, terminalsOf, pickNet, highlightClick, setHighlight, typeNameFor, ruleAreaId, itemSexpr, SHEET_NAME_OFF, SHEET_FILE_OFF, autoplaceSheetFields },
 };
 root.CollabTools.sch = sch;

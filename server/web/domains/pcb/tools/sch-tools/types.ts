@@ -95,7 +95,7 @@ export interface OrthoLine {
 /** SPECIAL_CASE_LABEL_INFO: a label kept on the line a drag stretches. */
 export interface OrthoLabel { item: KItem; orig: Pt; pos: Pt; line: OrthoLine; line0: OrthoLine; ls: Pt; le: Pt; track: boolean; owner: OrthoLine }
 /** The state orthoLineDrag keeps between mouse events (the moves are incremental and path dependent). */
-export interface OrthoSim { src: Anchor[]; lines: OrthoLine[]; drag: OrthoLine[]; labels: OrthoLabel[]; byId: Map<string, OrthoLine>; at: Pt; map?: (p: Pt) => Pt; grid: number }
+export interface OrthoSim { src: Anchor[]; lines: OrthoLine[]; drag: OrthoLine[]; labels: OrthoLabel[]; byId: Map<string, OrthoLine>; at: Pt; map?: (p: Pt) => Pt; grid: number; /** lineGrid.y (grid is its x) */ gridY?: number }
 export interface SchDrag {
   /** orig: the node before the drag; base: orig turned / mirrored by R / X / Y pressed during the drag (handleMoveToolActions) */
   items: { item: KItem; kind: string; orig: SNode; base?: SNode }[];
@@ -127,6 +127,8 @@ export interface SchDrag {
   sim?: OrthoSim | null;
   /** the connectable grid pitch (mm): how far before the moved end a bend is put */
   grid?: number;
+  /** GetGridSize().y of that grid (grid is its x) */
+  gridY?: number;
   /** the unselected labels lying on a line the drag stretches (m_specialCaseLabels) */
   onLine?: { item: KItem; orig: Pt; line: KItem }[];
   /** the junctions the move made redundant (recordRedundantJunctions): hidden while it lasts, migrated at the end */
@@ -165,7 +167,10 @@ export interface PointEdit { item: KItem; ep: EditPoints; idx: number; orig: SNo
 /** S.sheetJob: a sheet file being created on the server. */
 export interface SheetJob { doc: KDoc; promise: Promise<KItem | null> | null }
 /** A sheet pin from a hierarchical label riding the sheet's edge (SCH_DRAWING_TOOLS::TwoClickPlace, isSheetPin). */
-export interface SheetPinPlace { sheetId: string; name: string; shape: string; node: SNode; item: KItem | null; p: Pt; side: string }
+export interface SheetPinPlace { sheetId: string; name: string; shape: string; node: SNode; item: KItem | null; p: Pt; side: string;
+  /** SCH_MOVE_TOOL on a selected SCH_SHEET_PIN: the sheet as it was, the pin's index in it, whether a held button carries
+   *  it (released = placed) and whether the wires on it follow (drag) */
+  move?: { orig: SNode; index: number; byPointer: boolean; drag: boolean; at0: Pt } }
 /** S.unfold: the label and entry a bus unfold placed while its wire is drawn. */
 export interface UnfoldJob { labelId: string; entryId: string; origin: Pt; placed: boolean }
 /** An item placed last, for Insert (repeat). */
@@ -206,6 +211,7 @@ export type SchState = {
   /** m_Drawing.arc_edit_mode (ARC_EDIT_MODE): keep centre adjust radius / keep endpoints or start direction / keep centre and radius */
   arcEditMode?: "center" | "endpoints" | "radius";
   newPowerSymbols?: "default" | "global" | "local"; sheetBorder?: string; sheetBackground?: string; defaultLineThickness?: number;
+  /** TOOLS_HOLDER::GetMoveWarpsCursor (Preferences > Common > Warp mouse to anchor of moved object) */ moveWarpsCursor?: boolean;
   /** Place Sheet Pins: the sheet the tool works on (the selected one, else the first clicked) and the pin on the cursor */
   pinSheet?: string | null; pinPlace?: SheetPinPlace | null;
   lastLabelShape?: string; lastFlagShape?: string; lastAutoRotate?: boolean; autoRotateIds?: Set<string>;

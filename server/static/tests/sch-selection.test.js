@@ -245,5 +245,76 @@ test("cross-probe zoom (ZoomFitCrossProbeBBox): small parts are not blown up, a 
   const wide = z(300, 10, 200, 100); assert.ok(Math.abs(wide - 420 / 200) < 1e-9, String(wide));
 });
 
-console.log(`sch-selection: ${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+// EE_GRID_HELPER::ResolveSnap over two diagonal graphic lines that cross off the grid: SNAP_RESOLVER takes the
+// intersection (INTERSECTION, rank 1) before a point on one line (FINITE_MANIFOLD, rank 4) with the grid fixing the
+// other axis.  (An axis-aligned line has its own grid-aligned anchor, which wins as an intrinsic anchor.)
+const CROSS = (extra) => HEAD + EXTRA + ` (polyline (pts (xy 200 100) (xy 210 110)) (stroke (width 0) (type default)) (uuid "gd"))
+ (polyline (pts (xy 200 110.3) (xy 212 98.3)) (stroke (width 0) (type default)) (uuid "gb"))
+ (polyline (pts (xy 200 120.37) (xy 212 120.37)) (stroke (width 0) (type default)) (uuid "gh"))` + (extra || "") + ")";
+const freshCross = () => { const d = K.parseDoc(CROSS()), c = makeCtx(d, 20); sch.onDocChanged(c); return { d, c }; };
+
+test("snap inference: the intersection of two lines, a point on a line with the grid's other axis, Shift the grid only", () => {
+  const { c } = freshCross();
+  const a = _.resolveSnap(c, [205.4, 105], "polyline", null);
+  assert.deepStrictEqual(a.p, [205.15, 105.15], "where the lines cross"); assert.strictEqual(a.anchor, null, "an intersection is not an anchor: no snap indicator");
+  assert.deepStrictEqual(_.resolveSnap(c, [207.3, 107], "polyline", null).p, [207.01, 107.01], "on the line, x on the grid");
+  assert.deepStrictEqual(_.resolveSnap(c, [205.4, 105], "polyline", { shiftKey: true }).p, [205.74, 105.41], "Shift: no object snapping");
+  assert.deepStrictEqual(_.resolveSnap(c, [205.4, 105], "polyline", { ctrlKey: true, shiftKey: true }).p, [205.4, 105], "Ctrl+Shift: the raw cursor");
+  // an anchor (a line's end) still wins over everything in its snap-in range, and shows the indicator
+  const e = _.resolveSnap(c, [211.6, 98.5], "polyline", null); assert.deepStrictEqual(e.p, [212, 98.3]); assert.deepStrictEqual(e.anchor, [212, 98.3]);
+  // the grid-aligned point of an axis-aligned line is an anchor
+  assert.deepStrictEqual(_.resolveSnap(c, [205.6, 120.6], "polyline", null).anchor, [205.74, 120.37]);
+});
+
+test("AddConstructionItems: a line's two rays out from its ends (whole line when not extension-only, ends when persistent), an arc's circle and centre", () => {
+  const { d } = freshCross();
+  const h = _.schConstruction(d.items.get("gh"), true, false);
+  assert.deepStrictEqual(h.map((x) => x.t), ["half", "half"]);
+  assert.deepStrictEqual([h[0].a, h[1].a], [[200, 120.37], [212, 120.37]]);
+  assert.ok(h[0].b[0] < 200 && h[1].b[0] > 212, "each ray points away from the line");
+  assert.deepStrictEqual(_.schConstruction(d.items.get("gh"), false, true).map((x) => x.t), ["line", "pt", "pt"]);
+  const arc = K.createItem(d, K.parse('(arc (start 230 100) (mid 235 95) (end 240 100) (stroke (width 0) (type default)) (fill (type none)) (uuid "ga"))'));
+  const ac = _.schConstruction(arc, true, false); assert.deepStrictEqual(ac.map((x) => x.t), ["circle", "pt"]);
+  assert.ok(Math.abs(ac[0].r - 5) < 1e-9 && Math.abs(ac[1].p[0] - 235) < 1e-9 && Math.abs(ac[1].p[1] - 100) < 1e-9);
+  const circ = K.createItem(d, K.parse('(circle (center 260 100) (radius 3) (stroke (width 0) (type default)) (fill (type none)) (uuid "gc"))'));
+  assert.deepStrictEqual(_.schConstruction(circ, true, false), [{ t: "pt", p: [260, 100] }]);
+  const rect = d.items.get("r2"); assert.deepStrictEqual(_.schConstruction(rect, true, false), [], "a rectangle adds nothing");
+});
+
+test("BestDragOrigin: the moved items' anchor nearest the cursor, connectable ones only when a connectable item moves", () => {
+  const { d, c } = fresh();
+  const u1 = d.items.get("u1"), t1 = d.items.get("t1");
+  assert.deepStrictEqual(_.bestDragOrigin(c, [u1], [57.15, 49.53]), [58.42, 48.26], "the OUT pin, nearer than the symbol's origin");
+  assert.deepStrictEqual(_.bestDragOrigin(c, [u1], [50.8, 52.07]), [50.8, 50.8], "the symbol's origin");
+  assert.deepStrictEqual(_.bestDragOrigin(c, [t1], [91.44, 50.8]), [90, 50], "a text alone: its position");
+  assert.deepStrictEqual(_.bestDragOrigin(c, [u1, t1], [90.17, 50.8]), [58.42, 48.26], "a symbol with a text: the text's anchor does not count");
+  assert.deepStrictEqual(_.bestDragOrigin(c, [d.items.get("r2")], [111.76, 41.91]), [111.76, 41.91], "a shape has no anchors: the cursor");
+  // a move grabs the selection there: the pin follows the snapped cursor
+  sch.setDragMode(c, "move");
+  assert.ok(_.beginDrag(c, u1, [57.15, 49.53], true));
+  assert.deepStrictEqual(sch.state.drag.anchor0, [58.42, 48.26]);
+  _.moveDrag(c, [59.8, 49.6], {}); assert.deepStrictEqual(K.atOf(d.items.get("u1").node).slice(0, 2), [53.34, 50.8]);
+  _.endDrag(c, false);
+  // GetMoveWarpsCursor: the cursor goes to the grab point (the software crosshair); off, the grab is the snapped cursor
+  let warped = null; c.warpCursor = (p) => { warped = p.slice(); };
+  assert.ok(_.beginDrag(c, d.items.get("u1"), [57.15, 49.53], true)); assert.deepStrictEqual(warped, [58.42, 48.26]); _.endDrag(c, false);
+  warped = null; sch.state.moveWarpsCursor = false;
+  try { assert.ok(_.beginDrag(c, d.items.get("u1"), [57.4, 49.4], true)); assert.deepStrictEqual(sch.state.drag.anchor0, [57.15, 49.53]); assert.strictEqual(warped, null); _.endDrag(c, false); }
+  finally { sch.state.moveWarpsCursor = undefined; }
+});
+
+(async () => {
+  // ExtensionSnapActivateOnHover: hovering a line proposes its rays; accepted after 500 ms they take part in the snap
+  try {
+    globalThis.CollabEditor = undefined; sch.state.snapItem = null;
+    const { c } = freshCross();
+    assert.deepStrictEqual(_.resolveSnap(c, [215.3, 120.5], "polyline", null).p, [215.9, 120.65], "nothing past the line's end yet: the grid");
+    _.resolveSnap(c, [205.7, 120.37], "polyline", null);   // over the horizontal line
+    await new Promise((r) => setTimeout(r, 600));
+    assert.deepStrictEqual(_.resolveSnap(c, [215.3, 120.5], "polyline", null).p, [215.9, 120.37], "on the line's extension, x on the grid");
+    assert.deepStrictEqual(_.resolveSnap(c, [215.3, 120.5], "polyline", { shiftKey: true }).p, [215.9, 120.65], "Shift drops the construction geometry");
+    passed++;
+  } catch (e) { failed++; console.log("FAIL construction extension after hover\n     " + (e.stack || e).toString().split("\n").slice(0, 5).join("\n     ")); }
+  console.log(`sch-selection: ${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
+})();

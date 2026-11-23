@@ -5,7 +5,8 @@
 // change and resolves them on its own sheet, so a group made here appears in a desktop session at once and vice versa.
 import { E, isSch, requestRender, setStatusBar, toolCtx } from "./editor";
 import { promptText } from "./dom";
-import { expandGroups, groupMembers, groupOf, groupSexpr, topGroupOf } from "./logic";
+import { enteredGroupChanges, expandGroups, groupMembers, groupOf, groupSexpr, topGroupOf } from "./logic";
+import { addCommitRewriter } from "../editor/tools";
 
 interface Ctx extends ToolCtx { setSelection(ids: Iterable<string>): void }
 let entered: string | null = null;
@@ -138,6 +139,8 @@ export function installGroups(): void {
   add("group", "Group Items", "", group); add("ungroup", "Ungroup Items", "", ungroup); add("enterGroup", "Enter Group", "", enterGroup); add("leaveGroup", "Leave Group", "", leaveGroup);
   add("removeFromGroup", "Remove Items", "", removeFromGroup); add("groupProperties", "Group Properties...", "", renameGroup);
   sch.expandGroups = schExpandGroups;
+  // SCH_COMMIT::Push: what a commit adds (a paste, Repeat Last Item, a duplicate, a new drawing) joins the entered group
+  addCommitRewriter((changes) => (isSch() && E.kdoc && enteredGroup() ? enteredGroupChanges(E.kdoc, changes, enteredGroup()) : changes));
   (sch as unknown as { enteredGroupId?: () => string | null }).enteredGroupId = () => enteredGroup();   // the box selection scopes itself to the entered group
   (sch as unknown as { enterGroupAt?: typeof enterGroupAt }).enterGroupAt = enterGroupAt;
   // Esc, or a click outside the entered group's box, leaves the group (SCH_SELECTION_TOOL::ExitGroup)

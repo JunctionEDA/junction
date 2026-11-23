@@ -274,9 +274,12 @@ function sheetFilePath(ctx: SchCtx, file: string, from?: string): string {
  * SCH_SHEET_LIST::TestForRecursion for a pasted sheet: its file, or a file of one of its sub-sheets, is the sheet
  * pasted into or one of that sheet's parents somewhere in the hierarchy.
  */
-export function pastedSheetRecursion(ctx: SchCtx, file: string): boolean {
-  const cur = currentDoc(ctx); if (!cur || !cur.path) return false;
-  const dest = cur.path, h = hierarchyOf(ctx), src: string[] = [], seen = new Set<string>(), todo = [sheetFilePath(ctx, file)];
+export function pastedSheetRecursion(ctx: SchCtx, file: string, destFile?: string): boolean {
+  const cur = currentDoc(ctx); if (destFile === undefined && (!cur || !cur.path)) return false;
+  // SCH_MOVE_TOOL::dropWouldRecurse names the drop target's own file (destScreen->GetFileName()) as the destination
+  const dest = destFile !== undefined ? sheetFilePath(ctx, destFile) : cur!.path, h = hierarchyOf(ctx);
+  if (!dest) return false;
+  const src: string[] = [], seen = new Set<string>(), todo = [sheetFilePath(ctx, file)];
   const docOf = (f: string): KDoc | null => {
     const d = h ? h.docs.get(f) : null; if (d) return d;
     const sd = ctx.sheetDocs, v = sd ? (sd instanceof Map ? sd.get(f) || sd.get(baseName(f)) : sd[f] || sd[baseName(f)]) : null;

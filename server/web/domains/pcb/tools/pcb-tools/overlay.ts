@@ -1,5 +1,5 @@
 // pcb-tools/overlay.ts — the overlay: what the tools draw over the board.
-import type { BoardDoc, CopperShape, DesignSettings, DrawState, GeomPrim, PcbCtx, Pt, RatsnestLine, SnapType } from "./types";
+import type { BoardDoc, CopperShape, DesignSettings, DrawState, GeomPrim, PcbCtx, Pt, RatsnestLine, SnapAnchor, SnapType } from "./types";
 import { appGlobal, editorState, netlistCached, netNameOf, sizesOf } from "./app-state";
 import { drawArcPreview } from "./arcs";
 import { dimensionLabel, drawStatusPopup, drawTwoPointAssistant, textNextToCursor, AUX_ITEMS_COLOR, drawPickerPrompt } from "./assistants";
@@ -15,6 +15,9 @@ import { netTable, ratsnest, ratsnestLineVisible } from "./netlist";
 import { netOf } from "./nets";
 import { tableGrid } from "./nodes";
 import { drawEditPoints } from "./point-editor";
+import { ellipseArcGeom } from "./draw-tools";
+import { ellipseFromBox, ellipseOutline, ellipsePointAt } from "./ellipse";
+import { subGridOutline } from "./board-items";
 import { clearConstruction, constructionBatches, hasActiveConstruction, snapLineState, type CDrawable } from "./construction";
 import { padOnLayer, padsOf } from "./route-geom";
 import { padOutline as drcPadOutline } from "./drc-zones";
@@ -390,10 +393,17 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
     if (d.shape === "gline") line(c, d.start, d.cur);
     else if (d.shape === "grect" || d.shape === "gtextbox") c.strokeRect(...box());
     else if (d.shape === "table") {   // the table KiCad would make of the drag: it hangs from the first click
-      const L = tableGrid(d.start, d.cur, layer, ctx.gridPitch || 0), w = L.cols * L.cw, h = L.rows * L.ch;
+      const L = tableGrid(d.start, d.cur, layer, ctx.gridPitch || 0, ctx.gridPitchY), w = L.cols * L.cw, h = L.rows * L.ch;
       c.strokeRect(L.x, L.y, w, h);
       for (let i = 1; i < L.cols; i++) line(c, [L.x + L.cw * i, L.y], [L.x + L.cw * i, L.y + h]);
       for (let i = 1; i < L.rows; i++) line(c, [L.x, L.y + L.ch * i], [L.x + w, L.y + L.ch * i]);
+    } else if (d.shape === "gellipse") polyline(c, ellipseOutline(ellipseFromBox(d.start, d.cur), false, 128), true);
+    else if (d.shape === "gellipsearc") {
+      // ELLIPSE_ARC_DRAW_BEHAVIOR's preview: the ellipse of the box while it is sized, then the arc from the start
+      // angle to the cursor, with ELLIPSE_ASSISTANT's guide lines from the centre to the arc's ends
+      const e = ellipseArcGeom(d), arc = d.pts.length >= 2;
+      polyline(c, ellipseOutline(e, arc, 128), !arc);
+      if (arc) { c.save(); c.globalAlpha = 1; c.lineWidth = px; c.strokeStyle = AUX_ITEMS_COLOR; c.setLineDash([12 * px, 6 * px]); line(c, [e.cx, e.cy], ellipsePointAt(e, e.start)); if (d.pts.length >= 3) line(c, [e.cx, e.cy], ellipsePointAt(e, e.end)); c.restore(); }
     } else if (d.shape === "garc") drawArcPreview(c, d, px, color(layer)); else if (d.shape === "gcurve") {
       // BEZIER_GEOM_MANAGER's four points for the clicks so far, and BEZIER_ASSISTANT's guides: a dashed line from the
       // start to control 1 and, once the end is set, one of double length through the end (control 2 and its mirror)
@@ -421,6 +431,8 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
     if (d.pts && !POLY_TOOLS.has(d.shape)) { c.fillStyle = HL; const h = 3 * px; for (const p of d.pts) c.fillRect(p[0] - h, p[1] - h, 2 * h, 2 * h); }
     drawTwoPointAssistant(c, d, px, color(layer));
   }
+  // PlaceSubGrid's grid item between its clicks (drawn selected): the square it covers and its centre
+  if (S.subGrid && S.subGrid.len > 0) { c.save(); c.globalAlpha = 1; c.strokeStyle = HL; c.lineWidth = 1.5 * px; polyline(c, subGridOutline(S.subGrid), true); line(c, S.subGrid.center, subGridOutline(S.subGrid)[1]); c.restore(); }
   // the picked reference image, centred on the cursor
   if (S.image && S.hover && S.modTool === "image") {
     const img = S.image;
@@ -455,6 +467,8 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
   // a move's magnetic snap (the anchor the cursor was pulled onto): GRID_HELPER's SNAP_INDICATOR
   const cpx = px * (view.dpr || 1);
   if (S.move && S.move.snapAt) drawSnapIndicator(c, S.move.snapAt, S.move.snapAt.t, cpx);
+  const pa = S.pedit && (S.pedit.snapAt as SnapAnchor | null | undefined);   // the point editor's grid helper shows it too
+  if (pa) drawSnapIndicator(c, pa, pa.t, cpx);
   drawConstructionGeom(c, cpx);
   // a move held on an angle snap line: CONSTRUCTION_GEOM's snap line, dashed (12 px on, 6 off) in LAYER_ANCHOR, with
   // a 16 px cross and circle on its origin once it is longer than 8 px; nothing under 10 nm
@@ -505,7 +519,7 @@ const dashed = (c: CanvasRenderingContext2D, a: Pt, b: Pt, dash: number) => { c.
  * LAYER_AUX_ITEMS at 40 % alpha).
  */
 function drawConstructionGeom(c: CanvasRenderingContext2D, cpx: number) {
-  if (!S.move && !S.modTool) { if (hasActiveConstruction()) clearConstruction(); return; }
+  if (!S.move && !S.modTool && !S.pedit) { if (hasActiveConstruction()) clearConstruction(); return; }
   const box = viewportMm(c); if (!box) return;
   const sl = snapLineState(), snapSeg = S.move && S.move.guide && Math.hypot(S.move.guide[1][0] - S.move.guide[0][0], S.move.guide[1][1] - S.move.guide[0][1]) >= 1e-5 ? S.move.guide : null;
   const collinear = (a: Pt, b: Pt) => {

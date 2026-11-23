@@ -8,7 +8,8 @@ import { outline, paint } from "./overlay";
 import { drawEditPoints } from "./point-edit";
 import { ruleAreaLeader } from "./shapes";
 import { collisionCursor, collisionMarkers, drawCollision } from "./collision";
-import { snapAnchor, snapConn } from "./snap";
+import { lastSnapAnchor, snapAnchor, snapConn } from "./snap";
+import { clearConstruction, constructionBatches, hasActiveConstruction } from "../pcb-tools/construction";
 import { drawSchArcPreview } from "./arcs";
 import { drawTableLines, ellipseArcAngles, ellipseFromBox, sheetCorner, sheetNode } from "./nodes";
 import { CLR, K, S, atOf, kid, kids, ptsOf, str, toolOf } from "./state";
@@ -212,10 +213,10 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: SchCt
     c.save(); c.strokeStyle = K.SCH.notes; c.lineWidth = Math.max(0.1524, 2 * px); c.lineCap = "round"; c.lineJoin = "round"; c.globalAlpha = 0.85;
     const cur = d.await ? d.pts[1] : d.cur, p0 = d.pts[0];
     if (d.shape === "sheet") c.strokeStyle = K.SCH.sheet; else if (d.shape === "rulearea") c.strokeStyle = K.SCH.ruleArea;
-    if (d.shape === "table") { c.beginPath(); for (const l of drawTableLines(p0, cur, S.ctx ? S.ctx.gridPitch : 1.27, labelDefaults().textSize)) { c.moveTo(l[0], l[1]); c.lineTo(l[2], l[3]); } c.stroke(); }
+    if (d.shape === "table") { c.beginPath(); for (const l of drawTableLines(p0, cur, S.ctx ? S.ctx.gridPitch : 1.27, labelDefaults().textSize, S.ctx ? S.ctx.gridPitchY : undefined)) { c.moveTo(l[0], l[1]); c.lineTo(l[2], l[3]); } c.stroke(); }
     else if (d.shape === "sheet") {
       // the preview is the sheet itself (a Clone with "Untitled Sheet" / "untitled.kicad_sch"), sized by sizeSheet
-      const b = d.await ? cur : sheetCorner(p0, cur, S.ctx ? S.ctx.gridPitch : 1.27), it = ghost(doc, sheetNode(p0, b, S.sheetPreset ? S.sheetPreset.name : "Untitled Sheet", S.sheetPreset ? S.sheetPreset.file : "untitled.kicad_sch"));
+      const b = d.await ? cur : sheetCorner(p0, cur, S.ctx ? S.ctx.gridPitch : 1.27, S.ctx ? S.ctx.gridPitchY : undefined), it = ghost(doc, sheetNode(p0, b, S.sheetPreset ? S.sheetPreset.name : "Untitled Sheet", S.sheetPreset ? S.sheetPreset.file : "untitled.kicad_sch"));
       if (it) { c.restore(); paintItems(c, view, doc, [it], {}); c.save(); }
     }
     else if (d.shape === "rect" || d.shape === "textbox") c.strokeRect(Math.min(p0[0], cur[0]), Math.min(p0[1], cur[1]), Math.abs(cur[0] - p0[0]), Math.abs(cur[1] - p0[1]));
@@ -261,10 +262,34 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: SchCt
     const it = S.carry.item;
     paintItems(c, view, doc, [it], { selected: new Set([it.id]), moving: new Set([it.id]) });
   }
+  drawSchConstruction(c, px);
   // EE_GRID_HELPER: a cursor snapped to an object's anchor (a pin, a wire end, a label …) shows the SNAP_INDICATOR,
   // a plain grid snap nothing
   const sp = snapIndicatorAt(ctx);
   if (sp) drawSnapIndicator(c, sp, px);
+}
+/**
+ * EE_GRID_HELPER's construction geometry (CONSTRUCTION_GEOM::ViewDraw in LAYER_SCHEMATIC_ANCHOR): the accepted
+ * construction items one pixel wide, lines and rays out past the edge of the view, points as a 16 px cross.  Nothing
+ * is kept once no tool is snapping.
+ */
+export function drawSchConstruction(c: CanvasRenderingContext2D, px: number) {
+  const t = toolOf(S.tool), snapping = !!(S.wire || S.draw || S.carry || (S.drag && S.drag.moved) || (t && (t.kind === "wire" || t.kind === "bus" || t.kind === "polyline")));
+  if (!snapping) { if (hasActiveConstruction()) clearConstruction(); return; }
+  const far = 1e6 * px;
+  c.save(); c.globalAlpha = 1; c.setLineDash([]); c.strokeStyle = (K.SCH as { anchor?: string }).anchor || "#0000FF"; c.lineCap = "butt";
+  for (const bt of constructionBatches()) for (const ci of bt) for (const e of ci.drawables) {
+    const d = e.d; c.lineWidth = e.w * px; c.beginPath();
+    if (d.t === "line" || d.t === "half" || d.t === "seg") {
+      const v = [d.b[0] - d.a[0], d.b[1] - d.a[1]], L = Math.hypot(v[0], v[1]); if (!L) continue;
+      const u = [v[0] / L * far, v[1] / L * far], s0 = d.t === "line" ? [d.a[0] - u[0], d.a[1] - u[1]] : d.a, s1 = d.t === "seg" ? d.b : [d.a[0] + u[0], d.a[1] + u[1]];
+      c.moveTo(s0[0], s0[1]); c.lineTo(s1[0], s1[1]);
+    } else if (d.t === "circle") c.arc(d.c[0], d.c[1], d.r, 0, Math.PI * 2);
+    else if (d.t === "arc") c.arc(d.c[0], d.c[1], d.r, d.a0, d.a1, d.anticlockwise);
+    else { const h = 8 * px; c.moveTo(d.p[0] - h, d.p[1]); c.lineTo(d.p[0] + h, d.p[1]); c.moveTo(d.p[0], d.p[1] - h); c.lineTo(d.p[0], d.p[1] + h); }
+    c.stroke();
+  }
+  c.restore();
 }
 /**
  * Items drawn by the canvas painter over the overlay: a carried item, the delete tool's brightened candidate.  They
@@ -276,13 +301,14 @@ export function paintItems(c: CanvasRenderingContext2D, view: KView, doc: KDoc, 
   try { K.render(one, c, view, Object.assign({ background: false, overlay: true, grid: 0, frame: false, hidden: S.ctx && (S.ctx as { hiddenLayers?: Set<string> }).hiddenLayers || undefined }, opts) as KRenderOpts); }
   finally { c.restore(); }
 }
-/** Where the tool's cursor snapped to an object anchor (the wire / bus tools, a carried label), or null. */
+/** Where the tool's cursor snapped to an object anchor (the wire / bus / line tools, a graphic being drawn, a carried label), or null. */
 export function snapIndicatorAt(ctx: SchCtx): Pt | null {
   const t = toolOf(S.tool); if (!S.cursor || (t && t.id === "delete")) return null;
   if (S.mods && S.mods.shiftKey) return null;   // Shift: no magnetic snap
+  if (S.drag && S.drag.moved) return lastSnapAnchor();   // a move: the anchor its grab point snapped to
   const c = S.carry;
-  const kind = S.wire ? S.wire.kind : c ? (TEXT_KINDS_SNAP.has(c.kind) ? (c.kind === "bus" ? "bus" : "wire") : null) : t && (t.kind === "wire" || t.kind === "bus") ? t.kind : null;
-  if (!kind || kind === "polyline") return null;
+  const kind = S.wire ? S.wire.kind : c ? (TEXT_KINDS_SNAP.has(c.kind) ? (c.kind === "bus" ? "bus" : "wire") : null) : S.draw ? "polyline" : t && (t.kind === "wire" || t.kind === "bus" || t.kind === "polyline") ? t.kind : null;
+  if (!kind) return null;
   return snapAnchor(ctx, S.cursor, kind);
 }
 // what placeCarry snaps to connections rather than the grid alone

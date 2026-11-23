@@ -43,13 +43,30 @@ export interface SymRef {
   pins: Map<string, string>;
   /** the placed units of the symbol, for unit swaps; `self` this one's (pin swaps, its pins) */
   units?: SymUnit[]; self?: SymUnit;
+  /** the numbers of every pin of the library symbol (SCH_SYMBOL::GetPin finds a pin of any unit by its number) */
+  pinNumbers?: Set<string>;
+  /** this placed unit's pins on its sheet instance by number: the pin's net (SCH_PIN::GetConnectionName), the strongest
+   *  item physically connected to it and its net's resolved driver (pcb-netlist.ts PinDrivers) */
+  pinDrivers?: Map<string, PinConn>;
 }
+/** An item that can drive a net (pcb-netlist.ts DriverItem): its kind, sheet instance, item id and driver priority
+ *  (CONNECTION_SUBGRAPH::PRIORITY: NONE 0, PIN 1, SHEET_PIN 2, HIER_LABEL 3, LOCAL_LABEL 4, LOCAL_POWER_PIN 5,
+ *  GLOBAL_POWER_PIN 6, GLOBAL 7). */
+export interface DriverRef { kind: string; inst: number; id: string; prio: number; x: number; y: number; pin?: string; power?: boolean; sheetPin?: string }
+export interface PinConn { net: string; physical: DriverRef | null; resolved: DriverRef | null }
 export interface BaLine { severity: "error" | "warning" | "action" | "info"; text: string }
 export interface SymEdit {
   key: string; ref?: string; footprint?: string; value?: string; dnp?: boolean; inBom?: boolean; inPos?: boolean; exSim?: boolean;
   setFields: Map<string, string>; addFields: Map<string, string>; deleteFields: string[];
 }
-export interface LabelEdit { from: string; to: string; ref: string; pin: string }
+/**
+ * processNetNameChange's edits: a label's or sheet pin's new text ("text"), a power symbol's new value ("value"), or a
+ * new local label at a pin ("add", `spin` the SPIN_STYLE orientLabel gives: 0 left, 1 up, 2 right, 3 bottom).
+ */
+export type LabelEdit =
+  | { op: "text"; inst: number; id: string; kind: string; sheetPin?: string; text: string; ref: string; pin: string }
+  | { op: "value"; inst: number; id: string; text: string; ref: string; pin: string }
+  | { op: "add"; inst: number; x: number; y: number; text: string; spin: number; ref: string; pin: string };
 /** a unit swap: the placed unit `key` shows unit `unit` from now on */
 export interface UnitEdit { key: string; unit: number }
 /** a pin swap: pins `a` and `b` of the placed unit `key` trade their positions (SwapPinGeometry) */
@@ -60,8 +77,9 @@ const hasVars = (s: string): boolean => /\$\{[^}]*\}/.test(s);
 const tf = (b: boolean): string => (b ? "true" : "false");
 /** DescribeRef: "R1", or "<no reference designator>" */
 export const describeRef = (r: string): string => (r ? r : "<no reference designator>");
-/** A board net named after a pad ("Net-(R1-Pad2)", "unconnected-(…)") was not named by anyone. */
-const autoNet = (n: string): boolean => /^(Net-\(|unconnected-\()/.test(n) || n === "";
+/** NETINFO_ITEM::GetShortNetname / SCH_CONNECTION::Name( aIgnoreSheet ): the name without its sheet path. */
+const shortName = (n: string): string => n.slice(n.lastIndexOf("/") + 1);
+const LP_LOCAL_LABEL = 4;
 
 /** BackAnnotateSymbols: the report and the edits, for the dry run and the update alike.  The lines are ReportHead's
  *  (every change, "has no assigned symbol", "linked to same symbol") followed by ReportTail's ("Cannot find symbol",
@@ -75,7 +93,8 @@ function byTimeStamp(a: SymRef, b: SymRef): number {
   for (let i = 0; i < pa.length; i++) { const c = cmpStr(pa[i], pb[i]); if (c) return c; }
   return cmpStr(a.uuid || "", b.uuid || "");
 }
-export function backAnnotate(syms: SymRef[], fps: FpData[], o: BaOptions & { annotated?: boolean }): BaResult {
+/** `spinOf`: orientLabel for a symbol pin driver (the SPIN_STYLE a label added at that pin takes). */
+export function backAnnotate(syms: SymRef[], fps: FpData[], o: BaOptions & { annotated?: boolean; spinOf?: (d: DriverRef) => number }): BaResult {
   const head: BaLine[] = [], tail: BaLine[] = [], edits: SymEdit[] = [], labels: LabelEdit[] = [], relinks: { fpRef: string; path: string }[] = [], unitEdits: UnitEdit[] = [], pinSwaps: PinSwap[] = [];
   const out = (): BaResult => ({ lines: [...head, ...tail], edits, labels, relinks, changes, unitEdits, pinSwaps });
   let changes = 0;
@@ -151,16 +170,15 @@ export function backAnnotate(syms: SymRef[], fps: FpData[], o: BaOptions & { ann
     const swapped = o.pinSwaps && o.netNames && !skip ? pinSwapsFor(s, fp, !!o.allowPinSwaps, head, pinSwaps) : new Set<string>();
     changes += swapped.size / 2;
     if (o.netNames && !skip) {
-      const mine = s.self ? new Set(s.self.unitPins.get(s.self.unit) || []) : null;
+      // the pad map's pins in order, each pin whose net (its short name) differs from the pad's
       for (const pad of [...fp.pads.keys()].sort(cmpStr)) {
-        const boardNet = fp.pads.get(pad)!;
+        const boardNet = shortName(fp.pads.get(pad)!);
         if (swapped.has(pad)) continue;
-        if (mine && !mine.has(pad)) continue;   // another unit's pin: not connected on this unit's sheet
-        const schNet = s.pins.get(pad);
-        if (schNet === undefined) continue;
-        if (schNet === boardNet || autoNet(boardNet) || autoNet(schNet) || labels.some((l) => l.from === schNet)) continue;
-        changes++; labels.push({ from: schNet, to: boardNet, ref: R, pin: pad });
-        head.push({ severity: "action", text: `Change ${describeRef(R)} pin ${pad} net label from '${schNet}' to '${boardNet}'.` });
+        if (s.pinNumbers && !s.pinNumbers.has(pad)) { head.push({ severity: "error", text: `Cannot find ${describeRef(R)} pin '${pad}'.` }); continue; }
+        // a pin of another unit has no connection on this unit's sheet
+        const pc = s.pinDrivers ? s.pinDrivers.get(pad) : undefined; if (!pc) continue;
+        const schNet = shortName(pc.net);
+        if (schNet !== boardNet) changes += netNameChange(R, pad, pc, schNet, boardNet, head, labels, o.spinOf);
       }
     }
     if (o.otherFields) {
@@ -175,6 +193,53 @@ export function backAnnotate(syms: SymRef[], fps: FpData[], o: BaOptions & { ann
     if (any) edits.push(e);
   }
   return out();
+}
+
+/**
+ * BACK_ANNOTATE::processNetNameChange for one pin: the highest-priority item physically connected to the pin decides.
+ * A label, global label, hierarchical label or sheet pin is retexted; a power pin cannot be renamed; an ordinary pin
+ * takes its net's resolved driver when that is at least a local label (a power symbol's value then changes), else a
+ * new label is added at the pin.  Returns the number of changes.
+ */
+function netNameChange(ref: string, pin: string, pc: PinConn, oldName: string, newName: string, lines: BaLine[], out: LabelEdit[], spinOf?: (d: DriverRef) => number): number {
+  const d = pc.physical; if (!d) return 0;
+  const change = `Change ${describeRef(ref)} pin ${pin} net label from '${oldName}' to '${newName}'.`;
+  if (d.kind === "label" || d.kind === "global_label" || d.kind === "hierarchical_label" || d.kind === "sheet_pin") {
+    out.push({ op: "text", inst: d.inst, id: d.id, kind: d.kind, sheetPin: d.sheetPin, text: newName, ref, pin });
+    lines.push({ severity: "action", text: change });
+    return 1;
+  }
+  if (d.kind !== "pin") return 0;
+  if (d.power) { lines.push({ severity: "error", text: `Net ${oldName} cannot be changed to ${newName} because it is driven by a power pin.` }); return 0; }
+  // the physical walk found no label: the connectivity's resolved driver of the net
+  const r = pc.resolved;
+  if (r && r.prio >= LP_LOCAL_LABEL) {
+    if (r.kind === "pin") out.push({ op: "value", inst: r.inst, id: r.id, text: newName, ref, pin });
+    else out.push({ op: "text", inst: r.inst, id: r.id, kind: r.kind, sheetPin: r.sheetPin, text: newName, ref, pin });
+    lines.push({ severity: "action", text: change });
+    return 1;
+  }
+  out.push({ op: "add", inst: d.inst, x: d.x, y: d.y, text: newName, spin: spinOf ? spinOf(d) : 0, ref, pin });
+  lines.push({ severity: "action", text: `Add label '${newName}' to ${describeRef(ref)} pin ${pin} net.` });
+  return 1;
+}
+
+/**
+ * orientLabel: the SPIN_STYLE of a label added at a pin (0 left, 1 up, 2 right, 3 bottom): opposite the library pin's
+ * orientation (`pinAngle`: 0 right, 90 up, 180 left, 270 down), turned counter-clockwise once per 90 degrees of the
+ * symbol and then mirrored as the symbol is (SCH_SYMBOL::GetOrientation's canonical form: mirror x at 180 is mirror y).
+ */
+export function orientLabel(pinAngle: number, symAngle: number, mirror: string): number {
+  const LEFT = 0, UP = 1, RIGHT = 2, BOTTOM = 3;
+  const pa = ((Math.round(pinAngle / 90) % 4) + 4) % 4;
+  let spin = pa === 1 ? BOTTOM : pa === 2 ? RIGHT : pa === 3 ? UP : LEFT;
+  let rots = ((Math.round(symAngle / 90) % 4) + 4) % 4, mx = mirror === "x", my = mirror === "y";
+  if (mx && rots === 2) { mx = false; my = true; rots = 0; }
+  const ccw = [BOTTOM, LEFT, UP, RIGHT];   // RotateCCW: LEFT->BOTTOM, UP->LEFT, RIGHT->UP, BOTTOM->RIGHT
+  for (let i = 0; i < rots; i++) spin = ccw[spin];
+  if (mx) spin = spin === UP ? BOTTOM : spin === BOTTOM ? UP : spin;
+  if (my) spin = spin === LEFT ? RIGHT : spin === RIGHT ? LEFT : spin;
+  return spin;
 }
 
 /** LIB_SYMBOL::LetterSubReference / SubReference( unit, false ): A … Z, AA … */

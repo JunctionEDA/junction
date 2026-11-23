@@ -11,10 +11,15 @@ import type { Anchor, BreakJob } from "./types";
 import { canFollow } from "./clipboard";
 import { cursorOf, setSelectionIds } from "./commands";
 import { announceModes, endDrag } from "./drag";
-import { K, S, kid, kids, ptsOf, str } from "./state";
-import { addNode, deep, modChange, r4 } from "./util";
+import { K, S, kid, kids, num, ptsOf, str } from "./state";
+import { addNode, deep, dropKid, modChange, r4 } from "./util";
 import { setSpinOfNode, type Spin } from "./autorotate";
 import { netWalk } from "./highlight";
+import { libUnits, refOn } from "./annotate";
+import { isLockedItem } from "./lock";
+import { sheetPathHere } from "./sheets";
+import { editTxn, txnCleanUpAll } from "./junction";
+import { txnNeededJunctions, txnTrimOverlapping } from "./repeat";
 
 export interface PinRef { id: string; number: string }
 export interface PinHit { item: KItem; pin: SymPin }
@@ -138,15 +143,15 @@ export const PIN_HELPERS: { id: PinHelper; label: string; icon: string }[] = [
 export function pinHelper(ctx: SchCtx, pins: PinRef[], what: PinHelper, sheetRef?: (it: KItem) => string): string[] {
   const doc = ctx.doc, changes: KChange[] = [], ids: string[] = [];
   // grid.GetGridSize( GRID_HELPER_GRIDS::GRID_WIRES ): the Wires grid override when grid overrides are on
-  const ed = root.CollabEditor as unknown as { gridForClass?: (cls: string) => number } | undefined;
-  let grid = ctx.gridPitch > 0 ? ctx.gridPitch : 1.27;
-  try { const g = ed && ed.gridForClass ? ed.gridForClass("wires") : 0; if (g > 0) grid = g; } catch (e) { /* no preferences */ }
+  const ed = root.CollabEditor as unknown as { gridForClass?: (cls: string) => number; gridForClassXY?: (cls: string) => [number, number] } | undefined;
+  let grid = ctx.gridPitch > 0 ? ctx.gridPitch : 1.27, gridY = ctx.gridPitchY && ctx.gridPitchY > 0 ? ctx.gridPitchY : grid;   // wireGrid.x / wireGrid.y
+  try { const g = ed && ed.gridForClassXY ? ed.gridForClassXY("wires") : ed && ed.gridForClass ? [ed.gridForClass("wires"), 0] : null; if (g && g[0] > 0) { grid = g[0]; gridY = g[1] > 0 ? g[1] : g[0]; } } catch (e) { /* no preferences */ }
   for (const r of pins) {
     const h = pinOf(doc, r); if (!h) continue;
     const p: Pt = [h.pin.x, h.pin.y], side = h.pin.side;
     let node: SNode;
     if (what === "noconnect") node = noConnectNode(p);
-    else if (what === "wire") { const d = SIDE_DIR[side] || [1, 0]; node = lineNode("wire", p, [r4(p[0] + d[0] * grid), r4(p[1] + d[1] * grid)]); }
+    else if (what === "wire") { const d = SIDE_DIR[side] || [1, 0]; node = lineNode("wire", p, [r4(p[0] + d[0] * grid), r4(p[1] + d[1] * gridY)]); }
     else {
       const alt = pinAltFunction(doc, h.item, h.pin.number);
       let text = alt ? alt.name : shownName(h.pin);
@@ -279,6 +284,132 @@ export function swapPinLabels(ctx: SchCtx, pins: PinRef[]): string | null {
     const n = deep(l.node); n[1] = text.get(l.id)!; changes.push(modChange(doc, l, n));
   }
   if (changes.length) ctx.commit(changes, "Swap Pin Labels");
+  ctx.requestRender();
+  return null;
+}
+
+// ---------------------------------------------------------------- Swap Unit Labels / Swap Pins (SCH_EDIT_TOOL)
+/**
+ * GetSameSymbolMultiUnitSelection (sch_tool_utils.cpp): two or more selected symbols, in selection order, that are
+ * units of one multi-unit symbol: the same unit-less reference on this sheet, the same lib_id and the same pin count.
+ * Empty otherwise.
+ */
+export function sameSymbolMultiUnitSelection(doc: KDoc, items: KItem[]): KItem[] {
+  if (items.length < 2 || items.some((it) => it.kind !== "symbol")) return [];
+  let rootRef = "", rootLib = "", rootPins = -1; const out: KItem[] = [];
+  for (const it of items) {
+    if (libUnits(doc, it.node).units < 2) return [];
+    const ref = refOn(it.node, doc.instancePath || null);
+    if (!rootRef) rootRef = ref;
+    if (ref !== rootRef) return [];
+    const lib = str((kid(it.node, "lib_id") || [])[1]);
+    if (!out.length) rootLib = lib;
+    if (lib !== rootLib) return [];
+    const n = symbolPins(doc, it).length;
+    if (rootPins < 0) rootPins = n;
+    if (n !== rootPins) return [];
+    out.push(it);
+  }
+  return out.length < 2 ? [] : out;
+}
+/**
+ * SCH_EDIT_TOOL::SwapUnitLabels: each selected unit's pins, ordered by position (x, then y), must each have exactly
+ * one attached net label and no other pin; the labels then rotate across the units pin by pin (the last unit's text
+ * goes to the first, the first's to the second ...).  One "Swap Unit Labels" commit; the infobar error otherwise.
+ */
+export function swapUnitLabels(ctx: SchCtx, items: KItem[]): string | null {
+  const doc = ctx.doc, units = sameSymbolMultiUnitSelection(doc, items); if (units.length < 2) return null;
+  const vectors: KItem[][] = [];
+  for (const sym of units) {
+    const byPos: { p: Pt; label: KItem }[] = [];
+    for (const pin of symbolPins(doc, sym)) {
+      const label = singleNetLabelForPin(doc, { id: sym.id, number: pin.number });
+      if (!label) return "Each pin of selected units must have exactly one attached net label and no other pin connections.";
+      byPos.push({ p: [pin.x, pin.y], label });
+    }
+    byPos.sort((a, b) => (a.p[0] !== b.p[0] ? a.p[0] - b.p[0] : a.p[1] - b.p[1]));
+    vectors.push(byPos.map((e) => e.label));
+  }
+  const text = new Map<string, string>(), touched: KItem[] = [];
+  const get = (l: KItem) => (text.has(l.id) ? text.get(l.id)! : str(l.node[1]));
+  for (let pin = 0; pin < vectors[0].length; pin++) {
+    let carry = get(vectors[vectors.length - 1][pin]);
+    for (const vec of vectors) { const l = vec[pin], next = get(l); text.set(l.id, carry); carry = next; if (!touched.includes(l)) touched.push(l); }
+  }
+  const changes: KChange[] = [];
+  for (const l of touched) { if (text.get(l.id) === str(l.node[1])) continue; const n = deep(l.node); n[1] = text.get(l.id)!; changes.push(modChange(doc, l, n)); }
+  if (changes.length) ctx.commit(changes, "Swap Unit Labels");
+  ctx.requestRender();
+  return null;
+}
+/** SCH_SCREEN::Append's name for a changed library copy that others share: an equal "<name>_<n>" or the next free one. */
+function libVariantName(lib: Map<string, SNode>, libId: string, copy: SNode): string {
+  const item = libId.split(":").pop() || libId, matches: string[] = []; if (lib.has(libId)) matches.push(libId);
+  for (const n of lib.keys()) if (n.startsWith(item + "_") && /^\d+$/.test(n.slice(item.length + 1))) matches.push(n);
+  const body = (n: SNode): string => JSON.stringify((n as unknown[]).slice(2)), want = body(copy);
+  for (const n of matches) { const l = lib.get(n); if (l && body(l) === want) return n; }
+  let k = 1; while (lib.has(`${item}_${k}`)) k++;
+  return `${item}_${k}`;
+}
+/**
+ * SCH_EDIT_TOOL::SwapPins (only with eeschema's input.allow_unconstrained_pin_swaps): two or more pins of one symbol,
+ * in selection order, trade their library geometry (SwapPinGeometry: position, orientation and length) one pair after
+ * the other.  The symbol takes its own copy of the library symbol (a "<name>_<n>" variant when other symbols share it),
+ * then TrimOverLappingWires, AddJunctionsIfNeeded and SCHEMATIC::CleanUp; one "Swap Pins" commit.  A symbol used by
+ * several sheet instances or other projects is refused with the infobar error.
+ */
+export function swapPins(ctx: SchCtx, pins: PinRef[], allow: boolean, projectName?: string): string | null {
+  if (!allow || pins.length < 2) return null;
+  const doc = ctx.doc, sym = doc.items.get(pins[0].id);
+  if (!sym || sym.kind !== "symbol" || pins.some((p) => p.id !== sym.id)) return null;
+  if (isLockedItem(doc, sym)) return null;            // FilterSelectionForLockedItems
+  // Prj().GetProjectName(): the project this sheet's instances belong to
+  if (projectName === undefined) projectName = sheetPathHere(doc).project || "";
+  // SymbolHasSheetInstances: more than one instance path, or an instance of another project
+  const paths = new Set<string>(), others = new Set<string>();
+  for (const inst of kids(sym.node, "instances")) for (const pr of kids(inst, "project")) {
+    const pn = str(pr[1]); if (pn && (!projectName || pn !== projectName)) others.add(pn);
+    for (const pa of kids(pr, "path")) paths.add(str(pa[1]));
+  }
+  if (others.size) return `Pin swaps are disabled for symbols shared across other projects (${[...others].sort().join(", ")}). Duplicate the sheet to edit pins independently.`;
+  if (paths.size > 1) return "Pin swaps are disabled for shared symbols. Duplicate the sheet to edit pins independently.";
+  const libId = str((kid(sym.node, "lib_id") || [])[1]), libName = str((kid(sym.node, "lib_name") || kid(sym.node, "lib_id") || [])[1]);
+  const src = doc.lib.get(libName) || K.resolveLib(doc, libName) || K.resolveLib(doc, libId); if (!src) return null;
+  const copy = deep(src);
+  const unit = kid(sym.node, "unit") ? num(kid(sym.node, "unit")![1], 1) : 1, styleN = kid(sym.node, "body_style") || kid(sym.node, "convert"), style = styleN ? num(styleN[1], 1) : 1;
+  const libPin = (number: string): SNode | null => {
+    for (const sub of kids(copy, "symbol")) {
+      const m = str(sub[1]).match(/_(\d+)_(\d+)$/); const u = m ? +m[1] : 0, s = m ? +m[2] : 1;
+      if ((u !== 0 && u !== unit) || (m && s !== 0 && s !== style)) continue;
+      for (const g of kids(sub, "pin")) if (str((kid(g, "number") || [])[1]) === number) return g;
+    }
+    return null;
+  };
+  const nodes = pins.map((p) => libPin(p.number)); if (nodes.some((n) => !n)) return null;
+  for (let i = 0; i < nodes.length - 1; i++) {
+    const a = nodes[i]!, b = nodes[(i + 1) % nodes.length]!;
+    const aa = kid(a, "at")!, ba = kid(b, "at")!, al = kid(a, "length"), bl = kid(b, "length");
+    const ta = aa.slice(1), tb = ba.slice(1); aa.splice(1, aa.length - 1, ...tb); ba.splice(1, ba.length - 1, ...ta);
+    const la = al ? al[1] : 2.54, lb = bl ? bl[1] : 2.54;
+    if (al) al[1] = lb; else a.push(["length", lb]);
+    if (bl) bl[1] = la; else b.push(["length", la]);
+  }
+  const shared = [...doc.items.values()].some((o) => o.id !== sym.id && o.kind === "symbol" && str((kid(o.node, "lib_name") || kid(o.node, "lib_id") || [])[1]) === libName);
+  const name = shared ? libVariantName(doc.lib, libId, copy) : libName;
+  copy[1] = name;
+  const n = deep(sym.node); dropKid(n, "lib_name");
+  if (name !== libId) { const at = n.findIndex((c, j) => j > 0 && Array.isArray(c) && c[0] === "lib_id"); n.splice(at > 0 ? at : 1, 0, ["lib_name", name]); }
+  // the swap is seen with the new library copy in place; TrimOverLappingWires, AddJunctionsIfNeeded, CleanUp
+  const had = doc.lib.has(name), before = doc.lib.get(name); doc.lib.set(name, copy);
+  const t = editTxn(doc, ctx.IU);
+  try {
+    const now = t.modify(sym, n);
+    txnTrimOverlapping(t, doc, [now]);
+    txnNeededJunctions(t, doc, [now]);
+    txnCleanUpAll(t, doc, null);
+  } finally { t.restore(); if (had) doc.lib.set(name, before!); else doc.lib.delete(name); }
+  const changes = t.changes(); if (!changes.length) return null;
+  ctx.commit(changes, "Swap Pins");
   ctx.requestRender();
   return null;
 }

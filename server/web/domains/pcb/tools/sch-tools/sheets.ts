@@ -1,8 +1,8 @@
-import type { SchCtx, Pt, SAtom, SheetJob } from "./types";
+import type { SchCtx, Pt, SAtom, SheetJob, SheetPinPlace } from "./types";
 import { GENERATOR_VERSION, SEXPR_SCHEMATIC_FILE_VERSION } from "../../canvas/format-version";
 import { root } from "../root";
 import { labelDefaults } from "./dom";
-import { sheetNode, sheetPinNode } from "./nodes";
+import { PIN_SIDE, sheetNode, sheetPinNode } from "./nodes";
 import { rememberPlaced } from "./repeat";
 import { mmPerPx } from "./snap";
 import { K, S, atOf, kid, kids, num, str } from "./state";
@@ -234,16 +234,75 @@ export function movePinPlace(ctx: SchCtx, mm: Pt): void {
   const at = constrainOnEdge(ctx, sheet, mm);
   if (pp.item && pp.p[0] === at.p[0] && pp.p[1] === at.p[1] && pp.side === at.side) return;
   const ts = labelDefaults().textSize;   // createNewSheetPin: m_DefaultTextSize
-  const node = deep(sheet.node), pin = sheetPinNode(pp.name, at.p, at.side, ts); pin[2] = pp.shape;
-  const i = node.findIndex((c) => Array.isArray(c) && c[0] === "instances"); if (i >= 0) node.splice(i, 0, pin); else node.push(pin);
+  let node: SNode;
+  if (pp.move) node = movedPinNode(pp.move.orig, pp.move.index, at.p, at.side);
+  else {
+    node = deep(sheet.node); const pin = sheetPinNode(pp.name, at.p, at.side, ts); pin[2] = pp.shape;
+    const i = node.findIndex((c) => Array.isArray(c) && c[0] === "instances"); if (i >= 0) node.splice(i, 0, pin); else node.push(pin);
+  }
   // the ghost is the sheet with the new pin, under a uuid of its own so it never stands in for the real sheet
   const g = deep(node); const u = g.findIndex((c) => Array.isArray(c) && c[0] === "uuid"); if (u >= 0) g.splice(u, 1);
   pp.node = node; pp.p = at.p; pp.side = at.side; pp.item = ghost(ctx.doc, g);
   ctx.requestRender();
 }
-export function cancelPinPlace(ctx: SchCtx): void { S.pinPlace = null; ctx.requestRender(); }
+export function cancelPinPlace(ctx: SchCtx): void {
+  const pp = S.pinPlace; S.pinPlace = null;
+  if (pp && pp.move) endPinMove(ctx, pp, null);
+  ctx.requestRender();
+}
+/** The sheet node with its pin `index` moved to p on `side` (SCH_SHEET_PIN::SetPosition + SetSide: angle and spin style). */
+export function movedPinNode(orig: SNode, index: number, p: Pt, side: string): SNode {
+  const node = deep(orig), pin = kids(node, "pin")[index]; if (!pin) return node;
+  const [rot, just] = PIN_SIDE[side] || PIN_SIDE.left;
+  K.setAt(pin, r4(p[0]), r4(p[1]), rot);
+  let ef = kid(pin, "effects"); if (!ef) { ef = ["effects"]; pin.push(ef); }
+  const j = kid(ef, "justify"), extra = j ? j.slice(1).filter((v) => v !== "left" && v !== "right") : [], nj: SNode = ["justify", just, ...extra];
+  const ji = ef.findIndex((c) => Array.isArray(c) && c[0] === "justify"); if (ji >= 0) ef[ji] = nj; else ef.push(nj);
+  return node;
+}
+/**
+ * SCH_MOVE_TOOL with a sheet pin selected (Move, Drag, or a held-button drag of the selected pin): the pin rides the
+ * sheet's edge with the cursor (SCH_SHEET_PIN::ConstrainOnEdge), the sheet shown without it meanwhile; a click (or
+ * the release of the button) places it.  Drag takes the wire ends on the pin along.  Returns false when there is no
+ * such pin.
+ */
+export function beginSheetPinMove(ctx: SchCtx, sheetId: string, name: string, mm: Pt, byPointer = false, drag = S.dragMode === "drag"): boolean {
+  if (ctx.viewOnly) { ctx.toast("View-only access"); return false; }
+  const sheet = ctx.doc.items.get(sheetId); if (!sheet || sheet.kind !== "sheet") return false;
+  const pins = kids(sheet.node, "pin"), index = pins.findIndex((q) => str(q[1]) === name); if (index < 0) return false;
+  const orig = deep(sheet.node), pin = pins[index], a = atOf(pin);
+  switchTool(ctx, "sheetpin");
+  // the sheet without the pin while it moves (restored before the commit, as the drag engine does)
+  const at0: Pt = [a[0], a[1]];
+  const rest = deep(orig), ri = rest.indexOf(kids(rest, "pin")[index]); rest.splice(ri, 1);
+  sheet.node.length = 0; for (const c of rest) sheet.node.push(c); K.replaceChange(ctx.doc, sheet);
+  S.pinPlace = { sheetId, name, shape: str(pin[2] || "input"), node: orig, item: null, p: at0, side: "", move: { orig, index, byPointer, drag, at0 } };
+  movePinPlace(ctx, byPointer ? mm : at0);
+  return true;
+}
+function endPinMove(ctx: SchCtx, pp: SheetPinPlace, place: { p: Pt; side: string } | null): void {
+  const mv = pp.move!, sheet = ctx.doc.items.get(pp.sheetId);
+  if (sheet) { sheet.node.length = 0; for (const c of deep(mv.orig)) sheet.node.push(c); K.replaceChange(ctx.doc, sheet); }
+  if (sheet && place && (place.p[0] !== mv.at0[0] || place.p[1] !== mv.at0[1] || PIN_SIDE[place.side][0] !== (atOf(kids(mv.orig, "pin")[mv.index])[2] || 0))) {
+    const changes = [modChange(ctx.doc, sheet, movedPinNode(mv.orig, mv.index, place.p, place.side))];
+    // Drag: the wire ends on the pin follow it (getConnectedDragItems)
+    if (mv.drag) for (const it of ctx.doc.items.values()) {
+      if (it.kind !== "wire" && it.kind !== "bus") continue;
+      const q = K.ptsOf(it.node); if (q.length !== 2) continue;
+      const hit = q.map((v: number[]) => Math.abs(v[0] - mv.at0[0]) < 1e-4 && Math.abs(v[1] - mv.at0[1]) < 1e-4);
+      if (!hit[0] && !hit[1]) continue;
+      const n = deep(it.node), np = q.map((v: number[], i: number) => (hit[i] ? [r4(place.p[0]), r4(place.p[1])] : v.slice())); K.setPts(n, np); changes.push(modChange(ctx.doc, it, n));
+    }
+    ctx.commit(changes, mv.drag ? "Drag" : "Move");
+  }
+  switchTool(ctx, "select");
+  // the pin stays selected (finalizeMoveOperation)
+  const sel = (ctx as SchCtx & { selectPins?: (p: { id: string; number: string }[]) => void }).selectPins;
+  if (sel && ctx.doc.items.get(pp.sheetId)) sel([{ id: pp.sheetId, number: pp.name }]);
+}
 function placePinPlace(ctx: SchCtx, mm: Pt): void {
   const pp = S.pinPlace; if (!pp) return;
+  if (pp.move) { movePinPlace(ctx, mm); const q = S.pinPlace; S.pinPlace = null; if (q) endPinMove(ctx, q, { p: q.p, side: q.side }); ctx.requestRender(); return; }
   movePinPlace(ctx, mm);
   const sheet = ctx.doc.items.get(pp.sheetId); S.pinPlace = null; if (!sheet) return;
   // commit.Modify( sheet ); sheet->AddPin( pin )

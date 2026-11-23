@@ -11,9 +11,14 @@
 // The snap line manager keeps the move's angle-snap lines: their origin (moved onto each anchor the cursor snaps to
 // that is not on one of the lines), the snapped end and so the active direction.
 
-import type { Pt } from "./types";
-import { K } from "./state";
-import { isList, rotator } from "./util";
+import type { PcbCanvasApi, Pt } from "./types";
+import { root } from "../root";
+
+// The canvas API and the two helpers are taken from the global and inlined here rather than from ./state and ./util,
+// so the schematic editor's EE_GRID_HELPER (sch-tools/snap.ts) shares this module without the board tools' state.
+const K = new Proxy({} as PcbCanvasApi, { get: (_t, k) => (root.KiCadCanvas as unknown as Record<string | symbol, unknown>)[k] });
+const isList = Array.isArray;
+function rotator(deg: number) { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return (x: number, y: number) => [x * c + y * s, -x * s + y * c]; }
 
 /** KIGFX::CONSTRUCTION_GEOM::DRAWABLE: LINE (infinite), HALF_LINE (a ray from a through b), SEG, CIRCLE, SHAPE_ARC or a point. */
 export type CDrawable =
@@ -97,6 +102,13 @@ function acceptConstructionItems(batch: CBatch, persistent: boolean) {
 export function constructionBatches(): CBatch[] { return (CM.persistent ? [CM.persistent] : []).concat(CM.temporary); }
 /** CONSTRUCTION_MANAGER::HasActiveConstruction. */
 export const hasActiveConstruction = () => !!CM.persistent || CM.temporary.length > 0;
+/**
+ * SNAP_MANAGER::SetReferenceOnlyPoints: the ends of a persistent segment or arc (the point editor's original) are drawn
+ * but never snapped to; reaching one moves the snap line origin there instead.
+ */
+let REF_ONLY: Pt[] = [];
+export function setReferenceOnlyPoints(p: Pt[]) { REF_ONLY = p.map((q) => [q[0], q[1]] as Pt); }
+export const isReferenceOnly = (p: Pt) => REF_ONLY.some((q) => Math.abs(q[0] - p[0]) < 1e-9 && Math.abs(q[1] - p[1]) < 1e-9);
 /** CONSTRUCTION_MANAGER::Clear. */
 export function clearConstruction() {
   CM.persistent = null; CM.temporary = []; CM.involved.clear(); cancelConstructionProposal();

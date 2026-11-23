@@ -339,27 +339,28 @@ test("module: a press on an unselected track draws a box (DRAG_SELECTED); on the
   assert.equal(log.commits.at(-1).label, "Routing"); assert.equal(log.tool, "select");
 });
 
-test("drag collisions: walk around keeps the last valid step, a first step in violation needs Ctrl, free angle never commits a short", () => {
-  const doc = K.parseDoc(FIXTURE.replace(/\)\s*$/, `  (segment (start 108 54) (end 121 54) (width 0.25) (layer "F.Cu") (net "/SIG") (uuid "o-1"))\n)`), "kicad_pcb");
+test("drag collisions: walk around walks the dragged line round what it meets, a first step that cannot be walked needs Ctrl, free angle never commits a short", () => {
+  const doc = K.parseDoc(FIXTURE.replace(/\)\s*$/, `  (segment (start 108 54) (end 121 54) (width 0.25) (layer "F.Cu") (net "/SIG") (uuid "o-1"))\n  (segment (start 128 54) (end 140 54) (width 0.25) (layer "F.Cu") (net "/SIG") (uuid "o-2"))\n)`), "kicad_pcb");
   const { ctx, log } = fakeCtx(doc); pcb.onDocChanged(ctx);
-  // a valid step, then one onto the other net's track: the line stays at the last valid place and that is what commits
+  // a valid step, then one onto the other net's track: DRAGGER::tryWalkaround (WP_SHORTEST) walks the dragged line round
+  // the track's hull, hugging it at the clearance, and that is what commits
   P.state.sel = new Set(["s-1"]); ctx.cursor = [112, 50]; pcb.onKey("d", ev(), ctx);
   pcb.onPointerMove(ev(), [112, 51], ctx); const d = P.state.drag.subs[0]; assert.equal(d.status, true);
-  const valid = JSON.stringify(d.sol.lines[0].pts);
-  pcb.onPointerMove(ev(), [112, 54], ctx); assert.equal(d.forceMark, false); assert.equal(JSON.stringify(d.sol.lines[0].pts), valid, "the refused step keeps the last valid line");
+  pcb.onPointerMove(ev(), [112, 54], ctx); assert.equal(d.forceMark, false); assert.equal(d.status, true);
+  assert.equal(JSON.stringify(d.sol.lines[0].pts), "[[110,50],[113.55,53.55],[117.45,53.55],[118,53]]", "walked round the other net's track");
   pcb.onPointerDown(ev(), [112, 54], ctx);
   assert.equal(log.commits.at(-1).label, "Routing");
   const ids = new Set(log.commits.at(-1).changes.filter((c) => c.kind === "ADDED").map((c) => c.id));
   assert.ok(minGapTo(doc, ids, "GND") >= 0.2 - 1e-4, "no short: " + minGapTo(doc, ids, "GND"));
-  // the very first step collides: forced mark-obstacles mode, the obstacle shown, no commit without Ctrl
-  const n = log.commits.length; const seg = [...doc.items.values()].find((it) => it.kind === "segment" && P.pt(it.node, "start")[1] === 51 && P.pt(it.node, "end")[1] === 51);
-  assert.ok(seg, "the dragged run's straight part");
-  P.state.sel = new Set([seg.id]); ctx.cursor = [114, 51]; pcb.onKey("d", ev(), ctx);
-  pcb.onPointerMove(ev(), [114, 54], ctx); let dd = P.state.drag.subs[0];
-  assert.equal(dd.forceMark, true); assert.equal(dd.status, false); assert.ok(dd.hits.some((o) => o.id === "o-1"));
-  pcb.onPointerDown(ev(), [114, 54], ctx); assert.equal(log.commits.length, n, "refused without Ctrl");
-  P.state.sel = new Set([seg.id]); pcb.onKey("d", ev(), ctx); pcb.onPointerMove(ev(), [114, 54], ctx);
-  pcb.onPointerDown(ev({ ctrlKey: true }), [114, 54], ctx); assert.equal(log.commits.length, n + 1, "Ctrl+click commits anyway");
+  // the very first step collides and cannot be walked (the dragged free end lands inside the other track's hull: the
+  // walk does not complete): forced mark-obstacles mode, the obstacle shown, no commit without Ctrl
+  const n = log.commits.length;
+  P.state.sel = new Set(["s-4"]); ctx.cursor = [135, 50]; pcb.onKey("d", ev(), ctx);
+  pcb.onPointerMove(ev(), [135, 54], ctx); let dd = P.state.drag.subs[0]; assert.equal(dd.mode, "corner");
+  assert.equal(dd.forceMark, true); assert.equal(dd.status, false); assert.ok(dd.hits.some((o) => o.id === "o-2"));
+  pcb.onPointerDown(ev(), [135, 54], ctx); assert.equal(log.commits.length, n, "refused without Ctrl");
+  P.state.sel = new Set(["s-4"]); ctx.cursor = [135, 50]; pcb.onKey("d", ev(), ctx); pcb.onPointerMove(ev(), [135, 54], ctx);
+  pcb.onPointerDown(ev({ ctrlKey: true }), [135, 54], ctx); assert.equal(log.commits.length, n + 1, "Ctrl+click commits anyway");
   // free angle in violation: nothing is committed
   const doc2 = K.parseDoc(FIXTURE.replace(/\)\s*$/, `  (segment (start 108 54) (end 121 54) (width 0.25) (layer "F.Cu") (net "/SIG") (uuid "o-1"))\n)`), "kicad_pcb");
   const f2 = fakeCtx(doc2); pcb.onDocChanged(f2.ctx);

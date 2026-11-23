@@ -15,6 +15,8 @@ import { applySelection, selectionIds } from "./groups";
 import { base64Bytes, imageInfo, imageMm } from "./images";
 import { netTable } from "./netlist";
 import { netOf } from "./nets";
+import { ellipseArcAngles, ellipseFromBox, ellipseNode } from "./ellipse";
+import type { EllipseGeom } from "./ellipse";
 import { circleNode, curveNode, imageNode, lineNode, polyFilledOn, polyNode, rectNode, ruleAreaNode, tableNode, textBoxNode, thievingAllowed, thievingZoneNode, THIEVING_NEEDS_VERSION_MSG, zoneLayers, zoneNode } from "./nodes";
 import { netUnder } from "./route-geom";
 import { K, S, lastCtx } from "./state";
@@ -22,7 +24,7 @@ import { samePt, vadd, vsub, xy } from "./util";
 import { similarZoneNode, zoneCutoutChanges, zoneLayerList } from "./zone-modes";
 
 /** The shapes DRAWING_TOOL::drawShape draws: while one is in progress the screen's local origin is its first point. */
-const ORIGIN_SHAPES = new Set(["gline", "grect", "gcircle", "gtextbox"]);
+const ORIGIN_SHAPES = new Set(["gline", "grect", "gcircle", "gellipse", "gtextbox"]);
 /**
  * drawShape: `if( !isLocalOriginSet ) m_LocalOrigin = cursorPos` at the first click and back to (0, 0) when the shape
  * ends, unless the user had (or has since) set a local origin (resetLocalCoords).
@@ -62,6 +64,30 @@ function commitCurve(ctx: PcbCtx, g: Pt[]) {
 export function finishCurve(ctx: PcbCtx) {
   const d = S.draw; if (!d || d.shape !== "gcurve") return false;
   S.draw = null; commitCurve(ctx, curveGeom(d.pts, d.cur)); ctx.requestRender(); return true;
+}
+/**
+ * The elliptical arc being drawn (ELLIPSE_ARC_DRAW_BEHAVIOR over ELLIPSE_GEOM_MANAGER): the clicks so far, with the
+ * cursor standing in for the step in progress (SetCursorPosition) — the box's second corner, then the start angle,
+ * then the end angle.
+ */
+export function ellipseArcGeom(d: DrawState): EllipseGeom {
+  const pts = d.pts.concat([d.cur]);
+  const e = ellipseFromBox(pts[0], pts[1] || pts[0]);
+  if (pts.length >= 3) Object.assign(e, ellipseArcAngles(e, pts[2], pts.length >= 4 ? pts[3] : null));
+  return e;
+}
+/** DRAWING_TOOL::DrawEllipseArc's commit: "Draw Elliptical Arc", the arc selected; the tool stays for the next one. */
+function commitEllipseArc(ctx: PcbCtx, e: EllipseGeom) {
+  const c = addedChange(ctx.doc, withStroke(ellipseNode(e, true, S.gfxLayer)));
+  ctx.commit([c], "Draw Elliptical Arc"); applySelection(ctx, [c.id]);
+}
+/**
+ * ACTIONS::finishInteractive or a double-click while an elliptical arc is drawn (drawManagedShape): what there is so
+ * far is kept and committed (the cursor completing the step in progress).
+ */
+export function finishEllipseArc(ctx: PcbCtx) {
+  const d = S.draw; if (!d || d.shape !== "gellipsearc") return false;
+  S.draw = null; commitEllipseArc(ctx, ellipseArcGeom(d)); ctx.requestRender(); return true;
 }
 export function drawClick(ctx: PcbCtx, hv: Hover, t: string, ev: PtrEvent) {
   if (S.draw && S.draw.shape !== "garc") { const c = constrainDraw(S.draw, [hv.x, hv.y], !!(ev && (ev.ctrlKey || ev.metaKey))); hv = Object.assign({}, hv, { x: c[0], y: c[1] }); }
@@ -130,6 +156,14 @@ export function drawClick(ctx: PcbCtx, hv: Hover, t: string, ev: PtrEvent) {
     }
     ctx.requestRender(); return;
   }
+  if (t === "gellipsearc") {
+    // ELLIPSE_GEOM_MANAGER::acceptPoint: SET_BBOX_C1, SET_BBOX_C2, SET_START_ANGLE, SET_END_ANGLE (refused while the
+    // end equals the start)
+    if (d.pts.length === 3) { const e = ellipseArcGeom(Object.assign({}, d, { cur: p })); if (e.end === e.start) return; }
+    d.pts.push(p);
+    if (d.pts.length === 4) { const e = ellipseArcGeom(Object.assign({}, d, { pts: d.pts.slice(0, 3), cur: p })); S.draw = null; commitEllipseArc(ctx, e); }
+    ctx.requestRender(); return;
+  }
   if (t === "gtextbox" || t === "table") {
     S.draw = null; ctx.requestRender();
     if (t === "gtextbox" && samePt(p, d.start)) return;   // clicking the corner again drops the box
@@ -142,7 +176,7 @@ export function drawClick(ctx: PcbCtx, hv: Hover, t: string, ev: PtrEvent) {
       return;
     }
     // the second click: Table Properties on the new table; OK adds it ("Draw Table", selected), Cancel drops it
-    const node = tableNode(d.start, p, layer, ctx.gridPitch || 0);
+    const node = tableNode(d.start, p, layer, ctx.gridPitch || 0, ctx.gridPitchY);
     const dlg = newItemDialogs.table;
     const add = (n: SNode) => { const c = addedChange(ctx.doc, n); ctx.commit([c], "Draw Table"); applySelection(ctx, [c.id]); ctx.requestRender(); };
     if (!dlg) { add(node); return; }
@@ -151,9 +185,10 @@ export function drawClick(ctx: PcbCtx, hv: Hover, t: string, ev: PtrEvent) {
   }
   if (DIM_TYPE[t]) { dimClick(ctx, p, t); return; }
   if (samePt(p, d.start)) { S.draw = null; ctx.requestRender(); return; }   // clicking the start again ends the chain
-  const node = withStroke(t === "gline" ? lineNode(d.start, p, layer) : t === "grect" ? rectNode(d.start, p, layer) : circleNode(d.start, p, layer));
+  // DrawEllipse (drawShape + updateSegmentFromGeometryMgr): the ellipse inscribed in the two corners' box
+  const node = withStroke(t === "gline" ? lineNode(d.start, p, layer) : t === "grect" ? rectNode(d.start, p, layer) : t === "gellipse" ? ellipseNode(ellipseFromBox(d.start, p), false, layer) : circleNode(d.start, p, layer));
   const add = addedChange(ctx.doc, node);
-  ctx.commit([add], t === "gline" ? "Draw Line" : t === "grect" ? "Draw Rectangle" : "Draw Circle");
+  ctx.commit([add], t === "gline" ? "Draw Line" : t === "grect" ? "Draw Rectangle" : t === "gellipse" ? "Draw Ellipse" : "Draw Circle");
   // drawShape: a line whose end snapped onto an existing graphic closes a path: it is selected and the chain ends
   const closes = t === "gline" && !!(hv.snap && hv.snap.shape);
   if (t !== "gline" || closes) applySelection(ctx, [add.id]);   // DrawRectangle / DrawCircle: ACTIONS::selectItem

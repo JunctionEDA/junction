@@ -17,6 +17,7 @@ import { GENERATOR, GENERATOR_VERSION, SEXPR_SYMBOL_LIB_FILE_VERSION, minimumFil
 import { serialize } from "../canvas/export";
 import { expandStacked } from "../canvas/stacked-pins";
 import { downgradeSchNode, migrateSchNode } from "../canvas/legacy";
+import { geomBox } from "../canvas/hit";
 export { expandStacked };
 
 export type Node = SNode;
@@ -1382,3 +1383,14 @@ export function explodeStackedPin(sym: Node, pin: Node): Node[] | string {
 /** DIALOG_PIN_PROPERTIES::TransferDataFromWindow's "not on a 50 mils grid" test: the UNIT_BINDER value, in internal
  *  units (100 nm), modulo standard_grid (50). */
 export function pinOffStandardGrid(mm: number): boolean { return Math.round(mm / 0.0001) % 50 !== 0; }
+/** PIN_LAYOUT_CACHE::GetPinNumberBBox from a pin's geometry: the union of its number texts' boxes (null: no number shown). */
+export function pinNumberBox(geom: unknown[]): [number, number, number, number] | null {
+  let b: [number, number, number, number] | null = null;
+  for (const g of geom as { t?: string; layer?: string; alpha?: number }[]) {
+    // the remapped stacked pin's "/original" label (drawn faded after the block) is not part of the number box
+    if (g.t !== "text" || g.layer !== "Pin numbers" || (g.alpha !== undefined && g.alpha < 1)) continue;
+    const q = geomBox(g as never); if (!q) continue;
+    b = b ? [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])] : [q[0], q[1], q[2], q[3]];
+  }
+  return b;
+}

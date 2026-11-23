@@ -4,7 +4,7 @@ import { E } from "./state";
 import { toast } from "./util";
 import type { PeerEntry, PresenceState } from "./types";
 import { myRtt } from "./peercursors";
-import { applyView, canvasSelection, mmH, mmW, mmX0, mmY0, stage, visibleRectNm, world } from "./view";
+import { applyView, canvasSelection, flipMmX, mmH, mmW, mmX0, mmY0, stage, visibleRectDocNm, world } from "./view";
 export function cycleFollow() {
   const ids = Object.keys(E.peerState);
   if (!ids.length) { toast("No one else is here to follow"); return; }
@@ -27,14 +27,16 @@ export function applyFollowWeb(peers: Record<string, PeerEntry>) {
   if (E.followCursor) {
     if (!cursor || cursor.length < 2 || !cursor.every(Number.isFinite)) return;
     const scale = w * E.zoom / mmW();
-    E.panX = stage.clientWidth / 2 - (cursor[0] / E.IU - mmX0()) * scale;
+    // their pointer is in document coordinates: where this view draws it (mirrored while the board view is flipped)
+    E.panX = stage.clientWidth / 2 - (flipMmX(cursor[0] / E.IU) - mmX0()) * scale;
     E.panY = stage.clientHeight / 2 - (cursor[1] / E.IU - mmY0()) * scale;
     E.suppressBreakout = true; applyView(); E.suppressBreakout = false;
     return;
   }
   const vp = entry.state?.viewport;
   if (!vp || vp.length < 4 || !vp.every(Number.isFinite) || vp[2] <= 0) return;
-  const xMm = vp[0] / E.IU, yMm = vp[1] / E.IU, wMm = vp[2] / E.IU;
+  // their viewport is in document coordinates: its left edge in this view is the mirror of its right edge when flipped
+  const wMm = vp[2] / E.IU, xMm = Math.min(flipMmX(vp[0] / E.IU), flipMmX(vp[0] / E.IU + wMm)), yMm = vp[1] / E.IU;
   E.zoom = Math.min(40, Math.max(0.2, (stage.clientWidth / w) * (mmW() / wMm)));
   E.panX = -((xMm - mmX0()) / mmW()) * w * E.zoom;
   E.panY = -((yMm - mmY0()) / mmH()) * (w * mmH() / mmW()) * E.zoom;
@@ -100,7 +102,7 @@ export function sendPresence(mmPos: number[] | null, ghostSegs?: number[][] | nu
   const st: PresenceState = { cursor: [Math.round(at[0] * E.IU), Math.round(at[1] * E.IU)] };
   const rtt = myRtt(); if (rtt > 0) st.rtt = Math.round(rtt);
   st.ts = Math.round(performance.now() * 10) / 10;
-  const vp = visibleRectNm(); if (vp) st.viewport = vp;
+  const vp = visibleRectDocNm(); if (vp) st.viewport = vp;
   if (E.presenting) st.presenting = true;
   if (ghostSegs) st.ghost = ghostSegs;
   if (E.chatSay) st.say = E.chatSay as string;   // cursor chat (chat.ts)
@@ -239,6 +241,6 @@ export function startPresenceKeepalive() {
   }, 5000);
 }
 
-function viewCentreMm() { const v = visibleRectNm(); return v ? [(v[0] + v[2] / 2) / E.IU, (v[1] + v[3] / 2) / E.IU] : null; }
+function viewCentreMm() { const v = visibleRectDocNm(); return v ? [(v[0] + v[2] / 2) / E.IU, (v[1] + v[3] / 2) / E.IU] : null; }
 
 export function stopPresenceKeepalive() { if (E.presenceTimer) { clearInterval(E.presenceTimer); E.presenceTimer = 0; } }

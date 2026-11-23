@@ -267,10 +267,11 @@ test("Selection Filter pane: KiCad's labels and the flash of the boxes that turn
 
 test("Preferences: PCB Editor > Snapping (pads / tracks when routing, graphics always) and Allow free pads (off)", () => {
   const prefs = fs.readFileSync(webPath("domains", "pcb", "dialogs", "prefs.ts"), "utf8");
-  assert.ok(/pcbSnapping: \{ pads: "trackTool", tracks: "trackTool", graphics: true \}/.test(prefs));
+  assert.ok(/pcbSnapping: \{ pads: "trackTool", tracks: "trackTool", graphics: true, allLayers: false \}/.test(prefs));
   assert.ok(/allowFreePads: false/.test(prefs));
   const page = fs.readFileSync(webPath("domains", "pcb", "dialogs", "preferences.ts"), "utf8");
-  for (const label of ["Snap to pads:", "Snap to tracks and vias:", "Snap to graphics:", "When routing tracks", "Allow free pads"]) assert.ok(page.includes(label), label);
+  for (const label of ["Snap to pads:", "Snap to tracks and vias:", "Snap to graphics:", "When routing tracks", "Allow free pads",
+    "Snap to objects on all layers", "Snap to grid:", "When grid shown", "Object geometry", "Construction extensions"]) assert.ok(page.includes(label), label);
   // the board tools read them: MAGNETIC_SETTINGS decides what the cursor snaps to
   const doc = board(); P.state.magnetic = { pads: "always", tracks: "never", graphics: true };
   assert.ok(P.itemAnchors(doc.items.get("R1"), false, [9, 10], 0.25).some((a) => a[0] === 9 && a[1] === 10), "the pad under the cursor snaps when pads are Always");
@@ -283,6 +284,66 @@ test("dragFrom: a routable selection goes to the router's drag, anything else to
   ctx.selection = new Set(["g1", "g2"]);
   assert.equal(pcb.dragFrom(ctx, ["g1", "g2"], "g1", [5, 80], [0, 0], true), true); assert.ok(P.state.move, "graphics are moved");
   pcb.cancel();
+});
+
+test("point editor: SEG::Angle, snapCorner on the inscribed-angle circle, the sticky 45 degree corner held within 5 px", () => {
+  assert.equal(P.segAngleDeg([0, 0], [10, 0], [0, 0], [0, 10]), 90);
+  assert.equal(P.segAngleDeg([0, 0], [10, 0], [0, 0], [10, 10]), 45);
+  assert.deepEqual(P.snapCorner([0, 0], [10, 0], [5, 4.9], 90), [5, 5], "the right angle lies on the circle over the chord");
+  const doc = board(); const { ctx } = fakeCtx(doc); ctx.pxPerMm = 10; P.state.mmPerPx = 0.1;
+  const it = doc.items.get("poly1");
+  // corner c1 (140,100) between (120,100) and (140,120): dragged to 89 degrees it is put back at exactly 90
+  const pe = { id: "poly1", kind: "gr_poly", key: "c1", orig: K.parse(K.serialize(it.node)), start: [140, 100], moved: true };
+  const near = [139.9, 100.3], got = P.stickyCornerSnap(ctx, pe, near, { ctrlKey: false, shiftKey: false });
+  assert.ok(got, "snapped"); assert.ok(Math.abs(P.segAngleDeg(got, [120, 100], got, [140, 120]) - 90) < 2);
+  assert.deepEqual(P.stickyCornerSnap(ctx, pe, [near[0] + 0.2, near[1]], { ctrlKey: false, shiftKey: false }), got, "held while within 5 px (0.5 mm)");
+  assert.equal(P.stickyCornerSnap(ctx, pe, [near[0] + 0.2, near[1]], { ctrlKey: false, shiftKey: true }), null, "Shift lets go");
+  P.construction.clearConstruction();
+});
+
+test("point editor drag start: the item's clone is persistent construction geometry, a segment's ends reference only", () => {
+  const doc = board(); fakeCtx(doc); P.construction.clearConstruction(); P.state.snapInference = { objectGeometry: true, constructionExtensions: true };
+  P.proposePersistentConstruction(doc.items.get("g3"));
+  const batches = P.construction.constructionBatches(); assert.equal(batches.length, 1, "accepted at once");
+  const kinds = batches[0].flatMap((ci) => ci.drawables.map((e) => e.d.t)); assert.deepEqual(kinds, ["line", "pt", "pt"]);
+  assert.ok(P.construction.isReferenceOnly([50, 80]) && P.construction.isReferenceOnly([60, 80]), "its ends are reference-only points");
+  P.construction.clearConstruction(); P.construction.setReferenceOnlyPoints([]);
+  P.state.snapInference = { objectGeometry: true, constructionExtensions: false };
+  P.proposePersistentConstruction(doc.items.get("g3")); assert.equal(P.construction.constructionBatches().length, 0, "Construction extensions off: none");
+  P.state.snapInference = undefined;
+});
+
+test("Move (M) on pads picked on their own with Allow free pads: a sticky pad move dropped by the next click", () => {
+  const g = fs.readFileSync(webPath("domains", "pcb", "editor", "gestures.ts"), "utf8"), ix = fs.readFileSync(webPath("domains", "pcb", "editor", "index.ts"), "utf8");
+  assert.ok(/mode === "move" && ps && ps\.padSel && ps\.allowFreePads && !selectionIds\(\)\.length && startPadMove/.test(g), "M with a pad picked and free pads allowed");
+  assert.ok(/E\.hooks\.startPadMove = [^\n]*sticky = true/.test(ix), "the pad move follows the cursor with no button");
+  assert.ok(/if \(E\.pdrag && \(E\.pdrag as PadDrag\)\.sticky\) \{ padDragEnd\(true\)/.test(ix), "the next click drops it");
+  assert.ok(/if \(E\.pdrag\) \{ if \(!\(E\.pdrag as PadDrag\)\.sticky\) padDragEnd\(true\)/.test(ix), "the release does not end it");
+});
+
+test("Move (M): GetMoveWarpsCursor puts the crosshair on BestDragOrigin; off, the move runs from the snapped cursor about the same reference point", () => {
+  const doc = board(); const { ctx } = fakeCtx(doc);
+  let warped = null; ctx.warpCursor = (p) => { warped = p.slice(); };
+  const at = [5.3, 80.2], bdo = P.bestDragOrigin(doc, ["g1"], at, 0.25, { mmPerPx: 0.1 });
+  P.state.sel = new Set(["g1"]); ctx.selection = new Set(["g1"]);
+  assert.equal(pcb.beginMove(ctx, at, true), true);
+  assert.deepEqual(warped, bdo, "warped onto the drag origin"); assert.deepEqual(P.state.move.start, bdo); assert.deepEqual(P.state.move.aux, bdo);
+  pcb.cancel(); warped = null; P.state.moveWarpsCursor = false;
+  try {
+    P.state.sel = new Set(["g1"]); ctx.selection = new Set(["g1"]);
+    assert.equal(pcb.beginMove(ctx, at, true), true);
+    assert.equal(warped, null, "no warp"); assert.deepEqual(P.state.move.start, [5.25, 80.25], "m_cursor = originalCursorPos"); assert.deepEqual(P.state.move.aux, bdo, "the aux axes on dragOrigin");
+    pcb.cancel();
+  } finally { P.state.moveWarpsCursor = undefined; }
+});
+
+test("a non-square grid: a footprint's centre is an anchor only farther than |GetGrid()| (both axes) from its position", () => {
+  const doc = board(), R1 = doc.items.get("R1"), c = [(R1.bbox[0] + R1.bbox[2]) / 2, (R1.bbox[1] + R1.bbox[3]) / 2], d = Math.hypot(c[0] - 10, c[1] - 10);
+  const has = (g, gy) => P.itemAnchors(R1, false, null, g, { gridY: gy }).some((a) => a.t === "center" && Math.abs(a[0] - c[0]) < 1e-9 && Math.abs(a[1] - c[1]) < 1e-9);
+  assert.ok(d > 0, "the body is off its position");
+  const gx = d * 0.6;
+  assert.equal(has(gx, gx), true, "square: |grid| = 0.85 d");
+  assert.equal(has(gx, d * 1.2), false, "taller grid: |grid| = 1.34 d");
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

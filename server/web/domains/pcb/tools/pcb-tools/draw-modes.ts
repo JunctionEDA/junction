@@ -26,7 +26,7 @@ export const ANGLE_SNAP_MSG: Record<string, string> = { free: "", "90": "Constra
 /** EDIT_TOOL::doMoveSelection displayConstraintsMessage: the constraint field while a move runs (it stays afterwards). */
 export const MOVE_SNAP_MSG: Record<string, string> = { free: "", "90": "Angle snap lines: 90\u00b0", "45": "Angle snap lines: 45\u00b0" };
 /** The DRAWING_TOOL actions: activating one runs DRAWING_TOOL::Reset( RUN ), which calls UpdateStatusBar. */
-export const DRAWING_TOOL_IDS = new Set(["via", "gline", "grect", "gcircle", "gtext", "barcode", "garc", "gpoly", "gcurve", "gtextbox", "table", "image", "zone", "thievingzone", "rulearea", "dimaligned", "dimortho", "dimcenter", "dimradial", "leader", "anchor"]);
+export const DRAWING_TOOL_IDS = new Set(["via", "gline", "grect", "gcircle", "gtext", "barcode", "garc", "gpoly", "gcurve", "gellipse", "gellipsearc", "gtextbox", "table", "image", "zone", "thievingzone", "rulearea", "dimaligned", "dimortho", "dimcenter", "dimradial", "leader", "anchor"]);
 /** EDA_DRAW_FRAME::DisplayConstraintsMsg: status field 7 (the app keeps the last text written, as wxStatusBar does). */
 export function displayConstraintsMsg(msg: string) {
   try { if (typeof root.dispatchEvent === "function" && typeof CustomEvent === "function") root.dispatchEvent(new CustomEvent("kc:constraint-msg", { detail: { msg: msg || "" } })); } catch (e) { /* no DOM */ }
@@ -61,7 +61,7 @@ export const LINE_LIKE = (shape: string) => shape === "gline" || POLY_TOOLS.has(
  */
 export function drawSnapMode(d: DrawState, ctrl: boolean) {
   const t = d.shape;
-  if (t === "grect" || t === "gcircle") return ctrl ? "45" : "free";
+  if (t === "grect" || t === "gcircle" || t === "gellipse") return ctrl ? "45" : "free";
   if (LINE_LIKE(t)) return ctrl ? "free" : angleSnapMode();
   if (DIM_TYPE[t] && !d.end) return DIM_TYPE[t] === "center" || (!ctrl && angleSnapMode() !== "free") ? "45" : "free";
   return "free";
@@ -69,7 +69,7 @@ export function drawSnapMode(d: DrawState, ctrl: boolean) {
 export function constrainDraw(d: DrawState, p: Pt, ctrl: boolean) {
   const mode = drawSnapMode(d, ctrl); if (mode === "free" || POLY_TOOLS.has(d.shape)) return p;   // polygons bend a leader instead
   const v = vsub(p, d.start);
-  return vadd(d.start, mode === "90" ? snap90(v) : snapVec45(v, d.shape === "grect"));
+  return vadd(d.start, mode === "90" ? snap90(v) : snapVec45(v, d.shape === "grect" || d.shape === "gellipse"));
 }
 // ---- POLYGON_GEOM_MANAGER: in the 45 and 90 modes a polygon, zone or rule area reaches the cursor through a leader
 // that bends once (build45DegLeader / build90DegLeader), and a loop line of the same kind runs back to the first corner.
@@ -117,7 +117,7 @@ export function drawTrack(d: DrawState, raw: Pt, ctrl: boolean) {
 export const WIDTH_STEP = 0.1;
 export function drawWidth(layer: string) { return S.strokeW != null ? S.strokeW : gfxWidth(layer); }
 /** The tools whose loop takes incWidth / decWidth before the first click too (drawShape, drawManagedShape: m_stroke). */
-export const WIDTH_TOOLS = new Set(["gline", "grect", "gcircle", "garc", "gcurve"]);
+export const WIDTH_TOOLS = new Set(["gline", "grect", "gcircle", "gellipse", "garc", "gcurve", "gellipsearc"]);
 export function stepDrawWidth(ctx: PcbCtx, dir: number) {
   const d = S.draw, t = d ? d.shape : S.modTool;
   if (!t || t === "gtextbox" || t === "table") return false;

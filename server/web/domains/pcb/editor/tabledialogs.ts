@@ -301,7 +301,7 @@ export function schDefaultLineThickness(proText?: string | null): number {
   } catch { mils = 6; }
   return Math.round(mils * 0.0254 * 10000) / 10000;
 }
-export function schTableDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void, hooks?: { cellEditor?(ta: HTMLTextAreaElement): void }): boolean {
+export function schTableDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void, hooks?: { cellEditor?(ta: HTMLTextAreaElement): void; focusCell?: number | null }): boolean {
   const doc = ctx.doc as KDoc; if (!doc) return false;
   const node0 = item.node, ro = !!ctx.viewOnly, T = M().tableInfo(node0);
   const border = kid(node0, "border"), seps = kid(node0, "separators"); const bs = schStroke(border), ss = schStroke(seps);
@@ -335,7 +335,9 @@ export function schTableDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode 
         }
         inputs.push(row);
       }
-      if (first) { const fc = first; setTimeout(() => fc.focus(), 0); }
+      // DIALOG_TABLE_PROPERTIES' CallAfter: the grid cursor goes to the first selected cell and its editor opens
+      const fcell = hooks && typeof hooks.focusCell === "number" && hooks.focusCell >= 0 ? inputs[Math.floor(hooks.focusCell / T.cols)]?.[hooks.focusCell % T.cols] || null : null;
+      if (fcell || first) { const fc = (fcell || first)!; setTimeout(() => { fc.focus(); if (fcell) fc.select(); }, 0); }
       const ext = yes(kid(border, "external")), hdr = yes(kid(border, "header")), rws = yes(kid(seps, "rows")), cls = yes(kid(seps, "cols"));
       const bw = lenField(bs.width, { ro, key: "borderWidth" }), bstyle = selectField<string>(bs.style, LINE_STYLES, { ro, key: "borderStyle", icons: LINE_STYLE_ICONS });
       const sw = lenField(ss.width, { ro, key: "sepWidth" }), sstyle = selectField<string>(ss.style, LINE_STYLES, { ro, key: "sepStyle", icons: LINE_STYLE_ICONS });
@@ -395,6 +397,8 @@ export function newSchTableDialog(ctx: ToolCtx, node: SNode, done: (node: SNode 
 }
 
 /** The table's own dialog for either editor (OnEditItemRequest on a table). */
-export function tablePropsDialog(ctx: ToolCtx, item: KItem, isPcb: boolean): boolean { return isPcb ? tableDialog(ctx, item) : schTableDialog(ctx, item); }
+/** DIALOG_TABLE_PROPERTIES' CallAfter scans rows then columns for the first selected cell: the lowest index. */
+export function firstSelectedCell(cells: Iterable<number> | null | undefined): number | null { let best: number | null = null; for (const i of cells || []) if (i >= 0 && (best === null || i < best)) best = i; return best; }
+export function tablePropsDialog(ctx: ToolCtx, item: KItem, isPcb: boolean, focusCell?: number | null): boolean { return isPcb ? tableDialog(ctx, item) : schTableDialog(ctx, item, undefined, { focusCell }); }
 
 export { errorMessage };

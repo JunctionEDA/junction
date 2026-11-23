@@ -29,7 +29,7 @@ import { addChange, boardChangeExtras, createItem, fieldAt, fieldBoxes, groupMem
 import { SvgPath, renderPng, renderSvg, serialize, serializeItem, setRenderCacheWriter, svgDrawingSheet, wrapFragment } from "./export";
 import { buildGeom, ensureFontGeom, ensureSchTheme, inSchTheme } from "./geom";
 import { faceMetrics, kicadAscDesc, outlineBoxCorners, outlineLayout, readSfnt } from "./outline-text";
-import { hatchLines } from "./geom-pcb";
+import { ensureHatchKnockouts, hatchLines } from "./geom-pcb";
 import { ORIENT, fieldColor, hasOpTextVar, intersheetRefsText, letterSubReference, opVars, resolveLib, schDisplay, schFormat, subReference, symVars, symbolInstance, symbolTransform, unitDisplayNames, type OpTextVar, hasNetTextVar, labelVars, type LabelTextVar } from "./geom-sch";
 import { bboxOf, geomBox, geomHit, geomTouchesRect, itemTouchesRect, itemVisible, hitTest, hitTestDetail, layerList, movableItems, padAt, padGeomHit, snap } from "./hit";
 import { applyChange, setAt, setPts } from "./ops";
@@ -124,7 +124,7 @@ export const api = {
   PRODUCT_NAME, WS_TOKENS, TB_TOKENS, PAPER_SIZES, mm2mils, TEXT_INTERLINE, lineOffsets,
   fieldBoxes, fieldAt, pointInQuad, hitTestDetail, geomHit, geomBox,
   // exposed for tests and tools
-  symbolTransform, textWidth, parseMarkup, urlRuns, urlRunAt, urlRunBox, isUrlText, hatchLines, arcFrom3, bezierPts, pcbColor, pcbZ, drawPad, buildGeom, effectsOf, fillOf,
+  symbolTransform, textWidth, parseMarkup, urlRuns, urlRunAt, urlRunBox, isUrlText, hatchLines, ensureHatchKnockouts, arcFrom3, bezierPts, pcbColor, pcbZ, drawPad, buildGeom, effectsOf, fillOf,
   // display-option helpers (see render()): ratsnest / marker / net-name / zone-preview / flip constants and look-ups
   bboxOf, padAt, padGeomHit, markerAt, markerPolygon, markerScale, busConnectedLabels, busPinTint, isBusLabel, busConnection, busMemberNames, drawMarkers, zoomFactor, flipX, unflipX, flipCentre, dashPattern, trackNameColor,
   MARKER_CORNERS, MARKER_SCALE, MARKER_COLORS, RATSNEST_COLOR, ZONE_OPACITY, HIDDEN_TEXT_ALPHA, PX_PER_MM_ZOOM1, VIA_NETNAME_COLOR,

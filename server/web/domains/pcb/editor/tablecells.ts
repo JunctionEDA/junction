@@ -24,7 +24,7 @@ import { clearHooks } from "./selection";
 import { clearAllSelection, handleAutoPanning, interactionBusy, pcbState, schState, selectionChanged, selectionIds, stage, worldMm } from "./gestures";
 import { keyHooks } from "./hotkeys";
 import { E } from "./state";
-import { cellPropsDialog, errorMessage, newSchTableDialog, tablePropsDialog } from "./tabledialogs";
+import { cellPropsDialog, errorMessage, firstSelectedCell, newSchTableDialog, tablePropsDialog } from "./tabledialogs";
 import { selFilter } from "./selection";
 import { download } from "./pcbdialogs/ui";
 import { isSch, pxPerMm, requestRender } from "./view";
@@ -260,12 +260,12 @@ export function cellProperties(): boolean {
   const ctx = toolCtx(), pcb = isPcb(), id = c.item.id;
   cellPropsDialog(ctx, c.item, c.cells, pcb, {
     generated: !structureEditable(c.item),
-    editTable: () => { const it = (E.kdoc as KDoc | null)?.items.get(id); if (it) tablePropsDialog(toolCtx(), it, pcb); },
+    editTable: () => { const it = (E.kdoc as KDoc | null)?.items.get(id), now = cellSelection(); if (it) tablePropsDialog(toolCtx(), it, pcb, now && now.item.id === id ? firstSelectedCell(now.cells) : null); },
   });
   return true;
 }
 /** ACTIONS::editTable (Ctrl+E): the parent table's dialog. */
-export function editTable(): boolean { const c = cellSelection(); if (!c) return false; tablePropsDialog(toolCtx(), c.item, isPcb()); return true; }
+export function editTable(): boolean { const c = cellSelection(); if (!c) return false; tablePropsDialog(toolCtx(), c.item, isPcb(), firstSelectedCell(c.cells)); return true; }
 
 /** ACTIONS::exportTableCSV: the cells' shown text, saved as a file. */
 export function exportCsv(): boolean {

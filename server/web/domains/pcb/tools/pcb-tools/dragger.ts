@@ -1,5 +1,5 @@
 // pcb-tools/dragger.ts — PNS DRAGGER: the track drag (D, G, a left-drag on a selected track).
-import type { BoardDoc, DragSolution, DragSub, Joints, Obstacle, PcbCtx, Pt, TrackLine } from "./types";
+import type { BoardDoc, DragSolution, DragSub, Joints, LineArcs, Obstacle, PcbCtx, Pt, TrackElem, TrackLine } from "./types";
 import { ptKey } from "./connected";
 import { settingsOf } from "./dialogs";
 import { padCopperLayers, viaLayers } from "./distances";
@@ -10,7 +10,7 @@ import { netOf } from "./nets";
 import { padsOf } from "./route-geom";
 import { K, S } from "./state";
 import { layerOf, pt, r6, samePt, widthOf } from "./util";
-import { DIRS8, dir8, dirAngle, isDiagDir, now, pathClear, pathHits, ptsLength, routeObstacles, segHit, simplifyPts, walkTo } from "./walkaround";
+import { DIRS8, ST_DONE, WP_SHORTEST, dir8, dirAngle, fromNm, isDiagDir, pathClear, pathHits, ptsLength, routeObstacles, simplifyPts, toNm, walkaroundRoute } from "./walkaround";
 
 // ---------------------------------------------------------------- PNS DRAGGER: track drag (D, G, a left-drag on a selected track)
 // KiCad's interactive drag runs the router: the grabbed segment's whole LINE (the chain of same-net, same-width segments
@@ -219,6 +219,7 @@ export function arcStubLine(arc: KItem, at: Pt, layer: string, netKey: string): 
 /** TOOL_BASE::snapToItem: a grab within half the width of a track end takes the end, otherwise the nearest (grid) point on it. */
 export function snapGrab(ctx: PcbCtx, it: KItem, mm: Pt) {
   if (it.kind === "via") return pt(it.node, "at")!.slice();
+  if (it.kind === "arc") { const a = pt(it.node, "start"), m = pt(it.node, "mid"), b = pt(it.node, "end"); if (a && m && b) return alignToArc(ctx, mm, a, m, b); }   // GRID_HELPER::AlignToArc
   const [a, b] = trackEnds(it); const w2 = widthOf(it.node, 0.25) / 2;
   const da = Math.hypot(mm[0] - a[0], mm[1] - a[1]), db = Math.hypot(mm[0] - b[0], mm[1] - b[1]);
   if (da < w2 || db < w2) return (da < db ? a : b).slice();
@@ -231,9 +232,12 @@ export function snapGrab(ctx: PcbCtx, it: KItem, mm: Pt) {
  * its width of an end (Free Angle: always DM_CORNER, at the nearer vertex); a via gives DM_VIA.  null when it cannot drag.
  */
 export function dragStart(ctx: PcbCtx, it: KItem, mm: Pt, free: boolean) {
-  const doc = ctx.doc; if (!it || (it.kind !== "segment" && it.kind !== "via")) return null;
+  const doc = ctx.doc; if (!it || (it.kind !== "segment" && it.kind !== "via" && it.kind !== "arc")) return null;
   const p = snapGrab(ctx, it, mm); const d = { id: it.id, free: !!free, start: p.slice(), cursor: p.slice(), forceMark: false, first: true, status: true, sol: null, last: null, lastValid: p.slice(), obs: new Map() } as DragSub;   // mode, lines, netKey and ids follow
-  if (it.kind === "via") {
+  if (it.kind === "arc") {
+    const ln = startDragArc(ctx, it); if (!ln) return null;
+    d.mode = "arc"; d.lines = [ln]; d.netKey = ln.netKey;
+  } else if (it.kind === "via") {
     d.mode = "via"; d.via = it; d.viaAt = pt(it.node, "at")!.slice(); d.lines = viaFanout(doc, it); d.netKey = netTable(doc).key(netOf(it.node));
   } else {
     const ln = assembleLine(doc, it); if (!ln) return null;
@@ -255,6 +259,7 @@ export function dragSolution(d: DragSub, p: Pt): DragSolution {
     : d.free ? dragCornerFree(l.pts, l.vertex!, p) : dragCorner45(l.pts, l.vertex!, p, 0);
   if (d.mode === "via") return { lines: d.lines.map((l) => ({ l, pts: viaLine(l) })), viaAt: p.slice() };
   const l = d.lines[0];
+  if (d.mode === "arc") { const r = dragArcLine(l.pts, l.arcs!, l.index, p, l.width); return { lines: [{ l, pts: r.pts, arcs: r.arcs }] }; }   // LINE::DragArc
   const pts = d.mode === "segment" ? dragSegment45(l.pts, l.index, p, thresh(l)) : d.free ? dragCornerFree(l.pts, l.vertex!, p) : dragCorner45(l.pts, l.vertex!, p, thresh(l));
   return { lines: [{ l, pts }] };
 }
@@ -269,21 +274,277 @@ export function solutionHits(ctx: PcbCtx, d: DragSub, sol: DragSolution) {
   if (sol.viaAt) { const copper = ctx.doc.copper.length ? ctx.doc.copper : ["F.Cu", "B.Cu"]; const r = viaNow(d.via!.node).size / 2; for (const L of viaLayers(d.via!.node, copper)) for (const ob of pathHits(dragObstacles(ctx, d, L), [sol.viaAt], r)) if (!out.includes(ob)) out.push(ob); }
   return out;
 }
-/** DRAGGER::tryWalkaround, locally: a dragged segment that crosses an obstacle hugs it at clearance (its ends must be clear). */
+/**
+ * DRAGGER::dragWalkaround / tryWalkaround: a dragged line that collides is walked round what it meets by WALKAROUND
+ * with the WP_SHORTEST policy (both ways round each cluster, the shorter clear walk), its length limited to 30 times
+ * the dragged line's; null when the walk does not complete.
+ */
 export function walkSolution(ctx: PcbCtx, d: DragSub, sol: DragSolution): DragSolution | null {
   const lines: DragSolution["lines"] = [];
-  for (const { l, pts } of sol.lines) {
-    const O = dragObstacles(ctx, d, l.layer), r = l.width / 2; if (pathClear(O, pts, r)) { lines.push({ l, pts }); continue; }
-    const out = [pts[0].slice()];
-    for (let i = 0; i + 1 < pts.length; i++) {
-      const a = pts[i], b = pts[i + 1];
-      if (!segHit(O, a, b, r)) { out.push(b.slice()); continue; }
-      if (segHit(O, a, a, r) || segHit(O, b, b, r)) return null;
-      const w = walkTo(O, a, b, r, isDiagDir(dir8(a, b)), i > 0 ? dir8(pts[i - 1], a) : -1, now() + 30); if (!w) return null;
-      if (ptsLength(w) > 30 * Math.max(Math.hypot(b[0] - a[0], b[1] - a[1]), l.width)) return null;   // SetLengthLimit( true, 30.0 )
-      chainAppend(out, w);
-    }
-    const s = chainSimplify(out); if (s.length < 2 || !pathClear(O, s, r)) return null; lines.push({ l, pts: s });
+  for (const ln of sol.lines) {
+    const { l, pts } = ln; const O = dragObstacles(ctx, d, l.layer), r = l.width / 2; if (pathClear(O, pts, r)) { lines.push(ln); continue; }
+    if (pts.length < 2) return null;
+    const wr = walkaroundRoute(O, pts.map(toNm), r, { policies: [WP_SHORTEST], iterLimit: S.rs.walkaround_iteration_limit || 40, lengthLimit: true, lengthFactor: 30.0, cornerMode: S.rs.corner_mode });
+    if (wr.status[WP_SHORTEST] !== ST_DONE) return null;
+    const w = wr.lines[WP_SHORTEST].map(fromNm); if (w.length < 2) return null;
+    lines.push(Object.assign({}, ln, { pts: w }, ln.arcs ? { arcs: restoreArcTags(w, pts, ln.arcs) } : {}));
   }
   return Object.assign({}, sol, { lines });
+}
+
+// ---------------------------------------------------------------- lines with arcs (SHAPE_LINE_CHAIN's arc shapes)
+// A LINE that holds arcs keeps them as SHAPE_ARC shapes over the points of their polyline approximation.  Here a line's
+// `pts` carry every arc as its ConvertToPolyline points and `arcs.seg[i]` names the arc segment pts[i]..pts[i + 1]
+// belongs to (-1 for a straight segment).  Slicing, reversing and appending keep the tags; a walk or a drag that
+// rebuilds part of the line leaves the untouched head and tail with their arcs (restoreUntouchedArcs).
+/** ADVANCED_CFG::m_MaxTangentAngleDeviation (degrees) and m_MaxTrackLengthToKeep (mm). */
+export const MAX_TANGENT_ANGLE_DEVIATION = 1.0, MAX_TRACK_LENGTH_TO_KEEP = 0.0005;
+/** ARC_HIGH_DEF (SHAPE_ARC::DefaultAccuracyForPCB), mm. */
+const ARC_ACCURACY = 0.005;
+/** The circle of an arc and the way it turns: centre, radius, start angle and signed central angle (radians). */
+export function arcGeom(a: Pt, m: Pt, b: Pt) {
+  const c = K.arcFrom3(a, m, b) as { x: number; y: number; r: number } | null; if (!c) return null;
+  const sa = Math.atan2(a[1] - c.y, a[0] - c.x), ma = Math.atan2(m[1] - c.y, m[0] - c.x), ea = Math.atan2(b[1] - c.y, b[0] - c.x);
+  const norm = (x: number) => { while (x <= -Math.PI) x += 2 * Math.PI; while (x > Math.PI) x -= 2 * Math.PI; return x; };
+  // the sweep that passes through the mid point
+  let ca = norm(ea - sa); const toMid = norm(ma - sa);
+  if (ca > 0 ? (toMid < 0 || toMid > ca) : (toMid > 0 || toMid < ca)) ca = ca > 0 ? ca - 2 * Math.PI : ca + 2 * Math.PI;
+  return { c: [c.x, c.y] as Pt, r: c.r, sa, ca };
+}
+/** SHAPE_ARC::ConvertToPolyline( ARC_HIGH_DEF ): start and end exact, the inner points half the error outside the arc. */
+export function arcPolyline(a: Pt, m: Pt, b: Pt, width: number): Pt[] {
+  const g = arcGeom(a, m, b); if (!g) return [a.slice(), b.slice()];
+  const halfErr = Math.max(1e-6, ARC_ACCURACY / 2), ext = g.r + width / 2; const caDeg = Math.abs(g.ca) * 180 / Math.PI;
+  const chordMidDist = (() => { const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy; if (!L2) return Math.hypot(m[0] - a[0], m[1] - a[1]); const t = Math.max(0, Math.min(1, ((m[0] - a[0]) * dx + (m[1] - a[1]) * dy) / L2)); return Math.hypot(m[0] - a[0] - t * dx, m[1] - a[1] - t * dy); })();
+  let n: number, effErr: number;
+  if (ext < halfErr || !g.ca || chordMidDist < halfErr) { n = 0; effErr = ext; }
+  else {
+    // GetArcToSegmentCount and CircleToEndSegmentDeltaRadius, in nm as KiCad rounds them
+    const R = Math.max(1, Math.round(ext * 1e6)), E = Math.max(1, Math.round(ARC_ACCURACY * 1e6));
+    let inc = 180 / Math.PI * Math.acos(1 - E / R) * 2; inc = Math.min(360 / 8, inc);
+    n = Math.max(Math.round(caDeg / inc), 2);
+    let seg360 = Math.trunc(n * 360 / caDeg); if (seg360 <= 2) seg360 = 3;
+    effErr = Math.round(Math.abs(R * (1 - 1 / Math.cos(Math.PI / seg360)))) / 1e6;
+  }
+  const rr = g.r + effErr / 2; n *= 2; const out: Pt[] = [a.slice()];
+  for (let i = 1; i < n; i += 2) { const ang = g.sa + g.ca * i / n; out.push(rp([g.c[0] + rr * Math.cos(ang), g.c[1] + rr * Math.sin(ang)])); }
+  out.push(b.slice()); return out;
+}
+/** CalcArcMid: the point halfway round the circle about c from p to q (the shorter way, or the other one). */
+export function calcArcMid(p: Pt, q: Pt, c: Pt, minArc = true): Pt {
+  const sa = Math.atan2(p[1] - c[1], p[0] - c[0]), ea = Math.atan2(q[1] - c[1], q[0] - c[0]);
+  let rot = sa - ea; while (rot <= -Math.PI) rot += 2 * Math.PI; while (rot > Math.PI) rot -= 2 * Math.PI; rot /= 2;
+  if (!minArc) rot += Math.PI;
+  // RotatePoint turns clockwise on screen for a positive angle (y down): x' = x cos + y sin, y' = -x sin + y cos
+  const dx = p[0] - c[0], dy = p[1] - c[1], co = Math.cos(rot), si = Math.sin(rot);
+  return rp([c[0] + dx * co + dy * si, c[1] - dx * si + dy * co]);
+}
+/** A line's arcs as elements: runs of segments of one arc become that arc (or the part of it they span), the rest segments. */
+export function lineElems(pts: Pt[], arcs?: LineArcs | null): TrackElem[] {
+  const out: TrackElem[] = [];
+  for (let i = 0; i + 1 < pts.length;) {
+    const k = arcs ? arcs.seg[i] : -1;
+    if (k == null || k < 0) { if (!peq(pts[i], pts[i + 1])) out.push({ t: "seg", a: pts[i].slice(), b: pts[i + 1].slice() }); i++; continue; }
+    let j = i; while (j + 1 < pts.length && arcs!.seg[j] === k) j++;
+    const A = arcs!.list[k]; const p = pts[i], q = pts[j];
+    if (peq(p, A.a) && peq(q, A.b)) out.push({ t: "arc", a: A.a.slice(), m: A.m.slice(), b: A.b.slice() });
+    else if (peq(p, A.b) && peq(q, A.a)) out.push({ t: "arc", a: A.b.slice(), m: A.m.slice(), b: A.a.slice() });
+    else if (!peq(p, q)) {
+      // a part of the arc (SHAPE_LINE_CHAIN::Slice inside an arc): the same circle and turn between p and q
+      const g = arcGeom(A.a, A.m, A.b);
+      if (g) { const pa = Math.atan2(p[1] - g.c[1], p[0] - g.c[0]); let sw = Math.atan2(q[1] - g.c[1], q[0] - g.c[0]) - pa; if (g.ca > 0) { while (sw < 0) sw += 2 * Math.PI; } else { while (sw > 0) sw -= 2 * Math.PI; } const ma = pa + sw / 2; out.push({ t: "arc", a: p.slice(), m: rp([g.c[0] + g.r * Math.cos(ma), g.c[1] + g.r * Math.sin(ma)]), b: q.slice() }); }
+      else out.push({ t: "seg", a: p.slice(), b: q.slice() });
+    }
+    i = j;
+  }
+  return out;
+}
+/** The points and arc tags of a list of elements (SHAPE_LINE_CHAIN::Append of segments and arcs). */
+export function elemsLine(els: TrackElem[], width: number): { pts: Pt[]; arcs: LineArcs; starts: number[] } {
+  const pts: Pt[] = [], arcs: LineArcs = { seg: [], list: [] }, starts: number[] = [];
+  const add = (p: Pt, tag: number) => { if (pts.length && peq(pts[pts.length - 1], p)) return; if (pts.length) arcs.seg.push(tag); pts.push(p.slice()); };
+  for (const e of els) {
+    starts.push(pts.length && peq(pts[pts.length - 1], e.a) ? pts.length - 1 : pts.length);
+    if (e.t === "arc") { const k = arcs.list.length; arcs.list.push({ a: e.a.slice(), m: e.m.slice(), b: e.b.slice() }); const poly = arcPolyline(e.a, e.m, e.b, width); add(poly[0], -1); for (let i = 1; i < poly.length; i++) add(poly[i], k); }
+    else { add(e.a, -1); add(e.b, -1); }
+  }
+  return { pts, arcs, starts };
+}
+/** The arc tags of a line rebuilt from `orig`: its untouched head and tail keep theirs (LINE::restoreUntouchedArcs), the rest is straight. */
+export function restoreArcTags(pts: Pt[], orig: Pt[], arcs: LineArcs): LineArcs {
+  let head = 0; while (head < orig.length && head < pts.length && peq(orig[head], pts[head])) head++;
+  let tail = 0; while (tail < orig.length - head && tail < pts.length - head && peq(orig[orig.length - 1 - tail], pts[pts.length - 1 - tail])) tail++;
+  const seg: number[] = [];
+  for (let i = 0; i + 1 < pts.length; i++) {
+    if (i + 1 < head) seg.push(arcs.seg[i]);
+    else if (i >= pts.length - tail) seg.push(arcs.seg[orig.length - (pts.length - i)]);
+    else seg.push(-1);
+  }
+  return { seg, list: arcs.list };
+}
+/** A line's points and tags reversed (SHAPE_LINE_CHAIN::Reverse). */
+export const reverseArcs = (a: LineArcs): LineArcs => ({ seg: a.seg.slice().reverse(), list: a.list.map((x) => ({ ...x, a: x.b, b: x.a })) });
+/**
+ * NODE::AssembleLine for a line that may hold arcs: the track and every segment or arc reached through trivial
+ * joints (two same-net tracks of one width, no via, no pad centre, the next one not locked).  The arcs are given as
+ * their polylines (`arcs`); `index` is the point where the seed starts, `ids` run along the line.
+ */
+export function assembleArcLine(doc: BoardDoc, seed: KItem): TrackLine | null {
+  const J = jointIndex(doc); const L = layerOf(seed.node), w = widthOf(seed.node, 0.25), net = netOf(seed.node), key = J.NT.key(net);
+  const [A, B] = trackEnds(seed); if (!A || !B) return null;
+  const items: { it: KItem; rev: boolean }[] = [{ it: seed, rev: false }];
+  const walk = (from: KItem, p: Pt, atEnd: boolean) => {
+    let cur = from, q = p;
+    for (let guard = 0; guard < 10000; guard++) {
+      const k = ptKey(q);
+      if ((J.vias.get(k) || []).some((v) => v.layers.has(L))) return;
+      if ((J.pads.get(k) || []).some((x) => x.layers.has(L) && samePt([x.pad.x, x.pad.y], q))) return;
+      const links = (J.ends.get(L + "|" + k) || []).filter((o) => J.NT.key(netOf(o.node)) === key);
+      if (links.length !== 2) return;
+      const o = links[0] === cur ? links[1] : links[0];
+      if ((o.kind !== "segment" && o.kind !== "arc") || items.some((x) => x.it === o) || Math.abs(widthOf(o.node, 0.25) - w) > 1e-9 || isLocked(o.node)) return;
+      const [a, b] = trackEnds(o); const nq = samePt(a, q) ? b : a;
+      if (atEnd) items.push({ it: o, rev: !samePt(a, q) }); else items.unshift({ it: o, rev: samePt(a, q) });
+      cur = o; q = nq;
+    }
+  };
+  walk(seed, B, true); walk(seed, A, false);
+  const els: TrackElem[] = []; let seedEl = 0;
+  items.forEach(({ it, rev }) => {
+    if (it === seed) seedEl = els.length;
+    const [a, b] = trackEnds(it); const m = it.kind === "arc" ? pt(it.node, "mid") : null;
+    els.push(m ? (rev ? { t: "arc", a: b, m, b: a } : { t: "arc", a, m, b }) : (rev ? { t: "seg", a: b, b: a } : { t: "seg", a, b }));
+  });
+  const { pts, arcs, starts } = elemsLine(els, w); const index = starts[seedEl] || 0;
+  arcs.list.forEach((x, k) => { const it = items.filter(({ it }) => it.kind === "arc")[k]; if (it) { x.id = it.it.id; x.item = it.it; } });
+  return { ids: items.map(({ it }) => it.id), pts, index, width: w, layer: L, net, netKey: key, arcs };
+}
+/** Whether a point on the arc's circle lies within its sweep. */
+function onArcSweep(g: NonNullable<ReturnType<typeof arcGeom>>, p: Pt) {
+  let d = Math.atan2(p[1] - g.c[1], p[0] - g.c[0]) - g.sa;
+  if (g.ca > 0) { while (d < -1e-12) d += 2 * Math.PI; return d <= g.ca + 1e-12; }
+  while (d > 1e-12) d -= 2 * Math.PI; return d >= g.ca - 1e-12;
+}
+/** PCB_GRID_HELPER::AlignToArc: the arc's ends by their distance to the cursor, and its crossings with the grid point's horizontal, vertical and diagonal lines by their distance to the grid point. */
+export function alignToArc(ctx: PcbCtx, mm: Pt, a: Pt, m: Pt, b: Pt): Pt {
+  const aligned = ctx.snapOn ? ctx.snap(mm.slice()) : mm.slice(); if (!ctx.snapOn) return aligned;
+  const g = arcGeom(a, m, b); const pts: Pt[] = [];
+  if (g) for (const u of [[1, 0], [0, 1], [Math.SQRT1_2, Math.SQRT1_2], [Math.SQRT1_2, -Math.SQRT1_2]]) {
+    const fx = aligned[0] - g.c[0], fy = aligned[1] - g.c[1]; const B = fx * u[0] + fy * u[1], C = fx * fx + fy * fy - g.r * g.r; const disc = B * B - C;
+    if (disc < 0) continue; for (const t of [-B - Math.sqrt(disc), -B + Math.sqrt(disc)]) { const p = rp([aligned[0] + u[0] * t, aligned[1] + u[1] * t]); if (onArcSweep(g, p)) pts.push(p); }
+  }
+  let nearest = aligned, md = Infinity;
+  for (const p of [a, b]) { const d = (p[0] - mm[0]) ** 2 + (p[1] - mm[1]) ** 2; if (d < md) { md = d; nearest = p.slice(); } }
+  for (const p of pts) { const d = (p[0] - aligned[0]) ** 2 + (p[1] - aligned[1]) ** 2; if (d < md) { md = d; nearest = p; } }
+  return nearest;
+}
+/** A line with arcs as SHAPE_LINE_CHAIN operations: Slice( i, j ) (points i..j, their tags kept). */
+const sliceArcLine = (pts: Pt[], arcs: LineArcs, i: number, j: number) => ({ pts: pts.slice(i, j + 1).map((p) => p.slice()), seg: arcs.seg.slice(i, j) });
+/** SHAPE_LINE_CHAIN::Append: a chain that does not start where this one ends is joined by a straight segment. */
+function appendArcLine(out: { pts: Pt[]; seg: number[] }, add: { pts: Pt[]; seg: number[] }) {
+  if (!add.pts.length) return;
+  let k = 0; if (out.pts.length && peq(out.pts[out.pts.length - 1], add.pts[0])) k = 1; else if (out.pts.length) out.seg.push(-1);
+  for (let i = k; i < add.pts.length; i++) { out.pts.push(add.pts[i].slice()); if (i > 0) out.seg.push(add.seg[i - 1]); }
+}
+/** SEG::LineProject: p projected onto the line through a and b. */
+function lineProject(a: Pt, b: Pt, p: Pt): Pt { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy; if (!l2) return a.slice(); const t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2; return [a[0] + t * dx, a[1] + t * dy]; }
+const sideOf = (a: Pt, b: Pt, p: Pt) => { const d = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]); return Math.abs(d) < 1e-12 ? 0 : d < 0 ? -1 : 1; };
+const nearestOnSeg2 = (a: Pt, b: Pt, p: Pt): Pt => { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy; const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0; return [a[0] + t * dx, a[1] + t * dy]; };
+/**
+ * CIRCLE::ConstructFromTanTanPt for two lines that cross: of the circles tangent to both lines and passing through p,
+ * the fillet (the one whose touching point nearest the crossing gives p, i.e. the larger).  { c, r }; r is 0 when no
+ * circle exists (p at the crossing or outside the angle).
+ */
+export function tanTanPt(A: Pt[], B: Pt[], p: Pt): { c: Pt; r: number } {
+  const I = lineX(A[0], A[1], B[0], B[1]); if (!I) return { c: p.slice(), r: 0 };
+  if (peq(p, I)) return { c: p.slice(), r: 0 };
+  const far = (s: Pt[]) => (Math.hypot(s[0][0] - I[0], s[0][1] - I[1]) > Math.hypot(s[1][0] - I[0], s[1][1] - I[1]) ? s[0] : s[1]);
+  const fa = far(A), fb = far(B); const la = Math.hypot(fa[0] - I[0], fa[1] - I[1]), lb = Math.hypot(fb[0] - I[0], fb[1] - I[1]); if (!la || !lb) return { c: p.slice(), r: 0 };
+  const ua = [(fa[0] - I[0]) / la, (fa[1] - I[1]) / la], ub = [(fb[0] - I[0]) / lb, (fb[1] - I[1]) / lb];
+  let bx = ua[0] + ub[0], by = ua[1] + ub[1]; const bl = Math.hypot(bx, by); if (bl < 1e-15) return { c: p.slice(), r: 0 }; bx /= bl; by /= bl;   // the bisector (CalcArcMid of the far points, the minor angle)
+  const sinH = Math.abs(ua[0] * by - ua[1] * bx), cos2 = 1 - sinH * sinH; const dx = p[0] - I[0], dy = p[1] - I[1];
+  const bd = bx * dx + by * dy, d2 = dx * dx + dy * dy; let disc = bd * bd - cos2 * d2;
+  if (disc < 0) { if (disc > -1e-9 * Math.max(1, d2)) disc = 0; else return { c: p.slice(), r: 0 }; }
+  const t = (bd + Math.sqrt(disc)) / cos2; if (!(t > 0)) return { c: p.slice(), r: 0 };
+  return { c: [I[0] + bx * t, I[1] + by * t], r: t * sinH };
+}
+/**
+ * LINE::DragArc: the arc at point `index` of the line follows the cursor as a new arc tangent to the same two lines —
+ * the segments it joins when they carry on its tangents (within m_MaxTangentAngleDeviation), else the tangents at its
+ * own ends, a new tangent stub growing from the old end.  The cursor is kept inside the triangle of the largest such
+ * arc and outside that arc's circle.  An arc that shrinks to (almost) nothing collapses: the line runs straight
+ * through.  The line is returned unchanged when there is no tangent-circle solution.
+ */
+export function dragArcLine(pts: Pt[], arcs: LineArcs, index: number, aP: Pt, width: number): { pts: Pt[]; arcs: LineArcs } {
+  const same = { pts: pts.map((p) => p.slice()), arcs: { seg: arcs.seg.slice(), list: arcs.list } };
+  if (index < 0 || index >= pts.length) return same;
+  const arcIdx = index < arcs.seg.length ? arcs.seg[index] : -1; if (arcIdx < 0) return same;
+  let first = -1, last = -1; for (let i = 0; i < arcs.seg.length; i++) if (arcs.seg[i] === arcIdx) { if (first < 0) first = i; last = i + 1; }
+  if (first < 0) return same;
+  const A = arcs.list[arcIdx]; const g = arcGeom(A.a, A.m, A.b); if (!g) return same;
+  const P0 = A.a, P1 = A.b;   // the arc's own ends (GetP0 / GetP1)
+  const tangentAt = (e: Pt): Pt[] => { const rx = e[0] - g.c[0], ry = e[1] - g.c[1]; return [[e[0] + ry, e[1] - rx], [e[0] - ry, e[1] + rx]]; };
+  const collinear = (s: Pt[], t: Pt[], maxDeg: number) => { const ax = s[1][0] - s[0][0], ay = s[1][1] - s[0][1], cx = t[1][0] - t[0][0], cy = t[1][1] - t[0][1]; const ma = Math.hypot(ax, ay), mc = Math.hypot(cx, cy); if (ma <= 0 || mc <= 0) return false; const sn = Math.abs(ax * cy - ay * cx) / (ma * mc); return Math.asin(Math.min(1, Math.max(0, sn))) * 180 / Math.PI <= maxDeg; };
+  const tanS = tangentAt(P0), tanE = tangentAt(P1);
+  const useStart = first > 0 && collinear([pts[first - 1], pts[first]], tanS, MAX_TANGENT_ANGLE_DEVIATION);
+  const useEnd = last < pts.length - 1 && collinear([pts[last], pts[last + 1]], tanE, MAX_TANGENT_ANGLE_DEVIATION);
+  const own = lineX(tanS[0], tanS[1], tanE[0], tanE[1]);
+  let sS: Pt[], sE: Pt[];
+  if (useStart) sS = [pts[first - 1], pts[first]]; else { if (!own) return same; sS = [own, P0]; }
+  if (useEnd) sE = [pts[last], pts[last + 1]]; else { if (!own) return same; sE = [own, P1]; }
+  const I = lineX(sS[0], sS[1], sE[0], sE[1]); if (!I) return same;
+  const fromI0: Pt[] = [I, P0], fromI1: Pt[] = [I, P1];
+  const far = (p: Pt, q: Pt) => (Math.hypot(p[0] - I[0], p[1] - I[1]) > Math.hypot(q[0] - I[0], q[1] - I[1]) ? p : q);
+  const sFar = far(sS[0], sS[1]), eFar = far(sE[0], sE[1]); const temp = far(sFar, eFar) === eFar ? sFar : eFar;
+  const maxC = tanTanPt(fromI0, fromI1, temp);
+  const mS = lineProject(fromI0[0], fromI0[1], maxC.c), mE = lineProject(fromI1[0], fromI1[1], maxC.c);
+  const cTS: Pt[] = [mS, I], cTE: Pt[] = [mE, I], cCh: Pt[] = [mS, mE];
+  const oldMid = A.m; let cursor = aP.slice();
+  if (sideOf(cTS[0], cTS[1], oldMid) !== sideOf(cTS[0], cTS[1], cursor) || sideOf(cTE[0], cTE[1], oldMid) !== sideOf(cTE[0], cTE[1], cursor) || sideOf(cCh[0], cCh[1], oldMid) !== sideOf(cCh[0], cCh[1], cursor)) {
+    let best = nearestOnSeg2(cTS[0], cTS[1], cursor);
+    for (const c of [nearestOnSeg2(cTE[0], cTE[1], cursor), nearestOnSeg2(cCh[0], cCh[1], cursor)]) if ((c[0] - cursor[0]) ** 2 + (c[1] - cursor[1]) ** 2 < (best[0] - cursor[0]) ** 2 + (best[1] - cursor[1]) ** 2) best = c;
+    cursor = best;
+  }
+  const dC = Math.hypot(cursor[0] - maxC.c[0], cursor[1] - maxC.c[1]);
+  if (dC < maxC.r) { const ux = dC ? (cursor[0] - maxC.c[0]) / dC : 1, uy = dC ? (cursor[1] - maxC.c[1]) / dC : 0; cursor = [maxC.c[0] + ux * maxC.r, maxC.c[1] + uy * maxC.r]; }
+  const c = tanTanPt(sS, sE, cursor); if (c.r <= 0) return same;
+  let nS = rp(lineProject(sS[0], sS[1], c.c)), nE = rp(lineProject(sE[0], sE[1], c.c)); const center = c.c;
+  let pre = useStart ? first - 1 : first, suf = useEnd ? last + 1 : last;
+  const build = (withArc: boolean) => {
+    const out = { pts: [] as Pt[], seg: [] as number[] }; const list = arcs.list.slice();
+    if (pre >= 0) appendArcLine(out, sliceArcLine(pts, arcs, 0, pre));
+    if (withArc) { const m = calcArcMid(nS, nE, center); const k = list.length; list.push({ a: nS, m, b: nE }); const poly = arcPolyline(nS, m, nE, width); appendArcLine(out, { pts: poly, seg: poly.slice(1).map(() => k) }); }
+    if (suf <= pts.length - 1) appendArcLine(out, sliceArcLine(pts, arcs, suf, pts.length - 1));
+    return { pts: out.pts, arcs: { seg: out.seg, list } };
+  };
+  if (Math.hypot(nE[0] - nS[0], nE[1] - nS[1]) <= MAX_TRACK_LENGTH_TO_KEEP) return build(false);
+  if (first > 0) { const anchor = useStart ? pts[first - 1] : pts[first]; if (Math.hypot(anchor[0] - nS[0], anchor[1] - nS[1]) <= MAX_TRACK_LENGTH_TO_KEEP) { nS = anchor.slice(); pre = useStart ? first - 2 : first - 1; } }
+  if (last < pts.length - 1) { const anchor = useEnd ? pts[last + 1] : pts[last]; if (Math.hypot(anchor[0] - nE[0], anchor[1] - nE[1]) <= MAX_TRACK_LENGTH_TO_KEEP) { nE = anchor.slice(); suf = useEnd ? last + 2 : last + 1; } }
+  return build(true);
+}
+/**
+ * DRAGGER::startDragArc: an arc of 180° less the tangent deviation or more cannot be dragged (the failure reason goes
+ * to the infobar).  An arc at an end of its line gets a tiny tangent stub there (half m_MaxTrackLengthToKeep) so the
+ * drag has a line to slide along; the dragged line is the arc's line (NODE::AssembleLine) with the stubs.
+ */
+export function startDragArc(ctx: PcbCtx, arc: KItem): TrackLine | null {
+  const a = pt(arc.node, "start"), m = pt(arc.node, "mid"), b = pt(arc.node, "end"); if (!a || !m || !b) return null;
+  const g = arcGeom(a, m, b); const central = g ? Math.abs(g.ca) * 180 / Math.PI : 0;
+  if (central + MAX_TANGENT_ANGLE_DEVIATION >= 180) { ctx.toast("Unable to drag arc tracks of " + (180 - MAX_TANGENT_ANGLE_DEVIATION).toFixed(1) + " degrees or greater."); return null; }
+  const probe = assembleArcLine(ctx.doc, arc); if (!probe || !probe.arcs || !g) return null;
+  let arcIdx = -1, first = -1, lastPt = -1;
+  for (let i = 0; i < probe.pts.length; i++) {
+    const k = i < probe.arcs.seg.length ? probe.arcs.seg[i] : (i > 0 ? probe.arcs.seg[i - 1] : -1); if (k < 0) continue;   // ArcIndex( i ): the arc point i belongs to
+    if (arcIdx < 0) arcIdx = k;
+    if (k === arcIdx) { if (first < 0) first = i; lastPt = i; }
+  }
+  const isoStart = first === 0, isoEnd = lastPt === probe.pts.length - 1;
+  if (!isoStart && !isoEnd) return probe;
+  const stubLen = Math.max(1e-6, Math.round(MAX_TRACK_LENGTH_TO_KEEP * 1e6) / 2 / 1e6);
+  const outward = (e: Pt): Pt => { const rx = e[0] - g.c[0], ry = e[1] - g.c[1]; let px = -ry, py = rx; if (px * (m[0] - e[0]) + py * (m[1] - e[1]) > 0) { px = ry; py = -rx; } const mag = Math.hypot(px, py); return mag <= 0 ? [stubLen, 0] : [px / mag * stubLen, py / mag * stubLen]; };
+  const pts = probe.pts.map((p) => p.slice()), seg = probe.arcs.seg.slice(); let index = probe.index;
+  // the stubs join the line where the arc's own ends are (pts[0] / pts[last] are the arc's ends then)
+  if (isoStart) { const p0 = pts[0], o = outward(p0); pts.unshift(rp([p0[0] + o[0], p0[1] + o[1]])); seg.unshift(-1); index++; }
+  if (isoEnd) { const p1 = pts[pts.length - 1], o = outward(p1); pts.push(rp([p1[0] + o[0], p1[1] + o[1]])); seg.push(-1); }
+  return Object.assign({}, probe, { pts, index, arcs: { seg, list: probe.arcs.list } });
 }

@@ -113,12 +113,12 @@ export function autoplaceSheetFields(node: SNode, defaultLineWidth = SHEET_BORDE
  * MIN_SHEET_WIDTH x MIN_SHEET_HEIGHT (500 x 150 mil), its far corner on the nearest grid point but never rounded
  * inside the minimum.
  */
-export function sheetCorner(p0: Pt, cur: Pt, grid: number): Pt {
-  const g = grid > 0 ? grid : 1.27, minW = 12.7, minH = 3.81;
+export function sheetCorner(p0: Pt, cur: Pt, grid: number, gridY?: number): Pt {
+  const g = grid > 0 ? grid : 1.27, gY = gridY && gridY > 0 ? gridY : g, minW = 12.7, minH = 3.81;   // GAL::GetGridSize: X and Y
   const w = Math.max(cur[0] - p0[0], minW), h = Math.max(cur[1] - p0[1], minH);
-  let gx = Math.round((p0[0] + w) / g) * g, gy = Math.round((p0[1] + h) / g) * g;
+  let gx = Math.round((p0[0] + w) / g) * g, gy = Math.round((p0[1] + h) / gY) * gY;
   if (gx - p0[0] < minW - 1e-9) gx += g;
-  if (gy - p0[1] < minH - 1e-9) gy += g;
+  if (gy - p0[1] < minH - 1e-9) gy += gY;
   return [r4(gx), r4(gy)];
 }
 /** A "#RRGGBB" / "#RRGGBBAA" preference colour as the file's (color r g b a); null when unset (COLOR4D::UNSPECIFIED). */
@@ -132,10 +132,14 @@ export function sheetNode(a: Pt, b: Pt, name: string, file: string): SNode {
   // DrawSheet: SetBorderColor( default_sheet_border_color ), SetBackgroundColor( default_sheet_background_color ):
   // Preferences > Schematic Editor > Editing Options > Defaults for New Objects (unset: the theme's)
   const border = hexColorNode(S.sheetBorder), back = hexColorNode(S.sheetBackground);
+  // SetBorderWidth( MilsToIU( default_line_thickness ) ) (Preferences > Schematic Editor > Editing Options), and the
+  // fields AutoplaceFields puts KiROUND( GetPenWidth() / 2 ) + 4 IU off the border
+  const mils = Number(S.defaultLineThickness), bw = Number.isFinite(mils) && mils > 0 ? r4(mils * 0.0254) : SHEET_BORDER;
+  const margin = Math.round(bw / 2 * 1e4) / 1e4 + 0.0004, nameOff = bw === SHEET_BORDER ? SHEET_NAME_OFF : r4(margin + 1.27 * 0.5), fileOff = bw === SHEET_BORDER ? SHEET_FILE_OFF : r4(margin + 1.27 * 0.4);
   return ["sheet", ["at", x0, y0], ["size", r4(x1 - x0), r4(y1 - y0)], ["exclude_from_sim", "no"], ["in_bom", "yes"], ["on_board", "yes"], ["dnp", "no"], ["fields_autoplaced", "yes"],
-    ["stroke", ["width", SHEET_BORDER], ["type", "solid"], ...(border ? [border] : [])], ["fill", back || ["color", 0, 0, 0, 0]], ["uuid", K.newUuid()],
-    fieldNode("Sheetname", name, ["at", x0, r4(y0 - SHEET_NAME_OFF), 0], { effects: ["effects", fontNode(1.27), ["justify", "left", "bottom"]] }),
-    fieldNode("Sheetfile", file, ["at", x0, r4(y1 + SHEET_FILE_OFF), 0], { effects: ["effects", fontNode(1.27), ["justify", "left", "top"]] })];
+    ["stroke", ["width", bw], ["type", "solid"], ...(border ? [border] : [])], ["fill", back || ["color", 0, 0, 0, 0]], ["uuid", K.newUuid()],
+    fieldNode("Sheetname", name, ["at", x0, r4(y0 - nameOff), 0], { effects: ["effects", fontNode(1.27), ["justify", "left", "bottom"]] }),
+    fieldNode("Sheetfile", file, ["at", x0, r4(y1 + fileOff), 0], { effects: ["effects", fontNode(1.27), ["justify", "left", "top"]] })];
 }
 // Sheet pin on one side of the sheet: SCH_SHEET_PIN::SetSide picks the spin style (left edge reads
 // rightwards = justify left, right edge leftwards = justify right, top like right, bottom like left)
@@ -158,22 +162,22 @@ export function tableNode(a: Pt, b: Pt, rows: number, cols: number, grid: number
  *  5 x 2 grid steps and rounded to the grid.  Integer schematic IU (100 nm) like KiCad, so the cuts land alike.
  *  `textSize` is the schematic's m_DefaultTextSize (Schematic Setup > Formatting), 1.27 mm when not given. */
 export const DEFAULT_TEXT_SIZE = 1.27;
-export function drawTableSize(origin: Pt, cur: Pt, grid: number, textSize = DEFAULT_TEXT_SIZE): { rows: number; cols: number; cw: number; ch: number } {
-  const IU = 10000, iu = (v: number) => Math.round(v * IU), g = iu(grid > 0 ? grid : 1.27), fs = Math.max(1, iu(textSize > 0 ? textSize : DEFAULT_TEXT_SIZE));
+export function drawTableSize(origin: Pt, cur: Pt, grid: number, textSize = DEFAULT_TEXT_SIZE, gridY?: number): { rows: number; cols: number; cw: number; ch: number } {
+  const IU = 10000, iu = (v: number) => Math.round(v * IU), g = iu(grid > 0 ? grid : 1.27), gY = gridY && gridY > 0 ? iu(gridY) : g, fs = Math.max(1, iu(textSize > 0 ? textSize : DEFAULT_TEXT_SIZE));
   const dx = iu(cur[0]) - iu(origin[0]), dy = iu(cur[1]) - iu(origin[1]);
   const cols = Math.max(1, Math.trunc(dx / (fs * 15))), rows = Math.max(1, Math.trunc(dy / (fs * 2)));
-  let cw = Math.max(g * 5, Math.trunc(dx / cols)), ch = Math.max(g * 2, Math.trunc(dy / rows));
-  cw = Math.round(cw / g) * g; ch = Math.round(ch / g) * g;
+  let cw = Math.max(g * 5, Math.trunc(dx / cols)), ch = Math.max(gY * 2, Math.trunc(dy / rows));   // gridSize.x / gridSize.y
+  cw = Math.round(cw / g) * g; ch = Math.round(ch / gY) * gY;
   return { rows, cols, cw: r4(cw / IU), ch: r4(ch / IU) };
 }
 /** The new table; each cell's text size is the default text size (cell->SetTextSize( m_DefaultTextSize )). */
-export function drawTableNode(origin: Pt, cur: Pt, grid: number, textSize = DEFAULT_TEXT_SIZE): SNode {
-  const z = drawTableSize(origin, cur, grid, textSize);
+export function drawTableNode(origin: Pt, cur: Pt, grid: number, textSize = DEFAULT_TEXT_SIZE, gridY?: number): SNode {
+  const z = drawTableSize(origin, cur, grid, textSize, gridY);
   return tableGridNode(origin, z.rows, z.cols, z.cw, z.ch, textSize > 0 ? textSize : DEFAULT_TEXT_SIZE);
 }
 /** The preview of the table being drawn: its outline and the row / column lines, as segments. */
-export function drawTableLines(origin: Pt, cur: Pt, grid: number, textSize = DEFAULT_TEXT_SIZE): number[][] {
-  const z = drawTableSize(origin, cur, grid, textSize), [x0, y0] = origin, x1 = x0 + z.cols * z.cw, y1 = y0 + z.rows * z.ch, out: number[][] = [];
+export function drawTableLines(origin: Pt, cur: Pt, grid: number, textSize = DEFAULT_TEXT_SIZE, gridY?: number): number[][] {
+  const z = drawTableSize(origin, cur, grid, textSize, gridY), [x0, y0] = origin, x1 = x0 + z.cols * z.cw, y1 = y0 + z.rows * z.ch, out: number[][] = [];
   for (let r = 0; r <= z.rows; r++) out.push([x0, y0 + r * z.ch, x1, y0 + r * z.ch]);
   for (let c = 0; c <= z.cols; c++) out.push([x0 + c * z.cw, y0, x0 + c * z.cw, y1]);
   return out;

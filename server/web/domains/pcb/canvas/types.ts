@@ -92,6 +92,8 @@ export type GeomFlags = {
   field?: string;
   /** a hidden field kept for the showHiddenText option */
   hiddenText?: boolean;
+  /** a hidden schematic field: the colour it is drawn in when forced visible (EDA_ITEM::SetForceVisible, Find) */
+  shownColor?: string;
   /** pcbnew group membership (render's group numbers) */
   group?: number[] | number;
   fp?: string;
@@ -161,6 +163,8 @@ export interface Item extends Omit<KItem, "geom" | "hiddenGeom" | "bbox"> {
   bbox: Box | null;
   /** the schematic theme its geometry was built under */
   schTheme?: string;
+  /** the hatched shapes among its geometry, for the knockouts (geom-pcb.ts ensureHatchKnockouts) */
+  hatchSrcs?: { outline: Pt[]; type: string; w: number; color: string; layer: string; z: number }[];
   /** the font generation (outline-text.ts FONT_GEN) its outline-font text was laid out under; undefined without any */
   fontGen?: number;
   /** a board outline item (Edge.Cuts) */
@@ -198,6 +202,8 @@ export interface Doc extends Omit<KDoc, "items" | "bbox" | "page">, SheetContext
   bbox: Box | null;
   page: Pt;
   schTheme?: string;
+  /** the geometry generation its hatch knockouts were worked out at (geom-pcb.ts ensureHatchKnockouts) */
+  hatchSig?: string;
   /** the font generation its items were last brought up to (geom.ts ensureFontGeom) */
   fontGen?: number;
   version: number;
@@ -282,7 +288,7 @@ export interface RenderOpts {
   subgrids?: boolean; gridItemColor?: string;
   selected?: Set<string> | null; highlight?: Set<string> | null; lockedIds?: Set<string> | null;
   /** schematic items brightened by a cross-probe (EDA_ITEM::IsBrightened), named as `highlight` names them */ schBrightened?: Set<string> | null;
-  showHiddenPins?: boolean; showHiddenText?: boolean; /** eeschema's View > Show Hidden Fields (not pcbnew's hidden text) */ showHiddenFields?: boolean; zoneOutline?: boolean; padNumbers?: boolean;
+  showHiddenPins?: boolean; showHiddenText?: boolean; /** eeschema's View > Show Hidden Fields (not pcbnew's hidden text) */ showHiddenFields?: boolean; /** "id#field:Name" of hidden schematic fields drawn as if shown (EDA_ITEM::SetForceVisible: Find's matches) */ forceVisible?: Set<string> | null; zoneOutline?: boolean; padNumbers?: boolean;
   /** GetShowPageLimits (m_ShowPageLimits / eeschema's show_page_limits): the paper outline; on unless false */ pageLimits?: boolean;
   /** PCB_VIEWERS_SETTINGS_BASE m_ViewersDisplay.m_DisplayGraphicsFill / m_DisplayTextFill off (View > Sketch Graphic Items, Sketch Text Items) */ sketchGraphics?: boolean; sketchText?: boolean;
   /** PCB_DISPLAY_OPTIONS m_RatsnestThickness: the ratsnest line width in pixels (0.5) */ ratsnestThickness?: number;

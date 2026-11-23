@@ -10,6 +10,7 @@ import { unescapeText } from "./text";
 import { expandTextVars, hasTextVars, sheetTextVars, varResolver } from "./sheet";
 import type { VarResolver, VarValue } from "./sheet";
 import type { BoxRot, Doc, ImageEntry, Item, Pt, SheetContext, StrokeInfo } from "./types";
+import { schFormat } from "./geom-sch";
 
 /** node's Buffer, when the module runs under node (tests, the MCP host); absent in a browser. */
 declare const Buffer: { from(s: string, encoding: string): ArrayLike<number> } | undefined;
@@ -119,7 +120,12 @@ export function buildTableGeom(doc: Doc, item: Item, n: SNode): void {
     const b = c.box; bboxAdd(item, b.x0, b.y0); bboxAdd(item, b.x1, b.y1);
     if (c.cs <= 0 || c.rs <= 0) continue;
     const cn = c.node; const ef = effectsOf(cn);
-    if (!isPcb) {
+    // SCH_PAINTER::getRenderColor with m_OverrideItemColors: a SCH_TABLECELL takes the layer colours, its text
+    // LAYER_NOTES and its fill LAYER_NOTES_BACKGROUND (transparent in every built-in theme, so no fill is drawn);
+    // the borders (SCH_TABLE::DrawBorders) keep their own stroke colour
+    const over = !isPcb && schFormat.overrideItemColors;
+    if (over) ef.color = undefined;
+    if (!isPcb && !over) {
       const f = fillOf(cn); const fill = f.type === "color" ? f.color : f.type === "background" ? SCH.body : f.type === "solid" || f.type === "outline" ? SCH.notes : null;
       if (fill) G(item, { t: "rect", x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0, wd: 0, color: fill, fill, layer, z: zBg, noStroke: true });
     }

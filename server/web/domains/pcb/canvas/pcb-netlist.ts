@@ -13,6 +13,7 @@ import { expandTextVars, hasTextVars } from "./sheet";
 import { unescapeText } from "./text";
 import { footprintVariant, footprintVariantNode, setFootprintVariant, symbolFlags, symbolFlagsForVariant, symbolInstance, symbolVariant, type FpFlags, strNumCmp } from "./variant-model";
 import { boardItemBox } from "./kicad-bbox";
+import { padPolygon } from "./geom-pcb";
 
 type Pt = [number, number];
 
@@ -62,7 +63,23 @@ export interface Netlist {
   netMap?: Map<string, NetEntry>;
   /** the sheet instances the hierarchy walk found, root first ("/" then "/Sub/") */
   instances?: SheetInstance[];
+  /** every placed symbol pin by "<symbol path>#<pin number>" (the symbol path as NetComponent.paths spells it): its
+   *  net, the strongest item physically connected to it (BACK_ANNOTATE's addConnections + GetDriverPriority) and the
+   *  winning driver of its whole net (the connectivity's resolved driver) */
+  pinDrivers?: Map<string, PinDrivers>;
+  /** NET_SETTINGS' netclass label assignments as CONNECTION_GRAPH rebuilds them: the "Netclass" fields of the labels
+   *  and directive labels on each net and of the directive labels on the border of a rule area its items lie in;
+   *  a bus hands its classes to its members */
+  netclassLabels?: Map<string, Set<string>>;
 }
+/** An item that can drive a net, with its CONNECTION_SUBGRAPH::GetDriverPriority (NONE 0, PIN 1, SHEET_PIN 2,
+ *  HIER_LABEL 3, LOCAL_LABEL 4, LOCAL_POWER_PIN 5, GLOBAL_POWER_PIN 6, GLOBAL 7). */
+export interface DriverItem {
+  kind: string; inst: number; id: string; prio: number; x: number; y: number;
+  /** a symbol pin's number and SCH_PIN::IsPower; a sheet pin's name; a label's text */
+  pin?: string; power?: boolean; sheetPin?: string; text?: string;
+}
+export interface PinDrivers { net: string; physical: DriverItem | null; resolved: DriverItem | null }
 /** An item of a net on one sheet instance: a wire, label, junction, no-connect, bus entry, a symbol pin or a sheet pin. */
 export interface NetMember {
   inst: number; id: string; kind: string;
@@ -73,7 +90,9 @@ export interface NetMember {
 }
 export interface NetEntry { name: string; bus: boolean; members: NetMember[]; busMembers: string[];
   /** a bus group's aliases with their members (CONNECTION_PRESENTATION's "Bus Alias … Members" rows) */
-  aliases?: { name: string; members: string[] }[] }
+  aliases?: { name: string; members: string[] }[];
+  /** a net's winning driver (its priority is CONNECTION_SUBGRAPH::GetDriverPriority's) */
+  driver?: DriverItem }
 /** What the project adds to the sheets: its bus aliases (schematic.bus_aliases) and text variables (text_variables). */
 export interface NetlistOptions { busAliases?: BusAliases; textVars?: Record<string, string> | null }
 export interface SheetInstance { index: number; human: string; file: string; uuidPath: string[]; sheetName: string }
@@ -125,10 +144,12 @@ export function busVector(text: string): string[] | null {
 /** LIB_SYMBOL::IsLocalPower: the library copy the symbol draws from carries (power local). */
 function libIsLocalPower(doc: KDoc, n: SNode): boolean { const l = resolveLib(doc, str((kid(n, "lib_name") || kid(n, "lib_id") || [])[1])); const p = l && kid(l, "power"); return !!p && str(p[1]) === "local"; }
 const P_PIN = 1, P_SHEET_PIN = 2, P_HIER = 3, P_LOCAL = 4, P_LOCAL_POWER = 4.5, P_BUS_MEMBER = 5, P_POWER = 6, P_GLOBAL = 7;
+/** CONNECTION_SUBGRAPH::PRIORITY as GetDriverPriority returns it */
+const KP_NONE = 0, KP_PIN = 1, KP_SHEET_PIN = 2, KP_HIER = 3, KP_LOCAL = 4, KP_LOCAL_POWER = 5, KP_GLOBAL_POWER = 6, KP_GLOBAL = 7;
 /** `shape`: a sheet pin's (compareDrivers rule 4); `path` / `id`: stableDriverIdentity of a weak driver (the sheet path, the sheet pin's uuid). */
-interface Driver { prio: number; name: string; depth: number; shape?: string; path?: string; id?: string }
+interface Driver { prio: number; name: string; depth: number; shape?: string; path?: string; id?: string; src?: DriverItem }
 /** `onBoard`: PRIORITY::PIN (false: PRIORITY::NONE, a symbol excluded from the board or a #-reference); `path`: its sheet path. */
-interface PinRef { comp: string | null; ref: string; unitRef: string; pin: SymPin; pins: SymPin[]; uuid: string; power: boolean; inNetlist: boolean; onBoard: boolean; path: string }
+interface PinRef { comp: string | null; ref: string; unitRef: string; pin: SymPin; pins: SymPin[]; uuid: string; power: boolean; inNetlist: boolean; onBoard: boolean; path: string; src?: DriverItem }
 /** `netPrefix`: PathHumanReadable with the sheet names escaped (a "/" in a name is {slash}), the prefix of the sheet's local nets. */
 interface Instance { sheet: SheetFile; uuidPath: string[]; human: string; depth: number; index: number; sheetUuids: string[]; name: string; netPrefix: string; parent: Instance | null; sheetNode: SNode | null }
 /** getElectricalTypeLabel: ${CONNECTION_TYPE} of a global / hierarchical label or a sheet pin. */
@@ -262,6 +283,19 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
   const warnings: string[] = [];
   const textVars = (opts && opts.textVars) || null;
   const uf = new UnionFind();
+  // the subgraphs (what touches on one sheet, before names join anything): a twin of `uf` that takes only the
+  // physical joins (`link`)
+  const sg = new UnionFind(), ufAdd = uf.add.bind(uf);
+  uf.add = (): number => { sg.add(); return ufAdd(); };
+  const link = (a: number, b: number): void => { uf.union(a, b); sg.union(a, b); };
+  /** the items that can drive a net, by the node they sit on, in the order they were read */
+  const sgItems = new Map<number, DriverItem[]>();
+  const addSg = (n: number, d: DriverItem): void => { const l = sgItems.get(n); if (l) l.push(d); else sgItems.set(n, [d]); };
+  /** every placed pin: its symbol path and number, its node and its own driver item */
+  const pinOcc: { key: string; t: number; src: DriverItem }[] = [];
+  /** the netclasses the items of a node give its net (Netclass fields, rule areas) */
+  const classAt = new Map<number, Set<string>>();
+  const addClass = (n: number, c: string): void => { if (!c) return; const l = classAt.get(n); if (l) l.add(c); else classAt.set(n, new Set([c])); };
   const keyNodes = new Map<string, number>();
   const keyNode = (k: string): number => { let n = keyNodes.get(k); if (n === undefined) { n = uf.add(); keyNodes.set(k, n); } return n; };
   const drivers = new Map<number, Driver[]>();          // node -> drivers attached to it
@@ -406,6 +440,8 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
     for (const it of doc.items.values()) if (it.kind === "group") { const m = kid(it.node, "members") as SNode | null; const g = { uuid: kidStr(it.node, "uuid") || it.id, name: typeof it.node[1] === "string" ? str(it.node[1]) : "" }; if (m) for (const id of m.slice(1)) symGroup.set(str(id), g); }
     interface Line { a: Pt; b: Pt; node: number; bus: boolean }
     const lines: Line[] = [];
+    /** what the rule areas of the sheet may contain: wires and buses, pins and labels by their node */
+    const areaLines: { node: number; a: Pt; b: Pt }[] = [], areaPoints: { node: number; p: Pt }[] = [];
     const ends = new Map<string, number[]>();           // point -> line indices ending there
     for (const it of doc.items.values()) {
       if (it.kind !== "wire" && it.kind !== "bus") continue;
@@ -414,6 +450,7 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
       addMem(node, { inst: I, id: it.id, kind: it.kind });
       for (let k = 1; k < pts.length; k++) {
         const li = lines.length; lines.push({ a: pts[k - 1], b: pts[k], node, bus: it.kind === "bus" });
+        areaLines.push({ node, a: pts[k - 1], b: pts[k] });
         for (const p of [pts[k - 1], pts[k]]) { const key = pkey(p); const l = ends.get(key); if (l) l.push(li); else ends.set(key, [li]); }
       }
     }
@@ -430,13 +467,13 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
       return out;
     };
     // line ends meet line ends; an end resting on the middle of another line joins it only through a junction
-    for (const l of lines) for (const p of [l.a, l.b]) for (const n of lineEndsAt(p, l.bus)) uf.union(l.node, n);
+    for (const l of lines) for (const p of [l.a, l.b]) for (const n of lineEndsAt(p, l.bus)) link(l.node, n);
     const junctions: { id: string; p: Pt }[] = [], junctionAt = new Set<string>();
     for (const it of doc.items.values()) {
       if (it.kind !== "junction") continue;
       const p = (atOf(it.node) as number[]).slice(0, 2) as Pt;
       // CONNECTION_GRAPH::updateItemConnectivity: a junction connects the wires that pass through it as midpoints
-      for (const bus of [false, true]) { const ns = linesThrough(p, bus); for (let k = 1; k < ns.length; k++) uf.union(ns[0], ns[k]); }
+      for (const bus of [false, true]) { const ns = linesThrough(p, bus); for (let k = 1; k < ns.length; k++) link(ns[0], ns[k]); }
       junctions.push({ id: it.id, p }); junctionAt.add(pkey(p));
     }
     /** the lines an item with a connection point at p meets: those ending there, and with a junction there those passing through */
@@ -444,22 +481,27 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
     // point terminals: a node each, joined to the line under them and to one another
     const points = new Map<string, number[]>();
     // KiCad merges same-named drivers on this sheet before connecting global drivers across sheets.
-    const connectGlobal = (n: number, name: string, prio: number): void => {
+    const connectGlobal = (n: number, name: string, prio: number, src?: DriverItem): void => {
       uf.union(n, keyNode(`${I}|local:${name}`));
       uf.union(n, keyNode("global:" + name));
-      addDriver(n, { prio, name: escapeNetName(name), depth: inst.depth });
+      addDriver(n, { prio, name: escapeNetName(name), depth: inst.depth, src });
     };
+    /** CONNECTION_SUBGRAPH::GetNetclassesForDriver: an item's "Netclass" fields, their variables resolved */
+    const fieldClasses = (n: number, node: SNode, k: string, shape?: string): void => {
+      for (const p of kids(node, "property") as SNode[]) if (str(p[1]) === "Netclass") addClass(n, netText(str(p[2]), node, k, inst, shape));
+    };
+
     /** `through`: a label, which also takes the line whose middle it sits on (SCH_LABEL_BASE::UpdateDanglingState) */
     const terminal = (p: Pt, bus: boolean, through = false): number => {
       const n = uf.add();
-      for (const ln of through ? linesThrough(p, bus) : linesAt(p, bus)) uf.union(n, ln);
+      for (const ln of through ? linesThrough(p, bus) : linesAt(p, bus)) link(n, ln);
       const key = (bus ? "b" : "w") + pkey(p); const l = points.get(key);
-      if (l) { uf.union(l[0], n); l.push(n); } else points.set(key, [n]);
+      if (l) { link(l[0], n); l.push(n); } else points.set(key, [n]);
       return n;
     };
     const path = "/" + inst.uuidPath.join("/");
     // legacy invisible power-input pins of ordinary symbols: tied to the global net of their name only when nothing is attached
-    const hiddenPower: { t: number; name: string; p: Pt }[] = [];
+    const hiddenPower: { t: number; name: string; p: Pt; src: DriverItem }[] = [];
     for (const it of doc.items.values()) {
       const n = it.node, k = it.kind;
       if (k === "label" || k === "global_label" || k === "hierarchical_label") {
@@ -467,17 +509,23 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
         const text = netText(str(n[1]), n, k, inst, shape), p = (atOf(n) as number[]).slice(0, 2) as Pt, bus = isBusLabel(text);
         const t = terminal(p, bus, true);
         addMem(t, { inst: I, id: it.id, kind: k, text });
+        const src: DriverItem = { kind: k, inst: I, id: it.id, prio: k === "label" ? KP_LOCAL : k === "global_label" ? KP_GLOBAL : KP_HIER, x: p[0], y: p[1], text };
+        addSg(t, src); fieldClasses(t, n, k, shape); areaPoints.push({ node: t, p });
         if (bus) {
           const l = busLabels.get(t) || []; busLabels.set(t, l);
           l.push({ text, prio: k === "label" ? P_LOCAL : k === "global_label" ? P_GLOBAL : P_HIER, inst, conn: busConnection(text, busAliases) });
           uf.union(t, keyNode(k === "global_label" ? "gbus:" + text : k === "label" ? `${I}|lbus:${text}` : `${I}|hbus:${text}`));
-        } else if (k === "label") { uf.union(t, keyNode(`${I}|local:${text}`)); addDriver(t, { prio: P_LOCAL, name: inst.netPrefix + escapeNetName(text), depth: inst.depth }); }
-        else if (k === "global_label") connectGlobal(t, text, P_GLOBAL);
+        } else if (k === "label") { uf.union(t, keyNode(`${I}|local:${text}`)); addDriver(t, { prio: P_LOCAL, name: inst.netPrefix + escapeNetName(text), depth: inst.depth, src }); }
+        else if (k === "global_label") connectGlobal(t, text, P_GLOBAL, src);
         // a hierarchical label also names the net on its own sheet: it joins the local labels of that name
-        else { uf.union(t, keyNode(`${I}|hier:${text}`)); uf.union(t, keyNode(`${I}|local:${text}`)); addDriver(t, { prio: P_HIER, name: inst.netPrefix + escapeNetName(text), depth: inst.depth }); }
+        else { uf.union(t, keyNode(`${I}|hier:${text}`)); uf.union(t, keyNode(`${I}|local:${text}`)); addDriver(t, { prio: P_HIER, name: inst.netPrefix + escapeNetName(text), depth: inst.depth, src }); }
       } else if (k === "netclass_flag" || k === "directive_label") {
-        // a directive label sits on a net without naming it
-        addMem(terminal((atOf(n) as number[]).slice(0, 2) as Pt, false, true), { inst: I, id: it.id, kind: k, text: str(n[1]) });
+        // a directive label sits on a net without naming it (on a bus when no wire passes there); its Netclass field
+        // assigns the net's class
+        const p = (atOf(n) as number[]).slice(0, 2) as Pt, onBus = !linesThrough(p, false).length && linesThrough(p, true).length > 0;
+        const t = terminal(p, onBus, true);
+        addMem(t, { inst: I, id: it.id, kind: k, text: str(n[1]) });
+        fieldClasses(t, n, "directive_label");
       } else if (k === "sheet") {
         const child = childOf.get(I + "|" + it.id);
         const sheetName = propVal(n, "Sheetname") || propVal(n, "Sheet name");
@@ -488,11 +536,13 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
           const text = netText(str(pin[1]), pin, "sheet_pin", owner, shape), p = (atOf(pin) as number[]).slice(0, 2) as Pt, bus = isBusLabel(text);
           const t = terminal(p, bus);
           addMem(t, { inst: I, id: it.id, kind: "sheet_pin", pin: str(pin[1]), text: sheetName });
+          const src: DriverItem = { kind: "sheet_pin", inst: I, id: it.id, prio: KP_SHEET_PIN, x: p[0], y: p[1], sheetPin: str(pin[1]), text };
+          addSg(t, src);
           if (bus) {
             const l = busLabels.get(t) || []; busLabels.set(t, l); l.push({ text, prio: P_SHEET_PIN, inst, conn: busConnection(text, busAliases), shape });
             if (child !== undefined) uf.union(t, keyNode(`${child}|hbus:${text}`));
           } else {
-            sheetPinNodes.add(t); addDriver(t, { prio: P_SHEET_PIN, name: inst.netPrefix + escapeNetName(text), depth: inst.depth, shape, path, id: kidStr(pin, "uuid") || it.id + "#" + text });
+            sheetPinNodes.add(t); addDriver(t, { prio: P_SHEET_PIN, name: inst.netPrefix + escapeNetName(text), depth: inst.depth, shape, path, id: kidStr(pin, "uuid") || it.id + "#" + text, src });
             if (child !== undefined) uf.union(t, keyNode(`${child}|hier:${text}`));
           }
         }
@@ -556,15 +606,22 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
           const t = terminal([pin.x, pin.y], false);
           pinTerms.push({ pin, t }); const same = byNumber.get(pin.number); if (same) same.push(t); else byNumber.set(pin.number, [t]);
           addMem(t, { inst: I, id: it.id, kind: "pin", pin: pin.number, pinName: pin.name, ref: unitRef, symRef: ref, power });
+          // GetDriverPriority: SCH_PIN::IsGlobalPower (a power symbol's power input, or the legacy invisible power input
+          // of an ordinary symbol), IsLocalPower, then NONE for a symbol excluded from the board or a "#" reference
+          const pinPrio = pin.type === "power_in" && localPower ? KP_LOCAL_POWER : pin.type === "power_in" && (power || pin.hidden) ? KP_GLOBAL_POWER
+            : !onBoard || ref.startsWith("#") ? KP_NONE : KP_PIN;
+          const src: DriverItem = { kind: "pin", inst: I, id: it.id, prio: pinPrio, x: pin.x, y: pin.y, pin: pin.number, power: pinPrio >= KP_LOCAL_POWER };
+          addSg(t, src); areaPoints.push({ node: t, p: [pin.x, pin.y] });
+          pinOcc.push({ key: "/" + [...inst.sheetUuids, it.id].join("/") + "#" + pin.number, t, src });
           // CONNECTION_GRAPH: a local power pin joins the sheet's local label cache (sheet, name), not the global one
-          if (localPower && value && pin.type === "power_in") { uf.union(t, keyNode(`${I}|local:${value}`)); addDriver(t, { prio: P_LOCAL_POWER, name: inst.netPrefix + escapeNetName(value), depth: inst.depth }); continue; }
-          if (power && value && pin.type === "power_in") { connectGlobal(t, value, P_POWER); continue; }
+          if (localPower && value && pin.type === "power_in") { uf.union(t, keyNode(`${I}|local:${value}`)); addDriver(t, { prio: P_LOCAL_POWER, name: inst.netPrefix + escapeNetName(value), depth: inst.depth, src }); continue; }
+          if (power && value && pin.type === "power_in") { connectGlobal(t, value, P_POWER, src); continue; }
           // generateGlobalPowerPinSubGraphs: an invisible power-input pin of an ordinary symbol, decided once the sheet is read
-          if (!power && pin.hidden && pin.type === "power_in") hiddenPower.push({ t, name: pin.name, p: [pin.x, pin.y] });
+          if (!power && pin.hidden && pin.type === "power_in") hiddenPower.push({ t, name: pin.name, p: [pin.x, pin.y], src });
           if (pin.type === "no_connect") ncNodes.add(t);
           // GetDriverPriority: PRIORITY::PIN for a symbol that reaches the board, PRIORITY::NONE for a #-reference
           // (a PWR_FLAG's pin) or a symbol excluded from the board: those name a net only when no other pin is on it
-          const pr: PinRef = { comp: comp ? ref : null, ref, unitRef, pin, pins, uuid: it.id, power, inNetlist, onBoard: inNetlist && onBoard, path };
+          const pr: PinRef = { comp: comp ? ref : null, ref, unitRef, pin, pins, uuid: it.id, power, inNetlist, onBoard: inNetlist && onBoard, path, src };
           const l = pinsAt.get(t); if (l) l.push(pr); else pinsAt.set(t, [pr]);
           if (comp) (compPins.get(ref) as PinRef[]).push(pr);
         }
@@ -572,7 +629,7 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
         // group its named pins (a member may name one contact of a stacked pin such as [A1,A12])
         const lib = resolveLib(doc, kidStr(n, "lib_name") || kidStr(n, "lib_id")) || resolveLib(doc, kidStr(n, "lib_id"));
         if (lib) {
-          if (yes(lib, "duplicate_pin_numbers_are_jumpers", false)) for (const ts of byNumber.values()) for (let j = 1; j < ts.length; j++) uf.union(ts[0], ts[j]);
+          if (yes(lib, "duplicate_pin_numbers_are_jumpers", false)) for (const ts of byNumber.values()) for (let j = 1; j < ts.length; j++) link(ts[0], ts[j]);
           const jg = kid(lib, "jumper_pin_groups") as SNode | null;
           if (jg) for (const g of jg.slice(1)) {
             if (!isList(g)) continue;
@@ -583,7 +640,7 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
               if (!hit) hit = pinTerms.find((q) => q.pin.number.startsWith("[") && expandStacked(q.pin.number).pins.includes(number));
               if (hit && !found.includes(hit.t)) found.push(hit.t);
             }
-            for (let j = 1; j < found.length; j++) uf.union(found[0], found[j]);
+            for (let j = 1; j < found.length; j++) link(found[0], found[j]);
           }
         }
       }
@@ -607,14 +664,34 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
       const p1: Pt = [x, y], p2: Pt = [x + (sz ? num(sz[1]) : 0), y + (sz ? num(sz[2]) : 0)];
       const ts: number[] = [];
       for (const p of [p1, p2]) if (!linesThrough(p, true).length) ts.push(terminal(p, false));
-      if (ts.length === 2) uf.union(ts[0], ts[1]);
+      if (ts.length === 2) link(ts[0], ts[1]);
       addMem(ts.length ? ts[0] : uf.add(), { inst: I, id: it.id, kind: "bus_entry" });
     }
     // "ERC will warn about this: user has wired up an invisible pin": the implicit global net only for a pin nothing touches
     for (const hp of hiddenPower) {
       const key = pkey(hp.p), l = points.get("w" + key);
       const attached = (l && l.length > 1) || linesAt(hp.p, false).length > 0 || ncAt.has(key) || junctionAt.has(key);
-      if (!attached && hp.name) connectGlobal(hp.t, hp.name, P_POWER);
+      if (!attached && hp.name) connectGlobal(hp.t, hp.name, P_POWER, hp.src);
+    }
+    // SCH_RULE_AREA::RefreshContainedItemsAndDirectives: the directive labels whose connection point is on the area's
+    // border give their Netclass fields to the wires and buses the area collides with and to the pins and labels
+    // whose connection point lies in it (GetResolvedNetclasses)
+    for (const it of doc.items.values()) {
+      if (it.kind !== "rule_area") continue;
+      const pl = kid(it.node, "polyline") as SNode | null, poly = (pl ? ptsOf(pl) : []) as Pt[];
+      if (poly.length < 3) continue;
+      const onEdge = (p: Pt): boolean => poly.some((v, i) => distSeg(p, v, poly[(i + 1) % poly.length]) <= 5e-4);
+      const classes: string[] = [];
+      for (const dl of doc.items.values()) {
+        if (dl.kind !== "netclass_flag" && dl.kind !== "directive_label") continue;
+        if (!onEdge((atOf(dl.node) as number[]).slice(0, 2) as Pt)) continue;
+        for (const p of kids(dl.node, "property") as SNode[]) if (str(p[1]) === "Netclass") { const c = netText(str(p[2]), dl.node, "directive_label", inst); if (c) classes.push(c); }
+      }
+      if (!classes.length) continue;
+      const inside = (p: Pt): boolean => { if (onEdge(p)) return true; let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < ((b[0] - a[0]) * (p[1] - a[1])) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+      const cross = (a: Pt, b: Pt, c: Pt, d: Pt): boolean => { const o = (p: Pt, q: Pt, r: Pt): number => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])); return o(a, b, c) !== o(a, b, d) && o(c, d, a) !== o(c, d, b); };
+      for (const ln of areaLines) if (inside(ln.a) || inside(ln.b) || poly.some((v, i) => cross(ln.a, ln.b, v, poly[(i + 1) % poly.length]))) for (const c of classes) addClass(ln.node, c);
+      for (const ap of areaPoints) if (inside(ap.p)) for (const c of classes) addClass(ap.node, c);
     }
   }
 
@@ -671,11 +748,11 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
   for (const n of sheetPinNodes) groupOf(n).sheetPin = true;
   const nets = new Map<string, { ref: string; pin: string }[]>();
   /** the group's name; `weak`: no label or power pin names it (m_strong_driver false); `ident`: stableDriverIdentity of its driver */
-  interface Named { name: string; weak: boolean; ident: string }
+  interface Named { name: string; weak: boolean; ident: string; src?: DriverItem }
   const computeName = (g: Group): Named => {
     const strong = g.drivers.filter((d) => d.prio >= P_HIER);
-    if (strong.length) return { name: strong.sort(better)[0].name, weak: false, ident: "" };
-    if (g.drivers.length) { const d = g.drivers.sort(better)[0]; return { name: d.name, weak: d.prio === P_SHEET_PIN, ident: (d.path || "") + "|" + (d.id || "") }; }   // a sheet pin with nothing behind it
+    if (strong.length) { const d = strong.sort(better)[0]; return { name: d.name, weak: false, ident: "", src: d.src }; }
+    if (g.drivers.length) { const d = g.drivers.sort(better)[0]; return { name: d.name, weak: d.prio === P_SHEET_PIN, ident: (d.path || "") + "|" + (d.id || ""), src: d.src }; }   // a sheet pin with nothing behind it
     // GetDriverPriority: the pins that reach the board (PRIORITY::PIN) first; a net of only #-references and symbols
     // excluded from the board is named by those (PRIORITY::NONE)
     const onBoard = g.pins.filter((p) => p.onBoard), cands = onBoard.length ? onBoard : g.pins;
@@ -684,7 +761,7 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
     const ranked = cands.map((p) => ({ p, name: defaultPinNet(p, force) })).sort((a, b) => better({ prio: P_PIN, depth: 0, name: a.name }, { prio: P_PIN, depth: 0, name: b.name })
       || (a.p.uuid < b.p.uuid ? -1 : a.p.uuid > b.p.uuid ? 1 : 0) || (a.p.pin.number < b.p.pin.number ? -1 : a.p.pin.number > b.p.pin.number ? 1 : 0));
     const top = ranked[0];
-    return top ? { name: top.name, weak: true, ident: top.p.path + "|" + top.p.uuid + "|" + top.p.pin.number } : { name: "", weak: false, ident: "" };
+    return top ? { name: top.name, weak: true, ident: top.p.path + "|" + top.p.uuid + "|" + top.p.pin.number, src: top.p.src } : { name: "", weak: false, ident: "" };
   };
   const named = new Map<Group, Named>();
   for (const g of groups.values()) named.set(g, computeName(g));
@@ -741,6 +818,7 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
     const name = bus ? bus.name : groupName(r); if (!name) continue;
     let e = netMap.get(name);
     if (!e) { e = { name, bus: !!bus, members: [], busMembers: [] }; netMap.set(name, e); }
+    if (!bus && !e.driver) { const g = groups.get(r), nm = g ? named.get(g) : undefined; if (nm && nm.src) e.driver = nm.src; }
     e.members.push(...members);
     if (bus && bus.aliases.length) e.aliases = bus.aliases;
     if (bus) for (const m of bus.members) { const mn = groupName(uf.find(m)); if (mn && !e.busMembers.includes(mn)) e.busMembers.push(mn); }
@@ -763,8 +841,29 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
     fields.Datasheet = first((r) => r.datasheet); fields.Description = first((r) => r.description);
     comp.value = first((r) => r.value) || "~"; comp.footprint = first((r) => r.footprint); comp.fields = fields;
   }
+  // ---- each pin's drivers (BACK_ANNOTATE::processNetNameChange): the items of its subgraph in the order they were
+  // read, the pin itself first, and its net's winning driver
+  const islandItems = new Map<number, DriverItem[]>();
+  for (const [n, l] of sgItems) { const r = sg.find(n); const x = islandItems.get(r); if (x) x.push(...l); else islandItems.set(r, l.slice()); }
+  const pinDrivers = new Map<string, PinDrivers>();
+  for (const occ of pinOcc) {
+    if (pinDrivers.has(occ.key)) continue;
+    let physical: DriverItem | null = null, best = KP_NONE;
+    for (const d of [occ.src, ...(islandItems.get(sg.find(occ.t)) || []).filter((x) => x !== occ.src)]) if (d.prio > best) { physical = d; best = d.prio; }
+    const g = groups.get(uf.find(occ.t)), nm = g ? named.get(g) : undefined;
+    pinDrivers.set(occ.key, { net: nm ? nm.name : "", physical, resolved: (nm && nm.src) || null });
+  }
+  // ---- CONNECTION_GRAPH's checkNetclassDrivers: the classes of every subgraph of a net go to its name, a bus's to its members too
+  const netclassLabels = new Map<string, Set<string>>();
+  const assign = (name: string, cs: Set<string>): void => { if (!name || !cs.size) return; const l = netclassLabels.get(name); if (l) for (const c of cs) l.add(c); else netclassLabels.set(name, new Set(cs)); };
+  for (const [n, cs] of classAt) {
+    const r = uf.find(n), bus = busRoots.get(r);
+    if (!bus) { assign(groupName(r), cs); continue; }
+    assign(bus.name, cs);
+    for (const m of bus.members) assign(groupName(uf.find(m)), cs);
+  }
   const instOut: SheetInstance[] = instances.map((i) => ({ index: i.index, human: i.human, file: i.sheet.file, uuidPath: i.uuidPath, sheetName: i.name }));
-  return { components: Array.from(components.values()), nets, warnings, netMap, instances: instOut };
+  return { components: Array.from(components.values()), nets, warnings, netMap, instances: instOut, pinDrivers, netclassLabels };
 }
 
 /** The project file's part of the netlist: schematic.bus_aliases and text_variables of a parsed .kicad_pro (or its text). */
@@ -1328,16 +1427,6 @@ export function planUpdate(doc: KDoc, netlist: Netlist, o: UpdateOptions = {}): 
       say("warning", `Copper zone on ${zoneLayerDescription(doc, it.node)} at (${fmt(p0[0])}, ${fmt(p0[1])}) has no pads connected to net "${cur}".`);
     }
   }
-  // copper that sat on a renamed net follows it: BOARD_COMMIT::Push propagates the pads' new nets along the tracks that
-  // touch them; the tracks of a net no pad keeps take the pad's new name
-  const stillPadNets = new Set<string>();
-  for (const fp of fps) { const node = nodeOf.get(fp.id) || current(fp); for (const p of padsOf(node)) { const n = netNameOf(doc, p); if (n) stillPadNets.add(n); } }
-  for (const it of doc.items.values()) {
-    if (it.kind !== "segment" && it.kind !== "arc") continue;
-    const cur = netNameOf(doc, it.node); if (!cur || stillPadNets.has(cur)) continue;
-    const to = oldToNew.get(cur); if (!to) continue;
-    modified.set(it.id, setItemNet(it, to));
-  }
 
   // ---- group nesting and the staged group nodes
   for (const g of groups.values()) {
@@ -1370,6 +1459,25 @@ export function planUpdate(doc: KDoc, netlist: Netlist, o: UpdateOptions = {}): 
     }
   }
 
+  // BOARD_COMMIT::Push: the connectivity propagates the pads' nets along the copper that touches them.  Copper that
+  // reaches no pad keeps its net, but a net no pad keeps any more goes with the update: such copper takes the net
+  // the net was renamed to (where KiCad would leave it on a removed net)
+  {
+    const finalFps: SNode[] = [];
+    for (const fp of fps) if (!removed.includes(fp.id)) finalFps.push(nodeOf.get(fp.id) || current(fp));
+    finalFps.push(...added);
+    const stillPadNets = new Set<string>();
+    for (const node of finalFps) for (const p of padsOf(node)) { const n = netNameOf(doc, p); if (n) stillPadNets.add(n); }
+    const prop = propagateNets(doc, finalFps, (it) => modified.get(it.id) || it.node);
+    for (const it of doc.items.values()) {
+      if (it.kind !== "segment" && it.kind !== "arc" && it.kind !== "via" && !/^gr_(line|arc|circle|rect|poly)$/.test(it.kind)) continue;
+      const base = modified.get(it.id) || it.node, cur = netNameOf(doc, base);
+      let to = prop.nets.get(it.id) || "";
+      if (!to && it.kind !== "via" && prop.padless.has(it.id) && cur && !stillPadNets.has(cur)) to = oldToNew.get(cur) || "";
+      if (to && to !== cur) modified.set(it.id, setItemNet(Object.assign({}, it, { node: base }), to));
+    }
+  }
+
   if (applied) {
     // testConnectivity: every pin of a component has a pad of its number in its footprint
     for (const c of comps) {
@@ -1391,6 +1499,172 @@ export function planUpdate(doc: KDoc, netlist: Netlist, o: UpdateOptions = {}): 
   report.push({ severity: "action", text: "" }, { severity: "action", text: "" });
   say("info", `Total warnings: ${warnings}, errors: ${errors}.`);
   return { report, modified, removed, added, addedIds, warnings, errors };
+}
+
+// ---------------------------------------------------------------- BOARD_COMMIT's net propagation
+/** A copper primitive on its layers: a capsule (a segment of radius r; a circle when a = b) or a polygon. */
+type Prim = { a: Pt; b: Pt; r: number } | { pts: Pt[] };
+interface CnItem { id: string; net: string; layers: Set<string>; prims: Prim[]; box: [number, number, number, number]; canChange: boolean; pad: boolean; free: boolean }
+const segDistSeg = (a: Pt, b: Pt, c: Pt, d: Pt): number => {
+  const o = (p: Pt, q: Pt, r: Pt): number => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+  if (o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0) return 0;
+  return Math.min(distSeg(a, c, d), distSeg(b, c, d), distSeg(c, a, b), distSeg(d, a, b));
+};
+const inPolygon = (p: Pt, poly: Pt[]): boolean => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < ((b[0] - a[0]) * (p[1] - a[1])) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+const EPS = 1e-6;
+function primsCollide(x: Prim, y: Prim): boolean {
+  if ("r" in x && "r" in y) return segDistSeg(x.a, x.b, y.a, y.b) <= x.r + y.r + EPS;
+  if ("r" in x || "r" in y) {
+    const c = ("r" in x ? x : y) as { a: Pt; b: Pt; r: number }, poly = ("pts" in x ? x : y) as { pts: Pt[] };
+    if (inPolygon(c.a, poly.pts) || inPolygon(c.b, poly.pts)) return true;
+    return poly.pts.some((v, i) => segDistSeg(c.a, c.b, v, poly.pts[(i + 1) % poly.pts.length]) <= c.r + EPS);
+  }
+  const p = (x as { pts: Pt[] }).pts, q = (y as { pts: Pt[] }).pts;
+  if (p.some((v) => inPolygon(v, q)) || q.some((v) => inPolygon(v, p))) return true;
+  return p.some((v, i) => q.some((w, j) => segDistSeg(v, p[(i + 1) % p.length], w, q[(j + 1) % q.length]) <= EPS));
+}
+/** The points of an arc through start, mid and end (a straight run when they are in line). */
+function arcPts(a: Pt, m: Pt, b: Pt): Pt[] {
+  const d = 2 * (a[0] * (m[1] - b[1]) + m[0] * (b[1] - a[1]) + b[0] * (a[1] - m[1]));
+  if (Math.abs(d) < 1e-12) return [a, b];
+  const sq = (p: Pt): number => p[0] * p[0] + p[1] * p[1];
+  const cx = (sq(a) * (m[1] - b[1]) + sq(m) * (b[1] - a[1]) + sq(b) * (a[1] - m[1])) / d, cy = (sq(a) * (b[0] - m[0]) + sq(m) * (a[0] - b[0]) + sq(b) * (m[0] - a[0])) / d;
+  const r = Math.hypot(a[0] - cx, a[1] - cy), T = 2 * Math.PI, norm = (t: number): number => ((t % T) + T) % T;
+  const t0 = Math.atan2(a[1] - cy, a[0] - cx), tm = norm(Math.atan2(m[1] - cy, m[0] - cx) - t0), t1 = norm(Math.atan2(b[1] - cy, b[0] - cx) - t0);
+  const sweep = tm <= t1 ? t1 : t1 - T, n = Math.max(4, Math.ceil(Math.abs(sweep) / (Math.PI / 32)));
+  const out: Pt[] = []; for (let i = 0; i <= n; i++) { const t = t0 + (sweep * i) / n; out.push([cx + r * Math.cos(t), cy + r * Math.sin(t)]); }
+  return out;
+}
+const chain = (pts: Pt[], r: number, closed: boolean): Prim[] => { const out: Prim[] = []; for (let i = 0; i + 1 < pts.length; i++) out.push({ a: pts[i], b: pts[i + 1], r }); if (closed && pts.length > 2) out.push({ a: pts[pts.length - 1], b: pts[0], r }); return out; };
+/** A copper drawing (gr_* / a custom pad's primitive) as primitives, in its own coordinates. */
+function shapePrims(n: SNode, map: (p: Pt) => Pt): Prim[] {
+  const w = num(((kid(n, "width") || (kid(kid(n, "stroke") as SNode || [], "width"))) as SNode | null || [])[1], 0);
+  const fl = kid(n, "fill") as SNode | null, filled = !!fl && (str(fl[1]) === "yes" || str(fl[1]) === "solid" || (isList(fl[1]) && str((fl[1] as SNode)[1]) === "solid"));
+  const pt = (k: string): Pt | null => { const c = kid(n, k) as SNode | null; return c ? map([num(c[1]), num(c[2])]) : null; };
+  const k = str(n[0]).replace(/^(gr|fp)_/, "");
+  if (k === "line") { const a = pt("start"), b = pt("end"); return a && b ? [{ a, b, r: w / 2 }] : []; }
+  if (k === "arc") { const a = pt("start"), m = pt("mid"), b = pt("end"); return a && m && b ? chain(arcPts(a, m, b), w / 2, false) : []; }
+  if (k === "circle") { const c = pt("center"), e = pt("end"); if (!c || !e) return []; const R = Math.hypot(e[0] - c[0], e[1] - c[1]); if (filled) return [{ a: c, b: c, r: R + w / 2 }]; const ring: Pt[] = []; for (let i = 0; i < 64; i++) ring.push([c[0] + R * Math.cos((i / 64) * 2 * Math.PI), c[1] + R * Math.sin((i / 64) * 2 * Math.PI)]); return chain(ring, w / 2, true); }
+  if (k === "rect") { const s0 = kid(n, "start") as SNode | null, e0 = kid(n, "end") as SNode | null; if (!s0 || !e0) return []; const x0 = num(s0[1]), y0 = num(s0[2]), x1 = num(e0[1]), y1 = num(e0[2]); const pts = ([[x0, y0], [x1, y0], [x1, y1], [x0, y1]] as Pt[]).map(map); return filled ? [{ pts }, ...chain(pts, w / 2, true)] : chain(pts, w / 2, true); }
+  if (k === "poly") { const pts = (ptsOf(n) as Pt[]).map(map); if (pts.length < 2) return []; return filled && pts.length > 2 ? [{ pts }, ...(w > 0 ? chain(pts, w / 2, true) : [])] : chain(pts, w / 2, true); }
+  return [];
+}
+/** PAD::GetEffectiveShape on a copper layer, in board coordinates. */
+function padPrims(pad: SNode, fpAt: number[]): Prim[] {
+  const fr = ((fpAt[2] || 0) * Math.PI) / 180, fc = Math.cos(fr), fs = Math.sin(fr);
+  const pa = atOf(pad) as number[], px = pa[0] || 0, py = pa[1] || 0;
+  const cx = (fpAt[0] || 0) + px * fc + py * fs, cy = (fpAt[1] || 0) - px * fs + py * fc;
+  const pr = ((pa[2] || 0) * Math.PI) / 180, c = Math.cos(pr), s = Math.sin(pr);
+  const map = (q: Pt): Pt => [cx + q[0] * c + q[1] * s, cy - q[0] * s + q[1] * c];
+  const sz = kid(pad, "size") as SNode | null, w = sz ? num(sz[1]) : 0, h = sz ? num(sz[2], w) : w;
+  const shapeOf = (sh: string): Prim[] => {
+    if (sh === "circle") return [{ a: map([0, 0]), b: map([0, 0]), r: w / 2 }];
+    if (sh === "oval") { const l = Math.abs(w - h) / 2; return [w >= h ? { a: map([-l, 0]), b: map([l, 0]), r: h / 2 } : { a: map([0, -l]), b: map([0, l]), r: w / 2 }]; }
+    if (sh === "roundrect" && !kid(pad, "chamfer")) {
+      const rr = kid(pad, "roundrect_rratio") as SNode | null, r = Math.min(Math.max(0, rr ? num(rr[1], 0.25) : 0.25), 0.5) * Math.min(w, h), hw = w / 2, hh = h / 2;
+      const out: Prim[] = [{ pts: ([[-hw, -hh + r], [hw, -hh + r], [hw, hh - r], [-hw, hh - r]] as Pt[]).map(map) }, { pts: ([[-hw + r, -hh], [hw - r, -hh], [hw - r, hh], [-hw + r, hh]] as Pt[]).map(map) }];
+      for (const q of [[-hw + r, -hh + r], [hw - r, -hh + r], [hw - r, hh - r], [-hw + r, hh - r]] as Pt[]) out.push({ a: map(q), b: map(q), r });
+      return out;
+    }
+    return [{ pts: padPolygon(pad, sh === "chamfered_rect" || sh === "roundrect" ? "rect" : sh, w, h).map((q) => map([q[0], q[1]])) }];
+  };
+  const shape = str(pad[3]);
+  if (shape !== "custom") return shapeOf(shape);
+  // a custom pad: its anchor (options (anchor rect|circle)) and its primitives
+  const opt = kid(pad, "options") as SNode | null, anchor = opt ? str(((kid(opt, "anchor") as SNode | null) || [])[1]) : "";
+  const out = shapeOf(anchor === "circle" ? "circle" : "rect");
+  const prims = kid(pad, "primitives") as SNode | null;
+  if (prims) for (const g of prims.slice(1)) if (isList(g)) out.push(...shapePrims(g as SNode, map));
+  return out;
+}
+/**
+ * CN_CONNECTIVITY_ALGO::PropagateNets as BOARD_COMMIT::Push runs it: the tracks, arcs, vias, pads and copper drawings
+ * (zones left out) joined where their copper touches on a common copper layer (two pads of different nets do not
+ * join), each cluster taking the net of its pads (CN_CLUSTER::Add: the origin pad, a cluster whose pads disagree is
+ * left alone) or, without pads, of its first item on a net; every track, arc, via (but a free one) and drawing of the
+ * cluster on another net moves to it.  `footprints`: the footprint nodes as they will be.  Returns item id -> net
+ * name, and the ids of the clusters' items that touch no pad.
+ */
+export function propagateNets(doc: KDoc, footprints: SNode[], nodeOf: (it: KItem) => SNode): { nets: Map<string, string>; padless: Set<string> } {
+  const copper = doc.copper.slice().sort((a, b) => (a === "F.Cu" ? -1 : b === "F.Cu" ? 1 : a === "B.Cu" ? 1 : b === "B.Cu" ? -1 : strNumCmp(a, b)));
+  if (!copper.length) copper.push("F.Cu", "B.Cu");
+  const expand = (names: string[]): Set<string> => {
+    const out = new Set<string>();
+    for (const n of names) { if (n === "*.Cu") copper.forEach((c) => out.add(c)); else if (n === "F&B.Cu") { out.add("F.Cu"); out.add("B.Cu"); } else if (/\.Cu$/.test(n)) out.add(n); }
+    return out;
+  };
+  const items: CnItem[] = [];
+  const add = (id: string, net: string, layers: Set<string>, prims: Prim[], canChange: boolean, pad = false, free = false): void => {
+    if (!layers.size || !prims.length) return;
+    let box: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
+    const grow = (p: Pt, r: number): void => { box = [Math.min(box[0], p[0] - r), Math.min(box[1], p[1] - r), Math.max(box[2], p[0] + r), Math.max(box[3], p[1] + r)]; };
+    for (const pr of prims) if ("r" in pr) { grow(pr.a, pr.r); grow(pr.b, pr.r); } else for (const p of pr.pts) grow(p, 0);
+    items.push({ id, net, layers, prims, box, canChange, pad, free });
+  };
+  // BOARD::Tracks() in file order, then the pads of every footprint, then the copper drawings
+  for (const it of doc.items.values()) {
+    if (it.kind !== "segment" && it.kind !== "arc" && it.kind !== "via") continue;
+    const n = nodeOf(it), net = netNameOf(doc, n);
+    if (it.kind === "via") {
+      const at = atOf(n) as number[], sz = kid(n, "size") as SNode | null, ls = kid(n, "layers") as SNode | null;
+      const pair = ls ? ls.slice(1).map(str) : ["F.Cu", "B.Cu"], i0 = copper.indexOf(pair[0]), i1 = copper.indexOf(pair[pair.length - 1]);
+      const span = i0 >= 0 && i1 >= 0 ? new Set(copper.slice(Math.min(i0, i1), Math.max(i0, i1) + 1)) : expand(pair);
+      const free = yes(n, "free", false);
+      add(it.id, net, span, [{ a: [at[0] || 0, at[1] || 0], b: [at[0] || 0, at[1] || 0], r: (sz ? num(sz[1]) : 0) / 2 }], !free);
+      continue;
+    }
+    const w = num(((kid(n, "width") as SNode | null) || [])[1], 0), a = kid(n, "start") as SNode | null, b = kid(n, "end") as SNode | null; if (!a || !b) continue;
+    const pa: Pt = [num(a[1]), num(a[2])], pb: Pt = [num(b[1]), num(b[2])], m = kid(n, "mid") as SNode | null;
+    add(it.id, net, expand([kidStr(n, "layer")]), it.kind === "arc" && m ? chain(arcPts(pa, [num(m[1]), num(m[2])], pb), w / 2, false) : [{ a: pa, b: pb, r: w / 2 }], true);
+  }
+  for (const fp of footprints) {
+    const at = atOf(fp) as number[];
+    for (const pad of kids(fp, "pad") as SNode[]) {
+      const pl = kid(pad, "layers") as SNode | null, net = netNameOf(doc, pad);
+      const free = net.startsWith("unconnected-(") && kidStr(pad, "pintype") === "free";
+      add("pad:" + (kidStr(pad, "uuid") || kidStr(pad, "tstamp")), net, expand(pl ? pl.slice(1).map(str) : []), padPrims(pad, at), false, true, free);
+    }
+  }
+  for (const it of doc.items.values()) {
+    if (!/^gr_(line|arc|circle|rect|poly)$/.test(it.kind)) continue;
+    const n = nodeOf(it); if (!kid(n, "net")) continue;
+    add(it.id, netNameOf(doc, n), expand([kidStr(n, "layer")]), shapePrims(n, (p) => p), true);
+  }
+  // the touching pairs (a grid of cells for the candidates)
+  const uf = new UnionFind(); for (let i = 0; i < items.length; i++) uf.add();
+  const CELL = 2, cells = new Map<string, number[]>();
+  items.forEach((it, i) => { for (let x = Math.floor(it.box[0] / CELL); x <= Math.floor(it.box[2] / CELL); x++) for (let y = Math.floor(it.box[1] / CELL); y <= Math.floor(it.box[3] / CELL); y++) { const k = x + "," + y; const l = cells.get(k); if (l) l.push(i); else cells.set(k, [i]); } });
+  const tried = new Set<string>();
+  for (const list of cells.values()) for (let p = 0; p < list.length; p++) for (let q = p + 1; q < list.length; q++) {
+    const i = list[p], j = list[q], A = items[i], B = items[j], key = i + "|" + j;
+    if (tried.has(key)) continue; tried.add(key);
+    if (A.box[0] > B.box[2] + EPS || B.box[0] > A.box[2] + EPS || A.box[1] > B.box[3] + EPS || B.box[1] > A.box[3] + EPS) continue;
+    // CN_VISITOR: items of different nets that can neither change are never joined
+    if (!A.canChange && !B.canChange && A.net !== B.net) continue;
+    if (![...A.layers].some((l) => B.layers.has(l))) continue;
+    if (A.prims.some((x) => B.prims.some((y) => primsCollide(x, y)))) uf.union(i, j);
+  }
+  const clusters = new Map<number, number[]>();
+  items.forEach((_, i) => { const r = uf.find(i); const l = clusters.get(r); if (l) l.push(i); else clusters.set(r, [i]); });
+  const nets = new Map<string, string>(), padless = new Set<string>();
+  for (const members of clusters.values()) {
+    members.sort((a, b) => a - b);
+    let origin = "", originPad = false, conflicting = false;
+    const ranks = new Map<string, number>();
+    for (const i of members) {
+      const it = items[i]; if (!it.net) continue;
+      if (!origin) { origin = it.net; ranks.set(origin, 0); }
+      if (it.pad && !it.free) {
+        const rank = (ranks.get(it.net) || 0) + 1; ranks.set(it.net, rank);
+        if (!originPad || rank > (ranks.get(origin) || 0)) { originPad = true; origin = it.net; }
+        if (it.net !== origin) conflicting = true;
+      }
+    }
+    if (!members.some((i) => items[i].pad)) for (const i of members) padless.add(items[i].id);
+    if (conflicting || !origin) continue;
+    for (const i of members) { const it = items[i]; if (it.canChange && it.net !== origin) nets.set(it.id, origin); }
+  }
+  return { nets, padless };
 }
 
 /** ZONE::IsOnCopperLayer. */

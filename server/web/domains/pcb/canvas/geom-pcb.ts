@@ -5,9 +5,9 @@ import { expandDocVars, hatchGeom, roundRectPts } from "./geom-sch";
 import { expandTextVars, hasTextVars } from "./sheet";
 import { arcFrom3, atOf, bezierPts, dashOf, effectsOf, faceOf, ellipsePts, fillOf, has, isList, justOf, kid, kids, netOf, num, pointInPoly, polyPtsOf, rotPt, rotator, str, widthOf, yesNo } from "./sexpr";
 import { buildImageGeom, buildTableGeom } from "./tables-images";
-import { inflate, stadium, union } from "../fab/poly";
+import { inflate, stadium, subtract, union } from "../fab/poly";
 import { arcPoints, circlePoints } from "../fab/prims";
-import { parseMarkup, textWidth, unescapeText } from "./text";
+import { parseMarkup, strokeTextBox, textWidth, unescapeText } from "./text";
 import { linebreakText } from "./stroke-font";
 import { code128, code39 } from "./barcode";
 import { barcode2D } from "./barcode2d";
@@ -383,6 +383,103 @@ export function buildZoneGeom(doc: Doc, item: Item, n: SNode): void {
   }
 }
 
+/** Bumped by every item geometry build (geom.ts buildGeom): hatch knockouts are worked out again after any change. */
+let geomGen = 0;
+export function bumpGeomGen(): void { geomGen++; }
+/**
+ * PCB_SHAPE::getHatchingKnockouts / EDA_SHAPE::UpdateHatching: a hatched board shape's lines skip what else is drawn on
+ * its layer.  The board's texts, text boxes and shapes on the layer whose boxes meet the shape's box, and in every
+ * other footprint its visible fields and shapes on the layer (and its courtyard on a courtyard layer), are turned into
+ * polygons grown by half the hatch spacing (a text box by nothing: TransformShapeToPolygon with that margin), taken
+ * out of the outline (BooleanSubtract) and the hatch lines generated again over what is left.  PCB_PAINTER runs it on
+ * every draw (PCB_SHAPE::UpdateHatching forces it), so this runs whenever any geometry of the board was rebuilt.
+ */
+export function ensureHatchKnockouts(doc: Doc | null | undefined): void {
+  if (!doc || doc.type === "sch") return;
+  const sig = geomGen + ":" + doc.items.size;
+  if (doc.hatchSig === sig) return; doc.hatchSig = sig;
+  for (const it of doc.items.values()) if (it.hatchSrcs && it.hatchSrcs.length) applyHatchKnockouts(doc, it);
+}
+const boxOf = (pts: Pt[]): [number, number, number, number] => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const [x, y] of pts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; } return [x0, y0, x1, y1]; };
+const boxesMeet = (a: number[], b: number[]): boolean => a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3];
+/** TransformShapeToPolygon( margin ) of one drawn record: strokes as ovals, fills grown, a text as its turned box (buildBoundingHull). */
+type P2 = [number, number];
+function knockoutPolys(g: Geom, m: number, out: P2[][]): void {
+  const w = g.noStroke ? 0 : (g.w || 0), seg = (a: Pt, b: Pt): void => { out.push(stadium(a[0], a[1], b[0], b[1], w + 2 * m)); };
+  if (g.t === "line") seg([g.x1, g.y1], [g.x2, g.y2]);
+  else if (g.t === "poly" && g.pts && g.pts.length > 1) {
+    if (g.fill && g.pts.length > 2) out.push(...inflate([g.pts.map((p: Pt) => [p[0], p[1]] as [number, number])], w / 2 + m));
+    else for (let i = 0; i < (g.close ? g.pts.length : g.pts.length - 1); i++) seg(g.pts[i], g.pts[(i + 1) % g.pts.length]);
+  } else if (g.t === "circle") {
+    if (g.fill) out.push(circlePoints(g.x, g.y, g.r + w / 2 + m));
+    else { const c = circlePoints(g.x, g.y, g.r); for (let i = 0; i < c.length; i++) seg(c[i], c[(i + 1) % c.length]); }
+  } else if (g.t === "arc") {
+    const a = arcPoints(g.x, g.y, g.r, g.a0, g.a1, !!g.anticlockwise); for (let i = 0; i + 1 < a.length; i++) seg(a[i], a[i + 1]);
+  } else if (g.t === "text") {
+    const [x0, y0, x1, y1] = strokeTextBox(g as Parameters<typeof strokeTextBox>[0]), R = rotator(g.rot || 0), pad = (g.w || 0) / 2 + m;
+    out.push([[x0 - pad, y0 - pad], [x1 + pad, y0 - pad], [x1 + pad, y1 + pad], [x0 - pad, y1 + pad]].map(([px, py]) => { const [rx, ry] = R(g.mirror ? -px : px, py); return [g.x + rx, g.y + ry] as P2; }));
+  }
+}
+function applyHatchKnockouts(doc: Doc, item: Item): void {
+  item.geom = item.geom.filter((g) => !g.hatchLine);
+  const fpOwner = item.kind === "footprint" ? item.id : null;
+  for (const src of item.hatchSrcs!) {
+    const bb = boxOf(src.outline), spacing0 = src.w * 10, margin = spacing0 / 2, knock: P2[][] = [], outline = src.outline.map((p) => [p[0], p[1]] as P2);
+    const onLayer = (g: Geom): boolean => g.layer === src.layer && !g.hatchLine && !g.hole;
+    for (const o of doc.items.values()) {
+      if (o.kind === "footprint") {
+        if (o.id === fpOwner) continue;
+        // GetCourtyard( layer ) only when the hatched shape is on a courtyard layer: the closed courtyard shapes, filled
+        if (/^[FB]\.CrtYd$/.test(src.layer)) for (const g of o.geom) if (g.layer === src.layer && g.gfxShape && ((g.t === "poly" && g.close) || g.t === "circle")) knockoutPolys(Object.assign({}, g, { fill: true, noStroke: true }), 0, knock);
+        for (const g of o.geom) {   // its visible fields and its shapes (RunOnChildren: PCB_FIELD_T, PCB_SHAPE_T)
+          if (!onLayer(g) || !((g.t === "text" && g.field) || g.gfxShape)) continue;
+          const gb = K_BOX(g); if (gb && boxesMeet(gb, bb)) knockoutPolys(g, margin, knock);
+        }
+        continue;
+      }
+      if (o === item || !(o.kind === "gr_text" || o.kind === "gr_text_box" || /^gr_(line|rect|circle|arc|poly|curve|ellipse|ellipse_arc)$/.test(o.kind))) continue;
+      if (!o.bbox || !boxesMeet(o.bbox, bb) || !o.geom.some(onLayer)) continue;
+      for (const g of o.geom) if (onLayer(g)) knockoutPolys(g, o.kind === "gr_text_box" ? 0 : margin, knock);
+      if (o.kind === "gr_text_box") { const pts = polyPtsOf(o.node); if (pts.length > 2) knock.push(pts.map((p) => [p[0], p[1]] as P2)); else { const s = kid(o.node, "start"), e = kid(o.node, "end"); if (s && e) { const a = num(s[1]), b = num(s[2]), c = num(e[1]), d = num(e[2]); knock.push([[a, b], [c, b], [c, d], [a, d]]); } } }
+    }
+    const left: Pt[][] = knock.length ? subtract([outline], union(knock)) : [src.outline];
+    const slopes = src.type === "cross_hatch" ? [1, -1] : src.type === "hatch" ? [-1] : [1];
+    let spacing = spacing0; const major = Math.max(bb[2] - bb[0], bb[3] - bb[1]); if (major / spacing > 100) spacing = major / 100;
+    for (const sl of slopes) for (const [ax, ay, bx, by] of hatchLinesMulti(left, sl, spacing))
+      G(item, { t: "line", x1: ax, y1: ay, x2: bx, y2: by, w: src.w, color: src.color, layer: src.layer, z: src.z, cap: "round", noShadow: true, hatchLine: true, gfxShape: true });
+  }
+}
+/** The box of one record (its own, without growing the item's). */
+function K_BOX(g: Geom): [number, number, number, number] | null {
+  const sink: GeomSink = { geom: [], bbox: null }; G(sink, Object.assign({}, g)); return sink.bbox as [number, number, number, number] | null;
+}
+/** SHAPE_POLY_SET::GenerateHatchLines over a set of contours (outlines and holes, even-odd). */
+export function hatchLinesMulti(contours: Pt[][], slope: number, spacing: number): number[][] {
+  if (contours.length === 1) return hatchLines(contours[0], slope, spacing, -1);
+  const out: number[][] = []; const all = contours.filter((c) => c.length >= 3); if (!all.length) return out;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const c of all) for (const [x, y] of c) { if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; }
+  const maxA = slope > 0 ? maxY - slope * minX : maxY - slope * maxX, minA0 = slope > 0 ? minY - slope * maxX : minY - slope * minX;
+  const minA = Math.floor(minA0 / spacing) * spacing;
+  if ((maxA - minA) / spacing > 4000) return out;
+  const inside = (x: number, y: number): boolean => { let n = 0; for (const c of all) if (pointInPoly(c, x, y)) n++; return n % 2 === 1; };
+  const buf: Pt[] = [];
+  for (let a = minA; a < maxA; a += spacing) {
+    buf.length = 0;
+    for (const pts of all) for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const x1 = pts[j][0], y1 = pts[j][1], x2 = pts[i][0], y2 = pts[i][1];
+      const den = (y2 - y1) - slope * (x2 - x1); if (Math.abs(den) < 1e-12) continue;
+      const t = (slope * x1 + a - y1) / den; if (t < 0 || t > 1) continue;
+      buf.push([x1 + t * (x2 - x1), y1 + t * (y2 - y1)]);
+    }
+    buf.sort((p, q) => q[0] - p[0]);
+    for (let i = 0; i + 1 < buf.length; i++) {
+      const p1 = buf[i], p2 = buf[i + 1]; if (Math.abs(p1[0] - p2[0]) < 1e-9 && Math.abs(p1[1] - p2[1]) < 1e-9) continue;
+      if (inside((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2)) out.push([p1[0], p1[1], p2[0], p2[1]]);
+    }
+  }
+  return out;
+}
 /** SHAPE_POLY_SET::GenerateHatchLines for one outline: lines y = slope·x + a every `spacing`, clipped to the polygon. */
 export function hatchLines(pts: Pt[], slope: number, spacing: number, lineLen: number): number[][] {
   const out: number[][] = []; if (pts.length < 3) return out;
@@ -520,7 +617,12 @@ function graphicShapeGeom0(item: Item, g: SNode, shape: string, tf: Tf, layer: s
   if (layer === "Edge.Cuts") item.edge = true;   // board outline: what "fit" and the board box mean
   const f = fillOf(g); const fillColor = f.type === "solid" ? color : null; const ds = dashOf(g);
   // EDA_SHAPE::UpdateHatching: (fill hatch | reverse_hatch | cross_hatch) on a rectangle, circle, closed polygon or full ellipse
-  const hatched = !!hatchFillOf(g) && w > 0, hatch = (outline: Pt[]) => { if (hatched) hatchGeom(item, outline, hatchFillOf(g) as string, w, color, layer, z!, true); };
+  const hatched = !!hatchFillOf(g) && w > 0, hatch = (outline: Pt[]) => {
+    if (!hatched) return;
+    hatchGeom(item, outline, hatchFillOf(g) as string, w, color, layer, z!, true);
+    // kept for PCB_SHAPE::getHatchingKnockouts, applied once the board's other items are built (ensureHatchKnockouts)
+    (item.hatchSrcs || (item.hatchSrcs = [])).push({ outline: outline.slice(), type: hatchFillOf(g) as string, w, color, layer, z: z! });
+  };
   // a copper segment with a net carries its net name like a track (PCB_PAINTER::draw( PCB_SHAPE ) netname layer)
   const netTag = shape === "line" && /\.Cu$/.test(layer) && kid(g, "net") && item.kind === g[0] ? (() => { const nc = netCode(curDoc, g); return nc > 0 ? { net: nc, netSeg: true } : null; })() : null;
   if (shape === "line") {

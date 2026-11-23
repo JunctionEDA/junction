@@ -28,6 +28,24 @@ const comp = (ref, p, pins) => ({ ref, value: "47uF", footprint: "Capacitor_SMD:
   dnp: false, excludeFromBom: false, excludeFromBoard: false, pins: new Map(pins), variants: [] });
 const texts = (plan, sev) => plan.report.filter((r) => !sev || r.severity === sev).map((r) => r.text);
 
+test("BOARD_COMMIT::Push: the pads' new nets propagate along the copper that touches them; other copper keeps its net", () => {
+  const tracks = `(segment (start 11 10) (end 20 10) (width 0.25) (layer "F.Cu") (net 2) (uuid "s1"))
+    (segment (start 20 10) (end 20 20) (width 0.25) (layer "F.Cu") (net 2) (uuid "s2"))
+    (segment (start 40 40) (end 50 40) (width 0.25) (layer "F.Cu") (net 1) (uuid "s3"))
+    (segment (start 11 10) (end 20 10) (width 0.25) (layer "B.Cu") (net 2) (uuid "s4"))`;
+  const doc = board(fp("f1", "C1", "/s1", ["/A", "/OLD"]) + tracks);
+  const nl = { components: [comp("C1", "/s1", [["1", { net: "/A", type: "passive" }], ["2", { net: "/NEW", type: "passive" }]])], nets: new Map(), warnings: [] };
+  const plan = N.planUpdate(doc, nl, { updateFields: true, applied: true });
+  // the net as the modified item records it (a code, or the name the new pad carries for that code)
+  const pad2 = K.kids(plan.modified.get("f1"), "pad").find((p) => K.str(p[1]) === "2"), padNet = K.kid(pad2, "net");
+  assert.equal(K.str(padNet[padNet.length - 1]), "/NEW");
+  const NEW = String(padNet[1]);
+  const netOf = (id) => { const n = plan.modified.get(id); if (!n) return null; const k = K.kid(n, "net"); return String(k[1]) === NEW ? "/NEW" : String(k[1]); };
+  assert.equal(netOf("s1"), "/NEW"); assert.equal(netOf("s2"), "/NEW");
+  assert.equal(netOf("s3"), null, "copper on a net its pads keep is untouched");
+  // the pad is on F.Cu only: the B.Cu track reaches no pad, and its net (no pad keeps /OLD) follows the rename
+  assert.equal(netOf("s4"), "/NEW");
+});
 test("dry run vs applied: present / past tense, 'Removed unused net' only after applying, two blank lines before the totals", () => {
   const doc = board(fp("f1", "C1", "/s1", ["/A", "/OLD"]));
   const nl = { components: [comp("C1", "/s1", [["1", { net: "/A", type: "passive" }], ["2", { net: "/NEW", type: "passive" }]])], nets: new Map(), warnings: [] };

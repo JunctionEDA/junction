@@ -221,7 +221,7 @@ export function labelFields(item: Item, n: SNode, color: string, layer: string, 
     // a hidden field: kept aside in LAYER_HIDDEN for show_hidden_fields, outside the hit boxes
     const sink: GeomSink = ef.hide ? { geom: [], bbox: null } : item;
     textLines(sink, px, py, val, ef.size, fieldColor(ef, ef.hide ? SCH.hidden : fColor), pr, ef.just, layer, { z: fz, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing, field: str(p[1]), olKind: "field" });
-    if (ef.hide && sink.geom.length) { for (const g of sink.geom) { g.hiddenText = true; g.noBox = true; } (item.hiddenGeom = item.hiddenGeom || []).push(...sink.geom); }
+    if (ef.hide && sink.geom.length) { const sc = fieldColor(ef, fColor); for (const g of sink.geom) { g.hiddenText = true; g.noBox = true; if (g.color) g.shownColor = sc; } (item.hiddenGeom = item.hiddenGeom || []).push(...sink.geom); }
   }
 }
 
@@ -489,7 +489,7 @@ export function buildSheetGeom(item: Item, n: SNode, doc?: Doc | null): void {
       shown = expandDocVars(doc, shown);
     }
     textLines(sink, px, py, shown, ef.size, color, pr, ef.just, "Sheets", { z: name === "Sheetname" ? SCH_Z.sheetName : name === "Sheetfile" ? SCH_Z.sheetFile : SCH_Z.sheetFields, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing, field: name, olKind: "field" });
-    if (ef.hide && sink.geom.length) { for (const g of sink.geom) { g.hiddenText = true; g.noBox = true; } (item.hiddenGeom = item.hiddenGeom || []).push(...sink.geom); }
+    if (ef.hide && sink.geom.length) { const sc = col(fieldColor(ef, name === "Sheetname" ? SCH.sheetName : name === "Sheetfile" ? SCH.sheetFile : SCH.sheetFields)); for (const g of sink.geom) { g.hiddenText = true; g.noBox = true; if (g.color) g.shownColor = sc; } (item.hiddenGeom = item.hiddenGeom || []).push(...sink.geom); }
   }
   for (const pin of kids(n, "pin")) {
     const [px, py, pr] = atOf(pin); const ef = effectsOf(pin); const size = ef.size; const pen = textPen(ef, size);
@@ -826,7 +826,7 @@ export function buildSymbolGeom(doc: Doc, item: Item): void {
     const tg = transformedText(sink, Ti, px, py, shown, ef.size, color, pr, ef.just, isRef || isVal ? "Reference & value" : "Fields", { z: isRef ? SCH_Z.ref : isVal ? SCH_Z.value : SCH_Z.fields, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing, alpha, field: name, olKind: "field" });
     // a local power symbol (IsSymbolLikePowerLocalLabel) marks its Value with drawLocalPowerIcon
     if (isVal && localPower) localPowerIcon(sink, tg, shown, textPen(ef, ef.size), color, name);
-    if (ef.hide) { for (const hg of sink.geom) { hg.hiddenText = true; hg.noBox = true; } if (sink.geom.length) (item.hiddenGeom = item.hiddenGeom || []).push(...sink.geom); }
+    if (ef.hide) { const sc = col(fieldColor(ef, isRef ? SCH.ref : isVal ? SCH.value : SCH.field)); for (const hg of sink.geom) { hg.hiddenText = true; hg.noBox = true; if (hg.color) hg.shownColor = sc; } if (sink.geom.length) (item.hiddenGeom = item.hiddenGeom || []).push(...sink.geom); }
   }
   if (dnp && schFormat.showDnpMarkers) {   // m_ShowDNPMarkers
     // SCH_PAINTER: body box grown toward the pins, crossed at 3× the default line width
@@ -998,8 +998,10 @@ function buildPinGeomInner(item: GeomSink, g: SNode, tf: Tf, sym: PinSym, type: 
     const point = (across: number, row: number): Pt => vertical ? [center + row, alongY + across] : [alongX + across, center + row];
     // SCH_PAINTER::draw( SCH_PIN ): a remapped pin shows "/" + its original number after the pad, 4/5 of the number's
     // size and half its alpha, left aligned at the number box's right edge (its top for a vertical number, which
-    // reads bottom to top); the pair is shifted back by the label's length when it would run into the symbol body
-    const from = shown && shown.remappedFrom && !stacked ? "/" + shown.remappedFrom : "";
+    // reads bottom to top); the pair is shifted back by the label's length when it would run into the symbol body;
+    // a stacked block's box is the whole block (PIN_LAYOUT_CACHE::GetPinNumberBBox), its
+    // braces drawn about the shifted text like the lines themselves
+    const from = shown && shown.remappedFrom ? "/" + shown.remappedFrom : "";
     const fromSize = Math.max(1e-4, size * 4 / 5), fromLen = from ? textWidth(from, fromSize, numThick) : 0;
     const shift = from && (vertical ? oy > 0 : ox < 0) ? fromLen : 0;
     for (const [i, label] of lines.entries()) {
@@ -1007,7 +1009,7 @@ function buildPinGeomInner(item: GeomSink, g: SNode, tf: Tf, sym: PinSym, type: 
       textGeom(item, x, y, label, size, numColor, vertical ? 90 : 0, ["center", "middle"], "Pin numbers", { z: SCH_Z.pinNum, w: numThick });
     }
     if (from) {
-      const half = textWidth(lines[0], size, numThick) / 2, [x0, y0] = point(0, 0);
+      const half = lines.reduce((max, l) => Math.max(max, textWidth(l, size, numThick)), 0) / 2, [x0, y0] = point(0, 0);
       const tg = vertical ? textGeom(item, x0, y0 - half + shift, from, fromSize, numColor, 90, ["left", "middle"], "Pin numbers", { z: SCH_Z.pinNum, w: numThick })
         : textGeom(item, x0 + half - shift, y0, from, fromSize, numColor, 0, ["left", "middle"], "Pin numbers", { z: SCH_Z.pinNum, w: numThick });
       tg.alpha = (tg.alpha === undefined ? 1 : tg.alpha) * 0.5;
@@ -1015,8 +1017,9 @@ function buildPinGeomInner(item: GeomSink, g: SNode, tf: Tf, sym: PinSym, type: 
     if (stacked) {
       const brace = size / 3, top = -halfSpan - 2 * brace, bottom = halfSpan;
       const gap = lines.reduce((max, s) => Math.max(max, textWidth(s, size, numThick)), 0) / 2 + brace;
+      const sh = vertical ? shift : -shift;
       for (const sign of [-1, 1]) {
-        const edge = sign * gap, tip = sign * brace;
+        const edge = sign * gap + sh, tip = sign * brace;
         const pts = [point(edge, top), point(edge + tip / 2, top), point(edge + tip, (top + bottom) / 2),
           point(edge + tip / 2, bottom), point(edge, bottom)];
         G(item, { t: "poly", pts, close: false, w: numThick, color: numColor, layer: "Pin numbers", z: SCH_Z.pinNum });

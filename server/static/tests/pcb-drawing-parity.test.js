@@ -215,4 +215,15 @@ test("point editor: a rectangle's centre and radius handles, chamfer and move-co
   // POLYGON_EDGE_DRAG_POLICY: an edge dragged between its neighbours keeps their directions
   const [a, b] = P.polyEdgeDrag([[0, 0], [10, 0], [10, 10], [0, 10]], 1, [12, 5], false, 0);
   assert.deepEqual([a, b], [[12, 0], [12, 10]]);
+  // grid on: the perpendicular displacement is quantized to hypot( gridSize.x * perp.x, gridSize.y * perp.y )
+  const q = (gx, gy) => P.polyEdgeDrag([[0, 0], [10, 0], [10, 10], [0, 10]], 2, [5, 11.6], false, gx, gy)[0][1];
+  assert.equal(q(1, 1), 12, "a horizontal edge on a square grid: one X = Y step");
+  assert.equal(q(1, 2), 12, "and with a 2 mm Y it moves by whole Y steps");
+  assert.equal(q(1, 3), 13, "11.6 nearest multiple of 3 from 10 -> 13");
+});
+test("router pick slop and the table cells on a non-square grid (maxSlopRadius, gridSize.x / .y)", () => {
+  assert.deepEqual(P.tableGrid([0, 0], [10.3, 4.1], "F.SilkS", 0.5), { x: 0, y: 0, cw: 10.5, ch: 4, rows: 1, cols: 1 });
+  assert.deepEqual(P.tableGrid([0, 0], [10.3, 4.1], "F.SilkS", 0.5, 1.5), { x: 0, y: 0, cw: 10.5, ch: 4.5, rows: 1, cols: 1 });
+  const src = require("fs").readFileSync(require("./web-path").webPath("tools/pcb-tools/app-state.ts"), "utf8");
+  assert.ok(/const slop = Math\.max\(ctx\.gridPitch \|\| 0, ctx\.gridPitchY \|\| 0\)/.test(src), "pickSingleItem slop is max( GetGrid().x, GetGrid().y )");
 });

@@ -132,7 +132,11 @@ test("signals list: no duplicate power rows from .probe p() directives", () => {
 });
 
 const BA = load(["dialogs", "update-from-pcb-logic.ts"]);
-const sym = (o) => Object.assign({ key: "/a", keys: ["/a"], ref: "R1", power: false, value: "1k", footprint: "R:R_0603", dnp: false, inBom: true, inPos: true, onBoard: true, fields: new Map(), pins: new Map([["1", "/IN"]]) }, o);
+// each pin on a net driven by a local label it touches (what buildNetlist's pinDrivers gives)
+const lbl = (id) => ({ kind: "label", inst: 0, id, prio: 4, x: 0, y: 0 });
+const drivers = (pins) => new Map([...pins].map(([n, net]) => [n, { net, physical: lbl("L" + n), resolved: lbl("L" + n) }]));
+const sym = (o) => { const s = Object.assign({ key: "/a", keys: ["/a"], ref: "R1", power: false, value: "1k", footprint: "R:R_0603", dnp: false, inBom: true, inPos: true, onBoard: true, fields: new Map(), pins: new Map([["1", "/IN"]]) }, o);
+  if (!s.pinDrivers) s.pinDrivers = drivers(s.pins); return s; };
 const ALL = { relink: false, references: true, footprints: true, values: true, netNames: true, attributes: true, otherFields: true };
 test("back-annotation: value, footprint, reference, attributes, fields, net label; report lines", () => {
   const fp = BA.fpData(K.parse('(footprint "R:R_0805" (path "/a") (property "Reference" "R5") (property "Value" "2k2") (property "MPN" "X1") (property "ki_fp_filters" "R_*") (attr smd dnp exclude_from_bom) (pad "1" smd rect (net 3 "/VIN")))'));
@@ -145,8 +149,38 @@ test("back-annotation: value, footprint, reference, attributes, fields, net labe
   assert.ok(t.includes("Change R1 'Do not populate' from 'false' to 'true'."));
   assert.ok(t.includes("Change R1 'Exclude from bill of materials' from 'false' to 'true'."));
   assert.ok(t.includes("Add R1 field 'MPN' with value 'X1'.")); assert.ok(t.includes("Delete R1 field 'Old.'"));
-  assert.ok(t.includes("Change R1 pin 1 net label from '/IN' to '/VIN'."));
-  assert.equal(r.edits[0].ref, "R5"); assert.equal(r.labels[0].to, "/VIN");
+  // processNetNameChange compares and prints the short names (the net name past its sheet path)
+  assert.ok(t.includes("Change R1 pin 1 net label from 'IN' to 'VIN'."), t.join("\n"));
+  assert.equal(r.edits[0].ref, "R5"); assert.deepStrictEqual(r.labels[0], { op: "text", inst: 0, id: "L1", kind: "label", sheetPin: undefined, text: "VIN", ref: "R1", pin: "1" });
+});
+test("back-annotation: processNetNameChange by the pin's physically connected driver and its net's resolved driver", () => {
+  const fp = { ref: "R1", path: "/a", fpid: "R:R_0603", value: "1k", dnp: false, excludeFromBom: false, excludeFromPos: false, fields: new Map(), pads: new Map([["1", "/VIN"], ["3", "/X"]]) };
+  const o = Object.assign({}, ALL, { footprints: false, values: false, references: false, attributes: false, otherFields: false });
+  const pin = (prio, power) => ({ kind: "pin", inst: 1, id: "S", prio, x: 2.54, y: 5.08, pin: "1", power });
+  const run = (pc, spinOf) => BA.backAnnotate([sym({ pinNumbers: new Set(["1", "2"]), pinDrivers: new Map([["1", pc]]) })], [fp], Object.assign({ spinOf }, o));
+  // a pad the library symbol does not have
+  assert.ok(run({ net: "/IN", physical: lbl("L1"), resolved: lbl("L1") }).lines.some((l) => l.severity === "error" && l.text === "Cannot find R1 pin '3'."));
+  // a power pin drives the net
+  const pw = run({ net: "/IN", physical: pin(6, true), resolved: pin(6, true) });
+  assert.ok(pw.lines.some((l) => l.severity === "error" && l.text === "Net IN cannot be changed to VIN because it is driven by a power pin."));
+  assert.equal(pw.labels.length, 0);
+  // only pins here, the net named by a power symbol elsewhere: its value changes
+  const v = run({ net: "/IN", physical: pin(1), resolved: { kind: "pin", inst: 2, id: "P", prio: 5, x: 0, y: 0, power: true } });
+  assert.deepStrictEqual(v.labels, [{ op: "value", inst: 2, id: "P", text: "VIN", ref: "R1", pin: "1" }]);
+  // only pins: a label is added at the pin, turned by orientLabel
+  const a = run({ net: "Net-(R1-Pad1)", physical: pin(1), resolved: pin(1) }, () => 2);
+  assert.deepStrictEqual(a.labels, [{ op: "add", inst: 1, x: 2.54, y: 5.08, text: "VIN", spin: 2, ref: "R1", pin: "1" }]);
+  assert.ok(a.lines.some((l) => l.text === "Add label 'VIN' to R1 pin 1 net."));
+});
+test("orientLabel: a pin's SPIN_STYLE turned with the symbol, mirror x at 180 read as mirror y", () => {
+  // pin pointing right (angle 0) on an unrotated symbol: label spin LEFT; pin up: BOTTOM; left: RIGHT; down: UP
+  assert.deepStrictEqual([0, 90, 180, 270].map((a) => BA.orientLabel(a, 0, "")), [0, 3, 2, 1]);
+  // one turn counter-clockwise: LEFT -> BOTTOM
+  assert.equal(BA.orientLabel(0, 90, ""), 3);
+  // mirror y swaps left and right, mirror x swaps up and bottom
+  assert.equal(BA.orientLabel(0, 0, "y"), 2); assert.equal(BA.orientLabel(90, 0, "x"), 1);
+  // mirror x at 180 degrees is mirror y at 0
+  assert.equal(BA.orientLabel(0, 180, "x"), BA.orientLabel(0, 0, "y"));
 });
 test("back-annotation: unmatched footprints and symbols, nothing selected, re-link by reference", () => {
   const fp = { ref: "R9", path: "/zz", fpid: "R:R", value: "1k", dnp: false, excludeFromBom: false, excludeFromPos: false, fields: new Map(), pads: new Map() };
@@ -162,7 +196,8 @@ const quadUnits = () => { const unitPins = new Map([[1, ["1", "2"]], [2, ["3", "
   return [{ key: "/u1", unit: 1, unitPins, pinTypes }, { key: "/u2", unit: 2, unitPins, pinTypes }]; };
 test("back-annotation: a gate swap on the board is a unit swap with 'Prefer symbol unit swaps', labels otherwise", () => {
   const units = quadUnits(), pins = new Map([["1", "/A"], ["2", "/B"], ["3", "/C"], ["4", "/D"]]);
-  const s = [0, 1].map((i) => sym({ ref: "U1", keys: ["/u1", "/u2"], key: units[i].key, multi: true, sheetPath: ["r"], uuid: units[i].key, pins, units, self: units[i] }));
+  const s = [0, 1].map((i) => sym({ ref: "U1", keys: ["/u1", "/u2"], key: units[i].key, multi: true, sheetPath: ["r"], uuid: units[i].key, pins, units, self: units[i],
+    pinDrivers: drivers([...pins].filter(([n]) => units[i].unitPins.get(units[i].unit).includes(n))) }));
   const fp = { ref: "U1", path: "/u1", fpid: "P:SO8", value: "1k", dnp: false, excludeFromBom: false, excludeFromPos: false, fields: new Map(), pads: new Map([["1", "/C"], ["2", "/D"], ["3", "/A"], ["4", "/B"]]) };
   const o = Object.assign({}, ALL, { footprints: false, values: false, references: false, attributes: false, otherFields: false });
   const r = BA.backAnnotate(s, [fp], Object.assign({}, o, { unitSwaps: true }));

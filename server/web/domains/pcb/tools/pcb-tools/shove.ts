@@ -1,19 +1,22 @@
 // pcb-tools/shove.ts — SHOVE (pns_shove.cpp).
-import type { Box, BoardDoc, BranchOp, CircleShape, Conductor, CopperShape, WorldItem, DesignSettings, LegFn, Obstacle, ObstacleIndex, PadInfo, PcbCtx, PolyShape, Pt, Route, SegShape } from "./types";
+import type { Box, BoardDoc, BranchOp, CircleShape, Conductor, CopperShape, WorldItem, DesignSettings, LegFn, LineArcs, Obstacle, ObstacleIndex, PadInfo, PcbCtx, PolyShape, Pt, Route, SegShape, TrackElem } from "./types";
 import type { RouterSettings } from "./router-settings";
 import { headVia, opOn, routeDoc, routeOwn, viaSpanLayers } from "./branch";
 import { settingsOf } from "./dialogs";
 import { polySegDist, segsIntersect, shapeGap, shapeOffset } from "./distances";
-import { assembleLine, dragCorner45, peq, rp, viaFanout } from "./dragger";
+import { assembleArcLine, assembleLine, dragCorner45, lineElems, peq, restoreArcTags, reverseArcs, rp, viaFanout } from "./dragger";
 import { netClearance } from "./drc";
 import { viaNow } from "./edit-commands";
 import { isLocked } from "./groups";
 import { pointInPoly } from "./hit";
 import { closestOnSeg } from "./point-editor";
 import { K, S } from "./state";
-import { clone, r6, vunit } from "./util";
+import { clone, pt, r6, vunit } from "./util";
+import { netOf } from "./nets";
+import { segmentNode } from "./nodes";
+import { arcTrackNode } from "./posture";
 import { rulePairClearance } from "./rule-resolver";
-import { DIRS8, HULL_EPS, ROUTE_EPS, dir8, indexObstacles, isFreePad, now, pathClear, pathHits, ptsLength, routeClearance, routeObstacles, routerWorld, shapeCorePts, simplifyPts, walkHead } from "./walkaround";
+import { DIRS8, HULL_EPS, ROUTE_EPS, dir8, indexObstacles, isFreePad, now, pathClear, pathHits, ptsLength, routeClearance, routeObstacles, routerWorld, shapeCorePts, simplifyPts } from "./walkaround";
 import { mergeFull, mergeObtuse } from "./optimize-selected";
 import { runSmartPads } from "./smartpads";
 
@@ -22,15 +25,15 @@ import { runSmartPads } from "./smartpads";
 // of whatever pushes it (ShoveObstacleLine, both ways round, the side away from the pusher), vias are pushed out by
 // the collision's minimum translation and drag their tracks along (pushOrShoveVia), and every pushed thing is pushed
 // on a stack and checked in turn, until nothing collides or the iteration / time limits run out.  Pads, holes, rule
-// areas, the board edge, arcs and locked items are never moved: the head walks round them, and a pushed track that
+// areas, the board edge and locked items are never moved: the head walks round them, and a pushed track that
 // meets one walks round it too (onCollidingSolid).  The whole shove is recomputed from the route's branch on every
 // move, so pushed tracks spring back as the head retreats (the springback stack's effect).
 export const SHOVE_HEAD_RANK = 1e6;
-/** A movable track of the shove's world. */
-export interface ShoveTrack { kind: "track"; id: string; a: Pt; b: Pt; w: number; layer: string; net: string; item: KItem }
+/** A movable track of the shove's world (an arc: its own shape, the arc's polyline). */
+export interface ShoveTrack { kind: "track"; id: string; a: Pt; b: Pt; w: number; layer: string; net: string; item: KItem; arc?: CopperShape }
 /** A movable via of the shove's world (moved: at its pushed place). */
 export interface ShoveVia { kind: "via"; id: string; at: Pt; r: number; drill: number; layers: Set<string>; net: string; item: KItem; moved?: boolean }
-/** Something the shove never moves: a pad, hole, rule area, the edge, an arc, a locked track or via. */
+/** Something the shove never moves: a pad, hole, rule area, the edge, a locked track, arc or via. */
 export interface ShoveSolid { kind: "solid"; id: string | null; ckind: string; layers: Set<string> | null | undefined; net: string; shape: CopperShape; bbox: Box; pad?: PadInfo; src?: Conductor | WorldItem }
 export type ShoveObj = ShoveTrack | ShoveVia | ShoveSolid;
 /** The shove's view of the board (shoveWorld). */
@@ -38,6 +41,7 @@ export interface ShoveWorld { doc: BoardDoc; tracks: Map<string, ShoveTrack>; vi
 /** A line the shove moves or pushes with: a head, a pushed line of tracks, or a pushed via's proxy. */
 export interface ShoveLine {
   key: string; ids: string[]; pts: Pt[]; orig?: Pt[]; w: number; layer: string | null; net: string; rank: number;
+  /** the line's arcs (tags over pts) */ arcs?: LineArcs;
   head?: boolean; proxy?: boolean; via?: { at: Pt; r: number; layers?: Set<string> }; viaId?: string; ownIds?: Set<string> | null;
 }
 /** A pusher or pushed line as the hull and clearance checks read it. */
@@ -47,7 +51,7 @@ export interface ShoveState { lines: Map<string, ShoveLine>; lineOf: Map<string,
 /** What a shove hands the router: the branch edits and the preview. */
 export interface ShoveResult { ops: BranchOp[]; preview: ReturnType<typeof shovePreview>; viaOk: boolean }
 /** A collision found by shoveNearest. */
-interface ShoveHit { d: number; o?: ShoveObj; L?: ShoveLine }
+interface ShoveHit { d: number; o?: ShoveObj; L?: ShoveLine; arc?: boolean }
 /** The octagonal hull (8 directions) of a shape's core points grown by `off`: SegmentHull / OctagonalHull. */
 export function octagon(core: Pt[], off: number) {
   const h = DIRS8.map((u) => { let m = -Infinity; for (const p of core) m = Math.max(m, p[0] * u[0] + p[1] * u[1]); return m + off; });
@@ -115,8 +119,8 @@ export function selfIntersecting(pts: Pt[]) {
   return false;
 }
 /**
- * The shove's view of the board: the movable tracks (unlocked segments) and vias, in coarse grids, and the solids
- * (pads, holes, rule areas, the edge, arcs, locked tracks and vias, and vias at all while "Shove vias" is off).
+ * The shove's view of the board: the movable tracks (unlocked segments and arcs) and vias, in coarse grids, and the
+ * solids (pads, holes, rule areas, the edge, locked tracks and vias, and vias at all while "Shove vias" is off).
  */
 export function shoveWorld(doc: BoardDoc, s: DesignSettings, shoveVias: boolean): ShoveWorld {
   const bc = doc.__bc; const key = "sw" + (shoveVias ? 1 : 0);
@@ -128,6 +132,7 @@ export function shoveWorld(doc: BoardDoc, s: DesignSettings, shoveVias: boolean)
   for (const c of Wd.conds) {
     const locked = c.item && isLocked(c.item.node);
     if (c.kind === "segment" && !locked) { const o: ShoveTrack = { kind: "track", id: c.id, a: (c.shape as SegShape).a, b: (c.shape as SegShape).b, w: c.width, layer: Array.from(c.layers)[0], net: c.net, item: c.item }; tracks.set(c.id, o); gadd(o, c.bbox); maxW = Math.max(maxW, c.width); continue; }
+    if (c.kind === "arc" && !locked) { const a = pt(c.item.node, "start"), b = pt(c.item.node, "end"); if (a && b) { const o: ShoveTrack = { kind: "track", id: c.id, a, b, w: c.width, layer: Array.from(c.layers)[0], net: c.net, item: c.item, arc: c.shape }; tracks.set(c.id, o); gadd(o, c.bbox); maxW = Math.max(maxW, c.width); continue; } }
     if (c.kind === "via" && !locked && shoveVias) { const o: ShoveVia = { kind: "via", id: c.id, at: [(c.shape as CircleShape).x, (c.shape as CircleShape).y], r: (c.shape as CircleShape).r, drill: c.drill, layers: c.layers, net: c.net, item: c.item }; vias.set(c.id, o); gadd(o, c.bbox); maxW = Math.max(maxW, 2 * (c.shape as CircleShape).r); continue; }
     const o: ShoveSolid = { kind: "solid", id: c.id, ckind: c.kind, layers: c.layers, net: c.net, shape: c.shape, bbox: c.bbox, pad: c.kind === "pad" ? c.pad : undefined, src: c }; solids.push(o); gadd(o, c.bbox);
   }
@@ -158,18 +163,18 @@ export const lineSegs = (L: Pick<ShoveLine, "pts">): Pt[][] => (L.pts.length > 1
  */
 export function shoveNearest(SW: ShoveWorld, st: ShoveState, L: ShoveLine) {
   const s = SW.s; const segs = lineSegs(L); const found: Record<"solid" | "via" | "line", ShoveHit | null> = { solid: null, via: null, line: null };
-  const score = (k: "solid" | "via" | "line", d: number, x: { o?: ShoveObj; L?: ShoveLine }) => { if (!found[k] || d < found[k]!.d) found[k] = Object.assign({ d }, x); };
+  const score = (k: "solid" | "via" | "line", d: number, x: { o?: ShoveObj; L?: ShoveLine; arc?: boolean }) => { if (!found[k] || d < found[k]!.d) found[k] = Object.assign({ d }, x); };
   const consider = (o: ShoveObj | { kind: "line"; L: ShoveLine }, probe: Probe, idx: number, rL: number, onLayer: string) => {
     if (o.kind === "line") {
       const M = o.L; if (M === L || M.layer !== onLayer || sameNetKey(M.net, L.net)) return;
       const c = pairClr(s, L.net, M.net, onLayer);
-      for (let k = 0; k + 1 < M.pts.length; k++) { const g = probeGap(probe, rL, { t: "seg", a: M.pts[k], b: M.pts[k + 1], r: M.w / 2 }); if (g < c - ROUTE_EPS) { score("line", idx + probeDist(probe, M.pts[k]), { L: M }); return; } }
+      for (let k = 0; k + 1 < M.pts.length; k++) { const g = probeGap(probe, rL, { t: "seg", a: M.pts[k], b: M.pts[k + 1], r: M.w / 2 }); if (g < c - ROUTE_EPS) { score("line", idx + probeDist(probe, M.pts[k]), { L: M, arc: !!M.arcs && M.arcs.seg[k] >= 0 }); return; } }
       return;
     }
     if (L.ownIds && o.id && L.ownIds.has(o.id)) return;
     if (o.kind === "track") {
       if (o.layer !== onLayer || sameNetKey(o.net, L.net) || (L.ids && L.ids.includes(o.id))) return;
-      const g = probeGap(probe, rL, { t: "seg", a: o.a, b: o.b, r: o.w / 2 }); if (g < pairClr(s, L.net, o.net, onLayer) - ROUTE_EPS) score("line", idx + probeDist(probe, o.a), { o });
+      const g = probeGap(probe, rL, o.arc || { t: "seg", a: o.a, b: o.b, r: o.w / 2 }); if (g < pairClr(s, L.net, o.net, onLayer) - ROUTE_EPS) score("line", idx + probeDist(probe, o.a), { o, arc: !!o.arc });
     } else if (o.kind === "via") {
       if (!o.layers.has(onLayer) || sameNetKey(o.net, L.net) || (L.viaId && L.viaId === o.id)) return;
       const g = probeGap(probe, rL, { t: "circle", x: o.at[0], y: o.at[1], r: o.r }); if (g < pairClr(s, L.net, o.net, onLayer, "via") - ROUTE_EPS) score("via", idx + probeDist(probe, o.at), { o });
@@ -198,13 +203,17 @@ export function shoveNearest(SW: ShoveWorld, st: ShoveState, L: ShoveLine) {
 export type Probe = { t: "seg"; a: Pt; b: Pt } | { t: "circle"; x: number; y: number };
 export function probeGap(probe: Probe, r: number, shape: CopperShape) { const p: CopperShape = probe.t === "seg" ? { t: "seg", a: probe.a, b: probe.b, r } : { t: "circle", x: probe.x, y: probe.y, r }; return shapeGap(p, shape); }
 export function probeDist(probe: Probe, q: Pt) { const a = probe.t === "seg" ? probe.a : [probe.x, probe.y]; return Math.min(9999, Math.hypot(q[0] - a[0], q[1] - a[1])); }
-/** SHOVE::assembleLine for a track of the world (or the shoved line it is already part of). */
+/** SHOVE::assembleLine for a track of the world (or the shoved line it is already part of); a line with arcs keeps them. */
 export function shoveLineOf(SW: ShoveWorld, st: ShoveState, o: ShoveTrack): ShoveLine | null {
   if (st.lineOf.has(o.id)) return st.lineOf.get(o.id)!;
-  const ln = assembleLine(SW.doc, o.item); if (!ln) return null;
-  return { key: ln.ids.join(","), ids: ln.ids, pts: ln.pts.map((p) => p.slice()), orig: ln.pts.map((p) => p.slice()), w: ln.width, layer: ln.layer, net: ln.netKey, rank: -Infinity };
+  const al = assembleArcLine(SW.doc, o.item); const withArcs = !!al && !!al.arcs && al.arcs.seg.some((k) => k >= 0);
+  const ln = withArcs || o.item.kind === "arc" ? al : assembleLine(SW.doc, o.item); if (!ln) return null;
+  return Object.assign({ key: ln.ids.join(","), ids: ln.ids, pts: ln.pts.map((p) => p.slice()), orig: ln.pts.map((p) => p.slice()), w: ln.width, layer: ln.layer, net: ln.netKey, rank: -Infinity }, withArcs ? { arcs: ln.arcs } : {});
 }
-export function setLine(st: ShoveState, L: ShoveLine, pts: Pt[]) { L.pts = pts; if (L.head || L.proxy) return; st.lines.set(L.key, L); for (const id of L.ids) st.lineOf.set(id, L); }
+/** The line's new path; its arcs where the path leaves them as they were (LINE::restoreUntouchedArcs). */
+export function setLine(st: ShoveState, L: ShoveLine, pts: Pt[]) { if (L.arcs) L.arcs = restoreArcTags(pts, L.pts, L.arcs); L.pts = pts; if (L.head || L.proxy) return; st.lines.set(L.key, L); for (const id of L.ids) st.lineOf.set(id, L); }
+/** A line that holds arcs (the optimizer leaves those alone). */
+export const lineHasArcs = (L: Pick<ShoveLine, "arcs">) => !!L.arcs && L.arcs.seg.some((k) => k >= 0);
 /** The hulls a pusher puts around itself for a pushed line of width w (its segments, and its via). */
 export function pusherHulls(s: DesignSettings, P: ShoveShape, V: ShoveShape) {
   const c = pairClr(s, P.net, V.net); const out: Pt[][] = [];
@@ -275,9 +284,11 @@ export function pushVia(SW: ShoveWorld, st: ShoveState, L: ShoveLine, v: ShoveVi
   const rank = L.rank - 1; st.viaAt.set(v.id, at); st.viaRank.set(v.id, rank);
   const item = SW.doc.items.get(v.id);
   for (const fl of item ? viaFanout(SW.doc, item) : []) {
-    if (fl.arc || !fl.ids.length) return false;   // an arc on the via cannot follow (arcs are not shoved here)
-    const M: ShoveLine = st.lineOf.get(fl.ids[0]) || { key: fl.ids.join(","), ids: fl.ids, pts: fl.pts.map((p) => p.slice()), orig: fl.pts.map((p) => p.slice()), w: fl.width, layer: fl.layer, net: fl.netKey, rank: -Infinity };
-    if (!peq(M.pts[0], v.at) && peq(M.pts[M.pts.length - 1], v.at)) { M.pts.reverse(); M.ids = M.ids.slice().reverse(); if (M.orig) M.orig = M.orig.slice().reverse(); }
+    // an arc on the via: its whole line (NODE::AssembleLine, the arcs with it) follows
+    const ln = fl.arc ? (st.lineOf.get(fl.arc.id) ? null : assembleArcLine(SW.doc, fl.arc)) : fl; if (fl.arc && !ln && !st.lineOf.get(fl.arc.id)) return false;
+    const ids = fl.arc ? (ln ? ln.ids : st.lineOf.get(fl.arc.id)!.ids) : fl.ids; if (!ids.length) return false;
+    const M: ShoveLine = st.lineOf.get(ids[0]) || Object.assign({ key: ids.join(","), ids, pts: ln!.pts.map((p) => p.slice()), orig: ln!.pts.map((p) => p.slice()), w: ln!.width, layer: ln!.layer, net: ln!.netKey, rank: -Infinity }, ln!.arcs ? { arcs: ln!.arcs } : {});
+    if (!peq(M.pts[0], v.at) && peq(M.pts[M.pts.length - 1], v.at)) { M.pts.reverse(); M.ids = M.ids.slice().reverse(); if (M.orig) M.orig = M.orig.slice().reverse(); if (M.arcs) M.arcs = reverseArcs(M.arcs); }
     if (!peq(M.pts[0], v.at)) continue;
     M.rank = rank; setLine(st, M, dragCorner45(M.pts, 0, at, 0));
     const i = stack.indexOf(M); if (i >= 0) stack.splice(i, 1); stack.push(M);
@@ -322,11 +333,31 @@ export function shoveRun(SW: ShoveWorld, heads: Omit<ShoveLine, "key" | "rank" |
       const res = shoveLine(s, ob, cur); if (!res) return null; setLine(st, cur, res); continue;
     }
     const res = shoveLine(s, cur, ob); if (!res) return null;
+    if (hit.arc) {
+      // SHOVE::onCollidingArc: a shove that would more than double the arc's line (extensionFactor > 1.0) is SH_TRY_WALK —
+      // the pushing line walks round the arc as round a solid (onCollidingSolid)
+      const obsLen = ptsLength(ob.pts), ext = obsLen ? ptsLength(res) / obsLen - 1 : 0;
+      if (ext > 1.0) {
+        if (cur.head || cur.proxy) return null;
+        const sh: CopperShape = hit.o && (hit.o as ShoveTrack).arc ? (hit.o as ShoveTrack).arc! : { t: "path", pts: ob.pts, r: ob.w / 2 };
+        const w = walkLineAround(s, cur, sh, pairClr(s, cur.net, ob.net, cur.layer)); if (!w) return null;
+        cur.rank = rs.jump_over_obstacles ? cur.rank - 1 : cur.rank + 10000;
+        setLine(st, cur, w); continue;
+      }
+    }
     ob.rank = cur.rank - 1; setLine(st, ob, res);
     const i = stack.indexOf(ob); if (i >= 0) stack.splice(i, 1); stack.push(ob);
   }
   shoveOptimize(SW, st, heads as ShoveLine[], rs);   // SH_OK: runOptimizer( m_currentNode )
   return st;
+}
+/** ROUTER::VisibleViewArea (GAL::GetVisibleWorldExtents, set on every view and mouse event): the board box the canvas shows, or null. */
+export function visibleViewArea(ctx: PcbCtx): Box | null {
+  const st = ctx.stage as HTMLElement | undefined;
+  if (!st || typeof st.getBoundingClientRect !== "function" || typeof ctx.worldMm !== "function") return null;
+  const b = st.getBoundingClientRect(); if (!(b.width > 0 && b.height > 0)) return null;
+  const p = ctx.worldMm({ clientX: b.left, clientY: b.top }), q = ctx.worldMm({ clientX: b.right, clientY: b.bottom });
+  return [Math.min(p[0], q[0]), Math.min(p[1], q[1]), Math.max(p[0], q[0]), Math.max(p[1], q[1])];
 }
 /** AREA_CONSTRAINT::Check (not strict) for replacing vertices v1..v2 of `path` by `bypass` inside `area`. */
 export function areaAllows(area: Box, path: Pt[], v1: number, v2: number, bypass: Pt[]) {
@@ -339,7 +370,7 @@ export function areaAllows(area: Box, path: Pt[], v1: number, v2: number, bypass
   return false;
 }
 /** What a pushed line may not touch while it is optimized: the board as the shove left it (pushed lines and vias moved, the heads in). */
-function shoveObstacles(SW: ShoveWorld, st: ShoveState, heads: ShoveLine[], L: ShoveLine): ObstacleIndex {
+export function shoveObstacles(SW: ShoveWorld, st: ShoveState, heads: ShoveLine[], L: ShoveLine): ObstacleIndex {
   const skip = new Set<string>(); for (const M of st.lines.values()) for (const id of M.ids) skip.add(id); for (const id of st.viaAt.keys()) skip.add(id);
   const base = routeObstacles(SW.doc, SW.s, L.net, L.layer!, null, skip); const out: Obstacle[] = base.list.slice();
   const addSeg = (a: Pt, b: Pt, w: number, net: string, kind: string) => { const ob = { id: null, kind, net, shape: { t: "seg", a, b, r: w / 2 }, bbox: [Math.min(a[0], b[0]) - w / 2, Math.min(a[1], b[1]) - w / 2, Math.max(a[0], b[0]) + w / 2, Math.max(a[1], b[1]) + w / 2] } as unknown as Obstacle; ob.clr = routeClearance(SW.s, L.net, ob, L.layer, SW.doc); out.push(ob); };
@@ -359,12 +390,14 @@ function shoveObstacles(SW: ShoveWorld, st: ShoveState, heads: ShoveLine[], L: S
  * reversed before each pass.  Heads are left alone.
  */
 export function shoveOptimize(SW: ShoveWorld, st: ShoveState, heads: ShoveLine[], rs: RouterSettings) {
-  const queue = [...st.lines.values()].filter((L) => !L.head && !L.proxy && L.layer && L.pts.length >= 2); if (!queue.length) return;
+  const queue = [...st.lines.values()].filter((L) => !L.head && !L.proxy && L.layer && L.pts.length >= 2 && !lineHasArcs(L)); if (!queue.length) return;   // OPTIMIZER::Optimize leaves a line with arcs alone
   let area: Box | null = null; let maxW = 0;
   const grow = (p: Pt) => { area = area ? [Math.min(area[0], p[0]), Math.min(area[1], p[1]), Math.max(area[2], p[0]), Math.max(area[3], p[1])] : [p[0], p[1], p[0], p[1]]; };
   for (const L of queue) { maxW = Math.max(maxW, L.w); for (const p of L.pts) grow(p); for (const p of L.orig || []) grow(p); }
   for (const [id, at] of st.viaAt) { grow(at); const v = SW.vias.get(id); if (v) grow(v.at); }
-  if (!area) return; const A = area as Box; const box: Box = [A[0] - maxW, A[1] - maxW, A[2] + maxW, A[3] + maxW];
+  if (!area) return; const A = area as Box; let box: Box = [A[0] - maxW, A[1] - maxW, A[2] + maxW, A[3] + maxW];
+  // area->Intersect( VisibleViewArea() ): BOX2::Intersect, an empty box at the origin when they do not overlap
+  const V = S.viewArea; if (V) { const x0 = Math.max(box[0], V[0]), y0 = Math.max(box[1], V[1]), x1 = Math.min(box[2], V[2]), y1 = Math.min(box[3], V[3]); box = x0 < x1 && y0 < y1 ? [x0, y0, x1, y1] : [0, 0, 0, 0]; }
   const low = (rs.effort as number) === 0, passes = low ? 1 : 2;   // OE_LOW, OE_MEDIUM, OE_FULL
   const smart = !!rs.smart_pads && (rs.corner_mode === 0 || rs.corner_mode === 1);   // Smart Pads is incompatible with 90-degree mode
   const check = (path: Pt[], v1: number, v2: number, bypass: Pt[]) => areaAllows(box, path, v1, v2, bypass);
@@ -382,6 +415,7 @@ export function shoveOptimize(SW: ShoveWorld, st: ShoveState, heads: ShoveLine[]
 export function shoveOps(doc: BoardDoc, st: ShoveState) {
   const ops: BranchOp[] = [];
   for (const L of st.lines.values()) {
+    if (lineHasArcs(L)) { ops.push(...arcLineOps(doc, L)); continue; }
     const pts = simplifyPts(L.pts); const olds = L.ids.map((id: string) => doc.items.get(id)).filter(Boolean) as KItem[]; if (!olds.length) continue;
     const n = pts.length - 1; const grp = {};
     for (let i = 0; i < n; i++) {
@@ -393,6 +427,24 @@ export function shoveOps(doc: BoardDoc, st: ShoveState) {
     for (let i = Math.max(n, 0); i < olds.length; i++) ops.push(opOn(olds[i], { del: olds[i].id }, grp));
   }
   for (const [id, at] of st.viaAt) { const it = doc.items.get(id); if (!it) continue; const node = clone(it.node); K.kid(node, "at")!.splice(1, 2, r6(at[0]), r6(at[1])); ops.push(opOn(it, { set: id, node })); }
+  return ops;
+}
+/** The branch edits of a pushed line that holds arcs: its arcs and segments in order, an unchanged one kept, the others rewritten from one of the line's items of their kind. */
+function arcLineOps(doc: BoardDoc, L: ShoveLine): BranchOp[] {
+  const ops: BranchOp[] = []; const grp = {}; const olds = L.ids.map((id: string) => doc.items.get(id)).filter(Boolean) as KItem[]; if (!olds.length) return ops;
+  const used = new Set<string>(); const els = lineElems(L.pts, L.arcs);
+  const sameAs = (o: KItem, e: TrackElem) => { const a = pt(o.node, "start"), b = pt(o.node, "end"); if (!a || !b || (o.kind === "arc") !== (e.t === "arc")) return false; if (e.t === "arc") { const m = pt(o.node, "mid"); if (!m || !peq(m, e.m)) return false; } return (peq(a, e.a) && peq(b, e.b)) || (peq(a, e.b) && peq(b, e.a)); };
+  const fresh: TrackElem[] = [];
+  for (const e of els) { const o = olds.find((x) => !used.has(x.id) && sameAs(x, e)); if (o) used.add(o.id); else fresh.push(e); }
+  for (const e of fresh) {
+    const base = olds.find((x) => !used.has(x.id) && (x.kind === "arc") === (e.t === "arc")); const like = base || olds.find((x) => (x.kind === "arc") === (e.t === "arc"));
+    const node = like ? clone(like.node) : e.t === "arc" ? arcTrackNode(doc, e.a, e.m, e.b, L.w, L.layer!, netOf(olds[0].node)) : segmentNode(doc, e.a, e.b, L.w, L.layer!, netOf(olds[0].node));
+    K.kid(node, "start")!.splice(1, 2, r6(e.a[0]), r6(e.a[1])); K.kid(node, "end")!.splice(1, 2, r6(e.b[0]), r6(e.b[1]));
+    if (e.t === "arc") { const mk = K.kid(node, "mid"); if (mk) mk.splice(1, 2, r6(e.m[0]), r6(e.m[1])); }
+    if (base) { used.add(base.id); ops.push(opOn(base, { set: base.id, node }, grp)); }
+    else { const u = K.kid(node, "uuid"); if (u) node.splice(node.indexOf(u), 1); node.push(["uuid", K.newUuid()]); ops.push({ add: node, grp }); }
+  }
+  for (const o of olds) if (!used.has(o.id)) ops.push(opOn(o, { del: o.id }, grp));
   return ops;
 }
 /** What a shove shows: the pushed lines and vias, and the ids of the originals they hide. */
@@ -412,18 +464,20 @@ export function solidObs(ctx: PcbCtx, rt: Route, layer?: string) {
   return rt.sobs!;
 }
 /**
- * LINE_PLACER::rhShoveOnly: the head walked round the solids, then shoved into the rest.  { pts, reached, shove } or
- * null when the shove fails (the caller walks around instead).
+ * LINE_PLACER::rhShoveOnly after its walk round the solids: the walked line (tail + head) and its via shoved into the
+ * rest.  { shove, optO: what the head is optimized against afterwards (the solids and the lines as shoved) } or null
+ * when the shove fails (the caller walks around instead).
  */
-export function shoveHead(ctx: PcbCtx, rt: Route, leg: LegFn): { pts: Pt[]; reached: boolean; shove: ShoveResult } | null {
-  const s = settingsOf(ctx), doc = ctx.doc; const r = rt.width / 2;
-  const SOL = solidObs(ctx, rt); const w = walkHead(SOL, rt.last, rt.cursor, r, rt.diagFirst, rt.tracer.lastSegDir, leg);
-  const via = headVia(ctx, rt); const head: Omit<ShoveLine, "key" | "rank" | "ids"> = { pts: w.pts, w: rt.width, layer: rt.layer, net: rt.netKey, ownIds: rt.netKey ? null : routeOwn(rt) };
+export function shoveHead(ctx: PcbCtx, rt: Route, walked: Pt[]): { shove: ShoveResult; optO: ObstacleIndex } | null {
+  const s = settingsOf(ctx), doc = ctx.doc;
+  const via = headVia(ctx, rt); const head: Omit<ShoveLine, "key" | "rank" | "ids"> = { pts: walked, w: rt.width, layer: rt.layer, net: rt.netKey, ownIds: rt.netKey ? null : routeOwn(rt) };
   if (via) {
-    const hv = head.via = { at: w.pts[w.pts.length - 1].slice(), r: via.diameter / 2, layers: new Set(viaSpanLayers(doc, via.layers)) };
+    const hv = head.via = { at: walked[walked.length - 1].slice(), r: via.diameter / 2, layers: new Set(viaSpanLayers(doc, via.layers)) };
     for (const L of hv.layers) if (pathHits(solidObs(ctx, rt, L), [hv.at], hv.r).length) return null;
   }
+  S.viewArea = visibleViewArea(ctx);
   const SW = shoveWorld(doc, s, S.rs.shove_vias);
   const st = shoveRun(SW, [head], S.rs); if (!st) return null;
-  return { pts: w.pts, reached: w.reached, shove: { ops: shoveOps(doc, st), preview: shovePreview(doc, st), viaOk: true } };
+  const H = Object.assign({ key: "head0", rank: SHOVE_HEAD_RANK, ids: [], head: true }, head) as ShoveLine;
+  return { shove: { ops: shoveOps(doc, st), preview: shovePreview(doc, st), viaOk: true }, optO: shoveObstacles(SW, st, [], H) };
 }

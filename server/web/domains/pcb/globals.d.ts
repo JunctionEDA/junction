@@ -195,7 +195,7 @@ interface KiCadCanvasApi {
 
 /** The context app.js hands every tool hook (its toolCtx() seam). */
 interface ToolCtx {
-  K: KiCadCanvasApi; doc: KDoc | null; IU: number; isSch: boolean; zoom: number; pxPerMm: number; gridPitch: number; snapOn: boolean;
+  K: KiCadCanvasApi; doc: KDoc | null; IU: number; isSch: boolean; zoom: number; pxPerMm: number; gridPitch: number; /** GRID::y of the current grid (gridPitch is its X) */ gridPitchY?: number; snapOn: boolean;
   snap(mm: [number, number]): [number, number];
   tool: string; selFilter: Record<string, boolean>; activeLayer: string;
   selected: { id: string; x: number; y: number; rot?: number } | null; items: unknown[]; sheets: unknown[]; viewOnly: boolean; live: boolean;

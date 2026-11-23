@@ -4767,6 +4767,8 @@ ${ue}
 @media (prefers-color-scheme: dark){:root[data-theme="system"] .kic .lt{display:none} :root[data-theme="system"] .kic .dk{display:inline}}
 :root[data-theme="dark"]{--kic-lt:none;--kic-dk:inline}
 @media (prefers-color-scheme: dark){:root[data-theme="system"]{--kic-lt:none;--kic-dk:inline}}
+:root.k-icons-light .kic .lt{display:inline} :root.k-icons-light .kic .dk{display:none} :root.k-icons-light{--kic-lt:inline;--kic-dk:none}
+:root.k-icons-dark .kic .lt{display:none} :root.k-icons-dark .kic .dk{display:inline} :root.k-icons-dark{--kic-lt:none;--kic-dk:inline}
 .kbmp{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:24px;padding:0;border:1px solid var(--line);border-radius:var(--r-2,3px);background:var(--panel);color:var(--ink);cursor:pointer}
 .kbmp>.kic{display:block}
 .kbmp:hover:not(:disabled){border-color:var(--line-2);background:var(--paper)}

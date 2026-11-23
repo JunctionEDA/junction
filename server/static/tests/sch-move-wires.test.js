@@ -267,7 +267,8 @@ test("while moving, Ctrl turns the grid off and Shift the snap to other items' a
   _.moveDrag(c, [31.1, 101.2], { shiftKey: true }); assert.deepStrictEqual(at(doc.items.get("R1")), [30.48, 101.6], "the grid again");
   _.endDrag(c, false);
   // the drag origin (the symbol's position) lands on the other wire's off-grid end when it is within reach
-  ({ doc, c } = open(body, "move"));
+  // (zoomed in so the anchor is inside the snap-in range: min( 25 px, grid ) less 5 px)
+  ({ doc, c } = open(body, "move")); c.pxPerMm = 20;
   assert.ok(_.beginDrag(c, doc.items.get("R1"), [25.4, 100.33], true)); _.moveDrag(c, [40.2, 96.5], {});
   assert.deepStrictEqual(at(doc.items.get("R1")), [40.1, 96.6], "snapped to the anchor");
   _.moveDrag(c, [40.2, 96.5], { shiftKey: true }); assert.deepStrictEqual(at(doc.items.get("R1")), [40.64, 96.52], "Shift: grid only");

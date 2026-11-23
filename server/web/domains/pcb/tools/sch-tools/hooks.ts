@@ -20,7 +20,7 @@ import { cancelPinPlace, movePinPlace, sheetAt, sheetPinClick } from "./sheets";
 import { mmPerPx, snapConn } from "./snap";
 import { DRAW_TOOLS, K, S, TEXT_KINDS, atOf, toolOf, uuidOf } from "./state";
 import { breakAgain, restoreBreak } from "./transforms";
-import { ghost, same } from "./util";
+import { deep, ghost, same } from "./util";
 import { startWire, switchPosture, undoSegment, wireClick, wireFollow } from "./wire";
 
 // ---------------------------------------------------------------- hooks (see app.js "editing tools")
@@ -60,6 +60,8 @@ export function onActivate(toolId: string, ctx: SchCtx, before: string[] = []) {
   // Import Sheet arms the preset for the sheet tool it starts; any other activation drops it
   if (S.sheetPreset && S.sheetPreset.armed && toolId === "sheet") S.sheetPreset.armed = false; else S.sheetPreset = null;
   if (toolId === "arc") showSchArcMode(ctx);       // SelectToolbarAction( DrawArcForMode ): the Arc group shows the mode
+  // a sheet pin move left for another tool: the sheet gets its pin back where it was
+  if (S.pinPlace && S.pinPlace.move) { const it = ctx.doc.items.get(S.pinPlace.sheetId); if (it) { it.node.length = 0; for (const c of deep(S.pinPlace.move.orig)) it.node.push(c); K.replaceChange(ctx.doc, it); } S.pinPlace = null; }
   if (!toolOf(toolId)) { closePicker(); S.carry = null; ctx.requestRender(); return; }
   S.sel = null; S.hover = null; S.selEnds = null;
   if (toolId !== "place" && toolId !== "power" && toolId !== "image") S.carry = null;   // a carried duplicate rides into the place tool
@@ -200,6 +202,8 @@ export function onPointerMove(ev: PtrEvent | null | undefined, mm: Pt, ctx: SchC
 }
 /** Clicks are handled on pointerdown and drags in the capture hooks; a sheet drawn by press-drag-release ends here. */
 export function onPointerUp(ev: PtrEvent | null | undefined, mm: Pt, ctx: SchCtx) {
+  // a selected sheet pin carried by the held button: the release places it
+  if (S.pinPlace && S.pinPlace.move && S.pinPlace.move.byPointer && mm) { sheetPinClick(ctx, mm); return; }
   const d = S.draw; if (!d || !d.press) return;
   const press = d.press; d.press = null;
   if (!ctx || !mm || !ev || ev.clientX === undefined || d.shape !== "sheet" || d.await || d.pts.length !== 1) return;

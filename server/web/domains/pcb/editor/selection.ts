@@ -388,10 +388,14 @@ export function finishBoxSel(ev: { clientX: number; clientY: number }) {
   if (!isSch() && pcbSel && pcbSel.size && E.selection.size) { for (const id of pcbSel) if (E.kdoc.items.has(id)) E.selection.add(id); pcbSel.clear(); }
   // FilterCollectorForHierarchy: a boxed group member brings its top-level group (on the schematic too)
   E.selection = groupExpand(E.selection);
-  // fields (and, when nothing else was boxed, pins) the box covered on their own are the selection: SCH_FIELD_T / SCH_PIN_T
-  if (isSch() && !picked.length && !E.selection.size && !E.selected) {
-    if (schFields.length) { E.selField = schFields[schFields.length - 1]; E.selFields = schFields.slice(0, -1); E.selPins = []; }
-    else if (schPins.length) { E.selField = null; E.selFields = []; E.selPins = schPins; }
+  // the fields and pins (sheet pins too) the box covered on their own join the selection: SCH_FIELD_T / SCH_PIN_T /
+  // SCH_SHEET_PIN_T items alongside the boxed items (their parents were left out by FilterCollectorForHierarchy)
+  if (isSch() && (schFields.length || schPins.length)) {
+    const fields = (b.add ? selectedFields() : []).concat(schFields.filter((f) => !E.selection.has(f.id)));
+    const keep = (b.add ? E.selPins as { id: string; number: string }[] : []);
+    const pins = keep.concat(schPins.filter((p) => !E.selection.has(p.id) && !keep.some((q) => q.id === p.id && q.number === p.number)));
+    if (fields.length) { E.selField = fields[fields.length - 1]; E.selFields = fields.slice(0, -1); }
+    E.selPins = pins;
   }
   const prim = picked.find((it) => it.kind === "symbol" || it.kind === "footprint");
   E.selected = prim ? (E.items.find((f: ItemSummary) => f.id === prim.id) || E.selected) : (b.add ? E.selected : null);

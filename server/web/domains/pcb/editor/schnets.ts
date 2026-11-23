@@ -67,7 +67,9 @@ export function loadSheets(force = false): Promise<void> {
 }
 
 // ---------------------------------------------------------------- the net map
-interface Computed { map: Map<string, NetEntry>; instances: SheetInstance[]; index: Map<string, string>; rootName: string; docs: Map<string, KDoc>; key: string }
+interface Computed { map: Map<string, NetEntry>; instances: SheetInstance[]; index: Map<string, string>; rootName: string; docs: Map<string, KDoc>; key: string;
+  /** the netclass label assignments the hierarchy gives (directive labels, Netclass fields, rule areas) */
+  netclassLabels?: Map<string, Set<string>> }
 let computed: Computed | null = null, docGen = 0, proSeen: unknown = null, proGen = 0;
 function compute(): Computed | null {
   const h = helpers(); const cur = curEntry(), doc = E.kdoc as KDoc | null;
@@ -96,7 +98,7 @@ function compute(): Computed | null {
   const tops = topLevelSchematics().map((t) => ({ sheet: files.get(t.doc.path) as SheetFile, name: t.name, uuid: t.uuid })).filter((t) => !!t.sheet);
   const nl = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve, { symbolPins: h.symbolPins, isPower: (d, it) => h.isPowerSymbol(d, String(((KiCadCanvas.kid(it.node, "lib_id") as SNode | null) || [])[1])) }, project, NL().netlistOptions(E.proSettings || null));
   const map = nl.netMap || new Map<string, NetEntry>(), instances = nl.instances || [];
-  computed = { map, instances, index: SN().nameIndex(map), rootName: stem, docs, key };
+  computed = { map, instances, index: SN().nameIndex(map), rootName: stem, docs, key, netclassLabels: nl.netclassLabels };
   return computed;
 }
 /** The net map of the whole hierarchy as it stands (null outside a schematic). */
@@ -296,7 +298,7 @@ function stepNetItem(ctx: ToolCtx, dir: number): boolean {
 interface SchClass { name: string; color: string | null; wireWidth: number; busWidth: number; dashType: string | null }
 const LINE_STYLES: (string | null)[] = [null, "dash", "dot", "dash_dot", "dash_dot_dot"];   // LINE_STYLE: SOLID, DASH, DOT, DASHDOT, DASHDOTDOT
 interface SizesLike { classes: { name: string; priority: number }[]; assignments: Record<string, string[]>; patterns: { pattern: string; netclass: string }[] }
-let classCache: { src: unknown; sizes: SizesLike | null; raw: Map<string, Record<string, unknown>>; byNet: Map<string, SchClass>; styled: boolean } | null = null;
+let classCache: { src: unknown; sizes: SizesLike | null; raw: Map<string, Record<string, unknown>>; byNet: Map<string, SchClass>; styled: boolean; labels?: Map<string, Set<string>> | null } | null = null;
 /**
  * NET_SETTINGS::GetEffectiveNetClass for the schematic's values: the classes assigned to the net and those whose
  * pattern matches it, by priority, each value taken from the highest-priority class that sets it, Default's otherwise.
@@ -315,6 +317,10 @@ export function schClassOf(net: string): SchClass {
     for (const c of raw.values()) if ((typeof c.schematic_color === "string" && !/,\s*0(\.0*)?\s*\)$/.test(c.schematic_color)) || (typeof c.wire_width === "number" && c.wire_width !== 6) || (typeof c.bus_width === "number" && c.bus_width !== 12) || (typeof c.line_style === "number" && c.line_style > 0)) styled = true;
     classCache = { src: E.proSettings, sizes, raw, byNet: new Map(), styled };
   }
+  // CONNECTION_GRAPH rebuilds the label assignments from the schematic (unconditionally on a full recalculation), so
+  // the net map's take the place of the project file's netclass_assignments once the hierarchy is read
+  const nm = netMap(), labels = nm && nm.netclassLabels ? nm.netclassLabels : null;
+  if (classCache.labels !== labels) { classCache.labels = labels; classCache.byNet = new Map(); }
   const cc = classCache, hit = cc.byNet.get(net); if (hit) return hit;
   const out: SchClass = { name: "Default", color: null, wireWidth: 6 * 0.0254, busWidth: 12 * 0.0254, dashType: null };
   const take = (c: Record<string, unknown> | undefined): void => {
@@ -327,7 +333,7 @@ export function schClassOf(net: string): SchClass {
   take(cc.raw.get("Default"));
   if (net && cc.sizes) {
     const PS = (KiCadCanvas as unknown as { pcbSizes: { netclassPatternMatches(p: string, n: string): boolean } }).pcbSizes;
-    const names = new Set<string>(cc.sizes.assignments[net] || []);
+    const names = new Set<string>(cc.labels ? cc.labels.get(net) || [] : cc.sizes.assignments[net] || []);
     for (const p of cc.sizes.patterns) if (PS.netclassPatternMatches(p.pattern, net)) names.add(p.netclass);
     const res = Array.from(names, (n) => cc.sizes!.classes.find((c) => c.name === n)).filter((c): c is { name: string; priority: number } => !!c);
     res.sort((a, b) => (a.priority !== b.priority ? a.priority - b.priority : a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -412,6 +418,16 @@ export function previewNets(names: string[], ctx: ToolCtx = (toolCtx as unknown 
 export function netsOfItems(ids: string[]): (NetEntry | null)[] {
   const c = netMap(), inst = currentInstance(c); if (!c || !inst) return ids.map(() => null);
   return ids.map((id) => { const n = c.index.get(inst.index + "|" + id); return n ? c.map.get(n) || null : null; });
+}
+/**
+ * SCH_ITEM::Connection( sheet )->Name() for Find's "Search net names": the net of an item on the sheet on screen (a
+ * symbol pin by its number, a sheet pin by its name); a bus answers its own name and its members' nets.
+ */
+export function netNamesOf(id: string, pin?: string): string[] {
+  const c = netMap(), inst = currentInstance(c); if (!c || !inst) return [];
+  const n = c.index.get(inst.index + "|" + id + (pin !== undefined ? "#pin:" + pin : "")); if (!n) return [];
+  const e = c.map.get(n);
+  return e && e.bus ? [n].concat(e.busMembers || []) : [n];
 }
 /** Every net name of the schematic (GetNetClassAssignmentCandidates). */
 export function allNetNames(): string[] { const c = netMap(); return c ? SN().netNames(c.map, false) : []; }

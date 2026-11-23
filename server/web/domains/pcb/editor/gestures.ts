@@ -497,6 +497,13 @@ export function startMove(mode: "move" | "drag"): boolean {
   }
   // board: a footprint field selected on its own moves alone (EDIT_TOOL::Move on a PCB_FIELD), its umbilical line showing
   if (E.selField && !selectionIds().length && mode === "move") return startFieldMove(mm);
+  // board: pads picked on their own move by themselves when "Allow free pads" is on (m_AllowFreePads)
+  const ps = CollabTools.pcb && (CollabTools.pcb.state as unknown as { padSel?: string | null; padAlso?: { anchor: string; keys: string[] } | null; allowFreePads?: boolean });
+  const startPadMove = (E.hooks as { startPadMove?: (keys: string[], mm: number[]) => boolean }).startPadMove;
+  if (mode === "move" && ps && ps.padSel && ps.allowFreePads && !selectionIds().length && startPadMove) {
+    const keys = [ps.padSel, ...(ps.padAlso && ps.padAlso.anchor === ps.padSel ? ps.padAlso.keys.filter((k) => k !== ps.padSel) : [])];
+    if (startPadMove(keys, mm)) return true;
+  }
   // board: EDIT_TOOL::Move in the module for everything (footprints too), so Rotate / Flip / Mirror act on the move in
   // flight, the reference point and snapping are KiCad's, and with nothing selected the item under the cursor moves
   if (CollabTools.pcb) return runModuleAction("move");

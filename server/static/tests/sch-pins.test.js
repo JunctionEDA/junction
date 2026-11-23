@@ -120,6 +120,13 @@ test("Pin Helpers: No Connect on the pin, Wire stub one grid step out", () => {
   _.pinHelper(ctx, [{ id: "u1", number: "3" }], "wire");
   [n] = added(ctx); assert.strictEqual(ctx.log[1].label, "Wire Pins"); assert.deepStrictEqual(ptsOf(n.node), [[50.8, 43.18], [50.8, 41.91]]);
 });
+test("Pin Helpers: Wire stub on a non-square grid: wireGrid.x across, wireGrid.y up and down", () => {
+  const doc = K.parseDoc(SHEET), ctx = makeCtx(doc); ctx.gridPitch = 1.27; ctx.gridPitchY = 2.54;
+  _.pinHelper(ctx, [{ id: "u1", number: "3" }], "wire");
+  let [n] = added(ctx); assert.deepStrictEqual(ptsOf(n.node), [[50.8, 43.18], [50.8, 40.64]], "a top pin: the stub is one Y step");
+  _.pinHelper(ctx, [{ id: "u1", number: "2" }], "wire");
+  [n] = added(ctx); const p = ptsOf(n.node); assert.ok(Math.abs(Math.abs(p[1][0] - p[0][0]) - 1.27) < 1e-9, "a side pin: one X step"); assert.strictEqual(p[1][1], p[0][1]);
+});
 test("Pin Helpers > Wire with a pointer: the stub ends ride the cursor at once; the click pushes \"Wire Pins\", Esc leaves nothing", () => {
   _.setFollow(true);
   try {

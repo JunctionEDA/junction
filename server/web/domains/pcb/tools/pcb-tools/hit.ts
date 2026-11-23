@@ -1,6 +1,7 @@
 // pcb-tools/hit.ts — hit testing of the non-footprint items.
 import type { BoardDoc, PcbGeom, Pt } from "./types";
 import { K } from "./state";
+import { ELLIPSE_KINDS, ellipseHitDistance } from "./ellipse";
 
 // ---------------------------------------------------------------- hit testing (non-footprint items)
 export function distSeg(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
@@ -60,6 +61,10 @@ export function hitTestItem(doc: BoardDoc, x: number, y: number, slop: number, o
     const b = it.bbox; if (x < b[0] - slop || x > b[2] + slop || y < b[1] - slop || y > b[3] + slop) continue;
     let d = Infinity;
     if (it.kind === "gr_text" || it.kind === "gr_text_box" || it.kind === "dimension" || it.kind === "property") d = (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]) ? slop * 0.5 : Infinity;   // precise copper hits win over a text box (a footprint editor field is a PCB_FIELD text)
+    else if (ELLIPSE_KINDS.has(it.kind)) {   // EDA_SHAPE::hitTest: SHAPE_ELLIPSE::SquaredDistance to the outline (inside, when filled), and the hatch lines
+      d = ellipseHitDistance(it.node, x, y);
+      for (const g of it.geom as PcbGeom[]) if (g.t === "line") d = Math.min(d, geomDist(g, x, y));
+    }
     else if (it.kind === "pad") d = padDist(it.geom as PcbGeom[], x, y, slop);   // the footprint editor's pads are items of their own (GENERAL_COLLECTOR::FootprintItems)
     else for (const g of it.geom as PcbGeom[]) { if (it.kind === "zone" && g.fill) continue; d = Math.min(d, geomDist(g, x, y)); }
     if (d < bd) { bd = d; best = it; }

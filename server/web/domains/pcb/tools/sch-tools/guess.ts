@@ -64,9 +64,28 @@ export function bodyAndPinsBox(doc: KDoc, it: KItem): Box {
   for (const pin of symbolPins(doc, it)) { if (pin.hidden) continue; const q = pinBox(it, pin); b = [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])]; }
   return b;
 }
+/** A sheet's pins as SCH_SHEET_PIN candidates of their own (the pin's name stands for its number). */
+export function sheetPinCands(it: KItem): Cand[] {
+  if (it.kind !== "sheet") return [];
+  return K.kids(it.node, "pin").map((p: SNode) => {
+    const a = atOf(p), name = K.str(p[1]);
+    const pin: SymPin = { x: a[0], y: a[1], root: [a[0], a[1]], number: name, name, type: K.str(p[2] || ""), hidden: false, len: 0, side: "" };
+    return { key: pinKey(it.id, name), kind: "pin" as const, item: it, pin };
+  });
+}
+/** SCH_SHEET_PIN::GetBoundingBox: the box of its drawn shape and text (the canvas tags them with the pin's name). */
+function sheetPinBox(it: KItem, pin: SymPin): Box {
+  let b: Box | null = null;
+  for (const g of (it.geom || []) as { pinNo?: string }[]) {
+    if (g.pinNo !== pin.number) continue;
+    const q = (K.geomBox as (g: unknown) => Box | null)(g); if (q) b = b ? [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])] : q.slice() as Box;
+  }
+  return b || [pin.x, pin.y, pin.x, pin.y];
+}
 /** The candidate's GetBoundingBox(). */
 export function candBox(doc: KDoc, c: Cand): Box {
   const it = c.item;
+  if (c.kind === "pin" && it.kind === "sheet") return sheetPinBox(it, c.pin!);
   if (c.kind === "pin") return pinBox(it, c.pin!);
   if (c.kind === "field") return quadBox(c.quad!);
   if (it.kind === "symbol") return bodyAndPinsBox(doc, it);
@@ -82,6 +101,7 @@ function busEntryEnds(it: KItem): [Pt, Pt] { const [ax, ay] = atOf(it.node), s =
 /** The candidate's HitTest( position, accuracy ). */
 export function candHit(doc: KDoc, c: Cand, p: Pt, acc: number): boolean {
   const it = c.item;
+  if (c.kind === "pin" && it.kind === "sheet") return contains(inflate(sheetPinBox(it, c.pin!), acc), p);  // SCH_SHEET_PIN (SCH_HIERLABEL::HitTest)
   if (c.kind === "pin") return contains(inflate(pinBox(it, c.pin!), Math.max(acc, PIN_SYMBOL_SIZE / 4)), p);   // SCH_PIN: m_PinSymbolSize / 4 floors the accuracy
   if (c.kind === "field") return contains(inflate(quadBox(c.quad!), acc), p);
   if (it.kind === "symbol") return contains(inflate(bodyBox(doc, it), acc / 2), p);                       // SCH_SYMBOL: the body box grown by accuracy / 2
@@ -175,9 +195,16 @@ export function collectHits(ctx: SchCtx, mm: Pt, threshold?: number): Cand[] {
       if (candHit(doc, c, mm, thr) || (pinHit && (ed.pinSelectsSymbol || rejectsPins))) out.push(c);
       continue;
     }
+    // a sheet's pins and fields, a label's fields: SCH_SHEET_PIN and SCH_FIELD are collected as items of their own
+    if (it.kind === "sheet") for (const pc of sheetPinCands(it)) if (candHit(doc, pc, mm, thr)) out.push(pc);
+    if (it.kind === "sheet" || LABELS.has(it.kind)) for (const fc of fieldCands(it, hidden)) if (candHit(doc, fc, mm, thr)) out.push(fc);
     if (candHit(doc, c, mm, thr)) out.push(c);
   }
   return out;
+}
+function fieldCands(it: KItem, hidden: Set<string> | null): Cand[] {
+  let boxes: { name: string; pts: Pt[] }[] = []; try { boxes = K.fieldBoxes(it, hidden) as { name: string; pts: Pt[] }[]; } catch (e) { boxes = []; }
+  return boxes.map((f) => ({ key: fieldKey(it.id, f.name), kind: "field" as const, item: it, field: f.name, quad: f.pts }));
 }
 
 export interface Narrowed { cands: Cand[]; /** the collector's size before the filter */ pre: number; /** the filter categories that rejected a hit */ rejected: string[] }
@@ -258,7 +285,10 @@ export function guessCandidates(ctx: SchCtx, input: Cand[], mm: Pt): Cand[] {
 /** The candidate a key names, or null (the item, pin or field is gone). */
 export function candOfKey(doc: KDoc, key: string, hidden?: Set<string> | null): Cand | null {
   const pi = key.indexOf("#pin:"), fi = key.indexOf("@field:");
-  if (pi > 0) { const it = doc.items.get(key.slice(0, pi)); const pin = it ? symbolPins(doc, it).find((p) => p.number === key.slice(pi + 5)) : null; return it && pin ? { key, kind: "pin", item: it, pin } : null; }
+  if (pi > 0) {
+    const it = doc.items.get(key.slice(0, pi)); if (it && it.kind === "sheet") return sheetPinCands(it).find((c) => c.pin!.number === key.slice(pi + 5)) || null;
+    const pin = it ? symbolPins(doc, it).find((p) => p.number === key.slice(pi + 5)) : null; return it && pin ? { key, kind: "pin", item: it, pin } : null;
+  }
   if (fi > 0) {
     const it = doc.items.get(key.slice(0, fi)); if (!it) return null;
     let boxes: { name: string; pts: Pt[] }[] = []; try { boxes = K.fieldBoxes(it, hidden || null) as { name: string; pts: Pt[] }[]; } catch (e) { boxes = []; }
@@ -340,7 +370,7 @@ export function areaCandidates(ctx: SchCtx, area: { box?: Box; poly?: Pt[]; cont
     for (const id of ids) groupItems.add(id);
   }
   const out: AreaPick = { items: [], fields: [], pins: [] }, taken = new Set<string>();
-  const pinCands: Cand[] = [], fieldCands: Cand[] = [];
+  const pinCands: Cand[] = [], fieldCands0: Cand[] = [];
   for (const it of doc.items.values()) {
     if (it.kind === "group" || !selectableItem(doc, it)) continue;
     const c: Cand = { key: it.id, kind: "item", item: it };
@@ -348,8 +378,10 @@ export function areaCandidates(ctx: SchCtx, area: { box?: Box; poly?: Pt[]; cont
       // the view query: pins and visible fields whose box the selection reaches are candidates of their own
       for (const pin of symbolPins(doc, it)) { if (pin.hidden && !showHidden) continue; const pc: Cand = { key: pinKey(it.id, pin.number), kind: "pin", item: it, pin }; if (hit(pc, false)) pinCands.push(pc); }
       let boxes: { name: string; pts: Pt[] }[] = []; try { boxes = K.fieldBoxes(it, hidden) as { name: string; pts: Pt[] }[]; } catch (e) { boxes = []; }
-      for (const f of boxes) { const fc: Cand = { key: fieldKey(it.id, f.name), kind: "field", item: it, field: f.name, quad: f.pts }; if (hit(fc, false)) fieldCands.push(fc); }
+      for (const f of boxes) { const fc: Cand = { key: fieldKey(it.id, f.name), kind: "field", item: it, field: f.name, quad: f.pts }; if (hit(fc, false)) fieldCands0.push(fc); }
     }
+    if (it.kind === "sheet") for (const pc of sheetPinCands(it)) if (hit(pc, false)) pinCands.push(pc);
+    if (it.kind === "sheet" || LABELS.has(it.kind)) for (const fc of fieldCands(it, hidden)) if (hit(fc, false)) fieldCands0.push(fc);
     if (viaGroup.has(it.id)) { if (allows("item", it)) { out.items.push({ item: it, end: "whole" }); taken.add(it.id); } continue; }
     if (contained && groupItems.has(it.id)) continue;
     if (isSchLine(it)) {
@@ -364,9 +396,10 @@ export function areaCandidates(ctx: SchCtx, area: { box?: Box; poly?: Pt[]; cont
     }
     if (hit(c, contained) && allows("item", it)) { out.items.push({ item: it, end: "whole" }); taken.add(it.id); }
   }
-  // a field whose symbol is taken goes with it; pins are the selection only when nothing else was boxed
-  for (const fc of fieldCands) if (!taken.has(fc.item.id) && hit(fc, contained) && allows("field", fc.item)) out.fields.push({ id: fc.item.id, name: fc.field! });
-  if (!out.items.length && !out.fields.length) for (const pc of pinCands) if (!ed.pinSelectsSymbol && hit(pc, contained) && allows("pin", pc.item)) out.pins.push({ id: pc.item.id, number: pc.pin!.number });
+  // FilterCollectorForHierarchy( multiselect ): a field or pin (a sheet pin too) whose parent is taken goes with it; the
+  // others are selected alongside the boxed items
+  for (const fc of fieldCands0) if (!taken.has(fc.item.id) && hit(fc, contained) && allows("field", fc.item)) out.fields.push({ id: fc.item.id, name: fc.field! });
+  for (const pc of pinCands) if (!taken.has(pc.item.id) && (!ed.pinSelectsSymbol || pc.item.kind === "sheet") && hit(pc, contained) && allows("pin", pc.item)) out.pins.push({ id: pc.item.id, number: pc.pin!.number });
   return out;
 }
 

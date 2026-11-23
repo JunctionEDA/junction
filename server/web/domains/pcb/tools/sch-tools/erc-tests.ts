@@ -6,8 +6,9 @@ import type { Pt, ErcMarker } from "./types";
 import { type AnnSheet, type SchRef, checkAnnotation, sheetReferences } from "./annotate";
 import { type SymPin, globalPowerPin, symbolIsPower, symbolLibId, symbolPins } from "./autoplace";
 import { terminalsOf } from "./highlight";
-import { K, atOf, kid, kids, num, str } from "./state";
-import { r4 } from "./util";
+import { K, atOf, kid, kids, num, ptsOf, str } from "./state";
+import { onSegMid, r4 } from "./util";
+import { unescapeText } from "../../canvas/text";
 import type { ErcItemRef, ErcNet, ErcTerm } from "./erc";
 
 type Mark = (code: string, severity: string, p: Pt, text: string, ids: Iterable<string>, refs?: ErcItemRef[], extra?: Record<string, unknown>) => void;
@@ -308,4 +309,166 @@ export function hierarchyTests(insts: ErcInstance[], itemRef: (doc: KDoc, it: KI
   insts.forEach((s, i) => { for (const it of s.doc.items.values()) if (it.kind === "global_label") { const t = str(it.node[1]), e = gl.get(t); if (e) e.n++; else gl.set(t, { n: 1, inst: i, it }); } });
   for (const e of gl.values()) if (e.n === 1) mark(e.inst, "single_global_label", "warning", atOf(e.it.node), "Global label only appears once in the schematic", [e.it.id], [itemRef(insts[e.inst].doc, e.it)]);
   return out;
+}
+
+// ---------------------------------------------------------------- the connectivity's island diagnostics
+/** What busTests needs of the hierarchy's net map: the net an item of this sheet is on (its name, whether it is a bus,
+ *  its winning driver's priority and a bus's member nets). */
+export interface BusTestOpts {
+  busAliases?: Map<string, string[]> | Record<string, string[]> | null;
+  netOfItem?(id: string): { name: string; bus: boolean; prio: number; members: string[] } | undefined;
+}
+// SCH_CONNECTIVITY's contact kinds (conn_islands.cpp) and which of them propagate to which
+const ANCHOR = 0, WIRE = 1, BUS = 2, ENTRY = 3, NC = 5, BUS_SIDE = 6;
+const PROPAGATES = [
+  [true, true, true, true, true, false, false], [true, true, false, true, false, false, false], [true, false, true, false, true, false, false],
+  [true, true, false, false, false, false, false], [true, false, true, false, true, false, false], [false, false, false, false, false, false, false],
+  [false, false, false, false, false, false, false]];
+/**
+ * The connectivity engine's island diagnostics of one sheet (ENGINE::BusNetConflicts, BusBusConflicts,
+ * BusEntryConflicts and WiredImplicitPowerPins, reported by ERC_TESTER::TestConnectivity): the sheet's items joined
+ * into islands where their connection points meet (BuildScreenIslands: a line's middle counts where another item has a
+ * connection point; a bus entry's end on a bus touches nothing; wires and buses meet only through an anchor such as
+ * a label or a junction), then
+ * - bus_to_net_conflict: an island with both net and bus parts (wires and buses, net and bus labels);
+ * - bus_to_bus_conflict: a vector and a group bus label on one island, or bus labels sharing no member;
+ * - net_not_bus_member: a bus entry whose net is not one of the members of the bus it touches;
+ * - wired_implicit_power: a hidden power input of an ordinary symbol on an island with a wire (once per symbol).
+ */
+export function busTests(doc: KDoc, mark: Mark, itemRef: (doc: KDoc, it: KItem) => ErcItemRef, pinRef: (t: ErcTerm & { pin: SymPin }) => ErcItemRef, opts: BusTestOpts): void {
+  interface Vertex { items: string[]; it: KItem; kind: string; seg?: [Pt, Pt]; pos: Pt; label?: { text: string; conn: ReturnType<typeof K.busConnection> }; prio: number; pin?: SymPin; pins?: SymPin[]; power?: boolean; sheetPin?: string }
+  const verts: Vertex[] = [];
+  interface Port { v: number; kind: number; bit: number }
+  const points = new Map<string, { p: Pt; ports: Port[] }>();
+  const key = (p: Pt): string => r4(p[0]) + "," + r4(p[1]);
+  const addPort = (v: number, p: Pt, kind: number, bit: number): void => { const k = key(p); let e = points.get(k); if (!e) points.set(k, e = { p, ports: [] }); e.ports.push({ v, kind, bit }); };
+  const aliases = opts.busAliases || undefined;
+  const LABEL_PRIO: Record<string, number> = { label: 4, global_label: 7, hierarchical_label: 3 };
+  for (const it of doc.items.values()) {
+    const n = it.node;
+    if (it.kind === "wire" || it.kind === "bus") {
+      const pts = ptsOf(n) as Pt[]; if (pts.length < 2) continue;
+      const v = verts.length; verts.push({ items: [it.id], it, kind: it.kind, seg: [pts[0], pts[pts.length - 1]], pos: pts[0], prio: 0 });
+      addPort(v, pts[0], it.kind === "bus" ? BUS : WIRE, 1); addPort(v, pts[pts.length - 1], it.kind === "bus" ? BUS : WIRE, 2);
+    } else if (it.kind === "bus_entry") {
+      const [x, y] = atOf(n), sz = kid(n, "size"), a: Pt = [x, y], b: Pt = [x + (sz ? num(sz[1]) : 0), y + (sz ? num(sz[2]) : 0)];
+      const v = verts.length; verts.push({ items: [it.id], it, kind: it.kind, pos: a, prio: 0 });
+      addPort(v, a, ENTRY, 1); addPort(v, b, ENTRY, 2);
+    } else if (it.kind === "label" || it.kind === "global_label" || it.kind === "hierarchical_label") {
+      const p = atOf(n).slice(0, 2) as Pt, text = str(n[1]);
+      const v = verts.length; verts.push({ items: [it.id], it, kind: it.kind, pos: p, prio: text ? LABEL_PRIO[it.kind] : 0, label: { text, conn: K.busConnection(text, aliases) } });
+      addPort(v, p, ANCHOR, 1);
+    } else if (it.kind === "junction" || it.kind === "no_connect" || it.kind === "netclass_flag" || it.kind === "directive_label") {
+      const v = verts.length; verts.push({ items: [it.id], it, kind: it.kind, pos: atOf(n).slice(0, 2) as Pt, prio: 0 });
+      addPort(v, atOf(n).slice(0, 2) as Pt, ANCHOR, 1);
+    } else if (it.kind === "sheet") {
+      for (const pin of kids(n, "pin")) {
+        const p = atOf(pin).slice(0, 2) as Pt, text = str(pin[1]), uu = kid(pin, "uuid");
+        const v = verts.length; verts.push({ items: [uu ? str(uu[1]) : it.id + "#" + text], it, kind: "sheet_pin", pos: p, prio: 2, sheetPin: text, label: { text, conn: K.busConnection(text, aliases) } });
+        addPort(v, p, ANCHOR, 1);
+      }
+    } else if (it.kind === "symbol") {
+      const power = symbolIsPower(doc, it), ref = it.ref || propText(n, "Reference"), onBoard = !kid(n, "on_board") || str(kid(n, "on_board")![1]) !== "no";
+      // one vertex per pin number and position (pins stacked there are one contact)
+      const groups = new Map<string, number>();
+      for (const pin of symbolPins(doc, it)) {
+        const g = pin.number + "@" + key([pin.x, pin.y]);
+        let v = pin.type === "no_connect" ? undefined : groups.get(g);
+        const prio = pin.type === "power_in" && (power || pin.hidden) ? 6 : !onBoard || ref.startsWith("#") ? 0 : 1;
+        if (v === undefined) { v = verts.length; if (pin.type !== "no_connect") groups.set(g, v); verts.push({ items: [it.id + "#" + pin.number], it, kind: "pin", pos: [pin.x, pin.y], prio, pin, pins: [pin], power }); addPort(v, [pin.x, pin.y], pin.type === "no_connect" ? NC : ANCHOR, 1); }
+        else verts[v].pins!.push(pin);
+      }
+    }
+  }
+  const parent = verts.map((_, i) => i);
+  const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const busLinks: [number, number][] = [];
+  const segs = verts.map((v, i) => [v, i] as const).filter(([v]) => !!v.seg);
+  for (const e of points.values()) {
+    // a line whose middle is at a connection point has a port there
+    for (const [v, i] of segs) { const [a, b] = v.seg!; if (key(a) !== key(e.p) && key(b) !== key(e.p) && onSegMid(e.p, a, b)) e.ports.push({ v: i, kind: v.kind === "bus" ? BUS : WIRE, bit: 0 }); }
+    const hasBus = e.ports.some((q) => q.kind === BUS);
+    for (const q of e.ports) { if (q.kind === ENTRY && hasBus) q.kind = BUS_SIDE; else if (verts[q.v].kind === "junction" && hasBus) q.kind = BUS; }
+    for (let x = 0; x < e.ports.length; x++) for (let y = x + 1; y < e.ports.length; y++) {
+      const a = e.ports[x], b = e.ports[y]; if (a.v === b.v) continue;
+      if ((a.kind === ENTRY || a.kind === BUS_SIDE) && b.kind === BUS) busLinks.push([a.v, b.v]);
+      if ((b.kind === ENTRY || b.kind === BUS_SIDE) && a.kind === BUS) busLinks.push([b.v, a.v]);
+      if (a.kind === NC || b.kind === NC) continue;
+      if (PROPAGATES[a.kind][b.kind]) { const ra = find(a.v), rb = find(b.v); if (ra !== rb) parent[rb] = ra; }
+    }
+  }
+  const islands = new Map<number, number[]>();
+  verts.forEach((_, i) => { const r = find(i); const l = islands.get(r); if (l) l.push(i); else islands.set(r, [i]); });
+  const uuidOf = (v: Vertex): string => v.items[0];
+  const refOf = (v: Vertex): ErcItemRef => {
+    if (v.kind === "pin" && v.pin) return pinRef({ item: v.it, p: v.pos, net: "wire", pin: v.pin });
+    if (v.kind === "sheet_pin") { const pin = kids(v.it.node, "pin").find((q) => str(q[1]) === v.sheetPin), uu = pin ? kid(pin, "uuid") : null; return { x: r4(v.pos[0]), y: r4(v.pos[1]), desc: `Hierarchical Sheet Pin '${v.sheetPin}'`, id: v.it.id, sheetPin: v.sheetPin, ...(uu ? { uuid: str(uu[1]) } : {}) }; }
+    return itemRef(doc, v.it);
+  };
+  const isBusConn = (v: Vertex): boolean => !!(v.label && v.label.conn);
+  // CLAIM_LESS: the island's driver first (priority, the bus that contains the other, "-Pad" names last, then by name)
+  const subset = (a: { full: string }[], b: { full: string }[]): boolean => a.every((m) => b.some((o) => o.full === m.full));
+  const claimCmp = (a: Vertex, b: Vertex): number => {
+    if (a.prio !== b.prio) return b.prio - a.prio;
+    const ca = a.label && a.label.conn, cb = b.label && b.label.conn;
+    if (ca && cb) { const aInB = subset(ca.members, cb.members), bInA = subset(cb.members, ca.members); if (bInA && !aInB) return -1; if (aInB && !bInA) return 1; }
+    const na = a.label ? a.label.text : "", nb = b.label ? b.label.text : "";
+    return na < nb ? -1 : na > nb ? 1 : uuidOf(a) < uuidOf(b) ? -1 : uuidOf(a) > uuidOf(b) ? 1 : 0;
+  };
+  const LABELISH = new Set(["label", "global_label", "hierarchical_label", "sheet_pin"]);
+  for (const members of islands.values()) {
+    const vs = members.map((i) => verts[i]).sort((a, b) => (uuidOf(a) < uuidOf(b) ? -1 : uuidOf(a) > uuidOf(b) ? 1 : 0));
+    const hasWire = vs.some((v) => v.kind === "wire"), hasBusLine = vs.some((v) => v.kind === "bus");
+    const claims = vs.filter((v) => v.prio > 0).sort(claimCmp);
+    const hasBusLabel = claims.some((v) => LABELISH.has(v.kind) && isBusConn(v)), hasSignalLabel = claims.some((v) => LABELISH.has(v.kind) && !isBusConn(v));
+    const bundle = claims.length ? isBusConn(claims[0]) : hasBusLine;
+    const kindConflict = (hasWire && (hasBusLine || bundle)) || (hasBusLine && !bundle) || ((hasWire || hasSignalLabel) && hasBusLabel) || (hasBusLine && hasSignalLabel);
+    if (kindConflict) {
+      let net: Vertex | null = null, bus: Vertex | null = null;
+      for (const v of vs) {
+        let isBus: boolean;
+        if (v.kind === "wire" || v.kind === "bus") isBus = v.kind === "bus";
+        else if (LABELISH.has(v.kind)) isBus = v.prio > 0 && isBusConn(v);
+        else continue;
+        if (isBus && !bus) bus = v; else if (!isBus && !net) net = v;
+        if (net && bus) break;
+      }
+      if (net && bus) mark("bus_to_net_conflict", "error", net.pos, "Invalid connection between bus and net items", [net.it.id, bus.it.id], [refOf(net), refOf(bus)]);
+    }
+    const schemas = claims.filter((v) => isBusConn(v));
+    const first = schemas[0], second = first ? schemas.find((v) => v.label!.conn!.type !== first.label!.conn!.type) : undefined;
+    if (first && second) {
+      mark("bus_to_bus_conflict", "error", first.pos, "Bus vector and bus group are graphically connected", [first.it.id, second.it.id], [refOf(first), refOf(second)]);
+    } else if (bundle && claims.length >= 2) {
+      let canonical: Vertex | null = null;
+      for (const v of schemas) {
+        if (!LABELISH.has(v.kind)) continue;
+        if (!canonical) { canonical = v; continue; }
+        const leaves = new Set(canonical.label!.conn!.members.map((m) => m.full));
+        if (v.label!.conn!.members.some((m) => leaves.has(m.full))) continue;
+        mark("bus_to_bus_conflict", "error", canonical.pos, "Buses are graphically connected but share no bus members", [canonical.it.id, v.it.id], [refOf(canonical), refOf(v)]);
+        break;
+      }
+    }
+  }
+  // BusEntryConflicts: from the entry's side, one report per entry
+  if (opts.netOfItem) {
+    const seen = new Set<number>();
+    for (const [e, b] of busLinks) {
+      if (seen.has(e) || verts[b].kind !== "bus") continue;
+      const signal = opts.netOfItem(verts[e].it.id), bundle = opts.netOfItem(verts[b].it.id);
+      if (!signal || !bundle || signal.bus || !bundle.bus) continue;
+      seen.add(e);
+      if (signal.prio >= 6 || bundle.members.includes(signal.name)) continue;
+      mark("net_not_bus_member", "warning", verts[e].pos, `Net ${unescapeText(signal.name)} is graphically connected to bus ${unescapeText(bundle.name)} but is not a member of that bus`, [verts[e].it.id, verts[b].it.id], [refOf(verts[e]), refOf(verts[b])]);
+    }
+  }
+  // WiredImplicitPowerPins: per pin contact, the first hidden power input of an ordinary symbol on an island with a wire
+  const wired = new Set<number>();
+  for (const [r, members] of islands) if (members.some((i) => verts[i].kind === "wire")) wired.add(r);
+  verts.forEach((v, i) => {
+    if (v.kind !== "pin" || v.power || !wired.has(find(i))) return;
+    const pin = v.pins!.find((q) => q.hidden && q.type === "power_in"); if (!pin) return;
+    mark("wired_implicit_power", "warning", [pin.x, pin.y], "Wired hidden power input pin also connects globally by name", [v.it.id], [pinRef({ item: v.it, p: [pin.x, pin.y], net: "wire", pin })]);
+  });
 }

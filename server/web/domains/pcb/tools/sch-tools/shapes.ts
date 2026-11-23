@@ -1,11 +1,12 @@
 import type { SchCtx, Pt } from "./types";
 import { root } from "../root";
-import { commitSchArc, schArcClick } from "./arcs";
+import { commitSchArc, schArcClick, schArcPoints } from "./arcs";
 import { closePrompt, labelDefaults, promptImpl } from "./dom";
-import { bezierNode, circleNode, ellipseArcAngles, ellipseFromBox, ellipseNode, polygonNode, polylineNode, rectangleNode, ruleAreaNode, sheetCorner, sheetNode, drawTableNode, textBoxNode } from "./nodes";
+import { arcNode, bezierNode, circleNode, ellipseArcAngles, ellipseFromBox, ellipseNode, polygonNode, polylineNode, rectangleNode, ruleAreaNode, sheetCorner, sheetNode, drawTableNode, textBoxNode } from "./nodes";
 import { rememberPlaced } from "./repeat";
 import { SHEET_EXT, nextPage, placeSheet, placeSheetNode, sheetFileFor, sheetInstance } from "./sheets";
 import { K, S, kids, str } from "./state";
+import { resolveSnap } from "./snap";
 import { addNode, r4, same } from "./util";
 import { simplify } from "./wire";
 
@@ -13,7 +14,8 @@ import { simplify } from "./wire";
 // S.draw = { shape, pts (fixed clicks), cur (cursor) }: rect and textbox take two corners, circle its
 // centre then a radius point, arc its start, end and then a point on the arc, lines any number of
 // points until Enter, a double click or a click on the last point.
-export function drawPoint(ctx: SchCtx, mm: Pt) { return ctx.snap([mm[0], mm[1]]).map(r4); }
+// SCH_DRAWING_TOOLS::DrawShape: grid.BestSnapAnchor( cursorPos, GRID_GRAPHICS ) - EE_GRID_HELPER::ResolveSnap
+export function drawPoint(ctx: SchCtx, mm: Pt) { return resolveSnap(ctx, mm, "polyline", S.mods || null).p; }
 export function startDraw(ctx: SchCtx, shape: string, p: Pt) { S.draw = { shape, pts: [p], cur: p.slice() }; ctx.requestRender(); }
 export function cancelDraw(ctx: SchCtx) { S.draw = null; closePrompt(); ctx.requestRender(); }
 export function undoDrawPoint(ctx: SchCtx) { const d = S.draw; if (!d) return; if (d.pts.length > 1) d.pts.pop(); else S.draw = null; ctx.requestRender(); }
@@ -113,9 +115,37 @@ export function drawClick(ctx: SchCtx, shape: string, p: Pt, dbl = false) {
     if (d.pts.length === 2 && same(p, d.pts[0])) { ctx.toast("The curve's end must differ from its start"); return; }
     d.pts.push(p); if (d.pts.length === 4) finishDraw(ctx); else ctx.requestRender(); return;
   }
-  if (shape === "sheet") { d.pts.push(sheetCorner(d.pts[0], p, ctx.gridPitch)); finishDraw(ctx); return; }   // sizeSheet: never smaller than the minimum
+  if (shape === "sheet") { d.pts.push(sheetCorner(d.pts[0], p, ctx.gridPitch, ctx.gridPitchY)); finishDraw(ctx); return; }   // sizeSheet: never smaller than the minimum
   if (same(p, last) && shape !== "table") return;   // a zero-size shape is not a shape (a table is at least one cell)
   d.pts.push(p); finishDraw(ctx);
+}
+/**
+ * The item being drawn as EE_GRAPHIC_TOOL::DrawShape / DrawSheet / DrawTable / DrawRuleArea hold it after the first
+ * click (CalcEdit, sizeSheet, the table sized by the drag): the message panel's subject (SetMsgPanel( item ) on every
+ * motion).  Null before the first click or for a shape that is not a shape yet.
+ */
+export function drawPreviewNode(ctx: SchCtx): SNode | null {
+  const d = S.draw; if (!d || !d.pts.length) return null;
+  const p0 = d.pts[0], cur = d.await && d.pts[1] ? d.pts[1] : d.cur || p0, pts = d.pts;
+  switch (d.shape) {
+    case "rect": return rectangleNode(p0, cur);
+    case "textbox": return textBoxNode("", p0, cur);
+    case "circle": return circleNode(p0, Math.hypot(cur[0] - p0[0], cur[1] - p0[1]));
+    case "ellipse": return ellipseNode(ellipseFromBox(p0, cur), false);
+    case "ellipse_arc": { const e = ellipseFromBox(p0, pts.length >= 2 ? pts[1] : cur); if (pts.length >= 3) Object.assign(e, ellipseArcAngles(e, pts[2], cur)); return ellipseNode(e, pts.length >= 3); }
+    case "arc": { const a = schArcPoints(d); return a ? arcNode(a.start, a.mid, a.end) : null; }
+    case "lines": { const p = simplify([...pts, cur]); return p.length >= 2 ? polylineNode(p) : null; }
+    case "polygon": { const p = simplify([...pts, cur]); return p.length >= 2 ? polygonNode(p) : null; }
+    case "rulearea": { const { leader } = ruleAreaLeader(pts, cur); const p = simplify([...pts, ...leader.slice(1)]); return p.length >= 2 ? ruleAreaNode(p) : null; }
+    case "bezier": {
+      const n = pts.length, e = n > 2 ? pts[2] : cur;
+      const c = n === 1 ? [p0, cur, cur, cur] : n === 2 ? [p0, pts[1], cur, cur] : [p0, pts[1], [r4(2 * e[0] - cur[0]), r4(2 * e[1] - cur[1])], e];
+      return bezierNode(c[0], c[1], c[2], c[3]);
+    }
+    case "table": return drawTableNode(p0, cur, ctx.gridPitch, labelDefaults().textSize);
+    case "sheet": return sheetNode(p0, d.await ? cur : sheetCorner(p0, cur, ctx.gridPitch), S.sheetPreset ? S.sheetPreset.name : "Untitled Sheet", S.sheetPreset ? S.sheetPreset.file : "untitled.kicad_sch");
+    default: return null;
+  }
 }
 export function finishDraw(ctx: SchCtx) {
   const d = S.draw; if (!d) return;
@@ -135,7 +165,7 @@ export function finishDraw(ctx: SchCtx) {
   else if (d.shape === "table") {
     // SCH_DRAWING_TOOLS::DrawTable: the second click fixes the table sized by the drag, then DIALOG_TABLE_PROPERTIES
     // opens on it; OK adds it ("Draw Table") and selects it, Cancel drops it
-    const node = drawTableNode(pts[0], pts[1], ctx.gridPitch, labelDefaults().textSize);
+    const node = drawTableNode(pts[0], pts[1], ctx.gridPitch, labelDefaults().textSize, ctx.gridPitchY);
     d.await = true; ctx.requestRender();
     const done = (n: SNode | null) => { if (S.draw !== d) return; S.draw = null; if (n) commitShape(ctx, n, "Draw Table"); ctx.requestRender(); };
     const T = root.CollabTableCells;

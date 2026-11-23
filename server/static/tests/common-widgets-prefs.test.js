@@ -282,5 +282,47 @@ test("4: the search list keeps only its own navigation keys", () => {
   assert.ok(/Home|End|PageUp|PageDown/.test(t));
 });
 
+test("grids: a grid override may be non-square (its Y left 0 is square); Snap to grid Always / When grid shown / Never", () => {
+  const L = load(["dialogs", "logic.ts"]);
+  const o = JSON.parse(JSON.stringify(L.SCH_GRID_OVERRIDES)); o.enabled = true; o.wires = true; o.wiresMm = 1.27;
+  assert.deepStrictEqual(L.gridPitchForXY("wires", o, [0.635, 0.635]), [1.27, 1.27], "no Y: square");
+  o.wiresMmY = 2.54; assert.deepStrictEqual(L.gridPitchForXY("wires", o, [0.635, 0.635]), [1.27, 2.54]);
+  assert.strictEqual(L.gridPitchFor("wires", o, 0.635), 1.27, "the scalar pitch is the X size");
+  o.enabled = false; assert.deepStrictEqual(L.gridPitchForXY("wires", o, [0.635, 0.5]), [0.635, 0.5]);
+  // GAL::GetGridSnapping: ALWAYS snaps, WITH_GRID only while the grid is shown, NEVER not at all
+  const E = {}; const snapOn = fn(["editor", "doc.ts"], "gridSnapEnabled", { E });
+  const at = (snap, grid, mode) => { E.snapOn = snap; E.gridOn = grid; E.gridSnap = mode; return snapOn(); };
+  assert.deepStrictEqual([at(true, false, "always"), at(true, false, "withGrid"), at(true, true, "withGrid"), at(true, true, "never"), at(false, true, "always")], [true, false, true, false, false]);
+  const page = src("dialogs", "preferences.ts");
+  for (const ed of ["sym", "sch", "fp", "pcb"]) assert.ok(page.includes(`snappingPage(pg, "${ed}")`), ed + " has a Snapping page");
+});
+
+test("Common > Warp mouse to anchor of moved object, and the Schematic Editor's default sheet border width", () => {
+  const pg = src("dialogs", "preferences.ts"), pr = src("dialogs", "prefs.ts");
+  assert.ok(pg.includes('"Warp mouse to anchor of moved object"') && pg.includes("p.common.warpMouseOnMove = on"), "m_warpMouseOnMove row");
+  assert.ok(/warpMouseOnMove: true/.test(pr), "on by default (GetMoveWarpsCursor)");
+  assert.ok(/pcbS\.moveWarpsCursor = p\.common\.warpMouseOnMove !== false/.test(pr) && /moveWarpsCursor: p\.common\.warpMouseOnMove !== false/.test(pr), "both editors' tools read it");
+  assert.ok(pg.includes('row("Sheet border width:"') && pg.includes('"kd-pref-sheetwidth"'), "default_line_thickness row");
+  assert.ok(/defaultLineThickness: 6,/.test(pr) && /defaultLineThickness: p\.schEditing\.defaultLineThickness/.test(pr), "6 mil by default, given to the drawing tools");
+});
+
+test("Common > Icon theme (Light / Dark / Automatic) and Toolbar icon size (16 / 24 / 32)", () => {
+  const pg = src("dialogs", "preferences.ts"), pr = src("dialogs", "prefs.ts");
+  assert.ok(pg.includes('"Icon theme:"') && pg.includes('[["light", "Light"], ["dark", "Dark"], ["auto", "Automatic"]]'), "m_rbIconTheme*");
+  assert.ok(pg.includes('"Toolbar icon size:"') && pg.includes('[["16", "Small"], ["24", "Normal"], ["32", "Large"]]'), "m_rbIconSize*");
+  assert.ok(/iconTheme: "auto", toolbarIconSize: 24/.test(pr), "ICON_THEME::AUTO and 24 px by default");
+  // applyCommonAppearance: the root classes the icons and the toolbars read
+  const root = { classList: { s: new Set(), toggle(c, on) { if (on) this.s.add(c); else this.s.delete(c); } } };
+  const apply = fn(["dialogs", "prefs.ts"], "applyCommonAppearance", { setHotkeyFeedback() {}, setUseCustomCursors() {}, document: { documentElement: root }, prefs: () => null });
+  const run = (common) => { root.classList.s.clear(); apply({ common }); return [...root.classList.s].sort(); };
+  assert.deepStrictEqual(run({ iconTheme: "auto", toolbarIconSize: 24 }), []);
+  assert.deepStrictEqual(run({ iconTheme: "dark", toolbarIconSize: 16 }), ["k-icons-dark", "k-tb-16"]);
+  assert.deepStrictEqual(run({ iconTheme: "light", toolbarIconSize: 32 }), ["k-icons-light", "k-tb-32"]);
+  const icon = src("components", "Icon.tsx"), tb = src("components", "Toolbar.tsx"), dom = src("components", "kicon-dom.ts");
+  assert.ok(icon.includes("[.k-icons-light_&]:inline [.k-icons-dark_&]:hidden") && icon.includes("[.k-icons-light_&]:hidden [.k-icons-dark_&]:inline"), "the React icons pin a set");
+  assert.ok(dom.includes(":root.k-icons-dark .kic .lt{display:none}"), "and the DOM-built ones");
+  assert.ok(tb.includes("[.k-tb-16_&_.kicon]:w-4") && tb.includes("[.k-tb-32_&_.kicon]:w-8"), "toolbar buttons hold 16 / 32 px icons");
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

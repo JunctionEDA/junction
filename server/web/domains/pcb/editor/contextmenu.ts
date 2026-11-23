@@ -29,6 +29,7 @@ import { measureCopy, openSelectionProperties } from "./pointer";
 /** The table cell selection's view for the menu, filled in by editor/tablecells.ts at install. */
 export const tableMenu: { state(): { n: number; block: boolean; merged: boolean; structure: boolean } | null; pick(mm: Mm): boolean; actions: Record<string, () => boolean> } = { state: () => null, pick: () => false, actions: {} };
 import { toast } from "./util";
+import { prefs } from "../dialogs/prefs";
 import { IS_MAC } from "../../../shared/keys";
 import { editableCornersSelected } from "./pcbdialogs/vertex-editor";
 import { clickMode, modifiersState } from "./selmodes";
@@ -82,7 +83,10 @@ function attributeChecks(items: KItem[]): Record<string, boolean> {
 
 function menuCtx(): MenuCtx {
   const items = selectionItems(), s = schState(), p = pcbState(), sch = isSch();
-  const kinds = items.map(kindOf); if (E.selField && !kinds.length) kinds.push("field"); if (E.selPins.length && !kinds.length) for (let i = 0; i < E.selPins.length; i++) kinds.push("pin");
+  const kinds = items.map(kindOf);
+  // the fields and pins (SCH_FIELD_T, SCH_PIN_T, SCH_SHEET_PIN_T) a schematic selection holds alongside its items
+  if (sch) { for (let i = 0; i < selectedFields().length; i++) kinds.push("field"); for (const q of E.selPins as { id: string }[]) kinds.push(E.kdoc && E.kdoc.items.get(q.id)?.kind === "sheet" ? "sheet_pin" : "pin"); }
+  else if (E.selField && !kinds.length) kinds.push("field");
   const cells = tableMenu.state(); if (cells) for (let i = 0; i < cells.n; i++) kinds.push("table_cell");   // PCB_TABLECELL_T / SCH_TABLECELL_T
   if (sch && !kinds.length) { const mk = ((E.markers || []) as { selected?: boolean; severity?: string }[]).find((m) => m && m.selected); if (mk) kinds.push(mk.severity === "exclusion" ? "marker_excluded" : "marker"); }   // SCH_MARKER_T
   const draw = sch ? (s && s.draw) : (p && p.draw);
@@ -113,6 +117,8 @@ function menuCtx(): MenuCtx {
     canAddCorner, canRemoveCorner, editableCorners: !sch && editableCornersSelected(),
     canClose: outline && n >= 3, canUndoPoint: (outline || (!!draw && (draw.shape === "lines" || draw.shape === "gcurve"))) && n >= 1,
     pinAlts: !!(E.selPins.length === 1 && E.kdoc && schPins() && schPins()!.pinAlternates(E.kdoc as KDoc, E.selPins[0])),   // ALT_PIN_FUNCTION_MENU: one pin only
+    unitsSelection: sch && !!E.kdoc && !!schPins() && !!schPins()!.sameSymbolMultiUnitSelection && schPins()!.sameSymbolMultiUnitSelection!(E.kdoc as KDoc, items).length > 0,
+    pinSwaps: sch && !!prefs().schEditing.unconstrainedPinSwaps,
     highlight: !!E.highlightIds, belowRoot: !!root && !topLevelSchematics().some((t) => t.doc === (state as { doc?: unknown }).doc),
     hasLocked: items.some((it) => isLocked(it.node)), hasUnlocked: items.some((it) => !isLocked(it.node)),
     groupSelected: sch ? schGroupSelected(items) : boardGroupSelected(), ...boardMenuState(sch),
@@ -164,6 +170,9 @@ const SPECIAL: Record<string, (c: MenuCtx) => Run | string> = {
   "ACTIONS::unselectAll": () => () => clearAllSelection(),
   // SCH_EDIT_TOOL::SwapPinLabels (the error goes to the infobar)
   "SCH_ACTIONS::swapPinLabels": () => (schPins() ? () => { const P = schPins()!; const err = P.swapPinLabels(toolCtx(), (E.selPins as PinRef[]).slice()); if (err) toast(err, 5000); selectionChanged(); requestRender(); } : NOT_YET),
+  // SCH_EDIT_TOOL::SwapUnitLabels and SwapPins (the errors go to the infobar)
+  "SCH_ACTIONS::swapUnitLabels": () => (schPins() && schPins()!.swapUnitLabels ? () => { const err = schPins()!.swapUnitLabels!(toolCtx(), selectionItems()); if (err) toast(err, 5000); selectionChanged(); requestRender(); } : NOT_YET),
+  "SCH_ACTIONS::swapPins": () => (schPins() && schPins()!.swapPins ? () => { const err = schPins()!.swapPins!(toolCtx(), (E.selPins as PinRef[]).slice(), !!prefs().schEditing.unconstrainedPinSwaps); if (err) toast(err, 5000); selectionChanged(); requestRender(); } : NOT_YET),
   // a field selected on its own: a schematic field is hidden (SCH_EDIT_TOOL::DoDelete, fieldops.ts); a board footprint field
   // goes to the board module's Delete (EDIT_TOOL::DeleteItems, PCB_FIELD_T: "Hide Field")
   "ACTIONS::doDelete": () => (E.selField && !selectionItems().length ? (isSch() ? () => { deleteSelectedField(); } : moduleKey("Delete")) : E.selPins.length ? () => { /* SCH_EDIT_TOOL::DoDelete: a pin is never deleted on its own */ } : deleteAll),
@@ -297,6 +306,9 @@ interface SchPins {
   setAltPinFunction(ctx: unknown, r: PinRef, alt: string): boolean;
   pinHelper(ctx: unknown, pins: PinRef[], what: string, ref?: (it: KItem) => string): string[];
   swapPinLabels(ctx: unknown, pins: PinRef[]): string | null;
+  swapUnitLabels?(ctx: unknown, items: KItem[]): string | null;
+  swapPins?(ctx: unknown, pins: PinRef[], allow: boolean, project?: string): string | null;
+  sameSymbolMultiUnitSelection?(d: KDoc, items: KItem[]): KItem[];
   PIN_HELPERS: { id: string; label: string; icon: string }[];
 }
 function schPins(): SchPins | null { const m = CollabTools.sch; const u = m && (m._ as unknown as SchPins | undefined); return u && typeof u.pinHelper === "function" ? u : null; }

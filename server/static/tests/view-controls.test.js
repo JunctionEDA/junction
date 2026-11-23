@@ -289,6 +289,21 @@ test("22. Show scrollbars in editors: UpdateScrollbars' position / range and onS
   assert.ok(/updateScrollbars\(\)/.test(fnBody(VIEW, "applyView")) && /initScrollbars\(!!p\.common\.showScrollbars\)/.test(src("dialogs", "prefs.ts")));
 });
 
+// ---------------------------------------------------------------- flipped board view: peers in document coordinates
+test("flipped view: peer pointers, ghosts and followed viewports are document coordinates, mirrored into the view", () => {
+  // visibleRectDocNm: VIEW::GetViewport's world box, its x span mirrored back while the view is flipped
+  const body = fnBody(VIEW, "visibleRectDocNm"), code = esbuild.transformSync(body.replace(/^export /, ""), { loader: "ts" }).code;
+  const mk = (flipped) => new Function("visibleRectNm", "viewFlipped", "flipMmX", "E", code + "\nreturn visibleRectDocNm;")(() => [10e6, 5e6, 20e6, 8e6], () => flipped, (x) => (flipped ? 100 - x : x), { IU: 1e6 });
+  assert.deepStrictEqual(mk(false)(), [10e6, 5e6, 20e6, 8e6]);
+  assert.deepStrictEqual(mk(true)(), [70e6, 5e6, 20e6, 8e6], "the view's 10..30 is the board's 70..90");
+  const PEERS = src("editor", "peers.ts");
+  assert.ok(/st\.viewport = vp/.test(PEERS) && /const vp = visibleRectDocNm\(\)/.test(PEERS), "the viewport sent is the document's");
+  assert.ok(/flipMmX\(cursor\[0\] \/ E\.IU\)/.test(fnBody(PEERS, "applyFollowWeb")), "following a pointer centres where this view draws it");
+  assert.ok(/Math\.min\(flipMmX\(vp\[0\] \/ E\.IU\), flipMmX\(vp\[0\] \/ E\.IU \+ wMm\)\)/.test(fnBody(PEERS, "applyFollowWeb")), "a followed viewport is mirrored");
+  assert.ok(/at: \[flipMmX\(st\.cursor\[0\] \/ E\.IU\)/.test(VIEW), "a peer's pointer is drawn mirrored");
+  assert.ok(/"x1", flipMmX\(mm\(g\[0\]\)\)/.test(VIEW), "a peer's drawing ghost too");
+});
+
 (async () => {
   for (const [name, fn] of queue) {
     try { await fn(); passed++; console.log("  ok   " + name); }

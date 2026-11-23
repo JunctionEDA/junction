@@ -13,7 +13,7 @@ import { cursorPoint } from "./clipboard";
 import { settingsOf } from "./dialogs";
 import { shapeBBox, shapeGap } from "./distances";
 import { dragChanges } from "./drag-optimize";
-import { assembleLine, dragCorner45, rp } from "./dragger";
+import { assembleArcLine, assembleLine, dragCorner45, restoreArcTags, rp } from "./dragger";
 import { netClearance } from "./drc";
 import { routableItems } from "./edit-commands";
 import { angleSnapDirections, beginSelectDrag, bestDragOrigin, snapCursor } from "./grid-helper";
@@ -71,7 +71,7 @@ export function moveTransform(ctx: PcbCtx, how: string, arg?: number | string) {
   if (m.gen) return true;   // PCB_TUNING_PATTERN::Rotate / Flip do nothing while IN_EDIT
   if ((m.conns && m.conns.length) || m.ends.length) return true;   // a drag keeps its tracks attached: they cannot follow a turn
   if (!m.base) m.base = new Map(Array.from(m.orig, ([id, n]) => [id, clone(n)]));
-  let cx = m.start[0], cy = m.start[1];
+  let cx = (m.aux || m.start)[0], cy = (m.aux || m.start)[1];   // the reference point: dragOrigin (m.start is the cursor when the warp is off)
   // EDIT_TOOL::Flip while moving: several items, or a lone rectangle or table, flip about the middle of their box
   // (selection.GetCenter()); any other lone item about the move's reference point
   const lone = m.ids.length === 1 ? ctx.doc.items.get(m.ids[0]) : null;
@@ -94,7 +94,7 @@ export function selectMoveTo(ctx: PcbCtx, mm: Pt, mods?: SelectMove["mods"]) {
   // configureAngleSnap: in the 45 and 90 modes the cursor also holds to lines through the drag origin
   const dirs = angleSnapDirections(angleSnapMode());
   // (SetAuxAxes( true, dragOrigin ) when the move has no reference point: the drag origin's x / y beat a farther grid line)
-  const sn = snapCursor(ctx, [mm[0], mm[1]], m.skip || new Set(m.orig.keys()), mods || m.mods, { origin: m.start, dirs, aux: m.aux || null }); m.snapAt = sn.anchor;
+  const sn = snapCursor(ctx, [mm[0], mm[1]], m.skip || new Set(m.orig.keys()), mods || m.mods, { origin: m.aux || m.start, dirs, aux: m.aux || null }); m.snapAt = sn.anchor;
   const guide = sn.guide || null; if (!sameGuide(m.guide, guide)) { m.guide = guide; ctx.requestRender(); }
   if (S.moveSeq && S.popup) S.popup.at = [mm[0], mm[1]];   // Move Individually's popup stays by the cursor
   // an arrow key locks the move to its axis, for the mouse too, until the opposite key (tools/axis-lock.ts)
@@ -153,12 +153,18 @@ export function beginCarryMove(ctx: PcbCtx, opts?: { placing?: string[]; ids?: s
   // the drag origin (BestDragOrigin): the moved items' anchor nearest the mouse; a paste keeps its reference point,
   // which already sits under the cursor
   const mouse = opts.at ? opts.at.slice() : (ctx.cursor ? ctx.cursor.slice() : cursorPoint(ctx));
-  // which already sits under the cursor.  A browser cannot warp the mouse onto the origin (GetMoveWarpsCursor), so a
-  // drag made with the button held keeps KiCad's no-warp behaviour: the reference is the cursor where the drag began.
+  // A drag made with the button held keeps KiCad's no-warp behaviour: the reference is the cursor where the drag began.
   // D/G on one footprint (ROUTER_TOOL::InlineDrag) takes the same no-warp branch: the reference is the grid-snapped
   // cursor where D was pressed, so the footprint moves by whole grid steps and never jumps on the first motion.
-  const at = opts.origin ? opts.origin.slice() : opts.placing && !opts.restore ? cursorPoint(ctx) : opts.sticky === false || (opts.drag && free.length === 1 && doc.items.get(free[0]!)?.kind === "footprint") ? snapCursor(ctx, mouse, new Set(free), {}).p : bestDragOrigin(doc, free, mouse, ctx.gridPitch, { filter: ctx.selFilter, mmPerPx: 1 / Math.max(1e-6, ctx.pxPerMm || 4) });
-  const m: SelectMove = { ids: free, start: at.slice(), orig: new Map(), ends: [], last: [0, 0], moved: false, sticky: opts.sticky !== false, placing: opts.placing || null, restore: opts.restore || null, hover: !!opts.hover };
+  const noWarp = opts.sticky === false || (opts.drag && free.length === 1 && doc.items.get(free[0]!)?.kind === "footprint");
+  const useBdo = !opts.origin && !(opts.placing && !opts.restore) && !noWarp;
+  const at = opts.origin ? opts.origin.slice() : opts.placing && !opts.restore ? cursorPoint(ctx) : noWarp ? snapCursor(ctx, mouse, new Set(free), {}).p : bestDragOrigin(doc, free, mouse, ctx.gridPitch, { filter: ctx.selFilter, gridY: ctx.gridPitchY, mmPerPx: 1 / Math.max(1e-6, ctx.pxPerMm || 4) });
+  // GetMoveWarpsCursor: m_cursor = dragOrigin, the cursor warped onto it (the software crosshair: a page cannot move the pointer)
+  // turned off, m_cursor = originalCursorPos (the grid-snapped cursor) while the reference point and the aux axes stay on dragOrigin
+  const warp = useBdo && S.moveWarpsCursor !== false;
+  const wc = (ctx as { warpCursor?: (p: Pt) => void }).warpCursor; if (warp && typeof wc === "function") wc.call(ctx, at.slice() as Pt);
+  const start = useBdo && !warp ? snapCursor(ctx, mouse, new Set(free), {}).p : at;
+  const m: SelectMove = { ids: free, start: start.slice(), orig: new Map(), ends: [], last: [0, 0], moved: false, sticky: opts.sticky !== false, placing: opts.placing || null, restore: opts.restore || null, hover: !!opts.hover };
   if (!opts.origin && !opts.placing) m.aux = at.slice();   // doMoveSelection: no reference point, so SetAuxAxes( true, dragOrigin )
   snapLineClear(); clearConstruction();   // a new move's grid helper: no snap line or construction geometry yet
   for (const id of free) m.orig.set(id, clone(doc.items.get(id)!.node));
@@ -193,13 +199,15 @@ export function dragEnds(doc: BoardDoc, m: SelectMove) {
   const padAtEnd = (q: Pt, l: string) => pads.some((p) => onLayer(p.layers, l) && (samePt(q, [p.x, p.y]) || padCovers(p, q[0], q[1])));
   const seen = new Set<string>(); m.conns = [];
   for (const sg of Array.from(doc.items.values())) {
-    if (sg.kind !== "segment" || m.ids.includes(sg.id) || seen.has(sg.id)) continue;
+    if ((sg.kind !== "segment" && sg.kind !== "arc") || m.ids.includes(sg.id) || seen.has(sg.id)) continue;   // links of kind SEGMENT_T | ARC_T
     const l = layerOf(sg.node);
     for (const key of ["start", "end"]) {
       const q = pt(sg.node, key); if (!q) continue;
-      if (vias.some((v) => samePt(q, v))) { m.ends.push({ id: sg.id, key }); if (!m.orig.has(sg.id)) m.orig.set(sg.id, clone(sg.node)); continue; }
+      if (sg.kind === "segment" && vias.some((v) => samePt(q, v))) { m.ends.push({ id: sg.id, key }); if (!m.orig.has(sg.id)) m.orig.set(sg.id, clone(sg.node)); continue; }
       if (!padAtEnd(q, l) || seen.has(sg.id)) continue;
-      const ln = assembleLine(doc, sg); if (!ln) continue; ln.ids.forEach((id) => seen.add(id));
+      // NODE::AssembleLine: a line that holds arcs keeps them (the arcs between two moving pads are moved whole, SHAPE_ARC::Move)
+      const al = assembleArcLine(doc, sg); const ln = al && al.arcs && al.arcs.seg.some((k) => k >= 0) ? al : sg.kind === "segment" ? assembleLine(doc, sg) : al;
+      if (!ln) continue; ln.ids.forEach((id) => seen.add(id));
       const first = ln.pts[0], last = ln.pts[ln.pts.length - 1];
       const atFirst = Math.hypot(first[0] - q[0], first[1] - q[1]) <= Math.hypot(last[0] - q[0], last[1] - q[1]);
       if (padAtEnd(first, l) && padAtEnd(last, l)) { for (const id of ln.ids) { if (!m.ids.includes(id)) m.ids.push(id); if (!m.orig.has(id)) m.orig.set(id, clone(doc.items.get(id)!.node)); } break; }   // between two moving pads: carried whole
@@ -248,7 +256,12 @@ export function componentDragHits(ctx: PcbCtx, m: SelectMove, dx: number, dy: nu
   const out: DragHits = Array.from(hits); out.at = at; return out;
 }
 /** The attached lines at a component drag's offset (LINE::DragCorner of the attached end, 45°). */
-export function connLines(m: SelectMove, dx: number, dy: number) { return (m.conns || []).map((c) => { const p = c.l.pts[c.vertex]; return { l: c.l, pts: dragCorner45(c.l.pts, c.vertex, rp([p[0] + dx, p[1] + dy]), 0) }; }); }
+export function connLines(m: SelectMove, dx: number, dy: number) {
+  return (m.conns || []).map((c) => {
+    const p = c.l.pts[c.vertex]; const pts = dragCorner45(c.l.pts, c.vertex, rp([p[0] + dx, p[1] + dy]), 0);
+    return c.l.arcs ? { l: c.l, pts, arcs: restoreArcTags(pts, c.l.pts, c.l.arcs) } : { l: c.l, pts };   // the arcs the drag leaves alone stay arcs
+  });
+}
 /** A press while the selection follows the cursor: the left button drops it there (and the click goes no further). */
 export function onStickyPointerDown(ev: PointerEvent) {
   const ctx = lastCtx; const m = S.move; if (!m || !m.sticky || !ctx || !isBoardLikeDoc()) return;
@@ -276,7 +289,8 @@ export function startPendingDrag(ctx: PcbCtx, pd: PendingDrag) {
   // m_TrackDragAction: DRAG -> drag45Degree, DRAG_FREE_ANGLE -> dragFreeAngle, MOVE -> the move tool
   const mode = S.trackDragAction || "drag";
   const its = mode === "move" ? null : routableItems(ctx.doc, ids);
-  if (its && beginInlineDrag(ctx, its, pd.mm, mode === "dragFree", pd.app ? "app" : "select")) return true;   // (a line the dragger cannot take — an arc under the cursor — is moved)
+  if (its && beginInlineDrag(ctx, its, pd.mm, mode === "dragFree", pd.app ? "app" : "select")) return true;
+  if (its && its.some((it) => it.kind === "arc")) return true;   // ROUTER_TOOL::InlineDrag: an arc the router refuses (DRAGGER::startDragArc) is left where it is
   if (ids.length > 1) return beginCarryMove(ctx, { at: pd.mm, sticky: false });
   return beginSelectDrag(ctx, ctx.doc.items.get(ids[0])!, pd.mm);
 }

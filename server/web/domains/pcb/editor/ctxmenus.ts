@@ -46,6 +46,8 @@ export interface MenuCtx {
   padEdit?: boolean;
   /** the one selected pin has alternate functions (SCH_CONDITIONS::SingleMultiFunctionPin) */
   pinAlts?: boolean;
+  /** SCH_SELECTION_TOOL's multipleUnitsSelection (GetSameSymbolMultiUnitSelection) and allowPinSwaps (input.allow_unconstrained_pin_swaps) */
+  unitsSelection?: boolean; pinSwaps?: boolean;
   belowRoot: boolean;
   hasLocked: boolean; hasUnlocked: boolean;
   /** GROUP_CONTEXT_MENU::update's view of the selection (board): absent where the entries are not greyed */
@@ -239,9 +241,11 @@ function schSelectionMenu(): CondMenu {
   for (const a of ["SCH_ACTIONS::placeJunction", "SCH_ACTIONS::placeLabel", "SCH_ACTIONS::placeClassLabel", "SCH_ACTIONS::placeGlobalLabel", "SCH_ACTIONS::placeHierLabel"]) m.item(a, and(schWireOrBusSel, idle), 250);
   m.item("SCH_ACTIONS::breakWire", and(schLinesSel, idle), 250).item("SCH_ACTIONS::slice", and(schLinesSel, idle), 250);
   m.item("SCH_ACTIONS::placeSheetPin", and(schSheetSel, idle), 250).item("SCH_ACTIONS::autoplaceAllSheetPins", and(schSheetSel, idle), 250).item("SCH_ACTIONS::syncSheetPins", and(schSheetSel, idle), 250);
-  // multiplePinsSelection && schEditCondition && Idle (swapPins also needs eeschema's input.allow_unconstrained_pin_swaps,
-  // off by default and not offered here)
+  // multiplePinsSelection && schEditCondition && Idle; multipleUnitsSelection; swapPins also needs eeschema's
+  // input.allow_unconstrained_pin_swaps (Preferences > Schematic Editor > Editing Options)
   m.item("SCH_ACTIONS::swapPinLabels", and(moreThan(1), onlyTypes(set("pin")), idle), 250);
+  m.item("SCH_ACTIONS::swapUnitLabels", and((c) => !!c.unitsSelection, idle), 250);
+  m.item("SCH_ACTIONS::swapPins", and(moreThan(1), onlyTypes(set("pin")), idle, (c) => !!c.pinSwaps), 250);
   m.item("SCH_ACTIONS::assignNetclass", and(onlyTypes(SCH_CONNECTED), idle), 250).item("SCH_ACTIONS::findNetInInspector", and(onlyTypes(SCH_CONNECTED), idle), 250);
   m.item("SCH_ACTIONS::editPageNumber", schSheetSel, 250);
   m.sep(400);

@@ -756,7 +756,7 @@ export function newTextDialog(ctx: ToolCtx, node: SNode, done: (node: SNode | nu
 }
 
 // ---------------------------------------------------------------- <Shape> Properties
-const SHAPE_NAMES: Record<string, string> = { gr_line: "Line", gr_rect: "Rectangle", gr_circle: "Circle", gr_arc: "Arc", gr_poly: "Polygon", gr_curve: "Bezier" };
+const SHAPE_NAMES: Record<string, string> = { gr_line: "Line", gr_rect: "Rectangle", gr_circle: "Circle", gr_arc: "Arc", gr_poly: "Polygon", gr_curve: "Bezier", gr_ellipse: "Ellipse", gr_ellipse_arc: "Elliptical Arc" };
 // lineTypeNames (stroke_params.cpp): no "Default" entry, a default stroke (LINE_STYLE::DEFAULT, -1) shows as Solid
 const LINE_STYLES: [string, string][] = [["solid", "Solid"], ["dash", "Dashed"], ["dot", "Dotted"], ["dash_dot", "Dash-Dot"], ["dash_dot_dot", "Dash-Dot-Dot"]];
 type Geom = { kind: string } & Record<string, unknown>;
@@ -816,7 +816,7 @@ function shapeDialog(ctx: ToolCtx, item: KItem): boolean {
     const width = lenField(stroke ? nval(kid(stroke, "width")) : nval(legacyW), { ro, key: "lineWidth" });
     const style0 = ((t: string) => (LINE_STYLES.some(([k]) => k === t) ? t : "solid"))(sval(stroke ? kid(stroke, "type") : null));
     const style = selectField<string>(style0, LINE_STYLES, { ro: ro || !stroke, key: "lineStyle", icons: LINE_STYLE_ICONS });
-    const closed = kind === "gr_rect" || kind === "gr_circle" || kind === "gr_poly";
+    const closed = kind === "gr_rect" || kind === "gr_circle" || kind === "gr_poly" || kind === "gr_ellipse";
     const fk = kid(node, "fill"), fv = sval(fk);
     const fill0 = fv === "solid" || fv === "yes" ? "solid" : fv === "hatch" || fv === "reverse_hatch" || fv === "cross_hatch" ? fv : "none";
     const fillOpts: [string, string][] = [["none", "None"], ["solid", "Solid"], ["hatch", "Hatch"], ["reverse_hatch", "Reverse Hatch"], ["cross_hatch", "Cross-hatch"]];
@@ -831,7 +831,7 @@ function shapeDialog(ctx: ToolCtx, item: KItem): boolean {
     maskMargin.input.title = "This is the local clearance between the shape and the solder mask opening.\nLeave blank to use the value defined in the Board Setup.";
     const nowrap = "display:flex;align-items:center;gap:10px;white-space:nowrap";
     // createLineEndingControls: Start / End Shape with Length, Width and Thickness, for an open shape only (!IsClosed())
-    const open = kind === "gr_line" || kind === "gr_arc" || kind === "gr_curve";
+    const open = kind === "gr_line" || kind === "gr_arc" || kind === "gr_curve" || kind === "gr_ellipse_arc";
     const endings = (["start_shape", "end_shape"] as const).map((key) => {
       const v0 = IPM.readEndingValues(node, key), p = key === "start_shape" ? "start" : "end";
       return { key, v0, style: selectField<string>(v0.style, IPM.LINE_ENDING_CHOICES, { ro, key: p + "Shape" }),
@@ -874,6 +874,8 @@ function shapeDialog(ctx: ToolCtx, item: KItem): boolean {
       else if (kind === "gr_rect" && !solid && !(w > 0)) errors.push("Line width must be greater than zero for an unfilled rectangle.");
       else if (kind === "gr_poly" && !solid && !(w > 0)) errors.push("Line width must be greater than zero for an unfilled polygon.");
       else if (kind === "gr_curve" && !(w > 0)) errors.push("Line width must be greater than zero for an unfilled curve.");
+      else if (kind === "gr_ellipse" && !solid && !(w > 0)) errors.push("Line width must be greater than zero for an unfilled ellipse.");
+      else if (kind === "gr_ellipse_arc" && !(w > 0)) errors.push("Line width must be greater than zero.");
       if (kind === "gr_rect" && roundRect.get() && geom && geom.kind === "rect") {
         const g = geom as unknown as { start: number[]; end: number[] }, shortSide = Math.min(Math.abs(g.end[0] - g.start[0]), Math.abs(g.end[1] - g.start[1]));
         if (cornerR.get() * 2 > shortSide + 1e-9) { errors.push("Corner radius must be less than or equal to half the smaller side."); cornerR.set(+(shortSide / 2).toFixed(6)); }
@@ -1177,7 +1179,7 @@ export function pcbItemDialog(ctx: ToolCtx, item: KItem): boolean {
     case "gr_text_box": return textBoxDialog(ctx, item);
     case "table": return tableDialog(ctx, item);
     case "image": return (ctx.doc as KDoc).type === "pcb" ? refImageDialog(ctx, item) : false;
-    case "gr_line": case "gr_rect": case "gr_circle": case "gr_arc": case "gr_poly": case "gr_curve": return shapeDialog(ctx, item);
+    case "gr_line": case "gr_rect": case "gr_circle": case "gr_arc": case "gr_poly": case "gr_curve": case "gr_ellipse": case "gr_ellipse_arc": return shapeDialog(ctx, item);
     case "footprint": return footprintDialog(ctx, item);
     case "dimension": return dimensionDialog(ctx, item);
     case "target": return targetDialog(ctx, item);

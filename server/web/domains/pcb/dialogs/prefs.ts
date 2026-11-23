@@ -7,7 +7,7 @@ import { setUseCustomCursors } from "../editor/cursors";
 import { initScrollbars } from "../editor/scrollbars";
 import { hotkeyCyclePopup, setHotkeyFeedback } from "../editor/hotkey-popup";
 import { effectiveTheme, subscribeTheme } from "../../../shared/theme";
-import { PCB_DEFAULT_GRIDS, PCB_DEFAULT_GRID_IDX, PCB_GRID_OVERRIDES, SCH_GRID_OVERRIDES, gridPitchFor, schGridClassOfKind, schGridClassOfTool, type GridOverrides } from "./logic";
+import { PCB_DEFAULT_GRIDS, PCB_DEFAULT_GRID_IDX, PCB_GRID_OVERRIDES, SCH_GRID_OVERRIDES, gridPitchFor, gridPitchForXY, schGridClassOfKind, schGridClassOfTool, type GridOverrides } from "./logic";
 import { gridChoiceText, gridMessageText, type GridDef, type IuScale } from "../../../shared/units";
 import type { Units } from "../../../shared/store";
 import { IS_MAC } from "../../../shared/keys";
@@ -23,6 +23,8 @@ export type SchThemeId = string;
  * WINDOW_SETTINGS::grid: the grid list in KiCad's order (sizes in mm, square grids; names[i] is GRID::name, "" when
  * unnamed), last = grid.last_size (the grid the editor opens on), fast1 / fast2 = Alt+1 / Alt+2, axes = axes_enabled.
  */
+/** KIGFX::GRID_SNAPPING (grid.snap) and SNAP_INFERENCE_SETTINGS objectGeometry / constructionExtensions (both on by default). */
+export interface SnapPrefs { grid: "always" | "withGrid" | "never"; objectGeometry: boolean; constructionExtensions: boolean }
 export interface GridPrefs { sizes: number[]; /** GRID::y of each grid (mm), beside sizes (GRID::x) */ ys: number[]; names?: string[]; last?: number; fast1: number; fast2: number; overrides: GridOverrides; axes?: boolean }
 import { clampGal, galDefaults, type GalPrefs } from "./gal-options";
 import { isDarkBackground, type UserSchTheme } from "./color-themes";
@@ -52,7 +54,7 @@ export interface Prefs {
     /** drawing.arc_edit_mode, drawing.auto_place_sheet_pins, input.allow_unconstrained_pin_swaps, drawing.default_sheet_border_color /
      *  _background_color (empty: the theme's), drawing.new_power_symbols, selection.select_pin_selects_symbol, autoplace_fields.*,
      *  appearance.footprint_preview and the rescue tool's never_show */
-    arcEditMode?: "center" | "endpoints" | "radius"; autoPlaceSheetPins?: boolean; unconstrainedPinSwaps?: boolean; sheetBorder?: string; sheetBackground?: string;
+    arcEditMode?: "center" | "endpoints" | "radius"; autoPlaceSheetPins?: boolean; unconstrainedPinSwaps?: boolean; sheetBorder?: string; sheetBackground?: string; /** m_Drawing.default_line_thickness (mils): a new sheet's border width */ defaultLineThickness?: number;
     newPowerSymbols?: "default" | "global" | "local"; pinSelectsSymbol?: boolean; autoplaceFields?: boolean; autoplaceJustify?: boolean; autoplaceAlign?: boolean;
     footprintPreview?: boolean; neverShowRescue?: boolean };
   /** the schematic canvas colours (Preferences > Schematic Editor > Colors): a theme, and whether a dark UI swaps in the dark sheet */
@@ -86,7 +88,10 @@ export interface Prefs {
    * options that mean something in a browser: input.hotkey_feedback, appearance.grid_striping,
    * appearance.use_custom_cursors (on), appearance.show_scrollbars (off) and appearance.use_icons_in_menus
    */
-  common: { hcDimming: number; immediateActions: boolean; useCustomCursors: boolean; showScrollbars: boolean; hotkeyFeedback?: boolean; gridStriping?: boolean; menuIcons?: boolean };
+  common: { hcDimming: number; immediateActions: boolean; useCustomCursors: boolean; showScrollbars: boolean; hotkeyFeedback?: boolean; gridStriping?: boolean; menuIcons?: boolean;
+    /** COMMON_SETTINGS m_Input.warp_mouse_on_move ("Warp mouse to anchor of moved object", GetMoveWarpsCursor) */ warpMouseOnMove?: boolean;
+    /** m_Appearance.icon_theme (ICON_THEME: light / dark / automatic, which follows the window theme) */ iconTheme?: "light" | "dark" | "auto";
+    /** m_Appearance.toolbar_icon_size: 16 (Small), 24 (Normal) or 32 (Large) */ toolbarIconSize?: 16 | 24 | 32 };
   /** Pgm().GetLocalEnvVariables(): the variables the user added in Configure Paths (kicad_common.json environment.vars) */
   envVars?: { name: string; path: string }[];
   /** PCB Editor > Origins & Axes (PCBNEW_SETTINGS m_Display.m_DisplayOrigin, m_DisplayInvertXAxis / YAxis) */
@@ -94,7 +99,15 @@ export interface Prefs {
   /** Footprint Editor > Origins & Axes (FOOTPRINT_EDITOR_SETTINGS m_DisplayInvertXAxis / YAxis); the origin is pcbOrigin's */
   fpOrigin: { invertX: boolean; invertY: boolean };
   /** PCB Editor > Snapping, Object Snapping (PCBNEW_SETTINGS::m_MagneticItems): pads and tracks capture the cursor never, when routing tracks, or always; graphics never or always */
-  pcbSnapping: { pads: "never" | "trackTool" | "always"; tracks: "never" | "trackTool" | "always"; graphics: boolean };
+  pcbSnapping: { pads: "never" | "trackTool" | "always"; tracks: "never" | "trackTool" | "always"; graphics: boolean;
+    /** MAGNETIC_SETTINGS::allLayers ("Snap to objects on all layers"): the board tools keep it (kc.magneticAllLayers.pcb, the toolbar toggles it too) */ allLayers?: boolean };
+  /** Footprint Editor > Snapping, Object Snapping (FOOTPRINT_EDITOR_SETTINGS::m_MagneticItems): pads and graphics never or always (no tracks) */
+  fpSnapping: { pads: "never" | "always"; graphics: boolean; /** kc.magneticAllLayers.fpedit */ allLayers?: boolean };
+  /**
+   * Each editor's Snapping page (panel_snapping): grid.snap of its window settings (KIGFX::GRID_SNAPPING ALWAYS,
+   * WITH_GRID "When grid shown", NEVER) and SNAP_INFERENCE_SETTINGS' object geometry and construction extensions
+   */
+  snapping: Record<EditorId, SnapPrefs>;
   /**
    * PCB Editor > Editing Options (PCBNEW_SETTINGS): m_RotationAngle (degrees), m_TrackDragAction, m_CtrlClickHighlight,
    * m_Display.m_RatsnestThickness (pixels), m_ESCClearsNetHighlight, m_ShowCourtyardCollisions, m_AutoRefillZones.  The
@@ -110,6 +123,7 @@ export interface Prefs {
   gal: Record<EditorId, GalPrefs>;
 }
 const MIL = 0.0254;
+function snapDefaults(): SnapPrefs { return { grid: "always", objectGeometry: true, constructionExtensions: true }; }
 const IS_WIN = typeof navigator !== "undefined" && /Win/.test(navigator.platform || navigator.userAgent || "");
 function schGrids(): GridPrefs { return { sizes: [100 * MIL, 50 * MIL, 25 * MIL, 10 * MIL], ys: [100 * MIL, 50 * MIL, 25 * MIL, 10 * MIL], names: ["", "", "", ""], last: 1, fast1: 1, fast2: 2, overrides: { ...SCH_GRID_OVERRIDES }, axes: false }; }
 function pcbGrids(): GridPrefs { return { sizes: PCB_GRID_SIZES.slice(), ys: PCB_GRID_SIZES.slice(), names: Array(PCB_GRID_SIZES.length).fill(""), last: PCB_DEFAULT_GRID_IDX, fast1: PCB_DEFAULT_GRID_IDX, fast2: PCB_DEFAULT_GRID_IDX + 1, overrides: { ...PCB_GRID_OVERRIDES }, axes: false }; }
@@ -128,13 +142,13 @@ export const DEFAULT_PREFS: Prefs = {
     highlightNetclass: false, colorHighlightThickness: 15, colorHighlightOpacity: 60, crossProbeSelect: true, crossProbeCenter: true, crossProbeZoom: true, crossProbeHighlight: true, crossProbeFlash: false },
   sim: SIM_MOUSE_DEFAULTS,
   schEditing: { lineMode: "90", mouseDragIsDrag: true, autoAnnotate: true, autoStartWires: true, escClearsNetHighlight: true, repeatX: 0, repeatY: 100 * 0.0254, repeatIncrement: 1,
-    arcEditMode: "center", autoPlaceSheetPins: true, unconstrainedPinSwaps: false, sheetBorder: "", sheetBackground: "", newPowerSymbols: "default", pinSelectsSymbol: false,
+    arcEditMode: "center", autoPlaceSheetPins: true, unconstrainedPinSwaps: false, sheetBorder: "", sheetBackground: "", defaultLineThickness: 6, newPowerSymbols: "default", pinSelectsSymbol: false,
     autoplaceFields: true, autoplaceJustify: true, autoplaceAlign: true, footprintPreview: true, neverShowRescue: false },
   schColors: { theme: "default", followDark: false, user: [] },
   pcbDisplay: { showPadNumbers: true, showNetNames: true, showPageLimits: true, netNamesMode: 3, trackClearance: 2, padClearance: true,
     viaColorForTHPads: false, forceShowFieldsWhenFPSelected: true, live3DRefresh: false,
     crossProbing: { onSelection: true, centerOnItems: true, zoomToFit: true, autoHighlight: true, flashSelection: false } },
-  common: { hcDimming: 0.8, immediateActions: true, useCustomCursors: true, showScrollbars: false, hotkeyFeedback: true, gridStriping: false, menuIcons: !IS_MAC },
+  common: { hcDimming: 0.8, immediateActions: true, useCustomCursors: true, showScrollbars: false, hotkeyFeedback: true, gridStriping: false, menuIcons: !IS_MAC, warpMouseOnMove: true, iconTheme: "auto", toolbarIconSize: 24 },
   envVars: [],
   symDisplay: { showHiddenPins: true, showHiddenFields: true, showETypes: true, showAltIcons: true },
   symEditing: { lineWidth: 0, textSize: 50 * 0.0254, pinLength: 100 * 0.0254, pinNumSize: 50 * 0.0254, pinNameSize: 50 * 0.0254, pinPitch: 100 * 0.0254, labelDelta: 1, dragPinsWithEdges: true },
@@ -142,7 +156,9 @@ export const DEFAULT_PREFS: Prefs = {
   schFieldNames: [],
   pcbOrigin: { origin: "page", invertX: false, invertY: false },
   fpOrigin: { invertX: false, invertY: false },
-  pcbSnapping: { pads: "trackTool", tracks: "trackTool", graphics: true },
+  pcbSnapping: { pads: "trackTool", tracks: "trackTool", graphics: true, allLayers: false },
+  fpSnapping: { pads: "always", graphics: true, allLayers: false },
+  snapping: { sch: snapDefaults(), pcb: snapDefaults(), sym: snapDefaults(), fp: snapDefaults() },
   pcbEditing: { rotationAngle: 90, trackDragAction: "drag", ctrlClickHighlight: false, ratsnestThickness: 0.5, escClearsNetHighlight: true, showCourtyardCollisions: true, autoRefillZones: false, allowFreePads: false },
   fpEditing: { rotationAngle: 90 },
   grids: {
@@ -299,12 +315,22 @@ function applyColorTheme(p: Prefs): void {
 export function activeGridPitch(): number {
   const cur = E.gridPitch as number; if (!isSch()) return cur;
   const o = prefs().grids.sch.overrides; if (!o.enabled) return cur;
+  return gridPitchFor(activeGridClass(), o, cur);
+}
+function activeGridClass(): ReturnType<typeof schGridClassOfTool> {
   let cls = schGridClassOfTool(String(E.tool));
   if (!cls && E.tool === "select") {
     const id = E.fdrag ? null : E.drag && E.drag.fp ? E.drag.fp.id : null;
     if (E.fdrag) cls = "text"; else { const it = id && E.kdoc ? E.kdoc.items.get(id) : null; if (it) cls = schGridClassOfKind(it.kind); }
   }
-  return gridPitchFor(cls, o, cur);
+  return cls;
+}
+/** activeGridPitch as the (X, Y) of the grid the override names, or null when no override applies (the current grid's X and Y). */
+export function activeGridPitchXY(): [number, number] | null {
+  if (!isSch()) return null;
+  const o = prefs().grids.sch.overrides; if (!o.enabled) return null;
+  const cls = activeGridClass(); if (!cls || !o[cls] || !(o[(cls + "Mm") as "connectedMm"] > 0)) return null;
+  return gridPitchForXY(cls, o, [E.gridPitch as number, E.gridPitch as number]);
 }
 
 /**
@@ -312,7 +338,7 @@ export function activeGridPitch(): number {
  * modes (after OK in the dialog, and once when the page's first document opens) — otherwise a toolbar toggle made
  * since would be undone every time a sheet is entered.
  */
-type PcbToolPrefState = { magnetic?: { pads: string; tracks: string; graphics: boolean } | null; allowFreePads?: boolean; trackClearance?: number; padClearance?: boolean; rotationAngle?: number; fpRotationAngle?: number; trackDragAction?: string; showCourtyardCollisions?: boolean; flipDirection?: "tb" | "lr" };
+type PcbToolPrefState = { moveWarpsCursor?: boolean; snapInference?: { objectGeometry: boolean; constructionExtensions: boolean }; magnetic?: { pads: string; tracks: string; graphics: boolean } | null; allowFreePads?: boolean; trackClearance?: number; padClearance?: boolean; rotationAngle?: number; fpRotationAngle?: number; trackDragAction?: string; showCourtyardCollisions?: boolean; flipDirection?: "tb" | "lr" };
 /** The board tools' copies of the preferences (they load lazily: dialogs/index.ts calls this again on "kc-pcb-tools"). */
 export function applyPcbToolPrefs(p: Prefs = prefs()): void {
   const pcbS = CollabTools.pcb && (CollabTools.pcb.state as PcbToolPrefState); if (!pcbS) return;
@@ -321,8 +347,22 @@ export function applyPcbToolPrefs(p: Prefs = prefs()): void {
   pcbS.flipDirection = p.pcbEditing.flipLeftRight ? "lr" : "tb";   // one setting for both editors (panel_edit_options.cpp)
   pcbS.showCourtyardCollisions = p.pcbEditing.showCourtyardCollisions;   // not LAYER_CONFLICTS_SHADOW's visibility: that is the Appearance eye's
   // MAGNETIC_SETTINGS (PCB_GRID_HELPER::computeAnchors reads them) and m_AllowFreePads (FilterCollectorForFreePads)
-  pcbS.magnetic = { pads: p.pcbSnapping.pads, tracks: p.pcbSnapping.tracks, graphics: p.pcbSnapping.graphics !== false };
+  // (the Footprint Editor has its own: FOOTPRINT_EDITOR_SETTINGS::m_MagneticItems, no tracks)
+  pcbS.magnetic = editorId() === "fp" ? { pads: p.fpSnapping.pads, tracks: "never", graphics: p.fpSnapping.graphics !== false }
+    : { pads: p.pcbSnapping.pads, tracks: p.pcbSnapping.tracks, graphics: p.pcbSnapping.graphics !== false };
+  // SNAP_INFERENCE_SETTINGS of the editor (PCB_GRID_HELPER::snapInferenceSettings)
+  const sn = p.snapping[editorId()];
+  pcbS.snapInference = { objectGeometry: sn.objectGeometry !== false, constructionExtensions: sn.constructionExtensions !== false };
   pcbS.allowFreePads = !!p.pcbEditing.allowFreePads;
+  pcbS.moveWarpsCursor = p.common.warpMouseOnMove !== false;   // TOOLS_HOLDER::GetMoveWarpsCursor
+}
+/** MAGNETIC_SETTINGS::allLayers of the board editor or the Footprint Editor, as the board tools keep it (snap-pairs.ts). */
+const ALL_LAYERS_KEY = (fp: boolean): string => "kc.magneticAllLayers." + (fp ? "fpedit" : "pcb");
+export function snapAllLayersPref(fp: boolean): boolean { try { return localStorage.getItem(ALL_LAYERS_KEY(fp)) === "1"; } catch (e) { return false; } }
+export function setSnapAllLayersPref(fp: boolean, on: boolean): void {
+  try { localStorage.setItem(ALL_LAYERS_KEY(fp), on ? "1" : "0"); } catch (e) { /* no storage */ }
+  const pcbS = CollabTools.pcb && (CollabTools.pcb.state as { snapAllLayers?: boolean; snapAllLayersFp?: boolean }); if (!pcbS) return;
+  if (fp) pcbS.snapAllLayersFp = on; else pcbS.snapAllLayers = on;
 }
 /** PANEL_COMMON_SETTINGS' options that act on the whole page: the hotkey popup, table striping, cursors, menu icons. */
 export function applyCommonAppearance(p: Prefs = prefs()): void {
@@ -332,6 +372,10 @@ export function applyCommonAppearance(p: Prefs = prefs()): void {
   const root = document.documentElement;
   root.classList.toggle("k-grid-striping", !!p.common.gridStriping);
   root.classList.toggle("k-no-menu-icons", p.common.menuIcons === false);
+  // ICON_THEME: the light or dark set of every icon whatever the window theme (Automatic follows it)
+  root.classList.toggle("k-icons-light", p.common.iconTheme === "light"); root.classList.toggle("k-icons-dark", p.common.iconTheme === "dark");
+  // toolbar_icon_size: the toolbars' buttons hold 16, 24 or 32 px icons
+  root.classList.toggle("k-tb-16", p.common.toolbarIconSize === 16); root.classList.toggle("k-tb-32", p.common.toolbarIconSize === 32);
 }
 export function applyPrefs(full = true): void {
   const p = prefs();
@@ -345,10 +389,12 @@ export function applyPrefs(full = true): void {
   E.middleDrag = m.middleDrag; E.rightDrag = m.rightDrag; E.leftDrag = m.leftDrag; E.motionPanMod = m.motionPanMod;
   E.autoPan = m.autoPan; E.autoPanSpeed = m.autoPanSpeed;
   E.pinSelectsSymbol = !!p.schEditing.pinSelectsSymbol;   // selection.select_pin_selects_symbol (the click collector reads it)
-  E.gridFor = activeGridPitch;
+  E.gridFor = activeGridPitch; E.gridForXY = activeGridPitchXY;
+  E.gridSnap = p.snapping[editorId()].grid;
   applyCommonAppearance(p);
   // EE_GRID_HELPER::GetGridSize( grid class ) for the schematic tools (Pin Helpers' wire stub uses GRID_WIRES)
   (E as unknown as { gridForClass?: (cls: string) => number }).gridForClass = (cls: string) => gridPitchFor(cls as Parameters<typeof gridPitchFor>[0], prefs().grids.sch.overrides, E.gridPitch as number);
+  (E as unknown as { gridForClassXY?: (cls: string) => [number, number] }).gridForClassXY = (cls: string) => gridPitchForXY(cls as Parameters<typeof gridPitchForXY>[0], prefs().grids.sch.overrides, [E.gridPitch as number, ((E as unknown as { gridPitchY?: number }).gridPitchY || 0) > 0 ? (E as unknown as { gridPitchY: number }).gridPitchY : E.gridPitch as number]);
   applyColorTheme(p);
   E.pcbOrigin = p.pcbOrigin; E.fpOrigin = p.fpOrigin; publishUserOrigin();
   // CURSOR_STORE::GetCursor reads use_custom_cursors each time; EDA_DRAW_PANEL_GAL reads show_scrollbars once, as it is made
@@ -380,7 +426,9 @@ export function applyPrefs(full = true): void {
           st.annotateAuto = p.schEditing.autoAnnotate; (st as { autoplace?: unknown }).autoplace = { enable: p.schEditing.autoplaceFields !== false, justify: p.schEditing.autoplaceJustify !== false, align: p.schEditing.autoplaceAlign !== false }; st.autoStartWires = p.schEditing.autoStartWires; st.escClearsNetHighlight = p.schEditing.escClearsNetHighlight;
           st.repeatOffset = [p.schEditing.repeatX, p.schEditing.repeatY]; st.repeatIncrement = p.schEditing.repeatIncrement;
           // input.immediate_actions and m_Drawing's new_power_symbols / default sheet colours / arc edit mode, read by the drawing tools
-          Object.assign(st, { immediateActions: p.common.immediateActions !== false, newPowerSymbols: p.schEditing.newPowerSymbols || "default", sheetBorder: p.schEditing.sheetBorder || "", sheetBackground: p.schEditing.sheetBackground || "", arcEditMode: p.schEditing.arcEditMode || "center" });
+          // SNAP_INFERENCE_SETTINGS (EE_GRID_HELPER::snapInferenceSettings)
+          (st as { snapInference?: unknown }).snapInference = { objectGeometry: p.snapping.sch.objectGeometry !== false, constructionExtensions: p.snapping.sch.constructionExtensions !== false };
+          Object.assign(st, { immediateActions: p.common.immediateActions !== false, newPowerSymbols: p.schEditing.newPowerSymbols || "default", sheetBorder: p.schEditing.sheetBorder || "", sheetBackground: p.schEditing.sheetBackground || "", defaultLineThickness: p.schEditing.defaultLineThickness && p.schEditing.defaultLineThickness > 0 ? p.schEditing.defaultLineThickness : 6, moveWarpsCursor: p.common.warpMouseOnMove !== false, arcEditMode: p.schEditing.arcEditMode || "center" });
           syncSchModes(); } catch (e) { console.warn(e); } }
     } else {
       E.renderOpts.padNumbers = p.pcbDisplay.showPadNumbers; E.renderOpts.netNames = p.pcbDisplay.showNetNames; E.renderOpts.pageLimits = p.pcbDisplay.showPageLimits;

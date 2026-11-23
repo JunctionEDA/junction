@@ -2,13 +2,14 @@
 // A modeless dialog: Find walks the hits (left to right, top to bottom, then on to the project's other sheets unless
 // "Search the current sheet only" is ticked), selecting and centring each; Replace / Replace All edit references
 // (when allowed), values, fields, labels and text as ordinary collab changes.
-import { E, appState, applyView, focusOnLocation, openDialogRects, openDocId, pushUndoFor, toolCtx, cloneNode } from "./editor";
+import { E, appState, applyView, focusOnLocation, openDialogRects, openDocId, pushUndoFor, requestRender, toolCtx, cloneNode } from "./editor";
 import { KD, checkbox, h, textInput, type DlgApi } from "./dom";
 import { findHits, findHighlightIds, findOptionChanged, hitOrder, replaceInNode, str, pushFindHistory, type FindHit, type FindOpts } from "./logic";
 import { sheetList } from "./sch-hierarchy";
 import { comboBox } from "../../../shared/components/kcombo";
 import { projectDocs, readDoc, submitDocOp } from "./project";
 import { keyName } from "../../../shared/keys";
+import { netNamesOf } from "../editor/schnets";
 
 interface FindState extends FindOpts { replacement: string; backward: boolean; currentSheetOnly: boolean }
 const F: FindState = { query: "", replacement: "", backward: false, matchCase: false, wholeWord: false, regex: false, pins: false, hiddenFields: false, currentSheetOnly: false, selectionOnly: false, replaceRefs: false, netNames: false };
@@ -31,7 +32,7 @@ function remember(): void {
   try { localStorage.setItem(HIST_KEY, JSON.stringify(hist)); } catch { /* no storage */ }
 }
 const resolveLib = (d: Pick<KDoc, "items" | "lib">, name: string) => KiCadCanvas.resolveLib(d as KDoc, name);
-const keyOf = (hit: FindHit) => `${hit.id}\u0000${hit.what}\u0000${hit.field || ""}\u0000${hit.sub === undefined ? "" : hit.sub}`;
+const keyOf = (hit: FindHit) => `${hit.id}\u0000${hit.what}\u0000${hit.field || ""}\u0000${hit.sub === undefined ? "" : hit.sub}\u0000${hit.pin === undefined ? "" : hit.pin}`;
 const S = appState;
 let statusTimer: ReturnType<typeof setTimeout> | null = null;
 /** ShowFindReplaceStatus( msg, ms ): the dialog's status line; with a time it clears itself. */
@@ -51,12 +52,23 @@ export function findHasMatch(): boolean { return !!F.query && !!last && last.doc
  */
 let foundItemHighlighted = false;
 export function updateFind(): void {
-  const ids = findIsOpen() && F.query ? findHighlightIds(hitsHere()) : [];
+  const hits = findIsOpen() && F.query ? hitsHere() : [], ids = findHighlightIds(hits);
+  // SetForceVisible( true ) on each matching field (a hidden one is drawn while it matches), false once it no longer does
+  const forced = new Set(hits.filter((x) => x.field !== undefined && (x.kind === "symbol" || x.kind === "sheet" || x.kind.endsWith("label"))).map((x) => x.id + "#field:" + x.field));
+  const ro = E.renderOpts as { forceVisible?: Set<string> | null };
+  const had = ro.forceVisible instanceof Set ? ro.forceVisible : null;
+  if (forced.size || had) { ro.forceVisible = forced.size ? forced : null; if (!had || had.size !== forced.size || [...forced].some((k) => !had.has(k))) requestRender(); }
   if (!ids.length && !foundItemHighlighted) return;
   foundItemHighlighted = ids.length > 0;
   try { toolCtx().setHighlight(ids.length ? new Set(ids) : null); } catch { /* no canvas */ }
 }
-function hitsHere(): FindHit[] { return E.kdoc ? findHits(E.kdoc, F, F.selectionOnly ? new Set<string>(E.selection) : null, resolveLib) : []; }
+type PinsOf = (doc: KDoc, it: KItem) => { number: string; name: string; x: number; y: number }[];
+/** The sheet on screen resolves pins (SCH_SYMBOL::GetPins) and nets (the connectivity graph) for the search. */
+function optsHere(): FindOpts {
+  const pins = CollabTools.sch && (CollabTools.sch._.symbolPins as PinsOf | undefined);
+  return Object.assign({}, F, { netNamesOf: (it: KItem, pin?: string) => netNamesOf(it.id, pin), symbolPins: pins ? (d: unknown, it: KItem) => pins(d as KDoc, it) : undefined });
+}
+function hitsHere(): FindHit[] { return E.kdoc ? findHits(E.kdoc, optsHere(), F.selectionOnly ? new Set<string>(E.selection) : null, resolveLib) : []; }
 
 /**
  * SCH_FIND_REPLACE_TOOL::FindNext's tail: the matching item itself is selected (a field of a symbol or sheet, else
@@ -65,7 +77,10 @@ function hitsHere(): FindHit[] { return E.kdoc ? findHits(E.kdoc, F, F.selection
 function focusHit(hit: FindHit): void {
   if (!F.selectionOnly) {
     const ctx = toolCtx() as ReturnType<typeof toolCtx> & { selectField?: (id: string, name: string) => void };
-    if (hit.field && (hit.kind === "symbol" || hit.kind === "sheet") && ctx.selectField) ctx.selectField(hit.id, hit.field); else ctx.setSelection([hit.id]);
+    const pc = ctx as typeof ctx & { selectPins?: (pins: { id: string; number: string }[]) => void };
+    if (hit.field && (hit.kind === "symbol" || hit.kind === "sheet") && ctx.selectField) ctx.selectField(hit.id, hit.field);
+    else if (hit.pin !== undefined && pc.selectPins) pc.selectPins([{ id: hit.id, number: hit.pin }]);   // the SCH_PIN is the found item
+    else ctx.setSelection([hit.id]);
   }
   // m_frame->FocusOnLocation( item->GetBoundingBox().GetCenter() ): moves only when the item is out of sight or behind a dialog
   const c = hitCentre(hit);

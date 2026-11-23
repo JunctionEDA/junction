@@ -11,7 +11,7 @@ import { clone, corners, isList, pt, r6, rotator, samePt } from "./util";
 import { dimKnee, dimRead, dimUpdate, kiRotate, type DimModel } from "./dimensions";
 import { appGlobal, editorState } from "./app-state";
 import { root } from "../root";
-import { cancelConstructionProposal, clearConstruction, constructionBatchFor, constructionBatches, imageConstruction, itemShapes, proposeConstructionItems, setConstructionChangeCallback, shapeConstruction, shapeHit, snapLineClear, snapLineConfigure, snapLineConstruction, snapLineSetEnd, snapLineSetSnappedAnchor, snapLineState, type CDrawable } from "./construction";
+import { cancelConstructionProposal, clearConstruction, constructionBatchFor, constructionBatches, imageConstruction, isReferenceOnly, itemShapes, proposeConstructionItems, setConstructionChangeCallback, setReferenceOnlyPoints, shapeConstruction, shapeHit, snapLineClear, snapLineConfigure, snapLineConstruction, snapLineSetEnd, snapLineSetOrigin, snapLineSetSnappedAnchor, snapLineState, type CDrawable } from "./construction";
 
 // ---------------------------------------------------------------- select-tool drags (PCB_SELECTION_TOOL → EDIT_TOOL::doMoveSelection / drag45)
 // KiCad: a left-drag on a track slides the segment (attached ends follow), a via or graphic moves
@@ -39,8 +39,11 @@ export type MagneticOption = "never" | "trackTool" | "always";
 export interface MagneticSettings { pads: MagneticOption; tracks: MagneticOption; graphics: boolean }
 export const MAGNETIC_DEFAULTS: MagneticSettings = { pads: "trackTool", tracks: "trackTool", graphics: true };
 export const magneticSettings = (): MagneticSettings => Object.assign({}, MAGNETIC_DEFAULTS, S.magnetic || {});
+/** SNAP_INFERENCE_SETTINGS (snap_settings.h): object geometry and construction extensions on by default (Preferences > Snapping). */
+export interface SnapInferenceSettings { objectGeometry: boolean; constructionExtensions: boolean }
+export const snapInferenceSettings = (): SnapInferenceSettings => Object.assign({ objectGeometry: true, constructionExtensions: true }, S.snapInference || {});
 /** computeAnchors' options: the Selection Filter (drag origins only), the reference position, hidden layers. */
-export interface AnchorOpts { filter?: Record<string, boolean | undefined> | null; hidden?: Set<string> | null; magnetic?: MagneticSettings | null }
+export interface AnchorOpts { filter?: Record<string, boolean | undefined> | null; hidden?: Set<string> | null; magnetic?: MagneticSettings | null; /** GetGrid().y when the grid is not square (gridPitch is its x) */ gridY?: number }
 const C = ANCHOR_CORNER, O = ANCHOR_OUTLINE, SN = ANCHOR_SNAPPABLE, OR = ANCHOR_ORIGIN, CO = ANCHOR_CONSTRUCTED;
 /** SHAPE_LINE_CHAIN::NearestPoint on a closed chain. */
 function nearestOnChain(pts: Pt[], ref: Pt): Pt | null {
@@ -108,7 +111,7 @@ export function itemAnchors(it: KItem, from: boolean, mouse: Pt | null, gridPitc
     }
     if (off("footprints")) return out;
     const pos = anchorOf(it); add(pos, OR | SN, "center");
-    if (it.bbox) { const c = [(it.bbox[0] + it.bbox[2]) / 2, (it.bbox[1] + it.bbox[3]) / 2]; const g = gridPitch || 0; if (Math.hypot(c[0] - pos[0], c[1] - pos[1]) > Math.hypot(g, g)) add(c, OR | SN, "center"); }
+    if (it.bbox) { const c = [(it.bbox[0] + it.bbox[2]) / 2, (it.bbox[1] + it.bbox[3]) / 2]; const g = gridPitch || 0, gy = opts && opts.gridY && opts.gridY > 0 ? opts.gridY : g; if (Math.hypot(c[0] - pos[0], c[1] - pos[1]) > Math.hypot(g, gy)) add(c, OR | SN, "center"); }   // |grid|: GetGrid() as a vector
     return out;
   }
   if (k === "segment" || k === "arc") {
@@ -168,7 +171,7 @@ export function bestDragOrigin(doc: BoardDoc, ids: Iterable<string>, mouse: Pt, 
   const all: SnapAnchor[] = [], seen = new Set<string>();
   const take = (id: string, f: AnchorOpts | null | undefined, depth: number) => {
     const it = doc.items.get(id); if (!it || seen.has(id) || depth > 32) return; seen.add(id);
-    if (it.kind === "group" || it.kind === "generated") { const m = K.kid(it.node, "members"); for (const mid of m ? m.slice(1).map(K.str) : []) take(mid, { hidden: f ? f.hidden : null, magnetic: f ? f.magnetic : null }, depth + 1); return; }   // PCB_GROUP_T: its items, without the filter
+    if (it.kind === "group" || it.kind === "generated") { const m = K.kid(it.node, "members"); for (const mid of m ? m.slice(1).map(K.str) : []) take(mid, { hidden: f ? f.hidden : null, magnetic: f ? f.magnetic : null, gridY: f ? f.gridY : undefined }, depth + 1); return; }   // PCB_GROUP_T: its items, without the filter
     for (const p of itemAnchors(it, true, mouse, gridPitch, f)) all.push(p);
   };
   for (const id of ids) take(id, opts, 0);
@@ -239,10 +242,14 @@ export function snapCursor(ctx: PcbCtx, mm: Pt, skip: Set<string> | null, mods?:
   // m_enableSnap off: no anchors, snap lines or construction geometry (constructionEnabled needs m_enableSnap)
   if (mods.shiftKey || !ctx.doc) { S.snapItem = null; clearConstruction(); snapLineSetEnd(null); return { p: g, anchor: null }; }
   setConstructionChangeCallback(() => { if (ctx.requestRender) ctx.requestRender(); });
+  // SNAP_INFERENCE_SETTINGS (Preferences > Snapping > Snap Inference): constructionEnabled needs construction
+  // extensions; the items' own geometry (intersections, points on elements) needs object geometry
+  const inf = snapInferenceSettings(), consOn = inf.constructionExtensions;
+  if (!consOn) clearConstruction();
   const R = snapRanges(ctx.pxPerMm || 4, gridOn, ctx.gridPitch || 0), range = R.range;
   // MAGNETIC_SETTINGS::allLayers off: only what is on the active layer (ResolveSnap's LSET{ GetActiveLayer() })
   const only = snapAllLayers(ctx) ? "" : (K.pcbSizes.state.activeLayer || S.gfxLayer || S.layer || "");
-  const vis = snapVisibility(ctx), opts: AnchorOpts = { hidden: vis.hidden };
+  const vis = snapVisibility(ctx), opts: AnchorOpts = { hidden: vis.hidden, gridY: ctx.gridPitchY };
   let nearest: SnapAnchor | null = null, nd = Infinity; const near: KItem[] = [];
   for (const it of ctx.doc.items.values()) {
     if (skip && skip.has(it.id)) continue; const b = it.bbox;
@@ -252,7 +259,7 @@ export function snapCursor(ctx: PcbCtx, mm: Pt, skip: Set<string> | null, mods?:
     for (const p of snapAnchors(it, only, ctx.gridPitch, mm, opts)) { if (!((p.f || 0) & SN)) continue; const d = Math.hypot(p[0] - mm[0], p[1] - mm[1]); if (d < nd) { nd = d; nearest = p; } }
   }
   // computeAnchors over GetConstructionItems: the construction geometry's free points are snappable, constructed anchors
-  const batches = constructionBatches().concat(useLines ? [snapLineConstruction()] : []);
+  const batches = (consOn ? constructionBatches() : []).concat(useLines ? [snapLineConstruction()] : []);
   for (const bt of batches) for (const ci of bt) for (const e of ci.drawables) {
     if (e.d.t !== "pt") continue; const q = e.d.p, d = Math.hypot(q[0] - mm[0], q[1] - mm[1]);
     if (d < nd) { nd = d; nearest = [q[0], q[1]] as SnapAnchor; nearest.t = "none"; nearest.f = SN | CO; if (ci.item) nearest.id = ci.item.split("#")[0]; }
@@ -261,7 +268,10 @@ export function snapCursor(ctx: PcbCtx, mm: Pt, skip: Set<string> | null, mods?:
   // residual is eased by the ranking hysteresis
   const held = S.snapItem && (!S.snapItem.id || (ctx.doc.items.has(S.snapItem.id) && !(skip && skip.has(S.snapItem.id)))) ? S.snapItem : null;
   const hd = held ? Math.hypot(held[0] - mm[0], held[1] - mm[1]) : Infinity;
+  // a reference-only point (SetReferenceOnlyPoints) is never snapped to: within range it only moves the snap line origin
+  const nearestRef = !!nearest && isReferenceOnly([nearest[0], nearest[1]]);
   const nearestCaptured = !!nearest && nd <= R.in;
+  if (nearestCaptured && nearestRef) snapLineSetOrigin([nearest![0], nearest![1]]);
   // the snap lines: GetNearestSnapLinePoint (only while no anchor is within range: snapDist is the nearer of the
   // nearest and the held anchor), else SnapToConstructionLines, where the active direction reaches 1.5 x as far
   let lineSnap: Pt | null = null;
@@ -272,7 +282,7 @@ export function snapCursor(ctx: PcbCtx, mm: Pt, skip: Set<string> | null, mods?:
     if (!lineSnap) lineSnap = snapToConstructionLines(sl.origin, sl.dirs, sl.active, mm, g, range, gridOn && pitch > 0 ? pitch : 0, gridAt);
   }
   let best: SnapAnchor | null = null;
-  const heldOk = !!held && hd <= R.out, nearOk = nearestCaptured;
+  const heldOk = !!held && hd <= R.out && !isReferenceOnly([held[0], held[1]]), nearOk = nearestCaptured && !nearestRef;
   if (heldOk && nearOk) best = Math.max(0, hd / R.scale - R.rankingHysteresis) <= nd / R.scale ? held : nearest;
   else if (heldOk) best = held; else if (nearOk) best = nearest;
   let res: { p: Pt; anchor: SnapAnchor | null; guide?: [Pt, Pt] | null } | null = null, presented = false;
@@ -282,15 +292,15 @@ export function snapCursor(ctx: PcbCtx, mm: Pt, skip: Set<string> | null, mods?:
     // an anchor: the snap line's end when it lies on one of the lines, else the snap line's new origin; a new
     // intrinsic anchor proposes its item's construction geometry
     presented = true; snapLineSetSnappedAnchor([best[0], best[1]]);
-    if (best !== held && !((best.f || 0) & CO) && best.id) proposeFor(ctx, anchorItemKeys(ctx, best));
+    if (consOn && best !== held && !((best.f || 0) & CO) && best.id) proposeFor(ctx, anchorItemKeys(ctx, best));
     res = { p: [r6(best[0]), r6(best[1])], anchor: best };
   } else {
     // no anchor captured: where two elements within range cross (construction geometry included), then (grid off)
     // the nearest point on an element
-    const elem = elementSnap(near, mm, range, only, vis.hidden, !gridOn, batches);
+    const elem = inf.objectGeometry || consOn ? elementSnap(inf.objectGeometry ? near : [], mm, range, only, vis.hidden, !gridOn, batches) : null;
     // ResolveSnapFrame's subtype ranks: an intersection and a snap line point (CONSTRUCTED_POINT) both rank 1, the
     // nearer one winning; a point on an element (FINITE_MANIFOLD, 4) only after them
-    const guideOk = !!lineSnap && !nearestCaptured, isX = !!elem && elem.t === "intersection";
+    const guideOk = !!lineSnap && !nearestCaptured && !isReferenceOnly(lineSnap), isX = !!elem && elem.t === "intersection";
     const dist = (q: Pt) => Math.hypot(q[0] - mm[0], q[1] - mm[1]);
     if (elem && isX && !(guideOk && dist(lineSnap!) < dist(elem))) { presented = true; snapLineSetSnappedAnchor([elem[0], elem[1]]); res = { p: [r6(elem[0]), r6(elem[1])], anchor: elem }; }
     else if (guideOk) { presented = true; const q: Pt = [r6(lineSnap![0]), r6(lineSnap![1])]; snapLineSetEnd(q); res = { p: q, anchor: null }; }
@@ -298,8 +308,8 @@ export function snapCursor(ctx: PcbCtx, mm: Pt, skip: Set<string> | null, mods?:
   }
   // ExtensionSnapActivateOnHover: with no anchor captured, the graphic under the cursor proposes its construction
   // geometry; with nothing presented or proposed the pending proposal is cancelled
-  let keep = presented;
-  if (!nearestCaptured && !presented) {
+  let keep = presented || (nearestCaptured && nearestRef);
+  if (consOn && !nearestCaptured && !presented) {
     const hit = hoveredShape(near, mm, only, vis.hidden);
     if (hit) { proposeFor(ctx, [hit]); keep = true; }
   }
@@ -310,6 +320,21 @@ export function snapCursor(ctx: PcbCtx, mm: Pt, skip: Set<string> | null, mods?:
   return { p: g, anchor: null, guide };
 }
 let consOwner = "";
+/**
+ * PCB_POINT_EDITOR's drag start: a clone of the item (unfilled) as persistent construction geometry,
+ * AddConstructionItems( { clone }, aExtensionOnly = false, aIsPersistent = true ): a segment's whole line and its ends
+ * (reference only), an arc's circle, centre and ends (reference only), a circle's or rectangle's centre.  The point
+ * editor's grid helper owns it.
+ */
+export function proposePersistentConstruction(it: KItem) {
+  if (consOwner !== "cursor") { clearConstruction(); consOwner = "cursor"; }
+  if (!snapInferenceSettings().constructionExtensions) return;
+  const refOnly: Pt[] = [];
+  const keys = it.kind === "image" ? [{ key: it.id, drawables: imageConstruction(it) }]
+    : itemShapes(it).map((s) => { if (s.shape.kind === "line" || s.shape.kind === "arc") refOnly.push(s.shape.start, s.shape.end); return { key: s.key, drawables: shapeConstruction(Object.assign({}, s.shape, { filled: false }), false, true) }; });
+  if (refOnly.length) setReferenceOnlyPoints(refOnly);
+  proposeConstructionItems(constructionBatchFor(keys), true);
+}
 /** GRID_HELPER::Align's auxiliary axis: x or y taken from the axis origin where that is nearer the cursor than the grid point. */
 export function alignAux(nearest: Pt, at: Pt, aux: Pt): Pt {
   const out: Pt = [nearest[0], nearest[1]];

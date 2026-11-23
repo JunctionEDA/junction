@@ -22,6 +22,12 @@ export const TOOLS = [
   { id: "gpoly", label: "Draw polygon", key: "Ctrl+Shift+P", cursor: "crosshair", icon: '<path d="M12 3l9 7-4 11H7L3 10z"/>' },
   // KiCad's hotkeys where they do not collide with the web's (Ctrl+Shift+Z is redo, so the zone takes the macOS Alt+Z)
   { id: "gcurve", label: "Draw Bezier curve", key: "Ctrl+Shift+B", cursor: "crosshair", icon: '<path d="M4 18C8 4 16 20 20 6"/><path d="M4 18l4-6M20 6l-4 8" stroke-dasharray="1.5 1.5"/>' },
+  // PCB_ACTIONS::drawEllipse / drawEllipseArc (no default hotkeys)
+  { id: "gellipse", label: "Draw Ellipse", key: "", cursor: "crosshair", icon: '<ellipse cx="12" cy="12" rx="9" ry="5.5"/>' },
+  { id: "gellipsearc", label: "Draw Elliptical Arc", key: "", cursor: "crosshair", icon: '<path d="M3 12a9 5.5 0 0 1 18 0"/>' },
+  // PCB_ACTIONS::placePoint, placeSubGrid (DRAWING_TOOL::PlacePoint, PlaceSubGrid)
+  { id: "placepoint", label: "Place Point", key: "", cursor: "PENCIL", icon: '<circle cx="12" cy="12" r="2.5"/><path d="M12 4v4M12 16v4M4 12h4M16 12h4"/>' },
+  { id: "subgrid", label: "Place Sub-grid", key: "", cursor: "BULLSEYE", icon: '<rect x="4" y="4" width="16" height="16"/><path d="M9.3 4v16M14.7 4v16M4 9.3h16M4 14.7h16"/>' },
   { id: "barcode", label: "Add barcode", key: "", cursor: "PENCIL", icon: '<path d="M4 5v14M7 5v14M9 5v14M13 5v14M15 5v14M18 5v14M20 5v14"/>' },
   { id: "gtextbox", label: "Draw text box", key: "", cursor: "crosshair", icon: '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M7 9h10M7 12h7M7 15h5"/>' },
   { id: "table", label: "Draw table", key: "", cursor: "crosshair", icon: '<rect x="3" y="5" width="18" height="14"/><path d="M3 10h18M3 14.5h18M9 5v14M15 5v14"/>' },
@@ -59,6 +65,10 @@ export const TOOL_HINT = { route: "Route — click to start and to fix, / postur
   grect: "Rectangle — click two corners", gcircle: "Circle — click the centre, then the radius", gtext: "Text — click where it goes", barcode: "Barcode — click where it goes",
   garc: "Arc — click the points the drawing mode asks for; / switches the posture, Alt+/ the mode, Backspace takes back a point", gpoly: "Polygon — click the corners; click the first corner or press Enter to close",
   gcurve: "Bezier — click the start, the first control point, the second control point, then the end",
+  placepoint: "Point — click where each point goes",
+  subgrid: "Sub-grid — click its centre, then its size and angle",
+  gellipse: "Ellipse — click two corners of the box it fills",
+  gellipsearc: "Elliptical arc — click two corners of the box, then the start and the end of the arc",
   gtextbox: "Text box — click two corners", table: "Table — click the top-left corner, then the size",
   image: "Image — choose a file, then click where its centre goes",
   zone: "Zone — click the corners; click the first corner or press Enter to close, then pick the net",

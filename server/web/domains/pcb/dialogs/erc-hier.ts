@@ -86,7 +86,22 @@ export async function runHierErc(opts: { showAllErrors?: boolean }, resolve: (l:
     return mine ? mine.markers : [];
   }
   ercSource = "browser";
-  for (const inst of list) {
+  // the net names KiCad gives (the hierarchy's net map), for the tests that compare and print them
+  let netName: ((i: number, id: string, pin: string) => string | undefined) | undefined;
+  let netOfItem: ((i: number, id: string) => { name: string; bus: boolean; prio: number; members: string[] } | undefined) | undefined;
+  try {
+    await loadSheets();
+    const nm = netMap();
+    if (nm) {
+      const at = list.map((inst) => nm.instances.find((x) => x.file === inst.path && x.uuidPath.slice(1).join("/") === inst.uuidPath.join("/")));
+      netName = (i, id, pin) => { const x = at[i]; return x ? nm.index.get(x.index + "|" + id + "#pin:" + pin) : undefined; };
+      netOfItem = (i, id) => {
+        const x = at[i], name = x ? nm.index.get(x.index + "|" + id) : undefined, e = name ? nm.map.get(name) : undefined;
+        return e ? { name: e.name, bus: e.bus, prio: e.driver ? e.driver.prio : 0, members: e.busMembers } : undefined;
+      };
+    }
+  } catch (e) { netName = undefined; netOfItem = undefined; }
+  for (const [li, inst] of list.entries()) {
     // the sub-sheets this instance's sheet symbols name, and the pins of the sheet symbol that names it
     const subDocs = new Map<string, KDoc>();
     for (const child of list) if (child.parentDocId === inst.docId && child.sheetItemId && child.uuidPath.slice(0, -1).join("/") === inst.uuidPath.join("/")) {
@@ -102,21 +117,11 @@ export async function runHierErc(opts: { showAllErrors?: boolean }, resolve: (l:
     const doc = inst.docId === here && E.kdoc ? E.kdoc : inst.doc;
     let ms: HierMarker[] = [];
     // the tests across sheets (units, local / global and similar names, single global labels) run once below
-    try { ms = s.ercCheck(doc, Object.assign({}, base, { sheetDocs: subDocs, parentPins, showAllErrors: !!opts.showAllErrors, root: !inst.sheetItemId, crossSheet: !s.ercHierarchy ? true : false })); } catch (e) { ms = []; }
+    try { ms = s.ercCheck(doc, Object.assign({}, base, { sheetDocs: subDocs, parentPins, showAllErrors: !!opts.showAllErrors, root: !inst.sheetItemId, crossSheet: !s.ercHierarchy ? true : false, netOfItem: netOfItem ? (id: string) => netOfItem!(li, id) : undefined })); } catch (e) { ms = []; }
     // the instance path the symbols record: "/<root uuid>/<sheet uuids>" (the keys leave the root out)
     const fp = fullPath(inst);
     docs.push({ doc, key: inst.uuidPath.join("/"), path: fp.length ? "/" + fp.join("/") : undefined, parent: pIdx >= 0 ? pIdx : null, sheetId: inst.sheetItemId, root: !inst.sheetItemId }); raw.push(ms);
   }
-  // the net names KiCad gives (the hierarchy's net map), for the tests that compare and print them
-  let netName: ((i: number, id: string, pin: string) => string | undefined) | undefined;
-  try {
-    await loadSheets();
-    const nm = netMap();
-    if (nm) {
-      const at = list.map((inst) => nm.instances.find((x) => x.file === inst.path && x.uuidPath.slice(1).join("/") === inst.uuidPath.join("/")));
-      netName = (i, id, pin) => { const x = at[i]; return x ? nm.index.get(x.index + "|" + id + "#pin:" + pin) : undefined; };
-    }
-  } catch (e) { netName = undefined; }
   let cross: HierMarker[][] = [];
   try { cross = s.ercHierarchy ? s.ercHierarchy(docs, Object.assign({}, base, { showAllErrors: !!opts.showAllErrors, netName })) : []; } catch (e) { cross = []; }
   list.forEach((inst, i) => {

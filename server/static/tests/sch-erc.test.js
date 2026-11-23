@@ -360,5 +360,55 @@ test("ERC marker colours follow the colour theme (LAYER_ERC_ERR / WARN / EXCLUSI
   }
 });
 
+// ---- the connectivity engine's island tests (conn_engine_erc.cpp BusNetConflicts, BusBusConflicts,
+// BusEntryConflicts, WiredImplicitPowerPins) as ERC_TESTER::TestConnectivity reports them
+const sheet = (body) => K.parseDoc(HEAD + body + ")");
+const W = (a, b, id, kind) => `(${kind || "wire"} (pts (xy ${a[0]} ${a[1]}) (xy ${b[0]} ${b[1]})) (stroke (width 0) (type default)) (uuid "${id}"))`;
+const L = (text, at, id) => `(label "${text}" (at ${at[0]} ${at[1]} 0) (effects (font (size 1.27 1.27))) (uuid "${id}"))`;
+test("bus_to_net_conflict: a wire and a bus joined by a label; a wire meeting a bus end to end touches nothing", () => {
+  let ms = sch.ercCheck(sheet(W([10, 10], [20, 10], "w1") + W([20, 10], [30, 10], "b1", "bus")));
+  assert.strictEqual(of(ms, "bus_to_net_conflict").length, 0);
+  ms = sch.ercCheck(sheet(W([10, 10], [20, 10], "w1") + W([20, 10], [30, 10], "b1", "bus") + L("X", [20, 10], "l1")));
+  const m = of(ms, "bus_to_net_conflict"); assert.strictEqual(m.length, 1, JSON.stringify(ms.map((x) => x.code)));
+  assert.strictEqual(m[0].severity, "error"); assert.strictEqual(m[0].text, "Invalid connection between bus and net items");
+  // the net item: the island's first item by uuid that is no bus (here the label), at its first connection point
+  assert.deepStrictEqual(m[0].ids, ["l1", "b1"]); assert.deepStrictEqual([m[0].x, m[0].y], [20, 10]);
+  // a bus label on a wire
+  ms = sch.ercCheck(sheet(W([10, 10], [20, 10], "w1") + L("D[0..3]", [10, 10], "l1")));
+  assert.deepStrictEqual(of(ms, "bus_to_net_conflict").map((x) => x.ids), [["w1", "l1"]]);
+});
+test("bus_to_bus_conflict: a vector and a group on one bus; two vectors sharing no member", () => {
+  let ms = sch.ercCheck(sheet(W([10, 10], [30, 10], "b1", "bus") + L("D[0..3]", [10, 10], "l1") + L("{A B}", [30, 10], "l2")));
+  let m = of(ms, "bus_to_bus_conflict"); assert.strictEqual(m.length, 1);
+  assert.strictEqual(m[0].text, "Bus vector and bus group are graphically connected");
+  ms = sch.ercCheck(sheet(W([10, 10], [30, 10], "b1", "bus") + L("D[0..3]", [10, 10], "l1") + L("E[0..3]", [30, 10], "l2")));
+  m = of(ms, "bus_to_bus_conflict"); assert.strictEqual(m.length, 1);
+  assert.strictEqual(m[0].text, "Buses are graphically connected but share no bus members"); assert.deepStrictEqual(m[0].ids, ["l1", "l2"]);
+  ms = sch.ercCheck(sheet(W([10, 10], [30, 10], "b1", "bus") + L("D[0..3]", [10, 10], "l1") + L("D[2..5]", [30, 10], "l2")));
+  assert.strictEqual(of(ms, "bus_to_bus_conflict").length, 0);
+});
+test("net_not_bus_member: a bus entry's net that is not a member of the bus it touches (the hierarchy's net names)", () => {
+  const body = W([0, 0], [0, 50], "b1", "bus") + `(bus_entry (at 0 10) (size 2.54 2.54) (stroke (width 0) (type default)) (uuid "e1"))` + W([2.54, 12.54], [10, 12.54], "w1");
+  const nets = (members, prio) => ({ netOfItem: (id) => id === "e1" || id === "w1" ? { name: "/X", bus: false, prio: prio || 4, members: [] } : id === "b1" ? { name: "/D", bus: true, prio: 4, members } : undefined });
+  let m = of(sch.ercCheck(sheet(body), nets(["/D0", "/D1"])), "net_not_bus_member");
+  assert.strictEqual(m.length, 1); assert.strictEqual(m[0].severity, "warning");
+  assert.strictEqual(m[0].text, "Net /X is graphically connected to bus /D but is not a member of that bus");
+  assert.deepStrictEqual([m[0].x, m[0].y], [0, 10]); assert.deepStrictEqual(m[0].ids, ["e1", "b1"]);
+  assert.strictEqual(of(sch.ercCheck(sheet(body), nets(["/D0", "/X"])), "net_not_bus_member").length, 0);
+  // a net driven by a global power pin or label is not checked
+  assert.strictEqual(of(sch.ercCheck(sheet(body), nets(["/D0"], 6)), "net_not_bus_member").length, 0);
+});
+test("wired_implicit_power: a hidden power input of an ordinary symbol on a wire, once per pin", () => {
+  const { d, c } = fresh();
+  d.lib.set("T:IC", K.parse(LIB("T:IC", "U", PIN("input", "A", "1", 0, 0) + PIN("power_in", "VCC", "2", 0, 5.08, true))));
+  const u = place(c, "T:IC", [50.8, 50.8], "U1");
+  let ms = sch.ercCheck(d); assert.strictEqual(of(ms, "wired_implicit_power").length, 0, "not wired");
+  const p = _.symbolPins(d, u).find((q) => q.number === "2");
+  wire(d, [p.x, p.y], [p.x + 10.16, p.y]);
+  ms = sch.ercCheck(d); const m = of(ms, "wired_implicit_power");
+  assert.strictEqual(m.length, 1); assert.strictEqual(m[0].severity, "warning");
+  assert.strictEqual(m[0].text, "Wired hidden power input pin also connects globally by name"); assert.deepStrictEqual([m[0].x, m[0].y], [p.x, p.y]);
+});
+
 console.log(`sch-erc: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

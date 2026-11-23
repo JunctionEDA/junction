@@ -6,14 +6,14 @@ import { cursorOf, editable, selectedItems, setSelectionIds, snapCursor } from "
 import { junctionAt, needsJunction } from "./connect";
 import { DRAG_KINDS, LABEL_KINDS, announceModes, applyDrag, breakInto, cleanupAt, connPoints, endDrag, foldChanges, isNetLine, makeAnchor, restoreNode, noConnectsAt } from "./drag";
 import { editTxn } from "./junction";
-import { hitNonSymbol, rectOf } from "./hit";
+import { hitNonSymbol, pickAny, rectOf } from "./hit";
 import { PIN_SIDE, corners, flagFieldAt, fontNode, imageData, imageNode, junctionNode, lineNode, autoplaceSheetFields, SHEET_FILE_OFF, SHEET_NAME_OFF, placeFlagFields } from "./nodes";
 import { SCREEN_OP, anchorOf, mirrorNode, mirrorTextSpin, orientSymbol, rotateText90, setTextRot, shiftAt, shiftNode, symOrient, mirrorLabelFields, rotateLabelFields, rotateNode } from "./orient";
 import { mmPerPx } from "./snap";
 import { K, LINE_KINDS, POINT_KINDS, S, TEXT_KINDS, atOf, kid, kids, num, ptsOf, setAt, setPts, str } from "./state";
 import { selEndOf } from "./line-ends";
 import { addNode, deep, dropKid, modChange, r4, removeChange, replaceKid, same, segDist } from "./util";
-import { isLockedNode, unlockedSelection } from "./lock";
+import { isLockedItem, isLockedNode, unlockedSelection } from "./lock";
 import "../../../../shared/components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
 
 // ---------------------------------------------------------------- group transforms: rotate / mirror about the selection centre, swap, align, move exactly
@@ -266,6 +266,11 @@ export function orientDrag(ctx: SchCtx, op: string) {
     afterOrient(doc, e.item, n, op, !lone);
     if (dx || dy) shiftNode(e.kind, n, -dx, -dy);
     e.base = n;
+    // SCH_BITMAP::MirrorHorizontally / MirrorVertically: the picture of a moving image flips too
+    if (e.kind === "image" && (op === "x" || op === "y")) {
+      const entry = e;
+      flipInFlight(ctx, e.item.id, op, () => (S.drag === d && entry.base ? entry.base : null), () => { if (S.drag === d) { applyDrag(doc, d, d.last[0], d.last[1]); ctx.requestRender(); } });
+    }
   }
   for (const r of d.riders) {
     if (!r.node0) r.node0 = deep(r.item.node);
@@ -313,6 +318,29 @@ async function mirroredImages(items: KItem[], op: string): Promise<KItem[] | nul
     out.push(Object.assign({}, it, { node: n }));
   }
   return out;
+}
+/** The raster flips of images in flight, one after the other: each reads the picture the previous one left. */
+let flightFlips: Promise<unknown> = Promise.resolve();
+/**
+ * BITMAP_BASE::Mirror on an image in flight (on the cursor of a placement, or in a Move / Drag): the item's own node
+ * mirrors at once and its picture follows when the browser has flipped the raster.  `holder` answers the node the
+ * operation still carries (null once it is over); when the operation already ended and committed the image, the
+ * flipped picture amends that same undo step, as long as the sheet still holds the image as it was placed.
+ */
+export function flipInFlight(ctx: SchCtx, id: string, op: string, holder: () => SNode | null, refresh: () => void): void {
+  if (!imageFlipImpl || (op !== "x" && op !== "y")) return;
+  const flip = imageFlipImpl, doc = ctx.doc;
+  flightFlips = flightFlips.then(async () => {
+    const n0 = holder() || (doc.items.get(id) || { node: null }).node; if (!n0) return;
+    const before = imageData(n0), r = kid(n0, "rotate"), quarter = Math.round((r ? num(r[1], 0) : 0) / 90) % 2 !== 0;
+    const flipped = await flip(before, (op === "y") !== quarter); if (!flipped || ctx.doc !== doc) return;
+    const nd = kid(imageNode([0, 0], flipped), "data")!;
+    const put = (n: SNode) => { const d = kid(n, "data"); if (d) n[n.indexOf(d)] = deep(nd); else n.push(deep(nd)); };
+    const live = holder();
+    if (live) { if (imageData(live) !== before) return; put(live); refresh(); return; }
+    const it = doc.items.get(id); if (!it || imageData(it.node) !== before) return;
+    const n = deep(it.node); put(n); ctx.commit([modChange(doc, it, n)], "Mirror", { amend: true });
+  }).catch(() => {});
 }
 export function transformSelected(ctx: SchCtx, op: string, items: KItem[], centre?: Pt) {
   if (!editable(ctx)) return false;
@@ -536,7 +564,9 @@ export function alignToGridChanges(ctx: SchCtx, items: KItem[]) {
             ["top", Math.abs(target[1] - tl[1]), [clamp(target[0], tl[0], br[0]), tl[1]]], ["bottom", Math.abs(target[1] - br[1]), [clamp(target[0], tl[0], br[0]), br[1]]]];
           const rot0 = atOf(pin)[2] || 0, mine = rot0 === 180 ? "left" : rot0 === 0 ? "right" : rot0 === 90 ? "top" : "bottom";
           let best = sides.find((sd) => sd[0] === mine)!; for (const sd of sides) if (sd[1] < best[1] - 1e-6) best = sd;
-          setAt(pin, r4(best[2][0]), r4(best[2][1]), best[0] === "left" ? 180 : best[0] === "right" ? 0 : best[0] === "top" ? 90 : 270);
+          setAt(pin, r4(best[2][0]), r4(best[2][1]), PIN_SIDE[best[0]][0]);
+          // SCH_SHEET_PIN::SetSide: a pin that changed sides takes that side's spin style (its text justification)
+          if (best[0] !== mine) setSheetPinJustify(pin, PIN_SIDE[best[0]][1]);
           const total = off(orig, target);
           touched.push(orig, [r4(best[2][0]), r4(best[2][1])]);
           if (nz(total)) apply(g, total);
@@ -557,8 +587,21 @@ export function alignToGridChanges(ctx: SchCtx, items: KItem[]) {
   const extra = cleanupAt(doc, out, touched, keep, ctx.IU || 1e4);
   return foldChanges(out, extra);
 }
+/** The justification a sheet pin's spin style gives its text: (effects … (justify left|right)), the font kept. */
+function setSheetPinJustify(pin: SNode, just: string): void {
+  let ef = kid(pin, "effects"); if (!ef) { ef = ["effects", fontNode(1.27)]; pin.push(ef); }
+  const j = kid(ef, "justify"), extra = j ? j.slice(1).filter((v) => v !== "left" && v !== "right") : [];
+  replaceKid(ef, ["justify", just, ...extra]);
+}
 export function alignToGrid(ctx: SchCtx) {
   if (!editable(ctx)) return false;
+  // RequestSelection( MovableItems ): with nothing selected, the item under the cursor for this one action (a hover
+  // selection, let go once the alignment is done)
+  if (!selectedItems(ctx).length) {
+    const hov = pickAny(ctx, cursorOf(ctx)); if (!hov || isLockedItem(ctx.doc, hov)) return false;
+    const changes = alignToGridChanges(ctx, [hov]); if (changes.length) ctx.commit(changes, "Align Items to Grid");
+    return true;
+  }
   const items = unlockedSelection(ctx); if (!items.length) return false;   // FilterSelectionForLockedItems
   const changes = alignToGridChanges(ctx, items); if (!changes.length) return true;
   ctx.commit(changes, "Align Items to Grid"); return true;

@@ -4,6 +4,7 @@ import type { BoardDoc, Box, PcbChange, Pt } from "./types";
 /** A point map (x, y) → [x, y]. */
 export type PointFn = (x: number, y: number) => number[];
 import { replacedChange } from "./changes";
+import { flipEllipseNode, mirrorEllipseAxis, rotateEllipseNode } from "./ellipse";
 import { flipFootprintNode, flipLayerKid, mirrorShapeX, rotateFootprintNode, toggleMirror } from "./footprint";
 import { K, S } from "./state";
 import { clone, corners, isList, norm360, pt, r6, rotator, vadd, xy } from "./util";
@@ -11,7 +12,7 @@ import { clone, corners, isList, norm360, pt, r6, rotator, vadd, xy } from "./ut
 // ================================================================ parity pass: the non-tool commands of pcbnew
 // Everything below is DOM-free geometry and node editing (the dialogs at the end are swappable) so the node
 // tests can drive it; app.js reaches it through pcb.actions and the exported query functions.
-export const PCB_KINDS = new Set(["footprint", "segment", "arc", "via", "zone", "gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_text", "gr_text_box", "gr_curve", "gr_bbox", "dimension", "target", "image", "group", "table", "generated"]);
+export const PCB_KINDS = new Set(["footprint", "segment", "arc", "via", "zone", "gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_text", "gr_text_box", "gr_curve", "gr_ellipse", "gr_ellipse_arc", "gr_bbox", "dimension", "target", "image", "group", "table", "generated"]);
 export const EPS = 1e-3;   // touching copper, in mm (KiCad's connectivity uses exact contact on integer nanometres)
 export const DRC_EPS = 0.0005;   // ADVANCED_CFG::m_DRCEpsilon: half a micron short of a rule is not a violation
 export const isFootprintNode = (n: SNode) => n[0] === "footprint";
@@ -76,6 +77,7 @@ export function rotateNode(node: SNode, cx: number, cy: number, deg: number) {
     node[0] = "gr_poly"; for (const key of ["start", "end"]) { const i = node.indexOf(K.kid(node, key)!); if (i > 0) node.splice(i, 1); }
     node.splice(1, 0, ["pts", ...pts.map(xy)]); return node;
   }
+  if (k === "gr_ellipse" || k === "gr_ellipse_arc" || k === "fp_ellipse" || k === "fp_ellipse_arc") return rotateEllipseNode(node, cx, cy, deg);   // EDA_SHAPE::rotate: Rotation -= angle
   if ((k === "gr_text_box" || k === "table_cell") && K.kid(node, "start") && K.kid(node, "end")) return rotateTextBoxNode(node, cx, cy, deg);
   if (k === "table") {   // PCB_TABLE::Rotate: every cell turns (PCB_TEXTBOX::Rotate), then Normalize lays them out about cell 0
     const cells = K.kid(node, "cells"); if (!cells) return node;
@@ -146,11 +148,13 @@ export function reflectZoneOrientations(node: SNode, leftRight: boolean) {
 export function flipNode(node: SNode, cx: number, doc: BoardDoc, cy?: number, dir?: string): SNode {
   if (dir === "tb" && cy !== undefined) {
     if (node[0] === "zone") { mapNodePoints(node, (x: number, y: number) => [x, 2 * cy - y]); flipLayerKid(node); reflectZoneOrientations(node, false); return node; }
+    if (/_ellipse(_arc)?$/.test(String(node[0]))) { flipEllipseNode(node, cx, cy, false); flipLayerKid(node); return node; }   // ELLIPSE::Mirror( TOP_BOTTOM )
     flipNode(node, cx, doc); return rotateNode(node, cx, cy, 180);
   }
   const k = node[0]; const mirror = (x: number, y: number) => [2 * cx - x, y];
   if (k === "footprint") return legacyFootprintFrame(node, doc || S.doc, () => { flipFootprintNode(node); return mapNodePoints(node, mirror); });
-  mapNodePoints(node, mirror); flipLayerKid(node);
+  if (/_ellipse(_arc)?$/.test(String(k))) flipEllipseNode(node, cx, 0, true); else mapNodePoints(node, mirror);   // ELLIPSE::Mirror( LEFT_RIGHT )
+  flipLayerKid(node);
   if (k === "zone") reflectZoneOrientations(node, true);
   if (k === "via") { const ls = K.kid(node, "layers"); if (ls && doc) { const copper = doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"]; const names = ls.slice(1).map(K.str).sort((a, b) => copper.indexOf(a) - copper.indexOf(b)); ls.splice(1, ls.length - 1, ...names); } }
   if (k === "gr_text" || k === "gr_text_box" || k === "property") { toggleMirror(node); setAngleKid(node, -angleKid(node)); }
@@ -162,6 +166,7 @@ export function flipNode(node: SNode, cx: number, doc: BoardDoc, cy?: number, di
 /** Mirror in place (no side change): "h" about the vertical axis through cx, "v" about the horizontal one through cy. */
 export function mirrorNode(node: SNode, cx: number, cy: number, axis: string) {
   const k = node[0]; if (k === "footprint") return false;   // pcbnew refuses to mirror footprints outside the footprint editor
+  if (/_ellipse(_arc)?$/.test(String(k))) return flipEllipseNode(node, cx, cy, axis !== "v");   // PCB_SHAPE::Mirror -> EDA_SHAPE::flip
   mapNodePoints(node, axis === "v" ? (x: number, y: number) => [x, 2 * cy - y] : (x: number, y: number) => [2 * cx - x, y]);
   const text = (n: SNode) => { toggleMirror(n); setAngleKid(n, axis === "v" ? 180 - angleKid(n) : -angleKid(n)); };
   if (k === "gr_text" || k === "gr_text_box" || k === "property") text(node);
@@ -172,7 +177,7 @@ export function mirrorNode(node: SNode, cx: number, cy: number, axis: string) {
   return node;
 }
 /** EDIT_TOOL::MirrorableItems as the kinds here: what Mirror( const SEG& ) exists for. */
-const MIRRORABLE = new Set(["gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_curve", "gr_text", "gr_text_box", "property", "zone", "pad", "segment", "arc", "via", "group", "generated", "table", "image",
+const MIRRORABLE = new Set(["gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_curve", "gr_ellipse", "gr_ellipse_arc", "fp_ellipse", "fp_ellipse_arc", "gr_text", "gr_text_box", "property", "zone", "pad", "segment", "arc", "via", "group", "generated", "table", "image",
   "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "fp_curve", "fp_text", "fp_text_box"]);
 /**
  * BOARD_ITEM::Mirror( const SEG& aAxis ): the item reflected in place about the line through A and B (no side
@@ -189,6 +194,7 @@ export function mirrorNodeAxis(node: SNode, A: Pt, B: Pt): SNode | false {
   const refl = (x: number, y: number) => { const t = ((x - A[0]) * dx + (y - A[1]) * dy) / L2; return [2 * (A[0] + t * dx) - x, 2 * (A[1] + t * dy) - y]; };
   const axisAngle = -Math.atan2(dy, dx) * 180 / Math.PI, reflect = (a: number) => 2 * axisAngle - a;
   if (k === "table") { if (!aligned) return false; mirrorNode(node, A[0], A[1], A[0] === B[0] ? "h" : "v"); return node; }   // PCB_TABLE::Mirror( aAxis.A, flipDirection )
+  if (k === "gr_ellipse" || k === "gr_ellipse_arc") return mirrorEllipseAxis(node, A, B);
   if (k === "gr_text" || k === "property") {
     mapNodePoints(node, refl); let a = norm360(reflect(angleKid(node)));
     if (a > 90 && a <= 270) {
@@ -272,7 +278,7 @@ export function anchorOf(item: KItem): Pt {
   if (k === "footprint" || k === "via" || k === "gr_text" || k === "image" || k === "target") { const [x, y] = K.atOf(n); return [x, y]; }
   if (k === "gr_arc") { const a = pt(n, "start"), m = pt(n, "mid"), e = pt(n, "end"); const c = a && m && e ? arcCentre3(a, m, e) : pt(n, "center"); if (c) return [r6(c[0]), r6(c[1])]; }
   if (k === "segment" || k === "arc" || k === "gr_line" || k === "gr_arc" || k === "gr_rect" || k === "gr_text_box") { const p = pt(n, "start"); if (p) return p; }
-  if (k === "gr_circle") { const p = pt(n, "center"); if (p) return p; }
+  if (k === "gr_circle" || k === "gr_ellipse" || k === "gr_ellipse_arc") { const p = pt(n, "center"); if (p) return p; }
   if (k === "gr_poly" || k === "gr_curve" || k === "dimension" || k === "gr_text_box") { const p = firstVertex(K.kid(n, "pts")); if (p) return p; }
   if (k === "zone") { const poly = K.kid(n, "polygon"); const p = poly && firstVertex(K.kid(poly, "pts")); if (p) return p; }
   if (k === "table") { const cells = K.kid(n, "cells"); const first = cells && K.kids(cells, "table_cell")[0]; const p = first && pt(first, "start"); if (p) return p; }

@@ -4,6 +4,7 @@ import { PCB_BG, PCB_GRID, PCB_GRID_AXES, PCB_PAGE_LIMITS, PCB_SHEET, SCH, SCH_D
 import { atOf, colorOf, effectsOf, flipH, kid, kids, num, pointInPoly, ptsOf, splitLines, str, strokeOf, yesNo } from "./sexpr";
 import { isBusLabel } from "./busname";
 import { ensureFontGeom, ensureSchTheme } from "./geom";
+import { ensureHatchKnockouts } from "./geom-pcb";
 import { FAKE_ITALIC_SLANT, OUTLINE_EM, cssFamily, faceAvailable, fontChanged as olFontChanged, outlineLayout, type OutlineLayout } from "./outline-text";
 import { displayNetName, padLabelShown, printableCharCount } from "./geom-pcb";
 import { geomBox, geomHit } from "./hit";
@@ -394,6 +395,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   OC = (opts && opts.objectColors) || {};
   ensureSchTheme(doc);   // geometry built under another schematic colour theme is rebuilt first
   ensureFontGeom(doc);   // and text set in a face that has arrived since is laid out with its metrics
+  ensureHatchKnockouts(doc);   // PCB_SHAPE::UpdateHatching on every draw: the knockouts of what else is on the layer
   opts = opts || {}; const hidden = opts.hidden || new Set();
   const isPcb = doc.type === "pcb";
   setOverbarHeight(isPcb ? 1.23 : schFormat.overbarHeight);   // the board's KIFONT::METRICS are the defaults
@@ -402,6 +404,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   // hidden fields: pcbnew's hidden texts (showHiddenText), eeschema's own appearance.show_hidden_fields (LAYER_HIDDEN,
   // showHiddenFields) — two separate settings, as in KiCad
   const showHiddenText = isPcb ? !!opts.showHiddenText : !!opts.showHiddenFields, padNumbers = opts.padNumbers !== false;
+  const forceVis = !isPcb && opts.forceVisible instanceof Set && opts.forceVisible.size ? opts.forceVisible as Set<string> : null;
   // eeschema's View-menu options: mark_sim_exclusions and show_directive_labels (both on by default)
   const noSimMarks = !isPcb && opts.markSimExclusions === false, noDirectives = !isPcb && opts.showDirectiveLabels === false;
   if (!isPcb) {   // EESCHEMA_SETTINGS m_Selection: what the shadow passes below (and the overlay's) read
@@ -767,8 +770,20 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
         else if (g.track || (g.via && !g.hole && !g.viaMask && !g.indicator && (g.viaType !== "through" || g.viaLabel)) || g.npth || (g.pad && !g.hole && !g.indicator && g.t !== "text")) obstacles!.push(g);   // a through via cuts every layer once (its label ring stands for it)
       }
     }
+    // EDA_ITEM::IsForceVisible (SCH_FIND_REPLACE_TOOL::UpdateFind on a matching hidden field): drawn as if shown
+    if (it.hiddenGeom && forceVis && !showHiddenText) for (const g of it.hiddenGeom) {
+      if (!g.hiddenText || g.field === undefined || hidden.has(g.layer) || !forceVis.has(it.id + "#field:" + g.field)) continue;
+      const fg = g.shownColor ? Object.assign({}, g, { color: g.shownColor }) : g;
+      bucket(lift || (liftParts && liftParts.has("field:" + g.field)) ? SEL_BUCKETS : BUCKETS, zOf(g)).push(fg);
+      if (isHl || (padHl && subHl(it, g))) hlGeoms!.add(fg);
+    }
     if (it.hiddenGeom && (showHiddenPins || showHiddenText)) for (const g of it.hiddenGeom) {
       if (hidden.has(g.layer) || (g.hiddenText ? !showHiddenText : !showHiddenPins)) continue;
+      if (g.hiddenText && g.shownColor && forceVis && g.field !== undefined && forceVis.has(it.id + "#field:" + g.field)) {
+        const fg = Object.assign({}, g, { color: g.shownColor }); bucket(lift || (liftParts && liftParts.has("field:" + g.field)) ? SEL_BUCKETS : BUCKETS, zOf(g)).push(fg);
+        if (isHl || (padHl && !isPcb && subHl(it, g))) hlGeoms!.add(fg);
+        continue;
+      }
       const z = zOf(g);
       bucket(lift || (liftParts && liftParts.has(g.pinNo !== undefined ? "pin:" + g.pinNo : g.field ? "field:" + g.field : "")) ? SEL_BUCKETS : BUCKETS, z).push(g);
       if (isHl || (padHl && !isPcb && subHl(it, g))) hlGeoms!.add(g);

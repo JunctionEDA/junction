@@ -58,6 +58,8 @@ export interface PcbCtx extends ToolCtx {
   setLocalOrigin?(p: Pt): void;
   /** make a layer visible (the Appearance panel's SetLayerVisible( layer, true )) */
   showLayer?(layer: string): void;
+  /** APPEARANCE_CONTROLS / SetObjectVisible( layer, true ): an object layer of the Appearance panel turned on ("subgrids", …) */
+  showObject?(id: string): void;
   /** the toolbar group's shown action (the Arc group follows the arc drawing mode) */
   setGroupCurrent?(group: string, action: string): void;
 }
@@ -140,6 +142,8 @@ export type PcbState = {
   padPlace?: { type: import("./pad-tool").PadType; angle: number } | null; padTemplate?: SNode | null;
   pedit: PointEdit | null; mmPerPx: number;
   route: Route | null; drag: TrackDrag | null; draw: DrawState | null; hover: Hover | null;
+  /** DRAWING_TOOL::PlaceSubGrid between its two clicks: the grid item's centre, extent and angle */
+  subGrid?: import("./board-items").SubGridDraft | null;
   text: { box: HTMLElement } | null; modTool: string | null; doc: BoardDoc | null;
   /** the picked reference image riding the cursor */
   image: RefImage | null;
@@ -166,8 +170,10 @@ export type PcbState = {
   routerRulesFor?: unknown; routerRulesList?: import("./dru").DruRule[] | null;
   /** the board the shove world was last built for (its clearance queries resolve rules against it) */
   shoveDoc?: BoardDoc | null;
+  /** ROUTER::VisibleViewArea when the last shove ran (the canvas' visible world box; SHOVE::runOptimizer keeps to it) */
+  viewArea?: Box | null;
   move?: SelectMove | null; pending?: PendingDrag | null; sworld?: { doc: BoardDoc; ver: number; key: string; w: ShoveWorld } | null;
-  joints?: Joints; strokeW?: number | null; drawOrigin?: Pt | null; peditCtrl?: boolean; lastDown?: { t: number; x: number; y: number } | null; pick?: { done: (res: Pt | KItem | null) => void; prompt: string; filter?: (it: KItem) => boolean;
+  joints?: Joints; strokeW?: number | null; drawOrigin?: Pt | null; peditCtrl?: boolean; /** Shift held during a point-editor drag (grid.SetSnap( !MD_SHIFT )) */ peditShift?: boolean; lastDown?: { t: number; x: number; y: number } | null; pick?: { done: (res: Pt | KItem | null) => void; prompt: string; filter?: (it: KItem) => boolean;
     /** a two-point pick (TWO_POINT_GEOMETRY_MANAGER): the prompts, the preview drawn between the points, the first point once set, the end under the cursor */
     two?: { first: string; second: string; preview: "axis" | "ruler"; done: (a: Pt | null, b: Pt | null) => void }; from?: Pt | null; cur?: Pt | null; dragged?: boolean } | null;
   /** the interactive offset's arrow, left in place while its dialog is open ([cursor end, arrow end]) */ pickKeep?: [Pt, Pt] | null; popup?: { text: string; at: Pt; until: number } | null;
@@ -182,6 +188,8 @@ export type PcbState = {
   /** DRAWING_TOOL::DrawZone's ZONE_MODE for the zone tool: a cutout of / a zone similar to the source zone (zone-modes.ts); next: what the next activation takes */
   moveSeq?: import("./ref-move").MoveSeq | null; routeQueue?: import("./route-selected").RouteQueue | null; snapAllLayers?: boolean; snapAllLayersFp?: boolean;
   /** MAGNETIC_SETTINGS (Preferences > Editing Options > Magnetic Points) */ magnetic?: Partial<import("./grid-helper").MagneticSettings> | null; /** GRID_HELPER m_snapItem: the anchor the cursor is held on */ snapItem?: SnapAnchor | null; /** PCBNEW_SETTINGS m_AllowFreePads */ allowFreePads?: boolean;
+  /** TOOLS_HOLDER::GetMoveWarpsCursor (Preferences > Common) */ moveWarpsCursor?: boolean;
+  /** SNAP_INFERENCE_SETTINGS of the editor (Preferences > Snapping) */ snapInference?: Partial<import("./grid-helper").SnapInferenceSettings> | null;
   zoneMode?: { mode: "cutout" | "similar"; src: string } | null; zoneModeNext?: { mode: "cutout" | "similar"; src: string } | null;
 };
 
@@ -281,9 +289,15 @@ export interface TrackLine {
   vertex?: number;
   /** an arc ending on a dragged via, its tangent posture, and the item new segments copy */
   arc?: KItem; arcDiag?: boolean; tmpl?: KItem;
+  /** the line's arcs over its points (assembleArcLine) */
+  arcs?: LineArcs;
 }
+/** An arc of a line: its three points as on the board, and the board arc it came from. */
+export interface LineArc { a: Pt; m: Pt; b: Pt; id?: string; item?: KItem }
+/** The arcs of a line given as points: seg[i] is the arc (index into list) that segment pts[i]..pts[i + 1] belongs to, -1 for a straight one. */
+export interface LineArcs { seg: number[]; list: LineArc[] }
 /** One drag step's geometry: each line rebuilt for the cursor, and where the via goes. */
-export interface DragSolution { lines: { l: TrackLine; pts: Pt[] }[]; viaAt?: Pt }
+export interface DragSolution { lines: { l: TrackLine; pts: Pt[]; arcs?: LineArcs }[]; viaAt?: Pt }
 
 /** The shove engine's results (pcb-tools/shove.ts). */
 export type ShoveWorld = import("./shove").ShoveWorld;
@@ -369,6 +383,8 @@ export interface Route {
   ratAnchor?: { p: Pt; layers: string[]; through: boolean } | null; loopHidden?: Set<string> | null;
   /** m_originalActiveLayer: the active layer before the route, restored when it ends; amend: the commit joins the previous undo step (APPEND_UNDO after Continue From End) */
   originalLayer?: string; amend?: boolean;
+  /** LINE_PLACER's head / tail model of the leg being routed (branch.ts walkPlacer) */
+  walk?: import("./branch").WalkPlacer | null;
   /** SIZES_SETTINGS clearance and the sources the message panel names (updateSizesAfterRouterEvent / ImportSizes) */
   clearance?: number; clearanceSource?: string; widthSource?: string;
   // DIFF_PAIR_PLACER

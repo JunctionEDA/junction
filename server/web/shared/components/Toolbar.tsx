@@ -29,7 +29,9 @@ function useEditor(): Editor | null { return useApp((s) => s.document.editor); }
 const KB = "kb relative w-7.5 h-7.5 p-0.5 border border-transparent rounded-none bg-transparent text-ink inline-flex items-center justify-center flex-none"
   + " hover:bg-tb-hover hover:border-accent on:bg-tb-hover on:border-accent on:hover:bg-tb-on-hover active:bg-tb-press active:border-accent"
   + " desk:hover:bg-transparent desk:hover:border-transparent desk:active:bg-transparent desk:active:border-transparent desk:[&>*]:grayscale desk:[&>*]:opacity-45"
-  + " desk:on:bg-transparent desk:on:border-transparent";
+  + " desk:on:bg-transparent desk:on:border-transparent"
+  // Preferences > Common > Toolbar icon size: Small (16 px icons) and Large (32 px) around Normal's 24
+  + " [.k-tb-16_&]:w-5.5 [.k-tb-16_&]:h-5.5 [.k-tb-16_&_.kicon]:w-4 [.k-tb-16_&_.kicon]:h-4 [.k-tb-32_&]:w-9.5 [.k-tb-32_&]:h-9.5 [.k-tb-32_&_.kicon]:w-8 [.k-tb-32_&_.kicon]:h-8";
 /* No KiCad toolbar ever wraps: wxAuiToolBar keeps its one row (or column) and hides the tools that do
    not fit behind an overflow chevron that pops them up as a menu — ACTION_TOOLBAR's
    `SetOverflowVisible( !GetToolBarFits() )` (common/tool/action_toolbar.cpp:259-266).  OverflowBar

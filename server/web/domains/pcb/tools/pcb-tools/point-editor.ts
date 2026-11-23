@@ -14,8 +14,11 @@ import { lsGet, lsSet } from "./router-settings";
 import { K, S, lastCtx } from "./state";
 import { clone, pt, r6, samePt, vadd, vmul, vsub } from "./util";
 import { isTuningPattern } from "./tuning-patterns";
+import { proposePersistentConstruction, snapCursor } from "./grid-helper";
+import { clearConstruction, setReferenceOnlyPoints } from "./construction";
 import { EDIT_BORDER_PX, EDIT_HOVER_PX, EDIT_POINT_PX, editPointColors } from "../edit-point-style";
 import { AUX_ITEMS_COLOR } from "./assistants";
+import { ELLIPSE_KINDS, ellipseEditNode, ellipseEditPoints } from "./ellipse";
 import { genCancelEdit, genFinishEdit, genStartEdit, genUpdateEdit, selectedTuningPattern, tuningEditNode, tuningEditPoints } from "./tuning-edit";
 import type { GenEdit } from "./tuning-edit";
 
@@ -24,9 +27,9 @@ import type { GenEdit } from "./tuning-edit";
 // the corners / ends (EDIT_POINT), circles on the edge midpoints (EDIT_LINE centre points).  Dragging a handle reshapes
 // the item; a zone or polygon edge midpoint drags the whole edge; Ins (Create Corner) adds a corner on the edge under
 // the cursor, Remove Corner takes the corner under it out.  Only the edited coordinates are rewritten.
-export const PE_KINDS = new Set(["zone", "gr_poly", "gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_curve", "gr_text_box", "barcode", "dimension"]);
+export const PE_KINDS = new Set(["zone", "gr_poly", "gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_curve", "gr_ellipse", "gr_ellipse_arc", "gr_text_box", "barcode", "dimension"]);
 /** What a handle drag carries besides the cursor: Ctrl held, the grid pitch (0: off) and the line mode's angle limit. */
-export interface EditOpts { ctrl?: boolean; gridPitch?: number; angle?: string }
+export interface EditOpts { ctrl?: boolean; gridPitch?: number; /** GetGridSize().y (gridPitch is its x) */ gridPitchY?: number; angle?: string }
 /** Every contour of a zone outline or polygon as its (pts) list: the main outline first, then the holes ((polygon …) children of a zone). */
 export function peContours(node: SNode): SNode[] {
   if (node[0] !== "zone") { const p = K.kid(node, "pts"); return p ? [p] : []; }
@@ -63,6 +66,7 @@ export function editPoints(it: KItem): EditPoint[] {
   if (!it || !PE_KINDS.has(it.kind)) return [];
   const n = it.node, out: EditPoint[] = [];
   if (it.kind === "dimension") return dimEditPoints(n);
+  if (ELLIPSE_KINDS.has(it.kind)) return ellipseEditPoints(n);   // EDA_ELLIPSE_POINT_EDIT_BEHAVIOR::MakePoints
   if (it.kind === "zone" || it.kind === "gr_poly") {
     // BuildForPolyOutline: every contour (the main outline and the holes) has its corners and its edge lines
     let base = 0; const mids: EditPoint[] = [];
@@ -194,7 +198,7 @@ const lineAngle = (u: Pt, v: Pt) => { const a = Math.abs(Math.atan2(u[0] * v[1] 
  * displacement is quantized to it (pcb_point_editor.cpp: "Quantize the perpendicular displacement directly").
  * Returns the new positions of the edge's two corners.
  */
-export function polyEdgeDrag(pts: Pt[], i: number, pos: Pt, fixedLength: boolean, gridPitch: number): [Pt, Pt] {
+export function polyEdgeDrag(pts: Pt[], i: number, pos: Pt, fixedLength: boolean, gridPitch: number, gridPitchY?: number): [Pt, Pt] {
   const n = pts.length, j = (i + 1) % n, origin = pts[i], end = pts[j], prev = pts[(i - 1 + n) % n], next = pts[(j + 1) % n];
   const originDir = vsub(origin, prev), endDir = vsub(end, next), dragged = vsub(end, origin);
   const center: Pt = [(origin[0] + end[0]) / 2, (origin[1] + end[1]) / 2], perp: Pt = [-dragged[1], dragged[0]];
@@ -203,7 +207,7 @@ export function polyEdgeDrag(pts: Pt[], i: number, pos: Pt, fixedLength: boolean
   const originCollinear = lineAngle(dragged, originDir) < 10, endCollinear = lineAngle(dragged, endDir) < 10;
   const convergence = lineX(origin, originDir, end, endDir) || center;
   if (gridPitch > 0) {
-    const u: Pt = [perp[0] / len, perp[1] / len], step = Math.hypot(gridPitch * u[0], gridPitch * u[1]);
+    const u: Pt = [perp[0] / len, perp[1] / len], gy = gridPitchY && gridPitchY > 0 ? gridPitchY : gridPitch, step = Math.hypot(gridPitch * u[0], gy * u[1]);   // gridSize.x * perpUnit.x, gridSize.y * perpUnit.y
     if (step > 0) { const off = Math.round(((pos[0] - center[0]) * u[0] + (pos[1] - center[1]) * u[1]) / step) * step; pos = [center[0] + u[0] * off, center[1] + u[1] * off]; }
   }
   let nc = lineX(center, perp, pos, dragged) || pos;
@@ -228,7 +232,7 @@ export function polyEdgeDrag(pts: Pt[], i: number, pos: Pt, fixedLength: boolean
  */
 export function constrainHandle(orig: SNode, kind: string, key: string, p: Pt, angle: string | undefined): Pt {
   if (angle !== "45" && angle !== "90") return p;
-  if (kind === "dimension" || kind === "generated" || /^[em]/.test(key) || key === "rr") return p;   // edge lines and the radius handle move on their own lines
+  if (kind === "dimension" || kind === "generated" || ELLIPSE_KINDS.has(kind) || /^[em]/.test(key) || key === "rr") return p;   // edge lines (an ellipse has no 45-degree constrainer) and the radius handle move on their own lines
   let ref: Pt | null = null;
   if (kind === "gr_line") ref = pt(orig, key === "start" ? "end" : "start");
   else if (kind === "gr_circle") ref = key === "center" ? null : pt(orig, "center");
@@ -246,6 +250,7 @@ export function unfillZoneNode(node: SNode) {
 }
 export function editPointNode(orig: SNode, kind: string, key: string, p: Pt, raw: Pt | null | undefined, grid: ((p: Pt) => Pt) | null | undefined, opts?: EditOpts) {
   if (kind === "dimension") return dimEditNode(orig, key, p, raw || p, (grid || null));
+  if (ELLIPSE_KINDS.has(kind)) return ellipseEditNode(clone(orig), key, p);   // EDA_ELLIPSE_POINT_EDIT_BEHAVIOR::UpdateItem
   p = constrainHandle(orig, kind, key, p, opts && !opts.ctrl ? opts.angle : undefined);
   if (kind === "gr_arc") {
     const g = arcEditGeometry(orig, key, p, raw || p, arcEditMode()); if (!g) return clone(orig);
@@ -261,7 +266,7 @@ export function editPointNode(orig: SNode, kind: string, key: string, p: Pt, raw
     if (key[0] === "c") { xs[i][1] = r6(p[0]); xs[i][2] = r6(p[1]); }
     else {   // an edge line: POLYGON_EDGE_DRAG_POLICY (converging, Ctrl: fixed length) from the cursor itself
       const j = (i + 1) % nn;
-      const [a, b] = polyEdgeDrag(loc.pts, i, raw || p, !!(opts && opts.ctrl), grid && opts && opts.gridPitch ? opts.gridPitch : 0);
+      const [a, b] = polyEdgeDrag(loc.pts, i, raw || p, !!(opts && opts.ctrl), grid && opts && opts.gridPitch ? opts.gridPitch : 0, grid && opts && opts.gridPitchY ? opts.gridPitchY : 0);
       xs[i][1] = r6(a[0]); xs[i][2] = r6(a[1]); xs[j][1] = r6(b[0]); xs[j][2] = r6(b[1]);
     }
   } else if (kind === "gr_line") setXY(node, key, p);
@@ -434,6 +439,57 @@ export function movePointChanges(doc: BoardDoc, id: string, key: string, to: Pt)
   return K.serialize(node) === K.serialize(it.node) ? [] : [replacedChange(it, node)];
 }
 export const handleTol = () => EDIT_POINT_PX * (S.mmPerPx || 0.05);   // EDIT_POINT::POINT_SIZE, in mm at this zoom
+/**
+ * snapCorner: the point on the circle through `prev` and `next` on which the corner angle is `angleDeg` (inscribed
+ * angle theorem), of the two such circles the one nearer the guess.
+ */
+export function snapCorner(prev: Pt, next: Pt, guess: Pt, angleDeg: number): Pt {
+  const a = angleDeg * Math.PI / 180, chord = Math.hypot(next[0] - prev[0], next[1] - prev[1]), sinA = Math.sin(a);
+  if (chord === 0 || Math.abs(sinA) < 1e-9) return guess;
+  const radius = chord / (2 * sinA), mid: Pt = [(prev[0] + next[0]) / 2, (prev[1] + next[1]) / 2], dir = [next[0] - prev[0], next[1] - prev[1]];
+  const nl = Math.hypot(dir[0], dir[1]), normal = [-dir[1] / nl, dir[0] / nl];
+  const hsq = radius * radius - chord * chord / 4, hh = hsq > 0 ? Math.sqrt(hsq) : 0;
+  const project = (c: Pt): Pt => {
+    let v = [guess[0] - c[0], guess[1] - c[1]]; if (Math.hypot(v[0], v[1]) === 0) v = [prev[0] - c[0], prev[1] - c[1]];
+    const L = Math.hypot(v[0], v[1]) || 1; return [r6(c[0] + v[0] / L * radius), r6(c[1] + v[1] / L * radius)];
+  };
+  const p1 = project([mid[0] + normal[0] * hh, mid[1] + normal[1] * hh]), p2 = project([mid[0] - normal[0] * hh, mid[1] - normal[1] * hh]);
+  return Math.hypot(guess[0] - p1[0], guess[1] - p1[1]) < Math.hypot(guess[0] - p2[0], guess[1] - p2[1]) ? p1 : p2;
+}
+/** SEG::Angle( aOther ): the absolute angle between the two segments' directions (A - B), in degrees, 0 to 180. */
+export function segAngleDeg(a0: Pt, a1: Pt, b0: Pt, b1: Pt): number {
+  const n180 = (d: number) => { while (d <= -180) d += 360; while (d > 180) d -= 360; return d; };
+  const t = n180(Math.atan2(a0[1] - a1[1], a0[0] - a1[0]) * 180 / Math.PI), o = n180(Math.atan2(b0[1] - b1[1], b0[0] - b1[0]) * 180 / Math.PI);
+  return Math.abs(n180(t - o));
+}
+/**
+ * PCB_POINT_EDITOR's sticky angle snap (m_angleSnapActive / m_angleSnapPos): dragging a corner of a polygon or zone
+ * (more than two corners, Shift not held) to within 2 degrees of a multiple of 45 between its neighbours puts it where
+ * the angle is exact (snapCorner; through the grid when that keeps the angle within 2 degrees), and keeps it there
+ * until the cursor moves 5 px away or Shift is pressed.  The neighbours are the previous and next corners in the
+ * point list (contours one after the other).  Returns the held corner, or null to snap as usual.
+ */
+export function stickyCornerSnap(ctx: PcbCtx, pe: NonNullable<typeof S.pedit>, mm: Pt, mods: { ctrlKey: boolean; shiftKey: boolean }): Pt | null {
+  const as = pe.angleSnap as Pt | null | undefined;
+  if (as) {
+    const limit = 5 * (S.mmPerPx || 1 / Math.max(1e-6, ctx.pxPerMm || 4));
+    if (Math.hypot(mm[0] - as[0], mm[1] - as[1]) > limit || mods.shiftKey) pe.angleSnap = null; else return as;
+  }
+  if ((pe.kind !== "zone" && pe.kind !== "gr_poly") || mods.shiftKey) return null;
+  const m = /^c(\d+)$/.exec(pe.key); if (!m) return null;
+  const corners: Pt[] = []; for (const pn of peContours(pe.orig)) corners.push(...ptsOfList(pn));
+  const n = corners.length, idx = +m[1]; if (n <= 2 || idx >= n) return null;
+  const prev = corners[(idx + n - 1) % n], next = corners[(idx + 1) % n], pos = mm;
+  const ang = segAngleDeg(pos, prev, pos, next), snapAng = 45 * Math.round(ang / 45);
+  if (Math.abs(ang - snapAng) >= 2) return null;
+  let snapped = snapCorner(prev, next, pos, snapAng);
+  // SNAP_TO_GRID and grid.GetSnap(): through ResolveSnap, kept only when that holds the angle
+  const gridded = snapCursor(ctx, snapped, new Set([pe.id]), mods, null).p;
+  snapped = Math.abs(segAngleDeg(gridded, prev, gridded, next) - snapAng) < 2 ? gridded : pos;
+  if (Math.abs(snapped[0] - pos[0]) < 1e-6 && Math.abs(snapped[1] - pos[1]) < 1e-6) return null;
+  pe.angleSnap = [snapped[0], snapped[1]];
+  return pe.angleSnap as Pt;
+}
 export function onHandlePointerDown(ev: PointerEvent) {
   const ctx = lastCtx; if (!ctx || !isBoardLikeDoc() || ev.button !== 0 || ev.shiftKey || ev.ctrlKey || ev.metaKey || ev.altKey || appTool() !== "select") return;
   if (S.route || S.draw || S.drag || S.move || S.pedit || ctx.viewOnly) return;
@@ -446,18 +502,30 @@ export function onHandlePointerDown(ev: PointerEvent) {
   if (isTuningPattern(hit.it)) genStartEdit(ctx, hit.it);   // PCB_POINT_EDITOR: genStartEdit
   try { stage.setPointerCapture(ev.pointerId!); } catch (e) { /* synthetic event */ }
 }
-export function editHandleMove(ctx: PcbCtx, mm: Pt, ev?: { ctrlKey?: boolean; metaKey?: boolean } | null) {
-  if (ev) S.peditCtrl = !!(ev.ctrlKey || ev.metaKey);
+export function editHandleMove(ctx: PcbCtx, mm: Pt, ev?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } | null) {
+  if (ev) { S.peditCtrl = !!(ev.ctrlKey || ev.metaKey); S.peditShift = !!ev.shiftKey; }
   const pe = S.pedit; if (!pe) return; const it = ctx.doc.items.get(pe.id); if (!it) { S.pedit = null; return; }
   if (!pe.moved && Math.hypot(mm[0] - pe.start[0], mm[1] - pe.start[1]) < 1e-3) return;
-  const p = pe.ignoreGrid ? mm : ctx.snapOn && ctx.snap ? ctx.snap([mm[0], mm[1]]) : mm;   // the amplitude and spacing handles ignore the grid
+  // the drag starts: a clone of the item as it was is the persistent construction geometry (pcb_point_editor.cpp)
+  if (!pe.moved && !pe.ignoreGrid && pe.kind !== "generated") proposePersistentConstruction(Object.assign({}, it, { node: clone(pe.orig) }) as KItem);
+  const mods = { ctrlKey: !!S.peditCtrl, shiftKey: !!S.peditShift };
+  let p: Pt;
+  if (pe.ignoreGrid) { p = mm; pe.snapAt = null; }   // the amplitude and spacing handles ignore the grid
+  else {
+    // the sticky 45 degree corner of a polygon or zone: held while the cursor stays within 5 px of it, else found again
+    const st = stickyCornerSnap(ctx, pe, mm, mods);
+    if (st) { p = st; pe.snapAt = null; }
+    else { const sn = snapCursor(ctx, [mm[0], mm[1]], new Set([pe.id]), mods, null); p = sn.p; pe.snapAt = sn.anchor; }   // grid.ResolveSnap( pos, snapLayers, grid, { item } )
+  }
   if (pe.kind === "generated") { pe.moved = true; pe.node = tuningEditNode(pe.orig, pe.key, p); genUpdateEdit(ctx, pe.node); return; }   // genUpdateEdit: re-tuned live
   // the line mode's 45 / 90 limit unless Ctrl is held; Ctrl on a polygon edge keeps its length
-  pe.moved = true; pe.node = editPointNode(pe.orig, pe.kind, pe.key, p, mm, ctx.snapOn && ctx.snap ? ctx.snap : null, { ctrl: !!S.peditCtrl, gridPitch: ctx.snapOn ? ctx.gridPitch || 0 : 0, angle: angleSnapMode() });
+  pe.moved = true; pe.node = editPointNode(pe.orig, pe.kind, pe.key, p, mm, ctx.snapOn && ctx.snap ? ctx.snap : null, { ctrl: !!S.peditCtrl, gridPitch: ctx.snapOn ? ctx.gridPitch || 0 : 0, gridPitchY: ctx.snapOn ? ctx.gridPitchY || ctx.gridPitch || 0 : 0, angle: angleSnapMode() });
   it.node.length = 0; it.node.push(...clone(pe.node!)); K.replaceChange(ctx.doc, it); ctx.requestRender();
 }
 export function editHandleUp(ctx: PcbCtx, commit: boolean) {
-  const pe = S.pedit; S.pedit = null; if (!pe) return; const it = ctx.doc.items.get(pe.id); if (!it) { genCancelEdit(ctx); return; }
+  const pe = S.pedit; S.pedit = null; if (!pe) return;
+  clearConstruction(); setReferenceOnlyPoints([]); S.snapItem = null;   // the drag's grid helper and its construction geometry end with it
+  const it = ctx.doc.items.get(pe.id); if (!it) { genCancelEdit(ctx); return; }
   if (pe.kind === "generated") { if (commit && pe.moved) genFinishEdit(ctx); else genCancelEdit(ctx); return; }   // genFinishEdit: "Edit Tuning Pattern"
   it.node.length = 0; it.node.push(...clone(pe.orig)); K.replaceChange(ctx.doc, it);   // the original back first: commit records the inverse
   if (commit && pe.moved && pe.node && K.serialize(pe.node) !== K.serialize(pe.orig)) ctx.commit([replacedChange(it, pe.node)], "Move Point");

@@ -66,10 +66,19 @@ export function isoDate(d: Date): string { const p = (n: number) => String(n).pa
 // ---------------------------------------------------------------- find / replace
 export interface FindOpts { query: string; matchCase?: boolean; wholeWord?: boolean; regex?: boolean; pins?: boolean; hiddenFields?: boolean; netNames?: boolean; selectionOnly?: boolean; replaceRefs?: boolean;
   /** EDA_SEARCH_DATA::searchAndReplace: the dialog is Find and Replace */
-  searchAndReplace?: boolean }
+  searchAndReplace?: boolean;
+  /** SCH_ITEM::MatchesNetName: the resolved net names of an item on the sheet searched (a symbol pin or sheet pin by its
+   *  number / name); a bus answers its members' nets.  Without it "Search net names" finds nothing. */
+  netNamesOf?: (it: KItem, pin?: string) => string[];
+  /** SCH_SYMBOL::GetPins( sheet ): the pins of the symbol's unit and body style with their positions on the sheet */
+  symbolPins?: (doc: FindDoc, it: KItem) => { number: string; name: string; x: number; y: number }[] }
 export interface FindHit { id: string; kind: string; what: string; field?: string; text: string; replaceable: boolean; x: number; y: number;
   /** a sheet pin hit: its index among the sheet's pins */
-  sub?: number }
+  sub?: number;
+  /** a symbol pin hit: the pin's number (the pin itself is the found item) */
+  pin?: string;
+  /** the other texts the same item matches by (SCH_PIN::Matches: name or number or net; a label: its text or net) */
+  alt?: string[] }
 /** wxString::Upper: each character upper-cased in place (a character whose upper case is longer is kept), so offsets hold. */
 const upperChars = (s: string): string => Array.from(s).map((c) => { const u = c.toUpperCase(); return u.length === c.length ? u : c; }).join("");
 /** EDA_ITEM::Matches / Replace's isWordChar: wxIsalnum( c ) || c == '_'. */
@@ -139,7 +148,12 @@ type LibResolver = (doc: FindDoc, name: string) => SNode | null;
 /** The texts of one item that KiCad's find looks at (SCH_SYMBOL / SCH_FIELD / SCH_LABEL / SCH_TEXT / SCH_SHEET ::Matches). */
 export function searchableTexts(doc: FindDoc, it: KItem, o: FindOpts, resolveLib?: LibResolver): Omit<FindHit, "id" | "kind">[] {
   const out: Omit<FindHit, "id" | "kind">[] = [], n = it.node, [x, y] = at(n);
-  const push = (what: string, text: string, replaceable: boolean, field?: string, px = x, py = y, sub?: number) => out.push(sub === undefined ? { what, field, text, replaceable, x: px, y: py } : { what, field, text, replaceable, x: px, y: py, sub });
+  const push = (what: string, text: string, replaceable: boolean, field?: string, px = x, py = y, sub?: number, alt?: string[]) => {
+    const e: Omit<FindHit, "id" | "kind"> = sub === undefined ? { what, field, text, replaceable, x: px, y: py } : { what, field, text, replaceable, x: px, y: py, sub };
+    if (alt && alt.length) e.alt = alt;
+    out.push(e); return e;
+  };
+  const nets = (pin?: string): string[] => (o.netNames && o.netNamesOf ? o.netNamesOf(it, pin) : []);
   if (it.kind === "symbol" || it.kind === "sheet") {
     for (const p of kids(n, "property")) {
       const name = str(p[1]); if (name.startsWith("ki_")) continue;
@@ -150,14 +164,25 @@ export function searchableTexts(doc: FindDoc, it: KItem, o: FindOpts, resolveLib
       const [fx, fy] = at(p);
       push(name, str(p[2]), name === "Reference" ? !!o.replaceRefs : !(it.kind === "sheet" && name === "Sheetfile"), name, fx, fy);
     }
-    if (it.kind === "sheet") kids(n, "pin").forEach((p, i) => { const [px, py] = at(p); push("Sheet Pin", str(p[1]), true, undefined, px, py, i); });   // SCH_SHEET_PIN::IsReplaceable
-    if (it.kind === "symbol" && o.pins) {
-      const lid = kid(n, "lib_name") || kid(n, "lib_id"); const lib = lid ? (resolveLib ? resolveLib(doc, str(lid[1])) : doc.lib.get(str(lid[1])) || null) : null;
-      for (const pin of libPins(lib)) { if (pin.name && pin.name !== "~") push("Pin Name", pin.name, false); if (pin.number) push("Pin Number", pin.number, false); }
+    // SCH_SHEET_PIN::IsReplaceable; a sheet pin is a SCH_LABEL_BASE, so it also matches by its net (SCH_LABEL_BASE::Matches)
+    if (it.kind === "sheet") kids(n, "pin").forEach((p, i) => { const [px, py] = at(p); push("Sheet Pin", str(p[1]), true, undefined, px, py, i, nets(str(p[1]))); });
+    // SCH_SYMBOL::GetPins( sheet ): each pin is an item of its own, at its own position, matched by its name or number
+    // ("Search pin names and numbers") or by its net ("Search net names")
+    if (it.kind === "symbol" && (o.pins || o.netNames)) {
+      let pins = o.symbolPins ? o.symbolPins(doc, it) : null;
+      if (!pins) { const lid = kid(n, "lib_name") || kid(n, "lib_id"); const lib = lid ? (resolveLib ? resolveLib(doc, str(lid[1])) : doc.lib.get(str(lid[1])) || null) : null; pins = libPins(lib).map((p) => ({ number: p.number, name: p.name, x, y })); }
+      for (const pin of pins) {
+        const texts: string[] = [];
+        if (o.pins) texts.push(pin.name && pin.name !== "~" ? pin.name : "", pin.number);
+        texts.push(...nets(pin.number));
+        const list = texts.filter((t, i) => t !== "" || i === 0);
+        if (!list.length) continue;
+        const e = push("Pin", list[0], false, undefined, pin.x, pin.y, undefined, list.slice(1)); e.pin = pin.number;
+      }
     }
   } else if (LABEL_KINDS.has(it.kind)) {
-    push("Label", str(n[1]), true);
-    if (o.netNames && it.kind === "label") push("Net Name", "/" + str(n[1]), false);
+    // SCH_LABEL_BASE::Matches: its text, or (Search net names) its resolved net
+    push("Label", str(n[1]), true, undefined, x, y, undefined, nets());
     // a label's fields (SCH_FIELD::Matches / IsReplaceable): hidden ones need the option, Intersheetrefs is never replaced
     for (const p of kids(n, "property")) { if (!o.hiddenFields && hidden(p)) continue; const [fx, fy] = at(p); push(str(p[1]), str(p[2]), str(p[1]) !== "Intersheetrefs", str(p[1]), fx, fy); }
   } else if (it.kind === "text" || it.kind === "text_box") push("Text", str(n[1]), true);
@@ -171,7 +196,7 @@ export function findHits(doc: FindDoc, o: FindOpts, selection?: Set<string> | nu
   const hits: FindHit[] = [];
   for (const it of doc.items.values()) {
     if (o.selectionOnly && selection && !selection.has(it.id)) continue;
-    for (const t of searchableTexts(doc, it, o, resolveLib)) if (m(t.text)) hits.push(Object.assign({ id: it.id, kind: it.kind }, t));
+    for (const t of searchableTexts(doc, it, o, resolveLib)) if (m(t.text) || (t.alt && t.alt.some((a) => m(a)))) hits.push(Object.assign({ id: it.id, kind: it.kind }, t));
   }
   return hits.map((h, i) => ({ h, i })).sort((a, b) => hitOrder(a.h, b.h) || a.i - b.i).map((e) => e.h);
 }
@@ -361,6 +386,36 @@ export function groupMembers(node: SNode): string[] { const m = kid(node, "membe
 /** (group "name" (uuid …) (members …)) as SCH_IO_KICAD_SEXPR::saveGroup writes it: member ids sorted. */
 export function groupSexpr(name: string, uuid: string, members: string[]): string { return `(group ${quote(name)} (uuid ${quote(uuid)}) (members ${[...new Set(members)].sort().map(quote).join(" ")}))`; }
 export function groupOf(doc: Pick<KDoc, "items">, id: string): KItem | null { for (const it of doc.items.values()) if (it.kind === "group" && groupMembers(it.node).includes(id)) return it; return null; }
+/** SCH_ITEM::IsGroupableType by change type name: never a sheet pin (it goes with its sheet) nor a marker. */
+const GROUPABLE_TYPES = new Set(["SCH_SYMBOL", "SCH_PIN", "SCH_SHAPE", "SCH_BITMAP", "SCH_FIELD", "SCH_TEXT", "SCH_TEXTBOX", "SCH_TABLE", "SCH_GROUP", "SCH_LINE", "SCH_JUNCTION", "SCH_NO_CONNECT", "SCH_BUS_WIRE_ENTRY", "SCH_BUS_BUS_ENTRY", "SCH_LABEL", "SCH_GLOBALLABEL", "SCH_HIERLABEL", "SCH_RULE_AREA", "SCH_DIRECTIVE_LABEL", "SCH_SHEET"]);
+/**
+ * SCH_COMMIT::pushSchEdit CHT_ADD: with a group entered, every added groupable item that is not already in a group
+ * joins it (`enteredGroup->AddItem`), so a pasted, repeated, duplicated or newly drawn item lands inside the
+ * entered group.  Returns the changes with the entered group's MODIFIED change appended (or merged into one the
+ * commit already carries); unchanged when nothing joins.
+ */
+export function enteredGroupChanges(doc: Pick<KDoc, "items">, changes: KChange[], entered: string | null | undefined): KChange[] {
+  const g = entered ? doc.items.get(entered) : null; if (!g || g.kind !== "group") return changes;
+  const ownIdx = changes.findIndex((c) => c.id === g.id);
+  if (ownIdx >= 0 && changes[ownIdx].kind === "REMOVED") return changes;
+  // members named by groups this commit adds or changes: those items already have a parent group
+  const claimed = new Set<string>();
+  for (const c of changes) { const gm = (c as KChange & { groupMembers?: string[] }).groupMembers; if (gm && c.id !== g.id) for (const m of gm) claimed.add(m); }
+  const joins: string[] = [];
+  for (const c of changes) {
+    if (c.kind !== "ADDED" || c.id === g.id || !GROUPABLE_TYPES.has(String(c.typeName))) continue;
+    if (claimed.has(c.id) || groupOf(doc, c.id)) continue;
+    joins.push(c.id);
+  }
+  if (!joins.length) return changes;
+  const own = ownIdx >= 0 ? (changes[ownIdx] as KChange & { groupMembers?: string[] }) : null;
+  const before = own && own.groupMembers ? own.groupMembers : groupMembers(g.node);
+  const name = str(g.node[1]);
+  const members = [...new Set([...before, ...joins])];
+  const ch = { id: g.id, kind: "MODIFIED", typeName: "SCH_GROUP", sexpr: groupSexpr(name, g.id, members), groupMembers: [...members].sort() } as unknown as KChange;
+  const out = changes.slice(); if (ownIdx >= 0) out[ownIdx] = ch; else out.push(ch);
+  return out;
+}
 /** The outermost group an item belongs to, stopping below the group the user has entered. */
 export function topGroupOf(doc: Pick<KDoc, "items">, id: string, entered?: string | null): KItem | null {
   let g = groupOf(doc, id), top: KItem | null = null, guard = 0;
@@ -376,16 +431,20 @@ export function expandGroups(doc: Pick<KDoc, "items">, ids: Iterable<string>, en
 }
 
 // ---------------------------------------------------------------- grids
-export interface GridOverrides { enabled: boolean; connected: boolean; connectedMm: number; wires: boolean; wiresMm: number; text: boolean; textMm: number; graphics: boolean; graphicsMm: number; vias: boolean; viasMm: number }
+export interface GridOverrides { enabled: boolean; connected: boolean; connectedMm: number; wires: boolean; wiresMm: number; text: boolean; textMm: number; graphics: boolean; graphicsMm: number; vias: boolean; viasMm: number;
+  /** GRID::y of the grid each override names (the override_*_idx grid has its own X and Y); absent = square */
+  connectedMmY?: number; wiresMmY?: number; textMmY?: number; graphicsMmY?: number; viasMmY?: number }
 const MIL = 0.0254;
 /** APP_SETTINGS_BASE's schematic defaults: connected items and wires on 50 mil, text on 10 mil, graphics (off) on 25 mil. */
-export const SCH_GRID_OVERRIDES: GridOverrides = { enabled: true, connected: true, connectedMm: 50 * MIL, wires: true, wiresMm: 50 * MIL, text: true, textMm: 10 * MIL, graphics: false, graphicsMm: 25 * MIL, vias: false, viasMm: 100 * MIL };
+export const SCH_GRID_OVERRIDES: GridOverrides = { enabled: true, connected: true, connectedMm: 50 * MIL, wires: true, wiresMm: 50 * MIL, text: true, textMm: 10 * MIL, graphics: false, graphicsMm: 25 * MIL, vias: false, viasMm: 100 * MIL,
+  connectedMmY: 0, wiresMmY: 0, textMmY: 0, graphicsMmY: 0, viasMmY: 0 };
 /** APP_SETTINGS_BASE::DefaultGridSizeList for pcbnew and the footprint editor, in its order (mm). */
 export const PCB_DEFAULT_GRIDS: number[] = [1000, 500, 250, 200, 100, 50, 25, 20, 10, 5, 2, 1].map((mil) => +(mil * MIL).toFixed(6)).concat([5, 2.5, 1, 0.5, 0.25, 0.2, 0.1, 0.05, 0.025, 0.01]);
 /** grid.last_size / fast_grid_1's default index into it (0.5 mm). */
 export const PCB_DEFAULT_GRID_IDX = 15;
 /** The board's override defaults (all off): connected 16 (0.25 mm), text 18 (0.1 mm), wires 19 (0.05 mm), vias 18, graphics 15. */
-export const PCB_GRID_OVERRIDES: GridOverrides = { enabled: true, connected: false, connectedMm: 0.25, wires: false, wiresMm: 0.05, text: false, textMm: 0.1, graphics: false, graphicsMm: 0.5, vias: false, viasMm: 0.1 };
+export const PCB_GRID_OVERRIDES: GridOverrides = { enabled: true, connected: false, connectedMm: 0.25, wires: false, wiresMm: 0.05, text: false, textMm: 0.1, graphics: false, graphicsMm: 0.5, vias: false, viasMm: 0.1,
+  connectedMmY: 0, wiresMmY: 0, textMmY: 0, graphicsMmY: 0, viasMmY: 0 };
 export type GridClass = "connected" | "wires" | "text" | "graphics" | "vias" | null;
 /** EE_GRID_HELPER::GetItemGrid by item kind. */
 export function schGridClassOfKind(kind: string): GridClass {
@@ -401,6 +460,12 @@ const SCH_TOOL_KIND: Record<string, string> = { place: "symbol", power: "symbol"
   rulearea: "rule_area", sheet: "sheet", sheetpin: "sheet", text: "text", textbox: "text_box", rect: "rectangle", circle: "circle", arc: "arc", bezier: "bezier", polygon: "polyline", lines: "polyline", image: "image" };
 export function schGridClassOfTool(tool: string): GridClass { const k = SCH_TOOL_KIND[tool]; return k ? schGridClassOfKind(k) : null; }
 /** The pitch a grid class snaps to: its override when overrides are on and that one is ticked, else the current grid. */
+/** gridPitchFor as (X, Y): EE_GRID_HELPER::GetGridSize returns grids[ override_*_idx ] with both of its sizes. */
+export function gridPitchForXY(cls: GridClass, o: GridOverrides, current: [number, number]): [number, number] {
+  if (!o.enabled || !cls) return current;
+  const on = o[cls], mm = o[(cls + "Mm") as "connectedMm"], my = o[(cls + "MmY") as "connectedMmY"];
+  return on && mm > 0 ? [mm, my && my > 0 ? my : mm] : current;
+}
 export function gridPitchFor(cls: GridClass, o: GridOverrides, current: number): number {
   if (!o.enabled || !cls) return current;
   const on = o[cls], mm = o[(cls + "Mm") as "connectedMm"];

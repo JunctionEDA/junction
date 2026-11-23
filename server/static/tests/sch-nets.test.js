@@ -189,5 +189,40 @@ test("update PCB from the schematic: the project's board is <project>.kicad_pcb;
   assert.deepStrictEqual(b.copper, ["F.Cu", "B.Cu"]); assert.ok(b.layers.has("Edge.Cuts"));
 });
 
+// ---- BACK_ANNOTATE::processNetNameChange's inputs: each pin's physically connected driver and its net's resolved one
+test("pinDrivers: the highest-priority item a pin touches (label, sheet pin, power pin) and the net's winning driver", () => {
+  const pd = nl.pinDrivers, at = (sym, pin) => { for (const [k, v] of pd) if (k.endsWith("/" + sym + "#" + pin)) return v; return undefined; };
+  const r1p1 = at(R1, "1"); assert.equal(r1p1.net, "/SIG");
+  assert.equal(r1p1.physical.kind, "label"); assert.equal(r1p1.physical.id, "l1"); assert.equal(r1p1.physical.prio, 4);
+  assert.equal(r1p1.resolved.id, "l1");
+  const r1p2 = at(R1, "2"); assert.equal(r1p2.net, "/sub/IN");
+  assert.equal(r1p2.physical.kind, "sheet_pin"); assert.equal(r1p2.physical.sheetPin, "IN"); assert.equal(r1p2.physical.prio, 2);
+  const r2p2 = at(R2, "2"); assert.equal(r2p2.net, "GND");
+  assert.equal(r2p2.physical.kind, "pin"); assert.equal(r2p2.physical.id, PWR); assert.ok(r2p2.physical.power); assert.equal(r2p2.physical.prio, 6);
+  const r3p2 = at(R3, "2"); assert.equal(r3p2.net, "/sub/LOCAL"); assert.equal(r3p2.physical.id, "l2");
+  assert.equal(map.get("GND").driver.prio, 6); assert.equal(map.get("/SIG").driver.id, "l1");
+});
+test("pinDrivers: a pin on a net only pins name is its own driver; a pin of a '#' reference does not drive", () => {
+  const doc = K.parseDoc(`(kicad_sch (version 20250114) (uuid "root") (paper "A4") ${LIB} ${sym("Device:R", "R1", "1k", "", 50, 50, "r1", "/root")}
+    ${wire([50, 46.19], [60, 46.19], "w")})`, "kicad_sch");
+  const n = N.buildNetlist({ doc, file: "t.kicad_sch", uuid: "root" }, () => null, helpers, "t");
+  const d = [...n.pinDrivers.values()].find((x) => x.physical && x.physical.pin === "1");
+  assert.equal(d.physical.kind, "pin"); assert.equal(d.physical.prio, 1); assert.equal(d.resolved.prio, 1); assert.ok(!d.physical.power);
+});
+// ---- CONNECTION_GRAPH's netclass assignments: a directive label on a net, a rule area with a directive on its border
+test("netclassLabels: a directive label's Netclass names its net; a rule area gives its directive's class to what it holds", () => {
+  const flag = (x, y, cls, id) => `(netclass_flag "" (length 2.54) (shape round) (at ${x} ${y} 0) (effects (font (size 1.27 1.27))) (uuid "${id}") (property "Netclass" "${cls}" (at ${x} ${y} 0) (effects (font (size 1.27 1.27)))))`;
+  const doc = K.parseDoc(`(kicad_sch (version 20250114) (uuid "root") (paper "A4") ${LIB}
+    ${wire([10, 10], [30, 10], "wa")} (label "A" (at 10 10 0) (effects (font (size 1.27 1.27))) (uuid "la")) ${flag(20, 10, "Power", "fa")}
+    ${wire([10, 50], [30, 50], "wb")} (label "B" (at 10 50 0) (effects (font (size 1.27 1.27))) (uuid "lb"))
+    (rule_area (polyline (pts (xy 5 40) (xy 40 40) (xy 40 60) (xy 5 60)) (stroke (width 0) (type dash)) (fill (type none)) (uuid "ra")))
+    ${flag(40, 45, "HS", "fb")}
+    ${wire([10, 80], [30, 80], "wc")} (label "C" (at 10 80 0) (effects (font (size 1.27 1.27))) (uuid "lc")))`, "kicad_sch");
+  const n = N.buildNetlist({ doc, file: "t.kicad_sch", uuid: "root" }, () => null, helpers, "t");
+  assert.deepStrictEqual([...(n.netclassLabels.get("/A") || [])], ["Power"]);
+  assert.deepStrictEqual([...(n.netclassLabels.get("/B") || [])], ["HS"]);
+  assert.ok(!n.netclassLabels.has("/C"), [...n.netclassLabels.keys()].join(","));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

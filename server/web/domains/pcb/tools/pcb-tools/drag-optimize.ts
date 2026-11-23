@@ -4,15 +4,16 @@ import { branchChanges, branchDoc } from "./branch";
 import { addedChange, removedChange, replacedChange } from "./changes";
 import { settingsOf } from "./dialogs";
 import { viaLayers } from "./distances";
-import { PEPS, dragObstacles, dragSolution, initialTrace, peq, rp, solutionHits, trackEnds, walkSolution } from "./dragger";
+import { PEPS, dragObstacles, dragSolution, initialTrace, lineElems, peq, rp, solutionHits, trackEnds, walkSolution } from "./dragger";
 import { viaNow } from "./edit-commands";
 import { distSeg } from "./hit";
 import { segmentNode } from "./nodes";
+import { arcTrackNode } from "./posture";
 import { RM_MARK, RM_SHOVE } from "./router-settings";
-import { shoveOps, shovePreview, shoveRun, shoveWorld } from "./shove";
+import { shoveOps, shovePreview, shoveRun, shoveWorld, visibleViewArea } from "./shove";
 import { ANG_OBTUSE, ANG_STRAIGHT, angleType, cornerCost } from "./smartpads";
 import { K, S } from "./state";
-import { clone, r6 } from "./util";
+import { clone, pt, r6 } from "./util";
 import { dir8, pathClear, pathHits, routeObstacles, simplifyPts } from "./walkaround";
 
 // ---- OPTIMIZER as DRAGGER::optimizeAndUpdateDraggedLine runs it: MERGE_SEGMENTS | MERGE_COLINEAR (smooth_dragged_segments),
@@ -98,7 +99,7 @@ export function optimizeDragged(O: ObstacleIndex, pts: Pt[], orig: Pt[], p: Pt, 
 export function dragShove(ctx: PcbCtx, d: DragSub, sol: DragSolution) {
   const doc = ctx.doc, s = settingsOf(ctx); const heads = [];
   for (const { l, pts } of sol.lines) {
-    if (pts.length < 2) continue;
+    if (pts.length < 2) { if (d.mode === "arc") return null; continue; }   // a dragged arc that collapsed the line: the shove fails
     // a dragged line still meets the solids it would cross: SHOVE never moves those
     if (pathHits(dragSolidObs(ctx, d, l.layer), pts, l.width / 2).length) return null;
     heads.push({ pts, w: l.width, layer: l.layer, net: l.netKey, ownIds: d.ids });
@@ -109,6 +110,7 @@ export function dragShove(ctx: PcbCtx, d: DragSub, sol: DragSolution) {
     heads.push({ pts: [sol.viaAt.slice()], w: 0, layer: Array.from(layers)[0], net: d.netKey, ownIds: d.ids, viaId: d.via.id, via: { at: sol.viaAt.slice(), r, layers } });
   }
   if (!heads.length) return { ops: [], preview: { hidden: new Set<string>(), lines: [], vias: [] } };
+  S.viewArea = visibleViewArea(ctx);
   const SW = shoveWorld(doc, s, S.rs.shove_vias); const st = shoveRun(SW, heads, S.rs); if (!st) return null;
   return { ops: shoveOps(doc, st), preview: shovePreview(doc, st) };
 }
@@ -139,7 +141,7 @@ export function dragTo(ctx: PcbCtx, d: DragSub, p: Pt) {
   }
   const viaClear = !raw.viaAt || !solutionHits(ctx, d, { lines: [], viaAt: raw.viaAt }).length;
   let walked = viaClear ? walkSolution(ctx, d, raw) : null;
-  if (walked && (d.mode !== "via" || walked !== raw)) walked = Object.assign({}, walked, { lines: walked.lines.map(({ l, pts }, i: number) => (d.mode === "via" && pts === raw.lines[i].pts) ? { l, pts } : { l, pts: optimizeDragged(dragObstacles(ctx, d, l.layer), pts, l.pts, p, l.width) }) });
+  if (walked && (d.mode !== "via" || walked !== raw)) walked = Object.assign({}, walked, { lines: walked.lines.map((ln, i: number) => { const { l, pts } = ln; return ((d.mode === "via" && pts === raw.lines[i].pts) || (ln.arcs && ln.arcs.seg.some((k) => k >= 0))) ? ln : { l, pts: optimizeDragged(dragObstacles(ctx, d, l.layer), pts, l.pts, p, l.width) }; }) });   // optimizeAndUpdateDraggedLine leaves a line with arcs as it is
   if (walked) { d.sol = walked; d.hits = []; d.status = true; d.lastValid = p.slice(); return true; }
   if (first) { d.forceMark = true; d.sol = raw; d.hits = solutionHits(ctx, d, raw); d.status = allow || !d.hits.length; d.lastValid = p.slice(); return true; }
   d.status = true; d.hits = []; return false;   // the previous solution stays
@@ -147,23 +149,30 @@ export function dragTo(ctx: PcbCtx, d: DragSub, p: Pt) {
 /** ROUTER::CommitRouting for a drag: the old line's segments out, the new line's in (an unchanged segment is kept), the via moved. */
 export function dragChanges(ctx: PcbCtx, d: Pick<DragSub, "sol"> & Partial<DragSub>) {
   const doc = ctx.doc; const changes: PcbChange[] = [];
-  for (const { l, pts } of d.sol!.lines) {
+  for (const { l, pts, arcs } of d.sol!.lines) {
     const olds = l.ids.map((id: string) => doc.items.get(id)).filter(Boolean) as KItem[]; const kept = new Set<string>();
-    const fresh: Pt[][] = [];
-    for (let i = 0; i + 1 < pts.length; i++) {
-      const a = pts[i], b = pts[i + 1]; if (peq(a, b)) continue;
-      const same = olds.find((o) => !kept.has(o.id) && (() => { const [p, q] = trackEnds(o); return (peq(p, a) && peq(q, b)) || (peq(p, b) && peq(q, a)); })());
-      if (same) kept.add(same.id); else fresh.push([a, b]);
+    const fresh: { a: Pt; b: Pt; m?: Pt }[] = [];
+    // a line with arcs commits its arcs as arc tracks (the line's SHAPE_ARCs), everything else as segments
+    const els = arcs ? lineElems(pts, arcs) : null;
+    const pieces: { a: Pt; b: Pt; m?: Pt }[] = els ? els.map((e) => ({ a: e.a, b: e.b, m: e.m })) : [];
+    if (!els) for (let i = 0; i + 1 < pts.length; i++) { if (!peq(pts[i], pts[i + 1])) pieces.push({ a: pts[i], b: pts[i + 1] }); }
+    for (const { a, b, m } of pieces) {
+      if (peq(a, b)) continue;
+      const same = olds.find((o) => !kept.has(o.id) && (o.kind === "arc") === !!m && (() => { const [p, q] = trackEnds(o); if (m) { const om = pt(o.node, "mid"); if (!om || !peq(om, m)) return false; } return (peq(p, a) && peq(q, b)) || (peq(p, b) && peq(q, a)); })());
+      if (same) kept.add(same.id); else fresh.push({ a, b, m });
     }
     for (const o of olds) if (!kept.has(o.id)) changes.push(removedChange(o));
     // a new segment carries the dragged segment's own attributes (its lock state; a fresh uuid) — the grabbed segment
     // when it is on this line, otherwise the line's own segments (all alike: a locked one ends a line); an arc's new
     // stub is a plain track of the arc's width, layer and net
     const own = olds.find((o) => o.id === d.id) || olds[0];
-    for (const [a, b] of fresh) {
-      const tmpl = own ? clone(own.node) : segmentNode(doc, a, b, l.width, l.layer, l.net);
+    for (const { a, b, m } of fresh) {
+      // the template is of the new piece's kind: the grabbed item or the line's first one of that kind
+      const like = own && (own.kind === "arc") === !!m ? own : olds.find((o) => (o.kind === "arc") === !!m);
+      const tmpl = like ? clone(like.node) : m ? arcTrackNode(doc, a, m, b, l.width, l.layer, l.net) : segmentNode(doc, a, b, l.width, l.layer, l.net);
       const u = K.kid(tmpl, "uuid"); if (u) tmpl.splice(tmpl.indexOf(u), 1);
       K.kid(tmpl, "start")!.splice(1, 2, r6(a[0]), r6(a[1])); K.kid(tmpl, "end")!.splice(1, 2, r6(b[0]), r6(b[1]));
+      if (m) { const mk = K.kid(tmpl, "mid"); if (mk) mk.splice(1, 2, r6(m[0]), r6(m[1])); }
       changes.push(addedChange(doc, tmpl, l.net));
     }
   }

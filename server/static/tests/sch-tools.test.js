@@ -787,10 +787,30 @@ test("table: SCH_DRAWING_TOOLS::DrawTable sizes rows and columns from the drag; 
   assert.deepStrictEqual(_.drawTableSize([10, 10], [0, 0], 1.27), { rows: 1, cols: 1, cw: 6.35, ch: 2.54 });
   assert.deepStrictEqual(_.drawTableSize([0, 0], [60, 8], 1.27), { rows: 3, cols: 3, cw: 20.32, ch: 2.54 });
   assert.deepStrictEqual(kid(_.drawTableNode([0, 0], [60, 8], 1.27), "column_widths"), ["column_widths", 20.32, 20.32, 20.32]);
+  // a non-square grid: columns round to gridSize.x, rows to gridSize.y (at least 2 Y steps)
+  assert.deepStrictEqual(_.drawTableSize([0, 0], [60, 8], 1.27, 1.27, 2.54), { rows: 3, cols: 3, cw: 20.32, ch: 5.08 });
+  assert.deepStrictEqual(kid(_.drawTableNode([0, 0], [60, 8], 1.27, 1.27, 2.54), "row_heights"), ["row_heights", 5.08, 5.08, 5.08]);
   // the dialog decides when the editor provides it: Cancel adds nothing
   const before = c.log.length; globalThis.CollabTableCells = { newSchTableDialog(ctx, node, done) { assert.strictEqual(node[0], "table"); done(null); return true; } };
   try { sch.onPointerDown(ev(), [10.16, 10.16], c); sch.onPointerDown(ev(), [20.32, 20.32], c); } finally { delete globalThis.CollabTableCells; }
   assert.strictEqual(c.log.length, before, "Cancel places nothing"); assert.strictEqual(sch.state.draw, null);
+});
+
+test("sizeSheet on a non-square grid, and a new sheet's border width from default_line_thickness", () => {
+  // GetNearestGridPosition and the minimum-size bump step each axis by its own grid size
+  assert.deepStrictEqual(_.sheetCorner([0, 0], [20, 5.8], 1.27), [20.32, 6.35]);
+  assert.deepStrictEqual(_.sheetCorner([0, 0], [20, 5.8], 1.27, 2.54), [20.32, 5.08]);
+  assert.deepStrictEqual(_.sheetCorner([0, 0], [1, 1], 1.27, 2.54), [12.7, 5.08], "the minimum height rounds up by one Y step");
+  const width = (n) => kid(kid(n, "stroke"), "width")[1], fieldY = (n, f) => atOf(kids(n, "property").find((p) => str(p[1]) === f))[1];
+  let n = _.sheetNode([0, 0], [25.4, 12.7], "S", "s.kicad_sch");
+  assert.strictEqual(width(n), 0.1524, "6 mil by default"); assert.strictEqual(fieldY(n, "Sheetname"), -_.SHEET_NAME_OFF);
+  sch.state.defaultLineThickness = 20;
+  try {
+    n = _.sheetNode([0, 0], [25.4, 12.7], "S", "s.kicad_sch");
+    assert.strictEqual(width(n), 0.508, "SetBorderWidth( MilsToIU( 20 ) )");
+    assert.strictEqual(fieldY(n, "Sheetname"), -0.8894, "KiROUND( pen / 2 ) + 4 IU + 0.5 text size above");
+    assert.strictEqual(fieldY(n, "Sheetfile"), 13.4624, "and 0.4 text size below");
+  } finally { sch.state.defaultLineThickness = undefined; }
 });
 
 test("table rotate: SCH_TABLE::Rotate turns every cell about the pivot, swaps the text angle, then Normalize; mirror leaves it alone", () => {

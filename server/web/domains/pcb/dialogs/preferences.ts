@@ -15,7 +15,7 @@ import { SCH_COLOR_ITEMS, hiddenByBackground, newUserTheme, schExtraColors, same
 import { colorSwatch, colorText, parseColor, type RGBA } from "../../../shared/components/colorswatch";
 import { lenField, messageBox } from "../editor/pcbdialogs/ui";
 import { gridMessageText, loadUnits, messageText, unitName } from "../../../shared/units";
-import { saveUserSchTheme } from "./prefs";
+import { saveUserSchTheme, setSnapAllLayersPref, snapAllLayersPref } from "./prefs";
 import { DEFAULT_PREFS, SIM_MOUSE_DEFAULTS, SIM_TRACKPAD_DEFAULTS, schThemeList, GRID_MIN_SPACING_RANGE, GRID_THICKNESS_CHOICES, clonePrefs, editorId, gridLabel, savePrefs, scaleOf, type EditorId, type GalPrefs, type Prefs, type SimWheel } from "./prefs";
 import { clearDialogState, clearDontShowAgain, clearFileHistory, resetProgramSettings } from "./maintenance";
 import { askConfirm } from "../../../shared/components/msgbox";
@@ -122,7 +122,11 @@ export function resetPage(key: string, st: Staged): void {
     case "Footprint Editor/Editing Options": st.p.fpEditing = d.fpEditing; break;
     case "PCB Editor/Display Options": st.p.pcbDisplay = { ...d.pcbDisplay, showPageLimits: st.p.pcbDisplay.showPageLimits }; st.p.gal.pcb = d.gal.pcb; break;
     case "PCB Editor/Grids": st.p.grids.pcb = d.grids.pcb; break;
-    case "PCB Editor/Snapping": st.p.pcbSnapping = d.pcbSnapping; break;
+    // PANEL_SNAPPING::ResetPanel: the frame's defaults (grid.snap ALWAYS, its MAGNETIC_SETTINGS and SNAP_INFERENCE_SETTINGS)
+    case "PCB Editor/Snapping": st.p.pcbSnapping = d.pcbSnapping; st.p.snapping.pcb = d.snapping.pcb; break;
+    case "Footprint Editor/Snapping": st.p.fpSnapping = d.fpSnapping; st.p.snapping.fp = d.snapping.fp; break;
+    case "Schematic Editor/Snapping": st.p.snapping.sch = d.snapping.sch; break;
+    case "Symbol Editor/Snapping": st.p.snapping.sym = d.snapping.sym; break;
     case "PCB Editor/Origins & Axes": st.p.pcbOrigin = d.pcbOrigin; break;
     case "PCB Editor/Editing Options": st.p.pcbEditing = d.pcbEditing; st.p.pcbDisplay.showPageLimits = d.pcbDisplay.showPageLimits; st.arcEdit = 0; st.hv45 = true; st.curved = false; break;
     default: break;
@@ -153,6 +157,8 @@ export function openPreferences(page?: string, staged?: Staged): void {
   // the inactive layer mode is the open board's project setting (.kicad_prl "board.high_contrast_mode"), not a user preference
   let contrast = staged ? staged.contrast : getInactiveMode();
   let waka: WakaPage | null = null;
+  // MAGNETIC_SETTINGS::allLayers: the board tools' own setting (the toolbar toggles it too), staged here until OK
+  if (!staged) { p.pcbSnapping.allLayers = snapAllLayersPref(false); p.fpSnapping.allLayers = snapAllLayersPref(true); }
   // PANEL_PCBNEW_ACTION_PLUGINS: the plugin actions in the person's order, saved to their account on OK
   const plug = (window as unknown as { KcPlugins?: PluginHost }).KcPlugins;
   const plugRows0: PluginRow[] = plug ? plug.actionPluginRows("pcb") : [];
@@ -176,7 +182,10 @@ export function openPreferences(page?: string, staged?: Staged): void {
     const fast1 = select(choices(), String(g.fast1), (v) => { g.fast1 = +v; }, { id: `${pre}-fast1` }), fast2 = select(choices(), String(g.fast2), (v) => { g.fast2 = +v; }, { id: `${pre}-fast2` });
     const ovSel: Record<string, HTMLSelectElement> = {};
     const ovMm = o as unknown as Record<string, number>;
-    const ovIndex = (k: string): number => { const at = g.sizes.findIndex((x) => Math.abs(x - ovMm[k + "Mm"]) < 1e-6); return at >= 0 ? at : 0; };
+    // the override's grid by its X and Y (a grid saved before overrides kept a Y is square)
+    const ovIndex = (k: string): number => { const my = ovMm[k + "MmY"] > 0 ? ovMm[k + "MmY"] : null;
+      let at = g.sizes.findIndex((x, i) => Math.abs(x - ovMm[k + "Mm"]) < 1e-6 && (my === null || Math.abs(g.ys[i] - my) < 1e-6));
+      if (at < 0) at = g.sizes.findIndex((x) => Math.abs(x - ovMm[k + "Mm"]) < 1e-6); return at >= 0 ? at : 0; };
     // RebuildGridSizes: the lists are rebuilt and each selection is put back by its text; one that is gone falls back
     // to the first grid (the grid list, Grid 1 and the overrides) or the last (Grid 2)
     type Saved = { cur: string; f1: string; f2: string; ov: Record<string, string> };
@@ -192,7 +201,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
       list.replaceChildren(...g.sizes.map((_, i) => h("option", { value: String(i) }, texts[i]))); list.selectedIndex = cur; g.last = cur;
       g.fast1 = find(sv.f1, 0); g.fast2 = find(sv.f2, g.sizes.length - 1);
       for (const [sel2, idx] of [[fast1, g.fast1], [fast2, g.fast2]] as [HTMLSelectElement, number][]) { sel2.replaceChildren(...choices().map(([v, l]) => h("option", { value: v }, l))); sel2.value = String(idx); }
-      for (const [k, s2] of Object.entries(ovSel)) { const at = find(sv.ov[k], 0); s2.replaceChildren(...g.sizes.map((x, i) => h("option", { value: String(i) }, texts[i]))); s2.value = String(at); ovMm[k + "Mm"] = g.sizes[at]; }
+      for (const [k, s2] of Object.entries(ovSel)) { const at = find(sv.ov[k], 0); s2.replaceChildren(...g.sizes.map((x, i) => h("option", { value: String(i) }, texts[i]))); s2.value = String(at); ovMm[k + "Mm"] = g.sizes[at]; ovMm[k + "MmY"] = g.ys[at]; }
     };
     list.addEventListener("change", () => { g.last = list.selectedIndex; });
     // GRID::operator==: the same X, Y and name (two grids of one size may differ by name)
@@ -220,7 +229,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
     const fb = KD().staticBox(R, "Fast Grid Switching");
     fb.append(h("div", { style: "display:grid;grid-template-columns:max-content minmax(0,240px) max-content;gap:6px 10px;align-items:center" }, h("label", null, "Grid 1:"), fast1, h("span", { class: "ro" }, hkText("gridFast1")), h("label", null, "Grid 2:"), fast2, h("span", { class: "ro" }, hkText("gridFast2"))));
     const ob = KD().staticBox(R, "Grid Overrides"), og = h("div", { style: "display:grid;grid-template-columns:max-content minmax(0,240px);gap:6px 10px;align-items:center" });
-    const ov = (key: "connected" | "wires" | "vias" | "text" | "graphics", label: string) => { const s2 = select([], "", (v) => { ovMm[key + "Mm"] = g.sizes[+v]; }, { id: `${pre}-ov-${key}` }); ovSel[key] = s2;
+    const ov = (key: "connected" | "wires" | "vias" | "text" | "graphics", label: string) => { const s2 = select([], "", (v) => { ovMm[key + "Mm"] = g.sizes[+v]; ovMm[key + "MmY"] = g.ys[+v]; }, { id: `${pre}-ov-${key}` }); ovSel[key] = s2;
       og.append(checkbox(label, o[key], (on) => { o[key] = on; }, { id: `${pre}-ovon-${key}` }), s2); };
     // PANEL_GRID_SETTINGS relabels the overrides for the board editor, and the footprint editor has no wires or vias
     if (ed === "fp") ov("connected", "Pads:");
@@ -229,6 +238,9 @@ export function openPreferences(page?: string, staged?: Staged): void {
     ov("text", "Text:"); ov("graphics", "Graphics:");
     ob.append(og); fill();
   };
+  // PANEL_SNAPPING (common/dialogs/panel_snapping.cpp): Grid Snapping for every editor; Object Snapping (with "Snap to
+  // objects on all layers") in the board editors only, its track row in the PCB Editor only (m_routing); Snap Inference.
+  const snappingPage = (pg: HTMLElement, ed: EditorId): void => { buildSnappingPage(pg, ed, p); };
   // PANEL_GAL_OPTIONS, the left column of the Schematic and Footprint Editor Display Options pages: the grid's look and
   // the cursor of that frame (the PCB and Symbol Editor pages are built on their own branches of this dialog)
   const galPanel = (host: HTMLElement, ed: EditorId): void => {
@@ -328,7 +340,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
               select([["light", "Light"], ["dark", "Dark"], ["system", "System"]], uiMode, (v) => { uiMode = v as ThemeMode; }, { id: "kd-pref-uitheme", style: "width:160px" })),
               h("p", { class: "kd-note", style: "margin:8px 0 0" }, "System follows the light or dark setting of your computer.  Also in Preferences > Appearance."));
             // the User Interface check boxes that act in a browser (focus following between the windows of the desktop
-            // editors, the icon theme and toolbar icon size have no counterpart in the web editor); m_showScrollbars
+            // editors has no counterpart: a page cannot raise another browser window); m_showScrollbars
             // (appearance.show_scrollbars) and m_disableCustomCursors (the inverse of appearance.use_custom_cursors)
             const line = (el: HTMLElement): HTMLElement => h("div", { style: "margin-top:6px" }, el);
             ui.append(...[
@@ -340,6 +352,14 @@ export function openPreferences(page?: string, staged?: Staged): void {
               checkbox("Use alternating row colors in tables", !!p.common.gridStriping, (on) => { p.common.gridStriping = on; }, { id: "kd-pref-gridstriping" }),
               checkbox("Disable custom cursors", p.common.useCustomCursors === false, (on) => { p.common.useCustomCursors = !on; },
                 { id: "kd-pref-nocustomcursors", title: "When enabled, KiCad will use default system cursors instead of custom ones" })].map(line));
+            // m_rbIconTheme* (ICON_THEME) and m_rbIconSize* (toolbar_icon_size 16 / 24 / 32)
+            const rb = (name: string, rows: [string, string][], cur: string, set: (v: string) => void): HTMLElement => h("div", { class: "kd-row", style: "gap:14px" },
+              ...rows.map(([v, l]) => { const r = h("input", { type: "radio", name: "kd-pref-" + name, id: `kd-pref-${name}-${v}` }) as HTMLInputElement; r.checked = v === cur;
+                r.addEventListener("change", () => { if (r.checked) set(v); }); return h("label", { class: "kd-row", style: "gap:4px" }, r, l); }));
+            const cols = "display:grid;grid-template-columns:max-content auto;gap:6px 10px;align-items:center;margin-top:10px";
+            ui.append(h("div", { style: cols },
+              h("label", { style: "color:var(--ink-2)" }, "Icon theme:"), rb("icontheme", [["light", "Light"], ["dark", "Dark"], ["auto", "Automatic"]], p.common.iconTheme || "auto", (v) => { p.common.iconTheme = v as "light" | "dark" | "auto"; }),
+              h("label", { style: "color:var(--ink-2)" }, "Toolbar icon size:"), rb("iconsize", [["16", "Small"], ["24", "Normal"], ["32", "Large"]], String(p.common.toolbarIconSize || 24), (v) => { p.common.toolbarIconSize = +v as 16 | 24 | 32; })));
             // panel_common_settings' Appearance box: m_highContrastCtrl, the factor in percent ("%.0f") and m_highContrastUnits "%"
             const ap = KD().staticBox(pg, "Appearance");
             const dim = h("input", { type: "text", value: dimmingText(p.common.hcDimming), id: "kd-pref-hcdim", style: "width:80px" }) as HTMLInputElement;
@@ -347,8 +367,11 @@ export function openPreferences(page?: string, staged?: Staged): void {
             ap.append(h("div", { class: "kd-row" }, h("label", { style: "color:var(--ink-2)" }, "High-contrast mode dimming factor:"), dim, h("span", null, "%")));
             // panel_common_settings' Editing box: m_NonImmediateActions (input.immediate_actions is its inverse)
             const edt = KD().staticBox(pg, "Editing");
-            edt.append(checkbox("First hotkey selects tool", p.common.immediateActions === false, (on) => { p.common.immediateActions = !on; },
-              { id: "kd-pref-nonimmediate", title: "If not checked, hotkeys will immediately perform an action even if the relevant tool was not previously selected." }));
+            // m_warpMouseOnMove: a browser cannot move the pointer, so the software crosshair goes to the anchor instead
+            edt.append(h("div", null, checkbox("Warp mouse to anchor of moved object", p.common.warpMouseOnMove !== false, (on) => { p.common.warpMouseOnMove = on; },
+              { id: "kd-pref-warpmove", title: "The crosshair moves to the moved object's anchor (a browser cannot move the mouse pointer)" })),
+            h("div", { style: "margin-top:6px" }, checkbox("First hotkey selects tool", p.common.immediateActions === false, (on) => { p.common.immediateActions = !on; },
+              { id: "kd-pref-nonimmediate", title: "If not checked, hotkeys will immediately perform an action even if the relevant tool was not previously selected." })));
           } },
           { label: "Mouse and Touchpad", build(pg) { mousePage(pg, p); } },
           { label: "Hotkeys", build(pg) { hk = hotkeysPanel(pg, staged && staged.hotkeys); } },
@@ -374,12 +397,14 @@ export function openPreferences(page?: string, staged?: Staged): void {
         { label: "Symbol Editor", pages: [
           { label: "Display Options", build(pg) { const [, R] = displayCols(pg, "sym"); symDisplayPage(R, p); } },
           { label: "Grids", build: gridsPage("sym") },
+          { label: "Snapping", build(pg) { snappingPage(pg, "sym"); } },
           { label: "Editing Options", build(pg) { symEditingPage(pg, p); } },
           { label: "Colors", build(pg) { symColorsPage(pg, p); } },
         ] },
         { label: "Schematic Editor", pages: [
           { label: "Display Options", build(pg) { const [L, R] = displayCols(pg, "sch"); schDisplayPage(L, R, p, view); } },
           { label: "Grids", build: gridsPage("sch") },
+          { label: "Snapping", build(pg) { snappingPage(pg, "sch"); } },
           { label: "Editing Options", build(pg) { schEditingPage(pg, p); } },
           { label: "Colors", build(pg) { colorsPage(pg); } },
           { label: "Field Name Templates", build(pg) { fieldTemplatesPage(pg, p); } },
@@ -389,6 +414,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
         { label: "Footprint Editor", pages: [
           { label: "Display Options", build(pg) { displayCols(pg, "fp"); } },
           { label: "Grids", build: gridsPage("fp") },
+          { label: "Snapping", build(pg) { snappingPage(pg, "fp"); } },
           { label: "Origins & Axes", build(pg) {
             // PANEL_PCBNEW_DISPLAY_ORIGIN( FRAME_FOOTPRINT_EDITOR ): the Display Origin box is hidden; the axes are
             // FOOTPRINT_EDITOR_SETTINGS' own
@@ -447,19 +473,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
               checkbox("Refresh 3D view automatically", !!d.live3DRefresh, (on) => { d.live3DRefresh = on; }, { id: "kd-pref-live3drefresh" }));
           } },
           { label: "Grids", build: gridsPage("pcb") },
-          { label: "Snapping", build(pg) {
-            // panel_snapping (PANEL_PCB_SNAPPING), Object Snapping: MagneticSnapOptions( routing ) for pads and tracks, Never / Always for graphics
-            const sn = p.pcbSnapping;
-            const box = KD().staticBox(pg, "Object Snapping");
-            const routing: [string, string][] = [["never", "Never"], ["trackTool", "When routing tracks"], ["always", "Always"]];
-            const pads = select(routing, sn.pads, (v) => { sn.pads = v as typeof sn.pads; }, { id: "kd-pref-snap-pads", style: "width:100%" }); pads.title = "Capture cursor when the mouse enters a pad area";
-            const tracks = select(routing, sn.tracks, (v) => { sn.tracks = v as typeof sn.tracks; }, { id: "kd-pref-snap-tracks", style: "width:100%" }); tracks.title = "Capture cursor when the mouse approaches a track";
-            const gfx = select([["never", "Never"], ["always", "Always"]], sn.graphics ? "always" : "never", (v) => { sn.graphics = v === "always"; }, { id: "kd-pref-snap-graphics", style: "width:100%" }); gfx.title = "Capture cursor when the mouse approaches graphical control points";
-            box.append(h("div", { style: "display:grid;grid-template-columns:max-content minmax(0,260px);gap:6px 8px;align-items:center" },
-              h("label", { style: "color:var(--ink-2);white-space:nowrap" }, "Snap to pads:"), pads,
-              h("label", { style: "color:var(--ink-2);white-space:nowrap" }, "Snap to tracks and vias:"), tracks,
-              h("label", { style: "color:var(--ink-2);white-space:nowrap" }, "Snap to graphics:"), gfx));
-          } },
+          { label: "Snapping", build(pg) { snappingPage(pg, "pcb"); } },
           { label: "Origins & Axes", build(pg) {
             // panel_pcbnew_display_origin: where the status bar counts from, and which way each axis increases
             const o = p.pcbOrigin;
@@ -530,6 +544,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
           .then((yes) => { if (yes && okBtn) { bgConfirmed = true; okBtn.click(); } });
         return false;
       }
+      setSnapAllLayersPref(false, !!p.pcbSnapping.allLayers); setSnapAllLayersPref(true, !!p.fpSnapping.allLayers);
       lastPage = pageKey() || lastPage; if (hk) hk.apply(); if (uiMode !== getThemeMode()) setThemeMode(uiMode); savePrefs(p); applySchView(view, p); if (contrast !== getInactiveMode()) setInactiveMode(contrast); if (pcbTools() && arcEdit !== pcbTools()!.arcEditMode()) pcbTools()!.setArcEditMode(arcEdit);
       // PANEL_EDIT_OPTIONS::TransferDataFromWindow: m_AngleSnapMode = checked ? DEG45 : DIRECT (only when the box changed, so a 90 degree mode stays)
       const t = pcbTools(); if (t && t.setAngleSnap && hv45 !== (snap0 !== "free")) t.setAngleSnap(null, hv45 ? "45" : "free");
@@ -803,7 +818,11 @@ function schEditingPage(pg: HTMLElement, p: Prefs): void {
     paint(); return b;
   };
   const dn = KD().staticBox(L, "Defaults for New Objects");
+  // m_Drawing.default_line_thickness (integer mils): the border width SCH_DRAWING_TOOLS gives a new sheet
+  const lw = lenField(v("defaultLineThickness") * 0.0254, { units: loadUnits("eeschema").units, min: 0, onChange: (mm) => { const mils = Math.round(mm / 0.0254); if (mils > 0) se.defaultLineThickness = mils; } });
+  lw.input.id = "kd-pref-sheetwidth"; lw.input.style.width = "90px";
   dn.append(row("Sheet border:", swatch("sheetBorder", "sheetborder")), row("Sheet background:", swatch("sheetBackground", "sheetbg")),
+    row("Sheet border width:", h("span", { class: "kd-row" }, lw.input, h("span", { class: "ro" }, unitName(loadUnits("eeschema").units)))),
     row("Power symbols:", select([["default", "Default"], ["global", "Global"], ["local", "Local"]], v("newPowerSymbols"), (x) => { se.newPowerSymbols = x as "default" | "global" | "local"; }, { id: "kd-pref-powertype", style: "width:120px" })));
   const sl = KD().staticBox(L, "Selection");
   sl.append(flag("Clicking on a pin selects the symbol", "pinSelectsSymbol", "pinselects", "In schematic editor:\nIf enabled, clicking on a pin select the parent symbol.\nIf disabled, clicking on a pin select only the pin."));
@@ -833,4 +852,46 @@ function schLeftClick(): HTMLElement[] {
   const note = IS_MAC ? `Left click (and drag) actions depend on 3 modifier keys:\n${altK}, ${shiftK} and ${ctrlK}` : `Left click (and drag) actions depend on 2 modifier keys:\n${shiftK} and ${ctrlK}`;
   return [h("div", { style: "white-space:pre-line;margin:2px 0 6px" }, note),
     h("div", { style: "display:grid;grid-template-columns:max-content 1fr;gap:3px 16px;margin-left:8px" }, ...cmds.flatMap(([k, d]) => [h("span", null, k), h("span", null, d)]))];
+}
+
+/** panel_snapping_base: the three titled sections, each a bold title over a rule (m_gridSnappingLabel / m_gridSnappingLine …). */
+function snapSection(host: HTMLElement, title: string): HTMLElement {
+  const box = h("div", { style: "margin-bottom:12px" });
+  box.append(h("div", { style: "font-weight:600;margin:4px 0 2px" }, title), h("div", { style: "border-top:1px solid var(--line);margin:0 0 8px" }));
+  host.append(box); return box;
+}
+/** PANEL_SNAPPING for one editor, reading and writing the staged preferences `p`. */
+export function buildSnappingPage(pg: HTMLElement, ed: EditorId, p: Prefs): void {
+  const sn = p.snapping[ed], pre = `kd-pref-${ed}-snap`;
+  const row = (label: string, ctl: HTMLElement): Node[] => [h("label", { style: "color:var(--ink-2);white-space:nowrap" }, label), ctl];
+  const gridBox = (host: HTMLElement): HTMLElement => { const g = h("div", { style: "display:grid;grid-template-columns:max-content minmax(0,260px);gap:6px 8px;align-items:center" }); host.append(g); return g; };
+  // gridSnapModeMap: Always (ALWAYS), When grid shown (WITH_GRID), Never (NEVER)
+  const gs = select([["always", "Always"], ["withGrid", "When grid shown"], ["never", "Never"]], sn.grid, (v) => { sn.grid = v as typeof sn.grid; }, { id: `${pre}-grid`, style: "width:100%" });
+  gs.title = "Snap the cursor to the active grid";
+  gridBox(snapSection(pg, "Grid Snapping")).append(...row("Snap to grid:", gs));
+  if (ed === "pcb" || ed === "fp") {
+    // MagneticSnapOptions( m_routing ): Never / When routing tracks / Always for the PCB Editor's pads and tracks,
+    // Never / Always otherwise; MagneticSnapIndex falls back to Never for a value the list does not have
+    const routing: [string, string][] = [["never", "Never"], ["trackTool", "When routing tracks"], ["always", "Always"]], plain: [string, string][] = [["never", "Never"], ["always", "Always"]];
+    const os = gridBox(snapSection(pg, "Object Snapping"));
+    if (ed === "pcb") {
+      const m = p.pcbSnapping;
+      const pads = select(routing, m.pads, (v) => { m.pads = v as typeof m.pads; }, { id: "kd-pref-snap-pads", style: "width:100%" }); pads.title = "Capture cursor when the mouse enters a pad area";
+      const tracks = select(routing, m.tracks, (v) => { m.tracks = v as typeof m.tracks; }, { id: "kd-pref-snap-tracks", style: "width:100%" }); tracks.title = "Capture cursor when the mouse approaches a track";
+      const gfx = select(plain, m.graphics ? "always" : "never", (v) => { m.graphics = v === "always"; }, { id: "kd-pref-snap-graphics", style: "width:100%" }); gfx.title = "Capture cursor when the mouse approaches graphical control points";
+      os.append(...row("Snap to pads:", pads), ...row("Snap to tracks and vias:", tracks), ...row("Snap to graphics:", gfx));
+    } else {
+      const m = p.fpSnapping;
+      const pads = select(plain, m.pads === "always" ? "always" : "never", (v) => { m.pads = v as typeof m.pads; }, { id: "kd-pref-fpsnap-pads", style: "width:100%" }); pads.title = "Capture cursor when the mouse enters a pad area";
+      const gfx = select(plain, m.graphics ? "always" : "never", (v) => { m.graphics = v === "always"; }, { id: "kd-pref-fpsnap-graphics", style: "width:100%" }); gfx.title = "Capture cursor when the mouse approaches graphical control points";
+      os.append(...row("Snap to pads:", pads), ...row("Snap to graphics:", gfx));
+    }
+    const m = ed === "pcb" ? p.pcbSnapping : p.fpSnapping;
+    os.append(h("div", { style: "grid-column:1 / span 2;margin-top:4px" }, checkbox("Snap to objects on all layers", !!m.allLayers, (on) => { m.allLayers = on; },
+      { id: `${pre}-alllayers`, title: "When unchecked, only objects on the active layer are snapped to" })));
+  }
+  const si = snapSection(pg, "Snap Inference");
+  si.append(
+    h("div", { style: "margin-bottom:6px" }, checkbox("Object geometry", sn.objectGeometry, (on) => { sn.objectGeometry = on; }, { id: `${pre}-objgeom`, title: "Snap to endpoints, midpoints, centres and edges of existing objects" })),
+    h("div", null, checkbox("Construction extensions", sn.constructionExtensions, (on) => { sn.constructionExtensions = on; }, { id: `${pre}-construction`, title: "Snap to virtual extensions of lines and arcs" })));
 }
