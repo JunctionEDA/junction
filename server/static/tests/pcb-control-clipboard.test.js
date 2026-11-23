@@ -433,7 +433,7 @@ test("Pad Edit Mode dims the other layers and puts the contrast mode back on exi
   const src = editorSrc("editor", "fpedit.ts");
   assert.match(src, /padEditContrast = getInactiveMode\(\); if \(padEditContrast === "normal"\) setInactiveMode\("dim"\)/);
   assert.match(src, /function leavePadEditContrast\(\): void \{[^\n]*if \(prev && prev !== getInactiveMode\(\)\) setInactiveMode\(prev\)/);
-  assert.equal(src.split("leavePadEditContrast();").length - 1, 2, "left by Ctrl+E / Esc and when the pad is deleted");
+  assert.equal(src.split("leavePadEditContrast();").length - 1, 3, "left by Ctrl+E / Esc, when the pad is deleted and on an undo / redo (PAD_TOOL::OnUndoRedo)");
 });
 test("Zone display: unfilled-zones warning, Toggle Zone Display, ratsnest and net colour 3-state cycles", () => {
   const src = editorSrc("editor", "actions.ts"), ap = editorSrc("editor", "panels", "appearance.ts");

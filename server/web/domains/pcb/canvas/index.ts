@@ -30,7 +30,7 @@ import { SvgPath, renderPng, renderSvg, serialize, serializeItem, setRenderCache
 import { buildGeom, ensureFontGeom, ensureSchTheme, inSchTheme } from "./geom";
 import { faceMetrics, kicadAscDesc, outlineBoxCorners, outlineLayout, readSfnt } from "./outline-text";
 import { ensureHatchKnockouts, hatchLines } from "./geom-pcb";
-import { ORIENT, fieldColor, hasOpTextVar, intersheetRefsText, letterSubReference, opVars, resolveLib, schDisplay, schFormat, subReference, symVars, symbolInstance, symbolTransform, unitDisplayNames, type OpTextVar, hasNetTextVar, labelVars, type LabelTextVar } from "./geom-sch";
+import { ORIENT, fieldColor, hasOpTextVar, intersheetRefsText, letterSubReference, opVars, resolveLib, schDisplay, schFormat, subReference, symVars, symbolInstance, symbolTransform, unitDisplayNames, type OpTextVar, hasNetTextVar, labelVars, type LabelTextVar, resolveCrossReference, symbolResolver, textChecks } from "./geom-sch";
 import { bboxOf, geomBox, geomHit, geomTouchesRect, itemTouchesRect, itemVisible, hitTest, hitTestDetail, layerList, movableItems, padAt, padGeomHit, snap } from "./hit";
 import { applyChange, setAt, setPts } from "./ops";
 import { darkened, mixColor, brightenedItemColor, lockedShadowMargin, footprintBodyBox, drawLockedShadow, DRC_HIGHLIGHTED, HL_FACTOR, HC_EDGE_MIN, viaSpans, viaFlashesOn, unflashedGeoms, umbilicalLines, viaStitchOutline, viaStitchTicks, gridItemGeom, gridItemArea, gridTakesPrecedence, autoSparsePitch, DASH_RATIOS, HIDDEN_TEXT_ALPHA, HL_DIM, MARKER_COLORS, MARKER_CORNERS, MARKER_SCALE, PX_PER_MM_ZOOM1, RATSNEST_COLOR, VIA_NETNAME_COLOR, ZONE_OPACITY, brightened, dashPattern, defaultCreateCanvas, drawDrawingSheet, drawHalo, drawMarkers, drawPad, drawSelectionHalo, SCH_SELECTION_SHADOW, selectedColor, flipCentre, flipX, highlightColor, markerAt, markerPolygon, markerScale, render, busConnectedLabels, busPinTint, setViewTransform, trackNameColor, unflipX, zoomFactor, SEL_STYLE, busJunctions, directiveOnlyAreas, netStyled } from "./render";
@@ -41,9 +41,11 @@ import { plotParams } from "./plot-params";
 import { DRC_ITEMS } from "./drc-items";
 import { pcbNetlist } from "./pcb-netlist";
 import { schNets } from "./sch-nets";
+import { netChains } from "./net-chains";
 import { projectFile } from "./project-file";
 import { arcFrom3, atOf, bezierPts, boxOf, cloneNode, cornersInSequence, effectsOf, fillOf, kid, kids, num, parse, parseAll, pointInPoly, ptsOf, quotedMask, str, strokeOf, uuidOf } from "./sexpr";
-import { DEFAULT_DRAWING_SHEET, PRODUCT_NAME, TB_TOKENS, WS_TOKENS, alphabeticFromIndex, buildDrawingSheet, defaultDrawingSheet, documentDrawingSheet, hitTestDrawingSheet, expandTextVars, incrementLabel, indexFromAlphabetic, parseDrawingSheet, sheetTextPen, sheetTextVars, varResolver } from "./sheet";
+import { boardResolve, footprintResolve, pcbTextShown, pcbVars } from "./pcb-textvars";
+import { DEFAULT_DRAWING_SHEET, PRODUCT_NAME, TB_TOKENS, WS_TOKENS, alphabeticFromIndex, buildDrawingSheet, defaultDrawingSheet, documentDrawingSheet, drawingSheetTextChecks, hitTestDrawingSheet, expandTextVars, incrementLabel, indexFromAlphabetic, parseDrawingSheet, sheetTextPen, sheetTextVars, varResolver } from "./sheet";
 import { downgradeSchNode, migrateBoardNode, migrateSchNode } from "./legacy";
 import { IMAGE_CACHE, base64Bytes, imageInfo, legacyImageScaleFactor, shiftTable, tableCellShownText, cellAddr, parseCellAddress } from "./tables-images";
 import { SCH_PEN, TEXT_INTERLINE, isUrlText, lineOffsets, parseMarkup, setSchPen, textWidth, unescapeText, urlRunAt, urlRunBox, urlRuns } from "./text";
@@ -133,7 +135,7 @@ export const api = {
   // KiCad's stroke font (web/domains/pcb/canvas/stroke-font.ts): glyphs, markup, line layout, word wrap and the painter.
   // textMode: undefined = stroke font wherever Path2D exists, canvas fonts otherwise; "stroke" / "native" force one
   textMode: undefined, currentTextMode: textMode, strokeGlyph, strokeAdvance, strokeLine, strokeLineWidth, strokeOrigin, parseStrokeMarkup, linebreakText, drawStrokeText, drawTextStroke,
-  unescapeText, displayNetName, netCode, padLabelShown, unitLetter, letterSubReference, subReference, unitDisplayNames, symbolInstance, symVars, GRID_MIN_SPACING, GRID_TICK, MIN_TEXT_PX,
+  unescapeText, displayNetName, netCode, padLabelShown, unitLetter, letterSubReference, subReference, unitDisplayNames, symbolInstance, symVars, symbolResolver, resolveCrossReference, textChecks, drawingSheetTextChecks, boardResolve, footprintResolve, pcbTextShown, pcbVars, GRID_MIN_SPACING, GRID_TICK, MIN_TEXT_PX,
   // the board editor's track / via sizes, netclass resolution and routing layer pair (web/domains/pcb/canvas/pcb-sizes.ts)
   pcbSizes,
   // the Symbol Editor's render mode (web/domains/pcb/canvas/libsym.ts): one library symbol as an editable document
@@ -143,13 +145,13 @@ export const api = {
 type Api = typeof api & {
   itemTouchesRect: typeof itemTouchesRect; itemVisible: typeof itemVisible; geomTouchesRect: typeof geomTouchesRect;
   boardItemBox: typeof boardItemBox; presenceSelection: typeof presenceSelection;
-  pcbNetlist: typeof pcbNetlist; schNets: typeof schNets; boardSetup: typeof boardSetup; DRC_ITEMS: typeof DRC_ITEMS; projectFile: typeof projectFile; padModel: typeof padModel;
+  pcbNetlist: typeof pcbNetlist; schNets: typeof schNets; netChains: typeof netChains; boardSetup: typeof boardSetup; DRC_ITEMS: typeof DRC_ITEMS; projectFile: typeof projectFile; padModel: typeof padModel;
   footprintDoc: typeof footprintDocApi; plot: typeof plotApi; tableModel: typeof tableModel;
 };
 const plotApi = { PlotRecorder, plotRecorder, plotItems, sheetPlotItems, itemsBox, dashRuns, blackAndWhite, luminance, params: plotParams };
 (api as Api).itemTouchesRect = itemTouchesRect; (api as Api).itemVisible = itemVisible; (api as Api).geomTouchesRect = geomTouchesRect;
 (api as Api).boardItemBox = boardItemBox; (api as Api).presenceSelection = presenceSelection;   // BOARD_ITEM::GetBoundingBox for the presence payload (web/domains/pcb/canvas/kicad-bbox.ts)
-(api as Api).pcbNetlist = pcbNetlist; (api as Api).schNets = schNets; (api as Api).boardSetup = boardSetup; (api as Api).DRC_ITEMS = DRC_ITEMS; (api as Api).projectFile = projectFile; (api as Api).padModel = padModel;   // the board dialogs' pure halves (web/domains/pcb/editor/pcbdialogs)
+(api as Api).pcbNetlist = pcbNetlist; (api as Api).schNets = schNets; (api as Api).netChains = netChains; (api as Api).boardSetup = boardSetup; (api as Api).DRC_ITEMS = DRC_ITEMS; (api as Api).projectFile = projectFile; (api as Api).padModel = padModel;   // the board dialogs' pure halves (web/domains/pcb/editor/pcbdialogs)
 (api as Api).footprintDoc = footprintDocApi;
 (api as Api).plot = plotApi;   // File > Plot / Print: the painter recorded as plot items (web/domains/pcb/canvas/plot-rec.ts), the board's plot settings   // the Footprint Editor's document (web/domains/pcb/canvas/footprint-doc.ts)
 (api as Api).tableModel = tableModel;   // a table's structure edits and layout (web/domains/pcb/canvas/table-model.ts), shared by both editors   // the Footprint Editor's document (web/domains/pcb/canvas/footprint-doc.ts)

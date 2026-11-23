@@ -1,13 +1,15 @@
 // calculator/index.ts — Tools > Calculator Tools (PCB_CALCULATOR_FRAME): KiCad's tree of calculators in a modeless
-// window.  The pages here are the ones that work from typed numbers alone: Power, current and isolation (Via Size,
+// window.  The pages here are the ones that work from typed numbers alone: Footprint design (Through-hole Size, which
+// the Pad Properties dialog's hole size calculator button opens), Power, current and isolation (Via Size,
 // Track Width, Fusing Current), High Speed (Wavelength) and Memo (E-Series, Color Code, Board Classes).  The formulas
 // are calculator/model.ts; every value is shown as KiCad's "%g".
-import { KD, h, select, textInput } from "../dialogs/dom";
+import { KD, checkbox, h, select, textInput } from "../dialogs/dom";
 import { kicadIcon } from "../../../shared/components/kicon-dom";
 import { listDialog } from "../editor/pcbdialogs/ui";
 import {
   BOARD_CLASSES, BOARD_CLASS_ROWS, COPPER_RESISTIVITY, DIELECTRIC_CONSTANTS, FREQ_UNITS, LEN_CABLE_UNITS, LEN_UNITS, RESISTIVITIES, RESISTOR_UNITS, SPEED_UNITS, THICKNESS_UNITS, TIME_UNITS,
   colorCodeColumns, eSeries, fmtG, fusingCurrent, trackCurrentFromWidth, trackElectrical, trackWidthFromCurrent, viaSize, wavelength, type ESeries, type FuseSolve,
+  IPC2222B, PTH_STANDARDS, fmtMm3, mmToIU, pthHoleRange, pthRecommendedHole, pthReportText, type PthLead, type PthRange,
 } from "./model";
 
 /** DoubleFromString: a typed number ("," taken as the decimal point), NaN when it is none */
@@ -205,6 +207,97 @@ function colorCodePage(pg: HTMLElement): void {
   pg.append(h("div", { style: "display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap" }, left, grid)); draw();
 }
 
+// PANEL_PTH_SIZE: the hole and pad for a through-hole lead from IPC-2222B, with its preview and report
+function pthSizePage(pg: HTMLElement): void {
+  let level = Math.min(1, IPC2222B.levels.length - 1);
+  let last: { lead: PthLead; range: PthRange; hole: number; pad: number } = { lead: { shape: "round", minX: 0, maxX: 0, minY: 0, maxY: 0 }, range: { leadMin: 0, leadMax: 0, holeMin: 0, holeMax: 0 }, hole: 0, pad: 0 };
+  const inp = (id: string, v: string): HTMLInputElement => { const i = textInput(v, () => recalc(), { id, style: "width:80px" }); return i; };
+  const shape = select([["0", "Round"], ["1", "Square"], ["2", "Rectangular"]], "0", () => { leadShapeUI(); recalc(); }, { id: "calc-pth-shape" });
+  const xMin = inp("calc-pth-xmin", "0.6"), xMax = inp("calc-pth-xmax", "0.7"), yMin = inp("calc-pth-ymin", "0.25"), yMax = inp("calc-pth-ymax", "0.3");
+  const sizeXLabel = lbl("Diameter:"), sizeYLabel = lbl("Size Y:"), yUnit = unitText("mm");
+  const standard = select(PTH_STANDARDS.map((st, i): [string, string] => [String(i), st.id]), "0", () => recalc(), { id: "calc-pth-standard" });
+  const levelSel = select(IPC2222B.levels.map((l, i): [string, string] => [String(i), l]), String(level), (v) => { level = +v; recalc(); }, { id: "calc-pth-level" });
+  const roundTo = inp("calc-pth-round", "0.05");
+  const rounding = select([["0", "Up"], ["1", "Nearest"]], "0", () => recalc(), { id: "calc-pth-rounding" });
+  const annular = inp("calc-pth-annular", "0.4");
+  const cbMinLead = checkbox("Show minimum lead size", true, () => preview(), { id: "calc-pth-show-minlead" });
+  const cbMinHole = checkbox("Show minimum hole size", false, () => preview(), { id: "calc-pth-show-minhole" });
+  const cbMaxHole = checkbox("Show maximum hole size", false, () => preview(), { id: "calc-pth-show-maxhole" });
+  const checked = (l: HTMLLabelElement): boolean => !!(l.querySelector("input") as HTMLInputElement).checked;
+  const holeOut = h("input", { type: "text", id: "calc-pth-hole", readOnly: true, style: "width:80px" }), padOut = h("input", { type: "text", id: "calc-pth-pad", readOnly: true, style: "width:80px" });
+  const report = h("textarea", { id: "calc-pth-report", readOnly: true, style: "width:100%;min-height:250px;font-family:var(--mono, monospace);white-space:pre;resize:vertical" });
+  const copy = h("button", { type: "button", class: "btn sm", id: "calc-pth-copy", title: "Copy the report to the clipboard", style: "min-width:0;padding:2px 6px" }, kicadIcon("copy", 16) as unknown as Node);
+  copy.addEventListener("click", () => { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(report.value).catch(() => undefined); });   // OnCopyReportText
+  const cv = h("canvas", { id: "calc-pth-preview", width: 200, height: 200, style: "width:200px;height:200px" });
+  /** updateLeadShapeUI: "Diameter:", "Side length:" or "Size X:"; Size Y only for a rectangular lead. */
+  function leadShapeUI(): void {
+    const v = shape.value; sizeXLabel.textContent = v === "0" ? "Diameter:" : v === "1" ? "Side length:" : "Size X:";
+    for (const e of [sizeYLabel, yMin, yMax, yUnit]) e.style.display = v === "2" ? "" : "none";
+  }
+  /** drawPthSizePreview: pad and hole to scale, the lead in it, the minimum lead and the hole range dashed. */
+  function preview(): void {
+    const g = cv.getContext("2d"); if (!g) return;
+    const S = 200, dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+    if (cv.width !== Math.round(S * dpr)) { cv.width = cv.height = Math.round(S * dpr); }
+    g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, S, S);
+    const { lead, range, hole, pad } = last; if (!(pad > 0)) return;
+    const ow = 1, scale = (S - 2 * ow) / Math.max(pad, range.holeMax), px = (iu: number): number => Math.round(iu * scale), c = S / 2;
+    const circle = (d: number): void => { g.beginPath(); g.arc(c, c, px(d) / 2, 0, Math.PI * 2); };
+    // the hole is cut out of the copper (the background shows through)
+    g.fillStyle = "#fcb23c"; circle(pad); g.fill();
+    g.save(); g.globalCompositeOperation = "destination-out"; circle(hole); g.fill(); g.restore();
+    const rect = lead.shape === "rect", lw = px(lead.maxX), lh = px(rect ? lead.maxY : lead.maxX);
+    g.fillStyle = "#c8c8c8"; g.strokeStyle = "#c8c8c8"; g.lineWidth = ow;
+    if (lead.shape === "round") { circle(lead.maxX); g.fill(); g.stroke(); } else { g.fillRect(c - Math.trunc(lw / 2), c - Math.trunc(lh / 2), lw, lh); g.strokeRect(c - Math.trunc(lw / 2), c - Math.trunc(lh / 2), lw, lh); }
+    if (checked(cbMinLead)) {
+      g.setLineDash([3, 3]); g.strokeStyle = "#808080";
+      const mw = px(lead.minX), mh = px(rect ? lead.minY : lead.minX);
+      if (lead.shape === "round") { circle(lead.minX); g.stroke(); } else g.strokeRect(c - Math.trunc(mw / 2), c - Math.trunc(mh / 2), mw, mh);
+      g.setLineDash([]);
+    }
+    g.strokeStyle = "#808080"; circle(pad); g.stroke(); circle(hole); g.stroke();
+    g.strokeStyle = "#0060f0";
+    if (checked(cbMinHole)) { g.setLineDash([3, 3]); circle(range.holeMin); g.stroke(); }
+    if (checked(cbMaxHole)) { g.setLineDash([8, 4]); circle(range.holeMax); g.stroke(); }
+    g.setLineDash([]);
+  }
+  /** recalculate: an invalid entry empties the report. */
+  function recalc(): void {
+    const mm = (i: HTMLInputElement): number => { const v = num(i.value); return isFinite(v) ? mmToIU(v) : NaN; };
+    const sh = shape.value === "0" ? "round" : shape.value === "1" ? "square" : "rect";
+    const lead: PthLead = { shape: sh, minX: mm(xMin), maxX: mm(xMax), minY: 0, maxY: 0 };
+    let valid = isFinite(lead.minX) && isFinite(lead.maxX) && lead.minX > 0 && lead.minX <= lead.maxX;
+    if (sh === "rect") { lead.minY = mm(yMin); lead.maxY = mm(yMax); valid = valid && isFinite(lead.minY) && isFinite(lead.maxY) && lead.minY > 0 && lead.minY <= lead.maxY; }
+    const ann = mm(annular), step = mm(roundTo);
+    valid = valid && isFinite(ann) && ann >= 0 && isFinite(step) && step >= 0;
+    if (!valid) { report.value = ""; return; }
+    const range = pthHoleRange(level, lead), hole = pthRecommendedHole(range, step, rounding.value === "0"), pad = hole + 2 * ann;
+    last = { lead, range, hole, pad };
+    report.value = pthReportText(level, lead, ann, range, hole, pad);
+    holeOut.value = fmtMm3(hole); padOut.value = fmtMm3(pad);
+    preview();
+  }
+  const cols = h("div", { style: "display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap" }); pg.append(cols);
+  const left = h("div", { style: "display:flex;flex-direction:column;gap:8px" }), right = h("div", { style: "display:flex;flex-direction:column;gap:8px;flex:1;min-width:320px" });
+  cols.append(left, right);
+  KD().staticBox(left, "Properties").append(h("div", { style: "display:grid;grid-template-columns:max-content 80px 80px max-content;gap:6px 8px;align-items:center" },
+    lbl("Lead shape:"), h("div", { style: "grid-column:span 3" }, shape), h("span"), lbl("Min"), lbl("Max"), h("span"),
+    sizeXLabel, xMin, xMax, unitText("mm"), sizeYLabel, yMin, yMax, yUnit));
+  KD().staticBox(left, "Hole size standard").append(rows([lbl("Standard:"), standard, h("span")], [lbl("Level:"), levelSel, h("span")], [lbl("Round to:"), roundTo, unitText("mm")], [lbl("Rounding:"), rounding, h("span")]));
+  KD().staticBox(left, "Annular ring").append(rows([lbl("Annular ring:"), annular, unitText("mm")]));
+  const R = KD().staticBox(right, "Result");
+  R.append(h("div", { style: "display:flex;gap:12px;align-items:flex-start" }, cv, h("div", { style: "display:flex;flex-direction:column;gap:4px" }, cbMinLead, cbMinHole, cbMaxHole)),
+    rows([lbl("Recommended hole size:"), holeOut, unitText("mm")], [lbl("Recommended pad size:"), padOut, unitText("mm")]),
+    h("div", { style: "display:flex;gap:4px;align-items:flex-start;margin-top:6px" }, report, copy));
+  // updateSummaryTable: each level's hole rule
+  const summary = h("table", { id: "calc-pth-summary", style: "border-collapse:collapse" },
+    h("tr", null, h("th"), ...IPC2222B.levels.map((l) => h("th", { style: "padding:2px 10px;border-bottom:1px solid var(--line)" }, l))),
+    h("tr", null, h("th", { style: "padding:2px 10px;text-align:left;font-weight:500" }, "Min. hole diameter"), ...IPC2222B.minAdd.map((a) => h("td", { style: "padding:2px 10px" }, `Maximum lead diameter + ${fmtMm3(a)}mm`))),
+    h("tr", null, h("th", { style: "padding:2px 10px;text-align:left;font-weight:500" }, "Max. hole diameter"), ...IPC2222B.maxAdd.map((a) => h("td", { style: "padding:2px 10px" }, `Minimum lead diameter + ${fmtMm3(a)}mm`))));
+  KD().staticBox(pg, `${IPC2222B.id} Summary`).append(summary);
+  leadShapeUI(); recalc();
+}
+
 // PANEL_BOARD_CLASS: the minimum sizes of the six classes
 function boardClassPage(pg: HTMLElement): void {
   const unit = select(LEN_UNITS.map(([l], i) => [String(i), l] as [string, string]), "0", () => fill(), { id: "calc-bc-unit", style: "width:90px" });
@@ -220,13 +313,17 @@ function boardClassPage(pg: HTMLElement): void {
 
 /** PCB_CALCULATOR_FRAME: one window, reopened on the page it was left on. */
 let lastPage = "Track Width";
+/** MAIL_CALC_SHOW's page names (PCB_CALCULATOR_FRAME::OnShowCalculatorPage) and the pages they show. */
+const MAIL_PAGES: Record<string, string> = { pth_size: "Through-hole Size" };
 export function openCalculator(page?: string): void {
+  if (page && MAIL_PAGES[page]) page = MAIL_PAGES[page];
   let tb: { current(): string | null } | null = null;
   KD().open({ title: "Calculator Tools", width: 960, cls: "kd-wide kd-flush", modeless: true, persist: false, geomKey: "calculator",
     buttons: [{ label: "Close", close: true, primary: true, isDefault: true }],
     cancel() { if (tb) lastPage = tb.current() || lastPage; },
     build(body) {
       tb = KD().treebook(body, [
+        { label: "Footprint design", pages: [{ label: "Through-hole Size", build: pthSizePage }] },
         { label: "Power, current and isolation", pages: [{ label: "Via Size", build: viaSizePage }, { label: "Track Width", build: trackWidthPage }, { label: "Fusing Current", build: fusingPage }] },
         { label: "High Speed", pages: [{ label: "Wavelength", build: wavelengthPage }] },
         { label: "Memo", pages: [{ label: "E-Series", build: eSeriesPage }, { label: "Color Code", build: colorCodePage }, { label: "Board Classes", build: boardClassPage }] },

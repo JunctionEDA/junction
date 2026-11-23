@@ -12,7 +12,7 @@ import { KD, checkbox, h, select, textInput, promptText, confirmBox } from "./do
 import { messageBox } from "./sch-items";
 import { kicadIcon, bitmapButton } from "../../../shared/components/kicon-dom";
 import { zstdDecompress } from "./zstd";
-import { PARITY, UNIT_NOTATIONS, embeddedFilesText, embeddedOf, type AnnotationSettings, type ChainRow, type ChainState } from "./schematic-setup-logic";
+import { PARITY, UNIT_NOTATIONS, embeddedFilesText, embeddedOf, validChainName, type AnnotationSettings, type ChainRow, type ChainState } from "./schematic-setup-logic";
 export * from "./schematic-setup-logic";
 
 // ---------------------------------------------------------------- Annotation
@@ -49,35 +49,71 @@ export function parityPage(pg: HTMLElement, p: Record<string, boolean>, ro: bool
 }
 
 // ---------------------------------------------------------------- Net Chains
-/** PANEL_SETUP_NET_CHAINS: the Chains tab (grid, member nets) and the Net Chain Classes tab. The chains themselves live
- *  in the schematic, so their name, net class and colour show here as KiCad has them; the class assignments are the
- *  project's and are edited. */
-export function netChainsPage(pg: HTMLElement, st: ChainState, netClasses: () => string[], ro: boolean): void {
-  void netClasses;
+/** PANEL_SETUP_NET_CHAINS: the Chains tab (grid, member nets, delete) and the Net Chain Classes tab.  The edits are
+ *  buffered in `st` and applied on OK (ApplyEdits); `colorCell` is the dialog's GRID_CELL_COLOR_RENDERER. */
+export function netChainsPage(pg: HTMLElement, st: ChainState, netClasses: () => string[], ro: boolean,
+  colorCell?: (td: HTMLElement, css: string, ro: boolean, commit: (css: string) => void) => void): void {
+  if (!st.classOrig) st.classOrig = st.classes.slice();
+  if (!st.deletedClasses) st.deletedClasses = [];
   KD().notebook(pg, [
     { label: "Chains", build(tab) {
       const header = h("div", { id: "kd-ss-chains-header", style: "margin:4px 0 4px 2px" });
       const members = h("div", { class: "kd-list", id: "kd-ss-chain-members", style: "height:240px;overflow:auto;border:1px solid var(--line);border-radius:var(--r-1);background:var(--field)" });
       const mlabel = h("div", { style: "margin:0 0 4px" }, "Member Nets");
+      // updateMembersDetail: the row's nets, sorted
       const show = (r: ChainRow | null): void => {
-        mlabel.textContent = r ? (r.name ? `Member Nets — ${r.name} (${r.nets.length})` : `Member Nets (${r.nets.length})`) : "Member Nets";
-        members.replaceChildren(...(r ? r.nets : []).map((n) => h("div", { style: "padding:1px 6px" }, n)));
+        mlabel.textContent = r ? (r.name ? `Member Nets \u2014 ${r.name} (${r.nets.length})` : `Member Nets (${r.nets.length})`) : "Member Nets";
+        members.replaceChildren(...(r ? r.nets.slice().sort() : []).map((n) => h("div", { style: "padding:1px 6px" }, n)));
       };
-      const rows = st.chains;
-      header.textContent = `${rows.length} net chain(s)`;
-      const g = KD().grid<ChainRow>(h("div"), [
-        { key: "name", label: "Name", type: "ro" }, { key: "nets", label: "Members", type: "ro", width: 80, format: (v) => `${(v as string[]).length} nets` },
-        { key: "chainClass", label: "Net Chain Class", type: "choice", width: 150, options: () => [["", ""] as [string, string], ...st.classes.map((c) => [c, c] as [string, string])] },
-        { key: "netClass", label: "Net Class", type: "ro", width: 120 }, { key: "color", label: "Colour", type: "ro", width: 140 }], rows,
-        { readOnly: ro, height: 240, onSelect: (r) => show(r) });
+      // the choice editors allow other text (wxGridCellChoiceEditor( choices, true )): the choices are suggestions
+      const classList = "kd-ss-chain-classes", ncList = "kd-ss-chain-netclasses";
+      const dlClasses = h("datalist", { id: classList }), dlNc = h("datalist", { id: ncList });
+      const fillLists = (): void => {
+        dlClasses.replaceChildren(...["", ...st.classes.filter(Boolean)].map((c) => h("option", { value: c })));
+        dlNc.replaceChildren(...["", ...netClasses()].map((c) => h("option", { value: c })));
+      };
+      const view: ChainRow[] = [];
+      const lastName = new Map<ChainRow, string>();
+      const cols = [
+        { key: "name", label: "Name", type: "text" as const },
+        { key: "nets", label: "Members", type: "ro" as const, width: 80, format: (v: unknown) => `${(v as string[]).length} nets` },
+        { key: "chainClass", label: "Net Chain Class", type: "text" as const, width: 150, list: classList },
+        { key: "netClass", label: "Net Class", type: "text" as const, width: 120, list: ncList },
+        colorCell ? { key: "color", label: "Colour", width: 140, render: (td: HTMLElement, r: ChainRow, cro: boolean, commit: (v: unknown) => void) => colorCell(td, r.color, cro, (css) => commit(css)) }
+          : { key: "color", label: "Colour", type: "ro" as const, width: 140 },
+      ];
+      let sel = -1;
+      const g = KD().grid<ChainRow>(h("div"), cols, view, { readOnly: ro, height: 240,
+        onSelect: (r, i) => { sel = r ? i : -1; del.disabled = ro || sel < 0; show(r); },
+        onChange: (r, key) => {
+          if (key !== "name") return;
+          // the Name cell: invalid characters are refused and the old name comes back
+          if (!validChainName(r.name)) { const was = lastName.get(r) ?? ""; const bad = r.name; r.name = was; g.refresh(); void messageBox(`Name '${bad}' contains invalid characters.`, "Net Chains"); return; }
+          lastName.set(r, r.name); show(r);
+        } });
+      // rebuildChainsGrid: the rows not pending deletion, the count above them
+      const rebuild = (): void => {
+        view.splice(0, view.length, ...st.chains.filter((r) => !r.deleted));
+        for (const r of view) if (!lastName.has(r)) lastName.set(r, r.name);
+        header.textContent = `${view.length} net chain(s)`;
+        fillLists(); g.refresh();
+        if (sel >= view.length) sel = -1;
+        show(sel >= 0 ? view[sel] : null);
+      };
       const left = h("div", { style: "flex:3;min-width:0" }, g.el), right = h("div", { style: "flex:1;min-width:140px" }, mlabel, members);
-      const del = bitmapButton("small_trash", "Delete the selected committed net chain", null, { cls: "kd-ss-chain-del" }); del.disabled = true;
-      tab.append(header, h("div", { style: "display:flex;gap:8px" }, left, right), h("div", { class: "kd-row", style: "margin-top:4px" }, del,
-        h("span", { class: "kd-note" }, "Net chains are created, renamed and deleted on the schematic canvas.")));
-      if (rows.length) g.select(0); else show(null);
+      const del = bitmapButton("small_trash", "Delete the selected committed net chain", async () => {
+        if (sel < 0 || sel >= view.length) return;
+        const r = view[sel];
+        if (!(await confirmBox("Delete Net Chain", `Delete net chain '${r.name}'?`, "Yes"))) return;
+        r.deleted = true; sel = -1; rebuild();
+      }, { cls: "kd-ss-chain-del" });
+      del.disabled = true;
+      tab.append(header, h("div", { style: "display:flex;gap:8px" }, left, right), h("div", { class: "kd-row", style: "margin-top:4px" }, del), dlClasses, dlNc);
+      rebuild();
+      if (view.length) g.select(0); else show(null);
     } },
     { label: "Net Chain Classes", build(tab) {
-      const count = (c: string): number => st.chains.filter((r) => r.chainClass === c).length;
+      const count = (c: string): number => st.chains.filter((r) => !r.deleted && r.chainClass === c).length;
       const rows = st.classes.map((name) => ({ name, members: count(name) }));
       const host = h("div");
       const g = KD().grid<{ name: string; members: number }>(host, [{ key: "name", label: "Class Name", type: "ro" }, { key: "members", label: "Members", type: "ro", width: 90 }], rows, { readOnly: ro, height: 260 });
@@ -86,7 +122,7 @@ export function netChainsPage(pg: HTMLElement, st: ChainState, netClasses: () =>
       const add = bitmapButton("small_plus", "Add a new net chain class", async () => {
         const n = await promptText("Add Class", "New net chain class name:"); if (n === null) return;
         if (taken(n)) { await messageBox("That class name is empty or already in use.", "Add Class"); return; }
-        rows.push({ name: n.trim(), members: 0 }); sync(); g.select(rows.length - 1);
+        rows.push({ name: n.trim(), members: 0 }); st.classOrig!.push(""); sync(); g.select(rows.length - 1);
       });
       const ren = bitmapButton("small_edit", "Rename the selected class (updates every chain that uses it)", async () => {
         const i = g.selected(); if (i < 0) return; const old = rows[i].name;
@@ -97,7 +133,8 @@ export function netChainsPage(pg: HTMLElement, st: ChainState, netClasses: () =>
       const del = bitmapButton("small_trash", "Delete the selected class (chains revert to no class)", async () => {
         const i = g.selected(); if (i < 0) return;
         if (!(await confirmBox("Delete Class", `Delete net chain class '${rows[i].name}'?  Chains assigned to it will become unclassified.`, "Yes"))) return;
-        const old = rows[i].name; rows.splice(i, 1); for (const c of st.chains) if (c.chainClass === old) c.chainClass = ""; sync();
+        const old = rows[i].name; rows.splice(i, 1); const o = st.classOrig!.splice(i, 1)[0]; if (o) st.deletedClasses!.push(o);
+        for (const c of st.chains) if (c.chainClass === old) c.chainClass = ""; sync();
       });
       for (const b of [add, ren, del]) b.disabled = ro;
       tab.append(h("div", { style: "margin:4px 0 6px 2px" }, "Group net chains under a class label so DRC rules can target the whole group via ", h("code", null, "inNetChainClass('name')"), "."),

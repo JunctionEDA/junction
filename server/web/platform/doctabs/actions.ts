@@ -265,7 +265,8 @@ const KICAD_DESIGN = /\.(kicad_pro|kicad_sch|kicad_pcb)$/i;
 const ext = (name: string): string => (/\.([^./]+)$/.exec(name) || ["", ""])[1].toLowerCase();
 /** The file types a project stores (server/src/http.rs allowed_file). */
 const STORED = new Set(["kicad_pro", "kicad_sch", "kicad_pcb", "kicad_prl", "kicad_sym", "kicad_mod", "kicad_dru", "kicad_wks", "step", "stp", "wrl", "wrz", "lib", "sub", "cir", "mod", "model", "sp", "spice", "ibs", "in", "equ", "wbk", "jpart", "jasm"]);
-const storable = (name: string): boolean => STORED.has(ext(name)) || /^(sym-lib-table|fp-lib-table|design-block-lib-table)$/.test(baseOf(name));
+const storable = (name: string): boolean => STORED.has(ext(name)) || /^(sym-lib-table|fp-lib-table|design-block-lib-table)$/.test(baseOf(name))
+  || /(^|\/)[^/]+\.kicad_block\/[^/]+\.json$/i.test(name);   // a design block's metadata (server/src/http.rs design_block_file)
 
 /** What a set of dropped or chosen files will become, before anything is sent. */
 export interface ImportPlan {

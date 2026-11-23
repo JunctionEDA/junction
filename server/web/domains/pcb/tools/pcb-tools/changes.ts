@@ -4,6 +4,7 @@ import { DIM_CLASS } from "./dimensions";
 import { netOf } from "./nets";
 import { BOARD_VERSION, K } from "./state";
 import { isTuningPattern, tuningRemoveChanges } from "./tuning-patterns";
+import { excludeViaChanges, isViaStitch, stitchOfVia } from "./via-stitch";
 
    // REFERENCE_IMAGE: 1000 mils / ppi per pixel
 
@@ -65,6 +66,14 @@ export function deleteChanges(doc: BoardDoc, items: Iterable<KItem | string> | n
     }
     out.push(removedChange(it)); removed++; if (isTuningPattern(it)) gens.push(it);
   }
+  // PCB_VIA_STITCH::Remove takes the stitch's vias with it; a stitch's via deleted on its own is excluded from the
+  // stitch so it is not made again (EDIT_TOOL::DeleteItems: ExcludePosition, the stitch modified)
+  for (const id of Array.from(ids)) {
+    const it = doc.items.get(id); if (!isViaStitch(it)) continue;
+    for (const m of K.groupMemberIds(it.node)) { const v = doc.items.get(m); if (v && !ids.has(m)) { out.push(removedChange(v)); ids.add(m); } }
+  }
+  const lone = Array.from(ids).filter((id) => { const it = doc.items.get(id); if (!it || it.kind !== "via") return false; const g = stitchOfVia(doc, id); return !!g && !ids.has(g.id); });
+  if (lone.length) out.push(...excludeViaChanges(doc, lone));
   if (!removed) { if (hidden) out.hideLabel = hidden === 1 ? "Hide Field" : "Hide Fields"; else if (alreadyHidden) out.infoError = "Use the Footprint Properties dialog to remove fields."; }
   if (!gens.length) return out;
   // EDIT_TOOL::DeleteItems: a selection of only generators (a selected pattern is the generator with its members here)

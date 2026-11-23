@@ -19,6 +19,8 @@ export interface LibItem {
   power?: boolean;
   reference?: string;
   footprint?: string;
+  /** Symbols: the Datasheet field (a chooser column, LIB_SYMBOL::GetChooserFields). */
+  datasheet?: string;
   extends?: string;
   /** Symbols: the Value field (a library symbol's is its name) and each unit's own name (unit_name), when known. */
   value?: string;
@@ -76,7 +78,7 @@ async function getJson<T>(path: string): Promise<T> {
 
 // ---------------------------------------------------------------- official libraries
 
-interface SymbolRow { n: string; d: string; k: string; r: string; u: number; p?: boolean; e?: string; f?: string }
+interface SymbolRow { n: string; d: string; k: string; r: string; u: number; p?: boolean; e?: string; f?: string; ds?: string }
 interface FootprintRow { n: string; d: string; k: string; p: number }
 
 const tables = new Map<LibKind, Promise<{ ref: string; libraries: LibraryEntry[] }>>();
@@ -102,7 +104,7 @@ export function officialIndex(kind: LibKind, lib: string): Promise<LibItem[]> {
   if (!p) {
     p = kind === "symbol"
       ? getJson<{ symbols: SymbolRow[] }>(`/api/libs/symbols/${encodeURIComponent(lib)}`).then((j) => j.symbols.map((s): LibItem => ({
-        id: `${lib}:${s.n}`, name: s.n, description: s.d, keywords: s.k, library: lib, units: s.u, power: !!s.p, reference: s.r, footprint: s.f || "", extends: s.e || "", source: "official" })))
+        id: `${lib}:${s.n}`, name: s.n, description: s.d, keywords: s.k, library: lib, units: s.u, power: !!s.p, reference: s.r, footprint: s.f || "", datasheet: s.ds || "", extends: s.e || "", source: "official" })))
       : getJson<{ footprints: FootprintRow[] }>(`/api/libs/footprints/${encodeURIComponent(lib)}`).then((j) => j.footprints.map((f): LibItem => ({
         id: `${lib}:${f.n}`, name: f.n, description: f.d, keywords: f.k, library: lib, pads: f.p, source: "official" })));
     p.catch(() => indexes.delete(key));
@@ -235,7 +237,7 @@ async function projectIndex(kind: LibKind, lib: ProjectLib): Promise<LibItem[]> 
       for (let e = K().kid(root, "extends"); e && depth < 16; e = K().kid(root, "extends"), depth++) { const p = byName.get(String(e[1])); if (!p) break; root = p; }
       const ri = root === s ? info : symbolInfo(root);
       rows.push({ id: `${lib.name}:${info.name}`, name: info.name, description: info.description || ri.description, keywords: info.keywords || ri.keywords, library: lib.name,
-        units: ri.units, power: ri.power || info.power, reference: info.reference || ri.reference, footprint: info.footprint, extends: info.extends, value: info.value || info.name,
+        units: ri.units, power: ri.power || info.power, reference: info.reference || ri.reference, footprint: info.footprint, datasheet: info.datasheet, extends: info.extends, value: info.value || info.name,
         unitNames: symbolUnitNames(root), source: "project" });
     }
   }
@@ -306,7 +308,7 @@ export function placedItems(kind: LibKind, doc: KDoc | null, otherLibs?: Map<str
     let info; try { info = symbolInfo(node); } catch { return; }
     seen.add(id);
     out.push({ id, name: parseLibId(id).name, description: info.description, keywords: info.keywords, library: parseLibId(id).lib, units: info.units, power: info.power,
-      reference: info.reference, footprint: info.footprint, value: info.value || info.name, unitNames: symbolUnitNames(node), source: "placed" });
+      reference: info.reference, footprint: info.footprint, datasheet: info.datasheet, value: info.value || info.name, unitNames: symbolUnitNames(node), source: "placed" });
   };
   if (doc) for (const [id, node] of doc.lib) add(id, K().resolveLib(doc, id) || node);
   if (otherLibs) for (const [id, node] of otherLibs) add(id, node);
@@ -377,7 +379,7 @@ export function rememberRecent(kind: LibKind, item: LibItem, opts?: RecentOpts &
   if (item.source !== "official" && item.source !== "project") return;      // only what can be fetched again later
   const list = listOf(kind, opts);
   const entry: LibItem = { id: item.id, name: item.name, description: item.description, keywords: item.keywords, library: item.library, units: item.units, power: item.power,
-    reference: item.reference, footprint: item.footprint, value: item.value, unitNames: item.unitNames, extends: item.extends, pads: item.pads, source: item.source };
+    reference: item.reference, footprint: item.footprint, datasheet: item.datasheet, value: item.value, unitNames: item.unitNames, extends: item.extends, pads: item.pads, source: item.source };
   if (kind === "symbol" && list !== "picker") {
     if (opts && opts.unit && opts.unit > 0) entry.unit = opts.unit;
     if (opts && opts.fields && Object.keys(opts.fields).length) { entry.fields = Object.assign({}, opts.fields); if (opts.fields.Footprint !== undefined) entry.footprint = opts.fields.Footprint; }

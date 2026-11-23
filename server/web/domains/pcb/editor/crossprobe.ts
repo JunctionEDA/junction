@@ -16,7 +16,7 @@ import { clearAllSelection, pcbState, selectedAnywhere, selectionChanged, select
 import { fitBox, isSch, pxPerMm, stage } from "./view";
 import { prefs } from "../dialogs/prefs";
 import { expandStacked } from "../canvas/stacked-pins";
-import { highlightName, loadSheets, netMap, currentInstance, goTo, netProbe } from "./schnets";
+import { highlightRemote, loadSheets, netMap, currentInstance, goTo, netProbe } from "./schnets";
 import { toolCtx } from "./tools";
 
 /** A SelectionSpec: a footprint (symbol) by reference, a pad (pin) by reference and number, a sheet by its full path. */
@@ -290,7 +290,7 @@ function receiveNets(names: string[], o: ReturnType<typeof crossOpts>): void {
     if (isSch()) {
       // SCH_EDIT_FRAME::HandleRemoteNetHighlight: the first name, when the schematic has that net
       const net = names.length ? names[0] : "", c = netMap();
-      highlightName(net && c && c.map.has(net) ? net : null);
+      highlightRemote(net && c && c.map.has(net) ? net : null);
       return;
     }
     const pcb = CollabTools.pcb as unknown as { remoteNetHighlight?: (ctx: unknown, n: string[]) => Box | null } | undefined;

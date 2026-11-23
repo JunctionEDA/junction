@@ -115,3 +115,39 @@ export function boardXref(doc: { items: Map<string, { kind?: string; node: N }>;
   const v = vars;
   return { toRefs: (t) => kiidsToRefs(get(), t), toKiids: (t) => refsToKiids(get(), t, v) };
 }
+
+const TITLE_BLOCK_VARS = ["ISSUE_DATE", "CURRENT_DATE", "CURRENT_TIME_LOCALE", "CURRENT_TIME_HH_MM_SS", "REVISION", "TITLE", "COMPANY", ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => "COMMENT" + i)];
+/** FOOTPRINT::GetContextualTextVars. */
+const FOOTPRINT_VARS = ["REFERENCE", "VALUE", "LAYER", "FOOTPRINT_LIBRARY", "FOOTPRINT_NAME", "SHORT_NET_NAME(<pad_number>)", "NET_NAME(<pad_number>)", "NET_CLASS(<pad_number>)",
+  "PIN_NAME(<pad_number>)", "EXCLUDE_FROM_BOM", "EXCLUDE_FROM_BOARD", "EXCLUDE_FROM_SIM", "EXCLUDE_FROM_POS_FILES", "DNP"];
+/**
+ * PCB_BASE_EDIT_FRAME::GetContextualTextVars: after "${REF:" the variables of the footprint whose reference is REF;
+ * otherwise BOARD::GetContextualTextVars (its own tokens, the title block's, the project's text variables, each once)
+ * and then the variables of the footprint the text belongs to.
+ */
+export function pcbContextualTextVars(doc: { items: Map<string, { kind?: string; node: N }>; projectVars?: Record<string, string> | null } | null | undefined, crossRef: string, parentFp?: N | null): string[] {
+  if (crossRef) {
+    const fp = boardFootprints(doc ? doc.items.values() : null).find((f) => f.ref === crossRef);
+    return fp ? FOOTPRINT_VARS.slice() : [];
+  }
+  const out: string[] = [], add = (v: string): void => { if (!out.includes(v)) out.push(v); };
+  for (const v of ["LAYER", "FILENAME", "FILEPATH", "PROJECTNAME", "DRC_ERROR <message_text>", "DRC_WARNING <message_text>", "VARIANT", "VARIANT_DESC", "DRILL_OPERATIONS", "DRILL_SITES", "DRILL_GROUPS"]) add(v);
+  if (!out.includes("ISSUE_DATE")) out.push(...TITLE_BLOCK_VARS);
+  for (const v of Object.keys((doc && doc.projectVars) || {})) add(v);
+  if (parentFp) out.push(...FOOTPRINT_VARS);
+  return out;
+}
+/** BOARD_ITEM::GetParentFootprint for a dialog's item: the footprint the item is in on a board, or the Footprint
+ *  Editor's footprint for one of its texts. */
+export function parentFootprintOf(doc: { fpState?: { fp: N } | null } | null | undefined, item: { kind?: string; node: N }, node: N): N | null {
+  if (item.kind === "footprint") return item.node;
+  const k = str(node && node[0]);
+  return k.startsWith("fp_") || k === "property" ? (doc && doc.fpState ? doc.fpState.fp : null) : null;
+}
+/** SCINTILLA_TRICKS::DoTextVarAutocomplete for the board's dialogs: dialogs/sch-items.ts textVarAutocomplete, which
+ *  that module registers here (the board dialogs do not load the schematic dialogs themselves). */
+export const textVarAutocompleter: { fn: ((input: HTMLInputElement | HTMLTextAreaElement, getTokens: (xref: string) => string[]) => void) | null } = { fn: null };
+/** onCharFn: DoTextVarAutocomplete( GetContextualTextVars( item ) ) on a board dialog's text. */
+export function boardTextVarAutocomplete(input: HTMLInputElement | HTMLTextAreaElement, doc: Parameters<typeof pcbContextualTextVars>[0], parentFp: N | null): void {
+  if (textVarAutocompleter.fn) textVarAutocompleter.fn(input, (x) => pcbContextualTextVars(doc, x, parentFp));
+}

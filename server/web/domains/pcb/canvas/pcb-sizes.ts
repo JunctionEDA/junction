@@ -306,6 +306,8 @@ export class PcbSizes {
   src: unknown = undefined;
   trackIndex = 0;
   viaIndex = 0;
+  /** BOARD_DESIGN_SETTINGS::m_viaStackIndex: the microvia stack preset the stack tools place (not saved) */
+  viaStackIndex = 0;
   /** BOARD_DESIGN_SETTINGS::m_DiffPairIndex (0 = the net class values) */
   diffPairIndex = 0;
   /** m_useCustomDiffPair and m_customDiffPair (Use Custom Values… / Differential Pair Dimensions…) */

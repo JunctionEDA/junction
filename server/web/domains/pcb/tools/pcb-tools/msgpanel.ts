@@ -1,31 +1,40 @@
 // pcb-tools/msgpanel.ts — the message panel (EDA_MSG_PANEL) and the routed length.
-import type { BoardDoc, DesignSettings, DesignSource, NetRef, Netlist, PadInfo, Pt, Route } from "./types";
+import type { BoardDoc, Conductor, CopperShape, DesignSettings, DesignSource, NetRef, Netlist, PadInfo, Pt, Route } from "./types";
 import type { RouterSettings } from "./router-settings";
 
 /** One line of the message panel: a title over its value. */
 export interface MsgItem { title: string; value: string }
 /** msgPanelInfo's options: the design settings, the user's units, the route in flight and its router settings, the netlist. */
-export interface MsgPanelOpts { settings?: DesignSettings; units?: string; route?: Route | null; routerSettings?: RouterSettings; nl?: Netlist; net?: string; ellipsize?: (s: string) => string; toDisplay?: (p: Pt) => Pt }
+export interface MsgPanelOpts { settings?: DesignSettings; units?: string; route?: Route | null; routerSettings?: RouterSettings; nl?: Netlist; net?: string; ellipsize?: (s: string) => string; toDisplay?: (p: Pt) => Pt; /** the editor's active layer (the hole and edge clearance rows pick it) */ activeLayer?: string }
 import { connectedRun } from "./connected";
 import { ellipseLength } from "../../canvas/sexpr";
 import { resolve } from "./drc-rules";
 import type { RuleItem } from "./dru";
 import { copperOf } from "./dialogs";
 import { dimRead, dimUnits, dimUpdate, dimValueString, type DimModel } from "./dimensions";
-import { arcLength, padCopperLayers, shapeGap, shareLayer } from "./distances";
+import { arcLength, padCopperLayers, padShape, segSegDist, shapeGap, shareLayer } from "./distances";
 import { designSettings, netClearance, netclassName, netclassOf } from "./drc";
 import { evalRuleConstraint } from "./dru";
 import { routedRuleItem } from "./rule-resolver";
 import { viaNow } from "./edit-commands";
 import { isLocked } from "./groups";
-import { netlistCached } from "./app-state";
+import { layerNames, netlistCached } from "./app-state";
+import { evalRules, hasHole, itemLayerSet, resolveItem, type ResolveCtx } from "./inspect-resolve";
+import { geomShapes } from "./drc-silk";
+import { ARC_LOW_DEF, circleApprox, conductorPolys, copperCtx, ovalApprox, shapePolys, type CopperCtx } from "./drc-sliver";
+import { unflashedLayers } from "./drc-flash";
+import { holeShape, padHole, viaHole, type Hole } from "./drc-more";
+import { matchDpSuffix } from "./diffpair";
+import { subtract, union } from "../../fab/poly";
+import { area as polyArea, type Pt as FabPt } from "../../fab/prims";
 import { conductors, netTable, netlist, ratsnest } from "./netlist";
-import { hasNet, netOf } from "./nets";
+import { hasNet, netChainOf, netOf } from "./nets";
 import { zoneLayers } from "./nodes";
 import { padsOf } from "./route-geom";
 import { MODE_NAMES, cornerStyleName } from "./router-settings";
 import { K, S } from "./state";
 import { layerOf, norm180, pt, r6, widthOf } from "./util";
+import { IU_PER_PS, boardTrackLength, ldContext, msgTime, trackDelay } from "./length-delay";
 
 // ---------------------------------------------------------------- message panel (EDA_MSG_PANEL)
 // The strip under the canvas: GetMsgPanelInfo of the one selected item (PCB_TRACK / PCB_VIA / PAD / FOOTPRINT / ZONE /
@@ -268,17 +277,23 @@ export function tuningMsgPanel(doc: BoardDoc, gen: KItem, s: DesignSettings, uni
   if (pNet) add("Resolved Netclass", unescapeName(netclassName(s, pNet.name || "")));
   add("Layer", boardLayerName(doc, K.str((K.kid(n, "layer") || [])[1]) || "F.Cu"));
   if (width && !mixed) add("Width", V(width));
-  if (primary && pNet && pNet.name) {
-    const len = routedLength(doc, primary.id);
-    if (coupled && cNet && cNet.name) add("Routed Lengths", V(len) + ", " + V(routedLength(doc, coupled.id)));
-    else add("Routed Length", V(len));
+  if (primary && pNet && pNet.name) {   // BOARD::GetTrackLength: lengths, or delays when the net has them
+    const ld = ldContext(doc, s); const p = boardTrackLength(ld, primary.id);
+    if (coupled && cNet && cNet.name) {
+      const c = boardTrackLength(ld, coupled.id);
+      if (p.delay === 0 || c.delay === 0) add("Routed Lengths", V(p.length) + ", " + V(c.length));
+      else add("Routed Delays", msgTime(p.delay) + ", " + msgTime(c.delay));
+    } else if (p.delay === 0) add("Routed Length", V(p.length));
+    else add("Routed Delay", msgTime(p.delay));
+    if (p.padToDie !== 0 && p.padToDieDelay === 0) { add("Pad To Die Length", V(p.padToDie)); add("Full Length", V(p.length + p.padToDie)); }
+    else if (p.padToDieDelay > 0) { add("Pad To Die Delay", msgTime(p.padToDieDelay)); add("Full Delay", msgTime(p.delay + p.padToDieDelay)); }
   }
   const rule = S.ruleConstraint ? S.ruleConstraint(doc, mode === "diff_pair_skew" ? "skew" : "length", primary, coupled) : null;
   if (mode === "diff_pair_skew") {
     if (!rule || override) add(`Target Skew: ${V(numOf("target_skew") || 0)}`, "(from tuning pattern properties)");
     else if (rule.text) add(`Skew Constraints: ${rule.text}`, `(from ${rule.name})`);
   } else if (!rule || override) {
-    if (timeDomain) add(`Target Delay: ${(numOf("target_delay") || 0).toFixed(4)} ps`, "(from tuning pattern properties)");
+    if (timeDomain) add(`Target Delay: ${msgTime((numOf("target_delay") || 0) * IU_PER_PS)}`, "(from tuning pattern properties)");
     else add(`Target Length: ${V(numOf("target_length") || 0)}`, "(from tuning pattern properties)");
   } else if (rule.text) add(`${timeDomain ? "Delay" : "Length"} Constraints: ${rule.text}`, `(from ${rule.name})`);
 }
@@ -350,7 +365,7 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
         if (pf && K.str(pf[1])) add("Pin Name", K.str(pf[1]));
         if (ptp && K.str(ptp[1])) add("Pin Type", K.str(ptp[1]));
         if (!fpEd) {
-          add("Net", unescapeName(p.net.name)); add("Resolved Netclass", NN(p.net.name));
+          add("Net", unescapeName(p.net.name)); const pch = netChainOf(doc, p.net.name || ""); if (pch) add("Net Chain", unescapeName(pch)); add("Resolved Netclass", NN(p.net.name));
           if (isLocked(it.node) || isLocked(p.node)) add("Status", "Locked");
         }
         if (p.type === "smd" || p.type === "connect") add("Layer", padLayerDescribe(doc, p));
@@ -375,25 +390,34 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
     if (it && (it.kind === "segment" || it.kind === "arc")) {   // PCB_TRACK::GetMsgPanelInfo
       const n = it.node, net = netOf(n).name || "", w = widthOf(n, 0.25), layer = layerOf(n);
       add("Type", it.kind === "arc" ? "Track (arc)" : "Track");
-      add("Net", unescapeName(net)); add("Resolved Netclass", NN(net)); if (isLocked(n)) add("Status", "Locked");
+      add("Net", unescapeName(net)); const tch = netChainOf(doc, net || String(doc.nets.get(netOf(n).code) || "")); if (tch) add("Net Chain", unescapeName(tch)); add("Resolved Netclass", NN(net)); if (isLocked(n)) add("Status", "Locked");
       add("Layer", boardLayerName(doc, layer)); add("Width", V(w));
       const a = pt(n, "start"), b = pt(n, "end"); let len = a && b ? Math.hypot(b[0] - a[0], b[1] - a[1]) : 0;
       if (it.kind === "arc") { const m = pt(n, "mid"); const arc = a && m && b && K.arcFrom3(a, m, b); if (arc) { len = arcLength(arc); add("Radius", V(arc.r)); add("Angle", (len / arc.r * 180 / Math.PI * (arc.anticlockwise ? -1 : 1)).toFixed(2) + "deg"); } }
-      add("Segment Length", V(len));
-      if (hasNet(netOf(n))) {   // BOARD::GetTrackLength: the run's length and the die lengths of the pads at its ends
-        const run = trackRunLength(doc, it.id); add("Routed Length", V(run.len));
-        if (run.padToDie) { add("Pad To Die Length", V(run.padToDie)); add("Full Length", V(run.len + run.padToDie)); }
+      const ld = ldContext(doc, s, (opts.nl || netlistCached(doc)).conductors);
+      const segDelay = trackDelay(ld, it.id);   // PCB_TRACK::GetDelay: with a delay from the net's tuning profile the delay replaces the length
+      if (segDelay === 0) add("Segment Length", V(len)); else add("Segment Delay", msgTime(segDelay));
+      if (hasNet(netOf(n))) {   // BOARD::GetTrackLength: the connected copper through LENGTH_DELAY_CALCULATION (via heights, clipped in pads and vias)
+        const run = boardTrackLength(ld, it.id);
+        if (run.delay === 0) {
+          add("Routed Length", V(run.length));
+          if (run.padToDie !== 0) { add("Pad To Die Length", V(run.padToDie)); add("Full Length", V(run.length + run.padToDie)); }
+        } else {
+          add("Routed Delay", msgTime(run.delay));
+          if (run.padToDieDelay !== 0) { add("Pad To Die Delay", msgTime(run.padToDieDelay)); add("Full Delay", msgTime(run.delay + run.padToDieDelay)); }
+        }
       }
       add("Copper Area", msgArea(it.kind === "arc" ? len * w + Math.PI * w * w / 4 : ovalPolygonArea(len, w, 0.02), units));   // TransformShapeToPolySet( …, ARC_LOW_DEF, ERROR_INSIDE )
       const c = msgClearance(s, net); add(`Min Clearance: ${V(c.v)}`, `(from ${c.from})`);
       const nc = netclassOf(s, net); const mn = s.minTrackWidth || 0; const parts = []; if (mn > 0) parts.push("min " + V(mn)); if (nc && nc.track_width !== undefined) parts.push("opt " + V(nc.track_width));
       if (parts.length) add(`Width Constraints: ${parts.join("; ")}`, `(from netclass '${NN(net)}')`);
+      if (!fpEd) selectionMsgPanel(doc, list, s, units, opts.activeLayer || "F.Cu", add, true, out.length);   // a diff pair track's DP rows
       return out;
     }
     if (it && it.kind === "via") {   // PCB_VIA::GetMsgPanelInfo
       const n = it.node, net = netOf(n).name || ""; const v = viaNow(n);
       add("Type", n.includes("micro") ? "Micro Via" : n.includes("blind") ? "Blind Via" : n.includes("buried") ? "Buried Via" : "Through Via");
-      add("Net", unescapeName(net)); add("Resolved Netclass", NN(net)); if (isLocked(n)) add("Status", "Locked");
+      add("Net", unescapeName(net)); const vch = netChainOf(doc, net || String(doc.nets.get(netOf(n).code) || "")); if (vch) add("Net Chain", unescapeName(vch)); add("Resolved Netclass", NN(net)); if (isLocked(n)) add("Status", "Locked");
       const ls = K.kid(n, "layers"); const pair = ls ? ls.slice(1).map(K.str) : ["F.Cu", "B.Cu"];
       add("Layer", `${boardLayerName(doc, pair[0] || "F.Cu")} - ${boardLayerName(doc, pair[pair.length - 1] || "B.Cu")}`);
       // the padstack's sizes per layer: one value, else "(mixed)"
@@ -410,6 +434,7 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
         if (!ra) add(`Min Annular Width: ${V(s.minViaAnnular || 0)}`, "(from board setup constraints)");
         else add(`Min Annular Width: ${V(ra.min != null ? ra.min : 0)}`, `(from ${ra.min != null ? ra.name : c.from})`);
       }
+      if (!fpEd) selectionMsgPanel(doc, list, s, units, opts.activeLayer || "F.Cu", add, true, out.length);   // a diff pair via's DP rows
       return out;
     }
     if (it && it.kind === "footprint") {   // FOOTPRINT::GetMsgPanelInfo (board editor)
@@ -572,6 +597,7 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
       return out;
     }
   }
+  if (list.length >= 2) { selectionMsgPanel(doc, list, s, units, opts.activeLayer || "F.Cu", add, !fpEd, 0); return out; }   // PCB_CONTROL::UpdateMessagePanel for several items
   if (opts.net && !list.length) {   // NETINFO_ITEM::GetMsgPanelInfo: a net highlighted with nothing selected
     const NT = netTable(doc), name = opts.net; let code = 0;
     for (const [c, nm] of NT.byCode) if (nm === name) { code = c; break; }
@@ -612,4 +638,201 @@ export function inspectClearance(doc: BoardDoc, idA: string, idB: string, settin
   let gap = Infinity; for (const a of A) for (const b of B) if (shareLayer(a.layers, b.layers)) gap = Math.min(gap, shapeGap(a.shape, b.shape));
   const need = Math.max(netClearance(s, A[0].net), netClearance(s, B[0].net));
   return { gap: gap === Infinity ? null : r6(gap), required: need, sameNet: !!(A[0].net && A[0].net === B[0].net), nets: [A[0].net, B[0].net] };
+}
+
+// ---------------------------------------------------------------- PCB_CONTROL::UpdateMessagePanel for a selection
+/** The KICAD_T of a selection id, as the order std::map<KICAD_T, int> counts them in (typeinfo.h). */
+function selType(doc: BoardDoc, id: string): number {
+  if (id.includes("@field:")) return 5;
+  const h = id.indexOf("#"); const it = doc.items.get(h > 0 ? id.slice(0, h) : id); if (!it) return -1;
+  if (h > 0 || it.kind === "pad") return 2;
+  if (it.kind === "dimension") { const t = K.str((K.kid(it.node, "type") || [])[1]); return ({ aligned: 17, leader: 18, center: 19, radial: 20, orthogonal: 21 } as Record<string, number>)[t] || 17; }
+  return ({ footprint: 1, image: 4, generated: 6, gr_text: 7, gr_text_box: 8, table: 9, segment: 11, via: 12, arc: 13, barcode: 16, target: 22, zone: 23, group: 26, point: 28 } as Record<string, number>)[it.kind] ?? (/^gr_/.test(it.kind) ? 3 : 0);
+}
+/** EDA_ITEM::GetFriendlyName of a selection id (GetTypeDesc unless the class names itself). */
+export function friendlyName(doc: BoardDoc, id: string): string {
+  if (id.includes("@field:")) return "Text";
+  const h = id.indexOf("#"); const it = doc.items.get(h > 0 ? id.slice(0, h) : id); if (!it) return "";
+  if (h > 0 || it.kind === "pad") return "Pad";
+  if (it.kind === "zone") return zoneFriendlyName(it.node);
+  if (it.kind === "dimension") return K.str((K.kid(it.node, "type") || [])[1]) === "leader" ? "Leader" : "Dimension";
+  const m = /^gr_(line|rect|circle|arc|poly|curve|ellipse|ellipse_arc)$/.exec(it.kind); if (m) return SHAPE_NAMES[m[1]];
+  return ({ footprint: "Footprint", image: "Reference Image", generated: "Generator", gr_text: "Text", gr_text_box: "Text Box", table: "Table", segment: "Track", via: "Via", arc: "Track (arc)", barcode: "Barcode", target: "Target", group: "Group", point: "Point" } as Record<string, string>)[it.kind] || "";
+}
+/** The two-item rows, the single-track diff pair rows and the selection summary of PCB_CONTROL::UpdateMessagePanel. */
+export function selectionMsgPanel(doc: BoardDoc, list: string[], s: DesignSettings, units: string, activeLayer: string, put0: (t: string, v: unknown) => void, boardEditor: boolean, rows: number) {
+  const add = (t: string, v: unknown) => { rows++; put0(t, v); };
+  const V = (v: number) => msgValue(v, units);
+  const ctx: ResolveCtx = { doc, s, rules: (S.dru && S.dru.rules) || [], fmt: V, units };
+  const copper = copperOf(doc); const isCu = (l: string | null | undefined) => !!l && copper.includes(l);
+  const NT = netTable(doc);
+  let conds: Conductor[] | null = null; let unfl: Map<Conductor, Map<string, CopperShape>> | null = null;
+  const condsOf = (id: string) => {
+    if (!conds) { conds = conductors(doc); unfl = unflashedLayers(conds.filter((c) => c.kind !== "zone"), copper); }
+    const h = id.indexOf("#"), fid = h > 0 ? id.slice(0, h) : id, ix = h > 0 ? +id.slice(h + 1) : -1;
+    return conds.filter((c) => c.id === fid && (c.kind !== "pad" || c.index === ix) && (c.kind === "pad") === (ix >= 0));
+  };
+  /** GetEffectiveShape( layer ): the conductor's shape there (only its hole where a via or pad is not flashed). */
+  const shapesOn = (id: string, layer: string): CopperShape[] => {
+    const cs = condsOf(id).filter((c) => c.layers.has(layer));
+    if (cs.length) return cs.map((c) => { const u = unfl && unfl.get(c); return (u && u.get(layer)) || c.shape; });
+    const it = doc.items.get(id); return it && /^gr_/.test(it.kind) ? geomShapes(it.geom, layer) : [];
+  };
+  const padOfId = (id: string): PadInfo | null => {
+    const h = id.indexOf("#"); const it = doc.items.get(h > 0 ? id.slice(0, h) : id); if (!it) return null;
+    if (h > 0) return padsOf(it)[+id.slice(h + 1)] || null;
+    return it.kind === "pad" ? padsOf({ kind: "footprint", node: ["footprint", "", ["at", 0, 0], it.node] } as unknown as KItem)[0] || null : null;
+  };
+  const holeOf = (id: string): Hole | null => {
+    const h = id.indexOf("#"); const it = doc.items.get(h > 0 ? id.slice(0, h) : id); if (!it) return null;
+    if (it.kind === "via") return viaHole(it);
+    if (h > 0 && it.kind === "footprint") { const p = padsOf(it)[+id.slice(h + 1)]; return p ? padHole(it, p) : null; }
+    return null;
+  };
+  if (list.length === 1) {   // a single track of a diff pair: its coupled track's gap and uncoupled-length constraints
+    const it = doc.items.get(list[0]); if (!it || (it.kind !== "segment" && it.kind !== "arc" && it.kind !== "via")) return;
+    const net = NT.key(netOf(it.node)); const m = matchDpSuffix(net); if (!net || !m.rv || !NT.byName.has(m.complement)) return;   // BOARD::DpCoupledNet
+    const ends = (n: SNode): [Pt, Pt] => { const a = pt(n, it.kind === "via" ? "at" : "start") as Pt, b = pt(n, it.kind === "via" ? "at" : "end") as Pt; return [a, b]; };
+    const [a0, a1] = ends(it.node); let best: KItem | null = null, bestD = Infinity;
+    for (const c of doc.items.values()) {
+      if ((c.kind !== "segment" && c.kind !== "arc" && c.kind !== "via") || NT.key(netOf(c.node)) !== m.complement) continue;
+      const p0 = pt(c.node, c.kind === "via" ? "at" : "start"), p1 = pt(c.node, c.kind === "via" ? "at" : "end"); if (!p0 || !p1 || !a0 || !a1) continue;
+      const d = segSegDist(a0, a1, p0 as Pt, p1 as Pt); if (!best || d < bestD) { best = c; bestD = d; }
+    }
+    const A = resolveItem(doc, it.id) as RuleItem, B = best ? resolveItem(doc, best.id) : null; const layer = A.layer;
+    const g = evalRules(ctx, "diff_pair_gap", A, B, layer || null, null);
+    const parts: string[] = []; if (g.min != null && g.min > 0) parts.push("min " + V(g.min)); if (g.opt != null) parts.push("opt " + V(g.opt)); if (g.max != null) parts.push("max " + V(g.max));
+    if (parts.length) add(`DP Gap Constraints: ${parts.join("; ")}`, `(from ${g.name})`);
+    const u = evalRules(ctx, "diff_pair_uncoupled", A, B, layer || null, null);
+    if (u.max != null) add(`DP Max Uncoupled-length: ${V(u.max)}`, `(from ${u.name})`);
+    return;
+  }
+  if (boardEditor && list.length === 2) {
+    const A = resolveItem(doc, list[0]), B = resolveItem(doc, list[1]);
+    if (A && B) {
+      add(itemDescription(doc, list[0], units), itemDescription(doc, list[1], units));
+      const connected = (r: RuleItem) => r.kind === "pad" || r.kind === "segment" || r.kind === "arc" || r.kind === "via" || (r.kind === "zone" && !K.kid(r.node, "keepout")) || (/^gr_/.test(r.kind) && isCu(r.layer));
+      const layersA = itemLayerSet(doc, A), layersB = itemLayerSet(doc, B);
+      if (connected(A) && connected(B)) {
+        const overlap = copper.filter((l) => layersA.has(l) && layersB.has(l));   // LSET::CuStack order
+        if (overlap.length) {
+          const layer = overlap[0];
+          const netA = A.kind === "pad" ? NT.key((padsOf(A.parent as KItem).find((p) => p.node === A.node) as PadInfo).net) : NT.key(netOf(A.node));
+          const netB = B.kind === "pad" ? NT.key((padsOf(B.parent as KItem).find((p) => p.node === B.node) as PadInfo).net) : NT.key(netOf(B.node));
+          if (netA !== netB) add("Resolved Clearance", V(evalRules(ctx, "clearance", A, B, layer, null).min || 0));
+          let gap = Infinity; for (const sa of shapesOn(list[0], layer)) for (const sb of shapesOn(list[1], layer)) gap = Math.min(gap, shapeGap(sa, sb));
+          if (gap < Infinity) add("Actual Clearance", V(gap));
+        }
+      }
+      const hA = hasHole(A) ? holeOf(list[0]) : null, hB = hasHole(B) ? holeOf(list[1]) : null;
+      if (hA || hB) {
+        const cuA = [...layersA].some(isCu), cuB = [...layersB].some(isCu);
+        let layer = "";
+        if (layersB.has(activeLayer) && isCu(activeLayer)) layer = activeLayer;
+        else if (hB && layersA.has(activeLayer) && isCu(activeLayer)) layer = activeLayer;
+        else if (hA && cuB) layer = B.layer || "";
+        else if (hB && cuA) layer = A.layer || "";
+        if (isCu(layer)) {
+          let actual = Infinity;
+          if (hA && cuB) for (const sb of shapesOn(list[1], layer)) actual = Math.min(actual, shapeGap(holeShape(hA), sb));
+          if (hB && cuA) for (const sa of shapesOn(list[0], layer)) actual = Math.min(actual, shapeGap(holeShape(hB), sa));
+          if (actual < Infinity) { add("Resolved Hole Clearance", V(evalRules(ctx, "hole_clearance", A, B, layer, null).min || 0)); add("Actual Hole Clearance", V(actual)); }
+        }
+      }
+      for (const edgeLayer of ["Edge.Cuts", "Margin"]) {
+        let layer = "";
+        if (layersA.has(edgeLayer) && B.kind !== "footprint") { if (layersB.has(activeLayer) && isCu(activeLayer)) layer = activeLayer; else if (isCu(B.layer)) layer = B.layer as string; }
+        else if (layersB.has(edgeLayer) && A.kind !== "footprint") { if (layersA.has(activeLayer) && isCu(activeLayer)) layer = activeLayer; else if (isCu(A.layer)) layer = A.layer as string; }
+        if (layer) add(edgeLayer === "Edge.Cuts" ? "Resolved Edge Clearance" : "Resolved Margin Clearance", V(evalRules(ctx, "edge_clearance", A, B, layer, null).min || 0));
+      }
+    }
+  }
+  if (!rows) {
+    const counts = new Map<number, number>(); for (const id of list) { const t = selType(doc, id); counts.set(t, (counts.get(t) || 0) + 1); }
+    if (counts.size === 1) {
+      add(friendlyName(doc, list[0]), list.length);
+      if (selType(doc, list[0]) === 2) {   // pads: what they all share
+        const lays = new Set<string>(), shapes = new Set<string>(), sizes = new Set<string>(); let size: [number, number] = [0, 0];
+        for (const id of list) {
+          const p = padOfId(id); if (!p) continue;
+          lays.add(padLayerDescribe(doc, p));
+          for (const l of padstackLayers(p)) { shapes.add(l.shape); sizes.add(r6(l.w) + "," + r6(l.h)); size = [l.w, l.h]; }
+        }
+        if (lays.size === 1) add("Layer", [...lays][0]);
+        if (shapes.size === 1) add("Pad Shape", PAD_SHAPE[[...shapes][0]] || "???");
+        if (sizes.size === 1) add("Pad Size", `${V(size[0])} x ${V(size[1])}`);
+      }
+    } else {
+      const parts: string[] = [];
+      for (const [t, n] of [...counts.entries()].sort((a, b) => a[0] - b[0])) parts.push(`${friendlyName(doc, list.find((id) => selType(doc, id) === t) as string)}: ${n}`);
+      add("Selected Items", `${list.length} (${parts.join(", ")})`);
+    }
+    if (boardEditor) {
+      const nets = new Set<string>(), classes = new Set<string>();
+      for (const id of list) {
+        const r = resolveItem(doc, id); if (!r) continue;
+        const isConn = r.kind === "pad" || r.kind === "segment" || r.kind === "arc" || r.kind === "via" || r.kind === "zone" || /^gr_/.test(r.kind);
+        if (!isConn) continue;
+        const nr = r.kind === "pad" ? (padsOf(r.parent as KItem).find((p) => p.node === r.node) as PadInfo).net : netOf(r.node);
+        if (!hasNet(nr)) continue; const key = NT.key(nr);
+        nets.add(unescapeName(key)); classes.add(unescapeName(netclassName(s, key)));
+        if (nets.size > 1 && classes.size > 1) break;
+      }
+      if (nets.size === 1) add("Net", [...nets][0]);
+      if (classes.size === 1) add("Resolved Netclass", [...classes][0]);
+    }
+  }
+  // Selected 2D Length: tracks, arcs and segment / arc / curve shapes (vias add nothing), through groups
+  let lenOk = true, length = 0;
+  const accLen = (id: string): void => {
+    if (!lenOk) return; const it = id.includes("#") || id.includes("@") ? null : doc.items.get(id); if (!it) { lenOk = false; return; }
+    const n = it.node;
+    if (it.kind === "segment" || it.kind === "arc" || it.kind === "gr_line" || it.kind === "gr_arc") {
+      const a = pt(n, "start"), b = pt(n, "end"); if (!a || !b) return;
+      if (it.kind === "arc" || it.kind === "gr_arc") { const m = pt(n, "mid"); const arc = m && K.arcFrom3(a, m, b); length += arc ? arcLength(arc) : Math.hypot(b[0] - a[0], b[1] - a[1]); }
+      else length += Math.hypot(b[0] - a[0], b[1] - a[1]);
+    } else if (it.kind === "gr_curve") { const q = K.bezierPts(K.ptsOf(n)); for (let i = 1; i < q.length; i++) length += Math.hypot(q[i][0] - q[i - 1][0], q[i][1] - q[i - 1][1]); }
+    else if (it.kind === "via") { /* zero 2D length */ }
+    else if (it.kind === "group" || it.kind === "generated") for (const m of K.groupMemberIds(n)) accLen(m);
+    else lenOk = false;
+  };
+  for (const id of list) accLen(id);
+  if (lenOk) add("Selected 2D Length", V(length));
+  if (list.length >= 100) return;
+  // Selected 2D … Area: each item's shape on each enabled layer (ERROR_INSIDE, ARC_LOW_DEF); copper less the holes
+  const enabled = layerNames(doc); let areaOk = true, hasCu = false, hasNonCu = false;
+  const layerPolys = new Map<string, Pt[][]>(), holes: Pt[][] = []; let cc: CopperCtx | null = null;
+  const put = (l: string, ps: Pt[][]) => { const a = layerPolys.get(l); if (a) a.push(...ps); else layerPolys.set(l, ps.slice()); if (copper.includes(l)) hasCu = true; else hasNonCu = true; };
+  const accArea = (id: string): void => {
+    if (!areaOk) return;
+    const fi = id.indexOf("@field:"), h = id.indexOf("#"); const it = doc.items.get(fi > 0 ? id.slice(0, fi) : h > 0 ? id.slice(0, h) : id); if (!it) return;
+    if (it.kind === "footprint" && fi < 0 && h < 0) { areaOk = false; return; }
+    if (it.kind === "image") return;
+    if (it.kind === "group" || it.kind === "generated") { for (const m of K.groupMemberIds(it.node)) accArea(m); return; }
+    const r = resolveItem(doc, id); if (!r) return;
+    const lays = [...itemLayerSet(doc, r)].filter((l) => enabled.has(l));
+    const cs = fi < 0 ? condsOf(id) : [];
+    for (const l of lays) {
+      let ps: Pt[][];
+      if (fi > 0) ps = geomShapes(it.geom.filter((g) => (g as unknown as { field?: string }).field === id.slice(fi + 7)), l).flatMap(shapePolys);
+      else if (r.kind === "pad") {   // PAD::TransformShapeToPolySet: its copper outline, the plain pad shape on its technical layers
+        const c = cs.find((q) => q.layers.has(l)); const p = padOfId(id);
+        if (c) { if (!cc) cc = copperCtx(doc); ps = conductorPolys(c, l, cc, "low"); } else ps = p ? shapePolys(padShape(p)) : [];
+      } else if (cs.length) {
+        const c = cs.find((q) => q.layers.has(l));
+        ps = !c ? [] : c.kind === "zone" ? cs.filter((q) => q.layers.has(l)).flatMap((q) => shapePolys(q.shape)) : conductorPolys(c, l, cc as unknown as CopperCtx, "low");
+      } else ps = geomShapes(it.geom, l).flatMap(shapePolys);
+      put(l, ps);
+    }
+    const hole = holeOf(id);
+    if (hole) holes.push(hole.a[0] === hole.b[0] && hole.a[1] === hole.b[1] ? circleApprox(hole.a[0], hole.a[1], hole.w / 2, ARC_LOW_DEF, "outside") : ovalApprox(hole.a, hole.b, hole.w, ARC_LOW_DEF, "outside"));
+  };
+  for (const id of list) accArea(id);
+  if (!areaOk) return;
+  let total = 0;
+  for (const [l, ps] of layerPolys) {
+    if (copper.includes(l)) { let a = 0; for (const p of subtract(union(ps as FabPt[][]), holes as FabPt[][])) a += polyArea(p); total += Math.abs(a); }   // BooleanSubtract leaves outers and holes, signed
+    else for (const p of ps) total += Math.abs(polyArea(p as FabPt[]));
+  }
+  add(hasCu && !hasNonCu ? "Selected 2D Copper Area" : !hasCu && hasNonCu ? "Selected 2D Area" : "Selected 2D Total Area", msgArea(total, units));
 }

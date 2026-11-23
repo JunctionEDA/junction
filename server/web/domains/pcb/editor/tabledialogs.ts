@@ -17,7 +17,10 @@ import { fontField } from "../dialogs/font-picker";
 import { box, checkField, errorMessage, fmtLen, form, h, lenField, messageBox, openDialog, parseLen, selectField, unitLabel, unitName, type Field } from "./pcbdialogs/ui";
 import { syntaxHelp } from "./syntax-help";
 import { colorPicker } from "./pcbdialogs/color-picker";
-import { boardXref } from "./pcbdialogs/xref";
+import { boardTextVarAutocomplete, boardXref, parentFootprintOf } from "./pcbdialogs/xref";
+/** prefs.ts's itemColorsOverriddenNotice, loaded on use: a static import pulls the editor's documents into this
+ *  module, which the schematic tests load on its own. */
+const itemColorsOverriddenNotice = (body: HTMLElement): void => { void import("../dialogs/prefs").then((m) => m.itemColorsOverriddenNotice(body)); };
 
 const isList = Array.isArray;
 const K = (): KiCadCanvasApi => KiCadCanvas;
@@ -208,10 +211,13 @@ export function cellPropsDialog(ctx: ToolCtx, item: KItem, cells: number[], isPc
   return !!openDialog({ title: "Table Cell Properties", width: isPcb ? 560 : 600, readOnly: ro, noEnter: true,
     extra: opts.editTable ? [{ label: "Edit Table...", fn: () => { apply(); api && api.close(); setTimeout(() => opts.editTable && opts.editTable(), 0); } }] : undefined,
     build(body, a) {
+      if (!isPcb) itemColorsOverriddenNotice(body);   // DIALOG_TABLECELL_PROPERTIES (schematic)
       api = a;
       const genText = !!opts.generated;
       const text = h("textarea", { "data-k": "cell-text", spellcheck: false, readOnly: ro || genText, style: "width:100%;min-height:72px;resize:vertical;white-space:pre-wrap;font:inherit" }) as HTMLTextAreaElement;
       text.value = isMixed("text") ? MIXED : v.text;
+      // a board cell: onCharFn: DoTextVarAutocomplete( GetContextualTextVars( table ) ) (dialog_tablecell_properties.cpp)
+      if (isPcb && !ro && !genText) boardTextVarAutocomplete(text, doc, parentFootprintOf(doc as never, item, table0));
       text.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); ev.stopPropagation(); a.okButton && a.okButton.click(); } });
       setTimeout(() => { text.focus(); text.select(); }, 0);
       const help = h("a", { href: "#", "data-k": "syntax-help", title: "Show syntax help window", style: "white-space:nowrap" }, "Syntax help");
@@ -319,6 +325,7 @@ export function schTableDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode 
   let shown: { bn: string; sn: string } | null = null;   // the strokes as the dialog opened
   return !!openDialog({ title: "Table Properties", width: 640, readOnly: ro, noEnter: true,
     build(body) {
+      itemColorsOverriddenNotice(body);   // DIALOG_TABLE_PROPERTIES (schematic)
       const tw = T.widths.reduce((a, b) => a + b, 0) || 1;
       const cols = Array.from({ length: T.cols }, (_, c) => `${Math.max(0.5, (T.widths[c] || tw / T.cols) / tw * T.cols)}fr`).join(" ");
       const gridEl = h("div", { "data-k": "cells", style: `display:grid;grid-template-columns:${cols};gap:1px;background:var(--line);border:1px solid var(--line);max-height:260px;overflow:auto` });

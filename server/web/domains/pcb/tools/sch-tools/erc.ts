@@ -74,6 +74,8 @@ export interface ErcOpts {
   netName?(inst: number, symbolId: string, pin: string): string | undefined;
   /** the net an item of this sheet is on in the hierarchy's net map (net_not_bus_member compares a bus entry's net with its bus's members) */
   netOfItem?(id: string): { name: string; bus: boolean; prio: number; members: string[] } | undefined;
+  /** the sheet instance's path ("/<root uuid>/<sheet uuids>"), for the shown texts TestTextVars reads */ path?: string | null;
+  /** false when unresolved_variable is ignored: TestTextVars does not run (ERC_SETTINGS::IsTestEnabled) */ textVars?: boolean;
 }
 /** ctx.sheetDocs: Sheetfile (or docId / path) -> parsed doc or its text. */
 export type SheetDocs = NonNullable<SchCtx["sheetDocs"]>;
@@ -132,7 +134,7 @@ export function noConnectAt(doc: KDoc, p: Pt) { return noConnectsAt(doc, p).leng
  *  `len` (mm) is a length the report prints in its units where the text has "%L"; `id` (and `pin`, a symbol pin's
  *  number, or `sheetPin`, a sheet pin's name) name the item on its sheet for the dialog's cross-probe; `uuid` is the
  *  item's own KIID when it is not the id (a pin's). */
-export interface ErcItemRef { x: number; y: number; desc: string; len?: number; id?: string; pin?: string; sheetPin?: string; uuid?: string }
+export interface ErcItemRef { x: number; y: number; desc: string; len?: number; id?: string; pin?: string; sheetPin?: string; uuid?: string; /** the hierarchy run's sheet instance the item is on (ERC_ITEM::SetItemsSheetPaths), when it was told */ sheet?: number }
 const PIN_SHAPE_TEXT: Record<string, string> = { line: "Line", inverted: "Inverted", clock: "Clock", inverted_clock: "Inverted clock", input_low: "Input low", clock_low: "Clock low", output_low: "Output low", edge_clock_high: "Falling edge clock", non_logic: "NonLogic" };
 const unesc = (t: string): string => { const u = (K as unknown as { unescapeText?(s: string): string }).unescapeText; return u ? u(t) : t; };
 /** SCH_PIN::GetItemDescription of a placed symbol's pin: "Symbol U1 Pin 3 [IN+, Input, Line]". */
@@ -420,14 +422,14 @@ export function netTests(insts: ErcNetInstance[], opts?: ErcOpts | null): ErcMar
       left = rest;
       if (near < 0) continue;
       const b = all[near];
-      mark(a.i, "pin_to_pin", pinErrorSeverity(err), a.t.p, `Pins of type ${PIN_TYPE_TEXT[a.t.pin.type]} and ${PIN_TYPE_TEXT[b.t.pin.type]} are connected`, [a.t.item.id, b.t.item.id], [pinItemRef(a.t), pinItemRef(b.t)]);
+      mark(a.i, "pin_to_pin", pinErrorSeverity(err), a.t.p, `Pins of type ${PIN_TYPE_TEXT[a.t.pin.type]} and ${PIN_TYPE_TEXT[b.t.pin.type]} are connected`, [a.t.item.id, b.t.item.id], [Object.assign(pinItemRef(a.t), { sheet: a.i }), Object.assign(pinItemRef(b.t), { sheet: b.i })]);
     }
     if (needs && !hasDriver && !m.nc && !m.open) {
       // one marker on the chosen pin, or with Show all errors one on every pin that needs a driver (the power inputs on
       // a power net, else the pins not on power symbols, else all of them)
       const powerIns = needAll.filter((x) => x.t.pin.type === "power_in"), nonPower = needAll.filter((x) => !x.t.key);
       const flagged = !opts.showAllErrors ? [isPower && powerIns.length ? powerIns[0] : needs] : isPower && powerIns.length ? powerIns : nonPower.length ? nonPower : needAll;
-      for (const x of flagged) mark(x.i, isPower ? "power_pin_not_driven" : "pin_not_driven", "error", x.t.p, isPower ? "Input Power pin not driven by any Output Power pins" : "Input pin not driven by any Output pins", [x.t.item.id], [pinItemRef(x.t)]);
+      for (const x of flagged) mark(x.i, isPower ? "power_pin_not_driven" : "pin_not_driven", "error", x.t.p, isPower ? "Input Power pin not driven by any Output Power pins" : "Input pin not driven by any Output pins", [x.t.item.id], [Object.assign(pinItemRef(x.t), { sheet: x.i })]);
     }
   }
   // ---- ercCheckNoConnects with a flag, ercCheckLabels: each subgraph against the whole net of its name

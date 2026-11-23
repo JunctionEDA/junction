@@ -19,6 +19,7 @@ import { fieldsGrid, messageBox, schXref, selectReferenceNumber, swatch, type Sw
 import { embeddedFilesPanel, embeddedFileBytes } from "../editor/pcbdialogs/fp-3d-panel";
 import { checkField } from "../editor/pcbdialogs/ui";
 import { saveProject } from "./project";
+import { itemColorsOverriddenNotice, sheetColorsOverriddenWarning } from "./prefs";
 import { kicadIcon } from "../../../shared/components/kicon-dom";
 import { PIN_SHAPE_ICONS, PIN_TYPE_ICONS } from "../symedit/model";
 import { openChangeSymbols } from "./change-symbols";
@@ -415,6 +416,7 @@ export function openSheetProperties(ctx: Ctx, item: KItem, opts: SheetOpts = {})
   KD().open({
     title: "Sheet Properties", width: 900, readOnly: ro, cls: "kd-wide", cancel: opts.cancel,
     build(b) {
+      itemColorsOverriddenNotice(b);
       const fh = h("div"); b.append(fh);
       // the Sheetfile cell's GRID_CELL_PATH_EDITOR: the project's other schematic files, relative to this sheet's folder
       const sheetFiles = (): { path: string; here: string }[] => {
@@ -476,6 +478,8 @@ export function openSheetProperties(ctx: Ctx, item: KItem, opts: SheetOpts = {})
       if (fr) fr.value = file;
       const n = L.clone(staged);
       L.writeFields(n, rows, origin);
+      // GetOverrideSchItemColors and a border or background colour that changed: the note, before the colours are set
+      if (JSON.stringify(bc ? bc.get() : st.color) !== JSON.stringify(st.color) || JSON.stringify(fc ? fc.get() : bg) !== JSON.stringify(bg)) sheetColorsOverriddenWarning();
       L.writeStroke(n, { width: lenOf(els.bwidth, st.width), color: bc ? bc.get() : st.color });
       L.put(n, "fill", [["color", ...L.colorVals((fc ? fc.get() : bg) || [0, 0, 0, 0])]], ["uuid"]);
       setFlag(n, "exclude_from_sim", els.exsim.checked); setFlag(n, "in_bom", !els.exbom.checked); setFlag(n, "on_board", !els.exboard.checked); setFlag(n, "dnp", els.dnp.checked);

@@ -31,3 +31,28 @@ export function netStyle(doc: KDoc) {
 export function netNode(doc: KDoc, net: NetRef | null | undefined): SNode { return netStyle(doc) === "name" ? ["net", net && net.name ? net.name : ""] : ["net", net && net.code > 0 ? net.code : 0]; }
 export const hasNet = (n: NetRef | null | undefined): n is NetRef => !!(n && (n.name || n.code > 0));
 export const sameNet = (a: NetRef | null | undefined, b: NetRef | null | undefined) => hasNet(a) && hasNet(b) && (a.name && b.name ? a.name === b.name : a.code === b.code);
+
+// ---------------------------------------------------------------- net chains (NETINFO_ITEM::GetNetChain / GetTerminalPad)
+interface BoardChain { chain: string; pads: [string | null, string | null] }
+interface ChainsApi { parseBoardChains(node: SNode | null | undefined, nets: Map<number, string>): Map<string, BoardChain> }
+const CHAINS = new WeakMap<KDoc, { node: SNode | null | undefined; size: number; map: Map<string, BoardChain> }>();
+/** The board's nets with a chain or a terminal pad, by net name (the (net_chains …) section as the parser reads it). */
+export function boardChains(doc: KDoc): Map<string, BoardChain> {
+  const node = (doc as KDoc & { netChainsNode?: SNode | null }).netChainsNode, nets = (doc.nets || new Map()) as Map<number, string>;
+  const was = CHAINS.get(doc); if (was && was.node === node && was.size === nets.size) return was.map;
+  const api = (K as unknown as { netChains?: ChainsApi }).netChains;
+  const map = api && node ? api.parseBoardChains(node, nets) : new Map<string, BoardChain>();
+  CHAINS.set(doc, { node, size: nets.size, map });
+  return map;
+}
+/** NETINFO_ITEM::GetNetChain of the net named `net`: "" when it is on none. */
+export function netChainOf(doc: KDoc | null | undefined, net: string): string {
+  if (!doc || !net) return ""; const c = boardChains(doc).get(net); return c ? c.chain : "";
+}
+/** The board's nets whose chain is `chain`, in net-code order (BOARD::GetNetInfo). */
+export function chainNets(doc: KDoc, chain: string): string[] {
+  if (!chain) return [];
+  const m = boardChains(doc), out: string[] = [];
+  for (const [, name] of [...((doc.nets || new Map()) as Map<number, string>)].sort((a, b) => a[0] - b[0])) { const c = m.get(name); if (c && c.chain === chain) out.push(name); }
+  return out;
+}

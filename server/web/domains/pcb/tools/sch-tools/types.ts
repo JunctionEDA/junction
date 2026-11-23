@@ -113,6 +113,8 @@ export interface SchDrag {
   /** a paste / duplicate in flight: the ids of the items that only exist on this client */
   local?: Set<string>;
   pasted?: boolean; libs?: string[]; label?: string;
+  /** a paste in flight's caller: told whether it was placed (a placed design block's repeated placement) */
+  after?: (placed: boolean) => void;
   /** a Duplicate of a hover selection: the placed copy is not left selected */
   hover?: boolean;
   /** the lines selected by one end only: SCH_MOVE_TOOL moves that end alone (index into the point list) */
@@ -185,7 +187,12 @@ export type SchState = {
   cursor: Pt | null; cursorClient: Pt | null; prompt: HTMLElement | null; picker: HTMLElement | null; dom: boolean;
   draw: SchDraw | null; highlight: Set<string> | null; sheetJob: SheetJob | null; imageWait: boolean;
   /** Place > Import Sheet "Place as sheet" (SCH_ACTIONS::drawSheetFromFile): the next drawn sheet's name and file */
-  sheetPreset?: { name: string; file: string; armed?: boolean } | null;
+  sheetPreset?: { name: string; file: string; armed?: boolean;
+    /** drawSheetFromDesignBlock: the block's schematic for the new file, its fields (hidden user fields on the sheet),
+     *  the group to put the sheet in (place as group) and the undo label */
+    seed?: string; fields?: [string, string][]; group?: { name: string; libId: string } | null; label?: string;
+    /** told whether a sheet was placed (repeated placement) */
+    after?: (placed: boolean) => void } | null;
   pedit?: PointEdit | null;
   netHL?: NetHighlighter | null;
   dragMode: string; mouseDragMode: string; lineMode: string; posture: boolean;

@@ -963,8 +963,32 @@ function pushPadSettings(): void {
 function exitPadEditMode(): void {
   const doc = E.kdoc as KDoc | null; const id = FP.padEdit; if (!doc || !id) return;
   const ctx = toolCtx(); FP.padEdit = null; leavePadEditContrast();
-  if (doc.items.has(id)) { const r = PT().fpPads.recombinePadChanges(doc, id); ctx.setSelection([]); if (r.changes.length) ctx.commit(r.changes, "Edit Pad"); }
+  if (doc.items.has(id)) { const r = PT().fpPads.recombinePadChanges(doc, id); ctx.setSelection([]); if (r.changes.length) { const n0 = undoStack.length; ctx.commit(r.changes, "Edit Pad"); if (undoStack.length > n0) flagPadEditStep(id, null); } }
   toast("", 1);
+}
+/**
+ * The pad's ENTERED flag travels with its copy in the undo step: commit.Modify( pad ) before explodePad copies it
+ * without the flag, before RecombinePad with it.  PAD_TOOL::OnUndoRedo then enters or leaves Pad Edit Mode for the
+ * pad the undo or redo leaves flagged (no recombine on the way out).
+ */
+function flagPadEditStep(before: string | null, after: string | null): void {
+  const e = undoStack[undoStack.length - 1]; if (!e) return;
+  const pu = e.undoOthers, pr = e.redoOthers;
+  e.undoOthers = () => { if (pu) pu(); padEditOnUndoRedo(before); };
+  e.redoOthers = () => { if (pr) pr(); padEditOnUndoRedo(after); };
+}
+/** PAD_TOOL::OnUndoRedo. */
+function padEditOnUndoRedo(flagged: string | null): void {
+  const doc = E.kdoc as KDoc | null; if (!doc || !isFpEdit()) return;
+  const id = flagged && doc.items.has(flagged) ? flagged : null;
+  if (id === FP.padEdit) return;
+  if (id) { FP.padEdit = id; enterPadEditMode(); }
+  else { FP.padEdit = null; leavePadEditContrast(); toast("", 1); }
+}
+/** PAD_TOOL::enterPadEditMode: the contrast mode is remembered and Normal becomes Dimmed while the pad is edited. */
+function enterPadEditMode(): void {
+  padEditContrast = getInactiveMode(); if (padEditContrast === "normal") setInactiveMode("dim");
+  toast(`Pad Edit Mode.  Press ${keyName("Ctrl+E")} again to exit.`, 0);   // infoBar->ShowMessage( msg, wxICON_INFORMATION )
 }
 /** PAD_TOOL::m_previousHighContrastMode: the inactive-layer mode pad edit mode was entered with. */
 let padEditContrast: ReturnType<typeof getInactiveMode> | null = null;
@@ -977,13 +1001,13 @@ function editPad(): void {
   const id = selectedPadId(); if (!id) return;
   const it0 = doc.items.get(id);
   const ch = (PT().fpPads.explodePadChanges(doc, id) as KChange[]).filter((c) => !(c.kind === "MODIFIED" && c.id === id && it0 && c.sexpr === PT().wrapBoard(it0.node)));   // an unchanged pad is no step (an empty BOARD_COMMIT)
+  const n0 = undoStack.length;
   if (ch.length) ctx.commit(ch, "Edit Pad");
+  if (undoStack.length > n0) flagPadEditStep(null, id);
   ctx.setSelection([]); const pcbSel = CollabTools.pcb && (CollabTools.pcb.state as unknown as { sel?: Set<string> }).sel; if (pcbSel) pcbSel.clear();
   FP.padEdit = id;
-  // PAD_TOOL::enterPadEditMode: the contrast mode is remembered and Normal becomes Dimmed while the pad is edited
-  padEditContrast = getInactiveMode(); if (padEditContrast === "normal") setInactiveMode("dim");
   const it = doc.items.get(id); if (it) E.activeLayer = PT().fpPads.principalLayer(it.node);
-  toast(`Pad Edit Mode.  Press ${keyName("Ctrl+E")} again to exit.`, 0);   // infoBar->ShowMessage( msg, wxICON_INFORMATION )
+  enterPadEditMode();
 }
 /** Somebody saved this footprint (the server's "saved" notice): the saved file is what this copy compares against,
  *  so the '*' goes when the copy here is that file (KiCad's library cache follows the file in the same way). */

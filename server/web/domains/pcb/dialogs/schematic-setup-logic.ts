@@ -37,7 +37,9 @@ export function parityOf(sch: JsonObj): Record<string, boolean> {
   return out;
 }
 
-export interface ChainRow { name: string; nets: string[]; chainClass: string; netClass: string; color: string; from: string; to: string }
+export interface ChainRow { name: string; nets: string[]; chainClass: string; netClass: string; color: string; from: string; to: string;
+  /** CHAIN_ROW::origName (the committed chain's name when the dialog opened) and deletePending */
+  origName?: string; deleted?: boolean }
 type SNode = (string | number | SNode)[];
 const sv = (v: unknown): string => (v === undefined || v === null ? "" : String(v));
 /** The root sheet's committed (net_chain "name" (from ref pin) (to ref pin) (net_class …) (color r g b a) (nets …)). */
@@ -48,14 +50,16 @@ export function chainsOf(nodes: SNode[], classes: JsonObj): ChainRow[] {
     const kid = (k: string): SNode | null => (n.find((c) => Array.isArray(c) && c[0] === k) as SNode) || null;
     const nc = kid("net_class"), col = kid("color"), nets = kid("nets"), f = kid("from"), t = kid("to");
     const name = sv(n[1]);
-    out.push({ name, nets: nets ? nets.slice(1).map(sv) : [], chainClass: sv(classes[name] || ""), netClass: nc ? sv(nc[1]) : "",
+    out.push({ name, origName: name, nets: nets ? nets.slice(1).map(sv) : [], chainClass: sv(classes[name] || ""), netClass: nc ? sv(nc[1]) : "",
       color: col ? `rgba(${+col[1]}, ${+col[2]}, ${+col[3]}, ${+(+col[4]).toFixed(3)})` : "", from: f ? `${sv(f[1])}-${sv(f[2])}` : "", to: t ? `${sv(t[1])}-${sv(t[2])}` : "" });
   }
   return out;
 }
 export const validChainName = (s: string): boolean => !!s && !/["'() ]/.test(s);
 
-export interface ChainState { chains: ChainRow[]; classes: string[] }
+export interface ChainState { chains: ChainRow[]; classes: string[];
+  /** CLASS_ROW::origName of each entry of `classes` ("" for a class added here), and the classes deleted here (by their original name) */
+  classOrig?: string[]; deletedClasses?: string[] }
 
 /** Validate: the class names must be set and distinct (the chain names come from the schematic). */
 export function chainClassError(classes: string[]): string | null {
@@ -191,4 +195,56 @@ export function memberNameError(name: string): string | null { return name === "
 export const RESETTABLE_SCH_SETUP_PAGES = ["Annotation", "Pin Conflicts Map"];
 export function resetButtonState(page: string | null): { label: string; enabled: boolean } {
   return page && RESETTABLE_SCH_SETUP_PAGES.includes(page) ? { label: `Reset ${page} to Defaults`, enabled: true } : { label: "Reset to Defaults", enabled: false };
+}
+
+/** PANEL_SETUP_NET_CHAINS::Validate on the chains: a name on every row, valid characters, no duplicates. */
+export function chainRowsError(rows: ChainRow[]): string | null {
+  const live = rows.map((r, i) => ({ r, i })).filter((x) => !x.r.deleted);
+  for (const { r, i } of live) {
+    if (!r.name) return `Net chain on row ${i + 1} cannot have an empty name.`;
+    if (!validChainName(r.name)) return `Net chain name '${r.name}' contains invalid characters.`;
+    if (live.some((o) => o.i !== i && o.r.name === r.name)) return `Duplicate net chain name '${r.name}' on row ${i + 1}.`;
+  }
+  return null;
+}
+/** COLOR4D( "rgba(r, g, b, a)" ) as the (color r g b a) of a (net_chain …); null for an empty cell (UNSPECIFIED). */
+export function chainColorOf(css: string): [number, number, number, number] | null {
+  const m = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+))?\s*\)/.exec(css || "");
+  return m ? [Math.round(+m[1]), Math.round(+m[2]), Math.round(+m[3]), m[4] === undefined ? 1 : +m[4]] : null;
+}
+/** What ApplyEdits does to one committed chain: its final name (null: deleted), net class and colour. */
+export interface ChainEdit { orig: string; name: string | null; netClass: string; color: [number, number, number, number] | null }
+/**
+ * PANEL_SETUP_NET_CHAINS::ApplyEdits over the committed chains `committed` (their names) and the project's
+ * net_chain_classes `prev`: the renames in row order (RenameCommittedNetChain refuses a name another chain holds at
+ * that moment, and moves the old name's chain class), the colour / net class edits, every row's chain class, the
+ * deletions last (their class entry goes too), then the class list's deletions and renames.
+ */
+export function applyChainEdits(st: ChainState, committed: string[], prev: JsonObj): { edits: ChainEdit[]; classes: JsonObj } {
+  const names = new Set(committed), cls: JsonObj = { ...prev };
+  const setClass = (chain: string, c: string): void => { if (c) cls[chain] = c; else delete cls[chain]; };
+  const cur = st.chains.map((r) => r.origName ?? r.name);
+  st.chains.forEach((r, i) => {
+    if (r.deleted) return;
+    const o = cur[i];
+    if (!o || o === r.name || !names.has(o) || !validChainName(r.name) || names.has(r.name)) return;
+    names.delete(o); names.add(r.name);
+    const c = typeof cls[o] === "string" ? String(cls[o]) : "";
+    if (c) { setClass(o, ""); setClass(r.name, c); }
+    cur[i] = r.name;
+  });
+  for (const r of st.chains) if (!r.deleted) setClass(r.name, r.chainClass);
+  const edits: ChainEdit[] = [];
+  st.chains.forEach((r, i) => {
+    const orig = r.origName ?? r.name;
+    if (r.deleted) { if (orig && names.has(orig)) { names.delete(orig); setClass(orig, ""); edits.push({ orig, name: null, netClass: r.netClass, color: chainColorOf(r.color) }); } return; }
+    if (names.has(cur[i])) edits.push({ orig, name: cur[i], netClass: r.netClass, color: chainColorOf(r.color) });
+  });
+  const orig = st.classOrig || st.classes.map((c) => c);
+  for (const d of st.deletedClasses || []) for (const [k, v] of Object.entries({ ...cls })) if (v === d) setClass(k, "");
+  st.classes.forEach((n, i) => {
+    const o = orig[i];
+    if (o && o !== n) for (const [k, v] of Object.entries({ ...cls })) if (v === o) setClass(k, n);
+  });
+  return { edits, classes: cls };
 }

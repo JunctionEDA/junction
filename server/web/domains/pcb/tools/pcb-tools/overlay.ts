@@ -2,6 +2,7 @@
 import type { BoardDoc, CopperShape, DesignSettings, DrawState, GeomPrim, PcbCtx, Pt, RatsnestLine, SnapAnchor, SnapType } from "./types";
 import { appGlobal, editorState, netlistCached, netNameOf, sizesOf } from "./app-state";
 import { drawArcPreview } from "./arcs";
+import { gePreviewShapes } from "./graphic-edit";
 import { dimensionLabel, drawStatusPopup, drawTwoPointAssistant, textNextToCursor, AUX_ITEMS_COLOR, drawPickerPrompt } from "./assistants";
 import { DIM_TYPE, dimensionNode, snap45 } from "./dimensions";
 import type { DimSpec } from "./dimensions";
@@ -22,7 +23,9 @@ import { clearConstruction, constructionBatches, hasActiveConstruction, snapLine
 import { padOnLayer, padsOf } from "./route-geom";
 import { padOutline as drcPadOutline } from "./drc-zones";
 import { PAD_TOOLS, masterPad } from "./pad-tool";
-import { drawDragPreview, drawRoute } from "./route-preview";
+import { drawDragPreview, drawRoute, previewColor } from "./route-preview";
+import { drawSpreadPreview } from "./spread";
+import { drawViaStackPreview } from "./via-stack";
 import { ANCHOR, CLEARANCE_MODE, HALO_COLOR, HL, K, RATSNEST, S, VIA, bind } from "./state";
 import { drawTune } from "./tuning-patterns";
 import { drawGenEditPreview, drawTuningSelection } from "./tuning-edit";
@@ -373,6 +376,19 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
   }
   // drag in progress (ROUTER::moveDragging): the rebuilt lines over the hidden originals
   drawDragPreview(c, ctx, view, px);
+  // GRAPHIC_EDIT_TOOL's CONSTRUCTION_GEOM preview: the extended shape, or the span a trim removes, 4 px wide
+  { const gp = gePreviewShapes();
+    if (gp) {
+      const w = 4 * px * (view.dpr || 1); c.save(); c.globalAlpha = 1; c.strokeStyle = gp.color; c.lineWidth = w; c.setLineDash([]);
+      for (const g of gp.shapes) {
+        c.beginPath();
+        if (g.shape === "line") { c.moveTo(g.start[0], g.start[1]); c.lineTo(g.end[0], g.end[1]); }
+        else if (g.shape === "circle") c.arc(g.start[0], g.start[1], Math.hypot(g.end[0] - g.start[0], g.end[1] - g.start[1]), 0, Math.PI * 2);
+        else { const a = K.arcFrom3(g.start, g.mid!, g.end) as { x: number; y: number; r: number; a0: number; a1: number; anticlockwise: boolean } | null; if (a) c.arc(a.x, a.y, a.r, a.a0, a.a1, a.anticlockwise); }
+        c.stroke();
+      }
+      c.restore();
+    } }
   drawGenEditPreview(c, ctx);   // a tuning pattern being edited: its re-tuned line over the hidden originals
   if (!S.route && !S.draw && !S.drag && !S.modTool) drawTuningSelection(c, ctx, px);   // PCB_TUNING_PATTERN::ViewDraw while selected
   drawEditPoints(c, ctx, px);   // PCB_POINT_EDITOR's EDIT_POINTS over the selected item
@@ -387,7 +403,7 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
   if (isTuneTool(S.modTool)) drawTune(c, ctx, px);
   // drawing preview
   if (S.draw) {
-    const d = S.draw; const layer = d.layer || (d.shape === "zone" || d.shape === "thievingzone" ? S.layer : d.shape === "rulearea" ? RULE_AREA_LAYERS[0] : S.gfxLayer);
+    const d = S.draw; const layer = d.layer || (d.shape === "zone" || d.shape === "thievingzone" || d.shape === "viastitch" ? S.layer : d.shape === "rulearea" ? RULE_AREA_LAYERS[0] : S.gfxLayer);
     c.globalAlpha = 0.85; c.strokeStyle = color(layer); c.lineWidth = Math.max(drawWidth(layer), 1.5 * px);
     const box = (): [number, number, number, number] => [Math.min(d.start[0], d.cur[0]), Math.min(d.start[1], d.cur[1]), Math.abs(d.cur[0] - d.start[0]), Math.abs(d.cur[1] - d.start[1])];
     if (d.shape === "gline") line(c, d.start, d.cur);
@@ -481,6 +497,8 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
       c.beginPath(); c.arc(a[0], a[1], 8 * px, 0, Math.PI * 2); c.stroke();
     }
   }
+  drawViaStackPreview(c, cpx);   // the microvia stack being placed (DRAWING_TOOL::PlaceMicroviaStack's preview)
+  drawSpreadPreview(c, previewColor);   // the tracks being spread, where they would go
   // cursor: the via about to be placed, and the magnetic snap marker
   const hv = S.hover;
   if (hv && S.modTool) {

@@ -63,6 +63,14 @@ export function renderFootprintPreview(canvas: HTMLCanvasElement, fpid: string, 
   draw(canvas, doc, { hidden: new Set<string>() }, 60, zoom);
 }
 
+/** DESIGN_BLOCK_PREVIEW_WIDGET::DisplayDesignBlock: a design block's schematic or layout (a whole .kicad_sch /
+ *  .kicad_pcb), fitted to the pane; an unreadable file leaves the pane blank. */
+export function renderDesignBlockPreview(canvas: HTMLCanvasElement, kind: "sch" | "pcb", text: string): void {
+  let doc: KDoc;
+  try { doc = K().parseDoc(text); } catch { clearPreview(canvas, kind === "sch" ? "symbol" : "footprint"); return; }
+  draw(canvas, doc, kind === "pcb" ? { hidden: new Set<string>() } : {}, kind === "pcb" ? 60 : 24);
+}
+
 // ---------------------------------------------------------------- the choosers' live previews
 
 /** A chooser pane's own view over the fitted one: the wheel zoom about a point and the drag pan (reset on a new item). */

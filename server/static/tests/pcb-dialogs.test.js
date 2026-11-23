@@ -290,7 +290,7 @@ test("stackup: read, a dielectric sub-layer added, written back with addsublayer
   assert.strictEqual(L.length, 7); assert.strictEqual(B.stackupLayersThickness(L), 1.6);
   const d = L.find((l) => l.name === "dielectric 1");
   d.subs.push({ thickness: 0.1, material: "FR4", epsilonR: 4.5, lossTangent: 0.02 });
-  const text = B.stackupText(L, B.boardFinish(setup), true);
+  const text = B.stackupText(L, B.boardFinish(setup), true, false, 20240108);   // the board's version: a constant model at 1 GHz is implied
   assert.match(text, /\(layer "dielectric 1" \(type "core"\) \(thickness 1\.51\) \(material "FR4"\) \(epsilon_r 4\.5\) \(loss_tangent 0\.02\) addsublayer \(thickness 0\.1\)/);
   assert.match(text, /\(dielectric_constraints yes\)/);
   const back = B.stackupLayers(B.setupWithStackup(setup, text));

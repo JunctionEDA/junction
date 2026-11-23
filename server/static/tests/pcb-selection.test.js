@@ -252,11 +252,12 @@ test("selection context menu: Cancel, Enter Group, Leave Group, Clear Net Highli
   const list = evaluate(menuFor(c, false), c);
   const flat = list.map((e) => (e.sep ? "-" : e.menu ? ">" + e.menu.title : e.act.split("::").pop()));
   const ge = flat.indexOf("groupEnter"), gl = flat.indexOf("groupLeave"), ch = flat.indexOf("clearHighlight");
-  assert.ok(ge >= 0 && gl === ge + 1 && ch === gl + 1 && flat[ch + 1] === "-", flat.join(" "));
+  // pcb_selection_tool.cpp:348-354: Place / Save to Linked Design Block follow Leave Group on groupEnterCondition
+  assert.ok(ge >= 0 && gl === ge + 1 && flat[gl + 1] === "placeLinkedDesignBlock" && flat[gl + 2] === "saveToLinkedDesignBlock" && ch === gl + 3 && flat[ch + 1] === "-", flat.join(" "));
   const sel = list.find((e) => e.menu && e.menu.title === "Select");
   assert.ok(sel, flat.join(" "));
   const sub = (sel.items || []).map((e) => (e.sep ? "-" : e.act.split("::").pop()));
-  assert.deepEqual(sub, ["filterSelection", "-", "selectConnection", "selectNet", "selectSameSheet", "selectOnSchematic", "selectUnconnected", "grabUnconnected"]);
+  assert.deepEqual(sub, ["filterSelection", "-", "selectConnection", "selectNet", "selectNetChain", "selectSameSheet", "selectOnSchematic", "selectUnconnected", "grabUnconnected"]);
 });
 
 test("Selection Filter pane: KiCad's labels and the flash of the boxes that turned a click away", () => {

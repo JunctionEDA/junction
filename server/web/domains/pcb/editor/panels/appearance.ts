@@ -268,6 +268,8 @@ function setNetColor(name: string, color: string | null): void {
 
 /** The net class a net belongs to (project net settings: assignments, then patterns, else Default). */
 export function netClassOf(name: string): string { const n = nets().nets.find((x) => x.name === name); return n ? n.netclass : "Default"; }
+// ${NET_CLASS(pad)} in a board text (FOOTPRINT::ResolveTextVar: the pad's effective net class)
+if (typeof KiCadCanvas !== "undefined" && KiCadCanvas.pcbVars) KiCadCanvas.pcbVars.netClass = netClassOf;
 
 // ---------------------------------------------------------------- reading the editor's own toggles
 const pcbState = () => { const P = pcbTools(); return P ? P.state : null; };

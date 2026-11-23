@@ -9,11 +9,12 @@ import { connectedRun, ptKey } from "./connected";
 import { settingsOf } from "./dialogs";
 import { dpNetPair } from "./diffpair";
 import { assembleLine, peq, trackEnds } from "./dragger";
+import { IU_PER_PS, canCalculateLengthForDelay, ldContext, msgTime, netTuningProfileName } from "./length-delay";
 import { designSettings, netClearance } from "./drc";
 import { sizeUnits } from "./edit-commands";
 import { distSeg } from "./hit";
 import { TUNE_IU, TUNE_MSG_SELECT, chPoints, meanderDefaults, meanderMove, tuneCopy } from "./meander";
-import { msgValue, routedLength, unescapeName } from "./msgpanel";
+import { msgValue, unescapeName } from "./msgpanel";
 import { netTable } from "./netlist";
 import { evalRuleConstraint, parseDru } from "./dru";
 import { ruleSizes } from "./rule-resolver";
@@ -23,7 +24,7 @@ import { segmentNode } from "./nodes";
 import { line } from "./overlay";
 import { arcTrackNode } from "./posture";
 import { HL, K, S, saturated } from "./state";
-import { applyRuleTarget, coupledLength, fmtG, inTuneOutline, tuneBegin, tuneDp, tuneFinish, tuneMode, tunePick, tunePieces, tuneTarget, tuneUpdate } from "./tuning-tool";
+import { applyRuleTarget, chainDelayIU, chainMM, coupledPath, fmtG, inTuneOutline, lineChainIU, moveSettings, nearestOnChain, polyPtsText, tuneBegin, tuneDp, tuneFinish, tuneMode, tunePick, tunePieces, tuneTrackLine, tuneUpdate, tuningPathLength } from "./tuning-tool";
 import { clone, color, pt, r6, widthOf } from "./util";
 import { closestOnSeg } from "./point-editor";
 import { pathHits, routeObstacles, simplifyPts } from "./walkaround";
@@ -37,7 +38,22 @@ export function tuningPatternInfo(gen: Pick<KItem, "node">) {
   const num = ((k: string, d: number | null) => { const c = kid(k); return c ? K.num(c[1]) : d; }) as { (k: string, d: number): number; (k: string, d: null): number | null };   // the default passes through
   const bool = (k: string, d: boolean) => { const c = kid(k); return c ? (c.length < 2 || K.str(c[1]) === "yes") : d; };
   const str = (k: string) => { const c = kid(k); return c ? K.str(c[1]) : ""; };
-  const ptsOf = (k: string): Pt[] | null => { const c = kid(k); const p = c && K.kid(c, "pts"); return p ? (p.slice(1).filter((xy) => Array.isArray(xy) && xy[0] === "xy") as SNode[]).map((xy) => [K.num(xy[1]), K.num(xy[2])]) : null; };
+  // SHAPE_LINE_CHAIN as parsePolyPts reads it: (xy …) points and (arc (start) (mid) (end)) arcs
+  const chOf = (k: string): Chain | null => {
+    const c = kid(k); const p = c && K.kid(c, "pts"); if (!p) return null; const out: Chain = [];
+    const xyOf2 = (n: SNode | null | undefined): Pt | null => (n ? [K.num(n[1]), K.num(n[2])] : null);
+    for (const e of p.slice(1)) {
+      if (!Array.isArray(e)) continue;
+      if (e[0] === "xy") out.push({ p: [K.num(e[1]), K.num(e[2])] });
+      else if (e[0] === "arc") {
+        const a = xyOf2(K.kid(e as SNode, "start")), m = xyOf2(K.kid(e as SNode, "mid")), b = xyOf2(K.kid(e as SNode, "end")); if (!a || !m || !b) continue;
+        const last = out[out.length - 1]; if (!last || !peq(last.p, a)) out.push({ p: a });
+        out.push({ p: b, m });
+      }
+    }
+    return out;
+  };
+  const ptsOf = (k: string): Pt[] | null => { const ch = chOf(k); return ch ? ch.map((n) => n.p) : null; };
   const st = meanderDefaults(); const I = (v: number) => Math.round(v * TUNE_IU);
   st.minAmp = I(num("min_amplitude", 0.2)); st.maxAmp = I(num("max_amplitude", 1)); st.spacing = I(num("min_spacing", 0.6));
   st.crPct = num("corner_radius_percent", 80); st.round = bool("rounded", true); st.singleSided = bool("single_sided", false);
@@ -46,9 +62,12 @@ export function tuningPatternInfo(gen: Pick<KItem, "node">) {
   const opt = num("target_length", null);
   if (opt != null) st.target = { min: I(num("target_length_min", opt - 0.1)), opt: I(opt), max: I(num("target_length_max", opt + 0.1)) };
   const so = num("target_skew", null); if (so != null) st.skew = { min: I(num("target_skew_min", so - 0.1)), opt: I(so), max: I(num("target_skew_max", so + 0.1)) };
+  st.isTimeDomain = bool("is_time_domain", false);
+  const D = (v: number) => Math.round(v * IU_PER_PS), dOpt = num("target_delay", null);   // set_iu: ps
+  if (dOpt != null) st.targetDelay = { min: D(num("target_delay_min", dOpt)), opt: D(dOpt), max: D(num("target_delay_max", dOpt)) };
   const lay = kid("layer");
   const xyOf = (k: string): Pt | null => { const c = kid(k); const p = c && K.kid(c, "xy"); return p ? [K.num(p[1]), K.num(p[2])] : null; };
-  return { st, layer: lay ? K.str(lay[1]) : "F.Cu", base: ptsOf("base_line"), coupled: ptsOf("base_line_coupled"), mode: str("tuning_mode") || "single",
+  return { st, layer: lay ? K.str(lay[1]) : "F.Cu", base: ptsOf("base_line"), coupled: ptsOf("base_line_coupled"), baseCh: chOf("base_line"), coupledCh: chOf("base_line_coupled"), mode: str("tuning_mode") || "single",
     origin: xyOf("origin"), end: xyOf("end"), status: str("last_status"), tuningLength: num("last_tuning_length", null), netName: str("last_netname"),
     width: num("last_track_width", 0.25), gap: num("last_diff_pair_gap", 0), members: K.groupMemberIds(n) };
 }
@@ -56,14 +75,14 @@ export function tuningPatternInfo(gen: Pick<KItem, "node">) {
 export function baselineOps(doc: BoardDoc, gen: Pick<KItem, "node">) {
   const T = tuningPatternInfo(gen); const ops: BranchOp[] = []; const mem = T.members.map((id: string) => doc.items.get(id)).filter(Boolean) as KItem[];
   for (const it of mem) ops.push({ del: it!.id });
-  const lines = [T.base].concat(T.mode === "diff_pair" && T.coupled ? [T.coupled] : []);
+  const lines = [T.baseCh].concat(T.mode === "diff_pair" && T.coupledCh ? [T.coupledCh] : []);
   const added: { node: SNode; net: NetRef; width: number; coupled: boolean }[] = [];
   const tracks = mem.filter((it: KItem) => it.kind === "segment" || it.kind === "arc");
   // the base line is last_netname's (the members on it otherwise); the coupled one is its partner net's
   const NT = netTable(doc); const named = T.netName ? tracks.find((it) => netOf(it.node).name === T.netName) : null;
   let mainNet: NetRef | null = named ? netOf(named.node) : null;
-  lines.forEach((base, li) => {
-    if (!base || base.length < 2) return;
+  lines.forEach((baseCh, li) => {
+    if (!baseCh || baseCh.length < 2) return; const base = baseCh.map((n) => n.p);
     const near = (it: KItem) => { const a = pt(it.node, "start"); return a && base.some((q, i) => i + 1 < base.length && distSeg(a[0], a[1], q[0], q[1], base[i + 1][0], base[i + 1][1]) < Math.max(T.width, 0.01) * 4 + 1.2); };
     let net: NetRef | null = null;
     if (li === 0) net = mainNet;
@@ -74,7 +93,8 @@ export function baselineOps(doc: BoardDoc, gen: Pick<KItem, "node">) {
     const width = tmpl ? widthOf(tmpl.node, T.width) : T.width;
     for (let i = 0; i + 1 < base.length; i++) {
       if (peq(base[i], base[i + 1])) continue;
-      const node = segmentNode(doc, base[i], base[i + 1], width, T.layer, net); node.push(["uuid", K.newUuid()]); ops.push({ add: node }); added.push({ node, net: net!, width, coupled: li > 0 });
+      const m = baseCh[i + 1].m;   // an arc of the base line comes back as an arc track
+      const node = m ? arcTrackNode(doc, base[i], m, base[i + 1], width, T.layer, net) : segmentNode(doc, base[i], base[i + 1], width, T.layer, net); node.push(["uuid", K.newUuid()]); ops.push({ add: node }); added.push({ node, net: net!, width, coupled: li > 0 });
     }
   });
   return { ops, added, info: T };
@@ -112,33 +132,46 @@ export function regenerateTuningBranch(ctx: PcbCtx, gen: Pick<KItem, "id" | "kin
   const dual = info.mode === "diff_pair";
   const scratch = branchDoc(doc, ops);
   const seedId = K.str(K.kid(added[0].node, "uuid")![1]); const seed = scratch.items.get(seedId); if (!seed) return null;
-  const line = assembleLine(scratch, seed); if (!line) return null;
-  const st = tuneCopy(info.st); st.keepEndpoints = true;
+  const line = tuneTrackLine(scratch, seed); if (!line) return null;
+  const ld = ldContext(scratch, settingsOf(ctx));
   const ist = tuneCopy(info.st); const ruled = applyRuleTarget(scratch, ist, info.mode, seed, null);   // Update: a custom rule's target unless overridden
-  if (ruled) { st.target = ist.target; st.skew = ist.skew; }
-  const nearOnLine = (p: Pt) => { let best: Pt = line.pts[0], bd = Infinity; for (let i = 0; i + 1 < line.pts.length; i++) { const q = closestOnSeg(p, line.pts[i], line.pts[i + 1]); const d = Math.hypot(q[0] - p[0], q[1] - p[1]); if (d < bd) { bd = d; best = q; } } return [r6(best[0]), r6(best[1])]; };
+  if (!ruled && !ist.overrideCustomRules && info.mode !== "diff_pair_skew") {   // EditStart: no rule, the netclass tuning profile's time domain flag
+    const p = ld.profiles.get(netTuningProfileName(ld.s, line.netKey)); if (p) ist.isTimeDomain = p.enableTimeDomain;
+  }
+  // Update: a time domain pattern that is not new needs a delay model, else nothing changes
+  if (ist.isTimeDomain && !canCalculateLengthForDelay(ld, { net: line.netKey, layer: line.layer })) return null;
+  const nearOnLine = (p: Pt) => { const q = nearestOnChain(line.ch!, p).q; return [r6(q[0]), r6(q[1])]; };
   let origin = nearOnLine(info.origin || info.base![0]), end = nearOnLine(info.end || info.base![info.base!.length - 1]);
   if (Math.hypot(end[0] - origin[0], end[1] - origin[1]) < 0.1) { origin = info.base![0]; end = info.base![info.base!.length - 1]; }   // "Don't allow points too close"
-  if (info.mode === "diff_pair_skew") { const pair = dpNetPair(scratch, line.net); if (!pair) return null; st.target = tuneTarget(ist, coupledLength(scratch, pair, line.netKey, origin)); }
+  const mine = tuningPathLength(ld, seedId);
+  const TP: Parameters<typeof moveSettings>[0] = { st: ist, coupled: null, ld, netKey: line.netKey, layer: line.layer, width: line.width, lineLength: mine.length, lineDelay: mine.delay, dp: null, dpGap: info.gap };
+  if (info.mode === "diff_pair_skew") {
+    const pair = dpNetPair(scratch, line.net); if (!pair) return null; const cp = coupledPath(scratch, pair, line.netKey, origin, ld);
+    Object.assign(TP, { coupled: cp.length, coupledDelay: cp.delay, lastLength: mine.length, lastDelay: mine.delay });
+  }
   const I = (p: Pt) => [p[0] * TUNE_IU, p[1] * TUNE_IU];
   const r = line.width / 2, clearance = netClearance(settingsOf(ctx), line.netKey);
+  const delayOf = ist.isTimeDomain ? chainDelayIU(ld, { net: line.netKey, layer: line.layer }) : null;
+  let st = moveSettings(TP);
   let res: TuneResult, lineC: TrackLine | null = null;
   if (dual) {
     // DP_MEANDER_PLACER on both base lines: the coupled one is the partner net's line through its restored base line
     const cSeed = added.find((a) => a.coupled); const cIt = cSeed && scratch.items.get(K.str(K.kid(cSeed.node, "uuid")![1]));
-    lineC = cIt ? assembleLine(scratch, cIt) : null; if (!lineC || !cIt) return null;
+    lineC = cIt ? tuneTrackLine(scratch, cIt) : null; if (!lineC || !cIt) return null;
     const NT = netTable(scratch), pair = dpNetPair(scratch, line.net); if (!pair) return null;
-    const lenMine = routedLength(scratch, seedId), lenOther = routedLength(scratch, cIt.id);
+    const other = tuningPathLength(ld, cIt.id);
     const gap = info.gap > 0 ? info.gap : 0.1;
+    const dp = { line: lineC, net: lineC.net, netKey: lineC.netKey, mineIsP: NT.key(pair.P) === line.netKey, gap, lenMine: mine.length, lenOther: other.length, delayMine: mine.delay, delayOther: other.delay };
+    st = moveSettings(Object.assign({}, TP, { dp, lineLength: Math.max(mine.length, other.length), lineDelay: Math.max(mine.delay, other.delay) }));
     const O = routeObstacles(scratch, settingsOf(ctx), line.netKey, line.layer, null, new Set(lineC.ids));
     const hits = (ch: Chain) => pathHits(O, chPoints(ch).map((p) => [p[0] / TUNE_IU, p[1] / TUNE_IU]), r).length > 0;
-    st.target = ist.target;
-    res = tuneDp({ line, origin, end, cursor: end, width: line.width, clearance, dp: { line: lineC, net: lineC.net, netKey: lineC.netKey, mineIsP: NT.key(pair.P) === line.netKey, gap, lenMine, lenOther } }, st, I, hits);
+    res = tuneDp({ line, origin, end, cursor: end, width: line.width, clearance, dp }, st, I, hits, delayOf);
   } else {
     const O = routeObstacles(scratch, settingsOf(ctx), line.netKey, line.layer);
     const collides = (ch: Chain) => pathHits(O, chPoints(ch).map((p) => [p[0] / TUNE_IU, p[1] / TUNE_IU]), r).length > 0;
-    res = meanderMove({ pts: line.pts.map(I), origin: I(origin), end: I(end), cursor: I(end), st, width: Math.round(line.width * TUNE_IU),
-      clearance: Math.round(clearance * TUNE_IU), lineLength: routedLength(scratch, seedId) * TUNE_IU, collides });
+    const ch = lineChainIU(line);
+    res = meanderMove({ pts: chPoints(ch), ch, origin: I(origin), end: I(end), cursor: I(end), st, width: Math.round(line.width * TUNE_IU),
+      clearance: Math.round(clearance * TUNE_IU), lineLength: mine.length * TUNE_IU, lineDelay: mine.delay, delayOf, collides });
   }
   // the rebuilt line(s) onto the scratch board: kept segments stay, the rest of each line is replaced
   const ops2: BranchOp[] = [], members: string[] = [];
@@ -160,17 +193,20 @@ export function regenerateTuningBranch(ctx: PcbCtx, gen: Pick<KItem, "id" | "kin
   const g = clone(gen.node);
   const setKid = (k: string, ...v: SAtom[]) => { const c = K.kid(g, k); if (c) c.splice(1, c.length - 1, ...v); };
   const xy = (p: Pt): SNode => ["xy", +fmtG(p[0]), +fmtG(p[1])];
-  const base = res.baseline.map((n: { p: Pt }) => [r6(n.p[0] / TUNE_IU), r6(n.p[1] / TUNE_IU)]);
-  const bl = K.kid(g, "base_line"); if (bl && base.length >= 2) bl.splice(1, bl.length - 1, ["pts", ...base.map(xy)]);
-  const cbase = res.baselineCoupled ? res.baselineCoupled.map((n: { p: Pt }) => [r6(n.p[0] / TUNE_IU), r6(n.p[1] / TUNE_IU)]) : null;
-  const blc = K.kid(g, "base_line_coupled"); if (blc && cbase && cbase.length >= 2) blc.splice(1, blc.length - 1, ["pts", ...cbase.map(xy)]);
+  const baseCh = chainMM(res.baseline), base = baseCh.map((n) => n.p);
+  const bl = K.kid(g, "base_line"); if (bl && base.length >= 2) bl.splice(1, bl.length - 1, K.parse(polyPtsText(baseCh)) as SNode);
+  const cbaseCh = res.baselineCoupled ? chainMM(res.baselineCoupled) : null;
+  const blc = K.kid(g, "base_line_coupled"); if (blc && cbaseCh && cbaseCh.length >= 2) blc.splice(1, blc.length - 1, K.parse(polyPtsText(cbaseCh)) as SNode);
   if (base.length >= 2) { const o = K.kid(g, "origin"); if (o) o.splice(1, o.length - 1, xy(base[0])); const e = K.kid(g, "end"); if (e) e.splice(1, e.length - 1, xy(base[base.length - 1])); }
   const side = res.settings.initialSide < 0 ? "left" : res.settings.initialSide > 0 ? "right" : "default"; setKid("initial_side", side);
   if (ruled) {
     const mm = (v: number) => +fmtG(v / TUNE_IU);
+    const ps = (v: number) => +fmtG(v / IU_PER_PS);
     if (info.mode === "diff_pair_skew") { setKid("target_skew", mm(ist.skew.opt)); setKid("target_skew_min", mm(ist.skew.min)); setKid("target_skew_max", mm(ist.skew.max)); }
     else { setKid("target_length", mm(ist.target.opt)); setKid("target_length_min", mm(ist.target.min)); setKid("target_length_max", mm(ist.target.max)); }
+    if (info.mode !== "diff_pair_skew") { setKid("target_delay", ps(ist.targetDelay.opt)); setKid("target_delay_min", ps(ist.targetDelay.min)); setKid("target_delay_max", ps(ist.targetDelay.max)); }
   }
+  setKid("is_time_domain", ist.isTimeDomain ? "yes" : "no");
   setKid("last_status", res.status); setKid("last_tuning_length", +fmtG(res.length / TUNE_IU));
   const mk = K.kid(g, "members"); if (mk) mk.splice(1, mk.length - 1, ...members.slice().sort()); else g.push(["members", ...members.slice().sort()]);
   ops2.push({ set: gen.id, node: g });
@@ -216,26 +252,34 @@ export function tuneClick(ctx: PcbCtx, mm: Pt) {
 export interface TuneStatus { scope: string; label: string; value: string; min: string; max: string }
 export function tuneStatus(ctx: PcbCtx): TuneStatus | null {
   const U = S.tune; const doc = ctx.doc; const units = sizeUnits();
-  let net = null, len = null; const skew = tuneMode() === "skew";
-  if (U.pattern) { net = U.pattern.net; len = U.pattern.res ? U.pattern.res.length / TUNE_IU : U.pattern.lineLength; if (U.pattern.coupled != null) len -= U.pattern.coupled; }
-  else if (U.picker) {
-    const it = doc.items.get(U.picker); if (!it) return null; net = netOf(it.node); len = routedLength(doc, it.id);
-    if (skew) { const pair = dpNetPair(doc, net); const [a, b] = trackEnds(it); if (pair && a && b) len -= coupledLength(doc, pair, netTable(doc).key(net), [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]); }
+  let net = null, len = null, delay = 0; const skew = tuneMode() === "skew";
+  const st = U.pattern ? U.pattern.st : S.tuneSettings[tuneMode()]; const td = !!st.isTimeDomain;
+  if (U.pattern) {
+    const T = U.pattern; net = T.net; len = T.res ? T.res.length / TUNE_IU : T.lineLength; if (T.coupled != null) len -= T.coupled;
+    delay = T.res && td ? T.res.delay : T.lineDelay || 0; if (T.coupled != null) delay -= T.coupledDelay || 0;   // TuningDelayResult
+  } else if (U.picker) {
+    const it = doc.items.get(U.picker); if (!it) return null; net = netOf(it.node);
+    const ld = ldContext(doc, settingsOf(ctx)); const mine = tuningPathLength(ld, it.id); len = mine.length; delay = mine.delay;
+    if (skew) { const pair = dpNetPair(doc, net); const [a, b] = trackEnds(it); if (pair && a && b) { const cp = coupledPath(doc, pair, netTable(doc).key(net), [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], ld); len -= cp.length; delay -= cp.delay; } }
   } else return null;
   const name = netNameOf(ctx, net);
   // the skew tuner shows the pattern's skew window; the length tuners the net's LENGTH_CONSTRAINT straight from the
   // rules (a track of the net stands for it), "---" without one or when the rule's severity is ignore
   const mm = (v: number) => msgValue(v / TUNE_IU, units).replace(/ (mm|mils|in)$/, "");
-  const st = U.pattern ? U.pattern.st : S.tuneSettings[tuneMode()];
+  const ps = (as: number) => (as / IU_PER_PS).toFixed(2);   // MessageTextFromValue( TIME ) without units
   let min = "---", max = "---";
-  if (skew) { min = mm(st.skew.min); max = mm(st.skew.max); }
+  if (skew) { if (td) { min = ps(st.skewDelay.min); max = ps(st.skewDelay.max); } else { min = mm(st.skew.min); max = mm(st.skew.max); } }
   else if (S.ruleConstraint && net) {
     const NT = netTable(doc), k = NT.key(net); let rep: KItem | null = null;
     for (const it of doc.items.values()) if ((it.kind === "segment" || it.kind === "arc") && NT.key(netOf(it.node)) === k) { rep = it; break; }
     const c = rep ? S.ruleConstraint(doc, "length", rep, null) : null;
-    if (c && c.severity !== "ignore") { min = mm((c.min || 0) * TUNE_IU); max = c.max != null ? mm(c.max * TUNE_IU) : "---"; }
+    if (c && c.severity !== "ignore") {
+      if (c.timeDomain) { min = (c.min || 0).toFixed(2); max = c.max != null ? c.max.toFixed(2) : "---"; }
+      else { min = mm((c.min || 0) * TUNE_IU); max = c.max != null ? mm(c.max * TUNE_IU) : "---"; }
+    }
   }
-  return { scope: name ? unescapeName(name) : "", label: skew ? "current skew" : "current length", value: (skew ? "Skew: " : "Net: ") + msgValue(len, units), min, max };
+  const value = td ? msgTime(delay) : msgValue(len, units);
+  return { scope: name ? unescapeName(name) : "", label: skew ? "current skew" : td ? "current delay" : "current length", value: (skew ? "Skew: " : "Net: ") + value, min, max };
 }
 /**
  * TUNING_STATUS_VIEW_ITEM::ViewDraw in the stroke font with KiCad's preview metrics (GetConstantGlyphHeight: header

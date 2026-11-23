@@ -20,13 +20,17 @@ import { loadFab } from "../fab-outputs";
 import { selectionIds } from "../gestures";
 import { prefs } from "../../dialogs/prefs";
 import { E } from "../state";
-import { store } from "../appstore";
-import { loadBoardHeader } from "./board-setup";
+import { state, store } from "../appstore";
+import { loadBoardHeader, openBoardSetup } from "./board-setup";
+import { toast } from "../util";
 import { h, messageBox, openDialog, type DialogApi } from "./ui";
 import { type Damage, type ZoneInfo, itemLayers, staleZones } from "./zone-damage";
+import { skipTeardrops, teardropRebuild } from "./board-commit";
+import { regenerateAfterFill } from "./via-stitch";
 
 interface Settings { clearance: number; minClearance?: number; holeClearance?: number; edgeClearance: number; netclasses: Record<string, { clearance?: number }> }
 interface PcbToolsApi {
+  parseDru?(text: string): { errors: string[]; messages: { fatal?: boolean }[] };
   designSettings(src: unknown): Settings;
   netclassOf(s: Settings, net: string): { clearance?: number };
   replacedChange(item: KItem, node: SNode): KChange;
@@ -36,7 +40,14 @@ const PT = (): PcbToolsApi => (window as unknown as { PcbTools: PcbToolsApi }).P
 const board = (): KDoc | null => (E.kdoc && (E.kdoc as KDoc).type === "pcb" ? (E.kdoc as KDoc) : null);
 
 /** Rules as plain data (a worker cannot be handed a function): each net's netclass clearance and the board minimums. */
-interface RuleData { nets: Record<string, number>; dflt: number; minClearance: number; holeClearance: number; edgeClearance: number; custom: Record<string, number | string>; customMax: number }
+interface RuleData { nets: Record<string, number>; dflt: number; minClearance: number; holeClearance: number; edgeClearance: number; custom: Record<string, number | string>; customMax: number; prototype: boolean }
+/**
+ * PROJECT_LOCAL_SETTINGS::m_PrototypeZoneFill ("board.prototype_zone_fills" in the .kicad_prl): kept per project in
+ * this browser, as the editor keeps its other .kicad_prl settings.
+ */
+const prototypeKey = (): string => "kui.prl.prototype_zone_fills." + (((state.project as { projectId?: string } | null) || {}).projectId || "x");
+export function prototypeZoneFill(): boolean { try { return localStorage.getItem(prototypeKey()) === "1"; } catch (e) { return false; } }
+export function setPrototypeZoneFill(on: boolean): void { try { if (on) localStorage.setItem(prototypeKey(), "1"); else localStorage.removeItem(prototypeKey()); } catch (e) { /* no storage */ } }
 function ruleData(doc: KDoc): RuleData {
   const P = PT(); const s = P.designSettings(E.proSettings || null);
   const nets: Record<string, number> = {};
@@ -49,9 +60,9 @@ function ruleData(doc: KDoc): RuleData {
   for (const n of names) { const nc = P.netclassOf(s, n); nets[n] = nc && nc.clearance !== undefined ? nc.clearance : s.clearance; }
   // the custom rules (.kicad_dru) EvalRules would give the filler, per zone, item and layer
   const cr = P.zoneFillRules ? P.zoneFillRules(doc, s, E.druText) : { table: {}, max: 0 };
-  return { nets, dflt: s.clearance, minClearance: s.minClearance || 0, holeClearance: s.holeClearance || 0, edgeClearance: s.edgeClearance, custom: cr.table, customMax: cr.max };
+  return { nets, dflt: s.clearance, minClearance: s.minClearance || 0, holeClearance: s.holeClearance || 0, edgeClearance: s.edgeClearance, custom: cr.table, customMax: cr.max, prototype: prototypeZoneFill() };
 }
-const rulesOf = (d: RuleData): FillRules => ({ netClearance: (n: string) => (n in d.nets ? d.nets[n] : d.dflt), minClearance: d.minClearance, holeClearance: d.holeClearance, edgeClearance: d.edgeClearance, custom: d.custom, customMax: d.customMax });
+const rulesOf = (d: RuleData): FillRules => ({ netClearance: (n: string) => (n in d.nets ? d.nets[n] : d.dflt), minClearance: d.minClearance, holeClearance: d.holeClearance, edgeClearance: d.edgeClearance, custom: d.custom, customMax: d.customMax, prototype: d.prototype });
 
 // ---------------------------------------------------------------- the progress reporter (WX_PROGRESS_REPORTER)
 export interface Reporter { phase(n: number, text: string): void; advance(done: number, total: number): void; cancelled(): boolean; close(): void; onCancel?: () => void }
@@ -93,7 +104,7 @@ function fillWorkerUrl(): Promise<string> {
     if (!/fillZones/.test(fab)) throw new Error("this fab bundle has no zone filler");
     const main = `;(function(){var F=self.KiCadFab;self.onmessage=function(e){var d=e.data;var R=d.rules;
 (d.fonts||[]).forEach(function(f){self.KiCadCanvas.setFontData(f[0],f[1],f[2],f[3])});
-var rules={netClearance:function(n){return Object.prototype.hasOwnProperty.call(R.nets,n)?R.nets[n]:R.dflt},minClearance:R.minClearance,holeClearance:R.holeClearance,edgeClearance:R.edgeClearance,custom:R.custom,customMax:R.customMax};
+var rules={netClearance:function(n){return Object.prototype.hasOwnProperty.call(R.nets,n)?R.nets[n]:R.dflt},minClearance:R.minClearance,holeClearance:R.holeClearance,edgeClearance:R.edgeClearance,custom:R.custom,customMax:R.customMax,prototype:R.prototype};
 var prog={phase:function(n,t){self.postMessage({t:"phase",n:n,text:t})},advance:function(a,b){self.postMessage({t:"adv",a:a,b:b})},cancelled:function(){return false},yield:function(){return Promise.resolve()},warning:function(t){self.postMessage({t:"warn",text:t})}};
 F.fillZones({doc:d.doc,setup:d.setup},rules,d.ids,prog).then(function(r){self.postMessage({t:"done",r:r})},function(err){self.postMessage({t:"error",m:String(err&&err.stack||err)})});};})();`;
     return URL.createObjectURL(new Blob([canvas, "\n;\n", fab, "\n", main], { type: "text/javascript" }));
@@ -132,6 +143,22 @@ function fillWarning(text: string): void {
   const body = ov && ov.querySelector(".kd-body"); if (!body) return;
   cb = h("input", { type: "checkbox", "data-k": "dont-show" }) as HTMLInputElement;
   body.append(h("label", { style: "display:flex;gap:6px;align-items:center;margin-top:8px" }, cb, "Do not show again"));
+}
+
+/** ZONE_FILLER::Fill( aCheck ): KIDIALOG "Prototype zone fill enabled. Disable setting and refill?" (wxOK | wxCANCEL,
+ *  DoNotShowCheckbox: a ticked box keeps the answer).  True: "Disable and refill". */
+const PROTOTYPE_ASK_KEY = "kc.dontshow.zone-filler-prototype";
+function askDisablePrototype(): Promise<boolean> {
+  try { const v = localStorage.getItem(PROTOTYPE_ASK_KEY); if (v) return Promise.resolve(v === "ok"); } catch (e) { /* no storage: always asked */ }
+  return new Promise((resolve) => {
+    let cb: HTMLInputElement | null = null;
+    const keep = (v: string): void => { if (cb && cb.checked) { try { localStorage.setItem(PROTOTYPE_ASK_KEY, v); } catch (e) { /* no storage */ } } };
+    const ov = messageBox("Confirmation", "Prototype zone fill enabled. Disable setting and refill?",
+      [{ label: "Continue without Refill", fn: () => { keep("cancel"); resolve(false); } }, { label: "Disable and refill", fn: () => { keep("ok"); resolve(true); } }], 0);
+    const body = ov && ov.querySelector(".kd-body"); if (!body) { resolve(false); return; }
+    cb = h("input", { type: "checkbox", "data-k": "dont-show" }) as HTMLInputElement;
+    body.append(h("label", { style: "display:flex;gap:6px;align-items:center;margin-top:8px" }, cb, "Do not show again"));
+  });
 }
 
 /** The fill of `ids` (all zones when null); null when cancelled. */
@@ -223,6 +250,19 @@ export interface FillOptions {
   all?: boolean;
   /** report into an existing status line instead of a dialog (the DRC dialog) */
   status?: HTMLElement | null;
+  /** warn in the infobar when the custom rules do not compile (FillAllZones, ZoneFillDirty) */
+  rulesCheck?: boolean;
+  /** CheckAllZones (ZONE_FILLER::Fill with aCheck): with prototype fills on, ask to turn them off; without that and
+   *  with fills up to date, nothing is filled */
+  check?: boolean;
+}
+
+/** DRC_ENGINE::RulesValid: the project's .kicad_dru compiles (no parse error, no fatal message). */
+export function rulesValid(): boolean {
+  const P = PT(); const text = E.druText;
+  if (!text || !P.parseDru) return true;
+  const r = P.parseDru(text);
+  return !r.errors.length && !r.messages.some((m) => m.fatal);
 }
 
 /** Fill, then commit the fills as one undo step.  True when it committed (or there was nothing to change). */
@@ -230,11 +270,20 @@ export async function runZoneFill(ctx: ToolCtx, o: FillOptions): Promise<boolean
   const doc = board(); if (!doc) return false;
   if (inProgress) return false;
   if (ctx.viewOnly) { ctx.toast("View only"); return false; }
+  if (o.check && prototypeZoneFill()) {
+    const dirty = zoneFillsDirty();
+    if (await askDisablePrototype()) setPrototypeZoneFill(false);
+    else if (!dirty) return false;
+  }
+  if (inProgress) return false;
   inProgress = true;
   const v0 = docVersion();
   let rep: Reporter | null = null;
   try {
     const F = await loadFab();
+    // DRC_ENGINE::RulesValid: custom rules that do not compile leave the filler without them (FillAllZones when
+    // not headless, ZoneFillDirty)
+    if (o.rulesCheck && !rulesValid()) toast("Zone fills may be inaccurate.  DRC rules contain errors.", 10000, { text: "Show DRC rules", run: () => { void openBoardSetup(ctx, "Custom Rules"); } }, "warning");
     if (o.status) { const st = o.status; rep = { phase(n, t) { if (t) st.textContent = t; }, advance() {}, cancelled: () => false, close() {} }; }
     else if (o.title) rep = progressDialog(o.title, o.phases || 5);
     const results = await computeFill(doc, o.ids, rep, F);
@@ -262,7 +311,20 @@ const allZoneIds = (doc: KDoc): string[] => [...doc.items.values()].filter((it) 
 export function zoneFillAll(ctx: ToolCtx): boolean {
   const doc = board(); if (!doc) return false;
   if (inProgress) return true;
-  void runZoneFill(ctx, { ids: allZoneIds(doc), title: "Fill All Zones", phases: 5, label: "Fill Zone(s)", all: true });
+  // FillAllZones: the teardrops are rebuilt first (UpdateTeardrops( forceFullUpdate )), in the fill's own commit, and the
+  // new ones are filled with the rest; a cancelled fill takes them back (BOARD_COMMIT::Revert)
+  const td = ctx.viewOnly ? [] : teardropRebuild();
+  const undo: KChange[] = [];
+  for (const c of td) {
+    const it = doc.items.get(c.id);
+    if (c.kind === "ADDED") undo.push({ id: c.id, kind: "REMOVED", typeName: c.typeName, properties: [] });
+    else if (it) undo.push({ id: c.id, kind: c.kind === "REMOVED" ? "ADDED" : "MODIFIED", typeName: c.typeName, sexpr: KiCadCanvas.serializeItem(doc, it) });
+  }
+  if (td.length) ctx.commit(skipTeardrops(td), "Fill Zone(s)");
+  void runZoneFill(ctx, { ids: allZoneIds(doc), title: "Fill All Zones", phases: 5, label: "Fill Zone(s)", all: true, amend: td.length > 0, rulesCheck: true }).then((ok) => {
+    if (!ok && undo.length && board() === doc) ctx.commit(skipTeardrops(undo), "Fill Zone(s)", { amend: true, discard: true } as { amend: boolean });
+    else if (ok && board() === doc) regenerateAfterFill(ctx, allZoneIds(doc));
+  });
   return true;
 }
 /** ZONE_FILLER_TOOL::ZoneFill: the selected zones (wxBell when there are none or a fill is running). */
@@ -270,7 +332,7 @@ export function zoneFillSelected(ctx: ToolCtx): boolean {
   const doc = board(); if (!doc) return false;
   const ids = zoneIds(doc, selectionIds());
   if (inProgress || !ids.length) { bell(); return true; }
-  void runZoneFill(ctx, { ids, title: "Fill Zone", phases: 5, label: "Fill Zone(s)" });
+  void runZoneFill(ctx, { ids, title: "Fill Zone", phases: 5, label: "Fill Zone(s)" }).then((ok) => { if (ok && board() === doc) regenerateAfterFill(ctx, ids); });
   return true;
 }
 function bell(): void {
@@ -322,6 +384,6 @@ export async function zoneFillDirty(ctx: ToolCtx): Promise<void> {
   // a reporter only when the fills are big (more than 1000 points)
   let pts = 0; for (const id of ids) { const it = doc.items.get(id); if (!it) continue; for (const c of it.node) if (Array.isArray(c) && c[0] === "filled_polygon") { const ptsN = KiCadCanvas.kid(c as SNode, "pts") as SNode | null; pts += ptsN ? ptsN.length - 1 : 0; } }
   const t0 = Date.now();
-  const ok = await runZoneFill(ctx, { ids, title: pts > 1000 ? `Refill ${ids.length} Zones` : null, phases: 5, label: "Auto-fill Zone(s)", amend: true });
-  if (ok && Date.now() - t0 > 3000) ctx.toast("Automatic refill of zones can be turned off in Preferences if it becomes too slow.", 10000);
+  const ok = await runZoneFill(ctx, { ids, title: pts > 1000 ? `Refill ${ids.length} Zones` : null, phases: 5, label: "Auto-fill Zone(s)", amend: true, rulesCheck: true });
+  if (ok && Date.now() - t0 > 3000) toast("Automatic refill of zones can be turned off in Preferences if it becomes too slow.", 10000, { text: "Open Preferences", run: () => { void import("../../dialogs/preferences").then((m) => m.openPreferences("PCB Editor/Editing Options")); } });   // loaded on use: a static import puts the preferences (and the actions) ahead of the tools module in the bundle
 }

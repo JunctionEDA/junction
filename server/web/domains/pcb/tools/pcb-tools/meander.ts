@@ -7,6 +7,8 @@ export interface TuneRange { min: number; opt: number; max: number }
 export interface MeanderSettings {
   minAmp: number; maxAmp: number; step: number; spacing: number; crPct: number; round: boolean; singleSided: boolean; initialSide: number;
   target: TuneRange; skew: TuneRange; overrideCustomRules: boolean; keepEndpoints: boolean;
+  /** m_isTimeDomain and the delay targets (attoseconds): m_targetLengthDelay, m_targetSkewDelay */
+  isTimeDomain: boolean; targetDelay: TuneRange; skewDelay: TuneRange;
 }
 /** A node of a chain with arcs: reached from the node before straight, or along an arc through m. */
 export interface ChNode { p: Pt; m?: Pt }
@@ -28,6 +30,10 @@ export interface MLine { pl: MeanderPlacer; width: number; meanders: MeanderShap
 export interface MeanderParams {
   pts: Pt[]; origin: Pt; end: Pt; cursor?: Pt | null; st: MeanderSettings; width: number; clearance: number; lineLength: number;
   collides?: ((line: Chain) => boolean) | null;
+  /** the line with its arcs (IU); pts are its nodes */
+  ch?: Chain | null;
+  /** time domain: origPathDelay and CalculateDelayForShapeLineChain (attoseconds) */
+  lineDelay?: number; delayOf?: ((ch: Chain) => number) | null;
 }
 import { arcLength, segSegDist } from "./distances";
 import { closestOnSeg } from "./point-editor";
@@ -43,6 +49,8 @@ import { vadd, vmul, vsub } from "./util";
 export const TUNE_IU = 1e6;
 export const LENGTH_UNCONSTRAINED = 1e6 * TUNE_IU, DEFAULT_LENGTH_TOLERANCE = 0.1 * TUNE_IU, LENGTH_TARGET_TOLERANCE = 20;
 export const DELAY_UNCONSTRAINED_MM = 1e6;   // DELAY_UNCONSTRAINED (1e6 ps · IU_PER_PS) as set_iu writes it (÷ IU_PER_MM)
+/** MEANDER_SETTINGS::DELAY_UNCONSTRAINED and DEFAULT_DELAY_TOLERANCE in attoseconds (IU_PER_PS = 1e6) */
+export const DELAY_UNCONSTRAINED = 1e6 * 1e6, DEFAULT_DELAY_TOLERANCE = 0.1 * 1e6;
 export const MT_SINGLE = 1, MT_START = 2, MT_FINISH = 3, MT_TURN = 4, MT_CHECK_START = 5, MT_CHECK_FINISH = 6, MT_CORNER = 7, MT_ARC = 8, MT_EMPTY = 9;
 export const TUNED = "tuned", TOO_SHORT = "too_short", TOO_LONG = "too_long";
 export const TUNE_MSG_INSIDE = "Unable to tune segments inside other tuning patterns.";
@@ -52,16 +60,23 @@ export const TUNE_STATUS_TEXT: Record<string, string> = { [TOO_LONG]: "too long"
 /** MEANDER_SETTINGS() */
 export function meanderDefaults() {
   const st = { minAmp: 200000, maxAmp: 1000000, step: 50000, spacing: 600000, crPct: 80, round: true, singleSided: false, initialSide: -1,
-    target: null, overrideCustomRules: false, keepEndpoints: false } as unknown as MeanderSettings;   // target and skew are set just below
-  setTargetLength(st, LENGTH_UNCONSTRAINED); setTargetSkew(st, 0); return st;
+    target: null, overrideCustomRules: false, keepEndpoints: false, isTimeDomain: false } as unknown as MeanderSettings;   // the targets are set just below
+  setTargetLength(st, LENGTH_UNCONSTRAINED); setTargetLengthDelay(st, DELAY_UNCONSTRAINED); setTargetSkew(st, 0); setTargetSkewDelay(st, 0); return st;
 }
+/** MEANDER_SETTINGS::SetTargetLengthDelay */
+export function setTargetLengthDelay(st: MeanderSettings, opt: number) {
+  st.targetDelay = opt === DELAY_UNCONSTRAINED ? { min: 0, opt, max: opt } : { min: opt - DEFAULT_DELAY_TOLERANCE, opt, max: opt + DEFAULT_DELAY_TOLERANCE };
+}
+/** MEANDER_SETTINGS::SetTargetSkewDelay (its tolerance is DEFAULT_LENGTH_TOLERANCE, as in KiCad) */
+export function setTargetSkewDelay(st: MeanderSettings, opt: number) { st.skewDelay = { min: opt - DEFAULT_LENGTH_TOLERANCE, opt, max: opt + DEFAULT_LENGTH_TOLERANCE }; }
 /** MEANDER_SETTINGS::SetTargetSkew */
 export function setTargetSkew(st: MeanderSettings, opt: number) { st.skew = { min: opt - DEFAULT_LENGTH_TOLERANCE, opt, max: opt + DEFAULT_LENGTH_TOLERANCE }; }
 /** MEANDER_SETTINGS::SetTargetLength */
 export function setTargetLength(st: MeanderSettings, opt: number) {
   st.target = opt === LENGTH_UNCONSTRAINED ? { min: 0, opt, max: opt } : { min: opt - DEFAULT_LENGTH_TOLERANCE, opt, max: opt + DEFAULT_LENGTH_TOLERANCE };
 }
-export const tuneCopy = (st: MeanderSettings): MeanderSettings => Object.assign({}, st, { target: Object.assign({}, st.target), skew: Object.assign({}, st.skew) });
+export const tuneCopy = (st: MeanderSettings): MeanderSettings => Object.assign({}, st, { target: Object.assign({}, st.target), skew: Object.assign({}, st.skew),
+  targetDelay: Object.assign({}, st.targetDelay || { min: 0, opt: DELAY_UNCONSTRAINED, max: DELAY_UNCONSTRAINED }), skewDelay: Object.assign({}, st.skewDelay || { min: -DEFAULT_LENGTH_TOLERANCE, opt: 0, max: DEFAULT_LENGTH_TOLERANCE }), isTimeDomain: !!st.isTimeDomain });
 // vectors in IU (doubles; KiCad's VECTOR2D turtle) — the y axis points down as on the board
 export const vsubI = vsub;
 export const vlen = (a: Pt) => Math.hypot(a[0], a[1]);
@@ -107,6 +122,68 @@ export function chMirror(ch: Chain, P: Pt, dir: Pt): Chain {
   const s = { A: P, B: vadd(P, dir) };
   const m = (p: Pt) => { const q = lineProject(s, p); return [2 * q[0] - p[0], 2 * q[1] - p[1]]; };
   return ch.map((n) => n.m ? { p: m(n.p), m: m(n.m) } : { p: m(n.p) });
+}
+/** A three-point arc as centre, radius, start angle, sweep (≥ 0) and direction. */
+export function chArc(a: Pt, m: Pt, b: Pt) {
+  const c = K.arcFrom3(a, m, b); if (!c) return null;
+  let sw = c.anticlockwise ? c.a0 - c.a1 : c.a1 - c.a0; sw = ((sw % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  return { x: c.x, y: c.y, r: c.r, sw, dir: c.anticlockwise ? -1 : 1, a0: c.a0 };
+}
+/** The point a fraction t along piece i of a chain (from node i-1 to node i, along its arc when it has one). */
+export function chPieceAt(ch: Chain, i: number, t: number): Pt {
+  const a = ch[i - 1].p, n = ch[i];
+  if (n.m) { const g = chArc(a, n.m, n.p); if (g) { const ang = g.a0 + g.dir * g.sw * t; return [g.x + g.r * Math.cos(ang), g.y + g.r * Math.sin(ang)]; } }
+  return [a[0] + (n.p[0] - a[0]) * t, a[1] + (n.p[1] - a[1]) * t];
+}
+/** SHAPE_LINE_CHAIN::Reverse with arcs: each arc's mid moves to the node that now ends it. */
+export function chReverse(ch: Chain): Chain {
+  const out: Chain = [];
+  for (let i = ch.length - 1; i >= 0; i--) { const nxt = ch[i + 1]; out.push(nxt && nxt.m ? { p: ch[i].p.slice(), m: nxt.m.slice() } : { p: ch[i].p.slice() }); }
+  return out;
+}
+/** The nearest point of piece i to p and its fraction along the piece (an arc's projection clamped to its sweep). */
+export function chPieceNearest(ch: Chain, i: number, p: Pt): { q: Pt; t: number } {
+  const a = ch[i - 1].p, n = ch[i];
+  if (n.m) {
+    const g = chArc(a, n.m, n.p);
+    if (g && g.sw > 1e-12) {
+      let rel = (Math.atan2(p[1] - g.y, p[0] - g.x) - g.a0) * g.dir; rel = ((rel % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      if (rel <= g.sw) { const t = rel / g.sw; return { q: chPieceAt(ch, i, t), t }; }
+      const da = Math.hypot(p[0] - a[0], p[1] - a[1]), db = Math.hypot(p[0] - n.p[0], p[1] - n.p[1]);
+      return da <= db ? { q: a.slice(), t: 0 } : { q: n.p.slice(), t: 1 };
+    }
+  }
+  const d = [n.p[0] - a[0], n.p[1] - a[1]], l2 = d[0] * d[0] + d[1] * d[1];
+  const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / l2)) : 0;
+  return { q: [a[0] + d[0] * t, a[1] + d[1] * t], t };
+}
+/** The stretch of a chain between two positions (piece index + fraction), arcs cut into their sub-arcs. */
+function chSub(ch: Chain, s0: number, s1: number): Chain {
+  const i0 = Math.min(ch.length - 1, Math.max(1, Math.floor(s0) + 1)), i1 = Math.min(ch.length - 1, Math.max(1, Math.ceil(s1)));
+  const t0 = s0 - (i0 - 1), t1 = s1 - (i1 - 1);
+  const out: Chain = [{ p: chPieceAt(ch, i0, Math.max(0, Math.min(1, t0))) }];
+  for (let i = i0; i <= i1; i++) {
+    const a = i === i0 ? Math.max(0, Math.min(1, t0)) : 0, b = i === i1 ? Math.max(0, Math.min(1, t1)) : 1;
+    if (b <= a + 1e-12) continue;
+    const end = chPieceAt(ch, i, b);
+    if (ch[i].m) { if (!veq(out[out.length - 1].p, end)) out.push({ p: end, m: chPieceAt(ch, i, (a + b) / 2) }); }
+    else chAppend(out, end);
+  }
+  return out;
+}
+/**
+ * SHAPE_LINE_CHAIN::Split( start, end ) for a line with arcs: cut at the points nearest the two, arcs split into
+ * sub-arcs, the line reversed when the end comes first.
+ */
+export function splitChain(ch0: Chain, a: Pt, b: Pt) {
+  const near = (ch: Chain, p: Pt) => { let best: { d: number; s: number; q: Pt } | null = null; for (let i = 1; i < ch.length; i++) { const r = chPieceNearest(ch, i, p); const d = Math.hypot(r.q[0] - p[0], r.q[1] - p[1]); if (!best || d < best.d - 1e-9) best = { d, s: i - 1 + r.t, q: r.q }; } return best!; };
+  let ch = ch0, na = near(ch, a), nb = near(ch, b);
+  if (na.s > nb.s) { ch = chReverse(ch0); na = near(ch, a); nb = near(ch, b); }
+  const last = ch.length - 1;
+  const pre = na.s > 0 ? chSub(ch, 0, na.s) : [{ p: ch[0].p.slice() }];
+  const mid = chSub(ch, na.s, nb.s);
+  const post = nb.s < last ? chSub(ch, nb.s, last) : [{ p: ch[last].p.slice() }];
+  return { pre, mid, post, start: na.q, end: nb.q };
 }
 /** SHAPE_LINE_CHAIN::Simplify: duplicate and collinear points out, arcs kept. */
 export function chSimplify(ch: Chain) {
@@ -242,6 +319,12 @@ export function fitShape(m: MeanderShape, type: number, seg: Seg, P: Pt, side: b
 export function newMLine(pl: MeanderPlacer, width: number, dual = false, offset = 0): MLine { return { pl, width, meanders: [], last: [0, 0], dual, offset }; }
 /** MEANDERED_LINE::AddCorner( aA, aB ): b is the second line's corner of a pair. */
 export function mlAddCorner(L: MLine, a: Pt, b?: Pt) { const m = newShape(L.pl, L.width, L.dual, L.offset); m.type = MT_CORNER; m.line = [{ p: a.slice() }]; m.line2 = b ? [{ p: b.slice() }] : []; m.clipped = { A: a.slice(), B: a.slice() }; L.last = a.slice(); L.meanders.push(m); }
+/** MEANDERED_LINE::AddArc( aArc1, aArc2 ) (MEANDER_SHAPE::MakeArc: an MT_CORNER holding the arcs); a2 is the second line's arc of a pair. */
+export function mlAddArc(L: MLine, a1: Chain, a2?: Chain | null) {
+  const m = newShape(L.pl, L.width, L.dual, L.offset); m.type = MT_CORNER;
+  m.line = a1.map((n) => (n.m ? { p: n.p.slice(), m: n.m.slice() } : { p: n.p.slice() })); m.line2 = a2 ? a2.map((n) => (n.m ? { p: n.p.slice(), m: n.m.slice() } : { p: n.p.slice() })) : [];
+  const p1 = a1[a1.length - 1].p; m.clipped = { A: p1.slice(), B: p1.slice() }; L.last = p1.slice(); L.meanders.push(m);
+}
 export function mlAddMeander(L: MLine, m: MeanderShape) { L.last = m.clipped.B.slice(); L.meanders.push(shapeCopy(m)); }
 /** MEANDERED_LINE::CheckSelfIntersections */
 export function checkSelfIntersections(L: MLine, shape: MeanderShape, clearance: number) {
@@ -373,27 +456,34 @@ export function meanderMove(P: MeanderParams) {
   const st = P.st;
   const pl: MeanderPlacer = { st, clearance: P.clearance, width: P.width, result: null,
     checkFit(m: MeanderShape) { if (P.collides && P.collides(m.line)) return false; return checkSelfIntersections(this.result!, m, m.width + st.spacing); } };
-  const sp = splitLine(P.pts, P.origin, P.end);
+  const sp = P.ch && P.ch.some((n) => n.m) ? splitChain(P.ch, P.origin, P.end) : splitLine(P.pts, P.origin, P.end);
   const L = newMLine(pl, P.width); pl.result = L;
   for (let i = 0; i + 1 < sp.mid.length; i++) {
+    if (sp.mid[i + 1].m) { mlAddArc(L, [sp.mid[i], sp.mid[i + 1]]); continue; }   // tuned.IsArcSegment: MEANDERED_LINE::AddArc
     const s = { A: sp.mid[i].p, B: sp.mid[i + 1].p };
     const side = st.initialSide === 0 ? segSide(s, P.cursor || P.end) < 0 : st.initialSide < 0;
     mlAddCorner(L, s.A); meanderSegment(L, s, side); mlAddCorner(L, s.B);
   }
   const lineLen = P.lineLength; let lastLength = lineLen, status = TUNED, hasMeanders = false;
+  const timeDomain = !!(st.isTimeDomain && P.delayOf); let lastDelay = P.lineDelay || 0;
   let tuned: Chain = sp.mid;
   if (lineLen > st.target.max) status = TOO_LONG;
-  else { lastLength = lineLen - chLength(sp.mid); tuneLineLength(L, st.target.opt - lineLen); }
+  else {
+    lastLength = lineLen - chLength(sp.mid);
+    if (timeDomain) lastDelay = (P.lineDelay || 0) - P.delayOf!(sp.mid);
+    tuneLineLength(L, st.target.opt - lineLen);
+  }
   if (status !== TOO_LONG) {
     tuned = [];
     for (const m of L.meanders) if (m.type !== MT_EMPTY) { chAppendChain(tuned, m.line); hasMeanders = hasMeanders || isMeanderType(m.type); }
     lastLength += chLength(tuned);
+    if (timeDomain) lastDelay += P.delayOf!(tuned);
     status = lastLength > st.target.max ? TOO_LONG : lastLength < st.target.min ? TOO_SHORT : TUNED;
   }
   const fin: Chain = [];
   if (st.keepEndpoints) { chAppendChain(fin, chSimplify(sp.pre)); chAppendChain(fin, chSimplify(tuned)); chAppendChain(fin, chSimplify(sp.post)); }
   else { chAppendChain(fin, sp.pre); chAppendChain(fin, tuned); chAppendChain(fin, sp.post); }
-  return { final: st.keepEndpoints ? fin : chSimplify(fin), tuned: chSimplify(tuned), status, length: lastLength, hasMeanders, settings: st, start: sp.start, end: sp.end, baseline: sp.mid };
+  return { final: st.keepEndpoints ? fin : chSimplify(fin), tuned: chSimplify(tuned), status, length: lastLength, delay: lastDelay, hasMeanders, settings: st, start: sp.start, end: sp.end, baseline: sp.mid };
 }
 
 // ---------------------------------------------------------------- Tune Length of a Differential Pair (PNS::DP_MEANDER_PLACER)
@@ -426,9 +516,10 @@ export const DP_PARALLELITY_THRESHOLD = 10;
  * placer's pair carries no gap constraint, so KiCad's window is opt ± 10 µm around MINOPTMAX's opt; the web takes that
  * opt as the pair's measured gap (TOPOLOGY::AssembleDiffPair) so coupled stretches are found on real boards.
  */
-export function coupledSegmentPairs(P: Pt[], N: Pt[], width: number, gap: number) {
+export function coupledSegmentPairs(P: Pt[], N: Pt[], width: number, gap: number, arcP?: boolean[] | null, arcN?: boolean[] | null) {
   const out: CoupledSegs[] = [];
   for (let i = 0; i + 1 < P.length; i++) for (let j = 0; j + 1 < N.length; j++) {
+    if ((arcP && arcP[i]) || (arcN && arcN[j])) continue;   // IsArcSegment: arcs never couple
     const sp = { A: P[i], B: P[i + 1] }, sn = { A: N[j], B: N[j + 1] };
     const dist = segSegDist(sp.A, sp.B, sn.A, sn.B) - width;
     if (!approxParallelT(sp, sn, DP_PARALLELITY_THRESHOLD) || dist < gap - 10000 || dist > gap + 10000) continue;
@@ -441,20 +532,28 @@ export function coupledSegmentPairs(P: Pt[], N: Pt[], width: number, gap: number
 export interface DpMeanderParams {
   ptsP: Pt[]; ptsN: Pt[]; origin: Pt; end: Pt; cursor?: Pt | null; st: MeanderSettings; width: number; gap: number; clearance: number;
   lengthP: number; lengthN: number; collides?: ((line: Chain) => boolean) | null;
+  /** the lines with their arcs (IU) */
+  chP?: Chain | null; chN?: Chain | null;
+  /** time domain: origPathDelay and the coupled CalculateDelayForShapeLineChain (attoseconds) */
+  lineDelay?: number; delayOf?: ((ch: Chain) => number) | null;
 }
 /** DP_MEANDER_PLACER::Move: both lines meandered together around their centre line, trimmed to the target. */
 export function dpMeanderMove(P: DpMeanderParams) {
   const st = P.st, w = P.width;
-  const spP = splitLine(P.ptsP, P.origin, P.end), spN = splitLine(P.ptsN, P.origin, P.end);
+  const split = (ch: Chain | null | undefined, pts: Pt[]) => (ch && ch.some((n) => n.m) ? splitChain(ch, P.origin, P.end) : splitLine(pts, P.origin, P.end));
+  const spP = split(P.chP, P.ptsP), spN = split(P.chN, P.ptsN);
   const tunedP0 = chSimplify(spP.mid), tunedN0 = chSimplify(spN.mid);
   const dpLen = Math.max(P.lengthP, P.lengthN);
   const statusOf = (len: number) => len > st.target.max ? TOO_LONG : len < st.target.min ? TOO_SHORT : TUNED;
-  const asChain = (pts: Pt[]): Chain => pts.map((p) => ({ p: p.slice() }));
+  const asChain = (ch: Chain | null | undefined, pts: Pt[]): Chain => (ch ? ch.map((n) => (n.m ? { p: n.p.slice(), m: n.m.slice() } : { p: n.p.slice() })) : pts.map((p) => ({ p: p.slice() })));
+  const timeDomain = !!(st.isTimeDomain && P.delayOf), dpDelay = P.lineDelay || 0;
   const base = { settings: st, start: spP.start, end: spP.end, baselineP: spP.mid, baselineN: spN.mid, hasMeanders: false };
-  const original = (status: string) => Object.assign({}, base, { finalP: asChain(P.ptsP), finalN: asChain(P.ptsN), tunedP: tunedP0, tunedN: tunedN0, status, length: dpLen });
+  const original = (status: string) => Object.assign({}, base, { finalP: asChain(P.chP, P.ptsP), finalN: asChain(P.chN, P.ptsN), tunedP: tunedP0, tunedN: tunedN0, status, length: dpLen, delay: dpDelay });
   if (tunedP0.length < 2 || tunedN0.length < 2) return original(TOO_SHORT);   // issue #22041
   const pp = tunedP0.map((n) => n.p), np = tunedN0.map((n) => n.p);
-  const pairs = coupledSegmentPairs(pp, np, w, P.gap);
+  const arcOf = (ch: Chain) => ch.slice(1).map((n) => !!n.m);   // piece i runs from node i to node i + 1
+  const ap = arcOf(tunedP0), an = arcOf(tunedN0);
+  const pairs = coupledSegmentPairs(pp, np, w, P.gap, ap, an);
   if (!pairs.length) return original(statusOf(dpLen));   // started on an uncoupled stretch
   let offset = Math.trunc((P.gap + w) / 2);
   const c0 = pairs[0]; if (segSide(c0.coupledP, [(c0.coupledP.A[0] + c0.coupledN.A[0]) / 2, (c0.coupledP.A[1] + c0.coupledN.A[1]) / 2]) > 0) offset = -offset;   // pairOrientation
@@ -464,11 +563,21 @@ export function dpMeanderMove(P: DpMeanderParams) {
   const segCount = (pts: Pt[]) => pts.length - 1, next = (pts: Pt[], i: number) => i + 1 < segCount(pts) ? i + 1 : -1;
   const startPt = (pts: Pt[], i: number) => pts[Math.max(0, Math.min(i, pts.length - 1))];
   let ciP = 0, ciN = 0;
-  const addCornersUntil = (lp: number, ln: number) => {
+  const arcAt = (ch: Chain, i: number): Chain | null => (i >= 0 && i + 1 < ch.length && ch[i + 1].m ? [{ p: ch[i].p.slice() }, { p: ch[i + 1].p.slice(), m: ch[i + 1].m!.slice() }] : null);
+  const addCornersUntil = (lp: number, ln: number) => {   // addCornersUntilIndex: arcs pair up as MEANDERED_LINE::AddArc( arcP, arcN )
     for (;;) {
-      const pOk = ciP <= lp && ciP !== -1, nOk = ciN <= ln && ciN !== -1;
+      let pOk = ciP <= lp && ciP !== -1, nOk = ciN <= ln && ciN !== -1;
       if (!pOk && !nOk) break;
-      mlAddCorner(L, startPt(pp, ciP), startPt(np, ciN));
+      const pa = arcAt(tunedP0, ciP), na = arcAt(tunedN0, ciN);
+      if (!pa && !na) mlAddCorner(L, startPt(pp, ciP), startPt(np, ciN));
+      else if (pa && na) mlAddArc(L, pa, na);
+      else if (pa) {
+        mlAddCorner(L, startPt(pp, ciP), startPt(np, ciN));
+        while ((nOk = ciN <= ln && ciN !== -1)) { ciN = next(np, ciN); const a = arcAt(tunedN0, ciN); if (a) { mlAddArc(L, pa, a); break; } mlAddCorner(L, startPt(pp, ciP), startPt(np, ciN)); }
+      } else {
+        mlAddCorner(L, startPt(pp, ciP), startPt(np, ciN));
+        while ((pOk = ciP <= lp && ciP !== -1)) { ciP = next(pp, ciP); const a = arcAt(tunedP0, ciP); if (a) { mlAddArc(L, a, na!); break; } mlAddCorner(L, startPt(pp, ciP), startPt(np, ciN)); }
+      }
       if (pOk) ciP = next(pp, ciP);
       if (nOk) ciN = next(np, ciN);
     }
@@ -481,13 +590,18 @@ export function dpMeanderMove(P: DpMeanderParams) {
   }
   addCornersUntil(pp.length - 1, np.length - 1);
   mlAddCorner(L, pp[pp.length - 1], np[np.length - 1]);
-  let status = TUNED, lastLength = dpLen, hasMeanders = false, tunedP = tunedP0, tunedN = tunedN0;
+  let status = TUNED, lastLength = dpLen, lastDelay = dpDelay, hasMeanders = false, tunedP = tunedP0, tunedN = tunedN0;
   if (dpLen > st.target.max) status = TOO_LONG;
-  else { lastLength = dpLen - Math.max(chLength(tunedP0), chLength(tunedN0)); tuneLineLength(L, st.target.opt - dpLen); }
+  else {
+    lastLength = dpLen - Math.max(chLength(tunedP0), chLength(tunedN0));
+    if (timeDomain) lastDelay = dpDelay - Math.max(P.delayOf!(tunedP0), P.delayOf!(tunedN0));
+    tuneLineLength(L, st.target.opt - dpLen);
+  }
   if (status !== TOO_LONG) {
     tunedP = []; tunedN = [];
     for (const m of L.meanders) if (m.type !== MT_EMPTY) { chAppendChain(tunedP, m.line); chAppendChain(tunedN, m.line2); hasMeanders = hasMeanders || isMeanderType(m.type); }
     lastLength += Math.max(chLength(tunedP), chLength(tunedN));
+    if (timeDomain) lastDelay += Math.max(P.delayOf!(tunedP), P.delayOf!(tunedN));
     status = statusOf(lastLength);
   }
   const join = (sp: ReturnType<typeof splitLine>, tuned: Chain) => {
@@ -495,6 +609,6 @@ export function dpMeanderMove(P: DpMeanderParams) {
     if (st.keepEndpoints) { chAppendChain(fin, chSimplify(sp.pre)); chAppendChain(fin, chSimplify(tuned)); chAppendChain(fin, chSimplify(sp.post)); return fin; }
     chAppendChain(fin, sp.pre); chAppendChain(fin, tuned); chAppendChain(fin, sp.post); return chSimplify(fin);
   };
-  return Object.assign({}, base, { finalP: join(spP, tunedP), finalN: join(spN, tunedN), tunedP: chSimplify(tunedP), tunedN: chSimplify(tunedN), status, length: lastLength, hasMeanders });
+  return Object.assign({}, base, { finalP: join(spP, tunedP), finalN: join(spN, tunedN), tunedP: chSimplify(tunedP), tunedN: chSimplify(tunedN), status, length: lastLength, delay: lastDelay, hasMeanders });
 }
 export type DpTuneResult = ReturnType<typeof dpMeanderMove>;

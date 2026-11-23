@@ -100,7 +100,7 @@ export function ercNetName(net: ErcNet): string {
   return "";
 }
 
-export interface SheetTestOpts { connectionGrid?: number; netclasses?: Iterable<string> | null; defaultNetclass?: string }
+export interface SheetTestOpts { connectionGrid?: number; netclasses?: Iterable<string> | null; defaultNetclass?: string; /** the sheet instance's path (the symbols' instance path) */ path?: string | null; /** false when unresolved_variable is ignored (IsTestEnabled) */ textVars?: boolean }
 
 /** The tests of one sheet; `nets` are ercNets(doc).nets. */
 export function sheetTests(doc: KDoc, nets: ErcNet[], mark: Mark, itemRef: (doc: KDoc, it: KItem) => ErcItemRef, pinRef: (t: ErcTerm & { pin: SymPin }) => ErcItemRef, opts: SheetTestOpts): void {
@@ -161,6 +161,24 @@ export function sheetTests(doc: KDoc, nets: ErcNet[], mark: Mark, itemRef: (doc:
       mark("undefined_netclass", "error", atOf(it.node), `Netclass ${nc} is not defined`, [it.id]);
     }
   }
+  // TestTextVars: ${ERC_WARNING …} / ${ERC_ERROR …} assertions become generic warnings / errors with their message; any
+  // other text whose shown text still holds an unescaped ${…} is an unresolved variable
+  if (opts.textVars !== false) {
+    const varRef = /(^|[^\\])\$\{.*\}.*/;
+    const report = (item: string | null, assertions: { warning: boolean; message: string }[], p: Pt): boolean => {
+      for (const a of assertions) mark(a.warning ? "generic-warning" : "generic-error", a.warning ? "warning" : "error", p, item ? a.message : a.message + " (in drawing sheet)", item ? [item] : [], item ? undefined : []);
+      return assertions.length > 0;
+    };
+    for (const src of K.textChecks(doc, opts.path !== undefined ? opts.path : doc.instancePath)) {
+      if (report(src.assertionItem, src.assertions, src.assertionPos)) continue;
+      if (!varRef.test(src.shown)) continue;
+      mark("unresolved_variable", "error", src.pos, "Unresolved text variable", [src.item]);
+    }
+    for (const src of K.drawingSheetTextChecks(doc)) {
+      if (report(null, src.assertions, src.pos)) continue;
+      if (varRef.test(src.shown)) mark("unresolved_variable", "error", src.pos, "Unresolved text variable in drawing sheet", [], []);
+    }
+  }
 }
 
 /** A sheet for CheckAnnotate: its document, the instance path its symbols record and its page, when the caller knows the hierarchy. */
@@ -197,14 +215,16 @@ interface Named { inst: number; it: KItem; p: Pt; name: string; pin: boolean; gl
 export function hierarchyTests(insts: ErcInstance[], itemRef: (doc: KDoc, it: KItem) => ErcItemRef, pinRef: (t: ErcTerm & { pin: SymPin }) => ErcItemRef): ErcMarker[][] {
   const out: ErcMarker[][] = insts.map(() => []);
   const mark = (i: number, code: string, severity: string, p: Pt, text: string, ids: string[], items: ErcItemRef[]): void => { out[i].push({ code, severity, x: r4(p[0]), y: r4(p[1]), text, ids: Array.from(new Set(ids)), items } as ErcMarker); };
+  // ERC_ITEM::SetItemsSheetPaths: each item names the sheet instance it is on, so cross-probing goes to that sheet
+  const on = (i: number, r: ErcItemRef): ErcItemRef => Object.assign(r, { sheet: i });
   // ---- ERC_TESTER::TestAnnotation: SCH_REFERENCE_LIST::CheckAnnotation over every sheet instance (power and '#'
   // symbols left out); the marker carries the handler's message as it is and sits on the first item's symbol, on its sheet
   {
     const { sheets: annSheets, refs } = annotationRefs(insts);
     const CODES: Record<string, string> = { unannotated: "unannotated", extra_units: "extra_units", duplicate_reference: "duplicate_reference", different_unit_value: "unit_value_mismatch" };
     if (refs.length) checkAnnotation(refs, (code, msg, a, b) => {
-      const i = annSheets.indexOf(a.sheet), ia = a.item!, ib = b && b.item;
-      mark(Math.max(0, i), CODES[code], "error", atOf(ia.node), msg, ib ? [ia.id, ib.id] : [ia.id], ib && b!.sheet ? [itemRef(a.sheet!.doc, ia), itemRef(b!.sheet.doc, ib)] : [itemRef(a.sheet!.doc, ia)]);
+      const i = annSheets.indexOf(a.sheet), ia = a.item!, ib = b && b.item, j = b ? annSheets.indexOf(b.sheet) : -1;
+      mark(Math.max(0, i), CODES[code], "error", atOf(ia.node), msg, ib ? [ia.id, ib.id] : [ia.id], ib && b!.sheet ? [on(Math.max(0, i), itemRef(a.sheet!.doc, ia)), on(Math.max(0, j), itemRef(b!.sheet.doc, ib))] : [on(Math.max(0, i), itemRef(a.sheet!.doc, ia))]);
     });
   }
   // ---- multi-unit symbols, grouped by reference
@@ -230,7 +250,7 @@ export function hierarchyTests(insts: ErcInstance[], itemRef: (doc: KDoc, it: KI
     // TestMultiunitFootprints: the first unit with a footprint is the reference
     const base = units.find((x) => x.fp);
     if (base) for (const x of units) if (x.fp && x.fp !== base.fp)
-      mark(x.inst, "different_unit_footprint", "error", atOf(x.it.node), `Different footprints assigned to ${nameOf(base)} and ${nameOf(x)}`, [base.it.id, x.it.id], [itemRef(insts[base.inst].doc, base.it), itemRef(insts[x.inst].doc, x.it)]);
+      mark(x.inst, "different_unit_footprint", "error", atOf(x.it.node), `Different footprints assigned to ${nameOf(base)} and ${nameOf(x)}`, [base.it.id, x.it.id], [on(base.inst, itemRef(insts[base.inst].doc, base.it)), on(x.inst, itemRef(insts[x.inst].doc, x.it))]);
     // TestMissingUnits
     if (count > 1 && subs.length) {
       const placed = new Set(units.map((x) => x.unit)), missing: number[] = [], power: number[] = [], input: number[] = [], bidi: number[] = [];
@@ -242,7 +262,7 @@ export function hierarchyTests(insts: ErcInstance[], itemRef: (doc: KDoc, it: KI
         if (types.has("power_in")) power.push(u); if (types.has("input")) input.push(u); if (types.has("bidirectional")) bidi.push(u);
       }
       const b0 = units[0], names = (l: number[]): string => "[ " + l.slice(0, 3).map(unitName).join(", ") + (l.length > 3 ? ", ..." : "") + " ]";
-      const report = (l: number[], code: string, sev: string, fmt: (n: string) => string): void => { if (l.length) mark(b0.inst, code, sev, atOf(b0.it.node), fmt(names(l)), [b0.it.id], [itemRef(insts[b0.inst].doc, b0.it)]); };
+      const report = (l: number[], code: string, sev: string, fmt: (n: string) => string): void => { if (l.length) mark(b0.inst, code, sev, atOf(b0.it.node), fmt(names(l)), [b0.it.id], [on(b0.inst, itemRef(insts[b0.inst].doc, b0.it))]); };
       report(missing, "missing_unit", "warning", (n) => `Symbol ${ref} has unplaced units ${n}`);
       report(power, "missing_power_pin", "error", (n) => `Symbol ${ref} has input power pins in units ${n} that are not placed`);
       report(input, "missing_input_pin", "warning", (n) => `Symbol ${ref} has input pins in units ${n} that are not placed`);
@@ -262,7 +282,7 @@ export function hierarchyTests(insts: ErcInstance[], itemRef: (doc: KDoc, it: KI
       if (name.search(/[<>"\\:\t\n\r]/) > 0) continue;
       const lowerName = name.toLowerCase();
       if (filters.some((f) => (f.includes(":") ? wild(lowerId, f.toLowerCase()) : wild(lowerName, f.toLowerCase())))) continue;
-      mark(i, "footprint_filter", "warning", atOf(it.node), `Assigned footprint (${lowerName}) doesn't match footprint filters (${filters.join(" ")})`, [it.id], [itemRef(s.doc, it)]);
+      mark(i, "footprint_filter", "warning", atOf(it.node), `Assigned footprint (${lowerName}) doesn't match footprint filters (${filters.join(" ")})`, [it.id], [on(i, itemRef(s.doc, it))]);
     }
   });
   // ---- named items: labels and power pins (collectNamedItems)
@@ -271,12 +291,12 @@ export function hierarchyTests(insts: ErcInstance[], itemRef: (doc: KDoc, it: KI
     insts.forEach((s, i) => {
       for (const n of s.nets) for (const t of n.terms) {
         const k = t.item.kind;
-        if (k === "label" || k === "global_label" || k === "hierarchical_label") l.push({ inst: i, it: t.item, p: atOf(t.item.node), name: str(t.item.node[1]), pin: false, global: k === "global_label", hier: k === "hierarchical_label", label: k === "label", ref: itemRef(s.doc, t.item) });
+        if (k === "label" || k === "global_label" || k === "hierarchical_label") l.push({ inst: i, it: t.item, p: atOf(t.item.node), name: str(t.item.node[1]), pin: false, global: k === "global_label", hier: k === "hierarchical_label", label: k === "label", ref: on(i, itemRef(s.doc, t.item)) });
         else if (t.pin && t.pin.type === "power_in") {
           const powerSym = !!t.power, glob = globalPowerPin(s.doc, t.item, t.pin);
           if (!powerSym && !glob) continue;
           const name = !similar && glob && !powerSym ? t.pin.name : propText(t.item.node, "Value");
-          l.push({ inst: i, it: t.item, p: t.p, name, pin: true, global: glob, hier: false, label: false, ref: pinRef(t as ErcTerm & { pin: SymPin }) });
+          l.push({ inst: i, it: t.item, p: t.p, name, pin: true, global: glob, hier: false, label: false, ref: on(i, pinRef(t as ErcTerm & { pin: SymPin })) });
         }
       }
     });
@@ -307,7 +327,7 @@ export function hierarchyTests(insts: ErcInstance[], itemRef: (doc: KDoc, it: KI
   // ercCheckSingleGlobalLabel
   const gl = new Map<string, { n: number; inst: number; it: KItem }>();
   insts.forEach((s, i) => { for (const it of s.doc.items.values()) if (it.kind === "global_label") { const t = str(it.node[1]), e = gl.get(t); if (e) e.n++; else gl.set(t, { n: 1, inst: i, it }); } });
-  for (const e of gl.values()) if (e.n === 1) mark(e.inst, "single_global_label", "warning", atOf(e.it.node), "Global label only appears once in the schematic", [e.it.id], [itemRef(insts[e.inst].doc, e.it)]);
+  for (const e of gl.values()) if (e.n === 1) mark(e.inst, "single_global_label", "warning", atOf(e.it.node), "Global label only appears once in the schematic", [e.it.id], [on(e.inst, itemRef(insts[e.inst].doc, e.it))]);
   return out;
 }
 

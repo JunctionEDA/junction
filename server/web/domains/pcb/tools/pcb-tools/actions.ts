@@ -40,7 +40,7 @@ import { arrayChanges } from "./array";
 import { addedChange, boardNets, deleteChanges, removedChange, replacedChange } from "./changes";
 import { PASTE_LAYERS_MSG, clipGet, clipSet, clipboardText, cursorPoint, duplicateChanges, parseClipboard, pasteChanges, referencePoint, textOfItem } from "./clipboard";
 import { connectedRun } from "./connected";
-import { boardStatistics, convertChanges, footprintAttrChanges, justifyChanges, segmentToArcChanges, zonePriorityChanges } from "./convert";
+import { boardStatistics, convertDialogs, convertPolyNode, convertPolys, convertSettings, convertZoneNode, createLinesChanges, footprintAttrChanges, justifyChanges, segmentToArcChanges, topLeftStrokeWidth, zonePriorityChanges } from "./convert";
 import { copperOf, num0, openForm, settingsOf } from "./dialogs";
 import { DIM_TYPE } from "./dimensions";
 import { pickTwoPoints } from "./dom";
@@ -52,27 +52,31 @@ import { enterGroup, exitGroup, selectedTopGroup, withinEnteredGroup, enteredGro
 import { applySelection, expandGroups, groupChanges, groupMembers, groupMembersChanges, groupOf, isLocked, lockChanges, selectedItems, selectionIds, topParentOf, ungroupChanges, groupNode, parentOf, setLocked } from "./groups";
 import { itemAt } from "./guess";
 import { hitTestItem } from "./hit";
-import { LENGTH_UNCONSTRAINED, TUNE_IU, setTargetLength, setTargetSkew, tuneCopy } from "./meander";
+import { IU_PER_PS } from "./length-delay";
+import { DELAY_UNCONSTRAINED, LENGTH_UNCONSTRAINED, TUNE_IU, setTargetLength, setTargetLengthDelay, setTargetSkew, setTargetSkewDelay, tuneCopy } from "./meander";
 import { idsOnLayer, inspectClearance } from "./msgpanel";
 import { connectedCopperIds, netHighlightIds, netInspector, netItemIds, netTable, netlist, ratsnest, selectionNets } from "./netlist";
-import { netOf } from "./nets";
+import { chainNets, boardChains, netChainOf, netOf } from "./nets";
 import { zoneLayers } from "./nodes";
 import { ARC_EDIT_ACTIONS, addCornerChanges, addCornerLabel, arcEditMode, canAddCorner, chamferCornerChanges, chamferCornerLabel, editHandleAt, handleTol, movePointChanges, movePointTitle, nextArcEditMode, peSingleId, removeCornerChanges, removeCornerLabel, setArcEditMode } from "./point-editor";
 import { netUnder, padsOf } from "./route-geom";
-import { attemptFinish, continueFromEnd, selectLayerAndPlaceVia, setLayer, startWithVia, toggleViaPlacement, undoRouteLeg, viaSpan } from "./route-tool";
+import { attemptFinish, continueFromEnd, endRoute, selectLayerAndPlaceVia, setLayer, startWithVia, toggleViaPlacement, undoRouteLeg, viaSpan, layerPickerImpl } from "./route-tool";
+import { fixHead } from "./route-fix";
+import { spreadSetDistance, spreadStepDistance } from "./spread";
+import { makeViaStack, onViaStackCommand, selectedViaStack, viaStackProperties } from "./via-stack";
 import { CM_M45, CM_M90, CM_R45, CM_R90, RM_MARK, RM_SHOVE, RM_WALK, setRouterSettings } from "./router-settings";
 import { beginCarryMove, moveTransform } from "./select-move";
 import { connectedItemNets, expandConnection, footprintSheetPath, isExpandableGraphicShape, isPadKey, itemPassesFilter, nearestUnconnectedFootprints, netCopperIds, sheetItemIds, unconnectedFootprints, unrouteIds } from "./select-connected";
 import { K, S, bind, lastCtx } from "./state";
 import { breakTrackChanges, cleanupChanges, cleanupPlan, trackEditChanges, trackLayerChanges, type CleanupOpts } from "./track-edit";
-import { ALIGN_COMMIT, mirrorAxisChanges, alignChanges, anchorOf, bboxUnion, distributeChanges, flipChanges, mirrorChanges, moveExactChanges, packNodes, positionRelativeChanges, rotateChanges, swapChanges, topLeftAnchor, transformChanges } from "./transforms";
+import { ALIGN_COMMIT, flippedImagesOf, mirrorAxisChanges, alignChanges, anchorOf, bboxUnion, distributeChanges, flipChanges, mirrorChanges, moveExactChanges, packNodes, positionRelativeChanges, rotateChanges, swapChanges, topLeftAnchor, transformChanges } from "./transforms";
 import { isTuningPattern, regenerateTuning, tuneStep, tuningPatternInfo } from "./tuning-patterns";
 import { editTuningPattern, selectedTuningPattern, tuningNodeWithSettings } from "./tuning-edit";
 import { isTuneTool, tuneMode, tuneUpdate } from "./tuning-tool";
 import { clone, fmt, layerOf, r6, widthOf, rotator } from "./util";
 import { flipFieldChange, footprintFieldNode, requestField, rotateFieldChange, hideFieldChanges } from "./field-edit";
 import { imageInfo } from "./images";
-import { imageNode, textNode } from "./nodes";
+import { gfxWidth, imageNode, ruleAreaNode, textNode, zoneNode } from "./nodes";
 import { canHaveNumber, padMemory, typeFromPad } from "./pad-tool";
 import { incrementString } from "../../canvas/sheet";
 import { diffPairMarkers, matchedLengthMarkers } from "./dru";
@@ -216,6 +220,55 @@ export function pasteAt(ctx: PcbCtx, opts: { annotations: string; clearNets?: bo
   });
   return true;
 }
+/**
+ * PCB_CONTROL::AppendBoard for a design block's layout (AppendDesignBlock, PlaceLinkedDesignBlock): the block's board
+ * items are added as new items (placeBoardItems: fresh ids, footprints without a schematic path, references kept,
+ * items on layers this board lacks left out), the reference point is the position of GetTopLeftItem over the items
+ * selected (the leftmost, then topmost; a group's position is its bounding box centre) and they hang on the cursor
+ * until a click places them.  With place_as_group and two or more top-level items, they go into a new group named
+ * after the block and linked to it (locked when any item is), selected in their place.  `after` hears whether the
+ * placement was made (repeated placement).  Returns false when the text holds no board items.
+ */
+export function placeBoardText(ctx: PcbCtx, text: string, opts: { label: string; group?: { name: string; libId: string } | null; after?: (placed: boolean) => void }): boolean {
+  const parsed = parseClipboard(text); if (!parsed) return false;
+  const doc = ctx.doc;
+  // the items PCB_CONTROL selects: those whose parent group is not placed with them
+  const inGroup = new Set<string>(); for (const n of parsed.nodes) if (n[0] === "group" || n[0] === "generated") for (const id of groupMembers(n)) inGroup.add(id);
+  const byId = new Map<string, KItem>(); for (const n of parsed.nodes) { const it = K.createItem(doc, clone(n)); if (it) byId.set(it.id, it); }
+  const leafBox = (it: KItem): number[] | null => {
+    if (it.kind !== "group" && it.kind !== "generated") return it.bbox || null;
+    return bboxUnion(groupMembers(it.node).map((id) => byId.get(id)).filter(Boolean).map((m) => ({ ...m!, bbox: leafBox(m!) })) as KItem[]);
+  };
+  let ref: Pt | null = null;
+  for (const it of byId.values()) {
+    if (inGroup.has(it.id)) continue;
+    let p: Pt;
+    if (it.kind === "group") { const b = leafBox(it); p = b ? [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] : [0, 0]; }   // PCB_GROUP::GetPosition
+    else p = anchorOf(it);
+    if (!ref || p[0] < ref[0] || (p[0] === ref[0] && p[1] < ref[1])) ref = p;
+  }
+  const at = cursorPoint(ctx), r = ref || [0, 0];
+  const res: { changes: PcbChange[]; ids: string[]; select?: string[]; pruned?: boolean } = pasteChanges(doc, text, [at[0] - r[0], at[1] - r[1]], { annotations: "keep" });
+  if (res.pruned) ctx.toast(PASTE_LAYERS_MSG);
+  if (!res.changes.length) return false;
+  let select = res.select || res.ids, ids = res.ids.slice();
+  const changes = res.changes.slice();
+  if (opts.group) {
+    // groupableCount: the selected board items that are not a footprint's children
+    const members = select.slice();
+    if (members.length >= 2) {
+      const locked = [...byId.values()].some((it) => !inGroup.has(it.id) && isLocked(it.node));
+      const g: SNode = ["group", opts.group.name, ["uuid", K.newUuid()], ...(locked ? [["locked", "yes"] as SNode] : []), ["lib_id", opts.group.libId], ["members", ...members]];
+      const c = addedChange(doc, g); changes.push(c); ids.push(c.id); select = [c.id];
+    }
+  }
+  placePasted(ctx, changes, ids, select, opts.label, at);
+  if (S.move && S.move.placing) {
+    const prev = S.move.after;
+    S.move.after = (placed: boolean, committed: boolean) => { if (prev) prev(placed, committed); if (opts.after) opts.after(placed); };
+  } else if (opts.after) opts.after(true);
+  return true;
+}
 // PCB_CONTROL::Paste: a plain paste keeps the references (PASTE_MODE::KEEP_ANNOTATIONS); Paste Special asks
 // (DIALOG_PASTE_SPECIAL: the three reference modes, KEEP preselected, and "Clear net assignments")
 act("paste", "Paste", "Ctrl+V", (ctx: PcbCtx) => canEdit(ctx) && pasteAt(ctx, { annotations: "keep" }));
@@ -273,9 +326,10 @@ act("decrementSecondary", "Decrement Secondary", "", (ctx: PcbCtx) => incrementI
 // and the clipboard is left alone when there is none
 act("copyAsText", "Copy as Text", "Ctrl+Shift+C", (ctx: PcbCtx) => {
   const fr = requestField(ctx, ctx.cursor ? ctx.cursor.slice() : cursorPoint(ctx));
-  if (fr) { const f = footprintFieldNode(ctx.doc.items.get(fr.id)!.node, fr.name); const t = f ? K.str(f[2]).trim() : ""; if (t) clipSet(ctx, t); return true; }
+  // a footprint's field: PCB_FIELD::GetShownText (its footprint's and the board's variables, the variant's value)
+  if (fr) { const fp = ctx.doc.items.get(fr.id)!.node, f = footprintFieldNode(fp, fr.name); const t = f ? K.pcbTextShown(ctx.doc, K.str(f[2]), K.str((K.kid(f, "layer") || [])[1]) || "F.SilkS", fp, fr.name).trim() : ""; if (t) clipSet(ctx, t); return true; }
   const sel = requestSelection(ctx, { locks: false, rerun: (c: PcbCtx) => runAction("copyAsText", c) }); if (!sel) return true;
-  const texts = sel.ids.map((id) => textOfItem(ctx.doc.items.get(id)!).trim()).filter(Boolean);
+  const texts = sel.ids.map((id) => textOfItem(ctx.doc.items.get(id)!, ctx.doc).trim()).filter(Boolean);
   endHover(ctx, sel); if (texts.length) clipSet(ctx, texts.join("\n")); return true;
 }, { tip: "Copy selected item(s) to clipboard as text" });
 // selection
@@ -322,6 +376,17 @@ function selectNetAction(ctx: PcbCtx, select: boolean) {
 }
 act("selectNet", "Select Net", "", (ctx: PcbCtx) => selectNetAction(ctx, true));
 act("deselectNet", "Deselect Net", "", (ctx: PcbCtx) => selectNetAction(ctx, false));
+// PCB_SELECTION_TOOL::selectNetChain: the items of every net on the chain of each selected connected item's net (a net
+// on no chain: its own items, as Select Net)
+act("selectNetChain", "Select Net Chain", "", (ctx: PcbCtx) => {
+  const sel = selectCursor(ctx, (c) => runAction("selectNetChain", c)); if (!sel) return true;
+  const nl = netlist(ctx.doc), out = new Set(sel), pass = walkFilter(ctx);
+  for (const key of connectedItemNets(ctx.doc, sel, nl)) {
+    const chain = netChainOf(ctx.doc, key);
+    for (const k of chain ? chainNets(ctx.doc, chain) : [key]) for (const id of netCopperIds(ctx.doc, k, nl, pass)) out.add(id);
+  }
+  applyWalkSelection(ctx, out); return true;
+});
 // PCB_SELECTION_TOOL::expandConnection: each press widens the selection by one stage (to the next junction, then to
 // the pads, then the whole connection); nothing connected selected picks the connected item under the cursor first
 act("selectConnection", "Select/Expand Connection", "U", (ctx: PcbCtx) => {
@@ -638,13 +703,29 @@ act("mirrorInteractive", "Mirror Interactive", "", (ctx: PcbCtx) => {
   if (sel.hover) applySelection(ctx, sel.ids);
   pickTwoPoints(ctx, "Select the first point of the mirror axis...", "Select the second point of the mirror axis...", "axis", (a, b) => {
     if (!a || !b) { endHover(ctx, sel); return; }
-    const r = mirrorAxisChanges(ctx.doc, sel.ids.filter((id) => ctx.doc.items.has(id)), a, b, (id) => groupOf(ctx.doc, id) || null, (id) => Array.from(expandGroups(ctx.doc, [id])));
-    if (r.changes.length) ctx.commit(r.changes, "Mirror");
-    if (r.skips.footprints) ctx.toast(MIRROR_FOOTPRINTS, 3500); else if (r.skips.groups) ctx.toast(MIRROR_GROUPS, 3500); else if (r.skips.items) ctx.toast(MIRROR_ARBITRARY, 3500);
-    endHover(ctx, sel); ctx.requestRender();
+    const ids = sel.ids.filter((id) => ctx.doc.items.has(id));
+    const finish = (flipped?: Map<string, string> | null): void => {
+      const r = mirrorAxisChanges(ctx.doc, ids.filter((id) => ctx.doc.items.has(id)), a, b, (id) => groupOf(ctx.doc, id) || null, (id) => Array.from(expandGroups(ctx.doc, [id])), flipped || undefined);
+      if (r.changes.length) ctx.commit(r.changes, "Mirror");
+      if (r.skips.footprints) ctx.toast(MIRROR_FOOTPRINTS, 3500); else if (r.skips.groups) ctx.toast(MIRROR_GROUPS, 3500); else if (r.skips.items) ctx.toast(MIRROR_ARBITRARY, 3500);
+      endHover(ctx, sel); ctx.requestRender();
+    };
+    // the pictures' pixels flip first (decoded and re-encoded by the browser), then the one "Mirror" step
+    const all = expandGroups(ctx.doc, ids), doc = ctx.doc, before = new Map(Array.from(all).map((id) => [id, doc.items.get(id)]));
+    if (!Array.from(all).some((id) => doc.items.get(id)?.kind === "image")) { finish(); return; }
+    void flippedImagesOf(doc, all).then((flipped) => {
+      if (ctx.doc !== doc || Array.from(before).some(([id, it]) => doc.items.get(id) !== it)) { endHover(ctx, sel); return; }   // the board moved on meanwhile
+      finish(flipped);
+    }, () => finish());
   });
   return true;
 }, { tip: "Mirrors selected item(s) interactively" });
+// GRAPHIC_EDIT_TOOL::Extend / Trim (PCB_ACTIONS::extendGraphic / trimGraphic, AF_ACTIVATE): the hover pickers of
+// graphic-edit.ts; the selection is cleared as the tool starts (nothing is picked up front)
+act("extendGraphic", "Extend Line or Arc", "", (ctx: PcbCtx) => { if (S.route) return true; ctx.setTool("extendgraphic"); return true; },
+  { tip: "Hover a graphical line or arc to extend it until it meets another" });
+act("trimGraphic", "Trim Shape", "", (ctx: PcbCtx) => { if (S.route) return true; ctx.setTool("trimgraphic"); return true; },
+  { tip: "Hover the part of a graphical shape to remove between the nearest crossings" });
 // EDIT_TOOL::Swap (no tracks: PCB_TRACE_T is filtered) and PackAndMoveFootprints (footprints only)
 act("swap", "Swap", "Alt+S", (ctx: PcbCtx) => {
   if (S.route) return true;   // isRouterActive: wxBell
@@ -765,14 +846,21 @@ act("routerSettingsDialog", "Interactive Router Settings...", "", (ctx: PcbCtx) 
 /** The tuner's settings in mm as the Tuning Pattern Properties dialog shows them. */
 export function tuneSettingsView(st: MeanderSettings, mode: string) {
   const tgt = mode === "skew" ? st.skew.opt / TUNE_IU : st.target.opt === LENGTH_UNCONSTRAINED ? null : st.target.opt / TUNE_IU;
+  const dl = mode === "skew" ? st.skewDelay : st.targetDelay;
+  const delay = !dl || (mode !== "skew" && dl.opt === DELAY_UNCONSTRAINED) ? null : dl.opt / IU_PER_PS;
   return { targetLength: tgt, minAmp: st.minAmp / TUNE_IU, maxAmp: st.maxAmp / TUNE_IU, spacing: st.spacing / TUNE_IU,
-    round: st.round, crPct: st.crPct, singleSided: st.singleSided, overrideCustomRules: st.overrideCustomRules };
+    round: st.round, crPct: st.crPct, singleSided: st.singleSided, overrideCustomRules: st.overrideCustomRules, isTimeDomain: !!st.isTimeDomain, targetDelay: delay };
 }
 /** DIALOG_TUNING_PATTERN_PROPERTIES::TransferDataFromWindow onto MEANDER_SETTINGS. */
 export function applyTuneSettings(st: MeanderSettings, v: TuneView, mode: string) {
   if (mode === "skew") setTargetSkew(st, v.targetLength == null ? 0 : Math.round(v.targetLength * TUNE_IU));
   else setTargetLength(st, v.targetLength == null ? LENGTH_UNCONSTRAINED : Math.round(v.targetLength * TUNE_IU));
+  if (v.isTimeDomain) {   // the delay control is filled only in the time domain
+    if (mode === "skew") setTargetSkewDelay(st, v.targetDelay == null ? 0 : Math.round(v.targetDelay * IU_PER_PS));
+    else setTargetLengthDelay(st, v.targetDelay == null ? DELAY_UNCONSTRAINED : Math.round(v.targetDelay * IU_PER_PS));
+  } else if (mode === "skew") setTargetSkewDelay(st, 0); else setTargetLengthDelay(st, DELAY_UNCONSTRAINED);
   st.overrideCustomRules = !!v.overrideCustomRules;
+  if (v.isTimeDomain != null) st.isTimeDomain = !!v.isTimeDomain;   // the radio buttons (enabled or not, they carry the current domain)
   st.minAmp = Math.round(v.minAmp * TUNE_IU); st.maxAmp = Math.round(v.maxAmp * TUNE_IU); st.spacing = Math.round(v.spacing * TUNE_IU);
   st.round = !!v.round; st.crPct = Math.round(v.crPct); st.singleSided = !!v.singleSided;
 }
@@ -795,6 +883,7 @@ export function tunerProperties(ctx: PcbCtx) {
   if (S.route) return runAction("ACT_CustomTrackWidth", ctx);   // performRouting: PCB_ACTIONS::properties runs ACT_CustomTrackWidth
   if (isTuneTool(S.modTool)) return openTuneSettings(ctx);
   // EDIT_TOOL::Properties on a selected pattern: PCB_TUNING_PATTERN::ShowPropertiesDialog
+  const stack = selectedViaStack(ctx); if (stack) return viaStackProperties(ctx, stack);   // PCB_VIA_STACK::ShowPropertiesDialog
   const gen = selectedTuningPattern(ctx); if (!gen) return false;
   return openPatternProperties(ctx, gen);
 }
@@ -841,6 +930,13 @@ act("ACT_PlaceThroughVia", "Place Through Via", "", (ctx: PcbCtx) => {
 }, Object.assign({ tip: "Adds a through-hole via at the end of currently routed track." }, ROUTER_ACTION));
 act("ACT_PlaceBlindVia", "Place Blind/Buried Via", "", (ctx: PcbCtx) => routingOnly(ctx, () => toggleViaPlacement(ctx, "blind")), Object.assign({ tip: "Adds a blind or buried via at the end of currently routed track." }, ROUTER_ACTION));
 act("ACT_PlaceMicroVia", "Place Microvia", "", (ctx: PcbCtx) => routingOnly(ctx, () => toggleViaPlacement(ctx, "micro")), Object.assign({ tip: "Adds a microvia at the end of currently routed track." }, ROUTER_ACTION));
+act("ACT_PlaceViaStack", "Place Microvia Stack at Track End", "", (ctx: PcbCtx) => routingOnly(ctx, () => onViaStackCommand(ctx, () => toggleViaPlacement(ctx), () => fixHead(ctx, { finish: true }), () => endRoute(ctx, false))), Object.assign({ tip: "Drops the active microvia stack preset at the end of the currently routed track and continues on the target layer." }, ROUTER_ACTION));
+// ROUTER_TOOL::SpreadTracks' distance actions (live while the tool runs)
+act("ACT_SpreadTracksSetDistance", "Set Spreading Distance...", "E", (ctx: PcbCtx) => (S.modTool === "spread" ? spreadSetDistance(ctx) : false), Object.assign({ tip: "Sets the distance between the tracks for the Spread Tracks tool." }, ROUTER_ACTION));
+act("ACT_IncreaseSpreadingDistance", "Increase Spreading Distance...", "]", (ctx: PcbCtx) => (S.modTool === "spread" ? spreadStepDistance(ctx, true) : false), Object.assign({ tip: "Increases the distance between the tracks for the Spread Tracks tool by one grid unit." }, ROUTER_ACTION));
+act("ACT_DecreaseSpreadingDistance", "Decrease Spreading Distance...", "[", (ctx: PcbCtx) => (S.modTool === "spread" ? spreadStepDistance(ctx, false) : false), Object.assign({ tip: "Decreases the distance between the tracks for the Spread Tracks tool by one grid unit." }, ROUTER_ACTION));
+// GENERATOR_TOOL::MakeViaStackFromSelection
+act("makeViaStack", "Create Stack from Selection", "", (ctx: PcbCtx) => { if (ctx.fpEditor) return false; return makeViaStack(ctx); }, { menu: "Place", tip: "Wrap the selected microvias and traces into a microvia stack" });
 act("ACT_SelLayerAndPlaceThroughVia", "Select Layer and Place Through Via...", "", (ctx: PcbCtx) => routingOnly(ctx, () => selectLayerAndPlaceVia(ctx, "through")), Object.assign({ tip: "Select a layer, then add a through-hole via at the end of currently routed track." }, ROUTER_ACTION));
 act("ACT_SelLayerAndPlaceBlindVia", "Select Layer and Place Blind/Buried Via...", "", (ctx: PcbCtx) => routingOnly(ctx, () => selectLayerAndPlaceVia(ctx, "blind")), Object.assign({ tip: "Select a layer, then add a blind or buried via at the end of currently routed track." }, ROUTER_ACTION));
 act("ACT_SelLayerAndPlaceMicroVia", "Select Layer and Place Micro Via...", "", (ctx: PcbCtx) => routingOnly(ctx, () => selectLayerAndPlaceVia(ctx, "micro")), Object.assign({ tip: "Select a layer, then add a micro via at the end of currently routed track." }, ROUTER_ACTION));
@@ -978,9 +1074,63 @@ export function highlightNetAt(ctx: PcbCtx, at?: Pt | null, useSelection = false
   // m_lastHighlighted takes the nets that were showing whenever the highlight changes; m_currentlyHighlighted the new ones
   const shown = shownHighlight();
   if (!keys.size) { if (shown.length) S.hlLast = shown; S.hlCurrent = []; showHighlight(ctx, []); sendNetHighlight(); return true; }
-  const key = keys.values().next().value; if (keys.size === 1 && S.highlightNet === key) { if (shown.length) S.hlLast = shown; S.hlCurrent = []; showHighlight(ctx, []); sendNetHighlight(); return true; }
+  const key = keys.values().next().value;
+  // the one net highlighted clicked again: a net on a chain of more than one net escalates to the chain's nets
+  if (!useSelection && keys.size === 1 && shown.length === 1 && shown[0] === key) {
+    const chain = netChainOf(ctx.doc, key as string), nets = chain ? chainNets(ctx.doc, chain) : [];
+    if (nets.length > 1) { showHighlight(ctx, nets, nl); S.hlCurrent = nets.slice(); S.hlChain = chain; return true; }
+  }
+  S.hlChain = "";
+  if (keys.size === 1 && S.highlightNet === key) { if (shown.length) S.hlLast = shown; S.hlCurrent = []; showHighlight(ctx, []); sendNetHighlight(); return true; }
   if (shown.length) S.hlLast = shown;
   S.hlCurrent = Array.from(keys); showHighlight(ctx, S.hlCurrent, nl); sendNetHighlight(); return true;   // no infobar: the net shows in the message panel
+}
+/**
+ * BOARD_INSPECTION_TOOL::HighlightNetChain: the chain of the copper under the cursor; the same chain again, or none
+ * under the cursor while one is highlighted, turns the highlight off.
+ */
+export function highlightNetChainAt(ctx: PcbCtx, at?: Pt | null): boolean {
+  bind(ctx);
+  const p = at || (ctx.cursor ? ctx.cursor.slice() as Pt : cursorPoint(ctx));
+  const nl = netlist(ctx.doc), key = nl.table.key(netUnder(ctx.doc, p[0], p[1], null));
+  const sig = key ? netChainOf(ctx.doc, key) : "";
+  if ((!sig && S.hlChain) || (sig && sig === S.hlChain)) { S.hlChain = ""; showHighlight(ctx, []); S.hlCurrent = []; return true; }
+  S.hlChain = sig;
+  const codes = sig ? chainNets(ctx.doc, sig) : [];
+  showHighlight(ctx, codes, nl); S.hlCurrent = codes.slice();
+  return true;
+}
+/**
+ * REPLACE_TERMINAL_PAD_MENU::update: for one selected pad on a chain, the pad and its net's terminal pads A / B (uuids,
+ * "" for none); null otherwise.
+ */
+export function terminalPadState(ctx: PcbCtx): { pad: string; old: [string, string] } | null {
+  bind(ctx);
+  if (selectionIds(ctx).size || !S.padSel || (S.padAlso && S.padAlso.keys.length > 1)) return null;
+  const i = S.padSel.lastIndexOf("#"), fp = ctx.doc.items.get(S.padSel.slice(0, i)), pad = fp && padsOf(fp)[+S.padSel.slice(i + 1)];
+  if (!pad || !pad.net.name) return null;
+  const c = boardChains(ctx.doc).get(pad.net.name); if (!c || !c.chain) return null;
+  const u = K.kid(pad.node, "uuid") || K.kid(pad.node, "tstamp"); const id = u ? K.str(u[1]) : "";
+  return { pad: id, old: [c.pads[0] || "", c.pads[1] || ""] };
+}
+/**
+ * BOARD_INSPECTION_TOOL::ReplaceTerminalPad / BOARD::ReplaceNetChainTerminalPad: on every net of the highlighted chain,
+ * a terminal pad `prev` becomes `next`.  The board's new (net_chains …) text, or null when nothing changed.
+ */
+export function replaceTerminalPad(ctx: PcbCtx, prev: string, next: string): string | null {
+  bind(ctx);
+  if (!S.hlChain) return null;
+  const api = (K as unknown as { netChains?: { boardChainsText(m: Map<string, { chain: string; pads: [string | null, string | null] }>, order: string[], has: (u: string) => boolean): string } }).netChains;
+  if (!api) return null;
+  const pads = new Set<string>();
+  for (const it of ctx.doc.items.values()) if (it.kind === "footprint") for (const p of padsOf(it)) { const u = K.kid(p.node, "uuid") || K.kid(p.node, "tstamp"); if (u) pads.add(K.str(u[1])); }
+  const newPad = pads.has(next) ? next : null;   // FindPadByUuid
+  const m = new Map(Array.from(boardChains(ctx.doc), ([k, v]) => [k, { chain: v.chain, pads: [v.pads[0], v.pads[1]] as [string | null, string | null] }]));
+  let changed = false;
+  for (const [, c] of m) if (c.chain === S.hlChain) for (let j = 0; j < 2; j++) if (c.pads[j] && c.pads[j] === prev) { c.pads[j] = newPad; changed = true; }
+  if (!changed) return null;
+  const order = [...((ctx.doc.nets || new Map()) as Map<number, string>)].sort((a, b) => a[0] - b[0]).map((x) => x[1]);
+  return api.boardChainsText(m, order, (u) => pads.has(u));
 }
 /** SendCrossProbeNetName: highlightNet() names the net it highlighted to the schematic, or nothing when it cleared it. */
 function sendNetHighlight(): void {
@@ -1014,7 +1164,58 @@ function showHighlight(ctx: PcbCtx, keys: string[], nl?: ReturnType<typeof netli
 }
 act("highlightNet", "Highlight Net", "`", (ctx: PcbCtx) => highlightNetAt(ctx));
 act("highlightNetSelection", "Highlight Net of Selection", "", (ctx: PcbCtx) => highlightNetAt(ctx, null, true));
-act("clearHighlight", "Clear Net Highlighting", "~", (ctx: PcbCtx) => { S.hlCurrent = []; S.hlLast = []; showHighlight(ctx, []); sendNetHighlight(); return true; });
+/**
+ * BOARD_NETLIST_UPDATER's net chain steps after the update: ApplyChainAssignments (each board net takes the netlist's
+ * chain; a chain the netlist no longer gives is reported; a net whose chain changed loses its terminal pads), then the
+ * netlist's terminal pins as terminal pads (the pad of that number nearest its footprint's edge, on a net of that
+ * chain; the other nets of the chain lose that terminal).  The board's new (net_chains …) text (null when it is the
+ * same) and the warnings.
+ */
+export function netlistChainUpdate(ctx: PcbCtx, chains: { name: string; members: string[]; terminals: { ref: string; pin: string }[] }[]): { text: string | null; warnings: string[] } {
+  bind(ctx);
+  const doc = ctx.doc, warnings: string[] = [];
+  const api = (K as unknown as { netChains?: { boardChainsText(m: Map<string, { chain: string; pads: [string | null, string | null] }>, order: string[], has: (u: string) => boolean): string } }).netChains;
+  if (!api) return { text: null, warnings };
+  const nextOf = new Map<string, string>(); for (const c of chains) for (const n of c.members) nextOf.set(n, c.name);
+  const was = boardChains(doc);
+  const order = [...((doc.nets || new Map()) as Map<number, string>)].sort((a, b) => a[0] - b[0]).map((x) => x[1]);
+  const m = new Map<string, { chain: string; pads: [string | null, string | null] }>();
+  for (const net of order) {
+    const prev = was.get(net), previous = prev ? prev.chain : "", next = nextOf.get(net) || "";
+    if (previous && !next) warnings.push(`Net chain assignment '${previous}' on net '${net}' cleared by netlist update.`);
+    const pads: [string | null, string | null] = previous !== next || !prev ? [null, null] : [prev.pads[0], prev.pads[1]];
+    m.set(net, { chain: next, pads });
+  }
+  const padUuid = (p: { node: SNode }): string => { const u = K.kid(p.node, "uuid") || K.kid(p.node, "tstamp"); return u ? K.str(u[1]) : ""; };
+  const allPads = new Set<string>();
+  for (const it of doc.items.values()) if (it.kind === "footprint") for (const p of padsOf(it)) { const u = padUuid(p); if (u) allPads.add(u); }
+  for (const c of chains) {
+    const pads: ({ uuid: string; net: string } | null)[] = [null, null];
+    c.terminals.slice(0, 2).forEach((t, i) => {
+      let fp: KItem | null = null; for (const it of doc.items.values()) if (it.kind === "footprint" && it.ref === t.ref) { fp = it; break; }   // FindFootprintByReference
+      if (!fp) return;
+      const bb = fp.bbox; let best: { uuid: string; net: string } | null = null, bestDist = Infinity;
+      for (const p of padsOf(fp)) {
+        if (p.number !== t.pin) continue;
+        const d = bb ? Math.min(p.x - bb[0], bb[2] - p.x, p.y - bb[1], bb[3] - p.y) : 0, u = padUuid(p);
+        if (!best || d < bestDist || (d === bestDist && u < best.uuid)) { best = { uuid: u, net: p.net.name || "" }; bestDist = d; }
+      }
+      pads[i] = best;
+    });
+    for (let i = 0; i < 2; i++) {
+      const pad = pads[i]; if (!pad) continue;
+      const term = m.get(pad.net); if (!term || term.chain !== c.name) continue;
+      for (const [net, e] of m) if (net !== pad.net && e.chain === c.name && e.pads[i]) e.pads[i] = null;
+      term.pads[i] = pad.uuid;
+    }
+  }
+  const text = api.boardChainsText(m, order, (u) => allPads.has(u));
+  const cur = (doc as KDoc & { netChainsNode?: SNode | null }).netChainsNode;
+  const same = cur ? K.serialize(cur) === K.serialize(K.parse(text || "(net_chains)") as SNode) : !text;
+  return { text: same ? null : text, warnings };
+}
+act("highlightNetChain", "Highlight Net Chain", "", (ctx: PcbCtx) => highlightNetChainAt(ctx));
+act("clearHighlight", "Clear Net Highlighting", "~", (ctx: PcbCtx) => { S.hlCurrent = []; S.hlLast = []; S.hlChain = ""; showHighlight(ctx, []); sendNetHighlight(); return true; });
 // BOARD_INSPECTION_TOOL::HighlightNet, toggleNetHighlight: the current highlight goes off, and comes back on the next press
 act("toggleNetHighlight", "Toggle Net Highlight", "Alt+`", (ctx: PcbCtx) => { bind(ctx); const turnOn = !shownHighlight().length && S.hlCurrent.length > 0; showHighlight(ctx, turnOn ? S.hlCurrent : []); return true; });
 // toggleLastNetHighlight: the nets highlighted before the current ones come back, and the two sets swap
@@ -1148,13 +1349,84 @@ act("toggleExcludeFromSim", "Exclude from Simulation", "", (ctx: PcbCtx) => { co
 act("toggleDNP", "Do Not Populate", "", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select footprints first"); if (!ids) return true; return commitSel(ctx, footprintAttrChanges(ctx.doc, ids, "dnp"), "Toggle Attribute"); });
 for (const [id, how, label] of [["leftJustify", "left", "Left Justify"], ["centerJustify", "center", "Center Justify"], ["rightJustify", "right", "Right Justify"]])
   act(id, label, "", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select text first"); if (!ids) return true; return commitSel(ctx, justifyChanges(ctx.doc, ids, how), label); });
-for (const [id, to, label] of [["convertToPoly", "poly", "Create Polygon from Selection"], ["convertToLines", "lines", "Create Lines from Selection"], ["convertToTracks", "tracks", "Create Tracks from Selection"], ["convertToZone", "zone", "Create Zone from Selection"], ["convertToKeepout", "keepout", "Create Rule Area from Selection"]])
-  act(id, label, "", (ctx: PcbCtx) => {
-    const ids = selectionOrToast(ctx, "Select graphic shapes first"); if (!ids) return true;
-    if (to === "zone") { const items = ids.map((i) => ctx.doc.items.get(i)); const layer = /\.Cu$/.test(layerOf(items[0]!.node, "")) ? layerOf(items[0]!.node) : S.layer; const nets = boardNets(ctx.doc);
-      askText(ctx, "Zone net", "", (name: string | null) => { if (name === null) return; const net = name ? (nets.find((n) => n.name === name) || { code: -1, name }) : { code: 0, name: "" }; commitSel(ctx, convertChanges(ctx.doc, ids, "zone", { layer, net }), "zone from shapes"); }, nets.map((n) => n.name)); return true; }
-    return commitSel(ctx, convertChanges(ctx.doc, ids, to), label.toLowerCase());
-  });
+// CONVERT_TOOL::CreatePolys (Create Polygon / Zone / Rule Area from Selection): the items under the selection (or the
+// cursor); nothing convertible (the bounding-hull preflight) does nothing.  A polygon asks the Conversion Settings
+// first; a zone or rule area opens its properties dialog with the conversion settings in it ("Convert to Copper Zone",
+// "Convert to Non Copper Zone", "Convert to Rule Area").  The results go on the active layer.
+function convertPolysAction(ctx: PcbCtx, to: "poly" | "zone" | "keepout") {
+  if (S.route) return true;
+  if (!canEdit(ctx)) return true;
+  const sel = requestSelection(ctx, { locks: false, rerun: (c: PcbCtx) => runAction(to === "poly" ? "convertToPoly" : to === "zone" ? "convertToZone" : "convertToKeepout", c) }); if (!sel) return true;
+  const items = sel.items, doc = ctx.doc;
+  if (!convertPolys(items, "hull", convertSettings.gap)) { endHover(ctx, sel); return true; }
+  const layer = sizesOf(ctx).activeLayer || S.layer;
+  const finish = (changes: PcbChange[], used: Set<string>) => {
+    if (convertSettings.deleteOriginals) { applySelection(ctx, []); for (const it of items) if (used.has(it.id)) changes.push(removedChange(it)); }
+    else endHover(ctx, sel);
+    if (changes.length) ctx.commit(changes, to === "poly" ? (convertSettings.deleteOriginals ? "Convert to Polygon" : "Create Polygon") : (convertSettings.deleteOriginals ? "Convert to Zone" : "Create Zone"));
+    ctx.requestRender();
+  };
+  if (to === "poly") {
+    const dlg = convertDialogs.settings; if (!dlg) { ctx.toast("Conversion Settings: dialogs are unavailable here"); endHover(ctx, sel); return true; }
+    const previous = { ...convertSettings };
+    dlg({ copy: true, centerline: true, hull: true }, convertSettings, (ok: boolean) => {
+      if (!ok || ctx.doc !== doc) { endHover(ctx, sel); return; }
+      const r = { ...convertSettings };
+      if (r.strategy !== "centerline" && r.lineWidth === 0) r.lineWidth = gfxWidth(layer);   // bds.m_LineThickness[ GetLayerClass( layer ) ]
+      if (r.strategy === "hull" && r.gap > 0) r.gap += r.lineWidth / 2;
+      const res = convertPolys(items, r.strategy, r.gap);
+      if (!res) {
+        openForm({ title: "Error", width: 420, fields: [{ type: "note", value: "Could not convert selection" }, { type: "note", value: r.strategy === "hull" ? "Resulting polygon would be empty" : "Objects must form a closed shape" }] });
+        Object.assign(convertSettings, previous); endHover(ctx, sel); return;
+      }
+      const width = r.strategy === "copy" ? (topLeftStrokeWidth(items) ?? r.lineWidth) : r.lineWidth;
+      finish(res.outlines.map((o) => addedChange(doc, convertPolyNode(o, width, r.strategy === "centerline", layer))), res.used);
+    });
+    return true;
+  }
+  // zones and rule areas: no copy-line-width option; the board's default zone settings on the active layer, no name
+  if (convertSettings.strategy === "copy") convertSettings.strategy = "centerline";
+  const tpl = to === "keepout" ? ruleAreaNode([], [layer]) : zoneNode(doc, [], layer, { code: 0, name: "" });
+  if (to !== "keepout" && !/\.Cu$/.test(layer)) { const pr = K.kid(tpl, "priority"); if (pr) tpl.splice(tpl.indexOf(pr), 1); }
+  const dlg = newItemDialogs.zone; if (!dlg) { ctx.toast("Zone Properties: dialogs are unavailable here"); endHover(ctx, sel); return true; }
+  dlg(ctx, tpl, (node: SNode | null) => {
+    if (!node || ctx.doc !== doc) { endHover(ctx, sel); return; }
+    const res = convertPolys(items, convertSettings.strategy, convertSettings.gap); if (!res) { endHover(ctx, sel); return; }
+    finish(res.outlines.map((o) => { const z = convertZoneNode(node, o); return addedChange(doc, z, to === "zone" && K.kid(z, "net") ? netOf(z) : undefined); }), res.used);
+  }, convertSettings);
+  return true;
+}
+act("convertToPoly", "Create Polygon from Selection...", "", (ctx: PcbCtx) => convertPolysAction(ctx, "poly"), { tip: "Creates a graphic polygon from the selection" });
+act("convertToZone", "Create Zone from Selection...", "", (ctx: PcbCtx) => convertPolysAction(ctx, "zone"), { tip: "Creates a copper zone from the selection" });
+act("convertToKeepout", "Create Rule Area from Selection...", "", (ctx: PcbCtx) => convertPolysAction(ctx, "keepout"), { tip: "Creates a rule area from the selection" });
+// CONVERT_TOOL::CreateLines: rectangles, polygons, zones (and graphic lines / arcs) become lines on the active layer -
+// tracks for Create Tracks, where a non-copper active layer asks for a copper layer (SelectOneLayer); Create Lines asks
+// the Conversion Settings for whether to delete the sources.  "Create Lines" either way.
+function convertLinesAction(ctx: PcbCtx, tracks: boolean) {
+  if (S.route) return true;
+  if (!canEdit(ctx)) return true;
+  const sel = requestSelection(ctx, { locks: false, filter: (it: KItem) => it.kind === "zone" || /^gr_(line|arc|poly|rect)$/.test(it.kind), rerun: (c: PcbCtx) => runAction(tracks ? "convertToTracks" : "convertToLines", c) });
+  if (!sel || !sel.items.length) return true;
+  const doc = ctx.doc;
+  const run = (layer: string) => {
+    if (ctx.doc !== doc) return;
+    const ch = createLinesChanges(doc, sel.items, layer, tracks && !doc.fpEditor, convertSettings.deleteOriginals);
+    if (convertSettings.deleteOriginals) applySelection(ctx, []); else endHover(ctx, sel);
+    if (ch.length) ctx.commit(ch, "Create Lines");
+    ctx.requestRender();
+  };
+  const layer = sizesOf(ctx).activeLayer || S.layer;
+  if (tracks) {
+    if (/\.Cu$/.test(layer)) { run(layer); return true; }
+    layerPickerImpl({ layers: copperOf(doc), current: "F.Cu", disallow: new Set(), at: (ctx.cursor || [0, 0]) as Pt, client: S.client }, (l: string | null) => { if (l) run(l); else endHover(ctx, sel); });
+    return true;
+  }
+  const dlg = convertDialogs.settings; if (!dlg) { ctx.toast("Conversion Settings: dialogs are unavailable here"); endHover(ctx, sel); return true; }
+  dlg({ copy: false, centerline: false, hull: false }, convertSettings, (ok: boolean) => { if (ok) run(layer); else endHover(ctx, sel); });
+  return true;
+}
+act("convertToLines", "Create Lines from Selection...", "", (ctx: PcbCtx) => convertLinesAction(ctx, false), { tip: "Creates graphic lines from the selection" });
+act("convertToTracks", "Create Tracks from Selection", "", (ctx: PcbCtx) => convertLinesAction(ctx, true), { tip: "Creates tracks from the selected graphic lines" });
 // CONVERT_TOOL::SegmentToArc: the arc is added beside its source ("Create Arc"); nothing fitting selected does nothing
 act("convertToArc", "Create Arc from Selection", "", (ctx: PcbCtx) => {
   if (!canEdit(ctx)) return true;

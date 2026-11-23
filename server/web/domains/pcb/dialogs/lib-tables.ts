@@ -171,7 +171,8 @@ function ensureCss(): void { if (cssDone || typeof document === "undefined") ret
 
 export async function openLibTables(opts: LibTablesOpts): Promise<void> {
   const proj = appState.project; if (!proj) return;
-  const kind = opts.kind, sym = kind === "symbol", tableFile = T.tableFileName(kind);
+  // vis: the Show column (PANEL_FP_LIB_TABLE alone hides COL_VISIBLE); db: PANEL_DESIGN_BLOCK_LIB_TABLE
+  const kind = opts.kind, sym = kind === "symbol", db = kind === "designBlock", vis = kind !== "footprint", tableFile = T.tableFileName(kind);
   const tableDoc = proj.docs.find((d) => d.path === tableFile);
   let projText = "";
   if (tableDoc) { try { projText = await readDoc(tableDoc.docId); } catch { /* an unreadable table lists nothing */ } }
@@ -216,7 +217,7 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
       { key: "status", label: " ", type: "icon", width: 24, icon: statusCell(p) },
       lock({ key: "enabled", label: "Enable", type: "bool", width: 52 }),
     ];
-    if (sym) cols.push(lock({ key: "visible", label: "Show", type: "bool", width: 46 }));
+    if (vis) cols.push(lock({ key: "visible", label: "Show", type: "bool", width: 46 }));
     cols.push(lock({ key: "nickname", label: "Nickname", width: 150 }),
       lock({ key: "uri", label: "Library Path", width: 300, button: p.readOnly ? undefined : (r) => ({ icon: () => "small_folder", title: () => "Browse...", run: (_v, set) => { void browsePath(r, set); } }) }),
       lock({ key: "type", label: "Library Format", type: "choice", width: 150, options: (r) => T.formatChoices(kind, r.type) }),
@@ -342,7 +343,9 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
     reset.addEventListener("click", () => { void onReset(); });
     const migrate = h("button", { class: "btn", type: "button", "data-btn": "migrate", disabled: ro || global }, "Migrate Libraries") as HTMLButtonElement;
     migrate.addEventListener("click", () => { void onMigrate(); });
-    b.append(reset, migrate);
+    b.append(reset);
+    // "There aren't (yet) any legacy DesignBlock libraries to migrate": m_migrate_libs_button->Hide()
+    if (!db) b.append(migrate);
   };
 
   /** browseLibrariesHandler: pick project files of the entry's kind; a duplicate nickname asks Skip / Add Anyway. */
@@ -372,7 +375,7 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
   const onReset = async (): Promise<void> => {
     const g = pages[0]; if (!g) return;
     if (g.rows.length && !(await isOK("This action will reset your global library table on disk and cannot be undone."))) return;
-    await okBox("Message", `The global library table is the KiCad ${sym ? "symbol" : "footprint"} library set this server provides. It is already the default table.`);
+    await okBox("Message", `The global library table is the KiCad ${sym ? "symbol" : db ? "design block" : "footprint"} library set this server provides. It is already the default table.`);
   };
   /** onMigrateLibraries: the selected rows of a non-KiCad format, saved as KiCad libraries. */
   const onMigrate = async (): Promise<void> => {
@@ -409,8 +412,8 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
     if (!p.readOnly) {
       if (anyOff) { items.push({ label: "Activate Selected", run: setAll("enabled", true) }); block = true; }
       if (anyOn) { items.push({ label: "Deactivate Selected", run: setAll("enabled", false) }); block = true; }
-      if (sym && anyHid) { items.push({ label: "Set Visible Flag", run: setAll("visible", true) }); block = true; }
-      if (sym && anyVis) { items.push({ label: "Unset Visible Flag", run: setAll("visible", false) }); block = true; }
+      if (vis && anyHid) { items.push({ label: "Set Visible Flag", run: setAll("visible", true) }); block = true; }
+      if (vis && anyVis) { items.push({ label: "Unset Visible Flag", run: setAll("visible", false) }); block = true; }
       if (sel.length === 1 && first.type !== T.TABLE_TYPE) { items.push({ label: "Edit Options...", title: "Edit options for this library entry", run: () => { void editOptions(first, p); } }); block = true; }
       if (block) items.push({ sep: true });
       // GRID_TRICKS::showPopupMenu
@@ -428,7 +431,7 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
   };
   const copySel = async (p: Page, cut: boolean): Promise<void> => {
     const g = p.grid!; const sel = g.selectedRows(); if (!sel.length) return;
-    try { await navigator.clipboard.writeText(T.copyRows(sel.map((i) => p.rows[i]), sym)); } catch { /* no clipboard access */ }
+    try { await navigator.clipboard.writeText(T.copyRows(sel.map((i) => p.rows[i]), vis)); } catch { /* no clipboard access */ }
     if (cut && !p.readOnly) { for (const i of sel) Object.assign(p.rows[i], { nickname: "", uri: "", options: "", descr: "" }); g.refresh(); markDirty(p); }
   };
   /** paste_text: a "(sym_lib_table" / "(fp_lib_table" text inserts its rows at the top; spreadsheet text fills cells from the cursor. */
@@ -448,7 +451,7 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
       const startCol = focus && focus.dataset && focus.dataset.col ? Math.max(0, T.TEXT_COLS.indexOf(focus.dataset.col as keyof Row)) : T.TEXT_COLS.indexOf("nickname");
       const cells = T.pasteCells(text);
       // the Show column is hidden for footprints: pasted columns skip it
-      const cols = sym ? cells : cells.map((l) => (startCol <= 1 ? [...l.slice(0, 1 - startCol), "1", ...l.slice(1 - startCol)] : l));
+      const cols = vis ? cells : cells.map((l) => (startCol <= 1 ? [...l.slice(0, 1 - startCol), "1", ...l.slice(1 - startCol)] : l));
       T.applyPaste(p.rows, cols, row, startCol, blankRow);
     }
     p.grid.refresh(); markDirty(p); refreshSubs();
@@ -458,12 +461,12 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
   const written = new Set<Page>();
   const savePage = async (p: Page): Promise<boolean> => {
     if (p.readOnly || !p.path) return true;
-    const v = T.verifyRows(p.rows, sym);
+    const v = T.verifyRows(p.rows, vis);
     if (v.error) { select(pages.indexOf(p)); if (p.grid && v.row !== undefined) { p.rows.splice(0, p.rows.length, ...v.rows); p.grid.refresh(); p.grid.select(v.row); } await okBox("Library Nickname Error", v.error); return false; }
     p.rows.splice(0, p.rows.length, ...v.rows); if (p.grid) p.grid.refresh();
     // TransferDataFromWindow writes a table only when it differs from the one loaded (a missing table loads empty)
     if (rowsKey(p.rows) === p.original) return true;
-    const text = formatLibTable(p.rows, kind === "symbol" ? "sym_lib_table" : "fp_lib_table");
+    const text = formatLibTable(p.rows, T.tableRoot(kind));
     const id = await writeProjectText(p.path, text);
     if (!id) { await okBox("File Save Error", `Error saving project library table:\n\n'${p.path}' could not be written.`); return false; }
     p.docId = id; p.original = rowsKey(p.rows); markDirty(p); written.add(p);
@@ -474,7 +477,7 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
     // VerifyTable on every page before anything is written
     for (const p of pages) {
       if (p.readOnly) continue;
-      const v = T.verifyRows(p.rows, sym);
+      const v = T.verifyRows(p.rows, vis);
       if (v.error) { select(pages.indexOf(p)); p.rows.splice(0, p.rows.length, ...v.rows); if (p.grid) { p.grid.refresh(); if (v.row !== undefined) p.grid.select(v.row); } await okBox("Library Nickname Error", v.error); return false; }
     }
     const projPage = pages[1]; written.clear();
@@ -486,7 +489,7 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
 
   let closing = false; let dlgApi: { close(): void } | null = null;
   KD().open({
-    title: sym ? "Symbol Libraries" : "Footprint Libraries", width: 1000, cls: "kd-wide kd-libtable kd-nowrap", readOnly: ro, geomKey: sym ? "DIALOG_EDIT_LIBRARY_TABLES:sym" : "DIALOG_EDIT_LIBRARY_TABLES:fp",
+    title: sym ? "Symbol Libraries" : db ? "Design Block Libraries" : "Footprint Libraries", width: 1000, cls: "kd-wide kd-libtable kd-nowrap", readOnly: ro, geomKey: sym ? "DIALOG_EDIT_LIBRARY_TABLES:sym" : db ? "DIALOG_EDIT_LIBRARY_TABLES:db" : "DIALOG_EDIT_LIBRARY_TABLES:fp",
     build(body, a) {
       dlgApi = a;
       body.append(nb);
@@ -518,7 +521,7 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
 }
 
 /** The values the path substitutions grid shows for the server's library folders (populateEnvironReadOnlyTable). */
-export function serverEnvValues(refs: { symbol?: string; footprint?: string }): Record<string, string> {
+export function serverEnvValues(refs: { symbol?: string; footprint?: string; designBlock?: boolean }): Record<string, string> {
   const proj = appState.project;
   const out: Record<string, string> = {
     KIPRJMOD: proj ? `${proj.name} (this project's files)` : "",
@@ -526,6 +529,8 @@ export function serverEnvValues(refs: { symbol?: string; footprint?: string }): 
     KICAD10_FOOTPRINT_DIR: `gitlab.com/kicad/libraries/kicad-footprints${refs.footprint ? " @ " + refs.footprint : ""}`,
     KICAD10_3DMODEL_DIR: "gitlab.com/kicad/libraries/kicad-packages3D",
   };
+  // DESIGN_BLOCK_LIBRARY_ADAPTER::GlobalPathEnvVariableName: this server provides no design block libraries
+  if (refs.designBlock) out.KICAD10_DESIGN_BLOCK_DIR = "";
   // the variables the user added in Configure Paths (the server's own take precedence, as external ones do in KiCad)
   for (const v of userEnvVars()) if (!(v.name in out)) out[v.name] = v.path;
   return out;
@@ -545,13 +550,13 @@ export function userEnvVars(): { name: string; path: string }[] {
  */
 export async function manageLibraries(kind: T.LibTableKind, frame?: { readOnly?: boolean; loadError?(row: Row): string | null; onSaved?(rows: Row[]): void }): Promise<void> {
   let ref = ""; let globalRows: Row[] = [];
-  try {
+  if (kind !== "designBlock") try {
     const { officialLibraries } = await import("../library/sources");
     const t = await officialLibraries(kind); ref = t.ref || "";
     globalRows = t.libraries.map((l) => ({ enabled: true, visible: true, nickname: l.name, type: "KiCad", options: "", descr: l.description || "",
       uri: kind === "symbol" ? "${KICAD10_SYMBOL_DIR}/" + l.name + ".kicad_symdir" : "${KICAD10_FOOTPRINT_DIR}/" + l.name + ".pretty" }));
   } catch { /* the server's libraries are out of reach: an empty global table */ }
-  await openLibTables({ kind, globalRows, envValues: serverEnvValues(kind === "symbol" ? { symbol: ref } : { footprint: ref }), readOnly: !!(frame && frame.readOnly),
+  await openLibTables({ kind, globalRows, envValues: serverEnvValues(kind === "symbol" ? { symbol: ref } : kind === "designBlock" ? { designBlock: true } : { footprint: ref }), readOnly: !!(frame && frame.readOnly),
     loadError: frame && frame.loadError, onSaved: (rows) => {
       // PreloadLibraries: the choosers and trees read the project's libraries again
       window.dispatchEvent(new CustomEvent("kc-libtable-changed", { detail: { kind, rows } }));

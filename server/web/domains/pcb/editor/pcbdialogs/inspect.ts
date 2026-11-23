@@ -12,14 +12,15 @@ import { projectNetlist } from "./update-pcb";
 import { runZoneFill } from "./zonefill";
 import { fabContext, loadFab } from "../fab-outputs";
 import { bitmapButton, box, checkField, currentUnits, download, fmtLenU, grid, h, messageBox, notebook, openDialog, textEntryBox, textField, type CellValue } from "./ui";
-import { openPopupMenu, type PopupEntry } from "../contextmenu";
+import { inspectionPickAt, openPopupMenu, type PopupEntry } from "../contextmenu";
 import { adoptProjectFile, canWriteProject, saveProjectFile } from "../projectfile";
 import { editProject, type Plain, type ProjectEdit } from "../../canvas/project-file";
 import { loadBoardHeader, openBoardSetup } from "./board-setup";
 import { loadLibraryFootprint } from "../library";
 import { kicadActionAvailable, runKicadAction } from "../hotkeys";
 import { state as appStore } from "../appstore";
-import { lastFallback, serverDrc, toMarker, uuidIndex } from "../kicad-check";
+import { lastFallback, serverDrc, toMarker, uuidIndex, reportScale } from "../kicad-check";
+import { toast } from "../util";
 
 export interface Marker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; kiids?: string[]; descs?: string[]; layer?: string; excluded?: boolean; comment?: string; selected?: boolean; ruleSeverity?: boolean; items?: { x: number; y: number; desc: string; id?: string; uuid?: string }[] }
 interface Settings { severities: Record<string, string>; netclasses: Record<string, { clearance?: number }>; clearance: number; edgeClearance: number; minTrackWidth: number; minThroughDrill: number; boardSetup?: unknown }
@@ -32,6 +33,7 @@ interface PcbToolsApi {
   /** the custom rules' (.kicad_dru) matched-length checks */
   customRuleMarkers?(doc: KDoc, settings: unknown, rules: string | null, units?: string): Marker[];
   parseDru?(text: string): { errors: string[]; messages: { fatal?: boolean }[] };
+  markerPath?(doc: KDoc, m: { code: string; x: number; y: number; layer?: string; kiids?: string[] }): [number, number][] | null;
   drcErrorLimit?(code: string): number;
   itemPosition?(doc: KDoc, id: string): [number, number];
   itemDescription?(doc: KDoc, id: string, units: string): string;
@@ -44,7 +46,6 @@ interface PcbToolsApi {
   inspectClearance(doc: KDoc, a: string, b: string, settings: unknown): { gap: number | null; required: number; sameNet: boolean; nets: string[] } | null;
   netclassOf(s: Settings, net: string): { clearance?: number };
   footprintDiffLines(boardFp: SNode, libFp: SNode): string[];
-  inspectConstraints(doc: KDoc, id: string, s: Settings, fmt: (mm: number) => string): { title: string; header: string; item: string; lines: string[]; resolved: string }[] | null;
   selectionIds(ctx: ToolCtx): Set<string>;
 }
 const PT = (): PcbToolsApi => (window as unknown as { PcbTools: PcbToolsApi }).PcbTools;
@@ -376,8 +377,11 @@ export function openDrc(ctx: ToolCtx): void {
         // KiCad's own DRC on the server (kicad-check.ts); the browser's checks when it cannot run
         const docId = appStore.docId as string | null;
         if (docId) {
-          const rep = await serverDrc(docId, { parity: prefs.parity, refill: prefs.refill, allTrackErrors: opts.reportAllTrackErrors, signal: abort ? abort.signal : undefined });
-          if (rep && !cancelled) { const ix = uuidIndex(doc); markers = [...(rep.violations || []), ...(rep.unconnected_items || []), ...(rep.schematic_parity || [])].map((v) => toMarker(v, ix)); }
+          // kicad-cli reports in the frame's units (DRC_REPORT's m_reportUnits), its positions taken back to mm
+          const rep = await serverDrc(docId, { parity: prefs.parity, refill: prefs.refill, allTrackErrors: opts.reportAllTrackErrors, units: currentUnits(), signal: abort ? abort.signal : undefined });
+          if (rep && !cancelled) { const ix = uuidIndex(doc), k = reportScale(rep); markers = [...(rep.violations || []), ...(rep.unconnected_items || []), ...(rep.schematic_parity || [])].map((v) => toMarker(v, ix, k));
+            // the error legend: the report carries positions only, so the path comes from the items' copper here
+            if (P.markerPath && markers) for (const m of markers) { if ((m as { path?: unknown }).path) continue; const pth = P.markerPath(doc, m); if (pth) (m as { path?: unknown }).path = pth; } }
         }
         if (!markers && !cancelled) { markers = (await collectMarkers(doc, prefs.parity, opts.reportAllTrackErrors, currentUnits())).markers; how = ` (checked in the browser: ${lastFallback || "no saved document"})`; if (how) report(`Checked in the browser: ${lastFallback || "no saved document"}`); }
       }
@@ -651,57 +655,100 @@ export function openBoardStatistics(ctx: ToolCtx): void {
     } });
 }
 
-// ---------------------------------------------------------------- Clearance Resolution
-export function openClearance(ctx: ToolCtx): void {
-  const doc = board(); if (!doc) return;
-  const ids = Array.from(PT().selectionIds(ctx));   // the editor's selection and the board module's (tracks, vias, graphics)
-  if (ids.length !== 2) { ctx.toast("Select two items for a clearance resolution report."); return; }
-  const set = settings(), r = PT().inspectClearance(doc, ids[0], ids[1], set);
-  if (!r) { ctx.toast("Both items need copper"); return; }
-  const a = describeItem(doc, ids[0]), b = describeItem(doc, ids[1]);
-  const ncName = (net: string): string => { const nc = PT().netclassOf(set, net); for (const [k, v] of Object.entries(set.netclasses)) if (v === nc) return k; return "Default"; };
-  const lines: (string | [string, string])[] = [["h", "Clearance resolution for:"], ["li", a], ["li", b], ""];
-  if (r.sameNet) lines.push(`Items belong to the same net ('${r.nets[0]}'). Min clearance is 0.`);
-  else {
-    for (const [i, net] of r.nets.entries()) lines.push(`Checking netclass '${ncName(net)}' clearance for ${i ? b : a}: ${fmtLenU(PT().netclassOf(set, net).clearance ?? set.clearance)}.`);
-    lines.push("", `Resolved min clearance: ${fmtLenU(r.required)}.`, r.gap === null ? "The items share no copper layer." : `Actual clearance: ${fmtLenU(r.gap)}${r.gap < r.required - 1e-6 ? "  (violation)" : ""}.`);
-  }
-  openDialog({ title: "Clearance Report", width: 600, noOk: true,
-    build(body) {
-      const rep = h("div", { class: "pd-report", style: "min-height:220px" });
-      for (const l of lines) rep.append(Array.isArray(l) ? h("div", { class: l[0] === "h" ? "ln hd" : "ln li" }, (l[0] === "li" ? "• " : "") + l[1]) : h("div", { class: "ln" }, l || " "));
-      body.append(notebook([{ label: "Clearance", build: (el) => el.append(rep) }]).el);
-    } });
+// ---------------------------------------------------------------- Clearance Resolution / Constraints Resolution
+type ReportPage = { title: string; lines: string[]; layers?: { name: string; lines: string[] }[] };
+interface InspectTools {
+  inspectClearanceReport(doc: KDoc, a: string, b: string, s: Settings, active: string, fmt: (mm: number) => string, units: string): { pages: ReportPage[] } | { error: string } | null;
+  inspectConstraints(doc: KDoc, id: string, s: Settings, fmt: (mm: number) => string, units: string): ReportPage[] | null;
+  pickInteractively?(ctx: ToolCtx, mode: string, prompt: string, done: (res: unknown, at?: [number, number]) => void): void;
+  setCustomRules?(text: string | null): void;
 }
-
-// ---------------------------------------------------------------- Constraints Resolution
-/**
- * BOARD_INSPECTION_TOOL::InspectConstraints in DIALOG_BOOK_REPORTER "Constraints Report": one page per constraint the
- * selected track, arc or via has, each the header, the item, what EvalRules checked and the resolved min / opt / max.
- */
-export function openConstraints(ctx: ToolCtx): void {
-  const doc = board(); if (!doc) return;
-  const ids = Array.from(PT().selectionIds(ctx));
-  if (ids.length !== 1) { ctx.toast("Select a single item for a constraints resolution report."); return; }
-  const pages = PT().inspectConstraints(doc, ids[0], settings(), fmtLenU);
-  if (!pages) { ctx.toast("Constraints resolution covers tracks, arcs and vias."); return; }
-  // the report's <i>undefined</i> stays italic; everything else is text
-  const line = (text: string, cls: string): HTMLElement => {
-    const el = h("div", { class: cls });
-    text.split(/(<i>undefined<\/i>)/).forEach((part) => { if (part === "<i>undefined</i>") el.append(h("i", null, "undefined")); else if (part) el.append(document.createTextNode(part)); });
-    if (!text) el.textContent = "\u00a0";
+const IT = (): InspectTools => PT() as unknown as InspectTools;
+/** WX_HTML_REPORT_BOX: one line of the report's HTML (written by inspect-resolve.ts, every item text escaped there). */
+function reportLine(ctx: ToolCtx, html: string): HTMLElement {
+  if (html.startsWith("<h7>")) { const el = h("div", { class: "ln hd" }); el.innerHTML = html.replace(/^<h7>|<\/h7>$/g, ""); return el; }
+  if (html.startsWith("<ul>")) {
+    const el = h("div", { class: "ln" });
+    for (const li of html.replace(/^<ul>|<\/ul>$/g, "").split("</li>").filter(Boolean)) { const row = h("div", { class: "ln li" }); row.innerHTML = "\u2022 " + li.replace(/^<li>/, ""); el.append(row); }
     return el;
-  };
-  openDialog({ title: "Constraints Report", width: 640, noOk: true,
+  }
+  const el = h("div", { class: "ln" }); if (!html) { el.textContent = "\u00a0"; return el; }
+  el.innerHTML = html;
+  // the report's links: $CUSTOM_RULES (Board Setup > Custom Rules) and $DRC (the DRC dialog)
+  for (const a of Array.from(el.querySelectorAll("a"))) a.addEventListener("click", (ev) => { ev.preventDefault(); const href = a.getAttribute("href"); if (href === "$CUSTOM_RULES") void openBoardSetup(ctx, "Custom Rules"); else if (href === "$DRC") openDrc(ctx); });
+  return el;
+}
+/** DIALOG_BOOK_REPORTER: a notebook of HTML report pages; a page with layers has the "Layer:" choice above its report. */
+const reporters: Record<string, { close(): void } | null> = {};
+function bookReporter(ctx: ToolCtx, title: string, pages: ReportPage[], key: string): void {
+  const old = reporters[title]; if (old) { reporters[title] = null; old.close(); }   // DeleteAllPages: one dialog per frame, refilled
+  const fill = (rep: HTMLElement, lines: string[]): void => { rep.replaceChildren(); for (const l of lines) rep.append(reportLine(ctx, l)); };
+  reporters[title] = openDialog({ title, width: 640, noOk: true, modeless: true,
     build(body) {
       body.append(notebook(pages.map((pg) => ({ label: pg.title, build: (el: HTMLElement) => {
-        const rep = h("div", { class: "pd-report", style: "min-height:260px", "data-k": "constraintsReport" });
-        rep.append(line(pg.header, "ln hd"), line("\u2022 " + pg.item, "ln li"));
-        for (const l of pg.lines) rep.append(line(l, "ln"));
-        rep.append(line("", "ln"), line(pg.resolved, "ln"));
+        const rep = h("div", { class: "pd-report", style: "min-height:260px", "data-k": key });
+        if (pg.layers) {
+          const choice = h("k-select", { "data-k": "clearanceLayer" }) as HTMLElement & { value: string };
+          for (const [i, l] of pg.layers.entries()) choice.append(h("option", { value: String(i) }, l.name));
+          choice.value = "0"; choice.addEventListener("change", () => fill(rep, pg.layers![+choice.value || 0].lines));
+          el.append(h("div", null, "Layer:"), choice); fill(rep, pg.layers[0].lines);
+        } else fill(rep, pg.lines);
         el.append(rep);
       } }))).el);
-    } });
+    } }) as unknown as { close(): void };
+}
+const inspectFmt = (): ((mm: number) => string) => fmtLenU;
+const errorBar = (msg: string): void => toast(msg, 4000, undefined, "error");
+/** PCB_ACTIONS::inspectClearance's pick and inspectConstraints' types (BOARD_INSPECTION_TOOL clearanceTypes / constraintTypes). */
+const CLEARANCE_KINDS = new Set(["pad", "via", "segment", "arc", "zone", "shape", "footprint", "group"]);
+const CONSTRAINT_KINDS = new Set(["pad", "via", "segment", "arc", "zone", "shape", "footprint", "field", "text", "group"]);
+/** pickItemForInspection: the picker tool with the prompt beside the cursor; the item the click resolves to, or null on Escape. */
+function pickForInspection(ctx: ToolCtx, prompt: string, kinds: Set<string>, done: (id: string) => void): void {
+  const T = IT(); if (!T.pickInteractively) return;
+  T.pickInteractively(ctx, "item", prompt, (res, at) => {
+    if (!res) return;   // cancelled
+    const id = at ? inspectionPickAt(at, kinds) : null;
+    const it = res as KItem; const pick = id || (it && it.id) || null;
+    if (pick) done(pick);
+  });
+}
+/** BOARD_INSPECTION_TOOL::InspectClearance: two selected items, else the picker for the first (the one selected item stands for it) and the second. */
+export function openClearance(ctx: ToolCtx): void {
+  const doc = board(); if (!doc) return;
+  if (IT().setCustomRules) IT().setCustomRules!(E.druText || null);
+  const ids = Array.from(PT().selectionIds(ctx));
+  const report = (a: string, b: string): void => {
+    const r = IT().inspectClearanceReport(doc, a, b, settings(), (E.activeLayer as string) || "F.Cu", inspectFmt(), currentUnits());
+    if (!r) return;
+    if ("error" in r) { errorBar(r.error); return; }
+    bookReporter(ctx, "Clearance Report", r.pages, "clearanceReport");
+  };
+  if (ids.length === 2) { report(ids[0], ids[1]); return; }
+  const second = (first: string): void => {
+    // the first item stays brightened while the second is picked
+    ctx.setHighlight(new Set([first.split("#")[0]]));
+    pickForInspection(ctx, "Select second item for clearance resolution...", CLEARANCE_KINDS, (b) => {
+      ctx.setHighlight(null);
+      if (b === first) { errorBar("Select two different items for clearance resolution."); return; }
+      report(first, b);
+    });
+  };
+  if (ids.length === 1) second(ids[0]);
+  else pickForInspection(ctx, "Select first item for clearance resolution...", CLEARANCE_KINDS, second);
+}
+
+/** BOARD_INSPECTION_TOOL::InspectConstraints: the one selected item, the picker when nothing is selected. */
+export function openConstraints(ctx: ToolCtx): void {
+  const doc = board(); if (!doc) return;
+  if (IT().setCustomRules) IT().setCustomRules!(E.druText || null);
+  const ids = Array.from(PT().selectionIds(ctx));
+  const report = (id: string): void => {
+    const pages = IT().inspectConstraints(doc, id, settings(), inspectFmt(), currentUnits()); if (!pages) return;
+    bookReporter(ctx, "Constraints Report", pages, "constraintsReport");
+  };
+  if (ids.length === 1) report(ids[0]);
+  else if (!ids.length) pickForInspection(ctx, "Select item for constraints resolution...", CONSTRAINT_KINDS, report);
+  else errorBar("Select a single item for a constraints resolution report.");
 }
 
 // ---------------------------------------------------------------- Footprint Associations / Compare Footprint with Library

@@ -6,6 +6,7 @@ import { netLabel } from "../../../platform/review/names";
 // either a run token or the reason it is dimmed) and publishes the tree on the store; the React
 // ContextMenu component renders it and answers with dispatch({ type: "contextMenu", run }).
 import { actions as CTX_ACTIONS } from "../generated/kicad-context-spec.json";
+import { stitchMenuState } from "./pcbdialogs/via-stitch";
 import { menuMeta } from "../menuspec";
 import type { AppAction, CtxItem, Editor } from "../../../shared/store";
 import { ZOOM_LIST, toolFor } from "../tables";
@@ -19,6 +20,7 @@ import { FP } from "./fpedit";
 import { ARC_EDIT_MODE_MENU, evaluate, GRID_ORIGIN, menuFor, type MenuCtx, type MenuDef, type Resolved } from "./ctxmenus";
 import { activeModuleTool, applyPickMode, clearAllSelection, selectedAnywhere, hitsAt, markerUnder, interactionBusy, pcbState, pickAt, schState, selectAt, selectionBox, selectionChanged, selectionIds, selectionItems, selectItemId, stage, startFieldMove, startMove, toolCtx, worldMm, zoomBy } from "./gestures";
 import { E } from "./state";
+import { boardTerminalPadState, netChainMenuRows, setTerminalPad, type ChainRow } from "./netchains";
 import { isPastDragThreshold } from "../tools/drag-threshold";
 import { placeCrosshair } from "./crosshair";
 import { rightClickKeepsSelection } from "./kicad-input";
@@ -91,7 +93,7 @@ function menuCtx(): MenuCtx {
   if (sch && !kinds.length) { const mk = ((E.markers || []) as { selected?: boolean; severity?: string }[]).find((m) => m && m.selected); if (mk) kinds.push(mk.severity === "exclusion" ? "marker_excluded" : "marker"); }   // SCH_MARKER_T
   const draw = sch ? (s && s.draw) : (p && p.draw);
   const n = draw && Array.isArray(draw.pts) ? draw.pts.length : 0;
-  const outline = !!draw && (sch ? draw.shape === "polygon" || draw.shape === "rulearea" : ["gpoly", "zone", "thievingzone", "rulearea"].includes(draw.shape));
+  const outline = !!draw && (sch ? draw.shape === "polygon" || draw.shape === "rulearea" : ["gpoly", "zone", "thievingzone", "viastitch", "rulearea"].includes(draw.shape));
   const drawingLine = sch && !!s && (!!s.wire || (!!s.draw && s.draw.shape === "lines"));
   const routing = !sch && !!p && !!p.route;
   const root = sch ? rootSchematic() : null;
@@ -121,7 +123,7 @@ function menuCtx(): MenuCtx {
     pinSwaps: sch && !!prefs().schEditing.unconstrainedPinSwaps,
     highlight: !!E.highlightIds, belowRoot: !!root && !topLevelSchematics().some((t) => t.doc === (state as { doc?: unknown }).doc),
     hasLocked: items.some((it) => isLocked(it.node)), hasUnlocked: items.some((it) => !isLocked(it.node)),
-    groupSelected: sch ? schGroupSelected(items) : boardGroupSelected(), ...boardMenuState(sch),
+    groupSelected: sch ? schGroupSelected(items) : boardGroupSelected(), ...boardMenuState(sch), ...(sch ? {} : stitchState()),
     inGroup: sch ? !!((CollabTools.sch as unknown as { enteredGroupId?: () => string | null } | undefined)?.enteredGroupId?.()) : !!(CollabTools.pcb && (CollabTools.pcb.state as { enteredGroup?: string | null }).enteredGroup),
     hasItems: !!E.kdoc && E.kdoc.items.size > 0, checks: attributeChecks(items),
     overDrawingSheet: sch && !items.length && overDrawingSheet(),
@@ -212,6 +214,10 @@ function schGroupSelected(items: KItem[]): boolean {
   // one top-level group: every selected item is that group or one of its (nested) members
   for (const g of groups) { let all: Set<string>; try { all = new Set(sm.expandGroups(E.kdoc as KDoc, [g.id])); } catch (e) { continue; } if (items.every((it) => all.has(it.id))) return true; }
   return false;
+}
+/** VIA_STITCH_TOOL's conditions. */
+function stitchState(): { stitchExcludable?: boolean; stitchClearable?: boolean } {
+  try { const s = stitchMenuState(); return { stitchExcludable: s.excludable, stitchClearable: s.clearable }; } catch (e) { return {}; }
 }
 /** The board module's view of the selection for the Grouping and Zone Priority sub-menus (their update() greys entries). */
 function boardMenuState(sch: boolean): Pick<MenuCtx, "grouping" | "zoneCanRaise" | "zoneCanLower"> {
@@ -332,6 +338,28 @@ function pinHelperRows(): CtxItem[] {
     return it;
   });
 }
+/** NET_CHAIN_MENU::update's rows (editor/netchains.ts); an action row takes the action's label unless it names its own. */
+function netChainRows(c: MenuCtx): CtxItem[] {
+  const conv = (r: ChainRow): CtxItem => {
+    if (r.sub) return { label: r.label, sub: r.sub.map(conv) };
+    if (r.act) { const it = row(r.act, false, c, r.disabled); if (r.label) it.label = r.label; return it; }
+    const it: CtxItem = { label: r.label };
+    if (r.disabled || !r.run) it.why = " "; else it.run = runRow(r.run);
+    return it;
+  };
+  return netChainMenuRows().map(conv);
+}
+/** REPLACE_TERMINAL_PAD_MENU::update: Terminal A / B for a selected pad on a chain, greyed when the pad already is that terminal. */
+function terminalPadRows(): CtxItem[] {
+  const st = boardTerminalPadState(); if (!st) return [];
+  return [0, 1].map((j): CtxItem => {
+    const it: CtxItem = { label: j ? "Terminal B" : "Terminal A" };
+    if (st.old[j] && st.old[j] === st.pad) it.why = " ";
+    else if (E.viewOnly) it.why = VIEW_ONLY;
+    else it.run = runRow(() => { setTerminalPad(st.old[j], st.pad); });
+    return it;
+  });
+}
 /** The schematic module's bus unfolding (sch-tools unfold.ts). */
 interface UnfoldEntry { name: string; bus: boolean; members: string[] }
 interface SchUnfold { unfoldEntries(d: KDoc, bus: KItem): UnfoldEntry[]; busForUnfolding(ctx: unknown): KItem | null; printBusForUI(s: string): string; unfoldAction(ctx: unknown, o: unknown): boolean }
@@ -372,7 +400,7 @@ function unfoldRows(): CtxItem[] {
   const c = (E.lastClient as [number, number] | null) || [window.innerWidth / 2, window.innerHeight / 2];
   openPopupMenu(c[0], c[1], unfoldPopup(entries, bus, at, true));
 };
-function subRows(menu: MenuDef, items: Resolved[], c: MenuCtx): CtxItem[] { return menu.dynamic === "unfold" ? unfoldRows() : menu.dynamic === "zoom" ? zoomRows() : menu.dynamic === "grid" ? gridRows(c) : menu.dynamic === "diffpair" ? diffPairRows() : menu.dynamic === "trackwidth" ? trackWidthRows() : menu.dynamic === "viasize" ? viaSizeRows() : menu.dynamic === "pinfunction" ? pinFunctionRows() : menu.dynamic === "pinhelpers" ? pinHelperRows() : rows(items, c); }
+function subRows(menu: MenuDef, items: Resolved[], c: MenuCtx): CtxItem[] { return menu.dynamic === "unfold" ? unfoldRows() : menu.dynamic === "zoom" ? zoomRows() : menu.dynamic === "grid" ? gridRows(c) : menu.dynamic === "diffpair" ? diffPairRows() : menu.dynamic === "trackwidth" ? trackWidthRows() : menu.dynamic === "viasize" ? viaSizeRows() : menu.dynamic === "pinfunction" ? pinFunctionRows() : menu.dynamic === "pinhelpers" ? pinHelperRows() : menu.dynamic === "netchain" ? netChainRows(c) : menu.dynamic === "terminalpad" ? terminalPadRows() : rows(items, c); }
 
 /** "Symbol R1 (10k)", "Wire", "Track [VCC] on B.Cu, length 0.6400 mm": how KiCad names an item in a disambiguation menu. */
 function describe(it: KItem | string): string {
@@ -470,7 +498,41 @@ function selectCandidate(id: string): void {
  * item beats a much larger one around it, the active layer beats the others — so only real overlaps (stacked tracks,
  * a via on a track, two pads) stay ambiguous.
  */
-type Guess = (d: KDoc, ids: string[], where: Mm, o: { px: number; hidden: Set<string>; viewport: [number, number]; activeLayer?: string; highContrast?: boolean }) => string[];
+type Guess = (d: KDoc, ids: string[], where: Mm, o: { px: number; hidden: Set<string>; viewport: [number, number]; activeLayer?: string; highContrast?: boolean; marker?: { pts: number[][]; layer?: string } }) => string[];
+/**
+ * BOARD_INSPECTION_TOOL::pickItemForInspection's click: GENERAL_COLLECTOR over the inspection's types (`kinds`; a pad
+ * as "fpId#index"), the selectable ones, filterCollectorForInspection (a group's members under the point stand for
+ * the group, a footprint goes when a pad, via, track, arc or zone is there too) and GuessSelectionCandidates; the
+ * first that is left, or null.
+ */
+export function inspectionPickAt(mm: Mm, kinds: Set<string>): string | null {
+  if (isSch() || !E.kdoc) return null;
+  const d = E.kdoc as KDoc;
+  const kindOf = (id: string): string => { const fi = id.indexOf("@field:"); if (fi > 0) return "field"; if (id.indexOf("#") > 0) return "pad"; const it = d.items.get(id); return it ? it.kind : ""; };
+  const typeOk = (k: string): boolean => kinds.has(k) || (kinds.has("shape") && /^gr_(line|rect|circle|arc|poly|curve|ellipse|ellipse_arc)$/.test(k)) || (kinds.has("text") && (k === "gr_text" || k === "gr_text_box"));
+  let ids = candidatesAt(mm, kinds.has("field"));
+  const add: string[] = [];
+  for (const id of ids) { const it = d.items.get(id); if (it && it.kind === "group") for (const m of groupExpand([id])) if (m !== id && !ids.includes(m) && (E.kdoc as KDoc).items.has(m)) add.push(m); }
+  ids = ids.concat(add).filter((id) => typeOk(kindOf(id)));
+  if (ids.some((id) => ["pad", "via", "segment", "arc", "zone"].includes(kindOf(id)))) ids = ids.filter((id) => kindOf(id) !== "footprint");
+  ids = ids.filter((id) => kindOf(id) !== "group");
+  const P = (window as unknown as { PcbTools?: { guessCandidates?: Guess } }).PcbTools;
+  if (ids.length > 1 && P && P.guessCandidates) { try { ids = P.guessCandidates(d, ids, mm, guessOpts()); } catch (e) { console.warn(e); } }
+  return ids.length ? ids[0] : null;
+}
+/**
+ * selectPoint with a DRC marker under the cursor: GENERAL_COLLECTOR collects the marker (PCB_MARKER_T) with the
+ * items there and GuessSelectionCandidates weighs it like them (an exact hit on its polygon, its small area), so a
+ * marker drawn over a track or a pad is still picked.  True when the marker is among what the heuristics keep.
+ */
+export function markerWinsAt(mm: Mm, marker: { x: number; y: number; layer?: string }): boolean {
+  if (isSch() || !E.kdoc) return false;
+  const ids = candidatesAt(mm, true); if (!ids.length) return true;
+  const P = (window as unknown as { PcbTools?: { guessCandidates?: Guess } }).PcbTools; if (!P || !P.guessCandidates) return false;
+  const scale = (KiCadCanvas.MARKER_SCALE as { pcb: number }).pcb;
+  const pts = (KiCadCanvas.markerPolygon as (m: { x: number; y: number }, s: number) => number[][])(marker, scale);
+  try { return P.guessCandidates(E.kdoc as KDoc, ids, mm, Object.assign(guessOpts(), { marker: { pts, layer: marker.layer } })).includes("@marker"); } catch (e) { console.warn(e); return false; }
+}
 /** GuessSelectionCandidates' view of the editor: a pixel in mm, the hidden layers, the viewport, the real active layer and high-contrast mode. */
 function guessOpts(): { px: number; hidden: Set<string>; viewport: [number, number]; activeLayer?: string; highContrast?: boolean } {
   const ppm = Math.max(1e-6, pxPerMm()), r = stage.getBoundingClientRect();

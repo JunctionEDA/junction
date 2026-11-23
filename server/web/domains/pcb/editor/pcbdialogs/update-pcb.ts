@@ -15,6 +15,7 @@ import { topLevelSheetsOf } from "../bootpick";
 import { box, checkField, confirmBox, h, messageBox, openDialog, reportPanel, type Field } from "./ui";
 import { store } from "../appstore";
 import { messageText } from "../../../../shared/units";
+import { applyNetlistChains, netlistChainsOf } from "../netchains";
 
 interface SchModuleInternals { _?: { symbolPins(doc: KDoc, item: KItem): { x: number; y: number; number: string; name: string; type: string; hidden: boolean }[]; isPowerSymbol(doc: KDoc, libId: string): boolean } }
 const SCH_IU = 10000;
@@ -29,7 +30,7 @@ function rootSchematicOf(docs: ProjectDocInfo[]): ProjectDocInfo | null {
 }
 
 /** Every schematic sheet of the project as it is now, and the netlist of the hierarchy under the root sheet. */
-export async function projectNetlist(): Promise<{ netlist: Netlist; root: string; files: Map<string, SheetFile> } | { error: string }> {
+export async function projectNetlist(): Promise<{ netlist: Netlist; root: string; files: Map<string, SheetFile>; chainsPath: string; pro: Record<string, unknown> | null } | { error: string }> {
   const docs = projectDocs(), root = rootSchematicOf(docs);
   if (!root) return { error: "This project has no schematic." };
   const sch = (CollabTools.sch as (SchToolModule & SchModuleInternals) | undefined);
@@ -62,7 +63,8 @@ export async function projectNetlist(): Promise<{ netlist: Netlist; root: string
     return files.get(out.join("/")) || files.get(file) || null;
   };
   const netlist = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve, { symbolPins: helpers.symbolPins, isPower: (d, it) => helpers.isPowerSymbol(d, String(((KiCadCanvas.kid(it.node, "lib_id") as SNode | null) || [])[1])) }, root.path.split("/").pop()!.replace(/\.kicad_sch$/, ""), NL().netlistOptions(pro));
-  return { netlist, root: tops.length > 1 ? tops[0].path : root.path, files };
+  // the net chains live in the first top-level sheet (SCHEMATIC::GetTopLevelSheet( 0 ))
+  return { netlist, root: tops.length > 1 ? tops[0].path : root.path, files, chainsPath: tops.length ? tops[0].path : root.path, pro: pro && typeof pro === "object" ? pro as Record<string, unknown> : null };
 }
 
 // ---------------------------------------------------------------- the footprint library (optional service)
@@ -155,6 +157,7 @@ export async function openUpdatePcb(ctx: ToolCtx): Promise<void> {
   const reportBox = box("Changes to Be Applied", report.el);
   const fields = new Map<keyof UpdateOptions, Field<boolean>>();
   let netlist: Netlist | null = null, plan: UpdatePlan | null = null, busy = false, okBtn: HTMLButtonElement | null = null;
+  let chains: ReturnType<typeof netlistChainsOf> = [];
   // PCB_EDIT_FRAME::OnNetlistChanged selects the new footprints and ~DIALOG_UPDATE_PCB starts the move tool with
   // them (m_runDragCommand): closing the dialog hands them to the cursor for placing
   const newFootprints: string[] = [];
@@ -217,6 +220,9 @@ export async function openUpdatePcb(ctx: ToolCtx): Promise<void> {
       const changes = planChanges(doc, real, added);
       if (changes.length) { newFootprints.splice(0, newFootprints.length, ...added); ctx.commit(changes, "Update Netlist"); }
       report.set(real.report);
+      // the netlist's net chains: assignments, terminal pads and the chain classes (after the commit, on the updated nets)
+      const shown = real.report.slice();
+      void applyNetlistChains(chains).then((warnings) => { if (warnings.length) report.set([...shown, ...warnings.map((text) => ({ severity: "warning" as const, text }))]); });
       plan = null;
       if (okBtn) okBtn.disabled = true;
       return false;                       // KiCad keeps the dialog open with the report; Close dismisses it
@@ -236,6 +242,7 @@ export async function openUpdatePcb(ctx: ToolCtx): Promise<void> {
   const res = await projectNetlist();
   if ("error" in res) { report.set([{ severity: "error", text: res.error }]); return; }
   netlist = res.netlist;
+  chains = netlistChainsOf(res.netlist, res.files, res.chainsPath, res.pro);
   await dryRun();
 }
 

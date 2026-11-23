@@ -4,11 +4,15 @@
 // The dialog works on a copy of the footprint node and stores it as one MODIFIED change on OK, like every board
 // item dialog.  Only what the user changed is written, and each child goes where PCB_IO_KICAD_SEXPR::format(PAD)
 // puts it (PAD_ORDER below), in the writer's number format, so the desktop reads back exactly what it would have
-// written itself.  Pads with a front/inner/back or custom padstack show their front-layer values (the mode is shown,
-// not editable here); the Backdrill page and custom primitives are kept as stored.
-import { box, checkField, form, h, coordField, lenField, notebook, openDialog, selectField, textField, unitLabel, unitName, fmtLen, parseLen, type Field } from "./ui";
-import type { DlgShape, DlgType, PadModel, padModel as PadModelApi } from "../../canvas/pad-model";
+// written itself.  The padstack mode (Normal, Front/Inner/Back, Custom) and its edit layer choose which copper
+// layer's shape, size, offset, corners and primitives the shape controls edit (OnPadstackModeChanged /
+// OnEditLayerChanged); the Backdrill page holds the hole post-machining and the backdrills.  Custom primitives are
+// kept as stored.
+import { box, checkField, form, h, coordField, lenField, messageBox, notebook, openDialog, selectField, staticBitmap, textField, unitLabel, unitName, fmtLen, parseLen, type Field } from "./ui";
+import type { DlgShape, DlgType, PadLayerShape, PadModel, PadstackMode, PostMachining, padModel as PadModelApi } from "../../canvas/pad-model";
 import { popupMenu } from "../../dialogs/dom";
+import { openCalculator } from "../../calculator";
+import { bitmapButton } from "../../../../shared/components/kicon-dom";
 import { fitMenu } from "../../../../shared/menufit";
 import { comboArrow } from "../../../../shared/components/kicon-dom";
 
@@ -72,6 +76,12 @@ interface NetHelpers { netNameOf(doc: KDoc, node: SNode): string; boardNetNames(
 const PH = (): NetHelpers => (CollabTools as unknown as { props: { helpers: NetHelpers } }).props.helpers;
 
 /** DIALOG_PAD_PROPERTIES for pad `index` of a board footprint. */
+// session storage (DIALOG_PAD_PROPERTIES::m_page / m_sketchPreview)
+let lastPage = 0, sketchPreview = false;
+
+/** PAD_TOOL's last pad number (SetLastPadNumber), the memory the pad placer and Duplicate and Increment count from. */
+const padMemory = (): { lastNumber: string } | null => { const P = (window as unknown as { PcbTools?: { pad?: { padMemory?: { lastNumber: string } } } }).PcbTools; return (P && P.pad && P.pad.padMemory) || null; };
+
 export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number): boolean {
   const doc = ctx.doc; if (!doc) return false;
   const item = doc.items.get(fpItem.id) || fpItem;
@@ -81,9 +91,11 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
   const m: PadModel = structuredClone(was);   // NaN ("not set") must survive the copy
   const ro = !!ctx.viewOnly; const copper = doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"];
   const flipped = str((kid(staged, "layer") || [])[1]) === "B.Cu";
-  const padstack = kid(pad, "padstack"); const psMode = str((kid(padstack, "mode") || [])[1]);
-  let redraw = (): void => undefined, readAll = (): void => undefined;
-  const ref = str((K().kids(staged, "property") as SNode[]).find((p) => str(p[1]) === "Reference")?.[2] || "");
+  let redraw = (): void => undefined, readAll = (): void => undefined, readDrills = (): void => undefined;
+  const fieldOf = (name: string): string => str((K().kids(staged, "property") as SNode[]).find((p) => str(p[1]) === name)?.[2] || "");
+  // the padstack's layers as the dialog edits them (F.Cu included), and the layer the shape controls show
+  const stack: Record<string, PadLayerShape> = { "F.Cu": PM().layerShapeOf(m), ...m.psLayers };
+  let editLayer = "F.Cu";
   openDialog({
     title: "Pad Properties", width: 1060, readOnly: ro,
     build(body) {
@@ -94,8 +106,8 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
       const netNames = PH().boardNetNames(doc).filter(Boolean); if (m.net && !netNames.includes(m.net)) netNames.unshift(m.net);
       const net = selectField<string>(m.net, [["", "<no net>"], ...netNames.map((n): [string, string] => [n, n])], { ro, key: "padNet", onChange: (v) => { m.net = v; } });
       const px = coordField(m.x, "x", { ro, key: "posX" }), py = coordField(m.y, "y", { ro, key: "posY" });
-      const psModeSel = selectField<string>(psMode === "front_inner_back" ? "fib" : psMode === "custom" ? "custom" : "normal", [["normal", "Normal"], ["fib", "Front/Inner/Back"], ["custom", "Custom"]], { ro: true, key: "padstackMode" });
-      psModeSel.input.title = padstack ? "This pad's padstack has per-layer shapes; the front layer is edited here" : "";
+      const psModeSel = selectField<PadstackMode>(m.psMode, [["normal", "Normal"], ["fib", "Front/Inner/Back"], ["custom", "Custom"]], { ro, key: "padstackMode", onChange: (v) => onPadstackMode(v) });
+      const editLayerSel = h("k-select", { disabled: ro, "data-k": "editLayer" }) as HTMLSelectElement;
       const shape = selectField<DlgShape>(m.shape, [["circle", "Circular"], ["oval", "Oval"], ["rect", "Rectangular"], ["trapezoid", "Trapezoidal"], ["roundrect", "Rounded rectangle"], ["chamfer", "Chamfered rectangle"],
         ["mixed", "Chamfered with other corners rounded"], ["custom_circle", "Custom (circular base)"], ["custom_rect", "Custom (rectangular base)"]], { ro, key: "padShape", onChange: (v) => {
         // onPadShapeSelection( true ): a circle's default spoke angle is 45°, the others' 90°
@@ -128,7 +140,7 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
       // m_offsetShapeOpt: the offset controls are shown only while it is ticked (OnPadShapeSelection)
       const offOn = checkField(m.offset, "Offset shape from hole", { ro, key: "offset", onChange: (v) => { m.offset = v; offRow.style.display = v ? "" : "none"; redraw(); } });
       const offX = lenField(m.ox, { ro, key: "offsetX" }), offY = lenField(m.oy, { ro, key: "offsetY" });
-      const holeShape = selectField<number>(m.holeOblong ? 1 : 0, [[0, "Round"], [1, "Oblong"]], { ro, key: "holeShape", onChange: (v) => { m.holeOblong = v === 1; holeY.input.disabled = ro || !m.holeOblong || !holed(); redraw(); } });
+      const holeShape = selectField<number>(m.holeOblong ? 1 : 0, [[0, "Round"], [1, "Oblong"]], { ro, key: "holeShape", onChange: (v) => onDrillShape(v) });
       const holeX = lenField(m.hx, { ro, key: "holeX" }), holeY = lenField(m.holeOblong ? m.hy : m.hx, { ro: ro || !m.holeOblong, key: "holeY" });
       // OnUpdateUI: m_padToDie / m_padToDieDelay shown only while their box is ticked
       const dieOn = checkField(m.dieOn, "Specify pad to die length", { ro, key: "dieOn", onChange: (v) => { m.dieOn = v; syncDie(); } });
@@ -139,16 +151,22 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
       const syncDie = (): void => { for (const e of [die.el, dieUnit]) e.style.visibility = m.dieOn ? "" : "hidden"; for (const e of [delay, delayUnit]) e.style.visibility = m.dieDelayOn ? "" : "hidden"; };
       const xy = (a: Field<number>, b: Field<number>): HTMLElement => h("span", { class: "pd-xy" }, a.el, h("span", { class: "unit" }, unitName()), h("label", null, "Y:"), b.el);
       // m_padstackControls: for through-hole pads only (PadTypeSelected)
-      const padstackRows = h("div", null, form([["Padstack mode:", psModeSel.el], ["Edit layer:", selectField<string>("F.Cu", [["F.Cu", padstack ? "F.Cu" : "All layers"]], { ro: true, key: "editLayer" }).el]], true), h("hr", { class: "pp-hr" }));
+      const padstackRows = h("div", null, form([["Padstack mode:", psModeSel.el], ["Edit layer:", editLayerSel]], true), h("hr", { class: "pp-hr" }));
       const offRow = form([["X:", xy(offX, offY), unitLabel()]], true);
       // m_gbSizerHole / m_staticline71: shown for a pad type with a hole
-      const holeRows = h("div", null, form([["Hole shape:", holeShape.el], ["Hole size X:", xy(holeX, holeY), unitLabel()]], true), h("hr", { class: "pp-hr" }));
+      // updateHoleControls / updatePadSizeControls: a round hole or a circular pad has one "Diameter:", Y hidden
+      const holeXLabel = h("label", null, "Hole size X:"), sizeXLabel = h("label", null, "Pad size X:");
+      const xyFor = (a: Field<number>, b: Field<number>): { el: HTMLElement; y: HTMLElement } => { const y = h("span", { class: "pd-xy" }, h("label", null, "Y:"), b.el, h("span", { class: "unit" }, unitName())); return { el: h("span", { class: "pd-xy" }, a.el, h("span", { class: "unit" }, unitName()), y), y }; };
+      const holeXY = xyFor(holeX, holeY), sizeXY = xyFor(sx, sy);
+      // m_launchCalculatorBtn: OnHoleSizeCalculator shows the calculator's "pth_size" page
+      const calcBtn = bitmapButton("calculator", "Show hole size calculator", () => openCalculator("pth_size"), { key: "holeSizeCalculator" });
+      const holeRows = h("div", null, form([["Hole shape:", holeShape.el], [holeXLabel, h("span", { class: "pd-xy" }, holeXY.el, calcBtn), h("span")]], true), h("hr", { class: "pp-hr" }));
       const left = h("div", { class: "pp-col" },
         form([["Pad type:", type.el], ["Pad number:", number.el], ["Net name:", net.el], ["Position X:", xy(px, py), unitLabel()]], true),
         h("hr", { class: "pp-hr" }),
         padstackRows,
         form([["Pad shape:", shape.el]], true), shapeProps,
-        form([["Pad size X:", xy(sx, sy), unitLabel()], ["Angle:", h("span", { class: "pp-anglebox" }, angle, angles), unitLabel("deg")]], true),
+        form([[sizeXLabel, sizeXY.el, h("span")], ["Angle:", h("span", { class: "pp-anglebox" }, angle, angles), unitLabel("deg")]], true),
         h("div", { class: "pp-row" }, offOn.el), offRow,
         h("hr", { class: "pp-hr" }),
         holeRows,
@@ -172,8 +190,10 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
         form([["Fabrication property:", prop.el], ["Simulation electrical type:", sim.el]], true));
       // preview
       const cv = h("canvas", { class: "pp-preview" });
-      const sketch = checkField(false, "Preview pad in sketch mode", { key: "sketch", onChange: () => redraw() });
-      const right = h("div", { class: "pp-col pp-right" }, cv, sketch.el);
+      const sketch = checkField(sketchPreview, "Preview pad in sketch mode", { key: "sketch", onChange: (v) => { sketchPreview = v; redraw(); } });   // onChangePadDrawMode
+      // m_stackupImagesBook: the cross-section of the pad type's copper layers (OnUpdateUI)
+      const stackupImage = h("div", { class: "pp-stackup", "data-k": "stackupImage" });
+      const right = h("div", { class: "pp-col pp-right" }, stackupImage, cv);
       general.append(left, middle);
       // ---- Connections
       const zc = selectField<number>(m.zoneConnect, [[-1, "From parent footprint"], [2, "Solid"], [1, "Thermal relief"], [0, "None"]], { ro, key: "zoneConnect", onChange: (v) => { m.zoneConnect = v; } });
@@ -197,10 +217,13 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
       tdHD.title = "Tracks which are similar in size to the pad do not need teardrops.";
       const tdMaxLen = lenField(td.maxLen, { ro: tdRo, key: "tdMaxLen" }), tdMaxWid = lenField(td.maxWidth, { ro: tdRo, key: "tdMaxWidth" });
       const tdCurved = checkField(td.curved, "Curved edges", { ro: tdRo, key: "tdCurved", onChange: (v) => { td.curved = v; } });
-      const pctRow = (input: HTMLInputElement): HTMLElement => h("span", { class: "pp-row" }, input, h("span", { class: "unit" }, "%( d )"));
+      // m_minTrackWidthHint / m_stLenPercentHint / m_stWidthPercentHint: "d" for a circular pad, "w" otherwise
+      const hints: HTMLElement[] = [];
+      const pctRow = (input: HTMLInputElement): HTMLElement => { const hint = h("i", { "data-k": "tdHint" }, "d"); hints.push(hint); return h("span", { class: "pp-row" }, input, h("span", { class: "unit" }, "%(", hint, ")")); };
+      const tdBitmap = h("div", { class: "pp-tdbitmap", "data-k": "teardropBitmap" });
       const teardrops = box("Teardrops",
         legacy ? h("div", { class: "pd-info" }, "Board contains legacy teardrops.\nUse Edit > Edit Teardrops to apply automatic teardrops.") : null,
-        h("div", { class: "pp-col" }, tdOn.el, tdZone.el, tdTwo.el),
+        h("div", { class: "pp-tdtop" }, h("div", { class: "pp-col" }, tdOn.el, tdZone.el, tdTwo.el), tdBitmap),
         form([["Track width limit:", pctRow(tdHD), h("span"), "Max pad/via size to track width ratio to create a teardrop.\n100 always creates a teardrop."]]),
         h("div", { class: "pp-techhd" }, "Teardrop Shape"),
         form([["Best length (L):", pctRow(tdLen)], ["Maximum length (L):", tdMaxLen.el, unitLabel()], ["Best width (W):", pctRow(tdWid)], ["Maximum width (W):", tdMaxWid.el, unitLabel()]]),
@@ -221,10 +244,119 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
           ["Solder mask expansion:", mask.el, unitLabel(), "This is the local clearance between this pad and the solder mask.\nIf 0, the footprint local value or the global value is used."],
           ["Solder paste clearance:", paste, h("span")]]),
         h("p", { class: "pd-note" }, "Note: solder mask and paste values are used only for pads on copper layers."));
-      const nb = notebook([{ label: "General", build: (el) => el.append(general) }, { label: "Connections", build: (el) => el.append(connections) }, { label: "Clearance Overrides", build: (el) => el.append(clearance) }], { onShow: () => redraw() });
-      body.append(h("style", null, PP_CSS), h("div", { class: "pp-wrap" }, h("div", { class: "pp-book" }, nb.el), right));
+      // ---- Backdrill (m_backDrillPanel): Hole Post Machining and Backdrilling
+      const layerOpts = (): [string, string][] => PM().cuStack(copper).map((l): [string, string] => [l, layerName(l)]);
+      const pmCtl = (front: boolean, pm: PostMachining) => {
+        const mode = selectField<string>(pm.mode, [["none", "None"], ["countersink", "Countersink"], ["counterbore", "Counterbore"]], { ro, key: front ? "topPostMachining" : "bottomPostMachining", onChange: () => syncPm(true) });
+        const size = lenField(pm.size, { ro, key: front ? "topPostMachineSize1" : "bottomPostMachineSize1" });
+        const second = h("input", { type: "text", value: pm.mode === "counterbore" ? fmtLen(pm.depth) : f6(pm.angle), disabled: ro, "data-k": front ? "topPostMachineSize2" : "bottomPostMachineSize2", style: "width:92px" });
+        const sizeLabel = h("label", null, "Size:"), secondLabel = h("label", null, "Angle:"), secondUnit = h("span", { class: "unit" }, "deg"), sizeUnit = unitLabel();
+        let isAngle = pm.mode !== "counterbore";
+        /** onTopPostMachining / onBottomPostMachining: Angle in degrees (82 to start) for a countersink, Depth for a counterbore. */
+        const syncPm = (user: boolean): void => {
+          const v = mode.get(), on = v !== "none" && holeRound();
+          for (const e of [size.input, second] as (HTMLInputElement | HTMLSelectElement)[]) e.disabled = ro || !on;
+          for (const e of [sizeLabel, secondLabel]) e.classList.toggle("disabled", !on);
+          if (v === "countersink") { if (!isAngle) { second.value = ""; } isAngle = true; secondLabel.textContent = "Angle:"; secondUnit.textContent = "deg"; const a = Number(second.value.replace(",", ".")); if (!second.value.trim() || !a) second.value = "82"; }
+          else if (v === "counterbore") { if (isAngle && user) second.value = fmtLen(0); isAngle = false; secondLabel.textContent = "Depth:"; secondUnit.textContent = unitName(); }
+          void user;
+        };
+        const get = (): PostMachining => {
+          const v = mode.get() as PostMachining["mode"]; const t = second.value.trim().replace(",", ".");
+          return { mode: v, size: size.get(), depth: v === "counterbore" ? (t ? parseLen(t) : 0) : 0, angle: v === "countersink" ? Math.round((Number(t) || 0) * 10) / 10 : 0 };
+        };
+        const row = form([[front ? "Front:" : "Back:", mode.el], [sizeLabel, size.el, sizeUnit], [secondLabel, second, secondUnit]], true);
+        return { mode, row, syncPm, get };
+      };
+      const pmF = pmCtl(true, m.pmFront), pmB = pmCtl(false, m.pmBack);
+      const bdChoice = selectField<number>(m.bdChoice, [[0, "None"], [1, "Top"], [2, "Bottom"], [3, "Top & bottom"]], { ro, key: "backDrillChoice", onChange: () => syncBackdrill(true) });
+      const bdTopLayer = selectField<string>(m.bdTopEnd || "", [["", ""], ...layerOpts()], { ro, key: "backDrillTopLayer" }), bdBotLayer = selectField<string>(m.bdBotEnd || "", [["", ""], ...layerOpts()], { ro, key: "backDrillBottomLayer" });
+      const bdTopSize = lenField(m.bdTopSize, { ro, key: "backDrillTopSize" }), bdBotSize = lenField(m.bdBotSize, { ro, key: "backDrillBottomSize" });
+      const mustCut = "The backdrill must pass through this layer";
+      const bdTopLabel = h("label", { title: mustCut }, "Must-cut layer:"), bdBotLabel = h("label", { title: mustCut }, "Must-cut layer:");
+      bdTopLayer.input.title = mustCut; bdBotLayer.input.title = mustCut;
+      /** syncBackdrillControls: a side switched on starts on its outer layer, 1.1 × the larger hole size. */
+      function syncBackdrill(user: boolean): void {
+        const sel = bdChoice.get(), round = holeRound(), top = round && (sel === 1 || sel === 3), bot = round && (sel === 2 || sel === 3);
+        bdChoice.input.disabled = ro || !round;
+        bdTopSize.input.disabled = ro || !top; bdTopLayer.input.disabled = ro || !top; bdTopLabel.classList.toggle("disabled", !top);
+        bdBotSize.input.disabled = ro || !bot; bdBotLayer.input.disabled = ro || !bot; bdBotLabel.classList.toggle("disabled", !bot);
+        if (!user) return;
+        const drill = Math.max(holeX.get(), m.holeOblong ? holeY.get() : holeX.get());
+        if (top) { if (!bdTopLayer.get()) bdTopLayer.set("F.Cu"); if (!bdTopSize.get()) bdTopSize.set(Math.round(drill * 1.1 * 1e6) / 1e6); }
+        if (bot) { if (!bdBotLayer.get()) bdBotLayer.set("B.Cu"); if (!bdBotSize.get()) bdBotSize.set(Math.round(drill * 1.1 * 1e6) / 1e6); }
+      }
+      const backdrill = h("div", { class: "pp-page" },
+        box("Hole Post Machining", pmF.row, pmB.row),
+        box("Backdrilling", bdChoice.el,
+          form([[bdTopLabel, bdTopLayer.el], ["Top backdrill size:", bdTopSize.el, unitLabel()], [bdBotLabel, bdBotLayer.el], ["Bottom backdrill size:", bdBotSize.el, unitLabel()]], true)));
+      const holeRound = (): boolean => holeShape.get() === 0;
+      /** OnDrillShapeSelected: an oblong hole drops the backdrills and post-machining, after asking. */
+      function onDrillShape(v: number): void {
+        const apply = (): void => { m.holeOblong = holeShape.get() === 1; updateHoleControls(); redraw(); };
+        if (v === 1 && (bdChoice.get() !== 0 || pmF.mode.get() !== "none" || pmB.mode.get() !== "none")) {
+          messageBox("Warning", "Switching to non-circular hole will disable backdrills and post-machining. Continue?", [{ label: "OK", fn: apply }, { label: "Cancel", fn: () => { holeShape.set(0); } }], 1);
+          return;
+        }
+        apply();
+      }
+      /** updateHoleControls: "Diameter:" for a round hole (Y hidden); the drilling controls only for a round hole. */
+      function updateHoleControls(): void {
+        const round = holeRound();
+        holeXLabel.textContent = round ? "Diameter:" : "Hole size X:"; holeXY.y.style.display = round ? "none" : "";
+        holeY.input.disabled = ro || !holed() || round;
+        for (const p of [pmF, pmB]) p.mode.input.disabled = ro || !round;
+        syncBackdrill(false); pmF.syncPm(false); pmB.syncPm(false);
+      }
+      const PAGES = ["General", "Connections", "Clearance Overrides", "Backdrill"];
+      const nb = notebook([{ label: "General", build: (el) => el.append(general) }, { label: "Connections", build: (el) => el.append(connections) }, { label: "Clearance Overrides", build: (el) => el.append(clearance) },
+        { label: "Backdrill", build: (el) => el.append(backdrill) }], { start: lastPage < PAGES.length ? lastPage : 0, onShow: (i) => { lastPage = i; redraw(); } });
+      // the parent line: "Footprint %s (%s), %s, rotated %g deg"
+      const frot = Number((kid(staged, "at") || [])[3]) || 0;
+      const parentInfo = h("span", { class: "pp-parent", "data-k": "parentInfo" }, `Footprint ${fieldOf("Reference")} (${fieldOf("Value")}), ${flipped ? "back side (mirrored)" : "front side"}, rotated ${String(Math.round(frot * 1e4) / 1e4)} deg`);
+      body.append(h("style", null, PP_CSS), h("div", { class: "pp-wrap" }, h("div", { class: "pp-book" }, nb.el), right), h("div", { class: "pp-bottom" }, parentInfo, sketch.el));
       // ---- behaviour (DIALOG_PAD_PROPERTIES::OnPadShapeSelection / PadTypeSelected / UpdateLayersDropdown)
       const holed = (): boolean => m.type === "pth" || m.type === "npth";
+      /** afterPadstackModeChanged: the edit layer choices of the mode, the edit layer selected among them. */
+      function fillEditLayers(): void {
+        const opts = PM().padstackEditLayers(m.psMode, copper, layerName);
+        editLayerSel.replaceChildren(...opts.map(([k, l]) => h("option", { value: k }, l)));
+        editLayerSel.selectedIndex = Math.max(0, opts.findIndex(([k]) => k === editLayer));
+        editLayerSel.disabled = ro || m.psMode === "normal";
+      }
+      /** OnPadstackModeChanged: the controls go to the edit layer, the mode's new layers start as F.Cu; not reloaded. */
+      function onPadstackMode(v: PadstackMode): void {
+        readAll(); editLayer = PM().changePadstackMode(stack, editLayer, m, v); m.psMode = v; fillEditLayers(); redraw();
+      }
+      /** initPadstackLayerValues: the edit layer's shape into the shape controls. */
+      const loadShape = (): void => {
+        shape.set(m.shape); sx.set(m.w); sy.set(m.h); delta.set(m.delta); axis.set(m.deltaAxis);
+        ratio.value = pct(m.rratio); radius.set(m.rratio * Math.min(m.w, m.h)); cratio.value = pct(m.cratio);
+        corner.forEach((c, i) => c.set(m.corners[i])); offOn.set(m.offset); offX.set(m.ox); offY.set(m.oy);
+      };
+      // OnEditLayerChanged: save the previous layer's controls, show the chosen one's
+      editLayerSel.addEventListener("change", () => {
+        readAll(); PM().storeLayer(stack, editLayer, m);
+        const opts = PM().padstackEditLayers(m.psMode, copper, layerName); editLayer = (opts[editLayerSel.selectedIndex] || opts[0])[0];
+        PM().applyLayerShape(m, PM().padstackLayer(m.psMode, stack, stack["F.Cu"], editLayer)); loadShape(); onShape();
+      });
+      /** OnUpdateUI's m_stackupImagesBook page for the pad type and its copper layers. */
+      function updateStackupImage(): void {
+        const cu = Array.from(PM().modelLayers(m, copper)).filter((l) => /\.Cu$/.test(l));
+        let bmp = "";
+        if (m.type === "pth") bmp = !cu.length ? "" : m.copper === 0 ? "pads_reset_unused" : m.copper === 1 ? "pads_remove_unused_keep_bottom" : "pads_remove_unused";
+        else if (m.type === "npth") bmp = cu.includes("F.Cu") && cu.includes("B.Cu") ? "pads_npth_top_bottom" : cu.includes("F.Cu") ? "pads_npth_top" : cu.includes("B.Cu") ? "pads_npth_bottom" : "pads_npth";
+        if (stackupImage.dataset.bitmap === bmp) return;
+        stackupImage.dataset.bitmap = bmp; stackupImage.replaceChildren(...(bmp ? [staticBitmap(bmp, 156)] : []));
+      }
+      /** updatePadSizeControls: one "Diameter:" for a circular pad, and the teardrop picture and hints to match. */
+      function updatePadSizeControls(): void {
+        const circ = m.shape === "circle" || m.shape === "custom_circle";
+        sizeXLabel.textContent = circ ? "Diameter:" : "Pad size X:"; sizeXY.y.style.display = circ ? "none" : "";
+        const bmp = circ ? "teardrop_sizes" : "teardrop_rect_sizes";
+        if (tdBitmap.dataset.bitmap !== bmp) { tdBitmap.dataset.bitmap = bmp; tdBitmap.replaceChildren(staticBitmap(bmp, 180, 110)); }
+        for (const e of hints) e.textContent = circ ? "d" : "w";
+      }
       function onShape(): void {
         trapRows.style.display = m.shape === "trapezoid" ? "" : "none";
         roundRows.style.display = m.shape === "roundrect" || m.shape === "mixed" ? "" : "none";
@@ -241,7 +373,7 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
         if ((m.shape === "roundrect" || m.shape === "mixed") && !(m.rratio > 0)) { m.rratio = ipc(); ratio.value = pct(m.rratio); radius.set(m.rratio * Math.min(m.w, m.h)); }
         if ((m.shape === "chamfer" || m.shape === "mixed") && !(m.cratio > 0)) { m.cratio = 0.2; cratio.value = pct(m.cratio); }
         if ((m.shape === "chamfer" || m.shape === "mixed") && !m.corners.some(Boolean)) { m.corners = [true, false, false, false]; corner.forEach((c, i) => c.set(i === 0)); }
-        redraw();
+        updatePadSizeControls(); redraw();
       }
       /** OnUpdateUI's enable states for the type. */
       function typeEnables(): void {
@@ -250,6 +382,7 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
         dieOn.input.disabled = ro || !conn; (delayOn.input as HTMLInputElement).disabled = ro || !conn;
         holeShape.input.disabled = ro || !holed(); holeX.input.disabled = ro || !holed(); holeY.input.disabled = ro || !holed() || !m.holeOblong;
         holeRows.style.display = holed() ? "" : "none";
+        updateHoleControls();
         padstackRows.style.display = m.type === "pth" ? "" : "none";
       }
       /** PadTypeSelected: the new type's default layers, its hole and its connection. */
@@ -291,13 +424,23 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
       radius.input.addEventListener("change", () => { const mn = Math.min(sx.get(), sy.get()); if (mn > 0) { m.rratio = Math.max(0, Math.min(0.5, radius.get() / mn)); ratio.value = pct(m.rratio); } redraw(); });
       body.addEventListener("input", () => { readAll(); redraw(); });
       body.addEventListener("change", () => { readAll(); redraw(); });
-      redraw = (): void => drawPreview(cv, m, sketch.get(), copper);
-      onShape(); fillCopper(); typeEnables();
+      readDrills = (): void => {
+        m.bdChoice = bdChoice.get() as PadModel["bdChoice"]; m.bdTopSize = bdTopSize.get(); m.bdTopEnd = bdTopLayer.get(); m.bdBotSize = bdBotSize.get(); m.bdBotEnd = bdBotLayer.get();
+        m.pmFront = pmF.get(); m.pmBack = pmB.get();
+      };
+      redraw = (): void => { updateStackupImage(); drawPreview(cv, m, sketch.get(), copper); };
+      fillEditLayers(); onShape(); fillCopper(); typeEnables();
+      // the initial focus of the remembered page: the pad number, the thermal gap, the clearance
+      requestAnimationFrame(() => { const f = [number.input, gap.input, clr.input][lastPage]; if (f && !ro) { f.focus(); if (f === number.input) (f as HTMLInputElement).select(); } });
       requestAnimationFrame(() => redraw());
     },
     ok() {
       if (ro) return true;
-      readAll();
+      readAll(); readDrills();
+      // transferDataToPad: the edit layer's controls into its layer; the pad's own shape is the F.Cu layer's
+      PM().storeLayer(stack, editLayer, m); editLayer = "F.Cu";
+      PM().applyLayerShape(m, stack["F.Cu"]);
+      const layersOut = { ...stack }; delete layersOut["F.Cu"]; m.psLayers = layersOut;
       const { errors, warnings } = PM().checkPad(m);
       if (errors.length) { messageList("Pad Properties Errors", errors.concat(warnings)); return false; }
       const commit = (): void => {
@@ -306,6 +449,8 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
         ctx.commit([K().replaceChange(doc, { ...item, node: staged, geom: [], bbox: null })], "Edit Pad Properties");
         ctx.requestRender();
       };
+      // PAD_TOOL::SetLastPadNumber( m_previewPad->GetNumber() ), even when nothing else changed
+      const mem = padMemory(); if (mem) mem.lastNumber = m.number;
       if (warnings.length) { messageList("Pad Properties Warnings", warnings); }
       commit();
       return true;
@@ -340,4 +485,9 @@ const PP_CSS = `
 .pp-anglebox { display: inline-flex; align-items: stretch; }
 .pp-anglebox input { border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .pp-combo { padding: 0 6px; border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+.pp-stackup { display: flex; justify-content: center; min-height: 156px; }
+.pp-tdtop { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+.pp-bottom { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 8px; }
+.pp-parent { color: var(--muted, inherit); }
+label.disabled { opacity: 0.5; }
 `;

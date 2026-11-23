@@ -141,3 +141,58 @@ export function fmtG(v: number): string {
   if (e < -5 || e >= 6) { const s = v.toExponential(5).replace(/\.?0+e/, "e"); return s.replace(/e([+-])(\d)$/, "e$10$2"); }
   return String(+v.toPrecision(6));
 }
+
+// ---------------------------------------------------------------- the through-hole size (common/pth_hole_size.cpp)
+// Sizes are in nanometres (KiCad's PCB internal units), as there.
+export type PthLeadShape = "round" | "square" | "rect";
+export interface PthLead { shape: PthLeadShape; minX: number; maxX: number; minY: number; maxY: number }
+export interface PthRange { leadMin: number; leadMax: number; holeMin: number; holeMax: number }
+/** KiROUND for the sizes here. */
+const kiRound = (v: number): number => (v < 0 ? -Math.round(-v) : Math.round(v));
+export const mmToIU = (mm: number): number => kiRound(mm * 1e6);
+/** effectiveLeadSize: a square or rectangular lead's diagonal. */
+export function pthEffectiveLeadSize(l: PthLead): [number, number] {
+  if (l.shape === "square") return [kiRound(Math.hypot(l.minX, l.minX)), kiRound(Math.hypot(l.maxX, l.maxX))];
+  if (l.shape === "rect") return [kiRound(Math.hypot(l.minX, l.minY)), kiRound(Math.hypot(l.maxX, l.maxY))];
+  return [l.minX, l.maxX];
+}
+/** IPC2222_HOLE_SIZE_STANDARD, the one standard GetPthHoleSizeStandards lists. */
+export const IPC2222B = {
+  id: "IPC-2222B", levels: ["A (General)", "B (Moderate)", "C (High density)"],
+  minAdd: [mmToIU(0.25), mmToIU(0.20), mmToIU(0.15)], maxAdd: [mmToIU(0.70), mmToIU(0.70), mmToIU(0.60)],
+};
+export const PTH_STANDARDS = [IPC2222B];
+/** ComputeHoleSize: the smallest hole the largest lead fits, the largest the smallest lead still needs. */
+export function pthHoleRange(level: number, l: PthLead, std = IPC2222B): PthRange {
+  const lv = Math.max(0, Math.min(std.levels.length - 1, level));
+  const [leadMin, leadMax] = pthEffectiveLeadSize(l);
+  return { leadMin, leadMax, holeMin: leadMax + std.minAdd[lv], holeMax: leadMin + std.maxAdd[lv] };
+}
+/** ComputeRecommendedPthHoleSize: the middle of the range rounded (up or to the nearest) to the step, never under the minimum. */
+export function pthRecommendedHole(r: PthRange, step: number, up: boolean): number {
+  const mid = Math.trunc((r.holeMin + r.holeMax) / 2);
+  if (step <= 0) return mid;
+  let hole = up ? Math.trunc((mid + step - 1) / step) * step : Math.trunc((mid + Math.trunc(step / 2)) / step) * step;
+  if (hole < r.holeMin) hole = Math.trunc((r.holeMin + step - 1) / step) * step;
+  return hole;
+}
+/** wxString::Format( "%.3g", mm ) of a size in nm (formatMm). */
+export function fmtMm3(iu: number): string {
+  const v = iu / 1e6;
+  if (!isFinite(v)) return "";
+  if (v === 0) return "0";
+  const e = Math.floor(Math.log10(Math.abs(+v.toPrecision(3))));
+  if (e < -4 || e >= 3) { const s = v.toExponential(2).replace(/\.?0+e/, "e"); return s.replace(/e([+-])(\d)$/, "e$10$2"); }
+  return String(+v.toPrecision(3));
+}
+/** pthResultReportText: the labelled lines, the labels padded to one width. */
+export function pthReportText(level: number, l: PthLead, annular: number, r: PthRange, hole: number, pad: number, std = IPC2222B): string {
+  const rng = (a: number, b: number): string => `${fmtMm3(a)} – ${fmtMm3(b)} mm`;
+  const shape = l.shape === "round" ? "Round" : l.shape === "square" ? "Square" : "Rectangular";
+  const size = l.shape === "rect" ? `${fmtMm3(l.minX)} – ${fmtMm3(l.maxX)} mm x ${fmtMm3(l.minY)} – ${fmtMm3(l.maxY)} mm` : rng(l.minX, l.maxX);
+  const rows: string[][] = [["Standard:", std.id], ["Production level:", std.levels[Math.max(0, Math.min(std.levels.length - 1, level))]], ["Lead shape:", shape], ["Lead size:", size],
+    ["Effective lead size:", rng(r.leadMin, r.leadMax)], [""], ["Minimum hole size:", `${fmtMm3(r.holeMin)} mm`], ["Maximum hole size:", `${fmtMm3(r.holeMax)} mm`],
+    ["Recommended hole size:", `${fmtMm3(hole)} mm`], ["Hole clearance over max. lead:", `${fmtMm3(hole - r.leadMax)} mm`], ["Annular ring:", `${fmtMm3(annular)} mm`], ["Pad diameter:", `${fmtMm3(pad)} mm`]];
+  const w = Math.max(...rows.filter((x) => x.length > 1).map((x) => x[0].length));
+  return rows.map((x) => (x.length > 1 ? x[0].padEnd(w) + " " + x[1] : x[0]) + "\n").join("");
+}

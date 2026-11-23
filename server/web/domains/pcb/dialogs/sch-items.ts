@@ -18,7 +18,7 @@ import { schTableDialog } from "../editor/tabledialogs";
 import { keyName } from "../../../shared/keys";
 import { syntaxHelp } from "../editor/syntax-help";
 import { refImageDialog } from "../editor/pcbdialogs/refimage";
-import { E, toast, toolCtx } from "./editor";
+import { E, appState, toast, toolCtx } from "./editor";
 import { KD, popupMenu, checkbox, confirmBox, h, select, textInput } from "./dom";
 import { comboBox } from "../../../shared/components/kcombo";
 import { loadSheets, pageNumbersAndNames } from "../editor/panels/hierarchy";
@@ -36,6 +36,12 @@ import { isURL, resolveUriVars, type FpChooserFilters } from "../library/fpchoic
 import type { GridCellButton } from "./dom";
 import { sheetFileEntry } from "./sync-pins";
 import { readDoc } from "./project";
+import { itemColorsOverriddenNotice } from "./prefs";
+import { textVarAutocompleter } from "../editor/pcbdialogs/xref";
+import type { SimFile } from "./sim-model";
+import { expandSpiceIncludes } from "./sim-model-logic";
+import { embeddedModelFiles, projectModelFiles } from "./sim-files";
+import { builtinLibrary } from "../sim/builtin-libs";
 
 type Ctx = ToolCtx & { doc: KDoc };
 interface ItemOpts { onCreate?(node: SNode, more?: SNode[]): boolean | void; cancel?(): void; title?: string; label?: string; generic?: boolean; isNew?: boolean; symbolEditor?: SymEditorTextOpts; pinMapPage?: boolean }
@@ -200,6 +206,30 @@ function symbolByRef(doc: KDoc, ref: string): SNode | null {
   for (const d of docs) for (const it of d.items.values()) if (it.kind === "symbol") { const u = L.kid(it.node, "uuid"); if (u && L.str(u[1]) === hit.uuid) return it.node; }
   return null;
 }
+/** Sim.Library texts read for the field dialog's "${OP:" list, by path (null: unreadable). */
+const opLibraries = new Map<string, string | null>();
+/** The symbol's library symbol (lib_name, else lib_id). */
+function libSymbolOf(doc: KDoc, node: SNode): SNode | null {
+  const li = L.kid(node, "lib_name") || L.kid(node, "lib_id"); return li ? (KiCadCanvas.resolveLib(doc, L.str(li[1])) as SNode | null) : null;
+}
+/** SCH_FIELD::OnScintillaCharAdded after "${OP:" (L.simModelPorts), with the Sim.Library loadOpLibrary read. */
+export function opPortNames(doc: KDoc, sym: KItem): string[] {
+  return L.simModelPorts(sym.node, libSymbolOf(doc, sym.node), (p) => opLibraries.get(p) ?? null);
+}
+/** Reads the symbol's Sim.Library (the built-in libraries, the project's model files and the embedded ones) for opPortNames. */
+function loadOpLibrary(doc: KDoc, sym: KItem): void {
+  const p = L.simLibraryPath(sym.node, libSymbolOf(doc, sym.node)); if (!p || opLibraries.has(p)) return;
+  const ef = (doc as KDoc & { embeddedFiles?: SNode | null }).embeddedFiles;
+  const files = [...projectModelFiles((appState.project && appState.project.docs) || []), ...embeddedModelFiles([ef ? (["kicad_sch", ef] as unknown as SNode) : null, libSymbolOf(doc, sym.node)])];
+  const norm = (x: string): string => x.replace(/\\/g, "/").replace(/^\$\{KIPRJMOD\}\//, "").replace(/^\.\//, "");
+  const find = (x: string): SimFile | null => files.find((f) => norm(f.path) === norm(x)) || files.find((f) => norm(x).endsWith("/" + norm(f.path))) || null;
+  void (async (): Promise<void> => {
+    let text: string | null = builtinLibrary(p);
+    try { if (text === null) { const f = find(p); text = f ? await f.load() : null; } } catch (e) { text = null; }
+    if (text !== null && !/\.ibs$/i.test(p)) text = await expandSpiceIncludes(text, p, async (cands) => { for (const c of cands) { const g = find(c); if (g) { try { const t = await g.load(); if (t !== null) return t; } catch (e) { /* the next one */ } } } return null; }, []);
+    opLibraries.set(p, text);
+  })();
+}
 /**
  * getContextualTextVars of the text, text box and table dialogs: after "${REF:" the variables of that symbol, else
  * those of the sheet on screen.  `parent` (SCH_FIELD::OnScintillaCharAdded): a field also offers its parent's own
@@ -207,7 +237,8 @@ function symbolByRef(doc: KDoc, ref: string): SNode | null {
  */
 export function contextualTextVars(doc: KDoc, xref: string, parent?: KItem | null): string[] {
   const pv = Object.keys(projectVars() || {});
-  if (xref) { const n = xref === "OP" && parent ? null : symbolByRef(doc, xref); return n ? L.symbolTextVars(n) : []; }
+  if (xref === "OP" && parent) return parent.kind === "symbol" ? opPortNames(doc, parent) : [];
+  if (xref) { const n = symbolByRef(doc, xref); return n ? L.symbolTextVars(n) : []; }
   if (!parent) return L.sheetTextVars(sheetChain(), pv);
   const out: string[] = [];
   if (parent.kind === "symbol") out.push(...L.symbolTextVars(parent.node), ...L.sheetTextVars(sheetChain(), pv));
@@ -259,6 +290,8 @@ export function textVarAutocomplete(input: HTMLInputElement | HTMLTextAreaElemen
   });
   input.addEventListener("blur", () => setTimeout(close, 0));
 }
+// the board's dialogs complete their text variables with the same list (editor/pcbdialogs/xref.ts)
+textVarAutocompleter.fn = textVarAutocomplete;
 
 // ---------------------------------------------------------------- the fields grid (FIELDS_GRID_TABLE)
 interface GRow extends L.FieldRow { sizeT: string; xT: string; yT: string; hT: string; vT: string; orientT: string; colorT: string }
@@ -563,6 +596,7 @@ export function openTextDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
     title: opts.title || (box ? "Text Box Properties" : "Text Properties"), width: 640, readOnly: ro, cancel: opts.cancel,
     build(b) {
       body = b;
+      if (box) itemColorsOverriddenNotice(b);   // DIALOG_TEXT_PROPERTIES: a text box only
       const ta = h("textarea", { id: "kd-txt-text", rows: 5, style: "width:100%;font-family:var(--mono, monospace)", disabled: ro }) as HTMLTextAreaElement; ta.value = xref ? xref.toRefs(L.str(staged[1])) : L.str(staged[1]); els.text = ta;   // ConvertKIIDsToRefs
       b.append(h("div", { style: "display:flex;gap:8px;align-items:flex-start" }, h("label", { style: "padding-top:4px" }, "Text:"), ta));
       // onCharFn: DoTextVarAutocomplete( getContextualTextVars )
@@ -700,7 +734,7 @@ export function openFieldDialog(ctx: Ctx, item: KItem, name: string, apply?: (fi
         textCell = h("span", { style: "display:flex;gap:4px;align-items:center" }, text, fb); text.style.flex = "1";
       }
       // SCH_FIELD::OnScintillaCharAdded: the parent's variables, the sheet's and the project's
-      if (!ro && !apply && !text.disabled) textVarAutocomplete(text, (x) => contextualTextVars(doc, x, item));
+      if (!ro && !apply && !text.disabled) { textVarAutocomplete(text, (x) => contextualTextVars(doc, x, item)); if (item.kind === "symbol") loadOpLibrary(doc, item); }
       g.append(h("label", { id: "kd-fld-textlabel" }, shownName + ":"), textCell, h("span"));   // m_textLabel->SetLabel( aField->GetName() + ":" )
       if (isFile) g.append(h("span"), h("span", { class: "kd-note", id: "kd-fld-note" }, "Sheet filename can only be modified in Sheet Properties dialog."), h("span"));
       // m_unitLabel / m_unitChoice: the Reference field of a multi-unit symbol also picks the unit (dialog_field_properties.cpp)
@@ -916,6 +950,7 @@ function shapeDialog(ctx: Ctx, item: KItem): void {
   KD().open({
     title: `${name} Properties`, width: withEnds ? 620 : 440, readOnly: ro,
     build(b) {
+      itemColorsOverriddenNotice(b);
       // the rule area's boxes first (dialog_shape_properties_base.cpp): simulation, board, DNP, bill of materials
       if (rule) {
         const a = h("div", { style: "margin-bottom:8px" });

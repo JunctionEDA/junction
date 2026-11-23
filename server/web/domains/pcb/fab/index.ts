@@ -30,7 +30,7 @@ import { dxfTextString, writeDxf } from "./dxf";
 import { paintPage, writePng } from "./raster";
 import { gerberJobFile } from "./gbrjob";
 import { boardPage } from "./pageplot";
-import { type FillProgress, type FillRules, type ZoneFillResult, ZoneFiller, filledZoneNode, polyArea, storedFill } from "./zonefill";
+import { type FillProgress, type FillRules, type ZoneFillResult, ZoneFiller, filledZoneNode, polyArea, storedFill, zoneDefaultOffsets } from "./zonefill";
 
 import { statAreas } from "./stats";
 import { meshVrml, vrmlModels, writeVrml, type VrmlOptions } from "./vrml";
@@ -269,7 +269,7 @@ async function pcbwayQuoteZip(ctx: FabContext, pkg: FabPackage): Promise<Uint8Ar
  * flags per layer.  Null when the progress reporter cancelled it.
  */
 export function fillZones(ctx: FabContext, rules: FillRules, ids: string[] | null, prog?: FillProgress): Promise<ZoneFillResult[] | null> {
-  return new ZoneFiller(modelOf(ctx), rules).fill(ids, prog);
+  return new ZoneFiller(modelOf(ctx), rules.hatchOffsets ? rules : { ...rules, hatchOffsets: zoneDefaultOffsets(setupNode(ctx.setup)) }).fill(ids, prog);
 }
 
 /** The board as an ODB++ job (PCB_IO_ODBPP): text files by their path under the job folder. */

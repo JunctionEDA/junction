@@ -121,7 +121,7 @@ export function runKicadAction(id: string, viaHotkey = false): boolean {
  * polygons, rule areas) and ROUTER_TOOL::MainLoop.
  */
 const BOARD_PRIMED = new Set(["route", "routediff", "gline", "grect", "gcircle", "garc", "gcurve", "gtext", "gtextbox", "table", "barcode", "image",
-  "dimaligned", "dimortho", "dimcenter", "dimradial", "leader", "zone", "thievingzone", "gpoly", "rulearea"]);
+  "dimaligned", "dimortho", "dimcenter", "dimradial", "leader", "zone", "thievingzone", "viastitch", "gpoly", "rulearea"]);
 /**
  * TOOL_MANAGER::processEvent (tool_manager.cpp 1243-1250): with input.immediate_actions off ("First hotkey selects
  * tool") a hotkey that activates another tool loses its position, so the tool only arms; a tool that is already

@@ -1,8 +1,9 @@
 // kicad-canvas — GENERATED SOURCE MODULE (split from the former static/kicad-canvas.js; static/kicad-canvas.js is now the esbuild output of web/domains/pcb/canvas/index.ts — edit these modules, not the bundle).
 import { HOLE_WALL as HOLE_WALL_COLOR, NPTH, PAD_TEXT, PAD_TEXT_DARK, PCB_BG, VIA_HOLE, Z_PAD, Z_TEXT, Z_VIA, Z_ZONE, padLayers, pcbColor, pcbZ } from "./colors";
 import { G, bboxAdd, textLines } from "./geom";
-import { expandDocVars, hatchGeom, roundRectPts } from "./geom-sch";
+import { hatchGeom, roundRectPts } from "./geom-sch";
 import { expandTextVars, hasTextVars } from "./sheet";
+import { pcbTextShown } from "./pcb-textvars";
 import { arcFrom3, atOf, bezierPts, dashOf, effectsOf, faceOf, ellipsePts, fillOf, has, isList, justOf, kid, kids, netOf, num, pointInPoly, polyPtsOf, rotPt, rotator, str, widthOf, yesNo } from "./sexpr";
 import { buildImageGeom, buildTableGeom } from "./tables-images";
 import { inflate, stadium, subtract, union } from "../fab/poly";
@@ -166,9 +167,10 @@ export function buildPcbGeom(doc: Doc, item: Item): void {
   } else if (k === "barcode") {
     barcodeGeom(item, n, (x: number, y: number) => [x, y], 0);
   } else if (k === "gr_text") {
-    const [x, y, rot] = atOf(n); const tl = layerOf(n, "Dwgs.User"); pcbTextGeom(item, n, x, y, doc && doc.fpEditor ? fpEditorVars(doc, str(n[1]), tl) : expandDocVars(doc, str(n[1]).replace(/\$\{LAYER\}/g, tl)), rot, tl, { dxfText: { bold: !!effectsOf(n).bold } });
+    const [x, y, rot] = atOf(n); const tl = layerOf(n, "Dwgs.User"); pcbTextGeom(item, n, x, y, doc && doc.fpEditor ? fpEditorVars(doc, str(n[1]), tl) : pcbTextShown(doc, str(n[1]), tl), rot, tl, { dxfText: { bold: !!effectsOf(n).bold } });
   } else if (k === "gr_text_box") {
-    buildTextBoxGeom(item, n, (x: number, y: number) => [x, y], layerOf(n, "Dwgs.User"), 0);
+    const bl = layerOf(n, "Dwgs.User");
+    buildTextBoxGeom(item, n, (x: number, y: number) => [x, y], bl, 0, doc && !doc.fpEditor ? (t: string) => pcbTextShown(doc, t, bl) : null);
   } else if (k === "dimension") {
     buildDimensionGeom(item, n);
   } else if (k === "target") {
@@ -281,6 +283,24 @@ export function postMachiningKnockout(doc: Doc, n: SNode, layer: string): number
     best = Math.max(best, Math.max(0, size - 2 * dist * tanHalf));
   }
   return best;
+}
+/**
+ * PADSTACK::MachiningKnockout: the post-machining knockout, or the diameter of a backdrill (secondary or tertiary drill)
+ * whose span, in stack order, takes in the copper layer; a drill reaching a layer the board does not have counts for none.
+ */
+export function machiningKnockout(doc: Doc, n: SNode, layer: string): number {
+  if (!kid(n, "backdrill") && !kid(n, "tertiary_drill") && !kid(n, "front_post_machining") && !kid(n, "back_post_machining")) return 0;
+  let k = /\.Cu$/.test(layer) ? postMachiningKnockout(doc, n, layer) : 0;
+  const copper = doc.copper || [];
+  const pos = (l: string): number => l === "F.Cu" ? 0 : l === "B.Cu" ? 1000 : /^In\d+\.Cu$/.test(l) ? parseInt(l.slice(2), 10) : -1;
+  for (const key of ["backdrill", "tertiary_drill"]) {
+    const d = kid(n, key); if (!d) continue; const ls = kid(d, "layers"); const size = num((kid(d, "size") || [])[1], 0);
+    const start = str((ls || [])[1]), end = str((ls || [])[2]); if (!(size > 0) || !start || !end) continue;
+    if (!copper.includes(start) || !copper.includes(end)) continue;
+    const a = pos(start), b = pos(end), p = pos(layer); if (p < 0) continue;
+    if (p >= Math.min(a, b) && p <= Math.max(a, b)) k = Math.max(k, size);
+  }
+  return k;
 }
 /**
  * PCB_PAINTER::drawBackdrillIndicator / drawPostMachiningIndicator: a circle of 12 equal dashes and gaps, radius r − w / 2,
@@ -661,7 +681,8 @@ function graphicShapeGeom0(item: Item, g: SNode, shape: string, tf: Tf, layer: s
   }
 }
 
-export function buildTextBoxGeom(item: Item, n: SNode, tf: Tf, layer: string, rotBase: number): void {
+/** `shown`: PCB_TEXTBOX::GetShownText's variables (pcb-textvars.ts), when the box is on a board. */
+export function buildTextBoxGeom(item: Item, n: SNode, tf: Tf, layer: string, rotBase: number, shown?: ((t: string) => string) | null): void {
   const ef = effectsOf(n); if (ef.hide) return;
   // the file holds the library box and angle (a footprint's own rotation added on top): the angle is the text's
   const angN = kid(n, "angle"); const libAng = angN ? num(angN[1]) : 0; const ang = libAng + rotBase;
@@ -690,7 +711,7 @@ export function buildTextBoxGeom(item: Item, n: SNode, tf: Tf, layer: string, ro
   // PCB_TEXTBOX::GetShownText: wrapped to the box's first edge less the side margins, with the effective pen
   const col = el - lm - rm;
   const pen = ef.thick > 0 ? ef.thick : (ef.bold ? ef.size / 5 : ef.size / 8);
-  pcbTextGeom(item, n, anchor[0] + ex[0] / el * ox + ey[0] / yl * oy, anchor[1] + ex[1] / el * ox + ey[1] / yl * oy, linebreakText(unescapeText(str(n[1])), col, ef.sizeX, pen, ef.italic), ang, layer);
+  pcbTextGeom(item, n, anchor[0] + ex[0] / el * ox + ey[0] / yl * oy, anchor[1] + ex[1] / el * ox + ey[1] / yl * oy, linebreakText(shown ? shown(unescapeText(str(n[1]))) : unescapeText(str(n[1])), col, ef.sizeX, pen, ef.italic), ang, layer);
 }
 
 /** PCB_DIMENSION_BASE: its geometry, each record tagged as a dimension's (the sketch graphics mode reads it). */
@@ -775,7 +796,9 @@ export function buildFootprintGeom(doc: Doc, item: Item): void {
   item.ref = props.Reference || ""; item.value = props.Value || "";
   // FOOTPRINT::GetPrivateLayers: on a board a child on one of them is not drawn (PCB_PAINTER::Draw)
   const privN = !(doc && doc.fpEditor) ? kid(n, "private_layers") : null; const priv = privN ? new Set(privN.slice(1).map(str)) : null;
-  const expand = (t: string) => expandTextVars(t, (v: string) => (v === "REFERENCE" ? item.ref : v === "VALUE" ? item.value : v === "LAYER" ? side : v === "FOOTPRINT_NAME" ? item.lib : null) as string | null);   // all four set just above
+  // PCB_TEXT / PCB_FIELD::GetShownText: the text's layer, the footprint's variables, then the board's (pcb-textvars.ts)
+  const expand = (t: string, l: string, f: string | null) => (doc && !doc.fpEditor ? pcbTextShown(doc, t, l, n, f)
+    : expandTextVars(t, (v: string) => (v === "REFERENCE" ? item.ref : v === "VALUE" ? item.value : v === "LAYER" ? side : v === "FOOTPRINT_NAME" ? item.lib : null) as string | null));
   const textAt = (p: SNode, text: string) => {
     if (!isList(kid(p, "at"))) return;
     const at = kid(p, "at")!; const [px, py, pr] = atOf(p); const layer = layerOf(p, side === "B.Cu" ? "B.SilkS" : "F.SilkS"); const [x, y] = tf(px, py);
@@ -784,7 +807,7 @@ export function buildFootprintGeom(doc: Doc, item: Item): void {
     const field = p[0] === "property" ? str(p[1]) : p[0] === "fp_text" ? (str(p[1]) === "reference" ? "Reference" : str(p[1]) === "value" ? "Value" : null) : null;
     const dxfText = { bold: !!effectsOf(p).bold };
     const before = item.geom.length;
-    const first = pcbTextGeom(item, p, x, y, expand(text), pr, layer, field ? { upright: !unlocked, field, dxfText } : { upright: !unlocked, dxfText });
+    const first = pcbTextGeom(item, p, x, y, expand(text, layer, field), pr, layer, field ? { upright: !unlocked, field, dxfText } : { upright: !unlocked, dxfText });
     if (first) first.textPos = [x, y];
     // PCB_TEXT::ViewGetLOD: a text that is just ${REFERENCE} / ${VALUE} follows the References / Values toggle
     const role = text === "${REFERENCE}" ? "Reference" : text === "${VALUE}" ? "Value" : null;
@@ -806,7 +829,8 @@ export function buildFootprintGeom(doc: Doc, item: Item): void {
       textAt(g, str(g[2]));
     } else if (gk === "fp_text_box") {
       if (priv && priv.has(layerOf(g, "F.SilkS"))) continue;
-      buildTextBoxGeom(item, g, tf, layerOf(g, "F.SilkS"), frot);
+      const bl = layerOf(g, "F.SilkS");
+      buildTextBoxGeom(item, g, tf, bl, frot, doc && !doc.fpEditor ? (t: string) => pcbTextShown(doc, t, bl, n) : null);
     } else if (gk === "pad") {
       buildPadGeom(item, g, tf, side, doc, padIndex++);
     } else if (gk === "dimension") {

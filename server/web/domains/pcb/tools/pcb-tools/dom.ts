@@ -1,4 +1,6 @@
 // pcb-tools/dom.ts — DOM: select-mode picking, stolen keys, the layer chip, the text prompt and the image picker.
+import { spreadCancel, spreading } from "./spread";
+import { stackPlacing, viaStackUndo } from "./via-stack";
 import { clickMode, modifiersState } from "../../editor/selmodes";
 import type { Hover, PcbCtx, Pt, PtrEvent } from "./types";
 
@@ -82,7 +84,7 @@ export const liveSelection = () => appGlobal(() => editorState()!.selection, nul
  * PCB_PICKER_TOOL: the next click hands a point (selectPointInteractively, snapped like the cursor) or the item under
  * the cursor (selectItemInteractively) to done(); Escape hands back null.  Either way the tool goes back to Select.
  */
-export function pickInteractively(ctx: PcbCtx, mode: string, prompt: string, done: (res: Pt | KItem | null) => void, filter?: (it: KItem) => boolean) {
+export function pickInteractively(ctx: PcbCtx, mode: string, prompt: string, done: (res: Pt | KItem | null, at?: Pt) => void, filter?: (it: KItem) => boolean) {
   bind(ctx); S.pick = { done, prompt, filter }; ctx.setTool(mode === "item" ? "pickitem" : "pickpoint");   // the prompt follows the mouse (assistants.ts drawPickerPrompt)
 }
 /** GetVectorSnapped45 / GetVectorSnapped90 (geometry_utils.h): the end of a vector from o held to the angle snap mode. */
@@ -139,7 +141,7 @@ export function pickClick(ctx: PcbCtx, t: string, hv: Hover, mm: Pt, ev?: PtrEve
   if (t === "pickpoint") res = [hv.x, hv.y];
   else { const it = itemAt(ctx, mm); res = it || null; if (!it || (pk && pk.filter && !pk.filter(it))) { S.pick = pk; return; } }   // a click on nothing, or on an item m_ItemFilter refuses, keeps picking
   ctx.setTool("select");
-  if (pk && pk.done) pk.done(res);
+  if (pk && pk.done) pk.done(res, [mm[0], mm[1]]);
 }
 export function pickCancel() {
   if (S.pick && S.pick.two) {
@@ -153,6 +155,7 @@ export function cancelInFlight(any?: boolean) {
   if (S.pick) return pickCancel();
   if (S.pedit && lastCtx) { editHandleUp(lastCtx, false); return true; }
   if (S.tune.pattern) return tuneCancel(lastCtx!);   // the first Escape drops the pattern, the next leaves the tool
+  if (spreading() && lastCtx) return spreadCancel(lastCtx);   // SpreadTracks: IsCancelInteractive restores the selection and ends the tool
   // IsCancelInteractive ends every move, one made with the button held as well as one that follows the cursor: the
   // items go back and the selection stays
   if (S.route || S.draw || S.drag || S.text || S.image || S.move) {
@@ -173,6 +176,7 @@ export function cancelInFlight(any?: boolean) {
 export function undoRedoInFlight(ctx: PcbCtx, which: string) {
   if (S.tune.pattern) { if (which === "undo") tuneCancel(ctx); return true; }   // Undo drops the pattern being placed
   if (S.route) { if (which === "undo" && !ctx.viewOnly) undoRouteLeg(ctx); return true; }
+  if (S.modTool === "viastack" && stackPlacing()) { if (which === "undo") viaStackUndo(ctx); return true; }   // PlaceMicroviaStack: undo takes a hop back
   if (!(S.pedit || S.draw || S.drag || S.image || S.move)) return false;
   // DrawZone: ACTIONS::undo is deleteLastPoint (POLYGON_GEOM_MANAGER::DeleteLastCorner): the last corner goes and the
   // outline stays in progress; the first corner going ends it
@@ -189,6 +193,7 @@ export function routerKeyAction(ev: Pick<KeyboardEvent, "ctrlKey" | "metaKey" | 
   if (S.route) {
     if (ctrl && !alt && !shift && (k === "z" || k === "Z")) return "routerUndoLastSegment";
     if (ctrl && !alt && !shift && (code === "KeyV" || k === "v" || k === "V")) return "ACT_PlaceMicroVia";
+    if (ctrl && !alt && shift && (code === "KeyV" || k === "v" || k === "V")) return "ACT_PlaceViaStack";
     if (alt && shift && !ctrl && code === "KeyV") return "ACT_PlaceBlindVia";
     if (alt && !ctrl && (k === "<" || (shift && code === "Comma"))) return "ACT_SelLayerAndPlaceBlindVia";
   }

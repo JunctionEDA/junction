@@ -1,8 +1,9 @@
 // pcb-tools/teardrop-edit.ts — Edit > Edit Teardrops... (DIALOG_GLOBAL_EDIT_TEARDROPS::TransferDataFromWindow):
 // the pads and vias in scope get their TEARDROP_PARAMETERS removed (disabled), set to the board's defaults for
-// their shape, or given the values the dialog specifies; teardrop zones left without a teardrop go.
+// their shape, or given the values the dialog specifies; then the teardrops are rebuilt (TEARDROP_MANAGER).
 import type { BoardDoc, PcbChange } from "./types";
-import { removedChange, replacedChange } from "./changes";
+import { replacedChange } from "./changes";
+import { addTrackToTrackTeardrops, deleteTrackToTrackTeardrops, foldChanges, teardropAppliedDoc, teardropFullUpdate, type TeardropOpts } from "./teardrop";
 import { netOf } from "./nets";
 import { K } from "./state";
 import { clone } from "./util";
@@ -21,6 +22,10 @@ export interface TeardropEditOpts {
   selected?: Set<string> | null;
   /** net / net class / layer filters: true leaves the item alone */
   skip?(info: { net: string; layer: string }): boolean;
+  /** a net, net class, layer, round-pad, existing-teardrop or selection filter is on */
+  filtered?: boolean;
+  /** the project's teardrop targets and rules (the teardrop manager's) */
+  teardrop?: TeardropOpts;
 }
 interface PadModelApi { readTeardrops(n: SNode): TeardropParams; formatTeardrops(t: TeardropParams): string; setPadChild(pad: SNode, key: string, text: string | null): void; TD_DEFAULTS: TeardropParams }
 const PM = (): PadModelApi => (K as unknown as { padModel: PadModelApi }).padModel;
@@ -93,33 +98,23 @@ export function teardropEditChanges(doc: BoardDoc, o: TeardropEditOpts): PcbChan
       if (changed) { out.push(replacedChange(it, n)); edited.set(it.id, n); }
     }
   }
-  // TEARDROP_MANAGER: teardrops nothing asks for any more go (track-to-track ones when that target is cleared)
-  if (o.action === "remove" || removeAll) {
-    const disabled: { at: [number, number]; r: number; net: string }[] = [];
-    for (const it of doc.items.values()) {
-      const n = edited.get(it.id) || it.node;
-      if (it.kind === "via") { const a = K.kid(n, "at"), s = K.kid(n, "size"); if (a && !PM().readTeardrops(n).enabled) disabled.push({ at: [K.num(a[1]), K.num(a[2])], r: (s ? K.num(s[1]) : 0.8) / 2, net: netOf(n).name }); }
-      else if (it.kind === "footprint") {
-        // the footprint's (at …) or KiCad 10's (transform (translate …) (rotate …) (scale …)): TRANSFORM_TRS
-        const [fx, fy, deg] = K.atOf(n), rot = deg * Math.PI / 180, tr = K.kid(n, "transform"), sc = tr && K.kid(tr, "scale");
-        const sx = sc ? K.num(sc[1], 1) || 1 : 1, sy = sc ? K.num(sc[2], 1) || 1 : 1;
-        for (const p of K.kids(n, "pad")) {
-          if (PM().readTeardrops(p).enabled) continue;
-          const a = K.kid(p, "at"), s = K.kid(p, "size"); if (!a) continue;
-          const x = K.num(a[1]) * sx, y = K.num(a[2]) * sy, c = Math.cos(rot), sn = Math.sin(rot);
-          disabled.push({ at: [fx + x * c + y * sn, fy - x * sn + y * c], r: s ? Math.max(K.num(s[1]), K.num(s[2])) / 2 : 1, net: netOf(p).name });
-        }
-      }
-    }
-    for (const it of doc.items.values()) {
-      if (it.kind !== "zone") continue;
-      const attr = K.kid(it.node, "attr"), td = attr && K.kid(attr, "teardrop"); if (!td) continue;
-      const tt = K.kid(td, "type"), type = tt ? K.str(tt[1]) : "padvia";
-      if (type === "track_end") { if (removeAll || o.trackToTrack) out.push(removedChange(it)); continue; }
-      if (removeAll) { out.push(removedChange(it)); continue; }
-      const nn = K.kid(it.node, "net_name"), net = nn ? K.str(nn[1]) : netOf(it.node).name, pts = K.ptsOf(K.kid(it.node, "polygon") || it.node) as [number, number][];
-      if (disabled.some((d) => d.net === net && pts.some((p) => Math.hypot(p[0] - d.at[0], p[1] - d.at[1]) <= d.r + 1e-3))) out.push(removedChange(it));
+  // TEARDROP_MANAGER: Track to track (or Remove all) deletes the track-end teardrops, and "default values" adds them
+  // again with TARGET_TRACK enabled (BuildTrackCaches, AddTeardropsOnTracks)
+  const td: TeardropOpts = { ...(o.teardrop || {}) };
+  let res = out;
+  if (o.trackToTrack || removeAll) {
+    const gone = deleteTrackToTrackTeardrops(doc); res = foldChanges(res, gone);
+    if (o.action === "remove" || removeAll) td.trackEnabled = false;
+    else if (o.action === "default") {
+      td.trackEnabled = true;
+      res = foldChanges(res, addTrackToTrackTeardrops(teardropAppliedDoc(doc, res), td));
     }
   }
-  return out;
+  // no filter: the edit is pushed with SKIP_TEARDROPS and every teardrop rebuilt in the same undo step
+  // (UpdateTeardrops( forceFullUpdate )); with one, the commit's own teardrop pass does it
+  if (!o.filtered) {
+    res = foldChanges(res, teardropFullUpdate(teardropAppliedDoc(doc, res), td));
+    return Object.assign(res, { skipTeardrops: true });
+  }
+  return res;
 }

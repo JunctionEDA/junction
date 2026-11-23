@@ -14,7 +14,7 @@ import { footprintEditorDefaults, r6, samePt, vadd, vsub } from "./util";
 // any number of corners until the first corner is clicked again (or the last one twice, or Enter), a
 // text box or table two corners and then a prompt, a dimension two points and (aligned, orthogonal,
 // radial) a third for the offset or the text.
-export const POLY_TOOLS = new Set(["gpoly", "zone", "thievingzone", "rulearea"]);
+export const POLY_TOOLS = new Set(["gpoly", "zone", "thievingzone", "rulearea", "viastitch"]);
 export const gfxTool = (t: string | null | undefined) => /^g/.test(t || "") || t === "table" || t === "image" || !!DIM_TYPE[t!];   // draws on the chip's graphics layer
 export const RULE_AREA_LAYERS = ["F.Cu", "B.Cu"];
 // ---- PCB_TOOL_BASE::GetAngleSnapMode (PCBNEW_SETTINGS m_AngleSnapMode, DIRECT by default in the board editor):
@@ -26,7 +26,7 @@ export const ANGLE_SNAP_MSG: Record<string, string> = { free: "", "90": "Constra
 /** EDIT_TOOL::doMoveSelection displayConstraintsMessage: the constraint field while a move runs (it stays afterwards). */
 export const MOVE_SNAP_MSG: Record<string, string> = { free: "", "90": "Angle snap lines: 90\u00b0", "45": "Angle snap lines: 45\u00b0" };
 /** The DRAWING_TOOL actions: activating one runs DRAWING_TOOL::Reset( RUN ), which calls UpdateStatusBar. */
-export const DRAWING_TOOL_IDS = new Set(["via", "gline", "grect", "gcircle", "gtext", "barcode", "garc", "gpoly", "gcurve", "gellipse", "gellipsearc", "gtextbox", "table", "image", "zone", "thievingzone", "rulearea", "dimaligned", "dimortho", "dimcenter", "dimradial", "leader", "anchor"]);
+export const DRAWING_TOOL_IDS = new Set(["via", "gline", "grect", "gcircle", "gtext", "barcode", "garc", "gpoly", "gcurve", "gellipse", "gellipsearc", "gtextbox", "table", "image", "zone", "thievingzone", "viastitch", "rulearea", "dimaligned", "dimortho", "dimcenter", "dimradial", "leader", "anchor"]);
 /** EDA_DRAW_FRAME::DisplayConstraintsMsg: status field 7 (the app keeps the last text written, as wxStatusBar does). */
 export function displayConstraintsMsg(msg: string) {
   try { if (typeof root.dispatchEvent === "function" && typeof CustomEvent === "function") root.dispatchEvent(new CustomEvent("kc:constraint-msg", { detail: { msg: msg || "" } })); } catch (e) { /* no DOM */ }
@@ -128,11 +128,26 @@ export function stepDrawWidth(ctx: PcbCtx, dir: number) {
   else if (w > WIDTH_STEP) S.strokeW = +(w - WIDTH_STEP).toFixed(6);
   ctx.requestRender(); return true;
 }
-/** A new graphic as drawn: the session's stroke width (incWidth / decWidth) over the layer default. */
+/**
+ * DRAWING_TOOL::Reset( RUN ) (the tool starting) and layerChanged / drawShape's `if( m_layer != GetActiveLayer() )`:
+ * the stroke (m_stroke) goes back to the layer's default line thickness and LINE_STYLE::DEFAULT; on the same layer
+ * the stroke it has is kept (a width stepped with +/-, or the one SetStroke took from the Shape Properties dialog).
+ */
+export function strokeForLayer(layer: string) {
+  if (S.strokeLayer === layer) return;
+  S.strokeLayer = layer; S.strokeW = null; S.strokeStyle = null;
+}
+/** DRAWING_TOOL::SetStroke( stroke, layer ): the stroke the next shapes on `layer` are drawn with. */
+export function setDrawStroke(width: number | null, style: string | null, layer: string) {
+  S.strokeLayer = layer; S.strokeW = width != null && isFinite(width) ? width : null; S.strokeStyle = style && style !== "default" ? style : null;
+}
+/** A new graphic as drawn: the session's stroke (incWidth / decWidth, SetStroke) over the layer default. */
 export function withStroke(node: SNode) {
-  if (S.strokeW == null || !Array.isArray(node)) return node;
-  const w = r6(S.strokeW);
+  if (!Array.isArray(node)) return node;
   const st = node.find((c) => Array.isArray(c) && c[0] === "stroke") as SNode | undefined;
+  if (st && S.strokeStyle) { const ty = st.find((c) => Array.isArray(c) && c[0] === "type") as SNode | undefined; if (ty) ty[1] = S.strokeStyle; else st.push(["type", S.strokeStyle]); }
+  if (S.strokeW == null) return node;
+  const w = r6(S.strokeW);
   if (st) { const wi = st.find((c) => Array.isArray(c) && c[0] === "width"); if (wi) (wi as SNode)[1] = w; }
   const style = node.find((c) => Array.isArray(c) && c[0] === "style") as SNode | undefined;   // a dimension's line thickness
   if (style) { const th = style.find((c) => Array.isArray(c) && c[0] === "thickness") as SNode | undefined; if (th) th[1] = w; }

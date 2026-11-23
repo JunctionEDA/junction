@@ -9,7 +9,7 @@ import { applySeverities, sheetOrder } from "./erc-rules";
 import { sheetList, type SheetInstance } from "./sch-hierarchy";
 import { currentSheetPath } from "../editor/variant";
 import { loadSheets, netMap, onNetsChanged } from "../editor/schnets";
-import { serverErc, toMarker, uuidIndex } from "../editor/kicad-check";
+import { reportScale, serverErc, toMarker, uuidIndex } from "../editor/kicad-check";
 
 export interface HierMarker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; docId?: string; sheetPath?: string; sheetKey?: string; selected?: boolean; [k: string]: unknown }
 interface SchErc { ercCheck(doc: KDoc, opts: Record<string, unknown>): HierMarker[]; ercHierarchy?(docs: { doc: KDoc; key: string; path?: string | null; parent?: number | null; sheetId?: string | null; root?: boolean }[], opts?: Record<string, unknown>): HierMarker[][]; state: { markers?: unknown[]; markersDoc?: KDoc | null } }
@@ -21,7 +21,8 @@ export function ercProjectOpts(): Record<string, unknown> {
   const pro = projectJson(), erc = obj(pro.erc), sch = obj(pro.schematic), ns = obj(pro.net_settings);
   const cg = typeof sch.connection_grid_size === "number" && sch.connection_grid_size > 0 ? sch.connection_grid_size * 0.0254 : 1.27;
   const classes = Array.isArray(ns.classes) ? (ns.classes as unknown[]).map((c) => String(obj(c as never).name || "")).filter((n) => n) : null;
-  return { pinMap: Array.isArray(erc.pin_map) ? erc.pin_map : undefined, connectionGrid: cg, netclasses: classes, defaultNetclass: "Default" };
+  const sev = obj(erc.rule_severities);
+  return { pinMap: Array.isArray(erc.pin_map) ? erc.pin_map : undefined, connectionGrid: cg, netclasses: classes, defaultNetclass: "Default", textVars: sev.unresolved_variable !== "ignore" };
 }
 /** The markers of the last hierarchical run, by sheet instance (root first, then by page number). */
 let sheets: { docId: string; sheetPath: string; key: string; markers: HierMarker[] }[] = [], runPid: string | null = null;
@@ -52,7 +53,7 @@ export function onOpenSheet(m: { docId?: string; sheetKey?: string }): boolean {
  * Run the ERC over every sheet instance.  `resolve` applies the project's exclusions to one sheet's list
  * (dialogs/erc.ts withExclusions).  Returns the open sheet's markers (already on the canvas).
  */
-export async function runHierErc(opts: { showAllErrors?: boolean }, resolve: (l: HierMarker[]) => HierMarker[]): Promise<HierMarker[] | null> {
+export async function runHierErc(opts: { showAllErrors?: boolean; onPhase?: (msg: string) => void; signal?: AbortSignal }, resolve: (l: HierMarker[]) => HierMarker[]): Promise<HierMarker[] | null> {
   const s = sch(); if (!s) return null;
   let list: SheetInstance[] = [];
   try { list = await sheetList(); } catch (e) { list = []; }
@@ -69,13 +70,15 @@ export async function runHierErc(opts: { showAllErrors?: boolean }, resolve: (l:
   };
   // KiCad's own ERC on the server (editor/kicad-check.ts): each sheet instance takes the report's sheet with its uuid path
   // ("/<root>/<sheet>/…"; the run keys leave the root out).  The browser's checks below when it cannot run.
-  const rep = here ? await serverErc(here) : null;
+  const rep = here ? await serverErc(here, { showAllErrors: !!opts.showAllErrors, units: E.units, onPhase: opts.onPhase, signal: opts.signal }) : null;
+  const k = reportScale(rep);
+  if (opts.signal && opts.signal.aborted) return null;   // the dialog's Cancel: the server run was stopped
   if (rep && Array.isArray(rep.sheets)) {
     for (const inst of list) {
       const key = inst.uuidPath.join("/");
       const ks = rep.sheets.find((x) => { const segs = String(x.uuid_path || "").split("/").filter(Boolean); return segs.length === inst.uuidPath.length + 1 && segs.slice(1).join("/") === key; });
       const doc = inst.docId === here && E.kdoc ? E.kdoc : inst.doc, ix = uuidIndex(doc);
-      const all = (ks ? ks.violations || [] : []).map((v) => toMarker(v, ix) as unknown as HierMarker);
+      const all = (ks ? ks.violations || [] : []).map((v) => toMarker(v, ix, k) as unknown as HierMarker);
       const ms = resolve(all);
       const up = ks ? String(ks.uuid_path || "").split("/").filter(Boolean) : fullPath(inst);
       for (const m of ms) { m.docId = inst.docId; m.sheetPath = inst.sheetPath; m.sheetKey = key; m.uuidPath = up; }
@@ -116,10 +119,10 @@ export async function runHierErc(opts: { showAllErrors?: boolean }, resolve: (l:
     }
     const doc = inst.docId === here && E.kdoc ? E.kdoc : inst.doc;
     let ms: HierMarker[] = [];
-    // the tests across sheets (units, local / global and similar names, single global labels) run once below
-    try { ms = s.ercCheck(doc, Object.assign({}, base, { sheetDocs: subDocs, parentPins, showAllErrors: !!opts.showAllErrors, root: !inst.sheetItemId, crossSheet: !s.ercHierarchy ? true : false, netOfItem: netOfItem ? (id: string) => netOfItem!(li, id) : undefined })); } catch (e) { ms = []; }
     // the instance path the symbols record: "/<root uuid>/<sheet uuids>" (the keys leave the root out)
     const fp = fullPath(inst);
+    // the tests across sheets (units, local / global and similar names, single global labels) run once below
+    try { ms = s.ercCheck(doc, Object.assign({}, base, { sheetDocs: subDocs, parentPins, showAllErrors: !!opts.showAllErrors, root: !inst.sheetItemId, crossSheet: !s.ercHierarchy ? true : false, path: fp.length ? "/" + fp.join("/") : null, netOfItem: netOfItem ? (id: string) => netOfItem!(li, id) : undefined })); } catch (e) { ms = []; }
     docs.push({ doc, key: inst.uuidPath.join("/"), path: fp.length ? "/" + fp.join("/") : undefined, parent: pIdx >= 0 ? pIdx : null, sheetId: inst.sheetItemId, root: !inst.sheetItemId }); raw.push(ms);
   }
   let cross: HierMarker[][] = [];
@@ -129,7 +132,14 @@ export async function runHierErc(opts: { showAllErrors?: boolean }, resolve: (l:
     const up = fullPath(inst);
     // SHEETLIST_ERC_ITEMS_PROVIDER: a sheet's markers by x, y and message (the dialog then lists errors before warnings)
     const ms = resolve(applySeverities(sheetOrder(all), sev) as HierMarker[]);
-    for (const m of ms) { m.docId = inst.docId; m.sheetPath = inst.sheetPath; m.sheetKey = key; m.uuidPath = up; }
+    for (const m of ms) {
+      m.docId = inst.docId; m.sheetPath = inst.sheetPath; m.sheetKey = key; m.uuidPath = up;
+      // ERC_ITEM::GetMainItemSheetPath / GetAuxItemSheetPath: an item on another sheet instance keeps that sheet
+      for (const it of (m.items as { sheet?: number; docId?: string; sheetPath?: string; sheetKey?: string }[] | undefined) || []) {
+        const at = typeof it.sheet === "number" ? list[it.sheet] : undefined;
+        if (at && it.sheet !== i) { it.docId = at.docId; it.sheetPath = at.sheetPath; it.sheetKey = docs[it.sheet!].key; }
+      }
+    }
     out.push({ docId: inst.docId, sheetPath: inst.sheetPath, key, markers: ms });
   });
   sheets = out; runPid = pidNow();

@@ -186,6 +186,8 @@ export function uuidOf(node: SNode): string {
   // A schematic rule area has no uuid of its own: saveRuleArea prints "(rule_area "
   // and hands the item to saveShape, which writes the SCH_RULE_AREA's uuid inside the
   // nested (polyline …).  Keying it by a synthetic id would make every op for it miss.
+  // a net chain has no uuid either: it is keyed by its name (one (net_chain "name" …) per name in the root sheet)
+  if (node[0] === "net_chain") return "net_chain:" + str(node[1]);
   if (node[0] === "rule_area") { for (let j = 1; j < node.length; j++) { const c = node[j]; if (isList(c)) { const nested = kid(c, "uuid"); if (nested) return str(nested[1]); } } }
   return "";
 }

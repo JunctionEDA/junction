@@ -2,7 +2,8 @@
 import type { DrawState, PcbCtx, Pt } from "./types";
 
 /** An editor dialog for a new item: it edits the node and hands it back, or null on Cancel. */
-export type NewItemDialog = (ctx: PcbCtx, node: SNode, done: (node: SNode | null) => void) => void;
+/** extra: what a conversion (CONVERT_TOOL) hands a zone dialog: the conversion settings it shows and edits. */
+export type NewItemDialog = (ctx: PcbCtx, node: SNode, done: (node: SNode | null) => void, extra?: unknown) => void;
 import { addedChange } from "./changes";
 import { closeTextPrompt } from "./dom";
 import { askText, drawOriginSync } from "./draw-tools";

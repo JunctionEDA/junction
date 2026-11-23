@@ -6,6 +6,8 @@
 // order, as they were.
 
 import { isBusGroup, isBusVector } from "../canvas/busname";
+import { SimSession, type FieldLike } from "./sim-model-logic";
+import { refPrefix, simPinsOfLib } from "./sim-files";
 
 const K = (): KiCadCanvasApi => (globalThis as unknown as { KiCadCanvas: KiCadCanvasApi }).KiCadCanvas;
 const isList = Array.isArray;
@@ -873,6 +875,28 @@ export function renameNetPathPrefix(pro: Record<string, unknown>, oldPrefix: str
 }
 
 // ---------------------------------------------------------------- SCINTILLA_TRICKS::DoTextVarAutocomplete
+/** The simulation model's session over a placed symbol's fields (SIM_LIB_MGR::CreateModel), before its library is read. */
+function simSessionOf(node: SNode, lib: SNode | null): { ses: SimSession<FieldLike>; libraryPath: string } {
+  const rows: FieldLike[] = kids(node, "property").map((p) => ({ name: fieldName(p), value: fieldValue(p) }));
+  const ref = rows.find((r) => r.name === "Reference");
+  let units = 1; if (lib) for (const sub of kids(lib, "symbol")) { const m = /_(\d+)_\d+$/.exec(str(sub[1])); if (m) units = Math.max(units, Number(m[1])); }
+  const ses = new SimSession<FieldLike>(rows, { prefix: refPrefix(ref ? ref.value : ""), pins: simPinsOfLib(lib), unitCount: units }, (name, value, show) => ({ name, value, show }), (r) => ({ ...r }));
+  return { ses, libraryPath: ses.begin().libraryPath };
+}
+/** The Sim.Library a symbol's model is read from ("" for a built-in or inferred model). */
+export function simLibraryPath(node: SNode, lib: SNode | null): string { return simSessionOf(node, lib).libraryPath; }
+/**
+ * SCH_FIELD::OnScintillaCharAdded after "${OP:": the pins of the symbol's simulation model (SIM_LIB_MGR::CreateModel,
+ * then SIM_MODEL::GetPinNames; an optional pin without its angle brackets), then the synthetic "power" port.
+ * `libText` gives the text of the model's Sim.Library (null when it has not been or cannot be read).
+ */
+export function simModelPorts(node: SNode, lib: SNode | null, libText: (path: string) => string | null): string[] {
+  const { ses, libraryPath } = simSessionOf(node, lib);
+  ses.finishBegin(libraryPath ? libText(libraryPath) : null);
+  const out = ses.curModel().pinNames().map((n) => (n.startsWith("<") && n.endsWith(">") ? n.slice(1, -1) : n));
+  out.push("power");
+  return out;
+}
 /** Scintilla's WordStartPosition( pos, onlyWordCharacters = true ): back over letters, digits, '_' and non-ASCII. */
 export function wordStart(text: string, pos: number): number {
   let i = Math.max(0, Math.min(pos, text.length));

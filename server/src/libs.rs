@@ -157,6 +157,22 @@ impl Sx {
     }
 }
 
+/// The footprint of a `.kicad_mod` file's top-level lists: `(footprint …)` (or the old `(module …)`), or the one
+/// inside the `(kicad_footprint_lib (version …) (generator …) (footprint …))` header that KiCad writes from
+/// SEXPR_FOOTPRINT_LIB_HEADER_VERSION on (PCB_IO_KICAD_SEXPR_PARSER::Parse, `case T_kicad_footprint_lib`).
+pub(crate) fn footprint_node(tops: &[Sx]) -> Option<&Sx> {
+    tops.iter().find_map(|t| match t.head() {
+        "footprint" | "module" => Some(t),
+        "kicad_footprint_lib" => t.children().iter().find(|c| matches!(c.head(), "footprint" | "module")),
+        _ => None,
+    })
+}
+
+/// Whether a file's text starts as a footprint file does: `(footprint`, `(module` or `(kicad_footprint_lib`.
+pub(crate) fn is_footprint_text(head: &str) -> bool {
+    head.starts_with("(footprint") || head.starts_with("(module") || head.starts_with("(kicad_footprint_lib")
+}
+
 /// Parse every top-level list of `src`.  Lenient: an unterminated list ends at the end of input.
 pub(crate) fn parse_sexpr(src: &str) -> Vec<Sx> {
     let b = src.as_bytes();
@@ -248,6 +264,7 @@ struct SymbolMeta {
     keywords: String,
     reference: String,
     footprint: String,
+    datasheet: String,
     fp_filters: String,
     extends: Option<String>,
     power: bool,
@@ -277,6 +294,7 @@ fn index_symbols(src: &str, out: &mut Vec<SymbolMeta>, texts: &mut HashMap<Strin
                 keywords: String::new(),
                 reference: String::new(),
                 footprint: String::new(),
+                datasheet: String::new(),
                 fp_filters: String::new(),
                 extends: sym.list("extends").and_then(|e| e.arg(1)).map(str::to_string),
                 power: sym.list("power").is_some(),
@@ -289,6 +307,7 @@ fn index_symbols(src: &str, out: &mut Vec<SymbolMeta>, texts: &mut HashMap<Strin
                     "ki_keywords" => m.keywords = v.to_string(),
                     "Reference" => m.reference = v.to_string(),
                     "Footprint" => m.footprint = v.to_string(),
+                    "Datasheet" => m.datasheet = v.to_string(),
                     "ki_fp_filters" => m.fp_filters = v.to_string(),
                     _ => {}
                 }
@@ -399,6 +418,9 @@ fn build_symbol_lib(lib: &str, sources: Vec<String>) -> SymbolLib {
             if !m.footprint.is_empty() {
                 o["f"] = json!(m.footprint);
             }
+            if !m.datasheet.is_empty() && m.datasheet != "~" {
+                o["ds"] = json!(m.datasheet);
+            }
             if !m.fp_filters.is_empty() {
                 o["ff"] = json!(m.fp_filters);
             }
@@ -414,7 +436,7 @@ fn build_footprint_lib(lib: &str, files: Vec<(String, String)>) -> FootprintLib 
     let mut footprints = HashMap::new();
     for (file_name, src) in files {
         let tops = parse_sexpr(&src);
-        let Some(fp) = tops.iter().find(|t| matches!(t.head(), "footprint" | "module")) else { continue };
+        let Some(fp) = footprint_node(&tops) else { continue };
         // The file name is the footprint's identity in a .pretty library (FP_CACHE keys on it).
         let name = file_name.strip_suffix(".kicad_mod").unwrap_or(&file_name).to_string();
         let mut descr = fp.list("descr").and_then(|d| d.arg(1)).unwrap_or("").to_string();
@@ -1099,6 +1121,7 @@ mod tests {
     (property "Reference" "R" (at 2.032 0 90))
     (property "Value" "R" (at 0 0 90))
     (property "Footprint" "" (at -1.778 0 90))
+    (property "Datasheet" "https://example.com/r.pdf" (at 0 0 0))
     (property "Description" "Resistor (\"fixed\")" (at 0 0 0))
     (property "ki_keywords" "R res resistor" (at 0 0 0))
     (property "ki_fp_filters" "R_*" (at 0 0 0))
@@ -1118,6 +1141,12 @@ mod tests {
   (descr "Resistor SMD 0603") (tags "resistor") (property "Reference" "REF**" (at 0 -1.43 0) (layer "F.SilkS"))
   (pad "1" smd roundrect (at -0.825 0) (size 0.8 0.95) (layers "F.Cu" "F.Mask" "F.Paste"))
   (pad "2" smd roundrect (at 0.825 0) (size 0.8 0.95) (layers "F.Cu" "F.Mask" "F.Paste")))"#;
+    // FP_CACHE::Save / FormatFootprintLibFile from SEXPR_FOOTPRINT_LIB_HEADER_VERSION on
+    const FP_HEADER: &str = r#"(kicad_footprint_lib (version 20261031) (generator "kicad_footprint_editor") (generator_version "10.99")
+  (footprint "R_0805_2012Metric" (layer "F.Cu") (descr "Resistor SMD 0805") (tags "resistor")
+    (pad "1" smd roundrect (at -0.9 0) (size 1 1.4) (layers "F.Cu" "F.Mask" "F.Paste"))
+    (pad "2" smd roundrect (at 0.9 0) (size 1 1.4) (layers "F.Cu" "F.Mask" "F.Paste"))
+    (pad "3" smd roundrect (at 0 1) (size 1 1.4) (layers "F.Cu" "F.Mask" "F.Paste"))))"#;
 
     fn fixture() -> (PathBuf, Libs) {
         let dir = std::env::temp_dir().join(format!("kc-libs-test-{}-{}", std::process::id(), rand::random::<u32>()));
@@ -1140,6 +1169,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(fp.join("Resistor_SMD.pretty/R_0603_1608Metric.kicad_mod"), FP).unwrap();
+        std::fs::write(fp.join("Resistor_SMD.pretty/R_0805_2012Metric.kicad_mod"), FP_HEADER).unwrap();
         let libs = Libs::new("test", sym.to_str().unwrap(), &format!("file://{}", fp.display()), &dir.join("cache"));
         (dir, libs)
     }
@@ -1185,6 +1215,7 @@ mod tests {
         assert_eq!(r["r"], "R");
         assert_eq!(r["u"], 1);
         assert_eq!(r["ff"], "R_*");
+        assert_eq!(r["ds"], "https://example.com/r.pdf");
         assert!(r.get("p").is_none());
 
         // a derived symbol reports its parent's units and comes with the parent chain
@@ -1231,6 +1262,13 @@ mod tests {
         let fp: Value = serde_json::from_str(&libs.footprint_json("Resistor_SMD", "R_0603_1608Metric").await.unwrap()).unwrap();
         assert_eq!(fp["fpid"], "Resistor_SMD:R_0603_1608Metric");
         assert!(fp["footprint"].as_str().unwrap().contains("(pad \"2\""));
+        // the (kicad_footprint_lib …) header form is read like the bare one
+        assert_eq!(idx["footprints"][1]["n"], "R_0805_2012Metric");
+        assert_eq!(idx["footprints"][1]["d"], "Resistor SMD 0805");
+        assert_eq!(idx["footprints"][1]["p"], 3);
+        let fp: Value = serde_json::from_str(&libs.footprint_json("Resistor_SMD", "R_0805_2012Metric").await.unwrap()).unwrap();
+        assert!(fp["footprint"].as_str().unwrap().starts_with("(kicad_footprint_lib"));
+        assert!(is_footprint_text(FP_HEADER) && is_footprint_text(FP) && !is_footprint_text("<html>"));
         let _ = std::fs::remove_dir_all(dir);
     }
 

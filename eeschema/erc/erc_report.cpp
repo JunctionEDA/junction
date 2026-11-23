@@ -213,6 +213,17 @@ bool ERC_REPORT::WriteJsonReport( const wxString& aFullFileName )
             RC_JSON::VIOLATION violation;
             item->GetJsonViolation( violation, &unitsProvider, severity, itemResolver );
 
+            // The marker's own position, as DRC_REPORT::WriteJsonReport gives it for a board marker
+            if( const SCH_MARKER* marker = dynamic_cast<const SCH_MARKER*>( item->GetParent() ) )
+            {
+                RC_JSON::COORDINATE pos;
+                pos.x = EDA_UNIT_UTILS::UI::ToUserUnit( unitsProvider.GetIuScale(), unitsProvider.GetUserUnits(),
+                                                        marker->GetPos().x );
+                pos.y = EDA_UNIT_UTILS::UI::ToUserUnit( unitsProvider.GetIuScale(), unitsProvider.GetUserUnits(),
+                                                        marker->GetPos().y );
+                violation.pos = pos;
+            }
+
             jsonSheet.violations.push_back( violation );
         }
 

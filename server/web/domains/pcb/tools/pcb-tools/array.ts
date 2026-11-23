@@ -7,7 +7,13 @@ export interface ArrayOpts {
   centred?: boolean; hThenV?: boolean; reverseAlt?: boolean;
   centre?: Pt; angle?: number; angleOffset?: number; clockwise?: boolean; count?: number; rotateItems?: boolean;
   arrange?: boolean; keepRefs?: boolean;
+  /** ARRAY_OPTIONS::ShouldNumberItems / GetNumberingStartIsSpecified (the footprint editor's pad numbering) */
+  shouldNumber?: boolean; numberingStartSpecified?: boolean;
+  /** ARRAY_GRID_OPTIONS::m_2dArrayNumbering, m_pri_axis, m_sec_axis; a circular array numbers along `pri` (m_axis) */
+  twoD?: boolean; pri?: ArrayAxis; sec?: ArrayAxis;
 }
+/** ARRAY_AXIS: the numbering type (NUMBERING_NUMERIC, _HEX, _ALPHA_NO_IOSQXZ, _ALPHA_FULL), offset, step, lowercase output. */
+export interface ArrayAxis { type: number; offset: number; step: number; lower?: boolean }
 /** One copy's move: the offset in mm and the rotation in degrees. */
 export interface ArrayStep { offset: Pt; rot: number }
 import { duplicateChanges, refProp } from "./clipboard";
@@ -15,6 +21,7 @@ import { expandGroups, groupMembers, parentOf } from "./groups";
 import { K } from "./state";
 import { anchorOf, rotateNode, selectionCenter, transformChanges, translateNode } from "./transforms";
 import { r6, rotator } from "./util";
+import { canHaveNumber } from "./pad-tool";
 
 // ---------------------------------------------------------------- ARRAY_OPTIONS (common/array_options.cpp), in nanometres
 export const AIU = 1e6;
@@ -61,6 +68,71 @@ export function arrayStacked(o: ArrayOpts, pos: Pt) {
   for (let i = 0; i < arraySize(o); i++) { const t = arrayTransform(o, i, pos); const k = `${Math.round(t.offset[0] * AIU)},${Math.round(t.offset[1] * AIU)},${r6(t.rot)}`; if (seen.has(k)) return true; seen.add(k); }
   return false;
 }
+// ---------------------------------------------------------------- ARRAY_AXIS (common/array_axis.cpp)
+export const NUMBERING_NUMERIC = 0, NUMBERING_HEX = 1, NUMBERING_ALPHA_NO_IOSQXZ = 2, NUMBERING_ALPHA_FULL = 3;
+/** ARRAY_AXIS::TypeIsNumeric. */
+export const axisTypeIsNumeric = (type: number) => type === NUMBERING_NUMERIC || type === NUMBERING_HEX;
+/** ARRAY_AXIS::GetAlphabet. */
+export function axisAlphabet(type: number): string {
+  switch (type) {
+  case NUMBERING_HEX: return "0123456789ABCDEF";
+  case NUMBERING_ALPHA_NO_IOSQXZ: return "ABCDEFGHJKLMNPRTUVWY";
+  case NUMBERING_ALPHA_FULL: return "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  default: return "0123456789";
+  }
+}
+/** schemeNonUnitColsStartAt0: the alphabetic schemes count A, B, … Z, AA (not BA) after Z. */
+const nonUnitColsStartAt0 = (type: number) => type === NUMBERING_ALPHA_FULL || type === NUMBERING_ALPHA_NO_IOSQXZ;
+/** AlphabeticFromIndex( size_t aN, aAlphabet, aZeroBasedNonUnitCols ) (common/increment.cpp); aN is unsigned, as the size_t is. */
+export function alphabeticFromIndex(n: number, alphabet: string, zeroBasedNonUnitCols: boolean): string {
+  let N = BigInt.asUintN(64, BigInt(Math.trunc(n))); const radix = BigInt(alphabet.length); let out = "", first = true;
+  do {
+    let modN = Number(N % radix);
+    if (zeroBasedNonUnitCols && !first) modN--;   // start the "tens" column at Ax, not Bx
+    out = alphabet[(modN + alphabet.length) % alphabet.length] + out;
+    N /= radix; first = false;
+  } while (N);
+  return out;
+}
+/** ARRAY_AXIS::getNumberingOffset: the index a start text names in the axis's alphabet (null when it names none). */
+export function axisNumberingOffset(type: number, str: string): number | null {
+  if (!str.length) return null;
+  const alphabet = axisAlphabet(type), radix = alphabet.length; let offset = 0;
+  for (let i = 0; i < str.length; i++) {
+    let ch = str[i];
+    if (!axisTypeIsNumeric(type) && ch >= "a" && ch <= "z") ch = ch.toUpperCase();   // lowercase letters are accepted
+    let chIndex = alphabet.indexOf(ch); if (chIndex < 0) return null;
+    if (nonUnitColsStartAt0(type) && i < str.length - 1) chIndex++;   // "AA" is index 26, not 0
+    offset = offset * radix + chIndex;
+  }
+  return offset;
+}
+/** ARRAY_AXIS::SetOffset( const wxString& ): false when the text does not decode; a lowercase start gives lowercase numbers. */
+export function axisSetOffset(axis: ArrayAxis, text: string): boolean {
+  const off = axisNumberingOffset(axis.type, text); if (off === null) return false;
+  axis.lower = !axisTypeIsNumeric(axis.type) && !!text.length && text[0] >= "a" && text[0] <= "z";
+  axis.offset = off; return true;
+}
+/** ARRAY_AXIS::GetItemNumber( n ): the name of the n-th point along the axis. */
+export function axisItemNumber(axis: ArrayAxis, n: number): string {
+  const r = alphabeticFromIndex(axis.offset + axis.step * n, axisAlphabet(axis.type), nonUnitColsStartAt0(axis.type));
+  return axis.lower ? r.toLowerCase() : r;
+}
+/** ARRAY_GRID_OPTIONS::GetItemNumber / ARRAY_CIRCULAR_OPTIONS::GetItemNumber. */
+export function arrayItemNumber(o: ArrayOpts, n: number): string {
+  const pri = o.pri || { type: NUMBERING_NUMERIC, offset: 0, step: 1 };
+  if (o.type !== "circular" && o.twoD) { const [x, y] = arrayGridCoords(o, n); return axisItemNumber(pri, x) + axisItemNumber(o.sec || { type: NUMBERING_NUMERIC, offset: 0, step: 1 }, y); }
+  return axisItemNumber(pri, n);
+}
+/**
+ * ARRAY_PAD_NUMBER_PROVIDER: the next item number not among `existing` (the numbers of the footprint's unselected pads),
+ * counting from the first; a specified start (GetNumberingStartIsSpecified) reserves nothing.
+ */
+export function arrayPadNumberProvider(existing: Iterable<string>, o: ArrayOpts) {
+  const reserved = new Set<string>(o.shouldNumber && o.numberingStartSpecified ? [] : existing); let index = 0;
+  return { next(): string { let num: string; do { num = arrayItemNumber(o, index); index++; } while (reserved.has(num)); return num; } };
+}
+
 /** ARRAY_TOOL's origin: a lone item's position, else the selection's centre. */
 export function arrayOrigin(doc: BoardDoc, ids: string[]) { const items = ids.map((id: string) => doc.items.get(id)).filter(Boolean) as KItem[]; return items.length === 1 ? anchorOf(items[0]) : selectionCenter(items); }
 /** TransformItem: Move by the offset, then Rotate about the item's (new) position. */
@@ -143,15 +215,26 @@ export function arrayChanges(doc: BoardDoc, ids: string[], o: ArrayOpts) {
     return { key: k === N - 1 ? fp.id : `${k}:${fp.id}`, ref: fp.ref || "", pos: p };   // the last cell holds the originals themselves
   }) });
   const refs = reannotateBlocks(used, blocks);
+  // ShouldNumberItems (footprint editor): each cell's pads, in the tool's order (the copies cell by cell, the originals
+  // last), take ARRAY_PAD_NUMBER_PROVIDER's next number; the numbers of the unselected pads stay reserved
+  const padNums = new Map<string, string>();
+  if (o.shouldNumber && doc.fpEditor) {
+    const selected = expandGroups(doc, ids), unchanging: string[] = [];
+    for (const it of doc.items.values()) if (it.kind === "pad" && !selected.has(it.id)) unchanging.push(String(it.node[1] ?? ""));
+    const provider = arrayPadNumberProvider(unchanging, o);
+    for (let k = 0; k < N; k++) for (const it of roots) if (it.kind === "pad" && canHaveNumber(it.node)) padNums.set(k === N - 1 ? it.id : `${k}:${it.id}`, provider.next());
+  }
+  const setPadNum = (n: SNode, num: string | undefined) => { if (num !== undefined && n[0] === "pad") n[1] = num; };
   const setRef = (n: SNode, ref: string | undefined) => { if (ref === undefined || n[0] !== "footprint") return; const p = refProp(n); if (p && K.str(p[2]) !== ref) p[2] = ref; };
   for (let k = 0; k < N - 1; k++) {
     const r = duplicateChanges(doc, roots.map((it: KItem) => it.id), null, { annotations: "keep",
-      xform: (n, root, src) => { const pos = posOf.get(root.id)!; arrayApply(n, arrayTransform(o, k, pos), pos); if (src && src.kind === "footprint") setRef(n, refs.get(`${k}:${src.id}`)); } });
+      xform: (n, root, src) => { const pos = posOf.get(root.id)!; arrayApply(n, arrayTransform(o, k, pos), pos); if (src && src.kind === "footprint") setRef(n, refs.get(`${k}:${src.id}`)); if (src === root) setPadNum(n, padNums.get(`${k}:${root.id}`)); } });
     out.changes.push(...r.changes); out.ids.push(...r.ids);
   }
   if (N >= 1) for (const it of roots) {
     const pos = posOf.get(it.id)!, t = arrayTransform(o, N - 1, pos); const renamed = fpsOf(it, [], it).some(({ fp }) => refs.get(fp.id) !== (fp.ref || ""));
-    if (t.offset[0] || t.offset[1] || t.rot || renamed) moveRoot(it, (n: SNode, m: KItem) => { arrayApply(n, t, pos); if (m.kind === "footprint") setRef(n, refs.get(m.id)); });
+    const num = padNums.get(it.id), renumbered = num !== undefined && num !== String(it.node[1] ?? "");
+    if (t.offset[0] || t.offset[1] || t.rot || renamed || renumbered) moveRoot(it, (n: SNode, m: KItem) => { arrayApply(n, t, pos); if (m.kind === "footprint") setRef(n, refs.get(m.id)); if (m === it) setPadNum(n, num); });
   }
   out.ids.push(...roots.map((it: KItem) => it.id));
   return out;

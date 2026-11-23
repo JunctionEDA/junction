@@ -26,6 +26,13 @@ import { addNode, deep, dropKid, ghost, r4, ruleAreaId } from "./util";
 export interface PasteOpts { pasteMode?: string; keepAnnotations?: boolean; noJunctions?: boolean; label?: string; at?: Pt;
   /** Import Sheet's "Place as group": the new items go into one new group of this name (made unique on the sheet) */
   group?: string;
+  /** a placed design block (SCH_DRAWING_TOOLS::ImportSheet with placeDesignBlock): the group's SetDesignBlockLibId */
+  groupLibId?: string;
+  /** designBlockAnchor: the topmost, then leftmost, connection point of the items (else of their positions) lands on
+   *  the cursor, the same anchor on every placement, instead of GetTopLeftItem */
+  anchor?: "designBlock";
+  /** called once a paste that rides the cursor is placed (true) or cancelled (false): repeated placement */
+  after?: (placed: boolean) => void;
   /** Paste Special chose "Clear reference designators" although it is not the default (forceRemoveAnnotations) */
   explicit?: boolean;
   /** Duplicate: the reference point is the candidate nearest this point (the cursor when Ctrl+D was pressed) */
@@ -438,6 +445,13 @@ export function pasteChanges(doc: KDoc, parsed: Clip, at: Pt, opts?: PasteOpts |
     for (const n of flat) { const k = n[0] as string; if (CONNECTABLE.has(k)) for (const p of connPoints(doc, { kind: k, node: n })) take(p); if (k === "symbol") take(itemPosition(k, n)); }
     if (best === Infinity) for (const n of flat) for (const p of graphicPoints(n[0] as string, n)) take(p);
   }
+  if (!ref && o.anchor === "designBlock") {
+    // designBlockAnchor over FlattenGroups( newItems ): connection points first, compared by y, then x
+    let conn: Pt | null = null, pos: Pt | null = null;
+    const keep = (best: Pt | null, c: Pt): Pt => (!best || c[1] < best[1] || (c[1] === best[1] && c[0] < best[0]) ? [c[0], c[1]] : best);
+    for (const n of flat) { const k = n[0] as string; for (const p of connPoints(doc, { kind: k, node: n })) conn = keep(conn, p); pos = keep(pos, itemPosition(k, n)); }
+    ref = conn || pos;
+  }
   if (!ref) {
     // GetTopLeftItem over the items the paste selects: the groups and whatever is not in one
     const units = fresh.filter((n) => !grouped.has(idOf(n)));
@@ -458,7 +472,7 @@ export function pasteChanges(doc: KDoc, parsed: Clip, at: Pt, opts?: PasteOpts |
   const ids = items.map((it) => it.id);
   if (o.group !== undefined && items.length) {
     const members = fresh.filter((n) => !grouped.has(idOf(n))).map(idOf).filter(Boolean);
-    const { item, change } = addNode(doc, ["group", uniqueGroupName(doc, o.group), ["uuid", K.newUuid()], ["members", ...members]]);
+    const { item, change } = addNode(doc, ["group", uniqueGroupName(doc, o.group), ["uuid", K.newUuid()], ...(o.groupLibId ? [["lib_id", o.groupLibId] as SNode] : []), ["members", ...members]]);
     changes.push(change); ids.push(item.id);
   }
   return { changes, ids, libs, dropped };
@@ -509,7 +523,7 @@ function pasteParsed(ctx: SchCtx, parsed: Clip, opts?: PasteOpts | null) {
     const it = ctx.doc.items.get(id); if (!it || it.kind !== "sheet") continue;
     const f = kids(it.node, "property").find((q) => /^Sheet ?file$/i.test(str(q[1]))); if (f && str(f[2])) ensureSheetDoc(ctx, str(f[2])).catch(() => {});
   }
-  if (live && followPaste(ctx, ids, libs, (opts && opts.at) || cursorOf(ctx), label, !!(opts && opts.hover))) return true;
+  if (live && followPaste(ctx, ids, libs, (opts && opts.at) || cursorOf(ctx), label, !!(opts && opts.hover))) { if (opts && opts.after && S.drag) S.drag.after = opts.after; return true; }
   if (live) changes.push(...junctionsForNew(ctx.doc, ids.map((id) => ctx.doc.items.get(id)).filter(Boolean) as KItem[]));
   ctx.commit(changes, label);
   setSelectionIds(ctx, opts && opts.hover ? [] : ids);

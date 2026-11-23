@@ -212,6 +212,9 @@ export interface Doc extends Omit<KDoc, "items" | "bbox" | "page">, SheetContext
   stackup?: SNode | null;
   /** the board file's (setup …) and (general …) sections as they stand (a stackup edit starts from them) */
   setupNode?: SNode | null; generalNode?: SNode | null;
+  /** a board's (net_chains …): the nets' chains and terminal pads (canvas/net-chains.ts parseBoardChains) */
+  netChainsNode?: SNode | null;
+  /** the board's (property "k" "v") entries (BOARD::m_properties) */ boardProperties?: Record<string, string>;
   /** board net name -> code (geom-pcb netCode), and the last code handed out */
   netCodes?: Map<string, number>; netSeq?: number;
   /** schematic settings the app reads from the project (junction size …) */
@@ -334,6 +337,9 @@ export interface RenderOpts {
   schEnteredGroup?: string | null;
   /** schematic: each connected item's effective net class style, by item id (colour, wire / bus width in mm, line style) */
   schNetStyle?: Map<string, SchNetStyle> | null;
+  /** schematic: the highlighted net chain (SCH_PAINTER): its wires tinted in the chain's colour, and the terminal pins'
+   *  circles ("symbolId#pin:<number>" at x, y mm; the chain's colour, null for the brightened pin colour Brightened( 0.5 )) */
+  schNetChain?: { wires: Map<string, string>; terminals: { key: string; x: number; y: number; color: string | null }[] } | null;
   /** schematic: selection.highlight_netclass_colors: wires in the layer colour over a wider translucent pass in the class colour (thickness in mils, alpha 0..1) */
   netclassHighlight?: { thickness: number; alpha: number } | null;
 }

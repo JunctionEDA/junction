@@ -7,7 +7,7 @@ import { replacedChange } from "./changes";
 import { flipEllipseNode, mirrorEllipseAxis, rotateEllipseNode } from "./ellipse";
 import { flipFootprintNode, flipLayerKid, mirrorShapeX, rotateFootprintNode, toggleMirror } from "./footprint";
 import { K, S } from "./state";
-import { clone, corners, isList, norm360, pt, r6, rotator, vadd, xy } from "./util";
+import { clone, corners, flipLayerName, isList, norm360, pt, r6, rotator, vadd, xy } from "./util";
 
 // ================================================================ parity pass: the non-tool commands of pcbnew
 // Everything below is DOM-free geometry and node editing (the dialogs at the end are swappable) so the node
@@ -59,7 +59,9 @@ export function mapNodePoints(node: SNode, fn: PointFn) {
   if (k === "zone") for (const poly of K.kids(node, "polygon").concat(K.kids(node, "filled_polygon"))) mapPts(poly);
   if (k === "generated") {   // PCB_GENERATOR::Move / Rotate: its stored points (origin, end, base lines) go with it
     for (const key of ["origin", "end"]) { const c = K.kid(node, key); const xy = c && K.kid(c, "xy"); if (xy) { const [x, y] = fn(K.num(xy[1]), K.num(xy[2])); xy[1] = r6(x); xy[2] = r6(y); } }
-    for (const key of ["base_line", "base_line_coupled"]) { const c = K.kid(node, key); if (c) mapPts(c); }
+    for (const key of ["base_line", "base_line_coupled", "hops"]) { const c = K.kid(node, key); if (c) mapPts(c); }   // a microvia stack's hops too
+    // PCB_GENERATOR_POLY (a via stitch): its outline goes with it
+    const ol = K.kid(node, "outline"); if (ol) mapPts(ol);
   }
   if (k === "dimension") { const gt = K.kid(node, "gr_text"); if (gt) mapKey(gt, "at"); }
   return node;
@@ -156,6 +158,11 @@ export function flipNode(node: SNode, cx: number, doc: BoardDoc, cy?: number, di
   if (/_ellipse(_arc)?$/.test(String(k))) flipEllipseNode(node, cx, 0, true); else mapNodePoints(node, mirror);   // ELLIPSE::Mirror( LEFT_RIGHT )
   flipLayerKid(node);
   if (k === "zone") reflectZoneOrientations(node, true);
+  if (k === "generated" && doc) {   // PCB_VIA_STACK::Flip: the span's layers flip (GetFlippedLayer: inner layers mirror within the copper count)
+    const n = (doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"]).filter((l) => /\.Cu$/.test(l)).length;
+    const cu = (l: string) => { const m = /^In(\d+)\.Cu$/.exec(l); return m ? `In${n - 1 - parseInt(m[1], 10)}.Cu` : flipLayerName(l); };
+    for (const key of ["start_layer", "end_layer"]) { const c = K.kid(node, key); if (c) c[1] = cu(K.str(c[1])); }
+  }
   if (k === "via") { const ls = K.kid(node, "layers"); if (ls && doc) { const copper = doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"]; const names = ls.slice(1).map(K.str).sort((a, b) => copper.indexOf(a) - copper.indexOf(b)); ls.splice(1, ls.length - 1, ...names); } }
   if (k === "gr_text" || k === "gr_text_box" || k === "property") { toggleMirror(node); setAngleKid(node, -angleKid(node)); }
   if (k === "pad") padMirrorX(node);   // PAD::Flip: offset, trapezoid delta and primitives mirror, the relative angle negates
@@ -187,12 +194,24 @@ const MIRRORABLE = new Set(["gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_pol
  * an oblique axis becomes a polygon; a zone's hatch and thieving orientations reflect; a pad's own geometry mirrors
  * top / bottom in its frame.  Returns false for what has no arbitrary-axis mirror (the caller counts the skips).
  */
-export function mirrorNodeAxis(node: SNode, A: Pt, B: Pt): SNode | false {
-  const k = String(node[0]).replace(/^fp_/, "gr_"); if (!MIRRORABLE.has(node[0] as string) || k === "image") return false;
+export function mirrorNodeAxis(node: SNode, A: Pt, B: Pt, flippedImage?: string | null): SNode | false {
+  const k = String(node[0]).replace(/^fp_/, "gr_"); if (!MIRRORABLE.has(node[0] as string) || (k === "image" && !flippedImage)) return false;
   const dx = B[0] - A[0], dy = B[1] - A[1], L2 = dx * dx + dy * dy; if (!L2) return false;
   const aligned = A[0] === B[0] || A[1] === B[1];
   const refl = (x: number, y: number) => { const t = ((x - A[0]) * dx + (y - A[1]) * dy) / L2; return [2 * (A[0] + t * dx) - x, 2 * (A[1] + t * dy) - y]; };
   const axisAngle = -Math.atan2(dy, dx) * 180 / Math.PI, reflect = (a: number) => 2 * axisAngle - a;
+  if (k === "image") {
+    // REFERENCE_IMAGE::Mirror( aAxis ): the centre reflects, the picture flips top / bottom in its own frame
+    // (BITMAP_BASE::Mirror( TOP_BOTTOM ), the caller's re-encoded data) and the orientation is
+    // EDA_ORIENTATION::Reflect( axisAngle ), normalised
+    mapNodePoints(node, refl);
+    const r = K.kid(node, "rotate"), a = norm360(reflect(r ? K.num(r[1]) : 0));
+    if (r) { if (a) r[1] = r6(a); else node.splice(node.indexOf(r), 1); }
+    else if (a) { const ly = K.kid(node, "layer"); node.splice(ly ? node.indexOf(ly) + 1 : 2, 0, ["rotate", r6(a)]); }
+    const data: SNode = ["data"]; for (let i = 0; i < flippedImage!.length; i += 76) data.push(flippedImage!.slice(i, i + 76));
+    const d = K.kid(node, "data"); if (d) node[node.indexOf(d)] = data; else node.push(data);
+    return node;
+  }
   if (k === "table") { if (!aligned) return false; mirrorNode(node, A[0], A[1], A[0] === B[0] ? "h" : "v"); return node; }   // PCB_TABLE::Mirror( aAxis.A, flipDirection )
   if (k === "gr_ellipse" || k === "gr_ellipse_arc") return mirrorEllipseAxis(node, A, B);
   if (k === "gr_text" || k === "property") {
@@ -241,7 +260,7 @@ export interface MirrorSkips { footprints: number; groups: number; items: number
  * A-B.  A footprint is skipped (counted); a top-level group holding a footprint - or, for an oblique axis, a table -
  * is skipped whole (counted); a table about an oblique axis is skipped (counted as an item).
  */
-export function mirrorAxisChanges(doc: BoardDoc, ids: string[], A: Pt, B: Pt, groupOfId: (id: string) => KItem | null, members: (id: string) => string[]): { changes: PcbChange[]; skips: MirrorSkips } {
+export function mirrorAxisChanges(doc: BoardDoc, ids: string[], A: Pt, B: Pt, groupOfId: (id: string) => KItem | null, members: (id: string) => string[], flippedImages?: Map<string, string>): { changes: PcbChange[]; skips: MirrorSkips } {
   const skips: MirrorSkips = { footprints: 0, groups: 0, items: 0 }, aligned = A[0] === B[0] || A[1] === B[1]; const skip = new Set<string>();
   for (const id of ids) {
     const it = doc.items.get(id); if (!it || it.kind !== "group" || groupOfId(id)) continue;   // the top-level groups
@@ -251,10 +270,46 @@ export function mirrorAxisChanges(doc: BoardDoc, ids: string[], A: Pt, B: Pt, gr
   const changes = transformChanges(doc, ids.filter((id) => !skip.has(id)), (n, it) => {
     if (it.kind === "footprint") { skips.footprints++; return false; }
     if (it.kind === "table" && !aligned) { skips.items++; return false; }
-    if (it.kind === "image") { skips.items++; return false; }   // the bitmap itself would have to be mirrored (BITMAP_BASE::Mirror)
+    if (it.kind === "image") {   // PCB_REFERENCE_IMAGE::Mirror( aAxis ), with the picture's pixels flipped beforehand
+      const f = flippedImages && flippedImages.get(it.id); if (!f) { skips.items++; return false; }
+      return mirrorNodeAxis(n, A, B, f);
+    }
     return mirrorNodeAxis(n, A, B);
   });
   return { changes, skips };
+}
+/**
+ * BITMAP_BASE::Mirror( TOP_BOTTOM ) on a stored picture: the raster is decoded, flipped top / bottom and re-encoded
+ * (PNG) by the browser, which only answers later.  Resolves to the new base64, or null when it cannot be read.
+ */
+export type PcbImageFlipFn = (base64: string) => Promise<string | null>;
+function browserImageFlipTB(base64: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const cv = document.createElement("canvas"); cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+        const g = cv.getContext("2d"); if (!g || !cv.width || !cv.height) { resolve(null); return; }
+        g.translate(0, cv.height); g.scale(1, -1); g.drawImage(img, 0, 0);
+        resolve(cv.toDataURL("image/png").split(",")[1] || null);
+      } catch (e) { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    img.src = "data:" + (base64.startsWith("/9j/") ? "image/jpeg" : "image/png") + ";base64," + base64;
+  });
+}
+let pcbImageFlipImpl: PcbImageFlipFn | null = typeof document !== "undefined" && typeof Image !== "undefined" ? browserImageFlipTB : null;
+export function setPcbImageFlipImpl(fn: PcbImageFlipFn | null): void { pcbImageFlipImpl = fn; }
+/** The flipped pictures of the image items among ids (id -> base64); null when there is none to flip or no decoder. */
+export async function flippedImagesOf(doc: BoardDoc, ids: Iterable<string>): Promise<Map<string, string> | null> {
+  const imgs = Array.from(ids).map((id) => doc.items.get(id)).filter((it): it is KItem => !!it && it.kind === "image");
+  if (!imgs.length || !pcbImageFlipImpl) return null;
+  const out = new Map<string, string>();
+  for (const it of imgs) {
+    const d = K.kid(it.node, "data"); const b64 = d ? d.slice(1).map((x) => String(x)).join("") : "";
+    const f = b64 ? await pcbImageFlipImpl(b64) : null; if (f) out.set(it.id, f);
+  }
+  return out;
 }
 /** The centre of the circle through an arc's start, mid and end, or null when they are in line. */
 export function arcCentre3(a: Pt, m: Pt, e: Pt): Pt | null {

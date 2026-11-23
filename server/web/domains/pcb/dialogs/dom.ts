@@ -46,6 +46,8 @@ export interface GridColumn<R> { key: string; label: string; type?: "text" | "bo
   /** the cell drawn by the column itself (GRID_CELL_COLOR_RENDERER, GRID_CELL_ICON_TEXT_POPUP); commit() stores a new value */
   render?(td: HTMLElement, row: R, ro: boolean, commit: (value: unknown) => void): void }
 export interface GridOpts<R> { readOnly?: boolean; onHeader?(column: GridColumn<R>, index: number): void;
+  /** wxGrid::EnableDragColMove: a column header dragged onto another column's (wxEVT_GRID_COL_MOVE, the column's old and new position) */
+  onColMove?(from: number, to: number): void;
   /** A subclass's showPopupMenu: entries put above GRID_TRICKS' Cut / Copy / Paste / Delete / Select All for the cell. */
   cellMenu?(row: R, column: GridColumn<R>): PopItem[]; height?: number | string; onChange?(row: R, key: string | null, value: unknown, index: number): void; onSelect?(row: R | null, index: number): void;
   /** Shift- and Ctrl-click select several rows (wxGrid::wxGridSelectRows); Delete then removes them all */

@@ -2,7 +2,7 @@ import type { SchCtx, Pt } from "./types";
 import { root } from "../root";
 import { commitSchArc, schArcClick, schArcPoints } from "./arcs";
 import { closePrompt, labelDefaults, promptImpl } from "./dom";
-import { arcNode, bezierNode, circleNode, ellipseArcAngles, ellipseFromBox, ellipseNode, polygonNode, polylineNode, rectangleNode, ruleAreaNode, sheetCorner, sheetNode, drawTableNode, textBoxNode } from "./nodes";
+import { arcNode, bezierNode, circleNode, ellipseArcAngles, ellipseFromBox, ellipseNode, polygonNode, polylineNode, rectangleNode, ruleAreaNode, sheetCorner, sheetNode, drawTableNode, textBoxNode, fieldNode, fontNode } from "./nodes";
 import { rememberPlaced } from "./repeat";
 import { SHEET_EXT, nextPage, placeSheet, placeSheetNode, sheetFileFor, sheetInstance } from "./sheets";
 import { K, S, kids, str } from "./state";
@@ -179,12 +179,15 @@ export function finishDraw(ctx: SchCtx) {
     if (KD && KD.schItemDialog && !ctx.viewOnly) {
       const pre = S.sheetPreset; S.sheetPreset = null;
       const sn = pre ? sheetNode(pts[0], pts[1], pre.name, pre.file) : sheetNode(pts[0], pts[1], "Untitled Sheet", "untitled" + SHEET_EXT);
+      // drawSheetFromDesignBlock: the block's fields become hidden user fields at the sheet's position
+      if (pre && pre.fields) for (const [name, value] of pre.fields) sn.push(fieldNode(name, value, ["at", r4(Math.min(pts[0][0], pts[1][0])), r4(Math.min(pts[0][1], pts[1][1])), 0], { hidden: true, effects: ["effects", fontNode(1.27)] }));
       const inst = sheetInstance(ctx, ctx.doc, nextPage(ctx, ctx.doc)); if (inst) sn.push(inst);
       const it = { id: "", kind: "sheet", node: sn, geom: [], bbox: null };
-      KD.schItemDialog(ctx, it, { cancel() { if (S.draw === d) { S.draw = null; ctx.requestRender(); } }, onCreate(staged) {
+      KD.schItemDialog(ctx, it, { cancel() { if (S.draw === d) { S.draw = null; ctx.requestRender(); } if (pre && pre.after) pre.after(false); }, onCreate(staged) {
         if (S.draw !== d) return; S.draw = null;
         const fp = kids(staged, "property").find((q) => /^Sheet ?file$/i.test(str(q[1])));
-        placeSheetNode(ctx, staged, fp ? str(fp[2]) : "untitled" + SHEET_EXT, pre ? "Import Sheet Copy" : "Draw Sheet");
+        const job = placeSheetNode(ctx, staged, fp ? str(fp[2]) : "untitled" + SHEET_EXT, pre ? pre.label || "Import Sheet Copy" : "Draw Sheet", pre ? { seed: pre.seed, group: pre.group } : undefined);
+        if (pre && pre.after) { const after = pre.after; void Promise.resolve(job).then((item) => after(!!item)); }
       } });
       return;
     }

@@ -19,6 +19,7 @@ import { has, kid, kids, num, polyPtsOf, str } from "../canvas/sexpr";
 import { type BoardModel, type Footprint, type Node, type Pad, type Track, type Via, expandLayers, isCopper, padShapeOn } from "./model";
 import { PlotLog, footprintGeoms, geomPrims, padPrims, textKnockout } from "./plot";
 import { fracture, primPolys, roundRectOutside, stadium, stadiumOutside } from "./poly";
+import { courtyardLoops } from "./pnp";
 import { type Prim, type Pt, arcPoints, circlePoints, circlePointsOutside, rot } from "./prims";
 
 /** pcbnew's internal unit: 1 nm. */
@@ -243,6 +244,16 @@ export interface FillRules {
    * largest clearance they name (m_worstClearance)
    */
   custom?: Record<string, number | string>; customMax?: number;
+  /** BOARD_DESIGN_SETTINGS::m_ZoneLayerProperties: the board's hatch / thieving offset per copper layer (setup (zone_defaults …)) */
+  hatchOffsets?: Record<string, Pt>;
+  /** PROJECT_LOCAL_SETTINGS::m_PrototypeZoneFill ("Use solid fills for hatched zones"): copper zones are not hatched */
+  prototype?: boolean;
+}
+/** (setup (zone_defaults (property (layer "F.Cu") (hatch_position (xy x y))) …)): the board's default offset per layer. */
+export function zoneDefaultOffsets(setup: Node | null): Record<string, Pt> {
+  const out: Record<string, Pt> = {}; const zd = setup ? K(setup, "zone_defaults") : null; if (!zd) return out;
+  for (const pr of kids(zd, "property") as Node[]) { const l = K(pr, "layer"), hp = K(pr, "hatch_position"); const xy = hp ? K(hp, "xy") : null; if (l && xy) out[str(l[1])] = [num(xy[1]), num(xy[2])]; }
+  return out;
 }
 const padOverride = (pad: Pad, key: string): number | null => { const k = K(pad.node, key); if (k) return num(k[1]); const f = K(pad.fp.node, key); return f ? num(f[1]) : null; };
 
@@ -927,6 +938,15 @@ export class ZoneFiller {
       }
     }
     for (const fp of this.m.footprints) {
+      // knockoutCourtyardClearance: a physical_clearance rule between the zone and the footprint keeps the pour off its
+      // courtyard (grown by the rule's min); an inner layer takes the courtyard of the footprint's own side
+      const cg = this.physical("physical_clearance", z, fp.id, layer);
+      const fb = fp.item && fp.item.bbox;
+      if (cg >= 0 && (!fb || hits({ x0: fb[0], y0: fb[1], x1: fb[2], y1: fb[3] }, zb))) {
+        const side = layer === "F.Cu" || layer === "B.Cu" ? layer : fp.side;
+        const loops = courtyardLoops(fp, side === "B.Cu" ? "B.CrtYd" : "F.CrtYd");
+        if (loops && loops.length) { const cy = union(shapes(loops)); out.push(cg > 0 ? inflate(cy, cg, true, this.maxError) : cy); }
+      }
       for (const g of footprintGeoms(fp, layer, { plotReference: true, plotValue: true, subtractMaskFromSilk: false })) {
         if (g.hiddenText) continue;
         // net-tie graphics touching a same-net pad are part of the net
@@ -1055,7 +1075,7 @@ export class ZoneFiller {
     if (prune) { fill = inflate(fill, -(halfMin - eps), false, this.maxError); if (rings.length) rings = inflate(rings, -(halfMin - eps), false, this.maxError); }
     // blobs narrower than min thickness on both axes go
     fill = fromPolygons(polygonsOf(fill).filter((pg) => { const b = bboxOf([pg[0]]); return Math.max(b.x1 - b.x0, b.y1 - b.y0) >= z.minThickness; }));
-    if (z.hatch) {
+    if (z.hatch && !this.rules.prototype) {   // prototype zone fill: a hatched zone is filled solid
       const discs: Poly = []; for (const v of solidVias) if (v.layers.includes(layer)) for (const d of this.viaShape(v, layer, 0)) discs.push(d);
       const protect = union(union(rings, clearanceHoles), discs.length ? intersect(union(discs), smoothed) : []);
       // the refiller needs the un-hatched extent to re-border zones it later carves (issue 24758)
@@ -1144,7 +1164,7 @@ export class ZoneFiller {
         else { if (h.smoothingLevel > 2) maxError /= 2; holeBase = chamferFillet(holeBase, true, sv, maxError); }
       }
     }
-    const off = h.offsets.get(layer) || [0, 0];
+    const off = h.offsets.get(layer) || (this.rules.hatchOffsets && this.rules.hatchOffsets[layer]) || [0, 0];   // the zone's own offset, else the board default
     const mod = (a: number, b: number): number => a - b * Math.trunc(a / b);
     const x0 = bb.x0 - mod(bb.x0, grid) - grid, y0 = bb.y0 - mod(bb.y0, grid) - grid;
     const holes: PathD[] = [];
@@ -1188,7 +1208,7 @@ export class ZoneFiller {
     let region = orient ? rotP(fill, -orient) : fill;
     const bb = bboxOf(region);
     const left = iu(bb.x0), top = iu(bb.y0), right = iu(bb.x1), bottom = iu(bb.y1);
-    let off = t.offsets.get(layer) || [0, 0];
+    let off = t.offsets.get(layer) || (this.rules.hatchOffsets && this.rules.hatchOffsets[layer]) || [0, 0];
     if (orient) off = rot(off[0], off[1], -orient);
     const ox = iu(off[0]), oy = iu(off[1]);
     const minT = iu(z.minThickness), size = iu(t.size), gap = iu(t.gap), width = iu(t.width);

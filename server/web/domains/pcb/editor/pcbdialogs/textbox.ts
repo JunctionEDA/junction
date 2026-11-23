@@ -7,8 +7,8 @@
 // GetMinSize when the text no longer fits.  An edited text box is one "Edit Text Box Properties" change; the text
 // box tool (DRAWING_TOOL::DrawRectangle) opens it on the box just drawn and commits "Draw Text Box" on OK.
 import { comboBox } from "../../../../shared/components/kcombo";
-import { faceOfFont, fontField, setFaceOfFont } from "../../dialogs/font-picker";
-import { boardXref } from "./xref";
+import { KICAD_FONT, faceOfFont, fontField, setFaceOfFont } from "../../dialogs/font-picker";
+import { boardXref, boardTextVarAutocomplete, parentFootprintOf } from "./xref";
 import { syntaxHelpLink } from "../syntax-help";
 import { checkField, errorMessage, fmtLenU, form, h, kiconToggle, lenField, numField, openDialog, selectField, unitLabel, type Field } from "./ui";
 import { LINE_STYLE_ICONS } from "./table";
@@ -53,6 +53,8 @@ export const BORDER_STYLES: [string, string][] = [["solid", "Solid"], ["dash", "
 export interface TextBoxValues {
   text: string; locked: boolean; layer: string; angle: number; textW: number; textH: number; autoThickness: boolean; textThick: number;
   bold: boolean; italic: boolean; hJustify: string; vJustify: string; mirrored: boolean; border: boolean; borderWidth: number; borderStyle: string;
+  /** m_knockout: PCB_TEXTBOX::IsKnockout, (knockout yes) after the stroke */
+  knockout: boolean;
   /** the outline font, "" for KiCad Font */
   face: string;
 }
@@ -71,6 +73,7 @@ export function textBoxValues(node: SNode): TextBoxValues {
     bold: flag(font, "bold"), italic: flag(font, "italic"), face: faceOfFont(font),
     hJustify: js.includes("left") ? "left" : js.includes("right") ? "right" : "center", vJustify: js.includes("top") ? "top" : js.includes("bottom") ? "bottom" : "center",
     mirrored: js.includes("mirror"), border, borderWidth: border ? nval(kid(stroke, "width")) : NaN, borderStyle: style === "default" ? "solid" : style,
+    knockout: yes(kid(node, "knockout")),
   };
 }
 
@@ -124,6 +127,8 @@ export function applyTextBox(orig: SNode, v: TextBoxValues, v0: TextBoxValues): 
   put(node, "border", `(border ${v.border ? "yes" : "no"})`, ["stroke", "knockout"]);
   const w = isFinite(v.borderWidth) ? v.borderWidth : 0;
   put(node, "stroke", `(stroke (width ${f6(w)}) (type ${v.borderStyle}))`, ["knockout"]);
+  // SetIsKnockout: FormatBool( "knockout" ) after the stroke, before the render cache
+  put(node, "knockout", `(knockout ${v.knockout ? "yes" : "no"})`, ["render_cache", "property"]);
   // SetTextAngle( Normalize() ): PCB_TEXTBOX::Rotate about the start by the change, the box sliding with its centre
   const a1 = ((v.angle % 360) + 360) % 360, a0 = ((nval(kid(node, "angle")) % 360) + 360) % 360, d = a1 - a0;
   const c = corners(node);
@@ -164,12 +169,14 @@ export function textBoxDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode |
     return { text: text ? text.value : v0.text, locked: !!g("locked"), layer: String(g("layer")), angle: Number(g("angle")), textW: Number(g("textW")), textH: Number(g("textH")),
       autoThickness: !!g("autoThickness"), textThick: Number(g("textThick")), bold: !!g("bold"), italic: !!g("italic"), face: String(g("face")),
       hJustify: pick("align-", ["left", "center", "right"], v0.hJustify), vJustify: pick("valign-", ["top", "center", "bottom"], v0.vJustify), mirrored: !!g("mirrored"),
-      border: !!g("border"), borderWidth: Number(g("borderWidth")), borderStyle: String(g("borderStyle")) };
+      border: !!g("border"), borderWidth: Number(g("borderWidth")), borderStyle: String(g("borderStyle")), knockout: !!g("knockout") };
   };
   return !!openDialog({ title: "Text Box Properties", width: 640, readOnly: ro, noEnter: true,
     build(body) {
       text = h("textarea", { class: "pd-text", style: "min-height:110px;width:100%;box-sizing:border-box", readOnly: ro, "data-k": "text", spellcheck: false });
       text.value = v0.text;
+      // onCharFn: DoTextVarAutocomplete( GetContextualTextVars )
+      if (!ro) boardTextVarAutocomplete(text, doc, parentFootprintOf(doc as never, item, node0));
       text.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && ev.shiftKey) { ev.preventDefault(); const ok = (body.parentElement as HTMLElement).querySelector<HTMLButtonElement>(".kd-foot > button:last-child"); if (ok) ok.click(); } });   // SCINTILLA_TRICKS: Shift+Enter accepts, Enter is a new line
       setTimeout(() => { if (text) { text.focus(); text.select(); } }, 0);
       const locked = reg("locked", checkField(v0.locked, "Locked", { ro, key: "locked" }));
@@ -185,8 +192,13 @@ export function textBoxDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode |
       const mirrored = reg("mirrored", kiconToggle("text_mirrored", "Mirrored", v0.mirrored, { ro, key: "mirrored" }));
       const tw = reg("textW", lenField(v0.textW, { ro, key: "textW" })), tht = reg("textH", lenField(v0.textH, { ro, key: "textH" }));
       const thick = reg("textThick", lenField(v0.textThick, { ro: ro || v0.autoThickness, key: "textThick" }));
-      const auto = reg("autoThickness", checkField(v0.autoThickness, "Auto", { ro, key: "autoThickness", tip: "Adjust the text thickness",
+      // m_autoTextThickness: a BITMAP_BUTTON check button over BITMAPS::link (onAutoTextThickness)
+      const auto = reg("autoThickness", kiconToggle("link", "Adjust the text thickness", v0.autoThickness, { ro, key: "autoThickness",
         onChange: (on) => { thick.input.disabled = ro || on; if (on) thick.set(Math.round(tw.get() * NM / 8) / NM); } }));
+      const knockout = reg("knockout", checkField(v0.knockout, "Knockout", { ro, key: "knockout" }));
+      // onFontSelected: m_thickness (its label, control and units) shows only for the stroke font; the link stays
+      const thickLabel = h("span", null, "Thickness:"), thickUnits = unitLabel();
+      const onFont = (face: string): void => { const stroke = !face || face === KICAD_FONT; for (const e of [thickLabel, thick.el, thickUnits]) e.style.display = stroke ? "" : "none"; };
       const onTextSize = (): void => { if (auto.get()) thick.set(Math.round(tw.get() * NM / 8) / NM); };
       tw.input.addEventListener("input", onTextSize); tw.input.addEventListener("change", onTextSize);
       const bw = reg("borderWidth", lenField(v0.borderWidth, { ro: ro || !v0.border, key: "borderWidth", allowEmpty: true }));
@@ -202,12 +214,12 @@ export function textBoxDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode |
       body.append(h("label", { class: "pd-lbl" }, "Text:"), text, h("div", null, help),
         h("div", { class: "pd-row", style: "margin:8px 0" }, locked.el),
         h("div", { class: "pd-cols2" },
-          form([["Layer:", layer.el], ["Font:", reg("face", fontField(doc, v0.face, { ro, key: "face" })).el]], true),
+          form([["Layer:", layer.el], knockout.el, ["Font:", reg("face", fontField(doc, v0.face, { ro, key: "face", onChange: onFont })).el]], true),
           form([["Orientation:", angle.el, null, "Text orientation"]], true)),
         h("div", { style: "margin:6px 0 8px" }, tools),
         h("div", { class: "pd-cols2" },
           form([["Text width:", tw.el, unitLabel(), "Text width"], ["Text height:", tht.el, unitLabel(), "Text height"],
-            ["Thickness:", thick.el, h("span", { class: "pd-inline", style: "gap:6px" }, unitLabel(), auto.el), "Text thickness"]], true),
+            [thickLabel, thick.el, h("span", { class: "pd-inline", style: "gap:6px" }, thickUnits, auto.el), "Text thickness"]], true),
           form([border.el, ["Border width:", bw.el, unitLabel()], ["Border style:", bs.el]], true)));
     },
     cancel: create ? () => create(null) : undefined,

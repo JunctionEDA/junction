@@ -12,7 +12,7 @@ export const RM_MARK: number = 0, RM_SHOVE: number = 1, RM_WALK: number = 2;    
 export const CM_M45: number = 0, CM_R45: number = 1, CM_M90: number = 2, CM_R90: number = 3;         // DIRECTION_45::CORNER_MODE
 export const RS_KEY = "kc.pcbnew.pns";
 export const RS_DEFAULTS = Object.freeze({ mode: RM_WALK, effort: 1, remove_loops: true, smart_pads: true, shove_vias: true, suggest_finish: false, follow_mouse: true, start_diagonal: false,
-  shove_iteration_limit: 250, via_force_prop_iteration_limit: 40, spread_tracks_distance: 0, shove_time_limit: 1000, walkaround_iteration_limit: 40, jump_over_obstacles: false,
+  shove_iteration_limit: 250, via_force_prop_iteration_limit: 40, spread_tracks_distance: 0 as number, shove_time_limit: 1000, walkaround_iteration_limit: 40, jump_over_obstacles: false,
   smooth_dragged_segments: true, can_violate_drc: false, free_angle_mode: false, snap_to_tracks: false, snap_to_pads: false, optimize_dragged_track: false, auto_posture: true,
   fix_all_segments: true, restrict_angles: false, keep_diff_pair_coupling_when_dragging: true, corner_mode: CM_M45, walkaround_hug_length_threshold: 1.5, diff_pair_width_to_miter_ratio: 3.0 });
 /** ROUTING_SETTINGS by the parameter names KiCad stores in pcbnew.json's "tools.pns". */

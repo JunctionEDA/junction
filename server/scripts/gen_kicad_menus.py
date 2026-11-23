@@ -87,7 +87,10 @@ EXTRA_ICONS = {"import", "export_file", "fabrication", "language", "add_zone", "
                # wxArtProvider::GetBitmap( wxART_WARNING, wxART_CMN_DIALOG ): DIALOG_PLOT's solder mask alert
                "dialog_warning",
                # SYMBOL_EDIT_FRAME's File > Import / Export sub-menus (SCH_ACTIONS::importSymbol, exportSymbol)
-               "import_part", "export_part"}
+               "import_part", "export_part",
+               # DIALOG_PAD_PROPERTIES' m_stackupImagesBook (the copper stackup of the pad type)
+               "pads_reset_unused", "pads_remove_unused_keep_bottom", "pads_remove_unused", "pads_npth_top_bottom", "pads_npth_top",
+               "pads_npth_bottom", "pads_npth"}
 
 
 MAC_IF = r"#\s*if(?:def\s+|\s+defined\(\s*)__WX(?:OSX_)?MAC__[ \t]*\)?[^\n]*\n"

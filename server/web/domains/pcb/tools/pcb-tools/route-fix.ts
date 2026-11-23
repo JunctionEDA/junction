@@ -24,6 +24,7 @@ import { newTracer, trailAdd } from "./tracer";
 import { EPS } from "./transforms";
 import { clone, layerOf, pt, r6, samePt } from "./util";
 import { obstacleHit, obstaclesNear, pathClear, shapeCorePts } from "./walkaround";
+import { noteStackViaFixed } from "./via-stack";
 
 /** NODE::NearestObstacle: the obstacle met first along the line. */
 export function firstHit(O: ObstacleIndex, pts: Pt[], r: number) {
@@ -175,5 +176,6 @@ export function fixHead(ctx: PcbCtx, opts?: { finish?: boolean; snap?: SnapHit |
   } else rt.tracer = newTracer(rt.width, prevDir);   // the next leg prefers to carry on the last segment's direction
   rt.chained = !via;
   trailAdd(rt.tracer, rt.last);
+  noteStackViaFixed(rt, !!via);   // recordPendingStackViaPos: a microvia stack drop lands where the via went
   return true;
 }

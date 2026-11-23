@@ -5,6 +5,7 @@ import type { BoardDoc, DesignSettings, DrcMarker, SAtom } from "./types";
 import { arcLength } from "./distances";
 import { matchDpSuffix } from "./diffpair";
 import { marker, mm4, mmPair, ruled } from "./drc";
+import { tuningProfileRules } from "./length-delay";
 import { approxParallelT, commonParallelProjection } from "./meander";
 import { netOf } from "./nets";
 import { K, S } from "./state";
@@ -15,9 +16,12 @@ import { layerOf } from "./util";
 /** A rule's (constraint …): its type and min / opt / max in mm (null when not given). */
 export interface DruConstraint { type: string; min: number | null; opt: number | null; max: number | null; options?: string[]; timeDomain?: boolean; refLayer?: string; refNet?: string }
 /** A parsed (rule …). */
-export interface DruRule { name: string; condition: string; layer: string | null; severity: string | null; constraints: DruConstraint[]; expr: Expr | null; error: string | null; /** DRC_RULE::m_LayerSource: 'outer' / 'inner' (GetTokenString), the layer pattern that matched, else "" */ layerSource?: string }
+export interface DruRule { name: string; condition: string; layer: string | null; severity: string | null; constraints: DruConstraint[]; expr: Expr | null; error: string | null; /** DRC_RULE::m_LayerSource: 'outer' / 'inner' (GetTokenString), the layer pattern that matched, else "" */ layerSource?: string;
+  /** an implicit rule (DRC_ENGINE::loadImplicitRules): its name is shown as it is, not as rule '…' */ implicit?: boolean }
+/** How a message names the rule a constraint came from. */
+export const ruleLabel = (r: Pick<DruRule, "name" | "implicit">) => (r.implicit ? r.name : `rule '${r.name}'`);
 /** What a resolved constraint reports: the text as MessageTextFromMinOptMax writes it and the rule's name. */
-export interface RuleHit { text: string; name: string; min: number | null; opt: number | null; max: number | null; severity?: string | null }
+export interface RuleHit { text: string; name: string; min: number | null; opt: number | null; max: number | null; severity?: string | null; /** DRC_CONSTRAINT::OPTIONS::TIME_DOMAIN: the values are in ps */ timeDomain?: boolean }
 
 type Expr = { k: "lit"; v: Val } | { k: "prop"; who: "A" | "B" | "L"; nav: number; name: string } | { k: "call"; who: "A" | "B" | null; nav: number; fn: string; args: Expr[] }
   | { k: "not"; e: Expr } | { k: "bin"; op: string; a: Expr; b: Expr };
@@ -514,7 +518,9 @@ export function parseDru(text: string): { rules: DruRule[]; errors: string[]; me
   }
   return { rules, errors, messages };
 }
-const layerOk = (rule: DruRule, layer: string | null | undefined) => {
+/** The constraint type a condition is evaluated for (PCBEXPR_CONTEXT's constraint), for callers walking rules themselves. */
+export function setRuleConstraint(type: string | null) { const was = curConstraint; curConstraint = type; return was; }
+export const layerOk = (rule: DruRule, layer: string | null | undefined) => {
   if (!rule.layer || !layer) return true;
   if (rule.layer === "outer") return /^(F|B)\.Cu$/.test(layer);
   if (rule.layer === "inner") return /^In\d+\.Cu$/.test(layer);
@@ -535,11 +541,11 @@ export function evalRuleConstraint(rules: DruRule[], type: string, doc: BoardDoc
   for (let i = rules.length - 1; i >= 0; i--) {
     const r = rules[i]; const c = r.constraints.find((k) => k.type === type); if (!c) continue;
     if (!ruleMatches(r, doc, s, A, B)) continue;
-    const f = fmt || ((v: number) => v.toFixed(4) + " mm"); const parts: string[] = [];
+    const f = c.timeDomain ? (v: number) => v.toFixed(2) + " ps" : fmt || ((v: number) => v.toFixed(4) + " mm"); const parts: string[] = [];
     if (c.min != null && c.min > 0) parts.push("min " + f(c.min));   // MessageTextFromMinOptMax
     if (c.opt != null) parts.push("opt " + f(c.opt));
     if (c.max != null) parts.push("max " + f(c.max));
-    return { text: parts.join("; "), name: `rule '${r.name}'`, min: c.min, opt: c.opt, max: c.max, severity: r.severity };
+    return { text: parts.join("; "), name: ruleLabel(r), min: c.min, opt: c.opt, max: c.max, severity: r.severity, timeDomain: !!c.timeDomain };
   }
   return null;
 }
@@ -554,7 +560,7 @@ export function ruleClearance(rules: DruRule[], doc: BoardDoc, s: DesignSettings
   for (let i = rules.length - 1; i >= 0; i--) {
     const r = rules[i], c = r.constraints.find((k) => k.type === "clearance"); if (!c || c.min == null) continue;
     if (!ruleMatches(r, doc, s, A, B) && !ruleMatches(r, doc, s, B, A)) continue;
-    return { min: r.severity === "ignore" ? 0 : c.min, name: `rule '${r.name}'` };
+    return { min: r.severity === "ignore" ? 0 : c.min, name: ruleLabel(r) };
   }
   return null;
 }
@@ -635,7 +641,8 @@ export function matchedLengthMarkers(doc: BoardDoc, s: DesignSettings, rules: Dr
  * max; "Differential pair gap out of range" for each pair outside the gap (only when the uncoupled length fails too,
  * or no uncoupled rule applies).
  */
-export function diffPairMarkers(doc: BoardDoc, s: DesignSettings, rules: DruRule[]): DrcMarker[] {
+export function diffPairMarkers(doc: BoardDoc, s: DesignSettings, rules0: DruRule[]): DrcMarker[] {
+  const rules = [...tuningProfileRules(s, doc).filter((r) => r.constraints.some((c) => c.type === "diff_pair_gap")), ...rules0];   // the implicit tuning profile rules sit below the custom ones
   const out: DrcMarker[] = []; if (!rules.some((r) => r.constraints.some((c) => c.type === "diff_pair_gap" || c.type === "diff_pair_uncoupled"))) return out;
   const inPattern = new Set<string>(); for (const it of doc.items.values()) if (it.kind === "generated") for (const id of K.groupMemberIds(it.node)) inPattern.add(id);
   const byNet = new Map<string, KItem[]>();
@@ -676,7 +683,7 @@ export function diffPairMarkers(doc: BoardDoc, s: DesignSettings, rules: DruRule
     }
     if (gapR && (uncFail || !uncR)) for (const d of coupled) {
       if (!d.failMin && !d.failMax) continue; const [x, y] = at(d.n);
-      out.push(ruled(marker("diff_pair_gap_out_of_range", "error", x, y, `Differential pair gap out of range (rule '${gapR.r.name}' ${d.failMin ? "minimum" : "maximum"} gap ${mmPair(d.failMin ? gapR.c.min! : gapR.c.max!, d.gap)[0]}; actual ${mmPair(d.failMin ? gapR.c.min! : gapR.c.max!, d.gap)[1]})`, [d.p.id, d.n.id]), gapR.r.severity));
+      out.push(ruled(marker("diff_pair_gap_out_of_range", "error", x, y, `Differential pair gap out of range (${ruleLabel(gapR.r)} ${d.failMin ? "minimum" : "maximum"} gap ${mmPair(d.failMin ? gapR.c.min! : gapR.c.max!, d.gap)[0]}; actual ${mmPair(d.failMin ? gapR.c.min! : gapR.c.max!, d.gap)[1]})`, [d.p.id, d.n.id]), gapR.r.severity));
     }
   }
   return out.filter((mk) => s.severities[mk.code] !== "ignore");

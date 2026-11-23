@@ -4,6 +4,7 @@
 // GetMsgPanelInfo, the board summary (BOARD::GetMsgPanelInfo) otherwise, and the router's net / width /
 // clearance while a track is being routed (ROUTER_TOOL::UpdateMessagePanel).  The columns are computed by the
 // board module (pcb-tools.js msgPanelInfo); this file only decides when to ask again and publishes the result.
+import { chainNameForNet } from "./netchains";
 import { state, store } from "./appstore";
 import { E } from "./state";
 import { isSch } from "./view";
@@ -50,13 +51,13 @@ export function updateMsgPanel(): void {
   const pad = pcb && pcb.padSel ? pcb.padSel : null;
   const ids = pad ? [pad] : selectionIds();
   const ver = (store.get() as { document: { version: number } }).document.version;
-  const key = [ver, E.currentVariant || "", E.units, ids.join(","), rt ? `${rt.netKey}|${rt.width}|${rt.layer}` : "", doc.items.size, pcb && pcb.highlightNet ? pcb.highlightNet : ""].join("§");
+  const key = [ver, E.currentVariant || "", E.units, ids.join(","), rt ? `${rt.netKey}|${rt.width}|${rt.layer}` : "", doc.items.size, pcb && pcb.highlightNet ? pcb.highlightNet : "", E.activeLayer || ""].join("§");
   if (key === lastKey) return; lastKey = key;
   const src = E.proSettings;
   if (src !== settingsSrc) { settingsSrc = src; settings = P.designSettings ? P.designSettings(src || null) : null; }
   let items: MsgItem[] = [];
   if (doc.fpEditor && !ids.length && !rt) { store.set({ msgPanel: { items: footprintMsgPanel(doc) } }); return; }
-  try { items = P.msgPanelInfo(variantView(doc) as KDoc, ids, { settings, units: E.units, route: rt && rt.width ? rt : null, net: pcb && pcb.highlightNet && E.highlightIds ? pcb.highlightNet : null, ellipsize: ellipsizeEnd, toDisplay: (p: [number, number]) => [toDisplayAbsAxis(p[0], "x"), toDisplayAbsAxis(p[1], "y")] }); } catch (e) { console.warn(e); }
+  try { items = P.msgPanelInfo(variantView(doc) as KDoc, ids, { settings, units: E.units, route: rt && rt.width ? rt : null, net: pcb && pcb.highlightNet && E.highlightIds ? pcb.highlightNet : null, ellipsize: ellipsizeEnd, toDisplay: (p: [number, number]) => [toDisplayAbsAxis(p[0], "x"), toDisplayAbsAxis(p[1], "y")], activeLayer: E.activeLayer || undefined }); } catch (e) { console.warn(e); }
   if (doc.fpEditor && !items.length) items = footprintMsgPanel(doc);
   store.set({ msgPanel: { items } });
 }
@@ -167,7 +168,7 @@ function markerMsgPanel(doc: KDoc, m: ErcMarkerSel): MsgItem[] {
 /** The root sheet's file name without its extension (SCH_SHEET_PATH::PathHumanReadable( false ) starts with it). */
 function rootFileName(): string { try { const c = netMap(); return c ? c.rootName : ""; } catch (e) { return ""; } }
 /** SCH_CONNECTIVITY::AppendConnectionInfo's data: the connection's name, bus or net, and the net's resolved netclass. */
-function connectionOf(it: KItem, pin?: string): { name: string; bus: boolean; netclass: string; wireWidth?: number; aliases?: { name: string; members: string[] }[] } | null {
+function connectionOf(it: KItem, pin?: string): { name: string; bus: boolean; netclass: string; wireWidth?: number; aliases?: { name: string; members: string[] }[]; netChain?: string } | null {
   const r = nameOfPick({ item: it, pin }); if (!r || !r.name) return null;
   const c = netMap(); const e = c ? c.map.get(r.name) : null;
   const bus = !!(e && e.bus);
@@ -177,7 +178,8 @@ function connectionOf(it: KItem, pin?: string): { name: string; bus: boolean; ne
     if (PS) { try { if (sizesSrc !== E.proSettings) { sizesSrc = E.proSettings; sizes = PS.boardSizes(E.proSettings || null); } netclass = PS.effectiveNetclass(sizes, r.name).name || "Default";
       if (PS.effectiveNetclassNames) wireWidth = netclassWireWidth(PS.effectiveNetclassNames(sizes, r.name)); } catch (e2) { /* no project */ } }
   }
-  return { name: r.name, bus, netclass, wireWidth, aliases: bus && e && e.aliases ? e.aliases : undefined };
+  let netChain = ""; try { netChain = chainNameForNet(r.name); } catch (e2) { /* no chains yet */ }
+  return { name: r.name, bus, netclass, wireWidth, aliases: bus && e && e.aliases ? e.aliases : undefined, netChain };
 }
 let sizesSrc: unknown = undefined, sizes: unknown = null;
 /**

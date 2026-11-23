@@ -11,7 +11,7 @@ export const TOOL_MAP: Record<Editor, Record<string, string>> = {
     placeHierLabel: "hlabel", drawRuleArea: "rulearea", drawSheet: "sheet", placeSheetPin: "sheetpin", placeSchematicText: "text", drawTextBox: "textbox", drawTable: "table",
     drawRectangle: "rect", drawCircle: "circle", drawEllipse: "ellipse", drawEllipseArc: "ellipse_arc", drawArc: "arc", drawArcCenter: "arc", drawArcStartEndMid: "arc", drawArcStartEndCenter: "arc", drawArcTangent: "arc", drawArcStartDirEnd: "arc", drawBezier: "bezier", drawPolygon: "polygon", drawLines: "lines", placeImage: "image",
     deleteTool: "delete", zoomTool: "zoomtool" },   // ACTIONS::measureTool is PCB_VIEWER_TOOLS' (and gerbview's): eeschema has none
-  pcb: { selectSetRect: "select", selectSetLasso: "select", routeSingleTrack: "route", routeDiffPair: "routediff", tuneSingleTrack: "tunesingle", tuneDiffPair: "tunediff", tuneSkew: "tuneskew", drawVia: "via", drawZone: "zone", drawCopperThievingZone: "thievingzone", drawRuleArea: "rulearea", drawLine: "gline", drawArc: "garc", drawArcCenter: "garc", drawArcStartEndMid: "garc", drawArcStartEndCenter: "garc", drawArcTangent: "garc", drawArcStartDirEnd: "garc", drawRectangle: "grect",
+  pcb: { selectSetRect: "select", selectSetLasso: "select", routeSingleTrack: "route", routeDiffPair: "routediff", tuneSingleTrack: "tunesingle", tuneDiffPair: "tunediff", tuneSkew: "tuneskew", drawVia: "via", placeViaStack: "viastack", routerSpreadTracks: "spread", drawZone: "zone", drawCopperThievingZone: "thievingzone", drawViaStitchArea: "viastitch", drawRuleArea: "rulearea", drawLine: "gline", drawArc: "garc", drawArcCenter: "garc", drawArcStartEndMid: "garc", drawArcStartEndCenter: "garc", drawArcTangent: "garc", drawArcStartDirEnd: "garc", drawRectangle: "grect",
     placePoint: "placepoint", placeSubGrid: "subgrid", drawCircle: "gcircle", drawEllipse: "gellipse", drawEllipseArc: "gellipsearc", drawPolygon: "gpoly", drawBezier: "gcurve", placeReferenceImage: "image", placeText: "gtext", placeBarcode: "barcode", drawTextBox: "gtextbox", drawTable: "table",
     drawAlignedDimension: "dimaligned", drawOrthogonalDimension: "dimortho", drawCenterDimension: "dimcenter", drawRadialDimension: "dimradial", drawLeader: "leader",
     deleteTool: "delete", measureTool: "measure", zoomTool: "zoomtool", gridSetOrigin: "gridorigin", drillOrigin: "drillorigin",
@@ -152,7 +152,7 @@ export const FPEDIT_ONLY = new Set(["newLibrary", "addLibrary", "newFootprint", 
   "placePad", "placeThtPad", "placeSmdPad", "placeNpthPad", "placePasteAperturePad", "setAnchor", "checkFootprint", "showFootprintUsers", "loadFpFromBoard", "saveFpToBoard", "repairFootprint",
   "explodePad", "recombinePad", "pushPadSettings", "copyPadSettings", "applyPadSettings", "defaultPadProperties", "deleteFootprint", "renameFootprint"]);
 /** Board-only actions the Footprint Editor does not have (its tools and menus leave them out; their hotkeys do nothing there). */
-export const FPEDIT_BLOCKED = new Set(["getAndPlace", "routeSingleTrack", "routeDiffPair", "tuneSingleTrack", "tuneDiffPair", "tuneSkew", "drawVia", "drawZone", "drawCopperThievingZone", "drillOrigin", "placeFootprint",
+export const FPEDIT_BLOCKED = new Set(["getAndPlace", "routeSingleTrack", "routeDiffPair", "tuneSingleTrack", "tuneDiffPair", "tuneSkew", "drawVia", "placeViaStack", "makeViaStack", "routerSpreadTracks", "drawZone", "drawCopperThievingZone", "drawViaStitchArea", "drillOrigin", "placeFootprint",
   "runDRC", "zoneFillAll", "zoneUnfillAll", "zoneFill", "zoneUnfill", "showRatsnest", "editFpInFpEditor", "editLibFpInFpEditor_board", "updateFootprint", "changeFootprint", "boardSetup", "selectLayerPair",
   "trackWidthInc", "trackWidthDec", "viaSizeInc", "viaSizeDec", "updatePcbFromSchematic", "showEeschema", "highlightNet", "clearHighlight", "toggleNetHighlight", "toggleLastNetHighlight"]);
 
@@ -212,6 +212,8 @@ export const MODULE_DUPLICATES: Record<Editor, string[]> = {
     "increment", "incrementPrimary", "decrementPrimary", "incrementSecondary", "decrementSecondary",
     // PCB_SELECTION_TOOL's context menu only: Enter Group / Leave Group
     "enterGroup", "leaveGroup",
+    // the selection tool's Select sub-menu and the Net Chains... sub-menu (PCB_SELECTION_TOOL / BOARD_INSPECTION_TOOL context menus)
+    "selectNetChain", "highlightNetChain",
     "highlightNetSelection", "cleanupTracks", "pack", "zoneFill", "zoneUnfill", "pointEditorAddCorner", "pointEditorRemoveCorner", "pointEditorChamferCorner", "pointEditorMoveCorner", "pointEditorMoveMidpoint",
     // the interactive router's own commands: KiCad offers them in the router's context menu and the route tool's toolbar menu only
     "routerHighlightMode", "routerShoveMode", "routerWalkaroundMode", "cycleRouterMode", "routerUndoLastSegment", "routerDiffPairDialog",
@@ -220,7 +222,9 @@ export const MODULE_DUPLICATES: Record<Editor, string[]> = {
     // Tools > Rebuild All / Selected Generators: pcbnew lists them only with the EnableGenerators advanced setting
     "regenerateAll", "regenerateSelected",
     "ACT_SwitchCornerModeToNext", "ACT_SwitchCornerMode45", "ACT_SwitchCornerModeArc45", "ACT_SwitchCornerMode90", "ACT_SwitchCornerModeArc90",
-    "ACT_PlaceThroughVia", "ACT_PlaceBlindVia", "ACT_PlaceMicroVia", "ACT_SelLayerAndPlaceThroughVia", "ACT_SelLayerAndPlaceBlindVia", "ACT_SelLayerAndPlaceMicroVia",
+    "ACT_PlaceThroughVia", "ACT_PlaceBlindVia", "ACT_PlaceMicroVia", "ACT_PlaceViaStack", "ACT_SelLayerAndPlaceThroughVia", "ACT_SelLayerAndPlaceBlindVia", "ACT_SelLayerAndPlaceMicroVia",
+    // Spread Tracks' distance commands: the router's context menu while tracks are spread (router_tool.cpp spreadingTracksCond), E ] [
+    "ACT_SpreadTracksSetDistance", "ACT_IncreaseSpreadingDistance", "ACT_DecreaseSpreadingDistance",
     "ACT_CustomTrackWidth",   // the router's Q and TRACK_WIDTH_MENU's Use Custom Values... (router_tool.cpp), in no menu bar
     "drag45Degree", "dragFreeAngle",   // D and G: EDIT_TOOL's context menu (edit_tool.cpp:903-906), in no menu bar
     // Line Modes live on the left toolbar's radio group and Shift+Space; Ctrl++ / Ctrl+- (incWidth / decWidth) are the drawing tools' context menu
@@ -269,6 +273,8 @@ export interface ActionState {
   checks: Record<string, boolean>;
   /** the board editor's enable-condition inputs (PCB_EDIT_FRAME::setupUIConditions); absent outside it */
   pcb?: PcbEnableFacts | null;
+  /** groupWithDesignBlockLink: one item selected, a group with a design block link */
+  linkedGroup?: boolean;
 }
 /** Edit > Attributes: check items whose mark follows the selection (SCH_EDIT_TOOL::Init attribDNPCond …); KiCad sets
  *  no enable condition on them. */
@@ -294,7 +300,11 @@ export function conditionWhy(editor: string | null, id: string, st: ActionState)
   if (editor === "pcb" && st.pcb) { const w = id === "redo" ? undefined : pcbEnableWhy(id, st.pcb, st.undo); if (w !== undefined) return w; }
   if (id === "undo") return st.undo > 0 || (editor === "sch" && st.drawingWire) ? null : "Nothing to undo";
   if (id === "redo") return st.redo > 0 ? null : "Nothing to redo";
+  // SCH_EDIT_FRAME / PCB_EDIT_FRAME::setupUIConditions: placeLinkedDesignBlock, saveToLinkedDesignBlock ENABLE( groupWithDesignBlockLink )
+  if (id === "placeLinkedDesignBlock" || id === "saveToLinkedDesignBlock") return st.linkedGroup ? null : "Select one group linked to a design block";
   if (editor === "sch") {
+    if (id === "saveSheetAsDesignBlock") return st.itemCount > 0 || !st.idle ? null : "The sheet is empty";   // hasElements
+    if (id === "saveSelectionAsDesignBlock") return st.selCount > 0 ? null : "Nothing selected";             // NotEmpty
     if (SCH_HAS_ELEMENTS.has(id)) return st.itemCount > 0 || !st.idle ? null : "The sheet is empty";
     if (id === "paste" || id === "pasteSpecial") return st.idle ? null : "A tool is busy";
     if (SCH_MORE_THAN_ONE.has(id)) return st.selCount > 1 ? null : "Select two or more items";
@@ -354,6 +364,7 @@ export function pcbEnableWhy(id: string, f: PcbEnableFacts, undoCount: number): 
     case "zoneDuplicate": case "drawZoneCutout": case "drawSimilarZone": return no(f.kinds.length === 1 && onlyKinds(f, ["zone"]), "Select one zone");
     case "zoneMerge": return no(f.kinds.length > 1 && onlyKinds(f, ["zone"]), "Select more than one zone");
     case "saveSelectionAsDesignBlock": return no(f.kinds.length > 0, "Nothing selected");
+    case "saveBoardAsDesignBlock": return no(f.boardHasItems, "The board is empty");   // hasElements
     default: return undefined;
   }
 }
@@ -390,7 +401,9 @@ export const KICAD_KEY_WINS: Record<Editor, Record<string, string>> = {
 export const EDITOR_ONLY: Record<string, Editor> = { selectOnPCB: "sch", selectOnSchematic: "pcb", showSymbolLibTable: "sch", showFootprintLibTable: "pcb", move: "sch", drag: "sch", exportNetlist: "sch", saveCurrSheetCopyAs: "sch", drawSheetOnClipboard: "sch", saveCopy: "pcb",
   navigatePrevious: "sch", navigateNext: "sch", navigateBack: "sch", navigateForward: "sch", navigateUp: "sch", leaveSheet: "sch", toggleHiddenPins: "sch", toggleHiddenFields: "sch", toggleERCErrors: "sch", toggleERCWarnings: "sch", toggleERCExclusions: "sch", prevMarker: "sch", nextMarker: "sch",
   layerNext: "pcb", layerPrev: "pcb", layerTop: "pcb", layerBottom: "pcb", highContrastModeCycle: "pcb", highContrastMode: "pcb", showPcbNew: "sch", showEeschema: "pcb",
-  showSymbolEditor: "sch", editPageNumber: "sch", autoplaceAllSheetPins: "sch", findNetInInspector: "sch", showBusSyntaxHelp: "sch", assignNetclass: "sch", editWithLibEdit: "sch", editLibSymbolWithLibEdit: "sch" };
+  saveSheetAsDesignBlock: "sch", updateDesignBlockFromSheet: "sch", saveBoardAsDesignBlock: "pcb", updateDesignBlockFromBoard: "pcb",
+  showSymbolEditor: "sch", editPageNumber: "sch", autoplaceAllSheetPins: "sch", findNetInInspector: "sch", showBusSyntaxHelp: "sch", assignNetclass: "sch", editWithLibEdit: "sch", editLibSymbolWithLibEdit: "sch",
+  exportSymbolsToLibrary: "sch", exportSpecctraDSN: "pcb", exportGenCAD: "pcb", exportIDF: "pcb" };
 for (const id of INNER_LAYER_ACTIONS) EDITOR_ONLY[id] = "pcb";
 /** The menus that take a module action no entry above places (kept reachable in a trailing "Other Commands" sub-menu). */
 export const MODULE_ACTION_MENUS = ["Edit", "Tools", "Inspect"];
@@ -424,8 +437,8 @@ export const LINKS: Record<string, string> = {
 };
 
 /** Docked pane ids and the KiCad "show …" action that toggles each. */
-export const PANE_ACTION: Record<string, string> = { libtree: "showLibraryTree", props: "showProperties", hier: "showHierarchy", filter: "showSelectionFilter", history: "showGitCommitPane", peers: "showPeers", comments: "showComments", appearance: "showLayersManager", search: "showSearch", netnav: "showNetNavigator", netinsp: "showNetInspector" };
-export const PANE_TITLES: Record<string, string> = { libtree: "Libraries", props: "Properties", hier: "Schematic Hierarchy", filter: "Selection Filter", history: "History", peers: "Collaborators", comments: "Comments", chat: "Chat", appearance: "Appearance", search: "Search", netnav: "Net Navigator", netinsp: "Net Inspector" };
+export const PANE_ACTION: Record<string, string> = { libtree: "showLibraryTree", props: "showProperties", hier: "showHierarchy", filter: "showSelectionFilter", history: "showGitCommitPane", peers: "showPeers", comments: "showComments", appearance: "showLayersManager", search: "showSearch", netnav: "showNetNavigator", netinsp: "showNetInspector", designblocks: "showDesignBlockPanel" };
+export const PANE_TITLES: Record<string, string> = { libtree: "Libraries", props: "Properties", hier: "Schematic Hierarchy", filter: "Selection Filter", history: "History", peers: "Collaborators", comments: "Comments", chat: "Chat", appearance: "Appearance", search: "Search", netnav: "Net Navigator", netinsp: "Net Inspector", designblocks: "Design Blocks" };
 /**
  * Dock layout per editor, in KiCad's AUI order.  eeschema's left column (Layer 3) stacks Net Navigator (Position 0),
  * Schematic Hierarchy (1), Properties (2) and the Selection Filter (4) (eeschema_settings.cpp:64-125,
@@ -435,11 +448,11 @@ export const PANE_TITLES: Record<string, string> = { libtree: "Libraries", props
  * Search (pcb_edit_frame.cpp:406-420), hidden until shown (m_ShowNetInspector).  Collaborators, Comments and Chat are the web's own (Chat docks right, under History: a conversation reads down the side of the canvas, as in Figma).
  */
 export const DOCKS: Record<Editor, { left: string[]; right: string[]; bottom?: string[] }> = {
-  sch: { left: ["netnav", "hier", "props", "filter", "peers", "comments", "appearance"], right: ["history", "chat"], bottom: ["search"] },
-  pcb: { left: ["props", "peers", "comments"], right: ["appearance", "filter", "history", "chat"], bottom: ["netinsp", "search"] },
+  sch: { left: ["netnav", "hier", "props", "filter", "peers", "comments", "appearance"], right: ["designblocks", "history", "chat"], bottom: ["search"] },
+  pcb: { left: ["props", "peers", "comments"], right: ["appearance", "filter", "designblocks", "history", "chat"], bottom: ["netinsp", "search"] },
 };
 /** Panes hidden until the user opens them (per editor). */
-export const PANE_DEFAULT_HIDDEN: Record<Editor, string[]> = { sch: ["peers", "comments", "chat", "appearance", "search", "netnav", "history"], pcb: ["peers", "comments", "chat", "search", "history", "netinsp"] };
+export const PANE_DEFAULT_HIDDEN: Record<Editor, string[]> = { sch: ["peers", "comments", "chat", "appearance", "search", "netnav", "history", "designblocks"], pcb: ["peers", "comments", "chat", "search", "history", "netinsp", "designblocks"] };
 
 export const FILTERS: Record<Editor, [string, string][]> = {
   sch: [["symbols", "Symbols"], ["pins", "Pins"], ["wires", "Wires"], ["labels", "Labels"], ["graphics", "Graphics"], ["images", "Images"], ["text", "Text"], ["other", "Other items"], ["ruleAreas", "Rule Areas"]],

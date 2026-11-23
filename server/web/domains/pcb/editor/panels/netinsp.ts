@@ -11,6 +11,7 @@ import { confirmBox } from "../../dialogs/dom";
 import { E } from "../state";
 import { download, errorMessage } from "../pcbdialogs/ui";
 import { setNet } from "../pcbdialogs/item-props";
+import { chainClassOf } from "../netchains";
 import { layerDisplayName, netClassOf, netCommand } from "./appearance";
 import { KC, kdoc, loadJson, panelStore, pcbTools, projectId, saveJson, tctx, textEntry } from "./core";
 
@@ -54,7 +55,8 @@ function columns(doc: KDoc | null, td: boolean): NetInspColumn[] {
   return cols;
 }
 interface LengthRow { name: string; code: number; padCount: number; viaCount: number; trackLength: number; viaLength: number; dieLength: number; unroutedLength: number; totalLength: number; layerLengths: Record<string, number> }
-interface PT { netLengths(doc: KDoc, header: null, opts: { includeZeroPadNets?: boolean }): LengthRow[]; copperStack(copper: string[]): string[] }
+interface PT { netLengths(doc: KDoc, header: null, opts: { includeZeroPadNets?: boolean }): LengthRow[]; copperStack(copper: string[]): string[];
+  netChainLengths(doc: KDoc, rows: LengthRow[]): Map<string, number>; netChainOf(doc: KDoc, net: string): string }
 const PT = (): PT | null => (window as unknown as { PcbTools?: PT }).PcbTools || null;
 
 // ---------------------------------------------------------------- matching (netFilterMatches, EDA_COMBINED_MATCHER CTX_NET)
@@ -82,7 +84,8 @@ function filterMatches(name: string, netclass: string, s: NetInspSettings): bool
 
 // ---------------------------------------------------------------- the model (buildNetsList / DATA_MODEL)
 interface Item { key: string; name: string; netclass: string; group: "" | "netclass" | "chain" | "custom"; children: Item[]; padCount: number; viaCount: number;
-  viaLength: number; trackLength: number; dieLength: number; unrouted: number; layers: Record<string, number>; nets: string[]; code: number }
+  viaLength: number; trackLength: number; dieLength: number; unrouted: number; layers: Record<string, number>; nets: string[]; code: number;
+  chain: string; chainLength: number; chainClass: string }
 const total = (i: Item) => i.trackLength + i.viaLength + i.dieLength;
 const natural = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 
@@ -97,16 +100,20 @@ export function netInspectorModel(expandAll = false): NetInspModel {
   const stack = P.copperStack(doc.copper || []);
   const rows = P.netLengths(doc, null, { includeZeroPadNets: s.show_zero_pad_nets }).filter((r) => !!r.name);   // netFilterMatches: never the unconnected net (code 0, no name)
   if (s.show_zero_pad_nets) for (const n of addedNets) if (!rows.some((r) => r.name === n)) rows.push({ name: n, code: 1e9, padCount: 0, viaCount: 0, trackLength: 0, viaLength: 0, dieLength: 0, unroutedLength: 0, totalLength: 0, layerLengths: {} });
+  // calculateNets: the chain totals take every member net, whatever the filter shows
+  const chainLengths = P.netChainLengths(doc, rows);
   const items: Item[] = [];
   for (const r of rows) {
     const netclass = netClassOf(r.name);
     if (!filterMatches(r.name, netclass, s)) continue;
+    const chain = P.netChainOf(doc, r.name);
     items.push({ key: r.name, name: unescapeString(r.name), netclass: unescapeString(netclass), group: "", children: [], padCount: r.padCount, viaCount: r.viaCount, viaLength: r.viaLength,
-      trackLength: r.trackLength, dieLength: r.dieLength, unrouted: r.unroutedLength, layers: r.layerLengths, nets: [r.name], code: r.code });
+      trackLength: r.trackLength, dieLength: r.dieLength, unrouted: r.unroutedLength, layers: r.layerLengths, nets: [r.name], code: r.code,
+      chain: unescapeString(chain), chainLength: chainLengths.get(chain) || 0, chainClass: chain ? chainClassOf(chain) : "" });
   }
   // addCustomGroups, then addItem: custom rule, else net chain, else netclass
   const groups: Item[] = [];
-  const mk = (type: Item["group"], name: string): Item => ({ key: `${type}:${name}`, name, netclass: "", group: type, children: [], padCount: 0, viaCount: 0, viaLength: 0, trackLength: 0, dieLength: 0, unrouted: 0, layers: {}, nets: [], code: -1 });
+  const mk = (type: Item["group"], name: string): Item => ({ key: `${type}:${name}`, name, netclass: "", group: type, children: [], padCount: 0, viaCount: 0, viaLength: 0, trackLength: 0, dieLength: 0, unrouted: 0, layers: {}, nets: [], code: -1, chain: "", chainLength: 0, chainClass: "" });
   const custom = s.custom_group_rules.map((rule) => { const g = mk("custom", rule); groups.push(g); return g; });
   const byName = new Map<string, Item>();
   const top: Item[] = [];
@@ -114,7 +121,7 @@ export function netInspectorModel(expandAll = false): NetInspModel {
     let parent: Item | null = null;
     const ci = s.custom_group_rules.findIndex((rule) => combinedMatch(rule, it.name));
     if (ci >= 0) parent = custom[ci];
-    else if (s.group_by_net_chain) { const k = "chain:"; parent = byName.get(k) || null; if (!parent) { parent = mk("chain", ""); byName.set(k, parent); groups.push(parent); } }
+    else if (s.group_by_net_chain) { const k = "chain:" + it.chain; parent = byName.get(k) || null; if (!parent) { parent = mk("chain", it.chain); byName.set(k, parent); groups.push(parent); } }
     else if (s.group_by_netclass) { const k = "netclass:" + it.netclass; parent = byName.get(k) || null; if (!parent) { parent = mk("netclass", it.netclass); byName.set(k, parent); groups.push(parent); } }
     if (parent) {
       parent.children.push(it); parent.nets.push(...it.nets);
@@ -127,7 +134,7 @@ export function netInspectorModel(expandAll = false): NetInspModel {
   const num = (i: Item): number | null => {
     switch (col) {
       case C.PAD_COUNT: return i.padCount; case C.VIA_COUNT: return i.viaCount; case C.VIA_LEN: return i.viaLength; case C.TRACK_LEN: return i.trackLength;
-      case C.DIE_LEN: return i.dieLength; case C.UNROUTED: return i.unrouted; case C.TOTAL: return total(i); case C.CHAIN_LEN: return 0;
+      case C.DIE_LEN: return i.dieLength; case C.UNROUTED: return i.unrouted; case C.TOTAL: return total(i); case C.CHAIN_LEN: return i.chainLength;
       default: return col > LAST_STATIC_COL ? i.layers[stack[col - LAST_STATIC_COL - 1]] || 0 : null;
     }
   };
@@ -135,6 +142,7 @@ export function netInspectorModel(expandAll = false): NetInspModel {
     if (!!a.group !== !!b.group) return a.group ? -1 : 1;
     const nameA = a.group ? groupLabel(a) : a.name, nameB = b.group ? groupLabel(b) : b.name;
     if (col === C.NETCLASS && a.netclass !== b.netclass) return asc ? natural(a.netclass, b.netclass) : natural(b.netclass, a.netclass);
+    if (col === C.CHAIN && a.chain !== b.chain) return asc ? natural(a.chain, b.chain) : natural(b.chain, a.chain);
     const va = num(a), vb = num(b);
     if (va !== null && vb !== null && Math.abs(va - vb) > 1e-9) return asc ? va - vb : vb - va;
     return asc ? natural(nameA, nameB) : natural(nameB, nameA);
@@ -147,7 +155,7 @@ export function netInspectorModel(expandAll = false): NetInspModel {
       let v = "", z = false;
       switch (c.id) {
         case C.NAME: v = i.group ? groupLabel(i) : i.name; break;
-        case C.CHAIN: v = ""; break;
+        case C.CHAIN: v = i.chainClass ? `${i.chain}  [${i.chainClass}]` : i.chain; break;   // "DDR_DQ0  [DDR_DATA]"
         case C.NETCLASS: v = i.netclass; break;
         case C.PAD_COUNT: v = String(i.padCount); z = !i.padCount; break;
         case C.VIA_COUNT: v = String(i.viaCount); z = !i.viaCount; break;
@@ -156,7 +164,7 @@ export function netInspectorModel(expandAll = false): NetInspModel {
         case C.DIE_LEN: v = L(i.dieLength); z = !i.dieLength; break;
         case C.UNROUTED: v = messageText(i.unrouted, (E.units as "mm" | "mil" | "in") || "mm", "pcb", true); z = !i.unrouted; break;
         case C.TOTAL: v = L(total(i)); z = !total(i); break;
-        case C.CHAIN_LEN: v = ""; break;
+        case C.CHAIN_LEN: v = i.chain ? L(i.chainLength) : ""; z = !i.chainLength; break;
         default: { const lv = i.layers[stack[c.id - LAST_STATIC_COL - 1]] || 0; v = L(lv); z = !lv; }
       }
       cells.push(v); zero.push(z);

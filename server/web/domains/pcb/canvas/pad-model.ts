@@ -3,6 +3,7 @@
 // written back into the pad node — only what changed, each child where PCB_IO_KICAD_SEXPR::format( PAD ) puts it,
 // in the writer's number format.  Exposed as KiCadCanvas.padModel for the dialog and the node tests.
 import { atOf, kid as kid0, kids, parse } from "./sexpr";
+import { machiningKnockout } from "./geom-pcb";
 
 type SNode = unknown[];
 interface KDocLike { copper: string[]; items: Map<string, { kind: string; node: SNode }> }
@@ -46,9 +47,30 @@ export interface PadModel {
   clearance: number; mask: number; paste: number; pasteRatio: number;
   /** pad to die delay (ps), PAD_SIM_ELECTRICAL_TYPE ("" / "source" / "sink") */
   dieDelayOn: boolean; dieDelay: number; simType: string;
+  /** the edit layer's custom primitives, as written (the dialog keeps them as drawn) */
+  primitives: string | null;
   /** TEARDROP_PARAMETERS (written only when they differ from the defaults: isDefaultTeardropParameters) */
   td: Teardrops;
+  /** PADSTACK::MODE and the explicit copper layer definitions other than F.Cu (PADSTACK::INNER_LAYERS is In1.Cu) */
+  psMode: PadstackMode; psLayers: Record<string, PadLayerShape>;
+  /** m_backDrillChoice (0 None, 1 Top, 2 Bottom, 3 Top & bottom) and each side's size / must-cut layer ("" undefined) */
+  bdChoice: number; bdTopSize: number; bdTopEnd: string; bdBotSize: number; bdBotEnd: string;
+  /** the secondary and tertiary drills as stored (PADSTACK::backdrillWriteSlot keeps a side in its slot) */
+  bdSlots: [DrillSlot, DrillSlot];
+  /** PADSTACK::FrontPostMachining / BackPostMachining (angle in degrees) */
+  pmFront: PostMachining; pmBack: PostMachining;
 }
+export type PadstackMode = "normal" | "fib" | "custom";
+/** One copper layer's COPPER_LAYER_PROPS: the shape the dialog edits, and the per-layer overrides it keeps. */
+export interface PadLayerShape {
+  shape: DlgShape; w: number; h: number; deltaAxis: 0 | 1; delta: number; rratio: number; cratio: number; corners: [boolean, boolean, boolean, boolean];
+  offset: boolean; ox: number; oy: number; primitives: string | null;
+  spokeAngle: number; gap: number; spoke: number; clearance: number; zoneConnect: number | null;
+}
+export interface DrillSlot { size: number; start: string; end: string }
+export interface PostMachining { mode: "none" | "countersink" | "counterbore"; size: number; depth: number; angle: number }
+/** PADSTACK::INNER_LAYERS (In1_Cu): front/inner/back's inner entry shares the key of In1.Cu. */
+export const INNER_LAYERS = "In1.Cu";
 export interface Teardrops { enabled: boolean; twoSegments: boolean; preferZone: boolean; maxLen: number; maxWidth: number; lenRatio: number; widthRatio: number; filterRatio: number; curved: boolean }
 /** TEARDROP_PARAMETERS(): the values a pad without (teardrops …) has. */
 /** SEXPR_BOARD_FILE_VERSION 20260521 (Pad simulation electrical types) and 20251027 (pad-to-die delays with correct
@@ -84,6 +106,13 @@ const LAYER_ID: Record<string, number> = { "F.Cu": 0, "F.Mask": 1, "B.Cu": 2, "B
 const layerId = (n: string): number => { if (n in LAYER_ID) return LAYER_ID[n]; const m = /^In(\d+)\.Cu$/.exec(n); return m ? 2 * Number(m[1]) + 2 : 1000; };
 export const PROPS: [string, string][] = [["", "None"], ["pad_prop_bga", "BGA pad"], ["pad_prop_fiducial_loc", "Fiducial, local to footprint"], ["pad_prop_fiducial_glob", "Fiducial, global to board"],
   ["pad_prop_testpoint", "Test point pad"], ["pad_prop_heatsink", "Heatsink pad"], ["pad_prop_mechanical", "Mechanical"], ["pad_prop_castellated", "Castellated pad (TH only)"], ["pad_prop_pressfit", "Press-fit (round TH only)"]];
+/** FlipLayer for a copper layer: F.Cu and B.Cu swap, the inner layers mirror through the stack. */
+const flipCu = (l: string, copper: string[]): string => { if (l === "F.Cu") return "B.Cu"; if (l === "B.Cu") return "F.Cu"; const st = cuStack(copper), i = st.indexOf(l); return i > 0 && i < st.length - 1 ? st[st.length - 1 - i] : l; };
+/** The board's copper layers in stack order (LAYER_RANGE( F_Cu, B_Cu ) / UIOrder): F.Cu, In1.Cu … B.Cu. */
+export function cuStack(copper: string[]): string[] {
+  const inner = copper.filter((l) => /^In\d+\.Cu$/.test(l)).sort((a, b) => parseInt(a.slice(2), 10) - parseInt(b.slice(2), 10));
+  return ["F.Cu", ...inner, "B.Cu"];
+}
 const flipName = (l: string): string => (/^F\./.test(l) ? "B." + l.slice(2) : /^B\./.test(l) ? "F." + l.slice(2) : l);
 
 /** Expand the wildcard layer names a pad stores ("*.Cu", "*.Mask", "F&B.Cu") into single layers. */
@@ -132,6 +161,80 @@ export function defaultSpokeAngle(shape: string, anchor: string): number {
   return s === "circle" ? 45 : 90;
 }
 
+const CORNERS = ["top_left", "top_right", "bottom_left", "bottom_right"];
+/** The dialog's shape choice for a file shape with its corner and anchor children (initPadstackLayerValues). */
+function dlgShape(s: string, rr: number, cornersOn: boolean[], chamferRatio: number, anchor: string): DlgShape {
+  const chamfered = s === "roundrect" && (cornersOn.some(Boolean) || chamferRatio > 0);
+  return s === "circle" ? "circle" : s === "oval" ? "oval" : s === "rect" ? "rect" : s === "trapezoid" ? "trapezoid" : s === "custom" ? (anchor === "rect" ? "custom_rect" : "custom_circle")
+    : chamfered ? (rr > 0 ? "mixed" : "chamfer") : "roundrect";
+}
+/** parsePadstack's (layer …): one copper layer's shape and overrides. */
+export function readLayerShape(l: SNode, front: PadLayerShape): PadLayerShape {
+  const s = str((kid(l, "shape") || [])[1]) || "circle";
+  const sz = kid(l, "size"); const w = num(sz && sz[1], front.w), hh = num(sz && sz[2], w);
+  const ch = kid(l, "chamfer"); const corners = CORNERS.map((c) => !!ch && ch.includes(c)) as PadLayerShape["corners"];
+  const rr = num((kid(l, "roundrect_rratio") || [])[1], 0), cr = num((kid(l, "chamfer_ratio") || [])[1], 0);
+  const anchor = str((kid(kid(l, "options"), "anchor") || [])[1]);
+  const rd = kid(l, "rect_delta"); const dx = num(rd && rd[1]), dy = num(rd && rd[2]);
+  const off = kid(l, "offset"); const ox = num(off && off[1]), oy = num(off && off[2]);
+  const shape = dlgShape(s, rr, corners, cr, anchor);
+  const opt = (k: string): number => { const n = kid(l, k); return n ? num(n[1], NaN) : NaN; };
+  const sa = kid(l, "thermal_bridge_angle"); const zc = kid(l, "zone_connect"); const prims = kid(l, "primitives");
+  return { shape, w, h: hh, deltaAxis: dx === 0 && dy !== 0 ? 1 : 0, delta: dx !== 0 ? dx : dy, rratio: rr, cratio: cr, corners, offset: ox !== 0 || oy !== 0, ox, oy,
+    primitives: prims ? serializeNode(prims) : null, spokeAngle: sa ? num(sa[1], 90) : defaultSpokeAngle(s, anchor), gap: opt("thermal_gap"), spoke: opt("thermal_bridge_width"),
+    clearance: opt("clearance"), zoneConnect: zc ? num(zc[1], -1) : null };
+}
+const serializeNode = (n: unknown): string => isList(n) ? "(" + n.map(serializeNode).join(" ") + ")" : typeof n === "number" ? f6(n) : /^[A-Za-z_][\w.+-]*$/.test(String(n)) ? String(n) : quote(String(n));
+/** The model's copy of the layer being edited (the shape controls). */
+export function layerShapeOf(m: PadModel): PadLayerShape {
+  return { shape: m.shape, w: m.w, h: m.h, deltaAxis: m.deltaAxis, delta: m.delta, rratio: m.rratio, cratio: m.cratio, corners: [...m.corners] as PadLayerShape["corners"],
+    offset: m.offset, ox: m.ox, oy: m.oy, primitives: m.primitives, spokeAngle: m.spokeAngle, gap: m.gap, spoke: m.spoke, clearance: m.clearance, zoneConnect: m.zoneConnect < 0 ? null : m.zoneConnect };
+}
+/** Load a layer's shape into the model's shape fields (initPadstackLayerValues). */
+export function applyLayerShape(m: PadModel, l: PadLayerShape): void {
+  m.shape = l.shape; m.w = l.w; m.h = l.h; m.deltaAxis = l.deltaAxis; m.delta = l.delta; m.rratio = l.rratio; m.cratio = l.cratio; m.corners = [...l.corners] as PadModel["corners"];
+  m.offset = l.offset; m.ox = l.ox; m.oy = l.oy; m.primitives = l.primitives;
+}
+/** PADSTACK::CopperLayer( layer ) const: an explicit definition, else the side's or F.Cu's (ALL_LAYERS) one. */
+export function padstackLayer(mode: PadstackMode, layers: Record<string, PadLayerShape>, front: PadLayerShape, layer: string): PadLayerShape {
+  if (mode === "normal" || layer === "F.Cu") return front;
+  if (mode === "fib") return layer === "B.Cu" ? (layers["B.Cu"] || layers[INNER_LAYERS] || front) : (layers[INNER_LAYERS] || front);
+  return layers[layer] || front;
+}
+/** afterPadstackModeChanged: the edit layer choices (key, label) of a mode. */
+export function padstackEditLayers(mode: PadstackMode, copper: string[], name: (l: string) => string = (l) => l): [string, string][] {
+  if (mode === "fib") return [["F.Cu", name("F.Cu")], [INNER_LAYERS, "Inner Layers"], ["B.Cu", name("B.Cu")]];
+  if (mode === "custom") return cuStack(copper).map((l): [string, string] => [l, name(l)]);
+  return [["F.Cu", name("F.Cu")]];
+}
+/**
+ * OnPadstackModeChanged: transferDataToPad writes the controls into the edit layer, sets the mode and fills each layer
+ * the new mode adds from F.Cu (an inner layer of a custom stack from the inner layers); then afterPadstackModeChanged
+ * moves the edit layer (Normal: F.Cu; Front/Inner/Back: an inner layer becomes Inner Layers).  The controls are not
+ * reloaded.  `stack` holds every explicit layer, F.Cu included; returns the new edit layer.
+ */
+export function changePadstackMode(stack: Record<string, PadLayerShape>, editLayer: string, m: PadModel, mode: PadstackMode): string {
+  const had = new Set(Object.keys(stack));
+  storeLayer(stack, editLayer, m);
+  if (mode === "fib") {
+    for (const l of [INNER_LAYERS, "B.Cu"]) if (!had.has(l) && l !== editLayer) stack[l] = cloneLayer(stack["F.Cu"]);
+    return editLayer === "F.Cu" || editLayer === "B.Cu" ? editLayer : INNER_LAYERS;
+  }
+  return mode === "normal" ? "F.Cu" : editLayer;
+}
+/**
+ * transferDataToPad for the edit layer: the shape controls go to that layer.  The thermal and clearance overrides are
+ * the pad's own (the F.Cu entry, kept current from the model); another layer keeps the ones it was read with.
+ */
+export function storeLayer(stack: Record<string, PadLayerShape>, layer: string, m: PadModel): void {
+  const own = layerShapeOf(m);
+  if (layer !== "F.Cu") { const prev = stack[layer] || stack["F.Cu"]; if (prev) { own.spokeAngle = prev.spokeAngle; own.gap = prev.gap; own.spoke = prev.spoke; own.clearance = prev.clearance; own.zoneConnect = prev.zoneConnect; } }
+  stack[layer] = own;
+  const f = stack["F.Cu"];
+  if (f && layer !== "F.Cu") { f.spokeAngle = m.spokeAngle; f.gap = m.gap; f.spoke = m.spoke; f.clearance = m.clearance; f.zoneConnect = m.zoneConnect < 0 ? null : m.zoneConnect; }
+}
+export const cloneLayer = (l: PadLayerShape): PadLayerShape => ({ ...l, corners: [...l.corners] as PadLayerShape["corners"] });
+
 /** Read one pad (index) of a footprint item into the dialog's model (front-relative when the footprint is flipped). */
 export function readPad(doc: KDoc, fp: SNode, pad: SNode, netName: string): PadModel {
   const [fx, fy, frot] = atOf(fp); const [px, py, prot] = atOf(pad); const [rx, ry] = rot(frot)(px, py);
@@ -143,12 +246,13 @@ export function readPad(doc: KDoc, fp: SNode, pad: SNode, netName: string): PadM
   const t = str(pad[2]);
   const type: DlgType = t === "thru_hole" ? "pth" : t === "np_thru_hole" ? "npth" : t === "connect" ? "conn" : t === "non_component" ? "copper" : hasCu ? "smd" : "aperture";
   const sz = kid(pad, "size"); const w = num(sz && sz[1], 1), hh = num(sz && sz[2], w);
-  const s = str(pad[3]); const ch = kid(pad, "chamfer"); const cornersOn = ["top_left", "top_right", "bottom_left", "bottom_right"].map((c) => !!ch && ch.includes(c)) as [boolean, boolean, boolean, boolean];
+  const s = str(pad[3]); const ch = kid(pad, "chamfer"); const cornersOn = CORNERS.map((c) => !!ch && ch.includes(c)) as [boolean, boolean, boolean, boolean];
   const rr = num((kid(pad, "roundrect_rratio") || [])[1], 0.25), cr = num((kid(pad, "chamfer_ratio") || [])[1], 0.2);
   const opts = kid(pad, "options"), anchor = str((kid(opts, "anchor") || [])[1]);
   const chamfered = s === "roundrect" && cornersOn.some(Boolean);
   const shape: DlgShape = s === "circle" ? "circle" : s === "oval" ? "oval" : s === "rect" ? "rect" : s === "trapezoid" ? "trapezoid" : s === "custom" ? (anchor === "rect" ? "custom_rect" : "custom_circle")
     : chamfered ? (rr > 0 ? "mixed" : "chamfer") : "roundrect";
+  const prims = kid(pad, "primitives");
   const rd = kid(pad, "rect_delta"); const dx = num(rd && rd[1]), dy = num(rd && rd[2]);
   const dr = kid(pad, "drill"); const drVals = (dr || []).slice(1).filter((v) => !isList(v)); const oblong = drVals[0] === "oval"; const dn = drVals.filter((v) => typeof v === "number") as number[];
   const off = kid(dr, "offset");
@@ -163,7 +267,7 @@ export function readPad(doc: KDoc, fp: SNode, pad: SNode, netName: string): PadM
   const zc = kid(pad, "zone_connect");
   const defAngle = defaultSpokeAngle(s, anchor);
   const sa = kid(pad, "thermal_bridge_angle");
-  return {
+  const out: PadModel = {
     type, number: str(pad[1]), net: netName, x: fx + rx, y: fy + ry, angle: norm180(prot - frot),
     shape, w, h: hh, deltaAxis: dx === 0 && dy !== 0 ? 1 : 0, delta: dx !== 0 ? dx : dy, rratio: rr, cratio: cr, corners: cornersOn,
     offset: !!off && (num(off[1]) !== 0 || num(off[2]) !== 0), ox: num(off && off[1]), oy: num(off && off[2]),
@@ -175,7 +279,58 @@ export function readPad(doc: KDoc, fp: SNode, pad: SNode, netName: string): PadM
     clearance: opt("clearance"), mask: opt("solder_mask_margin"), paste: opt("solder_paste_margin"), pasteRatio: opt("solder_paste_margin_ratio"),
     dieDelayOn: !!kid(pad, "die_delay") && num((kid(pad, "die_delay") || [])[1]) !== 0, dieDelay: num((kid(pad, "die_delay") || [])[1]),
     simType: str((kid(pad, "sim_electrical_type") || [])[1]), td: readTeardrops(pad),
+    primitives: prims ? serializeNode(prims) : null,
+    psMode: "normal", psLayers: {}, bdChoice: 0, bdTopSize: 0, bdTopEnd: "", bdBotSize: 0, bdBotEnd: "",
+    bdSlots: [drillSlot(pad, "backdrill"), drillSlot(pad, "tertiary_drill")], pmFront: readPostMachining(pad, true), pmBack: readPostMachining(pad, false),
   };
+  // the padstack: its mode and each layer it defines (parsePadstack); "Inner" is PADSTACK::INNER_LAYERS
+  const ps = kid(pad, "padstack"); const mode = str((kid(ps, "mode") || [])[1]);
+  if (ps && (mode === "front_inner_back" || mode === "custom")) {
+    out.psMode = mode === "custom" ? "custom" : "fib";
+    const front = layerShapeOf(out);
+    for (const l of kids(ps, "layer") as SNode[]) { const name = str(l[1]); const key = name === "Inner" ? INNER_LAYERS : name; if (key !== "F.Cu") out.psLayers[key] = readLayerShape(l, front); }
+  }
+  // GetBackdrillSize / GetBackdrillEndLayer: each side is the drill started from its outer layer, in either slot
+  const side = (top: boolean): DrillSlot | null => { const want = top ? "F.Cu" : "B.Cu"; return out.bdSlots.find((d) => d.size > 0 && d.start === want) || null; };
+  const top = side(true), bot = side(false);
+  out.bdChoice = top ? (bot ? 3 : 1) : (bot ? 2 : 0);
+  if (top) { out.bdTopSize = top.size; out.bdTopEnd = top.end; } if (bot) { out.bdBotSize = bot.size; out.bdBotEnd = bot.end; }
+  // a flipped footprint's pad is edited flipped back (m_previewPad->Flip): PADSTACK::FlipLayers
+  return flipped ? flipPadstack(out, doc.copper) : out;
+}
+/**
+ * PADSTACK::FlipLayers on the model: the copper layer definitions move to their flipped layers (front/inner/back keeps
+ * its inner layers), the backdrill sides and the front / back post-machining swap.  Its own inverse.
+ */
+export function flipPadstack(m: PadModel, copper: string[]): PadModel {
+  const out: PadModel = structuredClone(m);
+  if (m.psMode !== "normal") {
+    const all: Record<string, PadLayerShape> = { "F.Cu": layerShapeOf(m), ...m.psLayers }, moved: Record<string, PadLayerShape> = {};
+    for (const [k, v] of Object.entries(all)) moved[m.psMode === "fib" && k === INNER_LAYERS ? k : flipCu(k, copper)] = cloneLayer(v);
+    const front = moved["F.Cu"] || Object.values(moved)[0]; delete moved["F.Cu"];
+    applyLayerShape(out, front);
+    // the pad-wide thermal and clearance overrides are the F.Cu entry's
+    out.spokeAngle = front.spokeAngle; out.gap = front.gap; out.spoke = front.spoke; out.clearance = front.clearance; out.zoneConnect = front.zoneConnect === null ? -1 : front.zoneConnect;
+    out.psLayers = moved;
+  }
+  const fl = (l: string): string => (l ? flipCu(l, copper) : l);
+  out.bdSlots = m.bdSlots.map((d) => ({ size: d.size, start: fl(d.start), end: fl(d.end) })) as PadModel["bdSlots"];
+  out.bdChoice = m.bdChoice === 1 ? 2 : m.bdChoice === 2 ? 1 : m.bdChoice;
+  out.bdTopSize = m.bdBotSize; out.bdTopEnd = fl(m.bdBotEnd); out.bdBotSize = m.bdTopSize; out.bdBotEnd = fl(m.bdTopEnd);
+  out.pmFront = { ...m.pmBack }; out.pmBack = { ...m.pmFront };
+  return out;
+}
+/** (backdrill (size s) (layers start end)) / (tertiary_drill …) as a DRILL_PROPS slot. */
+function drillSlot(pad: SNode, key: string): DrillSlot {
+  const d = kid(pad, key); const ls = kid(d, "layers");
+  return { size: num((kid(d, "size") || [])[1], 0), start: str((ls || [])[1]), end: str((ls || [])[2]) };
+}
+/** (front_post_machining countersink|counterbore (size) (depth) (angle)). */
+export function readPostMachining(pad: SNode, front: boolean): PostMachining {
+  const n = kid(pad, front ? "front_post_machining" : "back_post_machining");
+  if (!n) return { mode: "none", size: 0, depth: 0, angle: 0 };
+  const m = str(n[1]);
+  return { mode: m === "countersink" || m === "counterbore" ? m : "none", size: num((kid(n, "size") || [])[1], 0), depth: num((kid(n, "depth") || [])[1], 0), angle: num((kid(n, "angle") || [])[1], 0) };
 }
 
 const fileShape = (s: DlgShape): string => (s === "chamfer" || s === "mixed" ? "roundrect" : s === "custom_circle" || s === "custom_rect" ? "custom" : s);
@@ -219,6 +374,8 @@ export function checkPad(m: PadModel): { errors: string[]; warnings: string[] } 
 export function writePad(doc: KDoc, fp: SNode, pad: SNode, m: PadModel, was: PadModel, netCode: (name: string) => number): void {
   const [fx, fy, frot] = atOf(fp); const flipped = str((kid(fp, "layer") || [])[1]) === "B.Cu";
   const copper = doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"];
+  // the preview pad is flipped back onto the footprint's side before it is stored
+  if (flipped) { m = flipPadstack(m, copper); was = flipPadstack(was, copper); }
   const hasConn = m.type !== "npth" && m.type !== "aperture";
   // type and shape (the three atoms after the number)
   const t = m.type === "pth" ? "thru_hole" : m.type === "npth" ? "np_thru_hole" : m.type === "conn" ? "connect" : m.type === "copper" ? "non_component" : "smd";
@@ -236,15 +393,19 @@ export function writePad(doc: KDoc, fp: SNode, pad: SNode, m: PadModel, was: Pad
   if (m.shape === "trapezoid") { const dx = m.deltaAxis === 0 ? m.delta : 0, dy = m.deltaAxis === 1 ? m.delta : 0; setPadChild(pad, "rect_delta", dx || dy ? `(rect_delta ${f6(dx)} ${f6(dy)})` : null); }
   else setPadChild(pad, "rect_delta", null);
   // drill: plated / unplated holes only; an offset is kept on any type
-  const holeChanged = m.type !== was.type || m.holeOblong !== was.holeOblong || !sameNum(m.hx, was.hx) || !sameNum(m.hy, was.hy) || m.offset !== was.offset || !sameNum(m.ox, was.ox) || !sameNum(m.oy, was.oy);
+  // forceShapeOffsetOutput: a padstack layer whose offset differs from F.Cu's writes F.Cu's (offset) even at zero
+  const offsetOf = (l: PadLayerShape): [number, number] => (l.offset ? [l.ox, l.oy] : [0, 0]);
+  const forceOffset = (x: PadModel): boolean => { if (x.psMode === "normal") return false; const f = offsetOf(layerShapeOf(x)); return Object.values(x.psLayers).some((l) => { const o = offsetOf(l); return o[0] !== f[0] || o[1] !== f[1]; }); };
+  const holeChanged = m.type !== was.type || m.holeOblong !== was.holeOblong || !sameNum(m.hx, was.hx) || !sameNum(m.hy, was.hy) || m.offset !== was.offset || !sameNum(m.ox, was.ox) || !sameNum(m.oy, was.oy) || forceOffset(m) !== forceOffset(was);
   if (holeChanged) {
     const holed = m.type === "pth" || m.type === "npth";
-    const hx = holed ? m.hx : 0, hy = holed ? (m.holeOblong ? m.hy : m.hx) : 0; const off = m.offset && (m.ox || m.oy);
+    const hx = holed ? m.hx : 0, hy = holed ? (m.holeOblong ? m.hy : m.hx) : 0; const off = (m.offset && (m.ox || m.oy)) || forceOffset(m);
     if (hx > 0 || hy > 0 || off) {
       let s = "(drill"; if (holed && m.holeOblong) s += " oval"; if (hx > 0) s += " " + f6(hx); if (hy > 0 && Math.abs(hy - hx) > 1e-9) s += " " + f6(hy);
-      if (off) s += ` (offset ${f6(m.ox)} ${f6(m.oy)})`; setPadChild(pad, "drill", s + ")");
+      if (off) s += ` (offset ${f6(m.offset ? m.ox : 0)} ${f6(m.offset ? m.oy : 0)})`; setPadChild(pad, "drill", s + ")");
     } else setPadChild(pad, "drill", null);
   }
+  writeDrills(pad, m, was);
   if (m.property !== was.property) setPadChild(pad, "property", m.property ? `(property ${m.property})` : null);
   // layers
   const before = modelLayers(was, copper), after = modelLayers(m, copper);
@@ -296,7 +457,73 @@ export function writePad(doc: KDoc, fp: SNode, pad: SNode, m: PadModel, was: Pad
     if (m.shape !== was.shape || m.knockout !== was.knockout) setPadChild(pad, "options", `(options (clearance ${m.knockout}) (anchor ${m.shape === "custom_rect" ? "rect" : "circle"}))`);
     if (!kid(pad, "primitives")) setPadChild(pad, "primitives", "(primitives)");
   } else { setPadChild(pad, "options", null); setPadChild(pad, "primitives", null); }
+  // the padstack: (padstack (mode front_inner_back) (layer "Inner" …) (layer "B.Cu" …)), or every copper layer but F.Cu
+  const psText = (x: PadModel): string | null => formatPadstack(x, cuStack(copper));
+  const ps = psText(m); if (ps !== psText(was) || (ps === null) !== !kid(pad, "padstack")) setPadChild(pad, "padstack", ps);
 }
 
+/** formatPadLayer: one copper layer of a front/inner/back or custom padstack. */
+export function formatPadLayer(l: PadLayerShape, knockout: string): string {
+  const shape = fileShape(l.shape), circle = l.shape === "circle" || l.shape === "custom_circle";
+  let s = `(shape ${shape}) (size ${f6(l.w)} ${f6(circle ? l.w : l.h)})`;
+  if (l.shape === "trapezoid") { const dx = l.deltaAxis === 0 ? l.delta : 0, dy = l.deltaAxis === 1 ? l.delta : 0; if (dx || dy) s += ` (rect_delta ${f6(dx)} ${f6(dy)})`; }
+  if (l.offset && (l.ox || l.oy)) s += ` (offset ${f6(l.ox)} ${f6(l.oy)})`;
+  if (l.shape === "roundrect" || l.shape === "chamfer" || l.shape === "mixed") s += ` (roundrect_rratio ${f6(l.shape === "chamfer" ? 0 : l.rratio)})`;
+  if (l.shape === "chamfer" || l.shape === "mixed") { const names = CORNERS.filter((_, i) => l.corners[i]); s += ` (chamfer_ratio ${f6(l.cratio)}) (chamfer${names.length ? " " + names.join(" ") : ""})`; }
+  if (l.shape === "custom_circle" || l.shape === "custom_rect") s += ` (options (clearance ${knockout}) (anchor ${l.shape === "custom_rect" ? "rect" : "circle"})) ${l.primitives || "(primitives)"}`;
+  if (!sameNum(l.spokeAngle, circle ? 45 : 90)) s += ` (thermal_bridge_angle ${f6(l.spokeAngle)})`;
+  if (!isNaN(l.gap)) s += ` (thermal_gap ${f6(l.gap)})`;
+  if (!isNaN(l.spoke)) s += ` (thermal_bridge_width ${f6(l.spoke)})`;
+  if (!isNaN(l.clearance)) s += ` (clearance ${f6(l.clearance)})`;
+  if (l.zoneConnect !== null) s += ` (zone_connect ${l.zoneConnect})`;
+  return s;
+}
+/** The (padstack …) node of the model (null for a normal padstack); `stack` is the board's copper in stack order. */
+export function formatPadstack(m: PadModel, stack: string[]): string | null {
+  if (m.psMode === "normal") return null;
+  const front = layerShapeOf(m), get = (l: string): PadLayerShape => padstackLayer(m.psMode, m.psLayers, front, l);
+  if (m.psMode === "fib") return `(padstack (mode front_inner_back) (layer "Inner" ${formatPadLayer(get(INNER_LAYERS), m.knockout)}) (layer "B.Cu" ${formatPadLayer(get("B.Cu"), m.knockout)}))`;
+  return `(padstack (mode custom)${stack.filter((l) => l !== "F.Cu").map((l) => ` (layer ${quote(l)} ${formatPadLayer(get(l), m.knockout)})`).join("")})`;
+}
 
-export const padModel = { PAD_ORDER, TECH, PROPS, TD_DEFAULTS, SIM_ELECTRICAL_TYPE_VERSION, DIE_DELAY_VERSION, readTeardrops, formatTeardrops, f6, setPadChild, expandLayers, formatPadLayers, copperChoices, readPad, modelLayers, checkPad, writePad };
+/**
+ * transferDataToPad's drills: a pad type without a hole loses every drill (PAD_UTILS::RemoveAllDrillsFromPadstack);
+ * otherwise each backdrill side goes through SetBackdrillSize / SetBackdrillEndLayer (the side keeps its slot, a new
+ * top one takes the secondary drill and a new bottom one the tertiary, F.Cu / B.Cu as start), and the post-machining
+ * is written as PCB_IO_KICAD_SEXPR formats it (counterbore depth, countersink angle).
+ */
+function writeDrills(pad: SNode, m: PadModel, was: PadModel): void {
+  if (m.type !== "pth" && m.type !== "npth") { for (const k of ["backdrill", "tertiary_drill", "front_post_machining", "back_post_machining"]) setPadChild(pad, k, null); return; }
+  const bdSame = m.bdChoice === was.bdChoice && sameNum(m.bdTopSize, was.bdTopSize) && m.bdTopEnd === was.bdTopEnd && sameNum(m.bdBotSize, was.bdBotSize) && m.bdBotEnd === was.bdBotEnd;
+  if (!bdSame || m.type !== was.type) {
+    const slots = m.bdSlots.map((d) => ({ ...d }));
+    const find = (top: boolean): DrillSlot | undefined => slots.find((d) => d.size > 0 && d.start === (top ? "F.Cu" : "B.Cu"));
+    const writeSlot = (top: boolean): DrillSlot => {
+      const ex = find(top); if (ex) return ex;
+      const home = slots[top ? 0 : 1], other = slots[top ? 1 : 0];
+      return home.size > 0 && home.start === (top ? "B.Cu" : "F.Cu") ? other : home;
+    };
+    const side = (top: boolean, want: boolean, size: number, end: string): void => {
+      if (!want) { for (const d of slots) if (d.start === (top ? "F.Cu" : "B.Cu")) d.size = 0; return; }
+      const d = writeSlot(top); d.size = size; d.start = top ? "F.Cu" : "B.Cu"; if (end) d.end = end;
+    };
+    side(true, m.bdChoice === 1 || m.bdChoice === 3, m.bdTopSize, m.bdTopEnd);
+    side(false, m.bdChoice === 2 || m.bdChoice === 3, m.bdBotSize, m.bdBotEnd);
+    const node = (key: string, d: DrillSlot): string | null => (d.size > 0 && d.start && d.end ? `(${key} (size ${f6(d.size)}) (layers ${quote(d.start)} ${quote(d.end)}))` : null);
+    setPadChild(pad, "backdrill", node("backdrill", slots[0])); setPadChild(pad, "tertiary_drill", node("tertiary_drill", slots[1]));
+  }
+  const pmText = (key: string, p: PostMachining): string | null => {
+    if (p.mode === "none") return null;
+    const depth = p.mode === "counterbore" ? p.depth : 0, angle = p.mode === "countersink" ? Math.round(p.angle * 10) / 10 : 0;
+    return `(${key} ${p.mode}${p.size > 0 ? ` (size ${f6(p.size)})` : ""}${depth > 0 ? ` (depth ${f6(depth)})` : ""}${angle > 0 ? ` (angle ${f6(angle)})` : ""})`;
+  };
+  for (const [key, a, b] of [["front_post_machining", m.pmFront, was.pmFront], ["back_post_machining", m.pmBack, was.pmBack]] as [string, PostMachining, PostMachining][])
+    if (pmText(key, a) !== pmText(key, b) || m.type !== was.type) setPadChild(pad, key, pmText(key, a));
+}
+
+/** PAD::GetBackdrillOrPostMachiningKnockout / PCB_VIA's (PADSTACK::MachiningKnockout) on a copper layer. */
+export { machiningKnockout };
+
+
+export const padModel = { PAD_ORDER, TECH, PROPS, TD_DEFAULTS, SIM_ELECTRICAL_TYPE_VERSION, DIE_DELAY_VERSION, INNER_LAYERS, readTeardrops, formatTeardrops, f6, setPadChild, expandLayers, formatPadLayers, copperChoices, readPad, modelLayers, checkPad, writePad,
+  readLayerShape, layerShapeOf, applyLayerShape, padstackLayer, padstackEditLayers, changePadstackMode, storeLayer, cloneLayer, flipPadstack, formatPadLayer, formatPadstack, readPostMachining, cuStack, machiningKnockout };

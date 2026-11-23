@@ -10,6 +10,7 @@ import type { Plain, ProjectEdit } from "../../canvas/project-file";
 import type { BoardHeader, DrillProfile, LayerRow } from "../../canvas/board-setup";
 import { BS } from "./canvas";
 import { E } from "../state";
+import { prototypeZoneFill, setPrototypeZoneFill } from "./zonefill";
 import { popupMenu } from "../../dialogs/dom";
 import { zstdDecompress } from "../../dialogs/zstd";
 import { box, checkField, form, grid, gridButtons, h, iconButton, bitmapButton, staticBitmap, lenField, note, numField, openDialog, put, selectField, spinField, textEntryBox, textField, unitLabel, unitName, fmtLen, errorMessage, type CellValue, type Field } from "./ui";
@@ -30,6 +31,8 @@ export interface SetupCtx {
   layerRows(): LayerRow[];
   /** the board-file edit of the Drill Chart page */
   setDrillProfile(p: DrillProfile | null): void;
+  /** the board-file edit of the Zones page's hatch offsets: the (zone_defaults …) text, null to drop it */
+  setZoneDefaults(text: string | null): void;
   /** the full text of the board file, for the embedded files */
   boardText: string;
   /** PANEL_ASSIGN_COMPONENT_CLASSES' m_selectionRefs: the references of the footprints selected on the board, sorted */
@@ -133,8 +136,32 @@ export function zonesPage(ctx: SetupCtx) {
       smoothLevel: numOr(z.hatch_smoothing_level, 0), smoothValue: numOr(z.hatch_smoothing_value, 0.1), cornerSmoothing: numOr(z.corner_smoothing, 0), cornerRadius: numOr(z.corner_radius, 0), islands: numOr(z.remove_islands, 0), islandArea: numOr(z.min_island_area, 10) };
     const ro = ctx.roPro;
     const panel = zoneSettingsPanel(v, ro);
-    put(el, box("Default Properties for New Zones", panel.el));
+    // PANEL_SETUP_ZONE_HATCH_OFFSETS: an X / Y offset per enabled copper layer (BOARD_DESIGN_SETTINGS::m_ZoneLayerProperties,
+    // (setup (zone_defaults …)) in the board file), and the project's local "Use solid fills for hatched zones"
+    const zd = ctx.header && ctx.header.setup ? (ctx.header.setup as SNode[]).find((c) => Array.isArray(c) && c[0] === "zone_defaults") as SNode | undefined : undefined;
+    const had = new Map<string, [number, number]>();
+    if (zd) for (const pr of zd.slice(1)) {
+      if (!Array.isArray(pr) || pr[0] !== "property") continue;
+      const l = (pr as SNode[]).find((c) => Array.isArray(c) && c[0] === "layer") as SNode | undefined, hp = (pr as SNode[]).find((c) => Array.isArray(c) && c[0] === "hatch_position") as SNode | undefined;
+      const xy = hp ? (hp as SNode[]).find((c) => Array.isArray(c) && c[0] === "xy") as SNode | undefined : undefined;
+      if (l && xy) had.set(String(l[1]), [Number(xy[1]) || 0, Number(xy[2]) || 0]);
+    }
+    const cu = ctx.layerRows().filter((r) => r.copper);   // LSET::AllCuMask().UIOrder() of the enabled layers
+    const offRows: Record<string, CellValue>[] = cu.map((r) => { const o = had.get(r.name) || [0, 0]; return { layer: r.userName || r.name, name: r.name, id: r.id, x: o[0], y: o[1] }; });
+    const offGrid = grid([{ label: "Layer", key: "layer", type: "ro" }, { label: "X Offset", key: "x", type: "len" }, { label: "Y Offset", key: "y", type: "len" }], offRows, { ro: ctx.roBoard, height: "220px", key: "hatchOffsets" });
+    const proto = checkField(prototypeZoneFill(), "Use solid fills for hatched zones", { key: "prototypeZoneFills" });
+    proto.input.title = "Prototype zone fill mode fills hatched zones as solid to improve performance on large boards. This local setting takes effect the next time zones are filled.";
+    put(el, box("Default Properties for New Zones", panel.el), box("Zone Hatched Fill Offsets", h("div", null, offGrid.el, h("div", { style: "margin-top:8px" }, proto.el))));
     ctx.register("Zones", () => {
+      // TransferDataFromWindow: the local setting, then every row into m_ZoneLayerProperties (an offset once one is set)
+      setPrototypeZoneFill(proto.get());
+      if (!ctx.roBoard) {
+        const set = offGrid.rows().filter((r) => had.has(String(r.name)) || Number(r.x) || Number(r.y)).sort((a, b) => Number(a.id) - Number(b.id));
+        const mm = (v: CellValue): string => String(+(Number(v) || 0).toFixed(6));
+        const text = `(zone_defaults${set.map((r) => ` (property (layer "${r.name}") (hatch_position (xy ${mm(r.x)} ${mm(r.y)})))`).join("")})`;
+        const old = zd ? `(zone_defaults${[...had.entries()].map(([l, o]) => ` (property (layer "${l}") (hatch_position (xy ${mm(o[0])} ${mm(o[1])})))`).join("")})` : null;
+        if (text !== old) ctx.setZoneDefaults(text);
+      }
       const n = panel.get(), P = [...DS, "defaults", "zones"];
       const m: [string, number, boolean?][] = [["min_clearance", n.clearance], ["min_thickness", n.minWidth], ["pad_connection", n.padConnection, true], ["thermal_relief_gap", n.thermalGap], ["thermal_relief_spoke_width", n.spokeWidth],
         ["border_display_style", n.outline, true], ["border_hatch_pitch", n.hatchPitch], ["fill_mode", n.fillMode, true], ["hatch_orientation", n.hatchOrientation], ["hatch_thickness", n.hatchWidth], ["hatch_gap", n.hatchGap],

@@ -11,7 +11,7 @@
 // Actions are named as in the C++ ("SCH_ACTIONS::rotateCCW"); the label, icon and hotkey come from
 // the generated spec (server/scripts/gen_kicad_context.py scans this file for the names).
 // Entries that only exist for features the web editor has no notion of at all (design blocks,
-// net chains, variants, the symbol / footprint editor frames) are left out.
+// variants, the symbol / footprint editor frames) are left out.
 import type { Editor } from "../../../shared/store";
 
 /** What a condition can ask about: the selection and the state of the active tool. */
@@ -54,6 +54,8 @@ export interface MenuCtx {
   grouping?: { count: number; hasGroup: boolean; onlyOneGroup: boolean; hasNonGroup: boolean; hasMember: boolean };
   /** ZONE_PRIORITY_CONTEXT_MENU::update: an overlapping zone has a higher / lower priority than the one selected zone */
   zoneCanRaise?: boolean; zoneCanLower?: boolean;
+  /** VIA_STITCH_TOOL: a stitch's via picked (its child menu) / a stitch with exclusions picked */
+  stitchExcludable?: boolean; stitchClearable?: boolean;
   /** board: the selection is one group (groupEnterCondition) / a group is entered (inGroupCondition) */
   groupSelected?: boolean; inGroup?: boolean;
   /** board is not empty (EDIT_TOOL's noItemsCondition) */
@@ -73,7 +75,7 @@ export interface MenuDef {
   icon?: string;
   entries: Entry[];
   /** filled in by the editor: the zoom presets, the grid list */
-  dynamic?: "zoom" | "grid" | "diffpair" | "trackwidth" | "viasize" | "pinfunction" | "pinhelpers" | "unfold";
+  dynamic?: "zoom" | "grid" | "diffpair" | "trackwidth" | "viasize" | "pinfunction" | "pinhelpers" | "unfold" | "netchain" | "terminalpad";
 }
 export type Entry =
   | { order: number; cond: Cond; act: string; check?: boolean; enable?: Cond }
@@ -83,7 +85,7 @@ export type Entry =
 const always: Cond = () => true;
 
 export class CondMenu implements MenuDef {
-  title: string; icon?: string; entries: Entry[] = []; dynamic?: "zoom" | "grid" | "diffpair" | "trackwidth" | "viasize" | "pinfunction" | "pinhelpers" | "unfold";
+  title: string; icon?: string; entries: Entry[] = []; dynamic?: "zoom" | "grid" | "diffpair" | "trackwidth" | "viasize" | "pinfunction" | "pinhelpers" | "unfold" | "netchain" | "terminalpad";
   constructor(title = "", icon?: string) { this.title = title; this.icon = icon; }
   private add(e: Entry, order: number | undefined): this {
     e.order = order === undefined || order < 0 ? this.entries.length : order;
@@ -224,6 +226,10 @@ const schUnfoldMenu = (): MenuDef => ({ title: "Unfold from Bus", icon: "add_lin
 /** ALT_PIN_FUNCTION_MENU and PIN_TRICKS_MENU (sch_edit_tool.cpp): filled in by the editor from the selected pin. */
 const PIN_FUNCTION_MENU: MenuDef = { title: "Pin Function", icon: "component_select_unit", entries: [], dynamic: "pinfunction" };
 const PIN_TRICKS_MENU: MenuDef = { title: "Pin Helpers", icon: "pin", entries: [], dynamic: "pinhelpers" };
+/** NET_CHAIN_MENU (sch_selection_tool.cpp): filled in by the editor from the selection and the net chains. */
+const NET_CHAIN_MENU: MenuDef = { title: "Net Chain...", entries: [], dynamic: "netchain" };
+/** SCH_SELECTION_TOOL::Init's pinSelection || wireOrBusInSignal || symbolSelection. */
+const netChainSel: Cond = (c) => onlyTypes(set("pin"))(c) || and(count(1), onlyTypes(set("wire", "bus")))(c) || onlyTypes(set("symbol"))(c);
 /** SCH_CONDITIONS::AllPinsOrSheetPins */
 const allPins: Cond = (c) => c.kinds.length > 0 && c.kinds.every((k) => k === "pin" || k === "sheet_pin");
 /** The schematic selection tool's menu (m_selectionTool->GetToolMenu()). */
@@ -231,6 +237,7 @@ function schSelectionMenu(): CondMenu {
   const m = new CondMenu();
   // SCH_SELECTION_TOOL::Init
   m.item("ACTIONS::groupEnter", (c) => !!c.groupSelected, 1).item("ACTIONS::groupLeave", (c) => !!c.inGroup, 1);
+  m.item("SCH_ACTIONS::placeLinkedDesignBlock", (c) => !!c.groupSelected, 1).item("SCH_ACTIONS::saveToLinkedDesignBlock", (c) => !!c.groupSelected, 1);
   m.item("SCH_ACTIONS::clearHighlight", and(haveHighlight, idle), 1).sep(and(haveHighlight, idle), 1);
   m.item("SCH_ACTIONS::selectConnection", and(hasTypes(SCH_EXPANDABLE), idle), 2);
   addTableSelectItems(m, and(tableCellSelection, idle));
@@ -249,6 +256,7 @@ function schSelectionMenu(): CondMenu {
   m.item("SCH_ACTIONS::assignNetclass", and(onlyTypes(SCH_CONNECTED), idle), 250).item("SCH_ACTIONS::findNetInInspector", and(onlyTypes(SCH_CONNECTED), idle), 250);
   m.item("SCH_ACTIONS::editPageNumber", schSheetSel, 250);
   m.sep(400);
+  m.sub(NET_CHAIN_MENU, and(netChainSel, idle), 400);
   m.sep(1000); standardSubMenus(m);
   // SCH_LINE_WIRE_BUS_TOOL::Init
   m.sub(schUnfoldMenu(), and(count(1), onlyTypes(set("bus")), idle), 100);
@@ -349,9 +357,14 @@ const noActiveTool = tool("select");
 /** SELECT_MENU (pcb_selection_tool.cpp). */
 const pcbSelectMenu = () => new CondMenu("Select")
   .item("PCB_ACTIONS::filterSelection").sep()
-  .item("PCB_ACTIONS::selectConnection").item("PCB_ACTIONS::selectNet")
+  .item("PCB_ACTIONS::selectConnection").item("PCB_ACTIONS::selectNet").item("PCB_ACTIONS::selectNetChain")
   .item("PCB_ACTIONS::selectSameSheet").item("PCB_ACTIONS::selectOnSchematic")
   .item("PCB_ACTIONS::selectUnconnected").item("PCB_ACTIONS::grabUnconnected");
+/** NET_CHAINS_MENU and its REPLACE_TERMINAL_PAD_MENU (filled in by the editor from the selected pad). */
+const TERMINAL_PAD_MENU: MenuDef = { title: "Set terminal pad", entries: [], dynamic: "terminalpad" };
+const pcbNetChainsMenu = () => new CondMenu("Net Chains...").item("PCB_ACTIONS::highlightNetChain").sub(TERMINAL_PAD_MENU, always);
+/** PCB_SELECTION_TOOL::Init netItemSelection: one pad, via, track or arc. */
+const netItemSel = and(count(1), onlyTypes(set("pad", "via", "segment", "arc")));
 const pcbRoutingMenu = () => new CondMenu("Routing", "special_tools")
   .item("PCB_ACTIONS::routerRouteSelected", pcbRoutable).item("PCB_ACTIONS::routerRouteSelectedFromEnd", pcbRoutable).item("PCB_ACTIONS::unrouteSelected", pcbRoutable)
   .item("PCB_ACTIONS::unrouteSegment", pcbRoutable).item("PCB_ACTIONS::routerAutorouteSelected", pcbRoutable).item("PCB_ACTIONS::routerOptimizeSelected", and(hasTypes(set("segment", "arc")), idle));
@@ -394,14 +407,16 @@ const shapeBoolean = and(onlyTypes(BOOLEAN_TYPES), moreThan(1));
 const pcbShapeModMenu = () => new CondMenu("Shape Modification")
   .item("PCB_ACTIONS::simplifyPolygons", hasTypes(SIMPLIFY_TYPES)).sep(onlyTypes(FILLET_TYPES))
   .item("PCB_ACTIONS::filletLines", onlyTypes(FILLET_TYPES)).item("PCB_ACTIONS::chamferLines", onlyTypes(FILLET_TYPES))
-  .item("PCB_ACTIONS::extendLines", and(onlyTypes(set("gr_line")), count(2))).sep(count(1))
+  .item("PCB_ACTIONS::extendLines", and(onlyTypes(set("gr_line")), count(2)))
+  // both pick their own shape from under the pointer, so the selection says nothing about them (ShowAlways)
+  .item("PCB_ACTIONS::extendGraphic", always).item("PCB_ACTIONS::trimGraphic", always).sep(count(1))
   .item("PCB_ACTIONS::pointEditorMoveCorner", (c) => !!c.hasCorner).item("PCB_ACTIONS::pointEditorMoveMidpoint", (c) => !!c.hasMidpoint)
   .item("PCB_ACTIONS::pointEditorAddCorner", and(count(1), (c) => !!c.canAddCorner)).item("PCB_ACTIONS::pointEditorRemoveCorner", and(count(1), (c) => !!c.canRemoveCorner))
   .item("PCB_ACTIONS::pointEditorChamferCorner", and(count(1), (c) => !!c.canChamferCorner))
   .item("PCB_ACTIONS::editVertices", (c) => !!c.editableCorners)
   .sep(shapeBoolean).item("PCB_ACTIONS::mergePolygons", shapeBoolean).item("PCB_ACTIONS::subtractPolygons", shapeBoolean).item("PCB_ACTIONS::intersectPolygons", shapeBoolean);
 /** shapeModificationCondition: the sub-menu shows when any of its items would. */
-const shapeModVisible = or(hasTypes(SIMPLIFY_TYPES), onlyTypes(FILLET_TYPES), and(count(1), (c) => !!c.canAddCorner || !!c.canRemoveCorner || !!c.canChamferCorner), (c) => !!c.hasCorner || !!c.hasMidpoint, (c) => !!c.editableCorners, shapeBoolean);
+const shapeModVisible = or(always, hasTypes(SIMPLIFY_TYPES), onlyTypes(FILLET_TYPES), and(count(1), (c) => !!c.canAddCorner || !!c.canRemoveCorner || !!c.canChamferCorner), (c) => !!c.hasCorner || !!c.hasMidpoint, (c) => !!c.editableCorners, shapeBoolean);
 /** CONSTRAINT_EDIT_TOOL's menu. */
 const pcbConstraintMenu = () => new CondMenu("Constraints", "measurement").item("PCB_ACTIONS::manageConstraints");
 
@@ -409,9 +424,10 @@ const pcbConstraintMenu = () => new CondMenu("Constraints", "measurement").item(
 function pcbSelectionMenu(): CondMenu {
   const m = new CondMenu();
   // PCB_SELECTION_TOOL::Init
-  m.sub(pcbSelectMenu(), notEmpty); m.sep(1000);
+  m.sub(pcbSelectMenu(), notEmpty); m.sub(pcbNetChainsMenu(), and(netItemSel, not(inFpEditor))); m.sep(1000);
   m.item("ACTIONS::cancelInteractive", not(noActiveTool), 1);
   m.item("ACTIONS::groupEnter", (c) => !!c.groupSelected, 1).item("ACTIONS::groupLeave", (c) => !!c.inGroup, 1);
+  m.item("PCB_ACTIONS::placeLinkedDesignBlock", (c) => !!c.groupSelected, 1).item("PCB_ACTIONS::saveToLinkedDesignBlock", (c) => !!c.groupSelected, 1);
   m.item("PCB_ACTIONS::clearHighlight", haveHighlight, 1).sep(haveHighlight, 1);
   addTableSelectItems(m, tableCellSelection);
   m.sep(1); standardSubMenus(m);
@@ -442,6 +458,8 @@ function pcbSelectionMenu(): CondMenu {
   m.item("PCB_ACTIONS::getAndPlace", and(noActiveTool, empty, board)).sep(board);
   m.sub(pcbLockMenu(), and(notEmpty, board), 100).sub(pcbZoneMenu(), and(onlyTypes(PCB_ZONE), board), 100).sub(pcbZoneMenu(), and(tool("zone"), board), 300);
   m.sub(pcbNetMenu(), and(onlyTypes(PCB_CONNECTED), board), 100);
+  // VIA_STITCH_TOOL::Init (hasExclusionsCondition) and PCB_VIA_STITCH::GetChildContextMenu
+  m.item("PCB_ACTIONS::clearStitchViaExclusions", and((c) => !!c.stitchClearable, board), 100).item("PCB_ACTIONS::excludeStitchVia", and((c) => !!c.stitchExcludable, board), 100);
   // ALIGN_DISTRIBUTE_TOOL::Init, CONVERT_TOOL::Init, PCB_GROUP_TOOL::Init, CONSTRAINT_EDIT_TOOL::Init
   m.sub(pcbAlignMenu(), moreThan(1), 100).sub(pcbConvertMenu(), hasTypes(set(...PCB_SHAPES, "segment", "arc", "zone")), 100);
   m.sub(GROUP_MENU, notEmpty, 100).sub(pcbConstraintMenu(), always, 100);
@@ -463,13 +481,15 @@ function pcbRouterMenu(): CondMenu {
   m.item("PCB_ACTIONS::routerContinueFromEnd", hasOtherEnd).item("PCB_ACTIONS::routerAttemptFinish", hasOtherEnd);
   m.item("PCB_ACTIONS::routerAutorouteSelected", and(notRouting, notEmpty)).item("PCB_ACTIONS::routerOptimizeSelected", and(notRouting, notEmpty));
   m.item("PCB_ACTIONS::breakTrack", notRouting).item("PCB_ACTIONS::drag45Degree", notRouting).item("PCB_ACTIONS::dragFreeAngle", notRouting);
-  m.item("ACT_PlaceThroughVia").item("ACT_PlaceBlindVia").item("ACT_PlaceMicroVia").item("ACT_SelLayerAndPlaceThroughVia").item("ACT_SelLayerAndPlaceBlindVia").item("ACT_SelLayerAndPlaceMicroVia");
+  m.item("ACT_PlaceThroughVia").item("ACT_PlaceBlindVia").item("ACT_PlaceMicroVia").item("ACT_PlaceViaStack").item("ACT_SelLayerAndPlaceThroughVia").item("ACT_SelLayerAndPlaceBlindVia").item("ACT_SelLayerAndPlaceMicroVia");
   m.item("ACT_SwitchPosture");
   m.sub(new CondMenu("Track Corner Mode", "switch_corner_rounding_shape").item("ACT_SwitchCornerModeToNext", always, 1).sep(1)
     .check("ACT_SwitchCornerMode45").check("ACT_SwitchCornerModeArc45").check("ACT_SwitchCornerMode90").check("ACT_SwitchCornerModeArc90"));
   m.sep();
   m.sub(TRACK_WIDTH_MENU);
   m.sub(DIFF_PAIR_MENU, (c) => c.tool === "routediff");   // diffPairCond: the router is in PNS_MODE_ROUTE_DIFF_PAIR
+  const spreading: Cond = (c) => c.tool === "spread";   // spreadingTracksCond: the router is in PNS_MODE_SPREAD_TRACKS
+  m.item("ACT_IncreaseSpreadingDistance", spreading).item("ACT_DecreaseSpreadingDistance", spreading).item("ACT_SpreadTracksSetDistance", spreading);
   m.item("PCB_ACTIONS::routerSettingsDialog").sep();
   standardSubMenus(m);
   return m;
@@ -486,8 +506,8 @@ function pcbDrawingToolMenu(): CondMenu {
   m.item("PCB_ACTIONS::clearHighlight", haveHighlight, 2).sep(haveHighlight, 2);
   const arcTool = tool(...PCB_ARC_TOOLS);
   // canCloseOutline / canUndoPoint / canFinishShape go by the drawing mode alone (m_mode), not by the points so far
-  const canCloseOutline = tool("zone", "thievingzone", "rulearea", "gpoly");
-  const canUndoPoint = tool(...PCB_ARC_TOOLS, "zone", "thievingzone", "rulearea", "gpoly", "gcurve", "gline");
+  const canCloseOutline = tool("zone", "thievingzone", "viastitch", "rulearea", "gpoly");
+  const canUndoPoint = tool(...PCB_ARC_TOOLS, "zone", "thievingzone", "viastitch", "rulearea", "gpoly", "gcurve", "gline");
   const canFinishShape = tool(...PCB_ARC_TOOLS, "gcurve");
   m.item("PCB_ACTIONS::closeOutline", canCloseOutline, 200).item("ACTIONS::deleteLastPoint", canUndoPoint, 200).item("ACTIONS::finishInteractive", canFinishShape, 200).item("ACTIONS::arcPosture", arcTool, 200);
   m.check("PCB_ACTIONS::drawArcCenter", arcTool, 200).check("PCB_ACTIONS::drawArcStartEndMid", arcTool, 200).check("PCB_ACTIONS::drawArcStartEndCenter", arcTool, 200)
@@ -543,7 +563,7 @@ export function menuFor(c: MenuCtx, moduleTool: boolean): MenuDef {
   // PCB_PICKER_TOOL runs the point / item picks, Grid Origin (PCB_CONTROL::GridPlaceOrigin), Drill Origin
   // (BOARD_EDITOR_CONTROL::DrillOrigin) and Interactive Delete (PCB_CONTROL::InteractiveDelete): its own menu
   if (PCB_PICKER_TOOLS.has(c.tool)) return MENUS.pcbPicker;
-  return c.tool === "route" || c.tool === "routediff" ? MENUS.pcbRouter : c.tool === "drag" ? MENUS.basic : MENUS.pcbDrawing;
+  return c.tool === "route" || c.tool === "routediff" || c.tool === "spread" ? MENUS.pcbRouter : c.tool === "drag" ? MENUS.basic : MENUS.pcbDrawing;
 }
 
 /** One evaluated entry: CONDITIONAL_MENU::Evaluate's output before labels and availability are attached. */

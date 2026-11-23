@@ -19,7 +19,7 @@ import { spinOfNode } from "./autorotate";
 import { base64ToBytes, imageData, imageSize } from "./nodes";
 
 export interface MsgItem { title: string; value: string }
-export interface Connection { name: string; bus: boolean; netclass: string; /** the effective netclass's wire width, mm (SCH_JUNCTION::getEffectiveShape) */ wireWidth?: number; /** the bus aliases a bus group names, with their members */ aliases?: { name: string; members: string[] }[] }
+export interface Connection { name: string; bus: boolean; netclass: string; /** the effective netclass's wire width, mm (SCH_JUNCTION::getEffectiveShape) */ wireWidth?: number; /** the bus aliases a bus group names, with their members */ aliases?: { name: string; members: string[] }[]; /** the committed net chain the net is on (GetNetChainForNet), "" or absent when none */ netChain?: string }
 export interface SchMsgOpts {
   units: Units;
   /** the human-readable path of the sheet on screen ("/" on the root, "/Sub/" below) */
@@ -170,10 +170,11 @@ const PIN_ORIENT: Record<number, string> = { 0: "Right", 90: "Up", 180: "Left", 
 function pinRows(doc: KDoc, it: KItem, number: string, o: SchMsgOpts): MsgItem[] {
   const pin: SymPin | undefined = symbolPins(doc, it).find((p) => p.number === number); if (!pin) return [];
   const n = it.node, lib = libOf(doc, n), info = libUnitInfo(lib), out: MsgItem[] = [{ title: "Type", value: "Pin" }];
-  // SCH_ITEM::GetMsgPanelInfo: the parent symbol's unit and body style
-  const unit = kid(n, "unit") ? num(kid(n, "unit")![1], 1) : 1;
-  if (info.units > 1) out.push({ title: "Unit", value: info.names.get(unit) || unitLetter(unit) });
-  if (info.styles > 1) { const bs = kid(n, "body_style") || kid(n, "convert"); out.push({ title: "Body Style", value: bodyStyleDescription(lib, bs ? num(bs[1], 1) : 1) }); }
+  // SCH_ITEM::GetMsgPanelInfo when the parent symbol has several units / body styles: the pin's own (the library
+  // pin's: 0 for a pin common to all), as GetUnitDisplayName( GetUnit(), false ) and GetBodyStyleDescription( GetBodyStyle(), true )
+  const unit = pin.unit !== undefined ? pin.unit : kid(n, "unit") ? num(kid(n, "unit")![1], 1) : 1;
+  if (info.units > 1) out.push({ title: "Unit", value: unit === 0 ? "All units" : info.names.get(unit) || unitLetter(unit) });
+  if (info.styles > 1) { const bs = kid(n, "body_style") || kid(n, "convert"), style = pin.bodyStyle !== undefined ? pin.bodyStyle : bs ? num(bs[1], 1) : 1; out.push({ title: "Body Style", value: style === 0 ? "All body styles" : bodyStyleDescription(lib, style) }); }
   // SCH_PIN::GetShownName / GetType / GetShape: the assigned alternate function's when the pin has one
   const alt = pinAltFunction(doc, it, number), name = alt ? alt.name : pin.name, type = alt ? alt.type : pin.type, shape = alt ? alt.shape : pin.shape || "line";
   out.push({ title: "Name", value: unescapeString(name === "~" ? "" : name) }, { title: "Number", value: pin.number === "~" ? "" : pin.number },
@@ -283,7 +284,12 @@ function lineRows(it: KItem, o: SchMsgOpts): MsgItem[] {
   // a wire or bus whose own style is DEFAULT draws in its netclass's style (GetEffectiveLineStyle differs)
   if ((it.kind === "wire" || it.kind === "bus") && st.type === "default") out.push({ title: "Line Style", value: "from netclass" });
   else out.push(...strokeRows(n, o, true, false));
-  if (it.kind === "wire" || it.kind === "bus") out.push(...connectionRows(it, o));
+  if (it.kind === "wire" || it.kind === "bus") {
+    out.push(...connectionRows(it, o));
+    // the net's chain, after the connection info
+    const c = o.connection ? o.connection(it) : null;
+    if (c && c.netChain) out.push({ title: "Net Chain", value: unescapeString(c.netChain) });
+  }
   return out;
 }
 

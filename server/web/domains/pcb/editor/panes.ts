@@ -14,7 +14,7 @@ import { loadUnits, saveUnits, unitsAppFor } from "../../../shared/units";
 import { behindTab, bringToFront } from "./pane-tabs";
 // ================================================================ KiCad frame (the React chrome reads the store)
 // Docked panes: which are open, per editor, remembered in localStorage (kui.panes.<editor>).
-export const PANE_NAMES = ["props", "hier", "filter", "history", "peers", "comments", "chat", "appearance", "search", "netnav", "netinsp", "libtree"];
+export const PANE_NAMES = ["props", "hier", "filter", "history", "peers", "comments", "chat", "appearance", "search", "netnav", "netinsp", "libtree", "designblocks"];
 
 export const PANE_EDITOR_ONLY: Record<string, "sch" | "pcb" | undefined> = { hier: "sch", netnav: "sch", netinsp: "pcb" };
 

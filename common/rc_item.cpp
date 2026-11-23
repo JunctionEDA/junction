@@ -196,6 +196,30 @@ void RC_ITEM::GetJsonViolation( RC_JSON::VIOLATION& aViolation, UNITS_PROVIDER* 
                                                      auxItem->GetPosition().y );
         aViolation.items.emplace_back( item );
     }
+
+    // The third and fourth items of a violation that names more (ERC's multi-unit and duplicate-net
+    // pins, for one), so a report reader sees every item an exclusion is keyed on.
+    for( const KIID& id : { GetAuxItem2ID(), GetAuxItem3ID() } )
+    {
+        if( id == niluuid )
+            continue;
+
+        EDA_ITEM* extraItem = aResolver.ResolveItemById( id );
+
+        if( !extraItem )
+            continue;
+
+        RC_JSON::AFFECTED_ITEM item;
+        item.description = getItemDescription( extraItem, 1, aUnitsProvider );
+        item.uuid = extraItem->m_Uuid.AsString();
+        item.pos.x = EDA_UNIT_UTILS::UI::ToUserUnit( aUnitsProvider->GetIuScale(),
+                                                     aUnitsProvider->GetUserUnits(),
+                                                     extraItem->GetPosition().x );
+        item.pos.y = EDA_UNIT_UTILS::UI::ToUserUnit( aUnitsProvider->GetIuScale(),
+                                                     aUnitsProvider->GetUserUnits(),
+                                                     extraItem->GetPosition().y );
+        aViolation.items.emplace_back( item );
+    }
 }
 
 

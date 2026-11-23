@@ -21,6 +21,7 @@ import { ChatPane } from "./panes/Chat";
 import { SearchPane } from "./panes/Search";
 import { NetNavigatorPane } from "./panes/NetNavigator";
 import { LibrariesPane } from "./panes/Libraries";
+import { DesignBlocksPane } from "./panes/DesignBlocks";
 import { NetInspectorPane } from "./panes/NetInspector";
 import { FilterSummary } from "./panes/SelectionFilter";
 import { bringToFront, frontOf, frontTabs, groupKey, groupOf, subscribeFront } from "../../domains/pcb/editor/pane-tabs";
@@ -179,6 +180,7 @@ function paneBody(name: string): { body: ReactNode; footer?: ReactNode } | null 
     case "netnav": return { body: <NetNavigatorPane /> };
     case "netinsp": return { body: <NetInspectorPane /> };
     case "libtree": return { body: <LibrariesPane /> };
+    case "designblocks": return { body: <DesignBlocksPane /> };
     default: return null;
   }
 }

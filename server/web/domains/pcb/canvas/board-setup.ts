@@ -258,7 +258,7 @@ function replaceOrInsert(setup: SNode, key: string, text: string | null, before:
   setup.splice(at, 0, node);
 }
 const AFTER_MASK = ["solder_mask_min_width", "pad_to_paste_clearance", "pad_to_paste_clearance_ratio", "allow_soldermask_bridges_in_footprints", "tenting", "covering", "plugging", "capping", "filling", "zone_defaults", "aux_axis_origin", "grid_origin", "pcbplotparams"];
-export interface SetupEdit { maskPaste?: MaskPaste; finish?: BoardFinish; dash?: DashRatios; copper?: string[]; boardThickness?: number; drillProfile?: DrillProfile; stackup?: string; vias?: ViaProtection }
+export interface SetupEdit { maskPaste?: MaskPaste; finish?: BoardFinish; dash?: DashRatios; copper?: string[]; boardThickness?: number; drillProfile?: DrillProfile; stackup?: string; vias?: ViaProtection; /** (zone_defaults …), null to drop it */ zoneDefaults?: string | null }
 /**
  * A copy of the (setup …) node with the edits laid in, in formatSetup's order and omission rules (a zero
  * minimum web width, paste clearance or ratio is not written).  `copper` re-syncs the stackup's copper and
@@ -285,6 +285,8 @@ export function editSetup(setup: SNode | null, e: SetupEdit): SNode {
     replaceOrInsert(out, "capping", `(capping ${yn(v.cap)})`, AFTER_MASK.slice(8));
     replaceOrInsert(out, "filling", `(filling ${yn(v.fill)})`, AFTER_MASK.slice(9));
   }
+  // formatSetup: (zone_defaults (property (layer …) (hatch_position (xy …))) …) after the via protection, before aux_axis_origin
+  if (e.zoneDefaults !== undefined) replaceOrInsert(out, "zone_defaults", e.zoneDefaults, AFTER_MASK.slice(10));
   if (e.drillProfile) {
     // formatDrillSymbolProfile: written after grid_origin, before the plot parameters; a default profile writes nothing
     const old = kid(out, "drill_symbol_profile") as SNode | null;
@@ -354,6 +356,14 @@ export const EMBEDDED_FILE_PROP = "embedded_file";
 export function embeddedFilesChange(files: string[]): KChange {
   return { id: "board-setup", kind: "MODIFIED", typeName: BOARD_SETUP_TYPE, properties: files.map((v) => ({ name: EMBEDDED_FILE_PROP, after: { type: "sexpr", v } })) };
 }
+/**
+ * The board's (net_chains …) (after the items) is a section as well: a property "net_chains" carries the whole section,
+ * or "" when the board has no chains left (PCB_IO_KICAD_SEXPR writes none then).
+ */
+export const NET_CHAINS_PROP = "net_chains";
+export function netChainsChange(text: string): KChange {
+  return { id: "board-setup", kind: "MODIFIED", typeName: BOARD_SETUP_TYPE, properties: [{ name: NET_CHAINS_PROP, after: { type: "sexpr", v: text } }] };
+}
 /** The (file …) `file` into `files` (an (embedded_files …) node): in place of the one of its name, else last. */
 export function putEmbeddedFile(files: SNode, file: SNode): void {
   const nameOf = (f: SNode): string => kidStr(f, "name");
@@ -391,6 +401,11 @@ export function applyBoardSetup(doc: KDoc, change: KChange): boolean {
     const f = parse(p.after.v) as SNode | null; if (!f || f[0] !== "file") continue;
     if (!d.embeddedFiles) d.embeddedFiles = ["embedded_files"];
     putEmbeddedFile(d.embeddedFiles, f);
+  }
+  for (const p of change.properties || []) {
+    if (p.name !== NET_CHAINS_PROP || !p.after || typeof p.after.v !== "string") continue;
+    const node = p.after.v.trim() ? parse(p.after.v) as SNode | null : null;
+    doc.netChainsNode = node && node[0] === "net_chains" ? node : null;
   }
   d.boardSetup = applyHeaderChange(d.boardSetup || { general: null, layers: null, setup: null, version: 0 }, change);
   for (const p of change.properties || []) {
@@ -444,8 +459,16 @@ export function validateViaParameters(diameter: number, drill: number): { messag
 
 // ---------------------------------------------------------------- the physical stackup, edited (PANEL_SETUP_BOARD_STACKUP)
 /** One stackup item as PANEL_SETUP_BOARD_STACKUP edits it: a board layer, or a dielectric with its sub-layers. */
-export interface StackupLayer { name: string; type: string; color?: string; thickness?: number; locked?: boolean; material?: string; epsilonR?: number; lossTangent?: number; subs?: StackupSub[] }
-export interface StackupSub { thickness: number; locked?: boolean; material: string; epsilonR: number; lossTangent: number; color?: string }
+export interface StackupLayer { name: string; type: string; color?: string; thickness?: number; locked?: boolean; material?: string; epsilonR?: number; lossTangent?: number; subs?: StackupSub[];
+  /** a dielectric's (spec_frequency …) in Hz and (dielectric_model …): DIELECTRIC_PRMS::m_SpecFreq / m_DielectricModel */
+  specFreq?: number; dielectricModel?: DielectricModel }
+export interface StackupSub { thickness: number; locked?: boolean; material: string; epsilonR: number; lossTangent: number; color?: string; specFreq?: number; dielectricModel?: DielectricModel }
+/** DIELECTRIC_MODEL: CONSTANT, DJORDJEVIC_SARKAR (the file's constant / djordjevic_sarkar) */
+export type DielectricModel = "constant" | "djordjevic_sarkar";
+/** The first file version that can say (spec_frequency …) and (dielectric_model …). */
+export const SPEC_FREQ_VERSION = 20260511;
+const dielModel = (g: SNode): DielectricModel => (kidStr(g, "dielectric_model") === "djordjevic_sarkar" ? "djordjevic_sarkar" : "constant");
+const specFreqOf = (g: SNode): number => (kid(g, "spec_frequency") ? kidNum(g, "spec_frequency", 1e9) : 1e9);   // DIELECTRIC_PRMS: 1e9 for FR4 when the file does not say
 /** The (stackup …) node's layers as editable items. */
 export function stackupLayers(setup: SNode | null): StackupLayer[] {
   const st = setup ? (kid(setup, "stackup") as SNode | null) : null; if (!st) return [];
@@ -457,15 +480,26 @@ export function stackupLayers(setup: SNode | null): StackupLayer[] {
     const g0 = groups[0], th = kid(g0, "thickness") as SNode | null;
     const item: StackupLayer = { name, type: kidStr(g0, "type"), color: kidStr(g0, "color") || undefined, thickness: th ? num(th[1], 0) : undefined, locked: !!th && th.includes("locked"),
       material: kidStr(g0, "material") || undefined, epsilonR: kid(g0, "epsilon_r") ? kidNum(g0, "epsilon_r") : undefined, lossTangent: kid(g0, "loss_tangent") ? kidNum(g0, "loss_tangent") : undefined };
-    if (/^dielectric \d+$/.test(name)) item.subs = groups.slice(1).map((g) => { const t = kid(g, "thickness") as SNode | null; return { thickness: t ? num(t[1], 0) : 0, locked: !!t && t.includes("locked"), material: kidStr(g, "material"), epsilonR: kidNum(g, "epsilon_r", 1), lossTangent: kidNum(g, "loss_tangent", 0), color: kidStr(g, "color") || undefined }; });
+    if (/^dielectric \d+$/.test(name)) {
+      item.specFreq = specFreqOf(g0); item.dielectricModel = dielModel(g0);
+      item.subs = groups.slice(1).map((g) => { const t = kid(g, "thickness") as SNode | null; return { thickness: t ? num(t[1], 0) : 0, locked: !!t && t.includes("locked"), material: kidStr(g, "material"), epsilonR: kidNum(g, "epsilon_r", 1), lossTangent: kidNum(g, "loss_tangent", 0), color: kidStr(g, "color") || undefined, specFreq: specFreqOf(g), dielectricModel: dielModel(g) }; });
+    }
     out.push(item);
   }
   return out;
 }
 /** BOARD_STACKUP::FormatBoardStackup: the (stackup …) text for edited layers, with the finish and impedance flags. */
-export function stackupText(layers: StackupLayer[], finish: BoardFinish, impedanceControlled: boolean, castellated = false): string {
+export function stackupText(layers: StackupLayer[], finish: BoardFinish, impedanceControlled: boolean, castellated = false, fileVersion = 0): string {
   const parts: string[] = ["(stackup"];
   const f = (v: number): string => fmt(v);
+  // a dielectric's frequency and model; before 20260511 a file cannot say them, so a constant model at the FR4
+  // frequency (what an older file means anyway) is left out there
+  const freq = (o: { specFreq?: number; dielectricModel?: DielectricModel; material?: string }): string => {
+    if (o.specFreq === undefined || !o.material) return "";
+    const model = o.dielectricModel || "constant";
+    const implied = fileVersion > 0 && fileVersion < SPEC_FREQ_VERSION && model === "constant" && (o.specFreq === 1e9 || o.specFreq === 0);
+    return implied ? "" : ` (spec_frequency ${f(o.specFreq)}) (dielectric_model ${model})`;
+  };
   for (const l of layers) {
     let t = `(layer ${quote(l.name)} (type ${quote(l.type)})`;
     if (l.color) t += ` (color ${quote(l.color)})`;
@@ -473,7 +507,8 @@ export function stackupText(layers: StackupLayer[], finish: BoardFinish, impedan
     if (l.material) t += ` (material ${quote(l.material)})`;
     if (l.epsilonR !== undefined) t += ` (epsilon_r ${f(l.epsilonR)})`;
     if (l.lossTangent !== undefined) t += ` (loss_tangent ${f(l.lossTangent)})`;
-    for (const s of l.subs || []) t += ` addsublayer${s.color ? ` (color ${quote(s.color)})` : ""} (thickness ${f(s.thickness)}${s.locked ? " locked" : ""}) (material ${quote(s.material)}) (epsilon_r ${f(s.epsilonR)}) (loss_tangent ${f(s.lossTangent)})`;
+    t += freq(l);
+    for (const s of l.subs || []) t += ` addsublayer${s.color ? ` (color ${quote(s.color)})` : ""} (thickness ${f(s.thickness)}${s.locked ? " locked" : ""}) (material ${quote(s.material)}) (epsilon_r ${f(s.epsilonR)}) (loss_tangent ${f(s.lossTangent)})${freq(s)}`;
     parts.push(t + ")");
   }
   if (finish.copperFinish && finish.copperFinish !== "None") parts.push(`(copper_finish ${quote(finish.copperFinish)})`);
@@ -523,4 +558,4 @@ export function adjustDielectrics(layers: StackupLayer[], target: number): strin
 }
 
 export const boardSetup = { boardHeader, layerRows, layersText, setCopperCount, copperNames, layerNameError, defaultLayerName, modernLayerIds, stackupRows, stackupThickness, boardFinish, maskPaste, viaProtection, dashRatios,
-  editSetup, sectionText, setupWithPlotParams, validateDesignRules, designRuleWarnings, validateViaParameters, unitText, stackupLayers, stackupText, setupWithStackup, stackupLayersThickness, stackupFixedThickness, adjustDielectrics, drillProfile, DRILL_GROUP_KEYS, DRILL_MARK_POLICIES, DRILL_PROFILE_DEFAULT, readPlotParams, plotParamsText, boardSetupChange, embeddedFilesChange, putEmbeddedFile, EMBEDDED_FILE_PROP, applyHeaderChange, applyBoardSetup, COPPER_FINISHES, COPPER_TYPES, USER_TYPES, BOARD_SETUP_TYPE };
+  editSetup, sectionText, setupWithPlotParams, validateDesignRules, designRuleWarnings, validateViaParameters, unitText, stackupLayers, stackupText, setupWithStackup, stackupLayersThickness, stackupFixedThickness, adjustDielectrics, drillProfile, DRILL_GROUP_KEYS, DRILL_MARK_POLICIES, DRILL_PROFILE_DEFAULT, readPlotParams, plotParamsText, boardSetupChange, embeddedFilesChange, putEmbeddedFile, EMBEDDED_FILE_PROP, netChainsChange, NET_CHAINS_PROP, applyHeaderChange, applyBoardSetup, COPPER_FINISHES, COPPER_TYPES, USER_TYPES, BOARD_SETUP_TYPE };

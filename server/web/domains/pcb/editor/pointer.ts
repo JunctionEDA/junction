@@ -21,6 +21,8 @@ export function openSelectionProperties() {
   if (!E.kdoc || !window.KDialogs) return false;
   for (const f of propertiesHooks) if (f()) return true;   // a table cell selection: Table Cell Properties
   const ctx = toolCtx();
+  // DRAWING_TOOL's loops take PCB_ACTIONS::properties for the item being drawn
+  if (!isSch() && CollabTools.pcb && CollabTools.pcb.draftProperties && CollabTools.pcb.draftProperties(ctx)) return true;
   if (!isSch() && CollabTools.pcb && CollabTools.pcb.tunerProperties && CollabTools.pcb.tunerProperties(ctx)) return true;
   if (E.selField) { const it = E.kdoc.items.get(E.selField.id); if (it) { KDialogs!.openField(ctx, it, E.selField.name); return true; } }
   // SCH_EDIT_TOOL::Properties: one pin is promoted to its parent symbol; several pins (Front() an SCH_PIN) open nothing

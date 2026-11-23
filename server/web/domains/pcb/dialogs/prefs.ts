@@ -28,6 +28,7 @@ export interface SnapPrefs { grid: "always" | "withGrid" | "never"; objectGeomet
 export interface GridPrefs { sizes: number[]; /** GRID::y of each grid (mm), beside sizes (GRID::x) */ ys: number[]; names?: string[]; last?: number; fast1: number; fast2: number; overrides: GridOverrides; axes?: boolean }
 import { clampGal, galDefaults, type GalPrefs } from "./gal-options";
 import { isDarkBackground, type UserSchTheme } from "./color-themes";
+import { infoBar, messageBox, h } from "../editor/pcbdialogs/ui";
 export { GRID_MIN_SPACING_RANGE, GRID_THICKNESS_CHOICES, clampGal, type GalPrefs } from "./gal-options";
 export interface Prefs {
   /**
@@ -309,6 +310,35 @@ function applyColorTheme(p: Prefs): void {
   if (KiCadCanvas.setSchFormatting({ overrideItemColors: !!(ut && ut.overrideItemColors) }, E.kdoc && E.kdoc.type === "sch" ? E.kdoc : null)) requestRender();
   // with "follow the app's dark mode" on, a UI theme change (menu, other tab, the system) swaps the sheet too
   if (!followingUi) { followingUi = true; subscribeTheme(() => applyColorTheme(prefs())); }
+}
+
+/** COLOR_SETTINGS::GetOverrideSchItemColors: the schematic colour theme on show has "Override individual item colors" on. */
+export function overrideSchItemColors(p: Prefs = prefs()): boolean {
+  const want = schThemeFor(p), ut = (p.schColors.user || []).find((u) => u.id === want);
+  return !!(ut && ut.overrideItemColors);
+}
+/**
+ * The schematic item dialogs' m_infoBar->ShowMessage( "Note: individual item colors overridden in Preferences." ) when
+ * the theme overrides item colours (text box, shape, sheet, table and table cell properties).
+ */
+export function itemColorsOverriddenNotice(body: HTMLElement): void {
+  if (!overrideSchItemColors()) return;
+  const bar = infoBar(); body.prepend(bar.el); bar.show("Note: individual item colors overridden in Preferences.");
+}
+/**
+ * DIALOG_SHEET_PROPERTIES::TransferDataFromWindow: a border or background colour changed while the theme overrides item
+ * colours warns (KIDIALOG KD_WARNING with its detail text and "Do not show again").
+ */
+const SHEET_COLOR_NOTE_KEY = "kc.dontshow.sheet-colors-overridden";
+export function sheetColorsOverriddenWarning(): void {
+  if (!overrideSchItemColors()) return;
+  try { if (localStorage.getItem(SHEET_COLOR_NOTE_KEY)) return; } catch (e) { /* no storage: always shown */ }
+  let cb: HTMLInputElement | null = null;
+  const ov = messageBox("Warning", "Note: item colors are overridden in the current color theme.", [{ label: "OK", fn: () => { if (cb && cb.checked) { try { localStorage.setItem(SHEET_COLOR_NOTE_KEY, "1"); } catch (e) { /* no storage */ } } } }]);
+  const body = ov && ov.querySelector(".kd-body"); if (!body) return;
+  body.append(h("p", { style: "margin:4px 0 6px;white-space:pre-wrap", "data-k": "detail" }, "To see individual item colors uncheck 'Override individual item colors'\nin Preferences > Schematic Editor > Colors."));
+  cb = h("input", { type: "checkbox", "data-k": "dont-show" }) as HTMLInputElement;
+  body.append(h("label", { style: "display:flex;gap:6px;align-items:center;margin-top:8px" }, cb, "Do not show again"));
 }
 
 /** The pitch the cursor snaps to right now: the grid override of the active tool (or of the item being dragged), else the current grid. */

@@ -5,11 +5,12 @@
 // "Clear Annotation" resets them to "R?".  Recurse into subsheets takes in the sheets below the current one, Regroup
 // symbol units (with Reset) drops the locked unit sets, and the message panel lists AnnotateSymbols' report lines.  Other sheets are edited through their own documents, each step on
 // that sheet's undo list, as Find and Replace's Replace All does.
-import { E, appState, pushUndoFor, toast, toolCtx } from "./editor";
+import { E, appState, isSch, pushUndoFor, toast, toolCtx } from "./editor";
+import { commitObservers } from "../editor/tools";
 import { KD, checkbox, h, textInput, type DlgApi } from "./dom";
 import { obj, projectDocs, projectJson, readDoc, saveProject, sub, submitDocOp } from "./project";
 import { effectiveTheme } from "../../../shared/theme";
-import { subsheetFiles, annotateSettingsFromProject, annotateProjectChanges } from "./annotate-logic";
+import { subsheetFiles, annotateSettingsFromProject, annotateProjectChanges, trackerToStore } from "./annotate-logic";
 import { currentInstance, instancePage, loadSheets, netMap } from "../editor/schnets";
 import { messageBox, reportPanel, type ReportLine, infoBar } from "../editor/pcbdialogs/ui";
 export { subsheetFiles };
@@ -245,6 +246,21 @@ async function storeReusedSheetMode(): Promise<void> {
 async function storeUsedDesignators(used: string): Promise<void> {
   await saveProject((pro) => { sub(pro, "schematic").used_designators = used; }, "annotation options");
 }
+/**
+ * The designators placing, pasting and repeating handed out (REFDES_TRACKER::Insert through GetNextRefDes) written to
+ * the project with the rest of SCHEMATIC_SETTINGS, so a later session (or a collaborator) still bars them.
+ */
+let trackerSaving: Promise<void> | null = null;
+async function storeTrackedDesignators(): Promise<void> {
+  const S = sch(); if (!S || !S.state.refTracker || E.viewOnly || !isSch()) return;
+  while (trackerSaving) await trackerSaving;
+  const sc = obj(obj(projectJson()).schematic);
+  const text = trackerToStore(typeof sc.used_designators === "string" ? sc.used_designators : "", S.state.refTracker.used, S.serializeTracker, S.deserializeTracker);
+  if (text === null) return;
+  trackerSaving = storeUsedDesignators(text).catch((e: Error) => { console.warn("used designators:", e.message); }).finally(() => { trackerSaving = null; });
+  await trackerSaving;
+}
+commitObservers.push((phase) => { if (phase === "after") void storeTrackedDesignators(); });
 /**
  * DIALOG_ANNOTATE( parent, message ).  With a message (SCH_EDIT_FRAME::ModalAnnotate, from ReadyToNetlist) the dialog
  * is modal over whatever asked, its infobar shows the message, "Entire schematic" is ticked and that radio disabled.

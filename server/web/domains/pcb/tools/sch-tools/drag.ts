@@ -604,12 +604,12 @@ export function endDrag(ctx: SchCtx, commit: boolean) {
   const done = () => { S.docGen++; S.autoCursor = null; if (d.restoreMode) { S.dragMode = d.restoreMode; announceModes(ctx); } ctx.requestRender(); };
   if (d.brk) { endBreak(ctx, d, commit); done(); return; }
   if (d.local) {                                // a paste / duplicate in flight: never committed yet
-    if (!commit) { dropLocal(ctx, d); done(); return; }
+    if (!commit) { dropLocal(ctx, d); done(); if (d.after) d.after(false); return; }
     const changes = dragChanges(ctx, d, dx, dy, true);
     for (const id of d.local) ctx.doc.items.delete(id);
     if (changes.length) ctx.commit(changes, d.label || "Paste");
     setSelectionIds(ctx, d.hover ? [] : Array.from(d.local).filter((id) => ctx.doc.items.has(id)));   // SetIsHover( m_duplicateIsHoverSelection )
-    done(); return;
+    done(); if (d.after) d.after(true); return;
   }
   const turned = !!d.mapPt;
   if (!commit || (!turned && (!d.moved || (!dx && !dy)))) { restorePristine(doc, d); done(); return; }

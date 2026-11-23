@@ -11,9 +11,11 @@ import { exportCmpFile, generateBomLegacy, generateD356, generateFootprintReport
 import { openFootprintFields } from "./fp-fields";
 import { clearDrcMarkers, drcReport, excludeMarker, nextMarker, openBoardStatistics, openClearance, openConstraints, openDiffFootprint, openFootprintAssociations, openDrc, prevMarker } from "./inspect";
 import { showPane } from "../panes";
-import { fpFieldDialog, newTextDialog, newZoneDialog, openZoneManager, pcbItemDialog } from "./item-props";
+import { fpFieldDialog, newShapeDialog, newTextDialog, newZoneDialog, openZoneManager, pcbItemDialog } from "./item-props";
 import { tracksOnly, trackViaDialog } from "./track-via";
 import { newTextBoxDialog } from "./textbox";
+import { newDimensionDialog } from "./dimension";
+import { convertSettingsDialog } from "./convert";
 import { newBarcodeDialog } from "./barcode";
 import { newTableDialog } from "./table";
 import { createArrayDialog } from "./array";
@@ -32,6 +34,8 @@ import { openReannotate } from "./reannotate";
 import { openUpdatePcb, projectNetlist, updatePcbFromSchematicEditor } from "./update-pcb";
 import { noteCommit, runZoneFill, zoneFillAll, zoneFillSelected } from "./zonefill";
 import { commitObservers, toolCtx } from "../tools";
+import { installBoardCommitHooks } from "./board-commit";
+import { clearStitchViaExclusions, excludeStitchVia, newViaStitchDialog } from "./via-stitch";
 import { openVertexEditor } from "./vertex-editor";
 
 type Run = (ctx: ToolCtx) => void | boolean;
@@ -52,7 +56,12 @@ export function installPcbDialogs(): void {
   installTransformDialogs();   // Move Item, Position Relative, Swap Layers, Cleanup Tracks and Vias   // DIALOG_PAD_PROPERTIES in place of the module's short form
   Object.assign(CollabTools.pcb as object, { drcReport, projectNetlist });   // the DRC dialog's run and the project's netlist as data (plugins' kicad-cli)
   const nd = (CollabTools.pcb as ToolModule & { setNewItemDialogs?(d: Record<string, unknown>): void }).setNewItemDialogs;
-  if (nd) nd({ barcode: newBarcodeDialog, gr_text: newTextDialog, gr_text_box: newTextBoxDialog, table: newTableDialog, zone: newZoneDialog });   // Add Text, Draw Text Box and Draw Zone / Rule Area open their properties dialog first
+  // CONVERT_TOOL's Conversion Settings dialog
+  const cd = (CollabTools.pcb as ToolModule & { setConvertDialogs?(d: { settings?: typeof convertSettingsDialog }): void }).setConvertDialogs;
+  if (cd) cd({ settings: convertSettingsDialog });
+  if (nd) nd({ barcode: newBarcodeDialog, gr_text: newTextDialog, gr_text_box: newTextBoxDialog, table: newTableDialog, zone: newZoneDialog, viaStitch: newViaStitchDialog, shape: newShapeDialog, dimension: newDimensionDialog });   // Add Text, Draw Text Box and Draw Zone / Rule Area open their properties dialog first
+  action("excludeStitchVia", "Exclude From Stitching", "", excludeStitchVia);   // VIA_STITCH_TOOL::ExcludeStitchVia
+  action("clearStitchViaExclusions", "Clear Via Stitching Exclusions", "", clearStitchViaExclusions);
   action("createArray", "Create Array...", "", (ctx) => { createArrayDialog(ctx); });   // PCB_ACTIONS::createArray (ARRAY_TOOL)
   action("boardSetup", "Board Setup...", "", (ctx) => { void openBoardSetup(ctx); });
   action("zonesManager", "Zone Manager...", "", (ctx) => { openZoneManager(ctx); });   // GLOBAL_EDIT_TOOL::ZonesManager (Tools > Zone Manager...)
@@ -107,6 +116,7 @@ export function installPcbDialogs(): void {
   action("zoneFillAll", "Fill All Zones", "B", zoneFillAll);
   action("zoneFill", "Draft Fill Selected Zone(s)", "", zoneFillSelected);
   (window as unknown as { PcbZoneFill: unknown }).PcbZoneFill = { fillAll: zoneFillAll, fillSelected: zoneFillSelected, run: runZoneFill };
+  installBoardCommitHooks();
   commitObservers.push((phase, changes, label) => noteCommit(phase, changes as KChange[], label, () => toolCtx({}) as ToolCtx));
 }
 /** The schematic editor's Tools > Update PCB from Schematic… (F8) opens the board and runs the same dialog there. */

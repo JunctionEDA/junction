@@ -167,7 +167,7 @@ test("erc: the dialog's own wiring", () => {
   assert.ok(!/No violations\. Run ERC to check the schematic\./.test(t) && !/No violations of the shown severities\./.test(t), "KiCad shows no empty-list text");
   assert.ok(!/toast\(\(all\.length \? `ERC:/.test(t), "the result is not a toast");
   assert.ok(/if \(nb && nb\.index\(\) !== 0\) \{ refresh\(\); return; \}/.test(t), "Delete Marker acts on the Violations page only");
-  assert.ok(/close\.textContent = "Cancel"/.test(t) && /if \(running\) \{ cancelled = true; return false; \}/.test(t));
+  assert.ok(/close\.textContent = "Cancel"/.test(t) && /if \(running\) \{ cancelled = true; (?:if \(abort\) abort\.abort\(\); )?return false; \}/.test(t));
   assert.ok(/It will be excluded from the \$\{listName\} list/.test(t) && /Violation severities can also be edited in Schematic Setup/.test(t) && /Open the Schematic Setup dialog/.test(t));
   assert.ok(/\{ label: "Error", check: true, checked: cur === "error"/.test(t) && /\{ label: "Ignore", check: true, checked: cur === "ignore"/.test(t), "the ignored tests' severity menu");
   assert.ok(/Failed to create file '\$\{name\}'\./.test(t), "a report that cannot be written is an error box");

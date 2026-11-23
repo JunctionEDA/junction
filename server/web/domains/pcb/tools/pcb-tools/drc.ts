@@ -1,21 +1,25 @@
 // pcb-tools/drc.ts — design settings and the DRC subset.
 import { copperCtx, sliverMarkers } from "./drc-sliver";
+import { viaStitchOverlapMarkers } from "./via-stitch";
 import { connectionWidthMarkers } from "./drc-connwidth";
 import type { Box, Conductor, CopperShape, DesignSettings, DesignSource, DrcMarker, NetclassRules, BoardDoc, PolyShape, Pt } from "./types";
 import { arcPoints, boxGrid, boxesTouch, collisionPoint, nearestPoints, firstEdgeConflict, polysOverlap, shapeBBox, shapeGap, shareLayer, viaLayers } from "./distances";
-import { netOf } from "./nets";
+import { netChainOf, netOf } from "./nets";
 import { footprintCheckMarkers } from "./drc-footprints";
+import { physicalClearanceMarkers } from "./drc-physical";
 import { pointInPoly } from "./hit";
 import { netlist, ratsnest } from "./netlist";
 import { K } from "./state";
-import { boardElements } from "./drc-silk";
+import { boardElements, setupOf } from "./drc-silk";
+import { viaStackMarkers } from "./drc-via-stack";
 import { DRC_EPS, EPS } from "./transforms";
 import { isList, layerDefaults, layerOf, pt, r6, rotator, widthOf } from "./util";
 import { messageText } from "../../../../shared/units";
 import type { Units } from "../../../../shared/store";
-import { evalRuleConstraint, parseDru, ruleClearance } from "./dru";
+import { diffPairMarkers, evalRuleConstraint, parseDru, ruleClearance } from "./dru";
 import { assertionMarkers, disallowMarkers, ruleItems, sizeMarkers, trackAngleMarkers } from "./drc-rules";
 import type { DruRule } from "./dru";
+import { missingTuningProfileMarkers, netTuningProfileName, tuningProfileRules } from "./length-delay";
 import { moreDrcMarkers } from "./drc-more";
 import { matchDpSuffix } from "./diffpair";
 import { silkMaskMarkers } from "./drc-silk";
@@ -50,9 +54,12 @@ export function designSettings(src: string | DesignSource | DesignSettings | nul
       ["min_through_hole_diameter", "minThroughDrill"], ["min_microvia_diameter", "minMicroViaDiameter"], ["min_microvia_drill", "minMicroViaDrill"], ["min_via_annular_width", "minViaAnnular"],
       ["min_hole_clearance", "holeClearance"], ["min_copper_edge_clearance", "edgeClearance"], ["min_hole_to_hole", "minHoleToHole"], ["min_text_height", "minTextHeight"],
       ["min_text_thickness", "minTextThickness"], ["min_silk_line_width", "minSilkLineWidth"], ["min_silk_clearance", "minSilkClearance"], ["solder_mask_to_copper_clearance", "maskToCopperClearance"], ["min_resolved_spokes", "minResolvedSpokes"]]) take(key, prop);
+    if (typeof (rules as Record<string, unknown>).use_height_for_length_calcs === "boolean") s.useHeightForLengthCalcs = (rules as Record<string, unknown>).use_height_for_length_calcs;   // m_UseHeightForLengthCalcs
   }
+  const tp = (src as { tuning_profiles?: { tuning_profiles_impedance_geometric?: unknown } }).tuning_profiles; if (tp && Array.isArray(tp.tuning_profiles_impedance_geometric)) s.tuningProfiles = tp.tuning_profiles_impedance_geometric;   // TUNING_PROFILES (length-delay.ts reads them)
   const dflt = src.board && src.board.design_settings && src.board.design_settings.defaults; if (dflt) layerDefaults(dflt);   // Board Setup > Text & Graphics > Defaults: what a new item gets
   const ns = src.net_settings;
+  if (ns && ns.net_chain_classes && typeof ns.net_chain_classes === "object") { const m: Record<string, string> = {}; for (const [k, v] of Object.entries(ns.net_chain_classes as Record<string, unknown>)) if (typeof v === "string" && v) m[k] = v; s.netChainClasses = m; }
   if (ns && isList(ns.classes)) {
     // a class that leaves a value out takes the Default class's (NETCLASS composite: fields unset in every assigned class come from Default)
     const classes = (ns.classes as (Partial<NetclassRules> & { name?: string } | null)[]).filter((c): c is Partial<NetclassRules> & { name: string } => !!c && !!c.name);
@@ -93,6 +100,21 @@ export function netclassConstituents(s: DesignSettings, net: string | null | und
     const dr = raw.Default;
     if (NETCLASS_PARAMS.some((k) => !has(k)) || (dr && dr.tuning_profile && !out.some((n) => raw[n] && raw[n].tuning_profile))) out.push("Default");
   }
+  return out;
+}
+/**
+ * DRC_TEST_PROVIDER_NET_CHAIN_TUNING_PROFILES: the nets of a chain must share one tuning profile (their effective
+ * netclasses'); a chain with several is reported once, with no position and no items.
+ */
+export function netChainTuningProfileMarkers(doc: BoardDoc, s: DesignSettings): DrcMarker[] {
+  const byChain = new Map<string, Set<string>>();
+  for (const net of ((doc.nets || new Map()) as Map<number, string>).values()) {
+    const chain = netChainOf(doc, net); if (!chain) continue;
+    let set = byChain.get(chain); if (!set) { set = new Set(); byChain.set(chain, set); }
+    set.add(netTuningProfileName(s, net));
+  }
+  const out: DrcMarker[] = [];
+  for (const [chain, profiles] of byChain) if (profiles.size !== 1) out.push(marker("net_chain_tuning_profiles", "error", 0, 0, `Net chain ${chain} nets have multiple tuning profiles assigned`, []));
   return out;
 }
 /** NETCLASS::GetHumanReadableName of the net's effective class: "A", "A and B", "A, B and C", "A, B and N more". */
@@ -265,6 +287,26 @@ export const boxCenter = (a: Box, b: Box) => [(Math.max(a[0], b[0]) + Math.min(a
 export const FOOTPRINT_OWN = new Set(["clearance", "shorting_items", "hole_clearance", "hole_to_hole", "holes_co_located", "solder_mask_bridge", "silk_over_copper", "silk_overlap", "malformed_courtyard", "missing_courtyard", "pth_inside_courtyard", "npth_inside_courtyard", "isolated_copper"]);
 type DrcOpts = { unconnected?: boolean; outline?: boolean; rules?: DruRule[] | string | null; footprintOwn?: boolean; allTrackErrors?: boolean; units?: Units };
 /** `opts.units`: the user units the messages are written in (DRC_ENGINE::RunTests( aUnits )), mm by default. */
+/**
+ * The error legend's path (PCB_MARKER::SetPath) of a violation reported without one (kicad-cli's JSON report has the
+ * positions but not the geometry): DRC_TEST_PROVIDER_COPPER_CLEARANCE's reportTwoPointGeometry for crossing tracks and
+ * shorting items (the marker position: an X), and reportTwoShapeGeometry for a clearance between two copper items
+ * (their effective shapes' nearest points on the marker layer, the marker position when they touch).  Null where the
+ * report names items whose copper is not known here.
+ */
+export function markerPath(doc: BoardDoc, m: { code: string; x: number; y: number; layer?: string; kiids?: string[] }): [Pt, Pt] | null {
+  const pos: Pt = [m.x, m.y];
+  if (m.code === "tracks_crossing" || m.code === "shorting_items") return [pos, pos];
+  if (m.code !== "clearance" || !m.kiids || m.kiids.length !== 2 || !m.layer) return null;
+  const nl = netlist(doc);
+  const uidOf = (c: Conductor): string => (c.kind === "pad" ? K.uuidOf(c.pad.node) || c.id : K.uuidOf(c.item.node) || c.id);
+  const find = (u: string): Conductor | undefined => nl.conductors.find((c) => c.kind !== "zone" && uidOf(c) === u && c.layers.has(m.layer!));
+  const a = find(m.kiids[0]), b = find(m.kiids[1]); if (!a || !b) return null;
+  const unfl = unflashedLayers(nl.conductors, doc.copper && doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"]);
+  const shapeOn = (c: Conductor): CopperShape => { const u = unfl.get(c); return (u && u.get(m.layer!)) || c.shape; };
+  return shapeGap(shapeOn(a), shapeOn(b)) > 0 ? nearestPoints(shapeOn(a), shapeOn(b)) : [pos, pos];
+}
+
 export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | string | null | undefined, opts?: DrcOpts) {
   const was = setDrcUnits(opts && opts.units);
   try { return drcRun(doc, settings, opts); } finally { setDrcUnits(was); }
@@ -300,7 +342,9 @@ function drcRun(doc: BoardDoc, settings: DesignSettings | DesignSource | string 
   };
   // the custom rules' clearance constraints (.kicad_dru) take over from the netclass clearance where they match
   const rules = typeof opts.rules === "string" ? parseDru(opts.rules).rules : opts.rules || [];
-  const clrRules = rules.filter((r) => r.constraints.some((k) => k.type === "clearance" && k.min != null));
+  // the netclasses' tuning profile rules (DRC_ENGINE::loadImplicitRules), below the custom rules
+  const tuning = tuningProfileRules(s, doc), withTuning = (type: string) => [...tuning.filter((r) => r.constraints.some((k) => k.type === type)), ...rules];
+  const clrRules = withTuning("clearance").filter((r) => r.constraints.some((k) => k.type === "clearance" && k.min != null));
   const ruleMax = Math.max(0, ...clrRules.map((r) => r.constraints.find((k) => k.type === "clearance")!.min || 0));
   const maxClr = Math.max(s.clearance, s.minClearance || 0, ...Object.values(s.netclasses).map((n) => n.clearance || 0), s.edgeClearance, ruleMax);
   const ruleItem = (c: Conductor, layer: string) => (c.kind === "pad" ? { kind: c.kind, node: c.pad.node, parent: c.item, layer, shape: c.shape } : { kind: c.kind, node: c.item.node, item: c.item, layer, shape: c.shape });
@@ -643,7 +687,10 @@ function drcRun(doc: BoardDoc, settings: DesignSettings | DesignSource | string 
     if (s.severities.connection_width !== "ignore") out.push(...connectionWidthMarkers(doc, s, rules, nl.conductors, cc));
   }
   // track width, via diameter, hole size, annular width, segment length and angle through the rules (drc-rules.ts)
-  out.push(...sizeMarkers(doc, s, rules, conds), ...trackAngleMarkers(doc, s, rules, conds));
+  out.push(...sizeMarkers(doc, s, withTuning("track_width"), conds), ...trackAngleMarkers(doc, s, rules, conds));
+  // DRC_TEST_PROVIDER_MISC::testMissingTuningProfiles; the tuning profiles' diff pair gaps (the custom rules' own run adds them when there are some)
+  out.push(...missingTuningProfileMarkers(s));
+  if (!rules.length && tuning.some((r) => r.constraints.some((k) => k.type === "diff_pair_gap"))) out.push(...diffPairMarkers(doc, s, []));
   if (rules.length) { const items = ruleItems(doc); out.push(...disallowMarkers(doc, s, rules, items), ...assertionMarkers(doc, s, rules, items)); }
   // courtyards
   // the courtyard cache is deflated by maxError (5 um) so touching courtyards stay legal
@@ -697,6 +744,26 @@ function drcRun(doc: BoardDoc, settings: DesignSettings | DesignSource | string 
       }
     }
   }
+  // DRC_TEST_PROVIDER_CONNECTIVITY: a track or arc connected to a pad or via that is backdrilled or post-machined on the
+  // track's layer (PAD / PCB_VIA::IsBackdrilledOrPostMachined), once per track, at the end that lies on the item
+  if ((s.severities.track_on_post_machined_layer || "error") !== "ignore") {
+    const PM = (K as unknown as { padModel?: { machiningKnockout(doc: BoardDoc, n: SNode, layer: string): number } }).padModel;
+    const nodeOf = (c: Conductor): SNode => (c.kind === "pad" ? c.pad.node : c.item.node);
+    const machined = conds.filter((c) => (c.kind === "pad" || c.kind === "via") && PM && ["backdrill", "tertiary_drill", "front_post_machining", "back_post_machining"].some((k) => K.kid(nodeOf(c), k)));
+    if (machined.length) for (const t of conds) {
+      if (t.kind !== "segment" && t.kind !== "arc") continue;
+      const layer = layerOf(t.item.node), ts = shapeOn(t, layer);
+      for (const c of machined) {
+        if (!c.layers.has(layer) || c.net !== t.net || !boxesTouch(t.bbox, c.bbox, EPS)) continue;
+        const cs = shapeOn(c, layer); if (shapeGap(ts, cs) > EPS) continue;
+        if (!(PM!.machiningKnockout(doc, nodeOf(c), layer) > 0)) continue;
+        const a = pt(t.item.node, "start")!, b = pt(t.item.node, "end")!; const hit = (p: Pt) => shapeGap({ t: "circle", x: p[0], y: p[1], r: 0 }, cs) <= 0;
+        const p: Pt = hit(a) ? a : hit(b) ? b : [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        const m = marker("track_on_post_machined_layer", "error", p[0], p[1], "Track connected to post-machined or backdrilled layer", [t.id, c.id]); m.layer = layer; out.push(m);
+        break;
+      }
+    }
+  }
   // outline
   const ol = boardOutline(doc);
   if (!ol.hasEdges && opts.outline !== false) {
@@ -719,17 +786,32 @@ function drcRun(doc: BoardDoc, settings: DesignSettings | DesignSource | string 
   // hole to hole, text dimensions and mirroring, courtyard definitions and holes in courtyards, Edge.Cuts text,
   // keepout areas and disabled layers (drc-more.ts)
   out.push(...moreDrcMarkers(doc, s, rules));
+  // via-stitch areas of one net that overlap (DRC_TEST_PROVIDER_VIA_STITCH, via-stitch.ts)
+  out.push(...viaStitchOverlapMarkers(doc, drcErrorLimit("via_stitch_overlap")));
   // footprint attributes, scaling, pad checks and net-tie pad groups (drc-footprints.ts)
   out.push(...footprintCheckMarkers(doc, s));
+  // physical_clearance / physical_hole_clearance (drc-physical.ts)
+  out.push(...physicalClearanceMarkers(doc, s, rules));
+  // DRC_TEST_PROVIDER_MISC::testUnquotableNetclasses: a class name no rule can quote (EscapeStringLiteral: one ending
+  // in a backslash) loses its implicit rules, so it is named
+  if ((s.severities.generic_warning || "warning") !== "ignore") {
+    for (const name of Array.from(new Set(["Default", ...Object.keys(s.netclasses || {})])).sort()) {
+      if (name.endsWith("\\")) out.push(marker("generic_warning", s.severities.generic_warning || "warning", 0, 0, `Net class '${name}' cannot be used in rules; its clearance and width are not checked`, []));
+    }
+  }
   // silkscreen overlaps, silk clipped by mask or by the board edge, solder mask bridges (drc-silk.ts)
   out.push(...silkMaskMarkers(doc, s, rules));
   // thermal reliefs short of spokes (drc-zones.ts)
   out.push(...starvedThermalMarkers(doc, s, rules, nl.conductors), ...isolatedCopperMarkers(doc, nl.conductors));
+  // hole aspect ratios and microvia stacks (drc-via-stack.ts)
+  out.push(...viaStackMarkers(doc, s, rules, setupOf(doc, s), (doc as { generalNode?: SNode | null }).generalNode || ((doc as { boardSetup?: { general?: SNode | null } }).boardSetup || {}).general || null));
+  // net chains whose nets have different tuning profiles
+  out.push(...netChainTuningProfileMarkers(doc, s));
   // Junction's rule: a footprint is drawn the way its maker wants it, so what lies wholly inside one footprint (its own pads,
   // holes, mask and silk, its courtyard) is not reported.  Anything the layout causes (another item, the edge, a keep-out) still is.
   const inOne = (m: DrcMarker) => m.ids.length > 0 && m.ids.every((id) => id === m.ids[0]) && (doc.items.get(m.ids[0]) as KItem | undefined)?.kind === "footprint";
   // (the Design Rules Checker dialog passes footprintOwn: true to list them as KiCad does)
-  const kept = opts.footprintOwn ? out : out.filter((m) => !(FOOTPRINT_OWN.has(m.code) && inOne(m)));
+  const kept = opts.footprintOwn ? out : out.filter((m) => !(FOOTPRINT_OWN.has(m.code) && inOne(m) && !(m as DrcMarker & { netTie?: boolean }).netTie));   // CheckNetTies reports inside one footprint
   // the project's rule severities: ignored rules drop out, the rest take the severity the project gives them
   // (a marker whose rule set its own severity keeps it: PCB_MARKER::GetSeverity)
   const shown = kept.filter((m) => s.severities[m.code] !== "ignore").map((m) => { const sev = s.severities[m.code]; if (!m.ruleSeverity && (sev === "warning" || sev === "error")) m.severity = sev; return m; });

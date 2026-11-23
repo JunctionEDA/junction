@@ -3995,7 +3995,7 @@
     return `(kicad_sch (version ${version || SEXPR_SCHEMATIC_FILE_VERSION}) (generator "eeschema") (generator_version "${GENERATOR_VERSION}") (uuid "${K.newUuid()}") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "1"))))
 `;
   }
-  async function ensureSheetDoc(ctx, file) {
+  async function ensureSheetDoc(ctx, file, seed) {
     file = normSheetFile(file);
     if (!file) throw new Error("no sheet file name");
     const cur = currentDoc(ctx), dir = cur ? dirName(cur.path) : "", target = joinPath(dir, file);
@@ -4004,7 +4004,7 @@
     if (typeof ctx.api !== "function" || !ctx.project || !ctx.project.projectId) throw new Error("this session cannot create sheet files");
     const res = await ctx.api(`/api/projects/${ctx.project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path: target, docType: "kicad_sch" }) });
     if (!res || !res.docId) throw new Error("no document id returned");
-    if (!res.existing) await ctx.api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: emptySheetDoc(Number(ctx.doc?.version) || 0) });
+    if (!res.existing) await ctx.api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: seed !== void 0 ? seed : emptySheetDoc(Number(ctx.doc?.version) || 0) });
     const entry = { docId: res.docId, path: res.path || target, docType: "kicad_sch" };
     if (Array.isArray(ctx.docs) && !ctx.docs.some((d) => d && d.docId === entry.docId)) ctx.docs.push(entry);
     return { file, docId: entry.docId, created: !res.existing };
@@ -4097,7 +4097,7 @@
     })();
     return job.promise;
   }
-  function placeSheetNode(ctx, node, file, label = "Draw Sheet") {
+  function placeSheetNode(ctx, node, file, label = "Draw Sheet", opts) {
     if (S.sheetJob) {
       ctx.toast("Still creating the previous sheet\u2026");
       return S.sheetJob.promise;
@@ -4112,14 +4112,29 @@
         if (exists && root.KDialogs && root.KDialogs.confirm && !await root.KDialogs.confirm("Confirmation", `'${baseName(file)}' already exists.
 
 Link '${target}' to this file?`)) return null;
-        const ref = await ensureSheetDoc(ctx, file);
+        const ref = await ensureSheetDoc(ctx, file, opts && opts.seed);
         if (S.sheetJob !== job || ctx.doc !== doc) return null;
         const fp = kids(node, "property").find((q) => /^Sheet ?file$/i.test(str(q[1])));
         if (fp) fp[2] = ref.file;
         const { item, change } = addNode(doc, node);
-        ctx.commit([change], label, { newSheet: true });
+        const changes = [change];
+        let sel = item.id;
+        if (opts && opts.group) {
+          let name = opts.group.name;
+          const taken = /* @__PURE__ */ new Set();
+          for (const it of doc.items.values()) if (it.kind === "group") taken.add(str(it.node[1]));
+          if (taken.has(name)) {
+            let n = 1;
+            while (taken.has(name + n)) n++;
+            name = name + n;
+          }
+          const g = addNode(doc, ["group", name, ["uuid", K.newUuid()], ["lib_id", opts.group.libId], ["members", item.id]]);
+          changes.push(g.change);
+          sel = g.item.id;
+        }
+        ctx.commit(changes, label, { newSheet: true });
         rememberPlaced(item.kind, item.node);
-        ctx.setSelected({ id: item.id });
+        ctx.setSelected({ id: sel });
         return item;
       } catch (e) {
         ctx.toast("Could not create the sheet: " + (e && e.message || e), 4e3);
@@ -6103,6 +6118,7 @@ Link '${target}' to this file?`)) return null;
         const pre = S.sheetPreset;
         S.sheetPreset = null;
         const sn = pre ? sheetNode(pts[0], pts[1], pre.name, pre.file) : sheetNode(pts[0], pts[1], "Untitled Sheet", "untitled" + SHEET_EXT);
+        if (pre && pre.fields) for (const [name, value] of pre.fields) sn.push(fieldNode(name, value, ["at", r4(Math.min(pts[0][0], pts[1][0])), r4(Math.min(pts[0][1], pts[1][1])), 0], { hidden: true, effects: ["effects", fontNode(1.27)] }));
         const inst = sheetInstance(ctx, ctx.doc, nextPage(ctx, ctx.doc));
         if (inst) sn.push(inst);
         const it = { id: "", kind: "sheet", node: sn, geom: [], bbox: null };
@@ -6111,11 +6127,16 @@ Link '${target}' to this file?`)) return null;
             S.draw = null;
             ctx.requestRender();
           }
+          if (pre && pre.after) pre.after(false);
         }, onCreate(staged) {
           if (S.draw !== d) return;
           S.draw = null;
           const fp = kids(staged, "property").find((q) => /^Sheet ?file$/i.test(str(q[1])));
-          placeSheetNode(ctx, staged, fp ? str(fp[2]) : "untitled" + SHEET_EXT, pre ? "Import Sheet Copy" : "Draw Sheet");
+          const job = placeSheetNode(ctx, staged, fp ? str(fp[2]) : "untitled" + SHEET_EXT, pre ? pre.label || "Import Sheet Copy" : "Draw Sheet", pre ? { seed: pre.seed, group: pre.group } : void 0);
+          if (pre && pre.after) {
+            const after = pre.after;
+            void Promise.resolve(job).then((item) => after(!!item));
+          }
         } });
         return;
       }
@@ -8286,11 +8307,11 @@ Link '${target}' to this file?`)) return null;
     const pin = symbolPins(doc, it).find((p) => p.number === number);
     if (!pin) return [];
     const n = it.node, lib = libOf(doc, n), info = libUnitInfo(lib), out = [{ title: "Type", value: "Pin" }];
-    const unit = kid(n, "unit") ? num(kid(n, "unit")[1], 1) : 1;
-    if (info.units > 1) out.push({ title: "Unit", value: info.names.get(unit) || unitLetter(unit) });
+    const unit = pin.unit !== void 0 ? pin.unit : kid(n, "unit") ? num(kid(n, "unit")[1], 1) : 1;
+    if (info.units > 1) out.push({ title: "Unit", value: unit === 0 ? "All units" : info.names.get(unit) || unitLetter(unit) });
     if (info.styles > 1) {
-      const bs = kid(n, "body_style") || kid(n, "convert");
-      out.push({ title: "Body Style", value: bodyStyleDescription(lib, bs ? num(bs[1], 1) : 1) });
+      const bs = kid(n, "body_style") || kid(n, "convert"), style = pin.bodyStyle !== void 0 ? pin.bodyStyle : bs ? num(bs[1], 1) : 1;
+      out.push({ title: "Body Style", value: style === 0 ? "All body styles" : bodyStyleDescription(lib, style) });
     }
     const alt = pinAltFunction(doc, it, number), name = alt ? alt.name : pin.name, type = alt ? alt.type : pin.type, shape = alt ? alt.shape : pin.shape || "line";
     out.push(
@@ -8448,7 +8469,11 @@ Link '${target}' to this file?`)) return null;
     const st = strokeOf(n);
     if ((it.kind === "wire" || it.kind === "bus") && st.type === "default") out.push({ title: "Line Style", value: "from netclass" });
     else out.push(...strokeRows(n, o, true, false));
-    if (it.kind === "wire" || it.kind === "bus") out.push(...connectionRows(it, o));
+    if (it.kind === "wire" || it.kind === "bus") {
+      out.push(...connectionRows(it, o));
+      const c = o.connection ? o.connection(it) : null;
+      if (c && c.netChain) out.push({ title: "Net Chain", value: unescapeString(c.netChain) });
+    }
     return out;
   }
   function sheetRows(doc, it, o) {
@@ -8812,6 +8837,22 @@ Link '${target}' to this file?`)) return null;
         mark("undefined_netclass", "error", atOf(it.node), `Netclass ${nc} is not defined`, [it.id]);
       }
     }
+    if (opts.textVars !== false) {
+      const varRef = /(^|[^\\])\$\{.*\}.*/;
+      const report = (item, assertions, p) => {
+        for (const a of assertions) mark(a.warning ? "generic-warning" : "generic-error", a.warning ? "warning" : "error", p, item ? a.message : a.message + " (in drawing sheet)", item ? [item] : [], item ? void 0 : []);
+        return assertions.length > 0;
+      };
+      for (const src of K.textChecks(doc, opts.path !== void 0 ? opts.path : doc.instancePath)) {
+        if (report(src.assertionItem, src.assertions, src.assertionPos)) continue;
+        if (!varRef.test(src.shown)) continue;
+        mark("unresolved_variable", "error", src.pos, "Unresolved text variable", [src.item]);
+      }
+      for (const src of K.drawingSheetTextChecks(doc)) {
+        if (report(null, src.assertions, src.pos)) continue;
+        if (varRef.test(src.shown)) mark("unresolved_variable", "error", src.pos, "Unresolved text variable in drawing sheet", [], []);
+      }
+    }
   }
   function annotationRefs(insts) {
     const seenDocs = /* @__PURE__ */ new Set(), sheets = insts.map((s, i) => {
@@ -8843,12 +8884,13 @@ Link '${target}' to this file?`)) return null;
     const mark = (i, code, severity, p, text, ids, items) => {
       out[i].push({ code, severity, x: r4(p[0]), y: r4(p[1]), text, ids: Array.from(new Set(ids)), items });
     };
+    const on = (i, r) => Object.assign(r, { sheet: i });
     {
       const { sheets: annSheets, refs } = annotationRefs(insts);
       const CODES = { unannotated: "unannotated", extra_units: "extra_units", duplicate_reference: "duplicate_reference", different_unit_value: "unit_value_mismatch" };
       if (refs.length) checkAnnotation(refs, (code, msg, a, b) => {
-        const i = annSheets.indexOf(a.sheet), ia = a.item, ib = b && b.item;
-        mark(Math.max(0, i), CODES[code], "error", atOf(ia.node), msg, ib ? [ia.id, ib.id] : [ia.id], ib && b.sheet ? [itemRef2(a.sheet.doc, ia), itemRef2(b.sheet.doc, ib)] : [itemRef2(a.sheet.doc, ia)]);
+        const i = annSheets.indexOf(a.sheet), ia = a.item, ib = b && b.item, j = b ? annSheets.indexOf(b.sheet) : -1;
+        mark(Math.max(0, i), CODES[code], "error", atOf(ia.node), msg, ib ? [ia.id, ib.id] : [ia.id], ib && b.sheet ? [on(Math.max(0, i), itemRef2(a.sheet.doc, ia)), on(Math.max(0, j), itemRef2(b.sheet.doc, ib))] : [on(Math.max(0, i), itemRef2(a.sheet.doc, ia))]);
       });
     }
     const groups = /* @__PURE__ */ new Map();
@@ -8885,7 +8927,7 @@ Link '${target}' to this file?`)) return null;
       const base = units.find((x) => x.fp);
       if (base) {
         for (const x of units) if (x.fp && x.fp !== base.fp)
-          mark(x.inst, "different_unit_footprint", "error", atOf(x.it.node), `Different footprints assigned to ${nameOf(base)} and ${nameOf(x)}`, [base.it.id, x.it.id], [itemRef2(insts[base.inst].doc, base.it), itemRef2(insts[x.inst].doc, x.it)]);
+          mark(x.inst, "different_unit_footprint", "error", atOf(x.it.node), `Different footprints assigned to ${nameOf(base)} and ${nameOf(x)}`, [base.it.id, x.it.id], [on(base.inst, itemRef2(insts[base.inst].doc, base.it)), on(x.inst, itemRef2(insts[x.inst].doc, x.it))]);
       }
       if (count > 1 && subs.length) {
         const placed = new Set(units.map((x) => x.unit)), missing = [], power = [], input = [], bidi = [];
@@ -8904,7 +8946,7 @@ Link '${target}' to this file?`)) return null;
         }
         const b0 = units[0], names = (l) => "[ " + l.slice(0, 3).map(unitName).join(", ") + (l.length > 3 ? ", ..." : "") + " ]";
         const report = (l, code, sev, fmt) => {
-          if (l.length) mark(b0.inst, code, sev, atOf(b0.it.node), fmt(names(l)), [b0.it.id], [itemRef2(insts[b0.inst].doc, b0.it)]);
+          if (l.length) mark(b0.inst, code, sev, atOf(b0.it.node), fmt(names(l)), [b0.it.id], [on(b0.inst, itemRef2(insts[b0.inst].doc, b0.it))]);
         };
         report(missing, "missing_unit", "warning", (n) => `Symbol ${ref} has unplaced units ${n}`);
         report(power, "missing_power_pin", "error", (n) => `Symbol ${ref} has input power pins in units ${n} that are not placed`);
@@ -8925,7 +8967,7 @@ Link '${target}' to this file?`)) return null;
         if (name.search(/[<>"\\:\t\n\r]/) > 0) continue;
         const lowerName = name.toLowerCase();
         if (filters.some((f) => f.includes(":") ? wild(lowerId, f.toLowerCase()) : wild(lowerName, f.toLowerCase()))) continue;
-        mark(i, "footprint_filter", "warning", atOf(it.node), `Assigned footprint (${lowerName}) doesn't match footprint filters (${filters.join(" ")})`, [it.id], [itemRef2(s.doc, it)]);
+        mark(i, "footprint_filter", "warning", atOf(it.node), `Assigned footprint (${lowerName}) doesn't match footprint filters (${filters.join(" ")})`, [it.id], [on(i, itemRef2(s.doc, it))]);
       }
     });
     const named = (similar) => {
@@ -8933,12 +8975,12 @@ Link '${target}' to this file?`)) return null;
       insts.forEach((s, i) => {
         for (const n of s.nets) for (const t of n.terms) {
           const k = t.item.kind;
-          if (k === "label" || k === "global_label" || k === "hierarchical_label") l.push({ inst: i, it: t.item, p: atOf(t.item.node), name: str(t.item.node[1]), pin: false, global: k === "global_label", hier: k === "hierarchical_label", label: k === "label", ref: itemRef2(s.doc, t.item) });
+          if (k === "label" || k === "global_label" || k === "hierarchical_label") l.push({ inst: i, it: t.item, p: atOf(t.item.node), name: str(t.item.node[1]), pin: false, global: k === "global_label", hier: k === "hierarchical_label", label: k === "label", ref: on(i, itemRef2(s.doc, t.item)) });
           else if (t.pin && t.pin.type === "power_in") {
             const powerSym = !!t.power, glob = globalPowerPin(s.doc, t.item, t.pin);
             if (!powerSym && !glob) continue;
             const name = !similar && glob && !powerSym ? t.pin.name : propText(t.item.node, "Value");
-            l.push({ inst: i, it: t.item, p: t.p, name, pin: true, global: glob, hier: false, label: false, ref: pinRef(t) });
+            l.push({ inst: i, it: t.item, p: t.p, name, pin: true, global: glob, hier: false, label: false, ref: on(i, pinRef(t)) });
           }
         }
       });
@@ -8981,7 +9023,7 @@ Link '${target}' to this file?`)) return null;
         else gl.set(t, { n: 1, inst: i, it });
       }
     });
-    for (const e of gl.values()) if (e.n === 1) mark(e.inst, "single_global_label", "warning", atOf(e.it.node), "Global label only appears once in the schematic", [e.it.id], [itemRef2(insts[e.inst].doc, e.it)]);
+    for (const e of gl.values()) if (e.n === 1) mark(e.inst, "single_global_label", "warning", atOf(e.it.node), "Global label only appears once in the schematic", [e.it.id], [on(e.inst, itemRef2(insts[e.inst].doc, e.it))]);
     return out;
   }
   var ANCHOR = 0;
@@ -11730,12 +11772,12 @@ Link '${target}' to this file?`)) return null;
         left = rest;
         if (near < 0) continue;
         const b = all[near];
-        mark(a.i, "pin_to_pin", pinErrorSeverity(err), a.t.p, `Pins of type ${PIN_TYPE_TEXT[a.t.pin.type]} and ${PIN_TYPE_TEXT[b.t.pin.type]} are connected`, [a.t.item.id, b.t.item.id], [pinItemRef(a.t), pinItemRef(b.t)]);
+        mark(a.i, "pin_to_pin", pinErrorSeverity(err), a.t.p, `Pins of type ${PIN_TYPE_TEXT[a.t.pin.type]} and ${PIN_TYPE_TEXT[b.t.pin.type]} are connected`, [a.t.item.id, b.t.item.id], [Object.assign(pinItemRef(a.t), { sheet: a.i }), Object.assign(pinItemRef(b.t), { sheet: b.i })]);
       }
       if (needs && !hasDriver && !m.nc && !m.open) {
         const powerIns = needAll.filter((x) => x.t.pin.type === "power_in"), nonPower = needAll.filter((x) => !x.t.key);
         const flagged = !opts.showAllErrors ? [isPower && powerIns.length ? powerIns[0] : needs] : isPower && powerIns.length ? powerIns : nonPower.length ? nonPower : needAll;
-        for (const x of flagged) mark(x.i, isPower ? "power_pin_not_driven" : "pin_not_driven", "error", x.t.p, isPower ? "Input Power pin not driven by any Output Power pins" : "Input pin not driven by any Output pins", [x.t.item.id], [pinItemRef(x.t)]);
+        for (const x of flagged) mark(x.i, isPower ? "power_pin_not_driven" : "pin_not_driven", "error", x.t.p, isPower ? "Input Power pin not driven by any Output Power pins" : "Input pin not driven by any Output pins", [x.t.item.id], [Object.assign(pinItemRef(x.t), { sheet: x.i })]);
       }
     }
     insts.forEach((s, i) => {
@@ -12681,6 +12723,16 @@ ${body}
       }
       if (best === Infinity) for (const n of flat) for (const p of graphicPoints(n[0], n)) take(p);
     }
+    if (!ref && o.anchor === "designBlock") {
+      let conn = null, pos = null;
+      const keep = (best, c) => !best || c[1] < best[1] || c[1] === best[1] && c[0] < best[0] ? [c[0], c[1]] : best;
+      for (const n of flat) {
+        const k = n[0];
+        for (const p of connPoints(doc, { kind: k, node: n })) conn = keep(conn, p);
+        pos = keep(pos, itemPosition(k, n));
+      }
+      ref = conn || pos;
+    }
     if (!ref) {
       const units = fresh.filter((n) => !grouped.has(idOf(n)));
       let lead = null, lp = [0, 0], conn = null, cp = [0, 0];
@@ -12710,7 +12762,7 @@ ${body}
     const ids = items.map((it) => it.id);
     if (o.group !== void 0 && items.length) {
       const members = fresh.filter((n) => !grouped.has(idOf(n))).map(idOf).filter(Boolean);
-      const { item, change } = addNode(doc, ["group", uniqueGroupName(doc, o.group), ["uuid", K.newUuid()], ["members", ...members]]);
+      const { item, change } = addNode(doc, ["group", uniqueGroupName(doc, o.group), ["uuid", K.newUuid()], ...o.groupLibId ? [["lib_id", o.groupLibId]] : [], ["members", ...members]]);
       changes.push(change);
       ids.push(item.id);
     }
@@ -12773,7 +12825,10 @@ was dropped because the destination already has the sheet or one of its subsheet
       if (f && str(f[2])) ensureSheetDoc(ctx, str(f[2])).catch(() => {
       });
     }
-    if (live && followPaste(ctx, ids, libs, opts && opts.at || cursorOf(ctx), label, !!(opts && opts.hover))) return true;
+    if (live && followPaste(ctx, ids, libs, opts && opts.at || cursorOf(ctx), label, !!(opts && opts.hover))) {
+      if (opts && opts.after && S.drag) S.drag.after = opts.after;
+      return true;
+    }
     if (live) changes.push(...junctionsForNew(ctx.doc, ids.map((id) => ctx.doc.items.get(id)).filter(Boolean)));
     ctx.commit(changes, label);
     setSelectionIds(ctx, opts && opts.hover ? [] : ids);
@@ -14621,7 +14676,9 @@ was dropped because the destination already has the sheet or one of its subsheet
           len: len2,
           side: ox > 0 ? "right" : ox < 0 ? "left" : oy < 0 ? "top" : "bottom",
           shape: str(g[2]) || "line",
-          libRot: dir
+          libRot: dir,
+          unit: u,
+          bodyStyle: m ? s : 0
         });
       }
     }
@@ -14778,7 +14835,8 @@ was dropped because the destination already has the sheet or one of its subsheet
       const x = toIU(px), y = toIU(py), pos = tf(x, y), root3 = tf(x + d[0] * L, y + d[1] * L);
       const v = [T[0] * d[0] + T[1] * d[1], T[2] * d[0] + T[3] * d[1]];
       const side = v[0] > 0 ? "left" : v[0] < 0 ? "right" : v[1] > 0 ? "top" : "bottom";
-      out.push({ side, hidden: yesFlag(g, "hide"), pos, root: root3 });
+      const numN = kid(g, "number");
+      out.push({ side, hidden: yesFlag(g, "hide"), pos, root: root3, number: numN ? str(numN[1]) : "" });
     }
     return out;
   }
@@ -14817,6 +14875,8 @@ was dropped because the destination already has the sheet or one of its subsheet
     for (const g of item.geom || []) if (g.t === "text" && g.field && typeof g.field === "string" && typeof g.text === "string" && !shownText.has(g.field)) shownText.set(g.field, g.text);
     const ext = fields.map((p) => textBoxIU(p, shownText.get(str(p[1]))));
     const pins = allPinsIU(doc, node).filter((p) => !p.hidden || power);
+    let symPins = null;
+    const sheetPins = () => symPins || (symPins = symbolPins(doc, item));
     let fbox = { w: Math.max(...ext.map((e) => e.w)), h: ext.reduce((t, e) => t + (prefs.align ? roundIU(e.h, GRID50, true) : e.h + VPAD), 0) };
     const pinsOn = (side2) => pins.filter((p) => p.side === side2).length;
     let sides = ["right", "top", "left", "bottom"].map((s) => ({ side: s, pins: pinsOn(s) }));
@@ -14850,7 +14910,15 @@ was dropped because the destination already has the sheet or one of its subsheet
       let x = cx + sx2 * ox - idiv(size.w, 2), y = cy + sy2 * oy - idiv(size.h, 2);
       if (sp.pins > 0) {
         let pb = null;
-        for (const p of pins) if (p.side === sp.side) for (const q of [p.pos, p.root]) pb = merge(pb, q[0], q[1], q[0], q[1]);
+        for (const p of pins) {
+          if (p.side !== sp.side) continue;
+          for (const q of [p.pos, p.root]) pb = merge(pb, q[0], q[1], q[0], q[1]);
+          const shown = p.hidden ? null : sheetPins().find((q) => q.number === p.number && !q.hidden);
+          if (shown) {
+            const b = pinBox(item, shown);
+            pb = merge(pb, toIU(b[0]), toIU(b[1]), toIU(b[2]), toIU(b[3]));
+          }
+        }
         if (pb) {
           if (sy2) x = pb[2] + 2 * HPAD;
           else y = pb[1] - (size.h + 2 * VPAD);
@@ -15832,6 +15900,7 @@ was dropped because the destination already has the sheet or one of its subsheet
       if (!commit) {
         dropLocal(ctx, d);
         done();
+        if (d.after) d.after(false);
         return;
       }
       const changes2 = dragChanges(ctx, d, dx, dy, true);
@@ -15839,6 +15908,7 @@ was dropped because the destination already has the sheet or one of its subsheet
       if (changes2.length) ctx.commit(changes2, d.label || "Paste");
       setSelectionIds(ctx, d.hover ? [] : Array.from(d.local).filter((id) => ctx.doc.items.has(id)));
       done();
+      if (d.after) d.after(true);
       return;
     }
     const turned = !!d.mapPt;
@@ -16896,6 +16966,7 @@ was dropped because the destination already has the sheet or one of its subsheet
       setFollow(on) {
         S.forceFollow = !!on;
       },
+      addNode,
       junctionMerges,
       sheetAutoplaceFields,
       annotatePastedUnique,

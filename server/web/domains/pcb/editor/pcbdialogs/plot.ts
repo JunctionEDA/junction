@@ -340,7 +340,7 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
       // since the last fill of every zone
       if (user.checkZones && !ro && zoneFillsDirty() && [...doc.items.values()].some((it) => it.kind === "zone")) {
         status.textContent = "Check Zones";
-        await runZoneFill(ctx, { ids: [...doc.items.values()].filter((it) => it.kind === "zone").map((it) => it.id), title: null, status, label: "Fill Zone(s)", all: true });
+        await runZoneFill(ctx, { ids: [...doc.items.values()].filter((it) => it.kind === "zone").map((it) => it.id), title: null, status, label: "Fill Zone(s)", all: true, check: true });
         status.textContent = "";
       }
       const fctx = await fabContext(); if (!fctx) return;

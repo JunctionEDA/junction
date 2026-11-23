@@ -36,6 +36,7 @@
 import { openSymbolViewer } from "../symview/frame";
 import { SEXPR_BOARD_FILE_VERSION } from "../canvas/format-version";
 import { setCursorOverride } from "./cursors";
+import { carriedFootprintDialog } from "./pcbdialogs/item-props";
 import { state } from "./appstore";
 import { snapMm } from "./doc";
 import { clearSelection, drawSelection, renderProps } from "./selection";
@@ -320,6 +321,11 @@ function onCarryKey(ev: KeyboardEvent): void {
   else if (c && mod && !ev.shiftKey && (ev.key === "z" || ev.key === "Z")) endFootprintCarry();
   else if (c && (ev.key === "r" || ev.key === "R") && !mod && P) { P.rotateFootprintNode(c.node, ev.shiftKey ? -rotationStep() : rotationStep()); c.ghost = ghostBoard(c.node, c.doc); c.drawn = ""; }
   else if (c && (ev.key === "f" || ev.key === "F") && !mod && P) { flipCarried(P, c.node); c.ghost = ghostBoard(c.node, c.doc); c.drawn = ""; }
+  else if (c && (ev.key === "e" || ev.key === "E") && !mod && !ev.altKey) {
+    // the event passes to the edit tools: EDIT_TOOL::Properties on the carried footprint (Footprint Properties); the
+    // carry goes on with what the dialog wrote
+    carriedFootprintDialog(ctxNow(), (K().cloneNode as (n: SNode) => SNode)(c.node), (n) => { if (!n || fpCarry !== c) return; c.node = n; c.ghost = ghostBoard(n, c.doc); c.drawn = ""; });
+  }
   else took = false;
   if (took) { ev.stopImmediatePropagation(); ev.preventDefault(); }
 }

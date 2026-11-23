@@ -11,6 +11,7 @@ import { adoptProjectFile, canWriteProject, saveProjectFile } from "../projectfi
 import { openBoardSetup } from "./board-setup";
 import { effectiveTheme } from "../../../../shared/theme";
 import { TEARDROP_SIZES } from "./teardrop-bitmap";
+import { teardropOpts } from "./board-commit";
 import { box, checkField, form, h, openDialog, parseLen, selectField, unitLabel, type Field } from "./ui";
 
 type Obj = Record<string, unknown>;
@@ -18,6 +19,7 @@ interface Td { enabled: boolean; twoSegments: boolean; preferZone: boolean; maxL
 interface Opts {
   vias: boolean; pthPads: boolean; smdPads: boolean; trackToTrack: boolean; action: "remove" | "removeAll" | "default" | "specified";
   defaults: { round: Td; rect: Td }; specified?: Partial<Td>; roundOnly?: boolean; existingOnly?: boolean; selected?: Set<string> | null; skip?(i: { net: string; layer: string }): boolean;
+  filtered?: boolean; teardrop?: unknown;
 }
 interface Settings { netclasses: Record<string, unknown> }
 interface PcbToolsApi {
@@ -164,7 +166,8 @@ export function openEditTeardrops(ctx: ToolCtx): void {
       const o: Opts = { vias: vias.get(), pthPads: pth.get(), smdPads: smd.get(), trackToTrack: t2t.get(), action,
         defaults: { round: paramsFor(ds, "td_round_shape"), rect: paramsFor(ds, "td_rect_shape") }, specified,
         roundOnly: roundOnly.get(), existingOnly: existing.get(), selected: selOnly.get() ? selection : null,
-        skip: (i) => (netF !== null && i.net !== netF) || (ncF !== null && PT().netclassName(settings, i.net) !== ncF) || (layerF !== null && i.layer !== layerF) };
+        skip: (i) => (netF !== null && i.net !== netF) || (ncF !== null && PT().netclassName(settings, i.net) !== ncF) || (layerF !== null && i.layer !== layerF),
+        filtered: netF !== null || ncF !== null || layerF !== null || !!roundOnly.get() || !!existing.get() || !!selOnly.get(), teardrop: teardropOpts() };
       const changes = PT().teardropEditChanges(doc, o);
       if (changes.length) ctx.commit(changes, "Edit Teardrops");
       ctx.requestRender();

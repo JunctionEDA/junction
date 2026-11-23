@@ -96,8 +96,25 @@ fn project_libs(table: &str, suffix: &str) -> Vec<(String, String)> {
     out
 }
 
+/// KiCad's file format version `name` (SEXPR_SCHEMATIC_FILE_VERSION, SEXPR_SYMBOL_LIB_FILE_VERSION,
+/// SEXPR_BOARD_FILE_VERSION, …), read from the web's copy of the C++ headers (canvas/format-version.ts), so a file
+/// the server writes is stamped as the web and KiCad stamp a new one.
+pub(crate) fn kicad_format_version(name: &str) -> u64 {
+    const SRC: &str = include_str!("../web/domains/pcb/canvas/format-version.ts");
+    let head = format!("export const {name} = ");
+    SRC.lines().find_map(|l| l.trim().strip_prefix(head.as_str()).and_then(|r| r.trim().trim_end_matches(';').trim().parse().ok())).unwrap_or(0)
+}
+
+/// GetMajorMinorVersion() of the KiCad in this tree ("10.99"): what KiCad writes as `(generator_version …)`.
+pub(crate) fn kicad_generator_version() -> String {
+    const SRC: &str = include_str!("../web/domains/pcb/canvas/version.ts");
+    let base = SRC.lines().find_map(|l| l.trim().strip_prefix("export const KICAD_BASE_VERSION = ")).unwrap_or("\"10.99.0\"");
+    let base = base.trim().trim_end_matches(';').trim_matches('"');
+    base.split(|c: char| c == '.' || c == '-').take(2).collect::<Vec<_>>().join(".")
+}
+
 /// The symbol library file format this server writes; a schematic older than it keeps its own date.
-const SYMBOL_LIB_VERSION: u64 = 20241209;
+fn symbol_lib_version() -> u64 { kicad_format_version("SEXPR_SYMBOL_LIB_FILE_VERSION") }
 const OLDEST_SYMBOL_LIB_VERSION: u64 = 20211014;
 
 /// The files to add to a download of `entries` (path, content): one `.kicad_sym` per project
@@ -114,7 +131,7 @@ pub fn rebuild_symbol_libraries(entries: &[(String, Vec<u8>)]) -> Vec<(String, V
         if wanted.is_empty() { continue; }
         // nickname → symbol name → its text with the library prefix taken off the name
         let mut found: BTreeMap<&str, BTreeMap<String, String>> = BTreeMap::new();
-        let mut version = SYMBOL_LIB_VERSION;
+        let mut version = symbol_lib_version();
         for (path, content) in entries.iter().filter(|(p, _)| p.to_ascii_lowercase().ends_with(".kicad_sch")) {
             let _ = path;
             let Ok(text) = std::str::from_utf8(content) else { continue };
@@ -137,7 +154,8 @@ pub fn rebuild_symbol_libraries(entries: &[(String, Vec<u8>)]) -> Vec<(String, V
         }
         for (nick, path) in &wanted {
             let Some(symbols) = found.get(nick.as_str()) else { continue };
-            let mut file = format!("(kicad_symbol_lib\n\t(version {version})\n\t(generator \"junction\")\n\t(generator_version \"10.0\")\n");
+            // SCH_IO_KICAD_SEXPR_LIB_CACHE::Save's header
+            let mut file = format!("(kicad_symbol_lib\n\t(version {version})\n\t(generator \"kicad_symbol_editor\")\n\t(generator_version \"{}\")\n", kicad_generator_version());
             for body in symbols.values() { file.push('\t'); file.push_str(body); file.push('\n'); }
             file.push_str(")\n");
             out.push((path.clone(), file.into_bytes()));
@@ -221,7 +239,8 @@ mod tests {
         assert_eq!(out.len(), 1, "only the project's own library, and never a path that leaves the project");
         assert_eq!(out[0].0, "mine.kicad_sym");
         let text = String::from_utf8(out[0].1.clone()).unwrap();
-        assert!(text.starts_with("(kicad_symbol_lib\n\t(version 20241209)"), "{text}");
+        // the schematic's own format date (older than the library format), with KiCad's library header
+        assert!(text.starts_with("(kicad_symbol_lib\n\t(version 20250114)\n\t(generator \"kicad_symbol_editor\")\n\t(generator_version \""), "{text}");
         assert!(text.contains("(symbol \"B\" (property \"Reference\" \"B\""), "{text}");
         assert!(text.contains("(symbol \"VALVE (odd)\"\n") && text.contains("(symbol \"VALVE (odd)_1_1\"") && text.contains("(name \"a)\\\"b\")"), "{text}");
         assert!(!text.contains("Device") && !text.contains("mine:"), "{text}");
@@ -248,5 +267,33 @@ mod tests {
         let got: Vec<String> = out.iter().map(|m| format!("{}:{}", m["kind"].as_str().unwrap(), m["path"].as_str().unwrap())).collect();
         assert_eq!(got, ["symbol_library:mine.kicad_sym", "footprint_library:mine.pretty", "model:3d/a.step"]);
         assert!(missing_project_files(&[entry("a.kicad_sch", SCH)]).is_empty());
+    }
+
+    /// The stamps the server writes are the C++ headers' (eeschema/sch_file_versions.h, pcb_io_kicad_sexpr.h) and
+    /// cmake's KICAD_SEMANTIC_VERSION, when the KiCad tree is beside the server.
+    #[test]
+    fn format_versions_are_kicads() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let define = |file: &str, name: &str| -> Option<u64> {
+            let text = std::fs::read_to_string(root.join(file)).ok()?;
+            text.lines().find_map(|l| l.trim().strip_prefix("#define ")?.trim().strip_prefix(name)?.split_whitespace().next()?.parse().ok())
+        };
+        for (file, name) in [("eeschema/sch_file_versions.h", "SEXPR_SCHEMATIC_FILE_VERSION"), ("eeschema/sch_file_versions.h", "SEXPR_SYMBOL_LIB_FILE_VERSION"),
+                             ("pcbnew/pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.h", "SEXPR_BOARD_FILE_VERSION")] {
+            assert!(kicad_format_version(name) > 20250000, "{name}");
+            if let Some(v) = define(file, name) { assert_eq!(kicad_format_version(name), v, "{name}"); }
+        }
+        let gv = kicad_generator_version();
+        assert_eq!(gv.split('.').count(), 2, "{gv}");
+        if let Ok(cmake) = std::fs::read_to_string(root.join("cmake/KiCadVersion.cmake")) {
+            if let Some(v) = cmake.lines().find_map(|l| l.trim().strip_prefix("set( KICAD_SEMANTIC_VERSION \"")) {
+                assert!(v.starts_with(&format!("{gv}.")), "{v} vs {gv}");
+            }
+        }
+        let files = crate::http::pcb_stub_files("x");
+        let sch = String::from_utf8(files[1].1.clone()).unwrap();
+        let pcb = String::from_utf8(files[2].1.clone()).unwrap();
+        assert!(sch.starts_with(&format!("(kicad_sch\n\t(version {})\n\t(generator \"eeschema\")\n\t(generator_version \"{gv}\")", kicad_format_version("SEXPR_SCHEMATIC_FILE_VERSION"))), "{sch}");
+        assert!(pcb.starts_with(&format!("(kicad_pcb\n\t(version {})\n\t(generator \"pcbnew\")\n\t(generator_version \"{gv}\")\n\t(general", kicad_format_version("SEXPR_BOARD_FILE_VERSION"))), "{pcb}");
     }
 }

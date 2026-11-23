@@ -8,11 +8,12 @@ import { crossZ } from "./arcs";
 import { addedChange, replacedChange } from "./changes";
 import { dimEditNode, dimEditPoints, snap45, snap90 } from "./dimensions";
 import { angleSnapMode } from "./draw-modes";
-import { isLocked, selectionIds } from "./groups";
+import { groupMembers, isLocked, selectionIds } from "./groups";
 import { line } from "./overlay";
 import { lsGet, lsSet } from "./router-settings";
 import { K, S, lastCtx } from "./state";
-import { clone, pt, r6, samePt, vadd, vmul, vsub } from "./util";
+import { clone, norm360, pt, r6, rotator, samePt, vadd, vmul, vsub } from "./util";
+import { mapNodePoints, rotateNode } from "./transforms";
 import { isTuningPattern } from "./tuning-patterns";
 import { proposePersistentConstruction, snapCursor } from "./grid-helper";
 import { clearConstruction, setReferenceOnlyPoints } from "./construction";
@@ -27,7 +28,7 @@ import type { GenEdit } from "./tuning-edit";
 // the corners / ends (EDIT_POINT), circles on the edge midpoints (EDIT_LINE centre points).  Dragging a handle reshapes
 // the item; a zone or polygon edge midpoint drags the whole edge; Ins (Create Corner) adds a corner on the edge under
 // the cursor, Remove Corner takes the corner under it out.  Only the edited coordinates are rewritten.
-export const PE_KINDS = new Set(["zone", "gr_poly", "gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_curve", "gr_ellipse", "gr_ellipse_arc", "gr_text_box", "barcode", "dimension"]);
+export const PE_KINDS = new Set(["zone", "gr_poly", "gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_curve", "gr_ellipse", "gr_ellipse_arc", "gr_text_box", "barcode", "dimension", "image", "group", "pad"]);
 /** What a handle drag carries besides the cursor: Ctrl held, the grid pitch (0: off) and the line mode's angle limit. */
 export interface EditOpts { ctrl?: boolean; gridPitch?: number; /** GetGridSize().y (gridPitch is its x) */ gridPitchY?: number; angle?: string }
 /** Every contour of a zone outline or polygon as its (pts) list: the main outline first, then the holes ((polygon …) children of a zone). */
@@ -60,6 +61,201 @@ export const rectRadius = (n: SNode) => { const r = n[0] === "gr_rect" ? K.kid(n
 /** The (pts) list a polygon edit works on: the zone's first outline, the polygon's own points. */
 export function pePtsNode(node: SNode) { const host = node[0] === "zone" ? K.kid(node, "polygon") : node; return host ? K.kid(host, "pts") : null; }
 export function pePolyPts(node: SNode) { const p = pePtsNode(node); return p ? K.kids(p, "xy").map((x) => [K.num(x[1]), K.num(x[2])]) : []; }
+// ---- REFERENCE_IMAGE_POINT_EDIT_BEHAVIOR (common/tool/point_editor_behavior.cpp): the four corners of the image's
+// bounding box (scale about the transform origin), the transform origin and the rotation handle above it.  The
+// transform origin is REFERENCE_IMAGE::m_transformOriginOffset, which the file does not keep: it lives for the session,
+// per image (by uuid).
+const IMG_MIN = 1;                                        // pcbIUScale.mmToIU( 1.0 ): the smallest width and height
+const imgOrigins = new Map<string, Pt>();
+const imgBase = new Map<string, Pt>();                    // the unrotated size at scale 1 (BITMAP_BASE::GetSize / scale)
+const imgUuid = (n: SNode) => { const u = K.kid(n, "uuid"); return u ? String(u[1]) : ""; };
+const imgScale = (n: SNode) => { const s = K.kid(n, "scale"); const v = s ? K.num(s[1], 1) : 1; return v > 0 && isFinite(v) ? v : 1; };
+const imgAngle = (n: SNode) => { const r = K.kid(n, "rotate"); return r ? K.num(r[1], 0) : 0; };
+/** REFERENCE_IMAGE::GetTransformOriginOffset of an image node. */
+export function imageOriginOffset(n: SNode): Pt { const o = imgOrigins.get(imgUuid(n)); return o ? [o[0], o[1]] : [0, 0]; }
+export function setImageOriginOffset(n: SNode, off: Pt) { const u = imgUuid(n); if (!u) return; if (off[0] || off[1]) imgOrigins.set(u, off); else imgOrigins.delete(u); }
+/** GetSize (unrotated) and boundingSize (the extent at the image's orientation), in mm; null before the canvas measured it. */
+function imageSizes(n: SNode): { size: Pt; box: Pt } | null {
+  const b = imgBase.get(imgUuid(n)); if (!b) return null;
+  const sc = imgScale(n), size: Pt = [b[0] * sc, b[1] * sc], a = norm360(imgAngle(n));
+  if (a % 180 === 0) return { size, box: size };
+  if (a % 90 === 0) return { size, box: [size[1], size[0]] };
+  const c = Math.abs(Math.cos(a * Math.PI / 180)), sn = Math.abs(Math.sin(a * Math.PI / 180));
+  return { size, box: [size[0] * c + size[1] * sn, size[0] * sn + size[1] * c] };
+}
+function imageEditPoints(it: KItem): EditPoint[] {
+  const n = it.node, ext = it as KItem & { w?: number; h?: number };
+  if (ext.w && ext.h) { const sc = imgScale(n); imgBase.set(imgUuid(n), [ext.w / sc, ext.h / sc]); }
+  const sz = imageSizes(n); if (!sz) return [];
+  const pos = K.atOf(n) as Pt, off = imageOriginOffset(n), ang = imgAngle(n);
+  const tl: Pt = [pos[0] - sz.box[0] / 2, pos[1] - sz.box[1] / 2], br: Pt = [pos[0] + sz.box[0] / 2, pos[1] + sz.box[1] / 2];
+  const tr: Pt = [br[0], tl[1]], bl: Pt = [tl[0], br[1]], origin = vadd(pos, off);
+  // the rotation handle reaches 70 % of the image's height above the transform origin, along its orientation
+  const local = rotator(-ang)(off[0], off[1]), len = local[1] + sz.size[1] * 0.7;
+  const toRot = rotator(ang)(0, -len), rot: Pt = [origin[0] + toRot[0], origin[1] + toRot[1]];
+  return [{ key: "i0", p: tl, lines: [tr] }, { key: "i1", p: tr, lines: [br] }, { key: "i2", p: br, lines: [bl] }, { key: "i3", p: bl, lines: [tl] },
+    { key: "io", p: origin, lines: [rot] }, { key: "ir", p: rot }];
+}
+/** REFERENCE_IMAGE_POINT_EDIT_BEHAVIOR::UpdateItem on an image node; `off0` is the transform origin as the drag began. */
+function imageEditNode(orig: SNode, key: string, p: Pt, off0: Pt): SNode {
+  const node = clone(orig), pos = K.atOf(orig) as Pt, origin = vadd(pos, off0);
+  if (key === "io") { setImageOriginOffset(node, vsub(p, pos)); return node; }   // the other points did not move
+  if (key === "ir") {
+    // the handle points along the image's up direction: the target angle is the cursor's less a quarter turn
+    const v = vsub(p, origin), target = Math.atan2(-v[1], v[0]) * 180 / Math.PI - 90;
+    const delta = target - imgAngle(orig);
+    rotateNode(node, origin[0], origin[1], delta);                 // REFERENCE_IMAGE::Rotate( origin, delta )
+    const o = rotator(delta)(off0[0], off0[1]); setImageOriginOffset(node, [o[0], o[1]]);
+    return node;
+  }
+  const sz = imageSizes(orig); if (!sz) return node;
+  const i = +key.slice(1), hx = sz.box[0] / 2, hy = sz.box[1] / 2;
+  const oldCorner: Pt = [pos[0] + (i === 1 || i === 2 ? hx : -hx), pos[1] + (i >= 2 ? hy : -hy)];
+  let nc = vsub(p, origin); const oc = vsub(oldCorner, origin);
+  if (Math.sign(nc[0]) !== Math.sign(oc[0]) || Math.sign(nc[1]) !== Math.sign(oc[1])) nc = [0, 0];   // the corner may not cross the origin
+  const oldLen = Math.hypot(oc[0], oc[1]);
+  let ratio = oldLen > 0 ? Math.hypot(nc[0], nc[1]) / oldLen : 1;
+  const nw = Math.max(sz.box[0] * ratio, IMG_MIN), nh = Math.max(sz.box[1] * ratio, IMG_MIN);
+  ratio = Math.min(nw / sz.box[0], nh / sz.box[1]);
+  // SetImageScale -> scaleBy: the transform origin stays put, the centre and the offset scale about it
+  const off = vmul(off0, ratio) as Pt, centre = vsub(origin, off);
+  const at = K.kid(node, "at")!; at[1] = r6(centre[0]); at[2] = r6(centre[1]);
+  setImageOriginOffset(node, off);
+  const scale = Number((imgScale(orig) * ratio).toPrecision(6)), sn = K.kid(node, "scale");   // (scale {:g})
+  if (scale === 1) { if (sn) node.splice(node.indexOf(sn), 1); }
+  else if (sn) sn[1] = scale;
+  else { const after = K.kid(node, "rotate") || K.kid(node, "layer") || at; node.splice(node.indexOf(after) + 1, 0, ["scale", scale]); }
+  return node;
+}
+// ---- SHAPE_GROUP_POINT_EDIT_BEHAVIOR (pcb_point_editor.cpp): a group holding only graphic shapes gets the corners and
+// the centre of its shapes' bounding box (PCB_SHAPE::GetBoundingBox).  The centre moves the group; a corner, held one
+// mil inside the opposite one (PinEditedCorner), scales every shape about the old centre by the mean of the width and
+// height ratios (at least 0.01), the line widths with them.  Any other member rejects the group (no handles).
+const GROUP_SHAPES = new Set(["gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_curve"]);
+/** The group's shapes, or null when it holds anything else (aRejected). */
+export function groupShapeItems(doc: BoardDoc | null | undefined, group: KItem): KItem[] | null {
+  if (!doc) return null;
+  const items = groupMembers(group.node).map((id) => doc.items.get(id));
+  return items.length && items.every((m) => !!m && GROUP_SHAPES.has(m.kind)) ? items as KItem[] : null;
+}
+/** The merged GetBoundingBox of the shapes as [left, top, right, bottom] in mm. */
+export function groupShapesBox(items: KItem[]): [number, number, number, number] | null {
+  let b: [number, number, number, number] | null = null;
+  for (const m of items) {
+    const r = K.boardItemBox ? K.boardItemBox(m, 1e6) : null; if (!r) continue;
+    const q: [number, number, number, number] = [r[0] / 1e6, r[1] / 1e6, (r[0] + r[2]) / 1e6, (r[1] + r[3]) / 1e6];
+    b = b ? [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])] : q;
+  }
+  return b;
+}
+function groupEditPoints(it: KItem): EditPoint[] {
+  const doc = [liveDoc(), lastCtx && lastCtx.doc].find((d) => d && d.items.get(it.id) === it) || liveDoc();
+  const shapes = groupShapeItems(doc, it); const b = shapes && groupShapesBox(shapes); if (!b) return [];
+  const tl: Pt = [b[0], b[1]], tr: Pt = [b[2], b[1]], br: Pt = [b[2], b[3]], bl: Pt = [b[0], b[3]];
+  return [{ key: "g0", p: tl, lines: [tr] }, { key: "g1", p: tr, lines: [br] }, { key: "g2", p: br, lines: [bl] }, { key: "g3", p: bl, lines: [tl] }, { key: "gc", p: [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] }];
+}
+/** SHAPE_GROUP_POINT_EDIT_BEHAVIOR::UpdateItem: the shapes' new nodes, from their nodes and box as the drag began. */
+export function groupEditNodes(origs: Map<string, SNode>, box: [number, number, number, number], key: string, p: Pt): Map<string, SNode> {
+  const out = new Map<string, SNode>(), oc: Pt = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
+  if (key === "gc") {
+    const dx = p[0] - oc[0], dy = p[1] - oc[1];
+    for (const [id, n] of origs) { const m = clone(n); mapNodePoints(m, (x, y) => [x + dx, y + dy]); out.set(id, m); }
+    return out;
+  }
+  let [L, T, R, B] = box;
+  ({ g0: () => { L = Math.min(p[0], R - RECT_MIN); T = Math.min(p[1], B - RECT_MIN); }, g1: () => { R = Math.max(p[0], L + RECT_MIN); T = Math.min(p[1], B - RECT_MIN); },
+    g2: () => { R = Math.max(p[0], L + RECT_MIN); B = Math.max(p[1], T + RECT_MIN); }, g3: () => { L = Math.min(p[0], R - RECT_MIN); B = Math.max(p[1], T + RECT_MIN); } } as Record<string, () => void>)[key]?.();
+  const sx = (R - L) / (box[2] - box[0]), sy = (B - T) / (box[3] - box[1]);
+  const scale = Math.max((sx + sy) / 2, 0.01);   // MIN_SCALE
+  for (const [id, n] of origs) {
+    const m = clone(n);
+    mapNodePoints(m, (x, y) => [oc[0] + (x - oc[0]) * scale, oc[1] + (y - oc[1]) * scale]);   // Move( -origin ), Scale, Move( origin )
+    const st = K.kid(m, "stroke"), w = st ? K.kid(st, "width") : K.kid(m, "width");
+    if (w) w[1] = r6(K.num(w[1], 0) * scale);                                                  // SetWidth( KiROUND( width * scale ) )
+    out.set(id, m);
+  }
+  return out;
+}
+// ---- PAD_POINT_EDIT_BEHAVIOR (pcb_point_editor.cpp), footprint editor only: on the active copper layer (a technical
+// layer stands for the front or back copper) a round pad has a radius handle, an oval, rectangle, rounded / chamfered
+// rectangle or trapezoid at a cardinal orientation its four corners.  A pad with a hole or a shape offset keeps the hole
+// where it is and resizes / offsets the shape around it; otherwise the pad stays centred in its shape.
+const MIL = 0.0254;
+/** PADSTACK's copper layer the point editor works on: the active layer, or F.Cu / B.Cu for a technical one. */
+function padEditLayer(): string {
+  const l = String((lastCtx && lastCtx.activeLayer) || S.layer || "F.Cu");
+  return /\.Cu$/.test(l) ? l : /^F\./.test(l) ? "F.Cu" : "B.Cu";
+}
+/** The pad's shape, size and offset on that layer: the pad's own (F.Cu, or every layer), else its (padstack (layer …)). */
+function padLayerView(n: SNode, layer: string) {
+  const ps = K.kid(n, "padstack"), mode = ps ? K.str((K.kid(ps, "mode") || [])[1] || "normal") : "normal";
+  let L: SNode | null = null;
+  if (ps && mode === "front_inner_back" && layer !== "F.Cu") L = K.kids(ps, "layer").find((x) => K.str(x[1]) === (layer === "B.Cu" ? "B.Cu" : "Inner")) || null;
+  else if (ps && mode === "custom" && layer !== "F.Cu") L = K.kids(ps, "layer").find((x) => K.str(x[1]) === layer) || null;
+  if (L) {
+    const sh = K.kid(L, "shape"), sz = K.kid(L, "size"), off = K.kid(L, "offset");
+    return { shape: sh ? K.str(sh[1]) : K.str(n[3]), size: sz, offset: (off ? [K.num(off[1]), K.num(off[2])] : [0, 0]) as Pt,
+      setOffset: (o: Pt) => { const c = K.kid(L!, "offset"); if (c) { c[1] = r6(o[0]); c[2] = r6(o[1]); } else L!.splice(L!.indexOf(K.kid(L!, "size")!) + 1, 0, ["offset", r6(o[0]), r6(o[1])]); } };
+  }
+  const dr = K.kid(n, "drill"), off = dr ? K.kid(dr, "offset") : null;
+  return { shape: K.str(n[3]), size: K.kid(n, "size"), offset: (off ? [K.num(off[1]), K.num(off[2])] : [0, 0]) as Pt,
+    setOffset: (o: Pt) => {
+      let d = K.kid(n, "drill"); if (!d) { d = ["drill"]; const sz = K.kid(n, "size"); n.splice(sz ? n.indexOf(sz) + 1 : n.length, 0, d); }
+      const c = K.kid(d, "offset"); if (c) { c[1] = r6(o[0]); c[2] = r6(o[1]); } else d.push(["offset", r6(o[0]), r6(o[1])]);
+    } };
+}
+const padDrill = (n: SNode): Pt => {
+  const d = K.kid(n, "drill"); if (!d) return [0, 0];
+  const v = d.slice(1).filter((x) => typeof x === "number" || (typeof x === "string" && /^[-\d.]/.test(x))).map(Number);
+  return d.includes("oval") ? [v[0] || 0, v[1] ?? v[0] ?? 0] : [v[0] || 0, v[0] || 0];
+};
+const RECTISH = new Set(["oval", "trapezoid", "rect", "roundrect", "chamfered_rect"]);
+function padEditPoints(it: KItem): EditPoint[] {
+  const doc = [liveDoc(), lastCtx && lastCtx.doc].find((d) => d && d.items.get(it.id) === it) || liveDoc();
+  if (!doc || !(doc as BoardDoc & { fpEditor?: boolean }).fpEditor || isLocked(it.node)) return [];
+  return padHandles(it.node);
+}
+function padHandles(n: SNode): EditPoint[] {
+  const v = padLayerView(n, padEditLayer()); if (!v.size) return [];
+  const [x, y, a = 0] = K.atOf(n) as number[], o = rotator(a)(v.offset[0], v.offset[1]), sp: Pt = [x + o[0], y + o[1]];
+  let hx = K.num(v.size[1]) / 2, hy = K.num(v.size[2]) / 2;
+  if (v.shape === "circle") return [{ key: "p0", p: [sp[0] + hx, sp[1]] }];
+  const ang = norm360(a); if (!RECTISH.has(v.shape) || ang % 90) return [];
+  if (ang % 180) [hx, hy] = [hy, hx];
+  return [{ key: "p0", p: [sp[0] - hx, sp[1] - hy] }, { key: "p1", p: [sp[0] + hx, sp[1] - hy] }, { key: "p2", p: [sp[0] + hx, sp[1] + hy] }, { key: "p3", p: [sp[0] - hx, sp[1] + hy] }];
+}
+/** PAD_POINT_EDIT_BEHAVIOR::UpdateItem. */
+function padEditNode(orig: SNode, key: string, p: Pt): SNode {
+  const node = clone(orig), v = padLayerView(node, padEditLayer()); if (!v.size) return node;
+  const [x, y, a = 0] = K.atOf(orig) as number[];
+  if (v.shape === "circle") { const d = r6(2 * Math.hypot(p[0] - x, p[1] - y)); v.size[1] = d; v.size[2] = d; return node; }
+  const pts = padHandles(orig);
+  const cur = (k: string) => (pts.find((h) => h.key === k) || { p: [0, 0] as Pt }).p;
+  let tl = cur("p0"), tr = cur("p1"), br = cur("p2"), bl = cur("p3");
+  const drill = padDrill(orig), hole: Pt = [x, y];
+  // RECTANGLE_POINT_EDIT_BEHAVIOR::PinEditedCorner with the hole: the edited corner stays clear of the hole (or one
+  // mil inside the opposite corner) and drags its two neighbours' edges
+  if (key === "p0") { tl = drill[0] ? [Math.min(p[0], hole[0] - drill[0] / 2 - MIL), Math.min(p[1], hole[1] - drill[1] / 2 - MIL)] : [Math.min(p[0], br[0] - MIL), Math.min(p[1], br[1] - MIL)]; tr = [tr[0], tl[1]]; bl = [tl[0], bl[1]]; }
+  else if (key === "p1") { tr = drill[0] ? [Math.max(p[0], hole[0] + drill[0] / 2 + MIL), Math.min(p[1], hole[1] - drill[1] / 2 - MIL)] : [Math.max(p[0], bl[0] + MIL), Math.min(p[1], bl[1] - MIL)]; tl = [tl[0], tr[1]]; br = [tr[0], br[1]]; }
+  else if (key === "p3") { bl = drill[0] ? [Math.min(p[0], hole[0] - drill[0] / 2 - MIL), Math.max(p[1], hole[1] + drill[1] / 2 + MIL)] : [Math.min(p[0], tr[0] - MIL), Math.max(p[1], tr[1] + MIL)]; tl = [bl[0], tl[1]]; br = [br[0], bl[1]]; }
+  else if (key === "p2") { br = drill[0] ? [Math.max(p[0], hole[0] + drill[0] / 2 + MIL), Math.max(p[1], hole[1] + drill[1] / 2 + MIL)] : [Math.max(p[0], tl[0] + MIL), Math.max(p[1], tl[1] + MIL)]; tr = [br[0], tr[1]]; bl = [bl[0], br[1]]; }
+  const vertical = norm360(a) % 180 !== 0, tlbr = key === "p0" || key === "p2";
+  if (v.offset[0] || v.offset[1] || (drill[0] && drill[1])) {
+    // the hole stays: the shape is sized and offset around it
+    const d = tlbr ? [x - tl[0], y - tl[1], br[0] - x, br[1] - y] : [x - bl[0], y - tr[1], tr[0] - x, bl[1] - y];
+    let size: Pt = [d[0] + d[2], d[1] + d[3]]; const delta = rotator(-a)(size[0] / 2 - d[2], size[1] / 2 - d[3]);
+    if (vertical) size = [size[1], size[0]];
+    v.size[1] = r6(size[0]); v.size[2] = r6(size[1]);
+    v.setOffset([-delta[0], -delta[1]]);
+  } else {
+    // the pad stays centred in its shape
+    const [L, T, R, B] = tlbr ? [tl[0], tl[1], br[0], br[1]] : [bl[0], tr[1], tr[0], bl[1]];
+    let size: Pt = [Math.abs(R - L), Math.abs(B - T)]; if (vertical) size = [size[1], size[0]];
+    v.size[1] = r6(size[0]); v.size[2] = r6(size[1]);
+    const at = K.kid(node, "at")!; at[1] = r6((L + R) / 2); at[2] = r6((T + B) / 2);
+  }
+  return node;
+}
 /** EDIT_POINTS of an item: [{ key, p, circle }] in drawing order. */
 export function editPoints(it: KItem): EditPoint[] {
   if (it && it.kind === "generated") return isTuningPattern(it) ? tuningEditPoints(it) : [];   // PCB_TUNING_PATTERN::MakeEditPoints
@@ -67,6 +263,9 @@ export function editPoints(it: KItem): EditPoint[] {
   const n = it.node, out: EditPoint[] = [];
   if (it.kind === "dimension") return dimEditPoints(n);
   if (ELLIPSE_KINDS.has(it.kind)) return ellipseEditPoints(n);   // EDA_ELLIPSE_POINT_EDIT_BEHAVIOR::MakePoints
+  if (it.kind === "image") return imageEditPoints(it);
+  if (it.kind === "group") return groupEditPoints(it);
+  if (it.kind === "pad") return padEditPoints(it);
   if (it.kind === "zone" || it.kind === "gr_poly") {
     // BuildForPolyOutline: every contour (the main outline and the holes) has its corners and its edge lines
     let base = 0; const mids: EditPoint[] = [];
@@ -232,7 +431,7 @@ export function polyEdgeDrag(pts: Pt[], i: number, pos: Pt, fixedLength: boolean
  */
 export function constrainHandle(orig: SNode, kind: string, key: string, p: Pt, angle: string | undefined): Pt {
   if (angle !== "45" && angle !== "90") return p;
-  if (kind === "dimension" || kind === "generated" || ELLIPSE_KINDS.has(kind) || /^[em]/.test(key) || key === "rr") return p;   // edge lines (an ellipse has no 45-degree constrainer) and the radius handle move on their own lines
+  if (kind === "dimension" || kind === "generated" || ELLIPSE_KINDS.has(kind) || kind === "image" || kind === "group" || kind === "pad" || /^[em]/.test(key) || key === "rr") return p;   // edge lines (an ellipse has no 45-degree constrainer) and the radius handle move on their own lines
   let ref: Pt | null = null;
   if (kind === "gr_line") ref = pt(orig, key === "start" ? "end" : "start");
   else if (kind === "gr_circle") ref = key === "center" ? null : pt(orig, "center");
@@ -251,6 +450,8 @@ export function unfillZoneNode(node: SNode) {
 export function editPointNode(orig: SNode, kind: string, key: string, p: Pt, raw: Pt | null | undefined, grid: ((p: Pt) => Pt) | null | undefined, opts?: EditOpts) {
   if (kind === "dimension") return dimEditNode(orig, key, p, raw || p, (grid || null));
   if (ELLIPSE_KINDS.has(kind)) return ellipseEditNode(clone(orig), key, p);   // EDA_ELLIPSE_POINT_EDIT_BEHAVIOR::UpdateItem
+  if (kind === "pad") return padEditNode(orig, key, p);
+  if (kind === "image") { const pe = S.pedit; return imageEditNode(orig, key, p, pe && pe.imgOff0 && pe.kind === "image" ? pe.imgOff0 as Pt : imageOriginOffset(orig)); }
   p = constrainHandle(orig, kind, key, p, opts && !opts.ctrl ? opts.angle : undefined);
   if (kind === "gr_arc") {
     const g = arcEditGeometry(orig, key, p, raw || p, arcEditMode()); if (!g) return clone(orig);
@@ -435,6 +636,11 @@ export function movePointTitle(key: string) { return /^[em]\d/.test(key) ? { tit
 /** PCB_POINT_EDITOR::movePoint after the dialog: the handle set to the entered position, the item updated (no grid, no angle limit). */
 export function movePointChanges(doc: BoardDoc, id: string, key: string, to: Pt) {
   const it = doc.items.get(id); if (!it || !PE_KINDS.has(it.kind)) return [];
+  if (it.kind === "group") {
+    const shapes = groupShapeItems(doc, it), box = shapes && groupShapesBox(shapes); if (!shapes || !box) return [];
+    const nodes = groupEditNodes(new Map(shapes.map((m) => [m.id, m.node])), box, key, to);
+    return shapes.filter((m) => K.serialize(nodes.get(m.id)!) !== K.serialize(m.node)).map((m) => replacedChange(m, nodes.get(m.id)!));
+  }
   const node = editPointNode(it.node, it.kind, key, to, to, null);
   return K.serialize(node) === K.serialize(it.node) ? [] : [replacedChange(it, node)];
 }
@@ -499,6 +705,10 @@ export function onHandlePointerDown(ev: PointerEvent) {
   ev.stopImmediatePropagation(); ev.preventDefault();
   S.peditCtrl = false;
   S.pedit = { id: hit.it.id, kind: hit.it.kind, key: hit.h.key, orig: clone(hit.it.node), start: mm, moved: false, ignoreGrid: !!(hit.h as { ignoreGrid?: boolean }).ignoreGrid };
+  if (hit.it.kind === "image") S.pedit.imgOff0 = imageOriginOffset(hit.it.node);   // the transform origin as the drag begins
+  if (hit.it.kind === "group") {   // the shapes and their box as the drag begins
+    const shapes = groupShapeItems(doc, hit.it)!; S.pedit.groupOrigs = new Map(shapes.map((m) => [m.id, clone(m.node)])); S.pedit.groupBox = groupShapesBox(shapes);
+  }
   if (isTuningPattern(hit.it)) genStartEdit(ctx, hit.it);   // PCB_POINT_EDITOR: genStartEdit
   try { stage.setPointerCapture(ev.pointerId!); } catch (e) { /* synthetic event */ }
 }
@@ -518,6 +728,11 @@ export function editHandleMove(ctx: PcbCtx, mm: Pt, ev?: { ctrlKey?: boolean; me
     else { const sn = snapCursor(ctx, [mm[0], mm[1]], new Set([pe.id]), mods, null); p = sn.p; pe.snapAt = sn.anchor; }   // grid.ResolveSnap( pos, snapLayers, grid, { item } )
   }
   if (pe.kind === "generated") { pe.moved = true; pe.node = tuningEditNode(pe.orig, pe.key, p); genUpdateEdit(ctx, pe.node); return; }   // genUpdateEdit: re-tuned live
+  if (pe.kind === "group") {   // the shapes follow live
+    pe.moved = true; const nodes = groupEditNodes(pe.groupOrigs as Map<string, SNode>, pe.groupBox as [number, number, number, number], pe.key, p); pe.groupNodes = nodes;
+    for (const [id, n] of nodes) { const m = ctx.doc.items.get(id); if (m) { m.node.length = 0; m.node.push(...clone(n)); K.replaceChange(ctx.doc, m); } }
+    ctx.requestRender(); return;
+  }
   // the line mode's 45 / 90 limit unless Ctrl is held; Ctrl on a polygon edge keeps its length
   pe.moved = true; pe.node = editPointNode(pe.orig, pe.kind, pe.key, p, mm, ctx.snapOn && ctx.snap ? ctx.snap : null, { ctrl: !!S.peditCtrl, gridPitch: ctx.snapOn ? ctx.gridPitch || 0 : 0, gridPitchY: ctx.snapOn ? ctx.gridPitchY || ctx.gridPitch || 0 : 0, angle: angleSnapMode() });
   it.node.length = 0; it.node.push(...clone(pe.node!)); K.replaceChange(ctx.doc, it); ctx.requestRender();
@@ -527,7 +742,15 @@ export function editHandleUp(ctx: PcbCtx, commit: boolean) {
   clearConstruction(); setReferenceOnlyPoints([]); S.snapItem = null;   // the drag's grid helper and its construction geometry end with it
   const it = ctx.doc.items.get(pe.id); if (!it) { genCancelEdit(ctx); return; }
   if (pe.kind === "generated") { if (commit && pe.moved) genFinishEdit(ctx); else genCancelEdit(ctx); return; }   // genFinishEdit: "Edit Tuning Pattern"
+  if (pe.kind === "group") {   // the originals back first, then one "Move Point" over the changed shapes
+    const origs = pe.groupOrigs as Map<string, SNode>, nodes = pe.groupNodes as Map<string, SNode> | undefined, changes = [];
+    for (const [id, n] of origs) { const m = ctx.doc.items.get(id); if (m) { m.node.length = 0; m.node.push(...clone(n)); K.replaceChange(ctx.doc, m); } }
+    if (commit && pe.moved && nodes) for (const [id, n] of nodes) { const m = ctx.doc.items.get(id); if (m && K.serialize(n) !== K.serialize(m.node)) changes.push(replacedChange(m, n)); }
+    if (changes.length) ctx.commit(changes, "Move Point");
+    ctx.requestRender(); return;
+  }
   it.node.length = 0; it.node.push(...clone(pe.orig)); K.replaceChange(ctx.doc, it);   // the original back first: commit records the inverse
+  if (pe.kind === "image" && pe.imgOff0 && !(commit && pe.moved)) setImageOriginOffset(pe.orig, pe.imgOff0 as Pt);   // a cancelled drag keeps the old origin
   if (commit && pe.moved && pe.node && K.serialize(pe.node) !== K.serialize(pe.orig)) ctx.commit([replacedChange(it, pe.node)], "Move Point");
   ctx.requestRender();
 }

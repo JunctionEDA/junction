@@ -1522,7 +1522,7 @@ int EESCHEMA_JOBS_HANDLER::JobSchErc( JOB* aJob )
     adapter->AsyncLoad();
     adapter->BlockUntilLoaded();
 
-    ERC_TESTER ercTester( sch );
+    ERC_TESTER ercTester( sch, ercJob->m_showAllErrors );
 
     std::unique_ptr<DS_PROXY_VIEW_ITEM> drawingSheet( getDrawingSheetProxyView( sch ) );
     SCH_EDIT_FRAME* editFrame = nullptr;

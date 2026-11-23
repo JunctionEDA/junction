@@ -20,6 +20,7 @@ import { hasNet, netOf, sameNet } from "./nets";
 import { viaNode } from "./nodes";
 import { removeRedundant } from "./redundant";
 import { fixHead, leadingRatline, routeHighlight, routeUnhighlight } from "./route-fix";
+import { finishRouteStacks } from "./via-stack";
 import { netUnder, padsOf } from "./route-geom";
 import { RM_MARK } from "./router-settings";
 import { DBL_MS, HIT_MM, K, S, lastCtx } from "./state";
@@ -29,6 +30,7 @@ import { pathHits, routeObstacles, routerWorld } from "./walkaround";
 import { evalRuleConstraint } from "./dru";
 import { netClearance, netclassName, netclassOf } from "./drc";
 import { pinnedOpt, routedRuleItem } from "./rule-resolver";
+import { strokeForLayer } from "./draw-modes";
 
 /** ROUTER::CommitRouting: the route's branch onto the board as one undo step ("Routing", PNS_KICAD_IFACE::Commit). */
 export function commitRoute(ctx: PcbCtx, rt: Route) {
@@ -119,6 +121,7 @@ export function endRoute(ctx: PcbCtx, fixCurrent: boolean): boolean {
   if (rt.dp) { if (fixCurrent && rt.dpLines) dpFix(ctx, { finish: true }); }
   else if (fixCurrent && ((rt.els && rt.els.length) || rt.placingVia)) fixHead(ctx, { finish: true });
   S.route = null; const committed = commitRoute(ctx, rt); restoreActiveLayer(ctx, rt); routeUnhighlight(ctx, rt); sizesOf(ctx).endRoute(); refreshChip(ctx); ctx.requestRender();
+  finishRouteStacks(ctx, rt, committed);   // the microvia stacks the route dropped ("Expand Microvia Stacks"), then a queued staggered one
   if (S.routeQueue && routeQueueNext) { const next = routeQueueNext; Promise.resolve().then(() => next(ctx)); }   // RouteSelected: the next one
   return committed;
 }
@@ -518,7 +521,7 @@ export function setLayer(ctx: PcbCtx, layer: string) {
     }
     rt.placingVia = null; toggleViaPlacement(ctx, "through", layer); return;
   }
-  if (S.gfxLayer !== layer) S.strokeW = null;   // layerChanged: the drawing tools' stroke takes the new layer's default thickness
+  if (S.gfxLayer !== layer) strokeForLayer(layer);   // layerChanged: the drawing tools' stroke takes the new layer's default thickness
   if (S.draw && ctx.showLayer) ctx.showLayer(layer);
   S.layer = layer; S.gfxLayer = layer; sizesOf(ctx).setActiveLayer(layer); refreshChip(ctx); ctx.requestRender();
 }

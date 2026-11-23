@@ -29,18 +29,27 @@ const clipStored = () => { try { return localStorage.getItem(CLIP_KEY) || ""; } 
  * document or an image editor.  The text is already on the clipboard; this replaces it with the full set when the
  * browser lets a page write images (and leaves the text alone when it does not).
  */
+/** KiCad's private clipboard format (SCH_EDITOR_CONTROL::doCopy's wxDataFormat( "application/kicad" )), as the
+ *  browser's custom-format form: a page may only write a non-standard type under the "web " prefix. */
+export const KICAD_CLIP_TYPE = "web application/kicad";
 async function writeRichClipboard(text: string, ids: string[]): Promise<void> {
   const doc = E.kdoc as KDoc | null, CI = (window as unknown as { ClipboardItem?: { new(items: Record<string, Blob>): ClipboardItem; supports?(type: string): boolean } }).ClipboardItem;
   if (!doc || !isSch() || !CI || !navigator.clipboard || !navigator.clipboard.write) return;
+  // the KiCad data first (application/kicad), then the pictures of the selection, then the text
+  const custom: Record<string, Blob> = CI.supports && CI.supports(KICAD_CLIP_TYPE) ? { [KICAD_CLIP_TYPE]: new Blob([text], { type: KICAD_CLIP_TYPE }) } : {};
   let b: number[] | null = null;
   for (const id of ids) { const it = doc.items.get(id), r = it && it.bbox; if (r) b = b ? [Math.min(b[0], r[0]), Math.min(b[1], r[1]), Math.max(b[2], r[2]), Math.max(b[3], r[3])] : [r[0], r[1], r[2], r[3]]; }
-  if (!b || !(b[2] > b[0]) || !(b[3] > b[1])) return;
+  if (!b || !(b[2] > b[0]) || !(b[3] > b[1])) {
+    // no box to draw (expandedSelectionBox empty): the KiCad data and the text alone
+    if (Object.keys(custom).length && appClipboard.text === text) await navigator.clipboard.write([new CI({ ...custom, "text/plain": new Blob([text], { type: "text/plain" }) })]);
+    return;
+  }
   const ix = (b[2] - b[0]) * 0.02, iy = (b[3] - b[1]) * 0.02, box = [b[0] - ix, b[1] - iy, b[2] + ix, b[3] + iy];
   const opts = Object.assign({}, E.renderOpts, { ids: new Set(ids), bbox: box, margin: 0, background: false, frame: false, hidden: E.hiddenLayers });
   const dpi = Math.min(300, 4096 * 25.4 / Math.max(box[2] - box[0], box[3] - box[1]));
   const png = await KiCadCanvas.renderPng(doc, Object.assign({}, opts, { dpi }));
   const bytes = new Uint8Array(await png.arrayBuffer()); let bin = ""; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  const types: Record<string, Blob> = { "text/plain": new Blob([text], { type: "text/plain" }), "image/png": png, "text/html": new Blob([`<img src="data:image/png;base64,${btoa(bin)}" />`], { type: "text/html" }) };
+  const types: Record<string, Blob> = { ...custom, "text/plain": new Blob([text], { type: "text/plain" }), "image/png": png, "text/html": new Blob([`<img src="data:image/png;base64,${btoa(bin)}" />`], { type: "text/html" }) };
   if (CI.supports && CI.supports("image/svg+xml")) { try { types["image/svg+xml"] = new Blob([KiCadCanvas.renderSvg(doc, opts)], { type: "image/svg+xml" }); } catch (e) { /* the picture goes without its SVG */ } }
   if (appClipboard.text !== text) return;                                 // something else was copied meanwhile
   await navigator.clipboard.write([new CI(types)]);
@@ -51,7 +60,16 @@ async function clipboardHasImage(): Promise<boolean> {
 }
 export const appClipboard = { text: "", get() { return appClipboard.text || clipStored(); },
   set(t: unknown, ids?: string[]) { appClipboard.text = String(t || ""); try { if (appClipboard.text.length <= 2_000_000) localStorage.setItem(CLIP_KEY, appClipboard.text); else localStorage.removeItem(CLIP_KEY); } catch (e) { /* storage full or blocked: this tab still has it */ } if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(appClipboard.text).catch(() => {}); if (ids && ids.length) writeRichClipboard(appClipboard.text, ids).catch(() => {}); },
-  async read() { try { if (navigator.clipboard && navigator.clipboard.readText) { const t = await navigator.clipboard.readText(); if (t) return t; if (await clipboardHasImage()) return ""; } } catch (e) { /* permission denied: use the buffer */ } return appClipboard.get(); } };
+  async read() {
+    // GetClipboardUTF8: KiCad's own format when the clipboard has it, else the text
+    try { const k = await readKicadClipboard(); if (k) return k; } catch (e) { /* no custom formats here */ }
+    try { if (navigator.clipboard && navigator.clipboard.readText) { const t = await navigator.clipboard.readText(); if (t) return t; if (await clipboardHasImage()) return ""; } } catch (e) { /* permission denied: use the buffer */ } return appClipboard.get(); } };
+/** The application/kicad data on the system clipboard (KICAD_CLIP_TYPE), or "" when there is none. */
+export async function readKicadClipboard(): Promise<string> {
+  if (typeof navigator === "undefined" || !navigator.clipboard || !navigator.clipboard.read) return "";
+  for (const item of await navigator.clipboard.read()) if (item.types.includes(KICAD_CLIP_TYPE)) return await (await item.getType(KICAD_CLIP_TYPE)).text();
+  return "";
+}
 if (typeof window !== "undefined") window.addEventListener("storage", (ev) => { if (ev.key === CLIP_KEY) appClipboard.text = ev.newValue || ""; });
 
 export const undoStack: UndoEntry[] = [], redoStack: UndoEntry[] = [];
@@ -100,7 +118,8 @@ export function toolCtx(extra?: Record<string, unknown>) {
     localOrigin(): number[] { return (E.localOrigin as number[]).slice(); },
     setLocalOrigin(p: number[]) { E.localOrigin = p.slice(); store.slice("viewport", { origin: E.localOrigin.slice() }); },
     showLayer(layer: string) { if (E.kdoc && E.hiddenLayers.has(layer)) setLayerVisible(layer, true); },
-    showObject(id: string) { appearanceDispatch({ t: "objVisible", id, on: true }); },
+    // PCB_BASE_FRAME::SetObjectVisible( layer ): the Appearance panel's Objects row shown
+    showObject(id: string) { if (E.kdoc) appearanceDispatch({ t: "objVisible", id, on: true }); },
     // PCB_BASE_FRAME::SelectToolbarAction: a toolbar group shows the given action (the arc tool's drawing mode)
     setGroupCurrent(group: string, id: string) { if (store.get().groupCurrent[group] !== id) setGroupCurrent(group, id); },
     // PCB_SELECTION_TOOL's hover selection: the Clarify Selection candidates under a point, the popup that asks

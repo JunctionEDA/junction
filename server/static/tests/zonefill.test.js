@@ -154,6 +154,19 @@ test("hatch fill leaves a grid of holes; chamfered corners cut the outline", asy
   assert.ok(!filledAt(lc, 101.2, 101.2), "the corner is chamfered off"); assert.ok(filledAt(lc, 104, 101.2));
 });
 
+test("board hatch offsets (setup (zone_defaults …)) shift the hatch; a zone's own offset wins; prototype fills hatched zones solid", async () => {
+  const hz = (extra = "") => zone({ fill: "yes (mode hatch)", hatch: "(hatch_thickness 1) (hatch_gap 1.5) (hatch_orientation 0) (hatch_border_algorithm hatch_thickness) (hatch_min_hole_area 0.3)" }).replace("(polygon", extra + " (polygon");
+  const withDefaults = (t) => t.replace("(setup (pad_to_mask_clearance 0))", '(setup (pad_to_mask_clearance 0) (zone_defaults (property (layer "F.Cu") (hatch_position (xy 1.25 0)))))');
+  const plain = await fill(board(hz())); const shifted = await fill(withDefaults(board(hz())));
+  const lp = plain.layer(zid(plain.doc, "z1"), "F.Cu"), ls = shifted.layer(zid(shifted.doc, "z1"), "F.Cu");
+  const probe = []; for (let y = 115; y < 117.5; y += 0.5) for (let x = 105; x < 110; x += 0.25) probe.push([x, y]);
+  const pattern = (lf) => probe.map(([x, y]) => (filledAt(lf, x, y) ? 1 : 0)).join("");
+  assert.notEqual(pattern(lp), pattern(ls), "the board default moved the grid");
+  const own = await fill(withDefaults(board(hz('(property (layer "F.Cu") (hatch_position (xy 0 0)))'))));
+  assert.equal(pattern(own.layer(zid(own.doc, "z1"), "F.Cu")), pattern(lp), "the zone's own (0, 0) overrides the board default");
+  const proto = await fill(board(hz()), null, Object.assign({}, RULES, { prototype: true }));
+  const a = totalArea(proto.layer(zid(proto.doc, "z1"), "F.Cu")); assert.ok(a > 39 * 29 * 0.95, "solid: " + a);
+});
 test("filledZoneNode writes (fill yes …) and the filled polygons after the outline, layer by layer, islands flagged", async () => {
   const walls = [seg(110, 99, 110, 111, "SIG", 0.4), seg(99, 110, 111, 110, "SIG", 0.4)];
   const text = board(zone({ islands: 1, layer: "F.Cu" }).replace('(layer "F.Cu")', '(layers "F.Cu" "B.Cu")'), smdFp("R1", 130, 120, "GND"), ...walls);
@@ -290,6 +303,14 @@ test("physical_clearance raises the gap: max( PHYSICAL_CLEARANCE, CLEARANCE )", 
   const r = await fillWithRules(board(zone(), smdFp("R1", 120, 115, "SIG")), (doc) => ({ [`physical_clearance|${zid(doc, "z1")}|${fpid(doc, "R1")}#0|*`]: 1.2 }));
   const lf = r.layer("z1", "F.Cu");
   assert.ok(!filledAt(lf, 122.0, 115) && filledAt(lf, 122.5, 115));
+});
+test("physical_clearance to a footprint knocks its courtyard out of the pour (knockoutCourtyardClearance)", async () => {
+  const fp = smdFp("U1", 120, 115, "SIG").replace("(pad ", '(fp_rect (start -3 -3) (end 3 3) (stroke (width 0.05) (type default)) (fill no) (layer "F.CrtYd") (uuid "cy-U1")) (pad ');
+  const plain = await fill(board(zone(), fp)); assert.ok(filledAt(plain.layer(zid(plain.doc, "z1"), "F.Cu"), 122.5, 115), "no rule: only the pad's clearance");
+  const r0 = await fillWithRules(board(zone(), fp), (doc) => ({ [`physical_clearance|${zid(doc, "z1")}|${fpid(doc, "U1")}|*`]: 0 }));
+  const l0 = r0.layer("z1", "F.Cu"); assert.ok(!filledAt(l0, 122.5, 115) && filledAt(l0, 123.3, 115), "the courtyard itself at 0");
+  const r1 = await fillWithRules(board(zone(), fp), (doc) => ({ [`physical_clearance|${zid(doc, "z1")}|${fpid(doc, "U1")}|*`]: 1 }));
+  const l1 = r1.layer("z1", "F.Cu"); assert.ok(!filledAt(l1, 123.7, 115) && filledAt(l1, 124.4, 115), "grown by the rule's 1 mm");
 });
 test("thermal relief gap and zone connection from custom rules (a pad inherits its footprint's)", async () => {
   const text = board(zone(), thtFp("J1", 120, 115, "GND"));

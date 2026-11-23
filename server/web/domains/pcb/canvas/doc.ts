@@ -98,9 +98,12 @@ export function parseDoc(text: string, docType?: string): Doc {
       for (const l of node.slice(1)) if (isList(l)) { const name = str(l[1]), ltype = str(l[2]); doc.layers.set(name, { id: num(l[0]), type: ltype, userName: l[3] !== undefined ? str(l[3]) : "" }); if (/\.Cu$/.test(name) && ltype !== "user") doc.copper.push(name); }
     }
     else if (k === "general") { const t = kid(node, "thickness"); if (t && type === "pcb") doc.thickness = num(t[1], 1.6); if (type === "pcb") doc.generalNode = node; continue; }   // board thickness: the 3D viewer's extrusion
-    else if (k === "net") { if (type === "pcb") doc.nets.set(num(node[1], -1), str(node[2])); continue; }   // (net 3 "GND"): the board's net table
+    else if (k === "net") { if (type === "pcb") doc.nets.set(num(node[1], -1), str(node[2])); continue; }
+    // the board's (property "k" "v") (BOARD::m_properties): ${k} falls back to them after the project's variables
+    else if (type === "pcb" && k === "property") { (doc.boardProperties || (doc.boardProperties = {}))[str(node[1])] = str(node[2]); continue; }   // (net 3 "GND"): the board's net table
     else if (type === "pcb" && k === "setup") { const o = setupOrigins(node); doc.auxOrigin = o.aux; doc.gridOrigin = o.grid; doc.stackup = kid(node, "stackup") || null; doc.setupNode = node; continue; }   // the physical stackup is kept for impedance work   // the drill / place and grid origins
-    else if (k === "embedded_files") { doc.embeddedFiles = node; continue; }   // read by the Simulation Model dialog (kicad-embed://)
+    else if (k === "embedded_files") { doc.embeddedFiles = node; continue; }
+    else if (type === "pcb" && k === "net_chains") { doc.netChainsNode = node; continue; }   // each net's chain and terminal pads (NETINFO_ITEM)   // read by the Simulation Model dialog (kicad-embed://)
     else if (k === "symbol_instances" && type === "sch") {
       const m = new Map<string, { reference: string; unit: number; value: string; footprint: string }>();
       for (const p of kids(node, "path")) { const f = (key: string): string => { const c = kid(p, key); return c ? str(c[1]) : ""; }; m.set(str(p[1]), { reference: f("reference"), unit: num((kid(p, "unit") || [])[1], 1), value: f("value"), footprint: f("footprint") }); }

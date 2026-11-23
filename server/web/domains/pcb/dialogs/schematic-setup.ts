@@ -15,9 +15,10 @@ import { state as appState } from "../editor/appstore";
 import { allNetNames, loadSheets } from "../editor/schnets";
 import { netclassPatternMatches } from "../canvas/pcb-sizes";
 import { infoBar, messageBox as buttonBox } from "../editor/pcbdialogs/ui";
-import { SCH_IMPORT_OPTIONS, annotationOf, annotationPage, chainClassError, chainClassesJson, chainsOf, embeddedFilesPage, importSections, netChainsPage, parityOf, parityPage, writeAnnotation, aliasNameError, clampPrecision, connectionGridError, memberNameError, resetButtonState, sortAliases, templateFieldNameError, templateNamesWithWhitespace, untitledFieldName, type ChainState } from "./schematic-setup-pages";
+import { SCH_IMPORT_OPTIONS, annotationOf, annotationPage, applyChainEdits, chainClassError, chainRowsError, chainsOf, embeddedFilesPage, importSections, netChainsPage, parityOf, parityPage, writeAnnotation, aliasNameError, clampPrecision, connectionGridError, memberNameError, resetButtonState, sortAliases, templateFieldNameError, templateNamesWithWhitespace, untitledFieldName, type ChainState } from "./schematic-setup-pages";
 import { kicadIcon } from "../../../shared/components/kicon-dom";
 import { colorPicker, type RGBA } from "../editor/pcbdialogs/color-picker";
+import { applySetupEdits, setupChainRows } from "../editor/netchains";
 import { PIN_MAP_BMP } from "./pinmap-bitmaps";
 import { effectiveTheme } from "../../../shared/theme";
 import { DEFAULT_PIN_MAP, ERC_RULES, PIN_TYPE_NAMES, defaultSeverity, type Severity } from "./erc-rules";
@@ -117,7 +118,14 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
   const chainClasses = obj(net.net_chain_classes);
   let chainsLoaded = false;
   const chains: ChainState = { chains: [], classes: [...new Set(Object.values(chainClasses).map((v) => str(v)).filter(Boolean))].sort() };
-  const chainsReady = rootP.then((t) => { const K = KiCadCanvas; const nodes = t ? (K.parseAll ? (K.parseAll(t) as unknown[]) : []) : []; const top = Array.isArray(nodes[0]) ? nodes[0] as unknown[] : []; chains.chains = chainsOf(top as never[], chainClasses); chainsLoaded = true; });
+  // the committed chains as the schematic has them (NETCHAIN_MANAGER::GetCommittedNetChains), else the root sheet's entries
+  const chainsReady = rootP.then((t) => {
+    const live = setupChainRows(chainClasses);
+    if (live) chains.chains = live;
+    else { const K = KiCadCanvas; const nodes = t ? (K.parseAll ? (K.parseAll(t) as unknown[]) : []) : []; const top = Array.isArray(nodes[0]) ? nodes[0] as unknown[] : []; chains.chains = chainsOf(top as never[], chainClasses); }
+    chains.classOrig = chains.classes.slice(); chains.deletedClasses = [];
+    chainsLoaded = true;
+  });
 
   const numField = (key: string, id: string, scale: "len" | "pct" | "raw", width = 90) => {
     const cur = numOf(dv(key), 0), shown = scale === "len" ? fmt(toUser(cur)) : scale === "pct" ? String(+(cur * 100).toFixed(2)) : String(cur);
@@ -142,7 +150,7 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
     const moved = classes.map((c) => c.src).some((src, i) => src !== classes0[i]);
     n.classes = classes.filter((c) => c.name.trim()).map((c, i) => Object.assign({}, c.src, moved ? { priority: c.name.trim() === "Default" ? 2147483647 : i } : {}, { name: c.name.trim(), wire_width: parseFloat(c.wire) || 6, bus_width: parseFloat(c.bus) || 12, schematic_color: c.color || "rgba(0, 0, 0, 0.000)", line_style: c.style }));
     n.netclass_patterns = patterns.filter((x) => x.pattern.trim()).map((x) => ({ netclass: x.netclass, pattern: x.pattern.trim() }));
-    const cc = chainClassesJson(chains, chainClasses); if (chainsLoaded && JSON.stringify(cc) !== JSON.stringify(chainClasses)) n.net_chain_classes = cc;
+    const cc = applyChainEdits(chains, chains.chains.map((c) => c.origName ?? c.name), chainClasses).classes; if (chainsLoaded && JSON.stringify(cc) !== JSON.stringify(chainClasses)) n.net_chain_classes = cc;
     const tv: JsonObj = {}; for (const v of vars) if (v.name.trim()) tv[v.name.trim()] = v.value; p.text_variables = tv;
   };
   let tb: { current(): string | null; select(label: string): void } | null = null;
@@ -327,7 +335,7 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
               aliasNames = aliases.map((a) => a.name); }, buttons: { add: () => ({ name: "", members: [] }), remove: true } });
             R.append(rtitle, mhost); if (aliases.length) ag.select(0); else show(null);
           } },
-          { label: "Net Chains", build(pg) { const wait = h("div", { class: "ro" }, "Loading..."); pg.append(wait); void chainsReady.then(() => { wait.remove(); netChainsPage(pg, chains, () => classes.map((c) => c.name), ro); }); } },
+          { label: "Net Chains", build(pg) { const wait = h("div", { class: "ro" }, "Loading..."); pg.append(wait); void chainsReady.then(() => { wait.remove(); netChainsPage(pg, chains, () => classes.map((c) => c.name), ro, colorCell); }); } },
           { label: "Text Variables", build(pg) {
             KD().grid<VarRow>(pg, [{ key: "name", label: "Variable Name", type: "text", width: 260 }, { key: "value", label: "Text Substitution", type: "text" }], vars, { readOnly: ro, height: 330, buttons: { add: () => ({ name: "", value: "" }), remove: true } });
           } },
@@ -343,6 +351,7 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
       // PANEL_SETUP_FORMATTING::TransferDataFromWindow: the connection grid must lie in 25 .. 10000 mils
       const ge = connectionGridError(connGrid);
       if (ge) { if (tb) tb.select("Formatting"); void messageBox(ge).then(() => { const i = document.getElementById("kd-ss-conngrid") as HTMLInputElement | null; if (i) { i.focus(); i.select(); } }); return false; }
+      const re = chainRowsError(chains.chains); if (re) { void messageBox(re, "Net Chains"); return false; }
       const ce = chainClassError(chains.classes); if (ce) { void messageBox(ce, "Net Chain Classes"); return false; }
       const bad = vars.find((v) => v.name && !/^[^\s${}:]+$/.test(v.name)); if (bad) { toast(`Text variable name '${bad.name}' may not contain spaces, $, {, } or :`, 4000); return false; }
       // PANEL_TEMPLATE_FIELDNAMES::TransferDataFromWindow: white space is asked about name by name, then a mandatory
@@ -357,6 +366,8 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
         const te = templateFieldNameError(templates.map((t) => t.name));
         if (te) { if (tb) tb.select("Field Name Templates"); void messageBox(te.message); return; }
         dlg.close();
+        // ApplyEdits: the chains' renames, colours, net classes and deletions go into the schematic
+        if (chainsLoaded) { const { edits } = applyChainEdits(chains, chains.chains.map((c) => c.origName ?? c.name), chainClasses); await applySetupEdits(edits); }
         saveProject((p) => {
           writeInto(p);
         }, "schematic setup").then(() => toast("Schematic setup saved to the project"), (err: Error) => toast("Could not save the project settings: " + err.message, 5000));

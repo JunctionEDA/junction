@@ -126,7 +126,8 @@ function flatten(entries, trail, out) {
       const toolActs = {}; for (const [act, tid] of Object.entries(T.TOOL_MAP[ed])) (toolActs[tid] = toolActs[tid] || []).push(act);
       // the module keeps these on purpose: V places a via (KiCad's router does the same; as a tool it is Ctrl+Shift+X),
       // D drags a track segment (KiCad's Drag 45 Degree Mode), ` is Highlight Net under either name
-      const same = { pcb: { via: "V", drag: "D", highlightNetSelection: "`", pack: "P" }, sch: { highlight: "`" } }[ed];
+      // and Set Spreading Distance is E inside Spread Tracks, as KiCad's AS_CONTEXT ACT_SpreadTracksSetDistance is
+      const same = { pcb: { via: "V", drag: "D", highlightNetSelection: "`", pack: "P", ACT_SpreadTracksSetDistance: "E" }, sch: { highlight: "`" } }[ed];
       const clash = [];
       for (const a of Object.values(mod.actions)) { if (!a.key) continue; const k = moduleKey(a.key), o = own.get(k) || []; if (o.length && !o.includes(a.id) && !o.includes(aliasOf[a.id]) && same[a.id] !== k && !wins[k]) clash.push(`${a.id} on ${k} (KiCad: ${o})`); }
       for (const t of mod.tools) { if (!t.key) continue; const k = moduleKey(t.key), o = own.get(k) || []; if (o.length && !(toolActs[t.id] || []).some((x) => o.includes(x)) && same[t.id] !== k && !wins[k]) clash.push(`tool ${t.id} on ${k} (KiCad: ${o})`); }

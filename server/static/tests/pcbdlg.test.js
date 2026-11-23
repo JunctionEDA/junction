@@ -131,19 +131,22 @@ test("Constraints Resolution: board setup, net class and custom rules in EvalRul
   T.setCustomRules('(version 1)\n(rule wide (constraint track_width (min 0.3mm) (opt 0.4mm)) (condition "A.NetName == \'GND\'"))\n(rule other (constraint track_width (min 1mm)) (condition "A.NetName == \'VCC\'"))');
   try {
     const p = T.inspectConstraints(d, "s1", s);
-    assert.equal(p.length, 1); assert.equal(p[0].title, "Track Width");
+    // a track: Track Width, Solder Mask, Keepouts and Assertions (InspectConstraints' pages for PCB_TRACE_T)
+    assert.deepEqual(p.map((x) => x.title), ["Track Width", "Solder Mask", "Keepouts", "Assertions"]);
     const t = p[0].lines.join("\n");
+    assert.match(t, /^<h7>Track width resolution for:<\/h7>\n<ul><li>Track \[[^\]]*\] on F\.Cu, length [^<]* \[netclass Default\]<\/li><\/ul>/);
     assert.match(t, /Checking board setup constraints track width: min 0\.1 mm\.\nUnconditional constraint applied\./);
     assert.match(t, /Checking netclass 'Default' track width: opt 0\.3 mm\.\nConstraint applied\./);
     assert.match(t, /Checking rule 'wide': min 0\.3 mm; opt 0\.4 mm; max <i>undefined<\/i>\.\nChecking rule condition 'A\.NetName == 'GND''\.\nRule applied; overrides previous constraints\./);
     assert.match(t, /Checking rule 'other'[^\n]*\n[^\n]*\nCondition not satisfied; rule ignored\./);
-    assert.equal(p[0].resolved, "Resolved width constraints: min 0.3 mm; opt 0.4 mm; max <i>undefined</i>.");
+    assert.equal(p[0].lines[p[0].lines.length - 1], "Resolved width constraints: min 0.3 mm; opt 0.4 mm; max <i>undefined</i>.");
     // a microvia: the micro-via board setup constraint and the uvia net class sizes
     const v = T.inspectConstraints(d, "v2", s);
-    assert.deepEqual(v.map((x) => x.title), ["Via Diameter", "Via Annular Width", "Hole Size"]);
+    assert.deepEqual(v.map((x) => x.title), ["Via Diameter", "Via Annular Width", "Hole Size", "Solder Mask", "Keepouts", "Assertions"]);
     assert.match(v[0].lines.join("\n"), /Checking netclass 'Default' uvia via diameter: opt 0\.25 mm\./);
     assert.match(T.inspectConstraints(d, "v1", s)[0].lines.join("\n"), /micro-via via diameter: min 0\.2 mm\.\nMembership not satisfied; constraint ignored\./);
-    assert.equal(T.inspectConstraints(d, "fp1", s), null);
+    // a footprint has the pages every item has
+    assert.deepEqual(T.inspectConstraints(d, "fp1", s).map((x) => x.title), ["Keepouts", "Assertions"]);
   } finally { T.setCustomRules(null); }
 });
 

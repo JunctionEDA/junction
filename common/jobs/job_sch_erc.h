@@ -28,4 +28,8 @@ public:
     JOB_SCH_ERC();
     wxString GetDefaultDescription() const override;
     wxString GetSettingsDialogTitle() const override;
+
+    /// ERC_TESTER( aSchematic, aShowAllErrors ): report every pin that needs a driver, not one per net
+    /// (DIALOG_ERC's "Show all errors").
+    bool m_showAllErrors;
 };

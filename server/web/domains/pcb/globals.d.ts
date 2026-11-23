@@ -39,6 +39,8 @@ interface KDoc {
   fpEditor?: boolean;
   /** the file's (version …) */
   version?: number;
+  /** a board's (net_chains …): each net's chain and terminal pads (canvas/net-chains.ts parseBoardChains) */
+  netChainsNode?: SNode | null;
   /** the displayed sheet instance's path ("/<root uuid>/<sheet uuid>…"), set by the editor (KiCadCanvas.setInstancePath) */
   instancePath?: string | null;
   /** a schematic sheet's own (bus_alias "NAME" (members …)) entries: name -> member texts */
@@ -72,6 +74,14 @@ interface KiCadCanvasApi {
   presenceSelection(doc: KDoc | null, selection: Iterable<string> | null, IU: number, moving: boolean, max?: number): { selection: string[]; boxes?: [number, number, number, number][] } | null;
   /** DS_PROXY_VIEW_ITEM::HitTestDrawingSheetItems (canvas/sheet.ts) */
   hitTestDrawingSheet(doc: KDoc, x: number, y: number, tol: number): boolean;
+  /** PCB_TEXT / PCB_FIELD::GetShownText: the text's layer, its footprint's variables, then the board's (canvas/pcb-textvars.ts) */
+  pcbTextShown(doc: KDoc | null | undefined, text: string, layer: string, fp?: SNode | null, field?: string | null, opts?: { erc?: boolean; finalize?: boolean }): string;
+  /** the host's net class of a net, for ${NET_CLASS(pad)} (canvas/pcb-textvars.ts) */
+  pcbVars: { netClass: ((net: string) => string | null) | null };
+  /** SCH_CONNECTIVITY::ExtractTextChecks for one sheet instance (canvas/geom-sch.ts) */
+  textChecks(doc: KDoc, path?: string | null): { assertionItem: string | null; item: string; assertionPos: [number, number]; pos: [number, number]; assertions: { warning: boolean; message: string }[]; shown: string }[];
+  /** SCH_CONNECTIVITY::ExtractDrawingSheetTextChecks (canvas/sheet.ts) */
+  drawingSheetTextChecks(doc: KDoc, kind?: "ERC" | "DRC"): { pos: [number, number]; assertions: { warning: boolean; message: string }[]; shown: string }[];
   /** a (kicad_wks …) file, parsed (canvas/sheet.ts parseDrawingSheet) */
   parseDrawingSheet(text: string): unknown;
   parse(text: string): SNode | null;
@@ -249,6 +259,8 @@ interface ToolModule {
   padProperties?(ctx: ToolCtx, item: KItem, index: number): boolean;
   /** Board: with a length tuner active, PCB_ACTIONS::properties opens Tuning Pattern Properties (false otherwise). */
   tunerProperties?(ctx: ToolCtx): boolean;
+  /** PCB_ACTIONS::properties on the item a drawing tool is drawing (DRAWING_TOOL) */
+  draftProperties?(ctx: ToolCtx): boolean;
   /** `ev` is the key event, or a stand-in for a key the chrome synthesises (a menu's Delete) */
   onKey?(key: string, ev: KeyboardEvent | Pick<KeyboardEvent, "shiftKey" | "preventDefault"> | Record<string, never>, ctx: ToolCtx): boolean;
   drawOverlay?(ctx2d: CanvasRenderingContext2D, view: KView, ctx: ToolCtx): void;

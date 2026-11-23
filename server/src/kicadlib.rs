@@ -209,7 +209,7 @@ pub async fn item(AuthUser(_user): AuthUser, Query(q): Query<ItemQuery>) -> AppR
     if !resp.status().is_success() { return Err(unreachable("a library item")); }
     let text = resp.text().await.map_err(|_| unreachable("a library item"))?;
     let head = text.trim_start();
-    if text.len() > MAX_ITEM_BYTES || !(head.starts_with("(kicad_symbol_lib") || head.starts_with("(footprint") || head.starts_with("(module")) {
+    if text.len() > MAX_ITEM_BYTES || !(head.starts_with("(kicad_symbol_lib") || crate::libs::is_footprint_text(head)) {
         return Err(AppError::NotFound);   // a sign-in page or an error page, not a library file
     }
     let out = json!({ "kind": kind.word(), "library": lib, "name": name, "id": format!("{lib}:{name}"), "sexpr": text });
@@ -229,7 +229,7 @@ async fn footprint_text(lib: &str, name: &str) -> Option<String> {
     if !resp.status().is_success() { return None; }
     let text = resp.text().await.ok()?;
     let head = text.trim_start();
-    if text.len() > MAX_ITEM_BYTES || !(head.starts_with("(footprint") || head.starts_with("(module")) { return None; }
+    if text.len() > MAX_ITEM_BYTES || !crate::libs::is_footprint_text(head) { return None; }
     remember(key, &json!({ "kind": "footprint", "library": lib, "name": name, "id": format!("{lib}:{name}"), "sexpr": text }));
     Some(text)
 }

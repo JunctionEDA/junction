@@ -13,6 +13,8 @@ export const TOOLS = [
   { id: "tunediff", label: "Tune length of a differential pair", key: "8", cursor: "TUNE", icon: '<path d="M3 9h4v-4h3v4h3v-4h3v4h5M3 15h4v4h3v-4h3v4h3v-4h5"/>' },
   { id: "tuneskew", label: "Tune skew of a differential pair", key: "9", cursor: "TUNE", icon: '<path d="M3 9h4v-4h3v4h11M3 15h18"/>' },
   { id: "via", label: "Add via", key: "V", cursor: "PLACE", icon: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/>' },
+  { id: "viastack", label: "Place Microvia Stack", key: "", cursor: "PLACE", hidden: true, icon: '<circle cx="12" cy="7" r="3.5"/><circle cx="12" cy="17" r="3.5"/><path d="M12 10.5v3"/>' },
+  { id: "spread", label: "Spread Tracks", key: "", cursor: "PENCIL", hidden: true, icon: '<path d="M4 6h16M4 12h16M4 18h16"/><path d="M12 3v18" stroke-dasharray="2 2"/>' },
   { id: "drag", label: "Drag track segment", key: "D", cursor: "MOVING", icon: '<path d="M5 7h14"/><path d="M5 17h14" stroke-dasharray="2 2"/><path d="M12 9v5M9 12l3 3 3-3"/>' },
   { id: "gline", label: "Draw line", key: "Shift+L", cursor: "crosshair", icon: '<path d="M5 19L19 5"/>' },
   { id: "grect", label: "Draw rectangle", key: "Shift+R", cursor: "crosshair", icon: '<rect x="4" y="6" width="16" height="12" rx="1"/>' },
@@ -34,6 +36,7 @@ export const TOOLS = [
   { id: "image", label: "Place reference image", key: "", cursor: "crosshair", icon: '<rect x="3" y="5" width="18" height="14" rx="1"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 16l-5-5-7 7"/>' },
   { id: "zone", label: "Draw filled zone", key: "Alt+Z", cursor: "crosshair", icon: '<path d="M4 5h16v14H4z"/><path d="M4 12l7-7M4 19l14-14M11 19l9-9M18 19l2-2"/>' },
   { id: "thievingzone", label: "Draw Copper Thieving Zone", key: "", cursor: "crosshair", hidden: true, icon: '<path d="M4 5h16v14H4z"/><circle cx="8" cy="9" r="1"/><circle cx="12" cy="9" r="1"/><circle cx="16" cy="9" r="1"/><circle cx="8" cy="15" r="1"/><circle cx="12" cy="15" r="1"/><circle cx="16" cy="15" r="1"/>' },
+  { id: "viastitch", label: "Draw Via Stitch area", key: "", cursor: "crosshair", hidden: true, icon: '<path d="M4 5h16v14H4z"/><circle cx="8" cy="9" r="1.6"/><circle cx="16" cy="9" r="1.6"/><circle cx="8" cy="15" r="1.6"/><circle cx="16" cy="15" r="1.6"/>' },
   { id: "rulearea", label: "Draw rule area", key: "Ctrl+Shift+K", cursor: "crosshair", icon: '<path d="M4 5h16v14H4z" stroke-dasharray="3 2"/><path d="M8 8l8 8M16 8l-8 8"/>' },
   { id: "dimaligned", label: "Draw aligned dimension", key: "", cursor: "MEASURE", icon: '<path d="M4 20L20 4"/><path d="M4 20l6-1-5-5zM20 4l-6 1 5 5z"/>' },
   { id: "dimortho", label: "Draw orthogonal dimension", key: "Ctrl+Shift+H", cursor: "MEASURE", icon: '<path d="M4 18h16M4 13v8M20 13v8"/><path d="M4 18l4-2v4zM20 18l-4-2v4z"/>' },
@@ -54,6 +57,9 @@ export const TOOLS = [
   { id: "drillorigin", label: "Drill/Place File Origin", key: "", cursor: "PLACE", icon: '<circle cx="12" cy="12" r="7"/><path d="M12 3v18M3 12h18"/>' },
   // PCB_PICKER_TOOL (selectPointInteractively / selectItemInteractively) for a dialog that asks for a point or an item
   { id: "pickpoint", label: "Select Point", key: "", cursor: "PLACE", hidden: true, icon: '<circle cx="12" cy="12" r="3"/><path d="M12 3v5M12 16v5M3 12h5M16 12h5"/>' },
+  // GRAPHIC_EDIT_TOOL's hover pickers (Edit > Extend Line or Arc, Edit > Trim Shape): KICURSOR::BULLSEYE
+  { id: "extendgraphic", label: "Extend Line or Arc", key: "", cursor: "BULLSEYE", hidden: true, icon: '<path d="M4 18L13 9"/><path d="M13 9l6-6" stroke-dasharray="2 2"/><path d="M15 3h6v6"/>' },
+  { id: "trimgraphic", label: "Trim Shape", key: "", cursor: "BULLSEYE", hidden: true, icon: '<path d="M4 12h5M15 12h5"/><path d="M9 12h6" stroke-dasharray="2 2"/><path d="M12 4v16"/>' },
   { id: "pickitem", label: "Select Item", key: "", cursor: "BULLSEYE", hidden: true, icon: '<path d="M5 3l14 9-6 1.5L10 20z"/>' },
 ];
 export const TOOL_HINT = { route: "Route — click to start and to fix, / posture, V via, Ctrl+/ corner mode, Backspace undo segment, End or double-click to finish, Esc to discard",
@@ -61,7 +67,8 @@ export const TOOL_HINT = { route: "Route — click to start and to fix, / postur
   tunesingle: "Tune length — click a track to start, move along it and click to finish; 1/2 spacing, 3/4 amplitude, Ctrl+L settings, Esc to cancel",
   tunediff: "Tune differential pair length — click a track of a differential pair, move along it and click to finish; 1/2 spacing, 3/4 amplitude, Ctrl+L settings, Esc to cancel",
   tuneskew: "Tune skew — click a track of a differential pair, move along it and click to finish; 1/2 spacing, 3/4 amplitude, Ctrl+L settings, Esc to cancel",
-  via: "Via — click to place", drag: "Drag — move the mouse, click to fix", gline: "Line — click start and end; click the start point or press Enter to stop",
+  via: "Via — click to place", viastack: "Microvia stack — click to place; a staggered stack takes one click per hop, Backspace takes a hop back, Esc to leave",
+  spread: "Spread tracks — click the track to spread the others around, move along it and click to finish; E distance, ] / [ step it, Esc to cancel", drag: "Drag — move the mouse, click to fix", gline: "Line — click start and end; click the start point or press Enter to stop",
   grect: "Rectangle — click two corners", gcircle: "Circle — click the centre, then the radius", gtext: "Text — click where it goes", barcode: "Barcode — click where it goes",
   garc: "Arc — click the points the drawing mode asks for; / switches the posture, Alt+/ the mode, Backspace takes back a point", gpoly: "Polygon — click the corners; click the first corner or press Enter to close",
   gcurve: "Bezier — click the start, the first control point, the second control point, then the end",
@@ -73,6 +80,7 @@ export const TOOL_HINT = { route: "Route — click to start and to fix, / postur
   image: "Image — choose a file, then click where its centre goes",
   zone: "Zone — click the corners; click the first corner or press Enter to close, then pick the net",
   thievingzone: "Copper thieving zone — click the corners on the active copper layer; click the first corner or press Enter to close",
+  viastitch: "Via stitch area — click the corners; click the first corner or press Enter to close, then set the net and pattern",
   rulearea: "Rule area — click the corners on F.Cu and B.Cu; click the first corner or press Enter to close",
   dimaligned: "Aligned dimension — click the two points, then how far out the crossbar goes",
   dimortho: "Orthogonal dimension — click the two points, then where the crossbar goes (beside the points measures Y, above or below them X)",
@@ -81,6 +89,8 @@ export const TOOL_HINT = { route: "Route — click to start and to fix, / postur
   leader: "Leader — click the arrow point and the elbow; Dimension Properties then takes the text",
   delete: "Delete — click an item to remove it; Esc to leave the tool",
   pad: "Place pad", padtht: "Place pad", padsmd: "Place pad", padnpth: "Place pad", padpaste: "Place pad", anchor: "Place the footprint anchor",
+  extendgraphic: "Extend Line or Arc — hover a graphical line or arc to extend it until it meets another, click to extend; Esc to leave the tool",
+  trimgraphic: "Trim Shape — hover the part of a graphical shape to remove between the nearest crossings, click to trim; Esc to leave the tool",
   pickpoint: "Select center point...", pickitem: "Select center item...",
   gridorigin: "Grid origin — click where the grid starts", drillorigin: "Drill/place file origin — click the origin point for drill and placement files" };
 

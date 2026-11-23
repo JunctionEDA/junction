@@ -147,6 +147,13 @@ export function grid<R>(host: HTMLElement, columns: GridColumn<R>[], rows: R[], 
     });
     table.appendChild(tb);
     if (opts.onHeader) [...table.querySelectorAll<HTMLElement>("th")].forEach((th, i) => { th.style.cursor = "pointer"; th.addEventListener("click", () => opts.onHeader!(cols[i], i)); });
+    // EnableDragColMove: a header dropped on another column's header moves the column to that position
+    if (opts.onColMove) [...table.querySelectorAll<HTMLElement>("th")].forEach((th, i) => {
+      th.draggable = true; th.dataset.colPos = String(i);
+      th.addEventListener("dragstart", (ev) => { if (ev.dataTransfer) { ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/x-kd-col", String(i)); } });
+      th.addEventListener("dragover", (ev) => { if (ev.dataTransfer && [...ev.dataTransfer.types].includes("text/x-kd-col")) { ev.preventDefault(); ev.dataTransfer.dropEffect = "move"; } });
+      th.addEventListener("drop", (ev) => { const from = ev.dataTransfer ? parseInt(ev.dataTransfer.getData("text/x-kd-col"), 10) : NaN; if (isNaN(from)) return; ev.preventDefault(); if (from !== i) opts.onColMove!(from, i); });
+    });
   }
   wrap.appendChild(table); host.appendChild(wrap); refresh();
   installGridTricks(table, api, opts, () => sel, (i) => { sel = i; });

@@ -22,6 +22,7 @@
 #include <cli/exit_codes.h>
 #include "jobs/job_sch_erc.h"
 #include <kiface_base.h>
+#include <cli_progress_reporter.h>
 #include <layer_ids.h>
 #include <string_utils.h>
 #include <wx/crt.h>
@@ -36,6 +37,8 @@
 #define ARG_SEVERITY_WARNING "--severity-warning"
 #define ARG_SEVERITY_EXCLUSIONS "--severity-exclusions"
 #define ARG_EXIT_CODE_VIOLATIONS "--exit-code-violations"
+#define ARG_SHOW_ALL_ERRORS "--show-all-errors"
+#define ARG_PROGRESS "--progress"
 
 CLI::SCH_ERC_COMMAND::SCH_ERC_COMMAND() : COMMAND( "erc" )
 {
@@ -77,6 +80,15 @@ CLI::SCH_ERC_COMMAND::SCH_ERC_COMMAND() : COMMAND( "erc" )
     m_argParser.add_argument( ARG_EXIT_CODE_VIOLATIONS )
             .help( UTF8STDSTR( _( "Return a nonzero exit code if ERC violations exist" ) ) )
             .flag();
+
+    m_argParser.add_argument( ARG_SHOW_ALL_ERRORS )
+            .help( UTF8STDSTR( _( "Show all errors, including every pin that needs a driver "
+                                  "(the ERC dialog's \"Show all errors\")" ) ) )
+            .flag();
+
+    m_argParser.add_argument( ARG_PROGRESS )
+            .help( UTF8STDSTR( _( "Print each test phase to stdout as it starts" ) ) )
+            .flag();
 }
 
 
@@ -87,6 +99,7 @@ int CLI::SCH_ERC_COMMAND::doPerform( KIWAY& aKiway )
     ercJob->SetConfiguredOutputPath( m_argOutput );
     ercJob->m_filename = m_argInput;
     ercJob->m_exitCodeViolations = m_argParser.get<bool>( ARG_EXIT_CODE_VIOLATIONS );
+    ercJob->m_showAllErrors = m_argParser.get<bool>( ARG_SHOW_ALL_ERRORS );
     ercJob->SetVarOverrides( m_argDefineVars );
 
     int severity = 0;
@@ -149,7 +162,16 @@ int CLI::SCH_ERC_COMMAND::doPerform( KIWAY& aKiway )
         return EXIT_CODES::ERR_ARGS;
     }
 
-    int exitCode = aKiway.ProcessJob( KIWAY::FACE_SCH, ercJob.get() );
+    PROGRESS_REPORTER* progress = nullptr;
+
+    if( m_argParser.get<bool>( ARG_PROGRESS ) )
+    {
+        // ERC_TESTER::RunTests reports each phase ("Checking conflicts...") to the job's progress reporter
+        CLI_PROGRESS_REPORTER::GetInstance().SetVerbose( true );
+        progress = &CLI_PROGRESS_REPORTER::GetInstance();
+    }
+
+    int exitCode = aKiway.ProcessJob( KIWAY::FACE_SCH, ercJob.get(), nullptr, progress );
 
     return exitCode;
 }

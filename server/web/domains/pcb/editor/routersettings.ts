@@ -221,7 +221,11 @@ export function openCustomTrackViaSize(): void {
 
 // ---------------------------------------------------------------- DIALOG_TUNING_PATTERN_PROPERTIES
 /** pcb-tools.js's MEANDER_SETTINGS as the dialog shows them (lengths in mm; targetLength null = unconstrained). */
-export interface TuneView { targetLength: number | null; minAmp: number; maxAmp: number; spacing: number; round: boolean; crPct: number; singleSided: boolean; overrideCustomRules: boolean; constraint?: string | null }
+export interface TuneView {
+  targetLength: number | null; minAmp: number; maxAmp: number; spacing: number; round: boolean; crPct: number; singleSided: boolean; overrideCustomRules: boolean; constraint?: string | null;
+  /** m_isTimeDomain and the target delay (skew delay for the skew tuner) in ps; null = unconstrained */
+  isTimeDomain?: boolean; targetDelay?: number | null;
+}
 export type TuneMode = "single" | "diff_pair" | "diff_pair_skew";
 /**
  * The dialog's logic without the page: TransferDataToWindow (an unconstrained target shows empty, the skew tuner
@@ -234,14 +238,24 @@ export function tuneForm(mode: TuneMode, cur: TuneView) {
     values: v,
     targetLabel: mode === "diff_pair_skew" ? "Target Skew: " : "Target Length:",
     delayLabel: mode === "diff_pair_skew" ? "Target Skew Delay: " : "Target Delay:",
-    targetEnabled(): boolean { return !v.constraint || v.overrideCustomRules; },
+    /** the Length / Delay radio buttons */
+    modeEnabled(): boolean { return !v.constraint || v.overrideCustomRules; },
+    targetEnabled(): boolean { return (!v.constraint || v.overrideCustomRules) && !v.isTimeDomain; },
+    delayEnabled(): boolean { return (!v.constraint || v.overrideCustomRules) && !!v.isTimeDomain; },
+    /** TransferDataToWindow: only the active domain's target shows */
+    delayText(): string { return !v.isTimeDomain || v.targetDelay == null ? "" : String(+v.targetDelay.toFixed(4)); },
+    setDelay(text: string): boolean {
+      if (!text.trim()) { v.targetDelay = null; return true; }
+      const n = parseFloat(text.replace(/\s*ps\s*$/i, "")); if (isNaN(n)) return false; v.targetDelay = n; return true;
+    },
     sourceInfo(): string | null { return v.constraint && !v.overrideCustomRules ? `(from ${v.constraint})` : null; },
-    targetText(u: string): string { return v.targetLength == null ? "" : lengthText(v.targetLength, u); },
+    targetText(u: string): string { return v.isTimeDomain || v.targetLength == null ? "" : lengthText(v.targetLength, u); },
     setTarget(text: string, u: string): boolean {
       if (!text.trim()) { v.targetLength = null; return true; }
       const n = parseLength(text, u); if (isNaN(n)) return false; v.targetLength = n; return true;
     },
-    result(): TuneView { const r = Object.assign({}, v); delete r.constraint; return r; },
+    /** TransferDataFromWindow: the control of the other domain is empty, so its target is unconstrained */
+    result(): TuneView { const r = Object.assign({}, v); delete r.constraint; if (r.isTimeDomain) r.targetLength = null; else r.targetDelay = null; return r; },
   };
 }
 /** PCB_ACTIONS::lengthTunerSettings (Ctrl+L) — "Tuning Pattern Properties". */
@@ -251,14 +265,21 @@ export function openTuningSettings(req: { mode: TuneMode; settings: TuneView }, 
   const unitName = u === "mil" ? "mils" : u === "in" ? "in" : "mm";
   styles();
   const inputs: Record<string, HTMLInputElement> = {};
-  let target: HTMLInputElement | null = null, src: HTMLElement | null = null, corner: HTMLSelectElement | null = null;
-  KD().open({ title: "Tuning Pattern Properties", width: 400,
+  let target: HTMLInputElement | null = null, delay: HTMLInputElement | null = null, src: HTMLElement | null = null, corner: HTMLSelectElement | null = null;
+  KD().open({ title: "Tuning Pattern Properties", width: 420,
     build(body) {
       const grid = h("div", { class: "dpd-grid" }); body.appendChild(grid);
       const tl = h("span", null, form.targetLabel); target = h("input", { type: "text", value: form.targetText(u), "data-k": "target" });
+      const radios: HTMLInputElement[] = [];
       grid.append(tl, target, h("span", null, unitName));
-      const dl = h("span", { class: "off" }, form.delayLabel), di = h("input", { type: "text", value: "", disabled: true, "data-k": "delay", title: "Time-domain tuning needs a tuning profile in Board Setup" });
-      grid.append(dl, di, h("span", { class: "off" }, "ps"));
+      const dl = h("span", null, form.delayLabel); delay = h("input", { type: "text", value: form.delayText(), "data-k": "delay" });
+      const radio = (td: boolean) => {
+        const r = h("input", { type: "radio", name: "tuneDomain", checked: !!form.values.isTimeDomain === td, "data-k": td ? "radioDelay" : "radioLength" });
+        r.addEventListener("change", () => { if (!r.checked) return; form.values.isTimeDomain = td; sync(); });   // onRadioBtnTargetLengthClick / onRadioBtnTargetDelayClick
+        radios.push(r); return r;
+      };
+      grid.style.gridTemplateColumns = "auto auto 1fr auto";
+      grid.prepend(radio(false)); grid.append(radio(true), dl, delay, h("span", null, "ps"));
       const ov = checkbox("Override custom rules", form.values.overrideCustomRules, (on) => { form.values.overrideCustomRules = on; sync(); });
       src = h("span", { class: "dpd-src" }, "");
       body.appendChild(h("div", { style: "display:flex;gap:8px;align-items:center;margin-bottom:10px" }, ov, src));
@@ -275,12 +296,19 @@ export function openTuningSettings(req: { mode: TuneMode; settings: TuneView }, 
       const r = h("input", { type: "text", value: String(form.values.crPct), "data-k": "crPct" }); inputs.crPct = r;
       g2.append(h("span", null, "Radius (r):"), r, h("span", null, "%"));
       body.appendChild(checkbox("Single-sided", form.values.singleSided, (on) => { form.values.singleSided = on; }));
-      const sync = () => { const on = form.targetEnabled(); if (target) target.disabled = !on; tl.classList.toggle("off", !on); const s = form.sourceInfo(); if (src) { src.textContent = s || ""; src.style.display = s ? "" : "none"; } };
+      const sync = () => {
+        const on = form.targetEnabled(), dOn = form.delayEnabled(), mOn = form.modeEnabled();
+        if (target) target.disabled = !on; tl.classList.toggle("off", !on);
+        if (delay) delay.disabled = !dOn; dl.classList.toggle("off", !dOn);
+        for (const r of radios) r.disabled = !mOn;
+        const s = form.sourceInfo(); if (src) { src.textContent = s || ""; src.style.display = s ? "" : "none"; }
+      };
       sync();
-      setTimeout(() => { if (target && !target.disabled) target.focus(); }, 0);
+      setTimeout(() => { const f = target && !target.disabled ? target : delay && !delay.disabled ? delay : null; if (f) f.focus(); }, 0);
     },
     ok() {
       if (target && !target.disabled && !form.setTarget(target.value, u)) { toast("Please enter a valid value."); target.focus(); return false; }
+      if (delay && !delay.disabled && !form.setDelay(delay.value)) { toast("Please enter a valid value."); delay.focus(); return false; }
       for (const k of ["minAmp", "maxAmp", "spacing"] as const) {
         const v = parseLength(inputs[k].value, u); if (isNaN(v) || v < 0) { toast("Please enter a valid value."); inputs[k].focus(); return false; }
         form.values[k] = v;

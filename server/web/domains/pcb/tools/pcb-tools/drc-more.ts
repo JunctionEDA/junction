@@ -30,8 +30,8 @@ const kindOf = (n: SNode) => String(n[0]);
 
 // ---------------------------------------------------------------- holes
 /** A drilled hole as PAD / PCB_VIA::GetEffectiveHoleShape: a segment between the slot ends and its width. */
-interface Hole { id: string; kind: "pad" | "via"; a: Pt; b: Pt; w: number; layers: Set<string> | null; micro: boolean; pad?: PadInfo; fp?: KItem; uuid: string }
-function padHole(fp: KItem, p: PadInfo): Hole | null {
+export interface Hole { id: string; kind: "pad" | "via"; a: Pt; b: Pt; w: number; layers: Set<string> | null; micro: boolean; pad?: PadInfo; fp?: KItem; uuid: string }
+export function padHole(fp: KItem, p: PadInfo): Hole | null {
   if (p.type !== "thru_hole" && p.type !== "np_thru_hole") return null;
   const d = K.kid(p.node, "drill"); if (!d) return null;
   let w: number, h: number;
@@ -40,13 +40,13 @@ function padHole(fp: KItem, p: PadInfo): Hole | null {
   const half = Math.abs(w - h) / 2; const [dx, dy] = rotator(p.rot)(w >= h ? half : 0, w >= h ? 0 : half);
   return { id: fp.id, kind: "pad", a: [p.x - dx, p.y - dy], b: [p.x + dx, p.y + dy], w: Math.min(w, h), layers: null, micro: false, pad: p, fp, uuid: K.uuidOf(p.node) || fp.id + ":" + p.index };
 }
-function viaHole(it: KItem): Hole | null {
+export function viaHole(it: KItem): Hole | null {
   const a = pt(it.node, "at"); if (!a) return null; const d = K.kid(it.node, "drill"); const w = d ? K.num(d[1], 0) : 0; if (!(w > 0)) return null;
   const ls = K.kid(it.node, "layers"); const pair = ls ? [K.str(ls[1]), K.str(ls[2])] : ["F.Cu", "B.Cu"];
   const typed = it.node.includes("blind") || it.node.includes("micro") || it.node.includes("buried");
   return { id: it.id, kind: "via", a, b: a, w, layers: typed ? new Set(pair) : null, micro: it.node.includes("micro"), uuid: it.id };
 }
-const holeShape = (h: Hole): CopperShape => ({ t: "seg", a: h.a, b: h.b, r: h.w / 2 });
+export const holeShape = (h: Hole): CopperShape => ({ t: "seg", a: h.a, b: h.b, r: h.w / 2 });
 const holeCentre = (h: Hole): Pt => [(h.a[0] + h.b[0]) / 2, (h.a[1] + h.b[1]) / 2];
 /** The copper layers a via spans, in stack order (PCB_VIA::GetLayerSet for a blind / buried / micro via). */
 function viaSpan(doc: BoardDoc, h: Hole) {
@@ -273,6 +273,59 @@ export function textOnEdgeCutsMarkers(doc: BoardDoc): DrcMarker[] {
   return out;
 }
 
+/**
+ * DRC_TEST_PROVIDER_MISC::testTextVars: a ${DRC_WARNING …} / ${DRC_ERROR …} in a field, text, text box, table cell or
+ * dimension is a generic warning / error with its message; any other whose shown text (GetShownText( FOR_ERC_DRC ))
+ * still holds an unescaped ${…} is an unresolved variable.  Then the drawing sheet's texts, built as DRC builds them
+ * (page 1 of 1, "dummyFilename", "dummySheet", "dummyLayer").  ${DRILL_OPERATIONS} / ${DRILL_SITES} / ${DRILL_GROUPS},
+ * which BOARD::ResolveTextVar always answers from its drill chart model, are not reported.
+ */
+export function textVarMarkers(doc: BoardDoc): DrcMarker[] {
+  const out: DrcMarker[] = [];
+  const varRef = /(^|[^\\])\$\{.*\}.*/, drill = /\$\{DRILL_(OPERATIONS|SITES|GROUPS)\}/g;
+  const assertion = (id: string | null, text: string, p: Pt, layer: string): boolean => {
+    let found = false;
+    for (const [re, code] of [[/(^|[^\\])\$\{DRC_WARNING\s*([^}]*)\}/, "generic_warning"], [/(^|[^\\])\$\{DRC_ERROR\s*([^}]*)\}/, "generic_error"]] as [RegExp, string][]) {
+      let rest = text;
+      for (let m = re.exec(rest); m; m = re.exec(rest)) {
+        found = true;
+        const mk = marker(code, defaultSeverity(code), p[0], p[1], id ? m[2] : m[2] + " (in drawing sheet)", id ? [id] : []); mk.layer = layer; out.push(mk);
+        if (!m[0].length) break;
+        rest = rest.slice(m.index + m[0].length);
+      }
+    }
+    return found;
+  };
+  const check = (id: string, raw: string, shown: () => string, p: Pt, layer: string): void => {
+    if (assertion(id, raw, p, layer)) return;
+    if (varRef.test(shown().replace(drill, ""))) { const mk = marker("unresolved_variable", defaultSeverity("unresolved_variable"), p[0], p[1], "Unresolved text variable", [id]); mk.layer = layer; out.push(mk); }
+  };
+  const ERC = { erc: true };
+  for (const t of boardTexts(doc)) {
+    const raw = K.str(t.node[t.kind === "property" ? 2 : t.kind === "fp_text" ? 2 : 1]);
+    const field = t.kind === "property" ? K.str(t.node[1]) : t.kind === "fp_text" ? (K.str(t.node[1]) === "reference" ? "Reference" : K.str(t.node[1]) === "value" ? "Value" : null) : null;
+    const text = t.kind.endsWith("text_box") ? (K.unescapeText as (s: string) => string)(raw) : raw;
+    check(t.id, raw, () => K.pcbTextShown(doc as unknown as KDoc, text, t.layer, t.fp ? t.fp.node : null, field, ERC), t.pos, t.layer);
+  }
+  // PCB_TABLECELL: ${ROW} ${COL} ${ADDR} ${LAYER}, then the board's
+  for (const it of doc.items.values()) {
+    if (it.kind !== "table") continue;
+    const cells = K.kid(it.node, "cells"), list = cells ? K.kids(cells, "table_cell") : [], layer = layerOf(it.node, "Dwgs.User");
+    list.forEach((c, i) => {
+      const raw = K.str(c[1]); const p = pt(c, "start") || (K.ptsOf(c)[0] as Pt | undefined) || [0, 0];
+      check(it.id, raw, () => K.tableCellShownText(doc as unknown as KDoc, it.node, i, true), p as Pt, layer);
+    });
+  }
+  // the drawing sheet
+  const ds = Object.assign({}, doc, { pageNumber: "1", sheetCount: 1, fileName: "dummyFilename", filePath: "", fileRoot: "", sheetName: "dummySheet", sheetLayer: "dummyLayer" }) as unknown as KDoc;
+  if ((doc as unknown as { page?: number[] }).page) for (const t of K.drawingSheetTextChecks(ds, "DRC")) {
+    if (t.assertions.length) {
+      for (const a of t.assertions) { const code = a.warning ? "generic_warning" : "generic_error"; out.push(marker(code, defaultSeverity(code), t.pos[0], t.pos[1], a.message + " (in drawing sheet)", [])); }
+    } else if (varRef.test(t.shown.replace(drill, ""))) out.push(marker("unresolved_variable", defaultSeverity("unresolved_variable"), t.pos[0], t.pos[1], "Unresolved text variable", []));
+  }
+  return out;
+}
+
 interface Keepout { id: string; name: string; layers: Set<string>; pts: Pt[]; fp: KItem | null; tracks: boolean; vias: boolean; pads: boolean }
 function keepouts(doc: BoardDoc): Keepout[] {
   const copper = doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"]; const out: Keepout[] = [];
@@ -383,6 +436,6 @@ export function lineWidthMarkers(doc: BoardDoc, s: DesignSettings, ruleOf: RuleO
 /** The providers above as one pass, with the project's severities applied (ignored rules drop out). */
 export function moreDrcMarkers(doc: BoardDoc, s: DesignSettings, rules: DruRule[]): DrcMarker[] {
   const ruleOf: RuleOf = (type, A, B) => (rules.length ? evalRuleConstraint(rules, type, doc, s, A as never, B as never) : null);
-  const all = [...disabledLayerMarkers(doc), ...courtyardMarkers(doc), ...holeToHoleMarkers(doc, s, ruleOf, Math.max(0, ...rules.flatMap((r) => r.constraints.filter((c) => c.type === "hole_to_hole").map((c) => c.min || 0)))), ...holeClearanceMarkers(doc, s, ruleOf, Math.max(0, ...rules.flatMap((r) => r.constraints.filter((c) => c.type === "hole_clearance").map((c) => c.min || 0)))), ...textOnEdgeCutsMarkers(doc), ...keepoutMarkers(doc), ...textDimsMarkers(doc, s, ruleOf), ...lineWidthMarkers(doc, s, ruleOf), ...textMirroringMarkers(doc)];
+  const all = [...disabledLayerMarkers(doc), ...courtyardMarkers(doc), ...holeToHoleMarkers(doc, s, ruleOf, Math.max(0, ...rules.flatMap((r) => r.constraints.filter((c) => c.type === "hole_to_hole").map((c) => c.min || 0)))), ...holeClearanceMarkers(doc, s, ruleOf, Math.max(0, ...rules.flatMap((r) => r.constraints.filter((c) => c.type === "hole_clearance").map((c) => c.min || 0)))), ...textOnEdgeCutsMarkers(doc), ...keepoutMarkers(doc), ...textDimsMarkers(doc, s, ruleOf), ...lineWidthMarkers(doc, s, ruleOf), ...textMirroringMarkers(doc), ...(s.severities.unresolved_variable === "ignore" ? [] : textVarMarkers(doc))];
   return all.filter((m) => (s.severities[m.code] || m.severity) !== "ignore");
 }

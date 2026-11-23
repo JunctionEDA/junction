@@ -13,7 +13,7 @@ import { imageEntry } from "./tables-images";
 import { SCH_PEN, TEXT_INTERLINE, lineOffsets, textWidth, urlRunBox } from "./text";
 import { drawStrokeText, setOverbarHeight, strokeLine, strokeOrigin } from "./stroke-font";
 import { hopShapes, strokeHopShape } from "./hop-over";
-import { schFormat } from "./geom-sch";
+import { schFormat, TARGET_PIN_RADIUS } from "./geom-sch";
 import type { AnyCanvas, Box, CircleGeom, Ctx2D, Doc, DrawTextG, Geom, Item, Marker, Mat, ObjectsOpt, PadGeom, PathSink, Pt, RatsLine, RectGeom, RenderOpts, SchNetStyle, TextGeom, View, ViaRingGeom } from "./types";
 
 /** drawHalo's style: the halo colour (or a function of the geometry's colour), its alpha and the extra stroke width in device px. */
@@ -414,6 +414,8 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   }
   const netStyle = !isPcb && opts.schNetStyle && opts.schNetStyle.size ? opts.schNetStyle : null;
   const ncHl = netStyle && opts.netclassHighlight ? opts.netclassHighlight : null;
+  const chainHl = !isPcb && opts.schNetChain ? opts.schNetChain : null;
+  let chainTint: Map<Geom, string> | null = null;   // SCH_PAINTER::draw( SCH_LINE ): a wire of the highlighted chain in the chain's colour
   const ncPass: Geom[] | null = ncHl ? [] : null;
   const sketchPads = isPcb && !!opts.outlinePads, sketchTracks = isPcb && !!opts.outlineTracks, sketchVias = isPcb && !!opts.outlineVias;
   // PCB_PAINTER with m_sketchGraphics / m_sketchText: board and footprint graphic shapes, and texts, drawn as outlines
@@ -744,6 +746,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
         if (g !== g0 && hops && hops.has(g0)) hops.set(g, hops.get(g0)!);
         if (ncPass && g.ncColor) ncPass.push(g);
       }
+      if (chainHl && it.kind === "wire" && !g.hole) { const cc = chainHl.wires.get(it.id); if (cc) (chainTint || (chainTint = new Map())).set(g, cc); }
       if (busTint && busPinTint(it, g)) (schTint || (schTint = new Map())).set(g, SCH.bus);
       else if (busJct && g.t === "circle" && g.color === SCH.junction && (schFormat.overrideItemColors || !colorOf(it.node))) (schTint || (schTint = new Map())).set(g, SCH.busJunction);
       if (objHide) {
@@ -866,6 +869,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
       }
       if (hcDim && g.t !== "image") { const f = g.layer === "Edge.Cuts" ? hcEdgeF : hcF, bgc = bg || PCB_BG; color = mixColor(color!, bgc, f); if (fill) fill = mixColor(fill, bgc, f); }
     }
+    if (chainTint && color) { const cc = chainTint.get(g); if (cc) { const [r, gg, b] = parseColor(cc), a = parseColor(color)[3]; color = rgba(r, gg, b, a); } }   // GetColor().WithAlpha( color.a )
     setAlpha(alpha);
     const t = g.t;
     if (t === "text") {
@@ -1006,6 +1010,17 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   // highlight: the brightened items get a translucent halo of the highlight colour (the schematic's LAYER_SELECTION_SHADOWS pass for brightened items)
   // (pcbnew draws no halo: a highlighted board item is only brightened)
   if (hl && !isPcb) drawHalo(ctx, doc, skip ? new Set([...hl].filter((id) => !skip.has(id))) : hl, s, dpr, hidden, { color: hlColor, alpha: 0.15, extraPx: SEL_STYLE.hlThickness, strokesOnly: true });   // skipped items (drawn elsewhere) get none
+  // SCH_PAINTER::drawPin: a brightened terminal pin of the highlighted chain gets a circle at its dangling indicator
+  if (chainHl && hl && chainHl.terminals.length) {
+    ctx.save(); ctx.setTransform(A, 0, 0, s, E, ty); ctx.globalAlpha = 1; ctx.setLineDash([]);
+    ctx.lineWidth = SEL_STYLE.hlThickness * Math.max(1, dpr) / s + SEL_STYLE.hlThickness * MIL;   // getShadowWidth( true )
+    for (const t of chainHl.terminals) {
+      if (!hl.has(t.key)) continue;
+      ctx.strokeStyle = t.color || brightened(SCH.brightened, 0.5);
+      ctx.beginPath(); ctx.arc(t.x, t.y, TARGET_PIN_RADIUS, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
+  }
   if (schSel) {
     // the selection VIEW_GROUP, over everything else, its layers in SCH_LAYER_ORDER: the backgrounds (bitmaps,
     // shape / symbol / sheet / note fills), then LAYER_SELECTION_SHADOWS, then the items' strokes, then their anchors

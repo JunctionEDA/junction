@@ -6,8 +6,8 @@
 // Driving value mode needs a length constraint bound to both ends (DimensionCanDrive), which the web editor has no
 // way to make, so the Value choice offers Driven and Arbitrary as KiCad does for an unbound dimension.
 import { comboBox } from "../../../../shared/components/kcombo";
-import { faceOfFont, fontField, setFaceOfFont } from "../../dialogs/font-picker";
-import { box, checkField, form, h, coordField, kiconToggle, lenField, numField, openDialog, selectField, textField, unitLabel, type Field } from "./ui";
+import { KICAD_FONT, faceOfFont, fontField, setFaceOfFont } from "../../dialogs/font-picker";
+import { box, checkField, form, h, coordField, kiconToggle, lenField, messageBox, numField, openDialog, selectField, textField, unitLabel, type Field } from "./ui";
 import { boardXref } from "./xref";
 
 const isList = Array.isArray;
@@ -110,8 +110,11 @@ export function applyDimDialog(orig: SNode, v: DimDialogValues): SNode {
   return T.dimWrite(node, m);
 }
 
-/** DIALOG_DIMENSION_PROPERTIES on a dimension: false when it cannot open. */
-export function dimensionDialog(ctx: ToolCtx, item: KItem): boolean {
+/**
+ * DIALOG_DIMENSION_PROPERTIES on a dimension: false when it cannot open.  `create`: the dimension being drawn
+ * (DrawDimension's PCB_ACTIONS::properties), which gets the edited node on OK and null on Cancel.
+ */
+export function dimensionDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void): boolean {
   const doc = ctx.doc as KDoc; if (!doc) return false;
   const node0 = item.node, type = sval(kid(node0, "type")) || "aligned", ro = !!ctx.viewOnly;
   const center = type === "center", leader = type === "leader", aligned = type === "aligned" || type === "orthogonal";
@@ -132,15 +135,20 @@ export function dimensionDialog(ctx: ToolCtx, item: KItem): boolean {
       extOffset: Number(g("extOffset")), extHeight: Number(g("extHeight")), textFrame: Number(g("textFrame")) };
   };
   const measuredText = (v: DimDialogValues): string => { const m = PT().dimRead(applyDimDialog(node0, { ...v, arbitrary: false })); const u = PT().dimUpdate(m); return PT().dimBaseText({ ...u, prefix: "", suffix: "", unitsFormat: 0, override: null }, u.measured || 0); };
-  // updatePreviewText; a Driven value field follows the measurement in the chosen units and precision
+  // m_dimension->GetValueText(): the item's own measured text, which the value field keeps while it tracks the measurement
+  const ownValue = raw0.arbitrary ? measuredText(raw0) : raw0.value;
+  // updatePreviewText; valueFieldTracksMeasurement: a Driven value field shows the item's GetValueText(), only the preview follows edits
   const refresh = (): void => {
-    const v = current();
-    if (fields.value && fields.valueMode && fields.valueMode.get() === "driven") (fields.value as Field<string>).set(measuredText(v));
+    if (fields.value && fields.valueMode && fields.valueMode.get() === "driven") (fields.value as Field<string>).set(ownValue);
     if (preview) { const n = applyDimDialog(node0, current()); preview.textContent = sval(kid(n, "gr_text")); }
   };
   const live = (f: Field<string | number | boolean>): void => { f.input.addEventListener("input", refresh); f.input.addEventListener("change", refresh); };
-  const layerSel = reg("layer", selectField<string>(v0.layer, layerOptions(doc, v0.layer), { ro, key: "layer" }));
+  // SetLayerSelection fails on a layer the board does not define: the first defined layer, and a message
+  const layerMissing = !doc.layers.has(v0.layer) && doc.layers.size > 0;
+  const layerSel = reg("layer", selectField<string>(layerMissing ? Array.from(doc.layers.keys())[0] : v0.layer, layerMissing ? layerOptions(doc, "") : layerOptions(doc, v0.layer), { ro, key: "layer" }));
+  if (layerMissing) messageBox("Message", "This item was on a non-existing layer.\nIt has been moved to the first defined layer.");
   return !!openDialog({ title: "Dimension Properties", width: 760, readOnly: ro,
+    cancel: create ? () => create(null) : undefined,
     build(body) {
       if (leader) {
         const value = reg("value", textField(v0.value, { ro, key: "value" }));
@@ -176,7 +184,8 @@ export function dimensionDialog(ctx: ToolCtx, item: KItem): boolean {
           onChange: (on) => { if (!on) fields["align-" + a].set(true); } })));
         const tw = reg("textW", lenField(v0.textW, { ro, key: "textW" })), tht = reg("textH", lenField(v0.textH, { ro, key: "textH" }));
         const thick = reg("textThick", lenField(v0.textThick, { ro: ro || v0.autoThickness, key: "textThick" }));
-        const auto = reg("autoThickness", checkField(v0.autoThickness, "Auto", { ro, key: "autoThickness", tip: "Adjust the text thickness",
+        // m_autoTextThickness: a BITMAP_BUTTON check button over BITMAPS::link
+        const auto = reg("autoThickness", kiconToggle("link", "Adjust the text thickness", v0.autoThickness, { ro, key: "autoThickness",
           onChange: (on) => { thick.input.disabled = ro || on; if (on) thick.set(Math.round(tw.get() * NM / 8) / NM); } }));
         tw.input.addEventListener("input", () => { if (auto.get()) thick.set(Math.round(tw.get() * NM / 8) / NM); });   // onTextSize
         const manual = v0.posMode === 2;
@@ -189,8 +198,11 @@ export function dimensionDialog(ctx: ToolCtx, item: KItem): boolean {
         const keep = reg("keepAligned", checkField(v0.keepAligned, "Keep aligned with dimension", { ro, key: "keepAligned", tip: "Automatically set the text orientation to match the dimension lines",
           onChange: (on) => { angle.input.disabled = ro || on; } }));
         for (const f of [tw, tht, bold, italic] as Field<string | number | boolean>[]) live(f);
-        const left = form([["Font:", reg("face", fontField(doc, v0.face, { ro, key: "face" })).el], ["Width:", tw.el, unitLabel(), "Text width"], ["Height:", tht.el, unitLabel(), "Text height"],
-          ["Thickness:", thick.el, h("span", { class: "pd-inline", style: "gap:6px" }, unitLabel(), auto.el), "Text thickness"], ...(leader ? [] : [["Position mode:", posMode.el] as [string, HTMLElement]])], true);
+        // onFontSelected: m_thickness and m_autoTextThickness show only for the stroke font
+        const thickLabel = h("span", null, "Thickness:"), thickUnits = unitLabel();
+        const onFont = (face: string): void => { const stroke = !face || face === KICAD_FONT; for (const e of [thickLabel, thick.el, thickUnits, auto.el]) e.style.display = stroke ? "" : "none"; };
+        const left = form([["Font:", reg("face", fontField(doc, v0.face, { ro, key: "face", onChange: onFont })).el], ["Width:", tw.el, unitLabel(), "Text width"], ["Height:", tht.el, unitLabel(), "Text height"],
+          [thickLabel, thick.el, h("span", { class: "pd-inline", style: "gap:6px" }, thickUnits, auto.el), "Text thickness"], ...(leader ? [] : [["Position mode:", posMode.el] as [string, HTMLElement]])], true);
         const right = form([["Position X:", tx.el, unitLabel(), "Text pos X"], ["Position Y:", ty.el, unitLabel(), "Text pos Y"],
           ["Orientation:", angle.el, null, "Text orientation"], keep.el], true);
         const toggles = h("div", { class: "pd-inline", style: "flex-wrap:wrap;margin:0 0 8px" }, bold.el, italic.el, ...aligns.map((f) => f.el), mirrored.el);
@@ -212,13 +224,21 @@ export function dimensionDialog(ctx: ToolCtx, item: KItem): boolean {
       refresh();
     },
     ok() {
-      if (ro) return true;
-      const v = current(); if (JSON.stringify(v) === JSON.stringify(v0)) return true;   // nothing changed: the item stays as it is
+      if (ro) { if (create) create(null); return true; }
+      const v = current(); if (!create && JSON.stringify(v) === JSON.stringify(v0)) return true;   // nothing changed: the item stays as it is
       const back = (a: string, shown: string, orig: string): string => (a === shown ? orig : xref.toKiids(a));
       const node = applyDimDialog(node0, { ...v, prefix: back(v.prefix, v0.prefix, raw0.prefix), suffix: back(v.suffix, v0.suffix, raw0.suffix),
         value: v.arbitrary ? back(v.value, v0.value, raw0.value) : v.value });
+      if (create) { create(node); return true; }
       if (K().serialize(node) === K().serialize(node0)) return true;
       ctx.commit([K().replaceChange(doc, { ...item, node, geom: [], bbox: null })], "Edit Dimension Properties");
       return true;
     } });
+}
+
+/** The dimension tool's draft: Dimension Properties on it; done gets the edited node, or null on Cancel. */
+export function newDimensionDialog(ctx: ToolCtx, node: SNode, done: (node: SNode | null) => void): boolean {
+  const ok = dimensionDialog(ctx, { id: "", kind: "dimension", node, geom: [], bbox: null } as unknown as KItem, done);
+  if (!ok) done(null);
+  return ok;
 }

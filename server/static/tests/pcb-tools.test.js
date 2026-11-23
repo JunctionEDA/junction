@@ -1388,18 +1388,19 @@ test("message panel: the board summary, a track, a via, a pad and a footprint as
   const doc = fixture(); const s = P.designSettings(null);
   const cols = (ids, opts) => P.msgPanelInfo(doc, ids, Object.assign({ settings: s }, opts));
   const val = (list, title) => { const c = list.find((x) => x.title === title); return c ? c.value : undefined; };
-  // BOARD::GetMsgPanelInfo: Pads / Vias / Track Segments / Nets / Unrouted, also for a multi-selection
+  // BOARD::GetMsgPanelInfo: Pads / Vias / Track Segments / Nets / Unrouted with nothing selected
   const board = cols([]);
   assert.deepEqual(board.map((c) => c.title), ["Pads", "Vias", "Track Segments", "Nets", "Unrouted"]);
   assert.equal(val(board, "Pads"), "2"); assert.equal(val(board, "Vias"), "1"); assert.equal(val(board, "Track Segments"), "5"); assert.equal(val(board, "Nets"), "2");
   assert.equal(val(board, "Unrouted"), String(P.ratsnest(doc).length));
-  assert.deepEqual(cols(["s-1", "s-2"]).map((c) => c.title), board.map((c) => c.title));
+  // a multi-selection is PCB_CONTROL::UpdateMessagePanel's pair rows, never the board summary
+  assert.deepEqual(cols(["s-1", "s-2"]).map((c) => c.title).slice(1), ["Actual Clearance", "Selected 2D Length", "Selected 2D Copper Area"]);
   // PCB_TRACK: Type, Net, Resolved Netclass, Layer, Width, Segment Length, Routed Length, Copper Area, Min Clearance
   const tr = cols(["s-2"]);
   assert.deepEqual(tr.slice(0, 7).map((c) => c.title), ["Type", "Net", "Resolved Netclass", "Layer", "Width", "Segment Length", "Routed Length"]);
   assert.equal(val(tr, "Type"), "Track"); assert.equal(val(tr, "Net"), "GND"); assert.equal(val(tr, "Resolved Netclass"), "Default");
   assert.equal(val(tr, "Width"), "0.2500 mm"); assert.equal(val(tr, "Segment Length"), (3 * Math.SQRT2).toFixed(4) + " mm");
-  assert.equal(val(tr, "Routed Length"), (5 + 3 * Math.SQRT2 + 7).toFixed(4) + " mm", "the run through the via");
+  assert.equal(val(tr, "Routed Length"), (5 + 3 * Math.SQRT2 + 7 + 1.58).toFixed(4) + " mm", "the run through the via, with the via's stackup height (BuildDefaultStackupList: 1.6 mm board)");
   const clr = tr.find((c) => /^Min Clearance: /.test(c.title)); assert.equal(clr.title, "Min Clearance: 0.2000 mm"); assert.equal(clr.value, "(from netclass 'Default')");
   assert.equal(val(cols(["s-2"], { units: "mil" }), "Width"), "9.84 mils");
   // PCB_VIA
@@ -2085,7 +2086,7 @@ test("Text Box Properties: values round-trip; OK writes size, pen, flags, justif
   const node = K.parse('(gr_text_box "Line one\\nLine two" (start 10 10) (end 40 30) (margins 1.0025 1.0025 1.0025 1.0025) (layer "F.SilkS") (uuid "tb-1") (effects (font (size 1.5 1.2) (thickness 0.2)) (justify left top)) (border yes) (stroke (width 0.12) (type default)) (knockout no))');
   const v = T.textBoxValues(node);
   assert.deepEqual({ ...v }, { text: "Line one\nLine two", locked: false, layer: "F.SilkS", angle: 0, textW: 1.2, textH: 1.5, autoThickness: false, textThick: 0.2, bold: false, italic: false,
-    hJustify: "left", vJustify: "top", mirrored: false, border: true, borderWidth: 0.12, borderStyle: "solid", face: "" });
+    hJustify: "left", vJustify: "top", mirrored: false, border: true, borderWidth: 0.12, borderStyle: "solid", knockout: false, face: "" });
   let r = T.applyTextBox(node, { ...v, borderStyle: "dash" }, v);
   assert.equal(K.serialize(r.node).replace("(type dash)", "(type default)"), K.serialize(node), "only the border style changed");
   r = T.applyTextBox(node, { ...v, text: "A\nB", textW: 2, textH: 2, autoThickness: true, bold: true, hJustify: "center", vJustify: "bottom", mirrored: true, border: false, borderWidth: NaN, locked: true }, v);
@@ -2307,16 +2308,17 @@ test("edit teardrops: pads and vias get the shape's defaults, specified values o
   const round = { ...PM.TD_DEFAULTS, lenRatio: 0.4 }, rect = { ...PM.TD_DEFAULTS, lenRatio: 0.3 };
   const base = { vias: true, pthPads: true, smdPads: true, trackToTrack: false, defaults: { round, rect } };
   const add = td(doc, { ...base, action: "default" });
-  assert.deepEqual(add.map((c) => c.id).sort(), ["fp-1", "v-1"]);
+  assert.deepEqual(add.map((c) => c.id).sort(), ["fp-1", "td-1", "v-1"], "an unfiltered edit ends with UpdateTeardrops( forceFullUpdate ): the trackless teardrop goes");
+  assert.equal(add.find((c) => c.id === "td-1").kind, "REMOVED");
   const pads = K.kids(node(add.find((c) => c.id === "fp-1")), "pad");
   assert.equal(PM.readTeardrops(pads[0]).lenRatio, 0.4, "a round pad takes TARGET_ROUND"); assert.equal(PM.readTeardrops(pads[1]).lenRatio, 0.3, "a rectangle TARGET_RECT");
   assert.ok(PM.readTeardrops(pads[0]).enabled);
   const via = node(add.find((c) => c.id === "v-1")); const vi = via.findIndex((c) => Array.isArray(c) && c[0] === "teardrops");
   assert.equal(via[vi + 1][0], "net", "(teardrops) goes before the via's net");
-  for (const c of add) assert.ok(K.applyChange(doc, c, IU));
+  for (const c of add) if (c.id !== "td-1") assert.ok(K.applyChange(doc, c, IU));
   const smdOnly = td(doc, { ...base, vias: false, pthPads: false, action: "specified", specified: { maxLen: 3 } });
   assert.equal(PM.readTeardrops(K.kids(node(smdOnly[0]), "pad")[1]).maxLen, 3); assert.equal(PM.readTeardrops(K.kids(node(smdOnly[0]), "pad")[0]).maxLen, 1, "PTH pads out of scope keep theirs");
-  const skipNet = td(doc, { ...base, action: "remove", skip: (i) => i.net === "A" });
+  const skipNet = td(doc, { ...base, action: "remove", filtered: true, skip: (i) => i.net === "A" });
   assert.equal(skipNet.length, 0, "the net filter keeps every item");
   const rm = td(doc, { ...base, pthPads: false, smdPads: false, action: "remove" });
   assert.deepEqual(rm.map((c) => c.id).sort(), ["td-1", "v-1"], "the via's teardrop zone goes with it");

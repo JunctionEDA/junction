@@ -32,3 +32,14 @@ export function annotateProjectChanges(sch: ProSch, now: AnnotateProjectSettings
   if (was.startNum !== now.startNum) out.annotate_start_num = now.startNum;
   return Object.keys(out).length ? out : null;
 }
+
+/**
+ * SCHEMATIC_SETTINGS::m_refDesTracker as the project file keeps it (used_designators): the string to write when the
+ * designators handed out since (placing, pasting, repeating) are not all in it yet, else null.  KiCad writes the
+ * tracker with the project settings; the web project has no Save, so the tracker goes in as soon as it grows.
+ */
+export function trackerToStore(stored: string, live: Iterable<string>, ser: (used: Iterable<string>) => string, deser: (data: string) => Set<string>): string | null {
+  const used = deser(stored); let grew = false;
+  for (const d of live) if (d && !used.has(d)) { used.add(d); grew = true; }
+  return grew ? ser(used) : null;
+}

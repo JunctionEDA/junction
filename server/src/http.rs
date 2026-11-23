@@ -50,6 +50,9 @@ pub(crate) fn allowed_file(name: &str) -> bool {
     if matches!(base, "sym-lib-table" | "fp-lib-table" | "design-block-lib-table") {
         return true;
     }
+    if design_block_file(name) {
+        return true;
+    }
     let ext = base.rsplit('.').next().unwrap_or("");
     matches!(
         ext.to_ascii_lowercase().as_str(),
@@ -70,12 +73,28 @@ pub(crate) fn allowed_file(name: &str) -> bool {
     )
 }
 
+/// A file of a KiCad design block (DESIGN_BLOCK_IO): `<lib>.kicad_blocks/<name>.kicad_block/<name>.kicad_sch`, its
+/// `.kicad_pcb` and its `.json` metadata (description, keywords, default fields).  The design block libraries a
+/// project's design-block-lib-table names live in the project like its other libraries; their files are library
+/// files, not the project's own sheets and boards.
+pub(crate) fn design_block_file(path: &str) -> bool {
+    let mut parts: Vec<&str> = path.split('/').collect();
+    let Some(base) = parts.pop() else { return false };
+    let Some(dir) = parts.last() else { return false };
+    let Some(stem) = dir.strip_suffix(".kicad_block") else { return false };
+    let ext = base.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    !stem.is_empty() && matches!(ext.as_str(), "kicad_sch" | "kicad_pcb" | "json")
+}
+
 /// Auto-detected document class, from the file name.  Editors join only the types
 /// they know; everything else just rides along in the archive.
 pub(crate) fn doc_type_for(path: &str) -> &'static str {
     let base = path.rsplit('/').next().unwrap_or(path);
     if matches!(base, "sym-lib-table" | "fp-lib-table" | "design-block-lib-table") {
         return "lib_table";
+    }
+    if design_block_file(path) {
+        return "design_block";
     }
     match base.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
         "kicad_sch" => "kicad_sch",
@@ -1495,13 +1514,22 @@ pub(crate) fn pcb_stub_files(stem: &str) -> Vec<(String, Vec<u8>)> {
         "text_variables": {}
     }))
     .unwrap();
+    // A document never loaded is written at the current format version (SEXPR_SCHEMATIC_FILE_VERSION,
+    // SEXPR_BOARD_FILE_VERSION) with this KiCad's GetMajorMinorVersion() as generator_version.
+    let generator_version = crate::projectlibs::kicad_generator_version();
     let sch = format!(
-        "(kicad_sch\n\t(version 20250114)\n\t(generator \"eeschema\")\n\t(generator_version \"9.0\")\n\t(uuid \"{}\")\n\t(paper \"A4\")\n\t(lib_symbols)\n\t(sheet_instances\n\t\t(path \"/\"\n\t\t\t(page \"1\")\n\t\t)\n\t)\n\t(embedded_fonts no)\n)\n",
+        "(kicad_sch\n\t(version {})\n\t(generator \"eeschema\")\n\t(generator_version \"{}\")\n\t(uuid \"{}\")\n\t(paper \"A4\")\n\t(lib_symbols)\n\t(sheet_instances\n\t\t(path \"/\"\n\t\t\t(page \"1\")\n\t\t)\n\t)\n\t(embedded_fonts no)\n)\n",
+        crate::projectlibs::kicad_format_version("SEXPR_SCHEMATIC_FILE_VERSION"),
+        generator_version,
         Uuid::new_v4()
     );
     // The header KiCad writes for a new board: without the layer table there is no copper to route on.
+    let pcb_head = format!(
+        "(kicad_pcb\n\t(version {})\n\t(generator \"pcbnew\")\n\t(generator_version \"{}\")\n",
+        crate::projectlibs::kicad_format_version("SEXPR_BOARD_FILE_VERSION"),
+        generator_version
+    );
     let pcb = concat!(
-        "(kicad_pcb\n\t(version 20241229)\n\t(generator \"pcbnew\")\n\t(generator_version \"9.0\")\n",
         "\t(general\n\t\t(thickness 1.6)\n\t\t(legacy_teardrops no)\n\t)\n\t(paper \"A4\")\n\t(layers\n",
         "\t\t(0 \"F.Cu\" signal)\n\t\t(2 \"B.Cu\" signal)\n\t\t(9 \"F.Adhes\" user \"F.Adhesive\")\n\t\t(11 \"B.Adhes\" user \"B.Adhesive\")\n",
         "\t\t(13 \"F.Paste\" user)\n\t\t(15 \"B.Paste\" user)\n\t\t(5 \"F.SilkS\" user \"F.Silkscreen\")\n\t\t(7 \"B.SilkS\" user \"B.Silkscreen\")\n",
@@ -1515,7 +1543,7 @@ pub(crate) fn pcb_stub_files(stem: &str) -> Vec<(String, Vec<u8>)> {
     vec![
         (format!("{stem}.kicad_pro"), pro),
         (format!("{stem}.kicad_sch"), sch.into_bytes()),
-        (format!("{stem}.kicad_pcb"), pcb.as_bytes().to_vec()),
+        (format!("{stem}.kicad_pcb"), format!("{pcb_head}{pcb}").into_bytes()),
     ]
 }
 
@@ -2387,7 +2415,7 @@ pub async fn notify_sheet_changed(state: &AppState, project_id: Uuid, parent: Uu
 /// rename and delete.  A project's own schematic, board and project file stay put.
 fn doc_is_movable(doc_type: &str) -> bool {
     // the project's own document (shell.rs) stays where it is
-    matches!(doc_type, "footprint" | "symbol_lib" | "lib_table" | "model3d" | "worksheet" | "spice_model" | "other")
+    matches!(doc_type, "footprint" | "symbol_lib" | "lib_table" | "model3d" | "worksheet" | "spice_model" | "design_block" | "other")
         || (crate::itemdoc::is_item_doc(doc_type) && doc_type != "project_shell")
 }
 
@@ -2618,6 +2646,20 @@ pub async fn healthz(State(state): State<AppState>) -> AppResult<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn design_block_files_are_library_files() {
+        for p in ["blocks.kicad_blocks/amp.kicad_block/amp.kicad_sch", "lib/blocks.kicad_blocks/amp.kicad_block/amp.kicad_pcb",
+                  "blocks.kicad_blocks/amp.kicad_block/amp.json"] {
+            assert!(allowed_file(p), "{p}");
+            assert_eq!(doc_type_for(p), "design_block", "{p}");
+        }
+        assert!(doc_is_movable("design_block"));
+        // JSON anywhere else is still refused, and a project's own sheet stays a schematic
+        assert!(!allowed_file("notes.json") && !allowed_file("x.kicad_blocks/notes.json") && !allowed_file(".kicad_block/a.json"));
+        assert_eq!(doc_type_for("amp.kicad_sch"), "kicad_sch");
+        assert_eq!(doc_type_for("x.kicad_block/sub/amp.kicad_sch"), "kicad_sch");
+    }
 
     #[test]
     fn archive_layout_for_shared_files() {

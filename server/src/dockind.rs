@@ -83,6 +83,8 @@ const KINDS: &[(&str, DocKind)] = &[
     ("symbol_lib", DocKind { name: "symbol library", ..SEXPR_FILE }),
     ("footprint", DocKind { name: "footprint", ..SEXPR_FILE }),
     ("worksheet", DocKind { name: "drawing sheet", ..SEXPR_FILE }),
+    // a design block library's files (http.rs design_block_file): copied in and out whole, never merged item by item
+    ("design_block", DocKind { name: "design block", ..PLAIN_FILE }),
 ];
 
 /// The kind of a document type (`documents.doc_type`).  A type not listed is a plain file.

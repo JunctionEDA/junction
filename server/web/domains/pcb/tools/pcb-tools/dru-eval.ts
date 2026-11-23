@@ -7,7 +7,7 @@ import { pointInPoly } from "./hit";
 import { matchDpSuffix } from "./diffpair";
 import { courtyards, netclassName } from "./drc";
 import { boardNets } from "./changes";
-import { netOf } from "./nets";
+import { netChainOf, netOf } from "./nets";
 import { padsOf } from "./route-geom";
 import { K } from "./state";
 import { isList, layerOf, pt } from "./util";
@@ -60,6 +60,7 @@ export const MISSING_ARG: Record<string, string> = {
   intersectsBackCourtyard: "Missing footprint argument (A, B, or reference designator) to intersectsBackCourtyard().",
   intersectsArea: "Missing rule-area argument (A, B, or rule-area name) to intersectsArea().", enclosedByArea: "Missing rule-area argument (A, B, or rule-area name) to enclosedByArea().",
   intersectsKeepout: "Missing rule-area argument (A, B, or rule-area name) to intersectsKeepout().",
+  inNetChain: "Missing net-chain name argument to inNetChain().", inNetChainClass: "Missing netclass name argument to inNetChainClass().",
 };
 /** The lowercase function name to its registered spelling: LIBEVAL looks functions up case-insensitively. */
 export const FUNC_BY_LOWER = new Map(Object.keys(FUNCS).map((f) => [f.toLowerCase(), f]));
@@ -265,7 +266,15 @@ export function callFunc(fn: string, it: RuleItem | null, args: string[], c: FnC
   case "hasComponentClass": { const fp = it ? fpOf(it) : null; if (!fp || !as) return bool(false); const cc = K.kid(fp.node, "component_classes"); return bool(!!cc && K.kids(cc, "class").some((x) => wild(as, K.str(x[1])))); }
   case "customProperty": return str("");   // EDA_ITEM custom properties are not written to the board file
   case "hasCustomProperty": return bool(false);
-  case "inNetChain": case "hasNetChain": case "inNetChainClass": return bool(false);   // the board defines no net chains
+  // NETINFO_ITEM::GetNetChain of the item's net (the board's (net_chains …)); the chain's class is the project's
+  // net_settings.net_chain_classes (NET_SETTINGS::GetNetChainClass)
+  case "inNetChain": { if (!it || !as) return bool(false); const ch = netChainOf(doc, netName(doc, it.node)); return bool(!!ch && wxm(as, ch)); }
+  case "hasNetChain": return bool(!!it && !!netChainOf(doc, netName(doc, it.node)));
+  case "inNetChainClass": {
+    if (!it || !as) return bool(false); const ch = netChainOf(doc, netName(doc, it.node)); if (!ch) return bool(false);
+    const cls = s.netChainClasses && typeof s.netChainClasses[ch] === "string" ? s.netChainClasses[ch] : "";
+    return bool(!!cls && wxm(as, cls));
+  }
   case "inDiffPair": {   // the net's base name (suffix character out) matches, with or without a trailing '_'
     if (!it || !as) return bool(false); const name = netName(doc, it.node); const m = matchDpSuffix(name);
     if (!m.rv || !netExists(doc, m.complement)) return bool(false);

@@ -6,6 +6,7 @@
 // pcbItemDialog first and falls back to the generic property sheet for the kinds not handled here (pads
 // keep pcb-tools' Pad Properties; dimensions open Dimension Properties from ./dimension).
 import { KICAD_FONT, faceOfFont, fontField, setFaceOfFont } from "../../dialogs/font-picker";
+import { editViaStitch } from "./via-stitch";
 import { trackViaDialog } from "./track-via";
 import * as IPM from "./item-props-model";
 import { bitmapButton, box, checkField, errorMessage, fmtLen, fmtLenU, form, grid, gridButtons, h, coordField, iconToggle, lenField, messageBox, notebook, numField, openDialog, parseLen, selectField, spinField, textField, unitLabel, type CellValue, type Field } from "./ui";
@@ -16,10 +17,11 @@ import { dimensionDialog } from "./dimension";
 import { barcodeDialog } from "./barcode";
 import { textBoxDialog } from "./textbox";
 import { LINE_STYLE_ICONS, tableDialog } from "./table";
-import { boardXref } from "./xref";
+import { boardTextVarAutocomplete, boardXref, parentFootprintOf } from "./xref";
 import * as VM from "../../canvas/variant-model";
 import { syntaxHelpLink } from "../syntax-help";
 import { refImageDialog } from "./refimage";
+import { conversionBox, type ConvertSettings } from "./convert";
 import { zoneSettingsPanel, type ZoneDefaults } from "./board-setup-pages";
 import { models3dPanel, whenGone } from "./model3d";
 import { state } from "../appstore";
@@ -116,6 +118,18 @@ function itemDialog(ctx: ToolCtx, item: KItem, title: string, width: number, bui
       return true;
     } });
 }
+/**
+ * A zone dialog converting the selection (aConvertSettings): the Conversion Settings box goes on top of the dialog's
+ * own controls, and its values are written back once the zone's own were accepted.
+ */
+function withConversion(convert: ConvertSettings | undefined, build: (node: SNode, body: HTMLElement, ro: boolean) => Apply): (node: SNode, body: HTMLElement, ro: boolean) => Apply {
+  if (!convert) return build;
+  return (node, body, ro) => {
+    const apply = build(node, body, ro), conv = conversionBox(convert, ro);
+    body.prepend(conv.el);
+    return (n) => { const err = apply(n); if (!err) conv.apply(); return err; };
+  };
+}
 const xyRow = (lx: string, x: Field<number>, y: Field<number>): [string, HTMLElement, HTMLElement] => [lx, h("span", { class: "pd-xy" }, x.el, h("label", null, "Y:"), y.el), unitLabel()];
 
 // ---------------------------------------------------------------- Copper Zone Properties
@@ -166,9 +180,9 @@ function writeZone(n: SNode, v: ZoneDefaults, v0: ZoneDefaults): void {
       } else if (v0.fillMode === 1) for (const k of ["hatch_thickness", "hatch_gap", "hatch_orientation", "hatch_smoothing_level", "hatch_smoothing_value", "hatch_border_algorithm", "hatch_min_hole_area"]) put(f, k, null);
 }
 /** DIALOG_COPPER_ZONE: the layers, then PANEL_ZONE_PROPERTIES (name, net, locked, the notebook, corner smoothing, islands) and Open Zone Manager... */
-function zoneDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void): boolean {
+function zoneDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void, convert?: ConvertSettings): boolean {
   const doc = ctx.doc as KDoc;
-  return itemDialog(ctx, item, "Copper Zone Properties", 780, (node, body, ro) => {
+  return itemDialog(ctx, item, convert ? "Convert to Copper Zone" : "Copper Zone Properties", 780, withConversion(convert, (node, body, ro) => {
     const l1 = kid(node, "layer"), ln = kid(node, "layers");
     const cur = new Set<string>(l1 ? [sval(l1)] : ln ? ln.slice(1).map(String) : []);
     const layerChecks = withCurrent(copperLayers(doc), "").map(([name, label]) => ({ name, f: checkField(cur.has(name), label, { ro, key: "layer-" + name }) }));
@@ -204,7 +218,7 @@ function zoneDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => 
       writeZone(n, v, v0);
       return undefined;
     };
-  }, create, "Edit Zone Properties");
+  }), create, "Edit Zone Properties");
 }
 
 /** The layers a zone names, its wildcards ("*.Cu", "F&B.Cu", "*.Mask" …) spelled out over the board's layers. */
@@ -249,9 +263,9 @@ function outlineFields(node: SNode, ro: boolean): { outline: Field<string>; pitc
 }
 
 // ---------------------------------------------------------------- Rule Area Properties (DIALOG_RULE_AREA_PROPERTIES)
-function ruleAreaDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void): boolean {
+function ruleAreaDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void, convert?: ConvertSettings): boolean {
   const doc = ctx.doc as KDoc;
-  return itemDialog(ctx, item, "Rule Area Properties", 708, (node, body, ro) => {
+  return itemDialog(ctx, item, convert ? "Convert to Rule Area" : "Rule Area Properties", 708, withConversion(convert, (node, body, ro) => {
     // LSET::AllNonCuMask() | LSET::AllCuMask( copperLayerCount ): every layer of the board
     const layers = zoneLayerList(doc, node, allLayers(doc), ro, "No layers selected.");
     const name = textField(sval(kid(node, "name")), { ro, key: "name" }); name.input.title = "A unique name for this rule area for use in DRC rules";
@@ -318,13 +332,13 @@ function ruleAreaDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null)
       if (!pl || enabled !== plOn || kind !== kind0 || src !== src0) put(n, "placement", IPM.placementText(enabled, kind, src, quote), ["fill", "polygon"]);
       return undefined;
     };
-  }, create, "Edit Zone Properties");
+  }), create, "Edit Zone Properties");
 }
 
 // ---------------------------------------------------------------- Non Copper Zone Properties (DIALOG_NONCOPPER_ZONES_EDITOR)
-function nonCopperZoneDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void): boolean {
+function nonCopperZoneDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void, convert?: ConvertSettings): boolean {
   const doc = ctx.doc as KDoc;
-  return itemDialog(ctx, item, "Non Copper Zone Properties", 640, (node, body, ro) => {
+  return itemDialog(ctx, item, convert ? "Convert to Non Copper Zone" : "Non Copper Zone Properties", 640, withConversion(convert, (node, body, ro) => {
     const layers = zoneLayerList(doc, node, allLayers(doc).filter(([n]) => !/\.Cu$/.test(n)), ro, "No layer selected.", "Layers");
     const locked = checkField(PT().isLocked(node), "Locked", { ro, key: "locked" });
     const out = outlineFields(node, ro);
@@ -390,7 +404,7 @@ function nonCopperZoneDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | 
       } else if (hatchMode) { put(f, "mode", null); }
       return undefined;
     };
-  }, create, "Edit Zone Properties");
+  }), create, "Edit Zone Properties");
 }
 /** InvokeCopperZonesEditor / InvokeRuleAreaEditor / InvokeNonCopperZonesEditor on the template of a zone about to be drawn. */
 // ---------------------------------------------------------------- Zone Manager
@@ -571,10 +585,11 @@ export function openZoneManager(ctx: ToolCtx): boolean {
     } });
   return true;
 }
-export function newZoneDialog(ctx: ToolCtx, node: SNode, done: (node: SNode | null) => void): boolean {
+export function newZoneDialog(ctx: ToolCtx, node: SNode, done: (node: SNode | null) => void, convert?: unknown): boolean {
+  const conv = convert as ConvertSettings | undefined;   // CONVERT_TOOL::CreatePolys hands its CONVERT_SETTINGS over
   const item = { id: "", kind: "zone", node, geom: [], bbox: null } as unknown as KItem;
   const keepout = !!kid(node, "keepout"), copper = Array.from(zoneLayerSet(ctx.doc as KDoc, node)).some((l) => /\.Cu$/.test(l));
-  const ok = keepout ? ruleAreaDialog(ctx, item, done) : copper ? zoneDialog(ctx, item, done) : nonCopperZoneDialog(ctx, item, done);
+  const ok = keepout ? ruleAreaDialog(ctx, item, done, conv) : copper ? zoneDialog(ctx, item, done, conv) : nonCopperZoneDialog(ctx, item, done, conv);
   if (!ok) done(null);
   return ok;
 }
@@ -643,7 +658,7 @@ function textControls(doc: KDoc, node: SNode, ro: boolean, posLabels: [string, s
   const strokeOnly = (face: string): void => { const stroke = !face || face === KICAD_FONT; thRow.style.display = stroke ? "" : "none"; };
   const face = fontField(doc, face0, { ro, key: "face", onChange: (v) => strokeOnly(v) });
   const x = coordField(at[0], "x", { ro, key: "x" }), y = coordField(at[1], "y", { ro, key: "y" }), rot = orientationField(at[2] || 0, ro, "orientation");
-  strokeOnly(face0);
+  // onFontSelected runs on a font choice only: TransferDataToWindow leaves the thickness shown
   const left = form([["Layer:", layer.el], knockout.el, ["Font:", face.el], toggles], true);
   const sizes = form([["Width:", w.el, unitLabel(), "Text width"], ["Height:", ht.el, unitLabel(), "Text height"]]);
   const place = form([[posLabels[0], x.el, unitLabel(), "Text pos X"], [posLabels[1], y.el, unitLabel(), "Text pos Y"], ["Orientation:", rot.el, unitLabel("deg"), "Text orientation"]]);
@@ -684,6 +699,8 @@ function textDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => 
   const doc = ctx.doc as KDoc;
   return itemDialog(ctx, item, "Text Properties", 600, (node, body, ro) => {
     const text = h("textarea", { class: "pd-text", style: "min-height:90px", readOnly: ro, "data-key": "text" }); const xref = boardXref(doc), shownText = xref.toRefs(sval(node)); text.value = shownText;   // the reader already turned the file's "\\n" into new lines; cross-references shown as ${REF:FIELD}
+    // onCharFn: DoTextVarAutocomplete( GetContextualTextVars ) (registered ahead of the Enter handling, so Enter takes a choice)
+    if (!ro) boardTextVarAutocomplete(text, doc, parentFootprintOf(doc as never, item, node));
     text.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.stopPropagation(); if (ev.shiftKey) { ev.preventDefault(); const ok = (body.parentElement as HTMLElement).querySelector<HTMLButtonElement>(".kd-foot > button:last-child"); if (ok) ok.click(); } } });   // SCINTILLA_TRICKS: Shift+Enter accepts, Enter is a new line
     const locked = checkField(PT().isLocked(node), "Locked", { ro, key: "locked" });
     const c = textControls(doc, node, ro, ["Position X:", "Position Y:"]);
@@ -767,7 +784,7 @@ const GT = (): GeomApi => (window as unknown as { PcbTools: GeomApi }).PcbTools;
 /** s_lastTabForShape */
 const lastShapeTab = new Map<string, number>();
 const isExtCopper = (l: string): boolean => l === "F.Cu" || l === "B.Cu";
-function shapeDialog(ctx: ToolCtx, item: KItem): boolean {
+function shapeDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void): boolean {
   const doc = ctx.doc as KDoc, kind = item.kind, version = (doc as KDoc & { version?: number }).version || 0;
   return itemDialog(ctx, item, `${SHAPE_NAMES[kind]} Properties`, 620, (node, body, ro) => {
     // the geometry notebook: every page's fields, kept in step with one working geometry
@@ -909,14 +926,24 @@ function shapeDialog(ctx: ToolCtx, item: KItem): boolean {
         else put(n, "layer", `(layer ${quote(L)})`, ["solder_mask_margin", "net", "uuid", "tstamp"]);
       }
       const mmv = maskMargin.get(), m0 = mm0 ? nval(mm0) : NaN;
-      if (!mask) { if (mm0) put(n, "solder_mask_margin", null); }
-      else if (!(isFinite(mmv) && isFinite(m0) && Math.abs(mmv - m0) < 1e-9)) put(n, "solder_mask_margin", isFinite(mmv) ? `(solder_mask_margin ${f6(mmv)})` : null, ["net", "uuid", "tstamp"]);
+      // SetLocalSolderMaskMargin whether or not the mask box is ticked (the item keeps the margin; the node is the item)
+      if (!(isFinite(mmv) && isFinite(m0) && Math.abs(mmv - m0) < 1e-9)) put(n, "solder_mask_margin", isFinite(mmv) ? `(solder_mask_margin ${f6(mmv)})` : null, ["net", "uuid", "tstamp"]);
       // SetNetCode: the net on copper, none elsewhere
       const netName = doc.copper.includes(L) ? net.get() : "";
       if (netName !== PH().netNameOf(doc, n)) setNet(doc, n, netName);
+      // ShowGraphicItemPropertiesDialog: a shape on the active layer leaves its stroke as the drawing tool's (SetStroke)
+      const act = ctx.activeLayer, onActive = !!act && (L === act || (mask && (L === "F.Cu" ? "F.Mask" : "B.Mask") === act));
+      const M = (window as unknown as { CollabTools?: { pcb?: { setStroke?(w: number, style: string, layer: string): void } } }).CollabTools;
+      if (onActive && M && M.pcb && M.pcb.setStroke) M.pcb.setStroke(w, style.get(), act);
       return undefined;
     };
-  }, undefined, "Edit Shape Properties");
+  }, create, "Edit Shape Properties");
+}
+/** drawShape's PCB_ACTIONS::properties: the shape being drawn in its dialog; done gets the edited node, or null on Cancel. */
+export function newShapeDialog(ctx: ToolCtx, node: SNode, done: (node: SNode | null) => void): boolean {
+  const ok = shapeDialog(ctx, { id: "", kind: String(node[0]), node, geom: [], bbox: null } as unknown as KItem, done);
+  if (!ok) done(null);
+  return ok;
 }
 
 // ---------------------------------------------------------------- Footprint Properties
@@ -943,7 +970,9 @@ function fpButtons(ctx: ToolCtx, item: KItem, body: HTMLElement): HTMLElement {
     b("Update Footprint from Library...", "updateFootprint"), b("Change Footprint...", "changeFootprint"),
     b("Edit Footprint...", "editFpInFpEditor"), b("Edit Library Footprint...", "editLibFpInFpEditor_board"));
 }
-function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
+// DIALOG_FOOTPRINT_PROPERTIES::m_page, the page last shown during the session
+let fpLastPage = 0;
+function footprintDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void): boolean {
   const doc = ctx.doc as KDoc;
   return itemDialog(ctx, item, "Footprint Properties", 900, (node, body, ro) => {
     const props = (n: SNode): SNode[] => (K().kids(n, "property") as SNode[]).filter((p) => p.some((c) => isList(c)) && !String(p[1]).startsWith("ki_"));
@@ -956,7 +985,7 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
     const xref = boardXref(doc);   // field text shows cross-references as ${REF:FIELD} (dialog_footprint_properties.cpp:272, 603)
     // the board's current variant (the toolbar's): fields and the DNP / BOM / position-file / simulation flags show
     // and write the footprint's (variant …) (dialog_footprint_properties.cpp:263-312, 586-715)
-    const variant = String((E as { currentVariant?: string }).currentVariant || "");
+    const variant0 = String((E as { currentVariant?: string }).currentVariant || ""), variant = VM.isDefaultVariant(variant0) ? "" : variant0;
     const fieldText = (p: SNode): string => (variant ? VM.footprintFieldForVariant(node, variant, String(p[1])) : sval(p, 2));
     const fpRot0 = K().atOf(node)[2] || 0;
     const relRot = (abs: number): number => +(abs - fpRot0).toFixed(3);
@@ -1012,7 +1041,7 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
       h("div", { class: "pd-cols2" },
         box("Position", form([["X:", x.el, unitLabel()], ["Y:", y.el, unitLabel()], ["Orientation:", rot.el, unitLabel("deg")], ["Side:", side.el], ["Height:", height.el, unitLabel()]]), locked.el),
         box("Fabrication Attributes", form([["Footprint type:", type.el]], true), ...flags.map((f) => f.f.el))),
-      form([["Library link:", h("span", { class: "pd-value" }, String(node[1] ?? ""))]], true), fpButtons(ctx, item, body));
+      form([["Library link:", h("span", { class: "pd-value" }, String(node[1] ?? ""))]], true), ...(create ? [] : [fpButtons(ctx, item, body)]));
     const clearances = h("div", null, h("p", { class: "pd-note" }, "Leave values blank to use Board Setup values."),
       box("Clearances", form([["Pad clearance:", clr.el, unitLabel(), "This is the local net clearance for all pad of this footprint\nIf 0, the Netclass values are used\nThis value can be superseded by a pad local value."],
         ["Solder mask expansion:", mask.el, unitLabel(), "This is the local clearance between pads and the solder mask for this footprint.\nThis value can be superseded by a pad local value.\nIf 0, the global value is used."], bridges.el,
@@ -1039,8 +1068,15 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
       footprintId: () => { const id = String(node[1] ?? ""), c = id.indexOf(":"); return c >= 0 ? { lib: id.slice(0, c), name: id.slice(c + 1) } : { lib: "", name: id }; } });
     const tabs = notebook([{ label: "General", build: (el) => el.append(general) }, { label: "Clearance Overrides & Pad Connections", build: (el) => el.append(clearances) },
       { label: "3D Models", build: (el) => models3d.build(el) },
-      { label: "Embedded Files", build: (el) => { efPanel = embeddedFilesPanel({ names: FM.embeddedFileNames(node), ro, bytes: (nm) => embeddedFileBytes(node, nm, boardFiles), embedFonts }); el.append(efPanel.el); } }]);
+      { label: "Embedded Files", build: (el) => { efPanel = embeddedFilesPanel({ names: FM.embeddedFileNames(node), ro, bytes: (nm) => embeddedFileBytes(node, nm, boardFiles), embedFonts }); el.append(efPanel.el); } }],
+      { start: fpLastPage, onShow: (i) => { fpLastPage = i; } });
     body.append(tabs.el);
+    // the initial focus: the Reference cell with its number selected (page 0), the pad clearance (page 1)
+    requestAnimationFrame(() => {
+      if (ro) return;
+      if (tabs.current() === 0) { const ri = Math.max(0, g.rows().findIndex((r) => r.name === "Reference")), cell = g.el.querySelectorAll("tbody tr")[ri]?.querySelector<HTMLInputElement>('input[data-col="value"]'); if (cell && document.contains(cell)) { cell.focus(); selectReferenceNumber(cell); } }
+      else if (tabs.current() === 1 && document.contains(clr.input)) { (clr.input as HTMLInputElement).focus(); (clr.input as HTMLInputElement).select(); }
+    });
     whenGone(body, () => models3d.dispose());
     return (n) => {
       const e3d = models3d.validate();
@@ -1085,7 +1121,8 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
         const p = list.find((q) => String(q[1]) === r.name); if (!p) continue;
         if (MAND.slice(0, 1).includes(String(r.name)) && !String(r.value).trim()) return "Reference designator cannot be empty.";
         const fx = FH().fieldEffects(p), a = FH().fieldAt(p), e = kid(p, "effects"), f = e ? kid(e, "font") : null, sz = f ? kid(f, "size") : null;
-        if (variant) { if (String(r.value) !== xref.toRefs(fieldText(p))) variantFields[String(r.name)] = xref.toKiids(String(r.value)); }
+        // under a variant every field's value is the variant's (variant->SetFieldValue), the footprint keeps its own
+        if (variant) variantFields[String(r.name)] = String(r.value) === xref.toRefs(fieldText(p)) ? fieldText(p) : xref.toKiids(String(r.value));
         else if (String(r.value) !== xref.toRefs(sval(p, 2))) { const v = xref.toKiids(String(r.value)); if (v !== sval(p, 2)) p[2] = v; }
         if (!!r.show === FH().fieldHidden(p)) FH().setFieldHidden(n, p, !r.show);
         const w = Number(r.w), ht = Number(r.ht), th = Number(r.th);
@@ -1106,11 +1143,12 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
       if (locked.get() !== PT().isLocked(n)) PT().setLocked(n, locked.get());
       const next: Record<string, unknown> = { type: type.get() };
       if (variant) {
-        // the variant takes the flags and the field values; the footprint keeps its own (board_only stays the footprint's)
-        for (const f of flags) next[f.k] = f.k in (vflags || {}) ? !!attrs[f.k] : f.f.get();
-        const vpatch: Partial<VM.FpFlags> = {}; let vchanged = Object.keys(variantFields).length > 0;
-        for (const f of flags) if (vflags && f.k in vflags && f.f.get() !== vflags[f.k as keyof VM.FpFlags]) { vpatch[f.k as keyof VM.FpFlags] = f.f.get(); vchanged = true; }
-        if (vchanged) { const out = VM.setFootprintVariant(n, variant, { flags: vpatch, fields: variantFields }); n.splice(0, n.length, ...out); }
+        // GetVariant || AddVariant, then all four flags and every field value go to the variant; the footprint keeps its
+        // own four flags (board_only stays the footprint's)
+        for (const f of flags) next[f.k] = (VM.FP_FLAG_KEYS as string[]).includes(f.k) ? !!attrs[f.k] : f.f.get();
+        const vpatch: Partial<VM.FpFlags> = {};
+        for (const f of flags) if ((VM.FP_FLAG_KEYS as string[]).includes(f.k)) vpatch[f.k as keyof VM.FpFlags] = f.f.get();
+        const out = VM.setFootprintVariant(n, variant, { flags: vpatch, fields: variantFields }); n.splice(0, n.length, ...out);
       } else for (const f of flags) next[f.k] = f.f.get();
       next.allow_soldermask_bridges = bridges.get();
       if (next.type !== attrs.type || flags.some((f) => !!next[f.k] !== !!attrs[f.k]) || bridges.get() !== bridges0) PH().setFootprintAttrs(n, next);
@@ -1139,7 +1177,16 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
       if (embedFonts.get() !== fonts0) put(n, "embedded_fonts", `(embedded_fonts ${embedFonts.get() ? "yes" : "no"})`, ["embedded_files", "model"]);
       return undefined;
     };
-  }, undefined, "Edit Footprint Properties");
+  }, create, "Edit Footprint Properties");
+}
+/**
+ * PCB_ACTIONS::properties on the footprint the Place Footprint tool carries (the edit tools take the event,
+ * board_editor_control.cpp): Footprint Properties on the detached footprint; done gets the edited node, or null.
+ */
+export function carriedFootprintDialog(ctx: ToolCtx, node: SNode, done: (node: SNode | null) => void): boolean {
+  const ok = footprintDialog(ctx, { id: "", kind: "footprint", node, geom: [], bbox: null } as unknown as KItem, done);
+  if (!ok) done(null);
+  return ok;
 }
 
 // ---------------------------------------------------------------- Target Properties
@@ -1184,6 +1231,7 @@ export function pcbItemDialog(ctx: ToolCtx, item: KItem): boolean {
     case "dimension": return dimensionDialog(ctx, item);
     case "target": return targetDialog(ctx, item);
     case "barcode": return barcodeDialog(ctx, item.node, item);
+    case "generated": return KiCadCanvas.str((kid(item.node, "type") || [])[1]) === "via_stitch" ? editViaStitch(ctx, item) : false;
     default: return false;
   }
 }

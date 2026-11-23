@@ -5,7 +5,7 @@
 // string, the clipboard rows LIB_TABLE_GRID_TRICKS::paste_text takes, and the path substitutions shown under the grid.
 // The table text itself goes through KiCad's own writer (symedit/model.ts formatLibTable, LIBRARY_TABLE::Format).
 
-export type LibTableKind = "symbol" | "footprint";
+export type LibTableKind = "symbol" | "footprint" | "designBlock";
 /** One LIBRARY_TABLE_ROW as the grid edits it. */
 export interface LibTableRow { enabled: boolean; visible: boolean; nickname: string; uri: string; type: string; options: string; descr: string }
 
@@ -70,7 +70,13 @@ export const PCB_IO: IoDesc[] = [
   { type: TABLE_TYPE, exts: [] },
 ].map((d) => (d.type === TABLE_TYPE ? d : { ...d, options: PCB_OPTIONS }));
 
-export const plugins = (kind: LibTableKind): IoDesc[] => (kind === "symbol" ? SCH_IO : PCB_IO);
+/**
+ * PANEL_DESIGN_BLOCK_LIB_TABLE::populatePluginList: DESIGN_BLOCK_IO alone, whose GetLibraryDesc is "KiCad Design Block
+ * folders" with FILEEXT::KiCadDesignBlockLibPathExtension as its in-folder extension (the .kicad_blocks folder itself).
+ * The loop names KICAD_SEXP only, so there is no nested table choice.
+ */
+export const DB_IO: IoDesc[] = [{ type: "KiCad", exts: [], inDir: ["kicad_blocks"], folder: true }];
+export const plugins = (kind: LibTableKind): IoDesc[] => (kind === "symbol" ? SCH_IO : kind === "designBlock" ? DB_IO : PCB_IO);
 /** The Library Format choices (m_pluginChoices), plus a type the table carries that no plugin names. */
 export function formatChoices(kind: LibTableKind, current?: string): string[] {
   const list = plugins(kind).map((p) => p.type);
@@ -103,7 +109,7 @@ export function addExistingMenu(kind: LibTableKind): AddExistingEntry[] {
 
 const extOf = (path: string): string => { const f = path.replace(/\/+$/, "").split("/").pop() || ""; const i = f.lastIndexOf("."); return i > 0 ? f.slice(i + 1) : ""; };
 /** The library table file name of a kind (FILEEXT::SymbolLibraryTableFileName / FootprintLibraryTableFileName). */
-export const tableFileName = (kind: LibTableKind): string => (kind === "symbol" ? "sym-lib-table" : "fp-lib-table");
+export const tableFileName = (kind: LibTableKind): string => (kind === "symbol" ? "sym-lib-table" : kind === "designBlock" ? "design-block-lib-table" : "fp-lib-table");
 /**
  * SCH_IO_MGR / PCB_IO_MGR::GuessPluginTypeFromLibPath: the first plugin (in enum order) that reads the path's
  * extension; a .pretty folder is KiCad's, a library table file is a nested table.  "" when none does.
@@ -112,6 +118,8 @@ export function guessFormat(kind: LibTableKind, path: string): string {
   const p = path.replace(/\/+$/, ""); const name = p.split("/").pop() || "";
   if (name === tableFileName(kind)) return TABLE_TYPE;
   const ext = extOf(p);
+  // DESIGN_BLOCK_IO_MGR::GuessPluginTypeFromLibPath: a .kicad_blocks folder is DESIGN_BLOCK_IO's
+  if (kind === "designBlock") return ext.toLowerCase() === "kicad_blocks" ? "KiCad" : "";
   if (kind === "footprint" && ext.toLowerCase() === "pretty") return "KiCad";
   for (const io of plugins(kind)) if (io.exts.some((e) => e.toLowerCase() === ext.toLowerCase()) && ext) return io.type;
   return "";
@@ -129,6 +137,7 @@ export function nicknameFor(kind: LibTableKind, path: string, type: string): str
   const full = path.replace(/\/+$/, "").split("/").pop() || "";
   const i = full.lastIndexOf("."); const base = i > 0 ? full.slice(0, i) : full;
   if (kind === "footprint" && type === "KiCad" && extOf(full).toLowerCase() !== "pretty") return fixIllegalChars(full);
+  if (kind === "designBlock" && type === "KiCad" && extOf(full).toLowerCase() !== "kicad_blocks") return fixIllegalChars(full);
   return fixIllegalChars(base);
 }
 
@@ -166,7 +175,9 @@ export function formatOptions(opts: Map<string, string> | [string, string][]): s
 }
 
 /** LIB_TABLE_GRID_TRICKS::getTablePreamble. */
-export const tablePreamble = (kind: LibTableKind): string => (kind === "symbol" ? "(sym_lib_table" : "(fp_lib_table");
+export const tablePreamble = (kind: LibTableKind): string => (kind === "symbol" ? "(sym_lib_table" : kind === "designBlock" ? "(design_block_lib_table" : "(fp_lib_table");
+/** The table file's root token (LIBRARY_TABLE::Format). */
+export const tableRoot = (kind: LibTableKind): string => tablePreamble(kind).slice(1);
 /**
  * GRID_TRICKS::paste_text for a library table: spreadsheet rows (tab separated, or comma separated when there is no
  * tab) laid over the columns from the cursor's column on (Nickname, Library Path, Library Format, Options,
@@ -216,8 +227,8 @@ export function envVarsIn(uri: string): string[] {
  * (and the 3D model folder for footprints), sorted as the std::set keeps them.
  */
 export function pathSubstitutions(kind: LibTableKind, uris: string[]): string[] {
-  const set = new Set<string>(["KIPRJMOD", kind === "symbol" ? "KICAD10_SYMBOL_DIR" : "KICAD10_FOOTPRINT_DIR"]);
-  if (kind === "footprint") set.add("KICAD10_3DMODEL_DIR");
+  const set = new Set<string>(["KIPRJMOD", kind === "symbol" ? "KICAD10_SYMBOL_DIR" : kind === "designBlock" ? "KICAD10_DESIGN_BLOCK_DIR" : "KICAD10_FOOTPRINT_DIR"]);
+  if (kind !== "symbol") set.add("KICAD10_3DMODEL_DIR");   // PANEL_DESIGN_BLOCK_LIB_TABLE adds the 3D model folder too
   for (const u of uris) for (const v of envVarsIn(u)) set.add(v);
   return [...set].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
@@ -234,6 +245,9 @@ export function rowsByProjectPath(rows: LibTableRow[]): Map<string, LibTableRow>
  */
 export function projectLibraryExists(kind: LibTableKind, row: LibTableRow, paths: string[]): boolean | null {
   const p = projectPath(row.uri); if (p === null) return null;
+  // a design block library is a folder, and a folder with no design block in it yet holds no file the project can
+  // store: a .kicad_blocks path is there as long as the row names one (DESIGN_BLOCK_IO::CreateLibrary made it)
+  if (kind === "designBlock" && row.type === "KiCad") return /\.kicad_blocks$/i.test(p) || paths.some((x) => x.startsWith(p + "/"));
   const io = plugins(kind).find((x) => x.type === row.type);
   if (io && io.folder || (kind === "symbol" && row.type === "KiCad" && !/\.kicad_sym$/i.test(p))) return paths.some((x) => x.startsWith(p + "/"));
   return paths.includes(p);
@@ -249,6 +263,7 @@ export function projectCandidates(kind: LibTableKind, entry: { type: string; fol
   for (const p of paths) {
     const ext = extOf(p).toLowerCase(); const name = p.split("/").pop() || "";
     if (entry.type === TABLE_TYPE) { if (name === tableFileName(kind) && p.includes("/")) out.add(p); continue; }
+    if (kind === "designBlock") { const m = /^(.*\.kicad_blocks)\//i.exec(p); if (m) out.add(m[1]); continue; }
     if (!io) continue;
     if (kind === "symbol" && entry.folder) { if (ext === "kicad_sym" && p.includes("/")) out.add(dirOf(p)); continue; }
     if (io.folder) { if ((io.inDir || []).some((e) => e.toLowerCase() === ext) && p.includes("/")) out.add(dirOf(p)); continue; }

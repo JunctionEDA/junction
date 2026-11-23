@@ -8,6 +8,7 @@
 //            units (remembered), reset local coordinates, Show Hidden Fields, sheet navigation
 //   Route    layer switching (board)
 //   Help     List Hotkeys, About (help-dialogs.ts)
+import { groupDesignBlockId } from "../library/design-blocks";
 import { matchProperties, matchPropertiesSettings } from "./match-properties";
 import { leaveSheet } from "./schnets";
 import type { ActionHandler } from "./types";
@@ -28,6 +29,8 @@ import { E } from "./state";
 import { KICAD_BASE_VERSION } from "../canvas/version";
 import { PRODUCT_VERSION } from "../generated/product-version";
 import { openExportNetlist } from "./export-netlist";
+import { exportForOlderVersion, exportGenCad, exportIdf, exportSpecctraDsn } from "./kicad-jobs";
+import { exportSymbolsToLibrary } from "./export-symbols";
 import { selectedAnywhere, startMove } from "./gestures";
 import { openContextMenu } from "./contextmenu";
 import { hotkeyCyclePopup } from "./hotkey-popup";
@@ -230,6 +233,11 @@ function openUrl(url: string): void { window.open(url, "_blank", "noopener"); }
 export const MENU_HANDLERS: Record<string, ActionHandler> = {
   saveCopy: () => saveDocCopy(), saveCurrSheetCopyAs: () => saveDocCopy(),
   exportNetlist: () => openExportNetlist(), drawSheetOnClipboard: () => drawingToClipboard(),
+  // run by the desktop's own exporters on the server (kicad-jobs.ts): ExportForOlderVersion in both editors, the board's
+  // ExportSpecctraDSN, ExportGenCAD and ExportIDF
+  exportForOlderVersion: () => { void exportForOlderVersion(); },
+  exportSymbolsToLibrary: () => { void exportSymbolsToLibrary(); },
+  exportSpecctraDSN: () => { void exportSpecctraDsn(); }, exportGenCAD: () => exportGenCad(), exportIDF: () => { void exportIdf(); },
   properties: () => { openSelectionProperties(); },
   zoomFitSelection, zoomIn: () => zoomAtCursor(true), zoomOut: () => zoomAtCursor(false), zoomCenter: centreOnCursor,
   panUp: () => panStep(0, 1), panDown: () => panStep(0, -1), panLeft: () => panStep(1, 0), panRight: () => panStep(-1, 0),
@@ -363,7 +371,8 @@ export function actionState(): ActionState {
   if (sch) for (const d of schDocs()) { const sd = sheetDoc(d.docId); if (sd) for (const it of sd.items.values()) if (it.kind === "symbol") { symbols++; if (String(it.lib || "").includes(":")) named++; } }
   const u = store.get().undo;
   return { selCount: keys.length, selKinds: Array.from(new Set(items.map((it) => it.kind))), itemCount: doc ? doc.items.size : 0, idle: !busy, drawingWire: busy === "Press <ESC> to cancel drawing.",
-    undo: u.undo, redo: u.redo, legacyLibIds: symbols > 0 && named === 0, checks, pcb: sch ? null : pcbEnableFacts() };
+    undo: u.undo, redo: u.redo, legacyLibIds: symbols > 0 && named === 0, checks, pcb: sch ? null : pcbEnableFacts(),
+    linkedGroup: items.length === 1 && items[0].kind === "group" && !!groupDesignBlockId(items[0].node) };
 }
 /** Everything selected, pads included: the item ids of selectedIds() plus the board's picked pads as
  *  "footprintId#padIndex" (PCB_PAD_T in KiCad's selection).  Also window.CollabEditor.hooks.selectionKeys(). */

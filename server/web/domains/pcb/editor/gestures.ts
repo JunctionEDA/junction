@@ -26,6 +26,7 @@ import { E } from "./state";
 import { activeModule, moveOp as moveOpRaw, runModuleAction, setTool, toolCtx as toolCtxRaw, unlockedForEdit } from "./tools";
 import { applyView, canvas as canvasRaw, dragG as dragGRaw, isSch, pxPerMm, requestRender, requestRepaint, requestZoomEnd, stage as stageRaw, worldMm as worldMmRaw, zoomBy as zoomByRaw, zoomLimits } from "./view";
 import { toast } from "./util";
+import { markerWinsAt } from "./contextmenu";
 import { DEFAULT_WHEEL, makeZoomController, wheelAction, type WheelSettings } from "./wheel-model";
 import { IS_MAC } from "../../../shared/keys";
 import { isPastDragThreshold } from "../tools/drag-threshold";
@@ -764,7 +765,7 @@ function onDownCapture(ev: PointerEvent): void {
   // (DIALOG_DRC::SelectMarker)
   if (ev.button === 0 && !isSch() && E.tool === "select" && !interactionBusy() && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
     const m = markerUnder(worldMm(ev)); const hk = E.hooks as { drcSelectMarker?: (m: unknown) => void };
-    if (m && hk.drcSelectMarker && !pcbPick(worldMm(ev))) {
+    if (m && hk.drcSelectMarker && markerWinsAt(worldMm(ev), m as Marker & { layer?: string })) {
       ev.preventDefault(); ev.stopImmediatePropagation();
       clearAllSelection(false); hk.drcSelectMarker(m);
       selectionChanged(); return;

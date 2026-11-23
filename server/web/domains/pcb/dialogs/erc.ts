@@ -34,7 +34,7 @@ export { ercTextReport, sevOf, shownBy };
 
 /** An item of a violation: its place and description, the item that holds it on the sheet (`id`), a symbol pin's
  *  number or a sheet pin's name, and its own uuid. */
-export interface ErcViolationItem { x: number; y: number; desc: string; len?: number; id?: string; pin?: string; sheetPin?: string; uuid?: string }
+export interface ErcViolationItem { x: number; y: number; desc: string; len?: number; id?: string; pin?: string; sheetPin?: string; uuid?: string; /** the sheet instance of an item that is not on its marker's sheet (ERC_ITEM::GetAuxItemSheetPath) */ docId?: string; sheetPath?: string; sheetKey?: string }
 export interface ErcViolation { code: string; severity: string; x: number; y: number; text: string; ids: string[]; base?: string; comment?: string; selected?: boolean; brightened?: boolean; items?: ErcViolationItem[] }
 
 /** The rule title KiCad shows for a violation (ERC_ITEM::GetErrorText), falling back to the marker's own text. */
@@ -77,7 +77,6 @@ const liveMarkers = (): ErcViolation[] => ((E as unknown as { markers?: ErcViola
  *  SHEETLIST_ERC_ITEMS_PROVIDER lists them: errors, then warnings, then exclusions, each in sheet order. */
 export const markers = (): ErcViolation[] => sortBySeverity(allMarkers(liveMarkers() as unknown as HierMarker[]) as unknown as ErcViolation[]);
 const hereDoc = (): string | null => (appState as unknown as { docId: string | null }).docId;
-const onOtherSheet = (m: ErcViolation): boolean => !onOpenSheet(m as { docId?: string; sheetKey?: string });
 /** Hand a changed marker list (or the same list, changed) to the canvas and the module: each sheet keeps its own. */
 function publishMarkers(all: ErcViolation[]): void {
   const l = distribute(all as unknown as HierMarker[]) as unknown as ErcViolation[];
@@ -263,6 +262,7 @@ export function openErc(): void {
   let nb: { select(i: number): void; index(): number } | null = null;
   let infoBar: HTMLElement | null = null, resultsEl: HTMLElement | null = null, runningEl: HTMLElement | null = null, messages: HTMLElement | null = null;
   let running = false, cancelled = false, closeIsDefault = false, notAnnotated = 0;
+  let abort: AbortController | null = null;
   const st = runState();
   const shown = (m: ErcViolation): boolean => shownBy(m, show);
   const footBtn = (id: string): HTMLButtonElement | null => (api ? api.dlg.querySelector<HTMLButtonElement>(`#${id}, [data-btn="${id}"]`) : null);
@@ -329,9 +329,11 @@ export function openErc(): void {
     const it = typeof p === "number" && p >= 0 && m.items ? m.items[p] : null;
     // an item the sheet no longer has ("(Deleted Item)"): nothing to show
     if (typeof p === "number" && p >= 0 && (!it || !it.id)) { refresh(); scrollToRow(); return; }
-    // a marker on another sheet: that sheet opens (SCH_ACTIONS::changeSheet), then it is focused there
-    if (!opened && onOtherSheet(m)) {
-      const own = m as { docId?: string; sheetPath?: string }, target = own.docId!, before = E.kdoc;
+    // a marker on another sheet: that sheet opens (SCH_ACTIONS::changeSheet), then it is focused there; an item row goes
+    // to the item's own sheet (MainItemHasSheetPath / AuxItemHasSheetPath), which can be another than its marker's
+    const where = (it && it.docId ? it : m) as { docId?: string; sheetPath?: string; sheetKey?: string };
+    if (!opened && !onOpenSheet(where)) {
+      const own = where, target = own.docId!, before = E.kdoc;
       // the instance of a sheet used more than once (SCH_SHEET_PATH): the hierarchy shows that one
       preferInstance(own.sheetPath || null);
       if (target === hereDoc()) { onSheetOpened(); pick(m, false, true, p); return; }
@@ -435,16 +437,22 @@ export function openErc(): void {
     const close = closeBtn(), busy = ["kd-erc-run", "kd-erc-del", "kd-erc-delall", "kd-erc-save"].map(footBtn);
     if (close) close.textContent = "Cancel";
     for (const b of busy) if (b) b.disabled = true;
-    // ERC_TESTER::RunTests' AdvancePhase lines, for the tests the severities leave enabled
-    const sv = severities(); for (const line of ercPhaseMessages((code) => severityOf(code, sv) !== "ignore")) report(line);
+    // ERC_TESTER::RunTests' AdvancePhase lines: kicad-cli's own as it reaches each phase; when the browser's engine
+    // checks instead, the ones the severities leave enabled
+    const sv = severities();
+    let phases = 0;
+    abort = typeof AbortController !== "undefined" ? new AbortController() : null;
     try {
-      const mine = await runHierErc({ showAllErrors: opts.showAllErrors }, (l) => withExclusions(l as unknown as ErcViolation[]) as unknown as HierMarker[]);
+      const mine = await runHierErc({ showAllErrors: opts.showAllErrors, onPhase: (msg) => { if (!cancelled) { phases++; report(msg); } }, signal: abort ? abort.signal : undefined },
+        (l) => withExclusions(l as unknown as ErcViolation[]) as unknown as HierMarker[]);
+      if (!cancelled && !phases && (ercSource !== "kicad" || !mine)) for (const line of ercPhaseMessages((code) => severityOf(code, sv) !== "ignore")) report(line);
       if (cancelled) { forgetHierErc(); publishMarkers([]); }
       else if (!mine) { forgetHierErc(); a.run(toolCtx(), Object.assign(ercProjectOpts(), { showAllErrors: opts.showAllErrors, silent: true })); }
       else onSheetOpened();   // the canvas: this sheet's own markers (the others stay with their sheets)
       // the checks KiCad itself did not make: the browser's own engine ran, which lacks some of ERC_TESTER's tests
       if (!cancelled && (ercSource !== "kicad" || !mine)) report(`Checked in the browser (${lastFallback || "KiCad unavailable"}): ${BROWSER_UNCHECKED}`);
     } catch (e) { report(`ERC failed: ${(e as Error).message || e}`); }
+    abort = null;
     if (notAnnotated) report(`${notAnnotated} symbol(s) require annotation.`, true);
     report(cancelled ? "-------- ERC cancelled by user." : "Done.");
     running = false;
@@ -568,7 +576,7 @@ export function openErc(): void {
     extra: [{ label: "Delete Marker", fn: delOne, id: "kd-erc-del" }, { label: "Delete All Markers", fn: delAll, id: "kd-erc-delall" }],
     buttons: [{ label: "Run ERC", primary: true, isDefault: true, fn: () => { void run(); }, id: "kd-erc-run" }, { label: "Close", close: true }],
     // OnCancelClick: while the tests run the button is "Cancel" and only cancels them; else the focus is cleared and the dialog goes
-    cancel() { if (running) { cancelled = true; return false; } live = null; ercClearFocus(); return undefined; },
+    cancel() { if (running) { cancelled = true; if (abort) abort.abort(); return false; } live = null; ercClearFocus(); return undefined; },
   });
   // once a run has ended Close is the default button (m_sdbSizer1Cancel->SetDefault())
   api.dlg.addEventListener("keydown", (ev) => {

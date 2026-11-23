@@ -331,6 +331,25 @@ function natCmp(a: string, b: string): number { return a.localeCompare(b, undefi
  * FIELDS_EDITOR_GRID_DATA_MODEL::RebuildRows: filter, group on the group-by columns, sort, then number.
  * `refDelim` / `refRange` are ", " and "-" on screen and the format preset's on export.
  */
+/**
+ * FIELDS_TABLE_DATA_MODEL_BASE::MoveColumn after a header drag (DIALOG_FIELDS_TABLE::OnColMove): the column leaves its
+ * place and goes in at the other column's (std::rotate), in the preset's field order; false when nothing moved.
+ */
+export function moveColumn(fields: BomField[], from: string, to: string): boolean {
+  const a = fields.findIndex((f) => f.name === from), b = fields.findIndex((f) => f.name === to);
+  if (a < 0 || b < 0 || a === b) return false;
+  const [f] = fields.splice(a, 1); fields.splice(b, 0, f);
+  return true;
+}
+/**
+ * DIALOG_SYMBOL_FIELDS_TABLE::TransferDataToWindow's GoToCell on the selected symbol's row: the Value column when it is
+ * shown, else the Reference column, else the first other column shown (the keys of the shown columns, in order).
+ */
+export function cursorColumn(shown: string[]): string | null {
+  if (shown.includes("Value")) return "Value";
+  if (shown.includes("Reference")) return "Reference";
+  return shown.length ? shown[0] : null;
+}
 export function bomRows(rows: SymRow[], preset: BomPreset, refDelim = ", ", refRange = "-"): BomRow[] {
   const flt = str(preset.filter_string).trim(); const fm = flt ? matcher({ query: /[*?]/.test(flt) ? (flt.startsWith("*") ? "" : "*") + flt + (flt.endsWith("*") ? "" : "*") : flt }) : null;
   // FIELDS_TABLE_DATA_MODEL::MatchesFilter: the Reference alone, or each (shown) column's text, attributes by their names

@@ -90,10 +90,10 @@ fn xy(node: &Sx, head: &str) -> Option<(f64, f64)> {
     Some((num(k.arg(1))?, num(k.arg(2))?))
 }
 
-/// The first `(footprint …)` (or old `(module …)`) in `text`.
+/// The first `(footprint …)` (or old `(module …)`) in `text`, also inside a `(kicad_footprint_lib …)` header.
 pub fn parse(text: &str) -> Option<Footprint> {
     let top = parse_sexpr(text);
-    let node = top.iter().find(|n| n.head() == "footprint" || n.head() == "module")?;
+    let node = crate::libs::footprint_node(&top)?;
     Some(read(node))
 }
 
@@ -205,5 +205,10 @@ mod tests {
         assert_eq!((fp.pads[0].w, fp.pads[0].h), (0.6, 1.95));
         assert_eq!(fp.reference_prefix(), "U");
         assert_eq!(fp.field("datasheet"), Some("https://x/y.pdf"));
+        // a library file with KiCad's (kicad_footprint_lib …) header
+        let wrapped = format!("(kicad_footprint_lib (version 20261031) (generator \"kicad_footprint_editor\") (generator_version \"10.99\")\n  {lib})");
+        let fp = parse(&wrapped).unwrap();
+        assert_eq!(fp.pads.len(), 2);
+        assert!(fp.smd);
     }
 }

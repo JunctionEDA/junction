@@ -1,4 +1,5 @@
 // pcb-tools/draw-tools.ts — the drawing tools' clicks: shapes, zones and rule areas, text boxes, tables, dimensions and images.
+import { newStitch, readStitch, viaStitchUpdate, writeStitch } from "./via-stitch";
 import type { DrawState, Hover, PcbCtx, Pt, PtrEvent } from "./types";
 import type { PickedImage } from "./dom";
 import { root } from "../root";
@@ -6,7 +7,7 @@ import { sizesOf } from "./app-state";
 import { NM, arcClick, arcMove, toNm } from "./arcs";
 import { newItemDialogs } from "./assistants";
 import { addedChange, boardNets } from "./changes";
-import { openForm } from "./dialogs";
+import { openForm, settingsOf } from "./dialogs";
 import { DIM_TYPE, dimensionNode, snap45 } from "./dimensions";
 import type { DimSpec } from "./dimensions";
 import { pickerImpl, promptImpl } from "./dom";
@@ -123,7 +124,7 @@ export function drawClick(ctx: PcbCtx, hv: Hover, t: string, ev: PtrEvent) {
   if (t === "garc") { arcClick(ctx, p); return; }
   if (!S.draw) {
     S.draw = { shape: t, start: p, cur: p.slice(), pts: [p] }; if (t === "dimortho") S.draw.orientation = "h";
-    drawBegin(ctx, t === "zone" || t === "thievingzone" ? S.layer : t === "rulearea" ? null : layer);
+    drawBegin(ctx, t === "zone" || t === "thievingzone" || t === "viastitch" ? S.layer : t === "rulearea" ? null : layer);
     if (ORIGIN_SHAPES.has(t)) drawOriginBegin(ctx, p);
     ctx.requestRender(); return;
   }
@@ -186,7 +187,7 @@ export function drawClick(ctx: PcbCtx, hv: Hover, t: string, ev: PtrEvent) {
   if (DIM_TYPE[t]) { dimClick(ctx, p, t); return; }
   if (samePt(p, d.start)) { S.draw = null; ctx.requestRender(); return; }   // clicking the start again ends the chain
   // DrawEllipse (drawShape + updateSegmentFromGeometryMgr): the ellipse inscribed in the two corners' box
-  const node = withStroke(t === "gline" ? lineNode(d.start, p, layer) : t === "grect" ? rectNode(d.start, p, layer) : t === "gellipse" ? ellipseNode(ellipseFromBox(d.start, p), false, layer) : circleNode(d.start, p, layer));
+  const node = draftedShape(d, withStroke(t === "gline" ? lineNode(d.start, p, layer) : t === "grect" ? rectNode(d.start, p, layer) : t === "gellipse" ? ellipseNode(ellipseFromBox(d.start, p), false, layer) : circleNode(d.start, p, layer)));
   const add = addedChange(ctx.doc, node);
   ctx.commit([add], t === "gline" ? "Draw Line" : t === "grect" ? "Draw Rectangle" : t === "gellipse" ? "Draw Ellipse" : "Draw Circle");
   // drawShape: a line whose end snapped onto an existing graphic closes a path: it is selected and the chain ends
@@ -196,6 +197,60 @@ export function drawClick(ctx: PcbCtx, hv: Hover, t: string, ev: PtrEvent) {
   S.draw = t === "gline" && !closes ? { shape: t, start: p, cur: p.slice(), pts: [p], chain: (d.chain || []).concat([{ id: add.id, start: d.start, end: p }]) } : null;
   if (S.draw) drawOriginBegin(ctx, p);
   ctx.requestRender();
+}
+/** The shape the tool makes: the one Shape Properties edited while it was drawn (d.draft), on the clicked geometry. */
+function draftedShape(d: DrawState, fresh: SNode): SNode {
+  const draft = d.draft as SNode | undefined; if (!draft) return fresh;
+  const n = K.cloneNode(draft) as SNode;
+  for (const key of ["start", "end", "center"]) {
+    const f = K.kid(fresh, key), o = K.kid(n, key); if (!f) continue;
+    if (o) n[n.indexOf(o)] = f; else n.splice(1, 0, f);
+  }
+  return n;
+}
+/**
+ * PCB_ACTIONS::properties (E) inside DRAWING_TOOL's loops, on the item being drawn: true when the tool took it.
+ * - drawShape (line, rectangle, circle; `started`): OnEditItemRequest on the graphic.  Shape Properties edits it and
+ *   the drawing goes on: the edited start, stroke, fill and layer stay with it until the next click places its end.
+ * - DrawZone (zone, rule area, thieving zone; `started`): the zone's properties dialog; zoneTool.OnGeometryChange.
+ * - DrawDimension: in SET_END or SET_HEIGHT, OnEditItemRequest on the dimension, then the loop breaks: the draft
+ *   is deleted and the tool ends.  Before the first click the event passes on (EDIT_TOOL::Properties).
+ */
+export function draftProperties(ctx: PcbCtx): boolean {
+  const d = S.draw; if (!d) return false;
+  const t = d.shape;
+  if (t === "zone" || t === "rulearea" || t === "thievingzone") {
+    const dlg = newItemDialogs.zone; if (d.pending || !d.template || !dlg) return true;
+    d.pending = true;
+    dlg(ctx, K.cloneNode(d.template) as SNode, (n: SNode | null) => {
+      if (S.draw !== d) return;
+      d.pending = false;
+      if (n) { d.template = n; d.layer = zoneLayers(n)[0] || d.layer; }
+      ctx.requestRender();
+    });
+    return true;
+  }
+  if (t === "gline" || t === "grect" || t === "gcircle") {
+    const dlg = newItemDialogs.shape; if (!dlg) return true;
+    const layer = S.gfxLayer, cur = d.cur;
+    const node = draftedShape(d, withStroke(t === "gline" ? lineNode(d.start, cur, layer) : t === "grect" ? rectNode(d.start, cur, layer) : circleNode(d.start, cur, layer)));
+    dlg(ctx, node, (n: SNode | null) => {
+      if (S.draw !== d || !n) return;
+      d.draft = n;
+      // the drawn start is the graphic's (its corner for a rectangle, its centre for a circle)
+      const s = K.kid(n, t === "gcircle" ? "center" : "start"); if (s) { d.start = [Number(s[1]), Number(s[2])]; d.pts[0] = d.start; }
+      ctx.requestRender();
+    });
+    return true;
+  }
+  if (DIM_TYPE[t]) {
+    const dlg = newItemDialogs.dimension; if (!dlg) return true;
+    const type = DIM_TYPE[t], end = d.end || d.cur;
+    const node = dimensionNode(type, Object.assign({}, d, { end, textPos: type === "radial" || type === "leader" ? null : d.textPos, thickness: drawWidth(S.gfxLayer) }) as DimSpec, S.gfxLayer);
+    dlg(ctx, node, () => { if (S.draw !== d) return; S.draw = null; ctx.setTool("select"); ctx.requestRender(); });
+    return true;
+  }
+  return false;
 }
 /**
  * ZONE_CREATE_HELPER::createNewZone: the board's default zone settings on the active layer, no name, the highlighted
@@ -255,6 +310,7 @@ export function finishPoly(ctx: PcbCtx) {
     ctx.commit([c], "Draw Zone"); applySelection(ctx, [c.id]); return;   // commitZone: "Draw Zone", ACTIONS::selectItem
   }
   if (d.pts.length < 3) return;
+  if (d.shape === "viastitch") { createViaStitch(ctx, d.pts); return; }
   if (d.shape === "gpoly") {
     // ZONE_MODE::GRAPHIC_POLYGON: filled off Edge.Cuts and the courtyards, the layer's default line thickness, solid
     // (the width hotkeys do not reach it), "Draw Polygon", selected
@@ -336,3 +392,19 @@ export function placeImage(ctx: PcbCtx, hv: Pick<Hover, "x" | "y">) {
 }
 /** The inline prompt: done(text) on Enter ("" allowed), done(null) on Escape or blur. */
 export function askText(ctx: PcbCtx, title: string, initial: string | null | undefined, done: (v: string | null) => void, options?: string[] | null) { promptImpl(title, initial || "", S.client!, (v: string | null) => { S.text = null; done(v); }, options || null); }
+/**
+ * ZONE_CREATE_HELPER, ZONE_MODE::STITCH: a PCB_VIA_STITCH on the drawn outline with its defaults (the current via size
+ * and drill, a pitch of 2 mm or two via sizes), Via Stitching Properties on it (Cancel drops it), then EditStart /
+ * Update / EditFinish as one "Create Via Stitch", the stitch selected.
+ */
+export function createViaStitch(ctx: PcbCtx, outline: Pt[]) {
+  const v = sizesOf(ctx).currentVia(); const cur = { viaSize: v.diameter, viaDrill: v.drill };
+  const node = writeStitch(newStitch(outline as [number, number][], "", cur));
+  const done = (n: SNode | null) => {
+    if (!n) return;
+    const res = viaStitchUpdate(ctx.doc, readStitch(n), { settings: settingsOf(ctx), project: ctx.designSettings, curViaSize: cur.viaSize, curViaDrill: cur.viaDrill }, null, true);
+    ctx.commit(res.changes, "Create Via Stitch"); applySelection(ctx, [res.stitch.uuid]); ctx.requestRender();
+  };
+  const dlg = newItemDialogs.viaStitch; if (!dlg) { done(node); return; }
+  dlg(ctx, node, done);
+}

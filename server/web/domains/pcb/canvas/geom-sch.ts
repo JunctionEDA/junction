@@ -8,8 +8,10 @@ import { hatchLines } from "./geom-pcb";
 import { arcEnds, arcTangents, bezierEndings, emitEnding, hasEndings, polyTangents, readEndings, shortenArc, shortenPoly, shortenSegment } from "./line-ending";
 import { MIL, SCH_PEN, layoutPen, parseMarkup, setSchTextVersion, textPen, textWidth, unescapeText } from "./text";
 import { linebreakText } from "./stroke-font";
-import { expandTextVars, hasTextVars, sheetTextVars, varResolver } from "./sheet";
+import { expandTextVars, hasTextVars, sheetTextVars, textAssertions, varResolver, type ExpandOpts, type TextAssertion } from "./sheet";
 import type { Box, Doc, Geom, GeomSink, Item, Pt, SheetContext, TextEffects, Tf } from "./types";
+import { symbolFlagsForVariant, symbolViewForVariant } from "./variant-model";
+import { stringFromValue } from "../../../shared/units";
 /** SCH_SYMBOL::ResolveTextVar: the Sim.* fields a symbol may lack, which resolve to "" rather than staying ${…}. */
 const SIM_VARS = new Set(["SIM.DEVICE", "SIM.TYPE", "SIM.PINS", "SIM.PARAMS", "SIM.LIBRARY", "SIM.NAME"]);
 /** The host's operating-point variables (SCH_SYMBOL / SCH_LABEL_BASE::ResolveTextVar's ${OP…} from
@@ -24,8 +26,11 @@ export const opVars: { resolve: OpTextVar | null } = { resolve: null };
  */
 export const symVars: {
   net: ((item: Item, pin: string, kind: "NET_NAME" | "SHORT_NET_NAME" | "NET_CLASS", unit: number | null) => string | null) | null;
-  unitPlaced: ((item: Item, ref: string, unit: number) => { alt?: string } | false | null) | null;
-} = { net: null, unitPlaced: null };
+  unitPlaced: ((item: Item, ref: string, unit: number, pin?: string) => { alt?: string } | false | null) | null;
+  /** SCHEMATIC::ResolveCrossReference over the whole hierarchy (resolveCrossReference with every sheet instance); without
+   *  it a cross-reference is looked up on the item's own sheet */
+  crossRef: ((token: string, depth: number) => string | null) | null;
+} = { net: null, unitPlaced: null, crossRef: null };
 /**
  * The host's part of SCH_LABEL_BASE::ResolveTextVar: ${NET_NAME}, ${SHORT_NET_NAME} and ${NET_CLASS} of a label come
  * from the connection graph, which the editor keeps (editor/schnets.ts); null leaves the token as written.
@@ -58,7 +63,7 @@ function directiveFlagText(item: Item, doc: Doc | null | undefined, token: strin
  * operating point, CONNECTION_TYPE, the net's name and class (the host), a directive label's rule-area flags, the
  * label's own fields, then the sheet's and the project's variables.  A token nothing resolves stays as written.
  */
-function labelShownText(item: Item, text: string, doc?: Doc | null, depth = 0): string {
+export function labelShownText(item: Item, text: string, doc?: Doc | null, depth = 0, opts?: ExpandOpts): string {
   if (!text || !hasTextVars(text) || depth > 10) return text;
   const k = item.kind, n = item.node, directive = k === "directive_label" || k === "netclass_flag";
   let docVar: ((t: string) => unknown) | null = null;
@@ -71,11 +76,13 @@ function labelShownText(item: Item, text: string, doc?: Doc | null, depth = 0): 
       for (const p of kids(n, "property")) if (str(p[1]) === token && !INTERSHEET_FIELD.test(token)) return labelShownText(item, str(p[2]), doc, depth + 1);
       if (!docVar) docVar = varResolver(sheetTextVars(doc), { project: (doc && doc.projectVars) || null }) as (t: string) => unknown;
       return docVar(token) as string | null;
-    });
+    }, undefined, opts);
   } catch (e) { return text; }
 }
 /** An item whose text or fields hold a text variable the connection graph answers (${NET_NAME}, ${SHORT_NET_NAME}, ${NET_CLASS}). */
 export function hasNetTextVar(item: Item): boolean {
+  // a symbol's field with a pin's net function (SCH_SYMBOL::ResolveTextVar's NET_NAME( pin ) …)
+  if (item.kind === "symbol" && item.node) return kids(item.node, "property").some((p) => /\$\{(NET_NAME|SHORT_NET_NAME|NET_CLASS)\(/.test(str(p[2])));
   const n = item.node; if (!n || !(item.kind === "label" || item.kind === "global_label" || item.kind === "hierarchical_label" || item.kind === "directive_label" || item.kind === "netclass_flag")) return false;
   const re = /\$\{(NET_NAME|SHORT_NET_NAME|NET_CLASS)\}/;
   return re.test(str(n[1])) || kids(n, "property").some((p) => re.test(str(p[2])));
@@ -99,9 +106,9 @@ const nameShown = (p: SNode): boolean => yesNo(p, "show_name");
 /** `literalTilde`: the file is at version 20250318 or later, where a pin named "~" is literally "~" (older files meant no name). */
 export interface PinSym { literalTilde?: boolean; nameOff: number; hideNames: boolean; hideNums: boolean; maxNameHalf: number; col: (c: string) => string; alpha?: number; showHidden?: boolean; altIcons?: boolean }
 /** ${VAR} in free text: the title-block / sheet / project variables GetShownText resolves; unknown ones stay as written. */
-export function expandDocVars(doc: SheetContext | null | undefined, text: string): string {
+export function expandDocVars(doc: SheetContext | null | undefined, text: string, opts?: ExpandOpts): string {
   if (!text || !hasTextVars(text)) return text;
-  try { return expandTextVars(text, varResolver(sheetTextVars(doc), { project: (doc && doc.projectVars) || null })); } catch (e) { return text; }
+  try { return expandTextVars(text, varResolver(sheetTextVars(doc), { project: (doc && doc.projectVars) || null }), undefined, opts); } catch (e) { return text; }
 }
 /** The file version from which a pin name "~" is no longer read as an empty name. */
 export const TILDE_LITERAL_VERSION = 20250318;
@@ -595,25 +602,102 @@ export const PIN_TEXT_OFFSET = Math.round(24 * 0.15) * MIL, PIN_TEXT_MARGIN = 4 
 
 export const pinHidden = (g: SNode): boolean => has(g, "hide") || !!(kid(g, "hide") && str(kid(g, "hide")![1]) === "yes");
 
-export function buildSymbolGeom(doc: Doc, item: Item): void {
+/** A sheet instance a cross-reference is looked up in: the file's document and the instance path its items record. */
+export interface XrefSheet { doc: Doc; path: string | null }
+/**
+ * SCHEMATIC::resolveCrossReference: ${REF:FIELD[:VARIANT]}.  REF is a KIID path (what ConvertRefsToKIIDs stores: the
+ * last uuid names the item, the ones before it the sheet instance) or a reference designator (a unit's, J601A, matches
+ * exactly; the bare J601 any unit).  A symbol resolves FIELD through its ResolveTextVar on that sheet instance, under
+ * VARIANT when one is named; a sheet through its fields.  What cannot be found reads "<Unresolved: …>" /
+ * "<Unknown reference: …>".
+ */
+export function resolveCrossReference(sheets: XrefSheet[], token: string, depth: number): string {
+  const colon = token.indexOf(":"), ref = token.slice(0, colon), remainder = token.slice(colon + 1);
+  const segs = ref.split("/").filter(Boolean), uuid = segs.length ? segs[segs.length - 1] : "";
+  let fieldName = remainder, variant = "";
+  const c2 = remainder.indexOf(":"); if (c2 >= 0) { fieldName = remainder.slice(0, c2); variant = remainder.slice(c2 + 1); }
+  const onSymbol = (sh: XrefSheet, it: Item): string => {
+    const shown = variant ? Object.assign({}, it, { node: symbolViewForVariant(it.node, variant, sh.path, sh.doc.version) }) as Item : it;
+    const R = symbolResolver(sh.doc, shown, sh.path), r = depth < 10 ? R.resolve(fieldName, depth + 1) : null;
+    return r !== null && typeof r === "string" ? r : r !== null ? String((r as { ref: string }).ref) : `<Unresolved: ${R.baseRef}:${fieldName}>`;
+  };
+  // ResolveItem( uuid ): the first sheet instance holding the item, or the one the KIID path names
+  const prefix = segs.length > 1 ? "/" + segs.slice(0, -1).join("/") : null;
+  let hit: { sh: XrefSheet; it: Item } | null = null;
+  if (uuid) for (const sh of sheets) { const it = sh.doc.items.get(uuid); if (!it) continue; if (!hit) hit = { sh, it }; if (prefix && sh.path === prefix) { hit = { sh, it }; break; } }
+  if (hit && hit.it.kind === "symbol") return onSymbol(hit.sh, hit.it);
+  if (hit && hit.it.kind === "sheet") {
+    // SCH_SHEET::ResolveTextVar: a field by its canonical name in capitals or by its name, any case
+    const fields = kids(hit.it.node, "property"), name = (p: SNode): string => str(p[1]);
+    const canon = (nm: string): string => (/^sheet ?name$/i.test(nm) ? "SHEETNAME" : /^sheet ?file$/i.test(nm) ? "SHEETFILE" : nm.toUpperCase());
+    const f = fields.find((p) => canon(name(p)) === remainder || name(p).toLowerCase() === remainder.toLowerCase());
+    if (f) return str(f[2]);
+    const sn = fields.find((p) => /^sheet ?name$/i.test(name(p)));
+    return `<Unresolved: ${sn ? str(sn[2]) : ""}:${remainder}>`;
+  }
+  if (hit) return `<Unknown reference: ${ref}>`;
+  // by reference designator, walking the symbols directly
+  let found: { sh: XrefSheet; it: Item } | null = null;
+  outer: for (const sh of sheets) for (const it of sh.doc.items.values()) {
+    if (it.kind !== "symbol") continue;
+    const R = symbolResolver(sh.doc, it, sh.path);
+    if (!R.lib || R.baseRef.startsWith("#")) continue;
+    if (R.fullRef === ref) { found = { sh, it }; break outer; }
+    if (!found && R.baseRef === ref) found = { sh, it };
+  }
+  if (found) return onSymbol(found.sh, found.it);
+  return `<Unresolved: ${ref}>`;
+}
+/** SCH_SYMBOL's properties ResolveTextVar's ${PROPERTY.name} reads (PROPERTY_MANAGER, then GetDynamicProperties: the
+ *  fields), as DIFF_VALUE::ToDisplayString( MILS ) shows them; null when the symbol has no such property. */
+function symbolProperty(doc: Doc, n: SNode, name: string, c: { baseRef: string; fullRef: string; unit: number; lib: SNode | null; path: string | null }): string | null {
+  const field = (nm: string): string => { const p = kids(n, "property").find((q) => str(q[1]) === nm); return p ? str(p[2]) : ""; };
+  const libProp = (...names: string[]): string => { const p = c.lib ? kids(c.lib, "property").find((q) => names.includes(str(q[1]))) : null; return p ? str(p[2]) : ""; };
+  const subs = c.lib ? kids(c.lib, "symbol") : [];
+  let units = 1, styles = 1; for (const sub of subs) { const m = str(sub[1]).match(/_(\d+)_(\d+)$/); if (m) { units = Math.max(units, +m[1]); styles = Math.max(styles, +m[2]); } }
+  const bs = c.lib ? kid(c.lib, "body_styles") : null; if (bs) styles = Math.max(styles, bs.length - 1);
+  const flags = symbolFlagsForVariant(n, null, c.path, doc.version), b = (v: boolean): string => (v ? "true" : "false");
+  const [x, y, rot] = atOf(n), mir = str((kid(n, "mirror") || [])[1]);
+  switch (name) {
+    case "Reference": return c.baseRef;
+    case "Value": return field("Value");
+    case "Library Link": return str((kid(n, "lib_id") || [])[1]);
+    case "Library Description": return libProp("Description", "ki_description");
+    case "Keywords": return libProp("ki_keywords");
+    case "Unit": return units > 1 ? String(c.unit) : null;
+    case "Body Style": {
+      if (styles <= 1) return null;
+      const styleN = kid(n, "body_style") || kid(n, "convert"), st = styleN ? num(styleN[1], 1) : 1, named = bs ? bs.slice(1).map((v) => str(v)) : [];
+      if (!bs || named.includes("demorgan")) return st === 2 ? "Alternate" : st === 1 ? "Standard" : "?";
+      return st >= 1 && st <= named.length ? named[st - 1] : "?";
+    }
+    case "Exclude From Simulation": return b(flags.excludedFromSim);
+    case "Exclude From Bill of Materials": return b(flags.excludedFromBOM);
+    case "Exclude From Board": return b(flags.excludedFromBoard);
+    case "Exclude From Position Files": return b(flags.excludedFromPosFiles);
+    case "Do not Populate": return b(flags.dnp);
+    case "Position X": return stringFromValue(x, "mil", "sch", true);
+    case "Position Y": return stringFromValue(y, "mil", "sch", true);
+    case "Orientation": return String(((Math.round(rot) % 360) + 360) % 360);
+    case "Mirror X": return b(mir === "x");
+    case "Mirror Y": return b(mir === "y");
+    default: break;
+  }
+  // GetDynamicProperties: one per field, matched without regard to case
+  const f = kids(n, "property").find((q) => str(q[1]).toLowerCase() === name.toLowerCase());
+  return f ? str(f[2]) : null;
+}
+/** SCH_SYMBOL::ResolveTextVar for a symbol of `doc` on the sheet instance `path`, with what its fields show (GetRef). */
+export interface SymbolResolver { resolve(tok: string, depth: number): string | { ref: string } | null; fieldsOf: SNode[]; baseRef: string; fullRef: string; unitCount: number; lib: SNode | null; unit: number }
+export function symbolResolver(doc: Doc, item: Item, path?: string | null): SymbolResolver {
   const n = item.node;
   const libId = str((kid(n, "lib_name") || kid(n, "lib_id") || [])[1]);
-  const [ax, ay, rot] = atOf(n);
-  const mirrorN = kid(n, "mirror"); const mirror = mirrorN ? str(mirrorN[1]) : "";
-  // SCH_SHEET_PATH::UpdateAllScreenReferences: the reference and the unit shown are the displayed sheet path's instance
-  const inst = symbolInstance(n, doc.instancePath);
+  const inst = symbolInstance(n, path);
   const unit = inst && inst.unit !== null ? inst.unit : kid(n, "unit") ? num(kid(n, "unit")![1], 1) : 1;
   const styleN = kid(n, "body_style") || kid(n, "convert"); const style = styleN ? num(styleN[1], 1) : 1;
   const dnp = yesNo(n, "dnp"); const noSim = yesNo(n, "exclude_from_sim");
-  const T = symbolTransform(rot, mirror); const Ti = internalT(T);
-  const tf = (lx: number, ly: number): Pt => [ax + T[0] * lx + T[1] * ly, ay + T[2] * lx + T[3] * ly];
-  item.movable = true; item.x = ax; item.y = ay; item.rot = rot; item.lib = str((kid(n, "lib_id") || [])[1]) || libId; item.unit = unit;
   const lib = resolveLib(doc, libId) || (libId !== str((kid(n, "lib_id") || [])[1]) ? resolveLib(doc, str((kid(n, "lib_id") || [])[1])) : null);
-  const col = dnp ? (c: string) => dimColor(c, SCH.bg) : (c: string) => c;
-  // excluded from simulation: only the marker below (SCH_PAINTER keeps the symbol's own colours)
-  const alpha: number | undefined = undefined;
-  const bodyLayer = "Symbols";
-  let bodyBox: Box | null = null, pinBox: Box | null = null, unitCount = 1;
+  let unitCount = 1;
   if (lib) for (const sub of kids(lib, "symbol")) { const m = str(sub[1]).match(/_(\d+)_(\d+)$/); if (m && +m[1] > unitCount) unitCount = +m[1]; }
   const fieldsOf = kids(n, "property");
   // GetRef( path ): the instance's reference, else the Reference field
@@ -623,6 +707,8 @@ export function buildSymbolGeom(doc: Doc, item: Item): void {
   /** SCH_SYMBOL::ResolveTextVar. */
   const resolveTok = (tok: string, depth: number): string | { ref: string } | null => {
     if (opVars.resolve && tok.startsWith("OP")) { const r = opVars.resolve("symbol", item, tok); if (r !== null) return r; }
+    // SCHEMATIC::ResolveCrossReference: ${REF:FIELD} (stored as ${<uuid path>:FIELD}) names another symbol or sheet
+    if (tok.includes(":")) { const r = symVars.crossRef ? symVars.crossRef(tok, depth) : resolveCrossReference([{ doc, path: path || null }], tok, depth); if (r !== null) return r; }
     const low = tok.toLowerCase();
     for (const q of fieldsOf) {
       const qn = str(q[1]);
@@ -693,16 +779,40 @@ export function buildSymbolGeom(doc: Doc, item: Item): void {
         if (kind === "PIN_BASE_NAME") return nameOf(other.g);
         if (kind === "PIN_ALT_LIST") return altList(other.g);
         // the unit holding the pin, wherever it is placed: the host knows the hierarchy
-        const placed = symVars.unitPlaced ? symVars.unitPlaced(item, baseRef, other.u) : null;
+        const placed = symVars.unitPlaced ? symVars.unitPlaced(item, baseRef, other.u, pinNumber) : null;
         if (placed === false) return `<Unit ${subReference(lib, other.u, false)} not placed>`;
         if (kind === "PIN_NAME") return (placed && placed.alt) || nameOf(other.g);
         return net(other.u);
       }
       return `<Unresolved: pin ${pinNumber}>`;
     }
+    // the great property resolver: ${PROPERTY.My_Property}
+    if (tok.startsWith("PROPERTY.")) { const r = symbolProperty(doc, n, tok.slice(tok.indexOf(".") + 1).replace(/_/g, " "), { baseRef, fullRef, unit, lib, path: path || null }); if (r !== null) return r; return null; }
     // the sheet's own variables, the title block and the project (SCH_SHEET::ResolveTextVar and its parents)
     try { const v = varResolver(sheetTextVars(doc), { project: (doc && doc.projectVars) || null })(tok); return v === undefined ? null : v; } catch (e) { return null; }
   };
+  return { resolve: resolveTok, fieldsOf, baseRef, fullRef, unitCount, lib, unit };
+}
+export function buildSymbolGeom(doc: Doc, item: Item): void {
+  const n = item.node;
+  const libId = str((kid(n, "lib_name") || kid(n, "lib_id") || [])[1]);
+  const [ax, ay, rot] = atOf(n);
+  const mirrorN = kid(n, "mirror"); const mirror = mirrorN ? str(mirrorN[1]) : "";
+  // SCH_SHEET_PATH::UpdateAllScreenReferences: the reference and the unit shown are the displayed sheet path's instance
+  const inst = symbolInstance(n, doc.instancePath);
+  const unit = inst && inst.unit !== null ? inst.unit : kid(n, "unit") ? num(kid(n, "unit")![1], 1) : 1;
+  const styleN = kid(n, "body_style") || kid(n, "convert"); const style = styleN ? num(styleN[1], 1) : 1;
+  const dnp = yesNo(n, "dnp"); const noSim = yesNo(n, "exclude_from_sim");
+  const T = symbolTransform(rot, mirror); const Ti = internalT(T);
+  const tf = (lx: number, ly: number): Pt => [ax + T[0] * lx + T[1] * ly, ay + T[2] * lx + T[3] * ly];
+  item.movable = true; item.x = ax; item.y = ay; item.rot = rot; item.lib = str((kid(n, "lib_id") || [])[1]) || libId; item.unit = unit;
+  const lib = resolveLib(doc, libId) || (libId !== str((kid(n, "lib_id") || [])[1]) ? resolveLib(doc, str((kid(n, "lib_id") || [])[1])) : null);
+  const col = dnp ? (c: string) => dimColor(c, SCH.bg) : (c: string) => c;
+  // excluded from simulation: only the marker below (SCH_PAINTER keeps the symbol's own colours)
+  const alpha: number | undefined = undefined;
+  const bodyLayer = "Symbols";
+  let bodyBox: Box | null = null, pinBox: Box | null = null;
+  const R = symbolResolver(doc, item, doc.instancePath), { fieldsOf, baseRef, fullRef } = R, resolveTok = R.resolve;
   /** expandLibItemTextVars: a body text, text box or pin name of the library symbol, resolved against this symbol. */
   const symText = (t: string): string => (hasTextVars(t) ? expandTextVars(t, (tok) => resolveTok(tok, 0)) : t);
   const take = (g0: string) => { const b = item.bbox; if (!b) return; if (g0 === "pin") pinBox = boxUnion(pinBox, b[0], b[1], b[2], b[3]); else bodyBox = boxUnion(bodyBox, b[0], b[1], b[2], b[3]); };
@@ -1046,4 +1156,78 @@ function buildPinGeomInner(item: GeomSink, g: SNode, tf: Tf, sym: PinSym, type: 
       textGeom(item, alongX, pos[1] - (sym.maxNameHalf + clearance + nameThick), pinName, nameEf.size, nameColor, 0, ["center", "middle"], "Pin names", { z: SCH_Z.pinName, w: nameThick });
     }
   }
+}
+
+/** SCH_CONNECTIVITY::TEXT_CHECK_FACT: a text ERC_TESTER::TestTextVars looks at (item ids; positions in mm). */
+export interface TextCheck { assertionItem: string | null; item: string; assertionPos: Pt; pos: Pt; assertions: TextAssertion[]; shown: string }
+/**
+ * SCH_CONNECTIVITY::ExtractTextChecks (conn_facts.cpp:881-1003) for one sheet instance (`path`, the symbols' instance
+ * path): every field of a symbol, label and sheet, the texts and text boxes of each placed symbol's library symbol, the
+ * sheet pins, and the sheet's texts and text boxes.  A source with ${ERC_WARNING …} / ${ERC_ERROR …} carries its
+ * assertions; any other is kept only when its shown text (GetShownText( FOR_ERC_DRC ): an escaped \${…} keeps its
+ * backslash) still holds "${".
+ */
+export function textChecks(doc: Doc, path?: string | null): TextCheck[] {
+  const out: TextCheck[] = [];
+  const append = (assertionItem: string | null, id: string, assertionPos: Pt, raw: string, resolve: () => [string, Pt]): void => {
+    const assertions = textAssertions(raw);
+    if (assertions.length) { out.push({ assertionItem, item: id, assertionPos, pos: assertionPos, assertions, shown: "" }); return; }
+    const [shown, pos] = resolve();
+    if (shown.indexOf("${") >= 0) out.push({ assertionItem, item: id, assertionPos, pos, assertions: [], shown });
+  };
+  const ERC: ExpandOpts = { erc: true };
+  for (const item of doc.items.values()) {
+    const n = item.node, k = item.kind;
+    if (k === "symbol") {
+      const R = symbolResolver(doc, item, path);
+      const shownOf = (t: string): string => (hasTextVars(t) ? expandTextVars(t, (tok) => R.resolve(tok, 0), undefined, ERC) : t);
+      for (const p of kids(n, "property")) { const [px, py] = atOf(p); append(item.id, item.id, [px, py], str(p[2]), () => [shownOf(str(p[2])), [px, py]]); }
+      if (!R.lib) continue;
+      // the library symbol's texts and text boxes, at the centre of their box on the sheet
+      const [ax, ay, rot] = atOf(n), mirrorN = kid(n, "mirror"), mirror = mirrorN ? str(mirrorN[1]) : "";
+      const T = symbolTransform(rot, mirror), Ti = internalT(T);
+      const tf = (lx: number, ly: number): Pt => [ax + T[0] * lx + T[1] * ly, ay + T[2] * lx + T[3] * ly];
+      for (const sub of kids(R.lib, "symbol")) for (const g of sub.slice(2)) {
+        if (!isList(g) || (g[0] !== "text" && g[0] !== "text_box")) continue;
+        const [tx, ty, tr] = atOf(g), raw = str(g[1]);
+        append(item.id, item.id, [tx, -ty], raw, () => {
+          const shown = shownOf(raw), ef = effectsOf(g);
+          let c: Pt;
+          if (g[0] === "text_box") {
+            const sN = kid(g, "size"), a = tf(tx, ty), b = tf(tx + (sN ? num(sN[1]) : 5), ty + (sN ? num(sN[2]) : -2.5));
+            c = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+          } else {
+            const sink: GeomSink = { geom: [], bbox: null }, [px, py] = tf(tx, ty);
+            transformedText(sink, Ti, px, py, shown, ef.size, "", tr / 10, ef.just, "Symbols", { w: textPen(ef, ef.size), italic: ef.italic, sizeX: ef.sizeX, lineSpacing: ef.lineSpacing });
+            const bb = sink.bbox; c = bb ? [(bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2] : [px, py];
+          }
+          return [shown, c];
+        });
+      }
+    } else if (k === "label" || k === "global_label" || k === "hierarchical_label" || k === "directive_label" || k === "netclass_flag") {
+      for (const p of kids(n, "property")) {
+        const [px, py] = atOf(p), raw = str(p[2]);
+        append(item.id, item.id, [px, py], raw, () => {
+          let t = raw;
+          // SCH_GLOBALLABEL::ResolveTextVar answers INTERSHEET_REFS whether or not the references are shown
+          if (k === "global_label" && /\$\{INTERSHEET_REFS\}/.test(t)) t = t.replace(/\$\{INTERSHEET_REFS\}/g, doc.intersheetRefs ? intersheetRefsText(doc.intersheetRefs, str(n[1])) : "?");
+          return [labelShownText(item, t, doc, 0, ERC), [px, py]];
+        });
+      }
+    } else if (k === "sheet") {
+      // SCH_SHEET::ResolveTextVar: the sheet's own fields, then the sheet's and the project's variables
+      const sheetShown = (t: string, self: SNode | null): string => {
+        if (!hasTextVars(t)) return t;
+        const own = expandTextVars(t, (tok) => { const up = tok.toUpperCase(); for (const q of kids(n, "property")) if (q !== self && str(q[1]).toUpperCase() === up) return str(q[2]); return null; }, 0, { erc: true, finalize: false });
+        return expandDocVars(doc, own, ERC);
+      };
+      for (const p of kids(n, "property")) { const [px, py] = atOf(p); append(item.id, item.id, [px, py], str(p[2]), () => [sheetShown(str(p[2]), p), [px, py]]); }
+      // a sheet pin carries no assertions (its raw text is not looked at), only its shown text
+      for (const pin of kids(n, "pin")) { const [px, py] = atOf(pin); append(null, item.id, [px, py], "", () => [sheetShown(str(pin[1]), null), [px, py]]); }
+    } else if (k === "text" || k === "text_box") {
+      const [px, py] = atOf(n), raw = str(n[1]);
+      append(item.id, item.id, [px, py], raw, () => [expandDocVars(doc, raw, ERC), [px, py]]);
+    }
+  }
+  return out;
 }

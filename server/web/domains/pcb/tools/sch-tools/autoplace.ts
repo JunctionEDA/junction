@@ -3,13 +3,14 @@ import { carried, editable, selectedItems } from "./commands";
 import { isPowerSymbol } from "./dom";
 import { isLockedNode } from "./lock";
 import { isNetLine } from "./drag";
+import { pinBox } from "./pins";
 import { autoplaceSheetFields, fontNode } from "./nodes";
 import { K, S, atOf, kid, kids, num, ptsOf, str } from "./state";
 import { deep, dropKid, modChange, r4, replaceKid } from "./util";
 
 // ---------------------------------------------------------------- symbol pins with their electrical type (lib symbol + transform)
 /** A symbol pin on the sheet: its connection point, the root at the body, number, name, electrical type and side. */
-export interface SymPin { x: number; y: number; root: Pt; number: string; name: string; type: string; hidden: boolean; len: number; side: string; shape?: string; libRot?: number }
+export interface SymPin { x: number; y: number; root: Pt; number: string; name: string; type: string; hidden: boolean; len: number; side: string; shape?: string; libRot?: number; /** the library pin's own unit and body style (SCH_ITEM::GetUnit / GetBodyStyle: 0 when common to all) */ unit?: number; bodyStyle?: number }
 // symbolPins is asked for the same symbol many times per frame (junction previews, hit tests, dangling ends): the
 // result is kept per node and reused while the node's library symbol, position, orientation, unit and body style
 // are unchanged (nodes can be edited in place, so the key is checked every time).
@@ -39,7 +40,7 @@ function symbolPinsOf(lib: SNode, ax: number, ay: number, T: number[], unit: num
       let ox = pos[0] - root[0], oy = pos[1] - root[1]; const ol = Math.hypot(ox, oy) || 1; ox = Math.round(ox / ol); oy = Math.round(oy / ol);
       if (!ox && !oy) { const tip = tf(px - d[0], py - d[1]); ox = Math.sign(tip[0] - pos[0]); oy = Math.sign(tip[1] - pos[1]); }
       out.push({ x: pos[0], y: pos[1], root, number: str((kid(g, "number") || [])[1]), name: str((kid(g, "name") || [])[1]), type: str(g[1]) || "passive", hidden, len,
-        side: ox > 0 ? "right" : ox < 0 ? "left" : oy < 0 ? "top" : "bottom", shape: str(g[2]) || "line", libRot: dir });
+        side: ox > 0 ? "right" : ox < 0 ? "left" : oy < 0 ? "top" : "bottom", shape: str(g[2]) || "line", libRot: dir, unit: u, bodyStyle: m ? s : 0 });
     }
   }
   return out;
@@ -157,11 +158,11 @@ export function bodyBox(doc: KDoc, item: Pick<KItem, "node">): Box { return body
 export const boxW = (b: Box) => b[2] - b[0], boxH = (b: Box) => b[3] - b[1];
 export function boxesIntersect(a: Box | null, b: Box | null) { return a && b && a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1]; }
 /** Every pin of every unit and body style (SCH_SYMBOL::GetGraphicalPins( ALL_UNITS, ALL_BODY_STYLES )), with its side. */
-function allPinsIU(doc: KDoc, n: SNode): { side: string; hidden: boolean; pos: [number, number]; root: [number, number] }[] {
+function allPinsIU(doc: KDoc, n: SNode): { side: string; hidden: boolean; pos: [number, number]; root: [number, number]; number: string }[] {
   const lib = K.resolveLib(doc, str((kid(n, "lib_name") || kid(n, "lib_id") || [])[1])) || K.resolveLib(doc, symbolLibId(n)); if (!lib) return [];
   const [ax, ay, rot] = atOf(n), mN = kid(n, "mirror"), T = K.symbolTransform(rot, mN ? str(mN[1]) : ""), ox = toIU(ax), oy = toIU(ay);
   const tf = (x: number, y: number): [number, number] => [ox + T[0] * x + T[1] * y, oy + T[2] * x + T[3] * y];   // file lib coordinates (IU, Y up) -> sheet
-  const out: { side: string; hidden: boolean; pos: [number, number]; root: [number, number] }[] = [];
+  const out: { side: string; hidden: boolean; pos: [number, number]; root: [number, number]; number: string }[] = [];
   for (const sub of drawnSubs(lib, n, true)) for (const g of kids(sub, "pin")) {
     const [px, py, pr] = atOf(g), lenN = kid(g, "length"), L = toIU(lenN ? num(lenN[1]) : 2.54);
     const dir = ((Math.round(pr) % 360) + 360) % 360, d = dir === 0 ? [1, 0] : dir === 90 ? [0, 1] : dir === 180 ? [-1, 0] : [0, -1];
@@ -169,7 +170,8 @@ function allPinsIU(doc: KDoc, n: SNode): { side: string; hidden: boolean; pos: [
     // PinDrawOrient: the direction from the connection point into the body; the pin sits on the opposite side
     const v = [T[0] * d[0] + T[1] * d[1], T[2] * d[0] + T[3] * d[1]];
     const side = v[0] > 0 ? "left" : v[0] < 0 ? "right" : v[1] > 0 ? "top" : "bottom";
-    out.push({ side, hidden: yesFlag(g, "hide"), pos, root });
+    const numN = kid(g, "number");
+    out.push({ side, hidden: yesFlag(g, "hide"), pos, root, number: numN ? str(numN[1]) : "" });
   }
   return out;
 }
@@ -212,6 +214,8 @@ export function autoplaceNode(doc: KDoc, item: KItem, opts?: { manual?: boolean 
   for (const g of item.geom || []) if (g.t === "text" && g.field && typeof g.field === "string" && typeof g.text === "string" && !shownText.has(g.field)) shownText.set(g.field, g.text);
   const ext = fields.map((p) => textBoxIU(p, shownText.get(str(p[1]))));
   const pins = allPinsIU(doc, node).filter((p) => !p.hidden || power);
+  let symPins: SymPin[] | null = null;
+  const sheetPins = () => symPins || (symPins = symbolPins(doc, item));
   // computeFBoxSize( dynamic )
   let fbox = { w: Math.max(...ext.map((e) => e.w)), h: ext.reduce((t, e) => t + (prefs.align ? roundIU(e.h, GRID50, true) : e.h + VPAD), 0) };
   const pinsOn = (side: string) => pins.filter((p) => p.side === side).length;
@@ -227,7 +231,15 @@ export function autoplaceNode(doc: KDoc, item: KItem, opts?: { manual?: boolean 
     let ox = idiv(symW + size.w, 2), oy = idiv(symH + size.h, 2); if (sx) ox += HPAD; else if (sy) oy += VPAD;
     let x = cx + sx * ox - idiv(size.w, 2), y = cy + sy * oy - idiv(size.h, 2);
     if (sp.pins > 0) {
-      let pb: BoxIU | null = null; for (const p of pins) if (p.side === sp.side) for (const q of [p.pos, p.root]) pb = merge(pb, q[0], q[1], q[0], q[1]);
+      // getPinsBox: each pin's SCH_PIN::GetBoundingBox(), i.e. its line and decoration plus the shown name and number
+      // of a visible pin (an invisible pin keeps its labels out: aIncludeLabelsOnInvisiblePins is false)
+      let pb: BoxIU | null = null;
+      for (const p of pins) {
+        if (p.side !== sp.side) continue;
+        for (const q of [p.pos, p.root]) pb = merge(pb, q[0], q[1], q[0], q[1]);
+        const shown = p.hidden ? null : sheetPins().find((q) => q.number === p.number && !q.hidden);
+        if (shown) { const b = pinBox(item, shown); pb = merge(pb, toIU(b[0]), toIU(b[1]), toIU(b[2]), toIU(b[3])); }
+      }
       if (pb) { if (sy) x = pb[2] + 2 * HPAD; else y = pb[1] - (size.h + 2 * VPAD); }
     }
     return [x, y];

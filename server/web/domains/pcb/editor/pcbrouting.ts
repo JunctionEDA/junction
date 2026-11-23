@@ -14,7 +14,8 @@ import type { DiffPairDim, LayerPairPreset, PcbSizes, SizeUnits, ViaDim } from "
 import type { RoutingState } from "../../../shared/store";
 import { setToggles, state, store } from "./appstore";
 import { E } from "./state";
-import { runModuleAction } from "./tools";
+import { runModuleAction, toolCtx } from "./tools";
+import { openBoardSetup } from "./pcbdialogs/board-setup";
 import { saveProjectFile as writeProjectFile } from "./projectfile";
 import type { Plain } from "../canvas/project-file";
 import { api, esc, toast } from "./util";
@@ -182,12 +183,12 @@ export function chooseViaSize(index: number | "edit"): void {
   R().setViaIndex(Number(index));
 }
 /**
- * PCB_EDIT_FRAME::SelectViaStack_Event: a preset becomes the one in use; "Edit Pre-defined Microvia Stacks..." is
- * Board Setup's Microvia Stacks page, which the web's Board Setup does not have yet.
+ * PCB_EDIT_FRAME::SelectViaStack_Event: a preset becomes the one in use; "Edit Pre-defined Microvia Stacks..." opens
+ * Board Setup on its Microvia Stacks page.
  */
 export function chooseViaStack(index: number | "edit"): void {
-  if (index === "edit") { toast("Microvia stacks are edited in Board Setup > Microvia Stacks in the KiCad desktop app", 4000); return; }
-  if (index >= 0 && index < viaStackNames(E.proSettings).length) { viaStackIndex = index; publish(); }
+  if (index === "edit") { void openBoardSetup(toolCtx() as never, "Microvia Stacks"); return; }
+  if (index >= 0 && index < viaStackNames(E.proSettings).length) { viaStackIndex = index; R().viaStackIndex = index; publish(); }
 }
 /** + / - in the board editor (PCB_ACTIONS::layerNext / layerPrev); anything else, or a schematic, is not ours. */
 export function pcbLayerKey(ev: KeyboardEvent): boolean {

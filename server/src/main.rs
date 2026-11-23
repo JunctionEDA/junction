@@ -15,6 +15,7 @@ mod doc_actor;
 mod dockind;
 mod nonkicad_import;
 mod kicad_check;
+mod kicad_jobs;
 mod error;
 mod fab_quote;
 mod fonts;
@@ -425,6 +426,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(versions::routes())
         .merge(exports::routes())
         .merge(kicad_check::routes())
+        .merge(kicad_jobs::routes())
         .merge(proposals::routes())
         // GitHub repository sync (github.rs)
         .route("/auth/github/connect", get(auth::github_connect))

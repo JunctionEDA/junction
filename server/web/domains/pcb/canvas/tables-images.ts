@@ -8,6 +8,7 @@ import { SCH_PEN, textPen } from "./text";
 import { linebreakText } from "./stroke-font";
 import { unescapeText } from "./text";
 import { expandTextVars, hasTextVars, sheetTextVars, varResolver } from "./sheet";
+import { boardResolve } from "./pcb-textvars";
 import type { VarResolver, VarValue } from "./sheet";
 import type { BoxRot, Doc, ImageEntry, Item, Pt, SheetContext, StrokeInfo } from "./types";
 import { schFormat } from "./geom-sch";
@@ -58,6 +59,8 @@ export function tableCellShownText(doc: SheetContext | Doc | null | undefined, t
   const layer = lu && lu.userName ? lu.userName : lc;
   let base: VarResolver | null = null;
   const fallback = (token: string): VarValue => {
+    // PCB_TABLECELL: the board's variables (BOARD::ResolveTextVar)
+    if (pcb && doc && (doc as Doc).items) return boardResolve(doc as Doc, token, d + 1);
     if (!base) { try { base = varResolver(sheetTextVars(doc as SheetContext), { project: (doc && (doc as SheetContext).projectVars) || null }); } catch (e) { base = () => null; } }
     return base!(token);
   };

@@ -3,6 +3,7 @@ import { installDialogs } from "../dialogs/index";
 import { openImportGraphics } from "../importgfx/dialog";
 import { registerBomView } from "../parts/bomview";
 import { installSchNets } from "./schnets";
+import { installNetChains } from "./netchains";
 import "./dom";
 import "./appstore";
 import "./util";
@@ -56,6 +57,7 @@ import type { ItemSummary, SheetEntry } from "./types";
 type SchDrag = { moved?: boolean; last: number[]; kind?: string };
 import { installLibrary } from "./library";
 import { importFootprintFiles, installFpEditHandlers } from "./fpedit";
+import { installDesignBlocks } from "./design-blocks";
 import { importSymbolLibraries } from "../symedit/dialogs";
 import { comboOf, keyHooks, kicadActionAvailable, primesOnHotkey, runKicadAction, runSpecHotkey, shiftComboBound, typingTarget } from "./hotkeys";
 import { deleteSelectedField } from "./fieldops";
@@ -1223,8 +1225,10 @@ document.addEventListener("keydown", (ev) => {
 });
 
 installSchNets();   // the net highlight kept by name across the hierarchy (editor/schnets.ts)
+installNetChains(HANDLERS as unknown as Record<string, (a?: unknown) => void>);   // the net chains' actions, highlight and status (editor/netchains.ts)
 installSymbolEditor(HANDLERS as unknown as Record<string, (a?: unknown) => void>);   // the Symbol Editor (web/domains/pcb/symedit): showSymbolEditor, editWithLibEdit, editLibSymbolWithLibEdit
 installDialogs(HANDLERS);   // Page Settings, Find and Replace, Symbol Fields Table / BOM, Assign Footprints, Schematic Setup, Preferences, groups
+installDesignBlocks(HANDLERS);   // the Design Blocks pane and the design block actions (editor/design-blocks.ts)
 installFpEditHandlers(HANDLERS);   // the Footprint Editor's File / Edit / Place / Tools actions and Ctrl+E on the board (editor/fpedit.ts)
 store.slice("tool", { handled: Object.keys(HANDLERS) });
 installPcbRouting();

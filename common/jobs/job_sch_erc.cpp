@@ -23,8 +23,10 @@
 #include <i18n_utility.h>
 
 JOB_SCH_ERC::JOB_SCH_ERC() :
-    JOB_RC( "erc" )
+    JOB_RC( "erc" ),
+    m_showAllErrors( false )
 {
+    m_params.emplace_back( new JOB_PARAM<bool>( "show_all_errors", &m_showAllErrors, m_showAllErrors ) );
 }
 
 

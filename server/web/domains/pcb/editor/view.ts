@@ -10,6 +10,7 @@ import { drawHover } from "./gestures";
 import { pcbTools } from "./panels/core";
 import { anchorMm, breakFollow, followAction, peerName, sendPresence } from "./peers";
 import { drawSelection, selectedFields, selectedSet } from "./selection";
+import { schNetChainPaint } from "./netchains";
 import { schNetStyles } from "./schnets";
 import { E } from "./state";
 import { paintConfig, paintDocument, settledFrame, stats as paintStats } from "./paint";
@@ -108,12 +109,14 @@ E.drawCanvasSettled = drawCanvasSettled;
  * What the schematic painter needs from the tools besides the selection: the dangling local labels (a selected
  * one shows no anchor) and the items moved whole (their fields show no anchor, SCH_PAINTER's parentMoving).
  */
-function schPaintState(selected: Set<string> | null): { dangling?: Set<string>; moving?: Set<string>; schNetStyle?: ReturnType<typeof schNetStyles>; schEnteredGroup?: string | null } {
+function schPaintState(selected: Set<string> | null): { dangling?: Set<string>; moving?: Set<string>; schNetStyle?: ReturnType<typeof schNetStyles>; schEnteredGroup?: string | null; schNetChain?: ReturnType<typeof schNetChainPaint> } {
   if (!isSch() || !E.kdoc || !CollabTools.sch) return {};
   const tools = CollabTools.sch as unknown as { _?: { danglingLabelIds?: (d: KDoc) => Set<string> }; state?: { drag?: { items?: { item?: { id?: string } }[] } | null } };
-  const out: { dangling?: Set<string>; moving?: Set<string>; schNetStyle?: ReturnType<typeof schNetStyles>; schEnteredGroup?: string | null } = {};
+  const out: { dangling?: Set<string>; moving?: Set<string>; schNetStyle?: ReturnType<typeof schNetStyles>; schEnteredGroup?: string | null; schNetChain?: ReturnType<typeof schNetChainPaint> } = {};
   // each connected item's net class style (colour, wire / bus width, line style), and the entered group's id
   try { out.schNetStyle = schNetStyles(); } catch (e) { /* no net map yet */ }
+  // the highlighted net chain's wire colour and terminal pin circles (SCH_PAINTER)
+  try { out.schNetChain = schNetChainPaint(); } catch (e) { /* no net map yet */ }
   const eg = (CollabTools.sch as unknown as { enteredGroupId?: () => string | null }).enteredGroupId; if (eg) { try { out.schEnteredGroup = eg(); } catch (e) { /* older module */ } }
   if (selected && selected.size && tools._ && tools._.danglingLabelIds) { try { out.dangling = tools._.danglingLabelIds(E.kdoc); } catch (e) { /* no tools yet */ } }
   const d = tools.state && tools.state.drag;

@@ -56,7 +56,7 @@ export interface DrawingSheet { setup: typeof WKS_DEFAULTS; items: WksItem[] }
 export type SheetDraw =
   | { t: "line"; x1: number; y1: number; x2: number; y2: number; w: number }
   | { t: "rect"; x: number; y: number; w: number; h: number; lw: number }
-  | { t: "text"; x: number; y: number; text: string; size: number; sizeX: number; w: number; bold: boolean; italic: boolean; h: string; v: string; rot: number; color: string | null; multiline: boolean }
+  | { t: "text"; x: number; y: number; text: string; size: number; sizeX: number; w: number; bold: boolean; italic: boolean; h: string; v: string; rot: number; color: string | null; multiline: boolean; /** for ERC: the item's own text (EDA_TEXT::GetText) */ raw?: string }
   /** DS_DRAW_ITEM_POLYPOLYGONS: each outline filled in the sheet colour, no stroke */
   | { t: "poly"; polys: Pt[][] }
   /** DS_DRAW_ITEM_BITMAP: the image centred on its position, `x, y` its top-left corner */
@@ -585,7 +585,7 @@ export function constrainedTextSize(text: string, sizeX: number, sizeY: number, 
  * description (the built-in sheet by default); `firstPage` filters (option page1only|notonpage1);
  * `project` is the project's text_variables map (the .kicad_pro's), KiCad's last resolver.
  */
-export function buildDrawingSheet(page: readonly number[], vars: SheetVars | null | undefined, wks: DrawingSheet | null | undefined, firstPage?: boolean, project?: Record<string, unknown> | null): SheetDraw[] {
+export function buildDrawingSheet(page: readonly number[], vars: SheetVars | null | undefined, wks: DrawingSheet | null | undefined, firstPage?: boolean, project?: Record<string, unknown> | null, erc?: boolean): SheetDraw[] {
   const sheet = wks || defaultDrawingSheet();
   const setup = sheet.setup;
   const LT = [setup.left, setup.top];
@@ -613,7 +613,8 @@ export function buildDrawingSheet(page: readonly number[], vars: SheetVars | nul
 
     let full: string | null = null, multiline = false, escaped = false, size = 0, sizeX = 0, pen = 0;
     if (isText) {
-      const expanded = expandTextVars(it.text, resolve);
+      // DS_DRAW_ITEM_LIST( FOR_ERC_DRC ): ${ERC_…} kept, an escaped \${…} keeps its backslash
+      const expanded = expandTextVars(it.text, resolve, undefined, erc ? { erc: true } : undefined);
       const r = replaceAntiSlash(expanded);
       full = r.text;
       escaped = r.multiline;                        // ReplaceAntiSlashSequence's own answer: it guards IncrementLabel
@@ -663,8 +664,8 @@ export function buildDrawingSheet(page: readonly number[], vars: SheetVars | nul
       }
       const [sx, sy] = at(it.start!, j, it.incr);
       if (isText) {
-        if (label) out.push({ t: "text", x: sx, y: sy, text: label, size, sizeX, w: pen, bold: it.bold, italic: it.italic,
-          h: it.hjust, v: it.vjust, rot: it.rot, color: it.color, multiline });
+        if (label) out.push({ t: "text", x: sx, y: sy, text: erc && j > 0 ? expandTextVars(label, resolve, undefined, { erc: true }) : label, size, sizeX, w: pen, bold: it.bold, italic: it.italic,
+          h: it.hjust, v: it.vjust, rot: it.rot, color: it.color, multiline, ...(erc ? { raw: j > 0 ? label : it.text } : {}) });
         if (it.repeat > 1 && !escaped) label = incrementLabel(it.text, (j + 1) * it.incrLabel);
       } else {
         const [ex, ey] = at(it.end!, j, it.incr);
@@ -695,6 +696,42 @@ export function documentDrawingSheet(doc: SheetContext): SheetDraw[] {
   const items = buildDrawingSheet(doc.page, sheetTextVars(doc), wks, doc.isFirstPage !== false, doc.projectVars || null);
   SHEET_CACHE.set(doc, { key, wks, items });
   return items;
+}
+
+/** SCH_CONNECTIVITY::TEXT_ASSERTION: a ${ERC_WARNING message} or ${ERC_ERROR message} in a text. */
+export interface TextAssertion { warning: boolean; message: string }
+/**
+ * SCH_CONNECTIVITY::ExtractTextAssertions (conn_facts.cpp:808-838): the ERC_WARNING assertions of a text and then its
+ * ERC_ERROR ones, each the text after the keyword up to the closing brace; one written as \${…} is inert.
+ */
+export function textAssertions(text: string, kind: "ERC" | "DRC" = "ERC"): TextAssertion[] {
+  const out: TextAssertion[] = [];
+  if (text.indexOf("${") < 0) return out;
+  for (const warning of [true, false]) {
+    // DRC_TEST_PROVIDER_MISC::testTextVars reads ${DRC_WARNING …} / ${DRC_ERROR …} the same way
+    const re = new RegExp("(^|[^\\\\])\\$\\{" + kind + (warning ? "_WARNING" : "_ERROR") + "\\s*([^}]*)\\}");
+    let rest = text;
+    for (let m = re.exec(rest); m; m = re.exec(rest)) {
+      out.push({ warning, message: m[2] });
+      if (!m[0].length) break;
+      rest = rest.slice(m.index + m[0].length);
+    }
+  }
+  return out;
+}
+/**
+ * SCH_CONNECTIVITY::ExtractDrawingSheetTextChecks (conn_facts.cpp:840-879): the drawing sheet's texts as drawn for
+ * ERC (DS_DRAW_ITEM_LIST( FOR_ERC_DRC )), each with its assertions, or else its shown text when that still holds "${".
+ * `kind` "DRC" reads the DRC assertions (DRC_TEST_PROVIDER_MISC::testTextVars).
+ */
+export function drawingSheetTextChecks(doc: SheetContext, kind: "ERC" | "DRC" = "ERC"): { pos: Pt; assertions: TextAssertion[]; shown: string }[] {
+  const out: { pos: Pt; assertions: TextAssertion[]; shown: string }[] = [];
+  for (const it of buildDrawingSheet(doc.page, sheetTextVars(doc), doc.drawingSheet || null, doc.isFirstPage !== false, doc.projectVars || null, true)) {
+    if (it.t !== "text") continue;
+    const assertions = textAssertions(it.raw !== undefined ? it.raw : it.text, kind), shown = assertions.length ? "" : it.text;
+    if (assertions.length || shown.indexOf("${") >= 0) out.push({ pos: [it.x, it.y], assertions, shown });
+  }
+  return out;
 }
 
 /**

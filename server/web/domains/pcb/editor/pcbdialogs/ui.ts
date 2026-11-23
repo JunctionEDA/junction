@@ -749,6 +749,10 @@ export interface ListDialogOpts {
   onOk?(row: string[] | null, name: string): void;
   /** opened from a dialog: over it, which stays open (DlgSpec.child) */
   child?: boolean;
+  /** EDA_LIST_DIALOG::AddExtraCheckbox: checkboxes under the list; OK writes each one's state back (GetExtraCheckboxValues) */
+  checks?: { label: string; value: boolean }[];
+  /** Cancel, Esc or the close box (wxID_CANCEL) */
+  onCancel?(): void;
 }
 export function listDialog(title: string, headers: string[], items: string[][], onPick: (row: string[]) => void, opts?: ListDialogOpts): DialogApi | null {
   const cols: GridColumn[] = headers.map((label, i) => ({ key: "c" + i, label, type: "ro" as const }));
@@ -762,7 +766,9 @@ export function listDialog(title: string, headers: string[], items: string[][], 
   if (nameIn && opts!.name!.invalidChars) { const bad = opts!.name!.invalidChars; nameIn.addEventListener("input", () => { const v = nameIn.value.split("").filter((c) => !bad.includes(c)).join(""); if (v !== nameIn.value) nameIn.value = v; }); }
   let api: DialogApi | null = null; let busy = false;
   const row = (): string[] | null => { const i = g.selected(); return i >= 0 ? shown[i] || null : null; };
+  const checks = (opts && opts.checks || []).map((c) => ({ c, f: checkField(c.value, c.label) }));
   const pick = (): boolean => {
+    for (const { c, f } of checks) c.value = f.get();
     const r = row(); const name = nameIn ? nameIn.value.trim() : "";
     if (!opts || (!opts.validate && !opts.onOk)) { if (!r) return false; onPick(r); return true; }
     if (busy) return false;
@@ -774,9 +780,11 @@ export function listDialog(title: string, headers: string[], items: string[][], 
     return true;
   };
   api = openDialog({ title, width: opts && opts.width || 400, okLabel: opts && opts.okLabel, extra: opts && opts.extra, child: !!(opts && opts.child),
+    cancel: opts && opts.onCancel ? () => { opts.onCancel!(); } : undefined,
     build(body) {
       if (nameIn) body.append(h("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:8px" }, h("span", { class: "pd-lbl" }, opts!.name!.label), nameIn));
       body.append(filter, h("div", { class: "pd-lbl", style: "margin-bottom:4px" }, (opts && opts.listLabel) || "Items:"), g.el);
+      for (const { f } of checks) body.append(h("div", { style: "margin-top:5px" }, f.el));
       g.el.addEventListener("dblclick", () => { if (pick() && api) api.close(); });
       const at = opts && opts.select ? shown.findIndex((r) => r[0] === opts.select) : 0; if (shown.length) g.select(Math.max(0, at));
       setTimeout(() => { if (nameIn) { nameIn.focus(); nameIn.select(); } else filter.focus(); }, 0);

@@ -11,13 +11,16 @@ import type { BoardDoc, Conductor, Netlist, Pt } from "./types";
 import { shapeGap } from "./distances";
 import { netlist, ratsnest } from "./netlist";
 import { K } from "./state";
+import { netChainOf, netOf } from "./nets";
+import { rotator } from "./util";
 
 export interface NetLengthRow {
   name: string; code: number; padCount: number; viaCount: number;
   trackLength: number; viaLength: number; dieLength: number; unroutedLength: number; totalLength: number;
   layerLengths: Record<string, number>;
 }
-interface StackItem { layer: string | null; th: number[] }
+/** BOARD_STACKUP_ITEM: copper (its layer) or a dielectric (layer null, its type name: core, prepreg …), with sub-layer thicknesses. */
+export interface StackItem { kind: "copper" | "dielectric"; layer: string | null; typeName: string; th: number[] }
 
 /** The copper layers in stack order: F.Cu, In1.Cu … InN.Cu, B.Cu. */
 export function copperStack(copper: string[]): string[] {
@@ -39,14 +42,16 @@ export function stackupItems(general: SNode | null, setup: SNode | null, copper:
       const th: number[] = [];
       let cur = K.kid(l, "thickness"); th.push(cur ? K.num(cur[1], 0) : 0);
       for (let j = 2; j < l.length; j++) if (l[j] === "addsublayer") { cur = null; for (let k = j + 1; k < l.length && l[k] !== "addsublayer"; k++) { const c = l[k]; if (Array.isArray(c) && c[0] === "thickness") cur = c as SNode; } th.push(cur ? K.num(cur[1], 0) : 0); }
-      out.push({ layer: diel ? null : name, th });
+      const t = K.kid(l, "type");
+      out.push({ kind: diel ? "dielectric" : "copper", layer: diel ? null : name, typeName: t ? K.str(t[1]) : "", th });
     }
     if (out.length) return out;
   }
   const stack = copperStack(copper), n = stack.length;
   const thick = general && K.kid(general, "thickness") ? K.num(K.kid(general, "thickness")![1], 1.6) : 1.6;
   const diel = (thick - 0.035 * n - 0.01 * 2) / Math.max(1, n - 1);
-  stack.forEach((l, i) => { out.push({ layer: l, th: [0.035] }); if (i < n - 1) out.push({ layer: null, th: [diel] }); });
+  // the dielectrics alternate core, prepreg, core … from the top
+  stack.forEach((l, i) => { out.push({ kind: "copper", layer: l, typeName: "copper", th: [0.035] }); if (i < n - 1) out.push({ kind: "dielectric", layer: null, typeName: (i & 1) === 0 ? "core" : "prepreg", th: [diel] }); });
   return out;
 }
 /** BOARD_STACKUP::GetLayerDistance: the copper and dielectric between two copper layers, half of an inner end layer. */
@@ -129,4 +134,27 @@ export function netLengths(doc: BoardDoc, header: { general?: SNode | null; setu
       unroutedLength: unrouted.get(net.key) || 0, totalLength: track + viaLen + die, layerLengths });
   }
   return rows.sort((a, b) => a.code - b.code || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+/** calculateNets' net chain totals (LIST_ITEM::SetNetChainLength): the chain's member nets' total lengths, plus, per
+ *  footprint, the distance between each pair of its pads on two different nets of the same chain. */
+export function netChainLengths(doc: BoardDoc, rows: NetLengthRow[]): Map<string, number> {
+  const out = new Map<string, number>(), nets = (doc as unknown as { nets?: Map<number, string> }).nets || new Map<number, string>();
+  for (const r of rows) { const c = netChainOf(doc as unknown as KDoc, r.name); if (c) out.set(c, (out.get(c) || 0) + r.totalLength); }
+  for (const it of doc.items.values()) {
+    if (it.kind !== "footprint") continue;
+    const [fx, fy, frot] = K.atOf(it.node), R = rotator(frot);
+    const pads: { x: number; y: number; net: string; chain: string }[] = [];
+    for (const pad of K.kids(it.node, "pad")) {
+      const n = netOf(pad), name = n.name || (n.code > 0 ? nets.get(n.code) || "" : ""), chain = netChainOf(doc as unknown as KDoc, name);
+      if (!chain) continue;
+      const [px, py] = K.atOf(pad), [rx, ry] = R(px, py);
+      pads.push({ x: fx + rx, y: fy + ry, net: name, chain });
+    }
+    for (let i = 0; i < pads.length; i++) for (let j = i + 1; j < pads.length; j++) {
+      const a = pads[i], b = pads[j];
+      if (a.chain === b.chain && a.net !== b.net) out.set(a.chain, (out.get(a.chain) || 0) + Math.hypot(a.x - b.x, a.y - b.y));
+    }
+  }
+  return out;
 }

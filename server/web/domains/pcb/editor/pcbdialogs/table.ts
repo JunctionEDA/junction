@@ -5,7 +5,7 @@
 // (TransferDataFromWindow) writes every cell's text and layer, the table's layer and lock, and the two strokes
 // (a stroke with neither of its lines on is written without width, its width -1); one "Edit Table" change.  The
 // table tool (DRAWING_TOOL::DrawTable) opens it on the table just drawn and commits "Draw Table" on OK.
-import { boardXref } from "./xref";
+import { boardTextVarAutocomplete, boardXref, parentFootprintOf } from "./xref";
 import { syntaxHelpLink } from "../syntax-help";
 import { box, checkField, form, h, lenField, openDialog, selectField, unitLabel, type Field } from "./ui";
 
@@ -152,6 +152,8 @@ export function tableDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | n
           if (covered(cell)) { gridEl.append(h("div", { class: "pd-covered", style: `min-height:${hgt}px;background:var(--panel-2)`, title: "Covered by a merged cell" })); row.push(null); continue; }
           const t = h("textarea", { "data-k": `cell-${r}-${c}`, readOnly: ro, spellcheck: false, style: `min-height:${hgt}px;resize:none;border:0;border-radius:0;padding:3px 4px;font:inherit;background:var(--bench);color:var(--ink)` });
           t.value = v0.cells[r][c];
+          // the cell editor's onCharFn: DoTextVarAutocomplete( GetContextualTextVars( cell ) )
+          if (!ro) boardTextVarAutocomplete(t, doc, parentFootprintOf(doc as never, item, item.node));
           t.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.stopPropagation(); if (ev.shiftKey) { ev.preventDefault(); const ok = (body.parentElement as HTMLElement).querySelector<HTMLButtonElement>(".kd-foot > button:last-child"); if (ok) ok.click(); } } });
           if (!first) first = t;
           gridEl.append(t); row.push(t);

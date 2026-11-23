@@ -10,9 +10,12 @@ import { netNode, netOf } from "./nets";
 import { lineNode, polyNode, ruleAreaNode, segmentNode, zoneNode } from "./nodes";
 import { netUnder, padCovers, padOnLayer, padsOf } from "./route-geom";
 import { K } from "./state";
-import { transformChanges } from "./transforms";
 import * as VM from "../../canvas/variant-model";
-import { corners, isList, layerOf, pt, r6 } from "./util";
+import { clone, corners, isList, layerOf, pt, r6, samePt } from "./util";
+import { anchorOf, transformChanges } from "./transforms";
+import { PlotLog, geomPrims } from "../../fab/plot";
+import { inflate as polyInflate, primPolys, union as polyUnion } from "../../fab/poly";
+import type { Prim } from "../../fab/prims";
 
 // ---------------------------------------------------------------- pads
 /** The pad under (x, y): { item, index, pad } from padsOf, the smallest pad covering the point on any copper layer. */
@@ -105,6 +108,247 @@ export function convertChanges(doc: BoardDoc, ids: string[], to: string, extra?:
   else if (to === "keepout") { for (const loop of loops) out.push(addedChange(doc, ruleAreaNode(loop, /\.Cu$/.test(layer) ? [layer] : RULE_AREA_LAYERS))); }
   else return [];
   if (!(extra && extra.keep)) for (const it of items) if (/^gr_(line|arc|rect|poly|circle|curve)$/.test(it.kind)) out.push(removedChange(it));
+  return out;
+}
+// ---------------------------------------------------------------- CONVERT_TOOL::CreatePolys / CreateLines
+// CONVERT_SETTINGS (convert_settings.h): the strategy, the hull's gap and line width, and whether the sources go.  The
+// tool keeps one for the session (initUserSettings: centerlines, no gap, no width, delete the originals).
+export type ConvertStrategy = "copy" | "centerline" | "hull";
+export interface ConvertSettings { strategy: ConvertStrategy; gap: number; lineWidth: number; deleteOriginals: boolean }
+export const convertSettings: ConvertSettings = { strategy: "centerline", gap: 0, lineWidth: 0, deleteOriginals: true };
+/** CONVERT_SETTINGS_DIALOG ("Conversion Settings") is the editor's: the options it shows, the settings it edits in place, done(OK). */
+export type ConvertSettingsDialog = (show: { copy: boolean; centerline: boolean; hull: boolean }, settings: ConvertSettings, done: (ok: boolean) => void) => void;
+export const convertDialogs: { settings?: ConvertSettingsDialog } = {};
+export function setConvertDialogs(d: { settings?: ConvertSettingsDialog } | null) { convertDialogs.settings = d ? d.settings : undefined; }
+/** A polygon vertex, or an arc side (SHAPE_ARC in a SHAPE_LINE_CHAIN) from its start through its mid to its end. */
+export type PolyElem = Pt | { arc: [Pt, Pt, Pt] };
+export interface ConvOutline { outline: PolyElem[]; holes: PolyElem[][] }
+const CHAIN_EPS = 1e-4;                                     // chainingEpsilon: 100 IU
+const isArcElem = (e: PolyElem): e is { arc: [Pt, Pt, Pt] } => !Array.isArray(e);
+const near = (a: Pt, b: Pt, d: number) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 <= d * d;
+/** A (pts ...) list as SHAPE_LINE_CHAIN elements: its (xy) vertices and its (arc) sides. */
+function polyElemsOf(n: SNode): PolyElem[] {
+  const p = K.kid(n, "pts"); if (!p) return [];
+  const out: PolyElem[] = [];
+  for (const c of p.slice(1)) {
+    if (!isList(c)) continue;
+    if (c[0] === "xy") out.push([K.num(c[1]), K.num(c[2])]);
+    else if (c[0] === "arc") { const s = pt(c as SNode, "start"), m = pt(c as SNode, "mid"), e = pt(c as SNode, "end"); if (s && m && e) out.push({ arc: [s, m, e] }); }
+  }
+  return out;
+}
+/** The chain's points, an arc side flattened (for the polygon operations of the bounding hull). */
+function flatElems(els: PolyElem[]): Pt[] {
+  const out: Pt[] = [];
+  for (const e of els) {
+    if (!isArcElem(e)) { out.push(e); continue; }
+    const a = K.arcFrom3(e.arc[0], e.arc[1], e.arc[2]);
+    out.push(...(a ? arcPoints(a, e.arc[0], e.arc[2]) as Pt[] : [e.arc[0], e.arc[2]]));
+  }
+  return out;
+}
+const firstPt = (e: PolyElem): Pt => (isArcElem(e) ? e.arc[0] : e), lastPt = (e: PolyElem): Pt => (isArcElem(e) ? e.arc[2] : e);
+/** TransformShapeToPolygon through the plotter's primitives (the item's drawn stroke, fill and text). */
+function itemPolys(it: KItem): Pt[][] {
+  const prims: Prim[] = [], knock: Prim[] = [], log = new PlotLog();
+  for (const g of it.geom || []) { if ((g as { hole?: boolean }).hole) continue; geomPrims(g as unknown as Parameters<typeof geomPrims>[0], prims, knock, log); }
+  return prims.flatMap((p) => primPolys(p));
+}
+const shapeWidth = (n: SNode) => { const st = K.kid(n, "stroke"), w = st ? K.kid(st, "width") : K.kid(n, "width"); return w ? K.num(w[1], 0) : 0; };
+const solidFill = (n: SNode) => { const f = K.kid(n, "fill"); const v = f ? K.str(f[1]) : ""; return v === "yes" || v === "solid"; };
+/** CONVERT_TOOL::getStartEndPoints: a graphic line, arc or bezier (not with coincident ends), a track, a track arc. */
+export function convStartEnd(it: KItem): [Pt, Pt] | null {
+  const n = it.node;
+  if (it.kind === "gr_curve") { const ps = K.ptsOf(n); if (ps.length < 4 || samePt(ps[0], ps[3])) return null; return [ps[0], ps[3]]; }
+  const a = pt(n, "start"), b = pt(n, "end"); if (!a || !b) return null;
+  if ((it.kind === "gr_line" || it.kind === "gr_arc") && samePt(a, b)) return null;
+  return it.kind === "gr_line" || it.kind === "gr_arc" || it.kind === "segment" || it.kind === "arc" ? [a, b] : null;
+}
+/** A rounded rectangle's outline (ROUNDRECT::TransformToPolygon), its corners when it has no radius. */
+function rectOutline(n: SNode): Pt[] {
+  const [x0, y0, x1, y1] = corners(pt(n, "start")!, pt(n, "end")!); const rN = K.kid(n, "radius"); const r = Math.min(rN ? K.num(rN[1], 0) : 0, (x1 - x0) / 2, (y1 - y0) / 2);
+  if (!(r > 0)) return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+  const out: Pt[] = [], seg = Math.max(2, Math.ceil(Math.PI / 2 / (2 * Math.acos(Math.max(-1, 1 - 0.005 / r)))));
+  const corner = (cx: number, cy: number, a0: number) => { for (let i = 0; i <= seg; i++) { const a = a0 + (Math.PI / 2) * i / seg; out.push([r6(cx + r * Math.cos(a)), r6(cy + r * Math.sin(a))]); } };
+  corner(x1 - r, y0 + r, -Math.PI / 2); corner(x1 - r, y1 - r, 0); corner(x0 + r, y1 - r, Math.PI / 2); corner(x0 + r, y0 + r, Math.PI);
+  return out;
+}
+/** makePolysFromClosedGraphics: closed graphics, zones, texts and barcodes. */
+function closedGraphicsPolys(items: KItem[], strategy: ConvertStrategy, used: Set<string>): ConvOutline[] {
+  const out: ConvOutline[] = [], hull = strategy === "hull";
+  for (const it of items) {
+    if (used.has(it.id)) continue;
+    const n = it.node;
+    if (it.kind === "gr_rect" || it.kind === "gr_circle" || it.kind === "gr_poly") {
+      if (it.kind === "gr_circle" && !hull) {   // the whole circle as arcs (SHAPE_ARC of 360 degrees from its left), here its two halves through the top and the bottom
+        const c = pt(n, "center")!, e = pt(n, "end")!, R = Math.hypot(e[0] - c[0], e[1] - c[1]);
+        const l: Pt = [r6(c[0] - R), c[1]], r: Pt = [r6(c[0] + R), c[1]];
+        out.push({ outline: [{ arc: [l, [c[0], r6(c[1] - R)], r] }, { arc: [r, [c[0], r6(c[1] + R)], l] }], holes: [] });
+      } else if (!hull) out.push({ outline: it.kind === "gr_rect" ? rectOutline(n) : polyElemsOf(n), holes: [] });   // filled, the line width ignored
+      else for (const p of itemPolys(it)) out.push({ outline: p, holes: [] });
+      used.add(it.id); continue;
+    }
+    if (it.kind === "zone") {
+      const cs = K.kids(n, "polygon").map((pg) => (hull ? flatElems(polyElemsOf(pg)) : polyElemsOf(pg))).filter((p) => p.length > 2 || p.some(isArcElem));
+      if (cs.length) out.push({ outline: cs[0], holes: cs.slice(1) });
+      used.add(it.id); continue;
+    }
+    if (it.kind === "gr_text" || it.kind === "property" || it.kind === "barcode") { for (const p of itemPolys(it)) out.push({ outline: p, holes: [] }); used.add(it.id); }
+  }
+  return out;
+}
+/** makePolysFromOpenGraphics: open graphics, tracks and vias as their copper (the bounding hull). */
+function openGraphicsPolys(items: KItem[], used: Set<string>): Pt[][] {
+  const out: Pt[][] = [];
+  for (const it of items) {
+    if (used.has(it.id)) continue;
+    if (/^gr_(line|arc|curve)$/.test(it.kind) || it.kind === "segment" || it.kind === "arc" || it.kind === "via") { out.push(...itemPolys(it)); used.add(it.id); }
+  }
+  return out;
+}
+/** makePolysFromChainedSegs: lines, arcs, beziers and tracks chained end to end (100 nm) into closed outlines. */
+function chainedPolys(items: KItem[], used: Set<string>): ConvOutline[] {
+  const keys: Pt[] = [], conns = new Map<number, [number, KItem][]>(), keyOf = new Map<string, number>();
+  const find = (p: Pt) => { for (let i = 0; i < keys.length; i++) if (samePt(keys[i], p)) return i; for (let i = 0; i < keys.length; i++) if (near(p, keys[i], CHAIN_EPS)) return i; keys.push(p); return keys.length - 1; };
+  const toCheck: KItem[] = [];
+  for (const it of items) {
+    const se = convStartEnd(it); if (!se) continue;
+    toCheck.push(it);
+    const ka = find(se[0]), kb = find(se[1]);
+    (conns.get(ka) || conns.set(ka, []).get(ka)!).push([0, it]); (conns.get(kb) || conns.set(kb, []).get(kb)!).push([1, it]);
+    keyOf.set(it.id + ":0", ka); keyOf.set(it.id + ":1", kb);
+  }
+  const out: ConvOutline[] = [];
+  while (toCheck.length) {
+    const cand = toCheck.shift()!; if (used.has(cand.id)) continue;
+    const outline: PolyElem[] = [], inserted: string[] = [];
+    const put = (e: PolyElem, right: boolean) => {
+      if (right) { if (!isArcElem(e) && outline.length && samePt(lastPt(outline[outline.length - 1]), e)) return; outline.push(e); }   // Append drops a repeated point
+      else outline.unshift(e);
+    };
+    const insert = (it: KItem, anchor: Pt, right: boolean) => {
+      const n = it.node;
+      if (it.kind === "gr_arc" || it.kind === "arc") {
+        const s = pt(n, "start")!, m = pt(n, "mid")!, e = pt(n, "end")!;
+        put({ arc: samePt(anchor, s) ? [s, m, e] : [e, m, s] }, right);
+      } else if (it.kind === "gr_curve") {
+        const ps = K.bezierPts(K.ptsOf(n)) as Pt[], seq = samePt(anchor, K.ptsOf(n)[0]) ? ps : ps.slice().reverse();
+        for (const q of seq) put(q, right);   // Append each, or Insert( 0 ) each
+      } else { const se = convStartEnd(it)!; put(samePt(anchor, se[0]) ? se[1] : se[0], right); }
+      inserted.push(it.id);
+    };
+    const process = (it: KItem, anchor: number, right: boolean) => {
+      if (used.has(it.id)) return;
+      used.add(it.id);
+      const se = convStartEnd(it)!;
+      insert(it, anchor === 0 ? se[0] : se[1], right);
+      const next = 1 - anchor;
+      for (const [a2, other] of conns.get(keyOf.get(it.id + ":" + next)!) || []) { if (other === it) continue; process(other, a2, right); }
+    };
+    const se = convStartEnd(cand)!;
+    if (cand.kind !== "gr_arc" && cand.kind !== "arc") insert(cand, se[0], true);
+    process(cand, 1, true);
+    const left = (conns.get(keyOf.get(cand.id + ":0")!) || []).find(([, o]) => o !== cand);
+    if (left) process(left[1], left[0], false);
+    const count = outline.reduce((c, e) => c + (isArcElem(e) ? 3 : 1), 0);
+    if (count < 3 || !outline.length || !near(firstPt(outline[0]), lastPt(outline[outline.length - 1]), CHAIN_EPS)) { for (const id of inserted) used.delete(id); continue; }
+    // SetClosed( true ): mergeFirstLastPointIfNeeded drops the repeated closing point (the vertex when an arc ends there)
+    const f = outline[0], l = outline[outline.length - 1];
+    if (outline.length > 1 && !isArcElem(l) && samePt(firstPt(f), l)) outline.pop();
+    else if (outline.length > 1 && isArcElem(l) && !isArcElem(f) && samePt(f, l.arc[2])) outline.shift();
+    out.push({ outline, holes: [] });
+  }
+  return out;
+}
+/** Union output (paths) as outlines with the holes that sit inside them. */
+function outlinesOf(paths: Pt[][]): ConvOutline[] {
+  const area = (p: Pt[]) => { let a = 0; for (let i = 0, j = p.length - 1; i < p.length; j = i++) a += p[j][0] * p[i][1] - p[i][0] * p[j][1]; return a / 2; };
+  const total = paths.reduce((s, p) => s + area(p), 0), outer = (p: Pt[]) => Math.sign(area(p)) === Math.sign(total || 1);
+  const inside = (q: Pt, p: Pt[]) => { let c = false; for (let i = 0, j = p.length - 1; i < p.length; j = i++) if ((p[i][1] > q[1]) !== (p[j][1] > q[1]) && q[0] < (p[j][0] - p[i][0]) * (q[1] - p[i][1]) / (p[j][1] - p[i][1]) + p[i][0]) c = !c; return c; };
+  const outs: ConvOutline[] = paths.filter(outer).map((p) => ({ outline: p.map(([x, y]) => [r6(x), r6(y)] as Pt), holes: [] }));
+  for (const h of paths.filter((p) => !outer(p))) { const o = outs.find((x) => inside(h[0], x.outline as Pt[])); if (o) o.holes.push(h.map(([x, y]) => [r6(x), r6(y)] as Pt)); }
+  return outs;
+}
+/**
+ * CONVERT_TOOL::CreatePolys' getPolys: the outlines a strategy makes of the items, and the items it used (SKIP_STRUCT),
+ * or null when there is nothing.  The bounding hull merges everything (Simplify) and grows it by the gap, round.
+ */
+export function convertPolys(items: KItem[], strategy: ConvertStrategy, gap: number): { outlines: ConvOutline[]; used: Set<string> } | null {
+  const used = new Set<string>();
+  let outlines = closedGraphicsPolys(items, strategy, used);
+  if (strategy === "hull") {
+    const paths = outlines.flatMap((o) => [o.outline, ...o.holes].map(flatElems)).concat(openGraphicsPolys(items, used));
+    let merged = polyUnion(paths.filter((p) => p.length > 2) as [number, number][][]);
+    if (gap) merged = polyInflate(merged, gap);
+    outlines = outlinesOf(merged);
+  } else outlines = outlines.concat(chainedPolys(items, used));
+  outlines = outlines.filter((o) => o.outline.length);
+  return outlines.length ? { outlines, used } : null;
+}
+const ptsNode = (els: PolyElem[]): SNode => ["pts", ...els.map((e) => (isArcElem(e) ? ["arc", ["start", r6(e.arc[0][0]), r6(e.arc[0][1])], ["mid", r6(e.arc[1][0]), r6(e.arc[1][1])], ["end", r6(e.arc[2][0]), r6(e.arc[2][1])]] : ["xy", r6(e[0]), r6(e[1])]))];
+/** The graphic polygon CreatePolys adds: the first outline, a solid stroke, filled for centerlines, on the active layer. */
+export function convertPolyNode(o: ConvOutline, width: number, filled: boolean, layer: string): SNode {
+  return ["gr_poly", ptsNode(o.outline), ["stroke", ["width", r6(width)], ["type", "solid"]], ["fill", filled ? "yes" : "no"], ["layer", layer]];
+}
+/** A zone or rule area from the dialog's settings (ZONE_SETTINGS::ExportSetting) on an outline and its holes. */
+export function convertZoneNode(template: SNode, o: ConvOutline): SNode {
+  const n = clone(template);
+  let at = -1; for (let i = n.length - 1; i > 0; i--) if (isList(n[i]) && ((n[i] as SNode)[0] === "polygon" || (n[i] as SNode)[0] === "filled_polygon")) { n.splice(i, 1); at = i; }
+  const polys: SNode[] = [["polygon", ptsNode(o.outline)], ...o.holes.map((h): SNode => ["polygon", ptsNode(h)])];
+  if (at < 0) at = n.length; n.splice(at, 0, ...polys);
+  const u = K.kid(n, "uuid"); if (u) u[1] = K.newUuid();
+  return n;
+}
+/** COPY_LINEWIDTH: the stroke width of the top-left item with a line stroke (by BOARD_ITEM::GetPosition). */
+export function topLeftStrokeWidth(items: KItem[]): number | null {
+  let best: KItem | null = null, bp: Pt = [0, 0];
+  for (const it of items) {
+    if (!/^gr_(line|rect|circle|arc|poly|curve|text_box)$/.test(it.kind)) continue;   // HasLineStroke
+    const p = anchorOf(it);
+    if (!best || p[0] < bp[0] || (p[0] === bp[0] && p[1] < bp[1])) { best = it; bp = p; }
+  }
+  return best ? shapeWidth(best.node) : null;
+}
+/**
+ * CONVERT_TOOL::CreateLines (Create Lines / Create Tracks): every selected rectangle (rounded), polygon or zone outline
+ * (holes too) becomes lines on the target layer - tracks for Create Tracks on the board, keeping the source's net - in
+ * the source's width (GetBoardItemWidth) or the new item's default; a graphic line or arc becomes a track or track arc.
+ * The sides go first, then the arc sides.
+ */
+export function createLinesChanges(doc: BoardDoc, items: KItem[], layer: string, tracks: boolean, deleteOriginals: boolean): PcbChange[] {
+  const out: PcbChange[] = [];
+  const lineOf = (a: Pt, b: Pt, w: number | null, net: NetRef | null): SNode => tracks
+    ? segmentNode(doc, a, b, w && w > 0 ? w : 0.2, layer, net)
+    : ["gr_line", ["start", r6(a[0]), r6(a[1])], ["end", r6(b[0]), r6(b[1])], ["stroke", ["width", r6(w && w > 0 ? w : 0.1)], ["type", "default"]], ["layer", layer]];
+  const arcOf = (s: Pt, m: Pt, e: Pt, w: number | null, net: NetRef | null): SNode => tracks
+    ? ["arc", ["start", r6(s[0]), r6(s[1])], ["mid", r6(m[0]), r6(m[1])], ["end", r6(e[0]), r6(e[1])], ["width", r6(w && w > 0 ? w : 0.2)], ["layer", layer], netNode(doc, net)]
+    : ["gr_arc", ["start", r6(s[0]), r6(s[1])], ["mid", r6(m[0]), r6(m[1])], ["end", r6(e[0]), r6(e[1])], ["stroke", ["width", r6(w && w > 0 ? w : 0.1)], ["type", "default"]], ["layer", layer]];
+  const chain = (els: PolyElem[], w: number | null, net: NetRef | null) => {
+    const segs: [Pt, Pt][] = [], arcs: [Pt, Pt, Pt][] = [];
+    for (let i = 0; i < els.length; i++) {
+      const e = els[i], nx = els[(i + 1) % els.length];
+      if (isArcElem(e)) { arcs.push(e.arc); if (!samePt(e.arc[2], firstPt(nx))) segs.push([e.arc[2], firstPt(nx)]); }
+      else segs.push([e, firstPt(nx)]);
+    }
+    for (const [a, b] of segs) if (!samePt(a, b)) out.push(addedChange(doc, lineOf(a, b, w, net), tracks ? net : undefined));
+    for (const [s, m, e] of arcs) if (!samePt(s, e)) out.push(addedChange(doc, arcOf(s, m, e, w, net), tracks ? net : undefined));
+  };
+  for (const it of items) {
+    const n = it.node, net = K.kid(n, "net") ? netOf(n) : null;
+    // handleGraphicSeg: a graphic line or arc becomes a track (arc) on the target layer in its width
+    if (it.kind === "gr_line" || it.kind === "gr_arc") {
+      const a = pt(n, "start")!, b = pt(n, "end")!, w = shapeWidth(n);
+      out.push(addedChange(doc, it.kind === "gr_line" ? segmentNode(doc, a, b, w, layer, net)
+        : ["arc", ["start", r6(a[0]), r6(a[1])], ["mid", ...pt(n, "mid")!.map(r6)], ["end", r6(b[0]), r6(b[1])], ["width", r6(w)], ["layer", layer], netNode(doc, net)], net));
+      continue;
+    }
+    // GetBoardItemWidth: a shape's width unless it is solid filled; none for a zone
+    const w = /^gr_/.test(it.kind) && shapeWidth(n) && !solidFill(n) ? shapeWidth(n) : null;
+    if (it.kind === "gr_rect") chain(rectOutline(n), w, net);
+    else if (it.kind === "gr_poly") chain(polyElemsOf(n), w, net);
+    else if (it.kind === "zone") for (const pg of K.kids(n, "polygon")) chain(polyElemsOf(pg), null, net);
+  }
+  if (deleteOriginals) for (const it of items) out.push(removedChange(it));
   return out;
 }
 export function justifyChanges(doc: BoardDoc, ids: Iterable<string>, how: string) {

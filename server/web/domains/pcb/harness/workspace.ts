@@ -120,6 +120,7 @@ export class Workspace {
     if (doc.type === "sch") out.push(["lib_symbols", ...doc.lib.values()]);
     else for (const n of base.slice(1)) if (Array.isArray(n) && n[0] === "net") out.push(n);
     for (const it of doc.items.values()) out.push(it.node);
+    if (doc.type !== "sch" && doc.netChainsNode) out.push(doc.netChainsNode);   // the nets' chains, after the items as PCB_IO_KICAD_SEXPR writes them
     if (doc.type === "sch") for (const n of base.slice(1)) if (Array.isArray(n) && (n[0] === "sheet_instances" || n[0] === "embedded_fonts") && !HEADER.includes(n[0])) out.push(n[0] === "sheet_instances" && h.pageNumber ? withRootPage(n, h.pageNumber) : n);
     return k.serialize(out) + "\n";
   }

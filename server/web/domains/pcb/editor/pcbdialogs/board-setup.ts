@@ -32,8 +32,30 @@ import { ruleAtLine, ruleErrors, ruleReport, rulesEditor, type RuleMessage } fro
 import { markdownToHtml } from "../markdown";
 import { RULES_HELP_MD } from "../../generated/rules-help";
 import { keysInText } from "../../../../shared/keys";
-import type { DrillProfile, StackupLayer } from "../../canvas/board-setup";
+import type { DielectricModel, DrillProfile, StackupLayer, StackupSub } from "../../canvas/board-setup";
 import { applyFabStackup, BOARD_TYPES, FAB_STACKUPS, outer50Ohm } from "./fab-stackups";
+
+/** PANEL_SETUP_BOARD_STACKUP::m_specFreqChoices */
+export const FREQ_UNITS = ["Hz", "kHz", "MHz", "GHz"];
+/** PANEL_SETUP_BOARD_STACKUP::normaliseFrequency: the value in the largest unit it reaches. */
+export function normaliseFrequency(f: number): { value: number; units: number } {
+  if (f >= 1e9) return { value: f / 1e9, units: 3 };
+  if (f >= 1e6) return { value: f / 1e6, units: 2 };
+  if (f >= 1e3) return { value: f / 1e3, units: 1 };
+  return { value: f, units: 0 };
+}
+/** The frequency text in the chosen units as Hz, or null when it is not a number >= 0. */
+export function specFreqFromText(text: string, units: number): number | null {
+  const v = Number(text.trim().replace(",", ".")); if (!text.trim() || !isFinite(v) || v < 0) return null;
+  return v * [1, 1e3, 1e6, 1e9][units] || 0;
+}
+/** BOARD_STACKUP_ITEM::RemoveDielectricPrms: sublayer 0 is the item's own parameters, the next one takes its place. */
+export function removeDielectricPrms(l: StackupLayer, sub: number): void {
+  const subs = l.subs || []; if (!subs.length) return;
+  if (sub > 0) { subs.splice(sub - 1, 1); return; }
+  const n = subs.shift()!;
+  Object.assign(l, { thickness: n.thickness, locked: n.locked, material: n.material, epsilonR: n.epsilonR, lossTangent: n.lossTangent, color: n.color, specFreq: n.specFreq, dielectricModel: n.dielectricModel });
+}
 
 type Obj = { [key: string]: Plain };
 const isObj = (v: Plain | undefined): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
@@ -238,13 +260,13 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       if (!stack || !stack.length) { host.append(note("This board has no physical stackup.")); total.textContent = ""; return; }
       const table = h("table");
       // the header of the thickness-lock column is m_bitmapLockThickness (BITMAPS::locked), not text
-      const head = h("tr"); for (const t of ["Layer", "Id", "Type", "Material", "Thickness", "", "Color", "Epsilon R", "Loss Tan"]) head.append(h("th", null, t));
+      const head = h("tr"); for (const t of ["Layer", "Id", "Type", "Material", "Thickness", "", "Color", "Epsilon R", "Loss Tan", "Spec Freq", "", "Dielectric Model"]) head.append(h("th", null, t));
       const lockHead = head.children[5] as HTMLElement; lockHead.title = "Lock the thickness of this layer when adjusting dielectric thickness"; lockHead.style.cssText = "min-width:26px;width:26px;text-align:center;padding:0 4px"; lockHead.append(staticBitmap("locked", 16, 16, "vertical-align:middle"));
       table.append(h("thead", null, head));
       const body = h("tbody");
       let row = 0;
-      const mk = (l: StackupLayer, sub: { thickness: number; locked?: boolean; material: string; epsilonR: number; lossTangent: number; color?: string } | null, subIdx: number): void => {
-        const o = (sub || l) as { thickness?: number; locked?: boolean; material?: string; epsilonR?: number; lossTangent?: number; color?: string };
+      const mk = (l: StackupLayer, sub: StackupSub | null, subIdx: number): void => {
+        const o = (sub || l) as { thickness?: number; locked?: boolean; material?: string; epsilonR?: number; lossTangent?: number; color?: string; specFreq?: number; dielectricModel?: DielectricModel };
         const k = kindOf(l), d = /^dielectric (\d+)$/.exec(l.name), r = row++;
         const tr = h("tr", { class: r === selRow ? "sel" : "", "data-row": r });
         tr.addEventListener("pointerdown", () => { selRow = r; Array.from(body.children).forEach((x, i) => x.classList.toggle("sel", i === r)); });
@@ -277,6 +299,16 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
           const lt = numField(o.lossTangent ?? 0, { ro: roBoard }); lt.input.addEventListener("change", () => { o.lossTangent = lt.get(); touched = true; });
           tr.append(h("td", null, er.el), h("td", null, lt.el));
         } else tr.append(h("td", { class: "ro" }), h("td", { class: "ro" }));
+        if (k === "dielectric") {   // HasSpecFreqValue: the frequency (normaliseFrequency), its units and the dielectric model
+          const nf = normaliseFrequency(o.specFreq ?? 1e9);
+          const fq = h("input", { type: "text", value: String(+nf.value.toFixed(6)), disabled: roBoard, "data-k": "specFreq", style: "width:70px" });
+          const fu = selectField<number>(nf.units, FREQ_UNITS.map((u, i): [number, string] => [i, u]), { ro: roBoard });
+          const apply = (): void => { o.specFreq = specFreqFromText(fq.value, fu.get()) ?? o.specFreq; touched = true; };
+          fq.addEventListener("change", apply); fu.input.addEventListener("change", apply);
+          (fq as HTMLInputElement & { stackupFreq?: () => number | null }).stackupFreq = () => specFreqFromText(fq.value, fu.get());
+          const dm = selectField<DielectricModel>(o.dielectricModel || "constant", [["constant", "Constant"], ["djordjevic_sarkar", "Djordjevic-Sarkar"]], { ro: roBoard, onChange: (v) => { o.dielectricModel = v; touched = true; } });
+          tr.append(h("td", null, fq), h("td", null, fu.el), h("td", null, dm.el));
+        } else tr.append(h("td", { class: "ro" }), h("td", { class: "ro" }), h("td", { class: "ro" }));
         body.append(tr);
       };
       for (const l of stack) { mk(l, null, 0); (l.subs || []).forEach((s, i) => mk(l, s, i + 1)); }
@@ -285,17 +317,28 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       total.textContent = fmtLenU(BS().stackupLayersThickness(stack));
     };
     refreshStackup = draw; draw();
-    const dielectrics = (): string[] => (stack || []).filter((l) => /^dielectric \d+$/.test(l.name)).map((l) => l.name.replace("dielectric", "Layer"));
+    // onAddDielectricLayer / onRemoveDielectricLayer: EDA_LIST_DIALOG over the dielectric rows in stackup order
+    const dielRows = (): { l: StackupLayer; sub: number; count: number }[] => (stack || []).filter((l) => /^dielectric \d+$/.test(l.name)).flatMap((l) => { const n = (l.subs || []).length + 1; return Array.from({ length: n }, (_, i) => ({ l, sub: i, count: n })); });
+    const dielName = (l: StackupLayer): string => `Dielectric ${l.name.replace(/^dielectric /, "")}`;   // FormatDielectricLayerName
     const addDiel = (): void => {
-      const names = dielectrics(); if (!names.length) return;
-      void import("../../dialogs/dom").then((m) => { const r = addBtn.getBoundingClientRect(); m.popupMenu(r.left, r.bottom, names.map((n) => ({ label: n, run: () => {
-        const l = (stack || []).find((x) => x.name === n.replace("Layer", "dielectric")); if (!l) return;
-        (l.subs = l.subs || []).push({ thickness: l.thickness || 0.1, material: l.material || "FR4", epsilonR: l.epsilonR ?? 4.5, lossTangent: l.lossTangent ?? 0.02 }); touched = true; draw(); } }))); });
+      const rows = dielRows(); if (!rows.length) return;
+      const labels = rows.map((r) => [r.count > 1 ? `Layer '${dielName(r.l)}' (sublayer ${r.sub + 1}/${r.count})` : dielName(r.l)]);
+      listDialog("Add Dielectric Layer", ["Layers"], labels, (row) => {
+        const r = rows[labels.findIndex((x) => x[0] === (row && row[0]))]; if (!r) return;
+        // AddDielectricPrms( sublayer + 1 ): a DIELECTRIC_PRMS with its defaults inserted after the picked sublayer
+        const subs = (r.l.subs = r.l.subs || []);
+        subs.splice(r.sub, 0, { thickness: 0, material: "", epsilonR: 1, lossTangent: 0, specFreq: 0, dielectricModel: "constant" });
+        touched = true; draw(); removeBtn.disabled = roBoard || !removable();
+      }, { listLabel: "Select layer to add:", child: true });
     };
+    const removable = (): boolean => (stack || []).some((l) => /^dielectric \d+$/.test(l.name) && (l.subs || []).length > 0);   // onRemoveDielUI
     const removeDiel = (): void => {
-      const withSubs = (stack || []).filter((l) => l.subs && l.subs.length);
-      if (!withSubs.length) { bar.show("No sub-layer to remove: a dielectric layer can only lose the sub-layers added to it.", 10000, "warning"); return; }
-      void import("../../dialogs/dom").then((m) => { const r = removeBtn.getBoundingClientRect(); m.popupMenu(r.left, r.bottom, withSubs.map((l) => ({ label: l.name.replace("dielectric", "Layer"), run: () => { (l.subs as unknown[]).pop(); touched = true; draw(); } }))); });
+      const rows = dielRows().filter((r) => r.count > 1); if (!rows.length) return;
+      const labels = rows.map((r) => [`Layer '${dielName(r.l)}' sublayer ${r.sub + 1}/${r.count}`]);
+      listDialog("Remove Dielectric Layer", ["Layers"], labels, (row) => {
+        const r = rows[labels.findIndex((x) => x[0] === (row && row[0]))]; if (!r) return;
+        removeDielectricPrms(r.l, r.sub); touched = true; draw(); removeBtn.disabled = roBoard || !removable();
+      }, { listLabel: "Select layer to remove:", child: true });
     };
     const adjust = (): void => {
       if (!stack) return;
@@ -313,7 +356,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       const lines = (stack || []).flatMap((l) => [l, ...(l.subs || []).map((s) => ({ ...l, ...s, subs: undefined, name: l.name }))]).map((l) => [l.name, l.type, l.material || "", l.thickness !== undefined ? fmtLenU(l.thickness) : "", l.color || "", l.epsilonR ?? "", l.lossTangent ?? ""].join("\t"));
       void navigator.clipboard?.writeText(lines.join("\n") + `\nBoard thickness: ${fmtLenU(BS().stackupLayersThickness(stack || []))}\n`);
     };
-    const addBtn = h("button", { type: "button", class: "btn", disabled: roBoard, onclick: addDiel }, "Add Dielectric Layer..."), removeBtn = h("button", { type: "button", class: "btn", disabled: roBoard, onclick: removeDiel }, "Remove Dielectric Layer...");
+    const addBtn = h("button", { type: "button", class: "btn", disabled: roBoard, onclick: addDiel }, "Add Dielectric Layer..."), removeBtn = h("button", { type: "button", class: "btn", disabled: roBoard || !removable(), onclick: removeDiel }, "Remove Dielectric Layer...");
     showBuilds();
     put(el, box("Manufacturer stackups", h("div", { class: "pd-row" },
         h("label", null, "Manufacturer"), vendor.el, h("label", null, "Board type"), type.el), builds),
@@ -321,9 +364,20 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       h("div", { class: "pd-row" }, h("label", null, "Board thickness from stackup:"), total, h("span", { style: "flex:1" }), h("button", { type: "button", class: "btn", disabled: roBoard, onclick: adjust }, "Adjust Dielectric Thickness"), h("button", { type: "button", class: "btn", onclick: exportClip }, "Export to Clipboard")),
       roBoard ? null : note(BOARD_NOTE));
     validate("Physical Stackup", () => {
+      // transferDataFromUIToStackup's checks, in its order, one message per kind
+      if (stack) {
+        const all = stack.flatMap((l) => [l as { thickness?: number; epsilonR?: number; lossTangent?: number }, ...(l.subs || [])]);
+        const msgs: string[] = [];
+        if (all.some((o) => o.epsilonR !== undefined && !(o.epsilonR >= 0))) msgs.push("Incorrect value for Epsilon R (Epsilon R must be positive or null if not used)");
+        if (all.some((o) => o.lossTangent !== undefined && !(o.lossTangent >= 0))) msgs.push("Incorrect value for Loss tg (Loss tg must be positive or null if not used)");
+        const freqs = Array.from(host.querySelectorAll<HTMLInputElement & { stackupFreq?: () => number | null }>("input[data-k=specFreq]"));
+        if (freqs.some((i) => i.stackupFreq && i.stackupFreq() == null)) msgs.push("Incorrect value for specified frequency (must be positive or null if not used)");
+        if (all.some((o) => o.thickness !== undefined && o.thickness < 0)) msgs.push("A layer thickness is < 0. Fix it");
+        if (msgs.length) return { msg: msgs.join("\n") };
+      }
       if (touched && stack && header) {
         const fin = finishNow ? finishNow() : BS().boardFinish(header.setup);
-        setupEdit.stackup = BS().stackupText(stack, fin, !!(impedance && impedance.get()));
+        setupEdit.stackup = BS().stackupText(stack, fin, !!(impedance && impedance.get()), false, header.version);
         setupEdit.boardThickness = BS().stackupLayersThickness(stack);
       }
       return null;
@@ -764,8 +818,8 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     register("Violation Severity", { edits: () => Array.from(pick, ([code, v]) => ({ path: [...DS, "rule_severities", code], value: v })) });
   };
 
-  let drillEdit: DrillProfile | null = null;
-  const sctx = (): SetupCtx => ({ pro, ds, header, roPro, roBoard, boardText, register: (label, edits) => register(label, { edits }), validate, layerRows: () => layerRows, setDrillProfile: (p) => { drillEdit = p; },
+  let drillEdit: DrillProfile | null = null; let zoneDefaultsEdit: string | null | undefined;
+  const sctx = (): SetupCtx => ({ pro, ds, header, roPro, roBoard, boardText, register: (label, edits) => register(label, { edits }), validate, layerRows: () => layerRows, setDrillProfile: (p) => { drillEdit = p; }, setZoneDefaults: (t) => { zoneDefaultsEdit = t; },
     selectionRefs: () => {
       const sel = (CollabTools as unknown as { pcb?: { state?: { sel?: Set<string> } } }).pcb?.state?.sel, doc = E.kdoc;
       if (!sel || !doc) return [];
@@ -882,7 +936,8 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       if (canBoard && header) {
         if (layersTouched) { const text = BS().layersText(layerRows); if (text !== layers0) sections.layers = text; }
         if (drillEdit) setupEdit.drillProfile = drillEdit;
-        if (setupEdit.maskPaste || setupEdit.finish || setupEdit.vias || setupEdit.dash || setupEdit.copper || setupEdit.drillProfile || setupEdit.stackup) sections.setup = BS().sectionText(BS().editSetup(header.setup, setupEdit));
+        if (zoneDefaultsEdit !== undefined) setupEdit.zoneDefaults = zoneDefaultsEdit;
+        if (setupEdit.maskPaste || setupEdit.finish || setupEdit.vias || setupEdit.dash || setupEdit.copper || setupEdit.drillProfile || setupEdit.stackup || setupEdit.zoneDefaults !== undefined) sections.setup = BS().sectionText(BS().editSetup(header.setup, setupEdit));
         if (setupEdit.stackup && header.general && setupEdit.boardThickness) {
           const g = BS().sectionText(header.general).replace(/\(thickness [^)]*\)/, `(thickness ${+setupEdit.boardThickness.toFixed(6)})`);
           if (g !== BS().sectionText(header.general)) sections.general = g;

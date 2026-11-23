@@ -294,16 +294,20 @@ export function duplicateChanges(doc: BoardDoc, ids: Iterable<string>, offset?: 
 }
 /**
  * EDIT_TOOL::copyToClipboardAsText's getItemText: a text, a field (footprint editor), a dimension or a text box gives
- * its text; a table its cells, tab-joined along a row and newline-joined down the rows; anything else (a footprint
- * included) has no string representation.
+ * its shown text (GetShownText( FOR_CANVAS ): its variables resolved, pcb-textvars.ts); a table its cells' shown texts,
+ * tab-joined along a row and newline-joined down the rows; anything else (a footprint included) has no string
+ * representation.  Without `doc` the texts are taken as written.
  */
-export function textOfItem(it: KItem): string {
-  if (it.kind === "gr_text" || it.kind === "gr_text_box" || it.kind === "fp_text" || it.kind === "fp_text_box") return K.str(it.node[1]);
-  if (it.kind === "property") return K.str(it.node[2]);
-  if (it.kind === "dimension") return K.str((K.kid(it.node, "gr_text") || [])[1]);
+export function textOfItem(it: KItem, doc?: KDoc | null): string {
+  const shown = (t: string, layerNode: SNode): string => (doc ? K.pcbTextShown(doc, t, K.str((K.kid(layerNode, "layer") || [])[1]) || "Dwgs.User") : t);
+  const unesc = K.unescapeText as (s: string) => string;
+  if (it.kind === "gr_text" || it.kind === "fp_text") return shown(K.str(it.node[1]), it.node);
+  if (it.kind === "gr_text_box" || it.kind === "fp_text_box") return shown(doc ? unesc(K.str(it.node[1])) : K.str(it.node[1]), it.node);
+  if (it.kind === "property") return shown(K.str(it.node[2]), it.node);
+  if (it.kind === "dimension") return shown(K.str((K.kid(it.node, "gr_text") || [])[1]), it.node);
   if (it.kind === "table") {
     const cols = Math.max(1, K.num((K.kid(it.node, "column_count") || [])[1]) || 1), cells = K.kid(it.node, "cells"); if (!cells) return "";
-    const texts = K.kids(cells, "table_cell").map((c) => K.str(c[1])); const rows: string[] = [];
+    const texts = K.kids(cells, "table_cell").map((c, i) => (doc ? K.tableCellShownText(doc, it.node, i, true) : K.str(c[1]))); const rows: string[] = [];
     for (let i = 0; i < texts.length; i += cols) rows.push(texts.slice(i, i + cols).join("\t"));
     return rows.join("\n");
   }

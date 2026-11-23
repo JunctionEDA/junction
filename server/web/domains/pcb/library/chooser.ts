@@ -188,7 +188,7 @@ const lastSearch: { symbol: string; power: string } = { symbol: "", power: "" };
 const fpPanes = { description: true, view3d: false, fpView: true, own3d: false };
 
 /** LIB_TREE_MODEL_ADAPTER::GetAvailableColumns: Item and Description, and for symbols the fields the tree can show. */
-export function availableColumns(kind: LibKind): string[] { return kind === "symbol" ? ["Item", "Description", "Value", "Footprint", "Keywords", "Reference"] : ["Item", "Description"]; }
+export function availableColumns(kind: LibKind): string[] { return kind === "symbol" ? ["Item", "Description", "Value", "Footprint", "Keywords", "Reference", "Datasheet"] : ["Item", "Description"]; }
 /** The shown columns, Item always first (EDA_REORDERABLE_LIST_DIALOG keeps it); SYMBOL_TREE_MODEL_ADAPTER shows
  *  Item, Description and Value at first. */
 export function shownColumns(kind: LibKind, saved?: unknown): string[] {
@@ -205,6 +205,7 @@ export function columnText(it: LibItem | undefined, col: string, description: st
   if (col === "Footprint") return it.footprint || "";
   if (col === "Keywords") return it.keywords || "";
   if (col === "Reference") return it.reference || "";
+  if (col === "Datasheet") return it.datasheet || "";
   return "";
 }
 
@@ -386,7 +387,7 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
     };
     const itemKey = (g: Group, it: LibItem) => g.key + "/" + it.id;
     /** LIB_TREE_NODE_ITEM's search terms: the item's own, and the shown columns' field values */
-    const fieldsOf = (it: LibItem): Record<string, string> => ({ Value: it.value || it.name, Footprint: it.footprint || "", Keywords: it.keywords || "", Reference: it.reference || "" });
+    const fieldsOf = (it: LibItem): Record<string, string> => ({ Value: it.value || it.name, Footprint: it.footprint || "", Keywords: it.keywords || "", Reference: it.reference || "", Datasheet: it.datasheet || "" });
     let best: { key: string; score: number; exact: boolean } | null = null;
 
     function buildRows(): void {

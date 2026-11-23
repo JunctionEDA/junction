@@ -32,7 +32,13 @@ const helpers = (): SchHelpers | null => { const m = schMod(); return m && m._ ?
 interface Pick { item: KItem; at?: [number, number]; pin?: string }
 
 /** The highlight: the net's name, the bus-members toggle and the item the navigator should show selected. */
-export const HL = { name: null as string | null, busMembers: false, nav: null as { inst: number; id: string; pin?: string } | null };
+export const HL = { name: null as string | null, busMembers: false, nav: null as { inst: number; id: string; pin?: string } | null, chain: null as string | null };
+/** editor/netchains.ts's view of the net chains (NETCHAIN_MANAGER::GetNetChainByName / GetNetChainForNet) and the status line. */
+export const chainHooks = {
+  byName: null as ((name: string) => { name: string; nets: string[] } | null) | null,
+  forNet: null as ((net: string) => { name: string; nets: string[] } | null) | null,
+  status: null as ((name: string) => string | null) | null,
+};
 /** The sheet instance to show a file as when it is opened from the navigator (a file used twice has two). */
 let preferHuman: string | null = null;
 
@@ -121,16 +127,27 @@ function changed(): void { for (const fn of listeners) { try { fn(); } catch (e)
 /** UpdateNetHighlighting: brighten the items of the highlighted net on this sheet; the status bar names the net. */
 export function applyHighlight(ctx: ToolCtx = (toolCtx as unknown as () => ToolCtx)()): void {
   const h = helpers(); if (!h) return;
-  if (!HL.name) { h.setHighlight(ctx, null); setStatusBar({ message: "" }); changed(); return; }
+  const chain = HL.chain && chainHooks.byName ? chainHooks.byName(HL.chain) : null;
+  if (!HL.name && !chain) { h.setHighlight(ctx, null); setStatusBar({ message: "" }); changed(); return; }
   const c = netMap(), inst = currentInstance(c);
-  const keys = c && inst ? SN().collectKeys(c.map, HL.name, inst.index, HL.busMembers) : new Set<string>();
+  const keys = c && inst && HL.name ? SN().collectKeys(c.map, HL.name, inst.index, HL.busMembers) : new Set<string>();
+  // the highlighted chain's nets are collected too (UpdateNetHighlighting)
+  if (c && inst && chain) for (const n of chain.nets) for (const k of SN().collectKeys(c.map, n, inst.index, false)) keys.add(k);
   h.setHighlight(ctx, keys.size ? keys : null);
-  setStatusBar({ message: SN().highlightStatus(HL.name) });
+  // UpdateNetHighlightStatus: "Net chain members: …" for a highlighted chain, else the net
+  const chainLine = chain && chainHooks.status ? chainHooks.status(chain.name) : null;
+  setStatusBar({ message: chainLine !== null ? chainLine : HL.name ? SN().highlightStatus(HL.name) : "" });
   changed();
 }
 /** SetHighlightedConnection( name ): highlight a net by name (the Search pane, a cross-probe, a test). */
 export function highlightName(name: string | null, ctx?: ToolCtx): void { HL.name = name || null; HL.busMembers = false; HL.nav = null; applyHighlight(ctx); }
-export function clearHighlight(ctx?: ToolCtx): void { HL.name = null; HL.busMembers = false; HL.nav = null; applyHighlight(ctx); }
+export function clearHighlight(ctx?: ToolCtx): void { HL.name = null; HL.busMembers = false; HL.nav = null; HL.chain = null; applyHighlight(ctx); }
+/** SCH_EDIT_FRAME::HandleRemoteNetHighlight: the net, and its chain when it is on one. */
+export function highlightRemote(name: string | null, ctx?: ToolCtx): void {
+  const chain = name && chainHooks.forNet ? chainHooks.forNet(name) : null;
+  HL.chain = chain ? chain.name : null;
+  highlightName(name, ctx);
+}
 
 /** GetConnectionName of the picked item on this sheet: a pin by its number, a sheet pin by its name. */
 export function nameOfPick(pick: Pick | null): { name: string | null; inst: number; id: string; pin?: string } | null {
@@ -157,9 +174,14 @@ export function nameOfPick(pick: Pick | null): { name: string | null; inst: numb
 export function highlightPick(ctx: ToolCtx, pick: Pick | null): void {
   const r = nameOfPick(pick);
   if (!r || !r.name) { clearHighlight(ctx); return; }
-  if (r.name !== HL.name) { HL.busMembers = false; HL.name = r.name; }
-  else HL.busMembers = !HL.busMembers;
-  HL.nav = { inst: r.inst, id: r.id, pin: r.pin };
+  // a new net drops the chain highlight; the same net again highlights its chain when it is on one, else toggles
+  // the bus members
+  if (r.name !== HL.name) { HL.busMembers = false; HL.chain = null; HL.name = r.name; HL.nav = { inst: r.inst, id: r.id, pin: r.pin }; }
+  else {
+    const chain = chainHooks.forNet ? chainHooks.forNet(r.name) : null;
+    if (chain) { HL.name = null; HL.chain = chain.name; HL.busMembers = false; }
+    else { HL.busMembers = !HL.busMembers; HL.nav = { inst: r.inst, id: r.id, pin: r.pin }; }
+  }
   applyHighlight(ctx);
 }
 
@@ -171,11 +193,11 @@ function docChanged(ctx: ToolCtx, sameDoc: boolean): void {
     // the sheet just left: what was on screen is newer than the server's copy for a moment
     const left = lastLive && lastLive.docId !== cur ? schDocs().find((d) => d.docId === lastLive!.docId) : null;
     if (left && lastLive) sheets.set(left.docId, { file: { doc: lastLive.doc, uuid: String((lastLive.doc as KDoc & { uuid?: string }).uuid || ""), file: left.path }, at: Date.now() });
-    void loadSheets().then(() => { syncInstancePath(); if (HL.name) applyHighlight(); else changed(); });
+    void loadSheets().then(() => { syncInstancePath(); if (HL.name || HL.chain) applyHighlight(); else changed(); });
   }
   if (cur && E.kdoc) lastLive = { docId: cur, doc: E.kdoc as KDoc };
   refreshNetTexts(ctx);
-  if (HL.name) applyHighlight(ctx); else changed();
+  if (HL.name || HL.chain) applyHighlight(ctx); else changed();
 }
 
 /**
@@ -212,6 +234,55 @@ function labelTextVar(item: KItem, token: string): string | null {
   return null;
 }
 interface LabelVarCanvas { setLabelTextVar?(fn: ((item: KItem, token: string) => string | null) | null): void; refreshLabelTextVars?(doc: KDoc): boolean }
+interface SymVarCanvas {
+  symVars?: { net: unknown; unitPlaced: unknown; crossRef: unknown };
+  symbolInstance?(n: SNode, path: string | null): { ref: string; unit: number | null } | null;
+  resolveCrossReference?(sheets: { doc: KDoc; path: string | null }[], token: string, depth: number): string;
+}
+/** A symbol's reference and unit on a sheet instance (SCH_SYMBOL::GetRef( path, false ) / GetUnitSelection( path )). */
+function refAndUnit(node: SNode, path: string): { ref: string; unit: number } {
+  const K = KiCadCanvas as unknown as SymVarCanvas & { kid(n: SNode, k: string): SNode | null; kids(n: SNode, k: string): SNode[]; str(v: unknown): string };
+  const inst = K.symbolInstance ? K.symbolInstance(node, path) : null, rp = K.kids(node, "property").find((p) => K.str(p[1]) === "Reference"), u = K.kid(node, "unit");
+  return { ref: inst && inst.ref ? inst.ref : rp ? K.str(rp[2]) : "", unit: inst && inst.unit !== null ? inst.unit : u ? Number(u[1]) || 1 : 1 };
+}
+/** The placed symbol (and its sheet instance) with a reference and unit, anywhere in the hierarchy. */
+function findUnit(c: Computed, ref: string, unit: number): { inst: SheetInstance; it: KItem } | null {
+  for (const inst of c.instances) {
+    const d = c.docs.get(inst.file), path = "/" + inst.uuidPath.join("/"); if (!d) continue;
+    for (const it of d.items.values()) { if (it.kind !== "symbol") continue; const ru = refAndUnit(it.node, path); if (ru.ref === ref && ru.unit === unit) return { inst, it }; }
+  }
+  return null;
+}
+/**
+ * SCH_SYMBOL::ResolveTextVar's NET_NAME( pin ), SHORT_NET_NAME( pin ) and NET_CLASS( pin ) from the connection graph:
+ * SCH_PIN::GetConnectionName( path, local ) ("NC" for an unconnected pin's short name) and GetEffectiveNetClass.  A
+ * pin of another unit (`unit`) is the one on the sheet where that unit is placed.  null when the pin has no connection.
+ */
+function symbolNetVar(item: KItem, pin: string, kind: "NET_NAME" | "SHORT_NET_NAME" | "NET_CLASS", unit: number | null): string | null {
+  const doc = E.kdoc as KDoc | null; if (!doc || !doc.items.has(item.id)) return null;
+  const c = netMap(), here = currentInstance(c); if (!c || !here) return null;
+  let at: SheetInstance = here, id = item.id;
+  if (unit !== null) { const f = findUnit(c, refAndUnit(item.node, "/" + here.uuidPath.join("/")).ref, unit); if (!f) return null; at = f.inst; id = f.it.id; }
+  const name = c.index.get(at.index + "|" + id + "#pin:" + pin); if (name === undefined) return null;
+  if (kind === "NET_CLASS") return name ? netclassOfNet(name) : "";
+  if (kind === "SHORT_NET_NAME") { const local = NL().unescapeNetName(name.slice(name.lastIndexOf("/") + 1)); return local.toLowerCase().startsWith("unconnected") ? "NC" : local; }
+  return NL().unescapeNetName(name);
+}
+/** Whether a unit of `ref` is placed anywhere (false: "<Unit X not placed>"), with that unit's pin's alternate. */
+function symbolUnitPlaced(item: KItem, ref: string, unit: number, pin?: string): { alt?: string } | false | null {
+  const c = netMap(); if (!c || !c.instances.length) return null;
+  const f = findUnit(c, ref, unit); if (!f) return false;
+  const K = KiCadCanvas as unknown as { kid(n: SNode, k: string): SNode | null; kids(n: SNode, k: string): SNode[]; str(v: unknown): string };
+  const ip = pin !== undefined ? K.kids(f.it.node, "pin").find((p) => K.str(p[1]) === pin) : undefined, a = ip ? K.kid(ip, "alternate") : null;
+  return a && K.str(a[1]) ? { alt: K.str(a[1]) } : {};
+}
+/** SCHEMATIC::ResolveCrossReference over every sheet instance of the hierarchy (the open sheet as it is now). */
+function symbolCrossRef(token: string, depth: number): string | null {
+  const KC = KiCadCanvas as unknown as SymVarCanvas, c = netMap(), cur = curEntry(); if (!c || !c.instances.length || !KC.resolveCrossReference) return null;
+  const sheets: { doc: KDoc; path: string | null }[] = [];
+  for (const inst of c.instances) { const d = cur && inst.file === cur.path && E.kdoc ? E.kdoc as KDoc : c.docs.get(inst.file); if (d) sheets.push({ doc: d, path: "/" + inst.uuidPath.join("/") }); }
+  return KC.resolveCrossReference(sheets, token, depth);
+}
 /** The labels that show a net's name or class are drawn again when the nets may have changed. */
 function refreshNetTexts(ctx?: ToolCtx): void {
   const KC = KiCadCanvas as unknown as LabelVarCanvas, doc = E.kdoc as KDoc | null;
@@ -387,9 +458,10 @@ function hierarchyPages(): string[] | null {
 }
 export function installSchNets(): void {
   const KC = KiCadCanvas as unknown as LabelVarCanvas; if (KC.setLabelTextVar) KC.setLabelTextVar(labelTextVar);
+  const SV = (KiCadCanvas as unknown as SymVarCanvas).symVars; if (SV) { SV.net = symbolNetVar; SV.unitPlaced = symbolUnitPlaced; SV.crossRef = symbolCrossRef; }
   const m = schMod(); if (!m || !m.setNetHighlighter) return;
   (m.state as { hierarchyPages?: (() => string[] | null) | null }).hierarchyPages = hierarchyPages;
-  m.setNetHighlighter({ highlightPick: userHighlightPick, clear: (ctx: ToolCtx) => { clearHighlight(ctx); netProbe.send?.([]); }, active: () => !!HL.name, docChanged, wireDriverName, labelDefaults, busAliases, stepNetItem });
+  m.setNetHighlighter({ highlightPick: userHighlightPick, clear: (ctx: ToolCtx) => { clearHighlight(ctx); netProbe.send?.([]); }, active: () => !!HL.name || !!HL.chain, docChanged, wireDriverName, labelDefaults, busAliases, stepNetItem });
 }
 /** editor/crossprobe.ts: where the user's net highlight goes (SendCrossProbeNetName / SetCrossProbeConnection). */
 export const netProbe = { send: null as ((names: string[]) => void) | null };
@@ -400,6 +472,7 @@ export const netProbe = { send: null as ((names: string[]) => void) | null };
 function userHighlightPick(ctx: ToolCtx, pick: Pick | null): void {
   const before = HL.name;
   highlightPick(ctx, pick);
+  if (!HL.name && HL.chain) return;   // the same net again, escalated to its chain: no cross-probe
   if (!HL.name) { netProbe.send?.([]); return; }
   if (HL.name === before) return;
   const c = netMap(), e = c ? c.map.get(HL.name) : undefined; if (!e) { netProbe.send?.([]); return; }

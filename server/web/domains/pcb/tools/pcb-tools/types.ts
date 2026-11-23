@@ -58,7 +58,7 @@ export interface PcbCtx extends ToolCtx {
   setLocalOrigin?(p: Pt): void;
   /** make a layer visible (the Appearance panel's SetLayerVisible( layer, true )) */
   showLayer?(layer: string): void;
-  /** APPEARANCE_CONTROLS / SetObjectVisible( layer, true ): an object layer of the Appearance panel turned on ("subgrids", …) */
+  /** APPEARANCE_CONTROLS / SetObjectVisible( layer, true ): an object layer of the Appearance panel turned on ("subgrids", "zones", …) */
   showObject?(id: string): void;
   /** the toolbar group's shown action (the Arc group follows the arc drawing mode) */
   setGroupCurrent?(group: string, action: string): void;
@@ -155,6 +155,8 @@ export type PcbState = {
   settings: DesignSettings | null; settingsSrc: unknown; settingsCache: DesignSettings | null; druSrc?: string | null; highlightNet: string | null;
   /** the nets the canvas highlights (RENDER_SETTINGS::GetHighlightNetCodes), BOARD_INSPECTION_TOOL::m_currentlyHighlighted and m_lastHighlighted, as net keys */
   hlShown: string[]; hlCurrent: string[]; hlLast: string[];
+  /** BOARD_INSPECTION_TOOL::m_highlightedNetChain: the chain whose nets are highlighted, or "" */
+  hlChain?: string;
   /** the router's caches (per document change) and the obstacles shown in violation */
   docVer: number; rworld: RouterWorld | null; nlc: { doc: BoardDoc; ver: number; nl: Netlist } | null; violations: { obs: Obstacle[]; at: Pt } | null;
   /** the length tuner: the pattern being placed, the track under the cursor */
@@ -163,7 +165,7 @@ export type PcbState = {
   rs: import("./router-settings").RouterSettings; tuneSettings: { single: MeanderSettings; diffpair: MeanderSettings; skew: MeanderSettings };
   genEdit?: import("./tuning-edit").GenEdit | null;
   /** the board's custom rules for the tuner: a length / skew constraint on the pattern's tracks ({ text, name, min, opt, max } in mm) */
-  ruleConstraint?: ((doc: BoardDoc, what: string, a: KItem | null, b: KItem | null) => { text: string; name: string; min: number | null; opt: number | null; max: number | null; severity?: string | null } | null) | null;
+  ruleConstraint?: ((doc: BoardDoc, what: string, a: KItem | null, b: KItem | null) => { text: string; name: string; min: number | null; opt: number | null; max: number | null; severity?: string | null; timeDomain?: boolean } | null) | null;
   /** the project's custom rules (.kicad_dru), parsed */
   dru?: { rules: import("./dru").DruRule[]; errors: string[] } | null;
   /** rule-resolver: the rules with a clearance-type constraint, for the parsed dru they came from */
@@ -173,7 +175,8 @@ export type PcbState = {
   /** ROUTER::VisibleViewArea when the last shove ran (the canvas' visible world box; SHOVE::runOptimizer keeps to it) */
   viewArea?: Box | null;
   move?: SelectMove | null; pending?: PendingDrag | null; sworld?: { doc: BoardDoc; ver: number; key: string; w: ShoveWorld } | null;
-  joints?: Joints; strokeW?: number | null; drawOrigin?: Pt | null; peditCtrl?: boolean; /** Shift held during a point-editor drag (grid.SetSnap( !MD_SHIFT )) */ peditShift?: boolean; lastDown?: { t: number; x: number; y: number } | null; pick?: { done: (res: Pt | KItem | null) => void; prompt: string; filter?: (it: KItem) => boolean;
+  joints?: Joints; strokeW?: number | null;
+  /** DRAWING_TOOL::m_stroke's line style and m_layer, the layer the remembered stroke is for (SetStroke) */ strokeStyle?: string | null; strokeLayer?: string | null; drawOrigin?: Pt | null; peditCtrl?: boolean; /** Shift held during a point-editor drag (grid.SetSnap( !MD_SHIFT )) */ peditShift?: boolean; lastDown?: { t: number; x: number; y: number } | null; pick?: { done: (res: Pt | KItem | null, at?: Pt) => void; prompt: string; filter?: (it: KItem) => boolean;
     /** a two-point pick (TWO_POINT_GEOMETRY_MANAGER): the prompts, the preview drawn between the points, the first point once set, the end under the cursor */
     two?: { first: string; second: string; preview: "axis" | "ruler"; done: (a: Pt | null, b: Pt | null) => void }; from?: Pt | null; cur?: Pt | null; dragged?: boolean } | null;
   /** the interactive offset's arrow, left in place while its dialog is open ([cursor end, arrow end]) */ pickKeep?: [Pt, Pt] | null; popup?: { text: string; at: Pt; until: number } | null;
@@ -191,6 +194,8 @@ export type PcbState = {
   /** TOOLS_HOLDER::GetMoveWarpsCursor (Preferences > Common) */ moveWarpsCursor?: boolean;
   /** SNAP_INFERENCE_SETTINGS of the editor (Preferences > Snapping) */ snapInference?: Partial<import("./grid-helper").SnapInferenceSettings> | null;
   zoneMode?: { mode: "cutout" | "similar"; src: string } | null; zoneModeNext?: { mode: "cutout" | "similar"; src: string } | null;
+  /** GRAPHIC_EDIT_TOOL (Extend Line or Arc / Trim Shape): what the hover planned (graphic-edit.ts) */
+  gedit?: import("./graphic-edit").GeHover | null;
 };
 
 /** A copper shape: a core (point, segment, polyline, turned rectangle or polygon) plus an outward offset r. */
@@ -236,13 +241,15 @@ export interface DesignSettings {
   clearance: number; edgeClearance: number; trackWidth: number; viaDiameter: number; viaDrill: number; minTrackWidth: number; minViaDiameter: number; minThroughDrill: number;
   minClearance?: number; minConn?: number; minViaAnnular?: number; minMicroViaDiameter?: number; minMicroViaDrill?: number; holeClearance?: number; minHoleToHole?: number; minTextHeight?: number; minTextThickness?: number; minSilkLineWidth?: number;
   netclasses: Record<string, NetclassRules>; netclassOf: Record<string, string | string[]>; patterns: { re: RegExp; netclass: string; pattern?: string }[]; netclassRaw?: Record<string, Record<string, unknown>>; severities: Record<string, string>;
+  /** net_settings.net_chain_classes: each net chain's class (NET_SETTINGS::GetNetChainClass) */
+  netChainClasses?: Record<string, string>;
   [k: string]: unknown;
 }
 /** The .kicad_pro fields designSettings reads (parsed JSON), or design settings already in our shape. */
 export interface DesignSource {
   netclasses?: unknown; clearance?: unknown;
   board?: { design_settings?: { rules?: Record<string, number | undefined>; rule_severities?: Record<string, unknown>; defaults?: DesignDefaults } };
-  net_settings?: { classes?: unknown; netclass_assignments?: Record<string, string | string[]>; netclass_patterns?: unknown };
+  net_settings?: { classes?: unknown; netclass_assignments?: Record<string, string | string[]>; netclass_patterns?: unknown; net_chain_classes?: unknown };
 }
 /** A DRC finding (drc): where, how bad, the message, the items, the rule. */
 export interface DrcMarker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; /** the net of an unconnected-items marker (the dialog shows it on the items, not in the text) */ net?: string; kiids?: string[]; layer?: string; rule?: string; ruleSeverity?: boolean; /** PCB_MARKER::SetPath's start and end (the error legend) */ path?: [Pt, Pt] }
@@ -291,6 +298,8 @@ export interface TrackLine {
   arc?: KItem; arcDiag?: boolean; tmpl?: KItem;
   /** the line's arcs over its points (assembleArcLine) */
   arcs?: LineArcs;
+  /** the line with its arcs (the length tuner's NODE::AssembleLine) */
+  ch?: import("./meander").Chain;
 }
 /** An arc of a line: its three points as on the board, and the board arc it came from. */
 export interface LineArc { a: Pt; m: Pt; b: Pt; id?: string; item?: KItem }

@@ -195,7 +195,7 @@ export function instanceRef(node: SNode, path: string, project: string | undefin
 }
 
 /** How many units the library symbol of a placed symbol has. */
-function unitCount(doc: KDoc, node: SNode): number {
+export function unitCount(doc: KDoc, node: SNode): number {
   const id = kidStr(node, "lib_name") || kidStr(node, "lib_id");
   const lib = doc.lib.get(id) || doc.lib.get(kidStr(node, "lib_id"));
   if (!lib) return 1;
@@ -1803,4 +1803,4 @@ export function projectBoardPath(docs: { docId: string; path: string; docType: s
   return { path: path || (doc ? doc.path : ""), doc };
 }
 
-export const pcbNetlist = { newBoardText, projectBoardPath, instanceRef, buildNetlist, planUpdate, componentVariants, schematicParity, footprintFromLibrary, escapeNetName, unescapeNetName, busVector, netlistOptions };
+export const pcbNetlist = { newBoardText, projectBoardPath, instanceRef, buildNetlist, planUpdate, componentVariants, schematicParity, footprintFromLibrary, escapeNetName, unescapeNetName, busVector, netlistOptions, unitCount };

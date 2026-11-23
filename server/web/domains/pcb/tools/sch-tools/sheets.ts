@@ -48,7 +48,7 @@ export function sheetFileFor(name: string) { return normSheetFile(str(name).trim
 /** A new sheet file: written at the root sheet's version, as SCH_IO_KICAD_SEXPR does for a sheet never loaded (0: current). */
 export function emptySheetDoc(version = 0) { return `(kicad_sch (version ${version || SEXPR_SCHEMATIC_FILE_VERSION}) (generator "eeschema") (generator_version "${GENERATOR_VERSION}") (uuid "${K.newUuid()}") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "1"))))\n`; }
 // Reference the project doc for a sheet file, creating it (POST …/docs, then snapshot 0) when there is none.
-export async function ensureSheetDoc(ctx: SchCtx, file: string) {
+export async function ensureSheetDoc(ctx: SchCtx, file: string, seed?: string) {
   file = normSheetFile(file); if (!file) throw new Error("no sheet file name");
   const cur = currentDoc(ctx), dir = cur ? dirName(cur.path) : "", target = joinPath(dir, file);
   const found = existingSheet(ctx, target, file);
@@ -57,7 +57,7 @@ export async function ensureSheetDoc(ctx: SchCtx, file: string) {
   // the server's reply: the new (or existing) document's id and path
   const res = (await ctx.api(`/api/projects/${ctx.project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path: target, docType: "kicad_sch" }) })) as { docId?: string; path?: string; existing?: boolean } | null;
   if (!res || !res.docId) throw new Error("no document id returned");
-  if (!res.existing) await ctx.api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: emptySheetDoc(Number((ctx.doc as { version?: number } | null)?.version) || 0) });   // the open sheet's version: the project's
+  if (!res.existing) await ctx.api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: seed !== undefined ? seed : emptySheetDoc(Number((ctx.doc as { version?: number } | null)?.version) || 0) });   // the open sheet's version: the project's (a design block's sheet: the block's schematic)
   const entry = { docId: res.docId as string, path: res.path || target, docType: "kicad_sch" };
   if (Array.isArray(ctx.docs) && !ctx.docs.some((d) => d && d.docId === entry.docId)) ctx.docs.push(entry);
   return { file, docId: entry.docId, created: !res.existing };
@@ -121,7 +121,7 @@ export function placeSheet(ctx: SchCtx, a: Pt, b: Pt, name: string, file: string
   return job.promise;
 }
 // The sheet from DIALOG_SHEET_PROPERTIES: its file is linked (after asking, when it exists) or created, then the sheet is added.
-export function placeSheetNode(ctx: SchCtx, node: SNode, file: string, label = "Draw Sheet") {
+export function placeSheetNode(ctx: SchCtx, node: SNode, file: string, label = "Draw Sheet", opts?: { seed?: string; group?: { name: string; libId: string } | null }) {
   if (S.sheetJob) { ctx.toast("Still creating the previous sheet…"); return S.sheetJob.promise; }
   const doc = ctx.doc, job: SheetJob = { doc, promise: null }; S.sheetJob = job;
   job.promise = (async () => {
@@ -130,13 +130,21 @@ export function placeSheetNode(ctx: SchCtx, node: SNode, file: string, label = "
       const cur = currentDoc(ctx), dir = cur ? dirName(cur.path) : "", target = joinPath(dir, file);
       const exists = existingSheet(ctx, target, file);
       if (exists && root.KDialogs && root.KDialogs.confirm && !(await root.KDialogs.confirm("Confirmation", `'${baseName(file)}' already exists.\n\nLink '${target}' to this file?`))) return null;
-      const ref = await ensureSheetDoc(ctx, file);
+      const ref = await ensureSheetDoc(ctx, file, opts && opts.seed);
       if (S.sheetJob !== job || ctx.doc !== doc) return null;
       const fp = kids(node, "property").find((q) => /^Sheet ?file$/i.test(str(q[1]))); if (fp) fp[2] = ref.file;
       const { item, change } = addNode(doc, node);
-      ctx.commit([change], label, { newSheet: true });
+      const changes = [change];
+      // drawSheetFromDesignBlock with place_as_group: the sheet goes into a new group linked to the block
+      let sel = item.id;
+      if (opts && opts.group) {
+        let name = opts.group.name; const taken = new Set<string>(); for (const it of doc.items.values()) if (it.kind === "group") taken.add(str(it.node[1]));
+        if (taken.has(name)) { let n = 1; while (taken.has(name + n)) n++; name = name + n; }   // UniqueGroupName
+        const g = addNode(doc, ["group", name, ["uuid", K.newUuid()], ["lib_id", opts.group.libId], ["members", item.id]]); changes.push(g.change); sel = g.item.id;
+      }
+      ctx.commit(changes, label, { newSheet: true });
       rememberPlaced(item.kind, item.node);
-      ctx.setSelected({ id: item.id });
+      ctx.setSelected({ id: sel });
       return item;
     } catch (e) { ctx.toast("Could not create the sheet: " + ((e && (e as Error).message) || e), 4000); return null; }
     finally { if (S.sheetJob === job) S.sheetJob = null; ctx.requestRender(); }

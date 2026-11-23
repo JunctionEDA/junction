@@ -174,6 +174,7 @@ export function uploadProject(name: string, files: UploadFile[], onProgress: (fr
 export function isProjectFile(path: string): boolean {
   const base = path.split("/").pop() || path;
   if (base === "sym-lib-table" || base === "fp-lib-table" || base === "design-block-lib-table") return true;
+  if (/(^|\/)[^/]+\.kicad_block\/[^/]+\.(kicad_sch|kicad_pcb|json)$/i.test(path)) return true;   // a design block's files (design_block_file)
   return /\.(kicad_pro|kicad_sch|kicad_pcb|kicad_prl|kicad_sym|kicad_mod|kicad_dru|kicad_wks|step|stp|wrl|wrz|lib|sub|cir|mod|model|sp|spice|ibs|in|equ|wbk)$/i.test(base);
 }
 /** Another EDA tool's design the server converts to a KiCad project (server/src/nonkicad_import.rs): EasyEDA in every

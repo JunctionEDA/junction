@@ -6,7 +6,12 @@ export interface CandEntry { id: string; item: KItem; pad: boolean; geoms: GeomP
 /** The candidate id of a footprint field: GENERAL_COLLECTOR lists PCB_FIELD_T beside its footprint. */
 export const fieldCandidateId = (fpId: string, name: string) => `${fpId}@field:${name}`;
 /** guessCandidates' options. */
-export interface GuessOpts { px?: number; activeLayer?: string; hidden?: Set<string> | null; viewport?: number[] | null; highContrast?: boolean }
+export interface GuessOpts { px?: number; activeLayer?: string; hidden?: Set<string> | null; viewport?: number[] | null; highContrast?: boolean;
+  /** a DRC marker (PCB_MARKER_T) under the cursor, collected with the items: its polygon (mm) and violation layer.  It
+   *  takes part as the candidate MARKER_CANDIDATE (hitTestDistance: the polygon; GetCoverageArea: its area). */
+  marker?: { pts: Pt[]; layer?: string } | null }
+/** guessCandidates' id for GuessOpts.marker. */
+export const MARKER_CANDIDATE = "@marker";
 import { statusPopup } from "./assistants";
 import { deleteChanges } from "./changes";
 import { expandGroups, isLocked } from "./groups";
@@ -167,9 +172,15 @@ export function entryOnLayer(e: CandEntry, layer: string) {
  * activeLayer, hidden (Set of layer keys), viewport ([w, h] mm), highContrast }.
  */
 export function guessCandidates(doc: BoardDoc, ids: string[], where: Pt, opts?: GuessOpts | null): string[] {
-  opts = opts || {}; if (!ids || ids.length < 2) return (ids || []).slice();
+  opts = opts || {}; const mk = opts.marker;
+  if (!ids || ids.length + (mk ? 1 : 0) < 2) return mk ? [MARKER_CANDIDATE] : (ids || []).slice();
   const px = opts.px || 0.01, maxSlop = 5 * px, [x, y] = where, active = opts.activeLayer || S.layer || "F.Cu";
-  let list = ids.map((id: string) => candidateEntry(doc, id, opts!.hidden)).filter(Boolean) as CandEntry[]; if (list.length < 2) return list.map((e) => e.id);
+  let list = ids.map((id: string) => candidateEntry(doc, id, opts!.hidden)).filter(Boolean) as CandEntry[];
+  if (mk) {
+    const g = { t: "poly", pts: mk.pts, fill: true, close: true, w: 0, layer: mk.layer } as unknown as GeomPrim;
+    list.push({ id: MARKER_CANDIDATE, item: { id: MARKER_CANDIDATE, kind: "marker", node: ["marker"] as unknown as SNode, geom: [g] } as unknown as KItem, pad: false, geoms: [g] });
+  }
+  if (list.length < 2) return list.map((e) => e.id);
   // a silk layer in front: single-layer silk texts and shapes; a courtyard in front (high contrast): footprints
   let preferred: CandEntry[] = [];
   if (SILK_RE.test(active)) preferred = list.filter((e) => e.field ? SILK_RE.test(String((e.geoms[0] as { layer?: string }).layer || "")) : !e.pad && e.item.kind !== "footprint" && e.item.kind !== "zone" && (TEXTISH.has(e.item.kind) || /^gr_|^table/.test(e.item.kind)) && SILK_RE.test(layerOf(e.item.node, "")));

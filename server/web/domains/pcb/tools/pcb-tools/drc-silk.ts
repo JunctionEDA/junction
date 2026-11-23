@@ -131,7 +131,7 @@ export function polyIndex(pts: Pt[]) {
 
 // ---------------------------------------------------------------- the board's items as elements
 /** The board's (setup …): the settings' own copy (Board Setup), else the one the editor cached with the board. */
-function setupOf(doc: KDoc, s: DesignSettings): SNode | null {
+export function setupOf(doc: KDoc, s: DesignSettings): SNode | null {
   const own = s.boardSetup as SNode | string | null | undefined;
   if (own && typeof own !== "string") return own;
   if (typeof own === "string") { try { const t = K.parse(own); return (t && (t[0] === "setup" ? t : K.kid(t, "setup"))) || null; } catch (e) { return null; } }
