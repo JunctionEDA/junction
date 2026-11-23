@@ -99,6 +99,7 @@ export const KEYWORDS: { [id: string]: string } = {
   "sketch-pierce": "constraint relation path through plane",
   measure: "distance length angle radius area",
   "section-view": "cross-section cut view slice",
+  "render-mode": "raytrace ray tracing raytraced photo photoreal photorealistic picture image turntable video film 360 studio lighting visualize",
   comment: "note annotate review",
   "toggle-planes": "hide show default planes origin",
   "appearance-view-mode": "shaded wireframe hidden line edges render",

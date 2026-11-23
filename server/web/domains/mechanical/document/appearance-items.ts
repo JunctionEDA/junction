@@ -11,6 +11,7 @@
 // keeps its colour across rebuilds as long as it keeps its name.  Hide, show and isolate are not stored: they
 // are each person's own view.
 import { addedChange, byOrder, clone, modifiedChange, newId, orderBetween, removedChange, type Item, type ItemChange, type ItemDoc, type JsonObject } from "../../../shared/itemdoc/itemdoc";
+import { cleanFinish, type SurfaceFinish } from "../../../shared/render/materials";
 
 export const APPEARANCE_ITEM_ID = "appearance";
 
@@ -20,6 +21,12 @@ export interface BodyLook extends JsonObject {
   metalness?: number; roughness?: number;
   /** the library appearance these came from (document/materials-library.ts), for a reader that knows the library */
   appearance?: string;
+  /**
+   * What a rendered picture needs beyond those two (shared/render/materials.ts SurfaceFinish): a clear coat, how
+   * much light goes through and how it bends, sheen.  Optional numbers; a reader that ignores them still draws
+   * the part right in the shaded view, and a look without them is rendered from what its other numbers imply.
+   */
+  finish?: { [key: string]: number };
 }
 export interface AppearanceItem extends Item { type: "appearance"; bodies: { [bodyId: string]: BodyLook } }
 
@@ -43,6 +50,8 @@ export function looksOf(doc: ItemDoc | null): { [bodyId: string]: BodyLook } {
     if (typeof raw.metalness === "number" && Number.isFinite(raw.metalness)) look.metalness = unit(raw.metalness);
     if (typeof raw.roughness === "number" && Number.isFinite(raw.roughness)) look.roughness = unit(raw.roughness);
     if (typeof raw.appearance === "string" && raw.appearance.length <= 80) look.appearance = raw.appearance;
+    const finish = cleanFinish(raw.finish);
+    if (finish) look.finish = finish as { [key: string]: number };
     if (raw.faces && typeof raw.faces === "object") {
       const faces: { [n: string]: string } = {};
       for (const [n, c] of Object.entries(raw.faces)) if (isColor(c)) faces[n] = c.toLowerCase();
@@ -82,17 +91,19 @@ export function setBodyLook(doc: ItemDoc, bodyIds: readonly string[], patch: { c
 }
 
 /**
- * Give whole bodies a finished appearance: colour, metalness, roughness, opacity (null: opaque) and the library
- * id it came from.  It replaces what the body had, its faces' own colours included (a part dressed in brushed
+ * Give whole bodies a finished appearance: colour, metalness, roughness, opacity (null: opaque), the finish a
+ * rendered picture uses and the library id it came from.  It replaces what the body had, its faces' own colours included (a part dressed in brushed
  * aluminium is that all over); `faces` then colours faces of other bodies in the same change.
  */
-export function setBodyAppearance(doc: ItemDoc, bodyIds: readonly string[], a: { color: string; metalness: number; roughness: number; opacity?: number | null; appearance?: string }, faces: readonly { body: string; name: string; color: string }[] = []): ItemChange[] {
+export function setBodyAppearance(doc: ItemDoc, bodyIds: readonly string[], a: { color: string; metalness: number; roughness: number; opacity?: number | null; appearance?: string; finish?: SurfaceFinish | null }, faces: readonly { body: string; name: string; color: string }[] = []): ItemChange[] {
   if (!isColor(a.color)) return [];
   return edit(doc, (bodies) => {
     for (const id of bodyIds) {
       const look: BodyLook = { color: a.color.toLowerCase(), metalness: unit(a.metalness), roughness: unit(a.roughness) };
       if (typeof a.opacity === "number" && a.opacity < 1) look.opacity = clampOpacity(a.opacity);
       if (a.appearance) look.appearance = a.appearance;
+      const finish = cleanFinish(a.finish);
+      if (finish) look.finish = finish as { [key: string]: number };
       bodies[id] = look;
     }
     for (const f of faces) {

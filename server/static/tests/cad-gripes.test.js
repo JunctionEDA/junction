@@ -297,7 +297,7 @@ test("appearance library: standard looks, stored as colour, metalness and roughn
   // a see-through one, and a part with a face in one change
   const c = put([{ kind: "body", body: "b2" }, { kind: "face", body: "b1", name: "f:side" }, { kind: "face", body: "b2", name: "f:x" }], "acrylic-clear");
   assert.equal(c.length, 1, "one change: undone as one step");
-  assert.deepEqual(AI.looksOf(doc).b2, { color: "#f2f8fa", opacity: 0.3, metalness: 0, roughness: 0.04, appearance: "acrylic-clear" }, "the part's own face colours give way");
+  assert.deepEqual(AI.looksOf(doc).b2, { color: "#f2f8fa", opacity: 0.3, metalness: 0, roughness: 0.04, appearance: "acrylic-clear", finish: { transmission: 1, ior: 1.49, depth: 60 } }, "the part's own face colours give way (and the finish a rendered picture uses is stored beside them)");
   assert.deepEqual(AI.looksOf(doc).b1.faces, { "f:side": "#f2f8fa" });
   // an opaque appearance over a see-through one is opaque again
   put([{ kind: "body", body: "b2" }], "steel");

@@ -56,6 +56,8 @@ export class AssemblyScene {
   private connectorMarks: ConnectorMark[] = [];
   private shades = 0;
   readonly triad: Triad;
+  /** Called after what is drawn, or where, changed (Render mode traces it again). */
+  readonly onChange: (() => void)[] = [];
 
   constructor(readonly viewport: Viewport3D) {
     viewport.scene.add(this.root, this.highlight, this.marks, this.ghostRoot);
@@ -119,6 +121,8 @@ export class AssemblyScene {
     s.mesh.dispose(); s.edges.dispose(); s.points.dispose();
     this.shared.delete(mesh);
   }
+  /** The colour a piece nobody dressed is drawn in ("#rrggbb"): the palette's, by the order its geometry was first shown. */
+  colorOf(mesh: BodyMesh): string | null { const s = this.shared.get(mesh); return s ? "#" + this.materials[s.shade].color.getHexString() : null; }
   /** How many geometries are on the GPU, and how many objects draw them. */
   get stats(): { geometries: number; instances: number; pieces: number } { let pieces = 0; for (const i of this.instances.values()) pieces += i.pieces.length; return { geometries: this.shared.size, instances: this.instances.size, pieces }; }
 
@@ -158,6 +162,7 @@ export class AssemblyScene {
     this.viewport.look.contentChanged();
     this.drawHighlight();
     this.viewport.invalidate();
+    for (const fn of this.onChange) fn();
   }
   private dropPieces(o: InstanceObjects): void {
     for (const p of o.pieces) { o.group.remove(p.group); this.unshare(p.piece.mesh); }
@@ -174,6 +179,7 @@ export class AssemblyScene {
     this.viewport.look.contentChanged();
     this.drawHighlight();
     this.viewport.invalidate();
+    for (const fn of this.onChange) fn();
   }
   transformOf(id: string): Transform | null {
     const o = this.instances.get(id); if (!o) return null;

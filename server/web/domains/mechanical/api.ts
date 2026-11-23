@@ -16,6 +16,9 @@ export type { BodyMesh, BodyResult, FeatureInput, FeatureReport, FeatureStatus, 
 export { DEFAULT_PLANES, add, cross, dot, isGeomRef, length, normalize, scale, sub, toPlane, toWorld, type DefaultPlaneId, type Frame, type GeomKind, type GeomRef, type PlaneRef, type Vec2, type Vec3 } from "./core/geometry";
 export type { ParamField } from "./core/feature";
 export { densities, materialOf, materialsOf, type Material } from "./document/mass-materials";
+// how a part studio's parts look (colour, metalness, roughness, opacity, the finish a rendered picture uses)
+export { looksOf, type BodyLook } from "./document/appearance-items";
+export { appearanceOf, finishOf, surfaceLookOf } from "./document/materials-library";
 // the names people gave a part studio's bodies in its parts list: pass a regeneration's bodies through `namedBodies`
 export { namedBodies, partNamesOf } from "./document/part-items";
 // the board link (boardlink/): the link item a part studio drives a board with, as the board editor reads it
