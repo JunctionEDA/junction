@@ -86,7 +86,8 @@ fn asset_version() -> &'static str {
                    include_str!("../static/dist/viewer3d.js"), include_str!("../static/dist/fab.js"), include_str!("../static/dist/kicad-icons.json"),
                    include_str!("../static/dist/sim-ngspice.js"), include_str!("../static/dist/autoroute.js"), include_str!("../static/dist/parts.js"),
                    include_str!("../static/dist/boot.js"),
-                   include_str!("../static/dist/mechanical.js"), include_str!("../static/dist/assembly.js"), include_str!("../static/dist/cad-worker.js")];
+                   include_str!("../static/dist/mechanical.js"), include_str!("../static/dist/assembly.js"), include_str!("../static/dist/cad-worker.js"),
+                   include_str!("../static/dist/cad-render.js")];
         for b in all.iter().flat_map(|s| s.bytes()) {
             h ^= b as u64;
             h = h.wrapping_mul(0x100000001b3);
@@ -246,6 +247,9 @@ pub async fn viewer3d_js() -> Response { js_response(include_str!("../static/dis
 pub async fn mechanical_js() -> Response { js_response(include_str!("../static/dist/mechanical.js")) }
 pub async fn assembly_js() -> Response { js_response(include_str!("../static/dist/assembly.js")) }
 pub async fn cad_worker_js() -> Response { js_response(include_str!("../static/dist/cad-worker.js")) }
+// The render engine (server/web/shared/render/engine: three.js and a path tracer bundled): fetched the first time
+// Render mode is turned on in a part studio or an assembly, never before.
+pub async fn cad_render_js() -> Response { js_response(include_str!("../static/dist/cad-render.js")) }
 // Fabrication outputs (server/web/domains/pcb/fab: Gerber, drill, placement and BOM writers): fetched by the editor on
 // first use of File → Fabrication Outputs and by plugins that plot, with the same ?v= as the editor bundle.
 // The ngspice model parameter tables (web/domains/pcb/dialogs/sim-model-ngspice.ts): fetched by the Simulation Model

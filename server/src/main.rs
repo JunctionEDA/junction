@@ -296,6 +296,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/static/dist/mechanical.js", get(pages::mechanical_js))
         .route("/static/dist/assembly.js", get(pages::assembly_js))
         .route("/static/dist/cad-worker.js", get(pages::cad_worker_js))
+        .route("/static/dist/cad-render.js", get(pages::cad_render_js))
         .route("/static/dist/sim-ngspice.js", get(pages::sim_ngspice_js))
         .route("/static/dist/fab.js", get(pages::fab_js))
         .route("/static/dist/fab.js.map", get(pages::fab_js_map))
