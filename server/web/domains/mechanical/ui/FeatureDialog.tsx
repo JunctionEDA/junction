@@ -283,6 +283,7 @@ export function FeatureDialog({ studio }: { studio: PartStudio }) {
       ) : null}>
       <div ref={body} className="contents">
         {def ? fields.map((f) => <Field key={f.key} studio={studio} field={f} params={params} />) : <p className="note">This Junction does not know the feature type “{editing.draft.featureType}”.</p>}
+        {report && report.info && !failed ? <p className="note m-0" role="status" data-feature-info>{report.info}</p> : null}
         {report && report.message ? (
           <div className={cx("callout m-0 flex items-start gap-2", waiting ? "" : failed ? "err" : "warn")} role="status" data-waiting={waiting || undefined}>
             <span className="flex-1">{report.message}</span>

@@ -4,7 +4,8 @@
 // The feature list (the studio's, with the script's feature laid in or appended) is built by a regeneration
 // engine of its own, rolled back to just after that feature, so the caller's model is not disturbed.  The
 // engine is the real one: the result is checked for soundness exactly as on the page (kernel/regen.ts).
-import { VIEWS, encodePng, renderMeshes, type ViewName } from "../mcp/render";
+import { VIEWS, renderMeshes, type ViewName } from "../mcp/render";
+import { pngOf } from "./png";
 import { bbox } from "../kernel/ops/shapes";
 import type { Kernel } from "../kernel/occ";
 import type { FeatureInput } from "../kernel/protocol";
@@ -14,34 +15,12 @@ import { measureEntity } from "../services/_measure-kernel";
 import type { Vec3 } from "../core/geometry";
 import { looksInward } from "./host";
 import { lastRunOf } from "./run";
+import type { PartSummary, RunReport } from "./report-text";
+
+export { reportText, type PartSummary, type RunReport } from "./report-text";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
-
-export interface RunReport {
-  status: "ok" | "warning" | "error";
-  /** why it failed; `line` is in the script */
-  error?: { message: string; line?: number; kind?: string };
-  warnings: string[];
-  /** what the script reported with ctx.report */
-  reports: { label: string; value: string }[];
-  console: string[];
-  /** every new or changed body passed the kernel's check (closed, the right way out, no face crossing another) */
-  sound: boolean;
-  volume_before_mm3: number;
-  volume_after_mm3: number;
-  /** negative when material was removed */
-  volume_change_percent: number | null;
-  /** grams, when a density (g/cm³) was given */
-  mass_before_g?: number; mass_after_g?: number;
-  bodies: { id: string; name: string; volume_mm3: number; volume_before_mm3: number | null; faces: number; bbox_mm: number[] | null; changed: boolean }[];
-  ms: number;
-  /** how much of its allowance the script used */
-  budget?: { ticks: number; calls: number };
-  /** a picture of the result, PNG in base64 (when asked for) */
-  png?: string;
-  image_view?: string;
-}
 
 export interface RunOptions { image?: { view?: string; width?: number } | false; density?: number }
 
@@ -81,7 +60,8 @@ export async function runReport(k: Kernel, engine: RegenEngine, features: readon
     const view = (o.image && o.image.view && o.image.view in VIEWS ? o.image.view : "iso") as ViewName;
     const width = Math.max(300, Math.min(1400, (o.image && o.image.width) || 800));
     const pic = renderMeshes(result.bodies.filter((b) => b.mesh).map((b) => b.mesh!), { width, height: Math.round(width * 0.75), view, edges: true });
-    out.png = toBase64(encodePng(pic)); out.image_view = view;
+    // a picture that cannot be made is no reason to lose the report
+    try { out.png = toBase64(await pngOf(pic)); out.image_view = view; } catch (e) { /* the words stand without it */ }
   }
   return out;
 }
@@ -94,33 +74,7 @@ export function toBase64(bytes: Uint8Array): string {
   return g.btoa(s);
 }
 
-/** A report as a few lines a model (or a person) reads at a glance. */
-export function reportText(r: RunReport): string {
-  const lines: string[] = [];
-  if (r.status === "error") lines.push(`FAILED: ${r.error?.message || "the feature failed"}`);
-  else lines.push(`${r.status === "warning" ? "Built with a note" : "Built"}: ${r.sound ? "the result is a sound solid" : "THE RESULT IS NOT A SOUND SOLID"}.`);
-  for (const w of r.warnings) lines.push(`Note: ${w}`);
-  if (r.status !== "error") {
-    const pct = r.volume_change_percent;
-    lines.push(`Volume ${r.volume_before_mm3} → ${r.volume_after_mm3} mm³${pct === null ? "" : ` (${pct > 0 ? "+" : ""}${pct} %)`}; ${r.bodies.length} ${r.bodies.length === 1 ? "body" : "bodies"}, ${r.bodies.reduce((n, b) => n + b.faces, 0)} faces.`);
-    if (r.mass_before_g !== undefined) lines.push(`Mass ${r.mass_before_g} → ${r.mass_after_g} g.`);
-  }
-  for (const x of r.reports) lines.push(`${x.label}: ${x.value}`);
-  if (r.console.length) lines.push("Console:", ...r.console.slice(0, 40).map((c) => "  " + c));
-  return lines.join("\n");
-}
-
 // ---------------------------------------------------------------- what a part looks like, for whoever writes a script
-
-export interface PartSummary {
-  units: "mm";
-  bodies: {
-    id: string; name: string; volume_mm3: number; bbox_mm: { min: number[]; max: number[]; size: number[] } | null;
-    faces: { count: number; by_kind: { [kind: string]: number }; flat: { name: string; normal: number[]; area_mm2: number; openings: number }[] };
-    holes: { diameter_mm: number; count: number }[];
-    edges: number;
-  }[];
-}
 
 /** The bodies of a model state as a script's author needs them: sizes, the flat faces by direction and size, the holes. */
 export function partSummary(k: Kernel, state: ModelState): PartSummary {

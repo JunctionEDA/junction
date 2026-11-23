@@ -55,6 +55,8 @@ export interface Slot {
   parts?: Entry[][];
   /** the parts' headings, where the families have names of their own (Custom features) */
   partTitles?: (string | null)[];
+  /** the family a single button would have been in, had the family more than one member (a headed drop-down still names it) */
+  family?: string;
 }
 export interface Section {
   id: string; group: string;
@@ -149,7 +151,7 @@ function slotsOf<T>(list: T[], menuOf: (x: T) => string | undefined, entry: (x: 
     else slots.push({ key: `${prefix}/${menu || e.id}`, menu, entries: [e], keep });
   }
   // a family of one is a plain button
-  return slots.map((s) => (s.menu !== null && s.entries.length === 1 ? { ...s, menu: null } : s));
+  return slots.map((s) => (s.menu !== null && s.entries.length === 1 ? { ...s, menu: null, family: s.menu } : s));
 }
 
 /** The parts of the sketch toolbar, by the tools' `order`: draw, modify, constrain, dimension. */
@@ -175,9 +177,13 @@ function grouped(id: string, title: string, slots: Slot[]): Slot[] {
   const parts: Entry[][] = [], titles: (string | null)[] = [];
   let singles: Entry[] = [];
   for (const sl of slots) {
-    if (sl.menu === null) { singles.push(...sl.entries); continue; }
+    // in the library a family of one keeps its heading ("This project" with a single feature in it)
+    const title = sl.menu ?? (id === "library" ? sl.family ?? null : null);
+    if (title === null) { singles.push(...sl.entries); continue; }
     if (singles.length) { parts.push(singles); titles.push(null); singles = []; }
-    parts.push(sl.entries); titles.push(sl.menu);
+    // the features and the tools of one family are listed apart (slotsOf runs for each): one heading for both
+    if (titles.length && titles[titles.length - 1] === title) parts[parts.length - 1].push(...sl.entries);
+    else { parts.push(sl.entries.slice()); titles.push(title); }
   }
   if (singles.length) { parts.push(singles); titles.push(null); }
   // the library is a hundred features in families: its button is the last to leave the bar, and its drop-down is headed

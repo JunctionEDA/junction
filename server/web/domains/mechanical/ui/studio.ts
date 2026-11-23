@@ -15,6 +15,7 @@ import type { DocumentHostContext } from "../../../platform/documents/host";
 import { Viewport3D } from "../../../shared/viewport3d/viewport3d";
 import * as THREE from "three";
 import type { FeatureDefinition, ParamField } from "../core/feature";
+import { dynamicDef, dynamicDefs } from "../core/dynamic";
 import type { PlaneRef } from "../core/geometry";
 import { DEFAULT_PLANES } from "../core/geometry";
 import * as edits from "../document/edits";
@@ -105,7 +106,14 @@ class Progress {
   put(p: RegenProgress): void { const s = this.state; if (s.index === p.index && s.total === p.total && s.featureId === p.featureId) return; this.state = p; for (const fn of Array.from(this.listeners)) fn(); }
 }
 
-export const featureDef = (type: string): FeatureDefinition | undefined => FEATURES.find((f) => f.type === type);
+/** The change that gives a feature the type its draft has (a custom feature moved to another version of its script: setDraft). */
+function retyped(doc: ItemDoc, d: FeatureItem): ItemChange[] {
+  const f = doc.items.get(d.id) as FeatureItem | undefined;
+  return f && f.featureType !== d.featureType ? [{ id: d.id, kind: "MODIFIED", typeName: "feature", props: [{ path: ["featureType"], value: d.featureType }] }] : [];
+}
+
+/** A feature type's definition: one of features/, or one the page learnt while running (core/dynamic.ts: a project's custom features). */
+export const featureDef = (type: string): FeatureDefinition | undefined => FEATURES.find((f) => f.type === type) || dynamicDef(type);
 
 /**
  * Something that lives as long as a part studio is open and is not a tool, a panel or a feature: a link to
@@ -223,7 +231,7 @@ export class PartStudio {
     this.set({ past: doc ? { label } : null, canEdit: this.session.status.canEdit && !doc, selectedFeature: null, selectedFeatures: [] });
     this.documentChanged();
   }
-  definitions(): readonly FeatureDefinition[] { return FEATURES; }
+  definitions(): readonly FeatureDefinition[] { const more = dynamicDefs(); return more.length ? [...FEATURES, ...more] : FEATURES; }
   tools() { return TOOLS; }
 
   close(): void {
@@ -550,9 +558,9 @@ export class PartStudio {
   }
 
   /** Change the draft in the dialog; the model follows as a preview. */
-  setDraft(patch: { params?: JsonObject; name?: string }): void {
+  setDraft(patch: { params?: JsonObject; name?: string; /** another version of the same family of types (a custom feature whose script changed) */ featureType?: string }): void {
     const e = this.state.editing; if (!e) return;
-    const draft = { ...e.draft, ...(patch.name !== undefined ? { name: patch.name } : {}), params: patch.params ? { ...e.draft.params, ...patch.params } : e.draft.params };
+    const draft = { ...e.draft, ...(patch.name !== undefined ? { name: patch.name } : {}), ...(patch.featureType ? { featureType: patch.featureType } : {}), params: patch.params ? { ...e.draft.params, ...patch.params } : e.draft.params };
     this.set({ editing: { ...e, draft } });
     this.refreshSketches();
     this.refreshMarks();
@@ -662,7 +670,7 @@ export class PartStudio {
     if (awaitsPlane(this.state)) { this.host.toast("Select a plane or a planar face for the sketch first.", 2500); return; }
     const changes: ItemChange[] = e.isNew
       ? [{ id: d.id, kind: "ADDED", typeName: "feature", item: { ...d, order: orderAt(featuresOf(this.doc), rollbackIndex(this.doc)), ...folderKey(folderAt(this.doc, rollbackIndex(this.doc))) } }]
-      : [...edits.setParams(this.doc, d.id, d.params), ...edits.renameFeature(this.doc, d.id, d.name)];
+      : [...edits.setParams(this.doc, d.id, d.params), ...edits.renameFeature(this.doc, d.id, d.name), ...retyped(this.doc, d)];
     this.set({ editing: null, selectedFeature: d.id, selectedFeatures: [d.id] });
     this.view.setFilter(null);
     this.view.setMarks([], []);

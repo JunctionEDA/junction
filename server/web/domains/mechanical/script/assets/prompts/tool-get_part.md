@@ -1,0 +1,1 @@
+Describe the person's current part as it is just before the feature: each body's size and volume, its flat faces by direction and area (with how many openings each has), and its round holes by diameter. Use it when the first message's description is not enough.

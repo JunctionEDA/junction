@@ -26,22 +26,12 @@
 import { newQuickJSWASMModuleFromVariant, newVariant, type QuickJSContext, type QuickJSHandle, type QuickJSRuntime, type QuickJSWASMModule } from "quickjs-emscripten-core";
 import { PRELUDE } from "../generated/script-assets";
 import WASM_BASE64 from "../generated/script-wasm";
+import { DESCRIBE_LIMITS, RUN_LIMITS, type Limits } from "./limits";
 import { MAX_SOURCE, readManifest, type ScriptManifest } from "./manifest";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export interface Limits {
-  /** interrupt-handler calls allowed (the interpreter calls it about every 10 000 operations) */
-  ticks: number;
-  /** wall-clock allowance, kernel work included */
-  ms: number;
-  /** the interpreter's memory, bytes */
-  memory: number;
-  /** calls to the host */
-  calls: number;
-}
-export const RUN_LIMITS: Limits = { ticks: 60000, ms: 30000, memory: 64 << 20, calls: 50000 };
-export const DESCRIBE_LIMITS: Limits = { ticks: 2000, ms: 2000, memory: 32 << 20, calls: 0 };
+export { RUN_LIMITS, DESCRIBE_LIMITS, type Limits } from "./limits";
 
 export type ScriptErrorKind = "syntax" | "fail" | "api" | "throw" | "timeout" | "memory" | "declare";
 /** Why a script did not run to its end.  `line` is 1-based, in the script's own text. */

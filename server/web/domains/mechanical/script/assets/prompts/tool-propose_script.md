@@ -1,0 +1,1 @@
+Hand the finished script to the person. `source` is the whole script, exactly as it last built with run_script (a script that has not just built a sound result is refused: run it first). `summary` is two or three plain sentences for the person: what the feature does, what you tried it with, and anything they should know. After this call your work on the request is done.

@@ -6,7 +6,11 @@
 import type { Json } from "../../../shared/itemdoc/itemdoc";
 import { defineService } from "../kernel/service";
 import { sourceHash } from "../script/manifest";
-import { describeCached, sandboxOnce } from "../script/run";
+import { describeCached, runScriptFeature, sandboxOnce } from "../script/run";
+import { setScriptRunner } from "../script/runner";
+
+// the worker is where scripts run: features/script.ts finds the runner here (script/runner.ts says why)
+setScriptRunner((ctx, params) => runScriptFeature(ctx, params));
 
 export default defineService({
   name: "script-describe",
