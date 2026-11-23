@@ -154,7 +154,7 @@ test("Highlight collisions: the head goes straight through, a click in violation
   P.state.route.clickT = 0;   // not a double click (which would finish the route)
   pcb.onPointerMove(ev(), [20, 14.25], ctx); pcb.onPointerMove(ev(), [20, 14], ctx); pcb.onPointerDown(ev(), [20, 14], ctx);
   assert.equal(P.state.route.stages.length, 1, "allowed");
-  pcb.onKey("End", ev(), ctx); assert.equal(log.commits.length, 1); assert.equal(log.commits[0].label, "Route Track");
+  pcb.onKey("End", ev(), ctx); assert.equal(log.commits.length, 1); assert.equal(log.commits[0].label, "Routing");
   assert.equal(segsOf(doc, "B").length, 1, "nothing of net B moved");
 });
 
@@ -168,7 +168,7 @@ test("Shove: the head pushes net B's track aside, it springs back when the curso
   pcb.onPointerMove(ev(), [25, 9], ctx); assert.equal(P.state.route.shove ? P.state.route.shove.ops.length : 0, 0, "springback");
   pcb.onPointerMove(ev(), [20, 11.75], ctx); pcb.onPointerDown(ev(), [20, 11.75], ctx);
   pcb.onKey("End", ev(), ctx);
-  assert.equal(log.commits.length, 1); assert.equal(log.commits[0].label, "Route Track");
+  assert.equal(log.commits.length, 1); assert.equal(log.commits[0].label, "Routing");
   const b = segsOf(doc, "B"); assert.ok(b.length > 1, "net B's track bent round the new one");
   const ends = b.flatMap((it) => [P.pt(it.node, "start"), P.pt(it.node, "end")]);
   assert.ok(ends.some((p) => p[0] === 5 && p[1] === 12) && ends.some((p) => p[0] === 30 && p[1] === 12), "its ends stay where they were");
@@ -255,7 +255,7 @@ test("Shove drag: dragging net A's track onto net B pushes B, one commit carries
   const d = P.state.drag.subs[0]; assert.equal(d.status, true); assert.ok(d.shove && d.shove.ops.length, "B is pushed");
   assert.ok([...pcb.hiddenIds()].includes("sb"));
   pcb.onPointerDown(ev(), [15, 11.75], ctx);
-  assert.equal(log.commits.length, 1); assert.equal(log.commits[0].label, "drag track");
+  assert.equal(log.commits.length, 1); assert.equal(log.commits[0].label, "Routing");
   assert.ok(log.commits[0].changes.some((c) => c.id === "sb"), "the shoved track is in the same commit");
 });
 

@@ -23,6 +23,7 @@ import { beginInlineDrag, dragMove, finishDrag } from "./inline-drag";
 import { editHandleMove, editHandleUp } from "./point-editor";
 import { padCovers, padsOf } from "./route-geom";
 import { showViolations } from "./route-tool";
+import { RM_MARK } from "./router-settings";
 import { K, S, lastCtx } from "./state";
 import { bboxUnion, flipNode, mirrorNode, rotateNode, translateNode } from "./transforms";
 import { clone, layerOf, pt, r6, samePt } from "./util";
@@ -125,13 +126,13 @@ function finishMove(ctx: PcbCtx, m: SelectMove, commit: boolean, force?: boolean
     applySelection(ctx, []); ctx.requestRender(); return false;
   }
   if (!commit || (!m.xformed && (!m.moved || (!dx && !dy)))) { unhover(); ctx.requestRender(); return false; }
-  if (m.conns && !force) {   // COMPONENT_DRAGGER::FixRoute: refused while the dragged items collide (Ctrl+click forces)
+  if (m.conns && !force && !(S.rs.mode === RM_MARK && S.rs.can_violate_drc)) {   // COMPONENT_DRAGGER::FixRoute: refused while the dragged items collide (Ctrl+click forces, AllowDRCViolations lets it through)
     moveApply(ctx, m, dx, dy); const hits = componentDragHits(ctx, m, dx, dy); moveApply(ctx, m, 0, 0); S.rworld = null; S.sworld = null;
-    if (hits.length) { showViolations(hits, hits.at || cursorPoint(ctx)); ctx.toast("Track violates DRC."); ctx.requestRender(); return false; }
+    if (hits.length) { showViolations(hits, hits.at || cursorPoint(ctx)); ctx.requestRender(); return false; }
   }
   const changes = moveNodesAt(m, dx, dy).map(({ id, node }) => replacedChange(ctx.doc.items.get(id)!, node));
   if (m.conns && m.conns.length) changes.push(...dragChanges(ctx, { sol: { lines: connLines(m, dx, dy) } }));
-  ctx.commit(changes, m.conns && m.conns.length ? "drag" : m.label || "Move", m.placing || m.amend ? { amend: true } : undefined);
+  ctx.commit(changes, m.conns && m.conns.length ? "Routing" : m.label || "Move", m.placing || m.amend ? { amend: true } : undefined);
   unhover(); ctx.requestRender(); return true;
 }
 /**

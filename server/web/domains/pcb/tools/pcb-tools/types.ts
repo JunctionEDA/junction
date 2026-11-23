@@ -175,7 +175,7 @@ export type PcbState = {
   /** PCBNEW_SETTINGS m_FlipDirection (Editing Options > Flip board items): "tb" top / bottom (the default), "lr" left / right */ flipDirection?: "tb" | "lr";
   /** PCBNEW_SETTINGS m_ShowCourtyardCollisions (Editing Options): run the interactive courtyard check while moving */ showCourtyardCollisions?: boolean;
   /** PCBNEW_SETTINGS m_TrackDragAction: what a left-drag of tracks does ("move", "drag" = 45 degree, "dragFree"; "drag") */ trackDragAction?: "move" | "drag" | "dragFree"; enteredGroup?: string | null; hiddenSeverities?: Set<string> | null;
-  arcMode?: number; arcEditMode?: number; angleSnap?: string; stickyUp?: boolean; startWithVia?: { from: string } | null;
+  arcMode?: number; arcEditMode?: number; angleSnap?: string; stickyUp?: boolean;
   forceHover?: boolean; dragFree?: boolean; downHandled?: unknown; escCleared?: unknown;
   /** DRAWING_TOOL::DrawZone's ZONE_MODE for the zone tool: a cutout of / a zone similar to the source zone (zone-modes.ts); next: what the next activation takes */
   moveSeq?: import("./ref-move").MoveSeq | null; routeQueue?: import("./route-selected").RouteQueue | null; snapAllLayers?: boolean; snapAllLayersFp?: boolean;
@@ -225,14 +225,14 @@ export interface NetclassRules { clearance: number; track_width: number; via_dia
 export interface DesignSettings {
   clearance: number; edgeClearance: number; trackWidth: number; viaDiameter: number; viaDrill: number; minTrackWidth: number; minViaDiameter: number; minThroughDrill: number;
   minClearance?: number; minConn?: number; minViaAnnular?: number; minMicroViaDiameter?: number; minMicroViaDrill?: number; holeClearance?: number; minHoleToHole?: number; minTextHeight?: number; minTextThickness?: number; minSilkLineWidth?: number;
-  netclasses: Record<string, NetclassRules>; netclassOf: Record<string, string>; patterns: { re: RegExp; netclass: string }[]; severities: Record<string, string>;
+  netclasses: Record<string, NetclassRules>; netclassOf: Record<string, string | string[]>; patterns: { re: RegExp; netclass: string; pattern?: string }[]; netclassRaw?: Record<string, Record<string, unknown>>; severities: Record<string, string>;
   [k: string]: unknown;
 }
 /** The .kicad_pro fields designSettings reads (parsed JSON), or design settings already in our shape. */
 export interface DesignSource {
   netclasses?: unknown; clearance?: unknown;
   board?: { design_settings?: { rules?: Record<string, number | undefined>; rule_severities?: Record<string, unknown>; defaults?: DesignDefaults } };
-  net_settings?: { classes?: unknown; netclass_assignments?: Record<string, string>; netclass_patterns?: unknown };
+  net_settings?: { classes?: unknown; netclass_assignments?: Record<string, string | string[]>; netclass_patterns?: unknown };
 }
 /** A DRC finding (drc): where, how bad, the message, the items, the rule. */
 export interface DrcMarker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; kiids?: string[]; layer?: string; rule?: string }
@@ -364,8 +364,12 @@ export interface Route {
   collisions: Obstacle[] | null; shove: ShoveResult | null; tracer: import("./tracer").Tracer; keepHighlight: boolean;
   obs?: ObstacleIndex | null; sobs?: ObstacleIndex | null; bdoc?: BoardDoc | null; bdocVer?: number; viaBad?: Obstacle[] | null;
   ratAnchor?: { p: Pt; layers: string[]; through: boolean } | null; loopHidden?: Set<string> | null;
+  /** m_originalActiveLayer: the active layer before the route, restored when it ends; amend: the commit joins the previous undo step (APPEND_UNDO after Continue From End) */
+  originalLayer?: string; amend?: boolean;
+  /** SIZES_SETTINGS clearance and the sources the message panel names (updateSizesAfterRouterEvent / ImportSizes) */
+  clearance?: number; clearanceSource?: string; widthSource?: string;
   // DIFF_PAIR_PLACER
-  dp?: boolean; netN?: NetRef; netKeyN?: string; dpSizes?: import("./diffpair").DpSizes; dpStart?: import("./diffpair").DpPair;
+  dp?: boolean; dpInitDiag?: boolean; dpFixed?: boolean; netN?: NetRef; netKeyN?: string; dpSizes?: import("./diffpair").DpSizes; dpStart?: import("./diffpair").DpPair;
   dpLines?: import("./diffpair").DpLines | null; dpFit?: boolean; dpObs?: ObstacleIndex | null; dpGw?: import("./diffpair").DpGateway | null; dpTargetPair?: import("./diffpair").DpPair | null;
 }
 

@@ -1,5 +1,5 @@
 // pcb-tools/shove.ts — SHOVE (pns_shove.cpp).
-import type { Box, BoardDoc, BranchOp, CircleShape, Conductor, CopperShape, WorldItem, DesignSettings, LegFn, PadInfo, PcbCtx, PolyShape, Pt, Route, SegShape } from "./types";
+import type { Box, BoardDoc, BranchOp, CircleShape, Conductor, CopperShape, WorldItem, DesignSettings, LegFn, Obstacle, ObstacleIndex, PadInfo, PcbCtx, PolyShape, Pt, Route, SegShape } from "./types";
 import type { RouterSettings } from "./router-settings";
 import { headVia, opOn, routeDoc, routeOwn, viaSpanLayers } from "./branch";
 import { settingsOf } from "./dialogs";
@@ -13,7 +13,9 @@ import { closestOnSeg } from "./point-editor";
 import { K, S } from "./state";
 import { clone, r6, vunit } from "./util";
 import { rulePairClearance } from "./rule-resolver";
-import { DIRS8, HULL_EPS, ROUTE_EPS, isFreePad, now, pathHits, ptsLength, routeClearance, routeObstacles, routerWorld, shapeCorePts, simplifyPts, walkHead } from "./walkaround";
+import { DIRS8, HULL_EPS, ROUTE_EPS, dir8, indexObstacles, isFreePad, now, pathClear, pathHits, ptsLength, routeClearance, routeObstacles, routerWorld, shapeCorePts, simplifyPts, walkHead } from "./walkaround";
+import { mergeFull, mergeObtuse } from "./optimize-selected";
+import { runSmartPads } from "./smartpads";
 
 // ================================================================ SHOVE (pcbnew/router/pns_shove.cpp)
 // The head pushes the tracks and vias of other nets out of its way.  Each pushed track is re-walked around the hulls
@@ -290,7 +292,7 @@ export function pushVia(SW: ShoveWorld, st: ShoveState, L: ShoveLine, v: ShoveVi
 export function shoveRun(SW: ShoveWorld, heads: Omit<ShoveLine, "key" | "rank" | "ids">[], rs: RouterSettings) {
   const st: ShoveState = { lines: new Map(), lineOf: new Map(), viaAt: new Map(), viaRank: new Map() };
   const stack: ShoveLine[] = heads.map((h, i: number) => Object.assign({ head: true, key: "head" + i, rank: SHOVE_HEAD_RANK, ids: (h as Partial<ShoveLine>).ids || [] }, h));
-  const limit = rs.shove_iteration_limit || 250, deadline = now() + Math.min(rs.shove_time_limit || 1000, 150);   // an interactive move keeps well under KiCad's 1 s
+  const limit = rs.shove_iteration_limit || 250, deadline = now() + (rs.shove_time_limit || 1000);   // ShoveIterationLimit / ShoveTimeLimit
   const s = SW.s;
   for (let iter = 0; stack.length; iter++) {
     if (iter >= limit || now() > deadline) return null;
@@ -300,6 +302,8 @@ export function shoveRun(SW: ShoveWorld, heads: Omit<ShoveLine, "key" | "rank" |
     if (hit.kind === "solid") {
       if (cur.head || cur.proxy) return null;
       const so = hit.o as ShoveSolid; const w = walkLineAround(s, cur, so.shape, so.ckind === "keepout" ? 0 : solidClr(s, cur.net, so, cur.layer)); if (!w) return null;
+      // onCollidingSolid: the walked line's rank: one below (Jump over obstacles) or far above the line it was
+      cur.rank = rs.jump_over_obstacles ? cur.rank - 1 : cur.rank + 10000;
       setLine(st, cur, w); continue;
     }
     if (hit.kind === "via") {
@@ -321,7 +325,58 @@ export function shoveRun(SW: ShoveWorld, heads: Omit<ShoveLine, "key" | "rank" |
     ob.rank = cur.rank - 1; setLine(st, ob, res);
     const i = stack.indexOf(ob); if (i >= 0) stack.splice(i, 1); stack.push(ob);
   }
+  shoveOptimize(SW, st, heads as ShoveLine[], rs);   // SH_OK: runOptimizer( m_currentNode )
   return st;
+}
+/** AREA_CONSTRAINT::Check (not strict) for replacing vertices v1..v2 of `path` by `bypass` inside `area`. */
+export function areaAllows(area: Box, path: Pt[], v1: number, v2: number, bypass: Pt[]) {
+  const inA = (p: Pt) => p[0] >= area[0] && p[0] <= area[2] && p[1] >= area[1] && p[1] <= area[3];
+  const p1In = inA(path[v1]), p2In = inA(path[v2]);
+  if (p1In && p2In) return true;
+  const horiz = (a0: Pt, a1: Pt, b0: Pt, b1: Pt) => { const d1 = dir8(a0, a1), d2 = dir8(b0, b1); return d1 >= 0 && d1 === d2; };   // SEG::Angle( ... ).IsHorizontal()
+  if (v1 < path.length - 1 && !p1In && p2In && inA(path[v1 + 1])) return bypass.length > 1 && horiz(bypass[0], bypass[1], path[v1], path[v1 + 1]);
+  if (p1In && !p2In && v2 > 0 && inA(path[v2 - 1])) return bypass.length > 1 && horiz(bypass[bypass.length - 2], bypass[bypass.length - 1], path[v2 - 1], path[v2]);
+  return false;
+}
+/** What a pushed line may not touch while it is optimized: the board as the shove left it (pushed lines and vias moved, the heads in). */
+function shoveObstacles(SW: ShoveWorld, st: ShoveState, heads: ShoveLine[], L: ShoveLine): ObstacleIndex {
+  const skip = new Set<string>(); for (const M of st.lines.values()) for (const id of M.ids) skip.add(id); for (const id of st.viaAt.keys()) skip.add(id);
+  const base = routeObstacles(SW.doc, SW.s, L.net, L.layer!, null, skip); const out: Obstacle[] = base.list.slice();
+  const addSeg = (a: Pt, b: Pt, w: number, net: string, kind: string) => { const ob = { id: null, kind, net, shape: { t: "seg", a, b, r: w / 2 }, bbox: [Math.min(a[0], b[0]) - w / 2, Math.min(a[1], b[1]) - w / 2, Math.max(a[0], b[0]) + w / 2, Math.max(a[1], b[1]) + w / 2] } as unknown as Obstacle; ob.clr = routeClearance(SW.s, L.net, ob, L.layer, SW.doc); out.push(ob); };
+  const addVia = (at: Pt, r: number, net: string) => { const ob = { id: null, kind: "via", net, shape: { t: "circle", x: at[0], y: at[1], r }, bbox: [at[0] - r, at[1] - r, at[0] + r, at[1] + r] } as unknown as Obstacle; ob.clr = routeClearance(SW.s, L.net, ob, L.layer, SW.doc); out.push(ob); };
+  for (const M of [...st.lines.values(), ...heads]) {
+    if (M === L || M.net === L.net) continue;
+    if (M.layer === L.layer) for (let i = 0; i + 1 < M.pts.length; i++) addSeg(M.pts[i], M.pts[i + 1], M.w, M.net, "track");
+    if (M.via && (!M.via.layers || M.via.layers.has(L.layer!))) addVia(M.via.at, M.via.r, M.net);
+  }
+  for (const [id, at] of st.viaAt) { const v = SW.vias.get(id); if (v && v.net !== L.net && v.layers.has(L.layer!)) addVia(at, v.r, v.net); }
+  return indexObstacles(out);
+}
+/**
+ * SHOVE::runOptimizer: every pushed line re-optimized inside the area the shove changed (totalAffectedArea, grown by
+ * the widest line): Optimizer effort low merges obtuse corners once (MERGE_OBTUSE), medium and full replace runs of
+ * segments by cheaper 45° bypasses twice (MERGE_SEGMENTS), with Smart Pads in the 45° corner modes; the queue is
+ * reversed before each pass.  Heads are left alone.
+ */
+export function shoveOptimize(SW: ShoveWorld, st: ShoveState, heads: ShoveLine[], rs: RouterSettings) {
+  const queue = [...st.lines.values()].filter((L) => !L.head && !L.proxy && L.layer && L.pts.length >= 2); if (!queue.length) return;
+  let area: Box | null = null; let maxW = 0;
+  const grow = (p: Pt) => { area = area ? [Math.min(area[0], p[0]), Math.min(area[1], p[1]), Math.max(area[2], p[0]), Math.max(area[3], p[1])] : [p[0], p[1], p[0], p[1]]; };
+  for (const L of queue) { maxW = Math.max(maxW, L.w); for (const p of L.pts) grow(p); for (const p of L.orig || []) grow(p); }
+  for (const [id, at] of st.viaAt) { grow(at); const v = SW.vias.get(id); if (v) grow(v.at); }
+  if (!area) return; const A = area as Box; const box: Box = [A[0] - maxW, A[1] - maxW, A[2] + maxW, A[3] + maxW];
+  const low = (rs.effort as number) === 0, passes = low ? 1 : 2;   // OE_LOW, OE_MEDIUM, OE_FULL
+  const smart = !!rs.smart_pads && (rs.corner_mode === 0 || rs.corner_mode === 1);   // Smart Pads is incompatible with 90-degree mode
+  const check = (path: Pt[], v1: number, v2: number, bypass: Pt[]) => areaAllows(box, path, v1, v2, bypass);
+  for (let pass = 0; pass < passes; pass++) {
+    queue.reverse();
+    for (const L of queue) {
+      const O = shoveObstacles(SW, st, heads, L); const r = L.w / 2;
+      let pts = low ? mergeObtuse(O, L.pts, r, { check, obtuse: false }) : mergeFull(O, L.pts, r, { check, obtuse: false });
+      if (smart) { const sp = runSmartPads(SW.doc, pts, L.w, L.layer!, L.net, (q: Pt[]) => pathClear(O, q, r)); if (sp) pts = sp; }
+      if (pts.length !== L.pts.length || pts.some((p, i) => !peq(p, L.pts[i]))) setLine(st, L, pts);
+    }
+  }
 }
 /** The branch edits of a shove: each pushed line's segments rewritten (the first ones keep their uuids), each pushed via moved. */
 export function shoveOps(doc: BoardDoc, st: ShoveState) {

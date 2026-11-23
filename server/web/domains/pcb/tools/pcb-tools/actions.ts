@@ -78,7 +78,7 @@ import { diffPairMarkers, matchedLengthMarkers } from "./dru";
 import { sourceZone, zoneDuplicateNode, zoneMergeChanges } from "./zone-modes";
 import { zonePriorityAbility } from "./zone-priority";
 import { newItemDialogs } from "./assistants";
-import { routeSelected, unrouteSegment } from "./route-selected";
+import { routeSelected, unrouteSegment, cancelCurrentItem } from "./route-selected";
 import { optimizeSelected } from "./optimize-selected";
 import { cycleLayerPairPresets, setSnapMode } from "./snap-pairs";
 import { copyWithReference, interactiveOffset, moveIndividually, moveWithReference, skipMoveItem } from "./ref-move";
@@ -767,6 +767,7 @@ act("lengthTunerSettings", "Length Tuning Settings...", "Ctrl+L", (ctx: PcbCtx) 
 /** The tuner's loop takes PCB_ACTIONS::properties like lengthTunerSettings: E opens Tuning Pattern Properties. */
 export function tunerProperties(ctx: PcbCtx) {
   bind(ctx);
+  if (S.route) return runAction("ACT_CustomTrackWidth", ctx);   // performRouting: PCB_ACTIONS::properties runs ACT_CustomTrackWidth
   if (isTuneTool(S.modTool)) return openTuneSettings(ctx);
   // EDIT_TOOL::Properties on a selected pattern: PCB_TUNING_PATTERN::ShowPropertiesDialog
   const gen = selectedTuningPattern(ctx); if (!gen) return false;
@@ -831,6 +832,7 @@ act("layerPairPresetsCycle", "Cycle Layer Pair Presets", "Shift+V", (ctx: PcbCtx
 act("magneticSnapToggle", "Toggle Snapping Between Active and All Layers", "Shift+S", (ctx: PcbCtx) => setSnapMode(ctx, "toggle"), { menu: false, tip: "Toggles between snapping on all visible layers and only the active area" });
 act("magneticSnapActiveLayer", "Snap to Objects on the Active Layer Only", "", (ctx: PcbCtx) => setSnapMode(ctx, "active"), { menu: false, tip: "Enables snapping to objects on the active layer only" });
 act("magneticSnapAllLayers", "Snap to Objects on All Layers", "", (ctx: PcbCtx) => setSnapMode(ctx, "all"), { menu: false, tip: "Enables snapping to objects on all visible layers" });
+act("cancelCurrentItem", "Cancel Current Item", "", (ctx: PcbCtx) => cancelCurrentItem(ctx), { menu: false, tip: "Skip current item and route next selected item." });
 act("routerUndoLastSegment", "Undo Last Segment", "", (ctx: PcbCtx) => routingOnly(ctx, () => undoRouteLeg(ctx)), Object.assign({ tip: "Walks the current track back one segment." }, ROUTER_ACTION));
 act("selectLayerPair", "Set Layer Pair...", "", (ctx: PcbCtx) => { if (routingDialogs.layerPair) routingDialogs.layerPair(ctx); else ctx.toast("Set Layer Pair: dialogs are unavailable here"); return true; }, { menu: "-" });
 act("editPredefinedSizes", "Edit Pre-defined Sizes...", "", (ctx: PcbCtx) => { if (routingDialogs.sizes) routingDialogs.sizes(ctx); else ctx.toast("Edit Pre-defined Sizes: dialogs are unavailable here"); return true; }, { menu: "-" });

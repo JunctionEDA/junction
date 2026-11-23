@@ -431,8 +431,48 @@
       return { number: str(p[1]), type: str(p[2]), shape: str(p[3]), net: netNameOf(doc, p), w, h, drill, layers: (kid(p, "layers") || []).slice(1).map(str) };
     });
   }
-  var PAD_TYPES = ["smd", "thru_hole", "np_thru_hole", "connect"];
-  var PAD_SHAPES = ["circle", "rect", "oval", "roundrect", "trapezoid", "custom"];
+  var PAD_TYPES = ["smd", "thru_hole", "np_thru_hole", "connect", "non_component"];
+  var PAD_SHAPES = ["circle", "rect", "oval", "roundrect", "chamfered_rect", "trapezoid", "custom"];
+  var padRoundable = (shape) => shape === "roundrect" || shape === "chamfered_rect";
+  function defaultIpcRoundingRatio(w, h) {
+    const m = Math.min(w, h);
+    return m > 0 ? Math.min(0.25, 0.25 * m) / m : 0.25;
+  }
+  function applyPadAttribute(pad, type) {
+    const ls = kid(pad, "layers");
+    const names = ls ? ls.slice(1).map(str) : [];
+    const isCu = (l) => /\.Cu$/.test(l);
+    if (type === "thru_hole") {
+      if (ls) {
+        const rest = names.filter((l) => !isCu(l));
+        ls.length = 1;
+        ls.push("*.Cu", ...rest);
+      }
+    } else if (type === "smd" || type === "connect" || type === "non_component") {
+      const cu = names.filter(isCu);
+      const many = cu.length > 1 || cu.some((l) => l === "*.Cu" || l === "F&B.Cu" || l === "*.In.Cu");
+      if (ls && many) {
+        const hasBack = cu.some((l) => l === "B.Cu" || l === "*.Cu" || l === "F&B.Cu");
+        const first = cu.includes("F.Cu") || cu.includes("*.Cu") || cu.includes("F&B.Cu") ? "F.Cu" : cu.filter((l) => /^In\d+\.Cu$/.test(l)).sort((a, b) => +a.slice(2, -3) - +b.slice(2, -3))[0] || "In1.Cu";
+        const keep = hasBack ? "B.Cu" : first;
+        const rest = names.filter((l) => !isCu(l));
+        ls.length = 1;
+        ls.push(keep, ...rest);
+      }
+      const dr = kid(pad, "drill");
+      const off = dr && kid(dr, "offset");
+      if (dr) {
+        if (off) {
+          dr.length = 1;
+          dr.push(off);
+        } else delKid(pad, "drill");
+      }
+      for (const k of ["backdrill", "tertiary_drill", "front_post_machining", "back_post_machining"]) delKid(pad, k);
+    } else if (type === "np_thru_hole") {
+      pad[1] = "";
+      delKid(pad, "net");
+    }
+  }
   var PAD_LAYER_PRESETS = ["F.Cu F.Paste F.Mask", "B.Cu B.Paste B.Mask", "*.Cu *.Mask", "F.Cu F.Mask", "B.Cu B.Mask", "*.Cu"];
   var PAD_AFTER_NET = ["pinfunction", "pintype", "die_length", "die_delay", "solder_mask_margin", "solder_paste_margin", "solder_paste_margin_ratio", "clearance", "zone_connect", "thermal_bridge_width", "thermal_bridge_angle", "thermal_gap", "options", "primitives", "tenting", "uuid", "tstamp"];
   function padNode(node, index) {
@@ -495,7 +535,11 @@
     const pad = padNode(node, index);
     if (!pad) return false;
     if (patch.number !== void 0) pad[1] = str(patch.number);
-    if (patch.type && PAD_TYPES.includes(patch.type)) pad[2] = patch.type;
+    if (patch.type && PAD_TYPES.includes(patch.type) && str(pad[2]) !== patch.type) {
+      pad[2] = patch.type;
+      applyPadAttribute(pad, patch.type);
+    }
+    const wasRoundable = padRoundable(str(pad[3]));
     if (patch.shape && PAD_SHAPES.includes(patch.shape)) pad[3] = patch.shape;
     if (patch.w !== void 0 || patch.h !== void 0) {
       const sz = kid(pad, "size") || setKid(pad, "size", [1, 1], ["rect_delta", "drill", "property", "layers"]);
@@ -518,7 +562,7 @@
       if (typeof d === "string") d = /x/i.test(d) ? d.split(/x/i).map((s) => num(s)) : d.trim() === "" ? 0 : num(d);
       const old = kid(pad, "drill");
       const off = old && kid(old, "offset");
-      const vals = isList(d) ? d.length > 1 && Math.abs(d[1] - d[0]) > 1e-9 ? ["oval", r6(d[0]), r6(d[1])] : [r6(d[0])] : d > 0 ? [r6(d)] : [];
+      const vals = isList(d) ? d.length > 1 && (patch.drillShape === "oval" || Math.abs(d[1] - d[0]) > 1e-9) ? ["oval", r6(d[0]), r6(d[1])] : [r6(d[0])] : d > 0 ? [r6(d)] : [];
       if (!vals.length && !off) delKid(pad, "drill");
       else {
         const n = setKid(pad, "drill", vals, ["backdrill", "property", "sim_electrical_type", "layers"]);
@@ -532,9 +576,13 @@
     if (patch.rratio !== void 0 || patch.shape) {
       const shape = str(pad[3]);
       const before = ["chamfer_ratio", "chamfer", "net"].concat(PAD_AFTER_NET);
-      if (shape === "roundrect") {
+      if (padRoundable(shape)) {
         if (patch.rratio !== void 0 && patch.rratio !== null && !isNaN(patch.rratio)) setKid(pad, "roundrect_rratio", [r6(Math.max(0, Math.min(0.5, num(patch.rratio))))], before);
-        else if (!kid(pad, "roundrect_rratio")) setKid(pad, "roundrect_rratio", [0.25], before);
+        else if (!wasRoundable || !kid(pad, "roundrect_rratio")) {
+          const sz = kid(pad, "size");
+          const w = sz ? num(sz[1]) : 0;
+          setKid(pad, "roundrect_rratio", [r6(defaultIpcRoundingRatio(w, sz ? num(sz[2], w) : w))], before);
+        }
       } else if (shape !== "custom") delKid(pad, "roundrect_rratio");
     }
     if (patch.net !== void 0) {

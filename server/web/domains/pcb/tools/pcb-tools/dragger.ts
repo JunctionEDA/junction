@@ -250,7 +250,7 @@ export function dragStart(ctx: PcbCtx, it: KItem, mm: Pt, free: boolean) {
 }
 /** One drag step's geometry: each line rebuilt for cursor p (no collision handling). */
 export function dragSolution(d: DragSub, p: Pt): DragSolution {
-  const thresh = (l: TrackLine) => (d.free ? 0 : l.width / 4);   // smooth_dragged_segments: a quarter width in walk around
+  const thresh = (l: TrackLine) => (d.free || !S.rs.smooth_dragged_segments ? 0 : l.width / 4);   // SmoothDraggedSegments() ? Width() / 4 : 0
   const viaLine = (l: TrackLine) => l.arc ? (d.free ? chainSimplify([p.slice(), l.pts[1].slice()]) : chainSimplify(initialTrace(l.pts[1], p, -1, l.arcDiag).reverse()))
     : d.free ? dragCornerFree(l.pts, l.vertex!, p) : dragCorner45(l.pts, l.vertex!, p, 0);
   if (d.mode === "via") return { lines: d.lines.map((l) => ({ l, pts: viaLine(l) })), viaAt: p.slice() };

@@ -12,6 +12,7 @@ import { nameOfPick, netMap } from "./schnets";
 import { variantView } from "./variant";
 import { messageText } from "../../../shared/units";
 import type { Units } from "../../../shared/store";
+import { toDisplayAbsAxis } from "./userorigin";
 
 export interface MsgItem { title: string; value: string }
 type PcbApi = { msgPanelInfo?: (doc: KDoc, ids: string[], opts: Record<string, unknown>) => MsgItem[]; designSettings?: (src: unknown) => unknown };
@@ -48,7 +49,7 @@ export function updateMsgPanel(): void {
   if (src !== settingsSrc) { settingsSrc = src; settings = P.designSettings ? P.designSettings(src || null) : null; }
   let items: MsgItem[] = [];
   if (doc.fpEditor && !ids.length && !rt) { store.set({ msgPanel: { items: footprintMsgPanel(doc) } }); return; }
-  try { items = P.msgPanelInfo(variantView(doc) as KDoc, ids, { settings, units: E.units, route: rt && rt.width ? rt : null, net: pcb && pcb.highlightNet && E.highlightIds ? pcb.highlightNet : null }); } catch (e) { console.warn(e); }
+  try { items = P.msgPanelInfo(variantView(doc) as KDoc, ids, { settings, units: E.units, route: rt && rt.width ? rt : null, net: pcb && pcb.highlightNet && E.highlightIds ? pcb.highlightNet : null, ellipsize: ellipsizeEnd, toDisplay: (p: [number, number]) => [toDisplayAbsAxis(p[0], "x"), toDisplayAbsAxis(p[1], "y")] }); } catch (e) { console.warn(e); }
   if (doc.fpEditor && !items.length) items = footprintMsgPanel(doc);
   store.set({ msgPanel: { items } });
 }
@@ -80,6 +81,20 @@ function ellipsize(s: string): string {
   let lo = 0, hi = s.length;
   while (lo < hi) { const k = Math.ceil((lo + hi) / 2), t = s.slice(0, Math.ceil(k / 2)) + "..." + s.slice(s.length - Math.floor(k / 2)); if (measureCtx.measureText(t).width <= limit) lo = k; else hi = k - 1; }
   return s.slice(0, Math.ceil(lo / 2)) + "..." + s.slice(s.length - Math.floor(lo / 2));
+}
+
+/** KIUI::EllipsizeStatusText as the board items call it: the same width, cut at the end (wxELLIPSIZE_END). */
+function ellipsizeEnd(s: string): string {
+  const el = typeof document !== "undefined" ? document.getElementById("msgpanel") : null;
+  const w = el ? el.clientWidth : (typeof window !== "undefined" ? window.innerWidth : 1200);
+  const limit = Math.min(w, 800) * 0.3 + Math.max(w - 800, 0) * 0.6;
+  if (!measureCtx && typeof document !== "undefined") { const c = document.createElement("canvas"); measureCtx = c.getContext("2d"); }
+  if (!measureCtx) return s;
+  measureCtx.font = el ? getComputedStyle(el).font : "12px sans-serif";
+  if (measureCtx.measureText(s).width <= limit) return s;
+  let lo = 0, hi = s.length;
+  while (lo < hi) { const k = Math.ceil((lo + hi) / 2); if (measureCtx.measureText(s.slice(0, k) + "...").width <= limit) lo = k; else hi = k - 1; }
+  return s.slice(0, lo) + "...";
 }
 
 /**

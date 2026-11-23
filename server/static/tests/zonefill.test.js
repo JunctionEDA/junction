@@ -241,4 +241,71 @@ test("thieving dots keep clear of a pad by the clearance", async () => {
   for (const o of lf.outlines) { const b = bbox({ outlines: [o] }); const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2; const dx = Math.max(Math.abs(cx - 115) - 1, 0), dy = Math.max(Math.abs(cy - 115) - 1, 0); assert.ok(Math.hypot(dx, dy) >= 0.5 + 0.25 - 0.01, "dot clear of the pad: " + cx + "," + cy); }
 });
 
+test("iterative refill: a lower zone reclaims the space a higher zone's removed island leaves (Fill() 1320-1660)", async () => {
+  // SIG (priority 1) is cut in two by a GND track; its right half has no SIG pad and goes, and GND below takes it back
+  const hi = zone({ net: "SIG", uuid: "zhi", priority: 1, pts: [[110, 105], [130, 105], [130, 125], [110, 125]] });
+  const lo = zone({ net: "GND", uuid: "zlo" });
+  const phases = [];
+  const doc = K.parseDoc(board(hi, lo, smdFp("R1", 113, 115, "SIG"), smdFp("R2", 104, 115, "GND"), seg(120, 101, 120, 129, "GND", 0.5)), "kicad_pcb");
+  const res = await F.fillZones({ doc, setup: "" }, RULES, null, { phase: (n, t) => phases.push([n, t]), advance() {}, cancelled: () => false, yield: () => Promise.resolve() });
+  const L = (uuid) => res.find((r) => r.id === zid(doc, uuid)).layers.find((x) => x.layer === "F.Cu");
+  assert.ok(filledAt(L("zhi"), 114, 110) && !filledAt(L("zhi"), 126, 115), "the SIG island is gone");
+  assert.ok(filledAt(L("zlo"), 126, 115), "GND refilled where the island was");
+  assert.ok(!filledAt(L("zlo"), 114, 110), "GND still clears the connected SIG copper");
+  assert.ok(phases.some(([, t]) => t === "Refilling overlapping zones..."), JSON.stringify(phases));
+});
+
+test("iterative refill: nothing to refill when no island is removed and no same-net zones overlap", async () => {
+  const phases = [];
+  const doc = K.parseDoc(board(zone({ net: "GND" }), smdFp("R2", 104, 115, "GND")), "kicad_pcb");
+  await F.fillZones({ doc, setup: "" }, RULES, null, { phase: (n, t) => phases.push([n, t]), advance() {}, cancelled: () => false, yield: () => Promise.resolve() });
+  assert.ok(!phases.some(([, t]) => t === "Refilling overlapping zones..."));
+});
+
+// custom rules (.kicad_dru): FillRules.custom is EvalRules' answer per zone, item and layer (PcbTools.zoneFillRules)
+const fpid = (doc, ref) => [...doc.items.values()].find((it) => it.kind === "footprint" && K.str(K.kid(it.node, "uuid")[1]) === "fp-" + ref).id;
+async function fillWithRules(text, custom) {
+  const doc = K.parseDoc(text, "kicad_pcb");
+  const table = typeof custom === "function" ? custom(doc) : custom;
+  const res = await F.fillZones({ doc, setup: text }, Object.assign({}, RULES, { custom: table, customMax: 2 }), null);
+  return { doc, layer: (uuid, l) => res.find((r) => r.id === zid(doc, uuid)).layers.find((x) => x.layer === l) };
+}
+test("a custom clearance rule replaces the netclass and zone clearances to a pad (EvalRules: the rule wins outright)", async () => {
+  const text = board(zone(), smdFp("R1", 120, 115, "SIG"));
+  const plain = await fill(text); const lp = plain.layer(zid(plain.doc, "z1"), "F.Cu");
+  assert.ok(filledAt(lp, 121.7, 115), "0.5 mm by default");
+  const r = await fillWithRules(text, (doc) => ({ [`clearance|${zid(doc, "z1")}|${fpid(doc, "R1")}#0|*`]: 1.5 }));
+  const lf = r.layer("z1", "F.Cu");
+  assert.ok(!filledAt(lf, 122.2, 115) && filledAt(lf, 122.8, 115), "1.5 mm from the rule");
+  // a smaller rule clearance than the zone's own wins as well
+  const r2 = await fillWithRules(text, (doc) => ({ [`clearance|${zid(doc, "z1")}|${fpid(doc, "R1")}#0|F.Cu`]: 0.2 }));
+  assert.ok(filledAt(r2.layer("z1", "F.Cu"), 121.35, 115), "0.2 mm from the rule");
+});
+test("a pad's local clearance override beats a custom rule", async () => {
+  const fp = smdFp("R1", 120, 115, "SIG").replace('(net "SIG")', '(net "SIG") (clearance 0.3)');
+  const r = await fillWithRules(board(zone(), fp), (doc) => ({ [`clearance|${zid(doc, "z1")}|${fpid(doc, "R1")}#0|*`]: 1.5 }));
+  assert.ok(filledAt(r.layer("z1", "F.Cu"), 121.5, 115), "the 0.3 mm override");
+});
+test("physical_clearance raises the gap: max( PHYSICAL_CLEARANCE, CLEARANCE )", async () => {
+  const r = await fillWithRules(board(zone(), smdFp("R1", 120, 115, "SIG")), (doc) => ({ [`physical_clearance|${zid(doc, "z1")}|${fpid(doc, "R1")}#0|*`]: 1.2 }));
+  const lf = r.layer("z1", "F.Cu");
+  assert.ok(!filledAt(lf, 122.0, 115) && filledAt(lf, 122.5, 115));
+});
+test("thermal relief gap and zone connection from custom rules (a pad inherits its footprint's)", async () => {
+  const text = board(zone(), thtFp("J1", 120, 115, "GND"));
+  const d = 1.8;   // between the spokes (at 45 degrees on a round pad), 1.8 mm from the centre: inside a 1.0 gap, outside the zone's 0.5
+  const plain = await fill(text); assert.ok(filledAt(plain.layer(zid(plain.doc, "z1"), "F.Cu"), 120 + d, 115));
+  const g = await fillWithRules(text, (doc) => ({ [`thermal_relief_gap|${zid(doc, "z1")}|${fpid(doc, "J1")}|*`]: 1.0 }));
+  assert.ok(!filledAt(g.layer("z1", "F.Cu"), 120 + d, 115), "1.0 mm thermal gap");
+  const near = 1.2;
+  assert.ok(!filledAt(plain.layer(zid(plain.doc, "z1"), "F.Cu"), 120 + near, 115), "a thermal ring by default");
+  const c = await fillWithRules(text, (doc) => ({ [`zone_connection|${zid(doc, "z1")}|${fpid(doc, "J1")}#0|*`]: "FULL" }));
+  assert.ok(filledAt(c.layer("z1", "F.Cu"), 120 + near, 115), "solid from the rule");
+});
+test("a custom edge_clearance replaces copper_edge_clearance", async () => {
+  const r = await fillWithRules(board(zone()), (doc) => ({ [`edge_clearance|${zid(doc, "z1")}|edge|*`]: 1.5 }));
+  const b = bbox(r.layer("z1", "F.Cu"));
+  assert.ok(Math.abs(b[0] - 101.5) < 0.02 && Math.abs(b[3] - 128.5) < 0.02, b.join(","));
+});
+
 Promise.all(pending).then(() => { console.log(`zonefill: ${passed} passed, ${failed} failed`); if (failed) process.exit(1); });

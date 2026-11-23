@@ -12,7 +12,7 @@ import { deleteChanges } from "./changes";
 import { hoverPoint } from "./app-state";
 import { applySelection, selectionIds } from "./groups";
 import { netlist, ratsnest } from "./netlist";
-import { attemptFinish, continueFromEnd, routeClick, setLayer, setRouteQueueNext } from "./route-tool";
+import { abortRoute, attemptFinish, continueFromEnd, routeClick, setLayer, setRouteQueueNext } from "./route-tool";
 import { S } from "./state";
 import { pt, samePt } from "./util";
 
@@ -55,6 +55,19 @@ export function routeNext(ctx: PcbCtx): boolean {
     if (q.mode === "otherEnd") continueFromEnd(ctx);
     return true;
   }
+}
+/**
+ * PCB_ACTIONS::cancelCurrentItem ("Cancel Current Item", the router menu while routing a selection): the route in
+ * progress is aborted (AbortPlacement) and the next selected item is routed; unlike Escape the queue is kept.
+ */
+export function cancelCurrentItem(ctx: PcbCtx): boolean {
+  const q = S.routeQueue; if (!q || !S.route) return false;
+  abortRoute(ctx); S.routeQueue = q; routeNext(ctx); return true;
+}
+/** ROUTER_TOOL's hasOtherEnd: the routed net still has a ratsnest edge on the board (Route From Other End / Attempt Finish are offered). */
+export function routeHasOtherEnd(ctx: PcbCtx | null): boolean {
+  const rt = S.route; if (!rt || !rt.netKey || !ctx || !ctx.doc) return false;
+  return ratsnest(ctx.doc, netlist(ctx.doc)).some((l) => l.net === rt.netKey);
 }
 /** Escape while routing the selection: everything left is dropped (m_cancelled). */
 export function cancelRouteQueue() { S.routeQueue = null; }

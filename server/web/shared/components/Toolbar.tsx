@@ -4,10 +4,10 @@
 // scrolling column.  The right bar also carries the collab tools app.js keeps in its File menu on
 // the desktop, and a hidden `#ltools` marker that tells sch-tools which tool is active.
 import { usePluginBarEntries } from "../../domains/pcb/plugins/PluginUi";
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { actionMeta, isControl, isGroup, isSep, SPEC, type ActionItem, type ControlItem, type GroupItem, type ToolbarItem, type ToolbarLoc } from "../../domains/pcb/spec";
-import { EXTRA_TOOLS, READ_ONLY_OK, ZOOM_LIST, toolFor } from "../../domains/pcb/tables";
+import { EXTRA_TOOLS, READ_ONLY_OK, ZOOM_LIST, conditionWhy, toolFor, type ActionState } from "../../domains/pcb/tables";
 import { gridChoiceText } from "../units";
 import { Select, type SelectOption } from "./Select";
 import { appState, dispatch, useApp, type Editor } from "../store";
@@ -61,6 +61,38 @@ function viewOnlyWhy(viewOnly: boolean, id: string): string | null {
   return appState().canComment ? "Comment-only access" : "View-only access";
 }
 
+// ---------------------------------------------------------------- enable conditions
+/* ACTION_TOOLBAR buttons follow their action's enable condition (ACTION_MANAGER::SetConditions, evaluated on every UI
+   update): Undo is grey with an empty undo list, Rotate / Mirror with nothing selected, Group below two items, Ungroup
+   without a group.  The state is read from the editor (window.CollabApp.actionState) whenever the selection, the undo
+   list, the document or the tool changes, and after each click or key (a tool starting or ending an operation). */
+let actSnap: ActionState | null = null, actSig = "", actWired = false;
+const actSubs = new Set<() => void>();
+function refreshAct(): void {
+  const app = window.CollabApp; let st: ActionState | null = null;
+  try { st = app && app.actionState ? app.actionState() : null; } catch (e) { st = null; }
+  const sig = st ? JSON.stringify(st) : "";
+  if (sig === actSig) return;
+  actSig = sig; actSnap = st; for (const fn of Array.from(actSubs)) fn();
+}
+function subscribeAct(fn: () => void): () => void {
+  actSubs.add(fn);
+  if (!actWired && typeof window !== "undefined" && window.CollabApp) {
+    actWired = true;
+    let last = window.CollabApp.getState(), queued = false;
+    const later = () => { if (queued) return; queued = true; setTimeout(() => { queued = false; refreshAct(); }, 0); };
+    window.CollabApp.subscribe((s) => { const p = last; last = s; if (s.selection !== p.selection || s.undo !== p.undo || s.document !== p.document || s.tool !== p.tool) later(); });
+    window.addEventListener("pointerup", later, true); window.addEventListener("keyup", later, true);
+    later();
+  }
+  return () => { actSubs.delete(fn); };
+}
+/** Why the action's enable condition greys a schematic toolbar button; null when it may run. */
+function useConditionWhy(a: Avail, id: string): string | null {
+  const st = useSyncExternalStore(subscribeAct, () => actSnap);
+  return a.editor === "sch" && st ? conditionWhy(a.editor, id, st) : null;
+}
+
 // ---------------------------------------------------------------- buttons
 function ActionButton({ item, a, main }: { item: ActionItem; a: Avail; main?: boolean }) {
   const tool = useApp((s) => s.tool.current);
@@ -71,12 +103,13 @@ function ActionButton({ item, a, main }: { item: ActionItem; a: Avail; main?: bo
   const tid = toolFor(a.editor, id);
   const ro = viewOnlyWhy(useApp((s) => s.viewOnly), id);
   const why = unavailable(a, id) || ro;
+  const off = useConditionWhy(a, id), dead = !!ro || (!why && !!off);
   const on = tid ? tool === tid : isOn(id, toggles, panes);
   const menuHandled = a.handled.has(id + ":menu") && !ro;
   const attn = useApp((s) => (s.attention ? s.attention[id] : undefined));   // editor/attention.ts: something waits on this action
   return (
-    <button type="button" className={cx(KB, main && "kmain", why && "desk", on && "on")} data-uiact={id} data-ktool={tid || undefined} aria-disabled={ro ? true : undefined}
-      title={titleFor(a, id) + (ro ? "\n— " + ro : "") + (attn ? "\n— " + attn : "")} onClick={(ev) => { if (!ro) runUiAction(a, id, ev.currentTarget); }}
+    <button type="button" className={cx(KB, main && "kmain", (why || dead) && "desk", on && "on")} data-uiact={id} data-ktool={tid || undefined} aria-disabled={dead ? true : undefined}
+      title={titleFor(a, id) + (ro ? "\n— " + ro : "") + (attn ? "\n— " + attn : "")} onClick={(ev) => { if (!dead) runUiAction(a, id, ev.currentTarget); }}
       onContextMenu={menuHandled ? (ev) => { ev.preventDefault(); dispatch({ type: "action", id: id + ":menu", anchor: rectOf(ev.currentTarget) }); } : undefined}>
       <KIcon name={meta.icon || "options_generic"} />
       {attn ? (
@@ -129,7 +162,7 @@ function Palette({ group, wrap, a, onClose, armed }: { group: GroupItem; wrap: H
     <div className={cx("kpalette fixed z-70 bg-bench border border-line shadow-panel flex gap-0", dock === "top" ? "flex-col" : "flex-row")}
       style={{ ...style, padding: PALETTE_BORDER - 1 + "px" }} ref={ref} data-group={group.group}>
       {group.items.map((it) => {
-        const ro = viewOnlyWhy(viewOnly, it.id); const why = unavailable(a, it.id) || ro;
+        const ro = viewOnlyWhy(viewOnly, it.id); const why = unavailable(a, it.id) || ro || (a.editor === "sch" && actSnap ? conditionWhy(a.editor, it.id, actSnap) : null);
         return (
           <button type="button" key={it.id} title={titleFor(a, it.id)} data-uiact={it.id} aria-disabled={why ? true : undefined}
             className={cx(KB, dock === "top" ? "my-px" : "mx-px", why && "desk")}
@@ -228,7 +261,7 @@ function Control({ item }: { item: ControlItem }) {
   if (c === "ipcScripting") return null;
   let inner: ReactElement | null = null;
   if (c === "currentVariant") inner = <VariantSelect />;
-  else if (c === "overrideLocks") inner = <label className="kcheck inline-flex items-center gap-1 text-sm whitespace-nowrap" title="Allow editing locked items"><input type="checkbox" onChange={(ev) => { const ed = (window as unknown as { CollabEditor?: { overrideLocks?: boolean } }).CollabEditor; if (ed) ed.overrideLocks = ev.currentTarget.checked; }} /> Override locks</label>;
+  else if (c === "overrideLocks") inner = <label className="kcheck inline-flex items-center gap-1 text-sm whitespace-nowrap" title="Allow moving of locked items with the mouse"><input type="checkbox" onChange={(ev) => { const ed = (window as unknown as { CollabEditor?: { overrideLocks?: boolean } }).CollabEditor; if (ed) ed.overrideLocks = ev.currentTarget.checked; }} /> Override locks</label>;
   else if (c === "trackWidth") inner = <TrackWidthSelect />;
   else if (c === "viaDiameter") inner = <ViaSizeSelect />;
   else if (c === "viaStack") inner = <ViaStackSelect />;

@@ -237,13 +237,19 @@ export interface FillRules {
   /** board minimum clearance, hole clearance and copper-to-edge clearance (Board Setup > Constraints) */
   minClearance: number; holeClearance: number; edgeClearance: number;
   maxError?: number;
+  /**
+   * the custom rules (.kicad_dru) DRC_ENGINE::EvalRules gives, as plain data: `${type}|${zone id}|${item key}|${layer or *}`
+   * → the rule's min (zone_connection: FULL / THERMAL / NONE; thermal_spoke_width: "min,opt,max"); customMax is the
+   * largest clearance they name (m_worstClearance)
+   */
+  custom?: Record<string, number | string>; customMax?: number;
 }
 const padOverride = (pad: Pad, key: string): number | null => { const k = K(pad.node, key); if (k) return num(k[1]); const f = K(pad.fp.node, key); return f ? num(f[1]) : null; };
 
 // ---------------------------------------------------------------- the filler
 export interface LayerFill { layer: string; outlines: Pt[][]; islands: Set<number> }
 export interface ZoneFillResult { id: string; layers: LayerFill[] }
-export interface FillProgress { phase(n: number, text: string): void; advance(done: number, total: number): void; cancelled(): boolean; yield(): Promise<void> }
+export interface FillProgress { phase(n: number, text: string): void; advance(done: number, total: number): void; cancelled(): boolean; yield(): Promise<void>; warning?(text: string): void }
 
 /** POLY_YSTRIPES_INDEX: a closed path's edges bucketed by horizontal stripes, for point and segment queries on big fills. */
 class PathIndex {
@@ -299,6 +305,10 @@ export class ZoneFiller {
   private readonly fills = new Map<ZoneModel, Map<string, Poly>>();
   private readonly worst: number;
   private readonly items: CopperItem[] = [];
+  /** refillZoneFromCache's inputs per zone and layer: the fill before the zone knockouts, the same-net apron, the un-hatched extent */
+  private readonly preKnockout = new Map<string, Poly>();
+  private readonly apronCache = new Map<string, Poly>();
+  private readonly preHatchSolid = new Map<string, Poly>();
 
   constructor(readonly m: BoardModel, readonly rules: FillRules) {
     this.maxError = rules.maxError || MAX_ERROR;
@@ -307,7 +317,7 @@ export class ZoneFiller {
     const { loops, polylines } = this.edgeOutline();
     this.edges = polylines;
     this.board = loops.length ? booleanOpD(ClipType.Union, loops.map(toPath), null, FillRule.EvenOdd, PREC) : null;
-    let worst = Math.max(rules.minClearance, rules.edgeClearance, rules.holeClearance);
+    let worst = Math.max(rules.minClearance, rules.edgeClearance, rules.holeClearance, rules.customMax || 0);
     for (const z of this.zones) worst = Math.max(worst, z.clearance);
     const nets = new Set<string>(); for (const fp of m.footprints) for (const p of fp.pads) nets.add(p.net); for (const z of this.zones) nets.add(z.net); nets.add("");
     for (const n of nets) worst = Math.max(worst, rules.netClearance(n));
@@ -403,24 +413,70 @@ export class ZoneFiller {
   private padShapeName(pad: Pad, layer: string): string { return padShapeOn(pad, layer, this.m.copper).shape; }
 
   // ------------------------------------------------------------ rules
-  /** CLEARANCE_CONSTRAINT between the zone and an item (netclasses, local clearances, local overrides, board minimum). */
-  private clearance(z: ZoneModel, net: string | null, override: number | null): number {
+  /** A custom rule's value for (zone, item, layer), or undefined when no custom rule gives one. */
+  private custom(type: string, z: ZoneModel, key: string | null, layer: string | null): number | string | undefined {
+    const t = this.rules.custom; if (!t || key === null) return undefined;
+    const b = `${type}|${z.id}|${key}|`; const v = layer !== null ? t[b + layer] : undefined; return v !== undefined ? v : t[b + "*"];
+  }
+  private customMin(type: string, z: ZoneModel, key: string | null, layer: string | null): number | null { const v = this.custom(type, z, key, layer); return typeof v === "number" ? v : null; }
+  /** a pad's key in the rule table, and its footprint's (rules on the footprint are inherited by its pads) */
+  private padKey(pad: Pad): string { return pad.fp.id + "#" + pad.fp.pads.indexOf(pad); }
+  /** a pad's rule value, else its footprint's (EvalRules' "Inheriting from parent") */
+  private padCustom(type: string, z: ZoneModel, pad: Pad, layer: string | null): number | string | undefined { const v = this.custom(type, z, this.padKey(pad), layer); return v !== undefined ? v : this.custom(type, z, pad.fp.id, layer); }
+  /** PHYSICAL_CLEARANCE_CONSTRAINT / PHYSICAL_HOLE_CLEARANCE_CONSTRAINT: a custom rule's min, else -1 (no implicit rule). */
+  private physical(type: "physical_clearance" | "physical_hole_clearance", z: ZoneModel, key: string | null, layer: string | null): number { const v = this.customMin(type, z, key, layer); return v === null ? -1 : v; }
+  /**
+   * CLEARANCE_CONSTRAINT between the zone and an item: a local override (floored by the board minimum), else a custom
+   * rule outright, else the netclasses raised to the local clearances and the board minimum.
+   */
+  private clearance(z: ZoneModel, net: string | null, override: number | null, key: string | null = null, layer: string | null = null): number {
     const min = this.rules.minClearance || 0;
     if (override !== null && override > 0) return Math.max(override, min);
+    const cr = this.customMin("clearance", z, key, layer); if (cr !== null) return cr;
     let c = this.rules.netClearance(z.net); if (net !== null) c = Math.max(c, this.rules.netClearance(net));
     return Math.max(c, z.clearance, min);
   }
-  /** EvalZoneConnection: the pad's own setting, its footprint's, the zone's; THT thermal is thermal for a PTH only. */
-  private connection(z: ZoneModel, pad: Pad): string {
+  /** HOLE_CLEARANCE_CONSTRAINT: a local override (floored by the board hole clearance), else a custom rule, else the board hole clearance. */
+  private holeClearance(z: ZoneModel, override: number | null, key: string | null, layer: string | null): number {
+    const min = this.rules.holeClearance || 0;
+    if (override !== null && override > 0) return Math.max(override, min);
+    const cr = this.customMin("hole_clearance", z, key, layer); return cr !== null ? cr : min;
+  }
+  /** The clearance between two zones of different nets: max( PHYSICAL_CLEARANCE, CLEARANCE ) for the pair. */
+  private zoneGap(z: ZoneModel, k: ZoneModel, layer: string): number {
+    const cr = this.customMin("clearance", z, k.id, layer);
+    const c = cr !== null ? cr : Math.max(this.clearance(z, k.net, null), k.clearance);
+    return Math.max(-1, this.physical("physical_clearance", z, k.id, layer), c);
+  }
+  /** EvalZoneConnection: the pad's own setting, a custom rule, its footprint's, the zone's; THT thermal is thermal for a PTH only. */
+  private connection(z: ZoneModel, pad: Pad, layer: string | null = null): string {
     const zc = (n: Node): string | null => { const k = K(n, "zone_connect"); if (!k) return null; return ["NONE", "THERMAL", "FULL", "THT_THERMAL"][num(k[1], 1)] || null; };
-    let c = zc(pad.node) || zc(pad.fp.node) || z.connect;
+    const cr = this.padCustom("zone_connection", z, pad, layer);
+    let c = zc(pad.node) || (typeof cr === "string" ? cr : null) || zc(pad.fp.node) || z.connect;
     if (c === "THT_THERMAL") c = pad.type === "thru_hole" ? "THERMAL" : "FULL";
     return c;
   }
-  private thermalGap(z: ZoneModel, pad: Pad | null): number { if (pad) { const g = K(pad.node, "thermal_gap"); if (g && num(g[1]) > 0) return num(g[1]); } return z.thermalGap; }
-  private spokeWidth(z: ZoneModel, pad: Pad | null): number {
+  /** EvalZoneConnection on a via: a custom rule, else the zone's own setting (THT thermal is solid for anything but a PTH pad). */
+  private viaConnection(z: ZoneModel, v: Via, layer: string): string {
+    const cr = this.custom("zone_connection", z, v.id || null, layer); const c = typeof cr === "string" ? cr : z.connect;
+    return c === "THT_THERMAL" ? "FULL" : c;
+  }
+  private thermalGap(z: ZoneModel, pad: Pad | null, layer: string | null = null): number {
+    if (pad) { const g = K(pad.node, "thermal_gap"); if (g && num(g[1]) > 0) return num(g[1]); const cr = this.padCustom("thermal_relief_gap", z, pad, layer); if (typeof cr === "number") return cr; }
+    return z.thermalGap;
+  }
+  private viaThermalGap(z: ZoneModel, v: Via, layer: string): number { const cr = this.customMin("thermal_relief_gap", z, v.id || null, layer); return cr !== null ? cr : z.thermalGap; }
+  /** THERMAL_SPOKE_WIDTH_CONSTRAINT: the pad's own width (at least the zone's min thickness), else a rule's opt clamped to its min / max, else the zone's. */
+  private spokeWidth(z: ZoneModel, pad: Pad | null, layer: string | null = null): number {
     if (pad) { const g = K(pad.node, "thermal_bridge_width") || K(pad.node, "thermal_width"); if (g && num(g[1]) > 0) return Math.max(num(g[1]), z.minThickness); }
-    return z.spokeWidth;
+    const cr = pad ? this.padCustom("thermal_spoke_width", z, pad, layer) : undefined;
+    return typeof cr === "string" ? this.spokeFromRule(cr, z.spokeWidth) : z.spokeWidth;
+  }
+  private viaSpokeWidth(z: ZoneModel, v: Via, layer: string): number { const cr = this.custom("thermal_spoke_width", z, v.id || null, layer); return typeof cr === "string" ? this.spokeFromRule(cr, z.spokeWidth) : z.spokeWidth; }
+  private spokeFromRule(mom: string, implicit: number): number {
+    const [mn, op, mx] = mom.split(",").map((x) => (x === "" ? null : Number(x)));
+    let w = op !== null ? op : implicit; if (mn !== null) w = Math.max(w, mn); if (mx !== null) w = Math.min(w, mx);
+    return w;
   }
   private spokeAngle(pad: Pad): number {
     const a = K(pad.node, "thermal_bridge_angle"); if (a) return num(a[1]);
@@ -451,28 +507,39 @@ export class ZoneFiller {
     if (prog) { if (prog.cancelled()) return null; prog.phase(2, "Removing isolated copper islands..."); await prog.yield(); }
     const results: ZoneFillResult[] = [];
     const islandsOf = this.isolatedIslands(zones);
+    // the fills after island removal, layer by layer (the outlines as written, with the island flags)
+    const final = new Map<ZoneModel, Map<string, { outlines: Pt[][]; flags: Set<number> }>>();
+    // (zone, layer) pairs that lost islands, and the layers that were all islands to begin with (unconnected pours)
+    const removedIslands: [ZoneModel, string][] = []; const fullyIsolated = new Set<string>();
     for (const z of zones) {
-      const res: ZoneFillResult = { id: z.id, layers: [] };
+      const perLayer = new Map<string, { outlines: Pt[][]; flags: Set<number> }>(); final.set(z, perLayer);
       // copper-thieving fills are intentionally disconnected stamps: never classified as islands
       const zoneIslands = (!z.thieving && islandsOf.get(z)) || new Map<string, Set<number>>();
       // a zone with no pad connection on any layer is a deliberately unconnected pour: kept as it is
       let allIsolated = true;
-      for (const l of z.layers) { if (!isCopper(l)) continue; const polys = this.fillOutlines(z, l); const iso = zoneIslands.get(l); if (!polys.length) continue; if (!iso || iso.size !== polys.length) allIsolated = false; }
+      for (const l of z.layers) { if (!isCopper(l)) continue; const polys = this.fillOutlines(z, l); const iso = zoneIslands.get(l); if (iso && iso.size === polys.length) fullyIsolated.add(this.zlKey(z, l)); if (!polys.length) continue; if (!iso || iso.size !== polys.length) allIsolated = false; }
       for (const l of z.layers) {
         let outlines = this.fillOutlines(z, l); const iso = zoneIslands.get(l) || new Set<number>(); const flags = new Set<number>();
         if (isCopper(l) && !allIsolated && iso.size) {
-          const keep: Pt[][] = [];
+          const keep: Pt[][] = []; let removed = false;
           outlines.forEach((o, i) => {
             if (!iso.has(i)) { keep.push(o); return; }
             const a = Math.abs(signedArea(toPath(o)));
-            if (z.islandMode === 0) return;
-            if (z.islandMode === 2 && a < z.islandAreaMin) return;
+            if (z.islandMode === 0) { removed = true; return; }
+            if (z.islandMode === 2 && a < z.islandAreaMin) { removed = true; return; }
             flags.add(keep.length); keep.push(o);
           });
           outlines = keep;
+          if (removed) { removedIslands.push([z, l]); this.setFill(z, l, outlines); }
         }
-        res.layers.push({ layer: l, outlines, islands: flags });
+        perLayer.set(l, { outlines, flags });
       }
+    }
+    const refilled = await this.iterativeRefill(zones, final, removedIslands, fullyIsolated, prog);
+    if (refilled === null) return null;
+    for (const z of zones) {
+      const res: ZoneFillResult = { id: z.id, layers: [] };
+      for (const [l, f] of final.get(z) || new Map<string, { outlines: Pt[][]; flags: Set<number> }>()) res.layers.push({ layer: l, outlines: f.outlines, islands: new Set([...f.flags].filter((i) => i < f.outlines.length)) });
       // islands outside the board edge (a chamfer or fillet can put copper there)
       if (this.mayHoldOutOfBoardCopper(z)) {
         const minArea = z.minThickness * z.minThickness * 3;
@@ -489,11 +556,148 @@ export class ZoneFiller {
       }
       results.push(res);
     }
-    prog && prog.phase(3, "");
+    prog && prog.phase(refilled ? 4 : 3, "");
     return results;
   }
 
   private readonly outlineCache = new Map<Poly, Pt[][]>();
+  private zlKey(z: ZoneModel, layer: string): string { return z.id + "\u0000" + layer; }
+  /** ZONE::SetFilledPolysList: the fill the other zones knock out and the island search reads, as these outlines. */
+  private setFill(z: ZoneModel, layer: string, outlines: Pt[][]): void {
+    let map = this.fills.get(z); if (!map) { map = new Map(); this.fills.set(z, map); }
+    const p = outlines.map(shape); map.set(layer, p); this.outlineCache.set(p, outlines);
+  }
+  /** ZONE::BuildHashValue for the convergence test: the outlines' vertices to the nanometre. */
+  private fillHash(z: ZoneModel, layer: string): string { return this.fillOutlines(z, layer).map((o) => o.map((q) => Math.round(q[0] * 1e6) + "," + Math.round(q[1] * 1e6)).join(" ")).join("|"); }
+  /** zoneKnockoutMayInteract: the other zone is within reach of this one's clearance knockout and apron. */
+  private knockoutMayInteract(z: ZoneModel, k: ZoneModel): boolean {
+    const reach = this.worst + z.minThickness;
+    return hits(grow(z.bbox, reach), k.bbox) && collide(z.outline, k.outline, reach);
+  }
+
+  /**
+   * Fill()'s iterative refill (ADVANCED_CFG::m_ZoneFillIterativeRefill, on by default): zones that a zone which lost
+   * islands outranks, or that share its net, are refilled from their pre-knockout fill against a snapshot of every
+   * fill, then lose their own islands, until no fill changes (at most 8 passes).  Lower same-net zones overlapping a
+   * higher one are seeded too (issue 23790).  False when nothing was refilled, null when cancelled.
+   */
+  private async iterativeRefill(zones: ZoneModel[], final: Map<ZoneModel, Map<string, { outlines: Pt[][]; flags: Set<number> }>>,
+    removedIslands: [ZoneModel, string][], fullyIsolated: Set<string>, prog?: FillProgress): Promise<boolean | null> {
+    const copperSet = new Set(this.m.copper);
+    const hasFill = (z: ZoneModel, l: string): boolean => this.fillOutlines(z, l).length > 0;
+    const seeds = new Map<string, [ZoneModel, string]>();
+    for (const [z, l] of removedIslands) seeds.set(this.zlKey(z, l), [z, l]);
+    // the initial fill subtracts a higher same-net zone's outline, the refill its actual fill
+    for (const lower of zones) {
+      if (lower.ruleArea || lower.teardrop) continue;
+      for (const higher of this.zones) {
+        if (higher === lower || higher.ruleArea || higher.teardrop || higher.net !== lower.net || higher.priority <= lower.priority) continue;
+        if (!hits(lower.bbox, higher.bbox)) continue;
+        for (const l of lower.layers) if (copperSet.has(l) && higher.layers.includes(l) && hasFill(lower, l) && hasFill(higher, l)) seeds.set(this.zlKey(lower, l), [lower, l]);
+      }
+    }
+    if (!seeds.size) return false;
+    const MAX_ITERATIONS = 8;
+    let changed = [...seeds.values()]; let reported = false, hitLimit = false;
+    for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+      const toRefill: [ZoneModel, string][] = []; const seen = new Set<string>();
+      for (const [cz, cl] of changed) {
+        const bbox = grow(cz.bbox, this.worst);
+        for (const z of zones) {
+          if (z.ruleArea || z.teardrop || !z.layers.includes(cl)) continue;
+          const same = z.net === cz.net;
+          if (z !== cz && !higherPriority(cz, z) && !same) continue;
+          if (z !== cz && !same) { if (!this.knockoutMayInteract(z, cz)) continue; }
+          else if (!hits(z.bbox, bbox)) continue;
+          const key = this.zlKey(z, cl); if (seen.has(key)) continue; seen.add(key); toRefill.push([z, cl]);
+        }
+      }
+      if (!toRefill.length) break;
+      if (!reported) { if (prog) { if (prog.cancelled()) return null; prog.phase(3, "Refilling overlapping zones..."); await prog.yield(); } reported = true; }
+      const before = new Map<string, string>(); for (const [z, l] of toRefill) before.set(this.zlKey(z, l), this.fillHash(z, l));
+      // every refill reads the other zones' fills as they stood before the pass
+      const layers = new Set(toRefill.map((x) => x[1]));
+      const snapshot = new Map<ZoneModel, Map<string, Poly>>();
+      for (const z of this.zones) {
+        if (z.ruleArea) continue; const f = this.fills.get(z); if (!f) continue;
+        for (const l of z.layers) { if (!layers.has(l)) continue; const p = f.get(l); if (p && p.length) { let m = snapshot.get(z); if (!m) { m = new Map(); snapshot.set(z, m); } m.set(l, p); } }
+      }
+      let done = 0;
+      for (const [z, l] of toRefill) {
+        if (prog) { if (prog.cancelled()) return null; await prog.yield(); }
+        const p = this.refillZoneFromCache(z, l, snapshot);
+        if (p) { const outlines = fractured(p); this.setFill(z, l, outlines); const f = final.get(z); const cur = f && f.get(l); if (f) f.set(l, { outlines, flags: cur ? cur.flags : new Set() }); }
+        prog && prog.advance(++done, toRefill.length);
+      }
+      // island removal on the refilled zones only
+      const refillZones = [...new Set(toRefill.filter(([z]) => !z.thieving && !z.teardrop).map(([z]) => z))];
+      const islands = refillZones.length ? this.isolatedIslands(refillZones) : new Map<ZoneModel, Map<string, Set<number>>>();
+      for (const [z, l] of toRefill) {
+        if (z.thieving || z.teardrop) continue;
+        const iso = islands.get(z)?.get(l); if (!iso || !iso.size) continue;
+        const f = final.get(z); const cur = f && f.get(l); if (!f || !cur) continue;
+        if (fullyIsolated.has(this.zlKey(z, l)) && iso.size === cur.outlines.length) continue;
+        const keep: Pt[][] = []; const flags = new Set(cur.flags); let removed = false;
+        cur.outlines.forEach((o, i) => {
+          if (!iso.has(i)) { keep.push(o); return; }
+          const a = Math.abs(signedArea(toPath(o)));
+          if (z.islandMode === 0 || (z.islandMode === 2 && a < z.islandAreaMin)) { removed = true; return; }
+          flags.add(keep.length); keep.push(o);
+        });
+        if (removed) this.setFill(z, l, keep);
+        f.set(l, { outlines: keep, flags });
+      }
+      changed = toRefill.filter(([z, l]) => before.get(this.zlKey(z, l)) !== this.fillHash(z, l));
+      if (!changed.length) break;
+      if (iteration + 1 >= MAX_ITERATIONS) { hitLimit = true; break; }
+    }
+    if (hitLimit && prog && prog.warning) prog.warning(`Zone fills may be incorrect: iterative refill did not converge after ${MAX_ITERATIONS} passes.\n\nThis can happen with complex overlapping zones.  Consider simplifying your zones.`);
+    return true;
+  }
+
+  /**
+   * refillZoneFromCache: the zone's fill before the zone-to-zone knockouts, less the snapshot fills of the zones that
+   * outrank it (other nets grown by their clearance, same nets as they are), with the min-width prune between.
+   */
+  private refillZoneFromCache(z: ZoneModel, layer: string, snapshot: Map<ZoneModel, Map<string, Poly>>): Poly | null {
+    const pre = this.preKnockout.get(this.zlKey(z, layer)); if (!pre) return null;
+    let fill = pre;
+    const zb = grow(z.bbox, this.worst + EXTRA_MARGIN);
+    const diffNet: Poly = [], sameNet: Poly = []; let applied = false;
+    for (const k of this.zones) {
+      if (k === z || k.ruleArea || !k.layers.includes(layer) || k.teardrop || !higherPriority(k, z)) continue;
+      const same = k.net === z.net;
+      if (same) { if (!hits(k.bbox, zb)) continue; } else if (!this.knockoutMayInteract(z, k)) continue;
+      const fp = snapshot.get(k)?.get(layer); if (!fp || !fp.length) continue;
+      if (same) {
+        // equal priorities tie-break on the uuid; the initial fill gives only strictly higher hatched zones their outline
+        if (k.hatch && k.priority > z.priority) for (const q of k.outline) sameNet.push(q); else for (const q of fp) sameNet.push(q);
+      } else {
+        const gap = this.zoneGap(z, k, layer);
+        if (gap < 0) continue;
+        for (const q of inflate(fp, gap + EXTRA_MARGIN + this.maxError, true, this.maxError)) diffNet.push(q);
+        applied = true;
+      }
+    }
+    const diffU = diffNet.length ? union(diffNet) : [], sameU = sameNet.length ? union(sameNet) : [];
+    if (diffU.length) fill = subtract(fill, diffU);
+    if (applied) {
+      let apron = this.apronCache.get(this.zlKey(z, layer)) || [];
+      if (apron.length && diffU.length) apron = subtract(apron, diffU);
+      fill = this.postKnockoutMinWidthPrune(z, fill, apron);
+    }
+    if (sameU.length) fill = subtract(fill, sameU);
+    // the cache was hatched before these knockouts: a min-width ring restores the border the carve cut through,
+    // bounded by the un-hatched extent (issue 24758)
+    if (z.hatch) {
+      const solid = this.preHatchSolid.get(this.zlKey(z, layer)) || [];
+      const knock = diffU.length && sameU.length ? union(diffU, sameU) : diffU.length ? diffU : sameU;
+      if (solid.length && knock.length) { let border = subtract(inflate(knock, z.minThickness, true, this.maxError), knock); border = intersect(border, solid); fill = union(fill, border); }
+    }
+    const noise = this.maxError * this.maxError;
+    return fromPolygons(polygonsOf(fill).filter((pg) => Math.abs(signedArea(pg[0])) >= noise));
+  }
+
   private fillOutlines(z: ZoneModel, layer: string): Pt[][] {
     const f = this.fills.get(z); const p = f ? f.get(layer) : null; if (!p) return [];
     let o = this.outlineCache.get(p); if (!o) { o = fractured(p); this.outlineCache.set(p, o); }
@@ -610,10 +814,10 @@ export class ZoneFiller {
       let noConnection = pad.net !== z.net;
       if (!z.teardrop && (z.net === "" || this.padFlash.get(pad)?.get(layer) === false)) noConnection = true;
       if (noConnection) { noConn.push(pad); continue; }
-      let conn = z.teardrop ? "FULL" : this.connection(z, pad);
+      let conn = z.teardrop ? "FULL" : this.connection(z, pad, layer);
       if (conn === "THERMAL" && !this.padFlashes(pad, layer)) conn = "NONE";
       if (conn === "THERMAL") {
-        if (collide(fill, this.padShape(pad, layer, 0))) { thermal.push(pad); holesP = holesP.concat(this.padShape(pad, layer, this.thermalGap(z, pad))); }
+        if (collide(fill, this.padShape(pad, layer, 0))) { thermal.push(pad); holesP = holesP.concat(this.padShape(pad, layer, this.thermalGap(z, pad, layer))); }
       } else if (conn === "NONE") {
         if (hatch) { noConn.push(pad); continue; }
         const padClr = Math.max(z.clearance, 0);
@@ -631,10 +835,11 @@ export class ZoneFiller {
         let noConnection = v.net !== z.net;
         if (this.padFlash.get(v)?.get(layer) === false) noConnection = true;
         if (noConnection) continue;
-        const gap = z.thermalGap;   // EvalZoneConnection on a via: the zone's own setting
-        // EvalZoneConnection for a via is the zone's own setting; THT thermal is solid for anything but a PTH pad
-        if (z.connect === "THERMAL") { if (gap > 0) { thermal.push(v); holesP = holesP.concat(this.viaShape(v, layer, gap)); } }
-        else if (z.connect === "NONE") { /* buildCopperItemClearances */ }
+        const gap = this.viaThermalGap(z, v, layer);
+        // EvalZoneConnection for a via: a custom rule, else the zone's own setting; THT thermal is solid for anything but a PTH pad
+        const vc = this.viaConnection(z, v, layer);
+        if (vc === "THERMAL") { if (gap > 0) { thermal.push(v); holesP = holesP.concat(this.viaShape(v, layer, gap)); } }
+        else if (vc === "NONE") { /* buildCopperItemClearances */ }
         else solid.push(v);
       }
     }
@@ -654,20 +859,21 @@ export class ZoneFiller {
         if (seenP.has(key)) continue; seenP.add(key);
       }
       // knockoutPadClearance
-      const initGap = -1;
+      const pk = this.padKey(pad);
+      const initGap = this.physical("physical_clearance", z, pk, layer);
       let gap = initGap;
       const hasHole = !!pad.drill && pad.drill.w > 0;
       const flash = this.padFlashes(pad, layer) && pad.layers.has(layer);
       const plated = hasHole && pad.type === "thru_hole";
       const override = padOverride(pad, "clearance");
-      if (flash || plated) gap = Math.max(gap, this.clearance(z, pad.net, override));
+      if (flash || plated) gap = Math.max(gap, this.clearance(z, pad.net, override, pk, layer));
       if (flash && gap >= 0) {
         // an NPTH pad no larger than its hole has no copper
         const npthBare = pad.type === "np_thru_hole" && pad.drill && ((sh.shape === "circle" && pad.drill.w >= sh.w - 1e-9) || (sh.shape === "oval" && pad.drill.w >= sh.w - 1e-9 && pad.drill.h >= sh.h - 1e-9));
         if (!npthBare) out.push(this.padShape(pad, layer, gap + extra));
       }
       if (hasHole) {
-        let holeGap = this.rules.holeClearance || 0;
+        let holeGap = Math.max(this.physical("physical_hole_clearance", z, pk, layer), this.holeClearance(z, override, pk, layer));
         if (pad.type === "np_thru_hole") gap = initGap;
         gap = Math.max(gap, holeGap);
         if (gap >= 0) out.push(this.holeShape(pad, gap + extra));
@@ -681,22 +887,25 @@ export class ZoneFiller {
         const v = it.via; const key = [v.x.toFixed(6), v.y.toFixed(6), Math.max(v.drill, v.size), v.net].join("|"); if (seenT.has(key)) continue; seenT.add(key);
         let sameNet = v.net === z.net; if (!z.teardrop && z.net === "") sameNet = false;
         if (this.padFlash.get(v)?.get(layer) === false) sameNet = false;
-        let gap = -1;
-        if (!sameNet) gap = Math.max(gap, this.clearance(z, v.net, null));
+        const vk = v.id || null;
+        let gap = this.physical("physical_clearance", z, vk, layer);
+        if (!sameNet) gap = Math.max(gap, this.clearance(z, v.net, null, vk, layer));
         if (this.viaFlashes(v, layer) && gap > 0) out.push(this.viaShape(v, layer, gap + extra));
-        let holeGap = -1; if (!sameNet) holeGap = Math.max(holeGap, this.rules.holeClearance || 0);
+        let holeGap = this.physical("physical_hole_clearance", z, vk, layer); if (!sameNet) holeGap = Math.max(holeGap, this.holeClearance(z, null, vk, layer));
         gap = Math.max(gap, holeGap);
         if (gap >= 0) out.push([shape(circlePointsOutside(v.x, v.y, v.drill / 2 + gap + extra, this.maxError))]);
       } else if (it.track) {
         const t = it.track; const key = [t.x1, t.y1, t.x2, t.y2, t.w].map((x) => x.toFixed(6)).join("|"); if (seenT.has(key)) continue; seenT.add(key);
         let sameNet = it.net === z.net; if (!z.teardrop && z.net === "") sameNet = false;
-        let gap = -1; if (!sameNet) gap = Math.max(gap, this.clearance(z, it.net, null));
+        const tk = t.id || null;
+        let gap = this.physical("physical_clearance", z, tk, layer); if (!sameNet) gap = Math.max(gap, this.clearance(z, it.net, null, tk, layer));
         if (gap >= 0) out.push(this.trackShape(t, gap + extra));
       }
     }
     // graphic items: copper drawings and text on the layer, and the board edge
     const gfxGap = Math.max(-1, this.clearance(z, null, null));
-    const edgeGap = Math.max(-1, this.rules.edgeClearance);
+    const ce = this.customMin("edge_clearance", z, "edge", layer);
+    const edgeGap = Math.max(-1, ce !== null ? ce : this.rules.edgeClearance);
     const addGeom = (g: KGeom, gap: number): void => {
       if (gap < 0) return;
       if (g.t === "text") { if (g.hiddenText) return; const polys = textKnockout(g, g.knockout ? 0 : gap + extra, this.log); if (polys.length) out.push(shapes(polys)); return; }
@@ -712,7 +921,8 @@ export class ZoneFiller {
       const netN = K(it.node as Node, "net"); const gnet = netN ? (typeof netN[1] === "number" ? (this.m.doc.nets.get(netN[1] as number) || "") : str(netN[1])) : null;
       for (const g of it.geom) {
         if (g.point) continue;
-        if (g.layer === layer) { const same = gnet !== null && gnet === z.net && z.net !== ""; addGeom(g, same ? -1 : gfxGap); }
+        const phys = this.physical("physical_clearance", z, it.id, layer);
+        if (g.layer === layer) { const same = gnet !== null && gnet === z.net && z.net !== ""; addGeom(g, same ? phys : Math.max(phys, this.clearance(z, null, null, it.id, layer))); }
         else if (g.layer === "Margin") addGeom(g, Math.max(gfxGap, edgeGap));
       }
     }
@@ -744,7 +954,7 @@ export class ZoneFiller {
       const reach = this.worst + z.minThickness;
       if (!hits(grow(z.bbox, reach), k.bbox) || !collide(z.outline, k.outline, reach)) continue;
       const f = this.fills.get(k); const fp = f ? f.get(layer) : null; if (!fp || !fp.length) continue;
-      const gap = Math.max(-1, this.clearance(z, k.net, null), k.clearance);
+      const gap = this.zoneGap(z, k, layer);
       if (gap < 0) continue;
       out.push(inflate(fp, gap + EXTRA_MARGIN, true, this.maxError));
     }
@@ -770,10 +980,10 @@ export class ZoneFiller {
         if (!pad.layers.has(layer)) continue;
         const sh = padShapeOn(pad, layer, this.m.copper);
         circular = sh.shape === "circle" || (sh.shape === "oval" && Math.abs(sh.w - sh.h) < 1e-9);
-        gap = this.thermalGap(z, pad); spokeW = Math.min(this.spokeWidth(z, pad), Math.min(sh.w, sh.h));
+        gap = this.thermalGap(z, pad, layer); spokeW = Math.min(this.spokeWidth(z, pad, layer), Math.min(sh.w, sh.h));
         if (spokeW < z.minThickness) continue;
       } else if (via && z.hatch) {
-        circular = true; gap = z.thermalGap; spokeW = Math.min(z.spokeWidth, via.sizes ? via.sizes.get(layer) ?? via.size : via.size);
+        circular = true; gap = this.viaThermalGap(z, via, layer); spokeW = Math.min(this.viaSpokeWidth(z, via, layer), via.sizes ? via.sizes.get(layer) ?? via.size : via.size);
         if (spokeW < z.minThickness) continue;
       } else continue;
       const half = spokeW / 2;
@@ -848,6 +1058,9 @@ export class ZoneFiller {
     if (z.hatch) {
       const discs: Poly = []; for (const v of solidVias) if (v.layers.includes(layer)) for (const d of this.viaShape(v, layer, 0)) discs.push(d);
       const protect = union(union(rings, clearanceHoles), discs.length ? intersect(union(discs), smoothed) : []);
+      // the refiller needs the un-hatched extent to re-border zones it later carves (issue 24758)
+      let solid = fill; if (prune) solid = inflate(solid, halfMin - eps, true, this.maxError);
+      this.preHatchSolid.set(this.zlKey(z, layer), subtract(intersect(solid, maxExtents), clearanceHoles));
       fill = this.addHatch(z, layer, fill, protect);
     } else if (z.thieving) fill = this.addCopperThievingPattern(z, layer, fill);
     if (prune) fill = inflate(fill, halfMin - eps, true, this.maxError);
@@ -856,9 +1069,12 @@ export class ZoneFiller {
     const holes = padHoles.length ? union(clearanceHoles, padHoles) : clearanceHoles;
     fill = intersect(fill, maxExtents);
     fill = subtract(fill, holes);
-    // iterative-refill path (ADVANCED_CFG::m_ZoneFillIterativeRefill, on by default): the other-net zones last
+    // iterative-refill path (ADVANCED_CFG::m_ZoneFillIterativeRefill, on by default): the fill before the zone
+    // knockouts and the band an abutting same-net zone still pours into are kept for refillZoneFromCache, then the
+    // other-net zones go last
+    let apron = subtract(subtract(smoothed, maxExtents), holes);
+    this.preKnockout.set(this.zlKey(z, layer), fill); this.apronCache.set(this.zlKey(z, layer), apron);
     if (zoneClr.length) {
-      let apron = subtract(subtract(smoothed, maxExtents), holes);
       fill = subtract(fill, zoneClr); apron = subtract(apron, zoneClr);
       fill = this.postKnockoutMinWidthPrune(z, fill, apron);
     }
@@ -890,13 +1106,13 @@ export class ZoneFiller {
         if (!pad.layers.has(layer)) continue;
         const sh = padShapeOn(pad, layer, this.m.copper);
         const circ = sh.shape === "circle" || (sh.shape === "oval" && Math.abs(sh.w - sh.h) < 1e-9);
-        const gap = this.thermalGap(z, pad); const sw = Math.min(this.spokeWidth(z, pad), Math.min(sh.w, sh.h));
+        const gap = this.thermalGap(z, pad, layer); const sw = Math.min(this.spokeWidth(z, pad, layer), Math.min(sh.w, sh.h));
         if (sw < z.minThickness) continue;
         if (circ) { const [ox, oy] = rot(sh.offset[0], sh.offset[1], pad.rot); const r = Math.max(sh.w, sh.h) / 2; ring = subtract([shape(circlePoints(pad.x + ox, pad.y + oy, r + gap + sw, this.maxError))], [shape(circlePoints(pad.x + ox, pad.y + oy, r + gap, this.maxError))]); }
         else ring = subtract(this.padShape(pad, layer, gap + sw), this.padShape(pad, layer, gap));
       } else if (via) {
-        const d = via.sizes ? via.sizes.get(layer) ?? via.size : via.size; const sw = Math.min(z.spokeWidth, d); if (sw < z.minThickness) continue;
-        const r = d / 2 + z.thermalGap; ring = subtract([shape(circlePoints(via.x, via.y, r + sw, this.maxError))], [shape(circlePoints(via.x, via.y, r, this.maxError))]);
+        const d = via.sizes ? via.sizes.get(layer) ?? via.size : via.size; const sw = Math.min(this.viaSpokeWidth(z, via, layer), d); if (sw < z.minThickness) continue;
+        const r = d / 2 + this.viaThermalGap(z, via, layer); ring = subtract([shape(circlePoints(via.x, via.y, r + sw, this.maxError))], [shape(circlePoints(via.x, via.y, r, this.maxError))]);
       } else continue;
       for (const r of ring) all.push(r);
     }

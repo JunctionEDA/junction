@@ -80,7 +80,7 @@ test("Optimize Selected (Shift+T): a zig-zag track collapses to the cheapest 45Â
   const { ctx, log, doc } = boardCtx(BOARD(seg([0, 0], [5, 0], "a") + seg([5, 0], [5, 5], "b") + seg([5, 5], [10, 5], "c") + seg([10, 5], [10, 10], "d")));
   ctx.setSelection(["b"]);
   assert.strictEqual(pcb.actions.routerOptimizeSelected.run(ctx), true);
-  assert.strictEqual(log.commits.length, 1); assert.strictEqual(log.commits[0].label, "Optimize Selected");
+  assert.strictEqual(log.commits.length, 1); assert.strictEqual(log.commits[0].label, "Routing");
   assert.ok(tracks(doc) < 4, "fewer segments than the zig-zag");
   assert.strictEqual(ctx.selection.size, 0, "the selection is cleared first");
 });

@@ -103,6 +103,8 @@ function menuCtx(): MenuCtx {
     snapAllLayers: (() => { try { return !sch && !!(P && P.snapAllLayersOn && P.snapAllLayersOn(toolCtx())); } catch (e) { return false; } })(),
     hasCorner: !!handleKey && !midHandle, hasMidpoint: midHandle, canChamferCorner: !!one && (one.kind === "gr_poly" || one.kind === "zone"),
     editor: editor(), kinds, tool: E.tool, drawingLine, routing,
+    routeOtherEnd: routing && !!(P && (P as { routeHasOtherEnd?: (ctx: unknown) => boolean }).routeHasOtherEnd && (P as { routeHasOtherEnd: (ctx: unknown) => boolean }).routeHasOtherEnd(toolCtx())),
+    inRouteSelected: !sch && !!p && !!(p as { routeQueue?: unknown }).routeQueue,
     fpEditor: !sch && !!(E.kdoc && E.kdoc.fpEditor), padEdit: !sch && !!FP.padEdit,
     busy: interactionBusy() || drawingLine || routing || !!draw || (sch && !!s && !!s.carry),
     canAddCorner, canRemoveCorner, editableCorners: !sch && editableCornersSelected(),
@@ -522,12 +524,18 @@ E.hooks.clarify = (ids: string[], then: () => void): void => {
   const mm = E.lastCursorMm as Mm | null;
   clarifyPopup({ clientX: c[0], clientY: c[1] }, ids, then, mm && !isSch() ? candidatesAt(mm, true) : null);
 };
+/** getItemDescription of SELECTION_TOOL::doSelectionMenu: a footprint that reads like another candidate adds its library id. */
+function describeAmong(id: string, ids: string[]): string {
+  const PA = (window as unknown as { PcbTools?: { itemDescriptionAmong?: (d: KDoc, id: string, ids: string[], u: string) => string } }).PcbTools;
+  if (!isSch() && PA && PA.itemDescriptionAmong && E.kdoc) { const t = PA.itemDescriptionAmong(E.kdoc as KDoc, id, ids, E.units); if (t) return t; }
+  return describe(id);
+}
 /** KiCad's "Clarify Selection" list: offered when the click could have meant more than one item. */
 function clarifyRows(mm: Mm): CtxItem | null {
   const ids = candidatesAt(mm, true).slice(0, 12); if (ids.length < 2) return null;
   const sel = new Set(selectionIds()); const ps = pcbState() as unknown as { padSel?: string | null } | null;
   return { label: "Clarify Selection", icon: "cursor", sub: ids.map((id): CtxItem => ({
-    label: describe(id), check: true, checked: sel.has(id) || (!!ps && ps.padSel === id) || (!!E.selField && fieldId(E.selField.id, E.selField.name) === id), hover: candidateHover(id),
+    label: describeAmong(id, ids), check: true, checked: sel.has(id) || (!!ps && ps.padSel === id) || (!!E.selField && fieldId(E.selField.id, E.selField.name) === id), hover: candidateHover(id),
     run: runRow(() => { clearAllSelection(false); selectCandidate(id); selectionChanged(); if (anchor) show(anchor.x, anchor.y, anchor.mm, false); }),
   })) };
 }
@@ -685,7 +693,7 @@ function clarifyPopup(ev: { clientX: number; clientY: number }, ids: string[], t
     if (isSch() && list.length > 1 && items.length) { clearAllSelection(false); for (const id of items) applyPickMode(id, "add"); if (then) then(); return; }
     clearAllSelection(false); for (const id of list) selectCandidate(id); selectionChanged(); if (then) then();
   };
-  const items: CtxItem[] = ids.map((id, i): CtxItem => ({ label: i < 9 && !IS_MAC ? `${i + 1}  ${describe(id)}` : describe(id), key: i < 9 ? String(i + 1) : undefined, icon: menuImage(id), hover: hoverOf(id), run: runRow(() => pick([id])) }));
+  const items: CtxItem[] = ids.map((id, i): CtxItem => ({ label: i < 9 && !IS_MAC ? `${i + 1}  ${describeAmong(id, ids)}` : describeAmong(id, ids), key: i < 9 ? String(i + 1) : undefined, icon: menuImage(id), hover: hoverOf(id), run: runRow(() => pick([id])) }));
   items.push({ sep: true }, { label: "Select All", key: "A", run: runRow(() => pick(ids.filter((id) => !id.includes("#")))) });
   const more = all ? all.filter((id) => !ids.includes(id)) : [];
   if (more.length) items.push({ label: "Show More Choices...", key: "M", run: runRow(() => clarifyPopup(ev, ids.concat(more), then, null, mode)) });

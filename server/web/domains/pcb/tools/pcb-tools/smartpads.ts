@@ -4,6 +4,7 @@ import { ptKey } from "./connected";
 import { padShape, shapeGap } from "./distances";
 import { chainLen, jointIndex, rp } from "./dragger";
 import { segIntersect } from "./shove";
+import { K } from "./state";
 import { rotator, samePt } from "./util";
 import { dir8, legPts, simplifyPts } from "./walkaround";
 
@@ -47,14 +48,15 @@ export function padBreakouts(pad: PadInfo, width: number) {
     return out.map((b) => b.map(rp));
   }
   // customBreakouts: from the centre to where each 45° ray leaves the pad's outline
-  const R = rotator(pad.rot); const hw = pad.w / 2, hh = pad.h / 2;
-  const poly = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => { const [rx, ry] = R(x, y); return [c[0] + rx, c[1] + ry] as Pt; });
-  const len = Math.max(pad.w, pad.h) / 2 + 5e-6;
+  // the pad's own outline (SHAPE_SIMPLE: a rotated rectangle, a trapezoid, a custom pad's hull), else its w × h box turned with it
+  const R = rotator(pad.rot); const hw = pad.w / 2, hh = pad.h / 2; const real = padShape(pad);
+  const poly = real.t === "poly" && real.pts.length >= 3 ? real.pts : [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => { const [rx, ry] = R(x, y); return [c[0] + rx, c[1] + ry] as Pt; });
+  let bw = 0, bh = 0; { const xs = poly.map((q) => q[0]), ys = poly.map((q) => q[1]); bw = Math.max(...xs) - Math.min(...xs); bh = Math.max(...ys) - Math.min(...ys); }
+  const len = Math.max(bw, bh) / 2 + 5e-6;   // large enough to guarantee intersecting the convex polygon
   for (let a = 0; a < 360; a += 45) {
     const t = -a * Math.PI / 180; const v: Pt = [c[0] + len * Math.cos(t), c[1] - len * Math.sin(t)];
-    let hit = null; for (let i = 0; i < 4; i++) { const q = segIntersect(c, v, poly[i], poly[(i + 1) % 4]); if (q) { hit = q; break; } }
-    // segIntersect is shove's (the later declaration won): it answers { t, u, p }, which rp reads as [NaN, NaN] as it always has
-    if (hit) out.push([c, rp(hit as unknown as Pt)]);
+    let hit: Pt | null = null; for (let i = 0; i < poly.length; i++) { const q = segIntersect(c, v, poly[i], poly[(i + 1) % poly.length]); if (q) { hit = q.p; break; } }   // intersections[0].p
+    if (hit) out.push([c, rp(hit)]);
   }
   return out;
 }
@@ -62,9 +64,16 @@ export function padBreakouts(pad: PadInfo, width: number) {
 /** OPTIMIZER::findPadOrVia: the pad (or via) of the net centred on the point on the layer. */
 export function padOrViaAt(doc: BoardDoc, layer: string, netKey: string, p: Pt) {
   const J = jointIndex(doc); const k = ptKey(p);
-  if ((J.vias.get(k) || []).some((v) => v.layers.has(layer) && v.net === netKey)) return { via: true };
+  const v = (J.vias.get(k) || []).find((v) => v.layers.has(layer) && v.net === netKey);
+  if (v) { const sz = K.kid(v.item.node, "size"); return { via: true, at: p.slice() as Pt, diameter: sz ? K.num(sz[1]) : 0 }; }
   const x = (J.pads.get(k) || []).find((x) => x.layers.has(layer) && samePt([x.pad.x, x.pad.y], p) && J.NT.key(x.pad.net) === netKey);
   return x ? { pad: x.pad } : null;
+}
+/** computeBreakouts( VIA_T ): a via is broken out as its circle (circleBreakouts on the via's diameter), a pad by its own shape. */
+function solidOf(x: NonNullable<ReturnType<typeof padOrViaAt>>): PadInfo {
+  if (x.pad) return x.pad;
+  const d = x.diameter || 0;
+  return { x: x.at![0], y: x.at![1], rot: 0, w: d, h: d, off: [0, 0], net: null as unknown as PadInfo["net"], layers: [], number: "", type: "via", shape: "circle", node: [] as unknown as PadInfo["node"], index: -1 };
 }
 /** OPTIMIZER::smartPadsSingle: the cheapest collision-free breakout from the pad replacing the line's first vertices. */
 export function smartPadsSingle(line: Pt[], pad: PadInfo, width: number, atEnd: boolean, endVertex: number, clear: (pts: Pt[]) => boolean) {
@@ -102,8 +111,8 @@ export function runSmartPads(doc: BoardDoc, pts: Pt[], width: number, layer: str
   if (!netKey || pts.length < 3) return null;
   let line = pts.map((q: Pt) => q.slice()), changed = false, vtx = -1;
   const sp = padOrViaAt(doc, layer, netKey, line[0]);
-  if (sp && sp.pad) { const r = smartPadsSingle(line, sp.pad, width, false, 3, clear); if (r) { line = r.pts; vtx = r.p; changed = true; } }
+  if (sp) { const r = smartPadsSingle(line, solidOf(sp), width, false, 3, clear); if (r) { line = r.pts; vtx = r.p; changed = true; } }
   const ep = padOrViaAt(doc, layer, netKey, line[line.length - 1]);
-  if (ep && ep.pad) { const r = smartPadsSingle(line, ep.pad, width, true, vtx < 0 ? line.length - 1 : line.length - 1 - vtx, clear); if (r) { line = r.pts; changed = true; } }
+  if (ep) { const r = smartPadsSingle(line, solidOf(ep), width, true, vtx < 0 ? line.length - 1 : line.length - 1 - vtx, clear); if (r) { line = r.pts; changed = true; } }
   return changed ? simplifyPts(line) : null;
 }

@@ -146,5 +146,36 @@ test("DRC: disallow and assertion rules, segment length and angle, tracks crossi
   assert.ok(!by("clearance").some((x) => x.ids.includes("tx") && x.ids.includes("t1")), "a crossing is not also a clearance violation");
   const e = by("copper_edge_clearance"); assert.ok(e.some((x) => x.ids[1] === "v1" && /^Board edge clearance violation \(rule 'edge' clearance 30\.0000 mm; actual/.test(x.text)));
 });
+test("zone fill: zoneFillRules gives the worker EvalRules' custom values per zone, item and layer (ZONE_FILLER's evalRulesForItems)", () => {
+  const B = `(kicad_pcb (version 20260206) (generator "pcbnew") (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (25 "Edge.Cuts" user))
+    (net 0 "") (net 1 "GND") (net 2 "SIG")
+    (footprint "T:THT" (layer "F.Cu") (uuid "fpz") (at 20 20) (property "Reference" "J1" (at 0 -3) (layer "F.SilkS") (uuid "fpzr") (effects (font (size 1 1) (thickness 0.15))))
+      (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask") (net 1 "GND") (uuid "pz1"))
+      (pad "2" smd rect (at 3 0) (size 1 1) (layers "F.Cu") (net 2 "SIG") (uuid "pz2")))
+    (via (at 25 25) (size 0.8) (drill 0.4) (layers "F.Cu" "B.Cu") (net 2) (uuid "vz"))
+    (gr_rect (start 0 0) (end 40 40) (stroke (width 0.1) (type default)) (fill no) (layer "Edge.Cuts") (uuid "ez"))
+    (zone (net 1) (net_name "GND") (layers "F.Cu" "B.Cu") (uuid "zz") (hatch edge 0.5) (connect_pads (clearance 0.5)) (min_thickness 0.25) (fill (thermal_gap 0.5) (thermal_bridge_width 0.5))
+      (polygon (pts (xy 1 1) (xy 39 1) (xy 39 39) (xy 1 39)))))`;
+  const d = K.parseDoc(B, "kicad_pcb"); const s = P.designSettings(null);
+  const id = (k, u) => [...d.items.values()].find((it) => it.kind === k && K.str(K.kid(it.node, "uuid")[1]) === u).id;
+  const Z = id("zone", "zz"), FP = id("footprint", "fpz"), V = id("via", "vz");
+  try {
+    const r = P.zoneFillRules(d, s, `(version 1)
+(rule "pads" (condition "A.Type == 'Zone' && B.Type == 'Pad'") (constraint clearance (min 1mm)) (constraint thermal_relief_gap (min 0.8mm)) (constraint zone_connection solid))
+(rule "vias" (condition "B.Type == 'Via'") (constraint hole_clearance (min 0.7mm)) (constraint thermal_spoke_width (min 0.3mm) (opt 0.4mm)))
+(rule "edge" (constraint edge_clearance (min 2mm)))
+(rule "inner" (layer "B.Cu") (condition "B.Type == 'Pad'") (constraint clearance (min 0.3mm)))`);
+    assert.equal(r.table[`clearance|${Z}|${FP}#1|F.Cu`], 1);
+    assert.equal(r.table[`clearance|${Z}|${FP}#1|B.Cu`], 0.3, "the later layer rule wins on B.Cu");
+    assert.equal(r.table[`thermal_relief_gap|${Z}|${FP}#0|F.Cu`], 0.8);
+    assert.equal(r.table[`zone_connection|${Z}|${FP}#0|F.Cu`], "FULL");
+    assert.equal(r.table[`hole_clearance|${Z}|${V}|F.Cu`], 0.7);
+    assert.equal(r.table[`thermal_spoke_width|${Z}|${V}|F.Cu`], "0.3,0.4,");
+    assert.equal(r.table[`edge_clearance|${Z}|edge|F.Cu`], 2);
+    assert.equal(r.table[`clearance|${Z}|${V}|F.Cu`], undefined, "no rule: the filler keeps its netclass clearance");
+    assert.ok(r.max >= 2);
+    const none = P.zoneFillRules(d, s, null); assert.deepEqual(none.table, {});
+  } finally { P.setCustomRules(null); }
+});
 console.log(`pcb-rules: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

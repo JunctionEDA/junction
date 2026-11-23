@@ -22,7 +22,7 @@ import { prefs } from "../../dialogs/prefs";
 import { E } from "../state";
 import { store } from "../appstore";
 import { loadBoardHeader } from "./board-setup";
-import { h, openDialog, type DialogApi } from "./ui";
+import { h, messageBox, openDialog, type DialogApi } from "./ui";
 import { type Damage, type ZoneInfo, itemLayers, staleZones } from "./zone-damage";
 
 interface Settings { clearance: number; minClearance?: number; holeClearance?: number; edgeClearance: number; netclasses: Record<string, { clearance?: number }> }
@@ -30,12 +30,13 @@ interface PcbToolsApi {
   designSettings(src: unknown): Settings;
   netclassOf(s: Settings, net: string): { clearance?: number };
   replacedChange(item: KItem, node: SNode): KChange;
+  zoneFillRules?(doc: KDoc, s: Settings, druText?: string | null): { table: Record<string, number | string>; max: number };
 }
 const PT = (): PcbToolsApi => (window as unknown as { PcbTools: PcbToolsApi }).PcbTools;
 const board = (): KDoc | null => (E.kdoc && (E.kdoc as KDoc).type === "pcb" ? (E.kdoc as KDoc) : null);
 
 /** Rules as plain data (a worker cannot be handed a function): each net's netclass clearance and the board minimums. */
-interface RuleData { nets: Record<string, number>; dflt: number; minClearance: number; holeClearance: number; edgeClearance: number }
+interface RuleData { nets: Record<string, number>; dflt: number; minClearance: number; holeClearance: number; edgeClearance: number; custom: Record<string, number | string>; customMax: number }
 function ruleData(doc: KDoc): RuleData {
   const P = PT(); const s = P.designSettings(E.proSettings || null);
   const nets: Record<string, number> = {};
@@ -46,9 +47,11 @@ function ruleData(doc: KDoc): RuleData {
     visit(it.node);
   }
   for (const n of names) { const nc = P.netclassOf(s, n); nets[n] = nc && nc.clearance !== undefined ? nc.clearance : s.clearance; }
-  return { nets, dflt: s.clearance, minClearance: s.minClearance || 0, holeClearance: s.holeClearance || 0, edgeClearance: s.edgeClearance };
+  // the custom rules (.kicad_dru) EvalRules would give the filler, per zone, item and layer
+  const cr = P.zoneFillRules ? P.zoneFillRules(doc, s, E.druText) : { table: {}, max: 0 };
+  return { nets, dflt: s.clearance, minClearance: s.minClearance || 0, holeClearance: s.holeClearance || 0, edgeClearance: s.edgeClearance, custom: cr.table, customMax: cr.max };
 }
-const rulesOf = (d: RuleData): FillRules => ({ netClearance: (n: string) => (n in d.nets ? d.nets[n] : d.dflt), minClearance: d.minClearance, holeClearance: d.holeClearance, edgeClearance: d.edgeClearance });
+const rulesOf = (d: RuleData): FillRules => ({ netClearance: (n: string) => (n in d.nets ? d.nets[n] : d.dflt), minClearance: d.minClearance, holeClearance: d.holeClearance, edgeClearance: d.edgeClearance, custom: d.custom, customMax: d.customMax });
 
 // ---------------------------------------------------------------- the progress reporter (WX_PROGRESS_REPORTER)
 export interface Reporter { phase(n: number, text: string): void; advance(done: number, total: number): void; cancelled(): boolean; close(): void; onCancel?: () => void }
@@ -90,8 +93,8 @@ function fillWorkerUrl(): Promise<string> {
     if (!/fillZones/.test(fab)) throw new Error("this fab bundle has no zone filler");
     const main = `;(function(){var F=self.KiCadFab;self.onmessage=function(e){var d=e.data;var R=d.rules;
 (d.fonts||[]).forEach(function(f){self.KiCadCanvas.setFontData(f[0],f[1],f[2],f[3])});
-var rules={netClearance:function(n){return Object.prototype.hasOwnProperty.call(R.nets,n)?R.nets[n]:R.dflt},minClearance:R.minClearance,holeClearance:R.holeClearance,edgeClearance:R.edgeClearance};
-var prog={phase:function(n,t){self.postMessage({t:"phase",n:n,text:t})},advance:function(a,b){self.postMessage({t:"adv",a:a,b:b})},cancelled:function(){return false},yield:function(){return Promise.resolve()}};
+var rules={netClearance:function(n){return Object.prototype.hasOwnProperty.call(R.nets,n)?R.nets[n]:R.dflt},minClearance:R.minClearance,holeClearance:R.holeClearance,edgeClearance:R.edgeClearance,custom:R.custom,customMax:R.customMax};
+var prog={phase:function(n,t){self.postMessage({t:"phase",n:n,text:t})},advance:function(a,b){self.postMessage({t:"adv",a:a,b:b})},cancelled:function(){return false},yield:function(){return Promise.resolve()},warning:function(t){self.postMessage({t:"warn",text:t})}};
 F.fillZones({doc:d.doc,setup:d.setup},rules,d.ids,prog).then(function(r){self.postMessage({t:"done",r:r})},function(err){self.postMessage({t:"error",m:String(err&&err.stack||err)})});};})();`;
     return URL.createObjectURL(new Blob([canvas, "\n;\n", fab, "\n", main], { type: "text/javascript" }));
   })();
@@ -119,6 +122,18 @@ function transferable(doc: KDoc): KDoc {
   return { ...(doc as unknown as Record<string, unknown>), items } as unknown as KDoc;
 }
 
+/** KIDIALOG( msg, "Warning", wxOK | wxICON_WARNING ) with DoNotShowCheckbox: the filler's warning (an iterative refill
+ *  that did not converge), unless "Do not show again" was ticked before. */
+const FILL_WARNING_KEY = "kc.dontshow.zone-filler-refill";
+function fillWarning(text: string): void {
+  try { if (localStorage.getItem(FILL_WARNING_KEY)) return; } catch (e) { /* no storage: always shown */ }
+  let cb: HTMLInputElement | null = null;
+  const ov = messageBox("Warning", text, [{ label: "OK", fn: () => { if (cb && cb.checked) { try { localStorage.setItem(FILL_WARNING_KEY, "1"); } catch (e) { /* no storage */ } } } }]);
+  const body = ov && ov.querySelector(".kd-body"); if (!body) return;
+  cb = h("input", { type: "checkbox", "data-k": "dont-show" }) as HTMLInputElement;
+  body.append(h("label", { style: "display:flex;gap:6px;align-items:center;margin-top:8px" }, cb, "Do not show again"));
+}
+
 /** The fill of `ids` (all zones when null); null when cancelled. */
 async function computeFill(doc: KDoc, ids: string[] | null, rep: Reporter | null, F: KiCadFabApi): Promise<ZoneFillResult[] | null> {
   const header = await loadBoardHeader().catch(() => null);
@@ -137,6 +152,7 @@ async function computeFill(doc: KDoc, ids: string[] | null, rep: Reporter | null
           const m = ev.data as { t: string; n?: number; text?: string; a?: number; b?: number; r?: ZoneFillResult[]; m?: string };
           if (m.t === "phase" && rep) rep.phase(m.n || 1, m.text || "");
           else if (m.t === "adv" && rep) rep.advance(m.a || 0, m.b || 0);
+          else if (m.t === "warn") fillWarning(m.text || "");
           else if (m.t === "done") { w.terminate(); resolve(m.r || null); }
           else if (m.t === "error") { w.terminate(); console.warn("zone fill worker:", m.m); resolve("fallback"); }
         };
@@ -148,7 +164,7 @@ async function computeFill(doc: KDoc, ids: string[] | null, rep: Reporter | null
   }
   // on the page, yielding between zones
   let cancelled = false; if (rep) rep.onCancel = () => { cancelled = true; };
-  const prog: FillProgress = { phase: (n, t) => rep && rep.phase(n, t), advance: (a, b) => rep && rep.advance(a, b), cancelled: () => cancelled, yield: () => new Promise((r) => setTimeout(r, 0)) };
+  const prog: FillProgress = { phase: (n, t) => rep && rep.phase(n, t), advance: (a, b) => rep && rep.advance(a, b), cancelled: () => cancelled, yield: () => new Promise((r) => setTimeout(r, 0)), warning: fillWarning };
   const out = await F.fillZones({ doc: doc as never, setup: setup as never }, rulesOf(rd), ids, prog);
   return cancelled ? null : out;
 }

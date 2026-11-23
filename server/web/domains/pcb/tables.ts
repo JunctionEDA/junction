@@ -49,7 +49,7 @@ export type MenuEntry = string | [string, MenuEntry[]];
 // Space; ratsnest, net names and pad numbers on the left toolbar and the Appearance panel; the item commands in
 // the selection's context menu).
 // File's collaboration block, as this fork's KiCad menus have it (eeschema/menubar.cpp:151-161, menubar_pcb_editor.cpp:199-209)
-const COLLAB_FILE: MenuEntry[] = ["collabStartSession", "collabJoinSession", "collabCopyLink", "collabComments", "collabFollow", "collabHistory", "collabCompare", "collabGithub", "collabVendorParts", "collabLeaveSession"];
+const COLLAB_FILE: MenuEntry[] = ["collabStartSession", "collabJoinSession", "collabCopyLink", "collabComments", "collabProposals", "collabFollow", "collabHistory", "collabCompare", "collabGithub", "collabVendorParts", "collabLeaveSession"];
 // EDA_BASE_FRAME::AddStandardHelpMenu
 const HELP_MENU: MenuEntry[] = ["help", "gettingStarted", "ledTutorial", "listHotKeys", "getInvolved", "reportBug", "-", "about"];
 const LANG_MENU: MenuEntry = ["Set Language", ["languageEnglish"]];
@@ -63,8 +63,8 @@ export const MENUS: Record<Editor, [string, MenuEntry[]][]> = {
   sch: [
     ["&File", ["save", "saveCurrSheetCopyAs", "revert", "-",
       ["Import", ["importNonKicadSchematic|Non-KiCad Schematic...", "importFPAssignments|Footprint Assignments...", "importGraphics|Graphics..."]],
-      ["Export", ["drawSheetOnClipboard|Drawing to Clipboard", "exportNetlist|Netlist...", "exportSymbolsToLibrary|Symbols..."]],
-      "-", ...COLLAB_FILE, "-", "compareSchematicWithFile", "compareSchematicWithHistory|Compare Schematic with History...", "-", "schematicSetup", "-", "pageSettings", "print", "plot", "-", "close"]],
+      ["Export", ["drawSheetOnClipboard|Drawing to Clipboard", "exportNetlist|Netlist...", "exportSymbolsToLibrary|Symbols...", "exportForOlderVersion|For Older KiCad Version..."]],
+      "-", ...COLLAB_FILE, "-", "compareSchematicWithFile", "compareSchematicWithHistory", "-", "schematicSetup", "-", "pageSettings", "print", "plot", "-", "close"]],
     // eeschema/menubar.cpp: the Edit menu ends at Attributes; the item commands live in the context menus and hotkeys
     ["&Edit", ["undo", "redo", "-", "cut", "copy", "copyAsText", "paste", "pasteSpecial", "doDelete", "-",
       "selectAll", "unselectAll", "-",
@@ -200,7 +200,7 @@ export const MODULE_DUPLICATES: Record<Editor, string[]> = {
     // context menus only (board_editor_control.cpp ZONE_CONTEXT_MENU, the selection tool's menu, EDIT_TOOL's menu)
     "getAndPlace", "copyWithReference", "drawZoneCutout", "drawSimilarZone",
     // ROUTER_TOOL's context menu (router_tool.cpp:700-708) and the selection tool's (unrouteSegment)
-    "routerAttemptFinish", "routerContinueFromEnd", "routerRouteSelected", "routerRouteSelectedFromEnd", "routerAutorouteSelected", "routerOptimizeSelected", "unrouteSegment",
+    "routerAttemptFinish", "routerContinueFromEnd", "routerRouteSelected", "routerRouteSelectedFromEnd", "routerAutorouteSelected", "routerOptimizeSelected", "unrouteSegment", "cancelCurrentItem",
     // PCB_CONTROL's hotkey-only cycles (Shift+V, Shift+S) and the two snap modes they flip between
     "layerPairPresetsCycle", "magneticSnapToggle", "magneticSnapActiveLayer", "magneticSnapAllLayers",
     "duplicateIncrement",   // Duplicate and Increment: a hotkey (Ctrl+Shift+D) and the selection menu, in no menu bar
@@ -246,8 +246,56 @@ export const NEEDS_SELECTION = new Set(["cut", "copy", "copyAsText", "doDelete",
   "changeTrackWidth", "module:setTrackWidthFromNetclass", "changeTrackLayerNext", "changeTrackLayerPrev", "breakTrack", "unrouteSelected", "deleteFull", "group", "ungroup", "addToGroup", "removeFromGroup",
   "toggleLock", "lock", "unlock", "convertToPoly", "convertToZone", "convertToKeepout", "convertToLines", "convertToTracks", "convertToArc", "zoneDuplicate", "zoneMerge", "zonePriorityMoveToTop", "zonePriorityRaise", "zonePriorityLower",
   "zonePriorityMoveToBottom", "toggleExcludeFromBOM", "toggleExcludeFromSim", "toggleExcludeFromPosFiles", "module:toggleDNP", "leftJustify", "centerJustify", "rightJustify", "hideNetInRatsnest", "showNetInRatsnest"]);
+/** What the action conditions read, taken when a menu opens or the selection, the undo list or the sheet changes. */
+export interface ActionState {
+  /** the selection: how many items, and their kinds ("symbol", "group", …) */
+  selCount: number; selKinds: string[];
+  /** GetScreen()->Items().size() */
+  itemCount: number;
+  /** SELECTION_CONDITIONS::Idle: no tool has an operation in flight */
+  idle: boolean;
+  /** SCH_LINE_WIRE_BUS_TOOL::IsDrawingLineWireOrBus */
+  drawingWire: boolean;
+  undo: number; redo: number;
+  /** SCH_SCREENS::HasNoFullyDefinedLibIds: the schematic has symbols and none names its library (a legacy project) */
+  legacyLibIds: boolean;
+  /** the check conditions that follow the selection (Edit > Attributes), by action id */
+  checks: Record<string, boolean>;
+}
+/** Edit > Attributes: check items whose mark follows the selection (SCH_EDIT_TOOL::Init attribDNPCond …); KiCad sets
+ *  no enable condition on them. */
+export const SCH_ATTRIBUTE_CHECKS = new Set(["setDNP", "setExcludeFromSim", "setExcludeFromBOM", "setExcludeFromBoard", "setExcludeFromPosFiles"]);
+const SCH_HAS_ELEMENTS = new Set(["cut", "copy", "copyAsText", "doDelete", "duplicate", "selectAll", "unselectAll"]);
+const SCH_MORE_THAN_ONE = new Set(["alignLeft", "alignCenterX", "alignRight", "alignTop", "alignCenterY", "alignBottom", "group"]);
+/**
+ * Why an action cannot run right now, null when it can: the enable conditions SCH_EDIT_FRAME::setupUIConditions gives
+ * the schematic editor's actions (eeschema/sch_edit_frame.cpp:927-988), which grey the menu entry and the toolbar
+ * button alike.  The board editor keeps the selection rule of NEEDS_SELECTION.
+ *   undo: the undo list has an entry, or a wire / bus is being drawn (undoCond)   redo: RedoAvailable
+ *   cut, copy, copyAsText, doDelete, duplicate, selectAll, unselectAll: hasElements (the sheet has an item, or a tool
+ *     is busy), not the selection          paste, pasteSpecial: Idle
+ *   rotateCW / rotateCCW / mirrorH / mirrorV: NotEmpty      align…, group: MoreThan( 1 )      ungroup: HasType( SCH_GROUP_T )
+ *   zoomFitSelection and the Attributes check items: no condition
+ *   remapSymbols: SCH_SCREENS::HasNoFullyDefinedLibIds
+ */
+/** Entries greyed by their enable condition even where the web has no command behind them. */
+export const CONDITION_FIRST = new Set(["remapSymbols"]);
+export function conditionWhy(editor: string | null, id: string, st: ActionState): string | null {
+  if (id === "undo") return st.undo > 0 || (editor === "sch" && st.drawingWire) ? null : "Nothing to undo";
+  if (id === "redo") return st.redo > 0 ? null : "Nothing to redo";
+  if (editor === "sch") {
+    if (SCH_HAS_ELEMENTS.has(id)) return st.itemCount > 0 || !st.idle ? null : "The sheet is empty";
+    if (id === "paste" || id === "pasteSpecial") return st.idle ? null : "A tool is busy";
+    if (SCH_MORE_THAN_ONE.has(id)) return st.selCount > 1 ? null : "Select two or more items";
+    if (id === "ungroup") return st.selKinds.includes("group") ? null : "No group selected";
+    if (id === "zoomFitSelection" || SCH_ATTRIBUTE_CHECKS.has(id)) return null;
+    // remapSymbolsCondition: "The remapping can only be performed on legacy projects."
+    if (id === "remapSymbols") return st.legacyLibIds ? null : "Only a legacy project's symbols can be remapped";
+  }
+  return NEEDS_SELECTION.has(id) && st.selCount === 0 ? "Nothing selected" : null;
+}
 /** Entries that never change the document: everything else is greyed out for a view-only visitor, as in a read-only frame. */
-export const READ_ONLY_OK = new Set(["compareSchematicWithFile", "compareSchematicWithHistory", "compareBoardWithFile", "compareBoardWithHistory", "saveCurrSheetCopyAs", "saveCopy", "drawSheetOnClipboard", "exportNetlist", "collabCopyLink", "collabComments", "collabFollow", "collabHistory", "collabLeave", "collabLeaveSession", "collabJoinSession", "collabCompare", "collabGithub", "close", "pluginsReload", "pluginsShowFolder", "showGitCommitPane", "archive", "clone",
+export const READ_ONLY_OK = new Set(["compareSchematicWithFile", "compareSchematicWithHistory", "compareBoardWithFile", "compareBoardWithHistory", "saveCurrSheetCopyAs", "saveCopy", "drawSheetOnClipboard", "exportNetlist", "collabCopyLink", "collabComments", "collabProposals", "collabFollow", "collabHistory", "collabLeave", "showProjectManager", "collabLeaveSession", "collabJoinSession", "collabCompare", "collabGithub", "close", "pluginsReload", "pluginsShowFolder", "showGitCommitPane", "archive", "clone",
   "openInKicad", "print", "plot", "home", "copy", "copyAsText", "selectAll", "unselectAll", "selectConnection", "selectNode", "nextNetItem", "previousNetItem", "find", "showDatasheet",
   "selectNet", "deselectNet", "selectSameSheet", "module:selectAllOnLayer", "selectUnconnected", "filterSelection", "runERC", "runDRC", "clearMarkers", "boardStatistics", "measureTool", "inspectClearance", "inspectConstraints", "showFootprintAssociations", "diffFootprint",
   "highlightNetTool", "highlightNet", "clearHighlight", "toggleNetHighlight", "toggleLastNetHighlight", "localRatsnestTool", "hideNetInRatsnest", "showNetInRatsnest", "showPcbNew", "showEeschema", "theme", "themeLight", "themeDark", "themeSystem", "languageEnglish",

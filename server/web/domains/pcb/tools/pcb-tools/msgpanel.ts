@@ -5,11 +5,16 @@ import type { RouterSettings } from "./router-settings";
 /** One line of the message panel: a title over its value. */
 export interface MsgItem { title: string; value: string }
 /** msgPanelInfo's options: the design settings, the user's units, the route in flight and its router settings, the netlist. */
-export interface MsgPanelOpts { settings?: DesignSettings; units?: string; route?: Route | null; routerSettings?: RouterSettings; nl?: Netlist; net?: string }
+export interface MsgPanelOpts { settings?: DesignSettings; units?: string; route?: Route | null; routerSettings?: RouterSettings; nl?: Netlist; net?: string; ellipsize?: (s: string) => string; toDisplay?: (p: Pt) => Pt }
 import { connectedRun } from "./connected";
+import { resolve } from "./drc-rules";
+import type { RuleItem } from "./dru";
 import { copperOf } from "./dialogs";
+import { dimRead, dimUnits, dimUpdate, dimValueString, type DimModel } from "./dimensions";
 import { arcLength, padCopperLayers, shapeGap, shareLayer } from "./distances";
 import { designSettings, netClearance, netclassName, netclassOf } from "./drc";
+import { evalRuleConstraint } from "./dru";
+import { routedRuleItem } from "./rule-resolver";
 import { viaNow } from "./edit-commands";
 import { isLocked } from "./groups";
 import { netlistCached } from "./app-state";
@@ -31,6 +36,31 @@ export function msgArea(a: number, units: string) { const u = units || "mm"; ret
 export const UNESC: Record<string, string> = { slash: "/", backslash: "\\", lt: "<", gt: ">", colon: ":", dblquote: '"', quote: "'", space: " ", tab: "\t", return: "\n", brace: "{", bar: "|" };
 export const unescapeName = (t: string | null | undefined) => String(t || "").replace(/\{(slash|backslash|lt|gt|colon|dblquote|quote|space|tab|return|brace|bar)\}/g, (_, k: string) => UNESC[k]);
 export const msgAngle = (v: number) => String(+(+v).toPrecision(4));
+/** printf "%g": six significant digits, trailing zeroes dropped. */
+export const msgG = (v: number) => String(+(+v).toPrecision(6));
+/** KIUI::EllipsizeMenuText: unescaped, on one line, 34 characters and "..." past 36. */
+export function ellipsizeMenuText(t: string | null | undefined) { const msg = unescapeName(t).replace(/[\n\r\t]/g, " "); return msg.length > 36 ? msg.slice(0, 34) + "..." : msg; }
+/** The front of KIUI::EllipsizeStatusText: unescaped, on one line (the caller cuts it to the panel's width). */
+export const statusText = (t: string | null | undefined) => unescapeName(t).replace(/[\n\r\t]/g, " ");
+/** ZONE::LayerMaskDescribe's list: "A", "A and B", "A, B and C", "A, B and N more". */
+export function layerListText(names: string[]) { return names.length === 1 ? names[0] : names.length === 2 ? `${names[0]} and ${names[1]}` : names.length === 3 ? `${names[0]}, ${names[1]} and ${names[2]}` : names.length > 3 ? `${names[0]}, ${names[1]} and ${names.length - 2} more` : ""; }
+/** ZONE::IsTeardropArea: (attr (teardrop (type …))). */
+export function isTeardropZone(n: SNode) { const a = K.kid(n, "attr"); return !!a && !!K.kid(a, "teardrop"); }
+/** ZONE::GetFriendlyName. */
+export function zoneFriendlyName(n: SNode) {
+  if (K.kid(n, "keepout")) return "Rule Area"; if (isTeardropZone(n)) return "Teardrop Area";
+  return zoneLayers(n).some((l) => /\.Cu$/.test(l)) ? "Copper Zone" : "Non-copper Zone";
+}
+/** STROKE_PARAMS::GetMsgPanelInfo's style name (lineTypeNames; "Default" for the default style). */
+export const LINE_STYLE_NAMES: Record<string, string> = { solid: "Solid", dash: "Dashed", dot: "Dotted", dash_dot: "Dash-Dot", dash_dot_dot: "Dash-Dot-Dot" };
+/** EDA_TEXT::GetEffectiveTextPenWidth of a board text's (effects (font …)), mm; 0 thickness is the automatic pen. */
+export function textPenWidth(font: SNode | null) {
+  const sz = font && K.kid(font, "size"), th = font && K.kid(font, "thickness"); const h = sz ? K.num(sz[1]) : 1, w = sz ? K.num(sz.length > 2 ? sz[2] : sz[1]) : 1;
+  const bold = !!font && (font.includes("bold") || (!!K.kid(font, "bold") && K.str(K.kid(font, "bold")![1]) !== "no")), face = !!font && !!K.kid(font, "face");
+  let pen = th ? K.num(th[1]) : 0;
+  if (pen <= 1e-6) pen = bold ? Math.round(w * 1e6 / 5) / 1e6 : Math.round(w * 1e6 / 8) / 1e6; else if (bold && !face) pen = Math.round(pen * 1.6 * 1e6) / 1e6;
+  return Math.min(pen, Math.round(Math.min(Math.abs(w), Math.abs(h)) * 0.25 * 1e6) / 1e6);
+}
 /** BOARD::GetLayerName: the user name the board gives a layer, else its canonical one. */
 export function boardLayerName(doc: BoardDoc, name: string) { const l = doc && doc.layers && doc.layers.get ? doc.layers.get(name) : null; return l && l.userName ? l.userName : name; }
 /** BOARD_ITEM::LayerMaskDescribe for a pad: all copper layers, else the first copper / technical / any layer, "and others". */
@@ -55,6 +85,73 @@ export function routedLength(doc: BoardDoc, id: string) {
     else if (it.kind === "arc") { const a = pt(it.node, "start"), m = pt(it.node, "mid"), b = pt(it.node, "end"); const arc = a && m && b && K.arcFrom3(a, m, b); len += arc ? arcLength(arc) : (a && b ? Math.hypot(b[0] - a[0], b[1] - a[1]) : 0); }
   }
   return len;
+}
+/** NETCLASS::GetHumanReadableName's join, used for component classes too: "A", "A and B", "A, B and C", "A, B and N more". */
+export function humanList(names: string[]) {
+  if (names.length <= 1) return names[0] || "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  if (names.length === 3) return `${names[0]}, ${names[1]} and ${names[2]}`;
+  return `${names[0]}, ${names[1]} and ${names.length - 2} more`;
+}
+/** GetArcToSegmentCount for a full circle, rounded up to a multiple of 8 (TransformCircleToPolygon / TransformOvalToPolygon); mm. */
+export function circleSegCount(radius: number, error: number) {
+  const r = Math.max(1, Math.round(radius * 1e6)), e = Math.max(1, Math.round(error * 1e6));
+  const inc = Math.min(360 / 8, 180 / Math.PI * Math.acos(1 - e / r) * 2);
+  const n = Math.max(Math.round(360 / inc), 2);
+  return Math.floor((n + 7) / 8) * 8;
+}
+/** The area of TransformOvalToPolygon( …, ERROR_INSIDE ) for a segment `len` long and `w` wide: the body and two half polygons. */
+export function ovalPolygonArea(len: number, w: number, error: number) {
+  const r = Math.floor(Math.round(w * 1e6) / 2) / 1e6, n = circleSegCount(r, error), d = 2 * Math.PI / n;
+  return len * 2 * r + r * r * (2 * Math.sin(d / 2) + (n / 2 - 1) * Math.sin(d));
+}
+/** The area of TransformCircleToPolygon( …, ERROR_INSIDE ): a regular polygon inscribed in the circle. */
+export function circlePolygonArea(radius: number, error: number) { const n = circleSegCount(radius, error); return n * radius * radius * Math.sin(2 * Math.PI / n) / 2; }
+/** PAD::GetEffectivePolygon's area for the simple shapes (ARC_HIGH_DEF, ERROR_INSIDE): circle, oval, rectangle, rounded rectangle, trapezoid. */
+export function padPolygonArea(p: PadInfo) {
+  const ERR = 0.005, w = p.w, h = p.h;
+  if (p.shape === "circle") return circlePolygonArea(w / 2, ERR);
+  if (p.shape === "oval") return ovalPolygonArea(Math.abs(w - h), Math.min(w, h), ERR);
+  if (p.shape === "roundrect") {
+    const rr = K.kid(p.node, "roundrect_rratio"); const r = Math.min(w, h) * (rr ? K.num(rr[1]) : 0.25);
+    return w * h - 4 * r * r + circlePolygonArea(r, ERR);   // the corners together are one inscribed polygon
+  }
+  if (p.shape === "trapezoid") return w * h;   // the deltas shift opposite corners equally: the area is the rectangle's
+  return w * h;
+}
+/** The pad's shape and size on each unique layer of its padstack (PADSTACK::ForEachUniqueLayer). */
+export function padstackLayers(p: PadInfo): { shape: string; w: number; h: number }[] {
+  const out = [{ shape: p.shape, w: p.w, h: p.h }]; const ps = K.kid(p.node, "padstack"); const mode = ps && K.kid(ps, "mode");
+  if (!ps || !mode || K.str(mode[1]) === "normal") return out;
+  for (const l of K.kids(ps, "layer")) { const sh = K.kid(l, "shape"), sz = K.kid(l, "size"); out.push({ shape: sh ? K.str(sh[1]) : p.shape, w: sz ? K.num(sz[1]) : p.w, h: sz ? K.num(sz.length > 2 ? sz[2] : sz[1]) : p.h }); }
+  return out;
+}
+/**
+ * BOARD::GetTrackLength: the run's summed length and the pad-to-die length of the pads its ends land on
+ * (a pad counts once: GetTrackLength keeps the pads it has met).
+ */
+export function trackRunLength(doc: BoardDoc, id: string) {
+  const len = routedLength(doc, id); let padToDie = 0; const seen = new Set<SNode>();
+  const ends: { p: Pt; layer: string }[] = [];
+  for (const rid of connectedRun(doc, [id])) { const it = doc.items.get(rid); if (!it || (it.kind !== "segment" && it.kind !== "arc")) continue; const a = pt(it.node, "start"), b = pt(it.node, "end"); const l = layerOf(it.node); if (a) ends.push({ p: a, layer: l }); if (b) ends.push({ p: b, layer: l }); }
+  if (ends.length) {
+    const copper = copperOf(doc);
+    for (const fp of doc.items.values()) {
+      if (fp.kind !== "footprint") continue;
+      for (const p of padsOf(fp)) {
+        const dl = K.kid(p.node, "die_length"); if (!dl || !K.num(dl[1]) || seen.has(p.node)) continue;
+        const cu = padCopperLayers(p, copper);
+        if (ends.some((e) => cu.has(e.layer) && padHit(p, e.p))) { seen.add(p.node); padToDie += K.num(dl[1]); }
+      }
+    }
+  }
+  return { len, padToDie };
+}
+/** PAD::HitTest for a track end: inside the pad's box turned to its angle (the anchor region the connectivity uses). */
+function padHit(p: PadInfo, q: Pt) {
+  const a = -(p.rot || 0) * Math.PI / 180, dx = q[0] - p.x, dy = q[1] - p.y; const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
+  if (p.shape === "circle") return Math.hypot(lx, ly) <= p.w / 2 + 1e-6;
+  return Math.abs(lx) <= p.w / 2 + 1e-6 && Math.abs(ly) <= p.h / 2 + 1e-6;
 }
 /** EDA_SHAPE::getFriendlyName */
 export const SHAPE_NAMES: Record<string, string> = { line: "Segment", rect: "Rectangle", circle: "Circle", arc: "Arc", poly: "Polygon", curve: "Curve" };
@@ -81,6 +178,15 @@ export function itemDescription(doc: BoardDoc, id: string, units: string) {
   }
   const hash = String(id).indexOf("#"), it = doc.items.get(hash > 0 ? String(id).slice(0, hash) : id); if (!it) return "";
   const n = it.node;
+  if (it.kind === "pad") {   // PAD::GetItemDescription without a parent footprint (the Footprint Editor's board is an FPHOLDER)
+    const type = K.str(n[2]), num = K.str(n[1]);
+    if (type === "np_thru_hole") return "NPTH pad";
+    if (type === "smd" || type === "connect") {
+      const ls = K.kid(n, "layers"); const pl = { layers: ls ? ls.slice(1).map(K.str) : [] } as unknown as PadInfo;
+      return num ? `Pad ${num} on ${padLayerDescribe(doc, pl)}` : `Pad on ${padLayerDescribe(doc, pl)}`;
+    }
+    return num ? `PTH pad ${num}` : "PTH pad";
+  }
   if (hash > 0 && it.kind === "footprint") {
     const p = padsOf(it)[+String(id).slice(hash + 1)]; if (!p) return "";
     const ref = it.ref || "";
@@ -104,13 +210,31 @@ export function itemDescription(doc: BoardDoc, id: string, units: string) {
     const names = zoneLayers(n).map(L); const keep = K.kid(n, "keepout"); const nm = K.kid(n, "name"); const zn = nm ? K.str(nm[1]) : "";
     const ld = names.length === 1 ? `on ${names[0]}` : names.length === 2 ? `on ${names[0]} and ${names[1]}` : names.length === 3 ? `on ${names[0]}, ${names[1]} and ${names[2]}` : names.length > 3 ? `on ${names[0]}, ${names[1]} and ${names.length - 2} more` : "";
     if (keep) return zn ? `Rule area '${zn}' ${ld}` : `Rule Area ${ld}`;
+    if (isTeardropZone(n)) return `Teardrop ${netnameMsg(netOf(n))} ${ld}`;
     const pr = K.kid(n, "priority"); const prio = pr ? K.num(pr[1]) : 0;
     return zn ? `Zone '${zn}' ${netnameMsg(netOf(n))} ${ld}, priority ${prio}` : `Zone ${netnameMsg(netOf(n))} ${ld}, priority ${prio}`;
   }
-  if (it.kind === "gr_text") { const t = K.str(n[1]); return `PCB text '${t.length > 36 ? t.slice(0, 33) + "..." : t}' on ${L(layerOf(n))}`; }
+  if (it.kind === "gr_text") return `PCB text '${ellipsizeMenuText(K.str(n[1]))}' on ${L(layerOf(n))}`;
+  if (it.kind === "gr_text_box") return `PCB text box '${ellipsizeMenuText(K.str(n[1]))}' on ${L(layerOf(n))}`;
+  if (it.kind === "dimension") { const gt = K.kid(n, "gr_text"); return `Dimension '${ellipsizeMenuText(gt ? K.str(gt[1]) : "")}' on ${L(layerOf(n))}`; }
+  if (it.kind === "group") { const nm = typeof n[1] === "string" ? K.str(n[1]) : "", cnt = K.groupMemberIds(n).length; return nm ? `Group '${nm}', ${cnt} members` : `Unnamed Group, ${cnt} members`; }
+  if (it.kind === "table") { const cc = K.kid(n, "column_count"); return `${cc ? K.num(cc[1]) : 0} column table`; }
+  if (it.kind === "target") return "Target";
+  if (it.kind === "barcode") { const tx = K.kid(n, "text"); return `Barcode '${tx ? K.str(tx[1]) : ""}' on ${L(layerOf(n))}`; }
   const m = /^gr_(line|rect|circle|arc|poly|curve)$/.exec(it.kind);
   if (m) { const layer = layerOf(n); return /\.Cu$/.test(layer) ? `${SHAPE_NAMES[m[1]]} ${netnameMsg(netOf(n))} on ${L(layer)}` : `${SHAPE_NAMES[m[1]]} on ${L(layer)}`; }
   return "";
+}
+/**
+ * SELECTION_TOOL::doSelectionMenu's getItemDescription: a footprint whose description reads like another candidate's
+ * is told apart by its library id (FOOTPRINT::DisambiguateItemDescription).  `ids` are the menu's candidates.
+ */
+export function itemDescriptionAmong(doc: BoardDoc, id: string, ids: string[], units: string) {
+  const desc = itemDescription(doc, id, units); const it = doc.items.get(String(id));
+  if (!it || it.kind !== "footprint" || String(id).includes("#") || String(id).includes("@field:")) return desc;
+  const limit = Math.min(100, ids.length);
+  for (let i = 0; i < limit; i++) { if (ids[i] === id) continue; if (itemDescription(doc, ids[i], units) === desc) return `${desc} (${K.str(it.node[1])})`; }
+  return desc;
 }
 /** The tuning pattern a selection is: its generator with nothing beside it but its own members. */
 export function tuningPatternOfSelection(doc: BoardDoc, ids: string[]) {
@@ -166,7 +290,9 @@ export const PAD_SHAPE: Record<string, string> = { circle: "Circle", oval: "Oval
 export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPanelOpts) {
   opts = opts || {}; const units = opts.units || "mm", s = opts.settings || designSettings(null), out: MsgItem[] = [];
   const add = (title: string, value: unknown) => out.push({ title: String(title), value: String(value === undefined || value === null ? "" : value) });
-  const V = (v: number) => msgValue(v, units), NN = (net: string) => netclassName(s, net);
+  const V = (v: number) => msgValue(v, units), NN = (net: string) => unescapeName(netclassName(s, net));
+  const fpEd = !!(doc as unknown as { fpEditor?: boolean }).fpEditor;
+  const EL = (t: string | null | undefined) => { const m = statusText(t); return opts!.ellipsize ? opts!.ellipsize(m) : m; };   // KIUI::EllipsizeStatusText
   const rt = opts.route;
   if (rt) {   // ROUTER_TOOL::UpdateMessagePanel
     const net = rt.net && (rt.net.name || "");
@@ -176,19 +302,32 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
       add(`Routing Diff Pair: ${unescapeName(net)}, ${unescapeName(netB)}`, `Resolved Netclass: ${ncA === ncB ? ncA : ncA + ", " + ncB}`);
       add("Corner Style", cornerStyleName(rs)); add("Mode", MODE_NAMES[rs.mode]);
       const d = rt.dpSizes!; add(`Track Width: ${V(d.width)}`, `(from ${d.widthSource})`);
-      const c = msgClearance(s, net); add(`Min Clearance: ${V(c.v)}`, `(from ${c.from === "board setup constraints" ? "board minimum clearance" : c.from})`);
+      if (rt.clearance != null && rt.clearanceSource) add(`Min Clearance: ${V(rt.clearance)}`, `(from ${rt.clearanceSource})`);
+      else { const c = msgClearance(s, net); add(`Min Clearance: ${V(c.v)}`, `(from ${c.from === "board setup constraints" ? "board minimum clearance" : c.from})`); }
       add(`Diff Pair Gap: ${V(d.gap)}`, `(from ${d.gapSource})`);
+      // CT_MAX_UNCOUPLED between the pair's two traces on the routing layer
+      const rules = S.dru && S.dru.rules;
+      const unc = rules && rules.length ? evalRuleConstraint(rules, "diff_pair_uncoupled", doc, s, routedRuleItem({ net, layer: rt.layer }), routedRuleItem({ net: netB, layer: rt.layer })) : null;
+      if (unc && unc.max != null) add(`DP Max Uncoupled-length: ${V(unc.max)}`, `(from ${unc.name})`);
       return out;
     }
     if (net) add(`Routing Track: ${unescapeName(net)}`, `Resolved Netclass: ${NN(net)}`); else add("Routing Track", "(no net)");
     add("Corner Style", cornerStyleName(rs));
     add("Mode", MODE_NAMES[rs.mode]);
     const R = K.pcbSizes && K.pcbSizes.state;
-    const widthFrom = rt.connected && R && R.useConnectedWidth && !R.tempOverride ? "existing track" : R && !R.useNetclassTrack ? "user choice" : `netclass '${NN(net)}'`;
+    const widthFrom = rt.widthSource ? rt.widthSource : rt.connected && R && R.useConnectedWidth && !R.tempOverride ? "existing track" : R && !R.useNetclassTrack ? "user choice" : `netclass '${NN(net)}'`;
     add(`Track Width: ${V(rt.width)}`, `(from ${widthFrom})`);
-    const c = msgClearance(s, net); add(`Min Clearance: ${V(c.v)}`, `(from ${c.from === "board setup constraints" ? "board minimum clearance" : c.from})`);
+    if (rt.clearance != null && rt.clearanceSource) add(`Min Clearance: ${V(rt.clearance)}`, `(from ${rt.clearanceSource})`);   // updateSizesAfterRouterEvent / ImportSizes
+    else { const c = msgClearance(s, net); add(`Min Clearance: ${V(c.v)}`, `(from ${c.from === "board setup constraints" ? "board minimum clearance" : c.from})`); }
     return out;
   }
+  /** Font / Text Thickness / the size rows shared by PCB_TEXT and PCB_TEXTBOX. */
+  const textRows = (font: SNode | null, wName: string, hName: string) => {
+    const face = font && K.kid(font, "face"), th = font && K.kid(font, "thickness"), sz = font && K.kid(font, "size");
+    add("Font", face && K.str(face[1]) ? K.str(face[1]) : "Default");
+    add("Text Thickness", th && K.num(th[1]) ? V(textPenWidth(font)) : "Auto");
+    add(wName, V(sz ? K.num(sz.length > 2 ? sz[2] : sz[1]) : 1)); add(hName, V(sz ? K.num(sz[1]) : 1));
+  };
   const list = Array.from(ids || []);
   const gen = tuningPatternOfSelection(doc, list);
   if (gen) { tuningMsgPanel(doc, gen, s, units, add); return out; }
@@ -204,19 +343,28 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
     if (it && hash >= 0 && it.kind === "footprint") {   // PAD::GetMsgPanelInfo
       const p = padsOf(it)[hash > 0 ? +id.slice(hash + 1) : 0];
       if (p) {
-        add("Footprint", it.ref || "");
+        if (!fpEd) add("Footprint", it.ref || "");   // only in the board editor (PCB_EDIT_FRAME_NAME)
         add("Pad", p.number);
         const pf = K.kid(p.node, "pinfunction"), ptp = K.kid(p.node, "pintype");
         if (pf && K.str(pf[1])) add("Pin Name", K.str(pf[1]));
         if (ptp && K.str(ptp[1])) add("Pin Type", K.str(ptp[1]));
-        add("Net", unescapeName(p.net.name)); add("Resolved Netclass", NN(p.net.name));
-        if (isLocked(it.node) || isLocked(p.node)) add("Status", "Locked");
+        if (!fpEd) {
+          add("Net", unescapeName(p.net.name)); add("Resolved Netclass", NN(p.net.name));
+          if (isLocked(it.node) || isLocked(p.node)) add("Status", "Locked");
+        }
         if (p.type === "smd" || p.type === "connect") add("Layer", padLayerDescribe(doc, p));
+        if (fpEd && p.type === "smd") add("Area", msgArea(padPolygonArea(p), units));   // the Footprint Editor: the effective polygon's area
         const prop = K.kid(p.node, "property"); const PROP: Record<string, string> = { pad_prop_bga: "BGA", pad_prop_fiducial_glob: "Fiducial global", pad_prop_fiducial_loc: "Fiducial local", pad_prop_testpoint: "Test point", pad_prop_heatsink: "Heat sink", pad_prop_castellated: "Castellated", pad_prop_mechanical: "Mechanical", pad_prop_pressfit: "Press-fit" };
-        add(PAD_SHAPE[p.shape] || "???", (PAD_ATTR[p.type] || "???") + (prop && PROP[K.str(prop[1])] ? "," + PROP[K.str(prop[1])] : ""));
-        if (p.shape === "circle" || (p.shape === "oval" && Math.abs(p.w - p.h) < 1e-9)) add("Diameter", V(p.w)); else { add("Width", V(p.w)); add("Height", V(p.h)); }
+        // PADSTACK::ForEachUniqueLayer: a (padstack (mode front_inner_back|custom) (layer … (shape …) (size …))) pad has a shape and size per layer
+        const stack = padstackLayers(p);
+        const shapes = new Set(stack.map((l) => l.shape)), widths = new Set(stack.map((l) => r6(l.w))), heights = new Set(stack.map((l) => r6(l.h)));
+        const circles = new Set(stack.map((l) => l.shape === "circle" || (l.shape === "oval" && Math.abs(l.w - l.h) < 1e-9)));
+        add(shapes.size === 1 ? PAD_SHAPE[stack[0].shape] || "???" : "(mixed shapes)", (PAD_ATTR[p.type] || "???") + (prop && PROP[K.str(prop[1])] ? "," + PROP[K.str(prop[1])] : ""));
+        if (circles.size === 1 && circles.has(true)) add("Diameter", widths.size === 1 ? V(stack[0].w) : "(mixed)");
+        else { add("Width", widths.size === 1 ? V(stack[0].w) : "(mixed)"); add("Height", heights.size === 1 ? V(stack[0].h) : "(mixed)"); }
         const frot = K.atOf(it.node)[2] || 0; const prel = norm180(p.rot - frot);
-        add("Rotation", frot ? `${msgAngle(prel)}(+ ${msgAngle(frot)})` : msgAngle(p.rot));
+        add("Rotation", frot ? `${msgG(prel)}(+ ${msgG(frot)})` : msgG(p.rot));   // "%g(+ %g)"
+        const dl = K.kid(p.node, "die_length"); if (dl && K.num(dl[1])) add("Length in Package", V(K.num(dl[1])));
         const dr = K.kid(p.node, "drill");
         if (dr) { const oval = K.str(dr[1]) === "oval"; const nums = dr.slice(oval ? 2 : 1).filter((x) => typeof x === "number"); if (nums.length && nums[0] > 0) { if (oval) add("Hole X / Y", `${V(nums[0])} / ${V(nums.length > 1 ? nums[1] : nums[0])}`); else add("Hole", V(nums[0])); } }
         const c = msgClearance(s, p.net.name); add(`Min Clearance: ${V(c.v)}`, `(from ${c.from})`);
@@ -231,8 +379,11 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
       const a = pt(n, "start"), b = pt(n, "end"); let len = a && b ? Math.hypot(b[0] - a[0], b[1] - a[1]) : 0;
       if (it.kind === "arc") { const m = pt(n, "mid"); const arc = a && m && b && K.arcFrom3(a, m, b); if (arc) { len = arcLength(arc); add("Radius", V(arc.r)); add("Angle", (len / arc.r * 180 / Math.PI * (arc.anticlockwise ? -1 : 1)).toFixed(2) + "deg"); } }
       add("Segment Length", V(len));
-      if (hasNet(netOf(n))) add("Routed Length", V(routedLength(doc, it.id)));
-      add("Copper Area", msgArea(len * w + Math.PI * w * w / 4, units));
+      if (hasNet(netOf(n))) {   // BOARD::GetTrackLength: the run's length and the die lengths of the pads at its ends
+        const run = trackRunLength(doc, it.id); add("Routed Length", V(run.len));
+        if (run.padToDie) { add("Pad To Die Length", V(run.padToDie)); add("Full Length", V(run.len + run.padToDie)); }
+      }
+      add("Copper Area", msgArea(it.kind === "arc" ? len * w + Math.PI * w * w / 4 : ovalPolygonArea(len, w, 0.02), units));   // TransformShapeToPolySet( …, ARC_LOW_DEF, ERROR_INSIDE )
       const c = msgClearance(s, net); add(`Min Clearance: ${V(c.v)}`, `(from ${c.from})`);
       const nc = netclassOf(s, net); const mn = s.minTrackWidth || 0; const parts = []; if (mn > 0) parts.push("min " + V(mn)); if (nc && nc.track_width !== undefined) parts.push("opt " + V(nc.track_width));
       if (parts.length) add(`Width Constraints: ${parts.join("; ")}`, `(from netclass '${NN(net)}')`);
@@ -244,9 +395,20 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
       add("Net", unescapeName(net)); add("Resolved Netclass", NN(net)); if (isLocked(n)) add("Status", "Locked");
       const ls = K.kid(n, "layers"); const pair = ls ? ls.slice(1).map(K.str) : ["F.Cu", "B.Cu"];
       add("Layer", `${boardLayerName(doc, pair[0] || "F.Cu")} - ${boardLayerName(doc, pair[pair.length - 1] || "B.Cu")}`);
-      add("Diameter", V(v.size)); add("Hole", V(v.drill));
+      // the padstack's sizes per layer: one value, else "(mixed)"
+      const vw = new Set<number>(); const vps = K.kid(n, "padstack");
+      if (vps) for (const l of K.kids(vps, "layer")) { const sz = K.kid(l, "size"); if (sz) vw.add(r6(K.num(sz[1]))); }
+      const fsz = K.kid(n, "size"); if (fsz) vw.add(r6(K.num(fsz[1])));
+      add("Diameter", vw.size > 1 ? "(mixed)" : V(v.size)); add("Hole", V(v.drill));
       const c = msgClearance(s, net); add(`Min Clearance: ${V(c.v)}`, `(from ${c.from})`);
-      add(`Min Annular Width: ${V(s.minViaAnnular || 0)}`, "(from board setup constraints)");
+      {   // PCB_VIA::GetMinAnnulus: EvalRules( ANNULAR_WIDTH_CONSTRAINT, this, nullptr, GetLayer() ), the custom rules before the board setup one
+        const A: RuleItem = { kind: "via", node: n, item: it, layer: pair[0] || "F.Cu" };
+        const ra = resolve(S.dru ? S.dru.rules : [], "annular_width", doc, s, A, null, s.minViaAnnular || 0);
+        // the implicit board setup rule always has a minimum (m_ViasMinAnnularWidth, 0 included); a custom rule with
+        // none gives 0 and leaves the source string as GetOwnClearance set it
+        if (!ra) add(`Min Annular Width: ${V(s.minViaAnnular || 0)}`, "(from board setup constraints)");
+        else add(`Min Annular Width: ${V(ra.min != null ? ra.min : 0)}`, `(from ${ra.min != null ? ra.name : c.from})`);
+      }
       return out;
     }
     if (it && it.kind === "footprint") {   // FOOTPRINT::GetMsgPanelInfo (board editor)
@@ -256,8 +418,11 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
       add("Rotation", msgAngle(K.atOf(n)[2] || 0));
       const status = [], attrs = []; if (isLocked(n)) status.push("Locked"); if (n.includes("placed") || K.kid(n, "placed")) status.push("autoplaced");
       const at = K.kid(n, "attr"); const toks = at ? at.slice(1).map(K.str) : [];
-      if (toks.includes("board_only")) attrs.push("not in schematic"); if (toks.includes("exclude_from_pos_files")) attrs.push("exclude from pos files"); if (toks.includes("exclude_from_bom")) attrs.push("exclude from BOM"); if (toks.includes("dnp")) attrs.push("DNP");
+      if (toks.includes("board_only")) attrs.push("not in schematic"); if (toks.includes("exclude_from_pos_files")) attrs.push("exclude from pos files"); if (toks.includes("exclude_from_bom")) attrs.push("exclude from BOM"); if (toks.includes("exclude_from_sim")) attrs.push("exclude from simulation"); if (toks.includes("dnp")) attrs.push("DNP");
       add("Status: " + status.join(", "), "Attributes: " + attrs.join(", "));
+      // COMPONENT_CLASS::GetHumanReadableName of the footprint's (component_classes (class "…") …)
+      const ccs = K.kid(n, "component_classes"); const ccn = ccs ? K.kids(ccs, "class").map((c) => K.str(c[1])).filter(Boolean) : [];
+      if (ccn.length) add("Component Class", humanList(ccn));
       const m3 = K.kid(n, "model");
       add(`Footprint: ${K.str(n[1])}`, `3D-Shape: ${m3 ? K.str(m3[1]) : "<none>"}`);
       const descr = K.kid(n, "descr"), tags = K.kid(n, "tags");
@@ -266,8 +431,13 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
     }
     if (it && it.kind === "zone") {   // ZONE::GetMsgPanelInfo
       const n = it.node, keep = K.kid(n, "keepout"), net = netOf(n).name || "", zl = zoneLayers(n);
-      add("Type", keep ? "Rule Area" : "Zone");
-      if (keep) { const r = []; for (const [k, l] of [["vias", "No vias"], ["tracks", "No tracks"], ["pads", "No pads"], ["copperpour", "No zone fills"], ["footprints", "No footprints"]]) { const x = K.kid(keep, k); if (x && K.str(x[1]) === "not_allowed") r.push(l); } if (r.length) add("Restrictions", r.join(", ")); }
+      add("Type", zoneFriendlyName(n));
+      if (keep) {
+        const r = []; for (const [k, l] of [["vias", "No vias"], ["tracks", "No tracks"], ["pads", "No pads"], ["copperpour", "No zone fills"], ["footprints", "No footprints"]]) { const x = K.kid(keep, k); if (x && K.str(x[1]) === "not_allowed") r.push(l); } if (r.length) add("Restrictions", r.join(", "));
+        const pl = K.kid(n, "placement"); const en = pl && K.kid(pl, "enabled");
+        if (pl && en && K.str(en[1]) === "yes") { const src = K.kid(pl, "sheetname") || K.kid(pl, "component_class") || K.kid(pl, "group") || K.kid(pl, "design_block"); add("Placement source", unescapeName(src ? K.str(src[1]) : "")); }
+        if (K.kid(n, "linked_area") || K.kid(n, "link")) add("Layout link", "Linked");
+      }
       else if (zl.some((l) => /\.Cu$/.test(l) || l === "*.Cu")) { add("Net", unescapeName(net)); add("Resolved Netclass", NN(net)); const pr = K.kid(n, "priority"); add("Priority", pr ? K.num(pr[1]) : 0); }
       if (isLocked(n)) add("Status", "Locked");
       const names = zl.map((l) => boardLayerName(doc, l));
@@ -281,6 +451,12 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
         const cp = K.kid(n, "connect_pads"); const cc = cp && K.kid(cp, "clearance"); const c = msgClearance(s, net);
         const zc = cc ? K.num(cc[1]) : 0; const v = Math.max(zc, c.v); add(`Min Clearance: ${V(v)}`, `(from ${zc >= c.v && cc ? "zone" : c.from})`);
       }
+      let count = 0;
+      if (keep) {   // the outline's area and its points; else every vertex of the fills
+        let oa = 0; for (const pg of K.kids(n, "polygon")) { const q = K.ptsOf(pg); count += q.length; let a2 = 0; for (let i = 0; i < q.length; i++) { const a = q[i], b = q[(i + 1) % q.length]; a2 += a[0] * b[1] - b[0] * a[1]; } oa += Math.abs(a2) / 2; }
+        add("Outline Area", msgArea(oa, units));
+      } else for (const fp of K.kids(n, "filled_polygon")) count += K.ptsOf(fp).length;
+      add("Corner Count", count);
       return out;
     }
     if (it && /^gr_(line|rect|circle|arc|poly|curve)$/.test(it.kind)) {   // PCB_SHAPE::GetMsgPanelInfo (EDA_SHAPE::ShapeGetMsgPanelInfo)
@@ -294,8 +470,98 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
       else if (kind === "poly") add("Points", K.ptsOf(n).length);
       else if (kind === "rect" && a && b) { add("Width", V(Math.abs(b[0] - a[0]))); add("Height", V(Math.abs(b[1] - a[1]))); }
       else if (kind === "line" && a && b) { add("Length", V(Math.hypot(b[0] - a[0], b[1] - a[1]))); add("Angle", (Math.atan2(a[1] - b[1], b[0] - a[0]) * 180 / Math.PI).toFixed(1) + "°"); }
+      { const st = K.kid(n, "stroke"), ty = st && K.kid(st, "type"), wd = st && K.kid(st, "width"), ow = K.kid(n, "width");   // STROKE_PARAMS::GetMsgPanelInfo
+        add("Line Style", (ty && LINE_STYLE_NAMES[K.str(ty[1])]) || "Default"); add("Line Width", V(wd ? K.num(wd[1]) : ow ? K.num(ow[1]) : 0)); }
       const layer = layerOf(n); add("Layer", boardLayerName(doc, layer));
       if (/\.Cu$/.test(layer) && hasNet(netOf(n))) add("Net", unescapeName(netOf(n).name));
+      return out;
+    }
+    if (it && (it.kind === "gr_text" || it.kind === "fp_text")) {   // PCB_TEXT::GetMsgPanelInfo
+      const n = it.node, fp = it.kind === "fp_text"; const ef = K.kid(n, "effects"), font = ef ? K.kid(ef, "font") : null, j = ef && K.kid(ef, "justify");
+      const text = K.str(n[fp ? 2 : 1]);
+      if (fp) { add("Text", EL(text)); add("Type", "Text"); } else add("PCB Text", EL(text));
+      if (!fpEd && isLocked(n)) add("Status", "Locked");
+      add("Layer", boardLayerName(doc, layerOf(n)));
+      add("Mirror", j && j.includes("mirror") ? "Yes" : "No");
+      add("Angle", msgG(K.atOf(n)[2] || 0));
+      textRows(font, "Width", "Height");
+      return out;
+    }
+    if (it && it.kind === "gr_text_box") {   // PCB_TEXTBOX::GetMsgPanelInfo
+      const n = it.node; const ef = K.kid(n, "effects"), font = ef ? K.kid(ef, "font") : null, j = ef && K.kid(ef, "justify");
+      add("Text Box", EL(K.str(n[1])));
+      if (!fpEd && isLocked(n)) add("Status", "Locked");
+      add("Layer", boardLayerName(doc, layerOf(n)));
+      add("Mirror", j && j.includes("mirror") ? "Yes" : "No");
+      const ang = K.kid(n, "angle"); add("Angle", msgG(ang ? K.num(ang[1]) : 0));
+      textRows(font, "Text Width", "Text Height");
+      const a = pt(n, "start"), b = pt(n, "end");
+      let bw = 0, bh = 0;
+      if (a && b) { bw = Math.abs(b[0] - a[0]); bh = Math.abs(b[1] - a[1]); }
+      else { const q = K.ptsOf(n); if (q.length) { const bb = bboxOfPts(q); if (q.length === 4 && !(ang && K.num(ang[1]))) { bw = bb[2] - bb[0]; bh = bb[3] - bb[1]; } else { bw = Math.abs(q[2][0] - q[0][0]); bh = Math.abs(q[2][1] - q[0][1]); } } }   // GetEnd() - GetStart(): the stored corners
+      add("Box Width", V(bw)); add("Box Height", V(bh));
+      const st = K.kid(n, "stroke"), ty = st && K.kid(st, "type"), wd = st && K.kid(st, "width");
+      add("Line Style", (ty && LINE_STYLE_NAMES[K.str(ty[1])]) || "Default"); add("Line Width", V(wd ? K.num(wd[1]) : 0));
+      return out;
+    }
+    if (it && it.kind === "dimension") {   // PCB_DIMENSION_BASE / PCB_DIM_ALIGNED / PCB_DIM_LEADER::GetMsgPanelInfo
+      const n = it.node, m = dimRead(n); const gt = K.kid(n, "gr_text"), ef = gt && K.kid(gt, "effects"), font = ef ? K.kid(ef, "font") : null;
+      const O = (p: Pt) => { const o = opts!.toDisplay ? opts!.toDisplay([p[0] / 1e6, p[1] / 1e6]) : [p[0] / 1e6, p[1] / 1e6]; return `@(${V(o[0])}, ${V(o[1])})`; };   // ORIGIN_TRANSFORMS::ToDisplayAbs
+      if (m.type === "leader") {
+        add("Leader", EL(m.text)); add(O(m.start), "");
+        if (!fpEd && isLocked(n)) add("Status", "Locked");   // (PCB_DIM_LEADER does not call the base)
+        add("Layer", boardLayerName(doc, layerOf(n)));
+        return out;
+      }
+      const du = dimUnits(m as DimModel), DV = (v: number) => msgValue(v, du);
+      add("Dimension", EL(m.text)); add("Prefix", m.prefix);
+      if (m.override !== null) add("Override Text", m.override);
+      else {
+        add("Value", dimValueString(m as DimModel, dimUpdate({ ...m } as DimModel).measured || 0));
+        const PREC: Record<number, string> = { 6: "0.00 in / 0 mils / 0.0 mm", 7: "0.000 in / 0 mils / 0.00 mm", 8: "0.0000 in / 0.0 mils / 0.000 mm", 9: "0.00000 in / 0.00 mils / 0.0000 mm" };
+        add("Precision", PREC[m.precision] || (0).toFixed(Math.max(0, m.precision)));
+      }
+      add("Suffix", m.suffix);
+      add("Units", du === "mil" ? "mils" : du);
+      const face = font && K.kid(font, "face"); add("Font", face && K.str(face[1]) ? K.str(face[1]) : "Default");
+      add("Text Thickness", DV(m.textThick / 1e6)); add("Text Width", DV(m.textW / 1e6)); add("Text Height", DV(m.textH / 1e6));
+      if (m.type === "center") add(O(m.start), ""); else add(O(m.start), O(m.end));
+      if (!fpEd && isLocked(n)) add("Status", "Locked");
+      add("Layer", boardLayerName(doc, layerOf(n)));
+      if (m.type === "aligned" || m.type === "orthogonal") add("Height", DV(m.height / 1e6));
+      return out;
+    }
+    if (it && it.kind === "group") {   // PCB_GROUP::GetMsgPanelInfo
+      const n = it.node; const nm = typeof n[1] === "string" ? K.str(n[1]) : "";
+      add("Group", nm || "<unnamed>"); add("Members", K.groupMemberIds(n).length);
+      if (!fpEd && isLocked(n)) add("Status", "Locked");
+      return out;
+    }
+    if (it && it.kind === "image") {   // PCB_REFERENCE_IMAGE::GetMsgPanelInfo
+      const n = it.node; const g = (it.geom || []).find((x) => x.t === "image") as unknown as { w: number; h: number; pxMm: number; scale: number } | undefined;
+      const sc = K.kid(n, "scale");
+      add("Reference Image", ""); add("PPI", `${g && g.pxMm ? Math.round(25.4 / g.pxMm) : 300} `); add("Scale", `${(sc ? K.num(sc[1], 1) : 1).toFixed(6)} `);
+      add("Width", V(g ? g.w : 0)); add("Height", V(g ? g.h : 0)); add("Layer", boardLayerName(doc, layerOf(n)));
+      return out;
+    }
+    if (it && it.kind === "table") {   // PCB_TABLE::GetMsgPanelInfo
+      const cc = K.kid(it.node, "column_count"); add("Table", `${cc ? K.num(cc[1]) : 0} Columns`);
+      return out;
+    }
+    if (it && it.kind === "target") {   // PCB_TARGET::GetMsgPanelInfo
+      const n = it.node; const sz = K.kid(n, "size");
+      add("PCB Target", ""); add("Layer", boardLayerName(doc, layerOf(n))); add("Size", V(sz ? K.num(sz[1]) : 0)); add("Width", V(widthOf(n, 0))); add("Shape", n.includes("x") ? "X" : "+");
+      return out;
+    }
+    if (it && it.kind === "barcode") {   // PCB_BARCODE::GetMsgPanelInfo
+      const n = it.node; const BT: Record<string, string> = { code39: "CODE_39", code128: "CODE_128", datamatrix: "DATA_MATRIX", qr: "QR_CODE", microqr: "MICRO_QR_CODE" };
+      const ty = K.kid(n, "type"), tx = K.kid(n, "text"), th = K.kid(n, "text_height");
+      add("Barcode", BT[ty ? K.str(ty[1]) : ""] || (ty ? K.str(ty[1]) : ""));
+      add("Text", EL(tx ? K.str(tx[1]) : ""));
+      if (!fpEd && isLocked(n)) add("Status", "Locked");
+      add("Layer", boardLayerName(doc, layerOf(n)));
+      add("Angle", msgG(K.atOf(n)[2] || 0));
+      add("Text Height", V(th ? K.num(th[1]) : 0));
       return out;
     }
   }

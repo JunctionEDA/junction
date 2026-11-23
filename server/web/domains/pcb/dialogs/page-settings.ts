@@ -34,7 +34,7 @@ export function commitRootPage(page: string): boolean {
   const was = String(d.pageNumber || "1"); if (was === page) return false;
   const after = rootPageChange(page), before = rootPageChange(was);
   applyChanges([after]); sendOp([after]);
-  undoStack.push({ label: "change sheet page number", changes: [after], inverse: [before] }); if (undoStack.length > 200) undoStack.shift();
+  undoStack.push({ label: "Change Page Number", changes: [after], inverse: [before] }); if (undoStack.length > 200) undoStack.shift();
   redoStack.length = 0; publishUndo();
   return true;
 }

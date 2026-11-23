@@ -254,9 +254,10 @@ test("module: route from a pad, add a via with V, Enter clicks, End finishes: on
   pcb.onPointerMove(ev(), [125, 60], ctx);
   assert.equal(pcb.onKey("End", ev(), ctx), true);
   assert.equal(P.state.route, null);
-  assert.equal(log.commits.length, 1, "the whole route is one undo step"); assert.equal(log.commits[0].label, "Route Track");
+  assert.equal(log.commits.length, 1, "the whole route is one undo step"); assert.equal(log.commits[0].label, "Routing");
   const kinds = log.commits[0].changes.map((c) => c.typeName).sort();
-  assert.deepEqual(kinds, ["PCB_TRACK", "PCB_TRACK", "PCB_TRACK", "PCB_TRACK", "PCB_TRACK", "PCB_VIA"]);
+  // simplifyNewLine: the horizontal leg to (110, 52) and the one on to the via at (120, 52) are colinear and merge into one track
+  assert.deepEqual(kinds, ["PCB_TRACK", "PCB_TRACK", "PCB_TRACK", "PCB_TRACK", "PCB_VIA"]);
   const back = log.commits[0].changes.filter((c) => c.typeName === "PCB_TRACK").map((c) => K.kid(doc.items.get(c.id).node, "layer")[1]);
   assert.equal(back.filter((l) => l === "B.Cu").length, 2);
   assert.equal(pcb.onKey("PageUp", ev(), ctx), true); assert.equal(P.state.layer, "F.Cu");
@@ -299,7 +300,7 @@ test("module: D drags the selected segment with the router, a click commits the 
   assert.deepEqual([...pcb.hiddenIds()].sort(), ["s-1", "s-2"]);
   pcb.onPointerDown(ev(), [112, 52], ctx);
   assert.equal(log.tool, "select"); assert.equal(P.state.drag, null);
-  const c = log.commits.at(-1); assert.equal(c.label, "drag track");
+  const c = log.commits.at(-1); assert.equal(c.label, "Routing");
   assert.deepEqual(c.changes.map((x) => x.kind).sort(), ["ADDED", "ADDED", "ADDED", "REMOVED", "REMOVED"]);
   const segs = [...doc.items.values()].filter((it) => it.kind === "segment" && K.kid(it.node, "layer")[1] === "F.Cu").map((it) => [P.pt(it.node, "start"), P.pt(it.node, "end")]);
   for (const want of [[[110, 50], [112, 52]], [[112, 52], [117, 52]], [[117, 52], [118, 53]]]) assert.ok(segs.some((g) => JSON.stringify(g) === JSON.stringify(want)), JSON.stringify(want) + " in " + JSON.stringify(segs));
@@ -321,7 +322,7 @@ test("module: D on a footprint re-routes its attached tracks at 45° (COMPONENT_
   P.selectMoveTo(ctx, [100, 48]);
   assert.deepEqual([...pcb.hiddenIds()].includes("t-1"), true);
   P.finishSelectMove(ctx, true, false);
-  const c = log.commits.at(-1); assert.equal(c.label, "drag");
+  const c = log.commits.at(-1); assert.equal(c.label, "Routing");
   const segs = [...doc.items.values()].filter((it) => it.kind === "segment" && K.str(K.kid(it.node, "net")[1]) === "GND" && K.kid(it.node, "layer")[1] === "F.Cu").map((it) => JSON.stringify([P.pt(it.node, "start"), P.pt(it.node, "end")]));
   assert.ok(segs.includes(JSON.stringify([[100, 47.1], [102, 49.1]])) && segs.includes(JSON.stringify([[102, 49.1], [105, 49.1]])), segs.join(" "));
   ctx.selected = null; ctx.selection = new Set();
@@ -335,7 +336,7 @@ test("module: a press on an unselected track draws a box (DRAG_SELECTED); on the
   assert.equal(P.startPendingDrag(ctx, P.state.pending), true); P.state.pending = null;
   assert.equal(P.state.drag.bySelect, true); assert.equal(P.state.drag.subs[0].mode, "segment");
   P.dragMove(ctx, [112, 52]); P.finishDrag(ctx, true, false);
-  assert.equal(log.commits.at(-1).label, "drag track"); assert.equal(log.tool, "select");
+  assert.equal(log.commits.at(-1).label, "Routing"); assert.equal(log.tool, "select");
 });
 
 test("drag collisions: walk around keeps the last valid step, a first step in violation needs Ctrl, free angle never commits a short", () => {
@@ -347,7 +348,7 @@ test("drag collisions: walk around keeps the last valid step, a first step in vi
   const valid = JSON.stringify(d.sol.lines[0].pts);
   pcb.onPointerMove(ev(), [112, 54], ctx); assert.equal(d.forceMark, false); assert.equal(JSON.stringify(d.sol.lines[0].pts), valid, "the refused step keeps the last valid line");
   pcb.onPointerDown(ev(), [112, 54], ctx);
-  assert.equal(log.commits.at(-1).label, "drag track");
+  assert.equal(log.commits.at(-1).label, "Routing");
   const ids = new Set(log.commits.at(-1).changes.filter((c) => c.kind === "ADDED").map((c) => c.id));
   assert.ok(minGapTo(doc, ids, "GND") >= 0.2 - 1e-4, "no short: " + minGapTo(doc, ids, "GND"));
   // the very first step collides: forced mark-obstacles mode, the obstacle shown, no commit without Ctrl
@@ -1366,17 +1367,15 @@ test("router: walkaround keeps every obstacle's clearance and stops at the neare
   const end = blocked.pts.at(-1); assert.ok(Math.hypot(end[0] - 20, end[1] - 10) < 1.4 + 0.1, "near pad C's clearance edge: " + end);
 });
 
-test("router: V attaches a via that follows the head; a click cannot place it inside another net's clearance", () => {
+test("router: V attaches a via that follows the head; in another net's clearance it is pushed out (VIA::PushoutForce)", () => {
   const doc = routerDoc(); const { ctx, log } = routerCtx(doc); pcb.onDocChanged(ctx);
   pcb.onKey("x", ev(), ctx); pcb.onPointerDown(ev(), [10, 10], ctx);
   pcb.onPointerMove(ev(), [70, 10.75], ctx);   // 0.4 mm from net B's track centre: room for a 0.2 mm track, not for a 0.6 mm via
   assert.equal(P.state.route.reached, true);
   pcb.onKey("v", ev(), ctx);
-  assert.ok(P.state.route.placingVia); assert.deepEqual(P.state.route.viaBad.map((o) => o.id), ["sb1"], "the via's collision is marked");
+  assert.ok(P.state.route.placingVia); assert.equal(P.state.route.viaBad, null, "the via slid clear of net B");
+  assert.notDeepEqual(P.state.route.target, [70, 10.75], "the head ends at cursor + force");
   pcb.onPointerDown(ev(), [70, 10.75], ctx);
-  assert.equal(P.state.route.stages.length, 0, "no via, no segments"); assert.equal(P.state.route.layer, "F.Cu");
-  pcb.onPointerMove(ev(), [70, 12], ctx); assert.equal(P.state.route.viaBad, null);
-  pcb.onPointerDown(ev(), [70, 12], ctx);
   assert.equal(P.state.route.stages.length, 1); assert.equal(P.state.route.layer, "B.Cu");
   pcb.onKey("End", ev(), ctx);
   assert.equal(log.commits.length, 1); assert.ok(log.commits[0].changes.some((c) => c.typeName === "PCB_VIA"));
@@ -1597,7 +1596,7 @@ test("component drag: clearance is checked where the footprint was dropped — i
   assert.deepEqual(P.padsOf(doc.items.get("fp-1")).map((p) => [p.x, p.y]), [[104, 50], [106, 50]]);
   // pad 2 (net B) dropped onto net C's track is refused
   ({ doc, log } = componentDrag(CD_SRC(`  (segment (start 99 65) (end 120 65) (width 0.25) (layer "F.Cu") (net "C") (uuid "t2"))`), [98, 65]));
-  assert.equal(log.commits.length, 0); assert.deepEqual(log.toasts, ["Track violates DRC."]);
+  assert.equal(log.commits.length, 0); assert.deepEqual(log.toasts, [], "refused silently: KiCad shows the status note only for a forced mark-obstacles track drag");
   assert.deepEqual(P.padsOf(doc.items.get("fp-1")).map((p) => [p.x, p.y]), [[100, 50], [102, 50]]);
   // a footprint with no attached tracks is checked too (COMPONENT_DRAGGER's dragged items are its pads)
   const bare = RV_HDR + `  (footprint "Test:R" (layer "F.Cu") (uuid "fp-1") (at 100 50)
@@ -1605,7 +1604,7 @@ test("component drag: clearance is checked where the footprint was dropped — i
   (segment (start 95 60) (end 105 60) (width 0.25) (layer "F.Cu") (net "C") (uuid "t2"))
 )`;
   ({ log } = componentDrag(bare, [100, 60]));
-  assert.equal(log.commits.length, 0); assert.deepEqual(log.toasts, ["Track violates DRC."]);
+  assert.equal(log.commits.length, 0); assert.deepEqual(log.toasts, [], "refused silently: KiCad shows the status note only for a forced mark-obstacles track drag");
 });
 
 test("via drag: an arc ending on the via stays and a 45° stub joins it to the via's new place (ARC_T links of the joint)", () => {
@@ -1711,7 +1710,7 @@ test("multi-drag: followers of another net meet the lines already moved, not the
   for (const d of P.state.drag.subs) assert.equal(d.status, true);
   assert.deepEqual(P.state.drag.subs.map((d) => d.sol.lines[0].pts[1][1]), [52, 53], "both lines move up together, 1 mm apart");
   assert.ok(pcb.ghostSegs().length >= 2, "the drag in progress is offered to peers");
-  pcb.onPointerDown(ev(), [105, 52], ctx); assert.equal(log.commits.at(-1).label, "drag track");
+  pcb.onPointerDown(ev(), [105, 52], ctx); assert.equal(log.commits.at(-1).label, "Routing");
   assert.deepEqual(pcb.ghostSegs(), []);
 });
 

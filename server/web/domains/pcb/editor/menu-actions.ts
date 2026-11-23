@@ -18,7 +18,11 @@ import { setToggle, state, store } from "./appstore";
 import { openAbout, openHotkeyList } from "./help-dialogs";
 import { setCrosshair, setUnitsAction, toggleAlwaysShowCursor } from "./panes";
 import { cycleInactiveMode, layerAlphaStep, toggleInactiveMode } from "./panels/appearance";
-import { stepSheetPage } from "./panels/hierarchy";
+import { loadSheets, schDocs, sheetDoc, sheetInstances, stepSheetPage } from "./panels/hierarchy";
+import { libIsPower, symbolInstanceRef } from "./panels/search-model";
+import { askVisibility, cmpEdits, parseCmpFile, pickCmpFile, type CmpSymbolRef } from "../dialogs/import-fp-assignments";
+import { submitDocOp } from "../dialogs/project";
+import { toolCtx } from "./tools";
 import { openSelectionProperties } from "./pointer";
 import { E } from "./state";
 import { KICAD_BASE_VERSION } from "../canvas/version";
@@ -30,6 +34,8 @@ import { esc, toast } from "./util";
 import { applyView, fitBox, flipMmX, isSch, mmW, mmX0, mmY0, requestRender, stage, world, zoomBy, zoomStep } from "./view";
 import { fitMargin } from "./zoomlist";
 import { currentDoc, download, fileStem } from "./download";
+import * as VM from "../canvas/variant-model";
+import type { ActionState } from "../tables";
 
 type Sx = (string | number | Sx)[];
 interface DocEntry { docId: string; path: string; docType: string }
@@ -179,6 +185,7 @@ export const MENU_HANDLERS: Record<string, ActionHandler> = {
   navigatePrevious: () => stepSheet(-1), navigateNext: () => stepSheet(1), leaveSheet,
   layerNext: () => stepLayer(1), layerPrev: () => stepLayer(-1), layerTop: () => copperLayer("F.Cu"), layerBottom: () => copperLayer("B.Cu"),
   listHotKeys: () => openHotkeyList(), about: () => openAbout(),
+  importFPAssignments: () => { void importFPAssignments(); },
   languageEnglish: () => {},
 };
 Object.assign(HANDLERS, MENU_HANDLERS, {
@@ -187,6 +194,48 @@ Object.assign(HANDLERS, MENU_HANDLERS, {
   drag: () => { startMove("drag"); },
 });
 setToggle("languageEnglish", true);
+/**
+ * File > Import > Footprint Assignments... (SCH_EDITOR_CONTROL::ImportFPAssignments): the .cmp file, the visibility
+ * choice, then processCmpToFootprintLinkFile over Hierarchy().GetSymbols( SYMBOL_FILTER_NON_POWER ): every symbol with
+ * a library symbol, not power and not a '#' reference, on every sheet instance, matched by its composed reference there.
+ */
+async function importFPAssignments(): Promise<void> {
+  if (!isSch() || !E.kdoc) return;
+  if (E.viewOnly) { toast("View-only access"); return; }
+  const file = await pickCmpFile(); if (!file) return;
+  const vis = await askVisibility(); if (vis === null) return;
+  try { await loadSheets(); } catch (e) { /* the sheets as last read */ }
+  const fail = async (): Promise<void> => { const m = await import("../dialogs/sch-items"); await m.messageBox(`Failed to open symbol-footprint link file '${file.name}'.`); };
+  const K = KiCadCanvas as unknown as { kid(n: SNode, k: string): SNode | null; str(v: unknown): string; resolveLib(doc: KDoc, name: string): SNode | null; replaceChange(doc: KDoc, it: KItem): KChange };
+  if (file.text.includes("\u0000")) { await fail(); return; }
+  const refs: CmpSymbolRef[] = [];
+  for (const inst of sheetInstances()) {
+    const docId = inst.node.docId; if (!docId) continue;
+    const doc = sheetDoc(docId); if (!doc) continue;
+    for (const it of doc.items.values()) {
+      if (it.kind !== "symbol") continue;
+      const libId = K.str((K.kid(it.node, "lib_id") || [])[1]), libName = K.str((K.kid(it.node, "lib_name") || [])[1]);
+      const def = K.resolveLib(doc, libName || libId) || (libName ? K.resolveLib(doc, libId) : null);
+      if (!def) continue;   // GetLibSymbolRef(): orphans are left out
+      const ref = symbolInstanceRef(it.node as unknown[], inst.instPath).ref;
+      if (libIsPower(def as unknown[]) || ref.startsWith("#")) continue;
+      refs.push({ docId, id: it.id, ref });
+    }
+  }
+  const edits = cmpEdits(parseCmpFile(file.text), refs, (docId, id) => { const d = sheetDoc(docId), it = d ? d.items.get(id) : null; return it ? it.node : null; }, vis);
+  const here = state.docId;
+  try {
+    for (const [docId, nodes] of edits) {
+      const doc = sheetDoc(docId); if (!doc) continue;
+      const changes: KChange[] = [];
+      for (const [id, n] of nodes) { const it = doc.items.get(id); if (it && JSON.stringify(it.node) !== JSON.stringify(n)) changes.push(K.replaceChange(doc, Object.assign({}, it, { node: n, geom: [], bbox: null }))); }
+      if (!changes.length) continue;
+      if (docId === here) (toolCtx() as unknown as { commit(c: KChange[], label: string): void }).commit(changes, "Import Footprint Assignments");
+      else await submitDocOp(docId, changes);
+    }
+  } catch (e) { await fail(); return; }
+  requestRender();
+}
 /** A schematic View option held in the render options; `dflt` is KiCad's default (EESCHEMA_SETTINGS). */
 function schView(key: string, id: string, dflt = true): void {
   const on = !(E.renderOpts[key] === undefined ? dflt : !!E.renderOpts[key]);
@@ -197,6 +246,32 @@ setToggle("toggleERCExclusions", false);
 
 /** Exposed for the chrome (window.CollabApp.selectionCount) so menus can grey out what needs a selection. */
 export function selectionCount(): number { return E.kdoc ? selectionKeys().length : 0; }
+/**
+ * What the actions' enable and check conditions read (tables.ts conditionWhy), as window.CollabApp.actionState():
+ * the selection's size and kinds, how many items the sheet holds, whether a tool has an operation in flight, the undo
+ * list, and the Edit > Attributes check marks (SCH_EDIT_TOOL::Init attribDNPCond …: the selected symbols, sheets and
+ * rule areas all carry the attribute, read through the current variant on the sheet instance).
+ */
+export function actionState(): ActionState {
+  const doc = E.kdoc as KDoc | null, keys = doc ? selectionKeys() : [];
+  const items = doc ? selectedIds().map((id) => doc.items.get(id)).filter((it): it is KItem => !!it) : [];
+  const sch = isSch(), mod = W.CollabTools && (W.CollabTools.sch as unknown as { _?: { busyMessage?: () => string | null | undefined } } | undefined);
+  let busy = ""; try { busy = sch && mod && mod._ && mod._.busyMessage ? String(mod._.busyMessage() || "") : ""; } catch (e) { busy = ""; }
+  const checks: Record<string, boolean> = {};
+  if (sch && doc) {
+    const variant = String(E.currentVariant || ""), ed = E as { currentSheetPathOf?: () => string | null };
+    const path = variant && ed.currentSheetPathOf ? ed.currentSheetPathOf() : null, nodes = items.map((it) => it.node);
+    const on = (f: keyof VM.SymFlags): boolean => VM.attributeChecked(nodes, f, variant, path, doc.version);
+    checks.setDNP = on("dnp"); checks.setExcludeFromSim = on("excludedFromSim"); checks.setExcludeFromBOM = on("excludedFromBOM");
+    checks.setExcludeFromBoard = on("excludedFromBoard"); checks.setExcludeFromPosFiles = on("excludedFromPosFiles");
+  }
+  // SCH_SCREENS::HasNoFullyDefinedLibIds over the sheets of the project
+  let symbols = 0, named = 0;
+  if (sch) for (const d of schDocs()) { const sd = sheetDoc(d.docId); if (sd) for (const it of sd.items.values()) if (it.kind === "symbol") { symbols++; if (String(it.lib || "").includes(":")) named++; } }
+  const u = store.get().undo;
+  return { selCount: keys.length, selKinds: Array.from(new Set(items.map((it) => it.kind))), itemCount: doc ? doc.items.size : 0, idle: !busy, drawingWire: busy === "Press <ESC> to cancel drawing.",
+    undo: u.undo, redo: u.redo, legacyLibIds: symbols > 0 && named === 0, checks };
+}
 /** Everything selected, pads included: the item ids of selectedIds() plus the board's picked pads as
  *  "footprintId#padIndex" (PCB_PAD_T in KiCad's selection).  Also window.CollabEditor.hooks.selectionKeys(). */
 export function selectionKeys(): string[] {

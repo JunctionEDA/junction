@@ -56,3 +56,18 @@ export function sheetsByPage<T extends PageTreeNode<T>>(tree: T | null): { node:
   if (tree) walk(tree);
   return list.map((x, i) => ({ x, i })).sort((a, b) => comparePageNum(a.x.node.page || "", b.x.node.page || "") || a.i - b.i).map((e) => e.x);
 }
+
+/**
+ * HIERARCHY_TREE::OnCompareItems under HIERARCHY_PANE::buildHierarchyTree's SortChildren: the sub-sheets of every sheet
+ * in page order (SCH_SHEET_PATH::ComparePageNum: integers numerically and before any other page, the rest by
+ * StrNumCmp), sheets on the same page keeping the order of the file.  The top-level sheets under the hidden project
+ * root are not sorted (UpdateHierarchyTree appends them in the project's order).  Sorts in place.
+ */
+export function sortTreeByPage<T extends PageTreeNode<T>>(tree: T | null): T | null {
+  const walk = (n: T): void => {
+    if (!n.virtual && n.children.length > 1) n.children = n.children.map((c, i) => ({ c, i })).sort((a, b) => comparePageNum(a.c.page || "", b.c.page || "") || a.i - b.i).map((e) => e.c);
+    for (const c of n.children) walk(c);
+  };
+  if (tree) walk(tree);
+  return tree;
+}

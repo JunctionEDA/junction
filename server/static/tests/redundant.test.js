@@ -47,10 +47,10 @@ const tracks = (doc, net) => [...doc.items.values()].filter((it) => (it.kind ===
 
 console.log("remove redundant tracks");
 
-test("a new route between the same two pads erases the old line, in the same 'Route Track' commit", () => {
+test("a new route between the same two pads erases the old line, in the same 'Routing' commit", () => {
   const { ctx, log, doc } = fakeCtx();
   route(ctx, [[10, 10], [20, 10]]);
-  assert.equal(log.commits.length, 1); assert.equal(log.commits[0].label, "Route Track");
+  assert.equal(log.commits.length, 1); assert.equal(log.commits[0].label, "Routing");
   assert.ok(!doc.items.has("o1") && !doc.items.has("o2"), "the detour is gone");
   const t = tracks(doc, "S"); assert.ok(t.length >= 1);
   assert.ok(t.every((it) => P.pt(it.node, "start")[1] === 10 && P.pt(it.node, "end")[1] === 10), "only the straight route is left");

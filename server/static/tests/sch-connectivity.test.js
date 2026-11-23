@@ -464,7 +464,8 @@ test("28: the Properties panel has a junction's Color and a directive label's Sh
   const src = require("fs").readFileSync(webPath("editor", "panels", "propgrid.ts"), "utf8");
   assert.ok(/FLAG_SHAPES: \[string, string\]\[\] = \[\["dot", "Dot"\], \["round", "Circle"\], \["diamond", "Diamond"\], \["rectangle", "Rectangle"\]\]/.test(src));
   assert.ok(/if \(directive\) out\.push\(\{ group: BASIC, name: "Shape", type: "enum", choices: FLAG_SHAPES/.test(src) && /name: "Pin length", type: "length"/.test(src));
-  assert.ok(/junction[\s\S]{0,400}name: "Color", type: "color"/.test(src));
+  // the junction's Color is a COLOR4D property built by colorProp (one implementation with the stroke / sheet colours)
+  assert.ok(/case "junction"[\s\S]{0,600}colorProp\(BASIC, "Color", \(n\) => h\.kid\(n, "color"\)/.test(src) && /function colorProp\([\s\S]{0,200}type: "color"/.test(src));
 });
 
 console.log(passed + " passed, " + failed + " failed");

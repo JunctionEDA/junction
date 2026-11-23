@@ -214,7 +214,7 @@ test("Attempt Finish (F while routing) walks the head to the ratsnest end and fi
   ctx.setTool("route"); pcb.onPointerDown(ev(), [10, 10], ctx);
   assert.ok(P.state.route, "routing"); assert.equal(pcb.runAction("routerAttemptFinish", ctx), true);
   assert.equal(P.state.route, null, "the route ended");
-  assert.equal(log.commits.length, 1); assert.equal(log.commits[0].label, "Route Track");
+  assert.equal(log.commits.length, 1); assert.equal(log.commits[0].label, "Routing");
   const segs = [...doc.items.values()].filter((it) => it.kind === "segment" && !["t1", "t2", "t3"].includes(it.id));
   const ends = segs.flatMap((s) => [kid(s.node, "start").slice(1), kid(s.node, "end").slice(1)].map((p) => p.join(",")));
   assert.ok(ends.includes("10,10") && ends.includes("30,10"), ends.join(" "));

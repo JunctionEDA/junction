@@ -4,16 +4,20 @@
 // A line whose result collides, or that comes out the same, is left alone; a differential pair member is skipped with
 // KiCad's infobar message; each optimized line is its own step, appended to the first one (APPEND_UNDO).
 import type { BoardDoc, ObstacleIndex, PcbChange, PcbCtx, Pt, TrackLine } from "./types";
-import { dragChanges } from "./drag-optimize";
+import { dragChanges, obtuseOnly } from "./drag-optimize";
 import { assembleLine, initialTrace, peq } from "./dragger";
 import { settingsOf } from "./dialogs";
 import { dpNetPair } from "./diffpair";
 import { applySelection, selectionIds } from "./groups";
 import { ANG_OBTUSE, angleType, cornerCost, padOrViaAt, runSmartPads } from "./smartpads";
+import { S } from "./state";
 import { dir8, pathClear, routeObstacles, simplifyPts } from "./walkaround";
 
 /** OPTIMIZER::mergeFull: each run of segments replaced by the cheaper clear 45° bypass while the corner cost drops. */
-export function mergeFull(O: ObstacleIndex, pts: Pt[], r: number): Pt[] {
+/** The optimizer's extra constraints: `check` (AREA_CONSTRAINT and the like) and REQUIRE_OBTUSE_ANGLES (default: "Avoid sharp angles"). */
+export interface MergeOpts { check?: (path: Pt[], v1: number, v2: number, bypass: Pt[]) => boolean; obtuse?: boolean }
+export function mergeFull(O: ObstacleIndex, pts: Pt[], r: number, mo?: MergeOpts): Pt[] {
+  const obtuseReq = mo && mo.obtuse !== undefined ? mo.obtuse : !!S.rs.restrict_angles;
   let path = simplifyPts(pts); let step = path.length - 2;
   for (let guard = 0; guard < 400; guard++) {
     const nSegs = path.length - 1; if (step > nSegs - 2) step = nSegs - 2; if (step < 1) break;
@@ -22,6 +26,8 @@ export function mergeFull(O: ObstacleIndex, pts: Pt[], r: number): Pt[] {
       const a = path[n], b = path[n + step + 1]; const cands: (Pt[] | null)[] = [null, null], cost = [Infinity, Infinity];
       for (let i = 0; i < 2; i++) {
         const bypass = initialTrace(a, b, -1, i === 1); if (bypass.length < 2 || !pathClear(O, bypass, r)) continue;
+        if (obtuseReq && !obtuseOnly(path, n, n + step + 1, bypass)) continue;   // REQUIRE_OBTUSE_ANGLES
+        if (mo && mo.check && !mo.check(path, n, n + step + 1, bypass)) continue;
         cands[i] = simplifyPts(path.slice(0, n).concat(bypass, path.slice(n + step + 2))); cost[i] = cornerCost(cands[i]!);
       }
       if (cost[0] < costOrig && cost[0] < cost[1]) picked = cands[0]; else if (cost[1] < costOrig) picked = cands[1];
@@ -42,7 +48,8 @@ function intersectLines(a0: Pt, a1: Pt, b0: Pt, b1: Pt): Pt | null {
 const obtuse = (a0: Pt, a1: Pt, b0: Pt, b1: Pt) => { const d1 = dir8(a0, a1), d2 = dir8(b0, b1); return d1 >= 0 && d2 >= 0 && (angleType(d1, d2) & ANG_OBTUSE) !== 0; };
 
 /** OPTIMIZER::mergeObtuse: two segments `step` apart that meet at an obtuse angle replace what lies between them. */
-export function mergeObtuse(O: ObstacleIndex, pts: Pt[], r: number): Pt[] {
+export function mergeObtuse(O: ObstacleIndex, pts: Pt[], r: number, mo?: MergeOpts): Pt[] {
+  const obtuseReq = mo && mo.obtuse !== undefined ? mo.obtuse : !!S.rs.restrict_angles;
   let path = pts.map((p) => p.slice()); let step = path.length - 3; if (step < 0) return path;
   for (let guard = 0; guard < 400; guard++) {
     const nSegs = path.length - 1; if (step > nSegs - 2) step = nSegs - 2;
@@ -53,6 +60,8 @@ export function mergeObtuse(O: ObstacleIndex, pts: Pt[], r: number): Pt[] {
       if (!obtuse(s1a, s1b, s2a, s2b)) continue;
       const ip = intersectLines(s1a, s1b, s2a, s2b); if (!ip) continue;
       if (!obtuse(s1a, ip, ip, s2b) || !pathClear(O, [s1a, ip, s2b], r)) continue;
+      if (obtuseReq && !obtuseOnly(path, n, n + step + 1, [s1a, ip, s2b])) continue;
+      if (mo && mo.check && !mo.check(path, n, n + step + 1, [s1a, ip, s2b])) continue;
       path = path.slice(0, n + 1).concat([ip], path.slice(n + step + 1)); found = true; break;
     }
     if (!found) { if (step <= 2) return path; step--; }
@@ -106,7 +115,7 @@ export function optimizeSelected(ctx: PcbCtx): boolean {
     const pts = optimizeTrackLine(ctx, l); if (!pts) continue;
     const changes: PcbChange[] = dragChanges(ctx, { sol: { lines: [{ l, pts }] } });
     if (!changes.length) continue;
-    ctx.commit(changes, "Optimize Selected", first ? undefined : { amend: true }); first = false;
+    ctx.commit(changes, "Routing", first ? undefined : { amend: true }); first = false;
   }
   ctx.requestRender();
   return true;

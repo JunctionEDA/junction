@@ -535,6 +535,31 @@ async function subFiles(file: string): Promise<string[]> {
   }
   return out;
 }
+/**
+ * SCH_PROPERTIES_PANEL::handleSheetFilenameChange: a sheet's file-name field edited in the Properties panel.  The
+ * name gets the .kicad_sch extension (EnsureFileExtension: appended unless it already ends so, "Schematic_1.1" kept),
+ * an invalid one is refused with "A sheet must have a valid file name.", separators become '/', an unchanged name does
+ * nothing; otherwise ChangeSheetFile links or creates the file and the sheet takes the name ("Edit Properties").
+ * Resolves true when the sheet changed.
+ */
+export async function changeSheetFileProp(ctx: Ctx, item: KItem, value: string): Promise<boolean> {
+  let file = value;
+  if ((file.toLowerCase().split(".").pop() || "") !== "kicad_sch") { if (!file.endsWith(".")) file += "."; file += "kicad_sch"; }
+  // IsFullFileNameValid: wxFileName::GetForbiddenChars() of a Unix path (none besides NUL)
+  if (!file || file.includes("\0")) { await messageBox("A sheet must have a valid file name."); return false; }
+  file = file.replace(/\\/g, "/");
+  const isFile = (q: SNode): boolean => /^Sheet ?file$/i.test(L.fieldName(q));
+  const fp = L.kids(item.node, "property").find(isFile);
+  const oldFile = fp ? L.fieldValue(fp).replace(/\\/g, "/") : "";
+  if (file === oldFile) return false;
+  const n = L.clone(item.node), nf = L.kids(n, "property").find(isFile); if (!nf) return false;
+  nf[L.str(nf[1]) === "private" && nf.length > 3 && !Array.isArray(nf[2]) ? 3 : 2] = file;
+  const linked = await changeSheetFile(ctx, item, n, oldFile, file);
+  if (!linked) return false;
+  ctx.commit([KiCadCanvas.replaceChange(ctx.doc, Object.assign({}, item, { node: n, geom: [], bbox: null }) as KItem)], "Edit Properties");
+  if (linked !== true) void annotateNewSheetPaths(ctx, n, linked);
+  return true;
+}
 /** SCH_EDIT_FRAME::ChangeSheetFile for an existing sheet: link an existing file, or copy this sheet's contents to a new one. */
 async function changeSheetFile(ctx: Ctx, item: KItem, node: SNode, oldFile: string, newFile: string): Promise<boolean | string> {
   const cur = (ctx.docs as { docId: string; path: string; docType: string }[] || []).find((d) => d.docId === ctx.docId) || null;

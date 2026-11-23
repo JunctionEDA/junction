@@ -10,7 +10,7 @@ import { distSeg } from "./hit";
 import { segmentNode } from "./nodes";
 import { RM_MARK, RM_SHOVE } from "./router-settings";
 import { shoveOps, shovePreview, shoveRun, shoveWorld } from "./shove";
-import { cornerCost } from "./smartpads";
+import { ANG_OBTUSE, ANG_STRAIGHT, angleType, cornerCost } from "./smartpads";
 import { K, S } from "./state";
 import { clone, r6 } from "./util";
 import { dir8, pathClear, pathHits, routeObstacles, simplifyPts } from "./walkaround";
@@ -34,9 +34,23 @@ export function changedArea(pts: Pt[], orig: Pt[], w: number): Box | null {
 }
 export const inBox = (b: Box, p: Pt) => p[0] >= b[0] - PEPS && p[0] <= b[2] + PEPS && p[1] >= b[1] - PEPS && p[1] <= b[3] + PEPS;
 /** OPTIMIZER::mergeStep's constraints: PRESERVE_VERTEX_CONSTRAINT and AREA_CONSTRAINT (strict) for replacing vertices v1..v2. */
-export function mergeAllowed(path: Pt[], v1: number, v2: number, bypass: Pt[], anchor: Pt, area: Box) {
+/**
+ * OBTUSE_ONLY_CONSTRAINT::Check ("Avoid sharp angles", REQUIRE_OBTUSE_ANGLES): the replacement of vertices v1..v2 may
+ * only turn at obtuse (or straight) angles, inside itself and where it meets the segments kept on either side.
+ */
+export function obtuseOnly(path: Pt[], v1: number, v2: number, bypass: Pt[]) {
+  const ok = (a0: Pt, a1: Pt, b0: Pt, b1: Pt) => (angleType(dir8(a0, a1), dir8(b0, b1)) & (ANG_OBTUSE | ANG_STRAIGHT)) !== 0;
+  const n = bypass.length - 1; if (n < 1) return true;
+  for (let i = 0; i + 2 < bypass.length; i++) if (!ok(bypass[i], bypass[i + 1], bypass[i + 1], bypass[i + 2])) return false;
+  if (v1 > 0 && !ok(path[v1 - 1], path[v1], bypass[0], bypass[1])) return false;
+  if (v2 < path.length - 1 && !ok(bypass[n - 1], bypass[n], path[v2], path[v2 + 1])) return false;
+  return true;
+}
+export function mergeAllowed(path: Pt[], v1: number, v2: number, bypass: Pt[], anchor: Pt, area: Box | null) {
   let covers = false; for (let i = v1; i < v2; i++) if (segPtDist(path[i], path[i + 1], anchor) <= 1e-6) { covers = true; break; }
   if (covers) { let keeps = false; for (let i = 0; i + 1 < bypass.length; i++) if (segPtDist(bypass[i], bypass[i + 1], anchor) <= 1e-6) { keeps = true; break; } if (!keeps) return false; }
+  if (S.rs.restrict_angles && !obtuseOnly(path, v1, v2, bypass)) return false;
+  if (!area) return true;   // "Optimize entire track when dragging": no AREA_CONSTRAINT
   const p1 = path[v1], p2 = path[v2], in1 = inBox(area, p1), in2 = inBox(area, p2);
   if (in1 && in2) return true;
   const horiz = (a0: Pt, a1: Pt, b0: Pt, b1: Pt) => { const d1 = dir8(a0, a1), d2 = dir8(b0, b1); return d1 >= 0 && d1 === d2; };   // SEG::Angle(...).IsHorizontal(): the bypass carries on the kept segment
@@ -47,7 +61,9 @@ export function mergeAllowed(path: Pt[], v1: number, v2: number, bypass: Pt[], a
 /**
  * DRAGGER::optimizeAndUpdateDraggedLine: OPTIMIZER::mergeFull (each run of segments replaced by the cheaper of the two 45°
  * two-segment bypasses when it is clear and the corner cost drops) then mergeColinear, the cursor's vertex kept, the
- * changes kept to the area the drag touched.
+ * changes kept to the area the drag touched.  DIALOG_PNS_SETTINGS' drag options: mergeColinear only with "Smooth
+ * dragged segments", the area constraint dropped with "Optimize entire track when dragging", and only obtuse corners
+ * with "Avoid sharp angles" (restrict_angles).
  */
 export function optimizeDragged(O: ObstacleIndex, pts: Pt[], orig: Pt[], p: Pt, w: number) {
   if (pts.length < 3) return pts;
@@ -55,8 +71,9 @@ export function optimizeDragged(O: ObstacleIndex, pts: Pt[], orig: Pt[], p: Pt, 
   let anchor: Pt | null = null, at = -1, bd = Infinity;
   for (let i = 0; i + 1 < pts.length; i++) { const a = pts[i], b = pts[i + 1]; const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy; const k = l2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0; const q = rp([a[0] + k * dx, a[1] + k * dy]); const d = Math.hypot(q[0] - p[0], q[1] - p[1]); if (d < bd) { bd = d; anchor = q; at = i; } }
   let path = pts.map((q: Pt) => q.slice()); if (!path.some((q: Pt) => peq(q, anchor!))) path.splice(at + 1, 0, anchor!);
-  const area = changedArea(pts, orig, w) || [p[0], p[1], p[0], p[1]];
-  const r = w / 2; path = simplifyPts(path); let step = path.length - 2;
+  const area: Box | null = S.rs.optimize_dragged_track ? null : changedArea(pts, orig, w) || [p[0], p[1], p[0], p[1]];
+  const smooth = !!S.rs.smooth_dragged_segments;
+  const r = w / 2; if (smooth) path = simplifyPts(path); let step = path.length - 2;
   for (let guard = 0; guard < 200; guard++) {
     const nSegs = path.length - 1; if (step > nSegs - 2) step = nSegs - 2; if (step < 1) break;
     const costOrig = cornerCost(path); let picked: Pt[] | null = null;
@@ -72,7 +89,7 @@ export function optimizeDragged(O: ObstacleIndex, pts: Pt[], orig: Pt[], p: Pt, 
     if (picked) path = picked; else step--;
     if (!step) break;
   }
-  return simplifyPts(path);   // mergeColinear
+  return smooth ? simplifyPts(path) : path;   // mergeColinear (MERGE_COLINEAR with SmoothDraggedSegments)
 }
 /**
  * DRAGGER::dragShove's SHOVE run: each dragged line is a head (the via a proxy that carries its fanout), the dragged
@@ -109,21 +126,22 @@ export function dragSolidObs(ctx: PcbCtx, d: DragSub, layer: string) {
 export function dragTo(ctx: PcbCtx, d: DragSub, p: Pt) {
   d.cursor = p.slice(); const first = d.first; d.first = false;
   const raw = dragSolution(d, p); const mode = S.rs.mode;
-  if (d.free || d.forceMark) { d.sol = raw; d.shove = null; d.hits = solutionHits(ctx, d, raw); d.status = !d.hits.length; d.lastValid = p.slice(); return true; }
+  const allow = mode === RM_MARK && !!S.rs.can_violate_drc;   // ROUTING_SETTINGS::AllowDRCViolations (dragMarkObstacles: m_dragStatus = true)
+  if (d.free || d.forceMark) { d.sol = raw; d.shove = null; d.hits = solutionHits(ctx, d, raw); d.status = allow || !d.hits.length; d.lastValid = p.slice(); return true; }
   // DRAGGER::dragMarkObstacles: the step is always taken; it may be fixed when clear or when DRC violations are allowed
   if (mode === RM_MARK) { d.sol = raw; d.shove = null; d.hits = solutionHits(ctx, d, raw); d.status = !!S.rs.can_violate_drc || !d.hits.length; d.lastValid = p.slice(); return true; }
   // DRAGGER::dragShove: the dragged lines (and the via) push what they meet; a step the shove cannot make keeps the last one
   if (mode === RM_SHOVE) {
     const sh = dragShove(ctx, d, raw);
     if (sh) { d.sol = raw; d.shove = sh; d.hits = []; d.status = true; d.lastValid = p.slice(); return true; }
-    if (first) { d.forceMark = true; d.sol = raw; d.shove = null; d.hits = solutionHits(ctx, d, raw); d.status = !d.hits.length; d.lastValid = p.slice(); return true; }
+    if (first) { d.forceMark = true; d.sol = raw; d.shove = null; d.hits = solutionHits(ctx, d, raw); d.status = allow || !d.hits.length; d.lastValid = p.slice(); return true; }
     d.status = true; d.hits = []; return false;
   }
   const viaClear = !raw.viaAt || !solutionHits(ctx, d, { lines: [], viaAt: raw.viaAt }).length;
   let walked = viaClear ? walkSolution(ctx, d, raw) : null;
   if (walked && (d.mode !== "via" || walked !== raw)) walked = Object.assign({}, walked, { lines: walked.lines.map(({ l, pts }, i: number) => (d.mode === "via" && pts === raw.lines[i].pts) ? { l, pts } : { l, pts: optimizeDragged(dragObstacles(ctx, d, l.layer), pts, l.pts, p, l.width) }) });
   if (walked) { d.sol = walked; d.hits = []; d.status = true; d.lastValid = p.slice(); return true; }
-  if (first) { d.forceMark = true; d.sol = raw; d.hits = solutionHits(ctx, d, raw); d.status = !d.hits.length; d.lastValid = p.slice(); return true; }
+  if (first) { d.forceMark = true; d.sol = raw; d.hits = solutionHits(ctx, d, raw); d.status = allow || !d.hits.length; d.lastValid = p.slice(); return true; }
   d.status = true; d.hits = []; return false;   // the previous solution stays
 }
 /** ROUTER::CommitRouting for a drag: the old line's segments out, the new line's in (an unchanged segment is kept), the via moved. */
@@ -162,5 +180,5 @@ export function dragFix(ctx: PcbCtx, d: DragSub, force: boolean) {
   }
   if (!solutionChanged(d)) return false;
   const changes = dragChanges(ctx, d); if (!changes.length) return false;
-  ctx.commit(changes, "drag track"); return true;
+  ctx.commit(changes, "Routing"); return true;
 }

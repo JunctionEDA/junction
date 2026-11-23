@@ -14,7 +14,7 @@
 //
 // A tool-module action KiCad's menus do not place (CollabTools.<m>.actions) keeps its hotkey and context menu only.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
-import { FPEDIT_MENUS, HOME_MENUS, LINKS, MENUS, MENU_CHECKS, NEEDS_SELECTION, READ_ONLY_OK, SUBMENU_ICONS, type MenuEntry } from "../../domains/pcb/tables";
+import { FPEDIT_MENUS, HOME_MENUS, LINKS, MENUS, MENU_CHECKS, READ_ONLY_OK, SCH_ATTRIBUTE_CHECKS, SUBMENU_ICONS, CONDITION_FIRST, conditionWhy, type ActionState, type MenuEntry } from "../../domains/pcb/tables";
 import { dispatch, useApp, type AppState, type Editor, type ModuleAction } from "../store";
 import { iconFor, isOn, keyFor, labelFor, runUiAction, unavailable, useAvail, type Avail } from "../../domains/pcb/actions";
 import { menuKey } from "../keys";
@@ -62,7 +62,7 @@ export function editorMenus(editor: Editor, _moduleActions: ModuleAction[], sour
 }
 
 // ---------------------------------------------------------------- entry state
-interface Ctx { a: Avail; toggles: AppState["toggles"]; panes: AppState["panes"]; viewOnly: boolean; canCopy: boolean; canComment: boolean; canShare: boolean; guest: boolean; undo: AppState["undo"]; selCount: number; editing: boolean; inEditor: boolean }
+interface Ctx { a: Avail; toggles: AppState["toggles"]; panes: AppState["panes"]; viewOnly: boolean; canCopy: boolean; canComment: boolean; canShare: boolean; guest: boolean; undo: AppState["undo"]; selCount: number; act: ActionState | null; editing: boolean; inEditor: boolean }
 
 /** Why an available entry cannot run right now (KiCad greys these out); null when it can. */
 function disabledWhy(c: Ctx, id: string): string | null {
@@ -72,12 +72,12 @@ function disabledWhy(c: Ctx, id: string): string | null {
   if (id === "clone" && c.guest) return "Sign in to make your own copy";
   if (id === "share" && c.guest) return "Sign in to see who has access";
   if (id === "checkpoint" && c.viewOnly) return c.canComment ? "Comment-only access" : "View-only access";
-  if (id === "undo" && !c.undo.undo) return "Nothing to undo";
-  if (id === "redo" && !c.undo.redo) return "Nothing to redo";
+  // the action's enable condition (tables.ts conditionWhy), read as the menu opened
+  const st: ActionState = c.act ? { ...c.act, undo: c.undo.undo, redo: c.undo.redo } : { selCount: c.selCount, selKinds: [], itemCount: 1, idle: true, drawingWire: false, undo: c.undo.undo, redo: c.undo.redo, legacyLibIds: false, checks: {} };
+  if (id === "undo" || id === "redo") return conditionWhy(c.a.editor, id, st);
   // Plugin entries stay open to viewers: reading and exporting are theirs to do, and the plugin host refuses a viewer's writes itself.
   if (c.viewOnly && c.editing && !READ_ONLY_OK.has(id) && !id.startsWith("plugin")) return c.canComment ? "Comment-only access" : "View-only access";
-  if (NEEDS_SELECTION.has(id) && c.selCount === 0) return "Nothing selected";
-  return null;
+  return conditionWhy(c.a.editor, id, st);
 }
 const isCheckable = (id: string) => MENU_CHECKS.has(id);
 
@@ -256,8 +256,11 @@ function Panel({ nodes, depth, anchor, parentPanel, sel, open, c, onHover, onEnt
             </div>
           );
         }
-        const id = n.id, why = unavailable(c.a, id), off = why ? null : disabledWhy(c, id);
-        const checkable = isCheckable(id), on = checkable && isOn(id, c.toggles, c.panes);
+        // an action KiCad greys by its own condition is greyed that way first (Remap Legacy Library Symbols)
+        const cond = c.a.editor === "sch" && c.act && CONDITION_FIRST.has(n.id) ? conditionWhy(c.a.editor, n.id, { ...c.act, undo: c.undo.undo, redo: c.undo.redo }) : null;
+        const id = n.id, why = cond ? null : unavailable(c.a, id), off = cond || (why ? null : disabledWhy(c, id));
+        // Edit > Attributes: the mark follows the selection (SCH_EDIT_TOOL's attribDNPCond …), not a stored toggle
+        const checkable = isCheckable(id), on = checkable && (c.a.editor === "sch" && SCH_ATTRIBUTE_CHECKS.has(id) ? !!(c.act && c.act.checks[id]) : isOn(id, c.toggles, c.panes));
         const k = keyFor(c.a, id), icon = checkable ? null : iconFor(c.a, id);
         const label = n.label || labelFor(c.a, id);
         const title = id === "undo" && c.undo.undo ? `${c.undo.undo} step${c.undo.undo === 1 ? "" : "s"}` : id === "redo" && c.undo.redo ? `${c.undo.redo} step${c.undo.redo === 1 ? "" : "s"}` : why || off || undefined;
@@ -312,6 +315,7 @@ export function MenuBar() {
   const [st, setSt] = useState<Open | null>(null);       // the open menu, the highlighted index per depth, how many sub-menus are open
   const [focus, setFocus] = useState<number | null>(null); // a title focused from the keyboard without its menu open (Alt)
   const [selCount, setSelCount] = useState(0);
+  const [act, setAct] = useState<ActionState | null>(null);
   const stRef = useRef<Open | null>(null); stRef.current = st;
   const focusRef = useRef<number | null>(null); focusRef.current = focus;
   const menusRef = useRef(menus); menusRef.current = menus;
@@ -324,13 +328,14 @@ export function MenuBar() {
   const openMenu = useCallback((menu: number, first?: boolean) => {
     cancelTimer(); setFocus(null); hoverRef.current = "";
     setSelCount(window.CollabApp && window.CollabApp.selectionCount ? window.CollabApp.selectionCount() : 0);   // read as the menu opens, as KiCad evaluates its conditions
+    setAct(window.CollabApp && window.CollabApp.actionState ? window.CollabApp.actionState() : null);
     setSt({ menu, sel: first ? [firstIdx(menusRef.current[menu].nodes, 1, -1)] : [], open: 0 });
   }, []);
   useEffect(() => { close(); }, [view, editor, close]);
   // while a menu is open (or the bar is focused) the editor's hotkeys stand down (editor/hotkeys.ts typingTarget)
   useEffect(() => { if (st || focus !== null) document.body.dataset.menuOpen = "1"; else delete document.body.dataset.menuOpen; }, [st, focus]);
 
-  const c: Ctx = { a, toggles, panes, viewOnly, canCopy: !can || can.copy, canComment, canShare: !!can?.share, guest, undo, selCount, editing: false, inEditor };
+  const c: Ctx = { a, toggles, panes, viewOnly, canCopy: !can || can.copy, canComment, canShare: !!can?.share, guest, undo, selCount, act, editing: false, inEditor };
   const ctxFor = (menu: number): Ctx => ({ ...c, editing: inEditor && !/^(View|Preferences|Help)$/.test(menus[menu].title) });
   const cRef = useRef(c); cRef.current = c;
 

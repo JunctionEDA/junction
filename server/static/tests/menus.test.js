@@ -84,7 +84,7 @@ function flatten(entries, trail, out) {
   test("KiCad's own structure: File > Import / Export, Edit > Select, View > Panels, the board's Drawing Mode, Contrast Mode, Draw Dimensions, Fabrication Outputs", () => {
     const sub = (ed, menu, title) => { const m = T.MENUS[ed].find((x) => x[0].replace("&", "") === menu); const s = m && m[1].find((e) => Array.isArray(e) && e[0].replace("&", "") === title); assert.ok(s, `${ed}: ${menu} > ${title}`); return s[1].filter((e) => e !== "-").map((e) => (Array.isArray(e) ? e[0] : e)); };
     assert.deepStrictEqual(sub("sch", "File", "Import"), ["importNonKicadSchematic|Non-KiCad Schematic...", "importFPAssignments|Footprint Assignments...", "importGraphics|Graphics..."]);
-    assert.deepStrictEqual(sub("sch", "File", "Export"), ["drawSheetOnClipboard|Drawing to Clipboard", "exportNetlist|Netlist...", "exportSymbolsToLibrary|Symbols..."]);
+    assert.deepStrictEqual(sub("sch", "File", "Export"), ["drawSheetOnClipboard|Drawing to Clipboard", "exportNetlist|Netlist...", "exportSymbolsToLibrary|Symbols...", "exportForOlderVersion|For Older KiCad Version..."]);
     assert.deepStrictEqual(sub("pcb", "File", "Fabrication Outputs"), ["generateGerbers", "generateDrillFiles", "generateIPC2581File", "generateODBPPFile", "generatePosFile", "generateReportFile", "generateD356File", "generateBOM", "generateBOMLegacy", "fabPackage"]);
     assert.deepStrictEqual(sub("pcb", "View", "Drawing Mode"), ["zoneDisplayFilled", "zoneDisplayOutline", "padDisplayMode", "viaDisplayMode", "trackDisplayMode", "graphicsOutlines", "textOutlines"]);
     assert.deepStrictEqual(sub("pcb", "View", "Contrast Mode"), ["highContrastMode", "layerAlphaDec", "layerAlphaInc"]);

@@ -2,11 +2,14 @@
 import type { Pt } from "./types";
 import { segSegDist } from "./distances";
 import { polyArea } from "./drc";
+import { S } from "./state";
 import { dir8, dirAngle, isDiagDir, legPts, simplifyPts } from "./walkaround";
 
 // ---------------------------------------------------------------- MOUSE_TRAIL_TRACER: the posture follows the mouse
-export function newTracer(tol: number, lastSegDir: number) {
-  const t = { trail: [] as Pt[], tol, direction: lastSegDir >= 0 ? lastSegDir : 0, lastSegDir: lastSegDir >= 0 ? lastSegDir : -1, forced: false, manuallyForced: false };
+/** ROUTING_SETTINGS::InitialDirection: NE with "start_diagonal", else N (the tracer's default direction, SetDefaultDirections). */
+export const initialDir = () => (S.rs && S.rs.start_diagonal ? 1 : 0);
+export function newTracer(tol: number, lastSegDir: number, initial?: number) {
+  const t = { trail: [] as Pt[], tol, direction: lastSegDir >= 0 ? lastSegDir : initial || 0, lastSegDir: lastSegDir >= 0 ? lastSegDir : -1, forced: false, manuallyForced: false };
   return t;
 }
 /** The mouse trail and the posture it settled on. */

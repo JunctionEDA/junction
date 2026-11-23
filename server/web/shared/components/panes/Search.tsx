@@ -11,7 +11,7 @@ import type { SearchOpts, SearchResult, SearchRow, SelectionZoom } from "../../.
 import { useApp } from "../../store";
 import { cx } from "../../util";
 import { KIcon, SortArrow } from "../Icon";
-import { rowsAsText } from "../../../domains/pcb/editor/panels/search-model";
+import { rowsAsText, rowWindow } from "../../../domains/pcb/editor/panels/search-model";
 import { ContextMenu, panels, pdispatch, useContextMenu, usePanels, type MenuItem } from "./widgets";
 
 interface PaneSettings { zoom: SelectionZoom; hidden: boolean; metadata: boolean }
@@ -22,6 +22,10 @@ function loadSettings(editor: string): PaneSettings {
   try { const v = JSON.parse(localStorage.getItem(settingsKey(editor)) || "null") as Partial<PaneSettings> | null; return Object.assign({}, DEFAULTS, v || {}); } catch (e) { return Object.assign({}, DEFAULTS); }
 }
 function saveSettings(editor: string, s: PaneSettings): void { try { localStorage.setItem(settingsKey(editor), JSON.stringify(s)); } catch (e) { /* no storage */ } }
+
+// SEARCH_PANE_LISTVIEW is a virtual list (wxLC_VIRTUAL): every hit is in it, only the rows in view are drawn.  The
+// rows have one fixed height, so the window is arithmetic.
+const ROW_H = 20, OVERSCAN = 8;
 
 function toClipboard(text: string): void { try { if (navigator.clipboard && navigator.clipboard.writeText) void navigator.clipboard.writeText(text).catch(() => {}); } catch (e) { /* no clipboard */ } }
 
@@ -60,12 +64,22 @@ export function SearchPane() {
   useEffect(() => { setSel([]); setFocus(null); anchor.current = null; }, [active]);
   const def = tabs.find((t) => t.id === active);
   const rows = result.rows;
-  const index = (key: string | null) => (key === null ? -1 : rows.findIndex((r) => r.key === key));
+  const rowIndex = useMemo(() => { const m = new Map<string, number>(); rows.forEach((r, i) => m.set(r.key, i)); return m; }, [rows]);
+  const index = (key: string | null) => (key === null ? -1 : rowIndex.get(key) ?? -1);
+  const selSet = useMemo(() => new Set(sel), [sel]);
+  const [scroll, setScroll] = useState({ top: 0, height: 400 });
+  const win = rowWindow(rows.length, scroll.top, scroll.height, ROW_H, OVERSCAN);
+  /** EnsureVisible: scroll the list so row `i` is in view under the sticky header. */
+  const reveal = (i: number) => {
+    const el = list.current; if (!el) return;
+    const head = el.querySelector("thead"), hh = head ? (head as HTMLElement).offsetHeight : 0, top = i * ROW_H, view = el.clientHeight - hh;
+    if (top < el.scrollTop) el.scrollTop = top; else if (top + ROW_H > el.scrollTop + view) el.scrollTop = top + ROW_H - view;
+  };
 
   /** OnUpdateUI → SelectItems: the selected rows' items become the canvas selection. */
   const select = (keys: string[], foc: string | null) => {
     setSel(keys); setFocus(foc);
-    const picked = rows.filter((r) => keys.includes(r.key));
+    const want = new Set(keys), picked = rows.filter((r) => want.has(r.key));
     pdispatch({ t: "searchSelect", rows: picked, zoom: settings.zoom });
   };
   const clickRow = (ev: React.MouseEvent, r: SearchRow) => {
@@ -75,11 +89,11 @@ export function SearchPane() {
       select(rows.slice(lo, hi + 1).map((x) => x.key), r.key);
     } else if (multi) {
       anchor.current = r.key;
-      select(sel.includes(r.key) ? sel.filter((k) => k !== r.key) : sel.concat(r.key), r.key);
+      select(selSet.has(r.key) ? sel.filter((k) => k !== r.key) : sel.concat(r.key), r.key);
     } else { anchor.current = r.key; select([r.key], r.key); }
   };
   const activate = (r: SearchRow) => pdispatch({ t: "searchActivate", row: r, zoom: settings.zoom });
-  const copySel = () => toClipboard(rowsAsText(rows.filter((r) => sel.includes(r.key))));
+  const copySel = () => toClipboard(rowsAsText(rows.filter((r) => selSet.has(r.key))));
   const onListKey = (ev: React.KeyboardEvent) => {
     const mod = ev.ctrlKey || ev.metaKey, k = ev.key;
     if (mod && !ev.altKey && k.toLowerCase() === "a") { ev.preventDefault(); ev.stopPropagation(); select(rows.map((r) => r.key), focus); return; }
@@ -90,8 +104,8 @@ export function SearchPane() {
       const n = k === "ArrowDown" ? Math.min(rows.length - 1, f + 1) : Math.max(0, f - 1);
       if (n === f && sel.length) return;
       const key = rows[n].key;
-      if (ev.shiftKey) select(sel.includes(key) ? sel : sel.concat(key), key); else { anchor.current = key; select([key], key); }
-      const el = list.current && list.current.querySelector<HTMLElement>(`[data-search-row="${CSS.escape(key)}"]`); if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+      if (ev.shiftKey) select(selSet.has(key) ? sel : sel.concat(key), key); else { anchor.current = key; select([key], key); }
+      reveal(n);
       return;
     }
     if (k === "Enter") { ev.preventDefault(); ev.stopPropagation(); const r = rows[index(focus)]; if (r) activate(r); return; }
@@ -106,7 +120,8 @@ export function SearchPane() {
   const [listW, setListW] = useState(300);
   useEffect(() => {
     const el = list.current; if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => setListW(el.clientWidth || 300)); ro.observe(el); setListW(el.clientWidth || 300);
+    const size = () => { setListW(el.clientWidth || 300); setScroll((v) => (v.height === el.clientHeight ? v : { top: v.top, height: el.clientHeight || 400 })); };
+    const ro = new ResizeObserver(size); ro.observe(el); size();
     return () => ro.disconnect();
   }, [shown]);
   const colW = def ? (widths[active] || def.props.map((p) => Math.max(24, Math.floor(listW / 10) * p))) : [];
@@ -141,9 +156,10 @@ export function SearchPane() {
       </div>
       <div className="ktabs flex flex-none border-b border-line bg-bench">
         {tabs.map((t) => <button type="button" key={t.id} data-stab={t.id} className={cx("bg-transparent border-0 border-b-2 border-b-transparent py-1 px-3 text-sm text-ink-2 on:text-ink on:border-b-blue on:bg-paper", t.id === active && "on")} onClick={() => setTab(t.id)}>{t.label}</button>)}
-        <span className="ml-auto self-center pr-2 text-ink-3 text-xs" data-search-count>{result.total > rows.length ? `${rows.length} of ${result.total}` : `${result.total}`}</span>
+        <span className="ml-auto self-center pr-2 text-ink-3 text-xs" data-search-count>{`${result.total}`}</span>
       </div>
       <div ref={list} className="flex-auto min-h-0 overflow-auto outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--color-blue)]" tabIndex={0} data-search-list onKeyDown={onListKey}
+        onScroll={(ev) => { const el = ev.currentTarget; setScroll((v) => (v.top === el.scrollTop && v.height === el.clientHeight ? v : { top: el.scrollTop, height: el.clientHeight || v.height })); }}
         onContextMenu={(ev) => menu.open(ev, [{ label: "Copy", run: copySel }])}>{/* SEARCH_PANE_LISTVIEW::OnContextMenu: a plain wxID_COPY, always enabled */}
         <table className="border-collapse text-sm table-fixed select-none" style={{ width: colW.reduce((a, b) => a + b, 0) || undefined }} data-search-table={active}>
           <colgroup>{colW.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
@@ -157,14 +173,16 @@ export function SearchPane() {
               </th>)) : null}</tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.key} data-search-row={r.key} aria-selected={sel.includes(r.key)}
-                className={cx("cursor-default", sel.includes(r.key) ? "cur bg-sel" : "hover:bg-panel", focus === r.key && "outline outline-1 -outline-offset-1 outline-blue/50")}
-                onMouseDown={(ev) => { if (ev.button === 2 && sel.includes(r.key)) return; if (ev.button === 0 || ev.button === 2) clickRow(ev, r); }}
+            {win.before ? <tr aria-hidden="true" style={{ height: win.before }}><td colSpan={Math.max(1, colW.length)} className="p-0 border-0" /></tr> : null}
+            {rows.slice(win.start, win.end).map((r) => (
+              <tr key={r.key} data-search-row={r.key} aria-selected={selSet.has(r.key)} style={{ height: ROW_H }}
+                className={cx("cursor-default", selSet.has(r.key) ? "cur bg-sel" : "hover:bg-panel", focus === r.key && "outline outline-1 -outline-offset-1 outline-blue/50")}
+                onMouseDown={(ev) => { if (ev.button === 2 && selSet.has(r.key)) return; if (ev.button === 0 || ev.button === 2) clickRow(ev, r); }}
                 onDoubleClick={() => activate(r)}>
-                {r.cells.map((c, i) => <td key={i} className="px-2 py-px whitespace-nowrap border-r border-line-soft overflow-hidden text-ellipsis" style={{ textAlign: align(i) }} title={c}>{c}</td>)}
+                {r.cells.map((c, i) => <td key={i} className="px-2 py-0 whitespace-nowrap border-r border-line-soft overflow-hidden text-ellipsis" style={{ textAlign: align(i) }} title={c}>{c}</td>)}
               </tr>
             ))}
+            {win.after ? <tr aria-hidden="true" style={{ height: win.after }}><td colSpan={Math.max(1, colW.length)} className="p-0 border-0" /></tr> : null}
           </tbody>
         </table>
       </div>

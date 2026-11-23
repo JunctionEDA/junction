@@ -5,7 +5,8 @@ import { copperOf } from "./dialogs";
 import { snapCursor } from "./grid-helper";
 import { distSeg } from "./hit";
 import { netlist } from "./netlist";
-import { snapTarget } from "./route-geom";
+import { pickSingleItem, snapTarget, snapToItem } from "./route-geom";
+import { routerSnapsTo } from "./snap-pairs";
 import { RM_MARK } from "./router-settings";
 import { K, S, SNAP_MM, WIDTHS, lastCtx } from "./state";
 import { layerOf, pt, samePt, widthOf } from "./util";
@@ -61,6 +62,8 @@ export function gfxLayers(doc: BoardDoc) {
 // ---------------------------------------------------------------- interactions
 export function hoverPoint(ctx: PcbCtx, mm: Pt, magnetic: boolean, mods?: Mods | null): Hover {
   // the drawing tools resolve the cursor through the grid helper too (DRAWING_TOOL: grid.SetSnap( !Shift ), Ctrl = no grid: TOOL_EVENT::DisableGridSnapping)
+  const rt0 = S.route; const routerTool = magnetic && !!ctx.doc && (!!rt0 || S.modTool === "route" || S.modTool === "routediff");
+  if (routerTool) return routerHover(ctx, mm, mods || null);
   const sn = magnetic ? { p: ctx.snap(mm), anchor: null } : snapCursor(ctx, mm, null, mods);
   const g = sn.p; const out: Hover = { x: g[0], y: g[1], snap: sn.anchor ? { x: g[0], y: g[1], kind: "anchor", type: sn.anchor.t || "none", shape: !!sn.anchor.shape } : null };
   if (magnetic && ctx.doc) {
@@ -75,6 +78,40 @@ export function hoverPoint(ctx: PcbCtx, mm: Pt, magnetic: boolean, mods?: Mods |
     if (s2) { out.x = s2.x; out.y = s2.y; out.snap = s2; }
   }
   return out;
+}
+/**
+ * TOOL_BASE::updateStartItem / updateEndItem: the router's cursor.  Ctrl turns the grid off (DisableGridSnapping),
+ * Shift object snapping (SetSnap( !MD_SHIFT )); before a route Ctrl+Shift gives no start item and the raw mouse
+ * position.  The start item is picked on every shown copper layer (with the grid off only on the top one); the end
+ * item only among the routed net's items on the routing layer (any layer while a via is armed), and only when the
+ * magnetic pads / tracks option lets the router snap to it (checkSnap).  A route without a net has no end item
+ * outside Highlight collisions.
+ */
+export function routerHover(ctx: PcbCtx, mm: Pt, mods: Mods | null): Hover {
+  const ctrl = !!(mods && (mods.ctrlKey || mods.metaKey)), shift = !!(mods && mods.shiftKey); const rt = S.route;
+  if (!rt && ctrl && shift) return { x: mm[0], y: mm[1], snap: null };
+  const align = (q: Pt): Pt => (ctrl ? q : ctx.snap(q)); const g = align(mm.slice());
+  const out: Hover = { x: g[0], y: g[1], snap: null };
+  const hidden = appGlobal(() => editorState()!.hiddenLayers as Set<string> | null, null);
+  const copper = copperOf(ctx.doc); const slop = ctx.gridPitch || 0;
+  const top = (rt && rt.placingVia ? sizesOf(ctx).activeLayer : null) || S.layer;
+  const o = { top, copper, shown: hidden ? (l: string) => !hidden.has(l) : null, allowNetless: S.rs.mode === RM_MARK };
+  if (!rt) {
+    let c = pickSingleItem(ctx.doc, mm[0], mm[1], slop, null, null, o);
+    if (ctrl && c && !c.layers.includes(top)) c = null;   // !GetUseGrid(): only an item on the top layer
+    if (!c) return out;
+    const s = snapToItem(c, mm, top, shift ? (q: Pt) => q : align);
+    // the body of a track: the start is taken on its centre line by routeClick (trackUnder), which also breaks it there
+    if (s.kind === "trackMid") return out;
+    out.x = s.x; out.y = s.y; out.snap = s; return out;
+  }
+  if (S.rs.mode !== RM_MARK && !rt.netKey) return out;
+  const layer = rt.placingVia ? null : rt.layer;
+  let c = pickSingleItem(ctx.doc, mm[0], mm[1], slop, layer, rt.netKey ? rt.net : null, o);
+  if (!c && rt.dp && rt.netN) c = pickSingleItem(ctx.doc, mm[0], mm[1], slop, layer, rt.netN, o);
+  if (!c || shift || !routerSnapsTo(c.kind)) return out;
+  const s = snapToItem(c, mm, top, align);
+  out.x = s.x; out.y = s.y; out.snap = s; return out;
 }
 /** The copper layers that are shown, the active one excluded: where a route may start off the active layer. */
 export function otherCopperLayers(ctx: PcbCtx, active: string): string[] {

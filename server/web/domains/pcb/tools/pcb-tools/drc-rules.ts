@@ -289,3 +289,74 @@ export function assertionMarkers(doc: BoardDoc, s: DesignSettings, rules: DruRul
   }
   return out;
 }
+
+/** The constraint types ZONE_FILLER asks DRC_ENGINE::EvalRules for. */
+export const ZONE_FILL_RULE_TYPES = ["clearance", "physical_clearance", "hole_clearance", "physical_hole_clearance", "edge_clearance", "thermal_relief_gap", "thermal_spoke_width", "zone_connection"];
+/**
+ * The custom rules (.kicad_dru) the zone filler would get from EvalRules( type, zone, item, layer ), as plain data for
+ * the fill worker: `${type}|${zone id}|${item key}|${layer or *}` → the rule's min (zone_connection: the connection
+ * name).  Only rules that match are listed; the filler falls back to its implicit (netclass / board setup) value.
+ * Items: a pad `${footprint id}#${pad index}` (a pad with no rule of its own inherits its footprint's, `${footprint id}`),
+ * vias, tracks, zones and board drawings by id, and `edge` for the Edge.Cuts / Margin lines (the largest of them).
+ */
+export function zoneFillRuleTable(doc: BoardDoc, s: DesignSettings, rules: DruRule[]): { table: Record<string, number | string>; max: number } {
+  const table: Record<string, number | string> = {}; let max = 0;
+  const types = ZONE_FILL_RULE_TYPES.filter((t) => rules.some((r) => !r.error && r.constraints.some((c) => c.type === t)));
+  if (!types.length) return { table, max };
+  const layerSensitive = rules.some((r) => !!r.layer || /layer/i.test(r.condition || ""));
+  const copper = doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"];
+  const expand = (ls: string[]): string[] => { const out = new Set<string>(); for (const l of ls) { if (l === "*.Cu") copper.forEach((c) => out.add(c)); else if (l === "F&B.Cu") { out.add("F.Cu"); out.add("B.Cu"); } else if (/\.Cu$/.test(l)) out.add(l); } return [...out]; };
+  const zoneLayersOf = (n: SNode): string[] => { const l = K.kid(n, "layer"); if (l) return expand([K.str(l[1])]); const m = K.kid(n, "layers"); return m ? expand(m.slice(1).map(K.str)) : []; };
+  const zones = [...doc.items.values()].filter((it) => it.kind === "zone" && !K.kid(it.node, "keepout") && zoneLayersOf(it.node).length);
+  // the partners: pads (and their footprints), vias, tracks, other zones, board drawings and the board edge
+  type Partner = { key: string; item: RuleItem; bbox: number[] | null; edge?: boolean; fp?: string };
+  const partners: Partner[] = [];
+  const bb = (it: KItem): number[] | null => (it.bbox ? (it.bbox as unknown as number[]) : null);
+  for (const it of doc.items.values()) {
+    const k = it.kind;
+    if (k === "footprint") {
+      partners.push({ key: it.id, item: { kind: "footprint", node: it.node, item: it }, bbox: bb(it) });
+      K.kids(it.node, "pad").forEach((pad, i) => partners.push({ key: it.id + "#" + i, item: { kind: "pad", node: pad, parent: it }, bbox: bb(it), fp: it.id }));
+    } else if (k === "via" || k === "segment" || k === "arc" || k === "zone") partners.push({ key: it.id, item: { kind: k, node: it.node, item: it }, bbox: bb(it) });
+    else if (k === "image" || k === "group" || k === "point" || k === "generated") continue;
+    else {
+      const l = K.kid(it.node, "layer"); const layer = l ? K.str(l[1]) : "";
+      partners.push({ key: layer === "Edge.Cuts" || layer === "Margin" ? "edge" : it.id, item: { kind: k, node: it.node, item: it }, bbox: bb(it), edge: layer === "Edge.Cuts" || layer === "Margin" });
+    }
+  }
+  let reach = Math.max(s.clearance || 0, s.minClearance || 0, s.holeClearance || 0, s.edgeClearance || 0);
+  for (const r of rules) for (const c of r.constraints) if (types.includes(c.type) && c.min != null && typeof c.min === "number") reach = Math.max(reach, c.min);
+  const near = (a: number[] | null, b: number[] | null): boolean => !a || !b || !(b[0] > a[2] + reach || b[2] < a[0] - reach || b[1] > a[3] + reach || b[3] < a[1] - reach);
+  const evalBoth = (type: string, A: RuleItem, B: RuleItem) => evalRuleConstraint(rules, type, doc, s, A, B) || evalRuleConstraint(rules, type, doc, s, B, A);
+  for (const z of zones) {
+    const zb = bb(z);
+    const layers = layerSensitive ? zoneLayersOf(z.node) : ["*"];
+    for (const layer of layers) {
+      const evLayer = layer === "*" ? zoneLayersOf(z.node)[0] : layer;
+      const A: RuleItem = { kind: "zone", node: z.node, item: z, layer: evLayer };
+      for (const p of partners) {
+        if (p.item.item === z || !near(zb, p.bbox)) continue;
+        const B: RuleItem = Object.assign({}, p.item, { layer: evLayer });
+        for (const type of types) {
+          const thermal = type === "thermal_relief_gap" || type === "thermal_spoke_width" || type === "zone_connection";
+          if (thermal && p.item.kind !== "pad" && p.item.kind !== "via" && p.item.kind !== "footprint") continue;
+          if (type === "edge_clearance" ? !p.edge : p.edge) continue;
+          const h = evalBoth(type, A, B); if (!h) continue;
+          const key = `${type}|${z.id}|${p.key}|${layer}`;
+          if (type === "zone_connection") {
+            const opt = (rules.find((r) => `rule '${r.name}'` === h.name)?.constraints.find((c) => c.type === type)?.options || [])[0];
+            const CONN: Record<string, string> = { solid: "FULL", thermal_reliefs: "THERMAL", none: "NONE" };
+            if (opt && CONN[opt] && !(key in table)) table[key] = CONN[opt];
+            continue;
+          }
+          if (type === "thermal_spoke_width") { if (!(key in table)) table[key] = [h.min, h.opt, h.max].map((x) => (x == null ? "" : String(x))).join(","); continue; }
+          if (h.min == null) continue;
+          const v = h.min; if (!thermal) max = Math.max(max, v);
+          const prev = table[key];
+          table[key] = typeof prev === "number" ? Math.max(prev, v) : v;   // edge: the largest of the edge lines
+        }
+      }
+    }
+  }
+  return { table, max };
+}

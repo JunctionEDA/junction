@@ -12,6 +12,7 @@ import { barcodeAllowed, barcodeNode, BARCODE_NEEDS_VERSION_MSG, textNode } from
 import { line } from "./overlay";
 import { editHandleUp } from "./point-editor";
 import { routeUnhighlight } from "./route-fix";
+import { restoreActiveLayer } from "./route-tool";
 import { beginCarryMove, finishSelectMove } from "./select-move";
 import { K, S, lastCtx } from "./state";
 import { vsub } from "./util";
@@ -124,6 +125,6 @@ export function placeBarcodeAt(ctx: PcbCtx, at: Pt) {
     const c = addedChange(ctx.doc, n); ctx.commit([c], "Draw Barcode"); applySelection(ctx, [c.id]); ctx.requestRender();
   });
 }
-export function cancelOps() { if (S.drag && lastCtx && lastCtx.doc) { const D = S.drag; S.drag = null; routeUnhighlight(lastCtx, D.subs[0]); } if (S.route) { K.pcbSizes.state.endRoute(); const rt = S.route; S.route = null; if (lastCtx && lastCtx.doc) routeUnhighlight(lastCtx, rt); } S.violations = null; S.routeQueue = null; S.draw = null; drawOriginSync(lastCtx); S.drag = null; S.image = null; S.pending = null; if (S.move && lastCtx) finishSelectMove(lastCtx, false); S.move = null; if (S.pedit && lastCtx) editHandleUp(lastCtx, false); closeTextPrompt(); if (S.tune) S.tune.pattern = null; }
+export function cancelOps() { if (S.drag && lastCtx && lastCtx.doc) { const D = S.drag; S.drag = null; routeUnhighlight(lastCtx, D.subs[0]); } if (S.route) { K.pcbSizes.state.endRoute(); const rt = S.route; S.route = null; restoreActiveLayer(lastCtx && lastCtx.doc ? lastCtx : null, rt); if (lastCtx && lastCtx.doc) routeUnhighlight(lastCtx, rt); } S.violations = null; S.routeQueue = null; S.draw = null; drawOriginSync(lastCtx); S.drag = null; S.image = null; S.pending = null; if (S.move && lastCtx) finishSelectMove(lastCtx, false); S.move = null; if (S.pedit && lastCtx) editHandleUp(lastCtx, false); closeTextPrompt(); if (S.tune) S.tune.pattern = null; }
 /** pcb.setNewItemDialogs: the editor's dialogs for a new item. */
 export function setNewItemDialogsImpl(d: Record<string, NewItemDialog | undefined>) { newItemDialogs = d; }

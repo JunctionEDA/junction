@@ -1,5 +1,8 @@
 // pcb-tools/branch.ts — the route's branch: the router's NODE until CommitRouting, and the head it carries.
 import type { BoardDoc, BranchCache, BranchOp, Obstacle, PcbChange, PcbCtx, Pt, Route } from "./types";
+import { shapeOffset } from "./distances";
+import { pointInPoly } from "./hit";
+import { closestOnSeg } from "./point-editor";
 import { removedChange, replacedChange, upsertChange } from "./changes";
 import { copperOf, settingsOf } from "./dialogs";
 import { dpUpdateHead } from "./diffpair";
@@ -14,7 +17,7 @@ import { shoveHead } from "./shove";
 import { runSmartPads } from "./smartpads";
 import { K, S } from "./state";
 import { tracerPosture, trailAdd } from "./tracer";
-import { hullOf, isDiagDir, pathClear, pathHits, routeObstacles, walkHead } from "./walkaround";
+import { hullOf, isDiagDir, pathClear, pathHits, routeObstacles, shapeCorePts, walkHead } from "./walkaround";
 
 // ---------------------------------------------------------------- the route's branch: ROUTER's NODE until CommitRouting
 // Everything fixed while one track is routed (its segments, vias, broken tracks and what Shove pushed aside) lives on a
@@ -87,6 +90,46 @@ export function viaHits(ctx: PcbCtx, rt: Route, via: { at: Pt; diameter: number;
   for (const L of viaSpanLayers(doc, via.layers)) for (const ob of pathHits(routeObstacles(doc, s, rt.netKey, L, own), [via.at], via.diameter / 2)) if (!out.includes(ob)) out.push(ob);
   return out;
 }
+/** SHAPE::Collide's minimum translation vector for a disc of radius R at c against `sh` (its core and rounding): null when apart. */
+export function discMtv(sh: Obstacle["shape"], c: Pt, R: number): Pt | null {
+  const off = shapeOffset(sh); const core = shapeCorePts(sh); const need = R + off;
+  let q: Pt = core[0], bd = Infinity;
+  const segs: Pt[][] = core.length === 1 ? [[core[0], core[0]]] : (sh.t === "seg" || sh.t === "path") ? core.slice(0, -1).map((p, i) => [p, core[i + 1]]) : core.map((p, i) => [p, core[(i + 1) % core.length]]);
+  for (const [a, b] of segs) { const z = closestOnSeg(c, a, b); const d = Math.hypot(z[0] - c[0], z[1] - c[1]); if (d < bd) { bd = d; q = z; } }
+  const inside = (sh.t === "rect" || sh.t === "poly") && core.length >= 3 && pointInPoly(core, c[0], c[1]);
+  if (inside) { const d = bd; const n = d > 1e-12 ? [(q[0] - c[0]) / d, (q[1] - c[1]) / d] : [1, 0]; return [n[0] * (d + need), n[1] * (d + need)]; }
+  if (bd >= need) return null;
+  const n = bd > 1e-12 ? [(c[0] - q[0]) / bd, (c[1] - q[1]) / bd] : [1, 0];
+  return [n[0] * (need - bd), n[1] * (need - bd)];
+}
+/**
+ * VIA::PushoutForce( node, lead, force, collisionMask, iterLimit ): the via carried by the head is pushed out of the
+ * first obstacle it collides with by the minimum translation (its copper at the obstacle's clearance, its hole at the
+ * hole clearance, whichever is larger), each step at most a quarter of the diameter; after half the iterations a
+ * step that is still too big goes along `lead` instead.  The total force, or null when it does not come free within
+ * via_force_prop_iteration_limit iterations.  solidsOnly: Shove's mask (ITEM::SOLID_T), else everything (Walk around).
+ */
+export function viaPushout(ctx: PcbCtx, rt: Route, via: { at: Pt; diameter: number; drill?: number; layers: string[] }, lead: Pt, solidsOnly: boolean): Pt | null {
+  const doc = routeDoc(ctx, rt), s = settingsOf(ctx), own = rt.netKey ? null : routeOwn(rt);
+  const lists = viaSpanLayers(doc, via.layers).map((L) => routeObstacles(doc, s, rt.netKey, L, own));
+  const movable = (ob: Obstacle) => ob.kind === "segment" || ob.kind === "arc" || ob.kind === "via" || ob.kind === "track";
+  const rv = via.diameter / 2, rh = (via.drill || 0) / 2, limit = S.rs.via_force_prop_iteration_limit || 40, threshold = via.diameter / 4;
+  const pos = via.at.slice(), total: Pt = [0, 0]; let iter = 0;
+  for (; iter < limit; iter++) {
+    let obs: Obstacle | null = null;
+    for (const O of lists) { const h = pathHits(O, [pos], rv).find((ob) => !solidsOnly || !movable(ob)); if (h) { obs = h; break; } }
+    if (!obs) break;
+    let f = discMtv(obs.shape, pos, rv + obs.clr);
+    if (rh > 0) { const hc = obs.kind === "hole" ? (s.minHoleToHole || 0) : (s.holeClearance || 0); const fh = discMtv(obs.shape, pos, rh + hc); if (fh && (!f || Math.hypot(fh[0], fh[1]) > Math.hypot(f[0], f[1]))) f = fh; }
+    if (!f) return null;   // a collision but no translation: force propagation has failed
+    const mag = Math.hypot(f[0], f[1]);
+    if (iter > limit / 2 && mag > threshold) { const ll = Math.hypot(lead[0], lead[1]) || 1; f = [lead[0] / ll * threshold, lead[1] / ll * threshold]; }
+    else if (mag > threshold) f = [f[0] / mag * threshold, f[1] / mag * threshold];
+    total[0] += f[0]; total[1] += f[1]; pos[0] += f[0]; pos[1] += f[1];
+  }
+  if (iter === limit) return null;
+  return total;
+}
 /** The copper layers between two layers of a via, inclusive, in stack order. */
 export function viaSpanLayers(doc: BoardDoc, pair: string[]) {
   const cu = K.pcbSizes.copperStack(copperOf(doc)); const i = cu.indexOf(pair[0]), j = cu.indexOf(pair[pair.length - 1]);
@@ -104,13 +147,24 @@ export function updateHead(ctx: PcbCtx) {
   const rs = S.rs, rc = routeCtx(ctx, rt), O = routeObs(ctx, rt); const r = rt.width / 2;
   trailAdd(rt.tracer, rt.cursor);
   // MOUSE_TRAIL_TRACER: the posture follows the mouse unless "Use mouse path to set track posture" is off (then the
-  // last segment's direction, or the initial direction)
+  // posture switches every segment: m_lastSegDirection.Right(), or the initial direction on the first leg)
   if (rs.auto_posture || rt.tracer.manuallyForced) rt.diagFirst = isDiagDir(tracerPosture(rt.tracer, rt.cursor));
-  else rt.diagFirst = rt.tracer.lastSegDir >= 0 ? isDiagDir(rt.tracer.lastSegDir) : !!rs.start_diagonal;
+  else rt.diagFirst = rt.tracer.lastSegDir >= 0 ? !isDiagDir(rt.tracer.lastSegDir) : !!rs.start_diagonal;
   const cm = rs.corner_mode, free = rs.mode === RM_MARK && rs.free_angle_mode;
   const leg = (a: Pt, b: Pt, df: boolean) => cornerLeg(a, b, df, cm, false);
   rt.collisions = null; rt.shove = null; rt.viaBad = null;
   const via = headVia(ctx, rt);
+  // buildInitialLine: in Walk around and Shove the carried via is pushed out of what it collides with (all items /
+  // solids) and the head aims at cursor + force; the second attempt leads from the previous head end
+  const cursor0 = rt.cursor.slice(); let pushed = false;
+  if (via && rs.mode !== RM_MARK) {
+    const prevEnd = rt.target ? rt.target.slice() : null;
+    for (let attempt = 0; attempt < 2 && !pushed; attempt++) {
+      const from = attempt === 1 && prevEnd ? prevEnd : rt.last; if (attempt === 1 && !prevEnd) break;
+      const f = viaPushout(ctx, rt, Object.assign({}, via, { at: cursor0 }), [cursor0[0] - from[0], cursor0[1] - from[1]], rs.mode === RM_SHOVE);
+      if (f) { rt.cursor = rp([cursor0[0] + f[0], cursor0[1] + f[1]]); pushed = true; }
+    }
+  }
   if (rs.mode === RM_MARK) {
     let pts = cornerLeg(rt.last, rt.cursor, rt.diagFirst, cm, free); let hits = pathHits(O, pts, r);
     if (hits.length) {   // snap to the hull of the first obstacle (rhMarkObstacles)
@@ -136,6 +190,7 @@ export function updateHead(ctx: PcbCtx) {
     if (sp) rt.head = sp;
   }
   rt.target = rt.head[rt.head.length - 1].slice();
+  if (pushed) rt.cursor = cursor0;   // the mouse stays where it is; only the head and its via moved
   if (via && rs.mode === RM_WALK) { const vh = viaHits(ctx, rt, Object.assign({}, via, { at: rt.target })); rt.viaBad = vh.length ? vh : null; }
   rt.els = headElems(rt.head, cm, rs.mode === RM_MARK ? null : (p: Pt[]) => pathClear(O, p, r));
   rt.ratline = leadingRatline(rc, rt);

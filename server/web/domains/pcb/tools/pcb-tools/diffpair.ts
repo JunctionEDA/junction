@@ -3,7 +3,7 @@ import type { BoardDoc, Hover, NetRef, Obstacle, ObstacleIndex, PadInfo, PcbCtx,
 import type { Ratline } from "./route-fix";
 
 /** One end of a pair: a pad, via or dangling track end of one net (getDanglingAnchor), and the way a track end points. */
-export interface DpEnd { kind: string; p: Pt; dir: Pt | null; id?: string; layers?: string; width?: number; pad?: PadInfo }
+export interface DpEnd { kind: string; p: Pt; dir: Pt | null; id?: string; layers?: string; width?: number; pad?: PadInfo; /** DP_PRIMITIVE_PAIR::IsMidtrace: the track is split here when the pair leaves it */ mid?: boolean }
 /** The two ends a pair leg starts from (or lands on). */
 export interface DpPair { P: DpEnd; N: DpEnd }
 /** The pair's sizes for its nets (width, gap, via gap) and the half spacing h of the coupled lines. */
@@ -19,19 +19,23 @@ import { ptKey } from "./connected";
 import { copperOf, settingsOf } from "./dialogs";
 import { padCopperLayers, viaLayers } from "./distances";
 import { refreshChip } from "./dom";
-import { chainAppend, jointIndex, rp, trackEnds } from "./dragger";
+import { assembleLine, chainAppend, jointIndex, rp, trackEnds } from "./dragger";
 import { netTable } from "./netlist";
 import { hasNet, netOf, sameNet } from "./nets";
 import { viaNode } from "./nodes";
 import { drawShape, line, polyline } from "./overlay";
-import { leadingRatline, routeHighlight, trackOps } from "./route-fix";
+import { leadingRatline, routeHighlight, splitOps, trackOps } from "./route-fix";
+import { coupledSegmentPairs, lineProject } from "./meander";
+import { assembleDiffPair } from "./tuning-tool";
+import { closestOnSeg } from "./point-editor";
+import { distSeg } from "./hit";
 import { padsOf } from "./route-geom";
 import { drawViaPreview, previewColor, ratlineColor } from "./route-preview";
-import { endRoute, showViolations, trackUnder, viaPlan, viaSpan } from "./route-tool";
+import { commitRoute, endRoute, resizeAfterEvent, showViolations, sizeClearance, startItemRefusal, trackUnder, viaPlan, viaSpan } from "./route-tool";
 import { RM_MARK } from "./router-settings";
 import { DBL_MS, HALO_COLOR, K, S, saturated } from "./state";
-import { newTracer, tracerPosture, trailAdd } from "./tracer";
-import { color, layerOf, pt, r6, samePt, vadd, vmul, vsub, vunit, widthOf } from "./util";
+import { newTracer, trailAdd } from "./tracer";
+import { clone, color, layerOf, pt, r6, samePt, vadd, vmul, vsub, vunit, widthOf } from "./util";
 import { DIRS8, dir8, dirAngle, indexObstacles, isDiagDir, legPts, pathHits, routeObstacles, simplifyPts, walkHead } from "./walkaround";
 
 // ================================================================ DIFF_PAIR_PLACER (pcbnew/router/pns_diff_pair_placer.cpp)
@@ -44,6 +48,8 @@ import { DIRS8, dir8, dirAngle, indexObstacles, isDiagDir, legPts, pathHits, rou
 // with its partner beside it lands the pair on that target and finishes.  One commit, "Route Track".
 export const DP_MSG_NETS = "Unable to find complementary differential pair nets. Make sure the names of the nets belonging to a differential pair end with either N/P or +/-.";
 export const DP_MSG_START = "Can't find a suitable starting point.  If starting from an existing differential pair make sure you are at the end.";
+/** DIFF_PAIR_PLACER::FindDpPrimitivePair: what the user sees when neither an ending primitive pair nor a mid-trace start is found. */
+export const DP_MSG_START_FINAL = "Can't find a suitable starting point for the diff pair";
 export const DP_MSG_NOWHERE = "Cannot start a differential pair in the middle of nowhere.";
 export const DP_MSG_GAP = "Diff pair gap is less than board minimum clearance.";
 export const TAN_22_5 = Math.tan(Math.PI / 8);
@@ -109,14 +115,62 @@ export function dpClickedPrimitive(doc: BoardDoc, snap: SnapHit | null, p: Pt, n
 export function findDpPrimitivePair(doc: BoardDoc, snap: SnapHit | null, p: Pt, layer: string, net: NetRef): { error: string; pair?: undefined } | { pair: DpPair; nets: { P: NetRef; N: NetRef }; keys: { P: string; N: string }; error?: undefined } {
   const nets = dpNetPair(doc, net); if (!nets) return { error: DP_MSG_NETS };
   const NT = netTable(doc); const refKey = NT.key(net), keyP = NT.key(nets.P), keyN = NT.key(nets.N);
-  const ref = dpClickedPrimitive(doc, snap, p, refKey, layer); if (!ref) return { error: DP_MSG_START };
+  const ref = dpClickedPrimitive(doc, snap, p, refKey, layer);
   const coupledKey = refKey === keyP ? keyN : keyP; let best: DpEnd | null = null, bd = Infinity;
-  for (const q of dpPrimitives(doc, coupledKey, layer)) {
+  if (ref) for (const q of dpPrimitives(doc, coupledKey, layer)) {
     if (q.kind !== ref.kind || (q.kind !== "track" && q.layers !== ref.layers)) continue;
     const d = Math.hypot(q.p[0] - ref.p[0], q.p[1] - ref.p[1]); if (d < bd) { bd = d; best = q; }
   }
-  if (!best) return { error: DP_MSG_START };
-  return { pair: refKey === keyP ? { P: ref, N: best } : { P: best, N: ref }, nets, keys: { P: keyP, N: keyN } };
+  if (ref && best) return { pair: refKey === keyP ? { P: ref, N: best } : { P: best, N: ref }, nets, keys: { P: keyP, N: keyN } };
+  // findDpMidtraceIntersection: a start in the middle of an existing coupled pair
+  const mid = snap ? null : dpMidtracePair(doc, p, layer, refKey, keyP);
+  if (mid) return { pair: mid, nets, keys: { P: keyP, N: keyN } };
+  return { error: DP_MSG_START_FINAL };
+}
+/** SEG::Contains: the point within 1 IU of the segment. */
+const segContains = (s: { A: Pt; B: Pt }, q: Pt) => distSeg(q[0], q[1], s.A[0], s.A[1], s.B[0], s.B[1]) < 1;
+/**
+ * DIFF_PAIR_PLACER::findDpMidtraceIntersection: the start item is a track (not an arc) of a pair that
+ * TOPOLOGY::AssembleDiffPair can assemble; DIFF_PAIR::BuildMidpairIntersection then projects the click onto the
+ * start's line and pairs it with its projection on the partner: inside a coupled stretch first, then on a parallel
+ * segment of the same direction (clamped to it), else the nearest point of the partner line.  The primitives are the
+ * two segments, each pointing its own way (anchorDirection), and the pair is mid-trace: both are split there
+ * (SplitAdjacentSegments) when the first leg is fixed.
+ */
+export function dpMidtracePair(doc: BoardDoc, p: Pt, layer: string, refKey: string, keyP: string): DpPair | null {
+  const on = trackUnder(doc, p[0], p[1], layer); if (!on) return null;
+  const seg = on.item; if (netTable(doc).key(netOf(seg.node)) !== refKey) return null;
+  const line = assembleLine(doc, seg); if (!line) return null;
+  const ad = assembleDiffPair(doc, seg, line); if (!ad) return null;
+  const refIsP = refKey === keyP, ref = line, cpl = ad.line;
+  const Pl = refIsP ? ref : cpl, Nl = refIsP ? cpl : ref;
+  const IU = 1e6, toI = (q: Pt): Pt => [q[0] * IU, q[1] * IU], toMm = (q: Pt): Pt => rp([q[0] / IU, q[1] / IU]);
+  /** SHAPE_LINE_CHAIN::NearestPoint and the segment it lies on */
+  const nearest = (pts: Pt[], q: Pt) => { let bp = pts[0], bi = 0, bdd = Infinity; for (let i = 0; i + 1 < pts.length; i++) { const c = closestOnSeg(q, pts[i], pts[i + 1]); const d = Math.hypot(c[0] - q[0], c[1] - q[1]); if (d < bdd) { bdd = d; bp = c; bi = i; } } return { p: bp, i: bi }; };
+  const PI = Pl.pts.map(toI), NI = Nl.pts.map(toI); const pr = nearest(ref.pts.map(toI), toI(p)); const pproj = pr.p;
+  const cs = coupledSegmentPairs(PI, NI, ref.width * IU, ad.gap * IU);
+  let aP: Pt | null = null, aN: Pt | null = null, iP = -1, iN = -1;
+  for (const c of cs) {   // coupled segments take priority
+    if (segContains(c.coupledN, pproj)) { aP = lineProject(c.coupledP, pproj); aN = pproj; iP = c.indexP; iN = c.indexN; break; }
+    if (segContains(c.coupledP, pproj)) { aP = pproj; aN = lineProject(c.coupledN, pproj); iP = c.indexP; iN = c.indexN; break; }
+  }
+  if (!aP) for (const c of cs) {   // parallel segments, but noncoupled parts (bends, corner, etc) go second
+    const oP = { A: PI[c.indexP], B: PI[c.indexP + 1] }, oN = { A: NI[c.indexN], B: NI[c.indexN + 1] };
+    if (dir8(oP.A, oP.B) !== dir8(oN.A, oN.B)) continue;
+    if (segContains(oN, pproj)) { aP = closestOnSeg(lineProject(oP, pproj), oP.A, oP.B); aN = pproj; iP = c.indexP; iN = c.indexN; break; }
+    if (segContains(oP, pproj)) { aP = pproj; aN = closestOnSeg(lineProject(oN, pproj), oN.A, oN.B); iP = c.indexP; iN = c.indexN; break; }
+  }
+  if (!aP) {   // still nothing? take the nearest vertex of the complement track
+    const nr = nearest(cpl.pts.map(toI), pproj);
+    if (refIsP) { aP = pproj; aN = nr.p; iP = pr.i; iN = nr.i; } else { aP = nr.p; aN = pproj; iP = nr.i; iN = pr.i; }
+  }
+  const end = (l: typeof line, i: number, a: Pt): DpEnd | null => {
+    const id = l.ids[i]; const it = id ? doc.items.get(id) : null; if (!it) return null; const [s0, s1] = trackEnds(it); if (!s0 || !s1) return null;
+    const q = toMm(a); const dir = samePt(s0, q) ? vunit(vsub(s0, s1)) : vunit(vsub(s1, s0));   // anchorDirection
+    return { kind: "track", p: q, dir, id, layers: layer, width: l.width, mid: true } as DpEnd;
+  };
+  const eP = end(Pl, iP, aP!), eN = end(Nl, iN, aN!); if (!eP || !eN) return null;
+  return { P: eP, N: eN };
 }
 /** A polyline offset sideways by `off` (left of travel positive), mitred at the corners; `inDir` the travel direction before the first point. */
 export function offsetPts(pts: Pt[], off: number, inDir: Pt | null) {
@@ -217,7 +271,7 @@ export function dpUpdateHead(ctx: PcbCtx, hv: Hover | null) {
   const rt = S.route; if (!rt || !ctx.doc) return;
   const rs = S.rs; const sz = rt.dpSizes; const h = sz!.h; const R = h + sz!.width / 2;
   trailAdd(rt.tracer, rt.cursor);
-  if (rs.auto_posture || rt.tracer.manuallyForced) rt.diagFirst = isDiagDir(tracerPosture(rt.tracer, rt.cursor));
+  // DIFF_PAIR_PLACER has no mouse trail tracer: the posture is m_startDiagonal (m_initialDiagonal, flipped by ACT_SwitchPosture)
   const O = dpObstacles(ctx, rt); const mode = rs.mode;
   const gw = dpGateway(rt.dpStart!, rt.cursor, h); rt.dpGw = gw; rt.collisions = null; rt.dpTargetPair = null;
   if (!gw) { rt.dpLines = null; rt.dpFit = false; return; }
@@ -272,22 +326,29 @@ export function dpRatlines(ctx: PcbCtx, rt: Route) {
 }
 /** ROUTER::StartRouting in PNS_MODE_ROUTE_DIFF_PAIR: the start checks, then the placer's start pair. */
 export function dpStart(ctx: PcbCtx, hv: Hover, mm: Pt) {
-  const p = [hv.x, hv.y]; const doc = ctx.doc; const layer = S.layer;
+  const p = [hv.x, hv.y]; const doc = ctx.doc; const layer = S.layer;   // the pair starts on the active layer, which is also m_originalActiveLayer
   const snap = hv.snap && hv.snap.kind !== "anchor" ? hv.snap as SnapHit : null;
   let net: NetRef | null = snap ? snap.net : null, s2 = snap;
   if (!snap) { const on = trackUnder(doc, mm ? mm[0] : hv.x, mm ? mm[1] : hv.y, layer); if (on) { net = netOf(on.item.node); s2 = { kind: "track", x: on.point[0], y: on.point[1], net, id: on.item.id }; } }
-  if (!s2 || !hasNet(net)) { ctx.toast(DP_MSG_NOWHERE); return; }
   if (!/\.Cu$/.test(layer)) { ctx.toast("Tracks on Copper layers only."); return; }
-  const nets = dpNetPair(doc, net!); if (!nets) { ctx.toast(DP_MSG_NETS); return; }
+  // ROUTER::isStartingPointRoutable: skipped whole with AllowDRCViolations (Highlight collisions and the flag); else
+  // the gap against the board minimum clearance, then the non-routable items under the cursor
+  const allow = S.rs.mode === RM_MARK && S.rs.can_violate_drc;
+  const pairNets = s2 && hasNet(net) ? dpNetPair(doc, net!) : null;
+  if (!allow) {
+    if (pairNets && dpSizes(ctx, pairNets).gap < (settingsOf(ctx).minClearance || 0) - 1e-9) { ctx.toast(DP_MSG_GAP); return; }
+    const refusal = startItemRefusal(doc, p, mm || p, layer); if (refusal) { ctx.toast(refusal); return; }
+  }
+  if (!s2 || !hasNet(net)) { ctx.toast(DP_MSG_NOWHERE); return; }
+  const nets = pairNets; if (!nets) { ctx.toast(DP_MSG_NETS); return; }
   const sizes = dpSizes(ctx, nets);
-  if (!S.rs.can_violate_drc && sizes.gap < (settingsOf(ctx).minClearance || 0) - 1e-9) { ctx.toast(DP_MSG_GAP); return; }
   const fp = findDpPrimitivePair(doc, s2.kind === "track" ? null : s2, [s2.x, s2.y], layer, net!); if (fp.error) { ctx.toast(fp.error); return; }
   const NT = netTable(doc);
   S.route = { dp: true, start: p.slice(), startLayer: layer, startKind: s2.kind, last: p.slice(), target: p.slice(), cursor: p.slice(), head: [p.slice()], els: [], reached: true,
     net: nets.P, netKey: NT.key(nets.P), netN: nets.N, netKeyN: NT.key(nets.N), layer, width: sizes.width, dpSizes: sizes, dpStart: fp.pair, dpLines: null, dpFit: false,
-    diagFirst: !!S.rs.start_diagonal, clickT: Date.now(), clickAt: p.slice(), stages: [], split: null, startIds: [fp.pair!.P.id!, fp.pair!.N.id!], ratline: null, placingVia: null, chained: false,
-    collisions: null, shove: null, tracer: newTracer(sizes.width, -1), keepHighlight: false };
-  const rt = S.route; trailAdd(rt.tracer, p);
+    diagFirst: false, dpInitDiag: false, clickT: Date.now(), clickAt: p.slice(), stages: [], split: null, startIds: [fp.pair!.P.id!, fp.pair!.N.id!], ratline: null, placingVia: null, chained: false,
+    collisions: null, shove: null, tracer: newTracer(sizes.width, -1), keepHighlight: false, originalLayer: layer };
+  const rt = S.route; trailAdd(rt.tracer, p); sizeClearance(ctx, rt, layer);   // ImportSizes: the start's clearance and its source
   const R = sizesOf(ctx); if (R.activeLayer !== layer) R.setActiveLayer(layer);
   routeHighlight(ctx, rt); dpUpdateHead(ctx, hv); refreshChip(ctx); ctx.requestRender();
 }
@@ -300,6 +361,8 @@ export function dpFix(ctx: PcbCtx, opts?: { finish?: boolean }) {
   let P = L.P, N = L.N;
   if (!rs.fix_all_segments && !opts.finish && !rt!.dpTargetPair && !L.vias && P.length > 2 && N.length > 2) { P = P.slice(0, -1); N = N.slice(0, -1); }
   const ops = trackOps(doc, seg(P), (rt!.dpSizes)!.width, rt!.layer, rt!.net).concat(trackOps(doc, seg(N), (rt!.dpSizes)!.width, rt!.layer, (rt!.netN)!));
+  // initPlacement with a mid-trace start: SplitAdjacentSegments at both anchors
+  for (const e of [rt!.dpStart!.P, rt!.dpStart!.N]) { const it = e.mid && e.id ? doc.items.get(e.id) : null; if (it) ops.push(...splitOps(doc, { id: it.id, point: e.p.slice(), node: clone(it.node) })); }
   let nextPair: DpPair;
   if (L.vias) {
     const v = rt!.placingVia; const layers = v!.type === "through" ? viaSpan(doc) : [v!.span[0], v!.span[1]];
@@ -313,7 +376,8 @@ export function dpFix(ctx: PcbCtx, opts?: { finish?: boolean }) {
   rt!.stages.push({ ops, from: rt!.last.slice(), layer: rt!.layer, net: rt!.net, netKey: rt!.netKey, placingVia: rt!.placingVia, startIds: rt!.startIds, split: null, dir: rt!.tracer.lastSegDir, dpStart: rt!.dpStart });
   rt!.bdoc = null; rt!.obs = null; rt!.dpObs = null; rt!.dpStart = nextPair; rt!.last = nextPair.P.p.slice(); rt!.startIds = [];
   rt!.dpLines = null; rt!.head = [rt!.last.slice()]; rt!.target = rt!.last.slice(); rt!.ratline = null; rt!.collisions = null;
-  if (P.length > 2) rt!.diagFirst = !isDiagDir(dir8(P[P.length - 3], P[P.length - 2]));   // m_initialDiagonal
+  if (L.P.length > 2) rt!.dpInitDiag = !isDiagDir(dir8(L.P[L.P.length - 3], L.P[L.P.length - 2]));   // m_initialDiagonal, from the whole trace before it is cut
+  rt!.diagFirst = !!rt!.dpInitDiag;   // initPlacement: m_startDiagonal = m_initialDiagonal
   if (L.vias) { rt!.layer = (rt!.placingVia)!.toLayer; S.layer = rt!.layer; sizesOf(ctx).setActiveLayer(rt!.layer); rt!.placingVia = null; rt!.tracer = newTracer(rt!.width, -1); }
   else rt!.tracer = newTracer(rt!.width, prevDir);
   rt!.chained = !L.vias; trailAdd(rt!.tracer, rt!.last);
@@ -331,17 +395,17 @@ export function dpClick(ctx: PcbCtx, hv: Hover, mm: Pt, opts?: { enter?: boolean
   const landed = !!rt.dpTargetPair;
   if (!dpFix(ctx, { finish: landed })) { ctx.requestRender(); return; }
   if (landed) { endRoute(ctx, false); return; }
+  // DIFF_PAIR_PLACER::FixRoute: CommitPlacement() on every successful fix - each fixed leg is on the board (its own
+  // undo step) and Escape afterwards only drops the unfixed head
+  commitRoute(ctx, rt); rt.stages = []; rt.bdoc = null; rt.obs = null; rt.dpObs = null; rt.dpFixed = true;   // m_hasFixedAnything
+  resizeAfterEvent(ctx, rt, rt.layer);   // updateSizesAfterRouterEvent after the click (the via pair's layer when one was placed)
   dpUpdateHead(ctx, hv); routeHighlight(ctx, rt); refreshChip(ctx); ctx.requestRender();
 }
-/** Backspace while routing a pair (UnfixRoute): the last fixed stage comes off and the pair it started from is current again. */
-export function dpUndoLeg(ctx: PcbCtx) {
-  const rt = S.route; const st = rt && rt.stages.pop(); if (!st) return false;
-  rt.bdoc = null; rt.obs = null; rt.dpObs = null; rt.dpStart = st.dpStart; rt.last = st.from.slice(); rt.startIds = st.startIds || []; rt.placingVia = null;
-  if (st.layer !== rt.layer) { rt.layer = st.layer; S.layer = st.layer; sizesOf(ctx).setActiveLayer(st.layer); }
-  rt.tracer = newTracer(rt.width, rt.stages.length ? st.dir : -1); trailAdd(rt.tracer, rt.last); rt.dpLines = null;
-  rt.chained = rt.stages.length > 0 && !rt.stages[rt.stages.length - 1].placingVia;
-  dpUpdateHead(ctx, S.hover); routeHighlight(ctx, rt); refreshChip(ctx); ctx.requestRender(); return true;
-}
+/**
+ * Backspace / Ctrl+Z / Undo Last Segment while routing a pair: DIFF_PAIR_PLACER does not override UnfixRoute
+ * (PLACEMENT_ALGO::UnfixRoute returns std::nullopt), and every fixed leg is already committed, so nothing happens.
+ */
+export function dpUndoLeg(_ctx: PcbCtx) { return false; }
 /** DIFF_PAIR_PLACER::ToggleVia: a via pair at the lines' ends, through to the routing pair's other layer (or `target`). */
 export function dpToggleVia(ctx: PcbCtx, type?: string, target?: string) {
   const rt = S.route; if (!rt) return false;
@@ -355,11 +419,11 @@ export function dpToggleVia(ctx: PcbCtx, type?: string, target?: string) {
 }
 /** DIFF_PAIR_PLACER::SetLayer: before anything is fixed the pair moves to the layer when both its pads / vias reach it; otherwise a via pair is armed. */
 export function dpSetLayer(ctx: PcbCtx, layer: string) {
-  const rt = S.route; if (layer === rt!.layer) { if (rt!.placingVia) dpToggleVia(ctx); return; }
+  const rt = S.route; if (layer === rt!.layer) return;   // handleLayerSwitch: targetLayer == currentLayer, an armed via stays
   const st = rt!.dpStart; const doc = routeDoc(ctx, rt!);
   const reaches = (q: DpEnd) => q.kind === "pad" || q.kind === "via" ? dpPrimitives(doc, (q === st!.P ? rt!.netKey : rt!.netKeyN)!, layer).some((x) => x.kind === q.kind && samePt(x.p, q.p)) : false;
   if (!rt!.placingVia && ((!rt!.stages.length && reaches(st!.P) && reaches(st!.N)) || (rt!.stages.length && !rt!.chained))) {
-    rt!.layer = layer; S.layer = layer; sizesOf(ctx).setActiveLayer(layer); rt!.dpObs = null; rt!.tracer = newTracer(rt!.width, -1); trailAdd(rt!.tracer, rt!.last);
+    rt!.layer = layer; S.layer = layer; sizesOf(ctx).setActiveLayer(layer); rt!.dpObs = null; resizeAfterEvent(ctx, rt!, layer); rt!.tracer = newTracer(rt!.width, -1); trailAdd(rt!.tracer, rt!.last); rt!.diagFirst = !!rt!.dpInitDiag;
     dpUpdateHead(ctx, S.hover); refreshChip(ctx); ctx.requestRender(); return;
   }
   rt!.placingVia = null; dpToggleVia(ctx, "through", layer);

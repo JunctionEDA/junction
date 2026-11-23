@@ -23,24 +23,104 @@ import { fixHead, leadingRatline, routeHighlight, routeUnhighlight } from "./rou
 import { netUnder, padsOf } from "./route-geom";
 import { RM_MARK } from "./router-settings";
 import { DBL_MS, HIT_MM, K, S, lastCtx } from "./state";
-import { newTracer, trailAdd } from "./tracer";
+import { initialDir, newTracer, trailAdd } from "./tracer";
 import { clone, layerOf, pt, r6, samePt } from "./util";
 import { pathHits, routeObstacles, routerWorld } from "./walkaround";
+import { evalRuleConstraint } from "./dru";
+import { netClearance, netclassName, netclassOf } from "./drc";
+import { pinnedOpt, routedRuleItem } from "./rule-resolver";
 
-/** ROUTER::CommitRouting: the route's branch onto the board as one undo step ("Route Track"). */
+/** ROUTER::CommitRouting: the route's branch onto the board as one undo step ("Routing", PNS_KICAD_IFACE::Commit). */
 export function commitRoute(ctx: PcbCtx, rt: Route) {
   let b = routeDoc(ctx, rt); if (b === ctx.doc) return false;
   b = removeRedundant(ctx.doc, b, rt);   // DIFF_PAIR_PLACER::FixRoute runs removeLoops on both lines too
   const changes = branchChanges(ctx.doc, b); if (!changes.length) return false;
-  ctx.commit(changes, "Route Track"); return true;
+  ctx.commit(changes, "Routing", rt.amend ? { amend: true } : undefined); return true;   // amend: SetCommitFlags( APPEND_UNDO ) after Continue From End
+}
+/** ROUTER_TOOL::finishInteractive: frame()->SetActiveLayer( m_originalActiveLayer ), after every route, finished or aborted. */
+export function restoreActiveLayer(ctx: PcbCtx | null, rt: Route) {
+  const l = rt.originalLayer; if (!l) return;
+  S.layer = l; if (ctx) sizesOf(ctx).setActiveLayer(l); else if (K.pcbSizes) K.pcbSizes.state.setActiveLayer(l);
+}
+/** A MINOPTMAX constraint and the name of the rule that gave it (DRC_CONSTRAINT::GetName). */
+export interface SizeRule { min: number | null; opt: number | null; max: number | null; name: string }
+/**
+ * DRC_ENGINE::EvalRules( TRACK_WIDTH / CLEARANCE / DIFF_PAIR_GAP ) for a dummy track of `net` on `layer` (B: the
+ * coupled net's track for a pair): the last custom rule that matches, else the netclass's implicit rule: clearance
+ * min, track width min = board minimum and opt = the class width ("netclass '%s' diff pair" for a pair's width),
+ * diff pair gap min = board minimum clearance and opt = the class gap.
+ */
+export function trackRule(ctx: PcbCtx, type: "clearance" | "track_width" | "diff_pair_gap", net: string, layer: string, coupled?: string | null): SizeRule {
+  const s = settingsOf(ctx); const d = S.dru;
+  if (d && d.rules.length && ctx.doc) {
+    const h = evalRuleConstraint(d.rules, type, ctx.doc, s, routedRuleItem({ net, layer }), coupled != null ? routedRuleItem({ net: coupled, layer }) : null);
+    if (h) return { min: h.min, opt: h.opt, max: h.max, name: h.name };
+  }
+  const nc = netclassOf(s, net) as Record<string, number | undefined>, name = netclassName(s, net);
+  if (type === "clearance") return { min: netClearance(s, net), opt: null, max: null, name: `netclass '${name}'` };
+  if (type === "diff_pair_gap") return { min: s.minClearance || 0, opt: nc.diff_pair_gap != null ? nc.diff_pair_gap : null, max: null, name: `netclass '${name}'` };
+  if (coupled != null) return { min: s.minTrackWidth || 0, opt: nc.diff_pair_width != null ? nc.diff_pair_width : null, max: null, name: `netclass '${name}' diff pair` };
+  return { min: s.minTrackWidth || 0, opt: nc.track_width != null ? nc.track_width : s.trackWidth, max: null, name: `netclass '${name}'` };
+}
+/** The routing clearance the message panel shows: the rule's min when it reaches the board minimum, else the minimum. */
+export function sizeClearance(ctx: PcbCtx, rt: Route, layer: string) {
+  const min = settingsOf(ctx).minClearance || 0; const c = trackRule(ctx, "clearance", (rt.net && rt.net.name) || "", layer);
+  if (c.min != null && c.min >= min) { rt.clearance = c.min; rt.clearanceSource = c.name; } else { rt.clearance = min; rt.clearanceSource = "board minimum clearance"; }
+}
+/** PNS_KICAD_IFACE_BASE::ImportSizes' sources for a new route: the start's clearance rule and where the width came from. */
+export function importSizeSources(ctx: PcbCtx, rt: Route, usedConnected: boolean) {
+  sizeClearance(ctx, rt, rt.layer);
+  const R = sizesOf(ctx); const minW = settingsOf(ctx).minTrackWidth || 0;
+  if (usedConnected) { rt.widthSource = "existing track"; return; }
+  if (R.useNetclassTrack) {
+    const w = trackRule(ctx, "track_width", (rt.net && rt.net.name) || "", rt.layer);
+    rt.widthSource = w.opt != null && Math.abs(rt.width - w.opt) < 1e-9 ? w.name : "board minimum track width";
+  } else rt.widthSource = Math.abs(rt.width - R.currentTrackWidth()) < 1e-9 || Math.abs(rt.width - minW) >= 1e-9 ? "user choice" : "board minimum track width";
+}
+/**
+ * ROUTER_TOOL::updateSizesAfterRouterEvent, after a click, a via's layer switch or a layer command: CLEARANCE and
+ * TRACK_WIDTH (and for a pair its width and gap) evaluated for a dummy track on the target layer.  The width changes
+ * when the toolbar follows the netclass or the current width is out of the new range; LINE_PLACER::UpdateSizes
+ * then puts it on the head only when the width is explicit or nothing is placed yet from a start that is no track.
+ */
+export function resizeAfterEvent(ctx: PcbCtx, rt: Route, layer: string) {
+  const s = settingsOf(ctx); const R = sizesOf(ctx); const net = (rt.net && rt.net.name) || "";
+  const minW = s.minTrackWidth || 0, minC = s.minClearance || 0;
+  const explicit = !R.useConnectedWidth || !!R.tempOverride;   // SetTrackWidthIsExplicit( !m_UseConnectedTrackWidth || m_TempOverrideTrackWidth )
+  const out = (v: number, c: SizeRule, floor: number) => v < floor || (c.min != null && v < c.min) || (c.max != null && v > c.max);
+  sizeClearance(ctx, rt, layer);
+  if (rt.dp && rt.dpSizes && rt.netN) {
+    if (!(R.useNetclassDiffPair || !explicit)) return;
+    const d = rt.dpSizes, netN = rt.netN.name || ""; let changed = false;
+    const w = trackRule(ctx, "track_width", net, layer, netN), wp = pinnedOpt(w);
+    if (w.min != null || w.opt != null || w.max != null) {
+      // DIFF_PAIR_PLACER::UpdateSizes: an inherited width is kept once something is fixed unless the width is explicit
+      if ((R.useNetclassDiffPair || out(d.width, w, minW)) && (explicit || !rt.dpFixed)) { const v = Math.max(minW, wp ?? 0); if (v !== d.width) { d.width = v; changed = true; } }
+      d.widthSource = wp != null && Math.abs(d.width - wp) < 1e-9 ? w.name : "board minimum track width";
+    }
+    const g = trackRule(ctx, "diff_pair_gap", net, layer, netN), gp = pinnedOpt(g);
+    if (g.min != null || g.opt != null || g.max != null) {
+      if (R.useNetclassDiffPair || out(d.gap, g, minC)) { const v = Math.max(minC, gp ?? 0); if (v !== d.gap) { d.gap = v; changed = true; } }
+      d.gapSource = gp != null && Math.abs(d.gap - gp) < 1e-9 ? g.name : "board minimum clearance";
+    }
+    if (changed) { d.h = (d.gap + d.width) / 2; rt.width = d.width; rt.dpObs = null; rt.obs = null; }
+    return;
+  }
+  if (!(R.useNetclassTrack || !explicit)) return;
+  const w = trackRule(ctx, "track_width", net, layer), wp = pinnedOpt(w);
+  let width = rt.width;
+  if (R.useNetclassTrack || out(width, w, minW)) width = Math.max(minW, wp ?? 0);
+  if ((explicit || (!rt.stages.length && rt.startKind !== "track")) && width !== rt.width) { rt.width = width; rt.obs = null; rt.bdoc = null; }
+  rt.widthSource = wp != null && Math.abs(width - wp) < 1e-9 ? w.name : Math.abs(width - minW) < 1e-9 ? "board minimum track width" : "existing track";
 }
 /** End the route: fix the head when asked (End / double click: FixRoute( forceFinish )), then commit everything fixed. */
-export function endRoute(ctx: PcbCtx, fixCurrent: boolean) {
-  const rt = S.route; if (!rt) return;
+export function endRoute(ctx: PcbCtx, fixCurrent: boolean): boolean {
+  const rt = S.route; if (!rt) return false;
   if (rt.dp) { if (fixCurrent && rt.dpLines) dpFix(ctx, { finish: true }); }
   else if (fixCurrent && ((rt.els && rt.els.length) || rt.placingVia)) fixHead(ctx, { finish: true });
-  S.route = null; commitRoute(ctx, rt); routeUnhighlight(ctx, rt); sizesOf(ctx).endRoute(); refreshChip(ctx); ctx.requestRender();
+  S.route = null; const committed = commitRoute(ctx, rt); restoreActiveLayer(ctx, rt); routeUnhighlight(ctx, rt); sizesOf(ctx).endRoute(); refreshChip(ctx); ctx.requestRender();
   if (S.routeQueue && routeQueueNext) { const next = routeQueueNext; Promise.resolve().then(() => next(ctx)); }   // RouteSelected: the next one
+  return committed;
 }
 /** route-selected.ts's routeNext, handed over at load (the modules import each other). */
 let routeQueueNext: ((ctx: PcbCtx) => unknown) | null = null;
@@ -48,7 +128,7 @@ export function setRouteQueueNext(fn: (ctx: PcbCtx) => unknown) { routeQueueNext
 /** Escape / another tool (ROUTER::AbortPlacement): the route and everything fixed in it are dropped. */
 export function abortRoute(ctx: PcbCtx) {
   const rt = S.route; if (!rt) return; S.route = null; S.violations = null; S.routeQueue = null;   // RouteSelected stops (m_cancelled)
-  if (rt.layer !== rt.startLayer && ctx) { /* the active layer stays where routing left it, as in pcbnew */ }
+  restoreActiveLayer(ctx, rt);
   if (ctx) { routeUnhighlight(ctx, rt); sizesOf(ctx).endRoute(); refreshChip(ctx); ctx.requestRender(); } else if (K.pcbSizes) K.pcbSizes.state.endRoute();
 }
 /**
@@ -61,7 +141,7 @@ export function undoRouteLeg(ctx: PcbCtx) {
   rt.bdoc = null; rt.obs = null;
   rt.last = st.from.slice(); rt.net = st.net; rt.netKey = st.netKey; rt.startIds = st.startIds || []; rt.split = st.split || null; rt.placingVia = null;
   if (st.layer !== rt.layer) { rt.layer = st.layer; S.layer = st.layer; sizesOf(ctx).setActiveLayer(st.layer); }
-  rt.tracer = newTracer(rt.width, rt.stages.length ? st.dir : -1); trailAdd(rt.tracer, rt.last); rt.head = [rt.last.slice()]; rt.els = []; rt.target = rt.last.slice();
+  rt.tracer = newTracer(rt.width, rt.stages.length ? st.dir : -1, initialDir()); trailAdd(rt.tracer, rt.last); rt.head = [rt.last.slice()]; rt.els = []; rt.target = rt.last.slice();
   rt.chained = rt.stages.length > 0 && !rt.stages[rt.stages.length - 1].placingVia;
   if (rt.cursor) updateHead(ctx);
   routeHighlight(ctx, rt); refreshChip(ctx); ctx.requestRender(); return true;
@@ -94,20 +174,41 @@ export function startLayerOf(ctx: PcbCtx, hv: Hover, mm: Pt | null): string | nu
 }
 /** The obstacles in violation, shown as KiCad's router does (pure green over a clearance halo) until the cursor moves on. */
 export function showViolations(obs: Obstacle[], at: Pt) { S.violations = obs.length ? { obs, at: at.slice() } : null; }
+/** QueryHoverItems' non-routable hits at the point: the refusal of ROUTER::isStartingPointRoutable for the item kinds it names. */
+export function startItemRefusal(doc: BoardDoc, p: Pt, q: Pt, layer: string): string | null {
+  // a routable item (a pad, via or track with copper on the layer) under the cursor: failureReason = wxEmptyString; break
+  const pad = padAt(doc, q[0], q[1], layer);
+  if (pad && pad.pad.type !== "np_thru_hole") return null;
+  const cu = copperOf(doc);
+  if (hitTestItem(doc, q[0], q[1], HIT_MM, (c) => ((c.kind === "segment" || c.kind === "arc") && layerOf(c.node) === layer) || (c.kind === "via" && viaLayers(c.node, cu).has(layer)))) return null;
+  let reason: string | null = null;
+  const hole = pad || padAt(doc, q[0], q[1], null);
+  if (hole && hole.pad.type === "np_thru_hole") reason = "Cannot start routing from a non-plated hole.";
+  for (const k of routerWorld(doc).keepouts) {
+    if (!k.layers!.has(layer) || !pointInPoly((k.shape as { pts: Pt[] }).pts, p[0], p[1])) continue;
+    const z = k.id ? doc.items.get(k.id) : null; const nm = z ? K.kid(z.node, "name") : null; const name = nm ? K.str(nm[1]) : "";
+    reason = name ? `Rule area '${name}' disallows tracks.` : "Rule area disallows tracks.";
+  }
+  // PCB_FIELD_T / PCB_TEXT_T / PCB_TEXTBOX_T on the routing layer
+  const t = hitTestItem(doc, q[0], q[1], HIT_MM, (c) => (c.kind === "gr_text" || c.kind === "gr_text_box") && layerOf(c.node) === layer);
+  if (t) reason = "Cannot start routing from a text item.";
+  else for (const it of doc.items.values()) {
+    if (it.kind !== "footprint") continue; const b = it.bbox; if (b && (q[0] < b[0] - 5 || q[0] > b[2] + 5 || q[1] < b[1] - 5 || q[1] > b[3] + 5)) continue;
+    if ((K.fieldBoxes(it) as unknown as { pts: Pt[]; geom: { layer?: string } }[]).some((f) => f.geom.layer === layer && pointInPoly(f.pts, q[0], q[1]))) { reason = "Cannot start routing from a text item."; break; }
+  }
+  return reason;
+}
 /**
  * ROUTER::isStartingPointRoutable and ROUTER_TOOL's start checks: no route from a non-plated hole, inside a rule area
  * that keeps tracks out, from copper text, or where a zero-length track (at the route width, then the board minimum)
- * already violates clearance (not in Highlight collisions, which only marks).  Returns the refusal message or null.
+ * already violates clearance.  A routable item under the cursor on the layer clears the first three; "Allow DRC
+ * violations" in Highlight collisions (AllowDRCViolations) clears them all.  Returns the refusal message or null.
  */
 export function startRefusal(ctx: PcbCtx, p: Pt, mm: Pt, net: NetRef, width: number, layer: string, own: Set<string>, snapped: boolean) {
   const doc = ctx.doc; const q = mm || p;
-  const pad = padAt(doc, q[0], q[1], layer) || padAt(doc, q[0], q[1], null);
-  if (pad && pad.pad.type === "np_thru_hole") return "Cannot start routing from a non-plated hole.";
-  const W = routerWorld(doc);
-  if (W.keepouts.some((k) => k.layers!.has(layer) && pointInPoly((k.shape as { pts: Pt[] }).pts, p[0], p[1]))) return "Rule area disallows tracks.";
-  if (!snapped && !pad) { const t = hitTestItem(doc, q[0], q[1], HIT_MM); if (t && (t.kind === "gr_text" || t.kind === "gr_text_box") && /\.Cu$/.test(layerOf(t.node, ""))) return "Cannot start routing from a text item."; }
-  if (!/\.Cu$/.test(layer)) return "Tracks on Copper layers only.";
-  if (S.rs.mode === RM_MARK) return null;
+  if (!/\.Cu$/.test(layer)) return "Tracks on Copper layers only.";   // ROUTER_TOOL::prepareInteractive, before StartRouting
+  if (S.rs.mode === RM_MARK && S.rs.can_violate_drc) return null;   // Settings().AllowDRCViolations()
+  const item = startItemRefusal(doc, p, q, layer); if (item) return item;
   const s = settingsOf(ctx); const key = netTable(doc).key(net);
   const O = routeObstacles(doc, s, key, layer, key ? null : own);
   let hits = pathHits(O, [p], width / 2);
@@ -123,7 +224,7 @@ export function routeClick(ctx: PcbCtx, hv: Hover, mm: Pt, opts?: { enter?: bool
     let net = (hv.snap ? hv.snap.net : netUnder(ctx.doc, hv.x, hv.y, S.layer)) as NetRef;   // a grid snap carries none: undefined, as before
     let split: RouteSplit | null = null, startIds: string[] = [], startKind = hv.snap ? hv.snap.kind : null;
     // ROUTER_TOOL::getStartLayer: a start item that is not on the active layer moves the route (and the active layer) to its layer
-    const startOn = startLayerOf(ctx, hv, mm);
+    const startOn = startLayerOf(ctx, hv, mm); const originalLayer = S.layer;   // m_originalActiveLayer
     if (startOn && startOn !== S.layer) setLayer(ctx, startOn);
     if (!hv.snap) { const on = trackUnder(ctx.doc, mm ? mm[0] : hv.x, mm ? mm[1] : hv.y, S.layer); if (on) { p = on.point; net = netOf(on.item.node); split = { id: on.item.id, point: p.slice(), node: clone(on.item.node) }; startIds.push(on.item.id); startKind = "track"; } }   // started on a track: its centre line and its net
     else if (hv.snap.kind !== "pad") { const it = hitTestItem(ctx.doc, hv.x, hv.y, HIT_MM); if (it) startIds.push(it.id); }
@@ -135,14 +236,11 @@ export function routeClick(ctx: PcbCtx, hv: Hover, mm: Pt, opts?: { enter?: bool
     S.route = { start: p.slice(), startLayer: S.layer, startKind, startSpan: hv.snap && (hv.snap.kind === "pad" || hv.snap.kind === "via") ? ((hv.snap as SnapHit).layers || null) : null,
       last: p, target: p.slice(), cursor: p.slice(), head: [p.slice()], els: [], reached: true, net, netKey, layer: S.layer, width, connected, diagFirst: !!S.rs.start_diagonal, clickT: now, clickAt: p.slice(),
       stages: [], split, startIds, ratline: null, placingVia: null, chained: false, collisions: null, shove: null,
-      tracer: newTracer(width, -1), keepHighlight: !!netKey && S.highlightNet === netKey };
-    trailAdd(S.route.tracer, p);
+      tracer: newTracer(width, -1, initialDir()), keepHighlight: !!netKey && S.highlightNet === netKey, originalLayer };
+    trailAdd(S.route!.tracer, p);
+    importSizeSources(ctx, S.route!, !!(R.useConnectedWidth && !R.tempOverride && connected && connected > 0));
     if (R.activeLayer !== S.layer) R.setActiveLayer(S.layer);
-    routeHighlight(ctx, S.route); S.route.ratline = leadingRatline(ctx, S.route);
-    // V before the route started (m_startWithVia): a via from the layer the route began on to the toggled layer,
-    // unless the start pad / via already reaches it
-    const swv = S.startWithVia; S.startWithVia = null;
-    if (swv && swv.from !== S.route.layer && !startSpans(ctx, S.route, S.route.layer)) { const to = S.route.layer; S.route.layer = swv.from; S.layer = swv.from; S.route.obs = null; toggleViaPlacement(ctx, "through", to); }
+    routeHighlight(ctx, S.route); S.route!.ratline = leadingRatline(ctx, S.route!);
     refreshChip(ctx); ctx.requestRender(); return;
   }
   const rt = S.route;
@@ -158,8 +256,11 @@ export function routeClick(ctx: PcbCtx, hv: Hover, mm: Pt, opts?: { enter?: bool
   if (lands && hv.snap!.kind === "trackMid" && !(rt.split && rt.split.id === (hv.snap as SnapHit).id)) { const it = rc.doc.items.get((hv.snap as SnapHit).id!); if (it) endSplit = { id: it.id, point: [hv.x, hv.y], node: clone(it.node) }; }
   const markEnd = S.rs.mode === RM_MARK && hv.snap && samePt(rt.target, [hv.x, hv.y]) ? hv.snap as SnapHit : null;
   const placingVia = !!rt.placingVia;
-  if (!fixHead(ctx, { endSplit, snap: markEnd })) { ctx.requestRender(); return; }
-  if ((lands || (markEnd && hasNet(markEnd.net) && rt.netKey && sameNet(markEnd.net, rt.net))) && !placingVia) { endRoute(ctx, false); return; }
+  // LINE_PLACER::FixRoute: an end item of the routed net is the real end, every segment is fixed
+  const realEnd = !!(lands || (markEnd && hasNet(markEnd.net) && rt.netKey && sameNet(markEnd.net, rt.net)));
+  if (!fixHead(ctx, { endSplit, snap: markEnd, finish: realEnd })) { ctx.requestRender(); return; }
+  if (realEnd && !placingVia) { endRoute(ctx, false); return; }
+  resizeAfterEvent(ctx, rt, rt.layer);   // switchLayerOnViaPlacement / updateSizesAfterRouterEvent( current layer )
   if (rt.cursor) updateHead(ctx);
   routeHighlight(ctx, rt); refreshChip(ctx); ctx.requestRender();
 }
@@ -202,7 +303,7 @@ export function viaPlan(ctx: PcbCtx, rt: Route, type: string, target?: string | 
 /**
  * ROUTER_TOOL::onViaCommand: the first via command attaches a via to the head's end (it follows the cursor and is
  * checked with it, ToggleViaPlacement); the same command again takes it off.  The next click fixes trace and via
- * and routing goes on on the via's other layer.  With no route yet (the Route tool idle) the next route starts with a via.
+ * and routing goes on on the via's other layer.  With no route yet (the Route tool idle) only the active layer toggles.
  */
 export function toggleViaPlacement(ctx: PcbCtx, type?: string, target?: string | null) {
   const rt = S.route;
@@ -215,11 +316,12 @@ export function toggleViaPlacement(ctx: PcbCtx, type?: string, target?: string |
   if (rt.cursor) updateHead(ctx);
   refreshChip(ctx); ctx.requestRender(); return true;
 }
-/** ACT_PlaceThroughVia with the Route tool idle: the next route starts with a via, and the active layer toggles. */
-export function startWithVia(ctx: PcbCtx) { S.startWithVia = { from: S.layer }; runAction("layerToggle", ctx); }
+/** ACT_PlaceThroughVia with the Route tool idle (ROUTER_TOOL::MainLoop): PCB_ACTIONS::layerToggle, nothing else. */
+export function startWithVia(ctx: PcbCtx) { runAction("layerToggle", ctx); }
 /** The Select Layer and Place … Via commands: KiCad's layer picker at the track end, then the via to that layer. */
 export function selectLayerAndPlaceVia(ctx: PcbCtx, type: string) {
   const rt = S.route; if (!rt) return false;
+  if (rt.placingVia) return toggleViaPlacement(ctx);   // onViaCommand: any via action with a via armed takes it off
   const doc = routeDoc(ctx, rt); const cu = K.pcbSizes.copperStack(copperOf(doc));
   const disallow = new Set(type === "through" ? [] : [rt.layer]);
   const at = rt.target || rt.last;
@@ -405,12 +507,13 @@ export function setLayer(ctx: PcbCtx, layer: string) {
   const rt = S.route;
   if (rt && rt.dp) { dpSetLayer(ctx, layer); return; }
   if (rt) {
-    if (layer === rt.layer) { if (rt.placingVia) toggleViaPlacement(ctx); return; }
+    if (layer === rt.layer) return;   // handleLayerSwitch: targetLayer == currentLayer returns, an armed via stays
     const spans = !rt.stages.length && (!rt.startKind || ((rt.startKind === "pad" || rt.startKind === "via") && startSpans(ctx, rt, layer)));
     const afterVia = rt.stages.length && !rt.chained;
     if (!rt.placingVia && (spans || afterVia)) {
       rt.layer = layer; S.layer = layer; sizesOf(ctx).setActiveLayer(layer); rt.obs = null;
-      rt.tracer = newTracer(rt.width, -1); trailAdd(rt.tracer, rt.last); rt.head = [rt.last.slice()]; rt.els = [];
+      resizeAfterEvent(ctx, rt, layer);   // handleLayerSwitch: SwitchLayer, then updateSizesAfterRouterEvent( targetLayer )
+      rt.tracer = newTracer(rt.width, -1, initialDir()); trailAdd(rt.tracer, rt.last); rt.head = [rt.last.slice()]; rt.els = [];
       if (rt.cursor) updateHead(ctx); refreshChip(ctx); ctx.requestRender(); return;
     }
     rt.placingVia = null; toggleViaPlacement(ctx, "through", layer); return;
@@ -460,13 +563,14 @@ export function attemptFinish(ctx: PcbCtx): boolean {
  */
 export function continueFromEnd(ctx: PcbCtx): boolean {
   const rt = S.route; if (!rt || rt.dp) return false;
-  leadingRatline(ctx, rt); const a = rt.ratAnchor; if (!a) { ctx.toast("No ratsnest end to continue from."); return true; }
-  const currentEnd = rt.target.slice(), layer = rt.layer;
-  endRoute(ctx, false);
+  leadingRatline(ctx, rt); const a = rt.ratAnchor; if (!a) return true;   // ShowInfoBarError( FailureReason() ): empty here
+  const currentEnd = rt.target.slice(), layer = rt.layer, originalLayer = rt.originalLayer;
+  const needsAppend = endRoute(ctx, false) || !!rt.amend;   // HasPlacedAnything: the rest of the route joins the same undo step
   const next = a.layers.includes(layer) || a.layers.includes("*.Cu") || !a.layers.length ? layer : a.layers[0];
   if (next !== S.layer) setLayer(ctx, next);
   const hv = hoverPoint(ctx, a.p.slice(), true);
   routeClick(ctx, { x: a.p[0], y: a.p[1], snap: hv.snap }, a.p.slice());
-  const nr = S.route as Route | null; if (!nr) return true;
+  const nr = S.route as Route | null; if (!nr) { if (originalLayer) restoreActiveLayer(ctx, { originalLayer } as unknown as Route); return true; }
+  nr.originalLayer = originalLayer; nr.amend = needsAppend;
   nr.cursor = currentEnd; updateHead(ctx); ctx.requestRender(); return true;
 }

@@ -3,7 +3,9 @@ import { leaveSheet } from "./schnets";
 import { setGroupCurrent, setToggle, setToggles, state, store } from "./appstore";
 import { commentOnAction, openThreadAction, openThreadOnDoc } from "./comments";
 import { chatAction, openChat, startCursorChat } from "./chat";
-import { saveVersionDialog, versionsCommand } from "./versions";
+import { loadVersions, saveVersionDialog, versionsCommand } from "./versions";
+import { showProposals } from "./proposals";
+import { confirmBox } from "../dialogs/dom";
 import { enterSheet, navigateDocs, openDoc, openDocId, rootSchematic, setProjectDocs, selectItemAction, setActiveLayer, setGridPitch, setLayerVisible, switchEditor, updateGridStatus } from "./doc";
 import { loadHistory, restoreCheckpoint } from "./history";
 import { navigate } from "./home";
@@ -86,6 +88,25 @@ export async function runAction(act: string, el?: ActionAnchor) {
 export function toggleRenderOpt(key: string, id: string) { E.renderOpts[key] = !E.renderOpts[key]; setToggle(id, !!E.renderOpts[key]); store.slice("viewport", { renderOpts: Object.assign({}, E.renderOpts) }); requestRender(); }
 
 
+/**
+ * ACTIONS::revert.  eeschema asks "Revert '<file>' (and all sub-sheets) to last version saved?", pcbnew "Revert '<file>'
+ * to last version saved?" (IsOK: "Confirmation", Yes / No), then reloads from disk.  What Save writes here is a version
+ * of the project (File > Save), so the newest saved version is restored; the state before stays in History.
+ */
+async function revertToSaved(): Promise<void> {
+  if (E.viewOnly) { toast("View-only access"); return; }
+  const sch = isSch();
+  const root = sch ? rootSchematic() as { path: string } | null : null, cur = ((state as unknown as { docs?: { docId: string; path: string }[] }).docs || []).find((d) => d.docId === (state as unknown as { docId?: string }).docId);
+  const file = (sch ? root && root.path : cur && cur.path) || (cur ? cur.path : "");
+  if (!(await confirmBox("Confirmation", sch ? `Revert '${file}' (and all sub-sheets) to last version saved?` : `Revert '${file}' to last version saved?`, "Yes"))) return;
+  try { await loadVersions(); } catch (e) { /* the list as last read */ }
+  // the versions somebody saved (File > Save), not the automatic ones kept beside them
+  const list = (store.get() as unknown as { versions: { list: { id: string; name: string | null; kind: string; createdAt: string }[] } }).versions.list.filter((v) => v.kind === "named");
+  const last = list.slice().sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))[0];
+  if (!last) { toast("This project has no saved version to revert to. Save one with File > Save.", 5000); return; }
+  versionsCommand({ cmd: "restore", versionId: last.id, label: last.name ? `"${last.name}"` : "the last saved version" });
+}
+
 // Every chrome action the web editor handles, by KiCad action id (or one of ours).  An id missing here
 // that maps to a tool (server/web/domains/pcb/tables.ts TOOL_MAP) activates the tool; anything else is dimmed and
 // explained as desktop-only by the chrome itself.  Handlers get the anchor rect of the clicked control.
@@ -111,6 +132,12 @@ export const HANDLERS: Record<string, ActionHandler> = {
   selectSetLasso: () => { E.selMode = "lasso"; setRadio("Selection modes", "selectSetLasso"); store.slice("viewport", { selMode: E.selMode }); setTool("select"); },
   selectAll: () => selectAll(),
   save: (a) => runAction("checkpoint", a), refreshHistory: () => loadHistory(),
+  // File > Revert (SCH_EDITOR_CONTROL::Revert, BOARD_EDITOR_CONTROL::Revert): back to the last version saved
+  revert: () => { void revertToSaved(); },
+  // File > Proposed Changes: the assistant's pending proposals on this document (proposals.ts)
+  collabProposals: () => { void showProposals(); },
+  // Tools > Switch to Project Manager: the project manager is the projects page
+  showProjectManager: () => navigate("/"),
   undo: () => undoLast(), redo: () => redoLast(), find: () => undefined, doDelete: () => deleteAction(),
   zoomRedraw: () => requestRender(), zoomInCenter: () => zoomStep(true), zoomOutCenter: () => zoomStep(false), zoomFitScreen: () => fitView(), zoomFitObjects: () => fitObjects(),
   navigateBack: () => navigateDocs(-1), navigateForward: () => navigateDocs(1), navigateUp: () => leaveSheet(),

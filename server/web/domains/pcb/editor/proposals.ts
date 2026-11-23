@@ -67,6 +67,17 @@ export function noteProposalMsg(msg: { docId?: string; action?: string; proposal
   else if (p.status === "withdrawn") toast(`"${p.title}" was withdrawn`, 3500);
 }
 
+/**
+ * File > Proposed Changes (SCH_COLLAB_TOOL / PCB_COLLAB_TOOL ::ShowProposals, COLLAB_PROPOSALS::ShowBanner): the
+ * pending proposals of this document are read again and their list is unfolded; with none, KiCad's message.
+ */
+export async function showProposals(): Promise<void> {
+  if (!docId() || !(state as unknown as { me: unknown }).me) { toast("Proposed changes live on shared projects; start or join a session first.", 4500); return; }
+  await loadProposals();
+  if (!rows.length) { toast("No changes are proposed on this document.", 4000); return; }
+  open = true; render();
+}
+
 async function load(id: string): Promise<Row | null> {
   const have = full.get(id); if (have) return have;
   try { const r = (await request(`/api/proposals/${id}`)) as Row; if (!r.body) return null; full.set(id, r); return r; }

@@ -509,13 +509,16 @@ export function setPinAlternate(node: SNode, number: string, alt: string): void 
 
 
 // ---------------------------------------------------------------- FIELD_VALIDATOR (common/validators.cpp)
-export type FieldId = "REFERENCE" | "VALUE" | "FOOTPRINT" | "DATASHEET" | "SHEET_NAME" | "SHEET_FILENAME" | "USER";
+export type FieldId = "REFERENCE" | "VALUE" | "FOOTPRINT" | "DATASHEET" | "SHEET_NAME" | "SHEET_FILENAME" | "SHEET_REF_SUFFIX" | "USER";
 /** UTIL::GetRefDesPrefix: the reference up to its trailing digits and question marks. */
 export function refDesPrefix(ref: string): string { let i = ref.length; while (i > 0 && (ref[i - 1] === "?" || /[0-9]/.test(ref[i - 1]))) i--; return ref.slice(0, i); }
 /** GetFieldValidationErrorMessage: "" when the text is acceptable for that field. */
 export function fieldValidationError(id: FieldId, value: string): string {
   let excludes = "\r\n\t";
-  if (id === "REFERENCE") excludes += " "; else if (id === "SHEET_NAME") excludes += "/";
+  // SHEET_REF_SUFFIX: '?' marks unannotated references and ',' is reserved for stacked sheet series
+  if (id === "REFERENCE") excludes += " "; else if (id === "SHEET_NAME") excludes += "/"; else if (id === "SHEET_REF_SUFFIX") excludes += " ?,";
+  // a suffix is unescaped until it no longer changes, so {brace}comma} cannot hide a comma
+  if (id === "SHEET_REF_SUFFIX") for (let next = unescapeString(value); next !== value; next = unescapeString(value)) value = next;
   const empty = id === "REFERENCE" || id === "SHEET_NAME" || id === "SHEET_FILENAME";
   if (empty && !value) return id === "SHEET_NAME" ? "A sheet must have a name." : id === "SHEET_FILENAME" ? "A sheet must have a file specified." : "The value of the field cannot be empty.";
   const found: string[] = [];
@@ -523,7 +526,7 @@ export function fieldValidationError(id: FieldId, value: string): string {
   if (found.length) {
     let bad = "";
     found.forEach((f, i) => { if (bad) bad += found.length === 2 ? " or " : i < found.length - 2 ? ", or " : ", "; bad += f; });
-    const what: Record<FieldId, string> = { REFERENCE: "The reference designator", VALUE: "The value field", FOOTPRINT: "The footprint field", DATASHEET: "The datasheet field", SHEET_NAME: "The sheet name", SHEET_FILENAME: "The sheet filename", USER: "The field" };
+    const what: Record<FieldId, string> = { REFERENCE: "The reference designator", VALUE: "The value field", FOOTPRINT: "The footprint field", DATASHEET: "The datasheet field", SHEET_NAME: "The sheet name", SHEET_FILENAME: "The sheet filename", SHEET_REF_SUFFIX: "The reference suffix", USER: "The field" };
     return `${what[id]} cannot contain ${bad} character(s).`;
   }
   if (id === "REFERENCE" && value.includes("${")) return "The reference designator cannot contain text variable references";

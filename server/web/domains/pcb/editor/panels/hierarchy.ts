@@ -14,7 +14,7 @@ import { applyHighlight, currentInstance, preferInstance } from "../schnets";
 import { loadProject, onProjectChanged, projectJson, saveProject, sub } from "../../dialogs/project";
 import { confirmBox } from "../../dialogs/dom";
 import { commitRootPage } from "../../dialogs/page-settings";
-import { repairPageNumbers, sheetsByPage, type PageSheet } from "../../sim/sheet-pages";
+import { repairPageNumbers, sheetsByPage, sortTreeByPage, type PageSheet } from "../../sim/sheet-pages";
 import { KC, currentDocId, isSchDoc, kdoc, openDocs, panelStore, projectId, projectName, textEntry, type DocEntryLite, tctx } from "./core";
 
 interface SheetRef { id: string; name: string; file: string; page: string }
@@ -79,6 +79,8 @@ function repairPages(tree: HierNode, topUuid: (n: HierNode) => string): HierNode
   for (const top of tree.virtual ? tree.children : [tree]) walk(top, [topUuid(top)], { n: 1 });
   const { pages } = repairPageNumbers(list);
   nodes.forEach((n, i) => { n.page = pages[i]; });
+  // HIERARCHY_PANE::buildHierarchyTree: m_tree->SortChildren( aParent ) under every sheet (OnCompareItems)
+  sortTreeByPage(tree);
   return tree;
 }
 const fileUuid = (docId: string | null): string => { const e = docId ? entry(docId) : null; return String((e && (e.doc as unknown as { uuid?: string }).uuid) || ""); };
@@ -139,6 +141,23 @@ function find(path: string): HierNode | null {
   return walk(panelStore.get().hierarchy.root);
 }
 
+/** One sheet instance of the hierarchy (a SCH_SHEET_PATH): its tree node, its KIID path as the symbol instances name
+ *  it ("/<top-level sheet uuid>/<sheet symbol uuid>/…") and its human path ("/", "/Sub/Inner/"). */
+export interface SheetInstanceRow { node: HierNode; instPath: string; human: string }
+/** SCH_SCREENS::BuildClientSheetPathList: every sheet path of the hierarchy, in the tree's order.  A schematic file
+ *  that no sheet of the hierarchy uses has none. */
+export function sheetInstances(): SheetInstanceRow[] {
+  const root = panelStore.get().hierarchy.root, out: SheetInstanceRow[] = []; if (!root) return out;
+  const tops = root.virtual ? topLevelSchematics() : [];
+  const walk = (n: HierNode, uuids: string[], names: string[]): void => {
+    out.push({ node: n, instPath: "/" + uuids.join("/"), human: "/" + names.map((x) => x + "/").join("") });
+    for (const c of n.children) walk(c, uuids.concat(c.sheetId || ""), names.concat(c.name));
+  };
+  if (root.virtual) for (const top of root.children) { const t = tops.find((x) => x.doc.docId === top.docId); walk(top, [(t && t.uuid) || fileUuid(top.docId)], [top.name]); }
+  else walk(root, [fileUuid(root.docId)], []);
+  return out;
+}
+
 /** The page number each hierarchy path carries, by document id (the Search pane's Page column). */
 export function pageOfDoc(docId: string): string {
   const walk = (n: HierNode | null): string | null => { if (!n) return null; if (n.docId === docId) return n.page; for (const c of n.children) { const r = walk(c); if (r) return r; } return null; };
@@ -183,14 +202,14 @@ function topLevelEntry(file: string, pro: Record<string, unknown> = projectJson(
   return list.find((e) => e && (e.filename === file || e.filename === base)) || null;
 }
 /**
- * HIERARCHY_PANE's Rename, then renameSheet: a sub-sheet's Sheetname field in its parent sheet; a top-level sheet's
+ * HIERARCHY_PANE's Rename (the row's label edited in place, Hierarchy.tsx), then onTreeEditFinished and renameSheet: a sub-sheet's Sheetname field in its parent sheet; a top-level sheet's
  * name, which SCH_EDIT_FRAME::SaveProjectLocalSettings keeps in the project file's schematic.top_level_sheets.
  */
-async function rename(path: string): Promise<void> {
+async function rename(path: string, nm: string): Promise<void> {
   const node = find(path); if (!node) return;
-  const name = await textEntry("Rename", "Change name of this sheet", node.name); if (name === null) return;
-  const nm = name.trim(); if (!nm || nm === node.name) return;
-  if (node.sheetId) { await editSheetSymbol(node, "renaming sheet", (n) => setSheetName(n, nm)); return; }
+  // onTreeEditFinished: the label typed in the row, as typed (not trimmed); an empty or unchanged name changes nothing
+  if (!nm || nm === node.name) return;
+  if (node.sheetId) { await editSheetSymbol(node, "Rename Sheet", (n) => setSheetName(n, nm)); return; }
   if (E.viewOnly) { toast("View-only access"); return; }
   // the top-level sheet renamed: the one this row stands for (one of several), else the root sheet
   const root = ((node.docId && schDocs().find((d) => d.docId === node.docId)) || (store.get().project ? rootSchematic() : null)) as DocEntryLite | null; if (!root) return;
@@ -208,14 +227,16 @@ async function rename(path: string): Promise<void> {
 }
 async function editPage(path: string): Promise<void> {
   const node = find(path); if (!node) return;
-  // SCH_SHEET_PATH::PathHumanReadable( false ): the root file's stem, then each sheet name, each closed by '/'
-  // (with several top-level sheets: the stem of the top-level sheet's file, then the names below it)
+  // SCH_SHEET_PATH::PathHumanReadable( false, true ): the root file's stem, then each sheet name, each closed by '/',
+  // the last separator stripped (with several top-level sheets: the stem of the top-level sheet's file, then the
+  // names below it)
   const root = panelStore.get().hierarchy.root, top = root && root.virtual ? root.children.find((c) => path.startsWith(c.path)) : root;
   const stem = top ? top.file.replace(/\.kicad_sch$/, "") : "", names = namesTo(path);
-  const human = stem + "/" + (root && root.virtual ? names.slice(1) : names).map((n) => n + "/").join("");
+  const human = (stem + "/" + (root && root.virtual ? names.slice(1) : names).map((n) => n + "/").join("")).replace(/\/$/, "");
   if (E.viewOnly) { toast("View-only access"); return; }
-  const page = await textEntry("Edit Sheet Page Number", `Enter page number for sheet path${human.length > 20 ? "\n" + human : " " + human}`, node.page, { alnum: true }); if (page === null) return;
-  const pg = page.trim(); if (!pg || pg === node.page) return;
+  const page = await textEntry("Edit Sheet Page Number", `Enter page number for sheet path ${human.length > 20 ? "   \n" + human + ":   " : human + ":   "}`, node.page, { alnum: true }); if (page === null) return;
+  // dlg.GetValue() != GetPageNumber(): any other value is taken, an empty one included
+  const pg = page; if (pg === node.page) return;
   if (!node.sheetId) {
     // the root sheet has no sheet symbol: its page is the root file's own (sheet_instances (path "/" (page …)))
     if (!node.docId) return;
@@ -223,7 +244,7 @@ async function editPage(path: string): Promise<void> {
     if (currentDocId() === node.docId && commitRootPage(pg)) publishHierarchy();
     return;
   }
-  await editSheetSymbol(node, "change sheet page number", (n) => setSheetPage(n, pg));
+  await editSheetSymbol(node, "Change Page Number", (n) => setSheetPage(n, pg));
 }
 /**
  * SCH_EDIT_TOOL::EditPageNumber (Edit > Edit Sheet Page Number..., the sheet context menu): RequestSelection( {
@@ -264,7 +285,7 @@ export function hierarchyDispatch(a: PanelAction): boolean {
       else applyHighlight();   // the same file as another instance: the net map's listeners take the new instance
       return true;
     }
-    case "hierRename": void rename(a.path); return true;
+    case "hierRename": void rename(a.path, a.name); return true;
     case "hierPage": void editPage(a.path); return true;
     case "hierNewTop": void newTopLevelSheet(); return true;
     case "hierDeleteTop": void deleteTopLevelSheet(a.path); return true;

@@ -59,13 +59,59 @@ export function designSettings(src: string | DesignSource | DesignSettings | nul
       ...(num(c.diff_pair_gap) ? { diff_pair_gap: c.diff_pair_gap } : num(dpGap) ? { diff_pair_gap: dpGap } : {}),
       ...(typeof c.microvia_diameter === "number" ? { microvia_diameter: c.microvia_diameter } : {}), ...(typeof c.microvia_drill === "number" ? { microvia_drill: c.microvia_drill } : {}) };
     if (s.netclasses.Default) { s.clearance = s.netclasses.Default.clearance; s.trackWidth = s.netclasses.Default.track_width; s.viaDiameter = s.netclasses.Default.via_diameter; s.viaDrill = s.netclasses.Default.via_drill; }
+    // NET_SETTINGS keeps the classes' own values and priorities: a net in several classes gets their composite
+    s.netclassRaw = {}; for (const c of classes) s.netclassRaw[c.name] = c as unknown as Record<string, unknown>;
     if (ns.netclass_assignments) for (const [net, cls] of Object.entries(ns.netclass_assignments)) s.netclassOf[net] = cls;
-    if (isList(ns.netclass_patterns)) for (const p of ns.netclass_patterns as ({ pattern?: string; netclass: string } | null)[]) if (p && p.pattern) s.patterns.push({ re: new RegExp("^" + String(p.pattern).replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$"), netclass: p.netclass });
+    if (isList(ns.netclass_patterns)) for (const p of ns.netclass_patterns as ({ pattern?: string; netclass: string } | null)[]) if (p && p.pattern) s.patterns.push({ pattern: String(p.pattern), re: new RegExp("^" + String(p.pattern).replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$"), netclass: p.netclass });
   }
   return s;
 }
-export function netclassName(s: DesignSettings, net: string | null | undefined) { const name = net ? (s.netclassOf[net] || (s.patterns.find((p) => p.re.test(net)) || { netclass: undefined }).netclass) : null; return name && s.netclasses[name] ? name : "Default"; }
-export function netclassOf(s: DesignSettings, net: string | null | undefined): Partial<NetclassRules> { return s.netclasses[netclassName(s, net)] || s.netclasses.Default || { clearance: s.clearance, track_width: s.trackWidth, via_diameter: s.viaDiameter, via_drill: s.viaDrill }; }
+/** The parameters NET_SETTINGS::addMissingDefaults fills from the Default class (.kicad_pro keys). */
+const NETCLASS_PARAMS = ["clearance", "track_width", "via_diameter", "via_drill", "microvia_diameter", "microvia_drill", "diff_pair_width", "diff_pair_gap", "wire_width", "bus_width"];
+/**
+ * NET_SETTINGS::GetEffectiveNetClass's constituents for a net: every class assigned to it (a net may carry several)
+ * and every class whose pattern matches, sorted by priority then name (makeEffectiveNetclass); with two or more whose
+ * values leave a parameter unset the Default class joins as the last one.  A class named but not defined is an
+ * implicit one (priority just above Default's).  No assignment: empty (the net is in Default).
+ */
+export function netclassConstituents(s: DesignSettings, net: string | null | undefined): string[] {
+  if (!net) return [];
+  const names = new Set<string>(); const a = s.netclassOf[net] as unknown;
+  for (const n of (Array.isArray(a) ? a : a ? [a] : [])) if (n) names.add(String(n));
+  const PS = K.pcbSizes as unknown as { netclassPatternMatches?: (p: string, n: string) => boolean } | undefined;
+  for (const p of s.patterns) if (p.pattern !== undefined && PS && PS.netclassPatternMatches ? PS.netclassPatternMatches(p.pattern, net) : p.re.test(net)) names.add(p.netclass);
+  if (!names.size) return [];
+  const raw = s.netclassRaw || {}; const MAX = 2147483647;
+  const prio = (n: string) => { if (n === "Default") return MAX; const r = raw[n]; if (!r && !s.netclasses[n]) return MAX - 1; return r && typeof r.priority === "number" ? r.priority : MAX; };   // NETCLASS's own default priority is INT_MAX too
+  const out = Array.from(names).sort((x, y) => (prio(x) !== prio(y) ? prio(x) - prio(y) : x < y ? -1 : x > y ? 1 : 0));
+  if (out.length > 1 && !out.includes("Default")) {
+    const has = (k: string) => out.some((n) => { const r = raw[n]; return r ? typeof r[k] === "number" : !!s.netclasses[n] && !s.netclassRaw; });
+    const dr = raw.Default;
+    if (NETCLASS_PARAMS.some((k) => !has(k)) || (dr && dr.tuning_profile && !out.some((n) => raw[n] && raw[n].tuning_profile))) out.push("Default");
+  }
+  return out;
+}
+/** NETCLASS::GetHumanReadableName of the net's effective class: "A", "A and B", "A, B and C", "A, B and N more". */
+export function netclassName(s: DesignSettings, net: string | null | undefined) {
+  const c = netclassConstituents(s, net);
+  if (!c.length) return "Default"; if (c.length === 1) return c[0];
+  if (c.length === 2) return `${c[0]} and ${c[1]}`; if (c.length === 3) return `${c[0]}, ${c[1]} and ${c[2]}`;
+  return `${c[0]}, ${c[1]} and ${c.length - 2} more`;
+}
+/** The effective class's values: one class as it is, several merged from the lowest priority up (the highest wins), the rest from Default. */
+export function netclassOf(s: DesignSettings, net: string | null | undefined): Partial<NetclassRules> {
+  const dflt = s.netclasses.Default || { clearance: s.clearance, track_width: s.trackWidth, via_diameter: s.viaDiameter, via_drill: s.viaDrill };
+  const c = netclassConstituents(s, net);
+  if (!c.length) return dflt;
+  if (c.length === 1) return s.netclasses[c[0]] || dflt;
+  const out: Partial<NetclassRules> = Object.assign({}, dflt); const raw = s.netclassRaw || {};
+  for (let i = c.length - 1; i >= 0; i--) {
+    const r = raw[c[i]];
+    if (r) { for (const [k, v] of Object.entries(r)) if (typeof v === "number" && k !== "priority") out[k] = v; }
+    else if (s.netclasses[c[i]] && c[i] !== "Default") Object.assign(out, s.netclasses[c[i]]);
+  }
+  return out;
+}
 export const netClearance = (s: DesignSettings, net: string | null | undefined): number => { const nc = netclassOf(s, net); return nc && nc.clearance !== undefined ? nc.clearance : s.clearance; };
 export const mm4 = (v: number) => v.toFixed(4) + " mm";
 /** DRC_TEST_PROVIDER::formatMsg: when the two read the same at 4 places, both are written to the nanometre. */

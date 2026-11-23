@@ -15,7 +15,7 @@ import { hasNet, netNode, netOf } from "./nets";
 import { segmentNode, viaNode } from "./nodes";
 import { closestOnSeg } from "./point-editor";
 import { arcTrackNode, elemsPts } from "./posture";
-import { dirOfElem } from "./redundant";
+import { dirOfElem, simplifyNewLine } from "./redundant";
 import { showViolations, viaSpan } from "./route-tool";
 import { RM_MARK, RM_SHOVE } from "./router-settings";
 import { solidObs } from "./shove";
@@ -52,6 +52,15 @@ export function leadingRatline(ctx: PcbCtx, rt: Route): Ratline | null {
   const nl = netlistCached(ctx.doc); const net = nl.nets.get(rt.netKey); if (!net) return null;
   const end = rt.target; const probe = (p: Pt) => ({ t: "circle" as const, x: p[0], y: p[1], r: 0 });
   const touches = (cl: Cluster, p: Pt, layer: string) => cl.items.some((c) => c.kind !== "zone" && c.layers.has(layer) && boxesTouch(c.bbox, [p[0], p[1], p[0], p[1]], EPS) && shapeGap(c.shape, probe(p)) <= EPS);
+  const isThrough = (c: Conductor) => (c.kind === "pad" ? c.pad.type === "thru_hole" : c.kind === "via" ? c.layers.size >= copperOf(ctx.doc).length : false);
+  // TOPOLOGY::NearestUnconnectedAnchorPoint: the joint at the line's end already links another item of the net (a
+  // pad, via or track end exactly there): that joint is the anchor, with its layers, and the ratline collapses.
+  // With nothing drawn yet (ROUTER::GetNearestRatnestAnchor, SegmentCount() == 0) the nearest unconnected item is used.
+  const joined: Conductor[] = []; if (!samePt(end, rt.last)) for (const cl of net.clusters) for (const c of cl.items) if (c.kind !== "zone" && c.layers.has(rt.layer) && c.anchors.some((q: Pt) => samePt(q, end))) joined.push(c);
+  if (joined.length) {
+    const layers = new Set<string>(); for (const c of joined) for (const l of c.layers) layers.add(l);
+    rt.ratAnchor = { p: end.slice(), layers: Array.from(layers), through: joined.some(isThrough) }; return null;
+  }
   let best: Cluster["anchors"][number] | null = null, bd = Infinity, bcl: Cluster | null = null;
   for (const cl of net.clusters) {
     if (touches(cl, rt.last, rt.layer) || touches(cl, end, rt.layer) || (rt.start && touches(cl, rt.start, rt.startLayer))) continue;
@@ -59,7 +68,7 @@ export function leadingRatline(ctx: PcbCtx, rt: Route): Ratline | null {
   }
   rt.ratAnchor = null; if (!best) return null;
   const b0 = best, cond: Conductor | undefined = bcl!.items.find((c) => c.id === b0.id && c.anchors.some((q: Pt) => samePt(q, b0.p))) || bcl!.items.find((c) => c.id === b0.id);
-  rt.ratAnchor = { p: best.p.slice(), layers: cond ? Array.from(cond.layers) : [], through: !!cond && (cond.kind === "pad" ? cond.pad.type === "thru_hole" : cond.kind === "via" ? cond.layers.size >= copperOf(ctx.doc).length : false) };
+  rt.ratAnchor = { p: best.p.slice(), layers: cond ? Array.from(cond.layers) : [], through: !!cond && isThrough(cond) };
   return [end.slice(), best.p.slice()];
 }
 /** highlightNets( true, { net } ): the routed net brightened, the rest dimmed; a highlight the user had on that net is kept for afterwards. */
@@ -141,10 +150,11 @@ export function fixHead(ctx: PcbCtx, opts?: { finish?: boolean; snap?: SnapHit |
     if (via && rs.mode !== RM_MARK && rt.viaBad) { showViolations(rt.viaBad, via.at); return false; }
   }
   const realEnd = !!opts.finish;
-  if (!rs.fix_all_segments && !realEnd && !via && els.length > 1) els = els.slice(0, -1);
+  const fixAll = rs.fix_all_segments || els.some((e) => e.t === "arc");   // a line with arcs is fixed whole (rollback does not work with arcs)
+  if (!fixAll && !realEnd && !via && els.length > 1) els = els.slice(0, -1);
   const ops: BranchOp[] = [];
   if (rs.mode === RM_MARK && opts.snap) ops.push(...adoptNetOps(doc, rt, opts.snap));
-  ops.push(...trackOps(doc, els, rt.width, rt.layer, rt.net));
+  const tops = trackOps(doc, els, rt.width, rt.layer, rt.net); ops.push(...tops);
   const antennas: Antenna[] = [];   // the tracks split at the route's start / end: removeAntennas looks at their halves when the route is committed
   const noteSplit = (sp: RouteSplit, sops: BranchOp[]) => { if (sops.length === 2 && sops[1].add) { const u = K.kid(sops[1].add, "uuid"); antennas.push({ p: sp.point.slice(), layer: layerOf(sp.node), ids: [sp.id, u ? K.str(u[1]) : ""] }); } return sops; };
   if (rt.split && els.length) { ops.push(...noteSplit(rt.split, splitOps(doc, rt.split))); rt.split = null; }
@@ -155,6 +165,9 @@ export function fixHead(ctx: PcbCtx, opts?: { finish?: boolean; snap?: SnapHit |
   const prevDir = els.length ? dirOfElem(els[els.length - 1]) : -1;
   rt.stages.push({ ops, from: rt.last.slice(), layer: rt.layer, net: rt.net, netKey: rt.netKey, placingVia: rt.placingVia, startIds: rt.startIds, split: rt.split, dir: rt.tracer.lastSegDir, antennas });
   rt.bdoc = null; rt.obs = null;
+  // simplifyNewLine( m_lastNode, lastItem ): the fixed line merged with its colinear neighbours, on the same stage
+  const lastAdd = tops.length ? tops[tops.length - 1].add : null, lastU = lastAdd ? K.kid(lastAdd, "uuid") : null;
+  if (lastU) { const sops = simplifyNewLine(ctx.doc, routeDoc(ctx, rt), K.str(lastU[1])); if (sops.length) { ops.push(...sops); rt.bdoc = null; } }
   rt.last = end; rt.head = [end.slice()]; rt.els = []; rt.target = end.slice(); rt.ratline = null; rt.shove = null; rt.collisions = null; rt.startIds = [];
   if (via) {   // switchLayerOnViaPlacement: on to the via's other layer
     rt.layer = rt.placingVia!.toLayer; S.layer = rt.layer; sizesOf(ctx).setActiveLayer(rt.layer); rt.placingVia = null;

@@ -358,6 +358,8 @@ export interface CollabAppApi {
   renderProps(el: HTMLElement): void;
   /** How many items are selected right now (the app's selection plus the tool module's own): menus grey out on 0. */
   selectionCount?(): number;
+  /** What the actions' enable and check conditions read (domains/pcb/tables.ts conditionWhy). */
+  actionState?(): import("../domains/pcb/tables").ActionState;
 }
 
 declare global {

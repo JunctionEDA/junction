@@ -12,10 +12,12 @@ import { E } from "../state";
 import { fitBox } from "../view";
 import { layerDisplayName, netClassOf, netCommand } from "./appearance";
 import { KC, currentDocId, isSchDoc, kdoc, pcbTools, tctx } from "./core";
-import { pageOfDoc, schDocs, sheetDoc } from "./hierarchy";
-import { drillCells, drillLines, groupLeafIds, groupName, itemFields, searchTexts, sortRows } from "./search-model";
+import { schDocs, sheetDoc, sheetInstances } from "./hierarchy";
+import { applyHighlight, currentInstance, preferInstance } from "../schnets";
+import { symbolFlagsForVariant } from "../../canvas/variant-model";
+import { drillCells, drillLines, groupLeafIds, groupName, itemFields, libIsPower, permissiveMatcher, refMatchTexts, searchTexts, sortRows, symbolInstanceRef, unitSuffix } from "./search-model";
 
-interface PropsHelpers { formatLength(mm: number, unit: string): string; netNameOf(doc: KDoc, n: SNode): string; yes(n: SNode, k: string, d: boolean): boolean }
+interface PropsHelpers { formatLength(mm: number, unit: string): string; netNameOf(doc: KDoc, n: SNode): string; yes(n: SNode, k: string, d: boolean): boolean; libUnitCount(doc: KDoc, n: SNode): number }
 const H = (): PropsHelpers => (window.CollabTools.props as unknown as { helpers: PropsHelpers }).helpers;
 const len = (v: number) => H().formatLength(v, String(E.units || "mm"));
 
@@ -43,12 +45,9 @@ const SCH_TABS: SearchTab[] = [
 ];
 export function searchTabs(): SearchTab[] { return isSchDoc() ? SCH_TABS : PCB_TABS; }
 
-/** EDA_SEARCH_MATCH_MODE::PERMISSIVE, near enough: a case-insensitive substring, or a * / ? wildcard over the whole cell. */
-export function matcher(query: string): (cells: string[]) => boolean {
-  const q = query.trim().toLowerCase(); if (!q) return () => true;
-  if (/[*?]/.test(q)) { const re = new RegExp("^" + q.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$", "i"); return (cells) => cells.some((c) => re.test(c)); }
-  return (cells) => cells.some((c) => c.toLowerCase().includes(q));
-}
+/** EDA_SEARCH_MATCH_MODE::PERMISSIVE (search-model.ts permissiveMatcher): a regular expression, a wildcard pattern or a
+ *  substring of the query, whichever finds it, case-insensitive. */
+export function matcher(query: string): (cells: string[]) => boolean { return permissiveMatcher(query); }
 const field = (n: SNode, name: string): string => { const K = KC(); const p = K.kids(n, "property").find((q) => K.str(q[1]) === name); return p ? K.str(p[2]) : ""; };
 function polyArea(pts: [number, number][]): number { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); return Math.abs(a) / 2; }
 
@@ -60,12 +59,11 @@ function pcbRows(tab: string, doc: KDoc, o: SearchOpts): SearchRow[] {
       const lib = K.str(it.node[1]), descr = K.str((K.kid(it.node, "descr") || [])[1]), tags = K.str((K.kid(it.node, "tags") || [])[1]);
       rows.push({ key: it.id, ids: [it.id], cells: [it.ref || field(it.node, "Reference"), it.value || field(it.node, "Value"), layerDisplayName(doc, it.layer || "F.Cu"), len(x), len(y), lib, descr],
         match: searchTexts(itemFields(it.node as unknown[]), [lib, descr, tags], o) }); }
-    rows.sort((a, b) => a.cells[0].localeCompare(b.cells[0], undefined, { numeric: true }));
   } else if (tab === "zones") {
     for (const it of doc.items.values()) { if (it.kind !== "zone") continue; const n = it.node;
       const poly = K.kid(n, "polygon"), pts = poly ? K.ptsOf(poly) : []; const s = K.kid(n, "layer"), m = K.kid(n, "layers");
       const layers = s ? layerDisplayName(doc, K.str(s[1])) : m ? m.slice(1).map((l) => layerDisplayName(doc, K.str(l))).join(", ") : "";
-      rows.push({ key: it.id, ids: [it.id], cells: [K.str((K.kid(n, "name") || [])[1]), H().netNameOf(doc, n), layers, String(K.num((K.kid(n, "priority") || [])[1], 0)), pts[0] ? len(pts[0][0]) : "", pts[0] ? len(pts[0][1]) : "", (polyArea(pts)).toFixed(4).replace(/\.?0+$/, "") + " mm²"] }); }
+      rows.push({ key: it.id, ids: [it.id], cells: [K.str((K.kid(n, "name") || [])[1]), H().netNameOf(doc, n), layers, String(K.num((K.kid(n, "priority") || [])[1], 0)), pts[0] ? len(pts[0][0]) : "", pts[0] ? len(pts[0][1]) : "", (polyArea(pts)).toFixed(4).replace(/\.?0+$/, "") + " mm²"], match: [K.str((K.kid(n, "name") || [])[1])] }); }
   } else if (tab === "nets" || tab === "ratsnest") {
     const P = pcbTools(); if (!P) return rows;
     let names = P.boardNets(doc).map((n) => n.name);
@@ -76,14 +74,14 @@ function pcbRows(tab: string, doc: KDoc, o: SearchOpts): SearchRow[] {
       if (it.kind !== "gr_text" && it.kind !== "gr_text_box" && it.kind !== "dimension") continue; const n = it.node;
       const t = it.kind === "dimension" ? K.kid(n, "gr_text") : n; const at = it.kind === "dimension" ? (t ? K.atOf(t) : [0, 0, 0]) : K.atOf(n);
       const b = it.bbox; const x = K.kid(it.kind === "dimension" && t ? t : n, "at") ? at[0] : b ? (b[0] + b[2]) / 2 : 0, y = K.kid(it.kind === "dimension" && t ? t : n, "at") ? at[1] : b ? (b[1] + b[3]) / 2 : 0;
-      rows.push({ key: it.id, ids: [it.id], cells: [it.kind === "gr_text" ? "Text" : it.kind === "gr_text_box" ? "Textbox" : "Dimension", t ? K.str(t[1]) : "", layerDisplayName(doc, K.str((K.kid(n, "layer") || [])[1])), len(x), len(y)] });
+      rows.push({ key: it.id, ids: [it.id], cells: [it.kind === "gr_text" ? "Text" : it.kind === "gr_text_box" ? "Textbox" : "Dimension", t ? K.str(t[1]) : "", layerDisplayName(doc, K.str((K.kid(n, "layer") || [])[1])), len(x), len(y)], match: [t ? K.str(t[1]) : ""] });
     }
   } else if (tab === "groups") {
     // generators (tuning patterns) are internal, not user-facing grouping
     const groups = new Map<string, unknown[]>(); for (const it of doc.items.values()) if (it.kind === "group") groups.set(it.id, it.node as unknown[]);
     for (const it of doc.items.values()) {
       if (it.kind !== "group") continue; const b = KC().bboxOf(doc, groupLeafIds(it.node as unknown[], groups));
-      rows.push({ key: it.id, ids: [it.id], cells: ["Group", groupName(it.node as unknown[]), b ? len((b[0] + b[2]) / 2) : "", b ? len((b[1] + b[3]) / 2) : ""] });
+      rows.push({ key: it.id, ids: [it.id], cells: ["Group", groupName(it.node as unknown[]), b ? len((b[0] + b[2]) / 2) : "", b ? len((b[1] + b[3]) / 2) : ""], match: [groupName(it.node as unknown[])] });
     }
   } else if (tab === "drills") {
     const copper = (doc as unknown as { copper?: string[] }).copper || [];
@@ -94,47 +92,94 @@ function pcbRows(tab: string, doc: KDoc, o: SearchOpts): SearchRow[] {
   return rows;
 }
 
-const yn = (b: boolean) => (b ? "X" : "");
+// getResultCell: wxS( "X" ) or wxS( " " )
+const yn = (b: boolean) => (b ? "X" : " ");
 const LABEL_TYPES: Record<string, string> = { label: "Local", global_label: "Global", hierarchical_label: "Hierarchical", netclass_flag: "Directive", directive_label: "Directive" };
 /** The symbol's library keywords (ki_keywords of its lib_symbols entry), for "Search Metadata". */
 function symbolKeywords(doc: KDoc, lib: string): string {
   const K = KC(), def = doc.lib && doc.lib.get(lib); if (!def) return "";
   const kw = K.kids(def, "property").find((q) => K.str(q[1]) === "ki_keywords"); return kw ? K.str(kw[2]) : "";
 }
+interface VarApi { expandTextVars(text: string, resolve: (tok: string) => string | null): string; sheetTextVars(doc: unknown): Record<string, string>; varResolver(vars: Record<string, string>, opts?: { project?: unknown }): (tok: string) => string | null }
+/** EDA_TEXT::GetShownText( FOR_GUI ) of a sheet's free text: the title-block, sheet and project variables resolved, the
+ *  page number being the sheet instance's. */
+function shownOnSheet(doc: KDoc, page: string, text: string, own?: (tok: string) => string | null): string {
+  if (!text || text.indexOf("${") < 0) return text;
+  try {
+    const V = KC() as unknown as VarApi; const ctx = Object.assign({}, doc, { pageNumber: page || (doc as unknown as { pageNumber?: string }).pageNumber });
+    const sheet = V.varResolver(V.sheetTextVars(ctx), { project: (doc as unknown as { projectVars?: unknown }).projectVars || null });
+    return V.expandTextVars(text, (tok) => { const r = own ? own(tok) : null; return r !== null ? r : sheet(tok); });
+  } catch (e) { return text; }
+}
+/**
+ * SCH_SEARCH_HANDLER::FindAll: screens.BuildClientSheetPathList(), then one hit per ( item, SCH_SHEET_PATH ), so a
+ * sheet file used three times lists each of its items three times, each with its instance's page and (a symbol) its
+ * instance's reference; a schematic file outside the hierarchy is not searched.
+ */
 function schRows(tab: string, o: SearchOpts): SearchRow[] {
   const K = KC(), rows: SearchRow[] = [];
-  for (const d of schDocs()) {
-    const doc = sheetDoc(d.docId); if (!doc) continue; const page = pageOfDoc(d.docId); const here = d.docId === currentDocId();
+  const variant = String(E.currentVariant || "");
+  for (const inst of sheetInstances()) {
+    const nd = inst.node; if (!nd.docId) continue;
+    const doc = sheetDoc(nd.docId); if (!doc) continue; const page = nd.page;
+    let groups: Map<string, unknown[]> | null = null;
     for (const it of doc.items.values()) {
-      const n = it.node, at = () => K.atOf(n); const row = (cells: string[], match?: string[]) => rows.push({ key: d.docId + ":" + it.id, ids: [it.id], cells, docId: here ? undefined : d.docId, match });
+      const n = it.node, at = () => K.atOf(n); const row = (cells: string[], match: string[]) => rows.push({ key: nd.path + ":" + it.id, ids: [it.id], cells, docId: nd.docId || undefined, inst: inst.human, match });
       if (it.kind === "symbol") {
-        const lib = K.str((K.kid(n, "lib_id") || [])[1]); const ref = field(n, "Reference"); const power = ref.startsWith("#") || /^power:/.test(lib);
-        const match = (): string[] => searchTexts(itemFields(n as unknown[]), [lib, field(n, "Description"), symbolKeywords(doc, lib)], o);
-        if (tab === "symbols" && !power) row([ref, field(n, "Value"), field(n, "Footprint"), page, len(at()[0]), len(at()[1]), yn(H().yes(n, "exclude_from_sim", false)), yn(!H().yes(n, "in_bom", true)), yn(!H().yes(n, "on_board", true)), yn(!H().yes(n, "in_pos_files", true)), yn(H().yes(n, "dnp", false)), lib, field(n, "Description")], match());
-        if (tab === "power" && power) row([ref, field(n, "Value"), page, len(at()[0]), len(at()[1])], match());
-      } else if (tab === "text" && (it.kind === "text" || it.kind === "text_box")) row([it.kind === "text" ? "Text" : "Text Box", K.str(n[1]), page, len(at()[0]), len(at()[1])]);
-      else if (tab === "labels" && LABEL_TYPES[it.kind]) row([LABEL_TYPES[it.kind], K.str(n[1]), page, len(at()[0]), len(at()[1])]);
+        if (tab !== "symbols" && tab !== "power") continue;
+        const libId = K.str((K.kid(n, "lib_id") || [])[1]), libName = K.str((K.kid(n, "lib_name") || [])[1]);
+        const def = K.resolveLib(doc, libName || libId) || (libName ? K.resolveLib(doc, libId) : null);
+        // SYMBOL_SEARCH_HANDLER / POWER_SEARCH_HANDLER: !IsMissingLibSymbol() && IsPower()
+        const power = libIsPower(def as unknown[] | null);
+        if ((tab === "power") !== power) continue;
+        // SCH_SYMBOL::GetRef( sheetPath, true ): the instance's reference, with the unit letter of a multi-unit symbol
+        const ir = symbolInstanceRef(n as unknown[], inst.instPath), units = H().libUnitCount ? H().libUnitCount(doc, n) : 1;
+        const ref = units > 1 ? ir.ref + unitSuffix(ir.unit) : ir.ref;
+        // SCH_FIELD::GetShownText( sheetPath, FOR_GUI ): SCH_SYMBOL::ResolveTextVar's ${REFERENCE}, ${VALUE}, ${UNIT} and
+        // the symbol's other fields by name, then the sheet's and the project's variables
+        const own = (tok: string): string | null => {
+          const up = tok.toUpperCase();
+          if (up === "REFERENCE") return ref; if (up === "UNIT") return units > 1 ? unitSuffix(ir.unit) : "";
+          for (const q of K.kids(n, "property")) if (K.str(q[1]).toUpperCase() === up) return K.str(q[2]);
+          return null;
+        };
+        const shown = (name: string): string => shownOnSheet(doc, page, field(n, name), own);
+        // SCH_FIELD::Matches: every field that is shown (all with Search Hidden Fields); the Reference field matches
+        // the instance's reference (and that with its unit letter) and surfaces the metadata hits
+        const fields = itemFields(n as unknown[]), refField = fields.find((f) => f.name === "Reference");
+        const refSearched = !!refField && (o.hidden || !refField.hidden);
+        const descr = def ? field(def, "Description") || field(n, "Description") : "";
+        const match = searchTexts(fields.filter((f) => f.name !== "Reference"), refSearched ? [libId, descr, symbolKeywords(doc, libName || libId)] : [], o);
+        if (refSearched) match.push(...refMatchTexts(ir.ref, ir.unit, units));
+        if (tab === "symbols") {
+          // ResolveExcludedFromSim( sheetPath, variant ) … ResolveDNP( sheetPath, variant )
+          const f = symbolFlagsForVariant(n, variant, inst.instPath, doc.version);
+          row([ref, shown("Value"), shown("Footprint"), page, len(at()[0]), len(at()[1]), yn(f.excludedFromSim), yn(f.excludedFromBOM), yn(f.excludedFromBoard), yn(f.excludedFromPosFiles), yn(f.dnp), libId, descr], match);
+        } else row([ref, shown("Value"), page, len(at()[0]), len(at()[1])], match);
+      } else if (tab === "text" && (it.kind === "text" || it.kind === "text_box")) row([it.kind === "text" ? "Text" : "Text Box", shownOnSheet(doc, page, K.str(n[1])), page, len(at()[0]), len(at()[1])], [K.str(n[1])]);   // item->Matches: the text alone
+      else if (tab === "labels" && LABEL_TYPES[it.kind]) row([LABEL_TYPES[it.kind], shownOnSheet(doc, page, K.str(n[1])), page, len(at()[0]), len(at()[1])], [K.str(n[1])]);   // SCH_LABEL_BASE::Matches
       else if (tab === "groups" && it.kind === "group") {
-        const groups = new Map<string, unknown[]>(); for (const g of doc.items.values()) if (g.kind === "group") groups.set(g.id, g.node as unknown[]);
+        if (!groups) { groups = new Map<string, unknown[]>(); for (const g of doc.items.values()) if (g.kind === "group") groups.set(g.id, g.node as unknown[]); }
         const b = K.bboxOf(doc, groupLeafIds(n as unknown[], groups));
-        row([groupName(n as unknown[]), page, b ? len((b[0] + b[2]) / 2) : "", b ? len((b[1] + b[3]) / 2) : ""]);
+        row([groupName(n as unknown[]), page, b ? len((b[0] + b[2]) / 2) : "", b ? len((b[1] + b[3]) / 2) : ""], [groupName(n as unknown[])]);   // SCH_GROUP::Matches: the name
       }
     }
   }
-  const col = tab === "text" || tab === "labels" ? 1 : 0;
-  if (tab !== "groups") rows.sort((a, b) => a.cells[col].localeCompare(b.cells[col], undefined, { numeric: true }));
   return rows;
 }
 
-const MAX_ROWS = 500;
+/** SEARCH_PANE_TAB::Search: the handler's hits, every one of them (the list is virtual), then SEARCH_PANE_LISTVIEW::Sort,
+ *  which with no sort column (m_sortCol -1) orders by the first column, ascending, with StrNumCmp. */
 export function search(tab: string, query: string, opts?: SearchOpts): SearchResult {
   const doc = kdoc(); if (!doc) return { tab, rows: [], total: 0 };
   const o = opts || DEFAULT_OPTS;
   let rows: SearchRow[] = [];
-  try { rows = isSchDoc() ? schRows(tab, o) : pcbRows(tab, doc, o); } catch (e) { console.warn(e); }
+  const sch = isSchDoc();
+  try { rows = sch ? schRows(tab, o) : pcbRows(tab, doc, o); } catch (e) { console.warn(e); }
   const m = matcher(query); rows = rows.filter((r) => m(r.match || r.cells));
-  if (o.sortCol >= 0) rows = sortRows(rows, o.sortCol, o.ascending);
-  return { tab, rows: rows.slice(0, MAX_ROWS), total: rows.length };
+  // the board's Nets, Ratsnest and Drills handlers keep their own order until a column is clicked
+  if (o.sortCol >= 0 || sch || (tab !== "nets" && tab !== "ratsnest" && tab !== "drills")) rows = sortRows(rows, o.sortCol, o.ascending);
+  return { tab, rows, total: rows.length };
 }
 
 /**
@@ -165,12 +210,21 @@ export function searchDispatch(a: PanelAction): boolean {
     netCommand("highlight", names, names[0]);
     return true;
   }
-  // a schematic row on another sheet opens that sheet first (KiCad selects the hits of the current sheet path)
-  const away = rows.find((r) => r.docId);
-  if (away) {
-    const d = schDocs().find((x) => x.docId === away.docId); if (!d) return true;
-    const ids = rows.filter((r) => r.docId === away.docId).flatMap((r) => r.ids);
-    void (openDoc(d) as Promise<void>).then(() => { setTimeout(() => { selectAndShow(ids, a.zoom); after(); }, 50); });
+  // SCH_SEARCH_HANDLER::SelectItems: the selection is cleared; the hits are selected only when they are all on one
+  // sheet path, which is shown first (changeSheet) when it is not the current one
+  const first = rows.find((r) => r.inst !== undefined);
+  if (first) {
+    if (rows.some((r) => r.inst !== first.inst || r.docId !== first.docId)) { selectAndShow([], a.zoom); return true; }
+    const ids = Array.from(new Set(rows.flatMap((r) => r.ids)));
+    let cur: { human?: string } | null = null; try { cur = currentInstance(); } catch (e) { cur = null; }
+    if (first.docId && first.docId !== currentDocId()) {
+      const d = schDocs().find((x) => x.docId === first.docId); if (!d) return true;
+      preferInstance(first.inst as string);
+      void (openDoc(d) as Promise<void>).then(() => { setTimeout(() => { selectAndShow(ids, a.zoom); after(); }, 50); });
+      return true;
+    }
+    if (!cur || cur.human !== first.inst) { preferInstance(first.inst as string); applyHighlight(); }   // the same file as another instance
+    selectAndShow(ids, a.zoom); after();
     return true;
   }
   selectAndShow(Array.from(new Set(rows.flatMap((r) => r.ids))), a.zoom); after();

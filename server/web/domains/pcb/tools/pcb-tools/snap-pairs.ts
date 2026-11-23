@@ -63,6 +63,21 @@ export function snapAllLayers(ctx: PcbCtx | null): boolean {
   if (fp) S.snapAllLayersFp = stored; else S.snapAllLayers = stored;
   return stored;
 }
+/** MAGNETIC_OPTIONS (snap_settings.h): NO_EFFECT, CAPTURE_CURSOR_IN_TRACK_TOOL ("When routing tracks"), CAPTURE_ALWAYS. */
+export const MAGNETIC_NEVER = 0, MAGNETIC_ROUTING = 1, MAGNETIC_ALWAYS = 2;
+const MAG_NAMES = ["never", "trackTool", "always"] as const;
+/** MAGNETIC_SETTINGS::pads / tracks as the MAGNETIC_OPTIONS number: the one setting the Preferences dialog keeps
+ *  (S.magnetic, grid-helper.ts magneticSettings; default CAPTURE_CURSOR_IN_TRACK_TOOL). */
+export function magneticOption(which: "pads" | "tracks"): number {
+  const v = S.magnetic ? S.magnetic[which] : undefined, i = v ? MAG_NAMES.indexOf(v) : -1;
+  return i >= 0 ? i : MAGNETIC_ROUTING;
+}
+export function setMagneticOption(which: "pads" | "tracks", v: number): void {
+  v = v === MAGNETIC_NEVER || v === MAGNETIC_ALWAYS ? v : MAGNETIC_ROUTING;
+  S.magnetic = Object.assign({}, S.magnetic || {}, { [which]: MAG_NAMES[v] });
+}
+/** TOOL_BASE::checkSnap: the router snaps to an end item of this kind unless its magnetic option is "Never" (tracks and vias share one). */
+export const routerSnapsTo = (kind: string) => magneticOption(kind === "pad" ? "pads" : "tracks") !== MAGNETIC_NEVER;
 export function setSnapMode(ctx: PcbCtx, mode: "active" | "all" | "toggle"): boolean {
   const fp = !!ctx.fpEditor, now = snapAllLayers(ctx);
   const v = mode === "toggle" ? !now : mode === "all";

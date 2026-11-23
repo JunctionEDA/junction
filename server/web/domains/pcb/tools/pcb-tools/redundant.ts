@@ -1,11 +1,13 @@
 // pcb-tools/redundant.ts — Remove redundant tracks: removeLoops and removeAntennas.
-import type { Antenna, BoardDoc, BranchCache, Pt, Route, TrackElem } from "./types";
+import type { Antenna, BoardDoc, BranchCache, BranchOp, Pt, Route, TrackElem } from "./types";
+import { branchDoc, opOn } from "./branch";
 import { ptKey } from "./connected";
 import { jointIndex, trackEnds } from "./dragger";
 import { isLocked } from "./groups";
+import { distSeg } from "./hit";
 import { netOf } from "./nets";
-import { S } from "./state";
-import { layerOf, samePt, widthOf } from "./util";
+import { K, S } from "./state";
+import { clone, layerOf, r6, samePt, widthOf } from "./util";
 import { dir8 } from "./walkaround";
 
 export const dirOfElem = (e: TrackElem) => (e.t === "seg" ? dir8(e.a, e.b) : -1);
@@ -112,4 +114,57 @@ export function removeRedundant(base: BoardDoc, b: BoardDoc, rt: Route) {
     const key = st.netKey; for (const id of antennaRemovals(base, out, ant, key)) out.items.delete(id); out.__bc = {};
   }
   return out;
+}
+/**
+ * PLACEMENT_ALGO::simplifyNewLine, run on the route's node after each fix.  First the colinear leftovers on joints
+ * that are not line corners: of two same-width tracks meeting there, one that lies wholly inside the other and whose
+ * far end dangles is removed.  Then the line through the latest track is assembled (through its line corners, onto
+ * existing board tracks too) and its colinear neighbours are merged (OPTIMIZER::MERGE_COLINEAR, Simplify): two clicks
+ * along one straight run, or carrying an existing track straight on, leave one segment.  `base` is the board, `b` the
+ * route's branch with the fix on it; the branch edits that simplify it are returned (none when nothing merges).
+ */
+export function simplifyNewLine(base: BoardDoc, b: BoardDoc, latestId: string): BranchOp[] {
+  const ops: BranchOp[] = []; const latest0 = b.items.get(latestId); if (!latest0 || (latest0.kind !== "segment" && latest0.kind !== "arc")) return ops;
+  const onSeg = (a: Pt, e: Pt, p: Pt) => distSeg(p[0], p[1], a[0], a[1], e[0], e[1]) <= 1e-6;
+  const delOp = (it: KItem, grp?: object): BranchOp => (base.items.has(it.id) ? opOn(it, { del: it.id }, grp) : (grp ? { del: it.id, grp } : { del: it.id }));
+  // --- colinear segments on non-line-corner joints
+  const cleanup = new Set<string>();
+  const lineCorner = (j: ReturnType<typeof jointAt>) => !j.solid && j.links.length === 2 && j.links.every((o) => !isLocked(o.node)) && Math.abs(widthOf(j.links[0].node, 0.25) - widthOf(j.links[1].node, 0.25)) < 1e-9;
+  for (const it of b.items.values()) {
+    if (it.kind !== "segment" || base.items.has(it.id) || cleanup.has(it.id)) continue;   // GetUpdatedItems: the added segments
+    const L = layerOf(it.node), key = jointIndex(b).NT.key(netOf(it.node)), w = widthOf(it.node, 0.25); const [A, B] = trackEnds(it); if (!A || !B) continue;
+    const far = (o: KItem, p: Pt) => { const [a, e] = trackEnds(o); return samePt(a, p) ? e : a; };
+    const processJoint = (p: Pt): boolean => {
+      const j = jointAt(b, L, p, key); if (lineCorner(j)) return false;
+      for (const nb of j.links) {
+        if (nb === it || nb.id === it.id || cleanup.has(nb.id) || Math.abs(widthOf(nb.node, 0.25) - w) > 1e-9) continue;
+        const [na, ne] = trackEnds(nb); if (!na || !ne) continue;
+        if (nb.kind === "segment" && onSeg(A, B, na) && onSeg(A, B, ne)) { if (jointAt(b, L, far(nb, p), key).count === 1) cleanup.add(nb.id); }
+        else if (nb.kind === "segment" && onSeg(na, ne, A) && onSeg(na, ne, B)) { if (jointAt(b, L, far(it, p), key).count === 1) { cleanup.add(it.id); return true; } }
+      }
+      return false;
+    };
+    if (!processJoint(A)) processJoint(B);
+  }
+  let doc = b;
+  if (cleanup.size) { for (const id of cleanup) ops.push(delOp(b.items.get(id)!)); doc = branchDoc(b, ops.map((o) => ({ del: o.del }))); }
+  // --- AssembleLine( aLatest ) and MERGE_COLINEAR
+  const latest = doc.items.get(latestId); if (!latest) return ops;
+  const line = assembleLoopLine(doc, latest); if (!line || line.ids.length < 2) return ops;
+  const colinear = (i: number) => {   // tracks i and i + 1 of the line: both straight, on one line and going the same way
+    const x = doc.items.get(line.ids[i])!, y = doc.items.get(line.ids[i + 1])!; if (x.kind !== "segment" || y.kind !== "segment") return false;
+    const a = line.pts[i], m = line.pts[i + 1], e = line.pts[i + 2]; const ux = m[0] - a[0], uy = m[1] - a[1], vx = e[0] - m[0], vy = e[1] - m[1];
+    return Math.abs(ux * vy - uy * vx) <= 1e-9 * Math.max(1, Math.hypot(ux, uy) * Math.hypot(vx, vy)) && ux * vx + uy * vy > 0;
+  };
+  for (let i = 0; i + 1 < line.ids.length;) {
+    let j = i; while (j + 1 < line.ids.length && colinear(j)) j++;
+    if (j === i) { i++; continue; }
+    const first = doc.items.get(line.ids[i])!, from = line.pts[i], to = line.pts[j + 1]; const grp = {};
+    const node = clone(first.node); const sk = K.kid(node, "start")!, ek = K.kid(node, "end")!;
+    if (samePt([K.num(sk[1]), K.num(sk[2])], from)) ek.splice(1, 2, r6(to[0]), r6(to[1])); else sk.splice(1, 2, r6(to[0]), r6(to[1]));
+    ops.push(base.items.has(first.id) ? opOn(first, { set: first.id, node }, grp) : { set: first.id, node, grp });
+    for (let k = i + 1; k <= j; k++) ops.push(delOp(doc.items.get(line.ids[k])!, grp));
+    i = j + 1;
+  }
+  return ops;
 }

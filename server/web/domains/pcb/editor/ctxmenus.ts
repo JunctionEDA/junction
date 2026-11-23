@@ -27,6 +27,8 @@ export interface MenuCtx {
   drawingLine: boolean;
   /** a track is being routed */
   routing: boolean;
+  /** ROUTER_TOOL's hasOtherEnd (the routed net has a ratsnest edge) and inRouteSelected (a Route Selected run is in progress) */
+  routeOtherEnd?: boolean; inRouteSelected?: boolean;
   /** a shape with an outline is being drawn and has enough corners to close / a corner to take back */
   canClose: boolean; canUndoPoint: boolean;
   /** PCB_POINT_EDITOR::addCornerCondition / removeCornerCondition for the single selected item at the cursor */
@@ -449,10 +451,13 @@ function pcbSelectionMenu(): CondMenu {
 /** ROUTER_TOOL's menu (pcbnew/router/router_tool.cpp), shown while Route Single Track is the active tool. */
 function pcbRouterMenu(): CondMenu {
   const m = new CondMenu(); const notRouting: Cond = (c) => !c.routing;
-  m.item("ACTIONS::cancelInteractive", always, 1).sep(1);
+  const hasOtherEnd: Cond = (c) => !!c.routeOtherEnd;
+  m.item("ACTIONS::cancelInteractive", always, 1).item("PCB_ACTIONS::cancelCurrentItem", (c) => !!c.inRouteSelected, 1).sep(1);
   m.item("PCB_ACTIONS::clearHighlight", haveHighlight, 2).sep(haveHighlight, 2);
   m.item("PCB_ACTIONS::routeSingleTrack", notRouting).item("PCB_ACTIONS::routeDiffPair", notRouting);
   m.item("ACTIONS::finishInteractive").item("PCB_ACTIONS::routerUndoLastSegment");
+  m.item("PCB_ACTIONS::routerContinueFromEnd", hasOtherEnd).item("PCB_ACTIONS::routerAttemptFinish", hasOtherEnd);
+  m.item("PCB_ACTIONS::routerAutorouteSelected", and(notRouting, notEmpty)).item("PCB_ACTIONS::routerOptimizeSelected", and(notRouting, notEmpty));
   m.item("PCB_ACTIONS::breakTrack", notRouting).item("PCB_ACTIONS::drag45Degree", notRouting).item("PCB_ACTIONS::dragFreeAngle", notRouting);
   m.item("ACT_PlaceThroughVia").item("ACT_PlaceBlindVia").item("ACT_PlaceMicroVia").item("ACT_SelLayerAndPlaceThroughVia").item("ACT_SelLayerAndPlaceBlindVia").item("ACT_SelLayerAndPlaceMicroVia");
   m.item("ACT_SwitchPosture");

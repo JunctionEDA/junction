@@ -1,6 +1,6 @@
 // diffpair.test.js — Route Differential Pair (pcb-tools.js, after pcbnew/router/pns_diff_pair_placer.cpp):
 // BOARD::MatchDpSuffix, FindDpPrimitivePair and its failure messages, the coupled lines at the pair's gap, walk around,
-// Highlight collisions, the via pair, Backspace, landing on the target pair as one "Route Track" commit, the pair's
+// Highlight collisions, the via pair, Backspace, landing on the target pair as one "Routing" commit, the pair's
 // sizes (BOARD_DESIGN_SETTINGS / pcb-sizes.ts routeDiffPair), DIFF_PAIR_MENU and the Differential Pair Dimensions
 // dialog's logic (web/domains/pcb/editor/routersettings.ts), and the router menu's diffPairCond (web/domains/pcb/editor/ctxmenus.ts).
 // Run: node server/static/tests/diffpair.test.js
@@ -80,8 +80,13 @@ test("FindDpPrimitivePair: a pad and the nearest pad of the partner net; a track
   assert.ok(r.pair); assert.deepEqual(r.pair.P.p, [10, 10]); assert.deepEqual(r.pair.N.p, [10.65, 10]);
   const t = P.findDpPrimitivePair(doc, null, [30, 14], "F.Cu", { code: -1, name: "CLK_P" });
   assert.ok(t.pair, "the open ends of the CLK pair"); assert.deepEqual(t.pair.N.p, [30.45, 14]); assert.deepEqual(t.pair.P.dir, [0, 1]);
+  // findDpMidtraceIntersection: mid-track of a coupled pair, the click projected onto the partner (BuildMidpairIntersection)
   const mid = P.findDpPrimitivePair(doc, null, [30, 12], "F.Cu", { code: -1, name: "CLK_P" });
-  assert.equal(mid.error, P.DP_MSG_START, "mid-track is not an end");
+  assert.ok(mid.pair, "a mid-trace start"); assert.deepEqual(mid.pair.P.p, [30, 12]); assert.deepEqual(mid.pair.N.p, [30.45, 12]);
+  assert.equal(mid.pair.P.mid, true); assert.deepEqual(mid.pair.P.dir, [0, 1], "anchorDirection: the segment's own direction");
+  const midN = P.findDpPrimitivePair(doc, null, [30.45, 11], "F.Cu", { code: -1, name: "CLK_N" });
+  assert.deepEqual(midN.pair.P.p, [30, 11]); assert.deepEqual(midN.pair.N.p, [30.45, 11]);
+  assert.equal(P.findDpPrimitivePair(doc, null, [40, 12], "F.Cu", { code: -1, name: "CLK_P" }).error, P.DP_MSG_START_FINAL, "nothing there");
   assert.equal(P.findDpPrimitivePair(doc, null, [30, 12], "F.Cu", { code: -1, name: "GND" }).error, P.DP_MSG_NETS);
 });
 
@@ -110,8 +115,9 @@ test("a cursor beside the gateway's line keeps the straight run (routeHead's lea
 });
 
 test("walk around: the coupled pair goes round a pad of another net; every line keeps its clearance", () => {
-  const { ctx, doc } = fakeCtx(); startPair(ctx, [10, 10]); const rt = P.state.route;
-  pcb.onPointerMove(ev(), [10.3, 15], ctx); pcb.onPointerDown(ev(), [10.3, 15], ctx); assert.equal(rt.stages.length, 1);
+  const { ctx, doc, log } = fakeCtx(); startPair(ctx, [10, 10]); const rt = P.state.route;
+  pcb.onPointerMove(ev(), [10.3, 15], ctx); pcb.onPointerDown(ev(), [10.3, 15], ctx);
+  assert.equal(log.commits.length, 1, "DIFF_PAIR_PLACER::FixRoute commits each fix (CommitPlacement)"); assert.equal(rt.stages.length, 0);
   pcb.onPointerMove(ev(), [12, 24], ctx);
   assert.ok(rt.dpFit, "a clean fit");
   const O = P.routeObstacles(doc, P.designSettings(null), "USB_D+", "F.Cu", null);
@@ -120,16 +126,21 @@ test("walk around: the coupled pair goes round a pad of another net; every line 
   assert.ok(rt.reached, "the pair reaches the cursor below the pad");
 });
 
-test("landing on the partner pads finishes: both nets, one 'Route Track' commit, pads connected", () => {
+test("landing on the partner pads finishes: both nets, a 'Routing' commit per fix, pads connected; Escape keeps what was fixed", () => {
   const { ctx, log, doc } = fakeCtx(); startPair(ctx, [10, 10]); const rt = P.state.route;
   pcb.onPointerMove(ev(), [10.3, 15], ctx); pcb.onPointerDown(ev(), [10.3, 15], ctx);
   pcb.onPointerMove(ev(), [20, 30], ctx); assert.ok(rt.dpTargetPair, "snapped onto the target pair");
   pcb.onPointerDown(ev(), [20, 30], ctx);
-  assert.equal(P.state.route, null); assert.equal(log.commits.length, 1); assert.equal(log.commits[0].label, "Route Track");
+  assert.equal(P.state.route, null); assert.equal(log.commits.length, 2); assert.deepEqual(log.commits.map((c) => c.label), ["Routing", "Routing"]);
   const sp = segs(doc, "USB_D+"), sn = segs(doc, "USB_D-"); assert.ok(sp.length >= 3 && sn.length >= 3);
   const hasEnd = (list, p) => list.some((s) => ends(s).some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 1e-6));
   assert.ok(hasEnd(sp, [10, 10]) && hasEnd(sp, [20, 30])); assert.ok(hasEnd(sn, [10.65, 10]) && hasEnd(sn, [20.65, 30]));
   const nl = P.netlist(doc); assert.equal(nl.nets.get("USB_D+").unconnected, 0); assert.equal(nl.nets.get("USB_D-").unconnected, 0);
+  // AbortPlacement only kills the uncommitted head: a fixed leg survives Escape
+  const o = fakeCtx(); startPair(o.ctx, [10, 10]);
+  pcb.onPointerMove(ev(), [10.3, 15], o.ctx); pcb.onPointerDown(ev(), [10.3, 15], o.ctx); const kept = segs(o.doc, "USB_D+").length; assert.ok(kept >= 1);
+  pcb.onPointerMove(ev(), [12, 24], o.ctx); pcb.cancel(); assert.equal(P.state.route, null);
+  assert.equal(segs(o.doc, "USB_D+").length, kept, "the fixed leg stays"); assert.equal(o.log.commits.length, 1);
 });
 
 test("Highlight collisions: the lines go straight, the obstacle is marked and the click does not fix", () => {
@@ -138,15 +149,15 @@ test("Highlight collisions: the lines go straight, the obstacle is marked and th
   pcb.onPointerDown(ev(), [12.3, 22], ctx); assert.equal(rt.stages.length, 0);
 });
 
-test("V: a via pair at the via gap ends both lines; routing goes on on the other layer; Backspace takes it back", () => {
+test("V: a via pair at the via gap ends both lines; routing goes on on the other layer; Backspace does nothing (no UnfixRoute for a pair)", () => {
   const { ctx, doc } = fakeCtx(); startPair(ctx, [10, 10]); const rt = P.state.route;
   pcb.onPointerMove(ev(), [10.3, 15], ctx); pcb.onKey("v", ev(), ctx); assert.ok(rt.placingVia);
   const V = rt.dpLines.vias; assert.ok(V); assert.ok(Math.abs(Math.hypot(V.P[0] - V.N[0], V.P[1] - V.N[1]) - (0.25 + 0.6)) < 1e-6, "centres at via gap + diameter");
   pcb.onPointerDown(ev(), [10.3, 15], ctx);
-  assert.equal(rt.layer, "B.Cu"); assert.equal(rt.stages.length, 1); assert.equal(rt.dpStart.P.kind, "via");
-  pcb.onKey("Backspace", ev(), ctx); assert.equal(rt.stages.length, 0); assert.equal(rt.layer, "F.Cu");
-  pcb.onPointerMove(ev(), [10.3, 15], ctx); pcb.onKey("v", ev(), ctx); pcb.onPointerDown(ev(), [10.3, 15], ctx);
-  pcb.onKey("End", ev(), ctx); assert.equal(vias(doc).length, 2);
+  assert.equal(rt.layer, "B.Cu"); assert.equal(rt.dpStart.P.kind, "via"); assert.equal(vias(doc).length, 2, "the via pair is on the board at once");
+  pcb.onKey("Backspace", ev(), ctx); assert.equal(rt.layer, "B.Cu", "still on the via's layer"); assert.equal(vias(doc).length, 2);
+  assert.equal(P.state.route, rt, "still routing");
+  pcb.onKey("End", ev(), ctx); assert.equal(vias(doc).length, 2); assert.equal(P.state.layer, "F.Cu", "the active layer is restored when the route ends");
   assert.deepEqual(vias(doc).map((v) => K.str(K.kid(v.node, "net")[1])).sort(), ["USB_D+", "USB_D-"]);
 });
 
@@ -249,6 +260,34 @@ test("dpCoupledSegment: the parallel partner at the pair's gap; nothing for a ne
   const c = P.dpCoupledSegment(ctx, doc.items.get("pb")); assert.equal(c.item.id, "nb"); assert.deepEqual(c.grab, [20, 10.45]);
   assert.equal(P.dpCoupledSegment(ctx, doc.items.get("pa")).item.id, "na");
   const { ctx: c2, doc: d2 } = fakeCtx(); assert.equal(P.dpCoupledSegment(c2, d2.items.get("sp")).item.id, "sn");
+});
+
+test("posture: DIFF_PAIR_PLACER has no mouse trail; m_initialDiagonal (false) until a fix, / flips it (FlipPosture)", () => {
+  P.setRouterSettings({ start_diagonal: true });
+  const { ctx } = fakeCtx(); startPair(ctx, [10, 10]); const rt = P.state.route;
+  assert.equal(rt.diagFirst, false, "start_diagonal does not apply to a pair");
+  pcb.onPointerMove(ev(), [14, 18], ctx); assert.equal(rt.diagFirst, false, "the cursor's path does not set it");
+  pcb.onKey("/", ev(), ctx); assert.equal(rt.diagFirst, true);
+});
+
+test("message panel: DP Max Uncoupled-length from a diff_pair_uncoupled rule; Min Clearance from the resolved rule", () => {
+  P.setCustomRules(`(version 1)\n(rule "unc" (condition "A.inDiffPair('USB_D')") (constraint diff_pair_uncoupled (max 2mm)))\n(rule "clr" (condition "A.NetName == 'USB_D+'") (constraint clearance (min 0.4mm)))`);
+  try {
+    const { ctx, doc } = fakeCtx(); startPair(ctx, [10, 10]); const rt = P.state.route;
+    const rows = P.msgPanelInfo(doc, [], { route: rt, units: "mm" });
+    const unc = rows.find((r) => /^DP Max Uncoupled-length/.test(r.title)); assert.ok(unc, "the row is there"); assert.equal(unc.value, "(from rule 'unc')");
+    const clr = rows.find((r) => /^Min Clearance/.test(r.title)); assert.equal(clr.value, "(from rule 'clr')");
+  } finally { P.setCustomRules(null); }
+});
+
+test("mid-trace start: the pair leaves the middle of the CLK pair; the first fix splits both tracks there (SplitAdjacentSegments)", () => {
+  const { ctx, doc, log } = fakeCtx(); startPair(ctx, [30, 12]); const rt = P.state.route; assert.ok(rt, log.toasts.join("; "));
+  assert.equal(rt.dpStart.P.mid, true);
+  pcb.onPointerMove(ev(), [33, 17], ctx); pcb.onPointerDown(ev(), [33, 17], ctx);
+  assert.ok(log.commits.length >= 1, "the first leg is committed");
+  const hasEnd = (net, q) => segs(doc, net).some((it) => ends(it).some((e) => Math.hypot(e[0] - q[0], e[1] - q[1]) < 1e-6));
+  assert.ok(hasEnd("CLK_P", [30, 12]) && hasEnd("CLK_N", [30.45, 12]), "both tracks end at the anchors now");
+  assert.ok(segs(doc, "CLK_P").some((it) => it.id === "sp"), "the first half keeps the uuid");
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

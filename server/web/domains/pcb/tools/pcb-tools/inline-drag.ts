@@ -153,7 +153,7 @@ export function finishDrag(ctx: PcbCtx, commit: unknown, force: boolean) {
   if (commit && D.moved && !ctx.viewOnly) {
     const all: PcbChange[] = []; let ok = true;
     for (const d of D.subs) { const ch = dragFixChanges(ctx, d, force); if (!ch) { ok = false; break; } all.push(...ch); }
-    if (ok && all.length) { ctx.commit(all, "drag track"); done = true; }
+    if (ok && all.length) { ctx.commit(all, "Routing"); done = true; }
     if (D.appSel && ctx.setSelection && ctx.selection) ctx.setSelection(Array.from(ctx.selection));
   }
   routeUnhighlight(ctx, D.subs[0]);

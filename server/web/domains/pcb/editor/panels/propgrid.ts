@@ -9,18 +9,24 @@ import type { PropGrid, PropGroup, PropRow, PropType } from "../../panels-api";
 import { E } from "../state";
 import { fromDisplayAbsAxis, toDisplayAbsAxis } from "../userorigin";
 import { setNet } from "../pcbdialogs/item-props";
+import * as TV from "../pcbdialogs/track-via-model";
+import { applyDimDialog, dimDialogValues, type DimDialogValues } from "../pcbdialogs/dimension";
+import { KICAD_FONT, faceOfFont, facesUsed, setFaceOfFont } from "../../dialogs/font-picker";
 import { layerDisplayName, netClassOf } from "./appearance";
 import { KC, isSchDoc, kdoc, panelStore, pcbTools, tctx } from "./core";
 import { commitWithOtherUnits } from "../../dialogs/sync-units";
 import * as VM from "../../canvas/variant-model";
-import { currentInstance } from "../schnets";
-import { unescapeString } from "../../dialogs/sch-items-logic";
+import { currentInstance, netMap } from "../schnets";
+import { fieldValidationError, unescapeString, readEndingState, writeEndingState } from "../../dialogs/sch-items-logic";
 import { chooseFootprint, noFileBrowsing, openDatasheet } from "../../dialogs/browse-cells";
 import { chooserFilters, datasheetLink, type FpChooserFilters } from "../../library/fpchoice";
 import { toast } from "../util";
 import { colorText, parseColorText } from "../../../../shared/components/panes/prop-text";
-import { PIN_MAP_VERSION, activeAssociatedFootprint, associatedFootprints, defaultOverride, effectivePadNumber, readOverride, readPinMaps, writeOverride, type PinMapMode, type PinMapOverride } from "../../dialogs/sym-props-logic";
+import { composeRefSuffix, REF_SUFFIX_FIELD, PIN_MAP_VERSION, activeAssociatedFootprint, associatedFootprints, defaultOverride, effectivePadNumber, readOverride, readPinMaps, writeOverride, type PinMapMode, type PinMapOverride } from "../../dialogs/sym-props-logic";
 import { expandStacked } from "../../symedit/model";
+import { selectedFields } from "../selection";
+import { fieldNodeOf, fieldProps as schFieldProps, parentFieldRow, replaceField, type FieldProp } from "./field-props";
+import { changeSheetFileProp } from "../../dialogs/sch-symbol-sheet";
 
 type Raw = string | number | boolean | null;
 interface PropDef {
@@ -43,6 +49,12 @@ interface PropDef {
   optional?: boolean;
   /** an editable combo's predefined values in mm (a track's Width: BOARD_DESIGN_SETTINGS::m_TrackWidthList) */
   suggest?(): number[];
+  /** PROPERTY_BASE::SetValidator: the error for a value this item cannot take (shown, nothing committed); null or ""
+   *  when it may be set */
+  validate?(v: Raw, it: KItem): string | null;
+  /** DUMMY_PROPERTY: stands in on an item that has no such property, so the items beside it that do keep theirs
+   *  common (SCH_PROPERTIES_PANEL::rebuildProperties: a junction among wires, a wire among junctions) */
+  dummy?: boolean;
 }
 
 /** props.js's node editors (static/props.js `helpers`). */
@@ -54,7 +66,7 @@ interface Helpers {
   fieldList(n: SNode): SNode[]; setField(n: SNode, name: string, v: string): SNode;
   mirrorOf(n: SNode): string; setSymbolTransform(n: SNode, rot: number, mirror: string): void; setSymbolPosition(n: SNode, x: number, y: number): void;
   setSymbolUnit(n: SNode, u: number): void; setSymbolFlag(n: SNode, key: string, on: boolean): void; libUnitCount(doc: KDoc, n: SNode): number;
-  setFootprintPosition(n: SNode, x: number, y: number): void; setFootprintRotation(n: SNode, deg: number): boolean; setFootprintSide(n: SNode, side: string): boolean;
+  setFootprintPosition(n: SNode, x: number, y: number): void; setFootprintRotation(n: SNode, deg: number): boolean; setFootprintSide(n: SNode, side: string, leftRight?: boolean): boolean;
   footprintAttrs(n: SNode): Record<string, unknown>; setFootprintAttrs(n: SNode, patch: Record<string, unknown>): void;
   netNameOf(doc: KDoc, n: SNode): string; boardNetNames(doc: KDoc): string[]; boardLayers(doc: KDoc, copperOnly: boolean): string[];
   padNode(n: SNode, i: number): SNode | null; padInfo(doc: KDoc, pad: SNode): { number: string; type: string; shape: string; w: number; h: number; rot: number; drill: string; net: string; maskMargin: number | null; pasteMargin: number | null; rratio: number | null };
@@ -69,19 +81,20 @@ const K = KC;
 const r6 = (v: number) => +(+v).toFixed(6);
 
 // ---------------------------------------------------------------- selection
-/** Every selected item: the app's selection, the tool module's own picks, else the item of a selected field. */
+/** Every selected item: the app's selection, the tool module's own picks, else (on a board) the item of a selected
+ *  field.  A schematic field selected on its own is the SCH_FIELD itself (fieldGrid), not its symbol or sheet. */
 export function selectedItems(): KItem[] {
   const doc = kdoc(); if (!doc) return [];
   const ids = new Set<string>(E.selection as Set<string>);
   if (E.selected && E.selected.id) ids.add(E.selected.id as string);
   if (isSchDoc()) { const s = window.CollabTools.sch ? window.CollabTools.sch.state.sel : null; if (typeof s === "string" && s) ids.add(s); }
   else { const P = pcbTools(); if (P) for (const id of P.state.sel) ids.add(id); }
-  if (!ids.size && E.selField && E.selField.id) ids.add(E.selField.id as string);
+  if (!ids.size && E.selField && E.selField.id && !isSchDoc()) ids.add(E.selField.id as string);
   const out: KItem[] = [];
   for (const id of ids) { const it = doc.items.get(id); if (it) out.push(it); }
   return out;
 }
-export function selectionSignature(): string { return selectedItems().map((it) => it.id).sort().join(",") + selectedPads().map((p) => "|pad:" + p.key).join("") + E.selPins.map((p: { id: string; number: string }) => "|pin:" + p.id + ":" + p.number).join("") + "|" + String(E.units) + "|" + (E.viewOnly ? 1 : 0); }
+export function selectionSignature(): string { return selectedItems().map((it) => it.id).sort().join(",") + selectedPads().map((p) => "|pad:" + p.key).join("") + (isSchDoc() ? selectedFields().map((f) => "|field:" + f.id + ":" + f.name).join("") : "") + E.selPins.map((p: { id: string; number: string }) => "|pin:" + p.id + ":" + p.number).join("") + "|" + String(E.units) + "|" + (E.viewOnly ? 1 : 0); }
 
 // ---------------------------------------------------------------- shared property builders
 const BASIC = "Basic Properties";
@@ -94,6 +107,18 @@ function xyProp(group: string, name: string, key: string, index: 1 | 2, type: Pr
   return { group, name, type, get: (it) => { const k = H().kid(it.node, key); return k ? H().num(k[index]) : null; },
     set: (n, v) => { const k = H().kid(n, key); if (!k) return false; k[index] = r6(v as number); } };
 }
+/** A footprint's FOOTPRINT::GetScaleX / GetScaleY: (transform … (scale x y)), 1 without one. */
+function fpScale(n: SNode): [number, number] { const h = H(); const t = h.kid(n, "transform"), s = t && h.kid(t, "scale"); return s ? [h.num(s[1], 1) || 1, h.num(s[2], 1) || 1] : [1, 1]; }
+function scaleProp(name: string, index: 1 | 2): PropDef {
+  return { group: BASIC, name, type: "number", get: (x) => fpScale(x.node)[index - 1],
+    set: (n, v) => {
+      const h = H(), val = v as number; if (!Number.isFinite(val) || val <= 0) return false;
+      const cur = fpScale(n); const sc: [number, number] = index === 1 ? [val, cur[1]] : [cur[0], val]; if (sc[0] === cur[0] && sc[1] === cur[1]) return false;
+      let t = h.kid(n, "transform");
+      if (!t) { const [x, y, a] = K().atOf(n); const at = h.kid(n, "at"); const i = at ? n.indexOf(at) : 3; if (at) n.splice(i, 1); t = ["transform", ["translate", x, y], ["rotate", a]] as unknown as SNode; n.splice(i, 0, t); }
+      const s = h.kid(t, "scale"); if (s) { s[1] = r6(sc[0]); s[2] = r6(sc[1]); } else t.push(["scale", r6(sc[0]), r6(sc[1])]);
+    } };
+}
 function atProp(name: string, index: 1 | 2): PropDef {
   return { group: BASIC, name, type: "coord", get: (it) => K().atOf(it.node)[index - 1],
     set: (n, v) => { const [x, y] = K().atOf(n); K().setAt(n, index === 1 ? r6(v as number) : x, index === 2 ? r6(v as number) : y); } };
@@ -105,10 +130,9 @@ function strokeProps(group: string, styleName: string, withColor: boolean): Prop
       set: (n, v) => { let s = strokeOf(n); if (!s) s = H().setKid(n, "stroke", [["width", 0]], ["fill", "uuid", "tstamp"]); H().setKid(s, "type", [String(v)], ["color"]); } },
     { group, name: "Line Width", type: "length", get: (it) => H().strokeWidth(it.node), set: (n, v) => { H().setStrokeWidth(n, Math.max(0, v as number)); } },
   ];
-  if (withColor) out.push({ group, name: "Color", type: "color",
-    // PGPROPERTY_COLOR4D: the colour with its alpha ("#rrggbb" when opaque, else "rgba(r,g,b,a)"); "" is UNSPECIFIED
-    get: (it) => { const s = strokeOf(it.node), c = s && H().kid(s, "color"); if (!c || (!H().num(c[4]) && !H().num(c[1]) && !H().num(c[2]) && !H().num(c[3]))) return ""; return colorText([1, 2, 3].map((i) => H().num(c[i])), c.length > 4 ? H().num(c[4]) : 1); },
-    set: (n, v) => { let s = strokeOf(n); if (!s) s = H().setKid(n, "stroke", [["width", 0], ["type", "default"]], ["fill", "uuid", "tstamp"]); const c = parseColorText(String(v || "")); H().setKid(s, "color", c || [0, 0, 0, 0]); } });
+  // PGPROPERTY_COLOR4D: the colour with its alpha ("#rrggbb" when opaque, else "rgba(r,g,b,a)"); "" is UNSPECIFIED
+  if (withColor) out.push(colorProp(group, "Color", (n) => { const s = strokeOf(n); return s ? H().kid(s, "color") : null; },
+    (n, c) => { let s = strokeOf(n); if (!s) s = H().setKid(n, "stroke", [["width", 0], ["type", "default"]], ["fill", "uuid", "tstamp"]); H().setKid(s, "color", c); }));
   return out;
 }
 function fontOf(n: SNode, create: boolean): SNode | null {
@@ -306,18 +330,26 @@ function schProps(it: KItem, doc: KDoc): PropDef[] {
     case "label": case "global_label": case "hierarchical_label": case "netclass_flag": case "directive_label": case "text": case "text_box": return schTextProps(it);
     case "junction": return [atProp("Position X", 1), atProp("Position Y", 2),
       { group: BASIC, name: "Diameter", type: "length", get: (x) => h.num((h.kid(x.node, "diameter") || [])[1], 0), set: (n, v) => { h.setDiameter(n, Math.max(0, v as number)); } },
-      // SCH_JUNCTION_DESC "Color": the junction's own (color r g b a); "" is UNSPECIFIED (the netclass or layer colour)
-      { group: BASIC, name: "Color", type: "color",
-        get: (x) => { const c = h.kid(x.node, "color"); if (!c || (!h.num(c[4]) && !h.num(c[1]) && !h.num(c[2]) && !h.num(c[3]))) return ""; return colorText([1, 2, 3].map((i) => h.num(c[i])), c.length > 4 ? h.num(c[4]) : 1); },
-        set: (n, v) => { const c = parseColorText(String(v || "")); h.setKid(n, "color", c || [0, 0, 0, 0], ["uuid"]); } }];
+      // SCH_JUNCTION_DESC: Diameter, Color (the junction's own (color r g b a); "" is UNSPECIFIED: the netclass or layer colour)
+      colorProp(BASIC, "Color", (n) => h.kid(n, "color"), (n, c) => { h.setKid(n, "color", c, ["uuid", "tstamp"]); })];
     case "no_connect": return [atProp("Position X", 1), atProp("Position Y", 2)];
     case "bus_entry": return [atProp("Position X", 1), atProp("Position Y", 2), ...strokeProps(BASIC, "Wire Style", true)];
     case "sheet": {
       const fld = (name: string, label: string, ro: boolean): PropDef => ({ group: "Fields", name: label, type: "text", get: (x) => { const p = h.kids(x.node, "property").find((q) => h.str(q[1]) === name); return p ? h.str(p[2]) : null; }, set: ro ? undefined : (n, v) => { h.setField(n, name, String(v)); } });
       const user = h.kids(it.node, "property").map((p) => h.str(p[1])).filter((nm) => !SHEET_MANDATORY.includes(nm))
-        .map((nm): PropDef => Object.assign(fld(nm, nm, false), { key: "field" as const }));
-      return [atProp("Position X", 1), atProp("Position Y", 2), fld("Sheetname", "Sheet Name", false), fld("Sheetfile", "Sheet File", true), ...user,
+        .map((nm): PropDef => Object.assign(fld(nm, nm, false), { key: "field" as const },
+          // SCH_SHEET_FIELD_PROPERTY: the Reference Suffix field's validator (GetFieldValidationErrorMessage( SHEET_REF_SUFFIX ))
+          nm === REF_SUFFIX_FIELD ? { validate: (v: Raw) => fieldValidationError("SHEET_REF_SUFFIX", String(v === null ? "" : v)) } : {}));
+      // SCH_SHEET_DESC: Sheet Name (validated: GetFieldValidationErrorMessage( FIELD_T::SHEET_NAME )), Full Suffix (read
+      // only, shown when the sheet has one), Border Width, Border Color, Background Color
+      const name: PropDef = Object.assign(fld("Sheetname", "Sheet Name", false), { validate: (v: Raw) => fieldValidationError("SHEET_NAME", String(v === null ? "" : v)) });
+      return [atProp("Position X", 1), atProp("Position Y", 2), name, fld("Sheetfile", "Sheet File", true), ...user,
+        ...(sheetFullSuffix(it.node) ? [{ group: BASIC, name: "Full Suffix", type: "text", get: (x: KItem) => sheetFullSuffix(x.node) } satisfies PropDef] : []),
         { group: BASIC, name: "Border Width", type: "length", get: (x) => h.strokeWidth(x.node), set: (n, v) => { h.setStrokeWidth(n, Math.max(0, v as number)); } },
+        colorProp(BASIC, "Border Color", (n) => { const s = strokeOf(n); return s ? h.kid(s, "color") : null; },
+          (n, c) => { let s = strokeOf(n); if (!s) s = h.setKid(n, "stroke", [["width", 0], ["type", "solid"]], ["fill", "uuid", "tstamp"]); h.setKid(s, "color", c); }),
+        colorProp(BASIC, "Background Color", (n) => { const f = h.kid(n, "fill"); return f ? h.kid(f, "color") : null; },
+          (n, c) => { let f = h.kid(n, "fill"); if (!f) f = h.setKid(n, "fill", [], ["uuid", "tstamp", "property"]); h.setKid(f, "color", c); }),
         flag("Attributes", "Exclude From Simulation", "exclude_from_sim", false, false), flag("Attributes", "Exclude From Bill of Materials", "in_bom", true, true),
         flag("Attributes", "Exclude From Board", "on_board", true, true), flag("Attributes", "Do not Populate", "dnp", false, false)];
     }
@@ -349,17 +381,78 @@ function trackWidthList(): number[] {
 function netProps(doc: KDoc): PropDef[] {
   // BOARD_CONNECTED_ITEM's "Net" is a net selector: the board's nets, <no net> first
   const nets: [string, string][] = [["", "<no net>"], ...H().boardNetNames(doc).filter(Boolean).map((n): [string, string] => [n, unescapeString(n)])];   // pcb_track.cpp: UnescapeString( GetNetname() )
-  return [{ group: "Net", name: "Net", type: "enum", choices: nets, get: (it) => H().netNameOf(doc, it.node) || "",
-    set: (n, v) => { if (H().netNameOf(doc, n) === String(v || "")) return false; setNet(doc, n, String(v || "")); } },
-    { group: "Net", name: "Net Class", type: "text", get: (it) => { const n = H().netNameOf(doc, it.node); return n ? netClassOf(n) : "Default"; } }];
+  // registered with no group (Basic Properties); "Net Class" is hidden from the properties manager
+  return [{ group: BASIC, name: "Net", type: "enum", choices: nets, get: (it) => H().netNameOf(doc, it.node) || "",
+    set: (n, v) => { if (H().netNameOf(doc, n) === String(v || "")) return false; setNet(doc, n, String(v || "")); } }];
+}
+// ---------------------------------------------------------------- validators (include/properties/property_validators.h)
+const lenText = (mm: number): string => H().formatLength(mm, String(E.units || "mm"));
+/** VALIDATION_ERROR_TOO_SMALL / TOO_LARGE::Format */
+const tooSmall = (min: number, unitless?: boolean): string => `Value must be greater than or equal to ${unitless ? trimNum(min, 6) : lenText(min)}`;
+const tooLarge = (max: number, unitless?: boolean): string => `Value must be less than or equal to ${unitless ? trimNum(max, 6) : lenText(max)}`;
+/** PROPERTY_VALIDATORS::PositiveIntValidator: no value (std::optional) is always valid */
+const positiveInt = (v: Raw): string | null => (v === null || v === undefined ? null : (v as number) < 0 ? tooSmall(0) : null);
+/** PROPERTY_VALIDATORS::RangeIntValidator<Min, Max> (mm; max Infinity for INT_MAX) */
+const rangeInt = (min: number, max: number) => (v: Raw): string | null => (v === null || v === undefined ? null : (v as number) > max ? tooLarge(max) : (v as number) < min ? tooSmall(min) : null);
+/** PROPERTY_VALIDATORS::PositiveRatioValidator */
+const positiveRatio = (v: Raw): string | null => ((v as number) > 1 ? tooLarge(1, true) : (v as number) < 0 ? tooSmall(0, true) : null);
+const ZONE_CONNECTION: [string, string][] = [["", "Inherited"], ["0", "None"], ["1", "Thermal reliefs"], ["2", "Solid"], ["3", "Thermal reliefs for PTH"]];
+/** A copper layer on the outside of the board (IsExternalCopperLayer). */
+const isExternalCu = (l: string): boolean => l === "F.Cu" || l === "B.Cu";
+/** The layers of a track / copper shape: (layers "F.Cu" "F.Mask") with a solder mask opening, else (layer "F.Cu"). */
+function itemLayers(n: SNode): string[] { const h = H(); const l = h.kid(n, "layers"); if (l) return l.slice(1).map((x) => h.str(x)); const s = h.kid(n, "layer"); return s ? [h.str(s[1])] : []; }
+const itemCopper = (n: SNode): string => { const ls = itemLayers(n); return ls.find((l) => /\.Cu$/.test(l)) || ls[0] || ""; };
+/** "Technical Layers" of a track or a copper graphic on an outer layer (pcb_track.cpp, pcb_shape.cpp): Soldermask, Soldermask Margin Override. */
+function techLayerProps(): PropDef[] {
+  const h = H(), TL = "Technical Layers"; const ext = (x: KItem) => isExternalCu(itemCopper(x.node));
+  return [
+    { group: TL, name: "Soldermask", type: "bool", avail: ext, get: (x) => itemLayers(x.node).some((l) => /\.Mask$/.test(l)),
+      set: (n, v) => { const cu = itemCopper(n); if (!isExternalCu(cu)) return false; const keep = h.kid(n, "layer") || h.kid(n, "layers"); const extra = keep ? keep.slice(1).filter((t) => typeof t === "string" && !/\.(Cu|Mask)$/.test(t) && t !== cu) : [];
+        h.delKid(n, "layer"); h.delKid(n, "layers"); h.setKid(n, v ? "layers" : "layer", v ? [cu, cu === "F.Cu" ? "F.Mask" : "B.Mask"] : [cu, ...extra], ["solder_mask_margin", "net", "uuid", "tstamp"]); } },
+    { group: TL, name: "Soldermask Margin Override", type: "length", optional: true, avail: ext, get: (x) => { const c = h.kid(x.node, "solder_mask_margin"); return c ? h.num(c[1]) : null; },
+      set: (n, v) => { if (v === null || v === undefined) h.delKid(n, "solder_mask_margin"); else h.setKid(n, "solder_mask_margin", [r6(v as number)], ["net", "uuid", "tstamp"]); } },
+  ];
+}
+/** A track's Layer (BOARD_CONNECTED_ITEM's, copper only): the copper layer of (layer …) or (layers copper mask). */
+function trackLayerProp(doc: KDoc): PropDef {
+  const h = H();
+  return { group: BASIC, name: "Layer", type: "enum", choices: layerChoices(doc, true), get: (it) => itemCopper(it.node) || "F.Cu",
+    set: (n, v) => { const mask = itemLayers(n).some((l) => /\.Mask$/.test(l)), L = String(v);
+      if (!h.kid(n, "layers")) { h.setLayer(n, L); return; }
+      h.delKid(n, "layers");   // the mask opening follows an outer layer; an inner layer has none
+      if (mask && isExternalCu(L)) h.setKid(n, "layers", [L, L === "F.Cu" ? "F.Mask" : "B.Mask"], ["solder_mask_margin", "net", "uuid", "tstamp"]);
+      else { h.setKid(n, "layer", [L], ["solder_mask_margin", "net", "uuid", "tstamp"]); h.delKid(n, "solder_mask_margin"); } } };
+}
+/** BOARD_CONNECTED_ITEM's "Teardrops" group (a pad or a via of a board without legacy teardrops); `at` finds the pad / via in a cloned node. */
+function teardropDefs(doc: KDoc, at: (n: SNode) => SNode | null, via: boolean): PropDef[] {
+  if ((doc as unknown as { legacyTeardrops?: boolean }).legacyTeardrops) return [];
+  const G = "Teardrops";
+  type Td = { enabled: boolean; twoSegments: boolean; preferZone: boolean; maxLen: number; maxWidth: number; lenRatio: number; widthRatio: number; filterRatio: number; curved: boolean };
+  type PMApi = { readTeardrops(n: SNode): Td; formatTeardrops(t: Td): string; setPadChild(pad: SNode, key: string, text: string | null): void; TD_DEFAULTS: Td };
+  const PMo = (): PMApi => (K() as unknown as { padModel: PMApi }).padModel;
+  const read = (x: KItem): Td | null => { const n = at(x.node); return n ? PMo().readTeardrops(n) : null; };
+  const same = (a: Td, b: Td) => (Object.keys(b) as (keyof Td)[]).every((k) => (typeof a[k] === "number" ? Math.abs((a[k] as number) - (b[k] as number)) < 1e-9 : a[k] === b[k]));
+  const write = (root: SNode, patch: Partial<Td>): boolean => {
+    const n = at(root); if (!n) return false; const td = Object.assign(PMo().readTeardrops(n), patch);
+    const text = same(td, PMo().TD_DEFAULTS) ? null : PMo().formatTeardrops(td);   // the writer leaves default parameters out
+    if (via) TV.setChild(n, "teardrops", text, TV.VIA_ORDER, (t: string) => K().parse(t) as SNode); else PMo().setPadChild(n, "teardrops", text);
+    return true;
+  };
+  const row = (name: string, key: keyof Td, type: PropType, validate?: (v: Raw) => string | null): PropDef => ({ group: G, name, type, validate,
+    get: (x) => { const t = read(x); return t ? (t[key] as Raw) : null; }, set: (n, v) => write(n, { [key]: type === "bool" ? !!v : (v as number) } as Partial<Td>) });
+  const out = [row("Enable Teardrops", "enabled", "bool"), row("Best Length Ratio", "lenRatio", "number", positiveRatio), row("Max Length", "maxLen", "length"),
+    row("Best Width Ratio", "widthRatio", "number", positiveRatio), row("Max Width", "maxWidth", "length"), row("Curved Teardrops", "curved", "bool")];
+  if (!via) out.push(row("Prefer Zone Connections", "preferZone", "bool"));
+  out.push(row("Allow Teardrops To Span Two Tracks", "twoSegments", "bool"), row("Max Width Ratio", "filterRatio", "number"));
+  return out;
 }
 const FP_TYPES: [string, string][] = [["through_hole", "Through hole"], ["smd", "SMD"], ["", "Unspecified"]];
-const PAD_TYPES: [string, string][] = [["thru_hole", "Through-hole"], ["smd", "SMD"], ["connect", "Edge connector"], ["np_thru_hole", "NPTH, mechanical"]];
+const PAD_TYPES: [string, string][] = [["thru_hole", "Through-hole"], ["smd", "SMD"], ["connect", "Edge connector"], ["np_thru_hole", "NPTH, mechanical"], ["non_component", "Non-component"]];
 const PAD_DRILL_SHAPES: [string, string][] = [["circle", "Round"], ["oval", "Oblong"]];
 const PAD_SIM_TYPES: [string, string][] = [["", "None"], ["source", "Source"], ["sink", "Sink"]];
 const PAD_FAB_PROPS: [string, string][] = [["", "None"], ["pad_prop_bga", "BGA pad"], ["pad_prop_fiducial_glob", "Fiducial, global to board"], ["pad_prop_fiducial_loc", "Fiducial, local to footprint"], ["pad_prop_testpoint", "Test point pad"], ["pad_prop_heatsink", "Heatsink pad"], ["pad_prop_castellated", "Castellated pad"], ["pad_prop_mechanical", "Mechanical pad"], ["pad_prop_pressfit", "Press-fit pad"]];
 const PAD_ZONE_CONNECT: [string, string][] = [["", "Inherited"], ["0", "None"], ["1", "Thermal reliefs"], ["2", "Solid"], ["3", "Thermal reliefs for PTH"]];
-const PAD_SHAPES: [string, string][] = [["circle", "Circle"], ["rect", "Rectangle"], ["oval", "Oval"], ["trapezoid", "Trapezoid"], ["roundrect", "Rounded rectangle"], ["custom", "Custom"]];
+const PAD_SHAPES: [string, string][] = [["circle", "Circle"], ["rect", "Rectangle"], ["oval", "Oval"], ["trapezoid", "Trapezoid"], ["roundrect", "Rounded rectangle"], ["chamfered_rect", "Chamfered rectangle"], ["custom", "Custom"]];
 const PIN_TYPES: [string, string][] = ["input", "output", "bidirectional", "tri_state", "passive", "free", "unspecified", "power_in", "power_out", "open_collector", "open_emitter", "no_connect"].map((t): [string, string] => [t, t]);   // GetCanonicalElectricalTypeName
 const PAD_UNCONNECTED: [string, string][] = [["keep_all", "All copper layers"], ["remove_all", "Connected layers only"], ["remove_except_start_end", "Front, back and connected layers"], ["start_end_only", "Start and end layers only"]];
 const PAD_POST_MACHINING: [string, string][] = [["none", "Not post-machined"], ["counterbore", "Counterbore"], ["countersink", "Countersink"]];
@@ -411,18 +504,33 @@ function footprintProps(it: KItem, doc: KDoc, single: boolean): PropDef[] {
   const out: PropDef[] = [
     { group: BASIC, name: "Position X", type: "coord", get: (x) => K().atOf(x.node)[0], set: (n, v) => { h.setFootprintPosition(n, v as number, K().atOf(n)[1]); } },
     { group: BASIC, name: "Position Y", type: "coord", get: (x) => K().atOf(x.node)[1], set: (n, v) => { h.setFootprintPosition(n, K().atOf(n)[0], v as number); } },
-    { group: BASIC, name: "Orientation", type: "angle", get: (x) => K().atOf(x.node)[2], set: (n, v) => h.setFootprintRotation(n, v as number) },
-    { group: BASIC, name: "Layer", type: "enum", choices: [["F.Cu", layerDisplayName(doc, "F.Cu")], ["B.Cu", layerDisplayName(doc, "B.Cu")]], get: (x) => h.str((h.kid(x.node, "layer") || [])[1] || "F.Cu"), set: (n, v) => h.setFootprintSide(n, String(v)) },
     lockedProp(),
+    // FOOTPRINT::SetLayerAndFlip: Flip( GetPosition(), FLIP_DIRECTION::LEFT_RIGHT ), the orientation becomes 180 − θ
+    { group: BASIC, name: "Layer", type: "enum", choices: [["F.Cu", layerDisplayName(doc, "F.Cu")], ["B.Cu", layerDisplayName(doc, "B.Cu")]], get: (x) => h.str((h.kid(x.node, "layer") || [])[1] || "F.Cu"), set: (n, v) => h.setFootprintSide(n, String(v), true) },
+    { group: BASIC, name: "Orientation", type: "angle", get: (x) => K().atOf(x.node)[2], set: (n, v) => h.setFootprintRotation(n, v as number) },
+    // FOOTPRINT::SetScaleX / SetScaleY (SetTransformScale): the (transform … (scale x y)); a zero, negative or
+    // non-finite scale is refused.  The file keeps the children unscaled (the writer unbakes them), so only the
+    // transform changes; a footprint still placed by (at …) is written with a (transform …) once it is scaled.
+    scaleProp("Scale X", 1), scaleProp("Scale Y", 2),
     ...fieldProps(it).map((d) => (FP_MANDATORY.includes(d.name) || privateField(it.node, d.name) ? d : Object.assign(d, { key: "field" as const }))),
     { group: "Footprint Properties", name: "Library Link", type: "text", get: (x) => h.str(x.node[1]) },
     { group: "Footprint Properties", name: "Library Description", type: "text", get: (x) => h.str((h.kid(x.node, "descr") || [])[1]) },
     { group: "Footprint Properties", name: "Keywords", type: "text", get: (x) => h.str((h.kid(x.node, "tags") || [])[1]) },
+    // FOOTPRINT::m_height: (height h) after the keywords, left out at 0; boards before 20261017 cannot store it
+    { group: "Footprint Properties", name: "Height", type: "length", avail: (x) => !!h.kid(x.node, "height") || !(Number((doc as unknown as { version?: unknown }).version) > 0) || Number((doc as unknown as { version?: unknown }).version) >= 20261017,
+      get: (x) => h.num((h.kid(x.node, "height") || [])[1], 0),
+      set: (n, v) => { if (v) h.setKid(n, "height", [r6(v as number)], ["property", "component_classes", "path", "sheetname", "sheetfile", "solder_mask_margin", "solder_paste_margin", "solder_paste_margin_ratio", "clearance", "zone_connect", "attr", "fp_text", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "pad", "embedded_fonts", "model"]); else h.delKid(n, "height"); } },
+    // COMPONENT_CLASS::GetName of the static class: its constituents' names joined by commas
+    { group: "Footprint Properties", name: "Component Class", type: "text", get: (x) => { const c = h.kid(x.node, "component_classes"); return c ? h.kids(c, "class").map((k) => h.str(k[1])).join(",") : ""; } },
     { group: "Attributes", name: "Footprint Type", type: "enum", choices: FP_TYPES, get: (x) => String(h.footprintAttrs(x.node).type || ""), set: (n, v) => { h.setFootprintAttrs(n, { type: String(v) }); } },
-    attr("Not in Schematic", "board_only"), attr("Exclude From Position Files", "exclude_from_pos_files"), attr("Exclude From Bill of Materials", "exclude_from_bom"), attr("Do not Populate", "dnp"),
+    attr("Not in Schematic", "board_only"), attr("Exclude From Position Files", "exclude_from_pos_files"), attr("Exclude From Bill of Materials", "exclude_from_bom"), attr("Exclude From Simulation", "exclude_from_sim"), attr("Do not Populate", "dnp"),
     attr("Exempt From Courtyard Requirement", "allow_missing_courtyard"),
     over("Clearance Override", "clearance", ["zone_connect", "thermal_width", "thermal_gap", "attr", "net_tie_pad_groups", "fp_text", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "pad", "embedded_fonts", "model"]),
     over("Solderpaste Margin Override", "solder_paste_margin", ["solder_paste_margin_ratio", "solder_paste_ratio", "clearance", "zone_connect", "thermal_width", "thermal_gap", "attr", "net_tie_pad_groups", "fp_text", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "pad", "embedded_fonts", "model"]),
+    Object.assign(over("Solderpaste Margin Ratio Override", "solder_paste_margin_ratio", ["clearance", "zone_connect", "thermal_width", "thermal_gap", "attr", "net_tie_pad_groups", "fp_text", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "pad", "embedded_fonts", "model"]), { type: "number" as PropType }),
+    // ZONE_CONNECTION: INHERITED is no (zone_connect), the others its number
+    { group: "Overrides", name: "Zone Connection Style", type: "enum", choices: ZONE_CONNECTION, get: (x) => { const k = h.kid(x.node, "zone_connect"); return k ? String(h.num(k[1])) : ""; },
+      set: (n, v) => { if (v === "" || v === null) h.delKid(n, "zone_connect"); else h.setKid(n, "zone_connect", [+(v as string)], ["thermal_width", "thermal_gap", "attr", "net_tie_pad_groups", "fp_text", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "pad", "embedded_fonts", "model"]); } },
   ];
   // the Overrides entries registered with the Attributes group stay where KiCad lists them
   for (const d of out) if (d.name === "Exempt From Courtyard Requirement") d.group = "Overrides";
@@ -434,7 +542,7 @@ function padProps(fp: KItem, doc: KDoc): PropDef[] {
   const h = H(), G = "Pad Properties"; const pads = h.kids(fp.node, "pad"); if (!pads.length) return [];
   let idx = padIndexOf.get(fp.id) || 0; if (idx >= pads.length) idx = 0;
   const picker: PropDef = { group: G, name: "Pad", type: "enum", choices: pads.map((p, i): [string, string] => { const net = h.netNameOf(doc, p); return [String(i), h.str(p[1]) + (net ? " · " + unescapeString(net) : "")]; }), get: () => String(idx), local: (v, x) => { padIndexOf.set(x.id, +(v as string) || 0); } };
-  const own = padDefs(doc, idx).filter((d) => (d.group === G || d.group === "Overrides" || d.group === PM || d.group === BD) && (!d.avail || d.avail(fp))).map((d) => d.group === "Overrides" ? Object.assign(d, { group: "Pad Overrides" }) : d);
+  const own = padDefs(doc, idx).filter((d) => (d.group === G || d.group === "Overrides" || d.group === PM || d.group === BD || d.group === "Teardrops") && (!d.avail || d.avail(fp))).map((d) => d.group === "Overrides" ? Object.assign(d, { group: "Pad Overrides" }) : d);
   return [picker, ...own];
 }
 /** PAD's registered properties (pad.cpp PAD_DESC) for pad `idx` of a footprint item: Basic (position, orientation),
@@ -460,7 +568,7 @@ function padDefs(doc: KDoc, idx: number): PropDef[] {
   const drillKid = (x: KItem) => { const p = pad(x); return p ? h.kid(p, "drill") : null; };
   const oblong = (x: KItem) => { const d = drillKid(x); return !!d && d.includes("oval"); };
   // PAD_UTILS::PadHasMeaningfulRoundingRadius on the front layer: a rounded (or chamfered) rectangle
-  const rounded = (x: KItem) => { const p = pad(x); return !!p && normalStack(x) && h.str(p[3]) === "roundrect"; };
+  const rounded = (x: KItem) => { const p = pad(x); return !!p && normalStack(x) && (h.str(p[3]) === "roundrect" || h.str(p[3]) === "chamfered_rect"); };
   const rratio = (x: KItem) => { const p = pad(x), k = p && h.kid(p, "roundrect_rratio"); return k ? h.num(k[1]) : 0; };
   const minSide = (x: KItem) => { const i = info(x); return i ? Math.min(i.w, i.h) : 0; };
   const setRatio = (n: SNode, v: number) => { const p = h.padNode(n, idx); if (!p) return false; h.setKid(p, "roundrect_rratio", [r6(Math.max(0, Math.min(0.5, v)))], after("roundrect_rratio")); return true; };
@@ -480,8 +588,7 @@ function padDefs(doc: KDoc, idx: number): PropDef[] {
     { group: BASIC, name: "Position Y", type: "coord", get: (x) => padPos(x.node)?.[1] ?? null, set: (n, v) => { const c = padPos(n); return !!c && setPos(n, c[0], v as number); } },
     // PAD::GetOrientationDegrees: the board (absolute) angle, the one the pad's (at x y angle) stores
     { group: BASIC, name: "Orientation", type: "angle", get: (x) => { const i = info(x); return i ? h.normDeg(i.rot) : null; }, set: edit((v) => ({ rot: v as number })) },
-    { group: "Net", name: "Net", type: "enum", choices: nets, avail: isCopper, get: (x) => info(x)?.net ?? null, set: edit((v) => ({ net: String(v) })) },
-    { group: "Net", name: "Net Class", type: "text", avail: isCopper, get: (x) => { const n = info(x)?.net; return n ? netClassOf(n) : "Default"; } },
+    { group: BASIC, name: "Net", type: "enum", choices: nets, avail: isCopper, get: (x) => info(x)?.net ?? null, set: edit((v) => ({ net: String(v) })) },
     { group: G, name: "Pad Type", type: "enum", choices: PAD_TYPES, get: (x) => info(x)?.type ?? null, set: edit((v) => ({ type: String(v) })) },
     { group: G, name: "Pad Shape", type: "enum", choices: PAD_SHAPES, avail: normalStack, get: (x) => info(x)?.shape ?? null, set: edit((v) => ({ shape: String(v) })) },
     { group: G, name: "Pad Number", type: "text", avail: isCopper, get: (x) => info(x)?.number ?? null, set: edit((v) => ({ number: String(v) })) },
@@ -500,8 +607,9 @@ function padDefs(doc: KDoc, idx: number): PropDef[] {
     // PAD::SetDrillShape: (drill oval x y) for an oblong hole, (drill d) for a round one
     { group: G, name: "Hole Shape", type: "enum", choices: PAD_DRILL_SHAPES, canWrite: canHole, get: (x) => (oblong(x) ? "oval" : "circle"),
       set: (n, v) => { const p = h.padNode(n, idx), d = p && h.kid(p, "drill"); if (!d) return false; const i = d.indexOf("oval"); if (v === "oval") { if (i < 0) d.splice(1, 0, "oval"); } else if (i > 0) { d.splice(i, 1); const sz = d.slice(1).filter((t) => typeof t === "number"); if (sz.length > 1) d.splice(d.indexOf(sz[1]), 1); } } },
-    { group: G, name: "Hole Size X", type: "length", canWrite: canHole, get: (x) => drillOf(x)[0], set: (n, v) => { const p = h.padNode(n, idx); if (!p) return false; const d = h.padInfo(doc, p).drill.split(/x/i).map(Number); return h.setPad(n, idx, { drill: [v as number, d.length > 1 ? d[1] : (v as number)] }, doc); } },
-    { group: G, name: "Hole Size Y", type: "length", canWrite: canHole, avail: oblong, get: (x) => drillOf(x)[1], set: (n, v) => { const p = h.padNode(n, idx); if (!p) return false; const d = h.padInfo(doc, p).drill.split(/x/i).map(Number); return h.setPad(n, idx, { drill: [d[0] || (v as number), v as number] }, doc); } },
+    // PAD::SetDrillSizeXProp / SetDrillSizeYProp: only the size changes; an oblong hole stays oblong when X equals Y
+    { group: G, name: "Hole Size X", type: "length", canWrite: canHole, validate: positiveInt, get: (x) => drillOf(x)[0], set: (n, v) => { const p = h.padNode(n, idx); if (!p) return false; const dk = h.kid(p, "drill"), ob = !!dk && dk.includes("oval"); const d = h.padInfo(doc, p).drill.split(/x/i).map(Number); return h.setPad(n, idx, ob ? { drill: [v as number, d.length > 1 ? d[1] : (v as number)], drillShape: "oval" } : { drill: [v as number, v as number] }, doc); } },
+    { group: G, name: "Hole Size Y", type: "length", canWrite: canHole, avail: oblong, validate: positiveInt, get: (x) => drillOf(x)[1], set: (n, v) => { const p = h.padNode(n, idx); if (!p) return false; const d = h.padInfo(doc, p).drill.split(/x/i).map(Number); return h.setPad(n, idx, { drill: [d[0] || 0, v as number], drillShape: "oval" }, doc); } },
     { group: G, name: "Fabrication Property", type: "enum", choices: PAD_FAB_PROPS, get: (x) => { const p = pad(x), k = p && h.kid(p, "property"); return k ? h.str(k[1]) : ""; },
       set: (n, v) => { const p = h.padNode(n, idx); if (!p) return false; if (v) h.setKid(p, "property", [String(v)], after("property")); else h.delKid(p, "property"); } },
     // UNCONNECTED_LAYER_MODE: the writer keeps (remove_unused_layers) / (keep_end_layers) for a PTH pad only
@@ -519,12 +627,13 @@ function padDefs(doc: KDoc, idx: number): PropDef[] {
     // ZONE_CONNECTION: INHERITED is no (zone_connect), the others its number
     { group: "Overrides", name: "Zone Connection Style", type: "enum", choices: PAD_ZONE_CONNECT, get: (x) => { const p = pad(x), k = p && h.kid(p, "zone_connect"); return k ? String(h.num(k[1])) : ""; },
       set: (n, v) => { const p = h.padNode(n, idx); if (!p) return false; if (v === "" || v === null) h.delKid(p, "zone_connect"); else h.setKid(p, "zone_connect", [+(v as string)], after("zone_connect")); } },
-    optKid("Overrides", "Thermal Relief Spoke Width", "thermal_bridge_width", "length"),
+    optKid("Overrides", "Thermal Relief Spoke Width", "thermal_bridge_width", "length", { validate: rangeInt(0.025, Infinity) }),   // RangeIntValidator<minZoneWidth, INT_MAX>
     // PADSTACK::ThermalSpokeAngle: the stored angle, else DefaultThermalSpokeAngleForShape (45° for a circle, else 90°);
     // the writer leaves the default out
     { group: "Overrides", name: "Thermal Relief Spoke Angle", type: "angle", get: (x) => { const p = pad(x), k = p && h.kid(p, "thermal_bridge_angle"); return k ? h.num(k[1]) : (p && h.str(p[3]) === "circle" ? 45 : 90); },
       set: (n, v) => { const p = h.padNode(n, idx); if (!p) return false; const def = h.str(p[3]) === "circle" ? 45 : 90; const a = h.deg360(v as number); if (a === def) h.delKid(p, "thermal_bridge_angle"); else h.setKid(p, "thermal_bridge_angle", [r6(a)], after("thermal_bridge_angle")); } },
-    optKid("Overrides", "Thermal Relief Gap", "thermal_gap", "length"),
+    optKid("Overrides", "Thermal Relief Gap", "thermal_gap", "length", { validate: positiveInt }),
+    ...teardropDefs(doc, (n) => h.padNode(n, idx), false),
   ];
 }
 // the children of (pad …) in the writer's order (PCB_IO_KICAD_SEXPR::format( PAD )), so a new one lands in its place
@@ -649,6 +758,7 @@ function padGrid(doc: KDoc, pads: PadPick[], ro: boolean): PropGrid {
 function setPadProp(doc: KDoc, pads: PadPick[], id: string, text: string): string | null {
   const head = padDefs(doc, pads[0].idx).find((d) => defId(d) === id); if (!head || !head.set) return "No such property";
   const parsed = parse(head, text); if (typeof parsed === "string") return parsed;
+  for (const p of pads) { const d = padDefs(doc, p.idx).find((x) => defId(x) === id); const err = d && d.validate ? d.validate(parsed.v, p.fp) : null; if (err) return err; }
   const byFp = new Map<string, PadPick[]>(); for (const p of pads) { const l = byFp.get(p.fp.id) || []; l.push(p); byFp.set(p.fp.id, l); }
   const changes: KChange[] = [];
   for (const list of byFp.values()) {
@@ -667,17 +777,79 @@ function setPadProp(doc: KDoc, pads: PadPick[], id: string, text: string): strin
   return null;
 }
 const VIA_TYPES: [string, string][] = [["through", "Through"], ["blind", "Blind"], ["buried", "Buried"], ["micro", "Micro"]];
+const VIA_SIDE = (yes: string, no: string): [string, string][] => [["", "From board stackup"], ["yes", yes], ["no", no]];
 function viaProps(doc: KDoc): PropDef[] {
-  const h = H(), V = "Via Properties"; const cu = layerChoices(doc, true);
-  const layer = (name: string, i: 1 | 2): PropDef => ({ group: V, name, type: "enum", choices: cu, get: (x) => { const l = h.kid(x.node, "layers"); return l ? h.str(l[i]) : i === 1 ? "F.Cu" : "B.Cu"; },
-    set: (n, v) => { const l = h.kid(n, "layers"); const a = l ? h.str(l[1]) : "F.Cu", b = l ? h.str(l[2]) : "B.Cu"; h.setViaLayers(n, i === 1 ? String(v) : a, i === 2 ? String(v) : b); } });
+  const h = H(), V = "Via Properties", VB = "Backdrill", VP = "Post-machining"; const cu = layerChoices(doc, true);
+  const sx = (t: string) => K().parse(t) as SNode;
   const typeOf = (n: SNode) => VIA_TYPES.map((t) => t[0]).find((t) => t !== "through" && n.indexOf(t) > 0) || "through";
-  return [atProp("Position X", 1), atProp("Position Y", 2), lockedProp(),
-    { group: V, name: "Diameter", type: "length", get: (x) => h.num((h.kid(x.node, "size") || [])[1], 0.8), set: (n, v) => { if (!((v as number) > 0)) return false; h.setViaSize(n, v as number); } },
-    { group: V, name: "Hole", type: "length", get: (x) => h.num((h.kid(x.node, "drill") || [])[1], 0.4), set: (n, v) => { if (!((v as number) > 0)) return false; h.setViaDrill(n, v as number); } },
+  const pair = (n: SNode): [string, string] => { const l = h.kid(n, "layers"); return [l ? h.str(l[1]) : "F.Cu", l ? h.str(l[2]) : "B.Cu"]; };
+  /** PCB_VIA::SanitizeLayers: a through via spans the board, any other via runs from its upper to its lower layer */
+  const sanitize = (n: SNode) => {
+    let [a, b] = pair(n);
+    if (typeOf(n) === "through") { a = "F.Cu"; b = "B.Cu"; }
+    else { const stack = h.boardLayers(doc, true); if (stack.indexOf(a) > stack.indexOf(b) && stack.indexOf(b) >= 0) [a, b] = [b, a]; }
+    h.setViaLayers(n, a, b);
+  };
+  const layer = (name: string, i: 1 | 2): PropDef => ({ group: V, name, type: "enum", choices: cu, get: (x) => pair(x.node)[i - 1],
+    // PCB_VIA::ValidateViaParameters
+    validate: (v, x) => (!/\.Cu$/.test(String(v)) ? "Via layer must be a copper layer." : !h.boardLayers(doc, true).includes(String(v)) ? "Via layer is outside the board stack."
+      : String(v) === pair(x.node)[2 - i] ? "Via start layer and end layer cannot be the same" : null),
+    set: (n, v) => { const [a, b] = pair(n); const before = JSON.stringify(pair(n)); h.setViaLayers(n, i === 1 ? String(v) : a, i === 2 ? String(v) : b); sanitize(n); if (JSON.stringify(pair(n)) === before) return false; } });
+  const dia = (n: SNode) => h.num((h.kid(n, "size") || [])[1], 0.8), hole = (n: SNode) => h.num((h.kid(n, "drill") || [])[1], 0.4);
+  /** (tenting (front yes) (back no)), the legacy (tenting front back); a side that is not named follows the board stackup */
+  const sides = (n: SNode, key: string): [string, string] => {
+    const k = h.kid(n, key); let f = "", b = ""; if (!k) return [f, b];
+    for (let j = 1; j < k.length; j++) { const c = k[j];
+      if (Array.isArray(c)) { const s = h.str(c[1]), o = s === "yes" || s === "no" ? s : ""; if (c[0] === "front") f = o; else if (c[0] === "back") b = o; }
+      else if (c === "front") f = "yes"; else if (c === "back") b = "yes"; }
+    return [f, b];
+  };
+  const side = (name: string, key: string, i: 0 | 1, yes: string, no: string): PropDef => ({ group: V, name, type: "enum", choices: VIA_SIDE(yes, no), get: (x) => sides(x.node, key)[i],
+    set: (n, v) => { const s = sides(n, key); s[i] = String(v || ""); TV.setChild(n, key, !s[0] && !s[1] ? null : `(${key} (front ${s[0] || "none"}) (back ${s[1] || "none"}))`, TV.VIA_ORDER, sx); } });
+  const drillOpt = (name: string, key: string, yes: string, no: string): PropDef => ({ group: V, name, type: "enum", choices: VIA_SIDE(yes, no),
+    get: (x) => { const k = h.kid(x.node, key), s = k ? h.str(k[1]) : ""; return s === "yes" || s === "no" ? s : ""; },
+    set: (n, v) => { TV.setChild(n, key, v ? `(${key} ${String(v)})` : null, TV.VIA_ORDER, sx); } });
+  // backdrills (PCB_VIA::GetBackdrillMode & co.): the drill from F.Cu is the top one, from B.Cu the bottom one
+  const bdMode = (n: SNode) => ["none", "bottom", "top", "both"][TV.backdrillMode(n)];
+  const bdHas = (top: boolean) => (x: KItem) => { const m = bdMode(x.node); return m === "both" || m === (top ? "top" : "bottom"); };
+  const bdGet = (n: SNode, top: boolean) => { const b = TV.backdrills(n); return top ? b.front : b.back; };
+  const bdSet = (n: SNode, top: boolean, d: TV.Backdrill | null) => { const b = TV.backdrills(n); TV.setBackdrills(n, top ? d : b.front, top ? b.back : d, sx); };
+  const bdSize = (top: boolean): PropDef => ({ group: VB, name: `${top ? "Top" : "Bottom"} Backdrill Size`, type: "length", optional: true, avail: bdHas(top),
+    validate: (v) => (v !== null && v !== undefined && (v as number) < 0.001 ? "Backdrill diameter is too small." : null),
+    get: (x) => { const d = bdGet(x.node, top); return d ? d.size : null; },
+    set: (n, v) => { const d = bdGet(n, top); if (v === null || v === undefined) { bdSet(n, top, null); return; } bdSet(n, top, { size: v as number, end: d ? d.end : top ? "F.Cu" : "B.Cu" }); } });
+  const bdCut = (top: boolean): PropDef => ({ group: VB, name: `${top ? "Top" : "Bottom"} Backdrill Must-Cut`, type: "enum", choices: cu, avail: bdHas(top),
+    get: (x) => { const d = bdGet(x.node, top); return d ? d.end : null; }, set: (n, v) => { const d = bdGet(n, top); if (!d) return false; bdSet(n, top, { size: d.size, end: String(v) }); } });
+  const pmRow = (front: boolean, name: string, key: "size" | "depth" | "angle", type: PropType): PropDef => ({ group: VP, name: `${front ? "Front" : "Back"} ${name}`, type,
+    avail: (x) => TV.postMachining(x.node, front).mode !== "none", get: (x) => TV.postMachining(x.node, front)[key],
+    set: (n, v) => { const pm = TV.postMachining(n, front); TV.setPostMachining(n, front, Object.assign(pm, { [key]: Math.max(0, v as number) }), sx); } });
+  const pmDefs = (front: boolean): PropDef[] => [
+    { group: VP, name: `${front ? "Front" : "Back"} Post-machining`, type: "enum", choices: PAD_POST_MACHINING, get: (x) => TV.postMachining(x.node, front).mode,
+      set: (n, v) => { const pm = TV.postMachining(n, front); TV.setPostMachining(n, front, Object.assign(pm, { mode: String(v) as TV.PostMachining["mode"] }), sx); } },
+    pmRow(front, "Post-machining Size", "size", "length"), pmRow(front, "Post-machining Depth", "depth", "length"), pmRow(front, "Post-machining Angle", "angle", "angle")];
+  return [atProp("Position X", 1), atProp("Position Y", 2), lockedProp(), ...netProps(doc),
+    // PCB_VIA::GetIsFree: a free via keeps its net; otherwise it takes the net of the copper it lands on
+    { group: BASIC, name: "Automatically Update Net", type: "bool", get: (x) => !h.yes(x.node, "free", false),
+      set: (n, v) => { TV.setChild(n, "free", v ? null : "(free yes)", TV.VIA_ORDER, sx); } },
+    { group: V, name: "Diameter", type: "length", get: (x) => dia(x.node),
+      validate: (v, x) => ((v as number) < 0.001 ? "Via diameter is too small." : hole(x.node) >= (v as number) ? "Via hole size must be smaller than via diameter" : null),
+      set: (n, v) => { h.setViaSize(n, v as number); } },
+    { group: V, name: "Hole", type: "length", get: (x) => hole(x.node),
+      validate: (v, x) => ((v as number) < 0.001 ? "Via drill is too small." : (v as number) >= dia(x.node) ? "Via hole size must be smaller than via diameter" : null),
+      set: (n, v) => { h.setViaDrill(n, v as number); } },
     layer("Layer Top", 1), layer("Layer Bottom", 2),
-    { group: V, name: "Via Type", type: "enum", choices: VIA_TYPES, get: (x) => typeOf(x.node), set: (n, v) => { for (const t of ["blind", "buried", "micro"]) { const i = n.indexOf(t); if (i > 0) n.splice(i, 1); } if (v !== "through") n.splice(1, 0, String(v)); } },
-    ...netProps(doc)];
+    { group: V, name: "Via Type", type: "enum", choices: VIA_TYPES, get: (x) => typeOf(x.node), set: (n, v) => { for (const t of ["blind", "buried", "micro"]) { const i = n.indexOf(t); if (i > 0) n.splice(i, 1); } if (v !== "through") n.splice(1, 0, String(v)); sanitize(n); } },
+    side("Front Tenting", "tenting", 0, "Tented", "Not tented"), side("Back Tenting", "tenting", 1, "Tented", "Not tented"),
+    side("Front Covering", "covering", 0, "Covered", "Not covered"), side("Back Covering", "covering", 1, "Covered", "Not covered"),
+    side("Front Plugging", "plugging", 0, "Plugged", "Not plugged"), side("Back Plugging", "plugging", 1, "Plugged", "Not plugged"),
+    drillOpt("Capping", "capping", "Capped", "Not capped"), drillOpt("Filling", "filling", "Filled", "Not filled"),
+    { group: VB, name: "Backdrill Mode", type: "enum", choices: PAD_BACKDRILL, avail: (x) => typeOf(x.node) === "through" || bdMode(x.node) !== "none", get: (x) => bdMode(x.node),
+      // PADSTACK::SetBackdrillMode: a new side starts on its own copper layer, 1.1 × the hole
+      set: (n, v) => { const b = TV.backdrills(n), mk = (top: boolean, cur: TV.Backdrill | null): TV.Backdrill | null => (v === "both" || v === (top ? "top" : "bottom") ? cur || { size: r6(hole(n) * 1.1), end: top ? "F.Cu" : "B.Cu" } : null);
+        TV.setBackdrills(n, mk(true, b.front), mk(false, b.back), sx); } },
+    bdSize(false), bdCut(false), bdSize(true), bdCut(true),
+    ...pmDefs(true), ...pmDefs(false),
+    ...teardropDefs(doc, (n) => n, true)];
 }
 const ZONE_CONNECT: [string, string][] = [["", "Thermal reliefs"], ["no", "None"], ["yes", "Solid"], ["thru_hole_only", "Thermal reliefs for PTH"]];
 const FILL_MODES: [string, string][] = [["solid", "Solid fill"], ["hatch", "Hatch pattern"], ["thieving", "Copper thieving"]];
@@ -687,23 +859,45 @@ function zoneProps(it: KItem, doc: KDoc): PropDef[] {
   const cp = (n: SNode) => h.kid(n, "connect_pads");
   const fillKid = (name: string, key: string): PropDef => ({ group: El, name, type: "length", get: (x) => { const f = h.kid(x.node, "fill"), k = f && h.kid(f, key); return k ? h.num(k[1]) : 0.5; },
     set: (n, v) => { let f = h.kid(n, "fill"); if (!f) f = h.setKid(n, "fill", [], ["polygon", "filled_polygon"]); h.setKid(f, key, [r6(Math.max(0, v as number))], key === "thermal_gap" ? ["thermal_bridge_width", "smoothing", "radius", "island_removal_mode"] : ["smoothing", "radius", "island_removal_mode"]); } });
-  const out: PropDef[] = [
-    { group: BASIC, name: "Layer", type: "text", get: (x) => { const s = h.kid(x.node, "layer"), m = h.kid(x.node, "layers"); return s ? layerDisplayName(doc, h.str(s[1])) : m ? m.slice(1).map((l) => layerDisplayName(doc, h.str(l))).join(", ") : ""; } },
-    lockedProp(),
-    { group: BASIC, name: "Name", type: "text", get: (x) => h.str((h.kid(x.node, "name") || [])[1]), set: (n, v) => { h.setZoneName(n, String(v)); } },
-    { group: BASIC, name: "Priority", type: "int", get: (x) => h.num((h.kid(x.node, "priority") || [])[1], 0), set: (n, v) => { h.setZonePriority(n, v as number); } },
-  ];
-  if (h.kid(it.node, "keepout")) return out;
+  const zoneCopper = (n: SNode) => { const s = h.kid(n, "layer"), m = h.kid(n, "layers"); const l = s ? h.str(s[1]) : m ? h.str(m[1]) : ""; return /\.Cu$/.test(l) || /^\*\.Cu$|^F&B\.Cu$/.test(l); };
+  const isKeepout = !!h.kid(it.node, "keepout");
+  const nameRow: PropDef = { group: BASIC, name: "Name", type: "text", get: (x) => h.str((h.kid(x.node, "name") || [])[1]), set: (n, v) => { h.setZoneName(n, String(v)); } };
+  // ZONE_DESC: BOARD_ITEM's Locked, the Net (copper zones), Priority (copper zones that are not rule areas), Name; a
+  // zone's layer set is not a property (the single "Layer" is hidden)
+  const out: PropDef[] = [lockedProp()];
+  if (!isKeepout && zoneCopper(it.node)) out.push({ group: BASIC, name: "Priority", type: "int", get: (x) => h.num((h.kid(x.node, "priority") || [])[1], 0), set: (n, v) => { h.setZonePriority(n, v as number); } });
+  out.push(nameRow);
+  if (isKeepout) {
+    // "Keepout" (rule areas): (keepout (tracks allowed|not_allowed) (vias …) (pads …) (copperpour …) (footprints …))
+    const ko = (name: string, key: string): PropDef => ({ group: "Keepout", name, type: "bool", get: (x) => { const k = h.kid(x.node, "keepout"), c = k && h.kid(k, key); return !!c && h.str(c[1]) === "not_allowed"; },
+      set: (n, v) => { const k = h.kid(n, "keepout"); if (!k) return false; const order = ["tracks", "vias", "pads", "copperpour", "footprints"]; h.setKid(k, key, [v ? "not_allowed" : "allowed"], order.slice(order.indexOf(key) + 1)); } });
+    out.push(ko("Keep Out Tracks", "tracks"), ko("Keep Out Vias", "vias"), ko("Keep Out Pads", "pads"), ko("Keep Out Zone Fills", "copperpour"), ko("Keep Out Footprints", "footprints"));
+    // "Placement": (placement (enabled yes) (sheetname|component_class|group "…")); the source rows need it enabled
+    const SRC: [string, string][] = [["sheetname", "Sheet Name"], ["component_class", "Component Class"], ["group", "Group"]];
+    const pl = (n: SNode) => h.kid(n, "placement");
+    const plOn = (n: SNode) => { const p = pl(n); return !!p && h.yes(p, "enabled", false); };
+    const plSrc = (n: SNode): [string, string] => { const p = pl(n); if (p) for (const [k] of SRC) { const c = h.kid(p, k); if (c) return [k, h.str(c[1])]; } return ["sheetname", ""]; };
+    const plWrite = (n: SNode, on: boolean, type: string, name: string) => { h.delKid(n, "placement"); h.setKid(n, "placement", [["enabled", on ? "yes" : "no"], [type, name]], ["fill", "polygon", "filled_polygon"]); };
+    out.push({ group: "Placement", name: "Enable", type: "bool", get: (x) => plOn(x.node), set: (n, v) => { const [t, s] = plSrc(n); plWrite(n, !!v, t, s); } },
+      { group: "Placement", name: "Source Type", type: "enum", choices: SRC, avail: (x) => plOn(x.node), get: (x) => plSrc(x.node)[0], set: (n, v) => { plWrite(n, plOn(n), String(v), plSrc(n)[1]); } },
+      { group: "Placement", name: "Source Name", type: "text", avail: (x) => plOn(x.node), get: (x) => plSrc(x.node)[1], set: (n, v) => { plWrite(n, plOn(n), plSrc(n)[0], String(v)); } });
+    return out;
+  }
   // ZONE_DESC: Fill Mode on copper zones; a copper-thieving zone hides its net, pad connections and thermal rows
   // and shows its THIEVING_SETTINGS (Element Size writable for dots and squares, Line Width for hatch)
   type ZT = { zoneFillMode(n: SNode): string; setZoneFillMode(n: SNode, m: string): SNode; thievingOf(n: SNode): Record<string, number | string | boolean>; setThieving(n: SNode, p: Record<string, unknown>): SNode; thievingAllowed?(d: KDoc): boolean };
   const Z = pcbTools() as unknown as ZT | null;
-  const copper = (x: KItem) => { const s = h.kid(x.node, "layer"), m = h.kid(x.node, "layers"); const l = s ? h.str(s[1]) : m ? h.str(m[1]) : ""; return /\.Cu$/.test(l) || /^\*\.Cu$|^F&B\.Cu$/.test(l); };
-  if (!Z || !copper(it)) return out;
+  if (!Z || !zoneCopper(it.node)) return out;
+  const minW = (n: SNode) => h.num((h.kid(n, "min_thickness") || [])[1], 0.25);
+  const notBelowMin = (v: Raw, x: KItem): string | null => ((v as number) < minW(x.node) ? "Cannot be less than zone minimum width" : null);
+  const FILL_ORDER = ["mode", "thermal_gap", "thermal_bridge_width", "smoothing", "radius", "island_removal_mode", "island_area_min", "hatch_thickness", "hatch_gap", "hatch_orientation", "hatch_smoothing_level", "hatch_smoothing_value", "hatch_border_algorithm", "hatch_min_hole_area", "thieving"];
+  const fillNum = (name: string, key: string, type: PropType, def: number, extra?: Partial<PropDef>): PropDef => Object.assign({ group: "Fill Style", name, type,
+    get: (x: KItem) => { const f = h.kid(x.node, "fill"), k = f && h.kid(f, key); return k ? h.num(k[1]) : def; },
+    set: (n: SNode, v: Raw) => { let f = h.kid(n, "fill"); if (!f) f = h.setKid(n, "fill", [], ["polygon", "filled_polygon"]); h.setKid(f, key, [type === "int" ? Math.round(v as number) : r6(v as number)], FILL_ORDER.slice(FILL_ORDER.indexOf(key) + 1)); } }, extra || {});
   const FS = "Fill Style";
   const thieving = Z.zoneFillMode(it.node) === "thieving";
-  if (thieving) out.splice(1, 0, layerProp(doc, true, "F.Cu"));
-  const tv = (key: string, type: PropType, writable?: (x: KItem) => boolean): PropDef => ({ group: FS, name: "", type, get: (x) => Z.thievingOf(x.node)[key] as Raw,
+  if (thieving) out.splice(1, 0, layerProp(doc, true, "F.Cu")); else out.splice(1, 0, ...netProps(doc));
+  const tv = (key: string, type: PropType, writable?: (x: KItem) => boolean): PropDef => ({ group: FS, name: "", type, get: (x) => Z.thievingOf(x.node)[key] as Raw, validate: type === "length" ? positiveInt : undefined,
     set: (n, v, x) => { if (writable && !writable(x)) return false; if ((type === "length") && !((v as number) > 0)) return false; Z.setThieving(n, { [key]: type === "bool" ? !!v : type === "enum" ? String(v) : +(v as number) }); } });
   const named = (d: PropDef, name: string): PropDef => Object.assign(d, { name });
   const isHatch = (x: KItem) => Z.thievingOf(x.node).type === "hatch";
@@ -716,23 +910,81 @@ function zoneProps(it: KItem, doc: KDoc): PropDef[] {
     out.push(named(Object.assign(tv("type", "enum"), { choices: THIEVING_PATTERNS }), "Thieving Pattern"),
       named(tv("size", "length", (x) => !isHatch(x)), "Thieving Element Size"), named(tv("gap", "length"), "Thieving Gap"),
       named(tv("width", "length", isHatch), "Thieving Line Width"), named(tv("stagger", "bool"), "Thieving Stagger"), named(tv("orientation", "angle"), "Thieving Orientation"),
-      { group: El, name: "Clearance", type: "length", get: (x) => { const c = cp(x.node), k = c && h.kid(c, "clearance"); return k ? h.num(k[1]) : 0; }, set: (n, v) => { let c = cp(n); if (!c) c = h.setKid(n, "connect_pads", [], ["min_thickness", "filled_areas_thickness", "keepout", "fill"]); h.setKid(c, "clearance", [r6(Math.max(0, v as number))]); } },
-      { group: El, name: "Minimum Width", type: "length", get: (x) => h.num((h.kid(x.node, "min_thickness") || [])[1], 0.25), set: (n, v) => { if (!((v as number) > 0)) return false; h.setKid(n, "min_thickness", [r6(v as number)], ["filled_areas_thickness", "keepout", "fill"]); } });
+      { group: El, name: "Clearance", type: "length", validate: rangeInt(0, 100), get: (x) => { const c = cp(x.node), k = c && h.kid(c, "clearance"); return k ? h.num(k[1]) : 0; }, set: (n, v) => { let c = cp(n); if (!c) c = h.setKid(n, "connect_pads", [], ["min_thickness", "filled_areas_thickness", "keepout", "fill"]); h.setKid(c, "clearance", [r6(Math.max(0, v as number))]); } },
+      { group: El, name: "Minimum Width", type: "length", validate: rangeInt(0.025, Infinity), get: (x) => h.num((h.kid(x.node, "min_thickness") || [])[1], 0.25), set: (n, v) => { if (!((v as number) > 0)) return false; h.setKid(n, "min_thickness", [r6(v as number)], ["filled_areas_thickness", "keepout", "fill"]); } });
     return out;
   }
-  out.push(...netProps(doc),
-    { group: El, name: "Clearance", type: "length", get: (x) => { const c = cp(x.node), k = c && h.kid(c, "clearance"); return k ? h.num(k[1]) : 0; }, set: (n, v) => { let c = cp(n); if (!c) c = h.setKid(n, "connect_pads", [], ["min_thickness", "filled_areas_thickness", "keepout", "fill"]); h.setKid(c, "clearance", [r6(Math.max(0, v as number))]); } },
-    { group: El, name: "Minimum Width", type: "length", get: (x) => h.num((h.kid(x.node, "min_thickness") || [])[1], 0.25), set: (n, v) => { if (!((v as number) > 0)) return false; h.setKid(n, "min_thickness", [r6(v as number)], ["filled_areas_thickness", "keepout", "fill"]); } },
+  // the hatch rows are writable only in hatch mode; Minimum Island Area only when islands below a limit are removed
+  const hatched = (x: KItem) => Z.zoneFillMode(x.node) === "hatch";
+  const islandMode = (n: SNode) => { const f = h.kid(n, "fill"), k = f && h.kid(f, "island_removal_mode"); return k ? String(h.num(k[1])) : "0"; };
+  out.push(
+    fillNum("Hatch Orientation", "hatch_orientation", "angle", 0, { canWrite: hatched }),
+    fillNum("Hatch Width", "hatch_thickness", "length", 1, { canWrite: hatched, validate: notBelowMin }),
+    fillNum("Hatch Gap", "hatch_gap", "length", 1.5, { canWrite: hatched, validate: notBelowMin }),
+    fillNum("Hatch Minimum Hole Ratio", "hatch_min_hole_area", "number", 0.3, { canWrite: hatched, validate: positiveRatio }),
+    fillNum("Smoothing Effort", "hatch_smoothing_level", "int", 0, { canWrite: hatched }),
+    fillNum("Smoothing Amount", "hatch_smoothing_value", "number", 0.1, { canWrite: hatched }),
+    { group: FS, name: "Remove Islands", type: "enum", choices: [["0", "Always"], ["1", "Never"], ["2", "Below area limit"]], get: (x) => islandMode(x.node),
+      set: (n, v) => { let f = h.kid(n, "fill"); if (!f) f = h.setKid(n, "fill", [], ["polygon", "filled_polygon"]); h.setKid(f, "island_removal_mode", [+(v as string)], FILL_ORDER.slice(FILL_ORDER.indexOf("island_removal_mode") + 1)); if (v !== "2") h.delKid(f, "island_area_min"); else if (!h.kid(f, "island_area_min")) h.setKid(f, "island_area_min", [10], FILL_ORDER.slice(FILL_ORDER.indexOf("island_area_min") + 1)); } },
+    fillNum("Minimum Island Area", "island_area_min", "number", 0, { canWrite: (x: KItem) => islandMode(x.node) === "2" }),
+    { group: El, name: "Clearance", type: "length", validate: rangeInt(0, 100), get: (x) => { const c = cp(x.node), k = c && h.kid(c, "clearance"); return k ? h.num(k[1]) : 0; }, set: (n, v) => { let c = cp(n); if (!c) c = h.setKid(n, "connect_pads", [], ["min_thickness", "filled_areas_thickness", "keepout", "fill"]); h.setKid(c, "clearance", [r6(Math.max(0, v as number))]); } },
+    { group: El, name: "Minimum Width", type: "length", validate: rangeInt(0.025, Infinity), get: (x) => h.num((h.kid(x.node, "min_thickness") || [])[1], 0.25), set: (n, v) => { if (!((v as number) > 0)) return false; h.setKid(n, "min_thickness", [r6(v as number)], ["filled_areas_thickness", "keepout", "fill"]); } },
     { group: El, name: "Pad Connections", type: "enum", choices: ZONE_CONNECT, get: (x) => { const c = cp(x.node); return c && typeof c[1] === "string" ? c[1] : ""; },
       set: (n, v) => { let c = cp(n); if (!c) c = h.setKid(n, "connect_pads", [["clearance", 0.5]], ["min_thickness", "filled_areas_thickness", "keepout", "fill"]); if (typeof c[1] === "string") c.splice(1, 1); if (v) c.splice(1, 0, String(v)); } },
-    fillKid("Thermal Relief Gap", "thermal_gap"), fillKid("Thermal Relief Spoke Width", "thermal_bridge_width"));
+    Object.assign(fillKid("Thermal Relief Gap", "thermal_gap"), { validate: positiveInt }), Object.assign(fillKid("Thermal Relief Spoke Width", "thermal_bridge_width"), { validate: notBelowMin }));
   return out;
 }
 function fillOfShape(n: SNode): boolean { const f = H().kid(n, "fill"); if (!f) return false; const v = H().str(f[1]); return v === "yes" || v === "solid"; }
+const SHAPE_NAMES: Record<string, string> = { gr_line: "Segment", gr_rect: "Rectangle", gr_arc: "Arc", gr_circle: "Circle", gr_poly: "Polygon", gr_curve: "Bezier" };
+/** LINE_ENDING_STYLE's ENUM_MAP (common/eda_shape.cpp): its tokens and names, in the registered order. */
+const LINE_ENDINGS: [string, string][] = [["none", "None"], ["arrow", "Arrow"], ["circle", "Circle"], ["square", "Square"], ["arrow_open", "Open Arrow"]];
+const SHAPE_FILLS: [string, string][] = [["no", "None"], ["yes", "Solid"], ["hatch", "Hatch"], ["reverse_hatch", "Reverse Hatch"], ["cross_hatch", "Cross-hatch"]];
+/** An arc as EDA_SHAPE holds it: the centre and the two ends in its winding (the stored start and end swap when the
+ *  file's start → mid → end runs the other way), with GetArcAngle. */
+function arcInternal(n: SNode): { c: [number, number]; s: [number, number]; e: [number, number]; angle: number; swapped: boolean } | null {
+  const h = H(), P = (k: string): [number, number] | null => { const c = h.kid(n, k); return c ? [h.num(c[1]), h.num(c[2])] : null; };
+  const S = P("start"), M = P("mid"), En = P("end"); if (!S || !M || !En) return null;
+  const g = (K() as unknown as { arcFrom3(a: number[], b: number[], c: number[]): { x: number; y: number } | null }).arcFrom3(S, M, En); if (!g) return null;
+  const c: [number, number] = [g.x, g.y], phi = (p: [number, number]) => Math.atan2(p[1] - c[1], p[0] - c[0]) * 180 / Math.PI, n360 = (a: number) => ((a % 360) + 360) % 360;
+  const dM = n360(phi(M) - phi(S)), dE = n360(phi(En) - phi(S));
+  return dM < dE ? { c, s: S, e: En, angle: dE, swapped: false } : { c, s: En, e: S, angle: 360 - dE, swapped: true };
+}
+/** EDA_SHAPE::SetArcAngleAndEnd( aAngle, true ): the end is the start turned about the centre; a negative angle swaps the ends. */
+function setArcAngle(n: SNode, deg: number): boolean {
+  const h = H(), a = arcInternal(n); if (!a || !deg) return false;
+  const turn = (d: number): [number, number] => { const [x, y] = padRot(a.s[0] - a.c[0], a.s[1] - a.c[1], -d); return [r6(a.c[0] + x), r6(a.c[1] + y)]; };
+  let s: [number, number] = a.s, e = turn(deg); const mid = turn(deg / 2);
+  if (deg < 0) [s, e] = [e, s];
+  if (a.swapped) [s, e] = [e, s];
+  const put = (k: string, p: [number, number]) => { const c = h.kid(n, k); if (c) { c[1] = r6(p[0]); c[2] = r6(p[1]); } };
+  put("start", s); put("mid", mid); put("end", e); return true;
+}
 function boardShapeProps(it: KItem, doc: KDoc): PropDef[] {
   const h = H(), S = "Shape Properties", k = it.kind;
-  const out: PropDef[] = [layerProp(doc, false, "Dwgs.User"), lockedProp()];
+  const onCopper = (x: KItem) => /\.Cu$/.test(itemCopper(x.node));
+  // PCB_SHAPE_DESC: Locked, the Net of a shape on copper, Layer; then EDA_SHAPE's rows
+  const out: PropDef[] = [lockedProp(), ...netProps(doc).map((d): PropDef => Object.assign(d, { avail: onCopper })), Object.assign(trackLayerProp(doc), { choices: layerChoices(doc, false) })];
+  // BOARD_ITEM's Position X / Y, available on a polygon only (EDA_SHAPE::getPosition: its first vertex; setPosition moves every vertex)
+  if (k === "gr_poly") {
+    const polyPos = (name: string, i: 1 | 2): PropDef => ({ group: BASIC, name, type: "coord", get: (x) => { const p = h.kid(x.node, "pts"), q = p ? h.kids(p, "xy")[0] : null; return q ? h.num(q[i]) : null; },
+      set: (n, v) => { const p = h.kid(n, "pts"), xy = p ? h.kids(p, "xy") : []; if (!xy.length) return false; const d = (v as number) - h.num(xy[0][i]); if (!d) return false;
+        for (let j = 1; j < p!.length; j++) { const c = p![j] as SNode; if (!Array.isArray(c)) continue; if (c[0] === "xy") c[i] = r6(h.num(c[i]) + d); else if (c[0] === "arc") for (const key of ["start", "mid", "end"]) { const q = h.kid(c, key); if (q) q[i] = r6(h.num(q[i]) + d); } } } });
+    out.unshift(polyPos("Position X", 1), polyPos("Position Y", 2));
+  }
+  out.push({ group: S, name: "Shape", type: "text", get: () => SHAPE_NAMES[k] || k });   // read-only: a shape does not change its kind
+  const bez = (name: string, vi: number, i: 1 | 2): PropDef => ({ group: S, name, type: "coord", get: (x) => { const p = h.kid(x.node, "pts"), q = p ? h.kids(p, "xy")[vi] : null; return q ? h.num(q[i]) : null; },
+    set: (n, v) => { const p = h.kid(n, "pts"), q = p ? h.kids(p, "xy")[vi] : null; if (!q) return false; q[i] = r6(v as number); } });
   if (k === "gr_line" || k === "gr_rect" || k === "gr_arc") out.push(xyProp(S, "Start X", "start", 1), xyProp(S, "Start Y", "start", 2), xyProp(S, "End X", "end", 1), xyProp(S, "End Y", "end", 2));
+  if (k === "gr_curve") out.push(bez("Start X", 0, 1), bez("Start Y", 0, 2), bez("End X", 3, 1), bez("End Y", 3, 2));
+  if (k === "gr_rect") {
+    // EDA_SHAPE::SetRectangleWidth / Height move the end corner; Corner Radius is (radius r), left out at 0
+    const dim = (name: string, i: 1 | 2): PropDef => ({ group: S, name, type: "length", get: (x) => { const s = h.kid(x.node, "start"), e = h.kid(x.node, "end"); return s && e ? Math.abs(h.num(e[i]) - h.num(s[i])) : null; },
+      set: (n, v) => { const s = h.kid(n, "start"), e = h.kid(n, "end"); if (!s || !e) return false; e[i] = r6(h.num(s[i]) + (v as number)); } });
+    const half = (n: SNode) => { const s = h.kid(n, "start"), e = h.kid(n, "end"); return s && e ? Math.min(Math.abs(h.num(e[1]) - h.num(s[1])), Math.abs(h.num(e[2]) - h.num(s[2]))) / 2 : 0; };
+    out.push(dim("Width", 1), dim("Height", 2), { group: S, name: "Corner Radius", type: "length", get: (x) => h.num((h.kid(x.node, "radius") || [])[1], 0),
+      validate: (v, x) => ((v as number) > half(x.node) ? tooLarge(half(x.node)) : (v as number) < 0 ? tooSmall(0) : null),
+      set: (n, v) => { if ((v as number) > 0) h.setKid(n, "radius", [r6(v as number)], ["stroke", "fill", "layer", "layers", "solder_mask_margin", "net", "uuid", "tstamp"]); else h.delKid(n, "radius"); } });
+  }
   if (k === "gr_circle") {
     const centre = (name: string, i: 1 | 2): PropDef => ({ group: S, name, type: "coord", get: (x) => { const c = h.kid(x.node, "center"); return c ? h.num(c[i]) : null; },
       set: (n, v) => { const c = h.kid(n, "center"), e = h.kid(n, "end"); if (!c || !e) return false; const d = (v as number) - h.num(c[i]); c[i] = r6(v as number); e[i] = r6(h.num(e[i]) + d); } });
@@ -741,9 +993,29 @@ function boardShapeProps(it: KItem, doc: KDoc): PropDef[] {
       set: (n, v) => { const c = h.kid(n, "center"), e = h.kid(n, "end"); if (!c || !e || !((v as number) > 0)) return false; e[1] = r6(h.num(c[1]) + (v as number)); e[2] = r6(h.num(c[2])); } });
   }
   out.push({ group: S, name: "Line Width", type: "length", get: (x) => h.strokeWidth(x.node) || h.num((h.kid(x.node, "width") || [])[1], 0), set: (n, v) => { if (h.kid(n, "stroke") || !h.kid(n, "width")) h.setStrokeWidth(n, Math.max(0, v as number)); else h.setWidth(n, Math.max(0, v as number)); } });
-  if (h.kid(it.node, "stroke")) out.push(strokeProps(S, "Line Style", false)[0]);
-  if (k === "gr_rect" || k === "gr_circle" || k === "gr_poly") out.push({ group: S, name: "Filled", type: "bool", get: (x) => fillOfShape(x.node),
-    set: (n, v) => { const f = h.kid(n, "fill"); const old = f ? h.str(f[1]) : ""; const legacy = old === "solid" || old === "none"; h.setKid(n, "fill", [v ? (legacy ? "solid" : "yes") : (legacy ? "none" : "no")], ["layer", "net", "uuid", "tstamp"]); } });
+  // Line Style is always there: a shape with a legacy (width w) gets a (stroke …) when its style is set
+  out.push({ group: S, name: "Line Style", type: "enum", choices: LINE_STYLES.slice(1), get: (x) => { const st = h.kid(x.node, "stroke"), t = st && h.kid(st, "type"); const s = t ? h.str(t[1]) : "solid"; return s === "default" ? "solid" : s; },
+    set: (n, v) => { let st = h.kid(n, "stroke"); if (!st) { const w = h.num((h.kid(n, "width") || [])[1], 0); h.delKid(n, "width"); st = h.setKid(n, "stroke", [["width", w]], ["fill", "layer", "layers", "solder_mask_margin", "net", "uuid", "tstamp"]); } h.setKid(st, "type", [String(v)], ["color"]); } });
+  if (k === "gr_arc") out.push({ group: S, name: "Angle", type: "angle", get: (x) => { const a = arcInternal(x.node); return a ? r6(a.angle) : null; },
+    validate: (v) => ((v as number) === 0 ? "Arc angle must not be zero." : null), set: (n, v) => setArcAngle(n, v as number) });
+  // UI_FILL_MODE: (fill no|yes|hatch|reverse_hatch|cross_hatch); files before 20241228 say none / solid
+  if (k === "gr_rect" || k === "gr_circle" || k === "gr_poly" || k === "gr_curve") out.push({ group: S, name: "Fill", type: "enum", choices: SHAPE_FILLS,
+    get: (x) => { const f = h.kid(x.node, "fill"), s = f ? h.str(f[1]) : "no"; return s === "solid" ? "yes" : s === "none" ? "no" : SHAPE_FILLS.some((c) => c[0] === s) ? s : "no"; },
+    set: (n, v) => { const f = h.kid(n, "fill"); const old = f ? h.str(f[1]) : ""; const legacy = old === "solid" || old === "none"; const t = String(v);
+      h.setKid(n, "fill", [legacy && t === "yes" ? "solid" : legacy && t === "no" ? "none" : t], ["layer", "layers", "solder_mask_margin", "net", "uuid", "tstamp"]); } });
+  // EDA_SHAPE's line endings on an open shape (a segment, an arc, a curve whose ends differ): LINE_ENDING::Format's
+  // (start_shape …) / (end_shape …) after the stroke, nothing for None
+  const isOpen = (x: KItem): boolean => { if (k === "gr_line" || k === "gr_arc") return true; if (k !== "gr_curve") return false; const p = h.kid(x.node, "pts"), q = p ? h.kids(p, "xy") : []; return q.length < 3 || h.num(q[0][1]) !== h.num(q[q.length - 1][1]) || h.num(q[0][2]) !== h.num(q[q.length - 1][2]); };
+  if (k === "gr_line" || k === "gr_arc" || k === "gr_curve") {
+    const ending = (side: "Start" | "End", name: string, field: "style" | "length" | "width" | "thickness"): PropDef => {
+      const key = side === "Start" ? "start_shape" : "end_shape";
+      return { group: S, name: `${side} ${name}`, type: field === "style" ? "enum" : "length", choices: field === "style" ? LINE_ENDINGS : undefined, avail: isOpen,
+        get: (x) => readEndingState(x.node, key)[field] as Raw,
+        set: (n, v) => { const st = readEndingState(n, key); if (field === "style") st.style = String(v) as typeof st.style; else st[field] = Math.max(0, v as number); writeEndingState(n, key, st); } };
+    };
+    for (const side of ["Start", "End"] as const) out.push(ending(side, "Shape", "style"), ending(side, "Length", "length"), ending(side, "Width", "width"), ending(side, "Stroke Width", "thickness"));
+  }
+  out.push(...techLayerProps());
   return out;
 }
 /** PCB_TEXTBOX::SetTextAngle through the board module: the box slides about its start, the angle is the text's. */
@@ -757,17 +1029,17 @@ function boardTextBoxProps(doc: KDoc): PropDef[] {
   // PCB_SHAPE::GetPosition is the box's start; SetPosition moves the whole box
   const pos = (name: string, i: 1 | 2): PropDef => ({ group: BASIC, name, type: "coord", get: (x) => h.num((h.kid(x.node, "start") || [])[i], 0),
     set: (n, v) => { const s = h.kid(n, "start"), e = h.kid(n, "end"); if (!s) return false; const d = (v as number) - h.num(s[i]); s[i] = r6(h.num(s[i]) + d); if (e) e[i] = r6(h.num(e[i]) + d); } });
-  const margin = (name: string, i: number): PropDef => ({ group: T, name, type: "length", get: (x) => { const m = h.kid(x.node, "margins"); return m ? h.num(m[i], 0) : 0; },
+  const margin = (name: string, i: number): PropDef => ({ group: "Margins", name, type: "length", get: (x) => { const m = h.kid(x.node, "margins"); return m ? h.num(m[i], 0) : 0; },
     set: (n, v) => { const m = h.kid(n, "margins"); if (!m || !((v as number) >= 0)) return false; m[i] = r6(v as number); } });
   const orient: PropDef = { group: T, name: "Orientation", type: "angle", get: (x) => { const a = h.kid(x.node, "angle"); return h.normDeg(a ? h.num(a[1]) : 0); }, set: (n, v) => { slideTextBox(n, v as number); } };
   const out = [pos("Position X", 1), pos("Position Y", 2), ...base];
   out.splice(out.findIndex((d) => d.name === "Text") + 1, 0, orient);
   out.push(
     { group: T, name: "Knockout", type: "bool", get: (x) => { const l = h.kid(x.node, "layer"); return !!l && l.indexOf("knockout") > 0; }, set: (n, v) => { const l = h.kid(n, "layer"); if (!l) return false; const i = l.indexOf("knockout"); if (i > 0) l.splice(i, 1); if (v) l.push("knockout"); } },
-    { group: T, name: "Border", type: "bool", get: (x) => h.yes(x.node, "border", false), set: (n, v) => { h.setKid(n, "border", [v ? "yes" : "no"], ["stroke", "knockout", "uuid"]); } },
-    { group: T, name: "Border Style", type: "enum", choices: LINE_STYLES.slice(1), get: (x) => { const st = h.kid(x.node, "stroke"), t = st && h.kid(st, "type"); return t ? h.str(t[1]) : "solid"; },
+    { group: "Border Properties", name: "Border", type: "bool", get: (x) => h.yes(x.node, "border", false), set: (n, v) => { h.setKid(n, "border", [v ? "yes" : "no"], ["stroke", "knockout", "uuid"]); } },
+    { group: "Border Properties", name: "Border Style", type: "enum", choices: LINE_STYLES.slice(1), get: (x) => { const st = h.kid(x.node, "stroke"), t = st && h.kid(st, "type"); return t ? h.str(t[1]) : "solid"; },
       set: (n, v) => { const st = h.kid(n, "stroke") || h.setKid(n, "stroke", [["width", 0.1]], ["knockout", "uuid"]); h.setKid(st, "type", [String(v)]); } },
-    { group: T, name: "Border Width", type: "length", get: (x) => h.strokeWidth(x.node), set: (n, v) => { h.setStrokeWidth(n, Math.max(0, v as number)); } },
+    { group: "Border Properties", name: "Border Width", type: "length", get: (x) => h.strokeWidth(x.node), set: (n, v) => { h.setStrokeWidth(n, Math.max(0, v as number)); } },
     margin("Margin Left", 1), margin("Margin Top", 2), margin("Margin Right", 3), margin("Margin Bottom", 4));
   return out;
 }
@@ -775,13 +1047,21 @@ function boardTextProps(doc: KDoc): PropDef[] {
   const h = H(), T = "Text Properties";
   const size = (name: string, i: 1 | 2): PropDef => ({ group: T, name, type: "length", get: (x) => { const f = fontOf(x.node, false), s = f && h.kid(f, "size"); return s ? h.num(s[i], 1) : 1; },
     set: (n, v) => { if (!((v as number) > 0)) return false; const f = fontOf(n, true)!; const s = h.kid(f, "size") || h.setKid(f, "size", [1, 1], ["thickness", "bold", "italic"]); s[i] = r6(v as number); } });
+  const thick = (n: SNode): number => { const f = fontOf(n, false), t = f && h.kid(f, "thickness"); return t ? h.num(t[1]) : 0; };
+  /** EDA_TEXT::GetEffectiveTextPenWidth of an auto-thickness text: GetPenSizeForNormal / Bold of the smaller size */
+  const autoPen = (n: SNode): number => { const f = fontOf(n, false), s = f && h.kid(f, "size"); const m = s ? Math.min(h.num(s[1], 1), h.num(s[2], 1)) : 1; const bold = !!f && (f.includes("bold") || h.yes(f, "bold", false)); return r6(Math.round(m * 1e6 / (bold ? 5 : 8)) / 1e6); };
+  const faces: [string, string][] = [["", KICAD_FONT], ...facesUsed(doc as unknown as Parameters<typeof facesUsed>[0]).map((f): [string, string] => [f, f])];
+  // PCB_TEXT_DESC: Position, Layer, Locked, Orientation (BOARD_ITEM's and the masked-in EDA_TEXT angle), then EDA_TEXT's rows
   return [atProp("Position X", 1), atProp("Position Y", 2), layerProp(doc, false, "F.SilkS"), lockedProp(),
+    { group: BASIC, name: "Orientation", type: "angle", get: (x) => K().atOf(x.node)[2], set: (n, v) => { const [x, y] = K().atOf(n); K().setAt(n, x, y, r6(h.normDeg(v as number))); } },
     { group: T, name: "Text", type: "longtext", get: (x) => h.str(x.node[1]), set: (n, v) => { h.setText(n, String(v)); } },
-    { group: T, name: "Orientation", type: "angle", get: (x) => K().atOf(x.node)[2], set: (n, v) => { const [x, y] = K().atOf(n); K().setAt(n, x, y, r6(h.normDeg(v as number))); } },
-    size("Width", 2), size("Height", 1),
-    { group: T, name: "Thickness", type: "length", get: (x) => { const f = fontOf(x.node, false), t = f && h.kid(f, "thickness"); return t ? h.num(t[1]) : 0; }, set: (n, v) => { const f = fontOf(n, true)!; if ((v as number) > 0) h.setKid(f, "thickness", [r6(v as number)], ["bold", "italic", "color"]); else h.delKid(f, "thickness"); } },
-    fontFlag(T, "Bold", "bold"), fontFlag(T, "Italic", "italic"),
+    { group: T, name: "Font", type: "enum", choices: faces, get: (x) => { const f = faceOfFont(fontOf(x.node, false)); return faces.some((c) => c[0] === f) ? f : ""; }, set: (n, v) => { setFaceOfFont(fontOf(n, true)!, String(v || "")); } },
+    // Auto Thickness: no (thickness …); Thickness then shows the pen the size gives and is read-only
+    { group: T, name: "Auto Thickness", type: "bool", get: (x) => !(thick(x.node) > 0), set: (n, v) => { const f = fontOf(n, true)!; if (v) h.delKid(f, "thickness"); else h.setKid(f, "thickness", [autoPen(n)], ["bold", "italic", "color"]); } },
+    { group: T, name: "Thickness", type: "length", canWrite: (x) => thick(x.node) > 0, get: (x) => thick(x.node) || autoPen(x.node), set: (n, v) => { const f = fontOf(n, true)!; if ((v as number) > 0) h.setKid(f, "thickness", [r6(v as number)], ["bold", "italic", "color"]); else h.delKid(f, "thickness"); } },
+    fontFlag(T, "Italic", "italic"), fontFlag(T, "Bold", "bold"),
     { group: T, name: "Mirrored", type: "bool", get: (x) => justifyOf(x.node).mirror, set: (n, v) => setJustify(n, { mirror: !!v }) },
+    size("Width", 2), size("Height", 1),
     ...justifyProps(T),
     { group: T, name: "Knockout", type: "bool", get: (x) => { const l = h.kid(x.node, "layer"); return !!l && l.indexOf("knockout") > 0; }, set: (n, v) => { const l = h.kid(n, "layer"); if (!l) return false; const i = l.indexOf("knockout"); if (i > 0) l.splice(i, 1); if (v) l.push("knockout"); } },
   ];
@@ -845,22 +1125,77 @@ function tuningPatternProps(it: KItem, doc: KDoc): PropDef[] {
     { group: PT, name: "Rounded", type: "bool", get: (x) => yn(x.node, "rounded", true), set: (n, v) => setYn(n, "rounded", !!v) });
   return defs;
 }
+// DIMENSION_DESC / ALIGNED_DIMENSION_DESC (pcbnew/pcb_dimension.cpp): the rows read and write what the Dimension
+// Properties dialog does (dimDialogValues / applyDimDialog), so the geometry and the text are rebuilt the same way
+const DIM_PRECISIONS: [string, string][] = ["0", "0.0", "0.00", "0.000", "0.0000", "0.00000", "0.00 in / 0 mils / 0.0 mm", "0.000 / 0 / 0.00", "0.0000 / 0.0 / 0.000", "0.00000 / 0.00 / 0.0000"].map((l, i): [string, string] => [String(i), l]);
+function dimensionProps(it: KItem, doc: KDoc): PropDef[] {
+  const h = H(), D = "Dimension Properties", T = "Text Properties";
+  const type = (n: SNode) => h.str((h.kid(n, "type") || [])[1]) || "aligned";
+  const leader = type(it.node) === "leader", center = type(it.node) === "center", aligned = type(it.node) === "aligned" || type(it.node) === "orthogonal";
+  const valueMode = type(it.node) === "aligned" || type(it.node) === "orthogonal" || type(it.node) === "radial";   // DimensionHasValueMode
+  const apply = (n: SNode, patch: Partial<DimDialogValues>) => { const out = applyDimDialog(n, Object.assign(dimDialogValues(n), patch)); n.splice(0, n.length, ...out); };
+  const row = <Kk extends keyof DimDialogValues>(group: string, name: string, key: Kk, ptype: PropType, extra?: Partial<PropDef>): PropDef => Object.assign({ group, name, type: ptype,
+    get: (x: KItem) => { const v = dimDialogValues(x.node)[key]; return ptype === "enum" ? String(v) : (v as Raw); },
+    set: (n: SNode, v: Raw) => { const cur = dimDialogValues(n)[key]; apply(n, { [key]: typeof cur === "number" ? +(v as number) : typeof cur === "boolean" ? !!v : String(v) } as Partial<DimDialogValues>); } }, extra || {});
+  const out: PropDef[] = [
+    { group: BASIC, name: "Layer", type: "enum", choices: layerChoices(doc, false), get: (x) => dimDialogValues(x.node).layer, set: (n, v) => apply(n, { layer: String(v) }) },
+    lockedProp()];
+  if (!leader) out.push(row(D, "Prefix", "prefix", "text"), row(D, "Suffix", "suffix", "text"));
+  if (center) out.push({ group: D, name: "Override Text", type: "text", get: (x) => { const f = h.kid(x.node, "format"), o = f && h.kid(f, "override_value"); return o ? h.str(o[1]) : ""; },
+    set: (n, v) => { const f = h.kid(n, "format"); if (!f) return false; if (String(v)) h.setKid(f, "override_value", [String(v)], ["suppress_zeroes"]); else h.delKid(f, "override_value"); } });
+  if (valueMode) out.push(
+    { group: D, name: "Value Mode", type: "enum", choices: [["0", "Driven"], ["1", "Driving"], ["2", "Arbitrary"]], get: (x) => (dimDialogValues(x.node).arbitrary ? "2" : "0"),
+      // DimensionCanDrive: both ends bound to objects by constraints, which a board here does not hold
+      validate: (v) => (v === "1" ? "Driving requires both dimension endpoints bound to objects" : null), set: (n, v) => apply(n, { arbitrary: v === "2" }) },
+    // Driven mirrors the measured geometry, so the row is greyed out
+    { group: D, name: "Value", type: "text", canWrite: (x) => dimDialogValues(x.node).arbitrary, get: (x) => dimDialogValues(x.node).value, set: (n, v) => apply(n, { arbitrary: true, value: String(v) }) });
+  if (leader) out.push(row(D, "Text", "value", "text"));
+  if (!leader) out.push(
+    row(D, "Units", "unitsMode", "enum", { choices: [["0", "Inches"], ["1", "Mils"], ["2", "Millimeters"], ["3", "Automatic"]] }),
+    row(D, "Units Format", "unitsFormat", "enum", { choices: [["0", "1234.0"], ["1", "1234.0 mm"], ["2", "1234.0 (mm)"]] }),
+    row(D, "Precision", "precision", "enum", { choices: DIM_PRECISIONS }),
+    row(D, "Suppress Trailing Zeroes", "suppressZeroes", "bool"));
+  if (aligned) out.push({ group: D, name: "Arrow Direction", type: "enum", choices: [["inward", "Inward"], ["outward", "Outward"]], get: (x) => (dimDialogValues(x.node).arrowInward ? "inward" : "outward"), set: (n, v) => apply(n, { arrowInward: v === "inward" }) });
+  out.push(row(D, "Line Thickness", "lineThickness", "length"));
+  if (!center) out.push(row(D, "Arrow Length", "arrowLength", "length"), row(D, "Extension Line Offset", "extOffset", "length"));
+  if (aligned) {
+    type DT = { dimRead(n: SNode): { height: number }; dimUpdate(m: unknown): unknown; dimWrite(n: SNode, m: unknown): SNode };
+    const P = pcbTools() as unknown as DT | null;
+    if (P && P.dimRead) out.push({ group: D, name: "Crossbar Height", type: "coord", get: (x) => P.dimRead(x.node).height / 1e6,
+      set: (n, v) => { const m = P.dimRead(n); m.height = Math.round((v as number) * 1e6); P.dimUpdate(m); const o = P.dimWrite(n, m); n.splice(0, n.length, ...o); } });
+    out.push(row(D, "Extension Line Overshoot", "extHeight", "length"));
+  }
+  if (!center) {
+    if (!leader) out.push(row(T, "Text Position", "posMode", "enum", { choices: [["0", "Outside"], ["1", "Inline"], ["2", "Manual"]] }));
+    out.push(row(T, "Keep Aligned with Dimension", "keepAligned", "bool"),
+      row(T, "Orientation", "angle", "angle", { canWrite: (x: KItem) => !dimDialogValues(x.node).keepAligned }),
+      row(T, "Auto Thickness", "autoThickness", "bool"), row(T, "Thickness", "textThick", "length", { canWrite: (x: KItem) => !dimDialogValues(x.node).autoThickness }),
+      row(T, "Italic", "italic", "bool"), row(T, "Bold", "bold", "bool"), row(T, "Mirrored", "mirrored", "bool"),
+      row(T, "Width", "textW", "length"), row(T, "Height", "textH", "length"),
+      row(T, "Horizontal Justification", "hJustify", "enum", { choices: [["left", "Left"], ["center", "Center"], ["right", "Right"]] }));
+  }
+  return out;
+}
 function pcbProps(it: KItem, doc: KDoc, single: boolean): PropDef[] {
   const h = H();
   if (it.kind === "generated" && h.str((h.kid(it.node, "type") || [])[1]) === "tuning_pattern") return tuningPatternProps(it, doc);
   switch (it.kind) {
     case "footprint": return footprintProps(it, doc, single);
-    case "segment": case "arc": return [xyProp(BASIC, "Start X", "start", 1), xyProp(BASIC, "Start Y", "start", 2), xyProp(BASIC, "End X", "end", 1), xyProp(BASIC, "End Y", "end", 2),
+    // PCB_TRACK_DESC: BOARD_ITEM's Locked, the copper Layer and the Net, then the track's own rows and Technical Layers
+    case "segment": case "arc": return [lockedProp(), trackLayerProp(doc), ...netProps(doc),
       { group: BASIC, name: "Width", type: "length", get: (x) => h.num((h.kid(x.node, "width") || [])[1], 0.25), set: (n, v) => { if (!((v as number) > 0)) return false; h.setWidth(n, v as number); }, suggest: trackWidthList },
-      layerProp(doc, true, "F.Cu"), lockedProp(), ...netProps(doc)];
+      xyProp(BASIC, "Start X", "start", 1), xyProp(BASIC, "Start Y", "start", 2), xyProp(BASIC, "End X", "end", 1), xyProp(BASIC, "End Y", "end", 2),
+      ...techLayerProps()];
     case "via": return viaProps(doc);
     case "pad": if ((doc as unknown as { fpEditor?: boolean }).fpEditor) return fpEditorPadProps(doc, it); break;
     case "zone": return zoneProps(it, doc);
     case "gr_line": case "gr_rect": case "gr_circle": case "gr_arc": case "gr_poly": case "gr_curve": return boardShapeProps(it, doc);
     case "gr_text": return boardTextProps(doc);
     case "gr_text_box": return h.kid(it.node, "start") ? boardTextBoxProps(doc) : boardTextProps(doc).filter((d) => !/^Position|^Orientation/.test(d.name));
-    case "dimension": return [layerProp(doc, false, "Dwgs.User"), lockedProp(),
-      { group: "Dimension Properties", name: "Value", type: "text", get: (x) => { const t = h.kid(x.node, "gr_text"); return t ? h.str(t[1]) : ""; } }];
+    case "dimension": return dimensionProps(it, doc);
+    // PCB_GROUP_DESC: BOARD_ITEM's Locked (a group has no position or layer rows) and "Group Properties" / Name
+    case "group": return [lockedProp(), { group: "Group Properties", name: "Name", type: "text", get: (x) => (typeof x.node[1] === "string" ? h.str(x.node[1]) : ""),
+      set: (n, v) => { if (typeof n[1] === "string") n[1] = String(v); else n.splice(1, 0, String(v)); } }];
     default: break;
   }
   const out: PropDef[] = [];
@@ -878,7 +1213,7 @@ function pcbProps(it: KItem, doc: KDoc, single: boolean): PropDef[] {
 function fpEditorPadProps(doc: KDoc, it: KItem): PropDef[] {
   const wrapNode = (n: SNode): SNode => ["footprint", "", ["at", 0, 0], n] as unknown as SNode;
   const wrap = (x: KItem): KItem => Object.assign({}, x, { node: wrapNode(x.node) });
-  return padDefs(doc, 0).filter((d) => d.group !== "Net" && (!d.avail || d.avail(wrap(it)))).map((d): PropDef => Object.assign({}, d, {
+  return padDefs(doc, 0).filter((d) => d.name !== "Net" && d.name !== "Pin Name" && d.name !== "Pin Type" && (!d.avail || d.avail(wrap(it)))).map((d): PropDef => Object.assign({}, d, {
     get: (x: KItem) => d.get(wrap(x)),
     avail: d.avail ? (x: KItem) => d.avail!(wrap(x)) : undefined,
     canWrite: d.canWrite ? (x: KItem) => d.canWrite!(wrap(x)) : undefined,
@@ -889,9 +1224,20 @@ function fpEditorPadProps(doc: KDoc, it: KItem): PropDef[] {
 // ---------------------------------------------------------------- the grid
 const FRIENDLY: Record<string, string> = { symbol: "Symbol", footprint: "Footprint", wire: "Wire", bus: "Bus", polyline: "Graphic Line", segment: "Track", arc: "Arc", via: "Via", label: "Label", global_label: "Global Label",
   hierarchical_label: "Hierarchical Label", netclass_flag: "Directive Label", directive_label: "Directive Label", text: "Text", gr_text: "Text", text_box: "Text Box", gr_text_box: "Text Box", junction: "Junction", zone: "Zone",
-  no_connect: "No-Connect", bus_entry: "Bus Entry", pad: "Pad", sheet: "Sheet", gr_line: "Line", gr_rect: "Rectangle", gr_circle: "Circle", gr_arc: "Arc", gr_poly: "Polygon", gr_curve: "Bezier", rectangle: "Rectangle", circle: "Circle",
+  no_connect: "No-Connect", bus_entry: "Bus Entry", pad: "Pad", sheet: "Sheet", gr_line: "Segment", gr_rect: "Rectangle", gr_circle: "Circle", gr_arc: "Arc", gr_poly: "Polygon", gr_curve: "Curve", rectangle: "Rectangle", circle: "Circle",
   bezier: "Bezier", rule_area: "Rule Area", dimension: "Dimension", group: "Group", image: "Image", table: "Table" };
-const friendly = (it: KItem) => (it.kind === "arc" && it.docType === "pcb" ? "Track" : it.kind === "generated" ? "Tuning Pattern" : FRIENDLY[it.kind] || it.kind);
+/** GetFriendlyName (the panel's caption for one item): PCB_ARC "Track (arc)", ZONE by what it is, PCB_SHAPE by its shape, … */
+function friendly(it: KItem): string {
+  if (it.docType === "pcb") {
+    const h = H();
+    if (it.kind === "arc") return "Track (arc)";
+    if (it.kind === "zone") { const a = h.kid(it.node, "attr"); if (h.kid(it.node, "keepout")) return "Rule Area"; if (a && h.kid(a, "teardrop")) return "Teardrop Area";
+      const s = h.kid(it.node, "layer"), m = h.kid(it.node, "layers"), l = s ? h.str(s[1]) : m ? h.str(m[1]) : ""; return /\.Cu$/.test(l) ? "Copper Zone" : "Non-copper Zone"; }
+    if (it.kind === "image") return "Reference Image";
+    if (it.kind === "dimension" && h.str((h.kid(it.node, "type") || [])[1]) === "leader") return "Leader";
+  }
+  return it.kind === "generated" ? "Tuning Pattern" : FRIENDLY[it.kind] || it.kind;
+}
 
 function trimNum(v: number, digits: number): string { let t = v.toFixed(digits); if (t.includes(".")) t = t.replace(/0+$/, "").replace(/\.$/, ""); return t === "-0" ? "0" : t; }
 /** A coordinate row's axis (PROPERTY::SetCoordType ABS_X_COORD / ABS_Y_COORD): "Position X", "Start Y", "End X" … */
@@ -944,6 +1290,27 @@ export function copyItemProps(source: KItem, target: KItem, pairs: [string, stri
 /** The names of the properties this grid shows for an item. */
 export function itemPropNames(it: KItem): Set<string> { const doc = kdoc(); return new Set(doc ? defsOf(it, doc, true).filter((d) => d.set && !d.local).map((d) => d.name) : []); }
 
+/** A COLOR4D property over a (color r g b a) node: "" is COLOR4D::UNSPECIFIED (all zero, or no node). */
+function colorProp(group: string, name: string, find: (n: SNode) => SNode | null, put: (n: SNode, rgba: number[]) => void): PropDef {
+  return { group, name, type: "color",
+    get: (it) => { const c = find(it.node); if (!c || (!H().num(c[4]) && !H().num(c[1]) && !H().num(c[2]) && !H().num(c[3]))) return ""; return colorText([1, 2, 3].map((i) => H().num(c[i])), c.length > 4 ? H().num(c[4]) : 1); },
+    set: (n, v) => { put(n, parseColorText(String(v || "")) || [0, 0, 0, 0]); } };
+}
+/** SCH_SHEET::GetFullRefSuffixProp: the reference suffix of the sheet's instance under the sheet on screen (the path's
+ *  "Reference Suffix" fields, root first, then the sheet's own). */
+function sheetFullSuffix(node: SNode): string {
+  let up = "";
+  try {
+    const c = netMap(), here = currentInstance(c);
+    if (c && here) {
+      const nodes: (SNode | null)[] = [];
+      for (const id of here.uuidPath.slice(1)) { let hit: SNode | null = null; for (const d of c.docs.values()) { const it = d.items.get(id); if (it && it.kind === "sheet") { hit = it.node; break; } } nodes.push(hit); }
+      up = composeRefSuffix(nodes);
+    }
+  } catch (e) { up = ""; }
+  return up + composeRefSuffix([node]);
+}
+
 interface Resolved { items: KItem[]; defs: Map<string, PropDef>[]; shared: PropDef[] }
 /** A selected tuning pattern is its generator with its members: KiCad's selection holds the one PCB_GENERATOR. */
 function patternSelection(items: KItem[]): KItem | null {
@@ -954,8 +1321,21 @@ function resolve(): Resolved {
   const doc = kdoc(); let items = selectedItems(); if (!doc || !items.length) return { items: [], defs: [], shared: [] };
   const gen = patternSelection(items); if (gen) items = [gen];
   const defs = items.map((it) => new Map(defsOf(it, doc, items.length === 1).map((d): [string, PropDef] => [defId(d), d])));
+  // SCH_PROPERTIES_PANEL::rebuildProperties: with junctions and wires / buses selected together, dummy "Wire Style" and
+  // "Line Width" on the junctions and a dummy "Diameter" on the lines keep those three common; a change reaches the
+  // items that really have the property
+  if (isSchDoc() && items.some((it) => it.kind === "junction") && items.some((it) => it.kind === "wire" || it.kind === "bus")) {
+    const stand = (name: string, type: PropType, choices?: [string, string][]): PropDef => ({ group: BASIC, name, type, choices, dummy: true, get: () => null });
+    items.forEach((it, i) => {
+      const add = (d: PropDef): void => { if (!defs[i].has(defId(d))) defs[i].set(defId(d), d); };
+      if (it.kind === "junction") { add(stand("Wire Style", "enum", LINE_STYLES)); add(stand("Line Width", "length")); }
+      else if (it.kind === "wire" || it.kind === "bus") add(stand("Diameter", "length"));
+    });
+  }
   const shared: PropDef[] = [];
-  for (const d of defs[0].values()) if (defs.every((m) => { const o = m.get(defId(d)); return !!o && o.type === d.type; })) shared.push(d);
+  // the row is described by an item that has the property (the first item's may be the stand-in)
+  const real = (id: string): PropDef | undefined => { for (const m of defs) { const o = m.get(id); if (o && !o.dummy) return o; } return undefined; };
+  for (const d0 of defs[0].values()) { const d = d0.dummy ? real(defId(d0)) : d0; if (!d) continue;     if (defs.every((m) => { const o = m.get(defId(d)); return !!o && o.type === d.type; })) shared.push(d); }
   return { items, defs, shared };
 }
 
@@ -975,20 +1355,22 @@ export function propGrid(): PropGrid {
   if (!doc) return { title: "No objects selected", count: 0, groups: [], readOnly: true };
   const { items, defs, shared } = resolve(); const ro = !!E.viewOnly;
   if (!items.length && E.selPins.length && isSchDoc()) { const g = pinGrid(doc); if (g) return g; }
+  if (!items.length && isSchDoc()) { const picks = fieldPicks(doc); if (picks.length) return fieldGrid(doc, picks, ro); }
   if (!items.length) { const pads = selectedPads(); if (pads.length) return padGrid(doc, pads, ro); }
   if (!items.length) return { title: "No objects selected", count: 0, groups: [], readOnly: ro };
   const groups: PropGroup[] = [];
   for (const d of shared) {
     const id = defId(d); let value = "", mixed = false, first = true, writable = true;
     items.forEach((it, i) => {
-      const own = defs[i].get(id)!; if ((!own.set && !own.local) || (own.canWrite && !own.canWrite(it))) writable = false;
+      const own = defs[i].get(id)!; if (own.dummy) return;   // a stand-in has no value: the row shows the others'
+      if ((!own.set && !own.local) || (own.canWrite && !own.canWrite(it))) writable = false;
       let raw: Raw = null; try { raw = own.get(it); } catch (e) { raw = null; }
       const text = show(own, raw);
       if (first) { value = text; first = false; } else if (text !== value) mixed = true;
     });
     const row: PropRow = { id, name: d.name, type: d.type, value: mixed ? "" : value, mixed, readOnly: ro || !writable, choices: d.choices };
     if (d.key && !ro && items.length === 1) row.keyEditable = true;   // isKeyEditable looks at the front item
-    if (d.type === "enum" && d.group === "Net" && d.name === "Net") row.netSelector = true;   // PG_NET_SELECTOR_EDITOR
+    if (d.type === "enum" && d.group === BASIC && d.name === "Net" && !isSchDoc()) row.netSelector = true;   // PG_NET_SELECTOR_EDITOR
     if (d.suggest) { const u = String(E.units || "mm"); row.suggest = d.suggest().map((mm) => H().formatLength(mm, u)); }
     // SCH_PROPERTIES_PANEL / PCB_PROPERTIES_PANEL::createPGProperty: the Footprint and Datasheet properties get
     // PG_FPID_EDITOR and PG_URL_EDITOR (an editor only an editable row opens)
@@ -1034,7 +1416,7 @@ function parse(def: PropDef, text: string): { v: Raw } | string {
   const t = String(text);
   if (def.optional && !t.trim()) return { v: null };   // std::optional: an empty cell clears the value
   switch (def.type) {
-    case "length": case "coord": { const v = H().evalExpr(t, String(E.units || "mm")); if (Number.isNaN(v)) return "Not a valid length"; if (def.type === "length" && v < 0) return "Must not be negative"; const ax = coordAxis(def); return { v: ax ? r6(fromDisplayAbsAxis(v, ax)) : v }; }
+    case "length": case "coord": { const v = H().evalExpr(t, String(E.units || "mm")); if (Number.isNaN(v)) return "Not a valid length"; const ax = coordAxis(def); return { v: ax ? r6(fromDisplayAbsAxis(v, ax)) : v }; }
     case "angle": { const v = H().evalExpr(t.replace(/°|deg/gi, ""), ""); if (Number.isNaN(v)) return "Not a valid angle"; return { v }; }
     case "number": { const v = H().evalExpr(t, ""); if (Number.isNaN(v)) return "Not a valid number"; return { v }; }
     case "time": { const m = /^\s*(.*?)\s*(fs|ps|ns)?\s*$/i.exec(t)!; const v = H().evalExpr(m[1], ""); if (Number.isNaN(v)) return "Not a valid time"; const u = (m[2] || "ps").toLowerCase(); return { v: u === "fs" ? v / 1000 : u === "ns" ? v * 1000 : v }; }
@@ -1046,15 +1428,107 @@ function parse(def: PropDef, text: string): { v: Raw } | string {
   }
 }
 
+// ---------------------------------------------------------------- a schematic field selected on its own
+/** SCH_FIELD items in the selection (a field picked by itself, not through its symbol or sheet). */
+interface FieldPick { it: KItem; name: string }
+function fieldPicks(doc: KDoc): FieldPick[] {
+  const out: FieldPick[] = [];
+  for (const f of selectedFields()) { const it = doc.items.get(f.id); if (it && fieldNodeOf(it.node, f.name)) out.push({ it, name: f.name }); }
+  return out;
+}
+/** The parent's own row for the field's text: the symbol's field property (the reference through its instance data,
+ *  a variant's override when one is current) or the sheet's (the name validated, the file name read-only). */
+function parentTextDef(doc: KDoc, p: FieldPick): PropDef | null {
+  if (p.it.kind !== "symbol" && p.it.kind !== "sheet") return null;
+  const row = parentFieldRow(p.it.kind, p.name);
+  return defsOf(p.it, doc, false).find((d) => d.group === "Fields" && d.name === row) || null;
+}
+/** IsGeneratedField (common/common.cpp): a field whose name is a text variable or an expression. */
+const isGeneratedField = (name: string): boolean => /^(\$\{[\w.]*\}|@\{.*\})$/.test(name);
+function fieldDefs(doc: KDoc): FieldProp[] { return schFieldProps(facesUsed(doc), (t) => parseColorText(t)); }
+const asDef = (d: FieldProp): PropDef => ({ group: d.group, name: d.name, type: d.type, choices: d.choices, get: () => null });
+function fieldGrid(doc: KDoc, picks: FieldPick[], ro: boolean): PropGrid {
+  const groups: PropGroup[] = [];
+  for (const d of fieldDefs(doc)) {
+    const def = asDef(d); let value = "", mixed = false, writable = true;
+    picks.forEach((p, i) => {
+      let raw: Raw = null;
+      const own = d.name === "Text" ? parentTextDef(doc, p) : null;
+      if (own) { if (!own.set && !(p.it.kind === "sheet" && /^Sheet ?file$/i.test(p.name))) writable = false; try { raw = own.get(p.it); } catch (e) { raw = null; } }
+      else { const n = fieldNodeOf(p.it.node, p.name); try { raw = n ? d.get(n) : null; } catch (e) { raw = null; } }
+      // OverrideWriteability( "Text" ): a generated field ("${…}" / "@{…}" as its name) is read only
+      if (d.name === "Text" && isGeneratedField(p.name)) writable = false;
+      const text = show(def, raw); if (i === 0) value = text; else if (text !== value) mixed = true;
+    });
+    const row: PropRow = { id: defId(def), name: d.name, type: d.type, value: mixed ? "" : value, mixed, readOnly: ro || !writable, choices: d.choices };
+    let g = groups.find((x) => x.name === d.group); if (!g) { g = { name: d.group, rows: [] }; groups.push(g); }
+    g.rows.push(row);
+  }
+  return { title: picks.length === 1 ? "Field" : `${picks.length} objects selected`, count: picks.length, groups, readOnly: ro };
+}
+/** SCH_PROPERTIES_PANEL::valueChanged for selected fields: one replace of each parent, all in one "Edit Properties"
+ *  commit.  The text of a symbol's or sheet's field goes through the parent (SetRefProp, the current variant's
+ *  override, the sheet name's and reference suffix's validators); a sheet's file name through
+ *  handleSheetFilenameChange (changeSheetFileProp), which links or creates the file. */
+function setFieldProp(doc: KDoc, picks: FieldPick[], id: string, text: string): string | null {
+  const d = fieldDefs(doc).find((x) => defId(asDef(x)) === id); if (!d) return "No such property";
+  const parsed = parse(asDef(d), text); if (typeof parsed === "string") return parsed;
+  const isText = d.name === "Text";
+  // a sheet's file-name field: handleSheetFilenameChange (the extension, the file linked or created)
+  const isFile = (p: FieldPick): boolean => isText && p.it.kind === "sheet" && /^Sheet ?file$/i.test(p.name);
+  if (isText) for (const p of picks) {   // valueChanging: the value must be valid for every selected field
+    if (isGeneratedField(p.name)) return "Text: read only";
+    if (isFile(p)) continue;
+    const own = parentTextDef(doc, p); if (!own) continue;
+    const bad = own.validate ? own.validate(parsed.v, p.it) : p.it.kind === "symbol" && p.name === "Reference" ? fieldValidationError("REFERENCE", String(parsed.v)) : "";
+    if (bad) return bad;
+  }
+  const staged = new Map<string, { it: KItem; node: SNode; touched: boolean }>();
+  const files: FieldPick[] = [];
+  for (const p of picks) {
+    if (isFile(p)) { files.push(p); continue; }
+    let s = staged.get(p.it.id); if (!s) { s = { it: p.it, node: K().cloneNode(p.it.node), touched: false }; staged.set(p.it.id, s); }
+    const own = isText ? parentTextDef(doc, p) : null;
+    try {
+      if (own && own.set) {
+        if (show(own, own.get(Object.assign({}, p.it, { node: s.node }))) === show(own, parsed.v)) continue;
+        if (own.set(s.node, parsed.v, p.it) !== false) s.touched = true;
+      } else {
+        const n = fieldNodeOf(s.node, p.name); if (!n) continue;
+        if (show(asDef(d), d.get(n)) === show(asDef(d), parsed.v)) continue;
+        const next = d.set(n, parsed.v); if (next && replaceField(s.node, p.name, next)) s.touched = true;
+      }
+    } catch (e) { console.warn(e); }
+  }
+  if (files.length) {
+    const ctx = Object.assign(tctx() as unknown as ToolCtx, { doc });
+    void (async () => { for (const p of files) { const it = doc.items.get(p.it.id); if (it && await changeSheetFileProp(ctx, it, String(parsed.v))) panelStore.set({ selVersion: panelStore.get().selVersion + 1 }); } })();
+  }
+  const done = Array.from(staged.values()).filter((s) => s.touched); if (!done.length) return null;
+  const changes: KChange[] = done.map((s) => K().replaceChange(doc, Object.assign({}, s.it, { node: s.node, geom: [], bbox: null })));
+  // SyncOtherUnits: the value, footprint and datasheet of one symbol follow to its other units
+  if (isText && done.length === 1 && done[0].it.kind === "symbol" && picks.length === 1 && SYNCED_FIELDS.has(picks[0].name)) {
+    const ctx = tctx() as unknown as ToolCtx & { doc: KDoc };
+    commitWithOtherUnits(Object.assign(ctx, { doc }), done[0].it, done[0].node, changes, "Edit Properties", "field:" + picks[0].name);
+  } else tctx().commit(changes, "Edit Properties");
+  panelStore.set({ selVersion: panelStore.get().selVersion + 1 });
+  return null;
+}
+const SYNCED_FIELDS = new Set(["Value", "Footprint", "Datasheet"]);
+
 const SYNCED = new Set(["Value", "Exclude From Board", "Exclude From Bill of Materials", "Exclude From Position Files", "Do not Populate", "Pin Map Mode", "Pin Map Name"]);
 export function setProp(id: string, text: string): string | null {
   const doc = kdoc(); if (!doc) return "No document";
   if (E.viewOnly) return "View-only access";
   const { items, defs } = resolve();
+  if (!items.length && isSchDoc()) { const picks = fieldPicks(doc); if (picks.length) return setFieldProp(doc, picks, id, text); }
   if (!items.length) { const pads = selectedPads(); if (pads.length) return setPadProp(doc, pads, id, text); }
   if (!items.length) return "Nothing selected";
-  const head = defs[0].get(id); if (!head) return "No such property";
+  let head = defs[0].get(id); if (!head) return "No such property";
+  if (head.dummy) head = defs.map((m) => m.get(id)).find((d) => !!d && !d.dummy) || head;
   const parsed = parse(head, text); if (typeof parsed === "string") return parsed;
+  // PROPERTY_BASE::Validate (a sheet's name, a via's sizes …): one item that cannot take the value refuses the whole edit
+  for (let i = 0; i < items.length; i++) { const d = defs[i].get(id); const err = d && d.validate ? d.validate(parsed.v, items[i]) : null; if (err) return err; }
   if (head.local) { items.forEach((it, i) => { const d = defs[i].get(id); if (d && d.local) d.local(parsed.v, it); }); panelStore.set({ selVersion: panelStore.get().selVersion + 1 }); return null; }
   const gen = items.length === 1 && items[0].kind === "generated" ? items[0] : null; const P = pcbTools();
   if (gen && P && P.editTuningPattern) {   // PCB_TUNING_PATTERN: the property, then EditStart / Update / EditFinish in one commit

@@ -65,7 +65,7 @@ export interface PropGrid {
 // ---------------------------------------------------------------- Search (SEARCH_PANE and its handlers)
 /** A handler's columns with their proportions (tenths of the list's width) and alignment (wxLIST_FORMAT_LEFT / CENTER / RIGHT). */
 export interface SearchTab { id: string; label: string; columns: string[]; props: number[]; align: ("left" | "center" | "right")[] }
-export interface SearchRow { key: string; ids: string[]; cells: string[]; docId?: string; /** the texts the query matches (else the cells) */ match?: string[] }
+export interface SearchRow { key: string; ids: string[]; cells: string[]; docId?: string; /** a schematic hit's sheet instance (its human path: SCH_SEARCH_HIT::sheetPath) */ inst?: string; /** the texts the query matches (else the cells) */ match?: string[] }
 export interface SearchResult { tab: string; rows: SearchRow[]; total: number }
 /** APP_SETTINGS_BASE::SEARCH_PANE plus the list's sort column (-1: the handler's own order). */
 export interface SearchOpts { hidden: boolean; metadata: boolean; sortCol: number; ascending: boolean }
@@ -126,7 +126,7 @@ export type PanelAction =
   | { t: "viewport"; name: string }
   | { t: "viewportSave" } | { t: "viewportDelete" }
   | { t: "hierOpen"; path: string }
-  | { t: "hierRename"; path: string }
+  | { t: "hierRename"; path: string; /** the name typed into the row's in-place editor */ name: string }
   | { t: "hierPage"; path: string }
   | { t: "hierNewTop" }
   | { t: "hierDeleteTop"; path: string }

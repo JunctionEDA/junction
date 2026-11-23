@@ -169,7 +169,7 @@ test("router: netclass width, selected width, inherited width, via from the sele
   assert.equal(P.state.route.layer, "B.Cu"); assert.equal(R.activeLayer, "B.Cu");
   // End fixes the leg under the cursor and finishes: one commit
   pcb.onPointerMove(ev(), [110, 58], ctx); assert.equal(pcb.onKey("End", ev(), ctx), true); assert.equal(P.state.route, null);
-  assert.equal(log.commits.length, 1); assert.equal(log.commits[0].label, "Route Track");
+  assert.equal(log.commits.length, 1); assert.equal(log.commits[0].label, "Routing");
   assert.equal(R.tempOverride, false);
   // a route started on the end of an existing 0.35 track inherits its width and net
   pcb.onKey("PageUp", ev(), ctx); R.setTrackIndex(0);

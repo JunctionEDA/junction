@@ -240,6 +240,8 @@ export interface Track {
   /** the mask layer a track is opened on ((layers "F.Cu" "F.Mask")) and its margin */
   maskLayer: string | null; maskMargin: number | null;
   net?: string;
+  /** the document item it was read from */
+  id?: string;
 }
 export interface Via {
   x: number; y: number; size: number; drill: number;
@@ -254,6 +256,8 @@ export interface Via {
   /** (covering …) (plugging …) (capping …) (filling …) on the via: null follows the board's setup */
   coverFront: boolean | null; coverBack: boolean | null; plugFront: boolean | null; plugBack: boolean | null;
   capped: boolean | null; filled: boolean | null;
+  /** the document item it was read from */
+  id?: string;
 }
 export interface ZoneFill { layer: string; pts: Pt[]; net?: string; /** the (zone …) the fill belongs to */ zone?: Node }
 
@@ -339,8 +343,8 @@ export function boardModel(doc: FabDoc, setup: Node | null, variant?: string): B
       m.footprints.push(fp);
       // a zone inside a footprint is kept in the footprint's frame
       for (const z of kids(n, "zone") as Node[]) readZone(z, copper, fp.tf, m, doc.nets);
-    } else if (item.kind === "segment" || item.kind === "arc") { const t = readTrack(n, item.kind, doc.nets); if (t) m.tracks.push(t); }
-    else if (item.kind === "via") m.vias.push(readVia(n, copper, doc.nets));
+    } else if (item.kind === "segment" || item.kind === "arc") { const t = readTrack(n, item.kind, doc.nets); if (t) { t.id = item.id; m.tracks.push(t); } }
+    else if (item.kind === "via") { const v = readVia(n, copper, doc.nets); v.id = item.id; m.vias.push(v); }
     else if (item.kind === "zone") readZone(n, copper, null, m, doc.nets);
   }
   return m;

@@ -125,3 +125,59 @@ export function sortRows<R extends { cells: string[] }>(rows: R[], col: number, 
 }
 /** SEARCH_PANE_LISTVIEW::CopySelectionToClipboard: the selected rows, columns tab-separated, one line per row. */
 export function rowsAsText(rows: { cells: string[] }[]): string { return rows.map((r) => r.cells.join("\t") + "\n").join(""); }
+
+// ---------------------------------------------------------------- EDA_SEARCH_MATCH_MODE::PERMISSIVE
+/**
+ * EDA_ITEM::Matches in PERMISSIVE mode (common/eda_item.cpp:326-354): the text and the query are both upper-cased
+ * (matchCase is off), then EDA_COMBINED_MATCHER( query, CTX_SEARCH ) (common/eda_pattern_match.cpp:420-424) tries a
+ * regular expression, a wildcard pattern and a plain substring; any of them finding the query is a match.
+ *   - EDA_PATTERN_MATCH_REGEX::SetPattern: explicit only, "^…$" as written or "/…/" (the closing slash optional);
+ *     a pattern that does not compile is dropped
+ *   - EDA_PATTERN_MATCH_WILDCARD::SetPattern: `?` any character, `*` any run, the rest literal; NOT anchored
+ *   - EDA_PATTERN_MATCH_SUBSTR
+ * An empty query matches everything (the handlers test findString.IsEmpty() first).
+ */
+export function permissiveMatcher(query: string): (texts: string[]) => boolean {
+  if (!query) return () => true;
+  const q = query.toUpperCase(), res: RegExp[] = [];
+  let pat: string | null = null;
+  if (q.startsWith("^") && q.endsWith("$")) pat = q;
+  else if (q.startsWith("/")) { pat = q.slice(1); if (pat.endsWith("/")) pat = pat.slice(0, -1); }
+  if (pat !== null) { try { res.push(new RegExp(pat)); } catch (e) { /* not a regular expression */ } }
+  let wild = "";
+  for (const c of q) wild += c === "?" ? "." : c === "*" ? ".*" : ".+^${}()|[]/\\".includes(c) ? "\\" + c : c;
+  try { res.push(new RegExp(wild)); } catch (e) { /* cannot happen: every special character is escaped */ }
+  return (texts) => texts.some((t) => { const u = t.toUpperCase(); return res.some((re) => re.test(u)) || u.includes(q); });
+}
+
+// ---------------------------------------------------------------- schematic symbols on a sheet instance
+/** LIB_SYMBOL::IsPower of a resolved library symbol: its (power) flag; a missing library symbol is not power
+ *  (SYMBOL_SEARCH_HANDLER / POWER_SEARCH_HANDLER: "IsPower depends on non-missing lib symbol association"). */
+export function libIsPower(lib: N | null | undefined): boolean { return !!lib && !!kid(lib, "power"); }
+/** SCH_SYMBOL::GetRef( sheet ) and GetUnitSelection( sheet ): the (instances (project (path "<instPath>" (reference …)
+ *  (unit …)))) entry of the sheet instance, else the symbol's own Reference field and (unit …). */
+export function symbolInstanceRef(sym: N, instPath: string): { ref: string; unit: number } {
+  let hit: N | null = null;
+  for (const proj of kids(kid(sym, "instances") || [], "project")) for (const p of kids(proj, "path")) if (!hit && str(p[1]) === instPath) hit = p;
+  const own = kids(sym, "property").find((p) => str(p[1]) === "Reference");
+  const r = hit ? kid(hit, "reference") : null, u = hit ? kid(hit, "unit") : null;
+  return { ref: r ? str(r[1]) : own ? str(own[2]) : "", unit: num((u || kid(sym, "unit") || [])[1], 1) };
+}
+/** SCH_SYMBOL::SubReference (LIB_SYMBOL::LetterSubReference( unit, 'A' )): the unit's letter(s), A … Z then AA, AB … */
+export function unitSuffix(unit: number): string {
+  let u: number, suffix = "", n = Math.max(1, Math.floor(unit));
+  do { u = (n - 1) % 26; suffix = String.fromCharCode(65 + u) + suffix; n = Math.floor((n - u) / 26); } while (n > 0);
+  return suffix;
+}
+/** The texts a symbol hit matches through its Reference field (SCH_FIELD::Matches): the instance's reference, and
+ *  with several units the reference with its unit letter. */
+export function refMatchTexts(ref: string, unit: number, unitCount: number): string[] { return unitCount > 1 ? [ref, ref + unitSuffix(unit)] : [ref]; }
+
+// ---------------------------------------------------------------- the virtual list (wxLC_VIRTUAL)
+/** The rows of a fixed-height list a scrolled viewport shows: [start, end) with `overscan` rows either side, and the
+ *  heights that stand for the rows before and after them. */
+export function rowWindow(count: number, scrollTop: number, viewHeight: number, rowH: number, overscan: number): { start: number; end: number; before: number; after: number } {
+  const start = Math.max(0, Math.min(count, Math.floor(Math.max(0, scrollTop) / rowH) - overscan));
+  const end = Math.max(start, Math.min(count, Math.ceil((Math.max(0, scrollTop) + Math.max(0, viewHeight)) / rowH) + overscan));
+  return { start, end, before: start * rowH, after: (count - end) * rowH };
+}

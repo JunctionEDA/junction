@@ -21,7 +21,7 @@
 //
 // Built by 'npm run build:pcb-tools' into static/pcb-tools.js, a classic script (IIFE) that registers
 // window.CollabTools.pcb and window.PcbTools; the modules follow the sections of the original file.
-import type { BoardDoc, FormSpec, Hover, PcbChange, PcbCtx, Pt, PtrEvent } from "./types";
+import type { BoardDoc, FormSpec, Hover, PcbChange, PcbCtx, Pt, PtrEvent, DesignSettings } from "./types";
 import type { RequestOpts, RoutingDialogs } from "./actions";
 import type { NewItemDialog } from "./assistants";
 import type { PickerFn, PromptFn } from "./dom";
@@ -39,11 +39,11 @@ import { textOfItem, annotate, clearNets, clipboardText, cursorPoint, duplicateC
 import { connectedRun } from "./connected";
 import { boardStatistics, convertChanges, footprintAttrChanges, justifyChanges, padAt, selectionLoops, segmentToArcChanges, zonePriorityChanges } from "./convert";
 import { formImpl, padProperties, setFormImpl } from "./dialogs";
-import { DP_MSG_GAP, DP_MSG_NETS, DP_MSG_NOWHERE, DP_MSG_START, dpGateway, dpNetPair, dpPrimitives, dpSizes, findDpPrimitivePair, matchDpSuffix, offsetPts } from "./diffpair";
+import { DP_MSG_GAP, DP_MSG_NETS, DP_MSG_NOWHERE, DP_MSG_START, DP_MSG_START_FINAL, dpGateway, dpNetPair, dpPrimitives, dpSizes, findDpPrimitivePair, matchDpSuffix, offsetPts } from "./diffpair";
 import { ARROW_LEN, DIM_CLASS, DIM_TYPE, EXT_HEIGHT, EXT_OFFSET, dimBaseText, dimEditNode, dimEditPoints, dimGeometry, dimRead, dimUpdate, dimValueText, dimWrite, dimensionNode, readableAngle, snap45, snap90, snapVec45 } from "./dimensions";
 import { arcLength, arcPoints, boxGrid, boxesTouch, coreDist, padCopperLayers, padShape, firstEdgeConflict, polyPolyDist, segSegDist, segsIntersect, shapeGap, viaLayers } from "./distances";
 import { applySelMode, closeTextPrompt, pickClick, pickInteractively, pickTwoPoints, twoPointMove, twoPointUp, vectorSnapped, refreshChip, setPickerImpl, setPromptImpl, routerKeyAction, selMode, undoRedoInFlight } from "./dom";
-import { changedArea, dragChanges, dragTo, optimizeDragged } from "./drag-optimize";
+import { changedArea, dragChanges, dragTo, optimizeDragged, obtuseOnly } from "./drag-optimize";
 import { assembleLine, dragCorner45, dragCornerFree, dragSegment45, dragSolution, dragStart, initialTrace } from "./dragger";
 import { ANGLE_SNAP_MSG, DRAWING_TOOL_IDS, MOVE_SNAP_MSG, POLY_TOOLS, RULE_AREA_LAYERS, angleSnapMode, displayConstraintsMsg, build45Leader, constrainDraw, curveGeom, drawTrack, simplifyOutline, nextLineMode, setAngleSnap, stepDrawWidth, undoChainSegment, withStroke } from "./draw-modes";
 import { drawClick, drawOriginSync, finishCurve, finishPoly, openImagePicker, placeImage, polyOutline, zoneTemplate } from "./draw-tools";
@@ -64,7 +64,7 @@ import { hitTestItem } from "./hit";
 import { base64Bytes, imageInfo, imageMm } from "./images";
 import { beginToolDrag, dpCoupledSegment, dragCandidate, dragHiddenIds, dragMove, finishDrag } from "./inline-drag";
 import { LENGTH_UNCONSTRAINED, TUNE_IU, TUNE_MSG_INSIDE, TUNE_MSG_PICK, TUNE_MSG_SELECT, chLength, chPoints, coupledSegmentPairs, dpMeanderMove, meanderDefaults, meanderMove, setTargetLength, setTargetSkew, splitLine } from "./meander";
-import { SELECTION_TYPES, boardLayerName, filterIds, idsOnLayer, inspectClearance, itemDescription, msgPanelInfo } from "./msgpanel";
+import { SELECTION_TYPES, boardLayerName, filterIds, idsOnLayer, inspectClearance, itemDescription, itemDescriptionAmong, msgPanelInfo } from "./msgpanel";
 import { boardFindHits, edaMatches, findStep, netNameCmp, unescapeKiCad } from "./find";
 import { flipFieldChange, footprintFieldNode, hideFieldChanges, requestField, rotateFieldChange } from "./field-edit";
 import { copperStack, layerDistance, netLengths, stackupItems } from "./net-lengths";
@@ -78,12 +78,12 @@ import { addCornerChanges, arcEditGeometry, arcEditMode, canAddCorner, canRemove
 import { cornerLeg, elemsPts, headElems, roundCorners } from "./posture";
 import { antennaRemovals, loopRemovals, removeRedundant } from "./redundant";
 import { adoptNetOps, foldMicro, routeHighlight, routeUnhighlight, splitChanges, splitOps } from "./route-fix";
-import { netUnder, padsOf, routeLeg, snapTarget } from "./route-geom";
+import { netUnder, padsOf, pickSingleItem, routeLeg, snapTarget, snapToItem } from "./route-geom";
 import { drawStatusNote, routeHiddenIds, statusNoteDims } from "./route-preview";
-import { alignToSegment, endRoute, placeVia, setLayerPickerImpl, setNetChooser, routeClick, setLayer, startLayerOf, undoRouteLeg, viaPlan, viaSnapPoint, viaZoneNets } from "./route-tool";
+import { alignToSegment, endRoute, placeVia, setLayerPickerImpl, setNetChooser, routeClick, setLayer, startLayerOf, undoRouteLeg, viaPlan, viaSnapPoint, viaZoneNets, restoreActiveLayer, startRefusal } from "./route-tool";
 import { RS_DEFAULTS, cornerStyleName, parseRouterSettings, routerChecks, setRouterSettings } from "./router-settings";
 import { beginCarryMove, componentDragHits, finishSelectMove, moveTransform, selectMoveTo, startPendingDrag } from "./select-move";
-import { insideConvex, octagon, selfIntersecting, shoveLine, shoveOps, shoveRun, shoveWorld, walkAroundHull } from "./shove";
+import { areaAllows, insideConvex, octagon, selfIntersecting, shoveLine, shoveOps, shoveOptimize, shoveRun, shoveWorld, walkAroundHull } from "./shove";
 import { cornerCost, padBreakouts, runSmartPads, smartPadsSingle } from "./smartpads";
 import { BOARD_VERSION, DELETE_CURSOR, HIT_MM, K, S, WIDTHS, bind, lastCtx, saturated } from "./state";
 import { TOOLS, ghostSegs } from "./tools";
@@ -119,7 +119,7 @@ import { silkClearanceMarkers, silkEdgeMarkers, silkToMaskMarkers, maskBridgeMar
 import { courtyardMarkers, courtyardOutlines, disabledLayerMarkers, effectivePenWidth, holeClearanceMarkers, holeToHoleMarkers, keepoutMarkers, moreDrcMarkers, textDimsMarkers, textMirroringMarkers, textOnEdgeCutsMarkers } from "./drc-more";
 import { mirrorNodeAxis, mirrorAxisChanges, packNodes, findBestPacking, ALIGN_COMMIT, arcCentre3, PCB_KINDS, rotateTextBoxNode, setTextBoxAngleSliding, textBoxAngle, alignBox, alignChanges, anchorOf, distributeChanges, distributeDeltasGaps, distributeDeltasPoints, flipChanges, flipNode, mapNodePoints, mirrorChanges, mirrorNode, moveChanges, moveExactChanges, packChanges, positionRelativeChanges, rotateChanges, rotateNode, selectionCenter, swapChanges, topLeftAnchor, transformChanges, translateNode } from "./transforms";
 import { customRouteClearance, pinnedOpt, routedRuleItem, rulePairClearance, ruleSizes } from "./rule-resolver";
-import { assertionMarkers, disallowMarkers, padAnnulus, ruleItems, sizeMarkers, trackAngleMarkers } from "./drc-rules";
+import { assertionMarkers, disallowMarkers, padAnnulus, ruleItems, sizeMarkers, trackAngleMarkers, zoneFillRuleTable } from "./drc-rules";
 import { callFunc, footprintSelector, itemShape } from "./dru-eval";
 import { diffPairMarkers, evalRuleConstraint, matchedLengthMarkers, parseCondition, parseDru, ruleMatches, wildMatch } from "./dru";
 import { isTuningPattern, regenerateTuningChanges, setCustomRules, tuneClick, tuneHiddenIds, tuneStatus, tuneMove, tuningPatternInfo, tuningRemoveChanges } from "./tuning-patterns";
@@ -127,11 +127,12 @@ import { TUNE_MSG_DP_NETS, TUNE_MSG_SKEW_NETS, TUNE_MSG_SKEW_PICK, assembleDiffP
 import { LINE_W, TEXT_STYLE, flipLayerName, layerClass, layerOf, norm180, norm360, pt, r6, textStyle, useFootprintEditorDefaults, widthOf } from "./util";
 import { dir8, hullOf, isFreePad, legPts, pathClear, pathHits, routeClearance, routeObstacles, routerWorld, simplifyPts, walkHead, walkTo } from "./walkaround";
 import { uniqueZoneName, subtractOutline } from "./zone-modes";
-import { unrouteSegment, itemRatsnestAnchors } from "./route-selected";
-import { enabledLayerPairs, resetLayerPairCycle, itemOnLayer, snapAllLayers } from "./snap-pairs";
+import { unrouteSegment, itemRatsnestAnchors, routeHasOtherEnd } from "./route-selected";
+import { enabledLayerPairs, resetLayerPairCycle, itemOnLayer, snapAllLayers, magneticOption, setMagneticOption } from "./snap-pairs";
 import { zonePriorityAbility, zonePriorityPlan } from "./zone-priority";
 import { zoneDuplicateNode, zoneMergeChanges } from "./zone-modes";
 import { pruneItemLayers } from "./clipboard";
+import { routerHover } from "./app-state";
 
 /** Every pad picked on its own ("footprintId#padIndex"), the last one picked first; those picked before it with
  *  Shift count while it is still the picked pad. */
@@ -186,6 +187,11 @@ function isDoubleDown(ev: PtrEvent) {
 }
 /** The shapes DRAWING_TOOL::drawShape draws (a line, rectangle, circle or text box). */
 const DRAW_SHAPE_KINDS = new Set(["gline", "grect", "gcircle", "gtextbox"]);
+/** The custom rules the zone filler consults: zoneFillRuleTable over the .kicad_dru (druText, else the one loaded). */
+function zoneFillRules(doc: BoardDoc, s: DesignSettings, druText?: string | null) {
+  if (druText !== undefined && druText !== S.druSrc) { S.druSrc = druText; setCustomRules(druText || null); }
+  return zoneFillRuleTable(doc, s, S.dru ? S.dru.rules : []);
+}
 export const pcb = {
   id: "pcb", tools: TOOLS, state: S, ghostSegs,
   /** The KICURSOR a running tool switched to (null: its declared one): MOVING while a move, a drag or a placed image rides the cursor. */
@@ -226,7 +232,7 @@ export const pcb = {
   onActivate(t: string, ctx: PcbCtx) {
     bind(ctx);
     const mine = TOOLS.some((x) => x.id === t);
-    if (S.route && t !== (S.route.dp ? "routediff" : "route")) { const rt = S.route; S.route = null; routeUnhighlight(ctx, rt); }   // leaving the tool drops the unfixed leg
+    if (S.route && t !== (S.route.dp ? "routediff" : "route")) { const rt = S.route; S.route = null; restoreActiveLayer(ctx, rt); routeUnhighlight(ctx, rt); }   // leaving the tool drops the unfixed leg
     S.violations = null;
     if (t !== "pickpoint" && S.pick && S.pick.two) { S.pick = null; S.popup = null; }   // IsActivate: another tool ends a two-point pick
     if (t !== "pickpoint" && t !== "select") S.pickKeep = null;
@@ -243,7 +249,7 @@ export const pcb = {
     if (PAD_TOOLS[t]) { const selPad = [...S.sel].map((id) => ctx.doc && ctx.doc.items.get(id)).find((it) => it && it.kind === "pad"); S.padTemplate = selPad ? selPad.node : null; if (ctx.setStatus) ctx.setStatus("Place pad"); }
     if (t === "garc") showArcMode(ctx);
     if (t === "thievingzone" && !ctx.viewOnly && !thievingAllowed(ctx.doc)) { S.modTool = null; ctx.toast(THIEVING_NEEDS_VERSION_MSG); ctx.setTool("select"); return; }
-    if (t === "drag" && !beginToolDrag(ctx, !!S.dragFree)) { S.modTool = null; ctx.toast("Select a track or a via first, or point at one, then press D to drag it"); ctx.setTool("select"); return; }
+    if (t === "drag" && !beginToolDrag(ctx, !!S.dragFree)) { S.modTool = null; ctx.setTool("select"); return; }   // ROUTER_TOOL::InlineDrag returns silently
     refreshChip(ctx); ctx.requestRender();
     if (t === "image" && !S.image && !ctx.viewOnly) openImagePicker();   // KiCad opens the file dialog as the tool starts
   },
@@ -381,8 +387,17 @@ export const pcb = {
     const shift = !!ev.shiftKey;
     if (S.padPlace && (k === "r" || k === "R")) { S.padPlace.angle = (S.padPlace.angle + (shift ? -90 : 90) + 360) % 360; ctx.requestRender(); return true; }   // IPO_ROTATE
     switch (k) {
-    case "x": case "X": if (!shift) { ctx.setTool("route"); return true; } return false;
-    // V: ACT_PlaceThroughVia while the router is active (a via rides the head; idle, the next route starts with one),
+    // routeSingleTrack / routeDiffPair from the hotkey carry the cursor position: while a track is routed X is a click
+    // (performRouting: FixRoute); otherwise the tool starts and is primed with a click at the cursor (PrimeTool), so
+    // X over a pad or a track begins the route there.  The toolbar and the menus only arm the tool.
+    case "x": case "X": case "6": {
+      if (shift || (k === "6" && (S.route || ev.ctrlKey || ev.metaKey || ev.altKey))) return false;
+      if (S.route) { if (editing()) { const rt = S.route; const hv = S.hover || { x: rt.cursor[0], y: rt.cursor[1], snap: null }; routeClick(ctx, hv, [hv.x, hv.y], { enter: true }); } return true; }
+      const tool = k === "6" ? "routediff" : "route"; ctx.setTool(tool);
+      if (S.modTool === tool && ctx.cursor && !ctx.viewOnly) { const mm = ctx.cursor.slice(); const hv = hoverPoint(ctx, mm, true); S.hover = hv; routeClick(ctx, hv, mm); }
+      return true;
+    }
+    // V: ACT_PlaceThroughVia while the router is active (a via rides the head; idle, only the active layer toggles),
     // elsewhere PCB_ACTIONS::layerToggle (the spec table); Place Vias is Ctrl+Shift+X
     case "v": case "V": if (shift) return false; if (S.route || S.modTool === "route" || S.modTool === "routediff") { if (editing()) runAction("ACT_PlaceThroughVia", ctx); return true; } return false;
     case "<": if (S.route) { if (editing()) runAction("ACT_SelLayerAndPlaceThroughVia", ctx); return true; } return false;
@@ -407,6 +422,7 @@ export const pcb = {
     case "Flip": return editing() && flipSelected(ctx);
     case "/": if ((ev.ctrlKey || ev.metaKey) && (S.modTool === "route" || S.modTool === "routediff")) return runAction("ACT_SwitchCornerModeToNext", ctx);
       if (S.modTool === "garc" && !(ev.ctrlKey || ev.metaKey)) return runAction(ev.altKey ? "cycleArcDrawMode" : "arcPosture", ctx);
+      if (S.route && S.route.dp) { S.route.diagFirst = !S.route.diagFirst; updateHead(ctx); ctx.requestRender(); return true; }   // DIFF_PAIR_PLACER::FlipPosture
       if (S.route) { const rt = S.route; tracerFlip(rt.tracer, rt.head && rt.head.length > 1 ? dir8(rt.head[0], rt.head[1]) : -1); updateHead(ctx); ctx.requestRender(); return true; } return false;   // ACT_SwitchPosture, until the next fix
     case "PageUp": return runAction("layerTop", ctx);
     case "PageDown": return runAction("layerBottom", ctx);
@@ -624,14 +640,14 @@ export const pcb = {
 };
 root.CollabTools = root.CollabTools || {};
 root.CollabTools.pcb = pcb;
-root.PcbTools = { zonePriorityPlan, zonePriorityAbility, zoneMergeChanges, zoneDuplicateNode, pruneItemLayers, OffsetItemState, snapAnchors, textGraphics: textGraphicsApi, layerStyle, globalDeletion: globalDeletionApi, enabledLayerPairs, resetLayerPairCycle, itemOnLayer, itemRatsnestAnchors, uniqueZoneName, subtractOutline, footprintRefChoices, footprintByRef, netNameCmp, fieldEdit: { requestField, rotateFieldChange, flipFieldChange, hideFieldChanges, footprintFieldNode }, boardFindHits, edaMatches, findStep, unescapeKiCad, nearestSnapLinePoint, angleSnapDirections, MOVE_SNAP_MSG, ANGLE_SNAP_MSG, DRAWING_TOOL_IDS, useFootprintEditorDefaults, LINE_W, TEXT_STYLE, state: S, pad: padToolApi, exchange: exchangeApi, fpProps: fpPropsApi, fpPads: fpPadsApi, fpCheck: fpCheckApi, fpUsers: fpUsersApi, setEnumParams, openForm: (spec: FormSpec) => formImpl(spec), arcEditMode, setArcEditMode, arcEditGeometry, editPoints, editPointNode, ArcGeom, arcDrawMode, setArcDrawMode, arcFromStartEndMidDrag, arcFromStartEndCenterDrag, arcFromStartTangentEnd, arcTangentSeedAt, arcTangentSeedNear, snapVec45, netTable, zoneTemplate, build45Leader, polyOutline, angleSnapMode, setAngleSnap, constrainDraw, snap90, undoChainSegment, stepDrawWidth, withStroke, dimensionLabel, unfillChanges, alignBox, splitChanges, WIDTHS, BOARD_VERSION, routeLeg, segmentNode, viaNode, lineNode, rectNode, circleNode, arcNode, polyNode, textNode, netOf, netNode, netStyle,
+root.PcbTools = { shoveOptimize, areaAllows, startRefusal, obtuseOnly, routeHasOtherEnd, magneticOption, setMagneticOption, routerHover, pickSingleItem, snapToItem, zonePriorityPlan, zonePriorityAbility, zoneMergeChanges, zoneDuplicateNode, pruneItemLayers, OffsetItemState, snapAnchors, textGraphics: textGraphicsApi, layerStyle, globalDeletion: globalDeletionApi, enabledLayerPairs, resetLayerPairCycle, itemOnLayer, itemRatsnestAnchors, uniqueZoneName, subtractOutline, footprintRefChoices, footprintByRef, netNameCmp, fieldEdit: { requestField, rotateFieldChange, flipFieldChange, hideFieldChanges, footprintFieldNode }, boardFindHits, edaMatches, findStep, unescapeKiCad, nearestSnapLinePoint, angleSnapDirections, MOVE_SNAP_MSG, ANGLE_SNAP_MSG, DRAWING_TOOL_IDS, useFootprintEditorDefaults, LINE_W, TEXT_STYLE, state: S, pad: padToolApi, exchange: exchangeApi, fpProps: fpPropsApi, fpPads: fpPadsApi, fpCheck: fpCheckApi, fpUsers: fpUsersApi, setEnumParams, openForm: (spec: FormSpec) => formImpl(spec), arcEditMode, setArcEditMode, arcEditGeometry, editPoints, editPointNode, ArcGeom, arcDrawMode, setArcDrawMode, arcFromStartEndMidDrag, arcFromStartEndCenterDrag, arcFromStartTangentEnd, arcTangentSeedAt, arcTangentSeedNear, snapVec45, netTable, zoneTemplate, build45Leader, polyOutline, angleSnapMode, setAngleSnap, constrainDraw, snap90, undoChainSegment, stepDrawWidth, withStroke, dimensionLabel, unfillChanges, alignBox, splitChanges, WIDTHS, BOARD_VERSION, routeLeg, segmentNode, viaNode, lineNode, rectNode, circleNode, arcNode, polyNode, textNode, netOf, netNode, netStyle,
   wrapBoard, addedChange, replacedChange, removedChange, padsOf, snapTarget, netUnder, hitTestItem, itemAt, deleteAt, connectedRun, rotateFootprintNode, flipFootprintNode,
   flipLayerName, pt, selectMoveTo, finishSelectMove, assembleLine, dragStart, startPendingDrag, finishDrag, dragMove, dragTo, dragSolution, dragChanges, dragSegment45, optimizeDragged, changedArea, componentDragHits, isFreePad, dragCorner45, dragCornerFree, initialTrace, routableItems, nextWidth, norm180, norm360, DELETE_CURSOR,
   // the interactive router (Highlight collisions, Shove, Walk around)
   RS_DEFAULTS, parseRouterSettings, setRouterSettings, routerChecks, foldMicro, cornerStyleName, cornerLeg, roundCorners, elemsPts, headElems, branchDoc, branchChanges, viaPlan,
   octagon, walkAroundHull, selfIntersecting, shoveWorld, shoveRun, shoveLine, shoveOps, insideConvex, routerKeyAction, splitOps, adoptNetOps, branchOpFresh, undoRedoInFlight, nextLineMode, guessCandidates, fieldCandidateId, hitTestDistance,
-  matchDpSuffix, dpNetPair, dpPrimitives, findDpPrimitivePair, dpGateway, offsetPts, DP_MSG_NETS, DP_MSG_START, DP_MSG_NOWHERE, DP_MSG_GAP,
-  padBreakouts, smartPadsSingle, runSmartPads, cornerCost, dpCoupledSegment, loopRemovals, antennaRemovals, removeRedundant, isTuningPattern, tuningPatternInfo, regenerateTuningChanges, selectedTuningPattern, editTuningPattern, tuningEditNode, tuningEditPoints, tuningOutline, genStartEdit, genUpdateEdit, genFinishEdit, genCancelEdit, topParentOf, tuningRemoveChanges, setTargetSkew, coupledLength, TUNE_MSG_SKEW_PICK, TUNE_MSG_SKEW_NETS, TUNE_MSG_DP_NETS, dpMeanderMove, coupledSegmentPairs, assembleDiffPair, tuneHiddenIds, chPoints, setCustomRules, parseDru, evalRuleConstraint,
+  matchDpSuffix, dpNetPair, dpPrimitives, findDpPrimitivePair, dpGateway, offsetPts, DP_MSG_NETS, DP_MSG_START, DP_MSG_START_FINAL, DP_MSG_NOWHERE, DP_MSG_GAP,
+  padBreakouts, smartPadsSingle, runSmartPads, cornerCost, dpCoupledSegment, loopRemovals, antennaRemovals, removeRedundant, isTuningPattern, tuningPatternInfo, regenerateTuningChanges, selectedTuningPattern, editTuningPattern, tuningEditNode, tuningEditPoints, tuningOutline, genStartEdit, genUpdateEdit, genFinishEdit, genCancelEdit, topParentOf, tuningRemoveChanges, setTargetSkew, coupledLength, TUNE_MSG_SKEW_PICK, TUNE_MSG_SKEW_NETS, TUNE_MSG_DP_NETS, dpMeanderMove, coupledSegmentPairs, assembleDiffPair, tuneHiddenIds, chPoints, setCustomRules, zoneFillRules, parseDru, evalRuleConstraint,
   /** PANEL_SETUP_RULES::OnShowMatching: the ids of the board items (footprints for their pads) a named rule's condition and layer select. */
   ruleMatchingItems: (doc: BoardDoc, s: Parameters<typeof matchedLengthMarkers>[1], text: string, name: string): string[] | null => {
     const rule = parseDru(text).rules.find((r) => r.name === name); if (!rule) return null;
@@ -657,7 +673,7 @@ root.PcbTools = { zonePriorityPlan, zonePriorityAbility, zoneMergeChanges, zoneD
   selectionIds, applySelection, requestSelection, bestDragOrigin, snapCursor, itemAnchors, nearestAnchor, snapRanges, magneticSettings,
   boxContains, collectMultiple, itemInArea, lassoContains, padInArea, expandConnection, filterCategory, footprintSheetPath, itemPassesFilter, nearestUnconnectedFootprints, selectAllConnectedShapes, selectAllConnectedTracks, selectConnections, sheetItemIds, unconnectedFootprints, unrouteIds, footprintCoverageRatio, geomPolys, unlockedIds, moveTransform, modificationPoint, clearNets, LOCKED_WARNING, groupNode, groupOf, groupMembers, expandGroups, groupChanges, ungroupChanges, groupMembersChanges, isLocked, setLocked, lockChanges,
   // netTable, editPoints and editPointNode are listed above (the script named them twice, to the same values)
-  shapeGap, coreDist, segsIntersect, polyPolyDist, firstEdgeConflict, deflatePoly, padShape, padCopperLayers, viaLayers, arcPoints, arcLength, conductors, clusterRoots, netlist, ratsnest, localRatsnest, netInspector, netLengths, copperStack, stackupItems, layerDistance, netItemIds, netHighlightIds, msgPanelInfo, boardLayerName, itemDescription, dynamicRatsnest, selMode, addCornerChanges, removeCornerChanges, canAddCorner, canRemoveCorner, chamferCornerChanges, movePointChanges, polyEdgeDrag, simplifyOutline, curveGeom, zoneDefaultSettings, polyFilledOn,
+  shapeGap, coreDist, segsIntersect, polyPolyDist, firstEdgeConflict, deflatePoly, padShape, padCopperLayers, viaLayers, arcPoints, arcLength, conductors, clusterRoots, netlist, ratsnest, localRatsnest, netInspector, netLengths, copperStack, stackupItems, layerDistance, netItemIds, netHighlightIds, msgPanelInfo, boardLayerName, itemDescription, itemDescriptionAmong, dynamicRatsnest, selMode, addCornerChanges, removeCornerChanges, canAddCorner, canRemoveCorner, chamferCornerChanges, movePointChanges, polyEdgeDrag, simplifyOutline, curveGeom, zoneDefaultSettings, polyFilledOn,
   /** The point editor handle of the one selected item under a point: its key ("c3", "m1", "r0", "start" …), or null. */
   /** MAGNETIC_SETTINGS::allLayers of the frame the context is for (the picker's menu shows the other choice). */
   snapAllLayersOn(ctx: PcbCtx) { return snapAllLayers(ctx || lastCtx); },

@@ -194,6 +194,22 @@ export function symbolFlagsForVariant(sym: N, variant: string | null | undefined
   const st = variant ? symbolVariant(sym, variant, path, ver) : null; return st ? st.flags : symbolFlags(sym);
 }
 
+/**
+ * The check condition of an Edit > Attributes entry (SCH_EDIT_TOOL::Init attribDNPCond, attribExcludeFromSimCond …):
+ * of the selected symbols, sheets and rule areas (other items do not count) at least one carries the attribute and
+ * none lacks it.  A symbol or a sheet reads it through the current variant on the sheet instance; a rule area's is
+ * its own.
+ */
+export function attributeChecked(nodes: N[], flag: keyof SymFlags, variant?: string | null, path?: string | null, ver?: number | null): boolean {
+  let checked = 0, unchecked = 0;
+  for (const n of nodes) {
+    const kind = str(n[0]);
+    if (kind !== "symbol" && kind !== "sheet" && kind !== "rule_area") continue;
+    if ((kind === "rule_area" ? symbolFlags(n) : symbolFlagsForVariant(n, variant, path, ver))[flag]) checked++; else unchecked++;
+  }
+  return checked > 0 && unchecked === 0;
+}
+
 export interface SymVariantPatch { flags?: Partial<SymFlags>; fields?: Record<string, string> }
 /** The symbol with its instance's variant `name` edited (created when missing, from the symbol's flags), written in
  *  the writer's order; a variant left with no differentials is removed.  Children the web does not edit

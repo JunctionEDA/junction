@@ -56,7 +56,7 @@ import { importFootprintFiles, installFpEditHandlers } from "./fpedit";
 import { importSymbolLibraries } from "../symedit/dialogs";
 import { comboOf, keyHooks, kicadActionAvailable, runKicadAction, runSpecHotkey, typingTarget } from "./hotkeys";
 import { deleteSelectedField } from "./fieldops";
-import { selectionCount } from "./menu-actions";
+import { actionState, selectionCount } from "./menu-actions";
 import { installTableCells } from "./tablecells";   // last: its imports must not reorder the modules above
 import { fontCommitObserver, initFonts } from "./fonts";
 import { installViewSwitcher } from "./view-switcher";
@@ -65,7 +65,7 @@ import "./title";
 
 registerBomView();   // a PCB's bill of materials as a view of its tab (the shell opens it like a document)
 import "./cad-usage";   // on a board: the way to the part studios and assemblies that use it
-window.CollabApp = { getState: store.get, subscribe: store.subscribe, dispatch: (a) => dispatchAction(a), renderProps: (el) => renderPropsInto(el), selectionCount };
+window.CollabApp = { getState: store.get, subscribe: store.subscribe, dispatch: (a) => dispatchAction(a), renderProps: (el) => renderPropsInto(el), selectionCount, actionState };
 
 
 // ---------- home navigation (the home view is still rendered here) ----------
