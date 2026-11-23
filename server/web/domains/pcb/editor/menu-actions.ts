@@ -401,7 +401,7 @@ export function pcbEnableFacts(): PcbEnableFacts | null {
   }
   const ro = E.renderOpts as { objects?: { hide?: Set<string>; opacity?: Record<string, number> } };
   const zonesEnabled = !(ro.objects && ro.objects.hide && ro.objects.hide.has("zones")) && !(ro.objects && ro.objects.opacity && ro.objects.opacity.zones !== undefined && ro.objects.opacity.zones <= 0);
-  const busy = !!(S.route || S.draw || S.drag || S.move || S.modTool || S.pedit);
+  const busy = !!(S.route || S.draw || S.drag || S.move || S.modTool || S.pedit || S.blockDrag);
   const hl = S.hlCurrent as string[] | undefined;
   return { kinds, hasLocked, hasUnlocked, haveNet, boardHasItems: doc.items.size > 0, idleNoTool: !busy && store.get().tool.current === "select",
     netHighlightSet: !!(hl && hl.length) || !!S.highlightNet, zonesEnabled, drawingOrRouting: !!(S.route || S.draw) };

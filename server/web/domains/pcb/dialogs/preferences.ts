@@ -1,7 +1,7 @@
 // dialogs/preferences.ts — Preferences → Preferences… (Ctrl+,) in both editors: KiCad's paged dialog with the panels
 // that mean something in a browser.  Common > Mouse and Touchpad (common/dialogs/panel_mouse_settings), Hotkeys
 // (panel_hotkeys_editor, read-only here); Schematic Editor > Display Options, Grids, Editing Options, Colors;
-// PCB Editor > Display Options, Grids, Origins & Axes, Editing Options.  Everything is kept in localStorage (prefs.ts) and applied on OK.
+// PCB Editor > Display Options, Grids, Origins & Axes, Editing Options, Colors; Footprint Editor > Colors.  Everything is kept in localStorage (prefs.ts) and applied on OK.
 import { boardFontFaces } from "../editor/pcbdialogs/text-graphics";
 import { trapTab } from "../tools/kicad-dialogs/shell";
 import { E, isSch, requestRender, setToggles, store, toast } from "./editor";
@@ -11,17 +11,18 @@ import { hotkeysPanel } from "./hotkeys-panel";
 import { menuMeta, type UserHotkeys } from "../menuspec";
 import { formatLength } from "../tools/props/numeric";
 import { KD, checkbox, h, popupMenu, promptText, select, textInput } from "./dom";
-import { SCH_COLOR_ITEMS, hiddenByBackground, newUserTheme, schExtraColors, sameColor, themeNameError, type UserSchTheme } from "./color-themes";
+import { SCH_COLOR_ITEMS, fpColorItems, hiddenByBackground, newUserBoardTheme, newUserTheme, pcbColorItems, schExtraColors, sameColor, storableBoardColors, themeNameError, type UserSchTheme } from "./color-themes";
+import { PREVIEW_BOARD } from "./color-preview-board";
 import { colorSwatch, colorText, parseColor, type RGBA } from "../../../shared/components/colorswatch";
 import { lenField, messageBox } from "../editor/pcbdialogs/ui";
 import { gridMessageText, loadUnits, messageText, unitName } from "../../../shared/units";
-import { saveUserSchTheme, setSnapAllLayersPref, snapAllLayersPref } from "./prefs";
+import { boardColorsOf, boardThemeId, isReadOnlyTheme, saveUserSchTheme, savedBoardColors, setSnapAllLayersPref, snapAllLayersPref, storeSessionBoardColors } from "./prefs";
 import { DEFAULT_PREFS, SIM_MOUSE_DEFAULTS, SIM_TRACKPAD_DEFAULTS, schThemeList, GRID_MIN_SPACING_RANGE, GRID_THICKNESS_CHOICES, clonePrefs, editorId, gridLabel, savePrefs, scaleOf, type EditorId, type GalPrefs, type Prefs, type SimWheel } from "./prefs";
 import { clearDialogState, clearDontShowAgain, clearFileHistory, resetProgramSettings } from "./maintenance";
 import { askConfirm } from "../../../shared/components/msgbox";
 import type { Units } from "../../../shared/store";
 import { getThemeMode, setThemeMode, type ThemeMode } from "../../../shared/theme";
-import { getInactiveMode, setInactiveMode } from "../editor/panels/appearance";
+import { getInactiveMode, layerDisplayName, setInactiveMode } from "../editor/panels/appearance";
 import { wakatimePage, type WakaPage } from "./wakatime";
 import { cleanFieldTemplates, fieldTemplatesPage, symColorsPage, symDisplayPage, symEditingPage } from "./preferences-sym";
 import { assignScrollMod, type ScrollMod } from "../editor/wheel-model";
@@ -95,7 +96,9 @@ const ratsnestState = (): { curvedRatsnest: boolean; setCurvedRatsnest(on: boole
 const pcbTools = (): ArcEditTools | null => { const t = (window as unknown as { PcbTools?: Partial<ArcEditTools> }).PcbTools; return t && t.arcEditMode && t.setArcEditMode ? (t as ArcEditTools) : null; };
 
 /** The edits of an open Preferences dialog, kept when a page is reset (the dialog is rebuilt around them). */
-interface Staged { view?: SchView; p: Prefs; uiMode: ThemeMode; arcEdit: number; hv45?: boolean; curved?: boolean; contrast: ReturnType<typeof getInactiveMode>; hotkeys?: UserHotkeys }
+interface Staged { view?: SchView; p: Prefs; uiMode: ThemeMode; arcEdit: number; hv45?: boolean; curved?: boolean; contrast: ReturnType<typeof getInactiveMode>; hotkeys?: UserHotkeys;
+  /** a board Colors page's colours on show (PANEL_COLOR_SETTINGS m_currentSettings) after Reset to Defaults, by page key */
+  boardWork?: Record<string, { id: string; colors: Record<string, string> }> }
 /** PAGED_DIALOG's g_lastPage: the page the dialog was last closed on, for the next opening in this session. */
 let lastPage: string | null = null;
 /** The defaults a page's Reset to Defaults puts back (RESETTABLE_PANEL::ResetPanel of that page only). */
@@ -116,10 +119,20 @@ export function resetPage(key: string, st: Staged): void {
     // PANEL_COLOR_SETTINGS::ResetPanel: every colour of the theme on show back to its default; a read-only theme and
     // the theme choice stay as they are
     case "Schematic Editor/Colors": { const u = st.p.schColors.user.find((x) => x.id === st.p.schColors.theme); if (u) resetUserThemeColors(u); break; }
+    // PANEL_COLOR_SETTINGS::ResetPanel of a board page: the swatches (m_currentSettings) to GetDefaultColor, unsaved;
+    // nothing for a read-only theme
+    case "PCB Editor/Colors": case "Footprint Editor/Colors": {
+      const id = boardThemeId(st.p, key.startsWith("Footprint")); if (isReadOnlyTheme(st.p, id)) break;
+      const prev = st.boardWork && st.boardWork[key] && st.boardWork[key].id === id ? st.boardWork[key].colors : boardColorsOf(st.p, id);
+      const D = KiCadCanvas.boardThemeColors("default"), keys = key.startsWith("Footprint") ? fpColorItems(prev).map(([k]) => k) : pcbColorItems().map(([k]) => k);
+      const colors = { ...prev }; for (const k of keys) if (D[k] !== undefined) colors[k] = D[k];
+      (st.boardWork || (st.boardWork = {}))[key] = { id, colors }; break;
+    }
     case "Footprint Editor/Display Options": st.p.gal.fp = d.gal.fp; break;
     case "Footprint Editor/Grids": st.p.grids.fp = d.grids.fp; break;
     case "Footprint Editor/Origins & Axes": st.p.fpOrigin = d.fpOrigin; break;
-    case "Footprint Editor/Editing Options": st.p.fpEditing = d.fpEditing; break;
+    // PANEL_EDIT_OPTIONS::ResetPanel( footprint editor ): the shared anchor-point option back to the board editor's default too
+    case "Footprint Editor/Editing Options": st.p.fpEditing = d.fpEditing; st.p.pcbEditing.areaAnchorPointSelection = d.pcbEditing.areaAnchorPointSelection; break;
     case "PCB Editor/Display Options": st.p.pcbDisplay = { ...d.pcbDisplay, showPageLimits: st.p.pcbDisplay.showPageLimits }; st.p.gal.pcb = d.gal.pcb; break;
     case "PCB Editor/Grids": st.p.grids.pcb = d.grids.pcb; break;
     // PANEL_SNAPPING::ResetPanel: the frame's defaults (grid.snap ALWAYS, its MAGNETIC_SETTINGS and SNAP_INFERENCE_SETTINGS)
@@ -163,6 +176,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
   const plug = (window as unknown as { KcPlugins?: PluginHost }).KcPlugins;
   const plugRows0: PluginRow[] = plug ? plug.actionPluginRows("pcb") : [];
   const plugRows: PluginRow[] = plugRows0.map((r) => Object.assign({}, r));
+  const boardWork: NonNullable<Staged["boardWork"]> = (staged && staged.boardWork) || {};
   let hk: ReturnType<typeof hotkeysPanel> | null = null, body0: HTMLElement | null = null;
   const pageKey = (): string => { const n = body0 && body0.querySelector<HTMLElement>(".kd-tb-node.child.on"); return (n && n.dataset.page) || ""; };
   // the frame it was opened from: its grid list's selection is the grid in use (the Symbol Editor keeps its own)
@@ -315,6 +329,72 @@ export function openPreferences(page?: string, staged?: Staged): void {
       h("p", { class: "kd-note", style: "margin-top:10px" }, "Built-in themes are read-only: choose New Theme... to make an editable copy.  Right-click a color to copy, paste or revert it.  Changes are applied when the dialog is closed with OK; plots and exports use KiCad Default unless told otherwise."));
     paint();
   };
+  // PANEL_PCBNEW_COLOR_SETTINGS / PANEL_FP_EDITOR_COLOR_SETTINGS: the board namespace of the theme the frame uses
+  // (PCBNEW_SETTINGS / FOOTPRINT_EDITOR_SETTINGS appearance.color_theme): the Theme list as on the schematic page, a
+  // swatch per layer over the theme's background, saved at each change (updateColor -> saveCurrentTheme), and on the
+  // PCB Editor page the preview board drawn in the theme
+  const boardColorsPage = (pg: HTMLElement, fp: boolean): void => {
+    const sc = p.schColors, cfg = fp ? p.fpColors : p.pcbColors, pageId = fp ? "Footprint Editor/Colors" : "PCB Editor/Colors";
+    const NEW = "__new__", SEP = "__sep__";
+    const userOf = (id: string): UserSchTheme | undefined => sc.user.find((u) => u.id === id);
+    let themeId = boardThemeId(p, fp);
+    // the constructor stores the theme in use as the session has it
+    { const u0 = userOf(themeId); if (u0) storeSessionBoardColors(u0); }
+    const work = boardWork[pageId];
+    let cur: Record<string, string> = work && work.id === themeId ? { ...work.colors } : boardColorsOf(p, themeId);   // m_currentSettings
+    // m_validLayers: the Footprint Editor's are those the theme on show when the page is made gives a colour
+    const items: [string, string][] = fp ? fpColorItems(cur) : pcbColorItems(here === "pcb" && E.kdoc ? (l) => layerDisplayName(E.kdoc, l) : null);
+    const keys = items.map(([k]) => k);
+    const choices = (): [string, string][] => [...schThemeList(p).map(([id, n]) => [id, userOf(id) ? n : `${n} (read-only)`] as [string, string]), [SEP, "---"], [NEW, "New Theme..."]];
+    // saveCurrentTheme: the swatches' layers of a user theme written to its file
+    const saveCurrent = (): void => {
+      const u = userOf(themeId); if (!u) return;
+      const b = { ...(u.board || {}) }; for (const k of keys) if (cur[k] !== undefined) b[k] = cur[k];
+      u.board = storableBoardColors(b); saveUserSchTheme(u);
+    };
+    const select2 = (id: string): void => { themeId = id; cfg.theme = id; cur = boardColorsOf(p, id); delete boardWork[pageId]; paint(); };
+    const theme = select(choices(), themeId, (v) => {
+      if (v === SEP) { theme.value = themeId; return; }
+      if (v !== NEW) { if (v !== themeId) { saveCurrent(); select2(v); } return; }
+      theme.value = themeId; saveCurrent();
+      void promptText("Add Color Theme", "New theme name:", "", (name) => { const err = themeNameError(name, schThemeList(p).map(([, n]) => n)); if (err) { messageBox("Add Color Theme", err); return false; } return true; }).then((name) => {
+        if (name === null) return;
+        const u = newUserBoardTheme(name, keys, cur, schThemeList(p).map(([id]) => id)); sc.user.push(u); saveUserSchTheme(u);
+        theme.replaceChildren(...choices().map(([v2, l]) => h("option", { value: v2 }, l))); theme.value = u.id; select2(u.id);
+      });
+    }, { id: `kd-pref-${fp ? "fp" : "pcb"}-theme`, style: "width:260px" });
+    let copied: RGBA | null = null;
+    const grid = h("div", { id: `kd-pref-${fp ? "fp" : "pcb"}-swatches`, style: "display:grid;grid-template-columns:repeat(2,max-content minmax(0,1fr));gap:5px 10px;align-items:center;align-content:start" });
+    const preview = fp ? null : (h("canvas", { id: "kd-pref-pcb-preview", style: "width:100%;height:320px;display:block;border:1px solid var(--ink-3)" }) as HTMLCanvasElement);
+    const pdoc = preview ? colorPreviewDoc() : null;
+    const updatePreview = (): void => { if (preview && pdoc) drawColorPreview(preview, pdoc, cur, p); };
+    // updateColor: the colour set, the theme saved, the swatch backgrounds following the background's swatch
+    const setColor = (k: string, c: string): void => { cur[k] = c; delete boardWork[pageId]; saveCurrent(); if (k === "background") paint(); else { updatePreview(); } };
+    const paint = (): void => {
+      const u = userOf(themeId), saved = savedBoardColors(p, themeId), bg = parseColor(cur.background) || { r: 0, g: 0, b: 0, a: 1 };
+      grid.replaceChildren();
+      for (const [k, label] of items) {
+        const sw = colorSwatch(parseColor(cur[k]), { opacity: true, readOnly: !u, key: `board-color-${k}`, title: label, background: bg,
+          onChange: (c) => { if (!u || !c) return; setColor(k, colorText(c)); } });
+        sw.el.addEventListener("contextmenu", (ev) => {
+          ev.preventDefault();
+          const was = saved[k], now = cur[k];
+          popupMenu(ev.clientX, ev.clientY, [
+            { label: "Copy color", icon: "copy", run: () => { copied = parseColor(now); } },
+            ...(u && copied ? [{ label: "Paste color", icon: "paste", run: () => { setColor(k, colorText(copied!)); paint(); } }] : []),
+            ...(u && was && !sameColor(was, now) ? [{ label: "Revert to saved color", icon: "undo", run: () => { setColor(k, was); paint(); } }] : []),
+          ]);
+        });
+        grid.append(sw.el, h("span", null, label));
+      }
+      updatePreview();
+    };
+    const top = h("div", { class: "kd-row", style: "gap:8px;margin-bottom:12px" }, h("label", { style: "color:var(--ink-2)" }, "Theme:"), theme);
+    if (preview) pg.append(top, h("div", { style: "display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px" }, h("div", { style: "max-height:420px;overflow:auto" }, grid), preview));
+    else pg.append(top, grid);
+    paint();
+    if (preview) requestAnimationFrame(updatePreview);   // zoomFitPreview once the panel has its size
+  };
   /** A Display Options page's two columns: PANEL_GAL_OPTIONS on the left, the frame's own options on the right. */
   const displayCols = (pg: HTMLElement, ed: EditorId): [HTMLElement, HTMLElement] => {
     const L = h("div"), R = h("div"); pg.append(h("div", { style: "display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px" }, L, R)); galPanel(L, ed); return [L, R];
@@ -325,7 +405,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
       const key = pageKey();
       if (key === "Common/Hotkeys") { if (hk) hk.resetToDefaults(); return; }
       if (key === "Common/WakaTime") return;   // nothing local to reset: the key is removed with Remove Key
-      const st: Staged = { view, p, uiMode, arcEdit, hv45, curved, contrast, hotkeys: hk ? hk.staged() : undefined };
+      const st: Staged = { view, p, uiMode, arcEdit, hv45, curved, contrast, hotkeys: hk ? hk.staged() : undefined, boardWork };
       resetPage(key, st); KD().close(); openPreferences(key, st);
     } }],
     cancel() { lastPage = pageKey() || lastPage; },
@@ -439,9 +519,12 @@ export function openPreferences(page?: string, staged?: Staged): void {
             const rot = textInput(String(e.rotationAngle), (v) => { const n = parseFloat(v); if (isFinite(n) && n > 0 && n <= 360) e.rotationAngle = n; }, { id: "kd-pref-fp-rotstep", style: "width:80px" });
             rot.title = "Set increment (in degrees) for context menu and hotkey rotation.";
             ed.append(h("div", { style: "display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 8px;align-items:center" },
-              h("label", { style: "color:var(--ink-2);white-space:nowrap" }, "Step for rotate commands:"), h("div", { class: "kd-row", style: "gap:6px" }, rot, h("span", null, "deg"))));
+              h("label", { style: "color:var(--ink-2);white-space:nowrap" }, "Step for rotate commands:"), h("div", { class: "kd-row", style: "gap:6px" }, rot, h("span", null, "deg"))),
+              // m_cbAreaAnchorPick: the board editor's PCBNEW_SETTINGS::m_AreaAnchorPointSelection, one setting for both editors
+              checkbox("Show and edit anchor points on multi-selections", !!p.pcbEditing.areaAnchorPointSelection, (on) => { p.pcbEditing.areaAnchorPointSelection = on; }, { id: "kd-pref-fp-areaanchor", title: "If checked, selecting multiple items shows their anchor points. Anchor points can be picked by click, box, or lasso, and dragging a picked point moves all picked points as one block." }));
             KD().staticBox(pg, "Left Click Mouse Commands").append(...leftClickCommands("Toggle selection"));
           } },
+          { label: "Colors", build(pg) { boardColorsPage(pg, true); } },
         ] },
         { label: "PCB Editor", pages: [
           { label: "Display Options", build(pg) {
@@ -511,6 +594,8 @@ export function openPreferences(page?: string, staged?: Staged): void {
                   const r = h("input", { type: "radio", name: "kd-pref-flipdir", id: `kd-pref-flipdir-${id}` }) as HTMLInputElement; r.checked = !!e.flipLeftRight === v;
                   r.addEventListener("change", () => { if (r.checked) e.flipLeftRight = v; }); return h("label", { class: "kd-row", style: "gap:6px" }, r, label);
                 }))]),
+              // m_cbAreaAnchorPick (PCBNEW_SETTINGS::m_AreaAnchorPointSelection)
+              checkbox("Show and edit anchor points on multi-selections", !!e.areaAnchorPointSelection, (on) => { e.areaAnchorPointSelection = on; }, { id: "kd-pref-areaanchor", title: "If checked, selecting multiple items shows their anchor points. Anchor points can be picked by click, box, or lasso, and dragging a picked point moves all picked points as one block." }),
               checkbox("Allow free pads", !!e.allowFreePads, (on) => { e.allowFreePads = on; }, { id: "kd-pref-freepads", title: "If checked, pads can be moved with respect to the rest of the footprint." }));
             // Left Click Mouse Commands (m_mouseCmdsWinLin / m_mouseCmdsOSX): fixed rows, and Ctrl's choice
             const lc = KD().staticBox(L, "Left Click Mouse Commands");
@@ -528,6 +613,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
               checkbox("Show courtyard collisions when moving/dragging", e.showCourtyardCollisions, (on) => { e.showCourtyardCollisions = on; }, { id: "kd-pref-courtyard" }),
               checkbox("Automatically refill zones", e.autoRefillZones, (on) => { e.autoRefillZones = on; }, { id: "kd-pref-autorefill", title: "If checked, zones will be re-filled after each edit operation" }));
           } },
+          { label: "Colors", build(pg) { boardColorsPage(pg, false); } },
           { label: "Action Plugins", build(pg) { actionPluginsPage(pg, plugRows, plug); } },
         ] },
       ], { selected: page || lastPage || "Mouse and Touchpad" });
@@ -894,4 +980,34 @@ export function buildSnappingPage(pg: HTMLElement, ed: EditorId, p: Prefs): void
   si.append(
     h("div", { style: "margin-bottom:6px" }, checkbox("Object geometry", sn.objectGeometry, (on) => { sn.objectGeometry = on; }, { id: `${pre}-objgeom`, title: "Snap to endpoints, midpoints, centres and edges of existing objects" })),
     h("div", null, checkbox("Construction extensions", sn.constructionExtensions, (on) => { sn.constructionExtensions = on; }, { id: `${pre}-construction`, title: "Snap to virtual extensions of lines and arcs" })));
+}
+
+/** PANEL_PCBNEW_COLOR_SETTINGS::createPreviewItems: g_previewBoard on a 6000 x 5000 mil User page whose title block reads "Color Preview" and today's date. */
+export function colorPreviewDoc(): KDoc {
+  const d = KiCadCanvas.parseDoc(PREVIEW_BOARD, "pcb") as KDoc & { paper?: string; portrait?: boolean; titleBlock?: Record<string, string> };
+  d.page = [6000 * MIL, 5000 * MIL]; d.paper = "User"; d.portrait = false;
+  d.titleBlock = { title: "Color Preview", date: new Date().toLocaleDateString() };   // wxDateTime::Now().FormatDate()
+  return d;
+}
+/**
+ * zoomFitPreview: the scale that fits the board's bounding box (the page when it is empty), / 1.1, centred on the box.
+ * [ppm, centre x, centre y] for a w x h px view.
+ */
+export function colorPreviewFit(doc: KDoc, w: number, hh: number): [number, number, number] {
+  let b: number[] = doc.bbox; if (!b || !(b[2] > b[0]) || !(b[3] > b[1])) b = [0, 0, doc.page[0], doc.page[1]];
+  return [Math.min(w / (b[2] - b[0]), hh / (b[3] - b[1])) / 1.1, (b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
+}
+/**
+ * updatePreview: PCB_RENDER_SETTINGS::LoadColors( m_currentSettings ) and the board redrawn in it, with the grid of the
+ * PCB Editor's settings, no grid axes, no net colours and nothing highlighted.
+ */
+export function drawColorPreview(c: HTMLCanvasElement, doc: KDoc, colors: Record<string, string>, p: Prefs): void {
+  const dpr = window.devicePixelRatio || 1, w = c.clientWidth || 360, hh = c.clientHeight || 320;
+  c.width = Math.round(w * dpr); c.height = Math.round(hh * dpr);
+  const ctx = c.getContext("2d"); if (!ctx) return;
+  const [ppm, cx, cy] = colorPreviewFit(doc, w, hh), g = p.grids.pcb, at = Math.max(0, Math.min(g.sizes.length - 1, g.last ?? 0)), gal = p.gal.pcb;
+  const view: KView = { ppm, zoom: 1, panX: w / 2, panY: hh / 2, x0: cx, y0: cy, dpr };
+  const opts = { hidden: new Set<string>(), grid: g.sizes[at], gridY: g.ys && g.ys[at] > 0 ? g.ys[at] : g.sizes[at], gridStyle: gal.style, gridMinSpacing: gal.minSpacing,
+    gridLineWidth: gal.lineWidth, gridShowMajor: gal.showMajor, gridAxes: false, netColors: null, highlight: null, frame: true, pageLimits: p.pcbDisplay.showPageLimits } as KRenderOpts;
+  KiCadCanvas.withBoardColors(colors, () => KiCadCanvas.render(doc, ctx, view, opts));
 }

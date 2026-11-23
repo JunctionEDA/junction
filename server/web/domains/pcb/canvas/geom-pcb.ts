@@ -356,8 +356,8 @@ export function buildViaGeom(doc: Doc, item: Item, n: SNode): void {
   if (!(vtype === "blind" || vtype === "buried" || (vtype === "micro" && (pair[0] !== "F.Cu" || pair[1] !== "B.Cu")))) G(item, Object.assign({ t: "circle" as const, x, y, r: drill / 2, w: 0, color: VIA_HOLE, fill: VIA_HOLE, layer: "holes", z: zh, via: true, hole: true, net }, wall, span));
   else {
     // top-colour upper half, bottom-colour lower half
-    G(item, Object.assign({ t: "arc" as const, x, y, r: drill / 2, a0: Math.PI, a1: 2 * Math.PI, anticlockwise: false, w: 0, color: pcbColor(pair[0]), fill: pcbColor(pair[0]), layer: "holes", z: zh, pie: true, via: true, hole: true, net }, wall, span));
-    G(item, Object.assign({ t: "arc" as const, x, y, r: drill / 2, a0: 0, a1: Math.PI, anticlockwise: false, w: 0, color: pcbColor(pair[1]), fill: pcbColor(pair[1]), layer: "holes", z: zh, pie: true, via: true, hole: true, net }, span));
+    G(item, Object.assign({ t: "arc" as const, x, y, r: drill / 2, a0: Math.PI, a1: 2 * Math.PI, anticlockwise: false, w: 0, color: pcbColor(pair[0]), fill: pcbColor(pair[0]), layer: "holes", z: zh, pie: true, via: true, hole: true, net, holeLayer: pair[0] }, wall, span));
+    G(item, Object.assign({ t: "arc" as const, x, y, r: drill / 2, a0: 0, a1: Math.PI, anticlockwise: false, w: 0, color: pcbColor(pair[1]), fill: pcbColor(pair[1]), layer: "holes", z: zh, pie: true, via: true, hole: true, net, holeLayer: pair[1] }, span));
   }
   // backdrill indicators with the hole wall (in the colour of the layer the drill must cut), post-machining ones on the
   // copper layers they reach, drawn with the via's ring there
@@ -1121,7 +1121,7 @@ export function buildPadGeom(item: Item, pad: SNode, tf: Tf, side: string, doc: 
     const both = !!number && !!shownNet;
     const label = (text: string, ts: number, dyLocal: number, tag: "padNet" | "padNum", pair: boolean) => {
       const [dx, dy] = rotPt(0, dyLocal, rot);
-      const g: TextGeom = { t: "text", x: tcx + dx, y: tcy + dy, text, size: ts, sizeX: ts * 0.9, w: ts * 0.9 / 6, color, rot, h: "center", v: "middle", layer: textLayer, z, padText: true, padMin, padLayers: labelLayers.length ? labelLayers : [textLayer], noBox: true, minPx: 3.5, labelPad: padIndex };   // below 3.5 px the label is a smudge: skipped (KiCad would still paint it)
+      const g: TextGeom = { t: "text", x: tcx + dx, y: tcy + dy, text, size: ts, sizeX: ts * 0.9, w: ts * 0.9 / 6, color, rot, h: "center", v: "middle", layer: textLayer, z, padText: true, padMin, padLayers: labelLayers.length ? labelLayers : [textLayer], noBox: true, minPx: 3.5, labelPad: padIndex, padPth: pth };   // below 3.5 px the label is a smudge: skipped (KiCad would still paint it)
       g[tag] = true; if (pair) g.padPair = true; if (both) g.padBoth = true; if (mark) g.padMark = true; Object.assign(g, sideTag); G(item, g);
     };
     // the layout with both lines (size / 2.5, the name below, the number above) and each line alone, centred at full size

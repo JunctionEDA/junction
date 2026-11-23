@@ -27,7 +27,7 @@ export type SchThemeId = string;
 export interface SnapPrefs { grid: "always" | "withGrid" | "never"; objectGeometry: boolean; constructionExtensions: boolean }
 export interface GridPrefs { sizes: number[]; /** GRID::y of each grid (mm), beside sizes (GRID::x) */ ys: number[]; names?: string[]; last?: number; fast1: number; fast2: number; overrides: GridOverrides; axes?: boolean }
 import { clampGal, galDefaults, type GalPrefs } from "./gal-options";
-import { isDarkBackground, type UserSchTheme } from "./color-themes";
+import { isDarkBackground, storableBoardColors, type UserSchTheme } from "./color-themes";
 import { infoBar, messageBox, h } from "../editor/pcbdialogs/ui";
 export { GRID_MIN_SPACING_RANGE, GRID_THICKNESS_CHOICES, clampGal, type GalPrefs } from "./gal-options";
 export interface Prefs {
@@ -60,6 +60,10 @@ export interface Prefs {
     footprintPreview?: boolean; neverShowRescue?: boolean };
   /** the schematic canvas colours (Preferences > Schematic Editor > Colors): a theme, and whether a dark UI swaps in the dark sheet */
   schColors: { theme: SchThemeId; followDark: boolean; /** the themes made with New Theme... (KiCad's colors/*.json) */ user: UserSchTheme[] };
+  /** PCBNEW_SETTINGS / FOOTPRINT_EDITOR_SETTINGS "appearance.color_theme": the board editor's and the Footprint Editor's colour theme
+   *  (a theme of schColors' list: its "board" namespace) */
+  pcbColors: { theme: SchThemeId };
+  fpColors: { theme: SchThemeId };
   /** the inactive layer mode is not here: it is the project's ("board.high_contrast_mode", Appearance panel) */
   pcbDisplay: { showPadNumbers: boolean; showNetNames: boolean; showPageLimits: boolean;
     /** pcb_display.net_names_mode: 0 Do not show, 1 Show on pads, 2 Show on tracks, 3 Show on pads & tracks (default) */
@@ -116,7 +120,8 @@ export interface Prefs {
    */
   pcbEditing: { rotationAngle: number; trackDragAction: "move" | "drag" | "dragFree"; ctrlClickHighlight: boolean; ratsnestThickness: number;
     escClearsNetHighlight: boolean; showCourtyardCollisions: boolean; autoRefillZones: boolean; /** m_AllowFreePads: pads move with respect to the rest of their footprint */ allowFreePads: boolean;
-    /** m_FlipDirection ("editing.flip_left_right"): Flip board items left/right instead of top/bottom (the default) */ flipLeftRight?: boolean };
+    /** m_FlipDirection ("editing.flip_left_right"): Flip board items left/right instead of top/bottom (the default) */ flipLeftRight?: boolean;
+    /** m_AreaAnchorPointSelection ("editing.area_anchor_point_selection", off): multi-selections show and edit their anchor points; one setting for both editors */ areaAnchorPointSelection?: boolean };
   /** Footprint Editor > Editing Options (FOOTPRINT_EDITOR_SETTINGS): m_RotationAngle (degrees), apart from the board's */
   fpEditing: { rotationAngle: number };
   grids: Record<EditorId, GridPrefs>;
@@ -146,6 +151,8 @@ export const DEFAULT_PREFS: Prefs = {
     arcEditMode: "center", autoPlaceSheetPins: true, unconstrainedPinSwaps: false, sheetBorder: "", sheetBackground: "", defaultLineThickness: 6, newPowerSymbols: "default", pinSelectsSymbol: false,
     autoplaceFields: true, autoplaceJustify: true, autoplaceAlign: true, footprintPreview: true, neverShowRescue: false },
   schColors: { theme: "default", followDark: false, user: [] },
+  pcbColors: { theme: "default" },
+  fpColors: { theme: "default" },
   pcbDisplay: { showPadNumbers: true, showNetNames: true, showPageLimits: true, netNamesMode: 3, trackClearance: 2, padClearance: true,
     viaColorForTHPads: false, forceShowFieldsWhenFPSelected: true, live3DRefresh: false,
     crossProbing: { onSelection: true, centerOnItems: true, zoomToFit: true, autoHighlight: true, flashSelection: false } },
@@ -160,7 +167,7 @@ export const DEFAULT_PREFS: Prefs = {
   pcbSnapping: { pads: "trackTool", tracks: "trackTool", graphics: true, allLayers: false },
   fpSnapping: { pads: "always", graphics: true, allLayers: false },
   snapping: { sch: snapDefaults(), pcb: snapDefaults(), sym: snapDefaults(), fp: snapDefaults() },
-  pcbEditing: { rotationAngle: 90, trackDragAction: "drag", ctrlClickHighlight: false, ratsnestThickness: 0.5, escClearsNetHighlight: true, showCourtyardCollisions: true, autoRefillZones: false, allowFreePads: false },
+  pcbEditing: { rotationAngle: 90, trackDragAction: "drag", ctrlClickHighlight: false, ratsnestThickness: 0.5, escClearsNetHighlight: true, showCourtyardCollisions: true, autoRefillZones: false, allowFreePads: false, areaAnchorPointSelection: false },
   fpEditing: { rotationAngle: 90 },
   grids: {
     // APP_SETTINGS_BASE::DefaultGridSizeList and addParamsForWindow's defaultGridIdx (common/settings/app_settings.cpp):
@@ -295,6 +302,76 @@ export function registerUserThemes(p: Prefs = prefs()): string[] {
   }
   return changed;
 }
+// ---- board colour themes: the same theme list, each theme's "board" namespace (UserSchTheme.board; the built-ins' in
+// web/domains/pcb/canvas/colors.ts).  The canvas paints the live one (KiCadCanvas.setBoardColors).
+/** The board namespace of KiCad Default (no canvas: an empty map, which the canvas fills with KiCad Default's). */
+function boardDefaults(): Record<string, string> { return typeof KiCadCanvas !== "undefined" && KiCadCanvas.boardThemeColors ? KiCadCanvas.boardThemeColors("default") : {}; }
+/**
+ * PCB_CONTROL::LayerAlphaInc / Dec: COLOR_SETTINGS::SetColor on the theme in memory, never saved (KiCad writes a theme only
+ * from SaveColorSettings), so it lasts the session, built-in themes included.  Per theme id: the layers so changed.
+ */
+const sessionBoardColors = new Map<string, Record<string, string>>();
+/** The board editor's theme (PCBNEW_SETTINGS) or the Footprint Editor's: a theme that no longer exists is KiCad Default (::GetColorSettings). */
+export function boardThemeId(p: Prefs, fp: boolean): SchThemeId {
+  const want = (fp ? p.fpColors : p.pcbColors).theme;
+  return schThemeList(p).some(([id]) => id === want) ? want : "default";
+}
+/** Whether a theme is a built-in one (COLOR_SETTINGS::IsReadOnly). */
+export function isReadOnlyTheme(p: Prefs, id: SchThemeId): boolean { return !(p.schColors.user || []).some((u) => u.id === id); }
+/** A theme's whole board namespace as saved: KiCad Default's colour for every key it leaves out. */
+export function savedBoardColors(p: Prefs, id: SchThemeId): Record<string, string> {
+  const u = (p.schColors.user || []).find((x) => x.id === id);
+  if (u) { const out = { ...boardDefaults(), ...(u.board || {}) }; out.select_overlay = "rgba(0,0,0,0)"; return out; }   // no "board.select_overlay" is ever stored
+  return typeof KiCadCanvas !== "undefined" && KiCadCanvas.boardThemeColors ? KiCadCanvas.boardThemeColors(id) : {};
+}
+/** A theme's board namespace as the session has it (the saved colours and any opacity changed with { / }). */
+export function boardColorsOf(p: Prefs, id: SchThemeId): Record<string, string> { return { ...savedBoardColors(p, id), ...(sessionBoardColors.get(id) || {}) }; }
+/** LayerAlphaInc / Dec: a colour of the theme changed for the session only. */
+export function setSessionBoardColor(id: SchThemeId, key: string, color: string): void {
+  const m = sessionBoardColors.get(id) || {}; m[key] = color; sessionBoardColors.set(id, m);
+  applyBoardTheme(prefs());
+}
+/**
+ * PANEL_PCBNEW_COLOR_SETTINGS / PANEL_FP_EDITOR_COLOR_SETTINGS' constructor: current->Store(); SaveColorSettings( current,
+ * "board" ): the changes the session made to the theme in use ({ / } opacity) are written out when the page is made.
+ * `u` is the theme (it is changed); a built-in theme keeps them in the session.
+ */
+export function storeSessionBoardColors(u: UserSchTheme): void {
+  const s = sessionBoardColors.get(u.id); if (!s) return;
+  u.board = storableBoardColors({ ...(u.board || {}), ...s }); sessionBoardColors.delete(u.id); saveUserSchTheme(u);
+}
+/**
+ * APPEARANCE_CONTROLS::OnColorSwatchChanged / PANEL_COLOR_SETTINGS::saveCurrentTheme: a user theme's board colours set and
+ * the theme written at once (SaveColorSettings( cs, "board" ) writes the theme as the session has it).
+ */
+export function saveUserBoardColors(id: SchThemeId, colors: Record<string, string>): void {
+  const cur = clonePrefs(), u = cur.schColors.user.find((x) => x.id === id); if (!u) return;
+  const session = sessionBoardColors.get(id) || {}; sessionBoardColors.delete(id);
+  const board = { ...(u.board || {}), ...session, ...colors }; delete board.select_overlay;
+  u.board = board;
+  cache = normalize(merge(DEFAULT_PREFS, cur)); try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch (e) { /* no storage */ }
+  applyPrefs(true);
+}
+/**
+ * SETTINGS_MANAGER::GetMigratedColorSettings: the colours the Appearance panel kept per user before there were themes go
+ * into the "User" theme (made when missing), which both board editors then use.  `board`: those colours by theme key.
+ */
+export function migrateBoardColors(board: Record<string, string>): void {
+  const cur = clonePrefs();
+  let u = cur.schColors.user.find((x) => x.id === "user:user") || cur.schColors.user.find((x) => x.name.toLowerCase() === "user");
+  if (!u) { u = { id: "user:user", name: "User", colors: {} }; cur.schColors.user.push(u); }
+  const b = { ...(u.board || {}), ...board }; delete b.select_overlay; u.board = b;
+  cur.pcbColors.theme = u.id; cur.fpColors.theme = u.id;
+  cache = normalize(merge(DEFAULT_PREFS, cur)); try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch (e) { /* no storage */ }
+  applyBoardTheme(cache);
+}
+/** EDA_DRAW_FRAME::GetColorSettings of the frame on show: the Footprint Editor's theme for a footprint, the board editor's otherwise. */
+export function activeBoardColors(p: Prefs = prefs()): Record<string, string> { return boardColorsOf(p, boardThemeId(p, editorId() === "fp")); }
+/** PCB_RENDER_SETTINGS::LoadColors( GetColorSettings() ): the live board palette follows the frame's theme. */
+export function applyBoardTheme(p: Prefs = prefs()): void {
+  if (typeof KiCadCanvas === "undefined" || !KiCadCanvas.setBoardColors) return;
+  if (KiCadCanvas.setBoardColors(activeBoardColors(p))) requestRender();
+}
 function applyColorTheme(p: Prefs): void {
   if (typeof KiCadCanvas === "undefined" || !KiCadCanvas.setSchTheme) return;
   const changed = registerUserThemes(p), want = schThemeFor(p);
@@ -368,7 +445,7 @@ export function activeGridPitchXY(): [number, number] | null {
  * modes (after OK in the dialog, and once when the page's first document opens) — otherwise a toolbar toggle made
  * since would be undone every time a sheet is entered.
  */
-type PcbToolPrefState = { moveWarpsCursor?: boolean; snapInference?: { objectGeometry: boolean; constructionExtensions: boolean }; magnetic?: { pads: string; tracks: string; graphics: boolean } | null; allowFreePads?: boolean; trackClearance?: number; padClearance?: boolean; rotationAngle?: number; fpRotationAngle?: number; trackDragAction?: string; showCourtyardCollisions?: boolean; flipDirection?: "tb" | "lr" };
+type PcbToolPrefState = { moveWarpsCursor?: boolean; snapInference?: { objectGeometry: boolean; constructionExtensions: boolean }; magnetic?: { pads: string; tracks: string; graphics: boolean } | null; allowFreePads?: boolean; trackClearance?: number; padClearance?: boolean; rotationAngle?: number; fpRotationAngle?: number; trackDragAction?: string; showCourtyardCollisions?: boolean; flipDirection?: "tb" | "lr"; areaAnchorPointSelection?: boolean };
 /** The board tools' copies of the preferences (they load lazily: dialogs/index.ts calls this again on "kc-pcb-tools"). */
 export function applyPcbToolPrefs(p: Prefs = prefs()): void {
   const pcbS = CollabTools.pcb && (CollabTools.pcb.state as PcbToolPrefState); if (!pcbS) return;
@@ -384,6 +461,7 @@ export function applyPcbToolPrefs(p: Prefs = prefs()): void {
   const sn = p.snapping[editorId()];
   pcbS.snapInference = { objectGeometry: sn.objectGeometry !== false, constructionExtensions: sn.constructionExtensions !== false };
   pcbS.allowFreePads = !!p.pcbEditing.allowFreePads;
+  pcbS.areaAnchorPointSelection = !!p.pcbEditing.areaAnchorPointSelection;   // BlockDragAnchorEditingEnabled (both editors read the board editor's)
   pcbS.moveWarpsCursor = p.common.warpMouseOnMove !== false;   // TOOLS_HOLDER::GetMoveWarpsCursor
 }
 /** MAGNETIC_SETTINGS::allLayers of the board editor or the Footprint Editor, as the board tools keep it (snap-pairs.ts). */
@@ -426,6 +504,7 @@ export function applyPrefs(full = true): void {
   (E as unknown as { gridForClass?: (cls: string) => number }).gridForClass = (cls: string) => gridPitchFor(cls as Parameters<typeof gridPitchFor>[0], prefs().grids.sch.overrides, E.gridPitch as number);
   (E as unknown as { gridForClassXY?: (cls: string) => [number, number] }).gridForClassXY = (cls: string) => gridPitchForXY(cls as Parameters<typeof gridPitchForXY>[0], prefs().grids.sch.overrides, [E.gridPitch as number, ((E as unknown as { gridPitchY?: number }).gridPitchY || 0) > 0 ? (E as unknown as { gridPitchY: number }).gridPitchY : E.gridPitch as number]);
   applyColorTheme(p);
+  applyBoardTheme(p);
   E.pcbOrigin = p.pcbOrigin; E.fpOrigin = p.fpOrigin; publishUserOrigin();
   // CURSOR_STORE::GetCursor reads use_custom_cursors each time; EDA_DRAW_PANEL_GAL reads show_scrollbars once, as it is made
   initScrollbars(!!p.common.showScrollbars);   // (applyCommonAppearance set the cursors)

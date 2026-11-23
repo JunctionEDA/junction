@@ -26,8 +26,9 @@ export type KDialogsModule = typeof kdialogs & {
   schItemDialog?(ctx: DialogCtx, item: DialogItem, opts: ItemOpts): boolean;
   /** web/domains/pcb/editor/pcbdialogs: DIALOG_TEXT_PROPERTIES on a footprint field; true when it took the field. */
   pcbFieldDialog?(ctx: DialogCtx, item: DialogItem, name: string): boolean;
-  /** web/domains/pcb/dialogs/sch-items: DIALOG_FIELD_PROPERTIES; true when it took the field. */
-  schFieldDialog?(ctx: DialogCtx, item: DialogItem, name: string): boolean;
+  /** web/domains/pcb/dialogs/sch-items: DIALOG_FIELD_PROPERTIES; true when it took the field.  `opts.carried`: the parent is
+   *  the item being placed, and OK hands it the edited parent instead of committing. */
+  schFieldDialog?(ctx: DialogCtx, item: DialogItem, name: string, opts?: { carried?(node: SNode): void }): boolean;
   /** web/domains/pcb/dialogs/sch-items: SCH_EDIT_TOOL::Properties for the current selection. */
   schProperties?(): boolean;
 };

@@ -46,6 +46,8 @@ export interface MenuCtx {
   padEdit?: boolean;
   /** the one selected pin has alternate functions (SCH_CONDITIONS::SingleMultiFunctionPin) */
   pinAlts?: boolean;
+  /** the selection's (or the carried) symbol's library has several units / body styles (SCH_CONDITIONS::SingleMultiUnitSymbol / SingleMultiBodyStyleSymbol) */
+  multiUnitSymbol?: boolean; multiBodyStyleSymbol?: boolean;
   /** SCH_SELECTION_TOOL's multipleUnitsSelection (GetSameSymbolMultiUnitSelection) and allowPinSwaps (input.allow_unconstrained_pin_swaps) */
   unitsSelection?: boolean; pinSwaps?: boolean;
   belowRoot: boolean;
@@ -58,6 +60,9 @@ export interface MenuCtx {
   stitchExcludable?: boolean; stitchClearable?: boolean;
   /** board: the selection is one group (groupEnterCondition) / a group is entered (inGroupCondition) */
   groupSelected?: boolean; inGroup?: boolean;
+  /** board: MULTICHANNEL_CONTEXT_MENU's offChannel (no selected group is a repeated channel) and the number of linked
+   *  rule areas the selection stands for (oneLinked / anyLinked); a selected group links a design block (applyDesignBlockLayoutCondition) */
+  mcOffChannel?: boolean; mcLinked?: number; designBlockGroup?: boolean;
   /** board is not empty (EDIT_TOOL's noItemsCondition) */
   hasItems: boolean;
   /** schematic, nothing selected: the cursor is on a drawing-sheet item (HitTestDrawingSheetItems) */
@@ -75,7 +80,7 @@ export interface MenuDef {
   icon?: string;
   entries: Entry[];
   /** filled in by the editor: the zoom presets, the grid list */
-  dynamic?: "zoom" | "grid" | "diffpair" | "trackwidth" | "viasize" | "pinfunction" | "pinhelpers" | "unfold" | "netchain" | "terminalpad";
+  dynamic?: "zoom" | "grid" | "diffpair" | "trackwidth" | "viasize" | "pinfunction" | "pinhelpers" | "unfold" | "netchain" | "terminalpad" | "symbolunit" | "bodystyle";
 }
 export type Entry =
   | { order: number; cond: Cond; act: string; check?: boolean; enable?: Cond }
@@ -85,7 +90,7 @@ export type Entry =
 const always: Cond = () => true;
 
 export class CondMenu implements MenuDef {
-  title: string; icon?: string; entries: Entry[] = []; dynamic?: "zoom" | "grid" | "diffpair" | "trackwidth" | "viasize" | "pinfunction" | "pinhelpers" | "unfold" | "netchain" | "terminalpad";
+  title: string; icon?: string; entries: Entry[] = []; dynamic?: "zoom" | "grid" | "diffpair" | "trackwidth" | "viasize" | "pinfunction" | "pinhelpers" | "unfold" | "netchain" | "terminalpad" | "symbolunit" | "bodystyle";
   constructor(title = "", icon?: string) { this.title = title; this.icon = icon; }
   private add(e: Entry, order: number | undefined): this {
     e.order = order === undefined || order < 0 ? this.entries.length : order;
@@ -226,6 +231,12 @@ const schUnfoldMenu = (): MenuDef => ({ title: "Unfold from Bus", icon: "add_lin
 /** ALT_PIN_FUNCTION_MENU and PIN_TRICKS_MENU (sch_edit_tool.cpp): filled in by the editor from the selected pin. */
 const PIN_FUNCTION_MENU: MenuDef = { title: "Pin Function", icon: "component_select_unit", entries: [], dynamic: "pinfunction" };
 const PIN_TRICKS_MENU: MenuDef = { title: "Pin Helpers", icon: "pin", entries: [], dynamic: "pinhelpers" };
+/** SYMBOL_UNIT_MENU and BODY_STYLE_MENU (sch_edit_tool.cpp): filled in by the editor from the selected (or carried) symbol. */
+const SYMBOL_UNIT_MENU: MenuDef = { title: "Symbol Unit", icon: "component_select_unit", entries: [], dynamic: "symbolunit" };
+const BODY_STYLE_MENU: MenuDef = { title: "Body Style", icon: "body_style", entries: [], dynamic: "bodystyle" };
+/** SCH_CONDITIONS::SingleMultiUnitSymbol / SingleMultiBodyStyleSymbol. */
+const singleMultiUnitSymbol: Cond = (c) => c.kinds.length === 1 && c.kinds[0] === "symbol" && !!c.multiUnitSymbol;
+const singleMultiBodyStyleSymbol: Cond = (c) => c.kinds.length === 1 && c.kinds[0] === "symbol" && !!c.multiBodyStyleSymbol;
 /** NET_CHAIN_MENU (sch_selection_tool.cpp): filled in by the editor from the selection and the net chains. */
 const NET_CHAIN_MENU: MenuDef = { title: "Net Chain...", entries: [], dynamic: "netchain" };
 /** SCH_SELECTION_TOOL::Init's pinSelection || wireOrBusInSignal || symbolSelection. */
@@ -238,6 +249,7 @@ function schSelectionMenu(): CondMenu {
   // SCH_SELECTION_TOOL::Init
   m.item("ACTIONS::groupEnter", (c) => !!c.groupSelected, 1).item("ACTIONS::groupLeave", (c) => !!c.inGroup, 1);
   m.item("SCH_ACTIONS::placeLinkedDesignBlock", (c) => !!c.groupSelected, 1).item("SCH_ACTIONS::saveToLinkedDesignBlock", (c) => !!c.groupSelected, 1);
+  m.item("SCH_ACTIONS::convertImageToOutlines", and(count(1), onlyTypes(set("image"))), 1);   // imageSelection
   m.item("SCH_ACTIONS::clearHighlight", and(haveHighlight, idle), 1).sep(and(haveHighlight, idle), 1);
   m.item("SCH_ACTIONS::selectConnection", and(hasTypes(SCH_EXPANDABLE), idle), 2);
   addTableSelectItems(m, and(tableCellSelection, idle));
@@ -265,6 +277,7 @@ function schSelectionMenu(): CondMenu {
   // SCH_ALIGN_TOOL::Init
   m.sub(schAlignMenu(), moreThan(1), 100);
   // SCH_EDIT_TOOL::Init
+  m.sub(SYMBOL_UNIT_MENU, singleMultiUnitSymbol, 1).sub(BODY_STYLE_MENU, singleMultiBodyStyleSymbol, 1);
   m.sub(PIN_FUNCTION_MENU, (c) => c.kinds.length === 1 && c.kinds[0] === "pin" && !!c.pinAlts, 1).sub(PIN_TRICKS_MENU, allPins, 1);
   m.sub(schTransformMenu(), schOrient, 200).sub(schAttributesMenu(), hasTypes(SCH_ATTRIB), 200);
   m.item("SCH_ACTIONS::swap", and(onlyTypes(SCH_SWAPPABLE), moreThan(1)), 200).item("SCH_ACTIONS::properties", schProperties, 200);
@@ -324,6 +337,7 @@ function schDrawingToolMenu(): CondMenu {
   // SCH_EDIT_TOOL::Init (the drawing tools' menu)
   m.item("SCH_ACTIONS::clearHighlight", and(haveHighlight, idle), 1).sep(and(haveHighlight, idle), 1);
   m.item("SCH_ACTIONS::enterSheet", and(schSheetSel, idle), 1).sep(and(schSheetSel, idle), 1);
+  m.sub(SYMBOL_UNIT_MENU, singleMultiUnitSymbol, 1).sub(BODY_STYLE_MENU, singleMultiBodyStyleSymbol, 1);
   m.sub(schTransformMenu(), schOrient, 200).sub(schAttributesMenu(), hasTypes(SCH_ATTRIB), 200).item("SCH_ACTIONS::properties", schProperties, 200);
   m.sub(schEditFieldsMenu(), schSingleSymbol, 200).item("SCH_ACTIONS::autoplaceFields", hasTypes(SCH_FIELD_OWNERS), 200);
   m.item("SCH_ACTIONS::editWithLibEdit", and(schSingleSymbol, idle), 200);
@@ -420,6 +434,11 @@ const shapeModVisible = or(always, hasTypes(SIMPLIFY_TYPES), onlyTypes(FILLET_TY
 /** CONSTRAINT_EDIT_TOOL's menu. */
 const pcbConstraintMenu = () => new CondMenu("Constraints", "measurement").item("PCB_ACTIONS::manageConstraints");
 
+/** MULTICHANNEL_CONTEXT_MENU (multichannel_tool.cpp). */
+const pcbMultichannelMenu = () => new CondMenu("Multi-Channel", "mode_module")
+  .item("PCB_ACTIONS::expandToMatchingTopology", hasTypes(PCB_FOOTPRINT)).item("PCB_ACTIONS::expandToLargestTopology", hasTypes(PCB_FOOTPRINT))
+  .item("PCB_ACTIONS::repeatLayout", (c) => c.mcOffChannel !== false).item("PCB_ACTIONS::updateLinkedLayouts", (c) => c.mcLinked === 1)
+  .item("PCB_ACTIONS::unlinkLayout", (c) => !!c.mcLinked);
 /** The board selection tool's menu. */
 function pcbSelectionMenu(): CondMenu {
   const m = new CondMenu();
@@ -427,7 +446,9 @@ function pcbSelectionMenu(): CondMenu {
   m.sub(pcbSelectMenu(), notEmpty); m.sub(pcbNetChainsMenu(), and(netItemSel, not(inFpEditor))); m.sep(1000);
   m.item("ACTIONS::cancelInteractive", not(noActiveTool), 1);
   m.item("ACTIONS::groupEnter", (c) => !!c.groupSelected, 1).item("ACTIONS::groupLeave", (c) => !!c.inGroup, 1);
+  m.item("PCB_ACTIONS::applyDesignBlockLayout", (c) => !!c.designBlockGroup, 1);
   m.item("PCB_ACTIONS::placeLinkedDesignBlock", (c) => !!c.groupSelected, 1).item("PCB_ACTIONS::saveToLinkedDesignBlock", (c) => !!c.groupSelected, 1);
+  m.item("PCB_ACTIONS::convertImageToOutlines", and(count(1), onlyTypes(set("image"))), 1);   // referenceImageSelection
   m.item("PCB_ACTIONS::clearHighlight", haveHighlight, 1).sep(haveHighlight, 1);
   addTableSelectItems(m, tableCellSelection);
   m.sep(1); standardSubMenus(m);
@@ -463,6 +484,8 @@ function pcbSelectionMenu(): CondMenu {
   // ALIGN_DISTRIBUTE_TOOL::Init, CONVERT_TOOL::Init, PCB_GROUP_TOOL::Init, CONSTRAINT_EDIT_TOOL::Init
   m.sub(pcbAlignMenu(), moreThan(1), 100).sub(pcbConvertMenu(), hasTypes(set(...PCB_SHAPES, "segment", "arc", "zone")), 100);
   m.sub(GROUP_MENU, notEmpty, 100).sub(pcbConstraintMenu(), always, 100);
+  // MULTICHANNEL_TOOL::Init
+  m.sub(pcbMultichannelMenu(), and(hasTypes(set("footprint", "group", "zone")), board), 100);
   // MATCH_PROPERTIES_TOOL::Init
   m.item("PCB_ACTIONS::matchProperties", count(1), 950);
   // PCB_EDIT_TABLE_TOOL::Init

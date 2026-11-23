@@ -28,7 +28,8 @@ function drawPreview(cv: HTMLCanvasElement, m: PadModel, sketch: boolean, copper
   const g = cv.getContext("2d"); if (!g) return;
   const dpr = window.devicePixelRatio || 1, W = cv.clientWidth || 280, H = cv.clientHeight || 280;
   if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
-  const KC = KiCadCanvas as unknown as { PCB_BG?: string; pcbColor?(l: string): string };
+  const KC = KiCadCanvas as unknown as { PCB_BG?: string; pcbColor?(l: string): string; boardColor?(k: string): string };
+  const npth = KC.boardColor ? KC.boardColor("plated_hole") : "#1AC4D2", holeEdge = KC.boardColor ? KC.boardColor("via_hole") : "#E3B72E";
   const color = (l: string): string => (KC.pcbColor ? KC.pcbColor(l) : "#C83434");
   g.setTransform(dpr, 0, 0, dpr, 0, 0); g.fillStyle = KC.PCB_BG || "#001023"; g.fillRect(0, 0, W, H);
   const layers = PM().modelLayers(m, copper);
@@ -65,7 +66,7 @@ function drawPreview(cv: HTMLCanvasElement, m: PadModel, sketch: boolean, copper
   }
   if ((m.type === "pth" || m.type === "npth") && m.hx > 0) {
     const hw = m.hx * s, hh2 = (m.holeOblong ? m.hy : m.hx) * s; g.beginPath(); g.roundRect(-hw / 2, -hh2 / 2, hw, hh2, Math.min(hw, hh2) / 2);
-    g.fillStyle = m.type === "npth" ? "#1AC4D2" : KC.PCB_BG || "#001023"; g.strokeStyle = m.type === "npth" ? "#1AC4D2" : "#E3B72E"; g.lineWidth = 1.5;
+    g.fillStyle = m.type === "npth" ? npth : KC.PCB_BG || "#001023"; g.strokeStyle = m.type === "npth" ? npth : holeEdge; g.lineWidth = 1.5;
     if (sketch) g.stroke(); else { g.fill(); if (m.type === "pth") g.stroke(); }
   }
   g.restore();

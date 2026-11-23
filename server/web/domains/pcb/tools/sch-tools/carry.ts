@@ -32,7 +32,7 @@ export function dropCarry(ctx: SchCtx) {
   const c = S.carry; if (!c) return null; S.carry = null;
   const doc = ctx.doc, p = anchorOf(c.kind, c.node);
   // SCH_DRAWING_TOOLS::TwoClickPlace: a global / hierarchical label placed with "Auto" faces away from what it lands on
-  const auto = supportsAutoRotate(c.kind) && !!S.lastAutoRotate;
+  const auto = supportsAutoRotate(c.kind) && (c.autoRotate !== undefined ? c.autoRotate : !!S.lastAutoRotate);
   if (auto) { const n = autoRotateNode(doc, c.kind, c.node, uuidOf(c.node) || null, true); if (n) c.node = n; }
   if (c.kind === "junction" && junctionAt(doc, p[0], p[1])) { ctx.toast("There is already a junction here"); ctx.requestRender(); return null; }
   // TwoClickPlace: item->AutoplaceFields( screen, AUTOPLACE_AUTO ) on the label that lands

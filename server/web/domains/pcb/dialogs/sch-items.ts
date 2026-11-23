@@ -44,7 +44,7 @@ import { embeddedModelFiles, projectModelFiles } from "./sim-files";
 import { builtinLibrary } from "../sim/builtin-libs";
 
 type Ctx = ToolCtx & { doc: KDoc };
-interface ItemOpts { onCreate?(node: SNode, more?: SNode[]): boolean | void; cancel?(): void; title?: string; label?: string; generic?: boolean; isNew?: boolean; symbolEditor?: SymEditorTextOpts; pinMapPage?: boolean }
+interface ItemOpts { onCreate?(node: SNode, more?: SNode[]): boolean | void; cancel?(): void; title?: string; label?: string; generic?: boolean; isNew?: boolean; symbolEditor?: SymEditorTextOpts; pinMapPage?: boolean; carried?(node: SNode): void }
 /** DIALOG_TEXT_PROPERTIES in the Symbol Editor (m_isSymbolEditor): no hyperlink, syntax help or simulation exclusion; Private
  *  to symbol editor and Common to all units / body styles instead, and the result goes back to the editor. */
 export interface SymEditorTextOpts {
@@ -443,7 +443,10 @@ export function openLabelDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
   st.text = xref.toRefs(L.unescapeString(st.text));
   const AR = (): { autoRotateOf(id: string): boolean; setAutoRotate(id: string, on: boolean): void; labelOrientationForPoint(d: KDoc, p: [number, number], dflt: number, skip?: string): 0 | 1 | 2 | 3 } | null => {
     const m = CollabTools.sch; return m && m._ && (m._ as Record<string, unknown>).labelOrientationForPoint ? m._ as never : null; };
-  if (!isNew && (kind === "global_label" || kind === "hierarchical_label")) { const ar = AR(); st.autoRotate = !!ar && ar.autoRotateOf(item.id); }
+  // a label on the cursor (TwoClickPlace passed Properties on) shows the auto-rotation it will be placed with
+  const carry = opts.carried && CollabTools.sch ? (CollabTools.sch.state as { carry?: { autoRotate?: boolean } | null; lastAutoRotate?: boolean }) : null;
+  if (carry && (kind === "global_label" || kind === "hierarchical_label")) st.autoRotate = carry.carry && carry.carry.autoRotate !== undefined ? !!carry.carry.autoRotate : !!carry.lastAutoRotate;
+  else if (!isNew && (kind === "global_label" || kind === "hierarchical_label")) { const ar = AR(); st.autoRotate = !!ar && ar.autoRotateOf(item.id); }
   const mandatory = kind === "global_label" ? ["Intersheetrefs"] : [];
   const ro = !!ctx.viewOnly;
   let textEl: HTMLInputElement | HTMLTextAreaElement | null = null, multiCb: HTMLInputElement | null = null, grid: { rows(): L.FieldRow[] } | null = null;
@@ -531,7 +534,7 @@ export function openLabelDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
         spin: spinBtn ? Number(spinBtn.dataset.spin) as 0 | 1 | 2 | 3 : st.spin, autoRotate: !!(autoCb && autoCb.checked) };
       // "Auto": the label takes its spin from what it sits on (GetLabelOrientationForPoint) and the spin buttons are skipped
       const ar = AR();
-      if (!isNew && next.autoRotate && ar) next.spin = ar.labelOrientationForPoint(doc, origin, st.spin, item.id);
+      if (!isNew && !opts.carried && next.autoRotate && ar) next.spin = ar.labelOrientationForPoint(doc, origin, st.spin, item.id);
       const moved = rows.some((r) => L.rowMoved(r, origin));
       // labels need escaping; then any text variable cross-references become their UUIDs
       const lines = dir ? [""] : L.labelLines(raw, multi, isNew).map((t) => xref.toKiids(t));
@@ -554,6 +557,11 @@ export function openLabelDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
         const nodes = lines.map((t) => build(dir ? "" : t));
         for (let i = 1; i < nodes.length; i++) { const u = L.kid(nodes[i], "uuid"); if (u) u[1] = KiCadCanvas.newUuid() as unknown as SNode; }
         return opts.onCreate ? opts.onCreate(nodes[0], nodes.slice(1)) as boolean | undefined : undefined;
+      }
+      if (opts.carried) {
+        // GetEditFlags() != 0: nothing is staged; the label goes on riding the cursor as edited
+        if (carry && carry.carry && (kind === "global_label" || kind === "hierarchical_label")) carry.carry.autoRotate = next.autoRotate;
+        opts.carried(build(dir ? "" : lines[0])); return undefined;
       }
       if (ar && (kind === "global_label" || kind === "hierarchical_label")) ar.setAutoRotate(item.id, next.autoRotate);
       commitItem(ctx, item, build(dir ? "" : lines[0]), "Edit Label Properties");
@@ -698,6 +706,7 @@ export function openTextDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
       if (opts.symbolEditor) { opts.symbolEditor.apply(n, { private: (els.private as HTMLInputElement).checked, allUnits: (els.allUnits as HTMLInputElement).checked, allBodies: (els.allBodies as HTMLInputElement).checked }); return undefined; }
       const S = CollabTools.sch ? CollabTools.sch.state as Record<string, unknown> : {};
       if (opts.onCreate) { S.lastTextBold = isOn(els.bold); S.lastTextItalic = isOn(els.italic); S.lastTextH = hv; S.lastTextV = vv; S.lastTextVertical = vert; return opts.onCreate(n) as boolean | undefined; }
+      if (opts.carried) { opts.carried(n); return undefined; }   // the text on the cursor: edited in place, nothing staged
       commitItem(ctx, item, n, "Edit Text Properties");
       return undefined;
     },
@@ -709,7 +718,7 @@ export function openTextDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
  * `apply`: the Symbol Editor's own commit (SYMBOL_EDITOR_EDIT_TOOL::editFieldProperties) of the edited field node; the
  * item is then a "lib_symbol" holding the field in schematic coordinates.
  */
-export function openFieldDialog(ctx: Ctx, item: KItem, name: string, apply?: (field: SNode) => void): boolean {
+export function openFieldDialog(ctx: Ctx, item: KItem, name: string, apply?: (field: SNode) => void, carried?: (parent: SNode) => void): boolean {
   ensureCss();
   const p0 = L.kids(item.node, "property").find((p) => L.fieldName(p) === name); if (!p0) return false;
   const doc = ctx.doc, ro = !!ctx.viewOnly, fx = L.readFx(p0), [x0, y0, r0] = L.atOf(p0), isFile = item.kind === "sheet" && (name === "Sheetfile" || name === "Sheet file");
@@ -793,6 +802,13 @@ export function openFieldDialog(ctx: Ctx, item: KItem, name: string, apply?: (fi
       if (moved) L.drop(out, "fields_autoplaced");
       else if (L.yes(out, "fields_autoplaced") && item.kind === "symbol") {   // the parent is autoplaced again (editFieldText)
         const H = schH(); const a = H && H.autoplaceNode(doc, Object.assign({}, item, { node: out }) as KItem); if (a) out = a;
+      }
+      // the parent rides the cursor (its edit flags are set: editFieldText stages nothing for it): it takes the edit, and
+      // only the other units of an annotated multi-unit part are committed
+      if (carried) {
+        carried(out);
+        if (item.kind === "symbol" && (name === "Value" || name === "Footprint" || name === "Datasheet") && JSON.stringify(out) !== JSON.stringify(item.node)) commitWithOtherUnits(ctx, item, out, [], `Edit ${name}`, "field:" + name);
+        return undefined;
       }
       if (item.kind === "symbol" && (name === "Value" || name === "Footprint" || name === "Datasheet")) {
         // the value, footprint and datasheet fields are kept in sync in (annotated) multi-unit parts
@@ -1093,13 +1109,13 @@ export function schItemDialog(ctx: ToolCtx, item: KItem, opts: ItemOpts = {}): b
   if (k === "no_connect") return true;              // SCH_NO_CONNECT_T: nothing happens
   if (k === "sheet" && !opts.onCreate) { const pin = sheetPinUnderCursor(c, item); if (pin >= 0 && openSheetPinDialog(c, item, pin)) return true; }
   if (k === "sheet") { openSheetProperties(c, item, opts); return true; }
-  if (k === "symbol") { openSymbolProperties(c, item, { pinMapPage: !!opts.pinMapPage }); return true; }
+  if (k === "symbol") { openSymbolProperties(c, item, { pinMapPage: !!opts.pinMapPage, carried: opts.carried }); return true; }
   if (k === "table") { schTableDialog(ctx, item, undefined, { cellEditor: (ta) => textVarAutocomplete(ta, (x) => contextualTextVars(c.doc, x)) }); return true; }   // SCH_EDIT_TOOL::Properties, SCH_TABLE_T: DIALOG_TABLE_PROPERTIES
   return false;
 }
-export function schFieldDialog(ctx: ToolCtx, item: KItem, name: string): boolean {
+export function schFieldDialog(ctx: ToolCtx, item: KItem, name: string, opts?: { carried?(node: SNode): void }): boolean {
   if (!ctx.doc || ctx.doc.type !== "sch" || !item) return false;
-  return openFieldDialog(ctx as Ctx, item, name);
+  return openFieldDialog(ctx as Ctx, item, name, undefined, opts && opts.carried ? opts.carried : undefined);
 }
 function selectedIds(): Set<string> {
   const ids = new Set<string>(E.selection); if (E.selected) ids.add(E.selected.id);

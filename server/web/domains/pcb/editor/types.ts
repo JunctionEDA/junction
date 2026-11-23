@@ -49,6 +49,7 @@ export interface BoxSel { start: number[]; cur: number[]; startClient: number[];
   /** a schematic lasso after the button came up: clicks add points until a double click finishes it */ live?: boolean;
   /** a board lasso after its first drag: it stays open, taking corners by clicks, until a double-click closes it (SelectPolyArea) */ open?: boolean;
   /** a Ctrl press with m_CtrlClickHighlight: released without a drag it highlights the net under the press */ clickHighlight?: boolean;
+  /** block anchor editing was offered this drag already (pcb-tools/block-drag.ts AreaPickStarts) */ blockAsked?: boolean;
   /** a press with a modifier: released without a drag it runs selectPoint with that mode (index.ts modifierClick) */ modClick?: { mode: "add" | "toggle" | "remove"; ev: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey?: boolean; clientX: number; clientY: number; button: number; pointerId: number; pointerType: string } } }
 
 /** One step on the undo / redo lists (tools.ts): what was applied and how to take it back. */

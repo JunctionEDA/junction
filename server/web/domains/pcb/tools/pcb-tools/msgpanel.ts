@@ -462,7 +462,7 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
         const r = []; for (const [k, l] of [["vias", "No vias"], ["tracks", "No tracks"], ["pads", "No pads"], ["copperpour", "No zone fills"], ["footprints", "No footprints"]]) { const x = K.kid(keep, k); if (x && K.str(x[1]) === "not_allowed") r.push(l); } if (r.length) add("Restrictions", r.join(", "));
         const pl = K.kid(n, "placement"); const en = pl && K.kid(pl, "enabled");
         if (pl && en && K.str(en[1]) === "yes") { const src = K.kid(pl, "sheetname") || K.kid(pl, "component_class") || K.kid(pl, "group") || K.kid(pl, "design_block"); add("Placement source", unescapeName(src ? K.str(src[1]) : "")); }
-        if (K.kid(n, "linked_area") || K.kid(n, "link")) add("Layout link", "Linked");
+        if (pl && K.kid(pl, "link")) add("Layout link", "Linked");   // (placement … (link "set" …))
       }
       else if (zl.some((l) => /\.Cu$/.test(l) || l === "*.Cu")) { add("Net", unescapeName(net)); add("Resolved Netclass", NN(net)); const pr = K.kid(n, "priority"); add("Priority", pr ? K.num(pr[1]) : 0); }
       if (isLocked(n)) add("Status", "Locked");

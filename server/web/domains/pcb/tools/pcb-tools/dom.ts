@@ -1,6 +1,7 @@
 // pcb-tools/dom.ts — DOM: select-mode picking, stolen keys, the layer chip, the text prompt and the image picker.
 import { spreadCancel, spreading } from "./spread";
 import { stackPlacing, viaStackUndo } from "./via-stack";
+import { mwCancel, mwCarrying } from "./microwave";
 import { clickMode, modifiersState } from "../../editor/selmodes";
 import type { Hover, PcbCtx, Pt, PtrEvent } from "./types";
 
@@ -18,6 +19,7 @@ import { angleSnapMode, gfxTool, stepDrawWidth, POLY_TOOLS, drawTrack } from "./
 import { itemAt } from "./guess";
 import { hitTestItem } from "./hit";
 import { editHandleUp, onHandlePointerDown } from "./point-editor";
+import { blockCancel, onBlockDblClick, onBlockKeyDown, onBlockPointerDown } from "./block-drag";
 import { undoRouteLeg } from "./route-tool";
 import { onStagePointerMove, onStagePointerUp, onStickyPointerDown } from "./select-move";
 import { HIT_MM, K, S, bind, lastCtx } from "./state";
@@ -34,12 +36,15 @@ export function ensureDom(ctx: PcbCtx) {
   // select tool listens on the stage after app.js has had its turn with the footprints.
   ctx.stage.addEventListener("pointerdown", onStagePointerDown);
   window.addEventListener("pointerdown", onStickyPointerDown, true);   // before every stage listener: the click that drops a Move is nobody else's
+  window.addEventListener("pointerdown", onBlockPointerDown, true);   // a press on a pickable handle belongs to the block gesture (block anchor editing)
   window.addEventListener("pointerdown", onHandlePointerDown, true);   // a press on an edit point belongs to the point editor
+  ctx.stage.addEventListener("dblclick", onBlockDblClick, true);   // a double click closes the handle lasso
   ctx.stage.addEventListener("pointermove", onStagePointerMove, true);
   ctx.stage.addEventListener("pointerup", onStagePointerUp, true);
   ctx.stage.addEventListener("pointercancel", onStagePointerUp, true);
   // Keys app.js consumes before the module (F = fit view, Shift+C = comment, Escape) are caught in the
   // capture phase and re-posted under names of our own so they still arrive through onKey with a fresh ctx.
+  document.addEventListener("keydown", onBlockKeyDown, true);   // the handle lasso's keys
   document.addEventListener("keydown", onCaptureKey, true);
   // pcbnew has no canvas chip: the active layer, track width and via size live in the aux toolbar's combos
   K.pcbSizes.state.subscribe(() => { refreshChip(lastCtx!); if (lastCtx && lastCtx.requestRender) lastCtx.requestRender(); });   // the toolbar's selectors and the size hotkeys land here
@@ -154,8 +159,10 @@ export function pickCancel() {
 export function cancelInFlight(any?: boolean) {
   if (S.pick) return pickCancel();
   if (S.pedit && lastCtx) { editHandleUp(lastCtx, false); return true; }
+  if (blockCancel(lastCtx)) return true;   // a block drag or a handle area pick ends; else the first Escape drops the picked handles
   if (S.tune.pattern) return tuneCancel(lastCtx!);   // the first Escape drops the pattern, the next leaves the tool
   if (spreading() && lastCtx) return spreadCancel(lastCtx);   // SpreadTracks: IsCancelInteractive restores the selection and ends the tool
+  if (mwCancel()) { if (lastCtx) lastCtx.requestRender(); return true; }   // MICROWAVE_TOOL: the carried footprint / the line's origin goes, the tool stays
   // IsCancelInteractive ends every move, one made with the button held as well as one that follows the cursor: the
   // items go back and the selection stays
   if (S.route || S.draw || S.drag || S.text || S.image || S.move) {
@@ -174,9 +181,11 @@ export function cancelInFlight(any?: boolean) {
  * edit_tool_move_fct.cpp / drawing_tool.cpp); Redo does nothing.  True when the action was taken here.
  */
 export function undoRedoInFlight(ctx: PcbCtx, which: string) {
+  if (S.blockDrag) return true;   // UndoRedoBlock while a block drag runs
   if (S.tune.pattern) { if (which === "undo") tuneCancel(ctx); return true; }   // Undo drops the pattern being placed
   if (S.route) { if (which === "undo" && !ctx.viewOnly) undoRouteLeg(ctx); return true; }
   if (S.modTool === "viastack" && stackPlacing()) { if (which === "undo") viaStackUndo(ctx); return true; }   // PlaceMicroviaStack: undo takes a hop back
+  if (mwCarrying()) { if (which === "undo") { mwCancel(); ctx.requestRender(); } return true; }   // doInteractiveItemPlacement: undo drops the new item
   if (!(S.pedit || S.draw || S.drag || S.image || S.move)) return false;
   // DrawZone: ACTIONS::undo is deleteLastPoint (POLYGON_GEOM_MANAGER::DeleteLastCorner): the last corner goes and the
   // outline stays in progress; the first corner going ends it

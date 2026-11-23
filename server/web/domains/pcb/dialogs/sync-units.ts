@@ -27,8 +27,9 @@ export function commitWithOtherUnits(ctx: ToolCtx & { doc: KDoc }, item: KItem, 
   const variant = currentVariant(), ver = doc.version;
   const instOf = (id: string): P.SyncInstance => ({ variant, srcPath: units.srcPath, dstPaths: units.paths.get(id) || [], ver });
   for (const it of units.here) { const node = P.syncUnit(out, it.node, what, instOf(it.id)); if (node) all.push(KiCadCanvas.replaceChange(doc, Object.assign({}, it, { node, geom: [], bbox: null }) as KItem)); }
-  ctx.commit(all, label);
-  commitOtherSheets(label, units.there, (n) => P.syncUnit(out, n, what, instOf(L.str((L.kid(n, "uuid") || [])[1]))));
+  // `if( !commit.Empty() ) commit.Push()`: a symbol being placed stages nothing of its own
+  if (all.length) ctx.commit(all, label);
+  commitOtherSheets(label, units.there, (n) => P.syncUnit(out, n, what, instOf(L.str((L.kid(n, "uuid") || [])[1]))), all.length > 0);
 }
 
 /**
@@ -171,8 +172,15 @@ function askUnitPlaced(message: string, swapLabel: string, dupLabel: string): Pr
  * hierarchy (FindSymbolByRefAndUnit), "Symbol unit '%s' is already placed (on sheet '%s')" offers to swap the two
  * units or to duplicate the unit; the symbol's fields are autoplaced again when they were; the commit is "Swap Units"
  * or "Change Unit".  True when the request was taken (the answer may still be Cancel).
+ * `write`: the symbol is the one being placed (GetEditFlags() != 0): it is not staged, its new node goes to `write`,
+ * and only a swapped holder is committed (its fields autoplaced again only then, as nothing was staged otherwise).
  */
-export function selectUnit(ctx: ToolCtx & { doc: KDoc }, item: KItem, unit: number): boolean {
+/** The symbol being placed is still the one on the cursor (the question may outlive the placement). */
+function carriedStill(id: string): boolean {
+  const c = CollabTools.sch ? (CollabTools.sch.state as { carry?: { node: SNode } | null }).carry : null;
+  return !!c && KiCadCanvas.uuidOf(c.node) === id;
+}
+export function selectUnit(ctx: ToolCtx & { doc: KDoc }, item: KItem, unit: number, write?: (node: SNode) => void): boolean {
   const doc = ctx.doc, node0 = item.node;
   const lib = (KiCadCanvas.resolveLib(doc, L.str((L.kid(node0, "lib_id") || [])[1])) as SNode | null) || null;
   const count = libUnits(doc, node0);
@@ -200,23 +208,27 @@ export function selectUnit(ctx: ToolCtx & { doc: KDoc }, item: KItem, unit: numb
     const node = KiCadCanvas.cloneNode ? (KiCadCanvas.cloneNode as (n: SNode) => SNode)(node0) : JSON.parse(JSON.stringify(node0)) as SNode;
     helpers.setSymbolUnit(node, unit); L.setInstanceData(node, path, project, { unit });
     let out = node;
+    // `if( !staged ) return;`: a carried symbol with no holder to swap changes its unit and nothing else
+    const staged = !write || (swap && !!holder);
     // m_AutoplaceFields.enable: fields autoplaced (AUTO or MANUAL) are autoplaced again with their algorithm
     const sch = CollabTools.sch, ap = sch ? (sch.state as { autoplace?: { enable?: boolean } }).autoplace : null, fa = L.kid(node, "fields_autoplaced");
-    if (sch && (!ap || ap.enable !== false) && fa && L.str(fa[1]) !== "no") {
+    if (staged && sch && (!ap || ap.enable !== false) && fa && L.str(fa[1]) !== "no") {
       try { const placed = (sch._ as unknown as { autoplaceNode(d: KDoc, it: KItem): SNode | null }).autoplaceNode(doc, Object.assign({}, item, { node }) as KItem); if (placed) out = placed; } catch { /* the fields stay where they are */ }
     }
-    const changes: KChange[] = [KiCadCanvas.replaceChange(doc, Object.assign({}, item, { node: out, geom: [], bbox: null }) as KItem)];
+    if (write) write(out);
+    if (!staged) return;
+    const changes: KChange[] = write ? [] : [KiCadCanvas.replaceChange(doc, Object.assign({}, item, { node: out, geom: [], bbox: null }) as KItem)];
     // Swap: the other symbol gets the unit this one had
     const giveOld = (n: SNode, p: string): SNode => { const m = KiCadCanvas.cloneNode ? (KiCadCanvas.cloneNode as (x: SNode) => SNode)(n) : JSON.parse(JSON.stringify(n)) as SNode; helpers.setSymbolUnit(m, current); L.setInstanceData(m, p, project, { unit: current }); return m; };
     if (swap && holder && !holder.file) changes.push(KiCadCanvas.replaceChange(doc, Object.assign({}, holder.item, { node: giveOld(holder.item.node, holder.path), geom: [], bbox: null }) as KItem));
     const label = swap ? "Swap Units" : "Change Unit";
-    ctx.commit(changes, label);
+    if (changes.length) ctx.commit(changes, label);
     if (swap && holder && holder.file) { const h = holder; commitOtherSheets(label, [{ file: h.file!, ids: [h.item.id] }], (n) => giveOld(n, h.path)); }
   };
   if (!holder) { apply(false); return true; }
   const target = unitDisplayLetters(lib, unit), currName = unitDisplayLetters(lib, current);
   void askUnitPlaced(`Symbol unit '${target}' is already placed (on sheet '${sheetNameForMessage(holder.human)}')`, `Swap '${target}' and '${currName}'`, `Duplicate '${target}'`).then((r) => {
-    if (r === null || ctx.doc !== doc || !doc.items.has(item.id)) return;
+    if (r === null || ctx.doc !== doc || (write ? !carriedStill(item.id) : !doc.items.has(item.id))) return;
     apply(r === "swap");
   });
   return true;

@@ -6,9 +6,11 @@
 // not share shows "-- mixed values --" and is left alone unless edited; a check box they do not share is in its
 // third state.  OK validates as TransferDataFromWindow does (DisplayError and the bad field focused) and stores
 // one "Edit Track/Via Properties" commit.
-import { box, checkField, coordField, errorMessage, fmtLen, fmtLenU, form, h, messageBox, openDialog, parseLen, selectField, unitLabel, unitName, type Field } from "./ui";
+import { box, checkField, coordField, errorMessage, fmtLen, fmtLenU, form, h, messageBox, openDialog, parseLen, selectField, staticBitmap, unitLabel, unitName, type Field } from "./ui";
 import * as M from "./track-via-model";
 import { setNet } from "./item-props";
+import { BS } from "./canvas";
+import { newCut, newViaSectionState, setLayersFromStackup, stackupItems, viaSectionPreview, type PostMachiningCut } from "./via-cross-section";
 
 const K = (): KiCadCanvasApi => KiCadCanvas;
 const parse: M.Parse = (t) => K().parse(t) as SNode;
@@ -91,6 +93,35 @@ function lgrid(rows: [HTMLElement, HTMLElement, HTMLElement?][]): HTMLElement {
   const f = h("div", { class: "pd-form wide" });
   for (const [l, c, u] of rows) f.append(l, c, u || h("span"));
   return f;
+}
+
+/**
+ * CONNECTIVITY_DATA::IsConnectedOnLayer( via, layer, { PCB_TRACE_T, PCB_ARC_T, PCB_VIA_T, PCB_PAD_T } ): a track or arc
+ * of the via's net ending on it there, another via of the net over it on that layer, or a pad of the net under it.
+ */
+function viaConnectedOnLayer(doc: KDoc, via: KItem, layer: string): boolean {
+  type G = { t?: string; x?: number; y?: number; r?: number; w?: number; h?: number | string; layer?: string; net?: unknown; via?: boolean; track?: boolean; hole?: boolean; viaSize?: number };
+  const own = (via.geom as G[]).find((g) => g.via && g.layer === layer) || (via.geom as G[]).find((g) => g.via);
+  if (!own || own.net === undefined || own.net === "" || own.net === 0) return false;
+  const vx = Number(own.x), vy = Number(own.y), vr = (Number(own.viaSize) || Number(own.r) * 2 || 0) / 2;
+  for (const it of doc.items.values()) {
+    if (it === via) continue;
+    if (it.kind === "segment" || it.kind === "arc") {
+      const g = (it.geom as G[]).find((x) => x.track); if (!g || g.layer !== layer || g.net !== own.net) continue;
+      const s = M.kid(it.node, "start"), e = M.kid(it.node, "end");
+      for (const p of [s, e]) if (p && Math.hypot(+p[1] - vx, +p[2] - vy) <= vr + (Number(g.w) || 0) / 2) return true;
+    } else if (it.kind === "via") {
+      const g = (it.geom as G[]).find((x) => x.via && x.layer === layer); if (!g || g.net !== own.net) continue;
+      if (Math.hypot(Number(g.x) - vx, Number(g.y) - vy) <= vr + (Number(g.viaSize) || Number(g.r) * 2 || 0) / 2) return true;
+    } else if (it.kind === "footprint") {
+      for (const g of it.geom as G[]) {
+        if (g.layer !== layer || g.net !== own.net || g.hole || typeof g.x !== "number" || typeof g.y !== "number") continue;
+        const half = Math.max(Number(g.w) || 0, Number(g.h) || 0, (Number(g.r) || 0) * 2) / 2;
+        if (half > 0 && Math.hypot(g.x - vx, g.y - vy) <= half + vr) return true;
+      }
+    }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------- the dialog
@@ -327,20 +358,86 @@ export function trackViaDialog(ctx: ToolCtx, items: KItem[]): boolean {
         // the choices fill their grid cell (wxEXPAND in gbSizer4) instead of shrinking to their arrow
         for (const c of [vtype.el, l0.el, l1.el]) { c.style.width = "100%"; c.style.minWidth = "0"; }
         modeSel.el.style.flex = "0 1 auto"; editSel.style.flex = "0 0 auto"; editSel.style.minWidth = "104px";
-        const viaBox = box("Vias", h("div", { class: "pd-cols2" }, left, ringForm),
-          section("Backdrill"),
-          h("div", { class: "pd-row" }, bdLabel, bdMode.el),
-          h("div", { class: "pd-cols2" }, lgrid([[bfLabels[0], bfSize.el, unitLabel()], [bfLabels[1], bfLayer.el]]), lgrid([[bbLabels[0], bbSize.el, unitLabel()], [bbLabels[1], bbLayer.el]])),
-          section("Hole Post-machining"), pmRow(pmF), pmRow(pmB),
+        // m_viaPreview: the via settings on the left, the cross section beside them
+        const preview = viaSectionPreview();
+        const viaBox = box("Vias", h("div", { class: "pd-row", style: "align-items:stretch;flex-wrap:nowrap;gap:10px;margin:0" },
+          h("div", { style: "flex:1 1 auto;min-width:0" }, h("div", { class: "pd-cols2" }, left, ringForm),
+            section("Backdrill"),
+            h("div", { class: "pd-row" }, bdLabel, bdMode.el),
+            h("div", { class: "pd-cols2" }, lgrid([[bfLabels[0], bfSize.el, unitLabel()], [bfLabels[1], bfLayer.el]]), lgrid([[bbLabels[0], bbSize.el, unitLabel()], [bbLabels[1], bbLayer.el]])),
+            section("Hole Post-machining"), pmRow(pmF), pmRow(pmB)),
+          preview.el),
           h("hr", { style: "border:none;border-top:1px solid var(--line);margin:8px 0" }),
           legacy ? h("div", { class: "pd-info" }, "Board contains legacy teardrops.", h("br"), "Use Edit > Edit Teardrops to apply automatic teardrops.") : null,
           h("div", { class: "pd-cols2" },
-            h("div", null, tdOn.el, tdTwo.el, h("div", { class: "pd-row" }, h("label", null, "Maximum track width:"), hd.el, h("span", { class: "unit" }, "%")),
-              h("p", { class: "pd-note", style: "font-style:italic" }, "(as a percentage of pad/via/track size)")),
+            h("div", null, tdOn.el, tdTwo.el),
+            h("div", null, h("div", { class: "pd-row" }, h("label", null, "Maximum track width:"), hd.el, h("span", { class: "unit" }, "%")),
+              h("p", { class: "pd-note", style: "font-style:italic" }, "(as a percentage of pad/via/track size)"))),
+          // m_bitmapTeardrop beside the length and width values
+          h("div", { class: "pd-row", style: "align-items:flex-start;flex-wrap:nowrap;gap:12px" }, staticBitmap("teardrop_sizes", 180, 110),
             h("div", null, form([["Best length (L):", lenP.el, h("span", { class: "unit" }, "%( d )")], ["Maximum length (L):", maxL.el, unitLabel()],
               ["Best width (W):", widP.el, h("span", { class: "unit" }, "%( d )")], ["Maximum width (W):", maxW.el, unitLabel()]], true), curved.el)));
         body.append(viaBox);
+        /** updateViaPreview: the cross section of the span, rings, protection, backdrills and cuts the dialog shows now */
+        const updateViaPreview = (): void => {
+          const n = copper.length, st = newViaSectionState();
+          st.innerLayers = Math.max(0, n - 2);
+          // viaSpan
+          const t = vtype.get(), thru = t === "through" || t === undefined;
+          const a = l0.get(), b = l1.get();
+          const ia = thru || !a ? 0 : copper.indexOf(a), ib = thru || !b ? n - 1 : copper.indexOf(b);
+          const top = Math.max(0, Math.min(ia, ib)), bot = Math.max(ia, ib) < 0 ? n - 1 : Math.max(ia, ib);
+          const through = top === 0 && bot === n - 1;
+          st.topLayer = top; st.bottomLayer = bot;
+          const thickness = setLayersFromStackup(st, stackupItems(BS().stackupLayers((doc as KDoc & { setupNode?: SNode | null }).setupNode || null), n, doc.thickness || 1.6), n);
+          const dr = drill.get(), drillSize = typeof dr === "number" ? dr : 0;
+          const ratioToDrill = (v: number | null | undefined, dflt: number): number => (drillSize > 0 && typeof v === "number" ? v / drillSize : dflt);
+          st.padRatio = ratioToDrill(dia.get(), st.padRatio);
+          // which layers keep a ring: connection is a board question, asked for a single via only
+          const rm = ring.get();
+          if (vias.length === 1 && typeof rm === "number" && rm > 0 && rm <= 3) {
+            for (let o = 0; o < n; o++) {
+              const startEnd = o === top || o === bot, connected = viaConnectedOnLayer(doc, vias[0], copper[o]);
+              st.ringLayers.push(rm === 1 ? startEnd || connected : rm === 2 ? connected : startEnd);
+            }
+          }
+          // the protection features: the preset's, or a single custom via's own, each resolved against the board default;
+          // several custom vias share no padstack, so every feature stays mixed
+          const p = prot.get();
+          const feats = typeof p === "number" && p < M.IPC4761_CUSTOM ? M.presetFeatures(p) : vias.length === 1 ? M.viaFeatures(vias[0].node) : null;
+          if (feats) {
+            const bd = BS().viaProtection((doc as KDoc & { setupNode?: SNode | null }).setupNode || null);
+            st.tentFront = feats.tentFront ?? bd.tentFront; st.tentBack = feats.tentBack ?? bd.tentBack;
+            st.coverFront = feats.coverFront ?? bd.coverFront; st.coverBack = feats.coverBack ?? bd.coverBack;
+            st.plugFront = feats.plugFront ?? bd.plugFront; st.plugBack = feats.plugBack ?? bd.plugBack;
+            st.filled = feats.fill ?? bd.fill; st.capped = feats.cap ?? bd.cap;
+          }
+          // a backdrill removes every copper layer from its surface down to the layer chosen; through vias only
+          const layersFrom = (l: string | undefined, front: boolean): number | undefined => { if (l === undefined) return undefined; const o = copper.indexOf(l); if (!l || o < 0) return undefined; return front ? o + 1 : n - o; };
+          const bd = through ? bdMode.get() : 0;
+          if (bd === undefined) { st.backdrillFrontLayers = undefined; st.backdrillBackLayers = undefined; }
+          else {
+            if (bd === 2 || bd === 3) { st.backdrillFrontLayers = layersFrom(bfLayer.get(), true); st.backdrillFrontWidthRatio = ratioToDrill(bfSize.get(), st.backdrillFrontWidthRatio); }
+            if (bd === 1 || bd === 3) { st.backdrillBackLayers = layersFrom(bbLayer.get(), false); st.backdrillBackWidthRatio = ratioToDrill(bbSize.get(), st.backdrillBackWidthRatio); }
+          }
+          const cut = (pm: ReturnType<typeof pmCtl>): PostMachiningCut => {
+            const c = newCut(), m = pm.mode.get();
+            c.mode = m === "none" || m === "countersink" || m === "counterbore" ? m : undefined;
+            c.widthRatio = ratioToDrill(pm.size.get(), c.widthRatio);
+            const v = pm.second.get();
+            if (thickness > 0 && typeof v === "number") {
+              // the cone meets the hole wall where its half angle says it does
+              const depth = c.mode === "countersink" ? drillSize * (c.widthRatio - 1) / 2 / Math.tan(Math.max(20, Math.min(170, v)) * Math.PI / 360) : v;
+              c.depthFraction = depth / thickness;
+            }
+            return c;
+          };
+          st.postMachiningFront = cut(pmF); st.postMachiningBack = cut(pmB);
+          preview.setState(st);
+        };
+        viaBox.addEventListener("change", updateViaPreview); viaBox.addEventListener("input", updateViaPreview);
         onViaEdit();
+        updateViaPreview();
         viaCheck = () => {
           syncDia();
           // PCB_VIA::ValidateViaParameters

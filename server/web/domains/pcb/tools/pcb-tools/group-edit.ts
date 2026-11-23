@@ -2,7 +2,7 @@
 // A group is entered by a double-click or Enter Group. Its members are then picked one by one, everything outside it
 // is drawn at the Outside Group opacity, and Esc on an empty selection (or a click outside its box) leaves it.
 import type { BoardDoc, PcbCtx } from "./types";
-import { K, S } from "./state";
+import { K, S, anchorColor } from "./state";
 import { groupMembers, parentOf, selectionIds } from "./groups";
 
 /** The entered group's id while it still exists. */
@@ -70,7 +70,7 @@ export function withinEnteredGroup(doc: BoardDoc | null | undefined, ids: string
   const g = enteredGroup(doc); if (!g || !doc) return ids;
   const scope = groupDeepMembers(doc, g); return ids.filter((id) => scope.has(id));
 }
-export const ANCHOR_COLOR = "#FF26E2";   // LAYER_ANCHOR (builtin_color_themes.h)
+export const ANCHOR_COLOR = "#FF26E2";   // LAYER_ANCHOR in KiCad Default (builtin_color_themes.h); drawn in the live theme's (anchorColor)
 /**
  * PCB_PAINTER::draw( PCB_GROUP ) on LAYER_ANCHOR: a group selected on its own (not through a selected parent), or
  * the entered one, gets its bounding box at twice the outline width (2 px). When its name fits it also gets a title
@@ -79,11 +79,11 @@ export const ANCHOR_COLOR = "#FF26E2";   // LAYER_ANCHOR (builtin_color_themes.h
 export function drawGroupFrames(c: CanvasRenderingContext2D, ctx: PcbCtx, cpx: number) {
   const doc = ctx.doc; if (!doc) return;
   const sel = selectionIds(ctx), show = new Map<string, string>();
-  const ent = enteredGroup(doc); if (ent) show.set(ent, ANCHOR_COLOR);
+  const anchor = anchorColor(); const ent = enteredGroup(doc); if (ent) show.set(ent, anchor);
   for (const id of sel) {
     const it = doc.items.get(id); if (!it || it.kind !== "group") continue;
     const p = parentOf(doc, id); if (p && sel.has(p.id)) continue;
-    show.set(id, (K.selectedColor as (c: string) => string)(ANCHOR_COLOR));   // GetColor of a selected item: m_layerColorsSel
+    show.set(id, (K.selectedColor as (c: string) => string)(anchor));   // GetColor of a selected item: m_layerColorsSel
   }
   if (!show.size) return;
   const m = c.getTransform(), base = [m.a, m.b, m.c, m.d, m.e, m.f];

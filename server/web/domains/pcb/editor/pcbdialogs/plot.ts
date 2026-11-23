@@ -32,14 +32,13 @@ import { openGendrill } from "./gendrill";
 import { deliver, docDir, loadPrefs, projectLastPlotPath, savePrefs, saveProjectLastPlotPath, whenDialogsClosed } from "./plot-out";
 import { bitmapButton, box, checkField, ensureCss as kitCss, errorMessage, h, iconButton, numField, reportPanel, selectField, textField, type Field, type ReportLine } from "./ui";
 import { kicadIcon } from "../../../../shared/components/kicon-dom";
-import { prefs, schThemeList } from "../../dialogs/prefs";
+import { boardColorsOf, boardThemeId, prefs, schThemeList } from "../../dialogs/prefs";
 
 interface LayerRow { key: string; name: string; color: string }
 const layerRows = (): LayerRow[] => ((store as unknown as { get(): { document: { layers?: LayerRow[] } } }).get().document.layers || []);
 
 /** The formats in the dialog's order (getPlotFormat) and their PLOT_FORMAT ids. */
 export const FORMATS: [number, string][] = [[1, "Gerber"], [2, "Postscript"], [5, "SVG"], [3, "DXF"], [4, "PDF"], [6, "PNG"]];
-const SHEET_COLOR = "#C872AB";   // LAYER_DRAWINGSHEET in the default PCB theme
 
 /** PCBNEW_SETTINGS' plot panel: what KiCad keeps per user rather than in the board. */
 interface UserPlot { checkZones: boolean; fineScaleX: number; fineScaleY: number; widthAdjust: number; pdfBackground: string | null; svgFitPage: boolean }
@@ -168,7 +167,7 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
   // Color theme: GetColorSettingsList (the built-in themes, then the user's), the board editor's theme preselected
   // (setColorThemeSelection); the board editor shows KiCad Default with the Appearance panel's colours
   const themes = schThemeList(prefs());
-  const EDITOR_THEME = "default";
+  const EDITOR_THEME = boardThemeId(prefs(), false);   // PCBNEW_SETTINGS m_ColorTheme
   const themeSel = selectField<string>(opts.colorTheme && themes.some(([id]) => id === opts.colorTheme) ? opts.colorTheme : themes.some(([id]) => id === EDITOR_THEME) ? EDITOR_THEME : themes[0][0], themes, { key: "colorTheme" });
   themeSel.input.title = "Select the color theme to use for plotting";
   const themeLbl = h("span", { class: "pd-lbl" }, "Color theme:");
@@ -348,13 +347,10 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
       // SetColorSettings( formatUsesColorTheme() ? getColorSettings() : getEditorColorSettings() )
       const colors: Record<string, string> = {}; for (const r of layerRows()) colors[r.key] = r.color;
       const theme = t.format === 4 || t.format === 5 || t.format === 6 ? themeSel.get() : EDITOR_THEME;
-      let sheetColor = SHEET_COLOR;
-      if (theme !== EDITOR_THEME) {
-        const pcbColor = (KiCadCanvas as unknown as { pcbColor(l: string): string }).pcbColor;
-        // a theme without board colours answers COLOR_SETTINGS::GetDefaultColor: KiCad Default's
-        for (const l of new Set([...Object.keys(colors), ...enabled])) colors[l] = (theme === "classic" && P.classicLayerColor(l)) || pcbColor(l);
-        if (theme === "classic") sheetColor = P.CLASSIC_DRAWINGSHEET;
-      }
+      // the theme's board namespace (KiCad Default's colour for a key it leaves out), LAYER_DRAWINGSHEET included
+      const themeColors = boardColorsOf(prefs(), theme);
+      const sheetColor = themeColors.worksheet || "#C872AB";
+      if (theme !== EDITOR_THEME) for (const l of new Set([...Object.keys(colors), ...enabled])) if (themeColors[l]) colors[l] = themeColors[l];
       const vars = (E.proSettings ? ((): Record<string, string> => { try { return JSON.parse(E.proSettings).text_variables || {}; } catch (e) { return {}; } })() : {}) as Record<string, string>;
       const res = await fab.plotBoard(fctx, { params: t, layers: [...enabled.filter((l) => t.layerSelection.includes(l)), ...t.layerSelection.filter((l) => !enabled.includes(l))], common: t.plotOnAllLayers, colors, sheetColor, background: t.backgroundColor,
         outputDir: t.outputDirectory, boardDir: docDir(), author: vars.AUTHOR, subject: vars.SUBJECT });

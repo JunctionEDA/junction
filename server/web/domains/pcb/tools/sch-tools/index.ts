@@ -19,6 +19,7 @@ import type { NetHighlighter, Pt, SchCtx } from "./types";
 import { root } from "../root";
 import { actions, runAction } from "./actions";
 import { isLockedItem, isLockedNode, modifyLock, setLockedNode } from "./lock";
+import { bodyStyleMenu, carriedProperties, chooseBodyStyle, chooseSymbolUnit, libBodyStyles, placeSymbolUnit, symbolMenuConditions, symbolUnitMenu } from "./annotate";
 import { annotate, annotateChanges, annotateMessages, clearAnnotation, clearAnnotationChanges, cycleBodyStyle, incrementAnnotationChanges, editFieldPrompt, libUnits, placeNextUnit, showDatasheet, splitRef, stepUnit, toggleSymbolFlag, symbolShownText, unplacedUnits, annotateHierarchy, clearAnnotationHierarchy, replaceDuplicateIds, checkAnnotation, compareRef, deserializeTracker, inferredSelection, instanceOn, newSymbolMinRef, refOn, serializeTracker, setInstanceOn, sheetOf, sheetReferences, subReference, unitOn } from "./annotate";
 import { areaCandidates, candInPoly, crossProbeZoomRatio, polyArea, bodyAndPinsBox, candBox, candHit, candInBox, candOfKey, clickCandidates, collectHits, fieldKey, guessCandidates, narrowCands, pinKey, selectableItem, shapeFilled, sheetBody } from "./guess";
 import { autoplaceNode, autoplaceSelection, bodyBox, fieldExtent, globalPowerPin, symbolPins, autoplaceLabelNode } from "./autoplace";
@@ -69,6 +70,9 @@ const sch = {
   undoRedo, hotkeyTool(id: string, ctx: SchCtx, at?: Pt | null) { return hotkeyTool(ctx, id, at); }, primeTool,
   // SCH_POINT_EDITOR's corner conditions for the context menu
   canAddCorner, canRemoveCorner,
+  // SCH_ACTIONS::properties on the item being placed; SYMBOL_UNIT_MENU and BODY_STYLE_MENU (sch_edit_tool.cpp)
+  carriedProperties,
+  symbolMenus: { conditions: symbolMenuConditions, units: symbolUnitMenu, bodyStyles: bodyStyleMenu, selectUnit: chooseSymbolUnit, placeUnit: placeSymbolUnit, selectBodyStyle: chooseBodyStyle },
   // for tests and the props panel
   state: S, select(id: string | null) { if (!id || S.sel !== id) S.selEnds = null; S.sel = id || null; }, selEndKeys, putSelEnd, boxLineFlags, setPrompt(fn: PromptFn) { setPromptImpl(fn); }, setNetHighlighter(h: NetHighlighter | null) { S.netHL = h || null; }, setImagePicker(fn: ImagePickerFn) { setImagePickerImpl(fn); },
   // connected drag engine, shared with app.js's select tool (symbols and sheets; an array drags a multi-selection)
@@ -106,7 +110,7 @@ const sch = {
     ercNets, runERC, subsheetDoc, syncSheetPins, cleanupSheetPins, autoPlaceSheetPinsNode, transformNode, transformChanges, transformSelected, selectionCentre, halfGrid, swapNodes, swapChanges, swapSelection,
     alignToGridChanges, alignToGrid, alignEdgeChanges, alignEdges, moveExactChanges, moveExactly, rotationCentre, breakWireChanges, breakWire, openFieldsTable, unfoldMembers, unfoldEntries, busForUnfolding, printBusForUI, busLabelsOf, unfoldBus, unfoldAction,
     areaCandidates, candInPoly, crossProbeZoomRatio, polyArea, clickCandidates, collectHits, guessCandidates, narrowCands, candOfKey, candInBox, candBox, candHit, pinKey, fieldKey, sheetBody, bodyAndPinsBox, selectableItem, shapeFilled,
-    selectConnection, selectNode, stepNetItem, expandConnectionWithGraph, expandConnectionGraphically, incrementSelection, incrementStringPart, snapAnchors, snapRanges, resolveSnap, bestDragOrigin, schConstruction, editFieldPrompt, toggleSymbolFlag, stepUnit, cycleBodyStyle, placeNextUnit, libUnits, showDatasheet, CLIP, clipWrite, clipRead,
+    selectConnection, selectNode, stepNetItem, expandConnectionWithGraph, expandConnectionGraphically, incrementSelection, incrementStringPart, snapAnchors, snapRanges, resolveSnap, bestDragOrigin, schConstruction, editFieldPrompt, toggleSymbolFlag, stepUnit, cycleBodyStyle, placeNextUnit, libUnits, libBodyStyles, showDatasheet, CLIP, clipWrite, clipRead,
     lineNode, junctionNode, noConnectNode, busEntryNode, labelNode, symbolNode, orientSymbol, rotateNode, mirrorNode, cloneNode, shiftNode,
     tFrom, orientOf, mul, RCCW, MX, MY, needsJunction, junctionAt, pinsAt, snapConn, simplify, simplifyWireList, computeBreakPoint, collisionInit, collisionMarkers, editPoints, addCorner, removeCorner, arcEditPoints, cycleArcEditMode, findEditPoint, nextArcEditMode, editHandles, editPointColors, EDIT_BORDER_PX, polygonEdgeDrag, ellipseAngleAt, imageBoundingSize, imageOriginOffset, rectRadiusFor, applyPointEdit, editFollowers, pointEditStart, pointEditMove, pointEditEnd, wireFollow, wireClick, wirePoints, undoSegment, switchPosture, wireKey, isTerminalPoint, mergeOverlap,
     analyzePoint, autostartKind, autostartAt, explicitJunctionNeeded, explicitJunctionAllowed, previewJunctions, editTxn, txnCleanUp, txnTrimWire, singleClickPlace, busyMessage, vetoTool, startWire, cancelWire, hitNonSymbol, textRect, pickNonSymbol,

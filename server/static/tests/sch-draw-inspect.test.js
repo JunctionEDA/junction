@@ -428,5 +428,85 @@ test("item on the cursor: Increment a label, DNP / body style / Autoplace Fields
   sch.state.carry = null; sch.onActivate("select", ctx);
 });
 
+// ---------------------------------------------------------------- SYMBOL_UNIT_MENU / BODY_STYLE_MENU and Properties on the carried symbol
+const LIB_DM = `(symbol "Logic:NAND" (exclude_from_sim no) (in_bom yes) (on_board yes)
+  (property "Reference" "U" (at 0 5.08 0) ${FONT}) (property "Value" "NAND" (at 0 -5.08 0) ${FONT})
+  (symbol "NAND_1_1" (pin input line (at -5.08 0 0) (length 2.54) (name "A" ${FONT}) (number "1" ${FONT})))
+  (symbol "NAND_1_2" (pin input line (at -5.08 0 0) (length 2.54) (name "A" ${FONT}) (number "1" ${FONT}))))`;
+const LIB_NAMED = `(symbol "Logic:MUX" (body_styles "Narrow" "Wide" "Tall") (exclude_from_sim no) (in_bom yes) (on_board yes)
+  (property "Reference" "U" (at 0 5.08 0) ${FONT}) (property "Value" "MUX" (at 0 -5.08 0) ${FONT})
+  (symbol "MUX_1_1" (pin input line (at -5.08 0 0) (length 2.54) (name "A" ${FONT}) (number "1" ${FONT}))))`;
+function freshLibs(body) {
+  const doc = K.parseDoc(HEAD.replace("(lib_symbols ", `(lib_symbols ${LIB_DM} ${LIB_NAMED} `) + (body || "") + ")", "kicad_sch"), ctx = makeCtx(doc);
+  sch.setPrompt((t, i, c, done) => done(null));
+  sch.state.carry = null; sch.state.draw = null; sch.state.wire = null; sch.state.sel = null; sch.state.immediateActions = true; sch.state.placeOne = null;
+  sch.onDocChanged(ctx); sch.onActivate("select", ctx);
+  return { doc, ctx };
+}
+const carrySym = (ctx, src) => { sch.state.carry = { kind: "symbol", node: K.parse(src), item: null, pos: null }; sch.onActivate("place", ctx); sch.onPointerMove({}, [50.8, 50.8], ctx); };
+const uuidOf = (n) => str(kid(n, "uuid")[1]);
+test("Symbol Unit menu on the symbol being placed: units, ' (already placed)', Place unit rows; a choice edits the carry only", () => {
+  const { doc, ctx } = freshLibs(sym("Amp:OPA", "U1", 1, [10.16, 10.16], "u1"));
+  carrySym(ctx, sym("Amp:OPA", "U1", 2, [20.32, 20.32], "u1b"));
+  const M = sch.symbolMenus;
+  assert.deepStrictEqual(M.conditions(ctx), { multiUnit: true, multiBodyStyle: false });
+  assert.deepStrictEqual(M.units(ctx).map((r) => r.sep ? "-" : (r.checked ? "*" : "") + r.label),
+    ["A (already placed)", "*B", "C", "-", "Place unit B", "Place unit C"], "the carried symbol is not in the schematic: its own unit counts as free");
+  assert.strictEqual(M.selectUnit(ctx, 3), true);
+  assert.strictEqual(str(kid(sch.state.carry.node, "unit")[1]), "3"); assert.strictEqual(sch.state.carry.item.id, "u1b", "the ghost follows");
+  assert.strictEqual(M.placeUnit(ctx, 2), true, "PlaceSymbol's loop takes a Place unit choice and does nothing");
+  assert.ok(sch.state.carry && uuidOf(sch.state.carry.node) === "u1b");
+  assert.strictEqual(ctx.log.length, 0, "nothing committed");
+  sch.state.carry = null; sch.onActivate("select", ctx); void doc;
+});
+test("Symbol Unit menu on the selected symbol: SelectUnit commits Change Unit; Place unit starts Place Next Symbol Unit with that unit", () => {
+  const { doc, ctx } = freshLibs(sym("Amp:OPA", "U1", 1, [10.16, 10.16], "u1"));
+  ctx.setSelected({ id: "u1" });
+  const M = sch.symbolMenus;
+  assert.deepStrictEqual(M.units(ctx).map((r) => r.sep ? "-" : (r.checked ? "*" : "") + r.label), ["*A (already placed)", "B", "C", "-", "Place unit B", "Place unit C"]);
+  assert.ok(M.selectUnit(ctx, 2)); assert.strictEqual(last(ctx).label, "Change Unit");
+  assert.strictEqual(str(kid(doc.items.get("u1").node, "unit")[1]), "2");
+  const n = ctx.log.length; assert.ok(M.selectUnit(ctx, 2)); assert.strictEqual(ctx.log.length, n, "the unit it has: no change");
+  assert.ok(M.placeUnit(ctx, 3));
+  assert.ok(sch.state.carry && sch.state.carry.kind === "symbol"); assert.strictEqual(str(kid(sch.state.carry.node, "unit")[1]), "3");
+  sch.state.carry = null; sch.state.placeOne = null; sch.onActivate("select", ctx);
+});
+test("Body Style menu: Standard / Alternate for De Morgan, the library's names otherwise; carried symbol edited in place", () => {
+  const { doc, ctx } = freshLibs(sym("Logic:MUX", "U5", 1, [10.16, 10.16], "mx"));
+  carrySym(ctx, sym("Logic:NAND", "U2", 1, [20.32, 20.32], "nd"));
+  const M = sch.symbolMenus;
+  assert.deepStrictEqual(M.conditions(ctx), { multiUnit: false, multiBodyStyle: true });
+  assert.deepStrictEqual(M.bodyStyles(ctx).map((r) => (r.checked ? "*" : "") + r.label), ["*Standard", "Alternate"]);
+  assert.ok(M.selectBodyStyle(ctx, 2)); assert.strictEqual(str(kid(sch.state.carry.node, "body_style")[1]), "2");
+  assert.deepStrictEqual(M.bodyStyles(ctx).map((r) => (r.checked ? "*" : "") + r.label), ["Standard", "*Alternate"]);
+  assert.strictEqual(ctx.log.length, 0);
+  sch.state.carry = null; sch.onActivate("select", ctx);
+  ctx.setSelected({ id: "mx" });
+  assert.deepStrictEqual(M.bodyStyles(ctx).map((r) => (r.checked ? "*" : "") + r.label), ["*Narrow", "Wide", "Tall"]);
+  assert.ok(M.selectBodyStyle(ctx, 3)); assert.strictEqual(last(ctx).label, "Change Body Style");
+  assert.strictEqual(str(kid(doc.items.get("mx").node, "body_style")[1]), "3");
+  assert.deepStrictEqual(_.libBodyStyles(K.resolveLib(doc, "Logic:MUX")), { demorgan: false, count: 3, names: ["Narrow", "Wide", "Tall"] });
+});
+test("Properties and Edit Reference / Value / Footprint on the symbol being placed: the dialogs edit the carried copy", () => {
+  const { doc, ctx } = freshLibs();
+  carrySym(ctx, sym("Device:R", "R?", 1, [20.32, 20.32], "rc"));
+  const seen = [];
+  globalThis.KDialogs = {
+    schItemDialog(c, item, opts) { seen.push(["item", item.id, typeof opts.carried]); const n = K.cloneNode(item.node); kids(n, "property").find((p) => str(p[1]) === "Value")[2] = "4k7"; opts.carried(n); return true; },
+    schFieldDialog(c, item, name, opts) { seen.push(["field", item.id, name, typeof (opts && opts.carried)]); const n = K.cloneNode(item.node); kids(n, "property").find((p) => str(p[1]) === name)[2] = "R9"; opts.carried(n); return true; },
+  };
+  try {
+    assert.strictEqual(sch.carriedProperties(ctx), true);
+    assert.strictEqual(kids(sch.state.carry.node, "property").find((p) => str(p[1]) === "Value")[2], "4k7");
+    assert.strictEqual(sch.actions.editReference.run(ctx), true);
+    assert.strictEqual(kids(sch.state.carry.node, "property").find((p) => str(p[1]) === "Reference")[2], "R9");
+    assert.deepStrictEqual(seen, [["item", "rc", "function"], ["field", "rc", "Reference", "function"]]);
+    assert.strictEqual(sch.state.carry.item.id, "rc"); assert.ok(!doc.items.has("rc")); assert.strictEqual(ctx.log.length, 0, "nothing committed");
+    // a wire / junction on the cursor is not the dialog's: the request goes on to the selection
+    sch.state.carry = { kind: "junction", node: K.parse(`(junction (at 1.27 1.27) (diameter 0) (color 0 0 0 0) (uuid "jj"))`), item: null, pos: null }; sch.onPointerMove({}, [50.8, 50.8], ctx);
+    assert.strictEqual(sch.carriedProperties(ctx), false);
+  } finally { delete globalThis.KDialogs; sch.state.carry = null; sch.onActivate("select", ctx); }
+});
+
 console.log(`sch-draw-inspect: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

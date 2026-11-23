@@ -7,8 +7,12 @@ import { ensureDom } from "./dom";
 export let K = root.KiCadCanvas as PcbCanvasApi;                 // re-bound from ctx.K on every hook
 export const WIDTHS = [0.2, 0.25, 0.3, 0.5, 0.8, 1.0];
 export const HL = "#FFB43A", VIA = "#ECECEC", DEL = "#FF5C5C";
-export const ANCHOR = "rgb(255, 38, 226)";   // LAYER_ANCHOR (builtin_color_themes.h): the snap guides
-export const RATSNEST = "rgba(0, 248, 255, 0.35)";   // LAYER_RATSNEST (builtin_color_themes.h)
+/** A GAL colour of the live board colour theme (canvas colors.ts), KiCad Default's `dflt` without the canvas. */
+export function themeColor(key: string, dflt: string): string { return K && typeof K.boardColor === "function" ? K.boardColor(key) : dflt; }
+/** LAYER_ANCHOR of the live theme (KiCad Default rgb(255, 38, 226)): the snap guides. */
+export function anchorColor(): string { return themeColor("anchor", "rgb(255, 38, 226)"); }
+/** LAYER_RATSNEST of the live theme (KiCad Default rgba(0, 248, 255, 0.35)). */
+export function ratsnestColor(): string { return themeColor("ratsnest", "rgba(0, 248, 255, 0.35)"); }
 // the router's preview colours: the ratsnest Brightened(0.8) with alpha + 0.4 for the routed net, Brightened(0.5) for
 // the leading line from the head (DisplayRatline), and DARKDARKGRAY clearance halos
 export const RATSNEST_BRIGHT = "rgba(204, 250, 255, 0.575)", RATSNEST_LEAD = "rgba(128, 252, 255, 0.75)", HALO_COLOR = "rgb(72, 72, 72)";

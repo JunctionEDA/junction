@@ -18,10 +18,11 @@ import { isTuningPattern } from "./tuning-patterns";
 import { proposePersistentConstruction, snapCursor } from "./grid-helper";
 import { clearConstruction, setReferenceOnlyPoints } from "./construction";
 import { EDIT_BORDER_PX, EDIT_HOVER_PX, EDIT_POINT_PX, editPointColors } from "../edit-point-style";
-import { AUX_ITEMS_COLOR } from "./assistants";
+import { auxItemsColor } from "./assistants";
 import { ELLIPSE_KINDS, ellipseEditNode, ellipseEditPoints } from "./ellipse";
 import { genCancelEdit, genFinishEdit, genStartEdit, genUpdateEdit, selectedTuningPattern, tuningEditNode, tuningEditPoints } from "./tuning-edit";
 import type { GenEdit } from "./tuning-edit";
+import { blockAnchorEditingEnabled, blockClick, blockPickedKeys } from "./block-drag";
 
 // ---------------------------------------------------------------- point editor (PCB_POINT_EDITOR)
 // A single selected zone, rule area, polygon, line, rectangle, circle, arc or dimension carries KiCad's edit handles: squares on
@@ -148,15 +149,21 @@ export function groupShapesBox(items: KItem[]): [number, number, number, number]
   }
   return b;
 }
+/** PCB_POINT_EDITOR::bboxHandleInflation: with block anchor editing on, about 10 screen pixels keep the box's handles
+ * clear of the shapes' own handles next to it. */
+export const bboxHandleInflation = () => (blockAnchorEditingEnabled() ? 10 * (S.mmPerPx || 0.05) : 0);
 function groupEditPoints(it: KItem): EditPoint[] {
   const doc = [liveDoc(), lastCtx && lastCtx.doc].find((d) => d && d.items.get(it.id) === it) || liveDoc();
-  const shapes = groupShapeItems(doc, it); const b = shapes && groupShapesBox(shapes); if (!b) return [];
+  const shapes = groupShapeItems(doc, it); const b0 = shapes && groupShapesBox(shapes); if (!b0) return [];
+  const inf = bboxHandleInflation(), b = [b0[0] - inf, b0[1] - inf, b0[2] + inf, b0[3] + inf];   // bbox.Inflate( m_inflation )
   const tl: Pt = [b[0], b[1]], tr: Pt = [b[2], b[1]], br: Pt = [b[2], b[3]], bl: Pt = [b[0], b[3]];
   return [{ key: "g0", p: tl, lines: [tr] }, { key: "g1", p: tr, lines: [br] }, { key: "g2", p: br, lines: [bl] }, { key: "g3", p: bl, lines: [tl] }, { key: "gc", p: [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] }];
 }
 /** SHAPE_GROUP_POINT_EDIT_BEHAVIOR::UpdateItem: the shapes' new nodes, from their nodes and box as the drag began. */
-export function groupEditNodes(origs: Map<string, SNode>, box: [number, number, number, number], key: string, p: Pt): Map<string, SNode> {
+export function groupEditNodes(origs: Map<string, SNode>, box: [number, number, number, number], key: string, p: Pt, inflation = 0): Map<string, SNode> {
   const out = new Map<string, SNode>(), oc: Pt = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
+  // the gap taken back out before pinning, so a corner the user did not touch scales by exactly one
+  if (inflation) p = ({ g0: [p[0] + inflation, p[1] + inflation], g1: [p[0] - inflation, p[1] + inflation], g2: [p[0] - inflation, p[1] - inflation], g3: [p[0] + inflation, p[1] - inflation] } as Record<string, Pt>)[key] || p;
   if (key === "gc") {
     const dx = p[0] - oc[0], dy = p[1] - oc[1];
     for (const [id, n] of origs) { const m = clone(n); mapNodePoints(m, (x, y) => [x + dx, y + dy]); out.set(id, m); }
@@ -703,14 +710,18 @@ export function onHandlePointerDown(ev: PointerEvent) {
   const doc = liveDoc(); if (!doc) return; const mm = ctx.worldMm(ev);
   const hit = editHandleAt(doc, mm[0], mm[1], handleTol()); if (!hit) return;
   ev.stopImmediatePropagation(); ev.preventDefault();
+  startHandleEdit(ctx, doc, hit, mm);
+  try { stage.setPointerCapture(ev.pointerId!); } catch (e) { /* synthetic event */ }
+}
+/** The point editor's drag of one handle, from the press at mm (a Shift press the block gesture handed back too). */
+export function startHandleEdit(ctx: PcbCtx, doc: BoardDoc, hit: { it: KItem; h: EditPoint }, mm: Pt) {
   S.peditCtrl = false;
   S.pedit = { id: hit.it.id, kind: hit.it.kind, key: hit.h.key, orig: clone(hit.it.node), start: mm, moved: false, ignoreGrid: !!(hit.h as { ignoreGrid?: boolean }).ignoreGrid };
   if (hit.it.kind === "image") S.pedit.imgOff0 = imageOriginOffset(hit.it.node);   // the transform origin as the drag begins
   if (hit.it.kind === "group") {   // the shapes and their box as the drag begins
-    const shapes = groupShapeItems(doc, hit.it)!; S.pedit.groupOrigs = new Map(shapes.map((m) => [m.id, clone(m.node)])); S.pedit.groupBox = groupShapesBox(shapes);
+    const shapes = groupShapeItems(doc, hit.it)!; S.pedit.groupOrigs = new Map(shapes.map((m) => [m.id, clone(m.node)])); S.pedit.groupBox = groupShapesBox(shapes); S.pedit.groupInfl = bboxHandleInflation();
   }
   if (isTuningPattern(hit.it)) genStartEdit(ctx, hit.it);   // PCB_POINT_EDITOR: genStartEdit
-  try { stage.setPointerCapture(ev.pointerId!); } catch (e) { /* synthetic event */ }
 }
 export function editHandleMove(ctx: PcbCtx, mm: Pt, ev?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } | null) {
   if (ev) { S.peditCtrl = !!(ev.ctrlKey || ev.metaKey); S.peditShift = !!ev.shiftKey; }
@@ -729,7 +740,7 @@ export function editHandleMove(ctx: PcbCtx, mm: Pt, ev?: { ctrlKey?: boolean; me
   }
   if (pe.kind === "generated") { pe.moved = true; pe.node = tuningEditNode(pe.orig, pe.key, p); genUpdateEdit(ctx, pe.node); return; }   // genUpdateEdit: re-tuned live
   if (pe.kind === "group") {   // the shapes follow live
-    pe.moved = true; const nodes = groupEditNodes(pe.groupOrigs as Map<string, SNode>, pe.groupBox as [number, number, number, number], pe.key, p); pe.groupNodes = nodes;
+    pe.moved = true; const nodes = groupEditNodes(pe.groupOrigs as Map<string, SNode>, pe.groupBox as [number, number, number, number], pe.key, p, (pe.groupInfl as number) || 0); pe.groupNodes = nodes;
     for (const [id, n] of nodes) { const m = ctx.doc.items.get(id); if (m) { m.node.length = 0; m.node.push(...clone(n)); K.replaceChange(ctx.doc, m); } }
     ctx.requestRender(); return;
   }
@@ -739,6 +750,7 @@ export function editHandleMove(ctx: PcbCtx, mm: Pt, ev?: { ctrlKey?: boolean; me
 }
 export function editHandleUp(ctx: PcbCtx, commit: boolean) {
   const pe = S.pedit; S.pedit = null; if (!pe) return;
+  if (commit && !pe.moved) blockClick(ctx, pe.start, false);   // IsClick on a handle: pickHandleAt (a click on nothing pickable drops the picks)
   clearConstruction(); setReferenceOnlyPoints([]); S.snapItem = null;   // the drag's grid helper and its construction geometry end with it
   const it = ctx.doc.items.get(pe.id); if (!it) { genCancelEdit(ctx); return; }
   if (pe.kind === "generated") { if (commit && pe.moved) genFinishEdit(ctx); else genCancelEdit(ctx); return; }   // genFinishEdit: "Edit Tuning Pattern"
@@ -760,15 +772,17 @@ export function drawEditPoints(c: CanvasRenderingContext2D, ctx: PcbCtx, px: num
   const it = id ? (ge && ge.id === id && ge.fin && ge.fin.items.get(id)) || ctx.doc.items.get(id) : null; if (!it || isLocked(it.node)) return; const hs = editPoints(it); if (!hs.length) return;
   const cur = ctx.cursor || null; const size = EDIT_POINT_PX / 2 * px;   // POINT_SIZE / 2
   // EDIT_POINTS::ViewDraw: LAYER_AUX_ITEMS (inverted when too close to the background), its border and highlight shades;
-  // the hovered or active point stroked HOVER_SIZE in the highlight shade; an edge line's centre handle never shows a
-  // state (m_lineStateVisible is off in the plain point editor)
-  const { fill, border, highlight } = editPointColors(AUX_ITEMS_COLOR, K.PCB_BG || "#001023");
+  // the hovered or active point stroked HOVER_SIZE in the highlight shade, a picked one filled with it too; an edge
+  // line's centre handle shows a state only with block anchor editing on (m_lineStateVisible)
+  const { fill, border, highlight } = editPointColors(auxItemsColor(), K.PCB_BG || "#001023");
   const hotKey = S.pedit ? S.pedit.key : (cur ? ((editHandleAt(ctx.doc, cur[0], cur[1], handleTol()) || {}).h || {}).key : null);
+  // block anchor editing: picked handles drawn selected, and an edge line's centre shows its state (SetLineStateVisible)
+  const picked = blockPickedKeys(it.id), lineState = blockAnchorEditingEnabled();
   c.save(); c.globalAlpha = 1; c.setLineDash([]);
   for (const h of hs) if (h.lines) { c.lineWidth = EDIT_BORDER_PX / 4 * px; c.strokeStyle = border; for (const q of h.lines) line(c, h.p, q); }   // EDIT_POINTS' indicator lines
   for (const h of hs) {
-    const on = h.key === hotKey && !isEditLine(h.key);
-    c.lineWidth = (on ? EDIT_HOVER_PX : EDIT_BORDER_PX) * px; c.strokeStyle = on ? highlight : border; c.fillStyle = fill;
+    const showState = lineState || !isEditLine(h.key), sel = showState && picked.has(h.key), on = showState && h.key === hotKey;
+    c.lineWidth = (sel || on ? EDIT_HOVER_PX : EDIT_BORDER_PX) * px; c.strokeStyle = sel || on ? highlight : border; c.fillStyle = sel ? highlight : fill;
     c.beginPath(); if (h.circle) c.arc(h.p[0], h.p[1], size, 0, Math.PI * 2); else c.rect(h.p[0] - size, h.p[1] - size, 2 * size, 2 * size);
     c.fill(); c.stroke();
   }

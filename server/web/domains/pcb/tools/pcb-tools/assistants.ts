@@ -15,7 +15,7 @@ import { editHandleUp } from "./point-editor";
 import { routeUnhighlight } from "./route-fix";
 import { restoreActiveLayer } from "./route-tool";
 import { beginCarryMove, finishSelectMove } from "./select-move";
-import { K, S, lastCtx } from "./state";
+import { K, S, lastCtx, themeColor } from "./state";
 import { vsub } from "./util";
 
 /** STATUS_TEXT_POPUP::PopupFor: a one-line note 20 px right of and below the cursor that goes away by itself. */
@@ -38,11 +38,11 @@ export function drawTwoPointAssistant(c: CanvasRenderingContext2D, d: DrawState,
   const o = d.start, e = d.cur, v = vsub(e, o); if (!v[0] && !v[1]) return;
   const strs = t === "gline" ? [dimensionLabel("l", Math.hypot(v[0], v[1])), dimensionLabel("θ", Math.atan2(-v[1], v[0]) * 180 / Math.PI, true)]
     : t === "grect" ? [dimensionLabel("x", Math.abs(v[0])), dimensionLabel("y", Math.abs(v[1]))] : [dimensionLabel("r", Math.hypot(v[0], v[1]))];
-  if (t === "gcircle") { c.save(); c.globalAlpha = 1; c.lineWidth = px; c.strokeStyle = AUX_ITEMS_COLOR; line(c, o, e); c.restore(); }   // DRAW_CONTEXT::DrawLine in LAYER_AUX_ITEMS
+  if (t === "gcircle") { c.save(); c.globalAlpha = 1; c.lineWidth = px; c.strokeStyle = auxItemsColor(); line(c, o, e); c.restore(); }   // DRAW_CONTEXT::DrawLine in LAYER_AUX_ITEMS
   textNextToCursor(c, e, vsub(o, e), strs, px, colour);   // DrawTextNextToCursor( end, origin - end )
 }
-/** LAYER_AUX_ITEMS of the board editor's theme: what the drawing assistants write and rule in. */
-export const AUX_ITEMS_COLOR = "#FFFFFF";
+/** LAYER_AUX_ITEMS of the live board theme (KiCad Default white): what the drawing assistants write and rule in. */
+export function auxItemsColor(): string { return themeColor("aux_items", "#FFFFFF"); }
 /** KIGFX::PREVIEW::GetConstantGlyphHeight( gal, 0 ): the glyph height in pixels, and the stroke, shadow and line pitch factors (HiDPI canvases use the smaller set). */
 export function previewTextDims() {
   const hidpi = typeof devicePixelRatio === "number" && devicePixelRatio > 1;
@@ -69,7 +69,7 @@ export function textNextToCursor(c: CanvasRenderingContext2D, e: Pt, q: Pt, strs
     // an int in IU (nm), scaled by 1.2 and truncated again
     const sx = shadow ? Math.trunc(Math.trunc(shadowW * 1e6) * 1.2) / 1e6 : 0;
     x += (h === "left") !== flipped ? -sx : sx;
-    const color = shadow ? "#000000" : AUX_ITEMS_COLOR;   // GetShadowColor( white ): black
+    const color = shadow ? "#000000" : auxItemsColor();   // GetShadowColor( white ): black
     for (const str of strs) {
       y += pitch;
       stroke(c, base, { x, y, text: str, size, rot: 0, mirror: flipped, h, v: "center", pen: shadow ? pen + 2 * shadowW : pen, italic: false, dy: 0 }, color, px);

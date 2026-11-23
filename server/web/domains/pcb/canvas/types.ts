@@ -49,6 +49,8 @@ export type GeomFlags = {
   noStroke?: boolean;
   /** a filled sector (arcs: the via hole halves); read off circles too */
   pie?: boolean;
+  /** a pie half of a via hole: the copper layer whose colour it shows (the painter maps it through the live theme) */
+  holeLayer?: string;
   cap?: string;
   dash?: boolean; dashType?: string;
   /** opacity the painters multiply in */
@@ -81,6 +83,8 @@ export type GeomFlags = {
   noBox?: boolean;
   /** a pad label, and which one: the net name or the number */
   padText?: boolean; padNet?: boolean; padNum?: boolean;
+  /** a pad label on LAYER_PAD_NETNAMES (several copper layers): NETNAMES_LAYER_ID_START's colour, never inverted */
+  padPth?: boolean;
   /** pad labels: the two-line layout (number and net), whether the pad has both, whether its net label is the "x" / "*" mark */
   padPair?: boolean; padBoth?: boolean; padMark?: boolean;
   /** a pad label: the index of its pad among the footprint's pads */
@@ -340,6 +344,10 @@ export interface RenderOpts {
   /** schematic: the highlighted net chain (SCH_PAINTER): its wires tinted in the chain's colour, and the terminal pins'
    *  circles ("symbolId#pin:<number>" at x, y mm; the chain's colour, null for the brightened pin colour Brightened( 0.5 )) */
   schNetChain?: { wires: Map<string, string>; terminals: { key: string; x: number; y: number; color: string | null }[] } | null;
+  /** board: PCB_PAINTER's highlighted net chain (m_highlightedNetChain): the net codes of its nets and its colour override
+   *  (BOARD::GetNetChainColor, null when the board has none); `terminals`: the terminal pads (by uuid) of the highlighted
+   *  nets, true when the pad's net is on the highlighted chain */
+  pcbNetChain?: { nets: Set<number>; color: string | null; terminals: Map<string, boolean> } | null;
   /** schematic: selection.highlight_netclass_colors: wires in the layer colour over a wider translucent pass in the class colour (thickness in mils, alpha 0..1) */
   netclassHighlight?: { thickness: number; alpha: number } | null;
 }
@@ -349,6 +357,8 @@ export interface SchNetStyle { color?: string | null; wireWidth?: number; busWid
 export interface ExportOpts extends RenderOpts {
   /** the schematic colour theme to export in (KiCad Default unless given) */
   colorTheme?: string;
+  /** a board colour theme's board namespace to export a board PNG in (KiCad Default unless given) */
+  boardColors?: Record<string, string> | null;
   /** [x0, y0, x1, y1] mm: the export area */
   bbox?: number[] | null;
   /** mm around the area */

@@ -138,7 +138,24 @@ interface KiCadCanvasApi {
   strokeAdvance(ch: string): number;
   parseMarkup(s: string): { text: string; bars: [number, number][] | null };
   PCB_HIDDEN_DEFAULT: Set<string>;
+  /** the live board theme's board-layer colours (web/domains/pcb/canvas/colors.ts PCB_LIVE) */
   PCB_COLORS: Record<string, string>;
+  /** LAYER_PCB_BACKGROUND of the live board theme */
+  PCB_BG: string;
+  /** a board layer's colour under the live theme; defaultPcbColor: KiCad Default's (what geometry is built in) */
+  pcbColor(layer: string): string;
+  defaultPcbColor(layer: string): string;
+  /** the board colour themes (colors.ts): the live GAL colours, KiCad Default's, the theme layers, a built-in theme's board namespace */
+  BOARD: Record<string, string>;
+  BOARD_GAL_DEFAULT: Readonly<Record<string, string>>;
+  BOARD_THEME_LAYERS: readonly string[];
+  boardColor(key: string): string;
+  boardDefaultColor(key: string): string;
+  boardThemeColors(id: string): Record<string, string>;
+  boardThemeStamp(): number;
+  liveBoardColors(): Record<string, string>;
+  setBoardColors(colors: Record<string, string> | null): boolean;
+  withBoardColors<T>(colors: Record<string, string> | null, fn: () => T): T;
   SCH: Record<string, string>;
   /** schematic colour themes (web/domains/pcb/canvas/colors.ts) */
   SCH_DEFAULT: Readonly<Record<string, string>>;
@@ -292,6 +309,17 @@ interface SchToolModule extends ToolModule {
   modeText(): string;
   /** the ids of the items on the net of `item` (near: the pin or end it was picked at) */
   netItems(doc: KDoc, item: KItem, near?: unknown): Set<string>;
+  /** SCH_ACTIONS::properties while a symbol, label or text rides the cursor: its dialog edits the carried copy (true when taken) */
+  carriedProperties?(ctx: ToolCtx): boolean;
+  /** SYMBOL_UNIT_MENU / BODY_STYLE_MENU for the carried or the one selected symbol: their rows, conditions and choices */
+  symbolMenus?: {
+    conditions(ctx: ToolCtx): { multiUnit: boolean; multiBodyStyle: boolean };
+    units(ctx: ToolCtx): { sep?: boolean; label?: string; checked?: boolean; unit?: number; place?: number }[];
+    bodyStyles(ctx: ToolCtx): { label?: string; checked?: boolean; bodyStyle?: number }[];
+    selectUnit(ctx: ToolCtx, unit: number): boolean;
+    placeUnit(ctx: ToolCtx, unit: number): boolean;
+    selectBodyStyle(ctx: ToolCtx, style: number): boolean;
+  };
   _: Record<string, unknown>;
 }
 

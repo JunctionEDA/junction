@@ -480,6 +480,15 @@ function placeBoard(blk: DesignBlock, text: string, opts: DbPlaceOpts, linked: b
   };
   return place();
 }
+/** DESIGN_BLOCK_PANE::GetDesignBlock( libId, true, false, &err ) and the text of its board file, for
+ *  PCB_CONTROL::ApplyDesignBlockLayout (pcbdialogs/multichannel.ts); the reason in its words when there is none. */
+export async function designBlockBoard(libId: string): Promise<{ text: string } | { error: string }> {
+  let blk: DesignBlock;
+  if (!tableRows.length) tableRows = await readTable();   // the pane's libraries, though it was never opened
+  try { blk = await libs.load(parseDbLibId(libId)); } catch (e) { return { error: (e as Error).message }; }
+  if (!blk.pcbDoc) return { error: "the design block has no saved board layout" };
+  try { return { text: await libs.text(blk.pcbDoc) }; } catch { return { error: "the design block's board file could not be read" }; }
+}
 /** SCH_EDITOR_CONTROL / PCB_CONTROL::PlaceLinkedDesignBlock: the block linked to the one selected group. */
 export async function placeLinkedDesignBlock(): Promise<boolean> {
   const g = selectedLinkedGroup(); if (!g) return false;

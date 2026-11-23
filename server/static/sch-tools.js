@@ -2947,11 +2947,13 @@
   }
   function editFieldPrompt(ctx, name, title, quiet) {
     if (!editable(ctx)) return false;
-    const it = selectedItems(ctx).find((x) => x.kind === "symbol");
+    const cr = carried(ctx);
+    if (cr && cr.item.kind !== "symbol") return false;
+    const it = cr ? cr.item : selectedItems(ctx).find((x) => x.kind === "symbol");
     if (!it) return false;
     const p = kids(it.node, "property").find((q) => str(q[1]) === name);
     const cur = p ? str(p[2]) : "";
-    if (p && root.KDialogs && root.KDialogs.schFieldDialog && root.KDialogs.schFieldDialog(ctx, it, name)) return true;
+    if (p && root.KDialogs && root.KDialogs.schFieldDialog && root.KDialogs.schFieldDialog(ctx, it, name, cr ? { carried: (n) => cr.write(n) } : void 0)) return true;
     promptImpl(title, cur, S.cursorClient, (text) => {
       if (text === null || text === void 0 || text === cur) return;
       const node = deep(it.node);
@@ -2964,8 +2966,128 @@
         }
         q[2] = text;
       }
+      if (cr) {
+        if (S.carry && uuidOf(S.carry.node) === it.id) cr.write(node);
+        return;
+      }
       ctx.commit([modChange(ctx.doc, it, node)], name.toLowerCase());
     });
+    return true;
+  }
+  var CARRIED_PROPERTY_KINDS = /* @__PURE__ */ new Set(["symbol", "label", "global_label", "hierarchical_label", "netclass_flag", "directive_label", "text"]);
+  function carriedProperties(ctx) {
+    const cr = carried(ctx);
+    if (!cr) return false;
+    if (!CARRIED_PROPERTY_KINDS.has(cr.item.kind)) return false;
+    const dlg = root.KDialogs && root.KDialogs.schItemDialog;
+    const id = cr.item.id;
+    if (dlg) dlg(ctx, cr.item, { carried: (n) => {
+      if (S.carry && uuidOf(S.carry.node) === id) {
+        if (!uuidOf(n)) n.push(["uuid", id]);
+        cr.write(n);
+      }
+    } });
+    return true;
+  }
+  function libBodyStyles(lib) {
+    if (!lib) return { demorgan: false, count: 1, names: [] };
+    const bs = kid(lib, "body_styles");
+    if (bs) {
+      const words = bs.slice(1).filter((v) => !Array.isArray(v)).map((v) => str(v));
+      if (words.includes("demorgan")) return { demorgan: true, count: 2, names: [] };
+      return { demorgan: false, count: Math.max(1, words.length), names: words };
+    }
+    let n = 1;
+    for (const s of kids(lib, "symbol")) {
+      const m = /_(\d+)_(\d+)$/.exec(str(s[1]));
+      if (m) n = Math.max(n, +m[2]);
+    }
+    return n > 1 ? { demorgan: true, count: 2, names: [] } : { demorgan: false, count: 1, names: [] };
+  }
+  function bodyStyleLabel(lib, style) {
+    const b = libBodyStyles(lib);
+    if (b.demorgan) return style === 2 ? "Alternate" : style === 1 ? "Standard" : "?";
+    return b.count > 1 && style >= 1 && style <= b.names.length ? b.names[style - 1] : "?";
+  }
+  function unitLabel(lib, unit) {
+    const name = K.unitDisplayNames(lib).get(unit);
+    return name !== void 0 ? name : K.letterSubReference(unit, 65);
+  }
+  function menuSymbol(ctx) {
+    const cr = carried(ctx);
+    if (cr) return cr.item.kind === "symbol" ? { item: cr.item, write: (n) => cr.write(n) } : null;
+    const sel = selectedItems(ctx);
+    return sel.length === 1 && sel[0].kind === "symbol" ? { item: sel[0], write: null } : null;
+  }
+  var libOfSymbol = (doc, node) => K.resolveLib(doc, symbolLibId(node)) || null;
+  function symbolMenuConditions(ctx) {
+    const s = menuSymbol(ctx);
+    if (!s) return { multiUnit: false, multiBodyStyle: false };
+    const lib = libOfSymbol(ctx.doc, s.item.node);
+    if (!lib) return { multiUnit: false, multiBodyStyle: false };
+    return { multiUnit: libUnits(ctx.doc, s.item.node).units >= 2, multiBodyStyle: libBodyStyles(lib).count > 1 };
+  }
+  function symbolUnitMenu(ctx) {
+    const s = menuSymbol(ctx);
+    if (!s) return [];
+    const lib = libOfSymbol(ctx.doc, s.item.node), n = libUnits(ctx.doc, s.item.node).units;
+    const unit = unitOn(s.item.node, sheetOf(ctx.doc).path), missing = new Set(unplacedUnits(ctx.doc, s.item));
+    const out = [];
+    for (let ii = 0; ii < n && ii <= 676; ii++) out.push({ label: unitLabel(lib, ii + 1) + (missing.has(ii + 1) ? "" : " (already placed)"), checked: unit === ii + 1, unit: ii + 1 });
+    if (missing.size) {
+      out.push({ sep: true });
+      for (const u of [...missing].sort((a, b) => a - b)) out.push({ label: `Place unit ${unitLabel(lib, u)}`, place: u });
+    }
+    return out;
+  }
+  function bodyStyleMenu(ctx) {
+    const s = menuSymbol(ctx);
+    if (!s) return [];
+    const lib = libOfSymbol(ctx.doc, s.item.node), b = libBodyStyles(lib), bsN = kid(s.item.node, "body_style") || kid(s.item.node, "convert"), cur = bsN ? num(bsN[1], 1) : 1;
+    if (b.demorgan) return [{ label: "Standard", checked: cur === 1, bodyStyle: 1 }, { label: "Alternate", checked: cur !== 1, bodyStyle: 2 }];
+    if (b.count > 1) {
+      const out = [];
+      for (let i = 0; i < b.count; i++) out.push({ label: bodyStyleLabel(lib, i + 1), checked: cur === i + 1, bodyStyle: i + 1 });
+      return out;
+    }
+    return [];
+  }
+  function chooseSymbolUnit(ctx, unit) {
+    if (!editable(ctx)) return false;
+    const s = menuSymbol(ctx);
+    if (!s) return false;
+    const count = libUnits(ctx.doc, s.item.node).units, sheet = sheetOf(ctx.doc), cur = unitOn(s.item.node, sheet.path);
+    if (count <= 1 || cur === unit) return true;
+    const hook = root.CollabEditor && root.CollabEditor.selectUnit;
+    if (hook) return hook(ctx, s.item, unit, s.write || void 0);
+    const node = deep(s.item.node);
+    setInstanceOn(node, sheet, null, Math.min(unit, count));
+    if (s.write) {
+      s.write(node);
+      return true;
+    }
+    ctx.commit([modChange(ctx.doc, s.item, node)], "Change Unit");
+    return true;
+  }
+  function placeSymbolUnit(ctx, unit) {
+    if (carried(ctx)) return true;
+    return placeNextUnit(ctx, { unit });
+  }
+  function chooseBodyStyle(ctx, style) {
+    if (!editable(ctx)) return false;
+    const s = menuSymbol(ctx);
+    if (!s) return false;
+    const lib = libOfSymbol(ctx.doc, s.item.node);
+    if (!lib) return false;
+    const count = libBodyStyles(lib).count, bsN = kid(s.item.node, "body_style") || kid(s.item.node, "convert"), cur = bsN ? num(bsN[1], 1) : 1;
+    if (count <= 1 || cur === style) return true;
+    const node = deep(s.item.node), k = kid(node, "body_style") ? "body_style" : kid(node, "convert") ? "convert" : "body_style";
+    replaceKid(node, [k, Math.min(style, count)]);
+    if (s.write) {
+      s.write(node);
+      return true;
+    }
+    ctx.commit([modChange(ctx.doc, s.item, node)], "Change Body Style");
     return true;
   }
   function insertField(node, p) {
@@ -8028,6 +8150,97 @@ Link '${target}' to this file?`)) return null;
     return out;
   }
 
+  // web/domains/pcb/canvas/plot-params.ts
+  var FIXED = {
+    "F.Cu": 0,
+    "B.Cu": 2,
+    "F.Mask": 1,
+    "B.Mask": 3,
+    "F.SilkS": 5,
+    "B.SilkS": 7,
+    "F.Adhes": 9,
+    "B.Adhes": 11,
+    "F.Paste": 13,
+    "B.Paste": 15,
+    "Dwgs.User": 17,
+    "Cmts.User": 19,
+    "Eco1.User": 21,
+    "Eco2.User": 23,
+    "Edge.Cuts": 25,
+    "Margin": 27,
+    "B.CrtYd": 29,
+    "F.CrtYd": 31,
+    "B.Fab": 33,
+    "F.Fab": 35,
+    "Rescue": 37
+  };
+  var BY_ID = /* @__PURE__ */ new Map();
+  for (const [k, v] of Object.entries(FIXED)) BY_ID.set(v, k);
+  var LEGACY_FIXED = {
+    "F.Cu": 0,
+    "B.Cu": 31,
+    "B.Adhes": 32,
+    "F.Adhes": 33,
+    "B.Paste": 34,
+    "F.Paste": 35,
+    "B.SilkS": 36,
+    "F.SilkS": 37,
+    "B.Mask": 38,
+    "F.Mask": 39,
+    "Dwgs.User": 40,
+    "Cmts.User": 41,
+    "Eco1.User": 42,
+    "Eco2.User": 43,
+    "Edge.Cuts": 44,
+    "Margin": 45,
+    "B.CrtYd": 46,
+    "F.CrtYd": 47,
+    "B.Fab": 48,
+    "F.Fab": 49,
+    "Rescue": 59
+  };
+  var LEGACY_BY_ID = /* @__PURE__ */ new Map();
+  for (const [k, v] of Object.entries(LEGACY_FIXED)) LEGACY_BY_ID.set(v, k);
+  var CL = {
+    RED: "#840000",
+    YELLOW: "#C2C200",
+    LIGHTMAGENTA: "#C200C2",
+    LIGHTRED: "#C20000",
+    CYAN: "#008484",
+    GREEN: "#008400",
+    BLUE: "#000084",
+    DARKGRAY: "#848484",
+    MAGENTA: "#840084",
+    LIGHTGRAY: "#C2C2C2",
+    BROWN: "#848400",
+    LIGHTCYAN: "#00C2C2",
+    DARKRED: "#480000"
+  };
+  var CLASSIC_INNER = [CL.YELLOW, CL.LIGHTMAGENTA, CL.LIGHTRED, CL.CYAN, CL.GREEN, CL.BLUE, CL.DARKGRAY, CL.MAGENTA, CL.LIGHTGRAY, CL.MAGENTA, CL.RED, CL.BROWN, CL.LIGHTGRAY, CL.BLUE, CL.GREEN, CL.RED];
+  var CLASSIC_FIXED = {
+    "F.Cu": CL.RED,
+    "B.Cu": CL.GREEN,
+    "B.Adhes": CL.BLUE,
+    "F.Adhes": CL.MAGENTA,
+    "B.Paste": CL.LIGHTCYAN,
+    "F.Paste": CL.RED,
+    "B.SilkS": CL.MAGENTA,
+    "F.SilkS": CL.CYAN,
+    "B.Mask": CL.BROWN,
+    "F.Mask": CL.MAGENTA,
+    "Dwgs.User": CL.LIGHTGRAY,
+    "Cmts.User": CL.BLUE,
+    "Eco1.User": CL.GREEN,
+    "Eco2.User": CL.YELLOW,
+    "Edge.Cuts": CL.YELLOW,
+    "Margin": CL.LIGHTMAGENTA,
+    "B.CrtYd": CL.DARKGRAY,
+    "F.CrtYd": CL.LIGHTGRAY,
+    "B.Fab": CL.BLUE,
+    "F.Fab": CL.DARKGRAY
+  };
+  var CLASSIC_DRAWINGSHEET = CL.DARKRED;
+
   // web/domains/pcb/canvas/colors.ts
   var IS_MAC_PLATFORM = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
   var SCH_DEFAULT = Object.freeze({
@@ -8083,6 +8296,126 @@ Link '${target}' to this file?`)) return null;
     ercExcl: "rgba(194,194,194,0.8)"
   });
   var SCH = Object.assign({}, SCH_DEFAULT);
+  var PCB_COLORS = {
+    "F.Cu": "#C83434",
+    "B.Cu": "#4D7FC4",
+    "In1.Cu": "#7FC87F",
+    "In2.Cu": "#CE7D2C",
+    "In3.Cu": "#4FCBCB",
+    "In4.Cu": "#DB628B",
+    "In5.Cu": "#A7A5C6",
+    "In6.Cu": "#28CCD9",
+    "In7.Cu": "#E8B2A7",
+    "In8.Cu": "#F2EDA1",
+    "In9.Cu": "#8DCB81",
+    "In10.Cu": "#ED7C33",
+    "In11.Cu": "#5BC3EB",
+    "In12.Cu": "#F76F8E",
+    "In13.Cu": "#A7A5C6",
+    "In14.Cu": "#28CCD9",
+    "In15.Cu": "#E8B2A7",
+    "In16.Cu": "#F2EDA1",
+    "In17.Cu": "#ED7C33",
+    "In18.Cu": "#5BC3EB",
+    "In19.Cu": "#F76F8E",
+    "In20.Cu": "#A7A5C6",
+    "In21.Cu": "#28CCD9",
+    "In22.Cu": "#E8B2A7",
+    "In23.Cu": "#F2EDA1",
+    "In24.Cu": "#ED7C33",
+    "In25.Cu": "#5BC3EB",
+    "In26.Cu": "#F76F8E",
+    "In27.Cu": "#A7A5C6",
+    "In28.Cu": "#28CCD9",
+    "In29.Cu": "#E8B2A7",
+    "In30.Cu": "#F2EDA1",
+    "F.SilkS": "#F2EDA1",
+    "B.SilkS": "#E8B2A7",
+    "F.Mask": "rgba(216,100,255,0.4)",
+    "B.Mask": "rgba(2,255,238,0.4)",
+    "F.Paste": "rgba(180,160,154,0.9)",
+    "B.Paste": "rgba(0,194,194,0.9)",
+    "F.Adhes": "#840084",
+    "B.Adhes": "#000084",
+    "Edge.Cuts": "#D0D2CD",
+    "Margin": "#FF26E2",
+    "F.CrtYd": "#FF26E2",
+    "B.CrtYd": "#26E9FF",
+    "F.Fab": "#AFAFAF",
+    "B.Fab": "#585D84",
+    "Dwgs.User": "#C2C2C2",
+    "Cmts.User": "#5994DC",
+    "Eco1.User": "#B4DBD2",
+    "Eco2.User": "#D8C852"
+  };
+  var USER_COLORS = ["#C2C2C2", "#5994DC", "#B4DBD2", "#D8C852"];
+  function pcbColor(layer) {
+    if (PCB_COLORS[layer]) return PCB_COLORS[layer];
+    const u = /^User\.(\d+)$/.exec(layer);
+    if (u) return +u[1] === 9 ? "#E8B2A7" : USER_COLORS[(+u[1] - 1) % 4];
+    if (/\.Cu$/.test(layer)) return "#7FC87F";
+    return "#C2C2C2";
+  }
+  var BOARD_GAL_DEFAULT = Object.freeze({
+    anchor: "#FF26E2",
+    locked_shadow: "rgba(255,38,226,0.5)",
+    conflicts_shadow: "rgba(255,0,5,0.5)",
+    constraint_shadow: "rgba(80,160,240,0.5)",
+    constraint_under: "rgba(204,107,5,0.9)",
+    constraint_well: "rgba(46,184,77,0.9)",
+    constraint_over: "rgba(235,46,46,0.9)",
+    aux_items: "#FFFFFF",
+    background: "#001023",
+    cursor: "#FFFFFF",
+    drc_error: "rgba(215,91,107,0.8)",
+    drc_warning: "rgba(255,208,66,0.8)",
+    drc_exclusion: "rgba(255,255,255,0.8)",
+    drc_highlighted: "#FF00FF",
+    grid: "#848484",
+    grid_axes: "#C2C2C2",
+    pad_plated_hole: "#C2C200",
+    plated_hole: "#1AC4D2",
+    ratsnest: "rgba(0,248,255,0.35)",
+    select_overlay: "rgba(0,0,0,0)",
+    via_hole: "#E3B72E",
+    via_hole_walls: "#ECECEC",
+    worksheet: "#C872AB",
+    page_limits: "#848484",
+    outline_area: "rgba(100,100,100,0.35)",
+    track_net_names: "rgba(255,255,255,0.7)",
+    pad_net_names: "rgba(255,255,255,0.9)",
+    via_net_names: "rgba(50,50,50,0.9)",
+    points: "#FF26E2",
+    subgrids: "#C2C200",
+    via_stitching: "#4DCCB2"
+  });
+  var BOARD_THEME_LAYERS = Object.freeze([
+    "F.Cu",
+    ...Array.from({ length: 30 }, (_, i) => `In${i + 1}.Cu`),
+    "B.Cu",
+    "B.Adhes",
+    "F.Adhes",
+    "B.Paste",
+    "F.Paste",
+    "B.SilkS",
+    "F.SilkS",
+    "B.Mask",
+    "F.Mask",
+    "Dwgs.User",
+    "Cmts.User",
+    "Eco1.User",
+    "Eco2.User",
+    "Edge.Cuts",
+    "Margin",
+    "B.CrtYd",
+    "F.CrtYd",
+    "B.Fab",
+    "F.Fab",
+    ...Array.from({ length: 45 }, (_, i) => `User.${i + 1}`)
+  ]);
+  var BOARD = { ...BOARD_GAL_DEFAULT };
+  var PCB_LIVE = {};
+  for (const l of BOARD_THEME_LAYERS) PCB_LIVE[l] = pcbColor(l);
   var PCB_ORDER = ["B.Fab", "B.CrtYd", "B.Adhes", "B.Paste", "B.SilkS", "B.Mask", "B.Cu"];
   for (let i = 30; i >= 1; i--) PCB_ORDER.push("In" + i + ".Cu");
   PCB_ORDER.push("F.Fab", "F.CrtYd", "F.Adhes", "F.Paste", "F.SilkS", "F.Mask", "F.Cu", "holes");
@@ -13326,7 +13659,7 @@ was dropped because the destination already has the sheet or one of its subsheet
     if (!c) return null;
     S.carry = null;
     const doc = ctx.doc, p = anchorOf(c.kind, c.node);
-    const auto = supportsAutoRotate(c.kind) && !!S.lastAutoRotate;
+    const auto = supportsAutoRotate(c.kind) && (c.autoRotate !== void 0 ? c.autoRotate : !!S.lastAutoRotate);
     if (auto) {
       const n = autoRotateNode(doc, c.kind, c.node, uuidOf(c.node) || null, true);
       if (n) c.node = n;
@@ -16874,6 +17207,9 @@ was dropped because the destination already has the sheet or one of its subsheet
     // SCH_POINT_EDITOR's corner conditions for the context menu
     canAddCorner,
     canRemoveCorner,
+    // SCH_ACTIONS::properties on the item being placed; SYMBOL_UNIT_MENU and BODY_STYLE_MENU (sch_edit_tool.cpp)
+    carriedProperties,
+    symbolMenus: { conditions: symbolMenuConditions, units: symbolUnitMenu, bodyStyles: bodyStyleMenu, selectUnit: chooseSymbolUnit, placeUnit: placeSymbolUnit, selectBodyStyle: chooseBodyStyle },
     // for tests and the props panel
     state: S,
     select(id) {
@@ -17127,6 +17463,7 @@ was dropped because the destination already has the sheet or one of its subsheet
       cycleBodyStyle,
       placeNextUnit,
       libUnits,
+      libBodyStyles,
       showDatasheet,
       CLIP,
       clipWrite,

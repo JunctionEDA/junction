@@ -18,6 +18,7 @@ import { serialize } from "../canvas/export";
 import { expandStacked } from "../canvas/stacked-pins";
 import { downgradeSchNode, migrateSchNode } from "../canvas/legacy";
 import { geomBox } from "../canvas/hit";
+import { incrementString as stringIncrement } from "../canvas/sheet";
 export { expandStacked };
 
 export type Node = SNode;
@@ -1393,4 +1394,47 @@ export function pinNumberBox(geom: unknown[]): [number, number, number, number] 
     b = b ? [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])] : [q[0], q[1], q[2], q[3]];
   }
   return b;
+}
+/** PIN_LAYOUT_CACHE::GetPinNameBBox from a pin's geometry: the union of its name texts' boxes (null: no name drawn). */
+export function pinNameBox(geom: unknown[]): [number, number, number, number] | null {
+  let b: [number, number, number, number] | null = null;
+  // the alternate-function icon is drawn on the name layer too, but it has a box of its own (GetAltIconBBox)
+  for (const g of geom as { t?: string; layer?: string }[]) {
+    if (g.t !== "text" || g.layer !== "Pin names") continue;
+    const q = geomBox(g as never); if (!q) continue;
+    b = b ? [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])] : [q[0], q[1], q[2], q[3]];
+  }
+  return b;
+}
+/** SCH_TOOL_BASE::Increment's incrementable types as the Symbol Editor holds them: SCH_PIN_T and SCH_TEXT_T (labels never live in a library symbol). */
+export const INCREMENTABLE = new Set(["pin", "text"]);
+/** One item SCH_TOOL_BASE::Increment works on: its node and whether the mouse is in the pin's number / name box. */
+export interface IncrementItem { node: Node; overNumber?: boolean; overName?: boolean }
+/**
+ * SCH_TOOL_BASE::Increment in the Symbol Editor (STRING_INCREMENTER with SetSkipIOSQXZ( m_isSymbolEditor ) and its
+ * default alphabetic bound of 50): nothing unless every item is of one type; a pin steps its number when the mouse is
+ * in the number box, else its name when the mouse is in the name box; a text steps its text.  `index` is the part
+ * counted from the right (0 primary, 1 secondary).  True when anything changed.
+ */
+export function incrementItems(items: IncrementItem[], delta: number, index: number): boolean {
+  if (!items.length) return false;
+  const type = String(items[0].node[0]);
+  if (items.some((it) => String(it.node[0]) !== type)) return false;   // "Incrementing multiple types at once seems confusing"
+  const step = (t: string): string | null => stringIncrement(t, delta, index, true, 50);
+  let changed = false;
+  for (const it of items) {
+    const n = it.node;
+    if (n[0] === "pin") {
+      const key = it.overNumber ? "number" : it.overName ? "name" : null; if (!key) continue;
+      const k = kid(n, key); if (!k) continue;
+      const next = step(str(k[1])); if (next === null) continue;
+      if (next !== str(k[1])) changed = true;
+      k[1] = next;
+    } else if (n[0] === "text") {
+      const next = step(str(n[1])); if (next === null) continue;
+      if (next !== str(n[1])) changed = true;
+      n[1] = next;
+    }
+  }
+  return changed;
 }

@@ -71,10 +71,10 @@ function requestCursor(): void { if (!cursorReq) cursorReq = requestAnimationFra
 
 /**
  * The colour theme's cursor colour: LAYER_SCHEMATIC_CURSOR (KiCad Default #0F0F0F, Classic black) on the
- * schematic, LAYER_CURSOR (white) on the board (builtin_color_themes.h).
+ * schematic, LAYER_CURSOR of the board theme in use on the board (KiCad Default white).
  */
 export function cursorColor(): string {
-  if (!isSch()) return "#FFFFFF";
+  if (!isSch()) { const B = KiCadCanvas as unknown as { boardColor?: (k: string) => string }; return B.boardColor ? B.boardColor("cursor") : "#FFFFFF"; }
   const K = KiCadCanvas as unknown as { schTheme?: () => string; SCH?: Record<string, string> };
   const id = K.schTheme ? K.schTheme() : "default";
   return id === "classic" ? "#000000" : id === "dark" ? "#E8E8E8" : "#0F0F0F";

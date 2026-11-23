@@ -23,6 +23,7 @@ import { finishMoveIndividually } from "./ref-move";
 import { applySelection, expandGroups, selectionIds, topParentOf } from "./groups";
 import { beginInlineDrag, dragMove, finishDrag } from "./inline-drag";
 import { editHandleMove, editHandleUp } from "./point-editor";
+import { blockPointerMove, blockPointerUp } from "./block-drag";
 import { padCovers, padsOf } from "./route-geom";
 import { showViolations } from "./route-tool";
 import { RM_MARK } from "./router-settings";
@@ -297,6 +298,7 @@ export function startPendingDrag(ctx: PcbCtx, pd: PendingDrag) {
 export function onStagePointerMove(ev: PointerEvent) {
   const ctx = lastCtx; if (!ctx || !isBoardLikeDoc()) return;
   if (S.pedit) { ev.stopImmediatePropagation(); editHandleMove(ctx, ctx.worldMm(ev), ev); return; }
+  if (blockPointerMove(ctx, ev)) { ev.stopImmediatePropagation(); return; }   // block anchor editing: the drag, the area pick or its press
   if (S.pending) {
     const pd = S.pending;
     // the drag starts past KiCad's drag threshold in screen pixels (TOOL_DISPATCHER::IsPastDragThreshold)
@@ -315,6 +317,7 @@ export function onStagePointerUp(ev?: PointerEvent | null) {
     S.sel = new Set(pick); if (ctx.setSelection) ctx.setSelection([]); ctx.requestRender();
   }
   if (S.pedit) { if (ev) { ev.stopImmediatePropagation(); editHandleMove(ctx, ctx.worldMm(ev), ev); } editHandleUp(ctx, !!ev && ev.type === "pointerup"); return; }
+  if (blockPointerUp(ctx, ev || null)) { if (ev) ev.stopImmediatePropagation(); return; }
   if (S.stickyUp) { S.stickyUp = false; if (ev) { ev.stopImmediatePropagation(); ev.preventDefault(); } return; }   // the release of the click that dropped a Move
   if (S.drag && S.drag.bySelect) { if (ev) dragMove(ctx, ctx.worldMm(ev)); finishDrag(ctx, true, !!(ev && (ev.ctrlKey || ev.metaKey))); }   // Ctrl on release commits a drag in violation
   else if (S.move && !S.move.sticky) finishSelectMove(ctx, true);

@@ -1,5 +1,5 @@
 // kicad-canvas — GENERATED SOURCE MODULE (split from the former static/kicad-canvas.js; static/kicad-canvas.js is now the esbuild output of web/domains/pcb/canvas/index.ts — edit these modules, not the bundle).
-import { PCB_BG, PCB_PAGE_LIMITS, PCB_SHEET, SCH, schTheme } from "./colors";
+import { PCB_BG, PCB_PAGE_LIMITS, PCB_SHEET, SCH, schTheme, withBoardColors } from "./colors";
 import { SEXPR_BOARD_FILE_VERSION } from "./format-version";
 import { buildGeom, inSchTheme } from "./geom";
 import { padLabelShown } from "./geom-pcb";
@@ -262,7 +262,8 @@ export function renderPng(doc: Doc, opts?: ExportOpts | null): Promise<Blob> {
   const view = { ppm, zoom: 1, panX: 0, panY: 0, x0, y0, dpr: 1 };
   const isPcb = doc.type === "pcb";
   const ropts = Object.assign({}, opts, { grid: 0, selected: null, highlight: null, frame: opts.frame !== undefined ? opts.frame : (!isPcb && !opts.ids && !opts.bbox) });
-  render(doc, ctx, view, ropts);
+  // a board exports in KiCad Default unless the caller gives a theme's board colours (opts.boardColors), whatever the screen shows
+  if (isPcb) withBoardColors(opts.boardColors || null, () => render(doc, ctx, view, ropts)); else render(doc, ctx, view, ropts);
   const type = opts.type || "image/png";
   if (typeof canvas.convertToBlob === "function") return canvas.convertToBlob({ type, quality: opts.quality });
   if (typeof canvas.toBlob === "function") return new Promise((res, rej) => canvas.toBlob!((b) => b ? res(b) : rej(new Error("renderPng: toBlob failed")), type, opts.quality));
@@ -324,6 +325,7 @@ const PCB_STRING_SLOTS: Record<string, readonly number[] | 0> = {
   property: [1, 2], group: [1], gr_text: [1], gr_text_box: [1], fp_text_box: [1], fp_text: [2], footprint: [1], pad: [1],
   label: [1], global_label: [1], hierarchical_label: [1], text: [1], text_box: [1], component_class: 0, class: 0,
   custom_property: [1, 2],   // KICAD_FORMAT::FormatCustomProperties: Quotew( key ), Quotew( value )
+  link: [1], anchor: 0,      // a rule area's layout link: (placement … (link "set" … (anchor "uuid")))
 };
 /** Boards older than the quoted-names format (KiCad 5) keep bare layer names: see serializeItem. */
 let legacyBare = false;
@@ -332,6 +334,7 @@ function isStringSlot(node: SNode, j: number): boolean {
   const slots = PCB_STRING_SLOTS[node[0]];
   if (slots === undefined) return false;
   if (node[0] === "property" && (node[1] === "private" || typeof node[2] !== "string" || j > 2)) return false;   // not a pad's (property pad_prop_bga)
+  if (node[0] === "anchor" && (node[1] === "rect" || node[1] === "circle")) return false;   // a custom pad's (options … (anchor rect)): a bare keyword
   return slots === 0 || slots.indexOf(j) >= 0;
 }
 

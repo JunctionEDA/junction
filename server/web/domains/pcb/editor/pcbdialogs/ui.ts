@@ -38,6 +38,7 @@ const CSS = `
 .pd-tree { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); overflow: auto; padding: 4px 0; user-select: none; }
 .pd-tree .grp { padding: 4px 8px; font-weight: 600; cursor: default; }
 .pd-tree .leaf { padding: 3px 8px 3px 24px; cursor: pointer; white-space: nowrap; }
+.pd-tree .leaf.sub { padding-left: 40px; }
 .pd-tree .leaf:hover { background: var(--sel-soft); }
 .pd-tree .leaf.on, .pd-tree .leaf.on:hover { background: var(--sel); color: var(--ink); }
 .pd-page { overflow: auto; min-height: 0; padding-right: 4px; }
@@ -486,18 +487,20 @@ export function notebook(pages: Page[], opts?: { start?: number; onShow?(i: numb
   return { el, show, setLabel(i, label) { if (tabs[i]) tabs[i].textContent = label; }, current: () => cur };
 }
 
-export interface TreeGroup { label: string; pages: Page[] }
+/** A tree page; one with `sub` is a family node (a third level), which shows its first child when it is chosen */
+export interface TreePage extends Page { sub?: Page[] }
+export interface TreeGroup { label: string; pages: TreePage[] }
 /**
  * PAGED_DIALOG: groups with sub-pages down the left, the chosen page on the right.  `canLeave` is
  * onPageChanging's Validate + TransferDataFromWindow of the page being left: false keeps it shown.
  */
-export function treeBook(groups: TreeGroup[], start?: string, opts?: { canLeave?(label: string): boolean; onShow?(label: string, from: string): void }): { el: HTMLElement; show(label: string, force?: boolean): void; current(): string; built(label: string): boolean; rebuild(label: string): void } {
+export function treeBook(groups: TreeGroup[], start?: string, opts?: { canLeave?(label: string, to: string): boolean; onShow?(label: string, from: string): void }): { el: HTMLElement; show(label: string, force?: boolean): void; current(): string; built(label: string): boolean; rebuild(label: string): void } {
   const tree = h("div", { class: "pd-tree" }), page = h("div", { class: "pd-page" }), el = h("div", { class: "pd-book" }, tree, page);
   const built = new Map<string, HTMLElement>(), leaves = new Map<string, HTMLElement>(), specs = new Map<string, Page>();
   let cur = "";
   const show = (label: string, force?: boolean): void => {
     const pg = specs.get(label); if (!pg || label === cur) return;
-    if (cur && !force && opts && opts.canLeave && !opts.canLeave(cur)) return;
+    if (cur && !force && opts && opts.canLeave && !opts.canLeave(cur, label)) return;
     const from = cur; cur = label;
     for (const [l, leaf] of leaves) leaf.classList.toggle("on", l === label);
     let p = built.get(label);
@@ -507,7 +510,15 @@ export function treeBook(groups: TreeGroup[], start?: string, opts?: { canLeave?
   };
   for (const g of groups) {
     tree.append(h("div", { class: "grp" }, g.label));
-    for (const pg of g.pages) { const leaf = h("div", { class: "leaf" }, pg.label); leaf.addEventListener("click", () => show(pg.label)); leaves.set(pg.label, leaf); specs.set(pg.label, pg); tree.append(leaf); }
+    for (const pg of g.pages) {
+      if (pg.sub && pg.sub.length) {
+        const first = pg.sub[0].label, fam = h("div", { class: "leaf fam", "data-family": pg.label }, pg.label);
+        fam.addEventListener("click", () => show(first)); tree.append(fam);
+        for (const sp of pg.sub) { const leaf = h("div", { class: "leaf sub" }, sp.label); leaf.addEventListener("click", () => show(sp.label)); leaves.set(sp.label, leaf); specs.set(sp.label, sp); tree.append(leaf); }
+        continue;
+      }
+      const leaf = h("div", { class: "leaf" }, pg.label); leaf.addEventListener("click", () => show(pg.label)); leaves.set(pg.label, leaf); specs.set(pg.label, pg); tree.append(leaf);
+    }
   }
   show(start && specs.has(start) ? start : groups[0].pages[0].label);
   // a built page is dropped and, when it is the one showing, built again from its sources

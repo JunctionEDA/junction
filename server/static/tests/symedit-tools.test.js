@@ -266,6 +266,32 @@ await test("library tree menu: symbol_editor_control.cpp order and conditions, p
   assert.deepStrictEqual(sym.slice(3), ["newSymbol", "deriveFromExistingSymbol", "-", "save", "saveSymbolAs", "saveSymbolCopyAs", "revert", "-", "importSymbol", "exportSymbol", "-",
     "cutSymbol", "copySymbol", "pasteSymbol", "duplicateSymbol", "deleteSymbol", "-", "renameSymbol", "symbolProperties", "flattenSymbol", "-", "hideLibraryTree"]);
 });
+await test("Increment in the Symbol Editor (SCH_TOOL_BASE::Increment): pin number / name by the box under the mouse, texts, one type, IOSQXZ skipped", () => {
+  const L = load("canvas/libsym.ts");
+  const s = M.node(SYM);
+  const d = L.parseLibSymbol(s, {}); const pinIt = [...d.items.values()].find((it) => it.geom.some((g) => g.layer === "Pin numbers") && JSON.stringify(it.geom).includes('"A"'));
+  const nb = M.pinNumberBox(pinIt.geom), mb = M.pinNameBox(pinIt.geom);
+  assert.ok(nb && mb, "both boxes from the drawn texts"); assert.ok(mb[0] > nb[2] - 1e-9 || mb[1] > nb[3] - 1e-9 || nb[0] > mb[2] - 1e-9 || nb[1] > mb[3] - 1e-9, "apart: the name inside the body, the number over the pin");
+  const sub = s.find((c) => Array.isArray(c) && c[0] === "symbol" && c[1] === "X_1_1"); const [p1, p2] = sub.filter((c) => Array.isArray(c) && c[0] === "pin");
+  const numOf = (p) => p.find((c) => Array.isArray(c) && c[0] === "number")[1], nameOf = (p) => p.find((c) => Array.isArray(c) && c[0] === "name")[1];
+  assert.ok(M.incrementItems([{ node: p1, overNumber: true }], 1, 0)); assert.deepStrictEqual([numOf(p1), nameOf(p1)], ["2", "A"]);
+  assert.ok(M.incrementItems([{ node: p1, overName: true }], 1, 0)); assert.deepStrictEqual([numOf(p1), nameOf(p1)], ["2", "B"]);
+  assert.strictEqual(M.incrementItems([{ node: p1 }], 1, 0), false, "neither box under the mouse: nothing");
+  // SetSkipIOSQXZ( true ): H -> J; secondary part of "A1" -> "B1"; decrement below zero refused
+  nameOf(p2); p2.find((c) => Array.isArray(c) && c[0] === "name")[1] = "H";
+  assert.ok(M.incrementItems([{ node: p2, overName: true }], 1, 0)); assert.strictEqual(nameOf(p2), "J");
+  p2.find((c) => Array.isArray(c) && c[0] === "number")[1] = "A1";
+  assert.ok(M.incrementItems([{ node: p2, overNumber: true }], 1, 1)); assert.strictEqual(numOf(p2), "B1");
+  assert.ok(M.incrementItems([{ node: p2, overNumber: true }], -1, 0)); assert.strictEqual(numOf(p2), "B0");
+  assert.strictEqual(M.incrementItems([{ node: p2, overNumber: true }], -1, 0), false); assert.strictEqual(numOf(p2), "B0");
+  assert.ok(M.text(s).includes('(number "B0"'), "still a quoted string");
+  const tx = M.node('(text "IN7" (at 0 0 0) (effects (font (size 1.27 1.27))))');
+  assert.strictEqual(M.incrementItems([{ node: tx }, { node: p1, overNumber: true }], 1, 0), false, "items of two types: nothing");
+  assert.strictEqual(numOf(p1), "2");
+  assert.ok(M.incrementItems([{ node: tx }], -1, 0)); assert.strictEqual(tx[1], "IN6");
+  assert.deepStrictEqual([...M.INCREMENTABLE].sort(), ["pin", "text"]);
+});
+
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
 })();

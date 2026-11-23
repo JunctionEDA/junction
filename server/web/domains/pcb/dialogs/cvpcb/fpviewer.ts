@@ -10,7 +10,6 @@ import { hotkeyKey, keyName, shiftedPunctCombo } from "../../../../shared/keys";
 import { gridChoiceText, loadUnits, messageText, saveUnits, unitsMsg, type UnitsSettings } from "../../../../shared/units";
 import { PCB_DEFAULT_GRIDS } from "../logic";
 import { ZOOM_LIST } from "../../tables";
-import { PCB_CURSOR, PCB_GRID_AXES } from "../../canvas/colors";
 import { emptyPreviewDoc, footprintPreviewDoc } from "../../library/preview";
 import { show3DViewerOn } from "../../editor/viewer3d-loader";
 import * as L from "./logic";
@@ -94,16 +93,16 @@ export function openFpViewer(host: FpViewerHost): FpViewer {
     const sx = (x: number) => (x - v.x0) * ppm * dpr, sy = (y: number) => (y - v.y0) * ppm * dpr;
     g.save(); g.lineWidth = dpr;
     if (measure) {
-      g.strokeStyle = PCB_GRID_AXES; g.fillStyle = PCB_GRID_AXES; g.beginPath(); g.moveTo(sx(measure.a[0]), sy(measure.a[1])); g.lineTo(sx(measure.b[0]), sy(measure.b[1])); g.stroke();
+      g.strokeStyle = KiCadCanvas.boardColor("grid_axes"); g.fillStyle = KiCadCanvas.boardColor("grid_axes"); g.beginPath(); g.moveTo(sx(measure.a[0]), sy(measure.a[1])); g.lineTo(sx(measure.b[0]), sy(measure.b[1])); g.stroke();
       const dist = Math.hypot(measure.b[0] - measure.a[0], measure.b[1] - measure.a[1]);
       // a canvas font cannot name a CSS variable: the theme's monospace family, resolved
       const mono = getComputedStyle(document.documentElement).getPropertyValue("--mono").trim() || "monospace";
       g.font = `${12 * dpr}px ${mono}`; g.fillText(messageText(dist, units.units, "pcb"), sx(measure.b[0]) + 6 * dpr, sy(measure.b[1]) - 6 * dpr);
     }
-    if (zoomRect) { g.strokeStyle = PCB_GRID_AXES; g.setLineDash([4 * dpr, 4 * dpr]); const x = sx(Math.min(zoomRect.a[0], zoomRect.b[0])), y = sy(Math.min(zoomRect.a[1], zoomRect.b[1])); g.strokeRect(x, y, Math.abs(zoomRect.b[0] - zoomRect.a[0]) * ppm * dpr, Math.abs(zoomRect.b[1] - zoomRect.a[1]) * ppm * dpr); g.setLineDash([]); }
+    if (zoomRect) { g.strokeStyle = KiCadCanvas.boardColor("grid_axes"); g.setLineDash([4 * dpr, 4 * dpr]); const x = sx(Math.min(zoomRect.a[0], zoomRect.b[0])), y = sy(Math.min(zoomRect.a[1], zoomRect.b[1])); g.strokeRect(x, y, Math.abs(zoomRect.b[0] - zoomRect.a[0]) * ppm * dpr, Math.abs(zoomRect.b[1] - zoomRect.a[1]) * ppm * dpr); g.setLineDash([]); }
     if (cursor) {
       // KICURSOR crosshair: small (a short cross), full (window-wide), 45° (diagonals)
-      g.strokeStyle = PCB_CURSOR; const x = sx(cursor[0]), y = sy(cursor[1]); g.beginPath();
+      g.strokeStyle = KiCadCanvas.boardColor("cursor"); const x = sx(cursor[0]), y = sy(cursor[1]); g.beginPath();
       if (vs.crosshair === "full") { g.moveTo(0, y); g.lineTo(w, y); g.moveTo(x, 0); g.lineTo(x, hh); }
       else if (vs.crosshair === "45") { const L2 = Math.max(w, hh); g.moveTo(x - L2, y - L2); g.lineTo(x + L2, y + L2); g.moveTo(x - L2, y + L2); g.lineTo(x + L2, y - L2); }
       else { const a = 8 * dpr; g.moveTo(x - a, y); g.lineTo(x + a, y); g.moveTo(x, y - a); g.lineTo(x, y + a); }

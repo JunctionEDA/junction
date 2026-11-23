@@ -58,6 +58,7 @@ type SchDrag = { moved?: boolean; last: number[]; kind?: string };
 import { installLibrary } from "./library";
 import { importFootprintFiles, installFpEditHandlers } from "./fpedit";
 import { installDesignBlocks } from "./design-blocks";
+import { installImageOutlines } from "./image-outlines";
 import { importSymbolLibraries } from "../symedit/dialogs";
 import { comboOf, keyHooks, kicadActionAvailable, primesOnHotkey, runKicadAction, runSpecHotkey, shiftComboBound, typingTarget } from "./hotkeys";
 import { deleteSelectedField } from "./fieldops";
@@ -430,9 +431,18 @@ let boardPress: { mm: [number, number]; client: [number, number]; t?: number; po
 /** The board editor's select tool takes its presses through boardPress (the Footprint Editor keeps its own picking). */
 function boardArms(): boolean { return !isSch() && E.tool === "select" && !!E.kdoc && E.DOC_TYPE !== "footprint"; }
 E.hooks.cancelPress = (): void => { boardPress = null; };
+/** PCB_POINT_EDITOR's block anchor editing sees the selection tool's drag or click first (pcb-tools/block-drag.ts):
+ * true when it became a handle area pick, or picked a handle / dropped the picks. */
+function blockGesture(kind: "drag" | "click", at: number[], ev: { clientX: number; clientY: number; shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean }): boolean {
+  if (isSch()) return false;
+  const pm = CollabTools.pcb as unknown as { blockGesture?: (k: string, c: unknown, at: number[], cur: number[], mods: { shift: boolean; ctrl: boolean; alt: boolean }) => boolean } | undefined;
+  if (!pm || !pm.blockGesture) return false;
+  try { return !!pm.blockGesture(kind, toolCtx(), at, worldMm(ev as PointerEvent), { shift: !!ev.shiftKey, ctrl: !!(ev.ctrlKey || ev.metaKey), alt: !!ev.altKey }); } catch (e) { console.warn(e); return false; }
+}
 window.addEventListener("pointermove", (ev) => {
   const bp = boardPress; if (!bp || bp.menu || ev.pointerId !== bp.pointerId || !isPastDragThreshold(ev.clientX - bp.client[0], ev.clientY - bp.client[1], bp.t === undefined ? undefined : ev.timeStamp - bp.t)) return;
   boardPress = null;   // IsDrag
+  if (blockGesture("drag", bp.mm, ev)) return;   // BLOCK_DRAG_SESSION::AreaPickStarts: the drag picks handles instead
   if (bp.legacy) {   // the module moves everything selected from the press point; this move event reaches it next
     const pm = CollabTools.pcb as unknown as { beginMove?: (c: unknown, at: number[], sticky: boolean) => boolean } | undefined;
     if (pm && pm.beginMove) { try { pm.beginMove(toolCtx(), bp.mm, false); } catch (e) { console.warn(e); } }
@@ -443,6 +453,7 @@ window.addEventListener("pointermove", (ev) => {
 window.addEventListener("pointerup", (ev) => {
   const bp = boardPress; if (!bp || ev.pointerId !== bp.pointerId) return;
   boardPress = null;
+  if (blockGesture("click", bp.mm, ev)) return;   // the click picked a handle or dropped the picks (pickHandleAt)
   if (bp.legacy) { clickSelectAt(bp.mm); return; }   // IsClick: selectPoint( ..., false, false, false ) -> ClearSelection, then the pick
   cancelLongPress();
   boardSelectPoint(bp.mm, { clientX: ev.clientX, clientY: ev.clientY });   // IsClick, or the menu a drag from an ambiguous point waited for
@@ -928,6 +939,11 @@ function stagePointerMove(ev: PointerEvent, mm: [number, number]): void {
   if (E.zoomRect) { drawZoomRect(ev); return; }
   // a lasso appends a point on IsDrag and on a click; with the button up the cursor only stretches the closing edge
   // (the schematic's selectLasso once it is live, the board's SelectPolyArea always)
+  // a drag on empty canvas picks handles by area when block anchor editing says so (AreaPickStarts)
+  if (E.boxSel && !E.boxSel.blockAsked && !E.boxSel.open && !E.boxSel.live && !E.boxSel.clickHighlight && !isSch() && E.boxSel.startClient && isPastDragThreshold(ev.clientX - E.boxSel.startClient[0], ev.clientY - E.boxSel.startClient[1])) {
+    E.boxSel.blockAsked = true;
+    if (blockGesture("drag", E.boxSel.start, ev)) { E.boxSel = null; requestRepaint(); return; }
+  }
   if (E.boxSel) { E.boxSel.cur = mm; if (E.boxSel.lasso && (isSch() ? (!E.boxSel.live || !!(ev.buttons & 1)) : !!(ev.buttons & 1))) E.boxSel.pts.push(mm); boxSelModifiers(ev); drawBoxSel(); return; }
   if (E.tool === "measure") { const at = measurePoint(mm, ev); if (E.measure && E.measure.set) measureMove(at, ev.shiftKey); }
   if (E.pan && E.pan.zoom) {   // MOUSE_DRAG_ACTION::ZOOM: scale = exp( dy × zoom_speed × 0.001 ), up zooms in
@@ -1003,6 +1019,7 @@ const onPointerUp = (ev: PointerEvent) => {
   if (E.boxSel && E.boxSel.modClick && !isPastDragThreshold(ev.clientX - E.boxSel.startClient[0], ev.clientY - E.boxSel.startClient[1])) {
     const b = E.boxSel; E.boxSel = null; requestRepaint(); const mc = b.modClick as ModClick;
     if (mc.ev.altKey && !IS_WINDOWS && openClarifyMenu(mc.ev, mc.mode)) return;   // Alt (m_skip_heuristics): every candidate in Clarify Selection
+    if (blockGesture("click", b.start, mc.ev)) return;   // a Shift click toggles the pick of the handle under it
     modifierClick(b.start as [number, number], mc); return;   // IsClick: selectPoint with the modifiers
   }
   // SCH_SELECTION_TOOL::selectLasso: the lasso outlives the button: clicks add points, a double click (or End) selects,
@@ -1229,6 +1246,7 @@ installNetChains(HANDLERS as unknown as Record<string, (a?: unknown) => void>); 
 installSymbolEditor(HANDLERS as unknown as Record<string, (a?: unknown) => void>);   // the Symbol Editor (web/domains/pcb/symedit): showSymbolEditor, editWithLibEdit, editLibSymbolWithLibEdit
 installDialogs(HANDLERS);   // Page Settings, Find and Replace, Symbol Fields Table / BOM, Assign Footprints, Schematic Setup, Preferences, groups
 installDesignBlocks(HANDLERS);   // the Design Blocks pane and the design block actions (editor/design-blocks.ts)
+installImageOutlines(HANDLERS);   // Convert to Outlines on a reference image, both editors (editor/image-outlines.ts)
 installFpEditHandlers(HANDLERS);   // the Footprint Editor's File / Edit / Place / Tools actions and Ctrl+E on the board (editor/fpedit.ts)
 store.slice("tool", { handled: Object.keys(HANDLERS) });
 installPcbRouting();

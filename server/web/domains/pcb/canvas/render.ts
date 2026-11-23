@@ -1,6 +1,7 @@
 // kicad-canvas — GENERATED SOURCE MODULE (split from the former static/kicad-canvas.js; static/kicad-canvas.js is now the esbuild output of web/domains/pcb/canvas/index.ts — edit these modules, not the bundle).
 import { root } from "./env";
-import { PCB_BG, PCB_GRID, PCB_GRID_AXES, PCB_PAGE_LIMITS, PCB_SHEET, SCH, SCH_DEFAULT, SCH_Z, VIA_HOLE, DARK_CACHE, darkened, parseColor, pcbColor, pcbZ, rgba } from "./colors";
+import { HOLE_WALL, NPTH, PAD_TEXT, PAD_TEXT_DARK, PCB_BG, SCH, SCH_DEFAULT, SCH_Z, VIA_HOLE, DARK_CACHE, boardColor, boardLayerOverrides, boardThemeStamp, colorBrightness, darkened, invertedColor, liveNetnameColor, livePcbColor, parseColor, pcbColor, pcbZ, rgba } from "./colors";
+import { POINT_COLOR } from "./geom-pcb";
 import { atOf, colorOf, effectsOf, flipH, kid, kids, num, pointInPoly, ptsOf, splitLines, str, strokeOf, yesNo } from "./sexpr";
 import { isBusLabel } from "./busname";
 import { ensureFontGeom, ensureSchTheme } from "./geom";
@@ -245,8 +246,9 @@ export function highlightFill(g: Geom): string { return g.z !== undefined && g.z
 
 /** Track net-name colour for a copper colour: NETNAMES_LAYER_ID_START, inverted when the copper's brightness is above 0.5 (PCB_RENDER_SETTINGS::LoadColors). */
 export function trackNameColor(copper: string): string {
-  let v = NETNAME_COLOR_CACHE.get(copper);
-  if (!v) { const [r, g, b] = parseColor(copper); v = (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5 ? TRACK_NETNAME_DARK : TRACK_NETNAME_LIGHT; NETNAME_COLOR_CACHE.set(copper, v); }
+  const light = boardColor("track_net_names"), key = light + "|" + copper;   // the live theme's NETNAMES_LAYER_ID_START
+  let v = NETNAME_COLOR_CACHE.get(key);
+  if (!v) { v = colorBrightness(copper) > 0.5 ? invertedColor(light) : light; if (NETNAME_COLOR_CACHE.size < 4096) NETNAME_COLOR_CACHE.set(key, v); }
   return v;
 }
 
@@ -387,12 +389,22 @@ export const ZS: number[] = [];
 export function bucket(map: Map<number, Geom[]>, z: number): Geom[] { let arr = map.get(z); if (!arr) { arr = []; map.set(z, arr); } return arr; }
 
 /**
- * The board's object colours from the user's colour theme (Appearance > Objects swatches): ratsnest, drcWarnings,
- * drcErrors, drcExclusions, anchors, boardArea, drawingSheet, grid.  Set for each render; missing keys keep the defaults.
+ * The board's object colours from the live colour theme (Appearance > Objects swatches): ratsnest, drcWarnings,
+ * drcErrors, drcExclusions, anchors, boardArea, drawingSheet, grid; opts.objectColors wins.  Set for each render.
  */
 let OC: Record<string, string | undefined> = {};
+let ocStamp = -1, ocTheme: Record<string, string> = {};
+/** The Objects rows' colours of the live board theme (PCB_RENDER_SETTINGS::m_layerColors of their GAL layers). */
+function themeObjectColors(): Record<string, string> {
+  if (ocStamp !== boardThemeStamp()) {
+    ocStamp = boardThemeStamp();
+    ocTheme = { ratsnest: boardColor("ratsnest"), drcWarnings: boardColor("drc_warning"), drcErrors: boardColor("drc_error"), drcExclusions: boardColor("drc_exclusion"),
+      anchors: boardColor("anchor"), boardArea: boardColor("outline_area"), drawingSheet: boardColor("worksheet"), grid: boardColor("grid") };
+  }
+  return ocTheme;
+}
 export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | null): void {
-  OC = (opts && opts.objectColors) || {};
+  OC = doc && doc.type === "pcb" ? Object.assign({}, themeObjectColors(), (opts && opts.objectColors) || {}) : (opts && opts.objectColors) || {};
   ensureSchTheme(doc);   // geometry built under another schematic colour theme is rebuilt first
   ensureFontGeom(doc);   // and text set in a face that has arrived since is laid out with its metrics
   ensureHatchKnockouts(doc);   // PCB_SHAPE::UpdateHatching on every draw: the knockouts of what else is on the layer
@@ -416,6 +428,8 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   const ncHl = netStyle && opts.netclassHighlight ? opts.netclassHighlight : null;
   const chainHl = !isPcb && opts.schNetChain ? opts.schNetChain : null;
   let chainTint: Map<Geom, string> | null = null;   // SCH_PAINTER::draw( SCH_LINE ): a wire of the highlighted chain in the chain's colour
+  // PCB_PAINTER::draw( PCB_TRACK / PCB_ARC / PCB_VIA ): the copper (and a via's hole) of the highlighted chain in the chain's colour
+  const pcbChain = isPcb && opts.pcbNetChain && opts.pcbNetChain.color && opts.pcbNetChain.nets.size ? opts.pcbNetChain : null;
   const ncPass: Geom[] | null = ncHl ? [] : null;
   const sketchPads = isPcb && !!opts.outlinePads, sketchTracks = isPcb && !!opts.outlineTracks, sketchVias = isPcb && !!opts.outlineVias;
   // PCB_PAINTER with m_sketchGraphics / m_sketchText: board and footprint graphic shapes, and texts, drawn as outlines
@@ -478,7 +492,9 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   const trackA = objAlpha && typeof objAlpha.tracks === "number" ? Math.max(0, Math.min(1, objAlpha.tracks)) : 1;
   // PCB_RENDER_SETTINGS::LoadColors: a board layer colour is drawn with an alpha of 0.2 at least ("if the alpha
   // channel is too small, the layer is not visible"); the stored colour keeps what the user set
-  const layerDraw = layerColors ? new Map<string, string>() : null;
+  // the live theme's board layer colours (PCB_RENDER_SETTINGS::LoadColors, already clamped), then the caller's
+  const themeLayers = isPcb ? boardLayerOverrides() : null;
+  const layerDraw = layerColors || themeLayers ? new Map<string, string>(themeLayers || []) : null;
   if (layerColors) for (const [k, c] of layerColors) layerDraw!.set(k, minLayerAlpha(c));
   const itemColors = isPcb && opts.itemColors && opts.itemColors.size ? opts.itemColors : null, tint = itemColors ? new Map<Geom, string>() : null;
   const W = ctx.canvas.width, H = ctx.canvas.height, dpr = view.dpr || 1;
@@ -489,7 +505,11 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   // pixels drawn there are the full render's, the rest of the canvas is left alone
   const region = opts.region || null;
   if (region) { ctx.save(); ctx.beginPath(); ctx.rect(region[0], region[1], region[2] - region[0], region[3] - region[1]); ctx.clip(); }
-  const bg = opts.background === undefined ? (doc.type === "sch" ? SCH.bg : PCB_BG) : opts.background;
+  const bg = opts.background === undefined ? (doc.type === "sch" ? SCH.bg : boardColor("background")) : opts.background;
+  const pcbBg = boardColor("background");   // LAYER_PCB_BACKGROUND of the live theme
+  // LAYER_VIA_HOLES, LAYER_NON_PLATEDHOLES and the plated holes' background (LAYER_PAD_PLATEDHOLES = LAYER_PCB_BACKGROUND;
+  // a pad's plating ring is painted in the via hole colour) of the live theme, by the KiCad Default colour they are built in
+  const holeMap = isPcb ? new Map<string, string>([[VIA_HOLE, boardColor("via_hole")], [NPTH, boardColor("plated_hole")], [PCB_BG, pcbBg]]) : null;
   if (bg) { ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H); } else if (!opts.overlay && typeof ctx.clearRect === "function") ctx.clearRect(0, 0, W, H);
   const tx = view.panX * dpr - view.x0 * s, ty = view.panY * dpr - view.y0 * s;
   // base transform (document mm → device px); the flipped view mirrors X about the board centre
@@ -523,7 +543,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
     const i0 = Math.floor((vx0 - gx) / pitch), i1 = Math.ceil((vx1 - gx) / pitch), j0 = Math.floor((vy0 - gy) / pitchY), j1 = Math.ceil((vy1 - gy) / pitchY);
     const px1 = gridMinorPx(opts, dpr) / s;   // GAL::gridMinorLineWidth
     const isMajor = (n: number): boolean => tick > 0 && n % tick === 0;
-    const gridColor = opts.gridColor || (isPcb ? OC.grid || PCB_GRID : SCH.grid);
+    const gridColor = opts.gridColor || (isPcb ? OC.grid || boardColor("grid") : SCH.grid);
     if ((Math.ceil((fx1 - gx) / pitch) - Math.floor((fx0 - gx) / pitch)) * (Math.ceil((fy1 - gy) / pitchY) - Math.floor((fy0 - gy) / pitchY)) < 400000) {   // the whole view's count, region or not
       if (style === "dots") {
         ctx.fillStyle = gridColor; ctx.beginPath();
@@ -558,13 +578,13 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   // so Grid thickness widens them too), through 0,0
   if (opts.gridAxes) {
     const px1 = gridMinorPx(opts, dpr) / s;
-    ctx.strokeStyle = opts.gridAxesColor || (isPcb ? PCB_GRID_AXES : SCH.gridAxes); ctx.lineWidth = px1; ctx.lineCap = "butt"; ctx.beginPath();
+    ctx.strokeStyle = opts.gridAxesColor || (isPcb ? boardColor("grid_axes") : SCH.gridAxes); ctx.lineWidth = px1; ctx.lineCap = "butt"; ctx.beginPath();
     if (vy0 <= 0 && vy1 >= 0) { ctx.moveTo(vx0, 0); ctx.lineTo(vx1, 0); }
     if (vx0 <= 0 && vx1 >= 0) { ctx.moveTo(0, vy0); ctx.lineTo(0, vy1); }
     ctx.stroke();
   }
   // PCB_GRID_ITEMs (LAYER_SUBGRIDS): the custom routing / placement grids, over the background grid and its axes
-  if (isPcb && opts.subgrids !== false) drawGridItems(ctx, doc, opts, s, dpr, sCss, [vx0, vy0, vx1, vy1], bg || PCB_BG);
+  if (isPcb && opts.subgrids !== false) drawGridItems(ctx, doc, opts, s, dpr, sCss, [vx0, vy0, vx1, vy1], bg || pcbBg);
   // the drawing sheet (frame, tick band, title block) and, above it, the page outline.  Under the
   // flipped board view KiCad mirrors the sheet back about the page — "Draw the title block normally
   // even if the view is flipped" (ds_proxy_view_item.cpp:114-128) — so it is drawn unflipped here.
@@ -819,7 +839,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   const previewXf = (pg: Geom): ((c: string) => string) | null => {
     const dark = !!hl && !hlGeoms!.has(pg), lit = !!hl && hlGeoms!.has(pg), dim = !!hcLayer && pg.layer !== hcLayer && !lit && !(selGeoms && selGeoms.has(pg));
     if (!dark && !lit && !dim) return null;
-    return (c: string) => { let v = lit ? hlColor(c) : dark ? darkened(c, 1 - HL_FACTOR) : c; if (dim) v = mixColor(v, bg || PCB_BG, hcF); return v; };
+    return (c: string) => { let v = lit ? hlColor(c) : dark ? darkened(c, 1 - HL_FACTOR) : c; if (dim) v = mixColor(v, bg || pcbBg, hcF); return v; };
   };
   // selection: eeschema draws a selected item's shadow (LAYER_SELECTION_SHADOWS) under it, so the strokes stay on
   // top and only a glow shows around them; pcbnew repaints the item in its selected colour instead (drawOne)
@@ -837,12 +857,24 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
     if (g.hiddenText && isPcb) alpha *= HIDDEN_TEXT_ALPHA;
     if (outsideGeoms && outsideGeoms.has(g) && !gSel) alpha *= outsideOp;
     let color = g.color, fill = g.fill, wallColor: string | null = null;
+    // the live theme over the KiCad Default colours the geometry is built in (PCB_RENDER_SETTINGS::LoadColors): the hole
+    // layers, a knockout's background ink, LAYER_POINTS and the pad labels' netname layers
+    let wall0 = g.wallColor;
+    if (holeMap) {
+      if (g.hole) {
+        if (g.pie && g.holeLayer) { const lc = layerDraw && layerDraw.get(g.holeLayer); if (lc) { color = lc; fill = lc; } }
+        else { const m = holeMap.get(color!); if (m) color = m; if (fill) fill = holeMap.get(fill) || fill; }
+        if (wall0 === HOLE_WALL) wall0 = boardColor("via_hole_walls");
+      } else if (g.padText && (color === PAD_TEXT || color === PAD_TEXT_DARK)) color = liveNetnameColor(g.padPth ? null : g.layer);
+      else if (g.point && color === POINT_COLOR) color = boardColor("points");
+      else if (color === PCB_BG) { color = pcbBg; if (fill === PCB_BG) fill = pcbBg; }
+    }
     // the zone opacity is for the fills alone (an outline, its hatch and a rule area stay opaque); a copper graphic
     // takes the track opacity when it is not filled (PCB_RENDER_SETTINGS::GetColor)
     if (objAlpha && !g.zoneFill && !g.zoneOutline && !g.zoneHatch && !g.ruleArea) { const oc = g.teardrop ? "tracks" : objectClass(g) || (fill && g.t !== "text" && !g.hole ? "filledShapes" : g.gfxShape && /\.Cu$/.test(g.layer) ? "tracks" : null); const oa = oc ? objAlpha[oc] : undefined; if (oa !== undefined && oa < 1) alpha *= oa; }
     if (layerDraw && !g.hole) { const lc = layerDraw.get(g.layer); if (lc) { const def = pcbColor(g.layer); if (color === def) color = lc; if (fill === def) fill = lc; } }
     // m_UseViaColorForNormalTHPadstacks: a plated through-hole pad's copper in the via-hole colour
-    if (viaTH && g.pad && g.padType === "thru_hole" && !g.hole && !g.indicator && g.t !== "text" && copperZ!.indexOf(g.layer) >= 0) { color = VIA_HOLE; if (fill) fill = VIA_HOLE; }
+    if (viaTH && g.pad && g.padType === "thru_hole" && !g.hole && !g.indicator && g.t !== "text" && copperZ!.indexOf(g.layer) >= 0) { const vh = boardColor("via_hole"); color = vh; if (fill) fill = vh; }
     let netCol = false;   // the colour is a net colour (PCB_PAINTER's net-colour branch brightens it when selected)
     if (netColors && g.net! > 0 && (g.track || g.via || g.pad || g.zoneFill) && !g.hole && copperZ!.indexOf(g.layer) >= 0) { const nc = netColors.get(g.net!); if (nc) { color = nc; if (fill) fill = nc; netCol = true; } }
     if (tint) { const tc = tint.get(g); if (tc && copperZ!.indexOf(g.layer) >= 0) { color = tc; if (fill) fill = tc; netCol = true; } }
@@ -854,10 +886,10 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
       // board selection: the item repainted in its layer's selected colour (PCB_PAINTER::getColor), holes untouched
       // (m_layerColorsSel keeps the netname layers; the hole layers do take it, but not a plated hole's background);
       // a net colour is Brightened( m_selectFactor ) instead
-      if (gSel && !g.padText && !(g.hole && color === PCB_BG)) {
+      if (gSel && !g.padText && !(g.hole && color === pcbBg)) {
         const sc = (c: string) => netCol ? brightened(c, SELECT_FACTOR) : selectedColor(c);
         color = sc(color!); if (fill) fill = sc(fill);
-        if (g.wallColor) wallColor = selectedColor(g.wallColor);
+        if (wall0) wallColor = selectedColor(wall0);
       }
       if (hl) {
         // a selected item is never highlight-brightened (PCB_RENDER_SETTINGS::GetColor)
@@ -867,18 +899,22 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
         // dims nothing)
         else if (isPcb) { if (g.t === "image") alpha *= HL_FACTOR; else if (!gSel) { color = darkened(color!, 1 - HL_FACTOR); if (fill) fill = darkened(fill, 1 - HL_FACTOR); } }
       }
-      if (hcDim && g.t !== "image") { const f = g.layer === "Edge.Cuts" ? hcEdgeF : hcF, bgc = bg || PCB_BG; color = mixColor(color!, bgc, f); if (fill) fill = mixColor(fill, bgc, f); }
+      if (hcDim && g.t !== "image") { const f = g.layer === "Edge.Cuts" ? hcEdgeF : hcF, bgc = bg || pcbBg; color = mixColor(color!, bgc, f); if (fill) fill = mixColor(fill, bgc, f); }
     }
     if (chainTint && color) { const cc = chainTint.get(g); if (cc) { const [r, gg, b] = parseColor(cc), a = parseColor(color)[3]; color = rgba(r, gg, b, a); } }   // GetColor().WithAlpha( color.a )
+    // chainColor.WithAlpha( color.a ) on a copper layer of a track or arc, and on a via's copper and LAYER_VIA_HOLES
+    else if (pcbChain && color && g.net! > 0 && pcbChain.nets.has(g.net!) && !g.viaMask && ((g.track && !g.hole) || g.via) && (g.via && g.hole ? true : copperZ!.indexOf(g.layer) >= 0)) {
+      const [r, gg, b] = parseColor(pcbChain.color!); color = rgba(r, gg, b, parseColor(color)[3]); if (fill) fill = rgba(r, gg, b, parseColor(fill)[3]);
+    }
     setAlpha(alpha);
     const t = g.t;
     if (t === "text") {
       // SCH_PAINTER: a rolled-over text with a link definition is drawn whole in LAYER_HOVERED, underlined
       const roll = rollGeoms !== null && rollGeoms.has(g), run = roll && opts.rolloverRun ? opts.rolloverRun : null;
       if (roll && !run) color = SCH.hovered;
-      drawText(ctx, sketched && sketched.has(g) ? Object.assign({}, g, { w: minW }) : g, s, doc.type, minW, color, base, flip, bg || PCB_BG);   // sketch text: the strokes as hairlines
+      drawText(ctx, sketched && sketched.has(g) ? Object.assign({}, g, { w: minW }) : g, s, doc.type, minW, color, base, flip, bg || pcbBg);   // sketch text: the strokes as hairlines
       if (roll && !run) drawUnderline(ctx, g, color!, minW, base);
-      else if (run && base) drawRunHover(ctx, g, run, s, doc.type, minW, base, bg || PCB_BG);
+      else if (run && base) drawRunHover(ctx, g, run, s, doc.type, minW, base, bg || pcbBg);
       curStroke = curFill = null; curWidth = -1; curCap = "round"; return;
     }
     if (t === "image") {
@@ -909,7 +945,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
     }
     // LAYER_VIA_HOLEWALLS under the hole; PCB_PAINTER underpaints it filled in the outline mode too
     // (only via holes, which are circles, carry wallR)
-    if (g.wallR && ((g.wallR - (g as CircleGeom).r) * s > 0.35)) { setFill(wallColor || g.wallColor!); ctx.beginPath(); ctx.arc((g as CircleGeom).x, (g as CircleGeom).y, g.wallR, 0, Math.PI * 2); ctx.fill(); }
+    if (g.wallR && ((g.wallR - (g as CircleGeom).r) * s > 0.35)) { setFill(wallColor || wall0!); ctx.beginPath(); ctx.arc((g as CircleGeom).x, (g as CircleGeom).y, g.wallR, 0, Math.PI * 2); ctx.fill(); }
     // sketch mode: the shape's outline in a hairline, nothing filled — a via hole stays filled, an NPTH hole is outlined
     // with the pads (PCB_PAINTER: LAYER_VIA_HOLES always fills; pads outline all but LAYER_PAD_PLATEDHOLES); a selected
     // pad that does not flash on the layer is drawn as its outline
@@ -1021,6 +1057,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
     }
     ctx.restore();
   }
+  if (isPcb && hl && opts.pcbNetChain && opts.pcbNetChain.terminals.size) drawTerminalPads(ctx, doc, opts.pcbNetChain, hidden, layerDraw, hlColor, Math.max(1, dpr) / s, A, E, s, ty);
   if (schSel) {
     // the selection VIEW_GROUP, over everything else, its layers in SCH_LAYER_ORDER: the backgrounds (bitmaps,
     // shape / symbol / sheet / note fills), then LAYER_SELECTION_SHADOWS, then the items' strokes, then their anchors
@@ -1040,7 +1077,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   }
   if (!isPcb) drawSchGroupBoxes(ctx, doc, selWhole, opts.schEnteredGroup || null, s, dpr, base as unknown as Mat);
   // DRC / ERC markers: above everything but the selection (GAL_LAYER_ORDER: LAYER_SELECT_OVERLAY, then LAYER_DRC_*)
-  if (markers) drawMarkers(ctx, markers, doc.type, markerScale(doc.type, view), bg || (isPcb ? PCB_BG : SCH.bg), isPcb ? 0 : SEL_STYLE.thickness * Math.max(1, dpr) / s + SEL_STYLE.thickness * MIL);
+  if (markers) drawMarkers(ctx, markers, doc.type, markerScale(doc.type, view), bg || (isPcb ? pcbBg : SCH.bg), isPcb ? 0 : SEL_STYLE.thickness * Math.max(1, dpr) / s + SEL_STYLE.thickness * MIL);
   if (region) ctx.restore();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
@@ -1332,7 +1369,7 @@ function drawGridItems(ctx: Ctx2D, doc: Doc, opts: RenderOpts, s: number, dpr: n
   const order = [...list.filter((g) => !isSel(g)), ...list.filter(isSel)];   // precedence order: the first drawn wins, selected ones last
   const style = opts.gridStyle === "lines" || opts.gridStyle === "crosses" ? opts.gridStyle : "dots";
   const threshold = (opts.gridMinSpacing! > 0 ? opts.gridMinSpacing! : GRID_MIN_SPACING) * (style === "crosses" ? 2 : 1) / sCss;
-  const px1 = gridMinorPx(opts, dpr) / s, base = opts.gridItemColor || SUBGRID_COLOR;
+  const px1 = gridMinorPx(opts, dpr) / s, base = opts.gridItemColor || boardColor("subgrids");
   ctx.save(); ctx.setLineDash([]); ctx.lineCap = "butt";
   for (const g of order) {
     const hi = isSel(g), color = hi ? brightened(base, GRID_SELECTED_BRIGHTEN) : base;
@@ -1447,7 +1484,7 @@ function drawViaStitching(ctx: Ctx2D, doc: Doc, opts: RenderOpts, s: number, dpr
     const pts = viaStitchOutline(it.node); if (!pts) continue;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const p of pts) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }
     if (x1 < vr[0] || x0 > vr[2] || y1 < vr[1] || y0 > vr[3]) continue;
-    const color = sel && sel.has(it.id) ? selectedColor(VIA_STITCHING_COLOR) : VIA_STITCHING_COLOR;
+    const vsc = boardColor("via_stitching"), color = sel && sel.has(it.id) ? selectedColor(vsc) : vsc;   // LAYER_VIA_STITCHING of the live theme
     ctx.save(); ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.strokeStyle = color; ctx.lineCap = "round"; ctx.lineJoin = "round";
     ctx.lineWidth = Math.max(0.1, Math.max(1, dpr) / s); ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); ctx.closePath(); ctx.stroke();
     ctx.lineWidth = Math.max(1, dpr) / s; ctx.beginPath(); for (const [a, b] of viaStitchTicks(pts)) { ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); } ctx.stroke();
@@ -1488,8 +1525,10 @@ export function drawLockedShadow(ctx: Ctx2D, doc: Doc, ids: Set<string>, opts: R
   const t: Ctx2D = octx || ctx;
   t.save();
   if (octx) { octx.setTransform(1, 0, 0, 1, 0, 0); octx.clearRect(0, 0, W, H); octx.setTransform(base![0], base![1], base![2], base![3], base![4], base![5]); octx.globalAlpha = 1; }
-  else t.globalAlpha = LOCKED_SHADOW_ALPHA;
-  const color = "#FF26E2";
+  // LAYER_LOCKED_ITEM_SHADOW of the live theme: its colour opaque, its alpha over the whole shadow
+  const [lr, lg, lb, la] = parseColor(boardColor("locked_shadow")), shadowA = Math.max(0, Math.min(1, la));
+  if (!octx) t.globalAlpha = shadowA;
+  const color = rgba(lr, lg, lb).toUpperCase();   // the theme colour opaque, "#RRGGBB" as the canvas constants write it
   t.fillStyle = color; t.strokeStyle = color; t.lineJoin = "round"; t.lineCap = "round"; t.setLineDash([]);
   const fpHide = opts.objects && opts.objects.hide;
   for (const id of ids) {
@@ -1515,7 +1554,7 @@ export function drawLockedShadow(ctx: Ctx2D, doc: Doc, ids: Set<string>, opts: R
     }
   }
   t.restore();
-  if (octx) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = LOCKED_SHADOW_ALPHA; ctx.drawImage(off as CanvasImageSource, 0, 0); ctx.restore(); }
+  if (octx) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = shadowA; ctx.drawImage(off as CanvasImageSource, 0, 0); ctx.restore(); }
 }
 
 /** One geometry's locked shadow, painted in the context's current colour. */
@@ -1575,7 +1614,7 @@ export function drawMarkers(ctx: Ctx2D, markers: (Marker | null)[], docType: str
     else if (m.selected && selShadowW > 0) { ctx.strokeStyle = SCH.selection; ctx.lineWidth = selShadowW; ctx.stroke(); }
     // a selected or brightened board marker takes LAYER_DRC_HIGHLIGHTED (PCB_RENDER_SETTINGS::GetColor)
     // (a brightened schematic marker takes LAYER_BRIGHTENED: SCH_PAINTER::getRenderColor)
-    ctx.fillStyle = docType !== "sch" && (m.selected || m.brightened) ? DRC_HIGHLIGHTED : docType === "sch" && m.brightened ? SCH.brightened : colors[m.severity as string] || colors.error; ctx.fill();
+    ctx.fillStyle = docType !== "sch" && (m.selected || m.brightened) ? boardColor("drc_highlighted") : docType === "sch" && m.brightened ? SCH.brightened : colors[m.severity as string] || colors.error; ctx.fill();
     if (docType !== "sch" && m.selected && Array.isArray(m.path)) drawErrorLegend(ctx, m.path as [number, number][], scale, br, bgc, bb);
   }
   ctx.restore();
@@ -1635,7 +1674,7 @@ export function drawLabel(ctx: Ctx2D, x: number, y: number, text: string, size: 
 export function drawTrackName(ctx: Ctx2D, g: Geom, doc: Doc, s: number, sCss: number, vr: number[], base: Mat, flip: boolean, dark?: boolean): void {
   const name = displayNetName(doc.nets.get(g.net!)); if (!name) return;
   const width = g.w || 0; if (width * sCss < TRACK_NETNAME_MM * PX_PER_MM_ZOOM1) return;   // ViewGetLOD: 4 mm at zoom 1
-  const chars = name.length; const size = width * 0.55, pen = width / 12; let color = trackNameColor(g.color!); if (dark) color = darkened(color, 1 - HL_FACTOR);
+  const chars = name.length; const size = width * 0.55, pen = width / 12; let color = trackNameColor(livePcbColor(g.layer)); if (dark) color = darkened(color, 1 - HL_FACTOR);
   const vw = vr[2] - vr[0], vh = vr[3] - vr[1];
   if (g.t === "line") {
     const dx = g.x2 - g.x1, dy = g.y2 - g.y1; const len = Math.hypot(dx, dy); if (len < width * chars || len < 1e-9) return;
@@ -1660,7 +1699,7 @@ export function drawTrackName(ctx: Ctx2D, g: Geom, doc: Doc, s: number, sCss: nu
 
 /** PCB_PAINTER::draw(PCB_VIA) netname layer: the net name (and the layer pair of blind / micro vias) centred on the via. */
 export function drawViaName(ctx: Ctx2D, g: ViaRingGeom, doc: Doc, s: number, sCss: number, base: Mat, flip: boolean, dark?: boolean, showNets?: boolean): void {
-  const vc = dark ? darkened(VIA_NETNAME_COLOR, 1 - HL_FACTOR) : VIA_NETNAME_COLOR;
+  const vn = boardColor("via_net_names"), vc = dark ? darkened(vn, 1 - HL_FACTOR) : vn;   // LAYER_VIA_NETNAMES of the live theme
   const name = showNets === false ? "" : displayNetName(doc.nets.get(g.net!)); const showLayers = g.viaType && g.viaType !== "through";
   if (!name && !showLayers) return;
   if (g.viaSize * sCss < VIA_NETNAME_MM * PX_PER_MM_ZOOM1) return;   // ViewGetLOD: 10 mm at zoom 1
@@ -2167,7 +2206,7 @@ export const OUTLINE_OVERBAR = 1.23;
  */
 export function drawDrawingSheet(ctx: Ctx2D, doc: Doc, s: number, minW: number, pageLimits = true): void {
   const isPcb = doc.type === "pcb";
-  const ink = isPcb ? OC.drawingSheet || PCB_SHEET : SCH.frame;
+  const ink = isPcb ? OC.drawingSheet || boardColor("worksheet") : SCH.frame;
   const items = documentDrawingSheet(doc);
   ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineCap = "butt"; ctx.lineJoin = "miter";
   // DS_DRAW_ITEM_LIST::Print: the bitmaps first, then everything else in the description's order
@@ -2203,13 +2242,52 @@ export function drawDrawingSheet(ctx: Ctx2D, doc: Doc, s: number, minW: number, 
   }
   // DS_PAINTER::DrawBorder (ds_painter.cpp:383-396): the paper outline, last, in the page-limits colour (not plotted)
   if ((ctx as unknown as { __plot?: boolean }).__plot || !pageLimits) return;   // DS_PROXY_VIEW_ITEM::ViewDraw: settings->GetShowPageLimits()
-  ctx.strokeStyle = isPcb ? PCB_PAGE_LIMITS : SCH.pageLimits;
+  ctx.strokeStyle = isPcb ? boardColor("page_limits") : SCH.pageLimits;
   ctx.lineWidth = minW;
   ctx.strokeRect(0, 0, doc.page[0], doc.page[1]);
 }
 
 
 /** Put the canvas into document space (mm) for a given view — for tool overlays; pass the document as `flipDoc` to match the flipped board view. */
+/** A footprint's pad uuids by pad index (the (pad …) children in file order). */
+const PAD_UUIDS = new WeakMap<object, string[]>();
+function padUuids(node: unknown[]): string[] {
+  let v = PAD_UUIDS.get(node); if (v) return v;
+  v = kids(node as never, "pad").map((p) => { const u = kid(p, "uuid") || kid(p, "tstamp"); return u ? str(u[1]) : ""; });
+  PAD_UUIDS.set(node, v); return v;
+}
+/**
+ * The end of PCB_PAINTER::draw( PAD ): a terminal pad (NETINFO_ITEM::GetTerminalPad) of a highlighted net is framed at
+ * its bounding box in its colour Brightened( 0.2 ) at 2 x m_outlineWidth; on the highlighted chain in the chain's colour
+ * (Brightened( 0.25 ) more without one) at 3 x, with a second frame inset by twice that width at m_outlineWidth (1 IU:
+ * every width is the thinnest line).  The pad's colour is that of its top copper layer on show, highlighted.
+ */
+function drawTerminalPads(ctx: Ctx2D, doc: Doc, chain: NonNullable<RenderOpts["pcbNetChain"]>, hidden: Set<string>, layerDraw: Map<string, string> | null, hlColor: (c: string) => string, hair: number, A: number, E: number, s: number, ty: number): void {
+  const IU = 1e-6;
+  ctx.save(); ctx.setTransform(A, 0, 0, s, E, ty); ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineWidth = hair;
+  for (const it of doc.items.values()) {
+    if (it.kind !== "footprint" || !it.geom) continue;
+    const uuids = padUuids(it.node as unknown as unknown[]);
+    uuids.forEach((u, i) => {
+      const onChain = u ? chain.terminals.get(u) : undefined; if (onChain === undefined) return;
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, top: Geom | null = null;
+      for (const g of it.geom) {
+        if (!g.pad || g.padIndex !== i || g.hole || g.padText || !/\.Cu$/.test(g.layer)) continue;
+        const b = geomBox(g); if (!b) continue;
+        x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]); x1 = Math.max(x1, b[2]); y1 = Math.max(y1, b[3]);
+        if (!hidden.has(g.layer) && (!top || (g.z || 0) > (top.z || 0))) top = g;
+      }
+      if (!top || !(x1 >= x0)) return;
+      const base = hlColor((layerDraw && layerDraw.get(top.layer)) || livePcbColor(top.layer));
+      let term = brightened(base, 0.2), baseWidth = 2 * IU;
+      if (onChain) { term = chain.color || brightened(term, 0.25); baseWidth = 3 * IU; }
+      ctx.strokeStyle = term; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+      const inset = baseWidth * 2;
+      if (onChain && x1 - x0 - 2 * inset > 0 && y1 - y0 - 2 * inset > 0) ctx.strokeRect(x0 + inset, y0 + inset, x1 - x0 - 2 * inset, y1 - y0 - 2 * inset);
+    });
+  }
+  ctx.restore();
+}
 export function setViewTransform(ctx: Ctx2D, view: View, flipDoc?: { bbox?: Box | null } | null): number {
   const dpr = view.dpr || 1, s = view.ppm * view.zoom * dpr;
   const tx = view.panX * dpr - view.x0 * s, ty = view.panY * dpr - view.y0 * s;

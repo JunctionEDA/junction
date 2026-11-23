@@ -16,7 +16,9 @@ export const TOOL_MAP: Record<Editor, Record<string, string>> = {
     drawAlignedDimension: "dimaligned", drawOrthogonalDimension: "dimortho", drawCenterDimension: "dimcenter", drawRadialDimension: "dimradial", drawLeader: "leader",
     deleteTool: "delete", measureTool: "measure", zoomTool: "zoomtool", gridSetOrigin: "gridorigin", drillOrigin: "drillorigin",
     // the footprint editor's PAD_TOOL and anchor (pcb-tools/pad-tool.ts); FPEDIT_ONLY keeps them out of the board editor
-    placePad: "pad", placeThtPad: "padtht", placeSmdPad: "padsmd", placeNpthPad: "padnpth", placePasteAperturePad: "padpaste", setAnchor: "anchor" },
+    placePad: "pad", placeThtPad: "padtht", placeSmdPad: "padsmd", placeNpthPad: "padnpth", placePasteAperturePad: "padpaste", setAnchor: "anchor",
+    // MICROWAVE_TOOL (pcb-tools/microwave.ts); FPEDIT_BLOCKED keeps them out of the footprint editor
+    microwaveCreateGap: "mwgap", microwaveCreateStub: "mwstub", microwaveCreateStubArc: "mwstubarc", microwaveCreateFunctionShape: "mwshape", microwaveCreateLine: "mwline" },
 };
 /** The collab tools app.js keeps at the foot of the draw toolbar. */
 export const EXTRA_TOOLS: { id: string; tool: string; name: string; key: string; glyph: string }[] = [
@@ -154,7 +156,8 @@ export const FPEDIT_ONLY = new Set(["newLibrary", "addLibrary", "newFootprint", 
 /** Board-only actions the Footprint Editor does not have (its tools and menus leave them out; their hotkeys do nothing there). */
 export const FPEDIT_BLOCKED = new Set(["getAndPlace", "routeSingleTrack", "routeDiffPair", "tuneSingleTrack", "tuneDiffPair", "tuneSkew", "drawVia", "placeViaStack", "makeViaStack", "routerSpreadTracks", "drawZone", "drawCopperThievingZone", "drawViaStitchArea", "drillOrigin", "placeFootprint",
   "runDRC", "zoneFillAll", "zoneUnfillAll", "zoneFill", "zoneUnfill", "showRatsnest", "editFpInFpEditor", "editLibFpInFpEditor_board", "updateFootprint", "changeFootprint", "boardSetup", "selectLayerPair",
-  "trackWidthInc", "trackWidthDec", "viaSizeInc", "viaSizeDec", "updatePcbFromSchematic", "showEeschema", "highlightNet", "clearHighlight", "toggleNetHighlight", "toggleLastNetHighlight"]);
+  "trackWidthInc", "trackWidthDec", "viaSizeInc", "viaSizeDec", "updatePcbFromSchematic", "showEeschema", "highlightNet", "clearHighlight", "toggleNetHighlight", "toggleLastNetHighlight",
+  "microwaveCreateGap", "microwaveCreateStub", "microwaveCreateStubArc", "microwaveCreateFunctionShape", "microwaveCreateLine"]);
 
 /** The icon KiCad gives a sub-menu (ACTION_MENU::SetIcon in the menubars and the tools' context menus), by its title. */
 export const SUBMENU_ICONS: Record<string, string> = { Import: "import", Export: "export_file", "Fabrication Outputs": "fabrication", "Set Language": "language", "Drawing Mode": "add_zone", "Contrast Mode": "contrast_mode",

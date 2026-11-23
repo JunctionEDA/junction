@@ -21,6 +21,7 @@ import { activeAfterHide, appearanceNets, objectVisibilityChange, presetActiveLa
 import { editProject, type Plain, type ProjectEdit } from "../../canvas/project-file";
 import { adoptProjectFile, canWriteProject, saveProjectFile } from "../projectfile";
 import { messageBox } from "../../dialogs/cvpcb/widgets";
+import { activeBoardColors, boardThemeId, isReadOnlyTheme, migrateBoardColors, prefs, saveUserBoardColors, setSessionBoardColor } from "../../dialogs/prefs";
 
 // ---------------------------------------------------------------- layers
 // APPEARANCE_CONTROLS::rebuildLayers: copper front → back, then this technical / user sequence.
@@ -111,8 +112,46 @@ export const OBJECT_COLORS: Record<string, string> = {
   anchors: "#ff26e2", points: "#ff26e2", subgrids: "#c2c200", viaStitching: "#4dccb2", lockedShadow: "rgba(255,38,226,0.5)",
   conflicts: "rgba(255,0,5,0.5)", constraintShadow: "rgba(80,160,240,0.5)", boardArea: "rgba(100,100,100,0.35)", drawingSheet: "#c872ab", grid: "#848484",
 };
-/** The user's colour for an Objects row (kept with the layer colours, keyed "obj:<id>"), else the theme default. */
-export function objectColor(id: string): string | undefined { return user.colors["obj:" + id] || OBJECT_COLORS[id]; }
+/** The colour theme key ("board.<key>") of each Objects row with a swatch. */
+export const OBJECT_THEME_KEYS: Record<string, string> = {
+  ratsnest: "ratsnest", drcWarnings: "drc_warning", drcErrors: "drc_error", drcExclusions: "drc_exclusion", anchors: "anchor", points: "points", subgrids: "subgrids",
+  viaStitching: "via_stitching", lockedShadow: "locked_shadow", conflicts: "conflicts_shadow", constraintShadow: "constraint_shadow", boardArea: "outline_area",
+  drawingSheet: "worksheet", grid: "grid",
+};
+/** theme->GetColor( layer ) of the frame's colour theme (EDA_DRAW_FRAME::GetColorSettings): a board layer or an Objects row's GAL layer. */
+function themeColor(key: string): string | undefined { const c = activeBoardColors(); return c[key]; }
+/** The colour of an Objects row in the frame's colour theme. */
+export function objectColor(id: string): string | undefined { return (OBJECT_THEME_KEYS[id] && themeColor(OBJECT_THEME_KEYS[id])) || OBJECT_COLORS[id]; }
+/** The frame's colour theme is a built-in one (COLOR_SETTINGS::IsReadOnly): its swatches are read-only. */
+function themeReadOnly(): boolean { const p = prefs(); return isReadOnlyTheme(p, boardThemeId(p, fpEditor())); }
+/**
+ * APPEARANCE_CONTROLS::onReadOnlySwatch: a click on a swatch of a read-only theme says so in the infobar, with a link to
+ * the Preferences (ShowPreferences( wxEmptyString, wxEmptyString )).
+ */
+export function readOnlySwatchNotice(): void {
+  toast("The current color theme is read-only.  Create a new theme in Preferences to enable color editing.", 10000,
+    { text: "Open Preferences", run: () => { void import("../../dialogs/preferences").then((m) => m.openPreferences()); } });
+}
+/**
+ * APPEARANCE_CONTROLS::OnColorSwatchChanged: cs->SetColor( layer, color ) and SaveColorSettings( cs, "board" ): the frame's
+ * user theme takes the colour at once; a read-only theme cannot (its swatches only show onReadOnlySwatch).
+ */
+function setThemeColor(key: string, color: string): void {
+  const p = prefs(), id = boardThemeId(p, fpEditor());
+  if (isReadOnlyTheme(p, id)) { readOnlySwatchNotice(); return; }
+  saveUserBoardColors(id, { [key]: color });
+}
+/**
+ * SETTINGS_MANAGER::GetMigratedColorSettings: colours this panel kept per user before the board had colour themes move
+ * into the "User" theme once (layer colours by name, the Objects rows' by their theme key).
+ */
+function migrateLegacyColors(): void {
+  const keys = Object.keys(user.colors); if (!keys.length) return;
+  const board: Record<string, string> = {};
+  for (const k of keys) { const c = user.colors[k]; if (!c) continue; if (k.startsWith("obj:")) { const g = OBJECT_THEME_KEYS[k.slice(4)]; if (g) board[g] = c; } else board[k] = c; }
+  user.colors = {}; saveUser();
+  if (Object.keys(board).length) migrateBoardColors(board);
+}
 /** An Objects row's opacity: the user's, else KiCad's default (PROJECT_LOCAL_SETTINGS: zones and images 0.6, the rest 1). */
 function objOpacity(o: ObjectDef): number { const v = user.objOpacity[o.id]; return typeof v === "number" && v >= 0 && v <= 1 ? v : o.defaultOpacity === undefined ? 1 : o.defaultOpacity; }
 const SEVERITY: Record<string, string> = { drcWarnings: "warning", drcErrors: "error", drcExclusions: "exclusion" };
@@ -281,13 +320,14 @@ function objectVisible(id: string): boolean {
 }
 
 function layerRows(doc: KDoc): LayerInfo[] {
-  const pcbColor = KC().pcbColor;
-  const hidden = E.hiddenLayers as Set<string>;
+  const K = KC() as unknown as { boardDefaultColor?(k: string): string; defaultPcbColor?(l: string): string; pcbColor(l: string): string };
+  const hidden = E.hiddenLayers as Set<string>, theme = activeBoardColors();
   return boardLayerKeys(doc).map((key) => {
-    const def = pcbColor(key);
+    // the swatch's default (COLOR_SETTINGS::GetDefaultColor) is KiCad Default's; its colour the frame theme's
+    const def = K.boardDefaultColor ? K.boardDefaultColor(key) : K.defaultPcbColor ? K.defaultPcbColor(key) : K.pcbColor(key);
     // APPEARANCE_CONTROLS::rebuildLayers: the Footprint Editor names layers from its own settings' user layer names,
     // else GetStandardLayerName — never the holder board's names
-    return { key, name: fpEditor() ? layerDisplayName(null, key) : layerDisplayName(doc, key), color: user.colors[key] || def, defaultColor: def, visible: !hidden.has(key), copper: isCu(key), tip: layerTip(key) };
+    return { key, name: fpEditor() ? layerDisplayName(null, key) : layerDisplayName(doc, key), color: theme[key] || def, defaultColor: def, visible: !hidden.has(key), copper: isCu(key), tip: layerTip(key) };
   });
 }
 /** std::map order (m_layerPresets, m_viewports): wxString's ordinal comparison. */
@@ -355,6 +395,7 @@ export function publishAppearance(): void {
   const objects: ObjectRow[] = OBJECTS.filter((o) => !fp || FP_EDITOR_OBJECTS.includes(o.id)).map((o) => o.spacer ? { id: o.id, label: "", tip: "", spacer: true }
     : { id: o.id, label: o.label, tip: o.tip, canHide: o.canHide !== false, visible: o.canHide === false ? undefined : objectVisible(o.id), opacity: o.opacity ? objOpacity(o) : undefined,
       color: OBJECT_COLORS[o.id] ? objectColor(o.id) : undefined, defaultColor: OBJECT_COLORS[o.id] });
+  const readOnly = themeReadOnly();
   const n = nets(); const s = pcbState();
   const hiddenNets = s ? s.hiddenNets : new Set(proj.hiddenNets);
   // NET_GRID_TABLE::Rebuild: nets with a code above 0, no "unconnected-(" nets, sorted by name
@@ -370,7 +411,7 @@ export function publishAppearance(): void {
     fpEditor: fp, layers, active: E.activeLayer || "", objects, nets: netRows, netClasses: classRows,
     inactive: inactiveMode(), flip: !!E.renderOpts.flip, netColorMode: user.netColorMode, ratsnestMode: ratsnestRadio(objectVisible("ratsnest"), user.ratsnestMode),
     presets: allPresets(names).map((p) => p.name), builtinPresets: builtinPresets(names).sort(byName).map((p) => p.name), preset: currentPreset(layers),
-    viewports: vps.map((v) => v.name), viewport: proj.viewport,
+    viewports: vps.map((v) => v.name), viewport: proj.viewport, readOnlyColors: readOnly,
   };
   panelStore.set({ appearance: ap });
 }
@@ -380,8 +421,9 @@ export function applyAppearance(): void {
   const doc = kdoc(); if (!doc || isSchDoc()) return;
   loadProj();
   const ro = E.renderOpts as Record<string, unknown>;
-  const colors = new Map(Object.entries(user.colors));
-  ro.layerColors = colors.size ? colors : undefined;
+  // the layer and object colours are the frame's colour theme, which the canvas paints itself (KiCadCanvas.setBoardColors)
+  migrateLegacyColors();
+  ro.layerColors = undefined;
   const hide = new Set(user.objHidden.filter((id) => !["grid", "ratsnest", "anchors", "lockedShadow", "drawingSheet", "drcWarnings", "drcErrors", "drcExclusions", "conflicts", "boardArea", "subgrids", "viaStitching", "constraintShadow"].includes(id)));
   const show = new Set<string>(); for (const id of ["anchors", "lockedShadow", "boardArea", "viaStitching"]) if (!user.objHidden.includes(id)) show.add(id);
   // every opacity row goes to the renderer: zones and images default to 0.6, which is not the renderer's own default
@@ -391,9 +433,7 @@ export function applyAppearance(): void {
   if (show.has("lockedShadow") && P) { const ids = new Set<string>(); for (const it of doc.items.values()) { try { if (P.isLocked(it.node)) ids.add(it.id); } catch (e) { /* not lockable */ } } ro.lockedIds = ids; }
   else ro.lockedIds = undefined;
   // the Objects swatches the user changed (the user's colour theme): the renderer's object layers and the grid
-  const oc: Record<string, string> = {};
-  for (const id of Object.keys(OBJECT_COLORS)) { const c = user.colors["obj:" + id]; if (c) oc[id] = c; }
-  ro.objectColors = Object.keys(oc).length ? oc : undefined;
+  ro.objectColors = undefined;
   ro.frame = user.objHidden.includes("drawingSheet") ? false : undefined;
   ro.subgrids = user.objHidden.includes("subgrids") ? false : undefined;   // LAYER_SUBGRIDS: the board's grid items
   // LAYER_BOARD_OUTLINE_AREA: the board outline filled under everything (PCB_PAINTER::draw( PCB_BOARD_OUTLINE ))
@@ -421,7 +461,7 @@ export function applyAppearance(): void {
     s.hiddenNets = new Set(proj.hiddenNets);
     (s as { ratsnestMode?: string }).ratsnestMode = user.ratsnestMode === "visible" ? "visible" : "all";   // RATSNEST_MODE
     s.ratsnestColors = user.netColorMode !== "off" && byName.size ? byName : null;
-    s.ratsnestBase = user.colors["obj:ratsnest"] || null;
+    s.ratsnestBase = null;   // LAYER_RATSNEST of the live theme (pcb-tools ratsnestColor)
     s.netColorMode = user.netColorMode;
     s.showCourtyardConflicts = !user.objHidden.includes("conflicts");   // LAYER_CONFLICTS_SHADOW   // the router preview takes net colours only in the "all" mode (ROUTER_PREVIEW_ITEM::getLayerColor)
     const sev = new Set<string>(); for (const [id, name] of Object.entries(SEVERITY)) if (user.objHidden.includes(id)) sev.add(name);
@@ -483,17 +523,20 @@ export function cycleInactiveMode(): void {
 }
 // PCB_CONTROL::LayerAlphaInc / LayerAlphaDec: the active layer's colour alpha in steps of 0.05, kept within 0.2 .. 1
 const ALPHA_MIN = 0.2, ALPHA_MAX = 1, ALPHA_STEP = 0.05;
-/** { and } — Decrease / Increase Layer Opacity: the active layer's colour in the user's colour theme. */
+/**
+ * { and } — Decrease / Increase Layer Opacity: COLOR_SETTINGS::SetColor on the frame's theme in memory (a built-in theme
+ * too), which lasts the session; the canvas repaints with it.
+ */
 export function layerAlphaStep(dir: 1 | -1): boolean {
   const doc = kdoc(), key = E.activeLayer as string; if (!doc || isSchDoc() || !key) return false;
-  const K = KC(), cur = user.colors[key] || K.pcbColor(key), [r, g, b, a] = parseColor(cur);
+  const K = KC(), cur = themeColor(key) || K.pcbColor(key), [r, g, b, a] = parseColor(cur);
   const want = Math.round((a + dir * ALPHA_STEP) * 100) / 100;
   if (dir > 0 ? a > ALPHA_MAX - ALPHA_STEP + 1e-6 : a < ALPHA_MIN + ALPHA_STEP - 1e-6) return false;   // KiCad rings the bell
   // from below the floor (the picker's Opacity slider goes to 0) } steps up from there, as KiCad does; the
   // renderer draws anything under 0.2 at 0.2 (PCB_RENDER_SETTINGS::LoadColors)
   const c = rgba(r, g, b, Math.max(0, Math.min(ALPHA_MAX, want)));
-  if (c.toLowerCase() === K.pcbColor(key).toLowerCase()) delete user.colors[key]; else user.colors[key] = c;
-  saveUser(); applyAppearance(); publishAppearance();
+  const p = prefs(); setSessionBoardColor(boardThemeId(p, fpEditor()), key, c);
+  applyAppearance(); publishAppearance();
   return true;
 }
 /**
@@ -607,7 +650,9 @@ export function appearanceDispatch(a: PanelAction): boolean {
   switch (a.t) {
     case "layerVisible": { const h = new Set(E.hiddenLayers as Set<string>); if (a.on) h.delete(a.key); else h.add(a.key); setHidden(h); break; }
     case "layerActive": setActiveLayer(a.key); break;
-    case "layerColor": if (a.color) user.colors[a.key] = a.color; else delete user.colors[a.key]; saveUser(); break;
+    // APPEARANCE_CONTROLS::OnColorSwatchChanged; "Reset to Default" in the picker gives COLOR_SETTINGS::GetDefaultColor
+    case "layerColor": { const K = KC() as unknown as { boardDefaultColor?(k: string): string; pcbColor(l: string): string }; setThemeColor(a.key, a.color || (K.boardDefaultColor ? K.boardDefaultColor(a.key) : K.pcbColor(a.key))); break; }
+    case "readOnlySwatch": readOnlySwatchNotice(); return true;
     case "layerMenu": layerMenu(a.cmd); break;
     case "objVisible": {
       user.objHidden = objectVisibilityChange(user.objHidden, a.id, a.on); saveUser();   // onObjectVisibilityChanged
@@ -617,7 +662,7 @@ export function appearanceDispatch(a: PanelAction): boolean {
     }
     case "objOpacity": user.objOpacity[a.id] = Math.max(0, Math.min(1, a.value)); saveUser(); break;
     // APPEARANCE_CONTROLS::OnColorSwatchChanged: the object layer's colour in the user's colour theme
-    case "objColor": if (a.color && a.color.toLowerCase() !== (OBJECT_COLORS[a.id] || "").toLowerCase()) user.colors["obj:" + a.id] = a.color; else delete user.colors["obj:" + a.id]; saveUser(); break;
+    case "objColor": { const k = OBJECT_THEME_KEYS[a.id]; if (k) setThemeColor(k, a.color || OBJECT_COLORS[a.id]); break; }
     // m_btnNetInspector: PCB_ACTIONS::showNetInspector; m_btnConfigureNetClasses: ShowBoardSetupDialog( _( "Net Classes" ) )
     case "showNetInspector": showPane("netinsp", true); return true;
     case "boardSetup": void openBoardSetup(tctx() as never, a.page); return true;

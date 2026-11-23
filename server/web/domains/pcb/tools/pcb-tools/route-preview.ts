@@ -9,7 +9,7 @@ import { netClearance } from "./drc";
 import { viaNow } from "./edit-commands";
 import { drawShape, line, polyline, ring } from "./overlay";
 import { connLines } from "./select-move";
-import { CLEARANCE_MODE, HALO_COLOR, HALO_FILL_ALPHA, HALO_STROKE_ALPHA, K, RATSNEST, S, saturated } from "./state";
+import { CLEARANCE_MODE, HALO_COLOR, HALO_FILL_ALPHA, HALO_STROKE_ALPHA, K, S, ratsnestColor, saturated } from "./state";
 import { adjustColor, alphaOf } from "./overlay";
 import { color, layerOf, pt, widthOf } from "./util";
 
@@ -20,7 +20,7 @@ export function previewColor(layer: string, netKey?: string | null) {
 }
 /** PNS_KICAD_IFACE::DisplayRatline: the ratsnest colour (the net's when net colours are on) Brightened( 0.5 ), alpha + 0.4. */
 export function ratlineColor(netKey?: string | null) {
-  const base = (netKey && S.netColorMode && S.netColorMode !== "off" && S.ratsnestColors && S.ratsnestColors.get(netKey)) || RATSNEST;
+  const base = (netKey && S.netColorMode && S.netColorMode !== "off" && S.ratsnestColors && S.ratsnestColors.get(netKey)) || ratsnestColor();
   return adjustColor(base, 0.5, alphaOf(base) + 0.4);
 }
 const mode = () => (typeof S.trackClearance === "number" ? S.trackClearance : CLEARANCE_MODE.ROUTING_VIA);

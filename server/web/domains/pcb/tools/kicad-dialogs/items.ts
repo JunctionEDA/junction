@@ -19,6 +19,8 @@ export interface ItemOpts {
   cancel?(): void;
   /** a symbol's Properties dialog opens at its Pin Map page (SCH_PROPERTIES_PANEL "Edit Pin Map...") */
   pinMapPage?: boolean;
+  /** the item rides the cursor (a placement's edit flags are set): OK hands it the edited node instead of committing */
+  carried?(node: SNode): void;
 }
 
 export const TITLES: Record<string, string> = { symbol: "Symbol Properties", footprint: "Footprint Properties", wire: "Wire & Bus Line Properties", bus: "Wire & Bus Line Properties", polyline: "Line Properties",

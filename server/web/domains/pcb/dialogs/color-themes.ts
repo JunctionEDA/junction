@@ -3,7 +3,9 @@
 // colors/*.json, kept with the preferences here) and the checks the panel makes.  No editor imports.
 
 /** A theme the user made with New Theme...: its name, and every palette key's colour (web/domains/pcb/canvas/colors.ts SCH_DEFAULT). */
-export interface UserSchTheme { id: string; name: string; colors: Record<string, string>; /** "Override individual item colors" (schematic.override_item_colors) */ overrideItemColors?: boolean }
+export interface UserSchTheme { id: string; name: string; colors: Record<string, string>; /** "Override individual item colors" (schematic.override_item_colors) */ overrideItemColors?: boolean;
+  /** the theme's "board" namespace (layer names and GAL keys of web/domains/pcb/canvas/colors.ts): KiCad Default's for a key it leaves out */
+  board?: Record<string, string> }
 
 /**
  * The swatches of PANEL_EESCHEMA_COLOR_SETTINGS::createSwatches (eeschema/dialogs/panel_eeschema_color_settings.cpp):
@@ -98,4 +100,73 @@ export function userThemeId(name: string, taken: string[]): string {
 /** A new theme copied from the palette on show (PANEL_COLOR_SETTINGS::OnThemeChanged's New Theme...). */
 export function newUserTheme(name: string, from: Record<string, string>, takenIds: string[]): UserSchTheme {
   return { id: userThemeId(name, takenIds), name: name.trim(), colors: { ...from } };
+}
+
+// ---------------------------------------------------------------- the board namespace (PANEL_PCBNEW_COLOR_SETTINGS, PANEL_FP_EDITOR_COLOR_SETTINGS)
+/**
+ * The GAL layers PANEL_PCBNEW_COLOR_SETTINGS lists: GAL_LAYER_ID_START .. GAL_LAYER_ID_BITMASK_END less g_excludedLayers,
+ * then the layers outside that range it adds by hand.  [key, LayerName(), GAL id offset from GAL_LAYER_ID_START (the
+ * order createSwatches sorts ties in is the id's)].
+ */
+const BOARD_GAL_ITEMS: [string, string][] = [
+  ["plated_hole", "Non-plated holes"], ["anchor", "Anchors"], ["ratsnest", "Ratsnest"], ["grid", "Grid"], ["grid_axes", "Grid axes"], ["via_hole", "Via holes"],
+  ["drc_error", "DRC errors"], ["worksheet", "Drawing sheet"], ["select_overlay", "Selection highlight"], ["background", "Background"], ["cursor", "Cursor"],
+  ["aux_items", "Helper items"],
+  ["locked_shadow", "Locked item shadow"], ["conflicts_shadow", "Courtyard collision shadow"], ["constraint_shadow", "Constrained item shadow"],
+  ["constraint_under", "Under-constrained tint"], ["constraint_well", "Fully constrained tint"], ["constraint_over", "Over-constrained tint"],
+  ["outline_area", "Board outline area"], ["page_limits", "Page limits"], ["drc_warning", "DRC warnings"], ["drc_exclusion", "DRC exclusions"],
+  ["drc_highlighted", "DRC highlighted"], ["track_net_names", "Track net names"], ["pad_net_names", "Pad net names"], ["subgrids", "Grids"],
+];
+/** LayerName() of the board layers (common/layer_id.cpp), by the canvas' layer names. */
+const BOARD_LAYER_NAMES: Record<string, string> = {
+  "B.Adhes": "B.Adhesive", "F.Adhes": "F.Adhesive", "B.SilkS": "B.Silkscreen", "F.SilkS": "F.Silkscreen", "Dwgs.User": "User.Drawings", "Cmts.User": "User.Comments",
+  "Eco1.User": "User.Eco1", "Eco2.User": "User.Eco2", "F.CrtYd": "F.Courtyard", "B.CrtYd": "B.Courtyard",
+};
+/** LayerName() of a board layer. */
+export function boardLayerName(layer: string): string { return BOARD_LAYER_NAMES[layer] || layer; }
+/** LSET::TechAndUserUIOrder: the technical layers in the UI's order, then User.1 .. User.45. */
+const TECH_UI_ORDER = ["F.Adhes", "B.Adhes", "F.Paste", "B.Paste", "F.SilkS", "B.SilkS", "F.Mask", "B.Mask", "Dwgs.User", "Cmts.User", "Eco1.User", "Eco2.User",
+  "Edge.Cuts", "Margin", "F.CrtYd", "B.CrtYd", "F.Fab", "B.Fab", ...Array.from({ length: 45 }, (_, i) => `User.${i + 1}`)];
+/**
+ * PANEL_PCBNEW_COLOR_SETTINGS::createSwatches: the copper layers F.Cu, In1.Cu .. In30.Cu, B.Cu (LAYER_RANGE, not sorted),
+ * the technical and user layers in TechAndUserUIOrder, then the GAL layers sorted by LayerName().  A board layer is named
+ * by the board (BOARD::GetLayerName) when there is one.  [key, label].
+ */
+export function pcbColorItems(boardName?: ((layer: string) => string | null | undefined) | null): [string, string][] {
+  const gal = BOARD_GAL_ITEMS.map((x, i) => [x, i] as [[string, string], number]).sort((a, b) => byName(a[0][1], b[0][1]) || a[1] - b[1]).map(([x]) => x);
+  const layers = ["F.Cu", ...Array.from({ length: 30 }, (_, i) => `In${i + 1}.Cu`), "B.Cu", ...TECH_UI_ORDER];
+  return [...layers.map((l) => [l, (boardName && boardName(l)) || boardLayerName(l)] as [string, string]), ...gal];
+}
+/**
+ * The GAL layers of PANEL_FP_EDITOR_COLOR_SETTINGS (GAL_LAYER_ID_START .. GAL_LAYER_ID_END but the via and pad hole
+ * layers) that COLOR_SETTINGS can hold, in id order: the swatches are those the theme gives a colour (not UNSPECIFIED).
+ */
+const FP_GAL_ITEMS: [string, string][] = [
+  ["plated_hole", "Non-plated holes"], ["anchor", "Anchors"], ["ratsnest", "Ratsnest"], ["grid", "Grid"], ["grid_axes", "Grid axes"], ["drc_error", "DRC errors"],
+  ["worksheet", "Drawing sheet"], ["select_overlay", "Selection highlight"], ["background", "Background"], ["cursor", "Cursor"], ["aux_items", "Helper items"],
+  ["drc_warning", "DRC warnings"], ["drc_exclusion", "DRC exclusions"], ["locked_shadow", "Locked item shadow"], ["conflicts_shadow", "Courtyard collision shadow"],
+  ["outline_area", "Board outline area"], ["points", "Points"], ["constraint_shadow", "Constrained item shadow"], ["subgrids", "Grids"], ["via_stitching", "Via stitching"],
+  ["page_limits", "Page limits"], ["drc_highlighted", "DRC highlighted"], ["constraint_under", "Under-constrained tint"], ["constraint_well", "Fully constrained tint"],
+  ["constraint_over", "Over-constrained tint"],
+];
+/** COLOR4D::UNSPECIFIED: transparent black, what GetColor answers for a layer the theme has no colour for. */
+export function isUnspecified(c: string | undefined): boolean { const v = c ? rgbOf(c) : null; return !v || (v[0] === 0 && v[1] === 0 && v[2] === 0 && v[3] === 0); }
+/**
+ * PANEL_FP_EDITOR_COLOR_SETTINGS::createSwatches: F.Cu, "Internal Layers" (In1.Cu), B.Cu, then the GAL layers the theme on
+ * show when the page is made gives a colour, sorted by LayerName().  [key, label].
+ */
+export function fpColorItems(colors: Record<string, string>): [string, string][] {
+  const gal = FP_GAL_ITEMS.map((x, i) => [x, i] as [[string, string], number]).filter(([x]) => !isUnspecified(colors[x[0]]))
+    .sort((a, b) => byName(a[0][1], b[0][1]) || a[1] - b[1]).map(([x]) => x);
+  return [["F.Cu", "F.Cu"], ["In1.Cu", "Internal Layers"], ["B.Cu", "B.Cu"], ...gal];
+}
+/** COLOR_SETTINGS stores no "board.select_overlay": a user theme never keeps one (it reads back UNSPECIFIED). */
+export function storableBoardColors(colors: Record<string, string>): Record<string, string> { const out = { ...colors }; delete out.select_overlay; return out; }
+/**
+ * PANEL_COLOR_SETTINGS::OnThemeChanged's New Theme... from a board page: a theme with KiCad Default's schematic colours
+ * and the board colours of the page's swatches copied from the theme on show (the rest KiCad Default's).
+ */
+export function newUserBoardTheme(name: string, keys: string[], from: Record<string, string>, takenIds: string[]): UserSchTheme {
+  const board: Record<string, string> = {}; for (const k of keys) if (from[k] !== undefined) board[k] = from[k];
+  return { id: userThemeId(name, takenIds), name: name.trim(), colors: {}, board: storableBoardColors(board) };
 }

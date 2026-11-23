@@ -1674,7 +1674,8 @@ test("smaller commands: break wire, symbol flags, units and body styles, referen
   assert.ok(sch.runAction("previousUnit", c)); assert.deepStrictEqual(kid(d.items.get(u.id).node, "unit"), ["unit", 2]);
   assert.ok(sch.runAction("cycleBodyStyle", c)); assert.deepStrictEqual(kid(fragItem(lastCommit(c).changes[0]), "body_style"), ["body_style", 2]);
   assert.ok(sch.runAction("placeNextSymbolUnit", c)); assert.ok(sch.state.carry && kid(sch.state.carry.node, "unit")[1] === 1 && kids(sch.state.carry.node, "property")[0][2] === "U1", "the free unit rides on the cursor with the same reference");
-  sch.onActivate("select", c);
+  // the unit on the cursor dropped (Esc): with a symbol being placed, Edit Reference edits that symbol (PlaceSymbol passes it on)
+  sch.state.carry = null; sch.onActivate("select", c);
   sch.setPrompt((title, initial, client, done) => { assert.strictEqual(title, "Reference"); assert.strictEqual(initial, "U1"); done("U9"); });
   c.selection = new Set([u.id]); assert.ok(sch.onKey("u", {}, c)); assert.strictEqual(d.items.get(u.id).ref, "U9"); assert.strictEqual(lastCommit(c).label, "reference");
   sch.setPrompt((title, initial, client, done) => { assert.strictEqual(title, "Value"); done("Quad"); }); assert.ok(sch.onKey("v", {}, c)); assert.strictEqual(d.items.get(u.id).value, "Quad");

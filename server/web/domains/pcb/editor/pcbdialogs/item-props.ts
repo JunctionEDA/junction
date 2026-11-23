@@ -329,7 +329,11 @@ function ruleAreaDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null)
       const v = (f: Field<boolean>): string => (f.get() ? "not_allowed" : "allowed");
       put(n, "keepout", `(keepout (tracks ${v(tracks)}) (vias ${v(vias)}) (pads ${v(pads)}) (copperpour ${v(pour)}) (footprints ${v(fps)}))`, ["placement", "fill", "polygon"]);
       const enabled = plKind !== "none";
-      if (!pl || enabled !== plOn || kind !== kind0 || src !== src0) put(n, "placement", IPM.placementText(enabled, kind, src, quote), ["fill", "polygon"]);
+      if (!pl || enabled !== plOn || kind !== kind0 || src !== src0) {
+        put(n, "placement", IPM.placementText(enabled, kind, src, quote), ["fill", "polygon"]);
+        // the zone's layout link (Repeat Layout's "Link these areas") is no setting of this panel and stays
+        const link = pl && kid(pl, "link"), np = link && kid(n, "placement"); if (np) np.push(link);
+      }
       return undefined;
     };
   }), create, "Edit Zone Properties");

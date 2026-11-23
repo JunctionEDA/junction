@@ -10,7 +10,7 @@ import { drawHover } from "./gestures";
 import { pcbTools } from "./panels/core";
 import { anchorMm, breakFollow, followAction, peerName, sendPresence } from "./peers";
 import { drawSelection, selectedFields, selectedSet } from "./selection";
-import { schNetChainPaint } from "./netchains";
+import { boardChainPaint, schNetChainPaint } from "./netchains";
 import { schNetStyles } from "./schnets";
 import { E } from "./state";
 import { paintConfig, paintDocument, settledFrame, stats as paintStats } from "./paint";
@@ -149,7 +149,7 @@ export function drawCanvas() {
   const m0 = activeModule() as { hiddenIds?: () => Set<string> | null } | null;
   const own = m0 && m0.hiddenIds ? m0.hiddenIds() : null;   // the board module's items drawn elsewhere (a router drag's lines)
   // a dialog's pending edit on the canvas (DIALOG_FP_EDIT_PAD_TABLE: pads added to and removed from the view)
-  const dlgE = E as { dialogGhosts?: { ids: Set<string>; dx: number; dy: number; bright?: boolean }[] | null; dialogHidden?: Set<string> | null };
+  const dlgE = E as { dialogGhosts?: { ids: Set<string>; dx: number; dy: number; bright?: boolean | Set<string>; doc?: KDoc }[] | null; dialogHidden?: Set<string> | null };
   const dlgGhosts = !isSch() && dlgE.dialogGhosts ? dlgE.dialogGhosts : [], dlgHidden = !isSch() && dlgE.dialogHidden ? dlgE.dialogHidden : null;
   const skip = ghosts.length || own || dlgHidden ? new Set([...ghosts.flatMap((g) => [...g.ids]), ...(own || []), ...(dlgHidden || [])]) : null;
   const force: boolean | "rest" | "zoomEnd" = E.renderFull === "rest" || E.renderFull === "zoomEnd" ? E.renderFull : E.renderFull !== false; E.renderFull = false;
@@ -161,7 +161,7 @@ export function drawCanvas() {
   const peers = peerPaintIds(E.kdoc);
   const selected = peers.selected.size ? new Set([...(localSelection || []), ...peers.selected]) : localSelection;
   const highlight = E.highlightIds || (peers.highlight.size ? peers.highlight : null);
-  paintDocument(variantView(E.kdoc) as KDoc, cctx, view, Object.assign({ hidden: E.hiddenLayers, grid: E.gridOn ? E.gridPitch : 0, gridY: E.gridOn ? E.gridPitchY : 0, selected, highlight, brightened: boardBrightened(), enteredGroup: boardEnteredGroup(), skip: skip || undefined, rollover: E.hyperHover ? E.hyperHover.id : undefined, rolloverGeom: E.hyperHover && E.hyperHover.geom || null, rolloverRun: E.hyperHover && E.hyperHover.run || null }, schPaintState(selected), E.renderOpts), force, E.zoomAnim ? { to: E.zoomAnim.to, cx: E.zoomAnim.cx, cy: E.zoomAnim.cy } : null, requestRestRender);
+  paintDocument(variantView(E.kdoc) as KDoc, cctx, view, Object.assign({ hidden: E.hiddenLayers, grid: E.gridOn ? E.gridPitch : 0, gridY: E.gridOn ? E.gridPitchY : 0, selected, highlight, brightened: boardBrightened(), enteredGroup: boardEnteredGroup(), pcbNetChain: boardChainPaint(), skip: skip || undefined, rollover: E.hyperHover ? E.hyperHover.id : undefined, rolloverGeom: E.hyperHover && E.hyperHover.geom || null, rolloverRun: E.hyperHover && E.hyperHover.run || null }, schPaintState(selected), E.renderOpts), force, E.zoomAnim ? { to: E.zoomAnim.to, cx: E.zoomAnim.cx, cy: E.zoomAnim.cy } : null, requestRestRender);
   // A peer's items mid-drag: drawn where the peer has them (presence `at`), translucent, over everything else.
   if (ghosts.length) {
     const off: HTMLCanvasElement = E.ghostCanvas || (E.ghostCanvas = document.createElement("canvas"));
@@ -181,8 +181,9 @@ export function drawCanvas() {
     const octx = off.getContext("2d")!; const sc = view.ppm * view.zoom;
     for (const g of dlgGhosts) {
       octx.setTransform(1, 0, 0, 1, 0, 0); octx.clearRect(0, 0, off.width, off.height);
-      KiCadCanvas.render(E.kdoc, octx, Object.assign({}, view, { panX: view.panX + g.dx * sc, panY: view.panY + g.dy * sc }),
-        Object.assign({}, E.renderOpts, { hidden: E.hiddenLayers, grid: 0, frame: false, background: false, ids: g.ids, markers: null, ratsnest: null, highlight: null, selected: null, brightened: g.bright ? g.ids : null }));
+      // a ghost of items not on the board (the Repeat Layout preview's copies) brings its own scratch document
+      KiCadCanvas.render(g.doc || E.kdoc, octx, Object.assign({}, view, { panX: view.panX + g.dx * sc, panY: view.panY + g.dy * sc }),
+        Object.assign({}, E.renderOpts, { hidden: E.hiddenLayers, grid: 0, frame: false, background: false, ids: g.ids, markers: null, ratsnest: null, highlight: null, selected: null, brightened: g.bright instanceof Set ? g.bright : g.bright ? g.ids : null }));
       cctx.setTransform(1, 0, 0, 1, 0, 0); cctx.drawImage(off, 0, 0);
     }
   }

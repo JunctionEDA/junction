@@ -221,6 +221,22 @@ test("update PCB: Group footprints based on symbol group (BOARD_NETLIST_UPDATER:
   assert.ok(p3.report.some((r) => r.text === "Remove R2 from group 'amp'."));
   assert.ok(p3.removed.length === 1 && doc2.items.get(p3.removed[0]).kind === "group");
 });
+test("update PCB: the netlist's group name and design block link (BOARD_NETLIST_UPDATER::updateGroups)", () => {
+  const doc = K.parseDoc(PCB, "kicad_pcb");
+  const linked = { ...nl, components: nl.components.map((c) => (c.ref === "R1" || c.ref === "R2" ? { ...c, group: { uuid: "g-amp", name: "amp", libId: "Blocks:Amp" } } : c)) };
+  // a new group exists only in the real run: it is linked there, and the report says so
+  assert.ok(!N.planUpdate(doc, linked, { transferGroups: true }).report.some((r) => /library link/.test(r.text)));
+  const real = N.planUpdate(doc, linked, { transferGroups: true, applied: true });
+  assert.ok(real.report.some((r) => r.text === "Changed group library link from '' to 'Blocks:Amp'."), real.report.map((r) => r.text).join("\n"));
+  assert.strictEqual(K.serialize(real.added.find((n) => n[0] === "group")).replace(/\s+/g, " "), '(group "amp" (uuid "g-amp") (lib_id "Blocks:Amp") (members "f1" "f2"))');
+  // a board group the netlist renames and relinks
+  const doc2 = K.parseDoc(PCB.replace(/\)$/, ' (group "old" (uuid "g-amp") (members "f1" "f2")))'), "kicad_pcb");
+  const dry = N.planUpdate(doc2, linked, { transferGroups: true }).report.map((r) => r.text);
+  assert.ok(dry.includes("Change group name from 'old' to 'amp'.") && dry.includes("Change group library link from '' to 'Blocks:Amp'."), dry.join("\n"));
+  const p2 = N.planUpdate(doc2, linked, { transferGroups: true, applied: true });
+  const g = [...p2.modified.values()].find((n) => n[0] === "group"); assert.ok(g, "the group is modified");
+  assert.strictEqual(K.serialize(g).replace(/\s+/g, " "), '(group "amp" (uuid "g-amp") (lib_id "Blocks:Amp") (members "f1" "f2"))');
+});
 test("update PCB: delete unused footprints, and a library footprint is added below the board", () => {
   const doc = K.parseDoc(PCB, "kicad_pcb");
   const mod = K.parse('(footprint "R_0603_1608Metric" (version 20241229) (generator "pcbnew") (layer "F.Cu") (property "Reference" "REF**" (at 0 -1.4 0) (layer "F.SilkS") (uuid "x1") (effects (font (size 1 1) (thickness 0.15)))) (property "Value" "R_0603" (at 0 1.4 0) (layer "F.Fab") (uuid "x2") (effects (font (size 1 1) (thickness 0.15)))) (attr smd) (pad "1" smd roundrect (at -0.8 0) (size 0.9 0.95) (layers "F.Cu" "F.Paste" "F.Mask") (uuid "x3")) (pad "2" smd roundrect (at 0.8 0) (size 0.9 0.95) (layers "F.Cu" "F.Paste" "F.Mask") (uuid "x4")))');

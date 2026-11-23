@@ -34,6 +34,10 @@ import { RULES_HELP_MD } from "../../generated/rules-help";
 import { keysInText } from "../../../../shared/keys";
 import type { DielectricModel, DrillProfile, StackupLayer, StackupSub } from "../../canvas/board-setup";
 import { applyFabStackup, BOARD_TYPES, FAB_STACKUPS, outer50Ohm } from "./fab-stackups";
+import { FAMILIES, RuleDocument, constraintText, editedDefaults, entryCondition, entryLayer, homePanel, importGroup, netclassValuesFor, pageEditingDefault, pageTitleFor, rulesCanOverride, ruleScopeText, sectionsFor, allSections, type NetclassLike, type Section } from "./constraint-rules";
+import { constraintRulesPage, linkToPage, overrideIcon, type PopupRow, type RulePage, type StagedSettings } from "./constraint-rules-page";
+import { typeById as dreType } from "./drc-rule-model";
+import { newViaSectionState, setLayersFromStackup, stackupItems, viaSectionPreview } from "./via-cross-section";
 
 /** PANEL_SETUP_BOARD_STACKUP::m_specFreqChoices */
 export const FREQ_UNITS = ["Hz", "kHz", "MHz", "GHz"];
@@ -128,11 +132,35 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
   let layersTouched = false, refreshLayers: (() => void) | null = null, refreshStackup: (() => void) | null = null;
   const setupEdit: Parameters<ReturnType<typeof BS>["editSetup"]>[1] = {};
   if (!dru) druText = "(version 2)\n";     // PANEL_SETUP_RULES::TransferDataToWindow for a board without a rules file
-  let rules0 = druText, rulesEd: ReturnType<typeof rulesEditor> | null = null;
+  let rulesEd: ReturnType<typeof rulesEditor> | null = null;
+  type DruTools = { parseDru?: (t: string) => { errors: string[]; messages?: RuleMessage[] }; ruleMatchingItems?: (d: KDoc, s: unknown, t: string, n: string) => string[] | null; designSettings?: (p: unknown) => unknown; boardLayerName?: (d: KDoc, l: string) => string };
+  const druTools = (): DruTools => ((globalThis as { PcbTools?: DruTools }).PcbTools || {});
+  /** DRC_RULES_PARSER as DRC_RULE_DOCUMENT uses it: text with a parse error is kept verbatim and its rules are not edited */
+  const druParses = (t: string): boolean => {
+    const tl = druTools(); if (!tl.parseDru) return true;
+    const r = tl.parseDru(t);
+    return r.messages ? !r.messages.some((m) => m.severity === "error" || (m as RuleMessage & { fatal?: boolean }).fatal) : !r.errors.length;
+  };
+  // DRC_RULE_DOCUMENT: one document for every Design Rules page and Custom Rules, written to the rules file on OK
+  const ruleDoc = new RuleDocument(druParses);
+  ruleDoc.load(druText);
   const bar = infoBar();
   let book: ReturnType<typeof treeBook> | null = null;
   /** PAGED_DIALOG::SetError: the info bar for 10 s, the page shown, the control (or grid cell) focused */
   const setError = (page: string, e: PageError): void => { if (book) book.show(page, true); bar.show(e.msg, 10000, "warning"); focusError(e.ctrl, e.row, e.col); };
+  // m_stagedSettings: the board defaults the Constraints page, the rule pages and Solder Mask/Paste share.  A page writes
+  // only the fields changed since it last loaded them, and loads them again each time it is shown.
+  const MASK_KEYS = ["solder_mask_expansion", "solder_mask_min_width", "solder_paste_margin"];
+  const stagedValues = new Map<string, number>();
+  const loadStagedRules = (): void => { for (const [, d] of editedDefaults()) if (!MASK_KEYS.includes(d.setting)) stagedValues.set(d.setting, numOr(rules[d.setting], Number(RULE_DEFAULTS[d.setting] ?? 0))); };
+  const loadStagedMask = (setup: SNode | null): void => { const m = BS().maskPaste(setup); stagedValues.set("solder_mask_expansion", m.maskExpansion); stagedValues.set("solder_mask_min_width", m.maskMinWidth); stagedValues.set("solder_paste_margin", m.pasteClearance); };
+  loadStagedRules(); loadStagedMask(header ? header.setup : null);
+  const staged: StagedSettings = { values: stagedValues, issues: (v) => ({
+    errors: BS().validateDesignRules(v, currentUnits(), { maskExpansion: v.solder_mask_expansion, maskMinWidth: v.solder_mask_min_width, pasteMargin: v.solder_paste_margin }),
+    warnings: BS().designRuleWarnings(v, currentUnits()) }) };
+  register("Design Rules defaults", { edits: () => Array.from(stagedValues).filter(([k]) => !MASK_KEYS.includes(k)).map(([k, v]) => ({ path: [...DS, "rules", k], value: v, ints: k === "min_resolved_spokes" })) });
+  let maskExtra: { pasteRatio: number; allowBridges: boolean } | null = null;
+  let refreshConstraints: (() => void) | null = null, refreshMask: (() => void) | null = null;
 
   // ------------------------------------------------------------ Board Stackup
   // PANEL_SETUP_LAYERS::initialize_*_tech_layers: the check boxes' tool tips (the other fixed layers have none)
@@ -384,6 +412,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     });
   };
 
+  let refreshFinishPreview: (() => void) | null = null;
   let finishNow: (() => ReturnType<ReturnType<typeof BS>["boardFinish"]>) | null = null;
   const finishPage = (el: HTMLElement): void => {
     const f = BS().boardFinish(header ? header.setup : null);
@@ -393,7 +422,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     edge.input.title = "Options for edge card connectors.";
     // PANEL_SETUP_BOARD_FINISH's via protection group (VIA_PROTECTION_RULES gates which choices are allowed)
     const v0 = BS().viaProtection(header ? header.setup : null);
-    const onVia = (): void => { enableVias(); let cleared = false; for (const c of viaChecks) if (c.input.disabled && c.get()) { c.set(false); cleared = true; } if (cleared) enableVias(); };
+    const onVia = (): void => { enableVias(); let cleared = false; for (const c of viaChecks) if (c.input.disabled && c.get()) { c.set(false); cleared = true; } if (cleared) enableVias(); updateViaPreview(); };
     const vc = (v: boolean, label: string, tip: string, key: string): Field<boolean> => checkField(v, label, { ro: roBoard, key, tip, onChange: onVia });
     const PLUG = "Plugged: the hole is partly filled from this side.", TENT = "Tented: vias are covered with solder mask.\nNot tented: vias are not covered with solder mask.", COVER = "Covered: a second coat is applied over the via on this side.";
     const fillV = vc(v0.fill, "", "Filled: the hole is completely filled.", "fillVias"), capV = vc(v0.cap, "", "Capped: copper is plated over the filled hole, giving a flat solderable surface.", "capVias");
@@ -408,11 +437,29 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       enable(coverF, filled || tentF.get() || plugF.get()); enable(coverB, filled || tentB.get() || plugB.get());
     }
     enableVias();
+    // m_viaPreview: the board's default via with the eight settings, over the stackup and copper count (SetStackup)
+    const preview = viaSectionPreview({ width: 240, height: 120 });
+    function updateViaPreview(): void {
+      const cu = layerRows.filter((r) => r.copper && r.enabled).length || 2, st = newViaSectionState();
+      st.innerLayers = Math.max(0, cu - 2);
+      const tn = header && header.general ? (header.general.find((x) => Array.isArray(x) && x[0] === "thickness") as SNode | undefined) : undefined;
+      const thickness = tn ? Number(tn[1]) || 1.6 : 1.6;
+      setLayersFromStackup(st, stackupItems(BS().stackupLayers(header ? header.setup : null), cu, thickness), cu);
+      const def = obj(arr(net.classes).find((c) => obj(c).name === "Default"));
+      const vd = numOr(def.via_diameter, 0), vh = numOr(def.via_drill, 0);
+      if (vh > 0) st.padRatio = vd / vh;
+      st.filled = fillV.get(); st.capped = capV.get(); st.plugFront = plugF.get(); st.plugBack = plugB.get();
+      st.tentFront = tentF.get(); st.tentBack = tentB.get(); st.coverFront = coverF.get(); st.coverBack = coverB.get();
+      preview.setState(st);
+    }
+    refreshFinishPreview = updateViaPreview;
     const pair = (a: Field<boolean>, b: Field<boolean>): HTMLElement => h("div", { class: "pd-row" }, a.el, b.el);
     put(el, plated.el, form([["Copper finish:", finish.el], ["Edge card connectors:", edge.el]]),
       h("div", { class: "pd-row" }, h("label", null, "Settings for Vias with Protection Features Set to \"From rules\":")),
-      form([["Fill vias:", fillV.el], ["Cap vias:", capV.el], ["Plug vias:", pair(plugF, plugB)], ["Tent vias:", pair(tentF, tentB)], ["Cover vias:", pair(coverF, coverB)]]),
+      h("div", { class: "pd-row", style: "align-items:center;flex-wrap:nowrap" },
+        form([["Fill vias:", fillV.el], ["Cap vias:", capV.el], ["Plug vias:", pair(plugF, plugB)], ["Tent vias:", pair(tentF, tentB)], ["Cover vias:", pair(coverF, coverB)]]), preview.el),
       roBoard ? null : note(BOARD_NOTE));
+    updateViaPreview();
     finishNow = () => ({ copperFinish: finish.get(), edgeConnector: edge.get() as "no" | "yes" | "bevelled", edgePlating: plated.get(), hasStackup: f.hasStackup });
     validate("Board Finish", () => {
       const now = (finishNow as () => ReturnType<ReturnType<typeof BS>["boardFinish"]>)();
@@ -425,10 +472,11 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
 
   const maskPage = (el: HTMLElement): void => {
     const m = BS().maskPaste(header ? header.setup : null);
-    const exp = lenField(m.maskExpansion, { ro: roBoard, key: "maskExpansion" }), web = lenField(m.maskMinWidth, { ro: roBoard, key: "maskMinWidth" });
+    const sv = (k: string): number => stagedValues.get(k) ?? 0;
+    const exp = lenField(sv("solder_mask_expansion"), { ro: roBoard, key: "maskExpansion" }), web = lenField(sv("solder_mask_min_width"), { ro: roBoard, key: "maskMinWidth" });
     const toCu = lenField(numOr(rules.solder_mask_to_copper_clearance, 0), { ro: roPro, key: "maskToCopper" });
     const bridges = checkField(m.allowBridges, "Allow bridged solder mask apertures between pads within footprints", { ro: roBoard, key: "allowBridges", tip: "Disable DRC error checking for solder mask aperture bridging between pads in the same footprint." });
-    const paste = lenField(m.pasteClearance, { ro: roBoard, key: "pasteClearance" }), ratio = numField(+(m.pasteRatio * 100).toFixed(4), { ro: roBoard, key: "pasteRatio" });
+    const paste = lenField(sv("solder_paste_margin"), { ro: roBoard, key: "pasteClearance" }), ratio = numField(+(m.pasteRatio * 100).toFixed(4), { ro: roBoard, key: "pasteRatio" });
     exp.input.title = MASK_TIPS.exp; web.input.title = MASK_TIPS.web; toCu.input.title = MASK_TIPS.toCu; paste.input.title = MASK_TIPS.paste; ratio.input.title = MASK_TIPS.ratio;
     put(el,
       note("Consult your PCB manufacturer's specifications for solder mask expansion, web width, and clearance settings."),
@@ -440,11 +488,15 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       const issues = BS().validateDesignRules({}, currentUnits(), { maskExpansion: exp.get(), maskMinWidth: web.get(), maskToCopper: toCu.get(), pasteMargin: paste.get(), pasteRatio: ratio.get() / 100 });
       const ctrl: Record<string, HTMLElement> = { solder_mask_expansion: exp.input, solder_mask_min_width: web.input, solder_mask_to_copper_clearance: toCu.input, solder_paste_margin: paste.input, solder_paste_margin_ratio: ratio.input };
       if (issues.length) return { msg: issues[0].message, ctrl: ctrl[issues[0].setting] };
-      // the tenting flags are not on this page in KiCad 10 (they moved to the padstack); the file's values stay
-      const now = { maskExpansion: exp.get(), maskMinWidth: web.get(), pasteClearance: paste.get(), pasteRatio: +(ratio.get() / 100).toFixed(6), allowBridges: bridges.get(), tentFront: m.tentFront, tentBack: m.tentBack };
-      if ((Object.keys(now) as (keyof typeof now)[]).some((k) => now[k] !== m[k])) setupEdit.maskPaste = now;
+      // the three values the rule pages also edit go to the staged settings (finishOk writes them with these two)
+      for (const [k, f] of shared) { const v = f.get(); if (v !== loaded.get(k)) { stagedValues.set(k, v); loaded.set(k, v); } }
+      maskExtra = { pasteRatio: +(ratio.get() / 100).toFixed(6), allowBridges: bridges.get() };
       return null;
     });
+    const shared: [string, Field<number>][] = [["solder_mask_expansion", exp], ["solder_mask_min_width", web], ["solder_paste_margin", paste]];
+    const loaded = new Map<string, number>();
+    refreshMask = () => { for (const [k, f] of shared) { loaded.set(k, sv(k)); f.set(sv(k)); } };
+    refreshMask();
     register("Solder Mask/Paste", { edits: () => [{ path: [...DS, "rules", "solder_mask_to_copper_clearance"], value: toCu.get() }] });
   };
 
@@ -539,12 +591,14 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     // keeps the bitmap column empty, as the wxFlexGridSizer does
     const label = (text: string, bitmap: string | null): HTMLElement => h("span", { class: "pd-bmplabel" }, bitmap ? staticBitmap(bitmap, 24) : h("span", { class: "pd-bitmap", style: "width:24px" }), text);
     const len = (key: string, text: string, tip: string, bitmap: string | null = null): [HTMLElement, HTMLElement, HTMLElement, string] => {
-      const f = lenField(numOr(rules[key], Number(RULE_DEFAULTS[key])), { ro: roPro, key }); fields.push({ key, f, warn: f.warn });
+      const f = lenField(stagedValues.get(key) ?? numOr(rules[key], Number(RULE_DEFAULTS[key])), { ro: roPro, key }); fields.push({ key, f, warn: f.warn });
       f.input.title = tip;
-      return [label(text, bitmap), h("span", { style: "display:inline-flex;align-items:center;width:100%" }, f.el, f.warn.el), unitLabel(), tip];
+      // a value read elsewhere too (a rule page edits it, or rules can override it) carries the small_new_window badge
+      const badge = pageEditingDefault(key) || rulesCanOverride(key) ? overrideIcon(() => overridePopupRows(key)) : null;
+      return [label(text, bitmap), h("span", { style: "display:inline-flex;align-items:center;width:100%" }, f.el, f.warn.el, badge), unitLabel(), tip];
     };
     const chk = (key: string, label: string, tip: string, where: "rules" | "top"): HTMLElement => { const src = where === "rules" ? rules[key] : ds[key]; const f = checkField(boolOr(src, where === "rules" ? !!RULE_DEFAULTS[key] : false), label, { ro: roPro, key, tip }); fields.push({ key: where === "top" ? "^" + key : key, f }); return f.el; };
-    const spokes = spinField(numOr(rules.min_resolved_spokes, 2), { min: 0, max: 99, ro: roPro, key: "min_resolved_spokes" }); fields.push({ key: "min_resolved_spokes", f: spokes, int: true });
+    const spokes = spinField(stagedValues.get("min_resolved_spokes") ?? numOr(rules.min_resolved_spokes, 2), { min: 0, max: 99, ro: roPro, key: "min_resolved_spokes" }); fields.push({ key: "min_resolved_spokes", f: spokes, int: true });
     spokes.el.style.width = "64px";
     const R = "If set, this can only be reduced by custom rules.";
     // m_maxErrorTitle's own tool tip (the control keeps the other one)
@@ -574,7 +628,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
         box("Arc/Circle Approximations", form([maxErrorRow(len("max_error", "Maximum allowed deviation:", "The maximum allowed deviation between a true arc or circle and segments used to approximate it.  Smaller values produce smoother graphics at the expense of performance.")), slow])),
         // m_filletBitmap (zone_fillet) beside the fillets option, m_spokeBitmap (thermal_spokes) beside the spoke count
         box("Zone Fill Strategy", h("div", { class: "pd-row", style: "align-items:center" }, staticBitmap("zone_fillet", 24), chk("zones_allow_external_fillets", "Allow fillets/chamfers outside zone outline", "", "top")),
-          form([[label("Minimum thermal relief spoke count:", "thermal_spokes"), spokes.el]])),
+          form([[label("Minimum thermal relief spoke count:", "thermal_spokes"), h("span", { style: "display:inline-flex;align-items:center" }, spokes.el, linkToPage(pageEditingDefault("min_resolved_spokes"), () => showSetupPage(pageEditingDefault("min_resolved_spokes"))))]])),
         box("Length Tuning", chk("use_height_for_length_calcs", "Include stackup height in track length calculations", "When enabled, the distance between copper layers will be included in track length calculations for tracks with vias.  When disabled, via stackup height is ignored.", "rules")))));
     const values = (): Record<string, number> => { const o: Record<string, number> = {}; for (const x of fields) if (x.key[0] !== "^" && typeof x.f.get() === "number") o[x.key] = x.f.get() as number; return o; };
     // updateWarnings, debounced so a half-typed value does not flash a warning
@@ -587,12 +641,16 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     el.addEventListener("input", () => { if (timer) clearTimeout(timer); timer = window.setTimeout(updateWarnings, 250); });
     el.addEventListener("change", updateWarnings);
     updateWarnings();
-    register("Constraints", { edits: () => fields.map((x) => (x.key[0] === "^" ? { path: [...DS, x.key.slice(1)], value: x.f.get() } : { path: [...DS, "rules", x.key], value: x.f.get(), ints: x.int })) });
+    // the staged values are written by "Design Rules defaults"; this page writes the rest
+    register("Constraints", { edits: () => fields.filter((x) => !stagedValues.has(x.key)).map((x) => (x.key[0] === "^" ? { path: [...DS, x.key.slice(1)], value: x.f.get() } : { path: [...DS, "rules", x.key], value: x.f.get(), ints: x.int })) });
+    const loaded = new Map<string, number>();
+    refreshConstraints = () => { for (const x of fields) if (stagedValues.has(x.key)) { const v = stagedValues.get(x.key) as number; loaded.set(x.key, v); (x.f as Field<number>).set(v); } updateWarnings(); };
+    for (const x of fields) if (stagedValues.has(x.key)) loaded.set(x.key, stagedValues.get(x.key) as number);
     validate("Constraints", () => {
       const errs = BS().validateDesignRules(values(), currentUnits());
-      if (!errs.length) return null;
-      const x = fields.find((f) => f.key === errs[0].setting);
-      return { msg: errs[0].message, ctrl: x ? x.f.input : null };
+      if (errs.length) { const x = fields.find((f) => f.key === errs[0].setting); return { msg: errs[0].message, ctrl: x ? x.f.input : null }; }
+      for (const x of fields) if (stagedValues.has(x.key)) { const v = x.f.get() as number; if (v !== loaded.get(x.key)) { stagedValues.set(x.key, v); loaded.set(x.key, v); } }
+      return null;
     });
   };
 
@@ -785,7 +843,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       if (pcb && pcb.state) { pcb.state.sel = new Set(ids); ctx.requestRender(); }
       say([{ severity: "info", text: `Rule '${name}': ${ids.length} matching item(s).` }]);
     };
-    rulesEd = rulesEditor(druText, { ro, onShowMatching: showMatching });
+    rulesEd = rulesEditor(ruleDoc.getText(), { ro, onShowMatching: showMatching });
     if (dru) setTimeout(check, 0);     // OnCompile once the file is loaded
     const help = h("a", { href: "#", "data-k": "syntax-help", title: "Show syntax help window" }, "Syntax help");
     help.addEventListener("click", (ev) => {
@@ -841,45 +899,124 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       E.highlightIds = ids.length ? new Set(ids) : null; ctx.requestRender();
       return ids.length;
     } });
+  // ------------------------------------------------------------ the constraint family pages (PANEL_SETUP_CONSTRAINT_RULES)
+  const rulePages = new Map<string, RulePage>();
+  const showSetupPage = (title: string): void => { if (book && title) book.show(title); };
+  const netclassList = (): NetclassLike[] => arr(net.classes).map((c) => ({ ...obj(c), name: String(obj(c).name ?? "") }));
+  const syntaxHelp = (): void => {
+    const md = keysInText(RULES_HELP_MD);
+    if (typeof KDialogs !== "undefined" && KDialogs) KDialogs.open({ title: "Syntax Help", width: 760, modeless: true, child: true, buttons: [], build(body: HTMLElement) { const d = h("div", { class: "kd-help", "data-k": "rules-help", style: "max-height:70vh;overflow:auto;font-size:12px;line-height:1.35" }); d.innerHTML = markdownToHtml(md); body.append(d); } });
+  };
+  /** SetChangeCallback: every page showing rules reads the document again */
+  const rulesChanged = (): void => { for (const [title, p] of rulePages) if (book && book.built(title)) p.refreshFromDocument(); };
+  const rulePage = (section: Section) => (el: HTMLElement): void => {
+    const doc = E.kdoc as KDoc | null;
+    const p = constraintRulesPage({ doc: ruleDoc, staged, ro: !canWriteProject(), noProject: !proText,
+      netclasses: netclassList, showPage: showSetupPage, changed: rulesChanged,
+      setError: (msg, ctrl) => { bar.show(msg, 10000, "warning"); if (ctrl) focusError(ctrl); },
+      showMatches: (text, name) => {
+        const tl = druTools(), full = "(version 1)\n" + text;
+        if (!druParses(full) || !tl.ruleMatchingItems || !doc) return -1;
+        const ids = tl.ruleMatchingItems(doc, tl.designSettings ? tl.designSettings(E.proSettings || null) : {}, full, name);
+        if (!ids) return -1;
+        // FocusOnItems: the matching items are selected on the board
+        const pcb = (CollabTools as unknown as { pcb?: { state?: { sel?: Set<string> } } }).pcb;
+        if (pcb && pcb.state) { pcb.state.sel = new Set(ids); ctx.requestRender(); }
+        return ids.length;
+      },
+      checkSyntax: (text) => ruleErrors("(version 1)\n" + text, (t) => (druTools().parseDru ? (druTools().parseDru as (t: string) => { errors: string[]; messages?: RuleMessage[] })(t) : null)).map((e) => e.message + (e.rest || "")),
+      syntaxHelp,
+      enabledLayers: () => layerRows.filter((r) => r.enabled).map((r) => r.name),
+      layerName: (l) => { const tl = druTools(); return doc && tl.boardLayerName ? tl.boardLayerName(doc, l) : l; },
+      netNames: () => { const d = doc as (KDoc & { nets?: Map<number, string> }) | null; const out = new Set<string>(); if (d && d.nets) for (const v of d.nets.values()) if (v) out.add(String(v)); return [...out].sort(); },
+      areaNames: () => { const out: string[] = []; if (doc) for (const it of doc.items.values()) if (it.kind === "zone") { const n = (it.node as SNode).find((x) => Array.isArray(x) && x[0] === "name") as SNode | undefined; if (n && n[1]) out.push(String(n[1])); } return [...new Set(out)].sort(); },
+    }, section);
+    rulePages.set(section.title, p);
+    p.build(el);
+    validate(section.title, () => p.applyDefaults());
+  };
+  /** OVERRIDING_RULES_POPUP's rows for a Constraints page field: the rules setting it, the net class values, its page */
+  const overridePopupRows = (setting: string): PopupRow[] => {
+    const rows: PopupRow[] = [], code = rulesCanOverride(setting);
+    if (code) {
+      const idx = ruleDoc.indicesSetting(code);
+      if (idx.length) {
+        rows.push({ heading: setting === "min_clearance" ? "User clearance rules" : "Overridden by user rules" });
+        for (const i of idx) {
+          const r = ruleDoc.entries[i], home = dreType(r.type).panel === "custom" ? homePanel(code) : r.type;
+          rows.push({ name: r.name, detail: ruleScopeText(constraintText(r, home, fmtLenU), entryCondition(r), entryLayer(r)),
+            open: () => { const t = pageTitleFor(home); showSetupPage(t); const rp = rulePages.get(t); if (rp) rp.showRule(home, i); } });
+        }
+      }
+    }
+    const nc = netclassValuesFor(setting, netclassList());
+    if (nc.length) { rows.push({ heading: "Net class values" }); for (const [v, names] of nc) rows.push({ name: names.join(", "), detail: fmtLenU(v), open: () => showSetupPage("Net Classes") }); }
+    const page = pageEditingDefault(setting);
+    if (page) rows.push({ link: `Edit on the ${page} page`, open: () => showSetupPage(page) });
+    return rows;
+  };
   const groups: TreeGroup[] = [
-    { label: "Board Stackup", pages: [{ label: "Board Editor Layers", build: layersPage }, { label: "Physical Stackup", build: stackupPage }, { label: "Board Finish", build: finishPage }, { label: "Solder Mask/Paste", build: maskPage }, { label: "Drill Chart", build: (el) => drillChartPage(sctx())(el) }] },
+    { label: "Board Stackup", pages: [{ label: "Board Editor Layers", build: layersPage }, { label: "Physical Stackup", build: stackupPage }, { label: "Board Finish", build: finishPage }, { label: "Drill Chart", build: (el) => drillChartPage(sctx())(el) }] },
     { label: "Text & Graphics", pages: [{ label: "Defaults", build: defaultsPage }, { label: "Formatting", build: formattingPage }, { label: "Text Variables", build: variablesPage }] },
-    { label: "Design Rules", pages: [{ label: "Constraints", build: constraintsPage }, { label: "Pre-defined Sizes", build: sizesPage }, { label: "Microvia Stacks", build: (el) => viaStacksPage(sctx())(el) }, { label: "Zones", build: (el) => zonesPage(sctx())(el) },
+    { label: "Design Rules", pages: [{ label: "Constraints", build: constraintsPage },
+      // the constraint family nodes (a family shows its first page); Solder Mask/Paste heads Mask and Paste
+      ...FAMILIES.map(([f, label]) => ({ label, build: () => undefined, sub: [...(f === "SOLDER_MASK" ? [{ label: "Solder Mask/Paste", build: maskPage }] : []), ...sectionsFor(f).map((s) => ({ label: s.title, build: rulePage(s) }))] })),
+      { label: "Pre-defined Sizes", build: sizesPage }, { label: "Microvia Stacks", build: (el) => viaStacksPage(sctx())(el) }, { label: "Zones", build: (el) => zonesPage(sctx())(el) },
       { label: "Teardrops", build: teardropsPage }, { label: "Length-tuning Patterns", build: (el) => tuningPatternsPage(sctx())(el) }, { label: "Tuning Profiles", build: (el) => tuningProfilesPage(sctx())(el) },
       { label: "Net Classes", build: netClassesPage }, { label: "Component Classes", build: (el) => componentClassesPage(sctx())(el) }, { label: "Custom Rules", build: rulesPage }, { label: "Violation Severity", build: severityPage }] },
     { label: "Board Data", pages: [{ label: "Embedded Files", build: (el) => embeddedFilesPage(sctx())(el) }] }];
-  const order = groups.flatMap((g) => g.pages.map((p) => p.label));
+  const order = groups.flatMap((g) => g.pages.flatMap((p) => (p.sub ? p.sub.map((x) => x.label) : [p.label])));
 
   let dlg: ReturnType<typeof openDialog> = null;
   /** DIALOG_BOARD_SETUP::canDiscardChanges */
-  const rulesModified = (): boolean => (rulesEd ? rulesEd.get() : druText) !== rules0;
+  const syncCustomRules = (): void => { if (rulesEd && book && book.current() === "Custom Rules") ruleDoc.setText(rulesEd.get()); };
+  const rulesModified = (): boolean => { syncCustomRules(); return ruleDoc.modified; };
   const importSettings = (): void => importSettingsDialog(async (sel, src) => {
     // the other board's project file, header and rules stand in for this board's on the chosen pages, which are rebuilt
-    const map: Record<string, string[]> = { layers: ["Board Editor Layers", "Physical Stackup", "Board Finish"], mask: ["Solder Mask/Paste"], textDefaults: ["Defaults"], formatting: ["Formatting"], constraints: ["Constraints"], sizes: ["Pre-defined Sizes", "Microvia Stacks"],
-      zones: ["Zones"], teardrops: ["Teardrops"], tuning: ["Length-tuning Patterns"], netclasses: ["Net Classes"], componentClasses: ["Component Classes"], tuningProfiles: ["Tuning Profiles"], rules: ["Custom Rules"], severities: ["Violation Severity"] };
+    // a rule page goes with the group its board defaults belong to, and with the rules
+    const groupPages = (g: string): string[] => allSections().filter((s) => s.defaults.length && importGroup(s) === g).map((s) => s.title);
+    const map: Record<string, string[]> = { layers: ["Board Editor Layers", "Physical Stackup", "Board Finish"], mask: ["Solder Mask/Paste", ...groupPages("Solder Mask/Paste")], textDefaults: ["Defaults"], formatting: ["Formatting"], constraints: ["Constraints", ...groupPages("Constraints")], sizes: ["Pre-defined Sizes", "Microvia Stacks"],
+      zones: ["Zones"], teardrops: ["Teardrops"], tuning: ["Length-tuning Patterns"], netclasses: ["Net Classes"], componentClasses: ["Component Classes"], tuningProfiles: ["Tuning Profiles"], rules: ["Custom Rules", ...allSections().map((s) => s.title)], severities: ["Violation Severity"] };
     if (src.pro) { pro = obj(toPlain(parseProject(src.pro))); ds = obj(obj(pro.board).design_settings); rules = obj(ds.rules); defaults = obj(ds.defaults); net = obj(pro.net_settings); }
     if (sel.includes("layers") && src.header) { header = { ...(header || src.header), layers: src.header.layers, setup: src.header.setup, general: src.header.general }; layerRows = BS().layerRows(header.layers); layersTouched = true; setupEdit.copper = layerRows.filter((r) => r.copper).map((r) => r.name); }
-    if (sel.includes("rules") && src.rules !== null) druText = src.rules;
-    const labels = sel.flatMap((k) => map[k] || []);
+    if (sel.includes("constraints")) loadStagedRules();
+    if (sel.includes("mask") && src.header) loadStagedMask(src.header.setup);
+    if (sel.includes("rules")) ruleDoc.loadFrom(src.rules);
+    const labels = [...new Set(sel.flatMap((k) => map[k] || []))];
     if (book) for (const l of labels) book.rebuild(l);
   });
   dlg = openDialog({ title: "Board Setup", width: 980, height: 620, readOnly: !canPro && !canBoard,
     extra: [{ label: "Import Settings from Another Board...", fn: importSettings }],
     build(body) {
-      book = treeBook(groups, startPage || lastPage, { canLeave: (from) => {
+      book = treeBook(groups, startPage || lastPage, { canLeave: (from, to) => {
         // onPageChanging: the page being left must validate (the custom rules are written only on OK, so Cancel can still drop them)
-        if (from === "Custom Rules") return true;
-        const v = validators.get(from); const e = v ? v() : null; if (e) { setError(from, e); return false; } return true; } });
+        if (from === "Custom Rules") { if (rulesEd) ruleDoc.setText(rulesEd.get()); return true; }
+        const v = validators.get(from); const e = v ? v() : null; if (e) { setError(from, e); return false; }
+        // PANEL_SETUP_CONSTRAINT_RULES::ConfirmPendingRule: a rule left in the form is added, applied or dropped first
+        const rp = rulePages.get(from);
+        if (rp && rp.hasPendingRule()) { rp.confirmPendingRule((ok) => { if (ok && book) book.show(to, true); }); return false; }
+        return true; },
+      onShow: (label) => {
+        // every page refreshes the shared defaults and the rule document when it comes up
+        const rp = rulePages.get(label);
+        if (rp) { rp.refreshDefaults(); rp.refreshFromDocument(); }
+        if (label === "Constraints" && refreshConstraints) refreshConstraints();
+        if (label === "Solder Mask/Paste" && refreshMask) refreshMask();
+        if (label === "Board Finish" && refreshFinishPreview) refreshFinishPreview();
+        if (label === "Custom Rules" && rulesEd && rulesEd.get() !== ruleDoc.getText()) rulesEd.set(ruleDoc.getText());
+      } });
       body.append(bar.el, book.el);
       body.addEventListener("click", () => { if (book) lastPage = book.current(); });
       if (!proText || !canWriteProject()) bar.show("Project is missing or read-only. Some settings will not be editable.", 0, "warning");
     },
     cancel() {
       if (!rulesModified()) return true;
-      messageBox("Confirmation", "Discard changes to custom rules?", [{ label: "Cancel" }, { label: "Discard Changes", fn: () => { rulesEd = null; druText = rules0; if (dlg) dlg.close(); } }], 0);
+      messageBox("Confirmation", "Discard changes to custom rules?", [{ label: "Cancel" }, { label: "Discard Changes", fn: () => { rulesEd = null; ruleDoc.load(druText); if (dlg) dlg.close(); } }], 0);
       return false;
     },
     ok() {
+      const pending = book ? rulePages.get(book.current()) : undefined;
+      if (pending && pending.hasPendingRule()) { pending.confirmPendingRule((ok) => { if (ok && dlg && dlg.okButton) dlg.okButton.click(); }); return false; }
       for (const label of order) { if (!book || !book.built(label)) continue; const v = validators.get(label); const e = v ? v() : null; if (e) { setError(label, e); return false; } }
       if (!removedLayersCheck()) return false;
       return finishOk();
@@ -937,16 +1074,25 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
         if (layersTouched) { const text = BS().layersText(layerRows); if (text !== layers0) sections.layers = text; }
         if (drillEdit) setupEdit.drillProfile = drillEdit;
         if (zoneDefaultsEdit !== undefined) setupEdit.zoneDefaults = zoneDefaultsEdit;
+        {
+          // the staged mask and paste values, with the two only Solder Mask/Paste edits; the tenting flags are not on
+          // that page in KiCad 10 (they moved to the padstack), so the file's values stay
+          const m = BS().maskPaste(header.setup), sv = (k: string): number => stagedValues.get(k) ?? 0;
+          const now = { maskExpansion: sv("solder_mask_expansion"), maskMinWidth: sv("solder_mask_min_width"), pasteClearance: sv("solder_paste_margin"),
+            pasteRatio: maskExtra ? maskExtra.pasteRatio : m.pasteRatio, allowBridges: maskExtra ? maskExtra.allowBridges : m.allowBridges, tentFront: m.tentFront, tentBack: m.tentBack };
+          if ((Object.keys(now) as (keyof typeof now)[]).some((k) => now[k] !== m[k])) setupEdit.maskPaste = now;
+        }
         if (setupEdit.maskPaste || setupEdit.finish || setupEdit.vias || setupEdit.dash || setupEdit.copper || setupEdit.drillProfile || setupEdit.stackup || setupEdit.zoneDefaults !== undefined) sections.setup = BS().sectionText(BS().editSetup(header.setup, setupEdit));
         if (setupEdit.stackup && header.general && setupEdit.boardThickness) {
           const g = BS().sectionText(header.general).replace(/\(thickness [^)]*\)/, `(thickness ${+setupEdit.boardThickness.toFixed(6)})`);
           if (g !== BS().sectionText(header.general)) sections.general = g;
         }
       }
-      const rulesNow = rulesEd ? rulesEd.get() : druText;     // imported rules count even when the page was never shown
-      const rulesText = canWriteProject() && rulesNow !== rules0 ? rulesNow : null;
+      // the rule document, once, when any page changed it (imported rules count even when no page was shown)
+      syncCustomRules();
+      const rulesText = canWriteProject() && ruleDoc.modified ? ruleDoc.getText() : null;
       void save(ctx, proText, edits, sections, dru ? dru.docId : null, rulesText);
-      rules0 = rulesText === null ? rules0 : rulesText;
+      if (rulesText !== null) ruleDoc.modified = false;
       return true;
   }
 }

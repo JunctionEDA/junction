@@ -145,7 +145,9 @@ export interface SchDrag {
 /** S.wire: the wire / bus / line being drawn. */
 export interface SchWire { kind: string; segs: Pt[][]; cur: Pt; quitOnDraw: boolean; stroke: SNode | null }
 /** S.carry: an item riding on the cursor until a click places it. */
-export interface SchCarry { kind: string; node: SNode; item: KItem | null; pos: Pt | null; size?: Pt }
+export interface SchCarry { kind: string; node: SNode; item: KItem | null; pos: Pt | null; size?: Pt;
+  /** a global / hierarchical label's auto-rotation as its Properties dialog set it while it rode the cursor (else the remembered one) */
+  autoRotate?: boolean }
 /** S.draw: a graphic shape being drawn (pts are the fixed clicks, cur the cursor); await while a dialog is up. */
 export interface SchDraw {
   shape: string; pts: Pt[]; cur: Pt; await?: boolean;

@@ -637,18 +637,132 @@ export function clearAnnotation(ctx: SchCtx, opts?: { only?: Set<string> | null 
 }
 export function editFieldPrompt(ctx: SchCtx, name: string, title: string, quiet: boolean) {
   if (!editable(ctx)) return false;
-  const it = selectedItems(ctx).find((x) => x.kind === "symbol"); if (!it) return false;
+  // PlaceSymbol passes editReference / editValue / editFootprint on to SCH_EDIT_TOOL for the symbol on the cursor
+  // (evt->SetPassEvent): the field dialog edits it in place (GetEditFlags() != 0: nothing is staged or committed)
+  const cr = carried(ctx);
+  if (cr && cr.item.kind !== "symbol") return false;
+  const it = cr ? cr.item : selectedItems(ctx).find((x) => x.kind === "symbol"); if (!it) return false;
   const p = kids(it.node, "property").find((q) => str(q[1]) === name); const cur = p ? str(p[2]) : "";
   // SCH_EDIT_TOOL::editFieldText: DIALOG_FIELD_PROPERTIES ("Edit Reference Designator Field", …)
-  if (p && root.KDialogs && root.KDialogs.schFieldDialog && root.KDialogs.schFieldDialog(ctx, it, name)) return true;
+  if (p && root.KDialogs && root.KDialogs.schFieldDialog && root.KDialogs.schFieldDialog(ctx, it, name, cr ? { carried: (n: SNode) => cr.write(n) } : undefined)) return true;
   promptImpl(title, cur, S.cursorClient, (text) => {
     if (text === null || text === undefined || text === cur) return;
     const node = deep(it.node);
     if (name === "Reference") setReference(node, text);
     else { let q = kids(node, "property").find((z) => str(z[1]) === name); if (!q) { q = ["property" as SAtom, name, "", ["at", ...atOf(node).slice(0, 2), 0], ["hide", "yes"], ["effects", fontNode(1.27)]]; insertField(node, q); } q[2] = text; }
+    if (cr) { if (S.carry && uuidOf(S.carry.node) === it.id) cr.write(node); return; }
     ctx.commit([modChange(ctx.doc, it, node)], name.toLowerCase());
   });
   return true;
+}
+/**
+ * SCH_EDIT_TOOL::Properties on the item being placed: PlaceSymbol passes SCH_ACTIONS::properties on for the symbol on
+ * the cursor and TwoClickPlace for the label or text (evt->SetPassEvent, then ACTIONS::refreshPreview).  The item's
+ * dialog edits the carried copy (its edit flags are set, so DIALOG_SYMBOL_PROPERTIES / DIALOG_LABEL_PROPERTIES stage
+ * nothing) and the placement goes on with what it wrote.  True when the carry took the request.
+ */
+export const CARRIED_PROPERTY_KINDS = new Set(["symbol", "label", "global_label", "hierarchical_label", "netclass_flag", "directive_label", "text"]);
+export function carriedProperties(ctx: SchCtx): boolean {
+  const cr = carried(ctx); if (!cr) return false;
+  if (!CARRIED_PROPERTY_KINDS.has(cr.item.kind)) return false;
+  const dlg = root.KDialogs && root.KDialogs.schItemDialog;
+  const id = cr.item.id;
+  if (dlg) dlg(ctx, cr.item, { carried: (n: SNode) => { if (S.carry && uuidOf(S.carry.node) === id) { if (!uuidOf(n)) n.push(["uuid", id]); cr.write(n); } } });
+  return true;
+}
+/** LIB_SYMBOL::HasDeMorganBodyStyles / GetBodyStyleCount / GetBodyStyleNames of a library symbol. */
+export function libBodyStyles(lib: SNode | null): { demorgan: boolean; count: number; names: string[] } {
+  if (!lib) return { demorgan: false, count: 1, names: [] };
+  const bs = kid(lib, "body_styles");
+  if (bs) {
+    const words = bs.slice(1).filter((v) => !Array.isArray(v)).map((v) => str(v as SAtom));
+    if (words.includes("demorgan")) return { demorgan: true, count: 2, names: [] };
+    return { demorgan: false, count: Math.max(1, words.length), names: words };
+  }
+  // a library without (body_styles): its "Name_U_2" sub-symbols are De Morgan's alternate (m_demorgan)
+  let n = 1; for (const s of kids(lib, "symbol")) { const m = /_(\d+)_(\d+)$/.exec(str(s[1])); if (m) n = Math.max(n, +m[2]); }
+  return n > 1 ? { demorgan: true, count: 2, names: [] } : { demorgan: false, count: 1, names: [] };
+}
+/** SCH_SYMBOL::GetBodyStyleDescription( style, true ). */
+export function bodyStyleLabel(lib: SNode | null, style: number): string {
+  const b = libBodyStyles(lib);
+  if (b.demorgan) return style === 2 ? "Alternate" : style === 1 ? "Standard" : "?";
+  return b.count > 1 && style >= 1 && style <= b.names.length ? b.names[style - 1] : "?";
+}
+/** LIB_SYMBOL::GetUnitDisplayName( unit, false ): the (unit_name …) of the unit, else its letter. */
+export function unitLabel(lib: SNode | null, unit: number): string {
+  const name = K.unitDisplayNames(lib).get(unit);
+  return name !== undefined ? name : K.letterSubReference(unit, 65);
+}
+/** The one symbol SYMBOL_UNIT_MENU and BODY_STYLE_MENU act on (selection.Front()): the symbol on the cursor, which is the selection while it is placed, else the one selected symbol. */
+function menuSymbol(ctx: SchCtx): { item: KItem; write: ((n: SNode) => void) | null } | null {
+  const cr = carried(ctx);
+  if (cr) return cr.item.kind === "symbol" ? { item: cr.item, write: (n: SNode) => cr.write(n) } : null;
+  const sel = selectedItems(ctx); return sel.length === 1 && sel[0].kind === "symbol" ? { item: sel[0], write: null } : null;
+}
+const libOfSymbol = (doc: KDoc, node: SNode): SNode | null => (K.resolveLib(doc, symbolLibId(node)) as SNode | null) || null;
+/** SCH_CONDITIONS::SingleMultiUnitSymbol / SingleMultiBodyStyleSymbol for the menu's symbol (the caller checks the selection holds it alone). */
+export function symbolMenuConditions(ctx: SchCtx): { multiUnit: boolean; multiBodyStyle: boolean } {
+  const s = menuSymbol(ctx); if (!s) return { multiUnit: false, multiBodyStyle: false };
+  const lib = libOfSymbol(ctx.doc, s.item.node); if (!lib) return { multiUnit: false, multiBodyStyle: false };
+  return { multiUnit: libUnits(ctx.doc, s.item.node).units >= 2, multiBodyStyle: libBodyStyles(lib).count > 1 };
+}
+/** One row of SYMBOL_UNIT_MENU / BODY_STYLE_MENU: a unit or body style check item, a separator, or a Place unit entry. */
+export interface SymbolMenuRow { sep?: boolean; label?: string; checked?: boolean; unit?: number; place?: number; bodyStyle?: number }
+/**
+ * SYMBOL_UNIT_MENU::update: every unit of the package as a check item (the symbol's unit ticked), " (already placed)"
+ * after the units some symbol of the reference holds (GetUnplacedUnitsForSymbol), then "Place unit %s" for each unit
+ * nobody holds.
+ */
+export function symbolUnitMenu(ctx: SchCtx): SymbolMenuRow[] {
+  const s = menuSymbol(ctx); if (!s) return [];
+  const lib = libOfSymbol(ctx.doc, s.item.node), n = libUnits(ctx.doc, s.item.node).units;
+  const unit = unitOn(s.item.node, sheetOf(ctx.doc).path), missing = new Set(unplacedUnits(ctx.doc, s.item));
+  const out: SymbolMenuRow[] = [];
+  for (let ii = 0; ii < n && ii <= 676; ii++) out.push({ label: unitLabel(lib, ii + 1) + (missing.has(ii + 1) ? "" : " (already placed)"), checked: unit === ii + 1, unit: ii + 1 });
+  if (missing.size) { out.push({ sep: true }); for (const u of [...missing].sort((a, b) => a - b)) out.push({ label: `Place unit ${unitLabel(lib, u)}`, place: u }); }
+  return out;
+}
+/** BODY_STYLE_MENU::update: Standard / Alternate for De Morgan body styles, else the library's names, the symbol's ticked. */
+export function bodyStyleMenu(ctx: SchCtx): SymbolMenuRow[] {
+  const s = menuSymbol(ctx); if (!s) return [];
+  const lib = libOfSymbol(ctx.doc, s.item.node), b = libBodyStyles(lib), bsN = kid(s.item.node, "body_style") || kid(s.item.node, "convert"), cur = bsN ? num(bsN[1], 1) : 1;
+  if (b.demorgan) return [{ label: "Standard", checked: cur === 1, bodyStyle: 1 }, { label: "Alternate", checked: cur !== 1, bodyStyle: 2 }];
+  if (b.count > 1) { const out: SymbolMenuRow[] = []; for (let i = 0; i < b.count; i++) out.push({ label: bodyStyleLabel(lib, i + 1), checked: cur === i + 1, bodyStyle: i + 1 }); return out; }
+  return [];
+}
+/**
+ * A choice from SYMBOL_UNIT_MENU (TA_CHOICE_MENU_CHOICE, ID_POPUP_SCH_SELECT_UNIT…): SCH_EDIT_FRAME::SelectUnit on the
+ * selected symbol, or (PlaceSymbol's loop) on the symbol being placed, then refreshPreview.  The carried symbol is not
+ * staged (it has edit flags): only a swapped holder is committed, and its fields are autoplaced only then.
+ */
+export function chooseSymbolUnit(ctx: SchCtx, unit: number): boolean {
+  if (!editable(ctx)) return false;
+  const s = menuSymbol(ctx); if (!s) return false;
+  const count = libUnits(ctx.doc, s.item.node).units, sheet = sheetOf(ctx.doc), cur = unitOn(s.item.node, sheet.path);
+  if (count <= 1 || cur === unit) return true;
+  const hook = root.CollabEditor && root.CollabEditor.selectUnit;
+  if (hook) return hook(ctx, s.item, unit, s.write || undefined);
+  const node = deep(s.item.node); setInstanceOn(node, sheet, null, Math.min(unit, count));
+  if (s.write) { s.write(node); return true; }
+  ctx.commit([modChange(ctx.doc, s.item, node)], "Change Unit"); return true;
+}
+/** ID_POPUP_SCH_PLACE_UNIT…: SCH_SELECTION_TOOL runs placeNextSymbolUnit for that unit; PlaceSymbol's loop ignores it. */
+export function placeSymbolUnit(ctx: SchCtx, unit: number): boolean {
+  if (carried(ctx)) return true;
+  return placeNextUnit(ctx, { unit });
+}
+/** A choice from BODY_STYLE_MENU: SCH_EDIT_FRAME::SelectBodyStyle (no change for the style it has, "Change Body Style"; the symbol being placed is edited in place). */
+export function chooseBodyStyle(ctx: SchCtx, style: number): boolean {
+  if (!editable(ctx)) return false;
+  const s = menuSymbol(ctx); if (!s) return false;
+  const lib = libOfSymbol(ctx.doc, s.item.node); if (!lib) return false;
+  const count = libBodyStyles(lib).count, bsN = kid(s.item.node, "body_style") || kid(s.item.node, "convert"), cur = bsN ? num(bsN[1], 1) : 1;
+  if (count <= 1 || cur === style) return true;
+  const node = deep(s.item.node), k = kid(node, "body_style") ? "body_style" : kid(node, "convert") ? "convert" : "body_style";
+  replaceKid(node, [k, Math.min(style, count)]);
+  if (s.write) { s.write(node); return true; }
+  ctx.commit([modChange(ctx.doc, s.item, node)], "Change Body Style"); return true;
 }
 export function insertField(node: SNode, p: SNode) { const at = node.findIndex((c) => Array.isArray(c) && (c[0] === "pin" || c[0] === "instances")); if (at >= 0) node.splice(at, 0, p); else node.push(p); }
 /** The variant flag (SCH_SYMBOL_VARIANT) each attribute token sets. */

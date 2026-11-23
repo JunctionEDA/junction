@@ -3,7 +3,7 @@ import type { BoardDoc, CopperShape, DesignSettings, DrawState, GeomPrim, PcbCtx
 import { appGlobal, editorState, netlistCached, netNameOf, sizesOf } from "./app-state";
 import { drawArcPreview } from "./arcs";
 import { gePreviewShapes } from "./graphic-edit";
-import { dimensionLabel, drawStatusPopup, drawTwoPointAssistant, textNextToCursor, AUX_ITEMS_COLOR, drawPickerPrompt } from "./assistants";
+import { dimensionLabel, drawStatusPopup, drawTwoPointAssistant, textNextToCursor, auxItemsColor, drawPickerPrompt } from "./assistants";
 import { DIM_TYPE, dimensionNode, snap45 } from "./dimensions";
 import type { DimSpec } from "./dimensions";
 import { padShape, polysOverlap, rectCore, shapeOffset } from "./distances";
@@ -16,6 +16,7 @@ import { netTable, ratsnest, ratsnestLineVisible } from "./netlist";
 import { netOf } from "./nets";
 import { tableGrid } from "./nodes";
 import { drawEditPoints } from "./point-editor";
+import { drawBlock } from "./block-drag";
 import { ellipseArcGeom } from "./draw-tools";
 import { ellipseFromBox, ellipseOutline, ellipsePointAt } from "./ellipse";
 import { subGridOutline } from "./board-items";
@@ -26,14 +27,16 @@ import { PAD_TOOLS, masterPad } from "./pad-tool";
 import { drawDragPreview, drawRoute, previewColor } from "./route-preview";
 import { drawSpreadPreview } from "./spread";
 import { drawViaStackPreview } from "./via-stack";
-import { ANCHOR, CLEARANCE_MODE, HALO_COLOR, HL, K, RATSNEST, S, VIA, bind } from "./state";
+import { CLEARANCE_MODE, HALO_COLOR, HL, K, S, VIA, anchorColor, bind, ratsnestColor, themeColor } from "./state";
+import { drawMicrowavePreview } from "./microwave";
 import { drawTune } from "./tuning-patterns";
 import { drawGenEditPreview, drawTuningSelection } from "./tuning-edit";
 import { isTuneTool } from "./tuning-tool";
 import { color, pt, samePt, vadd, vsub } from "./util";
 
 // ---------------------------------------------------------------- overlay
-export const CONFLICTS_SHADOW = "rgba(255, 0, 5, 0.5)";   // LAYER_CONFLICTS_SHADOW (builtin_color_themes.h)
+/** LAYER_CONFLICTS_SHADOW of the live board theme (KiCad Default rgba(255, 0, 5, 0.5)). */
+export function conflictsShadowColor(): string { return themeColor("conflicts_shadow", "rgba(255, 0, 5, 0.5)"); }
 /**
  * DRC_INTERACTIVE_COURTYARD_CLEARANCE while footprints move (EDIT_TOOL::doMoveSelection, m_ShowCourtyardCollisions):
  * the moving footprints' courtyards against every other footprint's, front against front and back against back.
@@ -59,7 +62,8 @@ export function courtyardConflicts(doc: BoardDoc, moving: Set<string>): Map<stri
 /** ADVANCED_CFG m_HoleWallThickness (BOARD_DESIGN_SETTINGS::GetHolePlatingThickness), mm. */
 export const HOLE_PLATING_THICKNESS = 0.02;
 /** LAYER_NON_PLATEDHOLES (builtin_color_themes.h). */
-const NPTH_COLOR = "#1AC4D2";
+/** LAYER_NON_PLATEDHOLES of the live board theme (KiCad Default #1AC4D2). */
+const npthColor = (): string => themeColor("plated_hole", "#1AC4D2");
 /** One clearance outline: a track's capsule or arc band, a via's or round pad's circle, a pad's grown outline. */
 export type ClearanceShape =
   { t: "capsule"; a: Pt; b: Pt; r: number } | { t: "arcband"; x: number; y: number; r: number; a0: number; a1: number; anticlockwise: boolean; w: number }
@@ -153,7 +157,7 @@ export function drawClearanceOutlines(c: CanvasRenderingContext2D, ctx: PcbCtx, 
   const outsideOp = !entered ? 1 : ro && typeof ro.outsideGroupOpacity === "number" ? ro.outsideGroupOpacity : ro && ro.objects && ro.objects.opacity && typeof ro.objects.opacity.outsideGroup === "number" ? ro.objects.opacity.outsideGroup : 1;
   for (const o of list) {
     c.globalAlpha = entered && !entered.has(o.id) && !sel.has(o.id) ? outsideOp : 1;
-    let col = o.npth ? NPTH_COLOR : base;
+    let col = o.npth ? npthColor() : base;
     const lit = !!hl && (hl.has(o.id) || (o.padIndex !== undefined && hl.has(o.id + "#" + o.padIndex)));
     // a selected item is never highlight-brightened or darkened (PCB_RENDER_SETTINGS::GetColor)
     if (sel.has(o.id)) col = KC.selectedColor(col);
@@ -177,7 +181,7 @@ export function traceClearance(c: { moveTo(x: number, y: number): void; lineTo(x
 export const ROUTER_TOOLS = new Set(["route", "routediff", "tunesingle", "tunediff", "tuneskew", "drag"]);
 /** PCB_CONTROL's grid origin marker colour: the grid colour Brightened( 0.25 ), Darkened on a light background. */
 export function gridOriginColor() {
-  const gc = appGlobal(() => { const ro = (editorState() as unknown as { renderOpts: { gridColor?: string; objectColors?: Record<string, string> | null } }).renderOpts; return ro.gridColor || (ro.objectColors && ro.objectColors.grid); }, null) || "#848484";   // LAYER_GRID
+  const gc = appGlobal(() => { const ro = (editorState() as unknown as { renderOpts: { gridColor?: string; objectColors?: Record<string, string> | null } }).renderOpts; return ro.gridColor || (ro.objectColors && ro.objectColors.grid); }, null) || themeColor("grid", "#848484");   // LAYER_GRID of the live theme
   return adjustColor(gc, 0.25, alphaOf(gc), brightness(K.PCB_BG) >= 0.5);
 }
 /** A css colour's channels 0..255 and alpha 0..1. */
@@ -339,7 +343,7 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
     if (S.drag) for (const d of S.drag.subs) if (d.netKey) hlNets.add(d.netKey);
     const dimStatic = moving.size > 0 || hlNets.size > 0;
     const lightBg = brightness(K.PCB_BG) >= 0.5;
-    const baseOf = (net: string) => (S.ratsnestColors && S.ratsnestColors.get(net)) || S.ratsnestBase || RATSNEST;
+    const baseOf = (net: string) => (S.ratsnestColors && S.ratsnestColors.get(net)) || S.ratsnestBase || ratsnestColor();
     const byColor = new Map<string, RatsnestLine[]>();
     for (const l of lines) {
       if (S.hiddenNets.has(l.net)) continue; if (visCu && !visCu(l)) continue; if (sel && !l.ids.some((id: string) => sel.has(id))) continue; if (moving.size && l.ids.some((id: string) => moving.has(id))) continue;
@@ -372,7 +376,7 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
   if (S.move && S.move.moved && S.showCourtyardCollisions !== false && S.showCourtyardConflicts !== false) {
     const m = S.move, key = m.last[0] + "," + m.last[1] + (m.xformed ? "x" : "");
     if (!m.conflicts || m.conflicts.key !== key) m.conflicts = { key, fps: courtyardConflicts(doc, new Set(m.ids)) };
-    if (m.conflicts.fps.size) { c.globalAlpha = 1; c.fillStyle = CONFLICTS_SHADOW; c.beginPath(); for (const polys of m.conflicts.fps.values()) for (const P of polys) { c.moveTo(P[0][0], P[0][1]); for (let i = 1; i < P.length; i++) c.lineTo(P[i][0], P[i][1]); c.closePath(); } c.fill("nonzero"); }
+    if (m.conflicts.fps.size) { c.globalAlpha = 1; c.fillStyle = conflictsShadowColor(); c.beginPath(); for (const polys of m.conflicts.fps.values()) for (const P of polys) { c.moveTo(P[0][0], P[0][1]); for (let i = 1; i < P.length; i++) c.lineTo(P[i][0], P[i][1]); c.closePath(); } c.fill("nonzero"); }
   }
   // drag in progress (ROUTER::moveDragging): the rebuilt lines over the hidden originals
   drawDragPreview(c, ctx, view, px);
@@ -392,6 +396,7 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
   drawGenEditPreview(c, ctx);   // a tuning pattern being edited: its re-tuned line over the hidden originals
   if (!S.route && !S.draw && !S.drag && !S.modTool) drawTuningSelection(c, ctx, px);   // PCB_TUNING_PATTERN::ViewDraw while selected
   drawEditPoints(c, ctx, px);   // PCB_POINT_EDITOR's EDIT_POINTS over the selected item
+  drawBlock(c, ctx, px);   // block anchor editing: the multi-selection's handles, the picks, the pick band and the block drag
   // PAD_PLACER: the pad that a click would put down follows the cursor (F.Cu, or the layer it lives on)
   if (S.modTool && PAD_TOOLS[S.modTool] && S.hover) drawPadPreview(c, doc, PAD_TOOLS[S.modTool], [S.hover.x, S.hover.y], S.padPlace ? S.padPlace.angle : 0, px);
   // route in progress: fixed legs are already in the document, the current one lives here
@@ -419,12 +424,12 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
       // angle to the cursor, with ELLIPSE_ASSISTANT's guide lines from the centre to the arc's ends
       const e = ellipseArcGeom(d), arc = d.pts.length >= 2;
       polyline(c, ellipseOutline(e, arc, 128), !arc);
-      if (arc) { c.save(); c.globalAlpha = 1; c.lineWidth = px; c.strokeStyle = AUX_ITEMS_COLOR; c.setLineDash([12 * px, 6 * px]); line(c, [e.cx, e.cy], ellipsePointAt(e, e.start)); if (d.pts.length >= 3) line(c, [e.cx, e.cy], ellipsePointAt(e, e.end)); c.restore(); }
+      if (arc) { c.save(); c.globalAlpha = 1; c.lineWidth = px; c.strokeStyle = auxItemsColor(); c.setLineDash([12 * px, 6 * px]); line(c, [e.cx, e.cy], ellipsePointAt(e, e.start)); if (d.pts.length >= 3) line(c, [e.cx, e.cy], ellipsePointAt(e, e.end)); c.restore(); }
     } else if (d.shape === "garc") drawArcPreview(c, d, px, color(layer)); else if (d.shape === "gcurve") {
       // BEZIER_GEOM_MANAGER's four points for the clicks so far, and BEZIER_ASSISTANT's guides: a dashed line from the
       // start to control 1 and, once the end is set, one of double length through the end (control 2 and its mirror)
       const g = curveGeom(d.pts, d.cur); polyline(c, K.bezierPts([g[0], g[1], g[3], g[2]]), false);
-      c.save(); c.globalAlpha = 1; c.lineWidth = px; c.strokeStyle = AUX_ITEMS_COLOR; c.setLineDash([12 * px, 6 * px]);
+      c.save(); c.globalAlpha = 1; c.lineWidth = px; c.strokeStyle = auxItemsColor(); c.setLineDash([12 * px, 6 * px]);
       line(c, g[0], g[1]);
       if (d.pts.length >= 3) line(c, g[3], [2 * g[2][0] - g[3][0], 2 * g[2][1] - g[3][1]]);
       c.restore();
@@ -467,11 +472,11 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
   const tp = S.pick && S.pick.two && S.pick.from && S.pick.cur ? S.pick : null;
   const seg: [Pt, Pt] | null = tp ? (tp.two!.preview === "ruler" ? [tp.cur!, tp.from!] : [tp.from!, tp.cur!]) : S.pickKeep || null;
   if (seg && !samePt(seg[0], seg[1])) {
-    const [a, b] = seg, w = px * (view.dpr || 1); c.save(); c.globalAlpha = 1; c.strokeStyle = ANCHOR; c.lineWidth = w; c.setLineDash([]); line(c, a, b);
+    const [a, b] = seg, w = px * (view.dpr || 1); c.save(); c.globalAlpha = 1; c.strokeStyle = anchorColor(); c.lineWidth = w; c.setLineDash([]); line(c, a, b);
     if (!tp || tp.two!.preview === "ruler") {
       const v = vsub(b, a), L = Math.hypot(v[0], v[1]), head = 17.5 * w, R = (deg: number): Pt => { const t = deg * Math.PI / 180, cs = Math.cos(t), sn = Math.sin(t); return [(v[0] * cs - v[1] * sn) / L * head, (v[0] * sn + v[1] * cs) / L * head]; };
       for (const d of [30, -30]) { const h = R(d); line(c, b, [b[0] - h[0], b[1] - h[1]]); }   // RULER_ITEM: m_showEndArrowHead, 30 degrees a side
-      if (tp) textNextToCursor(c, a, vsub(b, a), [dimensionLabel("x", v[0]), dimensionLabel("y", v[1]), dimensionLabel("r", L), dimensionLabel("θ", Math.atan2(-v[1], v[0]) * 180 / Math.PI, true)], w, ANCHOR);
+      if (tp) textNextToCursor(c, a, vsub(b, a), [dimensionLabel("x", v[0]), dimensionLabel("y", v[1]), dimensionLabel("r", L), dimensionLabel("θ", Math.atan2(-v[1], v[0]) * 180 / Math.PI, true)], w, anchorColor());
     }
     c.restore();
   }
@@ -490,7 +495,7 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
   // a 16 px cross and circle on its origin once it is longer than 8 px; nothing under 10 nm
   const gl = S.move && S.move.guide;
   if (gl && Math.hypot(gl[1][0] - gl[0][0], gl[1][1] - gl[0][1]) >= 1e-5) {
-    const [a, b] = gl; c.globalAlpha = 1; c.strokeStyle = ANCHOR; c.lineWidth = px;
+    const [a, b] = gl; c.globalAlpha = 1; c.strokeStyle = anchorColor(); c.lineWidth = px;
     c.setLineDash([12 * px, 6 * px]); c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke(); c.setLineDash([]);
     if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 8 * px) {
       c.beginPath(); c.moveTo(a[0] - 8 * px, a[1]); c.lineTo(a[0] + 8 * px, a[1]); c.moveTo(a[0], a[1] - 8 * px); c.lineTo(a[0], a[1] + 8 * px); c.stroke();
@@ -498,6 +503,7 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
     }
   }
   drawViaStackPreview(c, cpx);   // the microvia stack being placed (DRAWING_TOOL::PlaceMicroviaStack's preview)
+  drawMicrowavePreview(c, view, ctx, px);   // MICROWAVE_TOOL: the inductor's rectangle, the footprint being placed
   drawSpreadPreview(c, previewColor);   // the tracks being spread, where they would go
   // cursor: the via about to be placed, and the magnetic snap marker
   const hv = S.hover;
@@ -545,7 +551,7 @@ function drawConstructionGeom(c: CanvasRenderingContext2D, cpx: number) {
     const off = (r: Pt) => Math.abs((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])) / L;
     return off(a) <= 1e-6 && off(b) <= 1e-6;
   };
-  c.save(); c.globalAlpha = 1; c.setLineDash([]); c.strokeStyle = ANCHOR; c.lineCap = "butt";
+  c.save(); c.globalAlpha = 1; c.setLineDash([]); c.strokeStyle = anchorColor(); c.lineCap = "butt";
   for (const bt of constructionBatches()) for (const ci of bt) for (const e of ci.drawables) {
     const d: CDrawable = e.d; c.lineWidth = e.w * cpx;
     if (d.t === "line" || d.t === "half" || d.t === "seg") {
@@ -556,15 +562,15 @@ function drawConstructionGeom(c: CanvasRenderingContext2D, cpx: number) {
     else if (d.t === "pt") { const h = 8 * cpx, p = d.p; c.beginPath(); c.moveTo(p[0] - h, p[1]); c.lineTo(p[0] + h, p[1]); c.moveTo(p[0], p[1] - h); c.lineTo(p[0], p[1] + h); c.stroke(); }
   }
   if (S.move && sl.origin && sl.dirs.length) {
-    const o = sl.origin, hi = adjustColor(ANCHOR, 0.2, 1);
+    const o = sl.origin, hi = adjustColor(anchorColor(), 0.2, 1);
     sl.dirs.forEach((dir, i) => {
       const seg = clipLineToBox(o, [o[0] + dir[0], o[1] + dir[1]], box); if (!seg) return;
-      c.strokeStyle = sl.active === i ? hi : ANCHOR; c.lineWidth = cpx; dashed(c, seg[0], seg[1], 8 * cpx);
+      c.strokeStyle = sl.active === i ? hi : anchorColor(); c.lineWidth = cpx; dashed(c, seg[0], seg[1], 8 * cpx);
     });
   }
   const aux = S.move && S.move.aux;
   if (aux) {
-    c.strokeStyle = adjustColor(AUX_ITEMS_COLOR, 0, 0.4); c.lineWidth = cpx; c.beginPath();
+    c.strokeStyle = adjustColor(auxItemsColor(), 0, 0.4); c.lineWidth = cpx; c.beginPath();
     c.moveTo(box[0], aux[1]); c.lineTo(box[2], aux[1]); c.moveTo(aux[0], box[1]); c.lineTo(aux[0], box[3]); c.stroke();
   }
   c.restore();

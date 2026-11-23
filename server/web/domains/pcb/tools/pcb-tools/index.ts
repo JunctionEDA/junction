@@ -68,10 +68,14 @@ import { placePointAt, subGridActivate, subGridClick, subGridMove } from "./boar
 import * as spreadApi from "./spread";
 import { spreadActivate, spreadClick, spreadDeactivate, spreadHiddenIds, spreadPointerMove, spreading } from "./spread";
 import * as viaStackApi from "./via-stack";
+import * as multichannelApi from "./multichannel";
 import { stackPlacing, viaStackActivate, viaStackClick, viaStackDeactivate, viaStackMove, viaStackUndo } from "./via-stack";
+import * as microwaveApi from "./microwave";
+import { isMwTool, mwActivate, mwClick, mwMove, mwProperties, mwUp, setShapeFilePickerImpl, MW } from "./microwave";
 import { viaStackMarkers } from "./drc-via-stack";
 import { base64Bytes, imageInfo, imageMm } from "./images";
 import { beginToolDrag, dpCoupledSegment, dragCandidate, dragHiddenIds, dragMove, finishDrag } from "./inline-drag";
+import { blockAreaDrag, blockClick, blockDragApi, blockDragKey, blockHiddenIds } from "./block-drag";
 import { LENGTH_UNCONSTRAINED, TUNE_IU, TUNE_MSG_INSIDE, TUNE_MSG_PICK, TUNE_MSG_SELECT, chLength, chPoints, coupledSegmentPairs, dpMeanderMove, meanderDefaults, meanderMove, setTargetLength, setTargetLengthDelay, setTargetSkew, splitChain, splitLine } from "./meander";
 import { assembleTuningPath, boardTrackLength, ldContext, lengthForDelay, missingTuningProfileMarkers, origPathDelay, origPathLength, tuningProfileRules } from "./length-delay";
 import { SELECTION_TYPES, boardLayerName, filterIds, idsOnLayer, inspectClearance, itemDescription, itemDescriptionAmong, msgPanelInfo } from "./msgpanel";
@@ -162,6 +166,7 @@ function selectedPadKeys(): string[] {
  */
 function dragKey(ctx: PcbCtx, free: boolean): boolean {
   bind(ctx); if (!ctx.doc) return false;
+  if (blockDragKey(ctx)) return true;   // D over a picked handle starts the block drag from the keyboard (PCB_POINT_EDITOR)
   const editing = () => { if (ctx.viewOnly) { ctx.toast("View-only access"); return false; } return true; };
   const ids = selectionIds(ctx); const it = liveSelected();
   if (!S.sel.size && it && ids.size === 1 && ctx.doc.items.get(it.id)?.kind === "footprint") return editing() && beginCarryMove(ctx, { drag: true });
@@ -247,7 +252,7 @@ export const pcb = {
     return !!startPendingDrag(ctx, { ids: list, item, mm: mm.slice(), client: [client[0] || 0, client[1] || 0], app });
   },
   /** What the canvas leaves out while it is drawn elsewhere (the lines being dragged). */
-  hiddenIds() { return routeHiddenIds() || tuneHiddenIds() || genHiddenIds() || dragHiddenIds() || spreadHiddenIds(); },
+  hiddenIds() { return routeHiddenIds() || tuneHiddenIds() || genHiddenIds() || dragHiddenIds() || spreadHiddenIds() || blockHiddenIds(); },
   onActivate(t: string, ctx: PcbCtx) {
     bind(ctx);
     const mine = TOOLS.some((x) => x.id === t);
@@ -262,6 +267,7 @@ export const pcb = {
     S.draw = null; S.subGrid = null; S.strokeW = null; S.strokeStyle = null; S.strokeLayer = S.gfxLayer; S.lastDown = null; drawOriginSync(ctx); closeTextPrompt(); S.hover = null; if (t !== "image") S.image = null;
     if (enumRunning() && t !== "enumpads") enumLeave(ctx, true);   // EnumeratePads: another tool pushes the step (Esc reverted it already)
     if (t !== "viastack") viaStackDeactivate();
+    mwActivate(t);   // MICROWAVE_TOOL: a new activation drops what the last one carried
     if (t !== "spread" && spreading()) spreadDeactivate(ctx);
     S.modTool = mine ? t : null;
     if (DRAWING_TOOL_IDS.has(t)) displayConstraintsMsg(ANGLE_SNAP_MSG[angleSnapMode()]!);   // DRAWING_TOOL::Reset( RUN ) -> UpdateStatusBar
@@ -288,6 +294,7 @@ export const pcb = {
     if (t === "enumpads") { enumDown(ev, mm, ctx); return true; }
     if (t === "viastack") { viaStackClick(ctx, mm, ev); return true; }
     if (t === "spread") { spreadClick(ctx, mm); return true; }
+    if (isMwTool(t)) { mwClick(ctx, t, [hv.x, hv.y]); return true; }
     if (t === "route" || t === "routediff") routeClick(ctx, hv, mm);
     else if (isTuneTool(t)) tuneClick(ctx, mm);
     else if (t === "gridorigin") { sizesOf(ctx).setGridOrigin([hv.x, hv.y]); ctx.toast(`Grid origin set to ${fmtSize(hv.x, true)}, ${fmtSize(hv.y)}`); ctx.setTool("select"); }
@@ -405,6 +412,7 @@ export const pcb = {
     if (t === "pickpoint" && S.pick && S.pick.two) twoPointMove(ctx, hv, ev);
     if (t === "delete") hv.del = ctx.viewOnly ? null : deleteCandidate(ctx, mm);
     if (t === "subgrid") subGridMove([hv.x, hv.y]);
+    if (isMwTool(t)) mwMove(ctx, t, [hv.x, hv.y]);
     if (GE_OPS[t]) geMove(ctx, [hv.x, hv.y]);
     if (S.violations && Math.hypot(hv.x - S.violations.at[0], hv.y - S.violations.at[1]) > 0.5) S.violations = null;
     if (S.route) { S.route.cursor = [hv.x, hv.y]; updateHead(ctx); }
@@ -414,6 +422,8 @@ export const pcb = {
     ctx.requestRender();
   },
   onPointerUp(ev: PtrEvent, mm: Pt, ctx: PcbCtx) {
+    // drawMicrowaveInductor: the release of a drag is the line's end
+    if (S.modTool === "mwline" && MW.line && ctx && ctx.doc && mm) { bind(ctx); const hv = toolHover(ctx, mm, "mwline", ev); mwUp(ctx, [hv.x, hv.y], ctx.pxPerMm || 1); return; }
     // the release of a press-drag during a two-point pick is its second point
     if (S.modTool !== "pickpoint" || !S.pick || !S.pick.two || !ctx || !ctx.doc || !mm) return;
     bind(ctx); twoPointUp(ctx, hoverPoint(ctx, mm, true, ev), ev);
@@ -422,6 +432,7 @@ export const pcb = {
     bind(ctx); if (!ctx.doc) return false;
     const editing = () => { if (ctx.viewOnly) { ctx.toast("View-only access"); return false; } return true; };
     const shift = !!ev.shiftKey;
+    if (MW.carry && (k === "e" || k === "E") && !shift) return mwProperties(ctx);   // PCB_ACTIONS::properties on the placed item
     if (S.padPlace && (k === "r" || k === "R")) { S.padPlace.angle = (S.padPlace.angle + (shift ? -90 : 90) + 360) % 360; ctx.requestRender(); return true; }   // IPO_ROTATE
     // PlaceMicroviaStack: undo / delete take a staggered stack's last hop back
     if (S.modTool === "viastack" && stackPlacing() && (k === "Backspace" || k === "Delete")) return viaStackUndo(ctx);
@@ -556,6 +567,15 @@ export const pcb = {
   deleteChanges,
   // the app's drag of a mixed selection, and Move: everything selected goes along (sticky = follows the cursor until a click)
   beginMove(ctx: PcbCtx, at: Pt, sticky: boolean) { bind(ctx); return beginCarryMove(ctx, { at, sticky }); },
+  /**
+   * PCB_POINT_EDITOR sees the selection tool's events first while block anchor editing is on: a drag on empty canvas
+   * becomes a handle area pick ("drag", AreaPickStarts), a click picks the handle under it or drops the picks ("click").
+   * True when the event stops here.
+   */
+  blockGesture(kind: "drag" | "click", ctx: PcbCtx, at: Pt, cur: Pt, mods: { shift?: boolean; ctrl?: boolean; alt?: boolean }) {
+    bind(ctx); if (!ctx.doc) return false;
+    return kind === "drag" ? blockAreaDrag(ctx, at, cur, mods) : !mods.ctrl && !mods.alt && blockClick(ctx, at, !!mods.shift);
+  },
   /** ~DIALOG_UPDATE_PCB: the new footprints selected and handed to Move with the selection's reference point at `origin` */
   moveFromReference(ctx: PcbCtx, ids: string[], origin: Pt) { bind(ctx); if (ctx.viewOnly || !ctx.doc) return false; applySelection(ctx, ids); return beginCarryMove(ctx, { ids, origin }); },
   /**
@@ -579,6 +599,8 @@ export const pcb = {
   requestSelection(ctx: PcbCtx, opts?: RequestOpts) { bind(ctx); return requestSelection(ctx, opts); },
   setPrompt(fn: PromptFn) { setPromptImpl(fn); },
   setImagePicker(fn: PickerFn) { setPickerImpl(fn); },
+  /** the microwave shape description file dialog (pcb-tools/microwave.ts), swapped by the node tests */
+  setShapeFilePicker(fn: (done: (text: string | null) => void) => void) { setShapeFilePickerImpl(fn); },
   cancel() { cancelOps(); },              // drop whatever is in flight and put a moved item back (a lost button release, Escape)
   // ---- the parity pass: commands, queries and dialogs app.js can call
   actions: ACTIONS,                       // { id: { label, key, run(ctx) -> handled } }, KiCad's ids and default hotkeys
@@ -694,7 +716,7 @@ export const pcb = {
 };
 root.CollabTools = root.CollabTools || {};
 root.CollabTools.pcb = pcb;
-root.PcbTools = { viaStack: viaStackApi, spread: spreadApi, viaStackMarkers, ellipse: Ellipse, boardItems: { placePointAt, subGridClick }, shoveOptimize, areaAllows, startRefusal, obtuseOnly, routeHasOtherEnd, magneticOption, setMagneticOption, routerHover, pickSingleItem, snapToItem, zonePriorityPlan, zonePriorityAbility, zoneMergeChanges, zoneDuplicateNode, pruneItemLayers, OffsetItemState, snapAnchors, textGraphics: textGraphicsApi, layerStyle, globalDeletion: globalDeletionApi, enabledLayerPairs, resetLayerPairCycle, itemOnLayer, itemRatsnestAnchors, uniqueZoneName, subtractOutline, footprintRefChoices, footprintByRef, netNameCmp, fieldEdit: { requestField, rotateFieldChange, flipFieldChange, hideFieldChanges, footprintFieldNode }, boardFindHits, edaMatches, findStep, unescapeKiCad, nearestSnapLinePoint, angleSnapDirections, MOVE_SNAP_MSG, ANGLE_SNAP_MSG, DRAWING_TOOL_IDS, useFootprintEditorDefaults, LINE_W, TEXT_STYLE, state: S, pad: padToolApi, exchange: exchangeApi, fpProps: fpPropsApi, fpPads: fpPadsApi, fpCheck: fpCheckApi, fpUsers: fpUsersApi, setEnumParams, openForm: (spec: FormSpec) => formImpl(spec), arcEditMode, setArcEditMode, arcEditGeometry, editPoints, editPointNode, ArcGeom, arcDrawMode, setArcDrawMode, arcFromStartEndMidDrag, arcFromStartEndCenterDrag, arcFromStartTangentEnd, arcTangentSeedAt, arcTangentSeedNear, snapVec45, netTable, zoneTemplate, build45Leader, polyOutline, angleSnapMode, setAngleSnap, constrainDraw, snap90, undoChainSegment, stepDrawWidth, withStroke, dimensionLabel, unfillChanges, alignBox, splitChanges, WIDTHS, BOARD_VERSION, routeLeg, segmentNode, viaNode, lineNode, rectNode, circleNode, arcNode, polyNode, textNode, netOf, netNode, netStyle,
+root.PcbTools = { blockDrag: blockDragApi, viaStack: viaStackApi, microwave: microwaveApi, spread: spreadApi, viaStackMarkers, ellipse: Ellipse, boardItems: { placePointAt, subGridClick }, shoveOptimize, areaAllows, startRefusal, obtuseOnly, routeHasOtherEnd, magneticOption, setMagneticOption, routerHover, pickSingleItem, snapToItem, zonePriorityPlan, zonePriorityAbility, zoneMergeChanges, zoneDuplicateNode, pruneItemLayers, OffsetItemState, snapAnchors, textGraphics: textGraphicsApi, layerStyle, globalDeletion: globalDeletionApi, enabledLayerPairs, resetLayerPairCycle, itemOnLayer, itemRatsnestAnchors, uniqueZoneName, subtractOutline, footprintRefChoices, footprintByRef, netNameCmp, fieldEdit: { requestField, rotateFieldChange, flipFieldChange, hideFieldChanges, footprintFieldNode }, boardFindHits, edaMatches, findStep, unescapeKiCad, nearestSnapLinePoint, angleSnapDirections, MOVE_SNAP_MSG, ANGLE_SNAP_MSG, DRAWING_TOOL_IDS, useFootprintEditorDefaults, LINE_W, TEXT_STYLE, state: S, pad: padToolApi, exchange: exchangeApi, fpProps: fpPropsApi, fpPads: fpPadsApi, fpCheck: fpCheckApi, fpUsers: fpUsersApi, setEnumParams, openForm: (spec: FormSpec) => formImpl(spec), arcEditMode, setArcEditMode, arcEditGeometry, editPoints, editPointNode, ArcGeom, arcDrawMode, setArcDrawMode, arcFromStartEndMidDrag, arcFromStartEndCenterDrag, arcFromStartTangentEnd, arcTangentSeedAt, arcTangentSeedNear, snapVec45, netTable, zoneTemplate, build45Leader, polyOutline, angleSnapMode, setAngleSnap, constrainDraw, snap90, undoChainSegment, stepDrawWidth, withStroke, dimensionLabel, unfillChanges, alignBox, splitChanges, WIDTHS, BOARD_VERSION, routeLeg, segmentNode, viaNode, lineNode, rectNode, circleNode, arcNode, polyNode, textNode, netOf, netNode, netStyle,
   wrapBoard, addedChange, replacedChange, removedChange, padsOf, snapTarget, netUnder, hitTestItem, itemAt, deleteAt, connectedRun, rotateFootprintNode, flipFootprintNode,
   flipLayerName, pt, selectMoveTo, finishSelectMove, assembleLine, dragStart, startPendingDrag, finishDrag, dragMove, dragTo, dragSolution, dragChanges, dragSegment45, optimizeDragged, changedArea, componentDragHits, isFreePad, dragCorner45, dragCornerFree, initialTrace, routableItems, nextWidth, norm180, norm360, DELETE_CURSOR,
   // the interactive router (Highlight collisions, Shove, Walk around)
@@ -746,4 +768,6 @@ root.PcbTools = { viaStack: viaStackApi, spread: spreadApi, viaStackMarkers, ell
   // array pad numbering (ARRAY_AXIS, ARRAY_PAD_NUMBER_PROVIDER)
   alphabeticFromIndex, arrayItemNumber, arrayPadNumberProvider, axisAlphabet, axisItemNumber, axisNumberingOffset, axisSetOffset, axisTypeIsNumeric,
   // GRAPHIC_EDIT_TOOL: Extend Line or Arc / Trim Shape
-  graphicEdit: { planExtend, planTrim, geHover, geCommitChanges, applyGeometryNode, refusalMessage, GE_OPS } };
+  graphicEdit: { planExtend, planTrim, geHover, geCommitChanges, applyGeometryNode, refusalMessage, GE_OPS },
+  // MULTICHANNEL_TOOL: placement rule areas, Repeat Layout, linked layouts, Apply Design Block Layout
+  multichannel: multichannelApi };

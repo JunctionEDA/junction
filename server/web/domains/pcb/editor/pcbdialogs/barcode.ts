@@ -7,7 +7,6 @@
 // DRAWING_TOOL::DrawBarcode opens it on the new barcode and commits "Draw Barcode" on OK.
 import { code128, code39 } from "../../canvas/barcode";
 import { barcode2D } from "../../canvas/barcode2d";
-import { PCB_BG, pcbColor } from "../../canvas/colors";
 import { comboBox } from "../../../../shared/components/kcombo";
 import { checkField, coordField, form, h, lenField, messageBox, numField, openDialog, radioBox, selectField, textField, unitLabel, type Field } from "./ui";
 
@@ -85,7 +84,7 @@ function drawPreview(cv: HTMLCanvasElement, v: BarcodeValues): void {
   const g = cv.getContext("2d"); if (!g) return;
   const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1, Wc = cv.clientWidth || 300, Hc = cv.clientHeight || 300;
   cv.width = Wc * dpr; cv.height = Hc * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  g.fillStyle = PCB_BG; g.fillRect(0, 0, Wc, Hc);
+  g.fillStyle = KiCadCanvas.PCB_BG; g.fillRect(0, 0, Wc, Hc);
   if (!(v.w > 0) || !(v.h > 0)) return;
   const { rects } = barcodeSymbol(v);
   const textY = v.h / 2 + 1, showText = v.showText && !!v.text;
@@ -100,9 +99,9 @@ function drawPreview(cv: HTMLCanvasElement, v: BarcodeValues): void {
   const scale = 0.7 / ext;
   g.save(); g.translate(Wc / 2, Hc / 2); g.scale(scale, scale); g.rotate(rad); g.scale(mx, 1);
   g.translate(-(bx0 + bx1) / 2, -(by0 + by1) / 2);
-  const color = pcbColor(v.layer);
+  const color = KiCadCanvas.pcbColor(v.layer);
   if (v.knockout) { g.fillStyle = color; g.fillRect(bx0, by0, bw, bh); }
-  const ink = v.knockout ? PCB_BG : color;
+  const ink = v.knockout ? KiCadCanvas.PCB_BG : color;
   g.fillStyle = ink;
   for (const [x0, y0, x2, y2] of rects) g.fillRect(x0, y0, x2 - x0, y2 - y0);
   if (showText) {

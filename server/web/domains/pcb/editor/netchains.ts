@@ -114,6 +114,43 @@ export function schNetChainPaint(): { wires: Map<string, string>; terminals: { k
   return { wires, terminals };
 }
 
+/**
+ * BOARD::m_netChainColors: each chain's colour override, set by Update PCB from the netlist (ClearNetChainColors, then
+ * SetNetChainColor of every chain whose "color" COLOR4D::SetFromHexString reads).  In memory only: the board file has none.
+ */
+export function setBoardChainColors(doc: KDoc, chains: { name: string; color: string }[]): void {
+  const m = new Map<string, string>();
+  for (const c of chains) { const css = hexColorCss(c.color); if (css) m.set(c.name, css); }
+  (doc as KDoc & { netChainColors?: Map<string, string> }).netChainColors = m;
+}
+/** COLOR4D::SetFromHexString: "#RRGGBB" or "#RRGGBBAA" (the # optional), as a CSS colour; null when it is neither. */
+export function hexColorCss(hex: string): string | null {
+  const m = /^#?([0-9a-f]{6})([0-9a-f]{2})?$/i.exec((hex || "").trim()); if (!m) return null;
+  const v = parseInt(m[1], 16), a = m[2] ? parseInt(m[2], 16) / 255 : 1;
+  return `rgba(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255},${+a.toFixed(4)})`;
+}
+const BOARD_CHAINS = new WeakMap<object, Map<string, { chain: string; pads: [string | null, string | null] }>>();
+/**
+ * The board painter's view of the highlight (PCB_PAINTER): the highlighted chain's nets (by code) with its colour
+ * override, and the terminal pads of the highlighted nets, true for those on that chain.  null while nothing is highlighted.
+ */
+export function boardChainPaint(): { nets: Set<number>; color: string | null; terminals: Map<string, boolean> } | null {
+  const doc = E.kdoc as (KDoc & { netChainsNode?: SNode | null; netChainColors?: Map<string, string> }) | null;
+  const sh = E.sharedNetHighlight as { nets: string[] } | null;
+  if (!doc || doc.type !== "pcb" || !E.highlightIds || !sh || !sh.nets.length) return null;
+  const node = doc.netChainsNode; if (!node) return null;
+  let chains = BOARD_CHAINS.get(node);
+  if (!chains) { chains = NC().parseBoardChains(node, doc.nets); BOARD_CHAINS.set(node, chains); }
+  const tools = (window as unknown as { PcbTools?: { state?: { hlChain?: string } } }).PcbTools;
+  const chain = (tools && tools.state && tools.state.hlChain) || "";
+  const terminals = new Map<string, boolean>();
+  for (const n of sh.nets) { const c = chains.get(n); if (!c) continue; for (const u of c.pads) if (u) terminals.set(u, !!chain && c.chain === chain); }
+  const nets = new Set<number>();
+  if (chain) for (const [code, name] of doc.nets) { const c = chains.get(name); if (c && c.chain === chain) nets.add(code); }
+  const color = chain && doc.netChainColors ? doc.netChainColors.get(chain) || null : null;
+  return nets.size || terminals.size ? { nets, color, terminals } : null;
+}
+
 // ---------------------------------------------------------------- the selection
 /** The current sheet instance's pin as a chain pin. */
 function pinOf(m: ChainModel, p: PinRef): ChainPin | null { const inst = currentInstance(); return inst ? NC().chainPinOf(m, inst.index, p.id, p.number) : null; }
@@ -568,6 +605,7 @@ export async function applyNetlistChains(chains: ReturnType<typeof netlistChains
   const P = CollabTools.pcb as unknown as { netlistChainUpdate?(c: unknown, ch: typeof chains): { text: string | null; warnings: string[] } } | undefined;
   if (!P || !P.netlistChainUpdate || E.viewOnly) return [];
   const r = P.netlistChainUpdate(ctx(), chains);
+  if (E.kdoc) setBoardChainColors(E.kdoc, chains);
   if (r.text !== null) {
     const BS = (KiCadCanvas as unknown as { boardSetup: { netChainsChange(t: string): KChange } }).boardSetup;
     const change = BS.netChainsChange(r.text); sendOp([change], false); applyChanges([change]);

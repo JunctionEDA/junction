@@ -16,6 +16,7 @@ import { box, checkField, confirmBox, h, messageBox, openDialog, reportPanel, ty
 import { store } from "../appstore";
 import { messageText } from "../../../../shared/units";
 import { applyNetlistChains, netlistChainsOf } from "../netchains";
+import { applyDesignBlockLayoutsToGroups } from "./multichannel";
 
 interface SchModuleInternals { _?: { symbolPins(doc: KDoc, item: KItem): { x: number; y: number; number: string; name: string; type: string; hidden: boolean }[]; isPowerSymbol(doc: KDoc, libId: string): boolean } }
 const SCH_IU = 10000;
@@ -219,6 +220,15 @@ export async function openUpdatePcb(ctx: ToolCtx): Promise<void> {
       const added: string[] = [];
       const changes = planChanges(doc, real, added);
       if (changes.length) { newFootprints.splice(0, newFootprints.length, ...added); ctx.commit(changes, "Update Netlist"); }
+      // PerformUpdate: each group the update added with a design block link gets the block's layout (Apply Design Block
+      // Layout on it alone), and the new footprints are then not handed to Move
+      const opts = options();
+      if (opts.applyDesignBlockLayouts) {
+        const kidOf = (n: SNode, k: string): string => { const c = n.find((x, i) => i > 1 && Array.isArray(x) && x[0] === k) as SNode | undefined; return c ? String(c[1] ?? "") : ""; };
+        const linkedGroups = real.added.filter((n) => n[0] === "group" && !!kidOf(n, "lib_id")).map((n) => kidOf(n, "uuid"));
+        if (linkedGroups.length) void applyDesignBlockLayoutsToGroups(ctx, linkedGroups);
+        newFootprints.splice(0, newFootprints.length);
+      }
       report.set(real.report);
       // the netlist's net chains: assignments, terminal pads and the chain classes (after the commit, on the updated nets)
       const shown = real.report.slice();

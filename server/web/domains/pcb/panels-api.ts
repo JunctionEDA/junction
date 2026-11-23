@@ -31,6 +31,8 @@ export interface AppearanceState {
   /** built-in presets first, then the user's; `preset` is the one the current visibility matches (null = unsaved) */
   presets: string[]; builtinPresets: string[]; preset: string | null;
   viewports: string[]; viewport: string | null;
+  /** the frame's colour theme is built in (COLOR_SETTINGS::IsReadOnly): a swatch click shows onReadOnlySwatch instead of the picker */
+  readOnlyColors?: boolean;
 }
 
 export type LayerMenuCmd = "showAllCu" | "hideAllCu" | "hideAllButActive" | "showAllNonCu" | "hideAllNonCu" | "showAll" | "hideAll"
@@ -109,6 +111,7 @@ export type PanelAction =
   | { t: "objVisible"; id: string; on: boolean }
   | { t: "objOpacity"; id: string; value: number }
   | { t: "objColor"; id: string; color: string | null }
+  | { t: "readOnlySwatch" }
   | { t: "showNetInspector" }
   | { t: "boardSetup"; page: string }
   | { t: "inactive"; mode: InactiveMode }

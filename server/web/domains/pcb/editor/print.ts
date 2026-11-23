@@ -34,7 +34,8 @@ const PCB_KEY = "kicad.print.board", SCH_KEY = "kicad.print.schematic";
 // drill_marks 1 (small), pagination ALL_LAYERS, edge_cuts_on_all_pages true, use_theme false
 const PCB_DEFAULTS: PcbPrint = { color: false, frame: false, background: false, drill: 1, mirror: false, perLayer: false, edges: true, scale: 1, custom: 1, layers: null };
 const SCH_DEFAULTS: SchPrint = { frame: false, color: false, background: false, otherTheme: false, theme: "default" };
-const SHEET_COLOR = "#C872AB";
+/** LAYER_DRAWINGSHEET of the colour theme the frame uses (KiCad Default #C872AB). */
+const sheetColor = (): string => { const K = KiCadCanvas as unknown as { boardColor?: (k: string) => string }; return K.boardColor ? K.boardColor("worksheet") : "#C872AB"; };
 const FP_EDITOR_PAGE: [number, number] = [297, 210];   // PAGE_INFO( A4 ), landscape, mm
 
 export function printDialog(): void {
@@ -106,7 +107,7 @@ async function pcbPrint(): Promise<void> {
     const m = fab.model(fctx); const log = { warn() { /* print shows no report */ }, messages: [] as string[] };
     const groups: [string, string[]][] = o.perLayer ? sel.map((l) => [l, o.edges && l !== "Edge.Cuts" ? ["Edge.Cuts"] : []]) : [[sel[0], sel.slice(1)]];
     const bgc = o.background && o.color ? ((KiCadCanvas as unknown as { PCB_BG?: string }).PCB_BG || "#001023") : null;
-    return groups.map(([layer, common], i) => fab.boardPage(m, { params, layer, common, layerName: o.perLayer ? nameOf(layer) : "", colors, sheetColor: SHEET_COLOR, background: bgc,
+    return groups.map(([layer, common], i) => fab.boardPage(m, { params, layer, common, layerName: o.perLayer ? nameOf(layer) : "", colors, sheetColor: sheetColor(), background: bgc,
       pageNumber: i + 1, pageCount: groups.length, customScale: o.scale === 2 ? o.custom : undefined, printBoard: !o.frame }, log as never));
   };
   KDialogs!.open({ title: "Print", width: 640,

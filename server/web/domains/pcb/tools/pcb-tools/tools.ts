@@ -30,6 +30,12 @@ export const TOOLS = [
   // PCB_ACTIONS::placePoint, placeSubGrid (DRAWING_TOOL::PlacePoint, PlaceSubGrid)
   { id: "placepoint", label: "Place Point", key: "", cursor: "PENCIL", icon: '<circle cx="12" cy="12" r="2.5"/><path d="M12 4v4M12 16v4M4 12h4M16 12h4"/>' },
   { id: "subgrid", label: "Place Sub-grid", key: "", cursor: "BULLSEYE", icon: '<rect x="4" y="4" width="16" height="16"/><path d="M9.3 4v16M14.7 4v16M4 9.3h16M4 14.7h16"/>' },
+  // PCB_ACTIONS::microwaveCreate* (MICROWAVE_TOOL, pcb-tools/microwave.ts): the Place menu's Draw Microwave Shapes
+  { id: "mwgap", label: "Draw Microwave Gaps", key: "", cursor: "PENCIL", hidden: true, icon: '<path d="M3 10h7v4H3zM14 10h7v4h-7z"/>' },
+  { id: "mwstub", label: "Draw Microwave Stubs", key: "", cursor: "PENCIL", hidden: true, icon: '<path d="M3 14h18M12 14V5"/><rect x="10" y="3" width="4" height="4"/>' },
+  { id: "mwstubarc", label: "Draw Microwave Arc Stubs", key: "", cursor: "PENCIL", hidden: true, icon: '<path d="M12 20L6 7a8 8 0 0 1 12 0z"/>' },
+  { id: "mwshape", label: "Draw Microwave Polygonal Shapes", key: "", cursor: "PENCIL", hidden: true, icon: '<path d="M3 16h18M5 16c2-9 4-9 7-4s5 5 7 4"/>' },
+  { id: "mwline", label: "Draw Microwave Lines", key: "", cursor: "PENCIL", hidden: true, icon: '<path d="M4 20V16h6v-3H6V9h8V6h-4V4"/>' },
   { id: "barcode", label: "Add barcode", key: "", cursor: "PENCIL", icon: '<path d="M4 5v14M7 5v14M9 5v14M13 5v14M15 5v14M18 5v14M20 5v14"/>' },
   { id: "gtextbox", label: "Draw text box", key: "", cursor: "crosshair", icon: '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M7 9h10M7 12h7M7 15h5"/>' },
   { id: "table", label: "Draw table", key: "", cursor: "crosshair", icon: '<rect x="3" y="5" width="18" height="14"/><path d="M3 10h18M3 14.5h18M9 5v14M15 5v14"/>' },
@@ -73,6 +79,10 @@ export const TOOL_HINT = { route: "Route — click to start and to fix, / postur
   garc: "Arc — click the points the drawing mode asks for; / switches the posture, Alt+/ the mode, Backspace takes back a point", gpoly: "Polygon — click the corners; click the first corner or press Enter to close",
   gcurve: "Bezier — click the start, the first control point, the second control point, then the end",
   placepoint: "Point — click where each point goes",
+  mwgap: "Microwave gap — click, give the size, then click where it goes; R / F turn and flip it, Esc drops it", mwstub: "Microwave stub — click, give the size, then click where it goes; R / F turn and flip it, Esc drops it",
+  mwstubarc: "Microwave arc stub — click, give the radius and the angle, then click where it goes; R / F turn and flip it, Esc drops it",
+  mwshape: "Microwave polygonal shape — click, read the shape description file, then click where it goes; R / F turn and flip it, Esc drops it",
+  mwline: "Microwave line — click (or drag) from the start to the end, then give the length and the value",
   subgrid: "Sub-grid — click its centre, then its size and angle",
   gellipse: "Ellipse — click two corners of the box it fills",
   gellipsearc: "Elliptical arc — click two corners of the box, then the start and the end of the arc",

@@ -1,6 +1,6 @@
 // pcb-tools/arcs.ts — arc drawing: ARC_DRAW_MODE, ARC_GEOM_MANAGER and ARC_MODE_SESSION.
 import type { Arc3, DrawState, PcbCtx, Pt } from "./types";
-import { AUX_ITEMS_COLOR, dimensionLabel, textNextToCursor } from "./assistants";
+import { auxItemsColor, dimensionLabel, textNextToCursor } from "./assistants";
 import { addedChange } from "./changes";
 import { angleSnapMode, withStroke } from "./draw-modes";
 import { applySelection } from "./groups";
@@ -123,13 +123,13 @@ export function drawArcPreview(c: CanvasRenderingContext2D, d: DrawState, px: nu
   const sh = g.shape(), mm = fromNm;
   if (sh) { const a = K.arcFrom3(mm(sh.start), mm(sh.mid), mm(sh.end)); if (a) { c.beginPath(); c.arc(a.x, a.y, a.r, a.a0, a.a1, a.anticlockwise); c.stroke(); } }
   // DRAW_CONTEXT: every guide in LAYER_AUX_ITEMS, alpha 0.5 when de-emphasised (PreviewOverlayDeemphAlpha), else 1
-  c.save(); c.globalAlpha = 1; c.lineWidth = px; c.strokeStyle = AUX_ITEMS_COLOR;
-  const plain = (a: Pt, b: Pt, dim: boolean) => { c.strokeStyle = AUX_ITEMS_COLOR; c.globalAlpha = dim ? 0.5 : 1; line(c, mm(a), mm(b)); };
+  c.save(); c.globalAlpha = 1; c.lineWidth = px; c.strokeStyle = auxItemsColor();
+  const plain = (a: Pt, b: Pt, dim: boolean) => { c.strokeStyle = auxItemsColor(); c.globalAlpha = dim ? 0.5 : 1; line(c, mm(a), mm(b)); };
   // DrawLineWithAngleHighlight: a guide at a multiple of 45 degrees in the special angle colour
-  const guide = (a: Pt, b: Pt, dim: boolean) => { c.strokeStyle = angleIsSpecial(vsub(b, a)) ? specialAngleColour() : AUX_ITEMS_COLOR; c.globalAlpha = dim ? 0.5 : 1; line(c, mm(a), mm(b)); c.strokeStyle = AUX_ITEMS_COLOR; };
+  const guide = (a: Pt, b: Pt, dim: boolean) => { c.strokeStyle = angleIsSpecial(vsub(b, a)) ? specialAngleColour() : auxItemsColor(); c.globalAlpha = dim ? 0.5 : 1; line(c, mm(a), mm(b)); c.strokeStyle = auxItemsColor(); };
   // DrawLineDashed( from, to, dashSize, dashSize / 2 ) with dashSize = 12 px: 6 px drawn every 12 px
   const dashed = (a: Pt, b: Pt) => { const v = vsub(b, a), L = Math.hypot(v[0], v[1]), lim = 400 * px * NM; const e = L > lim ? vadd(a, vmul(v, lim / L)) : b;
-    c.strokeStyle = AUX_ITEMS_COLOR; c.globalAlpha = 1; c.setLineDash([6 * px, 6 * px]); line(c, mm(a), mm(e)); c.setLineDash([]); };
+    c.strokeStyle = auxItemsColor(); c.globalAlpha = 1; c.setLineDash([6 * px, 6 * px]); line(c, mm(a), mm(e)); c.setLineDash([]); };
   const strs: string[] = []; let anchor = mm(g.startRadiusEnd()); const cursor = mm(g.last);
   if (g.mode === ARC_CENTER_START_END) {
     const o = g.getOrigin(); anchor = mm(o);
@@ -146,7 +146,7 @@ export function drawArcPreview(c: CanvasRenderingContext2D, d: DrawState, px: nu
       guide(start, chordEnd, i > 1); anchor = mm(mid);
       if (i > 1 && sol.valid) {
         const marked = g.mode === ARC_START_END_MID ? sol.mid : sol.center;
-        dashed(mid, marked); c.strokeStyle = AUX_ITEMS_COLOR; c.globalAlpha = 1; ring(c, mm(marked), 4 * px);
+        dashed(mid, marked); c.strokeStyle = auxItemsColor(); c.globalAlpha = 1; ring(c, mm(marked), 4 * px);
         if (g.mode === ARC_START_END_CENTER) { plain(marked, sol.start, true); plain(marked, sol.end, true); }
         strs.push(dimensionLabel("r", sol.radius / NM)); strs.push(dimensionLabel("s", Math.hypot(sol.mid[0] - mid[0], sol.mid[1] - mid[1]) / NM));
       }

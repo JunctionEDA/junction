@@ -13,6 +13,7 @@ import { E } from "../state";
 import { prototypeZoneFill, setPrototypeZoneFill } from "./zonefill";
 import { popupMenu } from "../../dialogs/dom";
 import { zstdDecompress } from "../../dialogs/zstd";
+import { TuningProfileCalculator, defaultStackup, newTrackRowLayers, stackupFromLayers, type StackupItem, type TrackRow } from "./tuning-profile-calc";
 import { box, checkField, form, grid, gridButtons, h, iconButton, bitmapButton, staticBitmap, lenField, note, numField, openDialog, put, selectField, spinField, textEntryBox, textField, unitLabel, unitName, fmtLen, errorMessage, type CellValue, type Field } from "./ui";
 
 type Obj = { [key: string]: Plain };
@@ -254,9 +255,21 @@ export function tuningPatternsPage(ctx: SetupCtx) {
 // ------------------------------------------------------------ Design Rules > Tuning Profiles
 const PS_PER_CM = (iu: number): number => +(iu / 1e6 * 10).toFixed(6);
 const IU_FROM_PS_PER_CM = (v: number): number => Math.round(v / 10 * 1e6);
+/** BOARD::GetStackupOrDefault's list: the board's (stackup …), else BuildDefaultStackupList for its layers and thickness. */
+function boardStackupOrDefault(ctx: SetupCtx): StackupItem[] {
+  const hd = ctx.header; if (!hd) return [];
+  const layers = BS().stackupLayers(hd.setup);
+  if (layers.length) return stackupFromLayers(layers);
+  const rows = BS().layerRows(hd.layers).filter((r) => r.enabled);
+  const t = (hd.general || []).find((c): c is SNode => Array.isArray(c) && c[0] === "thickness");
+  const thick = t ? Number(t[1]) : 1.6;
+  return defaultStackup(rows.map((r) => r.name), rows.filter((r) => r.copper).length, isFinite(thick) ? thick : 1.6);
+}
 export function tuningProfilesPage(ctx: SetupCtx) {
   return (el: HTMLElement): void => {
     const ro = ctx.roPro;
+    // one PANEL_SETUP_TUNING_PROFILE_INFO per profile: its calculators keep their parameters between calculations
+    const calcs = new WeakMap<Obj, TuningProfileCalculator>();
     const profiles: Obj[] = arr(obj(ctx.pro.tuning_profiles).tuning_profiles_impedance_geometric).map((p) => JSON.parse(JSON.stringify(obj(p))) as Obj);
     const bar = h("div", { class: "pd-tabs" }), host = h("div");
     let cur = -1;
@@ -274,15 +287,34 @@ export function tuningProfilesPage(ctx: SetupCtx) {
       const td = checkField(boolOr(p.enable_time_domain_tuning, false), "Enable time domain tuning", { ro, key: "timeDomain" }), mask = checkField(boolOr(p.model_solder_mask, false), "Model solder mask", { ro, key: "modelMask" });
       const bridge = numField(PS_PER_CM(numOr(p.net_chain_bridge_prop_delay, 0)), { ro, key: "bridgeDelay" }), via = numField(PS_PER_CM(numOr(p.via_prop_delay, 0)), { ro, key: "viaDelay" });
       const layers: Record<string, CellValue>[] = arr(p.layer_entries).map(obj).map((l) => ({ signal: strOr(l.signal_layer, "F.Cu"), top: strOr(l.top_reference_layer, ""), bottom: strOr(l.bottom_reference_layer, ""), width: numOr(l.width, 0) / 1e6, gap: numOr(l.diff_pair_gap, 0) / 1e6, delay: PS_PER_CM(numOr(l.delay, 0)) }));
-      const lopts: [string, string][] = [["", ""], ...cu().map((n): [string, string] => [n, n])];
-      const gl = grid([{ label: "Signal Layer", key: "signal", type: "select", options: lopts }, { label: "Top Reference", key: "top", type: "select", options: lopts }, { label: "Bottom Reference", key: "bottom", type: "select", options: lopts },
-        { label: "Track Width", key: "width", type: "len" }, { label: "Diff Pair Gap", key: "gap", type: "len" }, { label: "Unit Delay", key: "delay", type: "num" }], layers, { ro, height: "150px" });
+      const lopts: [string, string][] = [["", "<None>"], ...cu().map((n): [string, string] => [n, n])];
+      // calculateTrackParametersForCell: the cell's button (GRID_CELL_RUN_FUNCTION_EDITOR) works the column out
+      // from the target impedance, frequency and the board stackup between the row's signal and reference layers
+      const calc = (col: "width" | "gap" | "delay") => (row: Record<string, CellValue>): void => {
+        let c = calcs.get(p); if (!c) { c = new TuningProfileCalculator(); calcs.set(p, c); }
+        const tr: TrackRow = { signal: String(row.signal), top: String(row.top), bottom: String(row.bottom), width: Number(row.width), gap: Number(row.gap) };
+        const f = freq.get() * freqU.get();
+        const out = c.calculateTrackParametersForCell(tr, col, { type: type.get(), targetImpedance: imp.get(), frequency: isFinite(f) ? f : 0, modelSolderMask: mask.get(), layerNames: cu(), stackup: boardStackupOrDefault(ctx) });
+        if (!out) return;
+        if ("error" in out) { errorMessage(out.error); return; }
+        if (out.width !== undefined) row.width = out.width / 1e6;
+        if (out.gap !== undefined) row.gap = out.gap / 1e6;
+        row.delay = PS_PER_CM(out.delay);
+        gl.refresh();
+      };
+      const runBtn = (col: "width" | "gap" | "delay") => ({ icon: "small_refresh", title: "", run: calc(col) });
+      const gl = grid([{ label: "Signal Layer", key: "signal", type: "select", options: lopts.slice(1) }, { label: "Top Reference", key: "top", type: "select", options: lopts }, { label: "Bottom Reference", key: "bottom", type: "select", options: lopts },
+        { label: "Track Width", key: "width", type: "len", button: runBtn("width") }, { label: "Diff Pair Gap", key: "gap", type: "len", button: runBtn("gap") }, { label: "Unit Delay", key: "delay", type: "num", button: runBtn("delay") }], layers, { ro, height: "150px" });
+      // onChangeProfileType: the gap column only shows for a differential profile
+      const showGap = (): void => { const g = gl.columns.find((c) => c.key === "gap"); if (g) { if (type.get() === 0) g.hidden = true; else delete g.hidden; } gl.refresh(); };
+      showGap(); type.input.addEventListener("change", showGap);
       const vias: Record<string, CellValue>[] = arr(p.via_overrides).map(obj).map((v) => ({ sf: strOr(v.signal_layer_from, ""), st: strOr(v.signal_layer_to, ""), vf: strOr(v.via_layer_from, ""), vt: strOr(v.via_layer_to, ""), delay: numOr(v.delay, 0) / 1e6 }));
-      const gv = grid([{ label: "Signal Layer From", key: "sf", type: "select", options: lopts }, { label: "Signal Layer To", key: "st", type: "select", options: lopts }, { label: "Via Layer From", key: "vf", type: "select", options: lopts }, { label: "Via Layer To", key: "vt", type: "select", options: lopts }, { label: "Delay", key: "delay", type: "num" }], vias, { ro, height: "110px" });
+      const vopts: [string, string][] = [["", ""], ...lopts.slice(1)];
+      const gv = grid([{ label: "Signal Layer From", key: "sf", type: "select", options: vopts }, { label: "Signal Layer To", key: "st", type: "select", options: vopts }, { label: "Via Layer From", key: "vf", type: "select", options: vopts }, { label: "Via Layer To", key: "vt", type: "select", options: vopts }, { label: "Delay", key: "delay", type: "num" }], vias, { ro, height: "110px" });
       const unitTxt = unitLabel("ps/cm");
       host.append(form([["Name:", name.el], ["Type:", type.el], ["Target impedance:", imp.el, unitLabel("ohms")], ["Frequency:", h("span", { class: "pd-inline" }, freq.el, freqU.el)]]), td.el, mask.el,
         box("Net Chain Bridge Propagation", form([["Global unit delay:", bridge.el, unitLabel("ps/cm")]])),
-        box("Track Propagation", gl.el, gridButtons(gl, () => ({ signal: cu()[0] || "F.Cu", top: "", bottom: "", width: NaN, gap: NaN, delay: NaN }), { ro })),
+        box("Track Propagation", gl.el, gridButtons(gl, () => { const rs = gl.rows(); return { ...newTrackRowLayers(cu(), rs.length ? String(rs[rs.length - 1].signal) : null), width: 0, gap: 0, delay: 0 }; }, { ro })),
         box("Via Propagation", form([["Global unit delay:", via.el, unitTxt]]), h("div", { class: "pd-lbl" }, "Via delay overrides:"), gv.el, gridButtons(gv, () => ({ sf: "", st: "", vf: "", vt: "", delay: NaN }), { ro })));
       name.input.addEventListener("change", () => { (bar.children[i] as HTMLElement).textContent = name.get() || "(unnamed)"; });
       commits.push(() => {
@@ -304,6 +336,12 @@ export function tuningProfilesPage(ctx: SetupCtx) {
       const names = profiles.map((p) => strOr(p.profile_name, "").trim());
       const i = names.findIndex((n, k) => !n || names.indexOf(n) !== k);
       if (i >= 0) { showProfile(i); return { msg: names[i] ? `Tuning profile name '${names[i]}' already in use.` : "Tuning profile must have a name.", ctrl: host.querySelector("[data-k=profileName]") as HTMLElement }; }
+      // ValidateProfile: one row per signal layer
+      for (let k = 0; k < profiles.length; k++) {
+        const seen = new Set<string>(), rows = arr(profiles[k].layer_entries).map(obj);
+        const dup = rows.findIndex((r) => { const l = strOr(r.signal_layer, ""); if (seen.has(l)) return true; seen.add(l); return false; });
+        if (dup >= 0) { showProfile(k); return { msg: "Duplicated signal layer configuration in tuning profile", ctrl: host.querySelector(".pd-grid") as HTMLElement, row: dup, col: 0 }; }
+      }
       return null;
     });
   };

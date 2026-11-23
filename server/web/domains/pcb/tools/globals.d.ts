@@ -19,6 +19,10 @@ interface ToolsCanvasApi extends KiCadCanvasApi {
   /** Stroke-font text width (mm). */
   textWidth(text: string, size: number, thick: number): number;
   /** SCH_CONNECTION::ConfigureFromLabel of a bus label (web/domains/pcb/canvas/busname.ts): its net members, aliases expanded. */
+  /** LIB_SYMBOL::GetUnitDisplayNames: the (unit_name …) of each unit (web/domains/pcb/canvas/geom-sch.ts). */
+  unitDisplayNames(lib: SNode | null | undefined): Map<number, string>;
+  /** LIB_SYMBOL::LetterSubReference( unit, first ): A..Z, then AA.. */
+  letterSubReference(unit: number, initial: number): string;
   busConnection(label: string, aliases?: Map<string, string[]> | Record<string, string[]> | null): { type: "vector" | "group"; prefix: string; members: { local: string; full: string; vectorIndex: number; nested: boolean }[]; aliases: { name: string; members: string[] }[] } | null;
 }
 
@@ -46,8 +50,9 @@ interface ToolsRoot {
     pinExactAt?(mm: [number, number]): boolean;
     /** dialogs/sync-units.ts toggleAttribute: SetAttribute over the items and the other units of multi-unit parts. */
     toggleAttribute?(ctx: unknown, items: KItem[], isOn: (node: SNode) => boolean, set: (node: SNode, on: boolean) => SNode): boolean;
-    /** dialogs/sync-units.ts selectUnit: SCH_EDIT_FRAME::SelectUnit over the hierarchy (the "Unit Already Placed" question). */
-    selectUnit?(ctx: unknown, item: KItem, unit: number): boolean;
+    /** dialogs/sync-units.ts selectUnit: SCH_EDIT_FRAME::SelectUnit over the hierarchy (the "Unit Already Placed" question);
+     *  `write`: the symbol is being placed (edit flags set), so its new node goes there and only a swapped holder is committed. */
+    selectUnit?(ctx: unknown, item: KItem, unit: number, write?: (node: SNode) => void): boolean;
     tool?: string; DOC_TYPE?: string; kdoc?: KDoc | null; zoom?: number; selected?: { id: string; x: number; y: number; rot?: number } | null;
     selection?: Set<string> | null; hiddenLayers?: Set<string> | null; overrideLocks?: boolean; units?: string;
     /** the editor's own footprint drag (a group drag carries every footprint) */

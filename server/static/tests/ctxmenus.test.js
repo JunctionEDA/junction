@@ -110,6 +110,21 @@ test("footprint editor: PAD_TOOL's pad entries; no Paste Special, Get and Move, 
   assert.ok(two.includes("applyPadSettings") && !two.includes("copyPadSettings") && !two.includes("pushPadSettings"));
 });
 
+test("schematic: Symbol Unit / Body Style sub-menus for one multi-unit / multi-body symbol, selected or being placed (SYMBOL_UNIT_MENU, BODY_STYLE_MENU)", () => {
+  const sel = menu({ kinds: ["symbol"], hasUnlocked: true, multiUnitSymbol: true, multiBodyStyleSymbol: true });
+  assert.ok(sel.includes(">Symbol Unit") && sel.includes(">Body Style"), sel.join(" "));
+  assert.ok(sel.indexOf(">Symbol Unit") < sel.indexOf(">Body Style") && sel.indexOf(">Body Style") < sel.indexOf(">Transform Selection"), "order 1, before the order-200 entries");
+  assert.ok(!menu({ kinds: ["symbol"], multiUnitSymbol: false }).includes(">Symbol Unit"), "a single-unit symbol has none");
+  assert.ok(!menu({ kinds: ["symbol", "symbol"], multiUnitSymbol: true, multiBodyStyleSymbol: true }).includes(">Symbol Unit"), "SingleMultiUnitSymbol: one item only");
+  assert.ok(!menu({ kinds: ["symbol"], multiUnitSymbol: true }).includes(">Body Style"));
+  // the Place Symbol tool's own menu (SCH_DRAWING_TOOLS) while the symbol rides the cursor: it is the selection
+  const placing = menu({ tool: "place", kinds: ["symbol"], busy: true, multiUnitSymbol: true, multiBodyStyleSymbol: true }, true);
+  for (const want of ["cancelInteractive", ">Symbol Unit", ">Body Style", ">Transform Selection", ">Attributes", "properties", ">Edit Main Fields", "autoplaceFields"]) assert.ok(placing.includes(want), want + " missing: " + placing.join(" "));
+  assert.ok(!placing.includes("editWithLibEdit"), "Edit with Symbol Editor wants Idle");
+  assert.ok(placing.indexOf(">Symbol Unit") < placing.indexOf(">Transform Selection"));
+  const unit = evaluate(menuFor(ctx({ tool: "place", kinds: ["symbol"], busy: true, multiUnitSymbol: true }), true), ctx({ tool: "place", kinds: ["symbol"], busy: true, multiUnitSymbol: true })).find((e) => e.menu && e.menu.title === "Symbol Unit");
+  assert.deepStrictEqual([unit.menu.icon, unit.menu.dynamic], ["component_select_unit", "symbolunit"]);
+});
 // pcb-tools: cancel() puts a select-tool move back and clears what was in flight
 require(path.join(__dirname, "..", "kicad-canvas.js")); require(path.join(__dirname, "..", "pcb-tools.js"));
 test("pcb-tools cancel(): nothing in flight afterwards", () => {
@@ -131,5 +146,17 @@ test("board: Create Arc from Selection wants exactly one track, track arc or gra
   const has = (kinds) => allActs(evaluate(menuFor(ctx({ editor: "pcb", kinds }), false), ctx({ editor: "pcb", kinds }))).includes("PCB_ACTIONS::convertToArc");
   assert.ok(has(["segment"])); assert.ok(has(["arc"])); assert.ok(has(["gr_line"]));
   assert.ok(!has(["segment", "segment"])); assert.ok(!has(["gr_rect"]));
+});
+test("board: MULTICHANNEL_CONTEXT_MENU and Apply Design Block Layout (multichannel_tool.cpp, pcb_selection_tool.cpp)", () => {
+  const sub = (o) => { const c = ctx(Object.assign({ editor: "pcb", hasUnlocked: true }, o)); const e = evaluate(menuFor(c, false), c).find((x) => x.menu && x.menu.title === "Multi-Channel"); return e ? flat(e.items) : null; };
+  assert.deepStrictEqual(sub({ kinds: ["footprint"], mcOffChannel: true, mcLinked: 0 }), ["expandToMatchingTopology", "expandToLargestTopology", "repeatLayout"]);
+  assert.deepStrictEqual(sub({ kinds: ["zone"], mcOffChannel: true, mcLinked: 1 }), ["repeatLayout", "updateLinkedLayouts", "unlinkLayout"]);
+  // a repeated channel's group is repeated through its Properties; two linked areas cannot be updated at once
+  assert.deepStrictEqual(sub({ kinds: ["group"], mcOffChannel: false, mcLinked: 2 }), ["unlinkLayout"]);
+  assert.strictEqual(sub({ kinds: ["segment"] }), null);
+  assert.strictEqual(sub({ kinds: ["footprint"], fpEditor: true }), null);
+  const m = menu({ editor: "pcb", kinds: ["group"], groupSelected: true, designBlockGroup: true, hasUnlocked: true });
+  assert.ok(m.indexOf("groupEnter") < m.indexOf("applyDesignBlockLayout") && m.indexOf("applyDesignBlockLayout") < m.indexOf("placeLinkedDesignBlock"), m.join(" "));
+  assert.ok(!menu({ editor: "pcb", kinds: ["group"], groupSelected: true, hasUnlocked: true }).includes("applyDesignBlockLayout"));
 });
 console.log(`\n${passed} passed, ${failed} failed`); process.exit(failed ? 1 : 0);

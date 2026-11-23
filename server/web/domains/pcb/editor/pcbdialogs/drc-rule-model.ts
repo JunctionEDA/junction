@@ -16,6 +16,8 @@ export const RULE_TYPES: RuleType[] = [
   { id: "MINIMUM_THERMAL_RELIEF_SPOKE_COUNT", label: "Minimum thermal relief spoke count", code: "min_resolved_spokes", panel: "int", two: false, cat: ["Electrical"], unitless: true },
   { id: "MINIMUM_ANNULAR_WIDTH", label: "Minimum annular width", code: "annular_width", panel: "num", two: false, cat: ["Manufacturability"] },
   { id: "MINIMUM_DRILL_SIZE", label: "Minimum drill size", code: "hole_size", panel: "num", two: false, cat: ["Manufacturability", "Hole"] },
+  { id: "HOLE_SIZE", label: "Hole size", code: "hole_size", panel: "num", two: false, cat: ["Manufacturability", "Hole"] },
+  { id: "MINIMUM_VIA_DIAMETER", label: "Minimum via diameter", code: "via_diameter", panel: "num", two: false, cat: ["Manufacturability"] },
   { id: "HOLE_TO_HOLE_DISTANCE", label: "Hole to hole distance", code: "hole_to_hole", panel: "num", two: true, cat: ["Manufacturability", "Hole"] },
   { id: "VIA_STYLE", label: "Via style", code: "via_style", panel: "viastyle", two: false, cat: ["Manufacturability", "Hole"] },
   { id: "HOLE_ASPECT_RATIO", label: "Maximum aspect ratio", code: "hole_aspect_ratio", panel: "int", two: false, cat: ["Manufacturability", "Hole"], unitless: true },
@@ -212,7 +214,8 @@ export function loadRules(text: string): RuleList {
       else if (code === "length") set("ABSOLUTE_LENGTH", { min: bound(c, "min"), max: bound(c, "max") });
       else if (code === "min_resolved_spokes") set("MINIMUM_THERMAL_RELIEF_SPOKE_COUNT", { value: +S(c[2]) || 0 });
       else if (code === "via_count" || code === "microvia_stack_depth" || code === "hole_aspect_ratio") set(RULE_TYPES.find((t) => t.code === code)!.id, { value: bound(c, "max") });
-      else { const t = RULE_TYPES.find((x) => x.panel === "num" && x.code === code); if (t && bound(c, "min") !== null && c.length === 3) set(t.id, { value: bound(c, "min") }); }
+      // DRC_PANEL_MATCHER: a lone hole_size is claimed by HOLE_SIZE (MINIMUM_DRILL_SIZE has no claim of its own)
+      else { const t = code === "hole_size" ? typeById("HOLE_SIZE") : RULE_TYPES.find((x) => x.panel === "num" && x.code === code); if (t && bound(c, "min") !== null && c.length === 3) set(t.id, { value: bound(c, "min") }); }
     }
     if (rule.type !== "CUSTOM_RULE") {
       rule.conds = parseCondition(cond);

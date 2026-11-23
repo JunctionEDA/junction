@@ -87,6 +87,8 @@ export interface PcbCanvasApi extends ToolsCanvasApi {
   /** moves a table's cells by (dx, dy) */
   shiftTable(node: SNode, dx: number, dy: number): void;
   PCB_BG: string;
+  /** a GAL colour of the live board theme ("aux_items", "anchor", "ratsnest" ...: web/domains/pcb/canvas/colors.ts) */
+  boardColor(key: string): string;
 }
 
 /** Board Setup > Text & Graphics > Defaults as the project file stores it (board.design_settings.defaults). */
@@ -141,6 +143,8 @@ export type PcbState = {
   /** the Footprint Editor's Add Pad tools: the pad type being placed and its turn (R), and the pad selected when the tool started */
   padPlace?: { type: import("./pad-tool").PadType; angle: number } | null; padTemplate?: SNode | null;
   pedit: PointEdit | null; mmPerPx: number;
+  /** PCBNEW_SETTINGS m_AreaAnchorPointSelection (Editing Options > Show and edit anchor points on multi-selections) */ areaAnchorPointSelection?: boolean;
+  /** BLOCK_DRAG_SESSION: a block anchor drag in flight (block-drag.ts) */ blockDrag?: import("./block-drag").BlockDrag | null;
   route: Route | null; drag: TrackDrag | null; draw: DrawState | null; hover: Hover | null;
   /** DRAWING_TOOL::PlaceSubGrid between its two clicks: the grid item's centre, extent and angle */
   subGrid?: import("./board-items").SubGridDraft | null;

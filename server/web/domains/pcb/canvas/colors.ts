@@ -1,4 +1,5 @@
 // kicad-canvas — GENERATED SOURCE MODULE (split from the former static/kicad-canvas.js; static/kicad-canvas.js is now the esbuild output of web/domains/pcb/canvas/index.ts — edit these modules, not the bundle).
+import { classicLayerColor } from "./plot-params";
 // ---------------------------------------------------------------- colours
 export function rgba(r: number, g: number, b: number, a?: number): string { return a === undefined || a >= 1 ? "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("") : `rgba(${r},${g},${b},${+a.toFixed(3)})`; }
 
@@ -148,6 +149,120 @@ export function pcbColor(layer: string): string {
   if (PCB_COLORS[layer]) return PCB_COLORS[layer];
   const u = /^User\.(\d+)$/.exec(layer); if (u) return +u[1] === 9 ? "#E8B2A7" : USER_COLORS[(+u[1] - 1) % 4];
   if (/\.Cu$/.test(layer)) return "#7FC87F"; return "#C2C2C2";
+}
+
+// ---------------------------------------------------------------- board colour themes
+// The "board" namespace of a colour theme (common/settings/color_settings.cpp: "board.<key>" for the GAL layers, the
+// board layers by name).  Geometry is always built in KiCad Default's colours (PCB_COLORS, PCB_BG, VIA_HOLE ...); the
+// screen painter maps them to the live theme below (PCB_RENDER_SETTINGS::LoadColors), so a theme change costs no rebuild
+// and the exports keep KiCad Default unless told otherwise.
+
+/** s_defaultTheme's GAL board colours, keyed as COLOR_SETTINGS stores them ("board.<key>"); select_overlay has no parameter (UNSPECIFIED). */
+export const BOARD_GAL_DEFAULT: Readonly<Record<string, string>> = Object.freeze({
+  anchor: "#FF26E2", locked_shadow: "rgba(255,38,226,0.5)", conflicts_shadow: "rgba(255,0,5,0.5)", constraint_shadow: "rgba(80,160,240,0.5)",
+  constraint_under: "rgba(204,107,5,0.9)", constraint_well: "rgba(46,184,77,0.9)", constraint_over: "rgba(235,46,46,0.9)", aux_items: "#FFFFFF",
+  background: "#001023", cursor: "#FFFFFF", drc_error: "rgba(215,91,107,0.8)", drc_warning: "rgba(255,208,66,0.8)", drc_exclusion: "rgba(255,255,255,0.8)",
+  drc_highlighted: "#FF00FF", grid: "#848484", grid_axes: "#C2C2C2", pad_plated_hole: "#C2C200", plated_hole: "#1AC4D2", ratsnest: "rgba(0,248,255,0.35)",
+  select_overlay: "rgba(0,0,0,0)", via_hole: "#E3B72E", via_hole_walls: "#ECECEC", worksheet: "#C872AB", page_limits: "#848484",
+  outline_area: "rgba(100,100,100,0.35)", track_net_names: "rgba(255,255,255,0.7)", pad_net_names: "rgba(255,255,255,0.9)", via_net_names: "rgba(50,50,50,0.9)",
+  points: "#FF26E2", subgrids: "#C2C200", via_stitching: "#4DCCB2",
+});
+/** s_classicTheme's GAL board colours (COLOR4D names through color4d.cpp's B, G, R table). */
+const BOARD_GAL_CLASSIC: Record<string, string> = {
+  anchor: "#000084", locked_shadow: "rgba(0,0,132,0.6)", conflicts_shadow: "rgba(132,0,0,0.5)", constraint_shadow: "rgba(79,161,240,0.5)",
+  constraint_under: "rgba(204,107,5,0.9)", constraint_well: "rgba(46,184,77,0.9)", constraint_over: "rgba(235,46,46,0.9)", aux_items: "#FFFFFF",
+  background: "#000000", cursor: "#FFFFFF", drc_error: "rgba(255,0,0,0.8)", drc_warning: "rgba(0,255,0,0.8)", drc_exclusion: "#FFFFFF",
+  drc_highlighted: "#FF00FF", grid: "#848484", grid_axes: "#000084", pad_plated_hole: "#C2C200", plated_hole: "#C2C200", ratsnest: "#FFFFFF",
+  select_overlay: "#00FF00", via_hole: "rgba(128,102,0,0.8)", via_hole_walls: "#FFFFFF", worksheet: "#480000", page_limits: "#848484",
+  outline_area: "rgba(100,100,100,0.35)", track_net_names: "rgba(255,255,255,0.7)", pad_net_names: "rgba(255,255,255,0.9)", via_net_names: "rgba(50,50,50,0.9)",
+  points: "#000084", subgrids: "#C2C200", via_stitching: "#008484",
+};
+/** Every board layer a theme colours, in COLOR_SETTINGS' order: F.Cu, In1..In30, B.Cu, the technical layers, User.1..45. */
+export const BOARD_THEME_LAYERS: readonly string[] = Object.freeze([
+  "F.Cu", ...Array.from({ length: 30 }, (_, i) => `In${i + 1}.Cu`), "B.Cu", "B.Adhes", "F.Adhes", "B.Paste", "F.Paste", "B.SilkS", "F.SilkS", "B.Mask", "F.Mask",
+  "Dwgs.User", "Cmts.User", "Eco1.User", "Eco2.User", "Edge.Cuts", "Margin", "B.CrtYd", "F.CrtYd", "B.Fab", "F.Fab", ...Array.from({ length: 45 }, (_, i) => `User.${i + 1}`),
+]);
+/**
+ * COLOR_SETTINGS::GetDefaultColor: s_defaultTheme's colour of a key (a board layer name or a GAL key); a layer without a
+ * parameter falls back to s_copperColors / s_userColors[ layer % size ] (LAYER_SELECT_OVERLAY: GAL_LAYER_ID_START + 26 = 287,
+ * s_userColors[ 3 ] = (194, 194, 194)).
+ */
+export function boardDefaultColor(key: string): string {
+  if (key === "select_overlay") return "#C2C2C2";
+  if (Object.prototype.hasOwnProperty.call(BOARD_GAL_DEFAULT, key)) return BOARD_GAL_DEFAULT[key];
+  return pcbColor(key);
+}
+/** A built-in board theme: its name and the colours it sets (the rest are KiCad Default's). */
+export interface BoardThemeDef { name: string; colors: Record<string, string> }
+let classicBoard: Record<string, string> | null = null;
+/** s_classicTheme's board namespace, layers and GAL colours together (built on first use: plot-params holds the layer table). */
+function classicBoardColors(): Record<string, string> {
+  if (!classicBoard) {
+    classicBoard = { ...BOARD_GAL_CLASSIC };
+    for (const l of BOARD_THEME_LAYERS) { const c = classicLayerColor(l); if (c) classicBoard[l] = c; }
+  }
+  return classicBoard;
+}
+/** The board namespace of every theme of the theme table: KiCad's two built-ins; a theme without board colours (the Dark sheet theme) is KiCad Default's. */
+export function boardThemeColors(id: string): Record<string, string> {
+  const out: Record<string, string> = { ...BOARD_GAL_DEFAULT };
+  for (const l of BOARD_THEME_LAYERS) out[l] = pcbColor(l);
+  if (id === "classic") Object.assign(out, classicBoardColors());
+  return out;
+}
+
+/** PCB_RENDER_SETTINGS::LoadColors: a board layer colour with an alpha under 0.2 is drawn at 0.2. */
+function clampLayerAlpha(c: string): string { const [r, g, b, a] = parseColor(c); return a < 0.2 ? rgba(r, g, b, 0.2) : c; }
+
+/** The live board palette: the GAL colours of the theme on show (PCB_RENDER_SETTINGS::m_layerColors of the GAL layers). */
+export const BOARD: Record<string, string> = { ...BOARD_GAL_DEFAULT };
+/** The live board-layer colours (alpha clamped as LoadColors does); every layer a theme colours has an entry. */
+export const PCB_LIVE: Record<string, string> = {};
+for (const l of BOARD_THEME_LAYERS) PCB_LIVE[l] = pcbColor(l);
+let boardStamp = 0, boardKey = "", liveOverrides: Map<string, string> | null = null;
+/** Bumped on every change of the live board palette (painter caches keyed on it). */
+export function boardThemeStamp(): number { return boardStamp; }
+
+/**
+ * Load a theme's board namespace into the live palette (KiCad Default's colour for a key it leaves out); null puts KiCad
+ * Default back.  Returns whether anything changed.
+ */
+export function setBoardColors(colors: Record<string, string> | null): boolean {
+  const full = { ...boardThemeColors("default"), ...(colors || {}) };
+  const key = JSON.stringify(full); if (key === boardKey) return false;
+  boardKey = key; boardStamp++;
+  for (const k of Object.keys(BOARD_GAL_DEFAULT)) BOARD[k] = full[k] || BOARD_GAL_DEFAULT[k];
+  liveOverrides = null;
+  for (const l of BOARD_THEME_LAYERS) {
+    const c = clampLayerAlpha(full[l] || pcbColor(l)); PCB_LIVE[l] = c;
+    if (c.toLowerCase() !== pcbColor(l).toLowerCase()) (liveOverrides || (liveOverrides = new Map())).set(l, c);
+  }
+  return true;
+}
+/** The live board palette as a theme map (what setBoardColors was given, defaults filled in). */
+export function liveBoardColors(): Record<string, string> { return boardKey ? JSON.parse(boardKey) as Record<string, string> : boardThemeColors("default"); }
+/** Run fn with the live board palette switched to `colors` (an export in KiCad Default while the screen shows another theme). */
+export function withBoardColors<T>(colors: Record<string, string> | null, fn: () => T): T {
+  const was = boardKey ? JSON.parse(boardKey) as Record<string, string> : null; setBoardColors(colors);
+  try { return fn(); } finally { setBoardColors(was); }
+}
+/** The colour a board layer is drawn in under the live theme (PCB_RENDER_SETTINGS::GetColor's m_layerColors). */
+export function livePcbColor(layer: string): string { return PCB_LIVE[layer] || clampLayerAlpha(pcbColor(layer)); }
+/** The board layers whose live colour is not KiCad Default's (what the painter maps geometry colours through), or null. */
+export function boardLayerOverrides(): Map<string, string> | null { return liveOverrides; }
+/** A GAL colour of the live theme ("background", "via_hole", "grid" ...). */
+export function boardColor(key: string): string { return BOARD[key] || BOARD_GAL_DEFAULT[key] || "#000000"; }
+/** COLOR4D::Inverted: every channel c → 1 − c, alpha kept. */
+export function invertedColor(c: string): string { const [r, g, b, a] = parseColor(c); return rgba(255 - r, 255 - g, 255 - b, a); }
+/** COLOR4D::GetBrightness: r·0.299 + g·0.587 + b·0.114, on 0 .. 1 channels. */
+export function colorBrightness(c: string): number { const [r, g, b] = parseColor(c); return (r * 0.299 + g * 0.587 + b * 0.114) / 255; }
+/**
+ * PCB_RENDER_SETTINGS::LoadColors' netname colours: NETNAMES_LAYER_ID_START ("board.track_net_names") on dark copper, inverted
+ * on copper brighter than 0.5; a pad label of several layers takes it as it is (LAYER_PAD_NETNAMES is not themeable).
+ */
+export function liveNetnameColor(copper: string | null): string {
+  const light = boardColor("track_net_names");
+  return copper && colorBrightness(livePcbColor(copper)) > 0.5 ? invertedColor(light) : light;
 }
 
 // pcbnew GAL_LAYER_ORDER, bottom first; copper groups carry fill/track/pad/via sub-orders

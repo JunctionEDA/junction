@@ -11,7 +11,7 @@ import { exportCmpFile, generateBomLegacy, generateD356, generateFootprintReport
 import { openFootprintFields } from "./fp-fields";
 import { clearDrcMarkers, drcReport, excludeMarker, nextMarker, openBoardStatistics, openClearance, openConstraints, openDiffFootprint, openFootprintAssociations, openDrc, prevMarker } from "./inspect";
 import { showPane } from "../panes";
-import { fpFieldDialog, newShapeDialog, newTextDialog, newZoneDialog, openZoneManager, pcbItemDialog } from "./item-props";
+import { carriedFootprintDialog, fpFieldDialog, newShapeDialog, newTextDialog, newZoneDialog, openZoneManager, pcbItemDialog } from "./item-props";
 import { tracksOnly, trackViaDialog } from "./track-via";
 import { newTextBoxDialog } from "./textbox";
 import { newDimensionDialog } from "./dimension";
@@ -37,6 +37,7 @@ import { commitObservers, toolCtx } from "../tools";
 import { installBoardCommitHooks } from "./board-commit";
 import { clearStitchViaExclusions, excludeStitchVia, newViaStitchDialog } from "./via-stitch";
 import { openVertexEditor } from "./vertex-editor";
+import { applyDesignBlockLayout, expandSelection, generatePlacementRuleAreas, installMultichannel, repeatLayout, unlinkLayout, updateLinkedLayouts } from "./multichannel";
 
 type Run = (ctx: ToolCtx) => void | boolean;
 function action(id: string, label: string, key: string, run: Run): void {
@@ -59,7 +60,7 @@ export function installPcbDialogs(): void {
   // CONVERT_TOOL's Conversion Settings dialog
   const cd = (CollabTools.pcb as ToolModule & { setConvertDialogs?(d: { settings?: typeof convertSettingsDialog }): void }).setConvertDialogs;
   if (cd) cd({ settings: convertSettingsDialog });
-  if (nd) nd({ barcode: newBarcodeDialog, gr_text: newTextDialog, gr_text_box: newTextBoxDialog, table: newTableDialog, zone: newZoneDialog, viaStitch: newViaStitchDialog, shape: newShapeDialog, dimension: newDimensionDialog });   // Add Text, Draw Text Box and Draw Zone / Rule Area open their properties dialog first
+  if (nd) nd({ barcode: newBarcodeDialog, gr_text: newTextDialog, gr_text_box: newTextBoxDialog, table: newTableDialog, zone: newZoneDialog, viaStitch: newViaStitchDialog, shape: newShapeDialog, dimension: newDimensionDialog, footprint: carriedFootprintDialog });   // footprint: a microwave footprint being placed (E)   // Add Text, Draw Text Box and Draw Zone / Rule Area open their properties dialog first
   action("excludeStitchVia", "Exclude From Stitching", "", excludeStitchVia);   // VIA_STITCH_TOOL::ExcludeStitchVia
   action("clearStitchViaExclusions", "Clear Via Stitching Exclusions", "", clearStitchViaExclusions);
   action("createArray", "Create Array...", "", (ctx) => { createArrayDialog(ctx); });   // PCB_ACTIONS::createArray (ARRAY_TOOL)
@@ -89,6 +90,15 @@ export function installPcbDialogs(): void {
   action("boardReannotate", "Geographical Reannotate...", "", openReannotate);   // BOARD_REANNOTATE_TOOL::ShowReannotateDialog
   action("removeUnusedPads", "Remove Unused Pads...", "", openUnusedPads);   // GLOBAL_EDIT_TOOL::RemoveUnusedPads
   action("updatePcbFromSchematic", "Update PCB from Schematic...", "F8", (ctx) => { void openUpdatePcb(ctx); });
+  // MULTICHANNEL_TOOL (Tools > Multi-Channel and the selection menu's Multi-Channel sub-menu) and PCB_CONTROL::ApplyDesignBlockLayout
+  action("generatePlacementRuleAreas", "Generate Placement Rule Areas...", "", generatePlacementRuleAreas);
+  action("repeatLayout", "Repeat Layout...", "", (ctx) => { void repeatLayout(ctx); });
+  action("updateLinkedLayouts", "Update Linked Layouts", "", (ctx) => { void updateLinkedLayouts(ctx); });
+  action("unlinkLayout", "Unlink Layout", "", unlinkLayout);
+  action("expandToMatchingTopology", "Expand Selection by One Step", "", (ctx) => expandSelection(ctx, false));
+  action("expandToLargestTopology", "Expand Selection to Largest Matching Topology", "", (ctx) => expandSelection(ctx, true));
+  action("applyDesignBlockLayout", "Apply Design Block Layout", "", (ctx) => { void applyDesignBlockLayout(ctx); });
+  installMultichannel();
   // GLOBAL_EDIT_TOOL::ExchangeFootprints (DIALOG_EXCHANGE_FOOTPRINTS)
   action("updateFootprint", "Update Footprint...", "", (ctx) => { openExchangeFootprints(ctx, "updateFootprint"); });
   action("updateFootprints", "Update Footprints from Library...", "", (ctx) => { openExchangeFootprints(ctx, "updateFootprints"); });

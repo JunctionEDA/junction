@@ -120,7 +120,9 @@ function LayersTab() {
   const menu = useContextMenu();
   const hasInner = layers.some((l) => l.copper && l.key !== "F.Cu" && l.key !== "B.Cu");
   const items: MenuItem[] = LAYER_MENU.filter((m) => m === "-" || m[0] !== "inner" || hasInner).map((m) => m === "-" ? "-" : { label: m[1], icon: m[2], run: () => pdispatch({ t: "layerMenu", cmd: m[0] }) });
-  const swatch = (l: LayerInfo) => pickColor({ title: `${l.name} color`, color: l.color, def: l.defaultColor, set: (c) => pdispatch({ t: "layerColor", key: l.key, color: c }) });
+  const readOnly = usePanels((s) => !!s.appearance.readOnlyColors);
+  // COLOR_SWATCH::SetReadOnly: a swatch of a built-in theme calls APPEARANCE_CONTROLS::onReadOnlySwatch instead of the picker
+  const swatch = (l: LayerInfo) => readOnly ? pdispatch({ t: "readOnlySwatch" }) : pickColor({ title: `${l.name} color`, color: l.color, def: l.defaultColor, set: (c) => pdispatch({ t: "layerColor", key: l.key, color: c }) });
   return (
     <>
       <div id="layers" className="flex-auto min-h-0 overflow-auto bg-paper py-0.5" onContextMenu={(ev) => menu.open(ev, items)}>
@@ -150,13 +152,14 @@ function LayersTab() {
 
 function ObjectsTab() {
   const objects = usePanels((s) => s.appearance.objects);
+  const readOnly = usePanels((s) => !!s.appearance.readOnlyColors);
   return (
     <div id="objects" className="flex-auto min-h-0 overflow-auto bg-paper py-0.5">
       {objects.map((o, i) => o.spacer ? <div key={"sp" + i} className="h-2.5" /> : (
         <div key={o.id} className={cx(ROW2, "hover:bg-panel")} data-object={o.id}>
           {/* rebuildObjects: a COLOR_SWATCH where the theme has a colour for the layer, else a spacer of its width */}
           {o.color ? <span data-object-swatch={o.id} className="flex"><Swatch color={o.color} small title={OBJ_SWATCH_TIP}
-            onPick={() => pickColor({ title: `${o.label} color`, color: o.color!, def: o.defaultColor || null, set: (c) => pdispatch({ t: "objColor", id: o.id, color: c }) })} /></span>
+            onPick={() => readOnly ? pdispatch({ t: "readOnlySwatch" }) : pickColor({ title: `${o.label} color`, color: o.color!, def: o.defaultColor || null, set: (c) => pdispatch({ t: "objColor", id: o.id, color: c }) })} /></span>
             : <span className="w-3 flex-none" />}
           {o.canHide ? <Eye on={!!o.visible} k={o.id} title={`Show or hide ${o.label.toLowerCase()}`} onChange={(on) => pdispatch({ t: "objVisible", id: o.id, on })} /> : <span className="w-4 flex-none" />}
           <span className="flex-auto min-w-0 overflow-hidden text-ellipsis" title={o.tip}>{o.label}</span>

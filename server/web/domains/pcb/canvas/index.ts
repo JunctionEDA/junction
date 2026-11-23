@@ -22,7 +22,7 @@
 // static/kicad-canvas.js, which the server serves and the node test suites load.
 // kicad-canvas — GENERATED SOURCE MODULE (split from the former static/kicad-canvas.js; static/kicad-canvas.js is now the esbuild output of web/domains/pcb/canvas/index.ts — edit these modules, not the bundle).
 import { root } from "./env";
-import { PCB_BG, PCB_COLORS, PCB_HIDDEN_DEFAULT, SCH, SCH_DEFAULT, SCH_THEMES, SCH_Z, pcbColor, pcbZ, schTheme, schThemeColors, setSchTheme, withSchTheme } from "./colors";
+import { BOARD, BOARD_GAL_DEFAULT, BOARD_THEME_LAYERS, PCB_HIDDEN_DEFAULT, PCB_LIVE, SCH, SCH_DEFAULT, SCH_THEMES, SCH_Z, boardColor, boardDefaultColor, boardThemeColors, boardThemeStamp, liveBoardColors, livePcbColor, pcbColor, pcbZ, schTheme, schThemeColors, setBoardColors, withBoardColors, setSchTheme, withSchTheme } from "./colors";
 import { PAPER_SIZES, addItem, applyDocProps, computeBBox, mm2mils, paperSize, parseDoc, titleBlockOf } from "./doc";
 import type { Doc } from "./types";
 import { addChange, boardChangeExtras, createItem, fieldAt, fieldBoxes, groupMemberIds, moveItem, netNameOf, newUuid, pinPoints, pointInQuad, removeChange, replaceChange, typeNameOf, wireEndsAt } from "./edit";
@@ -106,7 +106,10 @@ export const api = {
   busJunctions, directiveOnlyAreas, netStyled, SEL_STYLE, SCH_Z,
   refreshOpTextVars(doc?: Doc | null) { if (!doc || doc.type !== "sch") return; for (const it of doc.items.values()) if (hasOpTextVar(it)) { try { buildGeom(doc, it); } catch (e) { /* no geometry */ } } },
   setSchDisplay(o: { pinAltIcons?: boolean; remappedPinNumbers?: boolean }, doc?: Doc | null) { if (typeof o.pinAltIcons === "boolean") schDisplay.pinAltIcons = o.pinAltIcons; if (typeof o.remappedPinNumbers === "boolean") schDisplay.remappedPinNumbers = o.remappedPinNumbers; if (doc && doc.type === "sch") for (const it of doc.items.values()) if (it.kind === "symbol") { try { buildGeom(doc, it); } catch (e) { /* no geometry */ } } }, schDisplay,
-  parse, parseAll, serialize, serializeItem, parseDoc, applyDocProps, paperSize, titleBlockOf, DASH_RATIOS, setViewTransform, drawSelectionHalo, selectedColor, moveItem, replaceChange, addChange, removeChange, typeNameOf, boardChangeExtras, netNameOf, groupMemberIds, wrapFragment, pinPoints, wireEndsAt, newUuid, createItem, setPts, setAt, atOf, ptsOf, kid, kids, num, str, uuidOf, cloneNode, quotedMask, resolveLib, ORIENT, addItem, applyChange, render, movableItems, hitTest, layerList, snap, computeBBox, PCB_HIDDEN_DEFAULT, SCH, PCB_COLORS, PCB_BG,
+  parse, parseAll, serialize, serializeItem, parseDoc, applyDocProps, paperSize, titleBlockOf, DASH_RATIOS, setViewTransform, drawSelectionHalo, selectedColor, moveItem, replaceChange, addChange, removeChange, typeNameOf, boardChangeExtras, netNameOf, groupMemberIds, wrapFragment, pinPoints, wireEndsAt, newUuid, createItem, setPts, setAt, atOf, ptsOf, kid, kids, num, str, uuidOf, cloneNode, quotedMask, resolveLib, ORIENT, addItem, applyChange, render, movableItems, hitTest, layerList, snap, computeBBox, PCB_HIDDEN_DEFAULT, SCH,
+  // the board colour theme on show (colors.ts): PCB_COLORS / pcbColor / PCB_BG are its live colours (geometry keeps KiCad
+  // Default's: defaultPcbColor); setBoardColors loads a theme's board namespace, boardThemeColors gives a built-in one's
+  PCB_COLORS: PCB_LIVE, pcbColor: livePcbColor, defaultPcbColor: pcbColor, PCB_BG: "", BOARD, BOARD_GAL_DEFAULT, BOARD_THEME_LAYERS, boardColor, boardDefaultColor, boardThemeColors, boardThemeStamp, liveBoardColors, setBoardColors, withBoardColors,
   // schematic colour themes (colors.ts): KiCad Default / KiCad Classic / Dark; the painters rebuild stale geometry,
   // renderSvg / renderPng use opts.colorTheme (KiCad Default unless given)
   SCH_DEFAULT, SCH_THEMES, schTheme, schThemeColors, setSchTheme, withSchTheme, ensureSchTheme, inSchTheme,
@@ -126,7 +129,7 @@ export const api = {
   PRODUCT_NAME, WS_TOKENS, TB_TOKENS, PAPER_SIZES, mm2mils, TEXT_INTERLINE, lineOffsets,
   fieldBoxes, fieldAt, pointInQuad, hitTestDetail, geomHit, geomBox,
   // exposed for tests and tools
-  symbolTransform, textWidth, parseMarkup, urlRuns, urlRunAt, urlRunBox, isUrlText, hatchLines, ensureHatchKnockouts, arcFrom3, bezierPts, pcbColor, pcbZ, drawPad, buildGeom, effectsOf, fillOf,
+  symbolTransform, textWidth, parseMarkup, urlRuns, urlRunAt, urlRunBox, isUrlText, hatchLines, ensureHatchKnockouts, arcFrom3, bezierPts, pcbZ, drawPad, buildGeom, effectsOf, fillOf,
   // display-option helpers (see render()): ratsnest / marker / net-name / zone-preview / flip constants and look-ups
   bboxOf, padAt, padGeomHit, markerAt, markerPolygon, markerScale, busConnectedLabels, busPinTint, isBusLabel, busConnection, busMemberNames, drawMarkers, zoomFactor, flipX, unflipX, flipCentre, dashPattern, trackNameColor,
   MARKER_CORNERS, MARKER_SCALE, MARKER_COLORS, RATSNEST_COLOR, ZONE_OPACITY, HIDDEN_TEXT_ALPHA, PX_PER_MM_ZOOM1, VIA_NETNAME_COLOR,
@@ -155,4 +158,6 @@ const plotApi = { PlotRecorder, plotRecorder, plotItems, sheetPlotItems, itemsBo
 (api as Api).footprintDoc = footprintDocApi;
 (api as Api).plot = plotApi;   // File > Plot / Print: the painter recorded as plot items (web/domains/pcb/canvas/plot-rec.ts), the board's plot settings   // the Footprint Editor's document (web/domains/pcb/canvas/footprint-doc.ts)
 (api as Api).tableModel = tableModel;   // a table's structure edits and layout (web/domains/pcb/canvas/table-model.ts), shared by both editors   // the Footprint Editor's document (web/domains/pcb/canvas/footprint-doc.ts)
+// LAYER_PCB_BACKGROUND of the live board theme
+Object.defineProperty(api, "PCB_BG", { get: () => boardColor("background"), enumerable: true, configurable: true });
 root.KiCadCanvas = api;

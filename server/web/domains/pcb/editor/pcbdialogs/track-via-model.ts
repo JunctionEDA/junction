@@ -92,6 +92,21 @@ export function protectionPreset(via: SNode, fileVersion = 0): number {
   const i = IPC4761.findIndex(([, p]) => p.tent === c.tent && p.cover === c.cover && p.plug === c.plug && p.fill === c.fill && p.cap === c.cap);
   return i < 0 ? IPC4761_CUSTOM : i;
 }
+/** A via's own protection features (PADSTACK's FrontOuterLayers / BackOuterLayers / Drill), undefined where the board default applies. */
+export interface ViaFeatures { tentFront?: boolean; tentBack?: boolean; coverFront?: boolean; coverBack?: boolean; plugFront?: boolean; plugBack?: boolean; fill?: boolean; cap?: boolean }
+export function viaFeatures(via: SNode): ViaFeatures {
+  const [tentFront, tentBack] = frontBack(via, "tenting"), [coverFront, coverBack] = frontBack(via, "covering"), [plugFront, plugBack] = frontBack(via, "plugging");
+  const d = (key: string): boolean | undefined => { const v = drillOpt(via, key); return v === "board" ? undefined : v === "yes"; };
+  return { tentFront, tentBack, coverFront, coverBack, plugFront, plugBack, fill: d("filling"), cap: d("capping") };
+}
+/** The features setViaConfiguration gives a preset below CUSTOM, undefined where it takes the board default. */
+export function presetFeatures(preset: number): ViaFeatures {
+  const p = IPC4761[preset][1];
+  const fb = (s: Surf): [boolean | undefined, boolean | undefined] => (s === "board" ? [undefined, undefined] : [s === "front" || s === "both", s === "back" || s === "both"]);
+  const [tentFront, tentBack] = fb(p.tent), [coverFront, coverBack] = fb(p.cover), [plugFront, plugBack] = fb(p.plug);
+  const d = (v: Drl): boolean | undefined => (v === "board" ? undefined : v === "yes");
+  return { tentFront, tentBack, coverFront, coverBack, plugFront, plugBack, fill: d(p.fill), cap: d(p.cap) };
+}
 /** setViaConfiguration: a preset below CUSTOM rewrites the five features; the via's own text is kept when it already says the same. */
 export function setProtectionPreset(via: SNode, preset: number, parse: Parse, fileVersion = 0): void {
   if (preset < 0 || preset >= IPC4761_CUSTOM || protectionPreset(via, fileVersion) === preset) return;

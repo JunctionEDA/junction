@@ -83,6 +83,7 @@ import { diffPairMarkers, matchedLengthMarkers } from "./dru";
 import { sourceZone, zoneDuplicateNode, zoneMergeChanges } from "./zone-modes";
 import { zonePriorityAbility } from "./zone-priority";
 import { newItemDialogs } from "./assistants";
+import { mwCarrying, mwFlip, mwRotate } from "./microwave";
 import { routeSelected, unrouteSegment, cancelCurrentItem } from "./route-selected";
 import { optimizeSelected } from "./optimize-selected";
 import { cycleLayerPairPresets, setSnapMode } from "./snap-pairs";
@@ -625,6 +626,7 @@ export const moveInFlight = (ctx: PcbCtx) => !!S.move || !!(ctx.handoffDrag && c
 /** EDIT_TOOL::Rotate: about the modification point; a hover selection is cleared afterwards; while moving, the move turns. */
 export function rotateBy(ctx: PcbCtx, deg: number) {
   if (S.route) return true;   // isRouterActive: wxBell
+  if (mwCarrying()) return mwRotate(ctx, deg);   // IPO_ROTATE: the microwave footprint being placed
   if (moveInFlight(ctx)) return moveTransform(ctx, "rotate", deg);
   if (!canEdit(ctx)) return true;
   // a footprint field (PCB_FIELD_T): PCB_TEXT::Rotate about its own position; a selected field stays selected
@@ -650,6 +652,7 @@ act("rotateSelectionCw", "Rotate Clockwise", "", (ctx: PcbCtx) => rotateBy(ctx, 
 export const flipDirection = (): "lr" | "tb" => S.flipDirection === "lr" ? "lr" : "tb";
 export function flipBy(ctx: PcbCtx) {
   if (S.route) { attemptFinish(ctx); return true; }   // F while routing is routerAttemptFinish
+  if (mwCarrying()) return mwFlip(ctx, flipDirection());   // IPO_FLIP: the microwave footprint being placed
   if (moveInFlight(ctx)) return moveTransform(ctx, "flip");
   if (!canEdit(ctx)) return true;
   // a footprint field: PCB_TEXT::Flip about its own position ("Change Side / Flip")

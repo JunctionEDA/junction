@@ -53,7 +53,7 @@ export interface NetComponent {
    *  netlist's (variants …) carries them), in the CASE_INSENSITIVE_MAP's order */
   variants?: NetVariant[];
   /** COMPONENT::GetGroup: the schematic group the symbol belongs to (its uuid and name) */
-  group?: { uuid: string; name: string };
+  group?: { uuid: string; name: string; /** the symbol group's design block link (NETLIST_GROUP::libId), "" for none */ libId?: string };
 }
 /** COMPONENT_VARIANT: a flag only when the variant changes it, the fields whose text the variant changes. */
 export interface NetVariant { name: string; dnp?: boolean; excludedFromBOM?: boolean; excludedFromSim?: boolean; excludedFromPosFiles?: boolean; fields: Map<string, string> }
@@ -436,8 +436,8 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
   for (const inst of instances) {
     const doc = inst.sheet.doc, I = inst.index;
     // the sheet's groups by member (SCH_ITEM::GetParentGroup)
-    const symGroup = new Map<string, { uuid: string; name: string }>();
-    for (const it of doc.items.values()) if (it.kind === "group") { const m = kid(it.node, "members") as SNode | null; const g = { uuid: kidStr(it.node, "uuid") || it.id, name: typeof it.node[1] === "string" ? str(it.node[1]) : "" }; if (m) for (const id of m.slice(1)) symGroup.set(str(id), g); }
+    const symGroup = new Map<string, { uuid: string; name: string; libId: string }>();
+    for (const it of doc.items.values()) if (it.kind === "group") { const m = kid(it.node, "members") as SNode | null; const g = { uuid: kidStr(it.node, "uuid") || it.id, name: typeof it.node[1] === "string" ? str(it.node[1]) : "", libId: kidStr(it.node, "lib_id") }; if (m) for (const id of m.slice(1)) symGroup.set(str(id), g); }
     interface Line { a: Pt; b: Pt; node: number; bus: boolean }
     const lines: Line[] = [];
     /** what the rule areas of the sheet may contain: wires and buses, pins and labels by their node */
@@ -894,7 +894,8 @@ export interface UpdateOptions {
   removeExtraFields?: boolean;
   /** "Group footprints based on symbol group" (BOARD_NETLIST_UPDATER::SetTransferGroups) */
   transferGroups?: boolean;
-  /** "Apply design block layouts to new groups": the board has no design block links here, so it changes nothing yet */
+  /** "Apply design block layouts to new groups": DIALOG_UPDATE_PCB runs Apply Design Block Layout on the linked groups
+   *  the update added (editor/pcbdialogs/update-pcb.ts); the plan itself is the same */
   applyDesignBlockLayouts?: boolean;
   /** the board footprint for a library id, or null when the library is not available (or has no such footprint) */
   footprintFor?(fpid: string): SNode | null | "missing";
@@ -1425,6 +1426,30 @@ export function planUpdate(doc: KDoc, netlist: Netlist, o: UpdateOptions = {}): 
       const pts = ptsOf(kid(it.node, "polygon") as SNode || it.node) as Pt[], p0 = pts.length ? pts[0] : [0, 0];
       const fmt = o.formatLength || ((v: number) => v.toFixed(4) + " mm");
       say("warning", `Copper zone on ${zoneLayerDescription(doc, it.node)} at (${fmt(p0[0])}, ${fmt(p0[1])}) has no pads connected to net "${cur}".`);
+    }
+  }
+
+  // ---- BOARD_NETLIST_UPDATER::updateGroups: the board groups the netlist knows take its name and design block link
+  // (a group the update adds exists only in the real run, where it is named and linked here)
+  if (o.transferGroups) {
+    const netGroups = new Map<string, { name: string; libId: string }>();
+    for (const c of netlist.components) if (c.group && !netGroups.has(c.group.uuid)) netGroups.set(c.group.uuid, { name: c.group.name, libId: c.group.libId || "" });
+    for (const [uuid, g] of groups) {
+      const ng = netGroups.get(uuid); if (!ng || (!g.id && !o.applied)) continue;
+      if (ng.name !== groupName(g)) {
+        say("action", T(`Change group name from '${groupName(g)}' to '${ng.name}'.`, `Changed group name from '${groupName(g)}' to '${ng.name}'.`));
+        if (o.applied) { g.node[1] = ng.name; g.dirty = true; }
+      }
+      const cur = kidStr(g.node, "lib_id");
+      if (ng.libId !== cur) {
+        say("action", T(`Change group library link from '${cur}' to '${ng.libId}'.`, `Changed group library link from '${cur}' to '${ng.libId}'.`));
+        if (o.applied) {
+          const i = g.node.findIndex((x, k) => k > 1 && Array.isArray(x) && x[0] === "lib_id");
+          if (i > 0) g.node.splice(i, 1);
+          if (ng.libId) { const m = g.node.findIndex((x, k) => k > 1 && Array.isArray(x) && x[0] === "members"); g.node.splice(m > 0 ? m : g.node.length, 0, ["lib_id", ng.libId]); }
+          g.dirty = true;
+        }
+      }
     }
   }
 

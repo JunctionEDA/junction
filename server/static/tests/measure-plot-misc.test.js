@@ -109,7 +109,10 @@ test("#7 Color theme: KiCad Classic's board colours and LAYER_DRAWINGSHEET, enab
   for (const f of [1, 2, 3]) assert.ok(!P.colorThemeEnabled(f, false));
   const s = src("editor", "pcbdialogs", "plot.ts");
   assert.ok(/"Color theme:"/.test(s) && /Select the color theme to use for plotting/.test(s));
-  assert.ok(/P\.classicLayerColor\(l\)/.test(s) && /sheetColor = P\.CLASSIC_DRAWINGSHEET/.test(s), "the chosen theme colours the plot");
+  // the chosen theme's board namespace colours the plot (KiCad Classic's layers from classicLayerColor, LAYER_DRAWINGSHEET its worksheet)
+  assert.ok(/themeColors = boardColorsOf\(prefs\(\), theme\)/.test(s) && /sheetColor = themeColors\.worksheet/.test(s), "the chosen theme colours the plot");
+  const cs = src("canvas", "colors.ts");
+  assert.ok(/classicLayerColor\(l\)/.test(cs) && /worksheet: "#480000"/.test(cs), "KiCad Classic's board colours and drawing sheet");
   assert.ok(/svgMode = selectField[^\n]*onChange: \(\) => syncEnables\(\)/.test(s), "the SVG output mode updates the control");
 });
 

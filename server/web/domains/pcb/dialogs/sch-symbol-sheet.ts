@@ -12,7 +12,7 @@ import { bitmapButton } from "../../../shared/components/kicon-dom";
 import { E, api, appState, rootSchematic, toast } from "./editor";
 import { KD, checkbox, confirmBox, h, popupMenu, promptText, select, textInput, type PopItem } from "./dom";
 import * as P from "./sym-props-logic";
-import { commitWithOtherUnits } from "./sync-units";
+import { commitWithOtherUnits, otherUnitsOf } from "./sync-units";
 import * as L from "./sch-items-logic";
 import { resolvedFieldTemplates } from "./field-templates";
 import { fieldsGrid, messageBox, schXref, selectReferenceNumber, swatch, type Swatch } from "./sch-items";
@@ -113,11 +113,17 @@ function pathRefSuffix(): string {
   return P.composeRefSuffix(nodes);
 }
 interface PinRow { number: string; name: string; alt: string; type: string; style: string; alts: string[]; typeKey: string; styleKey: string }
-interface SymPropsOpts { pinMapPage?: boolean }
+interface SymPropsOpts {
+  pinMapPage?: boolean;
+  /** the symbol rides the cursor (PlaceSymbol passed SCH_ACTIONS::properties on): GetEditFlags() != 0, so the dialog
+   *  stages nothing for it; OK hands it the edited node and only the other units (SyncOtherUnits) are committed */
+  carried?(node: SNode): void;
+}
 /** The schematic's current design variant (the toolbar's; "" for the default). */
 const currentVariantName = (): string => String((E as { currentVariant?: string }).currentVariant || "");
 export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts = {}): void {
-  const variant = currentVariantName(), vpath = variant ? sheetPathNow(ctx.doc).path : null;
+  const carried = opts.carried || null;
+  const variant = carried ? "" : currentVariantName(), vpath = variant ? sheetPathNow(ctx.doc).path : null;
   // TransferDataToWindow: the fields show GetFieldText( name, sheet, variant ), the attributes the variant's flags
   const doc = ctx.doc, ro = !!ctx.viewOnly, staged = L.clone(variant ? VM.symbolViewForVariant(item.node, variant, vpath, ctx.doc.version) : item.node), [ax, ay, rot] = L.atOf(staged), origin: [number, number] = [ax, ay];
   const libIdN = L.kid(staged, "lib_id"), libId = libIdN ? L.str(libIdN[1]) : "", libNameN = L.kid(staged, "lib_name"), libName = libNameN ? L.str(libNameN[1]) : libId;
@@ -196,8 +202,10 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
           const btns = h("div", { style: "flex:6;min-width:0;display:flex;flex-direction:column;gap:6px;padding-top:12px" });
           const button = (label: string, id: string, fn: (() => void) | null, why?: string) => { const x = h("button", { type: "button", class: "btn", id, disabled: ro || !fn, title: why }, label); if (fn) x.addEventListener("click", fn); btns.append(x); return x; };
           // OnUpdateSymbol / OnExchangeSymbol: TransferDataFromWindow first; a failed validation keeps the dialog open
-          button("Update Symbol from Library...", "kd-sym-update", () => { if (apply()) openChangeSymbols("update"); });
-          button("Change Symbol...", "kd-sym-change", () => { if (apply()) openChangeSymbols("change"); });
+          // DIALOG_CHANGE_SYMBOLS works on the symbols of the schematic: the one being placed is not one of them yet
+          const PLACING = "The symbol is being placed";
+          button("Update Symbol from Library...", "kd-sym-update", carried ? null : () => { if (apply()) openChangeSymbols("update"); }, carried ? PLACING : undefined);
+          button("Change Symbol...", "kd-sym-change", carried ? null : () => { if (apply()) openChangeSymbols("change"); }, carried ? PLACING : undefined);
           // OnClearVariantSymbol (shown only for a variant that holds a symbol override): apply the dialog, then clearVariantSymbol
           if (variant && VM.symbolVariantOverride(item.node, variant, vpath)) button("Clear Variant Symbol", "kd-sym-clearvariant", () => {
             if (!apply()) return;
@@ -206,7 +214,7 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
             if (JSON.stringify(node) !== JSON.stringify(it.node)) ctx.commit([KiCadCanvas.replaceChange(ctx.doc, { ...it, node, geom: [], bbox: null })], "Clear Variant Symbol");
           });
           const ed = editors();
-          button("Edit Symbol...", "kd-sym-editsch", ed ? () => { if (apply()) ed.editSchematicSymbol(item.id); } : null, ed ? undefined : "The Symbol Editor runs in the desktop app");
+          button("Edit Symbol...", "kd-sym-editsch", ed && !carried ? () => { if (apply()) ed.editSchematicSymbol(item.id); } : null, carried ? PLACING : ed ? undefined : "The Symbol Editor runs in the desktop app");
           btns.append(h("div", { style: "height:14px" }));
           button("Edit Library Symbol...", "kd-sym-editlib", ed ? () => { if (apply()) ed.editLibrarySymbol(libId); } : null, ed ? undefined : "The Symbol Editor runs in the desktop app");
           row.append(gen, att, btns); pg.append(row);
@@ -291,6 +299,15 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
           if (v.name !== libId) { const at = out.findIndex((c, j) => j > 0 && Array.isArray(c) && c[0] === "lib_id"); out.splice(at > 0 ? at : 1, 0, L.qnode("lib_name", v.name)); }
           libs.push(copy);
         } else { if (libs.length) libs.pop(); libs.push(copy); }
+      }
+      if (carried) {
+        // the library copies the placement will draw from; they are written with the symbol when it is placed
+        for (const l of libs) doc.lib.set(L.str(l[1]), l);
+        carried(out);
+        // SyncOtherUnits( currentSheet, commit ): the units of the reference already placed follow
+        const others = otherUnitsOf(doc, item, out);
+        if (others && (others.here.length || others.there.length)) commitWithOtherUnits(ctx, item, out, [], "Edit Symbol Properties");
+        return undefined;
       }
       const sexpr = libs.length ? "(lib_symbols " + libs.map((x) => KiCadCanvas.serialize(x)).join(" ") + ") " + KiCadCanvas.serialize(out) : null;
       if (!sexpr && JSON.stringify(out) === JSON.stringify(item.node)) return undefined;

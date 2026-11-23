@@ -84,10 +84,13 @@ function attributeChecks(items: KItem[]): Record<string, boolean> {
 }
 
 function menuCtx(): MenuCtx {
-  const items = selectionItems(), s = schState(), p = pcbState(), sch = isSch();
+  const s = schState(), p = pcbState(), sch = isSch();
+  // PlaceSymbol / TwoClickPlace: the item riding the cursor is the selection (selectionClear, AddItemToSel( item ))
+  const carryItem = sch && s && s.carry && (s.carry as { item?: KItem | null }).item ? (s.carry as { item: KItem }).item : null;
+  const items = carryItem ? [carryItem] : selectionItems();
   const kinds = items.map(kindOf);
   // the fields and pins (SCH_FIELD_T, SCH_PIN_T, SCH_SHEET_PIN_T) a schematic selection holds alongside its items
-  if (sch) { for (let i = 0; i < selectedFields().length; i++) kinds.push("field"); for (const q of E.selPins as { id: string }[]) kinds.push(E.kdoc && E.kdoc.items.get(q.id)?.kind === "sheet" ? "sheet_pin" : "pin"); }
+  if (sch && !carryItem) { for (let i = 0; i < selectedFields().length; i++) kinds.push("field"); for (const q of E.selPins as { id: string }[]) kinds.push(E.kdoc && E.kdoc.items.get(q.id)?.kind === "sheet" ? "sheet_pin" : "pin"); }
   else if (E.selField && !kinds.length) kinds.push("field");
   const cells = tableMenu.state(); if (cells) for (let i = 0; i < cells.n; i++) kinds.push("table_cell");   // PCB_TABLECELL_T / SCH_TABLECELL_T
   if (sch && !kinds.length) { const mk = ((E.markers || []) as { selected?: boolean; severity?: string }[]).find((m) => m && m.selected); if (mk) kinds.push(mk.severity === "exclusion" ? "marker_excluded" : "marker"); }   // SCH_MARKER_T
@@ -118,17 +121,24 @@ function menuCtx(): MenuCtx {
     busy: interactionBusy() || drawingLine || routing || !!draw || (sch && !!s && !!s.carry),
     canAddCorner, canRemoveCorner, editableCorners: !sch && editableCornersSelected(),
     canClose: outline && n >= 3, canUndoPoint: (outline || (!!draw && (draw.shape === "lines" || draw.shape === "gcurve"))) && n >= 1,
+    ...symbolMenuState(sch),
     pinAlts: !!(E.selPins.length === 1 && E.kdoc && schPins() && schPins()!.pinAlternates(E.kdoc as KDoc, E.selPins[0])),   // ALT_PIN_FUNCTION_MENU: one pin only
     unitsSelection: sch && !!E.kdoc && !!schPins() && !!schPins()!.sameSymbolMultiUnitSelection && schPins()!.sameSymbolMultiUnitSelection!(E.kdoc as KDoc, items).length > 0,
     pinSwaps: sch && !!prefs().schEditing.unconstrainedPinSwaps,
     highlight: !!E.highlightIds, belowRoot: !!root && !topLevelSchematics().some((t) => t.doc === (state as { doc?: unknown }).doc),
     hasLocked: items.some((it) => isLocked(it.node)), hasUnlocked: items.some((it) => !isLocked(it.node)),
-    groupSelected: sch ? schGroupSelected(items) : boardGroupSelected(), ...boardMenuState(sch), ...(sch ? {} : stitchState()),
+    groupSelected: sch ? schGroupSelected(items) : boardGroupSelected(), ...boardMenuState(sch), ...(sch ? {} : stitchState()), ...(sch ? {} : multichannelState(items as KItem[])),
     inGroup: sch ? !!((CollabTools.sch as unknown as { enteredGroupId?: () => string | null } | undefined)?.enteredGroupId?.()) : !!(CollabTools.pcb && (CollabTools.pcb.state as { enteredGroup?: string | null }).enteredGroup),
     hasItems: !!E.kdoc && E.kdoc.items.size > 0, checks: attributeChecks(items),
     overDrawingSheet: sch && !items.length && overDrawingSheet(),
     cells: cells ? { block: cells.block, merged: cells.merged, structure: cells.structure } : null,
   };
+}
+
+/** SCH_CONDITIONS::SingleMultiUnitSymbol / SingleMultiBodyStyleSymbol, asked of the schematic module for its menu symbol. */
+function symbolMenuState(sch: boolean): Pick<MenuCtx, "multiUnitSymbol" | "multiBodyStyleSymbol"> {
+  const m = sch && CollabTools.sch ? CollabTools.sch.symbolMenus : undefined; if (!m || !E.kdoc) return {};
+  try { const c = m.conditions(toolCtx()); return { multiUnitSymbol: c.multiUnit, multiBodyStyleSymbol: c.multiBodyStyle }; } catch (e) { return {}; }
 }
 
 // ---------------------------------------------------------------- what an entry does
@@ -223,6 +233,21 @@ function stitchState(): { stitchExcludable?: boolean; stitchClearable?: boolean 
 function boardMenuState(sch: boolean): Pick<MenuCtx, "grouping" | "zoneCanRaise" | "zoneCanLower"> {
   if (sch || !CollabTools.pcb || !CollabTools.pcb.menuState || !E.kdoc) return {};
   try { return CollabTools.pcb.menuState(toolCtx()); } catch (e) { return {}; }
+}
+/**
+ * MULTICHANNEL_CONTEXT_MENU's conditions (offChannel: no selected group is a repeated channel; the linked rule areas
+ * the selection stands for) and PCB_SELECTION_TOOL's applyDesignBlockLayoutCondition (a selected group has a design
+ * block link), asked of the board tools' multichannel module.
+ */
+function multichannelState(items: KItem[]): Pick<MenuCtx, "mcOffChannel" | "mcLinked" | "designBlockGroup"> {
+  type McLike = { Multichannel: new (doc: KDoc) => { channelZone(g: KItem): string | null; linkedAreasIn(ids: Iterable<string>): string[] } };
+  const M = (window as unknown as { PcbTools?: { multichannel?: McLike } }).PcbTools?.multichannel;
+  if (!M || !E.kdoc) return {};
+  try {
+    const mc = new M.Multichannel(E.kdoc as KDoc), groups = items.filter((it) => it.kind === "group");
+    return { mcOffChannel: !groups.some((g) => !!mc.channelZone(g)), mcLinked: mc.linkedAreasIn(items.map((it) => it.id)).length,
+      designBlockGroup: groups.some((g) => g.node.some((c) => Array.isArray(c) && c[0] === "lib_id" && !!KiCadCanvas.str(c[1]))) };
+  } catch (e) { return {}; }
 }
 /** PCB_SELECTION_TOOL's groupEnterCondition: the selection is one group. */
 function boardGroupSelected(): boolean {
@@ -328,6 +353,32 @@ function pinFunctionRows(): CtxItem[] {
   for (const a of info.alts.slice().sort()) if (a !== info.base) out.push(one(a, a === info.current));
   return out;
 }
+/**
+ * SYMBOL_UNIT_MENU::update: the units as check items (the symbol's ticked, " (already placed)" after the held ones),
+ * then "Place unit %s" for the free ones.  A choice is SCH_EDIT_FRAME::SelectUnit / placeNextSymbolUnit on the
+ * selected symbol, or SelectUnit on the one being placed (PlaceSymbol's TA_CHOICE_MENU_CHOICE).
+ */
+function symbolUnitRows(): CtxItem[] {
+  const m = CollabTools.sch ? CollabTools.sch.symbolMenus : undefined; if (!m || !E.kdoc) return [];
+  const ro = !!E.viewOnly;
+  return m.units(toolCtx()).map((r): CtxItem => {
+    if (r.sep) return { sep: true };
+    const it: CtxItem = r.place ? { label: r.label } : { label: r.label, check: true, checked: !!r.checked };
+    if (ro) it.why = VIEW_ONLY;
+    else it.run = runRow(() => { const c = toolCtx(); if (r.place) m.placeUnit(c, r.place); else m.selectUnit(c, r.unit || 1); selectionChanged(); requestRender(); });
+    return it;
+  });
+}
+/** BODY_STYLE_MENU::update: Standard / Alternate (De Morgan) or the library's body style names, the symbol's ticked. */
+function bodyStyleRows(): CtxItem[] {
+  const m = CollabTools.sch ? CollabTools.sch.symbolMenus : undefined; if (!m || !E.kdoc) return [];
+  const ro = !!E.viewOnly;
+  return m.bodyStyles(toolCtx()).map((r): CtxItem => {
+    const it: CtxItem = { label: r.label, check: true, checked: !!r.checked };
+    if (ro) it.why = VIEW_ONLY; else it.run = runRow(() => { m.selectBodyStyle(toolCtx(), r.bodyStyle || 1); selectionChanged(); requestRender(); });
+    return it;
+  });
+}
 /** PIN_TRICKS_MENU::update: Wire, No Connect, Net Label, Hierarchical Label, Global Label on the selected pins. */
 function pinHelperRows(): CtxItem[] {
   const P = schPins(), pins = E.selPins.slice() as PinRef[]; if (!P || !pins.length) return [];
@@ -400,7 +451,7 @@ function unfoldRows(): CtxItem[] {
   const c = (E.lastClient as [number, number] | null) || [window.innerWidth / 2, window.innerHeight / 2];
   openPopupMenu(c[0], c[1], unfoldPopup(entries, bus, at, true));
 };
-function subRows(menu: MenuDef, items: Resolved[], c: MenuCtx): CtxItem[] { return menu.dynamic === "unfold" ? unfoldRows() : menu.dynamic === "zoom" ? zoomRows() : menu.dynamic === "grid" ? gridRows(c) : menu.dynamic === "diffpair" ? diffPairRows() : menu.dynamic === "trackwidth" ? trackWidthRows() : menu.dynamic === "viasize" ? viaSizeRows() : menu.dynamic === "pinfunction" ? pinFunctionRows() : menu.dynamic === "pinhelpers" ? pinHelperRows() : menu.dynamic === "netchain" ? netChainRows(c) : menu.dynamic === "terminalpad" ? terminalPadRows() : rows(items, c); }
+function subRows(menu: MenuDef, items: Resolved[], c: MenuCtx): CtxItem[] { return menu.dynamic === "unfold" ? unfoldRows() : menu.dynamic === "zoom" ? zoomRows() : menu.dynamic === "grid" ? gridRows(c) : menu.dynamic === "diffpair" ? diffPairRows() : menu.dynamic === "trackwidth" ? trackWidthRows() : menu.dynamic === "viasize" ? viaSizeRows() : menu.dynamic === "pinfunction" ? pinFunctionRows() : menu.dynamic === "pinhelpers" ? pinHelperRows() : menu.dynamic === "netchain" ? netChainRows(c) : menu.dynamic === "terminalpad" ? terminalPadRows() : menu.dynamic === "symbolunit" ? symbolUnitRows() : menu.dynamic === "bodystyle" ? bodyStyleRows() : rows(items, c); }
 
 /** "Symbol R1 (10k)", "Wire", "Track [VCC] on B.Cu, length 0.6400 mm": how KiCad names an item in a disambiguation menu. */
 function describe(it: KItem | string): string {
@@ -815,9 +866,9 @@ export function startLongPress(ev: PointerEvent): void {
   lpTimer = window.setTimeout(() => {
     lpTimer = 0; if (!lpAt || lpAt !== at) return;
     const g = E.drag as { moved?: boolean; engine?: boolean } | null; if (g && g.moved) return;
-    const ps = pcbState() as unknown as { drag?: { moved?: boolean } | null; move?: unknown; pending?: unknown; pedit?: unknown } | null;
+    const ps = pcbState() as unknown as { drag?: { moved?: boolean } | null; move?: unknown; pending?: unknown; pedit?: unknown; blockDrag?: unknown } | null;
     const ss = schState() as unknown as { drag?: { moved?: boolean } | null; pending?: unknown; pedit?: unknown; wire?: unknown } | null;
-    if (isSch() ? (ss && (ss.pedit || ss.wire || (ss.drag && ss.drag.moved))) : (ps && ((ps.drag && ps.drag.moved) || ps.move || ps.pedit))) return;
+    if (isSch() ? (ss && (ss.pedit || ss.wire || (ss.drag && ss.drag.moved))) : (ps && ((ps.drag && ps.drag.moved) || ps.move || ps.pedit || ps.blockDrag))) return;
     if (E.fdrag && E.fdrag.moved) return;
     // SELECTION_TOOL::onDisambiguationExpire: with two or more items selected and no modifier it is more likely a
     // paused drag than a long click

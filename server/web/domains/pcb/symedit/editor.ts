@@ -1304,6 +1304,9 @@ export class SymbolEditor {
       deleteLastPoint: () => this.deleteLastPoint(),
       alignToGrid: () => this.alignToGrid(), swap: () => this.swapSel(),
       convertStackedPins: () => this.convertStacked(), explodeStackedPin: () => this.explodeStacked(),
+      // ACTIONS::increment (INCREMENT{ 1, 0 }) and its primary / secondary forms: SYMBOL_EDITOR_EDIT_TOOL::Increment
+      increment: () => this.increment(1, 0), incrementPrimary: () => this.increment(1, 0), decrementPrimary: () => this.increment(-1, 0),
+      incrementSecondary: () => this.increment(1, 1), decrementSecondary: () => this.increment(-1, 1),
     };
     for (const [id, t] of Object.entries(TOOL_ACTIONS)) A[id] = tool(t);
     // SCH_ACTIONS::drawArcCenter … drawArcStartDirEnd: Draw Arcs in that mode (drawArc keeps the mode last used)
@@ -1630,6 +1633,9 @@ export class SymbolEditor {
     wrap.addEventListener("pointerleave", () => { this.mouse.in = false; this.paint(); });
     wrap.addEventListener("wheel", (ev) => {
       ev.preventDefault(); const v = this.view();
+      // SCH_SELECTION_TOOL (m_isSymbolEditor): Shift+Alt+wheel increments the primary part, Ctrl+Alt+wheel the secondary
+      const field = ev.shiftKey && ev.altKey && !ev.ctrlKey && !ev.metaKey ? 0 : (ev.ctrlKey || ev.metaKey) && ev.altKey && !ev.shiftKey ? 1 : -1;
+      if (field >= 0) { const dy = ev.deltaY || ev.deltaX; if (dy && this.tool === "select" && !this.draw) { const [x, y] = this.toDoc(ev.clientX, ev.clientY); this.mouse.x = x; this.mouse.y = y; this.increment(dy < 0 ? 1 : -1, field); } return; }
       if (ev.ctrlKey && !ev.deltaMode && Math.abs(ev.deltaY) < 50 && ev.deltaY % 1 !== 0) { this.zoomAt(Math.exp(-ev.deltaY / 100), ev.clientX, ev.clientY); return; }   // pinch
       if (ev.shiftKey) { v.px -= ev.deltaY; this.paint(); return; }
       if (ev.ctrlKey) { v.py -= ev.deltaY; this.paint(); return; }
@@ -1640,6 +1646,41 @@ export class SymbolEditor {
     wrap.addEventListener("pointerup", (ev) => this.onUp(ev));
     wrap.addEventListener("dblclick", (ev) => this.onDbl(ev));
     void cv;
+  }
+  /** The mouse is inside the pin's name box (PIN_LAYOUT_CACHE::GetPinNameBBox): the box of its drawn name text. */
+  mouseOverPinName(id: string): boolean {
+    const doc = this.kdoc(); const it = doc && doc.items.get(id); if (!it) return false;
+    const box = M.pinNameBox(it.geom as unknown[]);
+    return !!box && this.mouse.x >= box[0] && this.mouse.x <= box[2] && this.mouse.y >= box[1] && this.mouse.y <= box[3];
+  }
+  /**
+   * SCH_TOOL_BASE::Increment (SYMBOL_EDITOR_EDIT_TOOL: ACTIONS::increment, incrementPrimary … decrementSecondary, and
+   * the selection tool's Shift+Alt / Ctrl+Alt wheel).  RequestSelection( pins, texts ): an empty selection takes the
+   * item under the cursor for this one step (a hover selection, cleared afterwards), a selection drops what is neither.
+   * A pin steps the number or the name whose box the mouse is in; a text its text.  "Increment" is one undo step; on
+   * items being moved or placed the move's own state takes the change (the move commits it).
+   */
+  increment(delta: number, index: number): void {
+    const t = this.tab; const sym = this.symbol(); if (!t || !sym || this.readOnly()) return;
+    const incrementable = (s: M.Node, id: string): boolean => { const n = nodeOf(s, id); return !!n && M.INCREMENTABLE.has(String(n[0])); };
+    const c0 = this.carry;
+    let hover = false;
+    if (!c0 && !t.sel.size) {
+      const doc = this.kdoc(); if (!doc) return; const v = this.view(); const [cx, cy] = this.snapFile(this.mouse.x, this.mouse.y);
+      const r = K().hitTestDetail(doc, cx, cy, 4 / v.s, { accept: (it: { id: string }) => this.passesFilter(it.id) && incrementable(sym, it.id) });
+      if (!r) return;
+      t.sel = new Set([r.id]); hover = true; this.selChanged();
+    } else if (!c0) {
+      const keep = [...t.sel].filter((id) => incrementable(sym, id));
+      if (keep.length !== t.sel.size) { t.sel = new Set(keep); this.selChanged(); }
+    }
+    const ids = (c0 ? c0.ids : [...t.sel]).filter((id) => incrementable(c0 ? M.node(c0.base) : sym, id));
+    if (!ids.length) return;
+    const over = new Map(ids.map((id) => [id, { overNumber: this.mouseOverPinNumber(id), overName: this.mouseOverPinName(id) }]));
+    const items = (s: M.Node): M.IncrementItem[] => ids.map((id) => ({ node: nodeOf(s, id)!, ...over.get(id)! })).filter((x) => !!x.node);
+    if (c0) { const b = M.node(c0.base); if (M.incrementItems(items(b), delta, index)) { c0.base = M.text(b); this.carryPreview(); this.paint(); } }
+    else this.edit("Increment", (s) => (M.incrementItems(items(s), delta, index) ? undefined : false));
+    if (hover) { t.sel.clear(); this.selChanged(); }
   }
   /** The mouse is inside the pin's number box: the box of its drawn number text (a stacked block: the whole block). */
   mouseOverPinNumber(id: string): boolean {
