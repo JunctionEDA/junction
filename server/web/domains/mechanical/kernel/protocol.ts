@@ -28,6 +28,8 @@ export interface FeatureReport {
   cached?: boolean;
   /** numbers of the feature a person can drag in the model while its dialog is open (ui/DragHandles.tsx) */
   handles?: DragHandle[];
+  /** what the feature has to say about a result that succeeded ("Mass saved: 31 %"); a custom feature's `ctx.report` */
+  info?: string;
 }
 
 /**

@@ -36,15 +36,20 @@
     "test:drcrules": "esbuild web/domains/pcb/editor/pcbdialogs/drc-rule-model.test.ts --bundle --platform=node --format=cjs --log-level=warning --outfile=node_modules/.cache/drc-rule-model.test.cjs && node node_modules/.cache/drc-rule-model.test.cjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "1.12.0",
+    "@codemirror/lang-javascript": "6.2.5",
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+    "@salusoft89/planegcs": "1.3.0",
     "clipper2-ts": "2.0.1-19",
+    "codemirror": "6.0.2",
     "occt-import-js": "^0.0.23",
     "opentype.js": "1.3.4",
     "pyodide": "314.0.7",
+    "quickjs-emscripten-core": "0.32.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "replicad-opencascadejs": "1.2.1",
-    "three": "^0.187.0",
-    "@salusoft89/planegcs": "1.3.0"
+    "three": "^0.187.0"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",

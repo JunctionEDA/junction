@@ -135,6 +135,8 @@ export interface EvalContext {
   fail(message: string): FeatureError;
   /** Attach a note to the feature without failing it ("2 curves are not on a closed loop"). */
   warn(message: string): void;
+  /** Say something about a result that succeeded ("Mass saved: 31 %"): shown with the feature, never a warning. */
+  info(message: string): void;
   /** Say where a number of the feature can be dragged in the model (protocol.ts DragHandle).  Say it before building, so that a value that fails can still be dragged back. */
   handle(h: import("./protocol").DragHandle): void;
 }

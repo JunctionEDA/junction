@@ -109,10 +109,11 @@ export class RegenEngine {
 
   private async run(f: FeatureInput, json: string, before: ModelState): Promise<Entry> {
     const k = this.k;
-    const def = this.defs.get(f.type);
+    // a family of types built by one definition: "script:<id>.<hash>" is the "script" feature (features/script.ts)
+    const def = this.defs.get(f.type) || (f.type.includes(":") ? this.defs.get(f.type.slice(0, f.type.indexOf(":"))) : undefined);
     const datums: NonNullable<ModelState["datums"]> = { ...(before.datums || {}) };
     const state: ModelState = { bodies: before.bodies.slice(), sketches: { ...before.sketches }, datums, extras: before.extras };
-    const owned: Deletable[] = [], temp: Deletable[] = [], notes: string[] = [];
+    const owned: Deletable[] = [], temp: Deletable[] = [], notes: string[] = [], infos: string[] = [];
     const handles: NonNullable<FeatureReport["handles"]> = [];
     const t0 = Date.now();
     // a body with no solid in it is a surface (types.ts Body.sheet): the shape says so, not the feature
@@ -169,6 +170,7 @@ export class RegenEngine {
       tmp: (o) => { temp.push(o); return o; },
       fail: (m) => new FeatureError(m),
       warn: (m) => { notes.push(m); },
+      info: (m) => { infos.push(m); },
       handle: (h) => { handles.push(h); },
     };
     let report: FeatureReport;
@@ -191,6 +193,7 @@ export class RegenEngine {
     k.scope = null;
     for (const o of temp.reverse()) { try { o.delete(); } catch (x) { /* already gone */ } }
     if (handles.length) report.handles = handles;
+    if (infos.length && report.status !== "error") report.info = infos.join(" · ");
     report.ms = Date.now() - t0;
     return { json, state: result, owned, report };
   }

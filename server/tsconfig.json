@@ -16,5 +16,6 @@
     "noEmit": true,
     "types": []
   },
-  "include": ["web/**/*.ts", "web/**/*.tsx", "web/**/*.d.ts"]
+  "include": ["web/**/*.ts", "web/**/*.tsx", "web/**/*.d.ts"],
+  "exclude": ["web/domains/mechanical/script/assets/**"]
 }

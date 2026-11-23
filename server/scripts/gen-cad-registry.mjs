@@ -67,3 +67,6 @@ write(path.join(asm, "generated", "mates.ts"), [
 
 // The outline fonts sketch text is set in (web/domains/mechanical/sketch/text.ts).
 await import("./gen-sketch-font.mjs");
+
+// What custom features carry as text, and the interpreter their scripts run in (web/domains/mechanical/script).
+await import("./gen-cad-script-assets.mjs");
