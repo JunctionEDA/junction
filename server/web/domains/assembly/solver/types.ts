@@ -61,6 +61,19 @@ export interface SolverMate {
   params: JsonObject;
 }
 
+/**
+ * A relation between two mate values: while the parts move, a changes `ratio` times as much as b (millimetres or
+ * radians, by what each value is).  Gears, a rack and its pinion, a screw, two slides tied together.  It ties
+ * the changes, not the values: the solver keeps Δa = ratio · Δb from where the bodies stand when it starts, so the
+ * parts mesh as they were put together and an angle may go round any number of times.
+ */
+export interface SolverRelation {
+  id: string;
+  a: { mate: string; key: string };
+  b: { mate: string; key: string };
+  ratio: number;
+}
+
 export interface DragGoal {
   body: string;
   /** the grabbed point, in the body's own space */
@@ -83,6 +96,8 @@ export interface SolveOptions {
   drag?: DragGoal;
   /** hold mate values at these numbers (mm or radians) during this solve: dragging a value, animating it */
   drives?: { mate: string; key: string; value: number }[];
+  /** relations between mate values (gear, rack and pinion, screw, linear) */
+  relations?: readonly SolverRelation[];
   /** a mate just made or edited: its second instance is first put where that one mate wants it */
   seed?: string;
   /** count the freedoms left and find which mates conflict (slower: not for every frame of a drag) */
@@ -100,6 +115,8 @@ export interface MateReport {
   values: { [key: string]: number };
 }
 
+export interface RelationReport { status: MateStatus; residual: number; message?: string }
+
 export interface BodyReport {
   /** true when the body cannot move: fixed, or welded to something fixed */
   grounded: boolean;
@@ -111,6 +128,8 @@ export interface SolveResult {
   /** every body's solved pose */
   poses: Map<string, Pose>;
   mates: Map<string, MateReport>;
+  /** each relation's state, by id (empty when none were given) */
+  relations: Map<string, RelationReport>;
   bodies: Map<string, BodyReport>;
   /** false when some mate could not be satisfied */
   ok: boolean;

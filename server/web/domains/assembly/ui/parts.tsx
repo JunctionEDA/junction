@@ -6,9 +6,9 @@ import type { AssemblyEditor, AssemblyState } from "./assembly";
 
 export function useAssembly<T>(a: AssemblyEditor, selector: (s: AssemblyState) => T): T { return useSyncExternalStore(a.subscribe, () => selector(a.getState())); }
 
-export function Glyph({ svg, size = 18 }: { svg?: string; size?: number }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" className="flex-none fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round]" strokeWidth={1.7} dangerouslySetInnerHTML={{ __html: svg || '<rect x="5" y="5" width="14" height="14" rx="2"/>' }} />;
-}
+// an icon is drawn as the part studio draws its own: thin lines, a filled face (mechanical ui/Glyph.tsx)
+export { Glyph } from "../../mechanical/api-ui";
+import { Glyph } from "../../mechanical/api-ui";
 
 export const ICONS = {
   eye: '<path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/>',
@@ -20,7 +20,15 @@ export const ICONS = {
   turn: '<path d="M5 12a7 7 0 1 1 2 5"/><path d="M4 13v5h5"/>',
   play: '<path d="M8 5l11 7-11 7z"/>',
   stop: '<rect x="6" y="6" width="12" height="12"/>',
-  part: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5"/><path d="M12 12v9"/>',
+  part: '<path class="f" d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path class="t" d="M4 7.5l8 4.5 8-4.5M12 12v9"/>',
+  assembly: '<path class="f" d="M3.5 13h7.5v7.5H3.5z"/><path d="M3.5 13h7.5v7.5H3.5zM13 13h7.5v7.5H13zM8.25 3.5h7.5V11h-7.5z"/>',
+  board: '<rect class="f" x="3" y="5.5" width="18" height="13" rx="1.5"/><rect x="3" y="5.5" width="18" height="13" rx="1.5"/><path class="t" d="M7 9.5h4v5H7zM14.5 9.5H18M14.5 12H18M14.5 14.5H18"/>',
+  pattern: '<rect class="f" x="3" y="3" width="7.5" height="7.5" rx="1"/><rect x="3" y="3" width="7.5" height="7.5" rx="1"/><rect class="t" x="13.5" y="3" width="7.5" height="7.5" rx="1"/><rect class="t" x="3" y="13.5" width="7.5" height="7.5" rx="1"/><rect class="t" x="13.5" y="13.5" width="7.5" height="7.5" rx="1"/>',
+  folderPlus: '<path d="M3 7h6l2 2h10v10H3z"/><path d="M12 12v4.5M9.75 14.25h4.5"/>',
+  rigid: '<rect class="d t" x="2.5" y="2.5" width="19" height="19" rx="1.5"/><rect class="f" x="5.5" y="6" width="6.5" height="6.5"/><rect x="5.5" y="6" width="6.5" height="6.5"/><rect x="12" y="11.5" width="6.5" height="6.5"/>',
+  connector: '<circle class="f" cx="9" cy="15" r="3.5"/><circle cx="9" cy="15" r="3.5"/><path d="M9 15V3.5M7 5.5l2-2 2 2M9 15h11.5M18.5 13l2 2-2 2"/>',
+  bookmark: '<path class="f" d="M6.5 3.5h11v17l-5.5-4-5.5 4z"/><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"/>',
+  explode: '<rect class="f" x="9" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6"/><path d="M7 7L3.5 3.5M17 7l3.5-3.5M7 17l-3.5 3.5M17 17l3.5 3.5"/>',
 };
 
 export function Caption({ children, right }: { children: ReactNode; right?: ReactNode }) {
@@ -31,7 +39,7 @@ export function Caption({ children, right }: { children: ReactNode; right?: Reac
   );
 }
 
-export interface MenuItem { label: string; run(): void; danger?: boolean; disabled?: boolean }
+export interface MenuItem { label: string; run(): void; danger?: boolean; disabled?: boolean; /** a rule above it */ rule?: boolean }
 export interface MenuState { x: number; y: number; items: MenuItem[] }
 
 /** A context menu at a point of the window; closes on a choice, a click elsewhere or Escape. */
@@ -45,12 +53,15 @@ export function ContextMenu({ menu, close }: { menu: MenuState | null; close(): 
     return () => { window.removeEventListener("pointerdown", away, true); window.removeEventListener("keydown", key, true); };
   }, [menu, close]);
   if (!menu) return null;
-  const x = Math.min(menu.x, window.innerWidth - 190), y = Math.min(menu.y, window.innerHeight - menu.items.length * 26 - 12);
+  const rules = menu.items.filter((it, i) => it.rule && i > 0).length;
+  const x = Math.min(menu.x, window.innerWidth - 200), y = Math.max(6, Math.min(menu.y, window.innerHeight - menu.items.length * 26 - rules * 9 - 12));
   return (
-    <div ref={ref} role="menu" className="cad-menu fixed z-[60] min-w-[170px] py-1 rounded-md border border-line bg-panel shadow-panel text-sm" style={{ left: x, top: y }}>
-      {menu.items.map((it) => (
-        <button key={it.label} type="button" role="menuitem" disabled={it.disabled} className={cx("block w-full text-left px-3 h-6.5 hover:bg-sel-soft disabled:opacity-45 disabled:hover:bg-transparent", it.danger && "text-err")}
-          onClick={() => { close(); it.run(); }}>{it.label}</button>
+    <div ref={ref} role="menu" className="cad-menu fixed z-[60] min-w-[180px] max-h-[calc(100vh-12px)] overflow-y-auto py-1 rounded-md border border-line bg-panel shadow-panel text-sm" style={{ left: x, top: y }}>
+      {menu.items.map((it, i) => (
+        <div key={it.label} className={cx(it.rule && i > 0 && "mt-1 pt-1 border-t border-line")}>
+          <button type="button" role="menuitem" disabled={it.disabled} className={cx("block w-full text-left px-3 h-6.5 hover:bg-sel-soft disabled:opacity-45 disabled:hover:bg-transparent", it.danger && "text-err")}
+            onClick={() => { close(); it.run(); }}>{it.label}</button>
+        </div>
       ))}
     </div>
   );

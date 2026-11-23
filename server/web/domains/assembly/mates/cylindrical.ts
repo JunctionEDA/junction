@@ -12,8 +12,10 @@ const solve: MateSolve = {
 export default defineMate({
   type: "cylindrical",
   title: "Cylindrical",
+  hint: "The second part slides along an axis and turns about it: a shaft in a hole.",
+  keywords: "mate joint axis concentric shaft sleeve hole constrain",
   order: 50,
-  icon: '<ellipse cx="12" cy="6" rx="5" ry="2"/><path d="M7 6v12a5 2 0 0 0 10 0V6"/><path d="M12 10v6"/>',
+  icon: '<path class="f" d="M7 7.5v10a5 2.2 0 0 0 10 0v-10z"/><path d="M7 7.5v10a5 2.2 0 0 0 10 0v-10"/><ellipse cx="12" cy="7.5" rx="5" ry="2.2"/><path d="M12 1.5v6M10 3.5l2-2 2 2"/>',
   defaults: () => limitDefaults([DISTANCE, ANGLE]),
   schema: limitFields([DISTANCE, ANGLE]),
   freedom: { translation: 1, rotation: 1 },

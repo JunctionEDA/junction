@@ -76,16 +76,16 @@ export function bindingsOf(commands: readonly KeyCommand[], overrides: Overrides
 }
 
 /** What the part studio itself uses a chord for where this command is heard, or null. */
-export function reservedFor(chord: string, context: KeyContext): string | null {
-  const r = RESERVED.find((x) => x.chord === chord && overlaps(x.context, context));
+export function reservedFor(chord: string, context: KeyContext, reserved: readonly { chord: string; what: string; context: KeyContext }[] = RESERVED): string | null {
+  const r = reserved.find((x) => x.chord === chord && overlaps(x.context, context));
   return r ? r.what : null;
 }
 
 /** A chord a person may not give: typing must stay typing, and the part studio's own keys stay its own. */
-export function chordProblem(chord: string | null, context: KeyContext): string | null {
+export function chordProblem(chord: string | null, context: KeyContext, reserved: readonly { chord: string; what: string; context: KeyContext }[] = RESERVED, owner = "the part studio"): string | null {
   if (!chord) return "Press a key, alone or with Ctrl, Alt or Shift.";
-  const r = reservedFor(chord, context);
-  if (r) return `${chord} is the part studio's own key: ${r}.`;
+  const r = reservedFor(chord, context, reserved);
+  if (r) return `${chord} is ${owner}'s own key: ${r}.`;
   if (/^(Ctrl\+)?(Alt\+)?(Shift\+)?(Meta|Dead|Unidentified|Process)$/.test(chord)) return "That key cannot be used.";
   if (/^Ctrl\+(Shift\+)?[CVXAWTNRLFPS]$/.test(chord) || /^(Ctrl\+)?F5$/.test(chord)) return `${chord} belongs to the browser.`;
   return null;

@@ -37,8 +37,10 @@ const solve: MateSolve = {
 export default defineMate({
   type: "tangent",
   title: "Tangent",
+  hint: "A round face touches a flat one, or two round faces touch.",
+  keywords: "mate joint touch cam roll wheel constrain",
   order: 90,
-  icon: '<circle cx="12" cy="10" r="5"/><path d="M3 15h18"/>',
+  icon: '<circle class="f" cx="12" cy="10" r="6"/><circle cx="12" cy="10" r="6"/><path d="M2.5 16h19"/>',
   defaults: () => ({ inside: false }),
   schema: [{ key: "inside", label: "Inside", kind: "boolean", hint: "For two cylinders: one rolls inside the other." }],
   freedom: { translation: 2, rotation: 2 },

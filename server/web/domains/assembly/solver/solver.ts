@@ -20,12 +20,18 @@
 //      one at a time in order and the ones that break a system that held are the ones reported.
 //
 // Limits are one-sided residuals (zero inside the range), so a part stops at its limit while it is dragged.
+//
+// Relations (gear, rack and pinion, screw, linear: types.ts SolverRelation) are one more residual each, over the
+// values of two mates: (a − a₀) − ratio · (b − b₀), with a₀ and b₀ the values as the bodies stood when the solve
+// began.  Angles are followed continuously from there (the branch nearest the last accepted step), so a gear
+// turns past half a turn without a jump.  A relation's row touches up to four bodies; its two mates are put in
+// one component and the envelope of the normal equations is widened to hold it.
 import type { JsonObject } from "../../../shared/itemdoc/itemdoc";
 import type { Vec3 } from "../../mechanical/api";
 import { frameInWorld, framePose } from "./frames";
 import { EnvelopeMatrix, pivotedCholesky, rankOf } from "./linear";
 import { add, applyPose, compose, cross, inverse, len, qconj, qexp, qlog, qmul, qnorm, qrot, sub, wrapAngle, type Pose } from "./math";
-import type { BodyReport, DragGoal, MateFrame, MateReport, MateSolve, SolveOptions, SolveResult, SolverBody, SolverMate } from "./types";
+import type { BodyReport, DragGoal, MateFrame, MateReport, MateSolve, MateValue, RelationReport, SolveOptions, SolveResult, SolverBody, SolverMate, SolverRelation } from "./types";
 
 /** below this (mm) a mate holds */
 export const TOLERANCE = 1e-6;
@@ -86,6 +92,20 @@ function perturb(f: MateFrame, c: Vec3, k: number, h: number, reach: number): Ma
 }
 
 interface Prepared { m: SolverMate; ia: number; ib: number; ga: number; gb: number; va: number; vb: number; drives?: { key: string; value: number }[] }
+/** A relation ready to evaluate: its two mates and values, where they started, and the unknowns its row touches. */
+interface PreparedRelation {
+  r: SolverRelation; pa: Prepared; pb: Prepared; va: MateValue; vb: MateValue;
+  a0: number; b0: number; lastA: number; lastB: number;
+  /** the unknown (index of a group in its component) each of the four connectors moves with; −1: it does not move */
+  ends: [number, number, number, number];
+  /** those unknowns, each once */
+  vars: number[];
+  /** millimetres per unit of the residual: `reach` when a is an angle */
+  w: number;
+}
+/** Where the relations' values stood when the solve began: handed from one Core to the next (solve, below). */
+type RelationStarts = Map<string, [number, number]>;
+const near = (v: MateValue, raw: number, last: number): number => (v.unit === "deg" ? last + wrapAngle(raw - last) : raw);
 
 class Core {
   readonly index = new Map<string, number>();
@@ -101,12 +121,14 @@ class Core {
   /** mates between two grounded groups or inside one group: nothing to solve, only to check */
   private readonly checks: Prepared[] = [];
   readonly active: Prepared[] = [];
-  private components: { groups: number[]; mates: Prepared[]; first: Int32Array; n: number }[] = [];
+  private components: { groups: number[]; mates: Prepared[]; rels: PreparedRelation[]; first: Int32Array; n: number }[] = [];
   private compOf = new Map<number, number>();
   iterations = 0;
   readonly reach: number;
+  readonly rels: PreparedRelation[] = [];
+  readonly relReports = new Map<string, RelationReport>();
 
-  constructor(readonly bodies: readonly SolverBody[], mates: readonly SolverMate[], readonly opts: SolveOptions) {
+  constructor(readonly bodies: readonly SolverBody[], mates: readonly SolverMate[], readonly opts: SolveOptions, relations: readonly SolverRelation[] = [], starts?: RelationStarts) {
     this.reach = opts.reach && opts.reach > 0 ? opts.reach : 100;
     bodies.forEach((b, i) => this.index.set(b.id, i));
     this.rel = bodies.map((b) => ({ p: [b.pose.p[0], b.pose.p[1], b.pose.p[2]], q: qnorm(b.pose.q) }));
@@ -123,6 +145,42 @@ class Core {
       const drives = opts.drives?.filter((d) => d.mate === m.id).map((d) => ({ key: d.key, value: d.value }));
       this.live.push({ m, ia, ib, ga: -1, gb: -1, va: -1, vb: -1, drives: drives && drives.length ? drives : undefined });
     }
+    for (const r of relations) {
+      const pa = this.live.find((p) => p.m.id === r.a.mate), pb = this.live.find((p) => p.m.id === r.b.mate);
+      const va = pa?.m.solve.values?.find((v) => v.key === r.a.key), vb = pb?.m.solve.values?.find((v) => v.key === r.b.key);
+      if (!pa || !pb || !va || !vb || !Number.isFinite(r.ratio)) { this.relReports.set(r.id, { status: "error", residual: Infinity, message: "One of the mates this relation ties is missing, or does not hold." }); continue; }
+      const [a1, b1] = this.frames(pa), [a2, b2] = this.frames(pb);
+      const at = starts?.get(r.id) || [va.measure(a1, b1), vb.measure(a2, b2)];
+      this.rels.push({ r, pa, pb, va, vb, a0: at[0], b0: at[1], lastA: near(va, va.measure(a1, b1), at[0]), lastB: near(vb, vb.measure(a2, b2), at[1]), ends: [-1, -1, -1, -1], vars: [], w: va.unit === "deg" ? this.reach : 1 });
+    }
+  }
+
+  /** Where every relation's values stood at the start: for the Cores that go on from this one. */
+  starts(): RelationStarts { const out: RelationStarts = new Map(); for (const q of this.rels) out.set(q.r.id, [q.a0, q.b0]); return out; }
+
+  /** A relation's two values as the bodies stand (angles on the branch nearest the last accepted step), one unknown perhaps nudged. */
+  private relationValues(q: PreparedRelation, pert?: { v: number; k: number; h: number; pivot: Vec3 }): [number, number] {
+    let [a1, b1] = this.frames(q.pa), [a2, b2] = q.pb === q.pa ? [a1, b1] : this.frames(q.pb);
+    if (pert) {
+      if (q.ends[0] === pert.v) a1 = perturb(a1, pert.pivot, pert.k, pert.h, this.reach);
+      if (q.ends[1] === pert.v) b1 = perturb(b1, pert.pivot, pert.k, pert.h, this.reach);
+      if (q.ends[2] === pert.v) a2 = perturb(a2, pert.pivot, pert.k, pert.h, this.reach);
+      if (q.ends[3] === pert.v) b2 = perturb(b2, pert.pivot, pert.k, pert.h, this.reach);
+    }
+    return [near(q.va, q.va.measure(a1, b1), q.lastA), near(q.vb, q.vb.measure(a2, b2), q.lastB)];
+  }
+  private relationResidual(q: PreparedRelation, pert?: { v: number; k: number; h: number; pivot: Vec3 }): number {
+    const [a, b] = this.relationValues(q, pert);
+    return (a - q.a0 - q.r.ratio * (b - q.b0)) * q.w;
+  }
+  /** One relation's row of the Jacobian: the columns (unknown · 6 + k) and the derivative in each. */
+  private relationRow(q: PreparedRelation, pivots: Vec3[]): { cols: number[]; j: number[] } {
+    const cols: number[] = [], j: number[] = [];
+    for (const v of q.vars) for (let k = 0; k < 6; k++) {
+      cols.push(v * 6 + k);
+      j.push((this.relationResidual(q, { v, k, h: H, pivot: pivots[v] }) - this.relationResidual(q, { v, k, h: -H, pivot: pivots[v] })) / (2 * H));
+    }
+    return { cols, j };
   }
 
   private find(i: number): number { while (this.parent[i] !== i) { this.parent[i] = this.parent[this.parent[i]]; i = this.parent[i]; } return i; }
@@ -180,15 +238,19 @@ class Core {
       if (!this.ground[p.ga] && !this.ground[p.gb]) comp[cfind(p.ga)] = cfind(p.gb);
     }
     for (const p of welded) { p.ga = this.find(p.ia); p.gb = this.find(p.ib); this.checks.push(p); }
-    const byRoot = new Map<number, { groups: Set<number>; mates: Prepared[] }>();
-    const entry = (g: number) => { const r = cfind(g); let e = byRoot.get(r); if (!e) { e = { groups: new Set(), mates: [] }; byRoot.set(r, e); } e.groups.add(g); return e; };
+    // a relation's two mates are solved together: the groups they move are one component
+    const moving = (q: PreparedRelation): number[] => Array.from(new Set([q.pa.ga, q.pa.gb, q.pb.ga, q.pb.gb].filter((g) => !this.ground[g])));
+    for (const q of this.rels) { const gs = moving(q); for (let i = 1; i < gs.length; i++) comp[cfind(gs[0])] = cfind(gs[i]); }
+    const byRoot = new Map<number, { groups: Set<number>; mates: Prepared[]; rels: PreparedRelation[] }>();
+    const entry = (g: number) => { const r = cfind(g); let e = byRoot.get(r); if (!e) { e = { groups: new Set(), mates: [], rels: [] }; byRoot.set(r, e); } e.groups.add(g); return e; };
     for (const p of this.active) {
       const e = entry(this.ground[p.ga] ? p.gb : p.ga);
       if (!this.ground[p.ga]) e.groups.add(p.ga);
       if (!this.ground[p.gb]) e.groups.add(p.gb);
       e.mates.push(p);
     }
-    const drag = this.opts.drag ? this.index.get(this.opts.drag.body) : undefined;
+    for (const q of this.rels) { const gs = moving(q); if (!gs.length) continue; const e = entry(gs[0]); for (const g of gs) e.groups.add(g); e.rels.push(q); }
+    const drag =this.opts.drag ? this.index.get(this.opts.drag.body) : undefined;
     if (drag !== undefined && !this.ground[this.find(drag)]) entry(this.find(drag));
     // 3. order each component's groups breadth-first so the normal equations have a narrow envelope
     for (const e of byRoot.values()) {
@@ -199,6 +261,7 @@ class Core {
         if (this.ground[p.ga]) groundedNear.add(p.gb); else if (this.ground[p.gb]) groundedNear.add(p.ga);
         else { adj.get(p.ga)!.push(p.gb); adj.get(p.gb)!.push(p.ga); }
       }
+      for (const q of e.rels) { const gs = moving(q); for (const g of gs) for (const h of gs) if (g !== h) adj.get(g)!.push(h); }
       const order: number[] = [], seen = new Set<number>();
       const starts = Array.from(e.groups).sort((p, q) => (groundedNear.has(q) ? 1 : 0) - (groundedNear.has(p) ? 1 : 0) || adj.get(p)!.length - adj.get(q)!.length || p - q);
       for (const s of starts) {
@@ -212,11 +275,18 @@ class Core {
         p.va = this.ground[p.ga] ? -1 : at.get(p.ga)!; p.vb = this.ground[p.gb] ? -1 : at.get(p.gb)!;
         if (p.va >= 0 && p.vb >= 0) { const lo = Math.min(p.va, p.vb); low[p.va] = Math.min(low[p.va], lo); low[p.vb] = Math.min(low[p.vb], lo); }
       }
+      for (const q of e.rels) {
+        const v = (g: number): number => (this.ground[g] ? -1 : at.get(g)!);
+        q.ends = [v(q.pa.ga), v(q.pa.gb), v(q.pb.ga), v(q.pb.gb)];
+        q.vars = Array.from(new Set(q.ends.filter((x) => x >= 0)));
+        const lo = Math.min(...q.vars);
+        for (const x of q.vars) low[x] = Math.min(low[x], lo);
+      }
       const n = order.length * 6, first = new Int32Array(n);
       for (let v = 0; v < order.length; v++) for (let k = 0; k < 6; k++) first[v * 6 + k] = low[v] * 6;
       const ci = this.components.length;
       for (const g of order) this.compOf.set(g, ci);
-      this.components.push({ groups: order, mates: e.mates, first, n });
+      this.components.push({ groups: order, mates: e.mates, rels: e.rels, first, n });
     }
   }
 
@@ -237,6 +307,7 @@ class Core {
     const cost = (): { cost: number; top: number } => {
       let sum = 0, top = 0;
       for (const p of c.mates) { const [a, b] = this.frames(p); evaluate(p.m.solve, p.m.params, a, b, reach, p.drives, r0); for (const v of r0) { sum += v * v; if (Math.abs(v) > top) top = Math.abs(v); } }
+      for (const q of c.rels) { const v = this.relationResidual(q); sum += v * v; if (Math.abs(v) > top) top = Math.abs(v); }
       if (goal && goalVar >= 0) for (const v of this.goalResidual(goal, goalBody)) sum += v * v;
       return { cost: sum, top };
     };
@@ -276,6 +347,13 @@ class Core {
             let t = 0; for (let i = 0; i < m; i++) t += J[i * 12 + jx] * J[i * 12 + jy];
             A.add(gx, gy, t);
           }
+        }
+      }
+      for (const q of c.rels) {
+        const res = this.relationResidual(q), row = this.relationRow(q, pivots);
+        for (let x = 0; x < row.cols.length; x++) {
+          g[row.cols[x]] += row.j[x] * res;
+          for (let y = 0; y < row.cols.length; y++) if (row.cols[y] <= row.cols[x]) A.add(row.cols[x], row.cols[y], row.j[x] * row.j[y]);
         }
       }
       if (goal && goalVar >= 0) {
@@ -318,7 +396,7 @@ class Core {
           this.G[gr] = compose(delta, saved[v]);
         });
         const next = cost();
-        if (next.cost <= now.cost) { accepted = true; const gain = now.cost - next.cost; now = next; lambda = Math.max(lambda / 6, 1e-9); if (gain <= now.cost * 1e-8 + 1e-26) iter = maxIterations; break; }
+        if (next.cost <= now.cost) { for (const q of c.rels) [q.lastA, q.lastB] = this.relationValues(q); accepted = true; const gain = now.cost - next.cost; now = next; lambda = Math.max(lambda / 6, 1e-9); if (gain <= now.cost * 1e-8 + 1e-26) iter = maxIterations; break; }
         c.groups.forEach((gr, v) => { this.G[gr] = saved[v]; });
         lambda *= 8;
       }
@@ -358,6 +436,11 @@ class Core {
       if (!good) ok = false;
       this.reports.set(p.m.id, good ? { status: "ok", residual: top, values } : { status: "conflict", residual: top, values, message: "This mate cannot hold together with the others." });
     }
+    for (const q of this.rels) {
+      const top = Math.abs(this.relationResidual(q));
+      if (top >= FAILED) ok = false;
+      this.relReports.set(q.r.id, top < FAILED ? { status: "ok", residual: top } : { status: "conflict", residual: top, message: "This relation cannot hold: the mates it ties cannot move that way together." });
+    }
     return ok;
   }
 
@@ -393,6 +476,10 @@ class Core {
           A[cols[x] * n + cols[y]] += t;
         }
       }
+      for (const q of c.rels) {
+        const row = this.relationRow(q, pivots);
+        for (let x = 0; x < row.cols.length; x++) for (let y = 0; y < row.cols.length; y++) A[row.cols[x] * n + row.cols[y]] += row.j[x] * row.j[y];
+      }
       const { nullspace } = pivotedCholesky(A, n, 1e-9);
       if (total !== null) total += nullspace.length;
       c.groups.forEach((g, v) => groupDof.set(g, rankOf(nullspace.map((vec) => vec.subarray(v * 6, v * 6 + 6)), 6)));
@@ -415,7 +502,7 @@ function finish(core: Core, ok: boolean, analyze: boolean, t0: number, iteration
   let bodies = new Map<string, BodyReport>(), dof: number | null = null;
   if (analyze) { const a = core.analyze(); bodies = a.bodies; dof = a.dof; }
   else core.bodies.forEach((b, i) => bodies.set(b.id, { grounded: core.grounded(i), dof: null }));
-  return { poses, mates: core.reports, bodies, ok, dof, iterations, ms: now() - t0 };
+  return { poses, mates: core.reports, relations: core.relReports, bodies, ok, dof, iterations, ms: now() - t0 };
 }
 
 /**
@@ -425,7 +512,9 @@ function finish(core: Core, ok: boolean, analyze: boolean, t0: number, iteration
  */
 export function solve(bodies: readonly SolverBody[], mates: readonly SolverMate[], opts: SolveOptions = {}): SolveResult {
   const t0 = now();
-  const core = new Core(bodies, mates, opts);
+  const relations = opts.relations || [];
+  const core = new Core(bodies, mates, opts, relations);
+  const starts = core.starts();
   const ok = core.run();
   if (ok || !opts.analyze) return finish(core, ok, !!opts.analyze, t0, core.iterations);
   let iterations = core.iterations;
@@ -448,8 +537,28 @@ export function solve(bodies: readonly SolverBody[], mates: readonly SolverMate[
       else conflicts.add(m.id);
     }
   }
-  const last = new Core(bodies, kept, { ...opts, drag: undefined });
+  // then the relations, one at a time over the mates that hold: one that breaks them is the conflict, not a mate
+  const keptRels: SolverRelation[] = [];
+  const live = new Set(kept.map((m) => m.id));
+  {
+    let state: readonly SolverBody[] = bodies;
+    for (const r of relations) {
+      if (!live.has(r.a.mate) || !live.has(r.b.mate)) continue;
+      const trial = new Core(state, kept, { ...opts, drag: undefined, seed: undefined }, [...keptRels, r], starts);
+      const good = trial.run();
+      iterations += trial.iterations;
+      if (good) { keptRels.push(r); state = bodies.map((b, i) => ({ ...b, pose: trial.worldPose(i) })); }
+    }
+  }
+  const last = new Core(bodies, kept, { ...opts, drag: undefined }, keptRels, starts);
   last.run();
+  for (const r of relations) {
+    if (keptRels.includes(r)) continue;
+    const was = core.relReports.get(r.id);
+    last.relReports.set(r.id, was && was.status === "error" ? was : !live.has(r.a.mate) || !live.has(r.b.mate)
+      ? { status: "error", residual: Infinity, message: "One of the mates this relation ties does not hold, so the relation is not applied." }
+      : { status: "conflict", residual: was ? was.residual : Infinity, message: "This relation conflicts with the mates: the two cannot move together in that ratio. Check which mates it ties, or suppress it." });
+  }
   for (const [id, r] of core.reports) {
     if (r.status === "error") last.reports.set(id, r);
     else if (conflicts.has(id)) last.reports.set(id, { status: "conflict", residual: r.residual, values: r.values, message: "This mate conflicts with the mates before it: they cannot all hold. Suppress or delete one of them, or change its connectors." });

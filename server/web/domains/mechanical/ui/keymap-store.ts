@@ -5,7 +5,21 @@
 // studio (ui/prefs.ts).  studio.ts hands over the commands when it loads (the tools, the features and their
 // default keys), so this file imports neither.
 import { useSyncExternalStore } from "react";
-import { bindingsOf, chordOf, cleanOverrides, commandFor, rebind, resetBinding, type Binding, type KeyCommand, type Overrides } from "./keymap";
+import { bindingsOf, chordOf, chordProblem, cleanOverrides, commandFor, rebind, resetBinding, type Binding, type KeyCommand, type KeyContext, type Overrides } from "./keymap";
+
+/** One editor's keys as the sheet that changes them needs them (ui/KeymapDialog.tsx KeymapSheet): the part studio's below, another editor's from keymap-make.ts. */
+export interface KeymapStore {
+  /** React: the bindings; re-renders when a key is changed */
+  use(): readonly Binding[];
+  overrides(): Overrides;
+  /** give a command a chord (null: none); the commands that had it lose it and are returned */
+  setKey(id: string, chord: string | null): string[];
+  resetKey(id: string): void;
+  resetAll(): void;
+  load(v: unknown): void;
+  /** why a chord may not be given, or null */
+  problem(chord: string | null, context: KeyContext): string | null;
+}
 
 const KEY = "junction.cad.keymap";
 let commands: KeyCommand[] = [];
@@ -55,3 +69,4 @@ export function commandForEvent(ev: KeyboardEvent, inSketch: boolean, only?: (b:
   return commandFor(keyBindings(), chordOf(ev), inSketch, only);
 }
 export const isFeatureCommand = (b: Binding): boolean => b.id.startsWith("f:");
+export const partStudioKeys: KeymapStore = { use: useKeyBindings, overrides: keyOverrides, setKey, resetKey, resetAll: resetAllKeys, load: loadKeys, problem: (chord, context) => chordProblem(chord, context) };

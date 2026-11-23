@@ -39,8 +39,9 @@ function toggle(assembly: AssemblyEditor): void {
 }
 
 export default defineAssemblyTool({
-  id: "history", title: "History", hint: "Versions and branches", order: 900,
-  icon: '<path d="M4 12a8 8 0 1 0 2.6-5.9"/><path d="M4 5v4h4"/><path d="M12 8v4l3 2"/>',
+  id: "history", title: "History", hint: "The project's versions and branches: save one, restore one, start a branch.", section: "file", order: 10, keep: 45,
+  keywords: "versions branches compare restore",
+  icon: '<path d="M3.5 12a8.5 8.5 0 1 0 2.8-6.3"/><path d="M3.5 3.5V8h4.5"/><path d="M12 7.5V12l3.2 2"/>',
   active: (assembly) => open.has(assembly),
   run: (assembly) => toggle(assembly),
 });

@@ -5,8 +5,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { cx } from "../../../shared/util";
 import { useStudio } from "./hooks";
-import { chordOf, chordProblem, conflictsOf, takenBy, type Binding } from "./keymap";
-import { keyOverrides, loadKeys, resetAllKeys, resetKey, setKey, useKeyBindings } from "./keymap-store";
+import { chordOf, conflictsOf, takenBy, type Binding } from "./keymap";
+import { partStudioKeys, type KeymapStore } from "./keymap-store";
 import { Sheet } from "./Sheet";
 import type { PartStudio } from "./studio";
 
@@ -14,13 +14,24 @@ const WHERE = { model: "Part studio", sketch: "In a sketch", any: "Everywhere" }
 
 export function KeymapDialog({ studio }: { studio: PartStudio }) {
   const open = useStudio(studio, (s) => !!s.ui?.keymap);
-  const bindings = useKeyBindings();
+  return <KeymapSheet open={open} store={partStudioKeys} close={() => { studio.setUi({ keymap: false }); studio.viewport.canvas.focus(); }} toast={(text, ms) => studio.host.toast(text, ms)} />;
+}
+
+/**
+ * The sheet itself, for any editor's keys: the part studio's (above) and the assembly's.  `where` names the
+ * contexts in the second column; `note` is the line at the foot; `file` the name keys are saved under.
+ */
+export function KeymapSheet({ open, store, close: shut, toast, where = WHERE, note = "A key may mean one thing in a sketch and another outside it. Your keys are kept in this browser; Save… and Load… carry them to another.", file = "junction-cad-keys" }: {
+  open: boolean; store: KeymapStore; close(): void; toast(text: string, ms?: number): void; where?: { readonly [context: string]: string }; note?: string; file?: string;
+}) {
+  const { setKey, resetKey, resetAll: resetAllKeys, load: loadKeys, overrides: keyOverrides, problem: chordProblem } = store;
+  const bindings = store.use();
   const [q, setQ] = useState("");
   const [only, setOnly] = useState<"all" | "changed" | "conflicts">("all");
   /** the command whose key is being pressed, and what was pressed when it cannot simply be taken */
   const [capture, setCapture] = useState<{ id: string; chord?: string; problem?: string; taken?: Binding[] } | null>(null);
   const conflicts = useMemo(() => conflictsOf(bindings), [bindings]);
-  const close = () => { setCapture(null); studio.setUi({ keymap: false }); studio.viewport.canvas.focus(); };
+  const close = () => { setCapture(null); shut(); };
   useEffect(() => { if (!open) { setQ(""); setOnly("all"); setCapture(null); } }, [open]);
   useEffect(() => {
     if (!capture || capture.chord) return;
@@ -48,9 +59,9 @@ export function KeymapDialog({ studio }: { studio: PartStudio }) {
   const save = () => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([JSON.stringify({ junction: "cad-keys", keys: keyOverrides() }, null, 2)], { type: "application/json" }));
-    a.download = "junction-cad-keys.json"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    a.download = `${file}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
-  const load = (file: File | undefined) => { if (file) void file.text().then((t) => { try { const v = JSON.parse(t); loadKeys(v && v.keys ? v.keys : v); studio.host.toast("Keys loaded", 1500); } catch { studio.host.toast("That file is not a set of keys.", 3000); } }); };
+  const load = (file: File | undefined) => { if (file) void file.text().then((t) => { try { const v = JSON.parse(t); loadKeys(v && v.keys ? v.keys : v); toast("Keys loaded", 1500); } catch { toast("That file is not a set of keys.", 3000); } }); };
   return (
     <Sheet title="Keyboard shortcuts" name="keymap" onClose={close} attrs={{ "data-changed": String(changed), "data-conflicts": String(clashing) }}
       actions={<>
@@ -72,7 +83,7 @@ export function KeymapDialog({ studio }: { studio: PartStudio }) {
           return (
             <div key={b.id} role="row" className={cx("flex items-center gap-2 px-3 min-h-8 border-b border-line last:border-b-0", cap && "bg-sel-soft")} data-key-row={b.id} data-key-title={b.title} data-key-chord={b.chord || ""} data-key-custom={b.custom || undefined} data-key-conflict={clash ? clash.join(" ") : undefined}>
               <span className="flex-1 min-w-0 truncate" role="cell">{b.title}</span>
-              <span className="flex-none w-24 text-ink-3 text-xs" role="cell">{WHERE[b.context]}</span>
+              <span className="flex-none w-24 text-ink-3 text-xs" role="cell">{where[b.context] || b.context}</span>
               <span className="flex flex-none items-center justify-end gap-1.5 w-[21rem]" role="cell">
                 {cap && cap.problem ? <span className="text-err text-xs truncate" data-key-problem>{cap.problem}</span> : null}
                 {cap && cap.taken ? <>
@@ -89,7 +100,7 @@ export function KeymapDialog({ studio }: { studio: PartStudio }) {
           );
         }) : <p className="note px-3 py-2 m-0">Nothing here.</p>}
       </div>
-      <p className="note flex-none m-0 px-3 py-1.5 border-t border-line text-xs">A key may mean one thing in a sketch and another outside it. Your keys are kept in this browser; Save… and Load… carry them to another.</p>
+      <p className="note flex-none m-0 px-3 py-1.5 border-t border-line text-xs">{note}</p>
     </Sheet>
   );
 }

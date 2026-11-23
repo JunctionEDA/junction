@@ -11,7 +11,8 @@ is committed and synced, geometry names. This file covers what the assembly adds
 
 ```
 document/format.ts     the .jasm format: instances, mates                                   (shared)
-document/edits.ts      every edit as item changes; groups, explicit connectors, named positions
+document/edits.ts      every edit as item changes; folders, explicit connectors, named positions
+document/extras.ts     relations, rigid groups, instance patterns, saved exploded views, the order of the list
 core/mate.ts           the mate contract        core/tool.ts   the toolbar contract         (shared)
 core/transform.ts      3 × 4 placement matrices                                             (shared)
 mates/                 ONE FILE PER MATE TYPE   (_residuals.ts: what they are made of)
@@ -19,6 +20,8 @@ tools/                 ONE FILE PER TOOLBAR TOOL
 solver/                math.ts (poses), frames.ts (connector frames), linear.ts, solver.ts, types.ts
 connectors/infer.ts    implicit mate connectors from a part's tessellation
 model/problem.ts       document + geometry → the solver's input → what to tell a person about each mate
+model/relations.ts     ONE ENTRY PER RELATION (gear, rack and pinion, screw, linear)
+model/replicate.ts     Replicate: the holes of a part that are like the one a mate is in
 sources/               where an instance's geometry comes from: part.ts, subassembly.ts, board.ts,
                        manager.ts (the open source documents), kernels.ts (worker pool), cache.ts (IndexedDB)
 services/, panels/     interference and the bill of materials: the logic (pure), and their panels
@@ -27,19 +30,57 @@ suppliers/             models from suppliers: model.ts (a search row, what an in
 viewport/scene.ts      instances drawn from shared geometry, picking, connector glyphs     triad.ts  the manipulator
 viewport/boards.ts     board instances as they look (the mechanical domain's BoardDisplay)
 ui/assembly.ts         AssemblyEditor: the object every tool and panel is handed
-ui/*.tsx               the frame, the instance tree, the mates list, the mate and Insert dialogs; the view cube is the
-                       part studio's (ViewCubeControl from mechanical/api-ui.ts), with standard views, fit and projection
+ui/commands.ts         every tool, mate and relation as one list: the toolbar's sections, the tool search, the keys
+ui/Toolbar.tsx         the one-row toolbar, drawn as the part studio's is       ui/keys.ts   a person's own keys
+ui/Overlays.tsx        the tool search, the right-click menu and its marking ring, the sheets of keys
+ui/Bars.tsx            the exploded view's and the section's strips, the rail of panel buttons at the right edge
+ui/forms.ts            the forms tools ask: a relation, a pattern
+ui/*.tsx               the frame, the instance tree, the mate features, the mate and Insert dialogs; the view cube is
+                       the part studio's (ViewCubeControl from mechanical/api-ui.ts)
+panels/                bill of materials, mass properties, measure, animate
 generated/             written by scripts/gen-cad-registry.mjs; not committed
 ```
 
 Tests: `static/tests/assembly-solver.test.js` (the solver and every mate, in node),
+`assembly-relations.test.js` (relations, Width, Planar's limits, patterns, exploded views, the list's order, what a
+delete takes with it, mass and measure, Replicate), `scripts/cad-assembly-chrome-ui.mjs` (the toolbar, the tool search,
+the tree and every new tool, driven in Chromium as a person would),
 `assembly-model.test.js` (connectors from the real kernel, edits, an assembly following a rebuilt part),
 `assembly-doc.test.js` (the format), `cad-analysis.test.js` (interference and the bill of materials),
 `scripts/cad-suppliers-ui.mjs` (the Suppliers tab and the server's providers, against stand-ins),
 `models3d.test.js` (the standard parts, built by the kernel), `scripts/cad-assembly-ui.mjs` (the real app in Chromium, two people), `scripts/cad-analysis-ui.mjs` (the
 panels) and `scripts/cad-e2e.mjs` (a board fastened in a tray, a hinged lid, a clash found).
 
+## The chrome
+
+Laid out as the part studio is, from the same pieces (`mechanical/api-ui.ts`): one row of icon buttons in sections
+(undo redo │ Insert │ the ten mates │ Mate connector, Group, Fix │ Relations ▾ │ Pattern ▾ │ Exploded view, Named
+position, Animate │ Bill of materials, Interference, Section view, Measure, Mass properties │ History │ More ▾), each
+with a tooltip of its name, key and one line; buttons that do not fit go under More; **Search tools…** at the right
+end (S at the pointer, Ctrl+K, Alt+C) finds every tool, mate and relation by name or by another word for it ("joint",
+"hinge", "ground", "BOM", "clash"). A tool file says where it goes: `section`, `order`, `keep`, `menu`, `keywords`,
+`key` (`core/tool.ts`); a mate has `hint` and `keywords`. A right click in the model opens the menu for the instance
+under the pointer with the marking ring of eight tools above it; **?** lists the keys and **Change keys…** rebinds
+them (the part studio's `KeymapSheet`; the assembly's keys are its own, `junction.asm.keymap`). Left: **Instances (n)**
+with a filter, the assembly, folders, patterns and sub-assemblies that open, and each instance's state (fixed, held,
+"n free", in red with the reason when its source failed or a mate on it cannot hold); rows drag to another place or
+into a folder; **Mate features (n)** below: mates, relations, groups, patterns, connectors; then named positions and
+exploded views. Right edge: a rail of buttons for the panels.
+
 ## What a person can do
+
+- **Relations** (Relations ▾): Gear, Rack and pinion, Screw, Linear, between the values of two mates (Screw also on
+  one Cylindrical mate). The solver holds them; they count in the freedoms; one that cannot hold is the conflict.
+- **Width** mate (two faces on each part: the tab is centred between the walls). **Planar** has limits on its three
+  values. Every mate that has a place for one has an **Offset** (X, Y, Z, a turn); **Pick** in the mate dialog
+  chooses whether clicks take faces, edges, points.
+- **Group**: the selected instances keep their places and move as one. **Fix** as before.
+- **Linear and circular instance patterns** whose copies follow their seeds (along X, Y, Z or a clicked edge, face
+  or hole); **Replicate** (a part mated in a hole goes in every hole like it, each copy with its mate).
+- **Exploded views** kept under names (an even spread, and the manipulator pulls one part further); **Animate** (a
+  slider and Play for any mate's value); **Section view** (a cut across X, Y or Z, uncapped); **Measure** (between
+  two connectors: distance, deltas, angle, between planes or axes; one round thing: its diameter); **Mass
+  properties** (parts only: mass, volume, centre). A **double click** on a part opens its part studio.
 
 - **Insert** parts of any part studio of the project (one, several, the whole studio), other assemblies, and
   the project's boards.  A part studio is read and built without opening its tab, with its variables applied
@@ -123,6 +164,17 @@ assembly.host                          // DocumentHostContext: project, docs, to
 In a panel, read state with `useAssembly(assembly, (s) => s.instances)` (`ui/parts.tsx`).
 `window.JunctionAssembly` is the open editor, for tests and the console.
 
+## The document (more)
+
+`document/extras.ts` adds, all optional and kept by a reader that does not know them: `relation` items
+(`relationType`, `a` / `b`: `{ mate, key }`, `params`), `rigid` items (`instances`, `places` relative to the first),
+`pattern` items (`patternType`, `seeds`, `count`, `spacing` or `angle`, `frames`: the direction or axis in each
+seed's own space) whose copies are ordinary instances carrying `pattern`, `seed`, `index`, and `explode` items
+(`offsets` by instance). A mate end may carry `ref2` (Width). `buildProblem(…, extras)` takes them: pattern copies
+and rigid groups become welds the solver makes for itself (never mates a person sees), relations become
+`SolverRelation`s. A relation ties the CHANGE of two values from where the bodies stand when a solve begins, so
+angles may go round any number of times; a value typed far away is reached in steps (`solveProblem`).
+
 ## The document
 
 `document/format.ts` has the instance and mate items. `document/edits.ts` adds, all optional and all ignored by
@@ -189,10 +241,18 @@ The solver runs on the page's thread; it has not needed a worker.
 - **Connectors come from the tessellation**, not the B-rep: planes, cylinders, circles, lines and points are
   recognised; a cone, a sphere or a spline face gives its middle and average normal. Tangent works for a plane
   with a cylinder and for two cylinders only.
-- **Angles are in (−180°, 180°]**: a limit cannot span more than one turn, and there is no screw, gear, rack or
-  linear relation between mates.
-- **Copy in a row** makes plain instances: it is not a pattern that follows its seed.
-- **The exploded view** is one slider from the middle; there are no stored explode steps.
+- **Angles are in (−180°, 180°]**: a limit cannot span more than one turn. A relation keeps no phase of its own:
+  it holds from where the parts were put, so mesh the teeth, then add it.
+- **Copy in a row** makes plain instances; a pattern's copies follow their seed as one rigid thing with it. A
+  pattern has one direction (no second direction, no skipped instances); a copy cannot seed another pattern.
+- **Mirror instances** is not there: a mirrored part needs mirrored geometry, which a placement cannot give.
+- **Replicate** matches round edges and cylindrical faces of the same size on the same part, by one mate.
+- **A saved exploded view** is one offset per instance: no ordered steps, no explode lines.
+- **Section view** is not capped; **Mass properties** does not weigh boards or sub-assemblies and gives no inertia;
+  **Measure** is between connectors, not the least distance between two faces (Interference has clearance).
+- **Mate limits**: Ball has none (no cone angle); Parallel and Tangent take no offset.
+- **The tree** has no Origin row and no drag of an instance into another assembly; a sub-assembly opens to show its
+  parts' names only.
 - **Sub-assemblies are rigid**: their inner freedoms cannot be moved from outside.
 - **Freedoms are not counted** for a single connected group of more than 80 moving instances (it still solves).
 - **Replace** keeps the mates' names; a mate whose geometry the new part lacks says so and must be re-picked.

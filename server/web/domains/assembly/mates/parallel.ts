@@ -8,8 +8,10 @@ const solve: MateSolve = { residuals(a, b, _params, reach, out) { sameZ(a, b, re
 export default defineMate({
   type: "parallel",
   title: "Parallel",
+  hint: "Two faces or axes stay parallel; the part is otherwise free.",
+  keywords: "mate joint align orientation constrain",
   order: 80,
-  icon: '<path d="M5 19L13 5"/><path d="M11 19l8-14"/>',
+  icon: '<path class="f" d="M3 8.5l6-4v11l-6 4z"/><path d="M3 8.5l6-4v11l-6 4z"/><path class="t" d="M14.5 8.5l6-4v11l-6 4z"/>',
   defaults: () => ({}),
   schema: [],
   freedom: { translation: 3, rotation: 1 },

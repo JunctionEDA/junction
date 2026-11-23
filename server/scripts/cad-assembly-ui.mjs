@@ -115,7 +115,7 @@ try {
   await alice.click('text=New assembly');
   await alice.waitForFunction(() => window.JunctionAssembly && window.JunctionAssembly.getState().loaded, null, { timeout: 30000 });
   const url = alice.url();
-  check('an empty assembly opens with its tools', await alice.isVisible('[data-tool=Insert]') && await alice.isVisible('[data-mate-tool=revolute]') && (await alice.$$('[data-mate-tool]')).length === 9);
+  check('an empty assembly opens with its tools', await alice.isVisible('[data-tool=Insert]') && await alice.isVisible('[data-mate-tool=revolute]') && (await alice.$$('[data-mate-tool]')).length === 10);
   await shot(alice, '01-empty');
 
   // ---------------------------------------------------------------- insert: one part of one studio, the whole of another
@@ -298,7 +298,7 @@ try {
   await settled(alice, 3);
   await alice.click('[data-instance=Lid]');
   await alice.click("[data-instance='Hinge pin']", { modifiers: ['Control'] });
-  await menu(alice, "[data-instance='Hinge pin']", 'Group');
+  await menu(alice, "[data-instance='Hinge pin']", 'New folder');
   await alice.fill("[data-panel=instances] input[aria-label='Name']", 'Moving parts');
   await alice.keyboard.press('Enter');
   await alice.waitForSelector("[data-group='Moving parts']");
@@ -329,7 +329,7 @@ try {
   check('Delete removes the selected instances', true);
 
   // ---------------------------------------------------------------- named positions, exploded view
-  await alice.click("[data-tool=Position]");
+  await alice.click("[data-tool='Named position']");
   await alice.fill('[data-form] input[data-param=name]', 'Half open');
   await alice.click('[data-form] [data-accept]');
   await alice.waitForSelector("[data-position='Half open']");
@@ -342,7 +342,7 @@ try {
   await alice.waitForFunction(() => { const s = window.JunctionAssembly.getState(); return Math.abs(s.mateInfo[s.mates[0].id].values.angle + 45) < 1e-3; });
   await settled(alice, 3);
   check('a named position brings the lid back to 45°', true);
-  await alice.click('[data-tool=Explode]');
+  await alice.click("[data-tool='Exploded view']");
   await alice.waitForSelector('[data-explode]');
   const apart = await asm(alice, () => { const a = window.JunctionAssembly, s = a.getState(); return s.instances.map((i) => { const shown = a.scene.transformOf(i.id), solved = a.transformOf(i.id); return Math.hypot(shown[3] - solved[3], shown[7] - solved[7], shown[11] - solved[11]); }); });
   check('the exploded view pulls the parts apart on screen only', apart.every((d) => d > 1) && (await asm(alice, () => window.JunctionAssembly.unsettled)) < 1e-6, apart.map((d) => d.toFixed(1)).join(' '));
@@ -368,7 +368,7 @@ try {
   await settled(alice, 3);
 
   // ---------------------------------------------------------------- an explicit mate connector, and a mate that uses it
-  await alice.click("[data-tool=Connector]");
+  await alice.click("[data-tool='Mate connector']");
   const side = await at(alice, [100, 30, 20]);
   await alice.mouse.move(side.x, side.y, { steps: 3 });
   await click(alice, side);

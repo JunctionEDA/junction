@@ -15,8 +15,10 @@ const solve: MateSolve = {
 export default defineMate({
   type: "pin-slot",
   title: "Pin slot",
+  hint: "A pin in a slot: the second part turns about the pin and slides along the slot.",
+  keywords: "mate joint slot pin constrain",
   order: 60,
-  icon: '<rect x="3" y="8" width="18" height="8" rx="4"/><circle cx="9" cy="12" r="2"/>',
+  icon: '<rect x="2.5" y="8" width="19" height="8" rx="4"/><circle class="f" cx="8.5" cy="12" r="2.4"/><circle cx="8.5" cy="12" r="2.4"/><path class="t" d="M13 12h5M16.2 10.2L18 12l-1.8 1.8"/>',
   defaults: () => ({ rotation: 0, ...limitDefaults([TRAVEL, ANGLE]) }),
   schema: [{ ...ROTATION, label: "Slot direction", hint: "Turn the slot's direction about the connector's axis." }, ...limitFields([TRAVEL, ANGLE])],
   freedom: { translation: 1, rotation: 1 },

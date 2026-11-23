@@ -10,6 +10,7 @@
 // For analysis tools and panels (see README.md, "For tools"): `placed()`, `sources`, `scene.setMarked`,
 // `showPanel`, `ask`, `commit`, `getState` / `subscribe`.
 import type { ReactNode } from "react";
+import { Plane, Vector3 } from "three";
 import { newId, type Item, type ItemChange, type ItemDoc, type JsonObject } from "../../../shared/itemdoc/itemdoc";
 import { ItemDocSession, type SessionStatus } from "../../../shared/itemdoc/sync";
 import type { DocumentHostContext } from "../../../platform/documents/host";
@@ -23,9 +24,15 @@ import {
   addConnector, addMate, connectorsOf, copyInstances, deleteItems, groupInstances, groupsOf, insertInstances, numberedName, positionsOf, renameItem, replaceSource, savePosition, setCollapsed,
   setFixed, setHidden, setMateValues, setSuppressed, setTransforms, ungroup, updateConnector, updateMate, type ConnectorItem, type GroupItem, type PositionItem,
 } from "../document/edits";
+import {
+  addExplode, addFolder, addPattern, addRelation, addRigid, dissolvePattern, explodesOf, memberOf, moveInstances, patternFrames, patternsOf, relationsOf, rigidsOf, updateExplode, updatePattern, updateRelation,
+  type ExplodeItem, type PatternItem, type RelationEnd, type RelationItem, type RigidItem,
+} from "../document/extras";
+import { relationDef } from "../model/relations";
+import { matchingRefs } from "../model/replicate";
 import { ASSEMBLY_KIND, instancesOf, isInstance, isMate, matesOf, transformOf as storedTransform, type InstanceItem, type InstanceSource, type MateConnector, type MateItem, type Transform } from "../document/format";
 import { MATES, TOOLS } from "../generated/page";
-import { buildProblem, endFrame, measureMates, reachOf, solveProblem, type Geometry, type MateInfo, type Problem } from "../model/problem";
+import { buildProblem, endFrame, measureMates, reachOf, solveProblem, type Geometry, type MateInfo, type Problem, type ProblemExtras } from "../model/problem";
 import { frameInWorld, prepareA, prepareB } from "../solver/frames";
 import { applyPose, dot, inverse, poseDistance, poseOf, qaxis, qmul, qnorm, transformOf, type Pose } from "../solver/math";
 import { solve } from "../solver/solver";
@@ -46,9 +53,16 @@ export interface MateDraft {
   a: MateConnector | null;
   b: MateConnector | null;
   params: JsonObject;
-  /** which connector the next click in the model fills */
-  field: "a" | "b" | null;
+  /** which connector the next click in the model fills ("a2", "b2": the second face of a side, for Width) */
+  field: MateField | null;
 }
+export type MateField = "a" | "b" | "a2" | "b2";
+/** What the tool search was opened from: the pointer, the middle of the window, or the field in the toolbar. */
+export interface PaletteAt { x: number | null; y: number | null; under?: { left: number; top: number; width: number; right: number } }
+/** The overlays that open for a moment: the tool search, the right-click menu, the sheets of keys. */
+export interface AssemblyUi { palette?: PaletteAt | null; menu?: { x: number; y: number; instance: string | null } | null; keys?: boolean; help?: boolean }
+export interface PickFilter { face: boolean; edge: boolean; vertex: boolean }
+export interface SectionCut { axis: "x" | "y" | "z"; offset: number; flip: boolean }
 
 export interface InstanceInfo {
   status: "ready" | "loading" | "error";
@@ -62,8 +76,8 @@ export interface InstanceInfo {
 /** A panel a tool adds beside the viewport (a bill of materials, an interference report). */
 export interface PanelDefinition { id: string; title: string; /** "bottom": under the viewport, for something wide (a table) */ side?: "left" | "right" | "bottom"; render(assembly: AssemblyEditor): ReactNode }
 /** A small form a tool asks ("how many copies?"). */
-export interface FormField { key: string; label: string; kind: "number" | "text"; value: number | string; unit?: string }
-export interface FormDefinition { title: string; fields: FormField[]; acceptLabel?: string; accept(values: { [key: string]: number | string }): void }
+export interface FormField { key: string; label: string; kind: "number" | "text" | "choice" | "boolean"; value: number | string | boolean; unit?: string; /** a choice's options */ options?: { value: string; label: string }[]; hint?: string }
+export interface FormDefinition { title: string; fields: FormField[]; acceptLabel?: string; /** a line under the fields */ note?: string; accept(values: { [key: string]: number | string | boolean }): void }
 
 /** One instance as it stands on screen, with its geometry: what an analysis tool reads. */
 export interface PlacedPiece { id: string; name: string; mesh: BodyMesh; /** the piece in assembly space */ transform: Transform }
@@ -98,9 +112,26 @@ export interface AssemblyState {
   connecting: boolean;
   /** the id of the item whose name is being typed in the lists */
   renaming: string | null;
+  /** relations between mate values, rigid groups, instance patterns and saved exploded views (document/extras.ts) */
+  relations: RelationItem[];
+  relationInfo: { [id: string]: MateInfo };
+  rigids: RigidItem[];
+  patterns: PatternItem[];
+  explodes: ExplodeItem[];
   /** 0: assembled; above: how far the exploded view pulls the parts apart */
   explode: number;
   exploding: boolean;
+  /** the saved exploded view on screen (null: none, or one not saved yet) */
+  explodeView: string | null;
+  /** true when the exploded view on screen differs from what is saved */
+  explodeDirty: boolean;
+  /** what the next click in the model is for, when a tool asked for one (Measure, a pattern's direction) */
+  picking: { prompt: string } | null;
+  /** which geometry a click takes while a connector is being chosen */
+  filter: PickFilter;
+  /** a section through the view (not stored) */
+  section: SectionCut | null;
+  ui: AssemblyUi;
   animating: { mate: string; key: string } | null;
   /** what a manipulator drag has done so far: "25 mm", "30°" */
   readout: string | null;
@@ -112,9 +143,11 @@ const EMPTY: AssemblyState = {
   loaded: false, status: { state: "connecting", text: "connecting…", role: null, canEdit: false }, canEdit: false, canUndo: false, canRedo: false,
   instances: [], mates: [], groups: [], positions: [], connectors: [], selection: [], instanceInfo: {}, mateInfo: {}, dof: null, solveMs: 0, building: 0, kernelFailure: null,
   mating: null, inserting: null, connecting: false, renaming: null, explode: 0, exploding: false, animating: null, readout: null, panels: [], form: null,
+  relations: [], relationInfo: {}, rigids: [], patterns: [], explodes: [], explodeView: null, explodeDirty: false, picking: null, filter: { face: true, edge: true, vertex: true }, section: null, ui: {},
 };
 
 export const mateDef = (type: string): MateDefinition | undefined => MATES.find((d) => d.type === type);
+const add3 = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 
 export class AssemblyEditor {
   readonly session: ItemDocSession;
@@ -161,6 +194,7 @@ export class AssemblyEditor {
     c.addEventListener("pointerup", this.onUp);
     c.addEventListener("pointercancel", this.onUp);
     c.addEventListener("pointerleave", this.onLeave);
+    c.addEventListener("pointermove", this.onTrack);
     c.addEventListener("dblclick", this.onDouble);
     c.addEventListener("keydown", this.onKey);
     this.session.start();
@@ -225,6 +259,7 @@ export class AssemblyEditor {
   }
 
   private draftItem(d: MateDraft): MateItem | null {
+    if (mateDef(d.mateType)?.pairs && !(d.a?.ref2 && d.b?.ref2)) return null;
     return d.a && d.b ? { id: d.id, type: "mate", mateType: d.mateType, name: d.name, order: "~", a: d.a, b: d.b, params: d.params } : null;
   }
   private activeMates(doc: ItemDoc): MateItem[] {
@@ -233,7 +268,8 @@ export class AssemblyEditor {
     const draft = this.draftItem(d);
     return [...mates.filter((m) => m.id !== d.id), ...(draft ? [draft] : [])];
   }
-  private problem(doc: ItemDoc): Problem { return buildProblem(instancesOf(doc), this.activeMates(doc), this.connectors, MATES, this.geometry, this.live || undefined); }
+  private extras(doc: ItemDoc): ProblemExtras { return { relations: relationsOf(doc), patterns: patternsOf(doc), rigids: rigidsOf(doc) }; }
+  private problem(doc: ItemDoc): Problem { return buildProblem(instancesOf(doc), this.activeMates(doc), this.connectors, MATES, this.geometry, this.live || undefined, this.extras(doc)); }
 
   /** Read the document and the sources again, solve, draw.  `seed`: a mate whose second part should jump into place. */
   private refresh(o: { seed?: string; drives?: { mate: string; key: string; value: number }[] } = {}): void {
@@ -275,6 +311,10 @@ export class AssemblyEditor {
     const groups = groupsOf(doc), positions = positionsOf(doc);
     for (const g of groups) ids.add(g.id);
     for (const p of positions) ids.add(p.id);
+    const relations = relationsOf(doc), rigids = rigidsOf(doc), patterns = patternsOf(doc), explodes = explodesOf(doc);
+    for (const x of [...relations, ...rigids, ...patterns, ...explodes]) ids.add(x.id);
+    const relationInfo: { [id: string]: MateInfo } = {};
+    for (const [id, info] of solved.relations) relationInfo[id] = info;
     const connectors = Array.from(this.connectors.values());
     for (const c of connectors) ids.add(c.id);
     const activity = this.sources.activity;
@@ -282,6 +322,7 @@ export class AssemblyEditor {
     if (this.insertPreview.length) this.drawInsertPreview();
     this.set({
       instances, mates, groups, positions, connectors, instanceInfo, mateInfo, dof: solved.result.dof, solveMs: solved.result.ms,
+      relations, relationInfo, rigids, patterns, explodes, explodeView: this.state.explodeView && ids.has(this.state.explodeView) ? this.state.explodeView : null,
       selection: this.state.selection.filter((id) => ids.has(id)), building: activity.building, kernelFailure: activity.failure,
       canUndo: this.session.canUndo, canRedo: this.session.canRedo,
       renaming: this.state.renaming && ids.has(this.state.renaming) ? this.state.renaming : null,
@@ -330,6 +371,10 @@ export class AssemblyEditor {
     this.scene.setInstances(instances.filter((i) => !i.suppressed).map((i) => ({ id: i.id, pieces: this.sources.piecesOf(i).pieces, hidden: !!i.hidden })));
     this.place(instances);
   }
+  /** an exploded view: how far each instance was pulled by hand, on top of the even spread (`explode`) */
+  private burst = new Map<string, Vec3>();
+  /** how far each instance is drawn from where it is, in all (the spread and the pull): empty when assembled */
+  private offsets = new Map<string, Vec3>();
   private place(instances: readonly InstanceItem[] = this.state.instances): void {
     const out = new Map<string, Transform>();
     const k = this.state.explode;
@@ -340,9 +385,12 @@ export class AssemblyEditor {
       for (const i of instances) { const pose = this.display.get(i.id), c = pose && this.localCentre(i); if (!pose || !c) continue; const w = applyPose(pose, c); centres.set(i.id, w); sum[0] += w[0]; sum[1] += w[1]; sum[2] += w[2]; n++; }
       if (n) centre = [sum[0] / n, sum[1] / n, sum[2] / n];
     }
+    this.offsets = new Map();
     for (const [id, pose] of this.display) {
-      const t = transformOf(pose), c = centres.get(id);
-      if (centre && c) { t[3] += (c[0] - centre[0]) * k; t[7] += (c[1] - centre[1]) * k; t[11] += (c[2] - centre[2]) * k; }
+      const t = transformOf(pose), c = centres.get(id), b = this.state.exploding ? this.burst.get(id) : undefined;
+      const d: Vec3 = centre && c ? [(c[0] - centre[0]) * k, (c[1] - centre[1]) * k, (c[2] - centre[2]) * k] : [0, 0, 0];
+      if (b) { d[0] += b[0]; d[1] += b[1]; d[2] += b[2]; }
+      if (d[0] || d[1] || d[2]) { t[3] += d[0]; t[7] += d[1]; t[11] += d[2]; this.offsets.set(id, d); }
       out.set(id, t);
     }
     this.scene.setTransforms(out);
@@ -356,9 +404,11 @@ export class AssemblyEditor {
     const instanceIds = new Set(s.instances.map((i) => i.id));
     this.scene.setSelection(s.selection.filter((id) => instanceIds.has(id)));
     // the manipulator sits on the one selected instance that can move
-    const only = s.selection.length === 1 && !s.mating && !s.exploding && s.canEdit ? s.instances.find((i) => i.id === s.selection[0]) : undefined;
+    // (in an exploded view it pulls the instance apart from the rest, whether or not its mates would let it move)
+    const only = s.selection.length === 1 && !s.mating && (s.canEdit || s.exploding) ? s.instances.find((i) => i.id === s.selection[0]) : undefined;
     const info = only && s.instanceInfo[only.id], pose = only && this.display.get(only.id), centre = only && this.localCentre(only);
-    if (!this.drag) this.scene.triad.setPose(only && info && !info.grounded && pose && centre && !only.hidden && !only.suppressed ? { p: applyPose(pose, centre), q: pose.q } : null);
+    const off = (only && this.offsets.get(only.id)) || [0, 0, 0];
+    if (!this.drag && !this.pull) this.scene.triad.setPose(only && info && (s.exploding || !info.grounded) && pose && centre && !only.hidden && !only.suppressed ? { p: add3(applyPose(pose, centre), off), q: s.exploding ? [0, 0, 0, 1] : pose.q } : null);
     // connector glyphs: the mate being drafted, the selected mates, and what is under the pointer while picking
     const marks: ConnectorMark[] = [];
     const ends = (m: { a: MateConnector | null; b: MateConnector | null; params: JsonObject }) => {
@@ -369,7 +419,20 @@ export class AssemblyEditor {
     // explicit connectors are always there to be picked; the one under the pointer and the selected ones stand out
     const near = this.nearConnector;
     for (const c of s.connectors) { const f = this.explicitFrame(c); if (f) marks.push({ frame: f, strong: c.id === near || s.selection.includes(c.id) }); }
-    if ((s.connecting || (s.mating && s.mating.field)) && this.hover && !near) { const f = this.pickFrame(this.hover); if (f) marks.push({ frame: f }); }
+    for (const f of this.toolMarks) marks.push({ frame: f, strong: true });
+    // the two instances of a selected relation's mates, and of a selected mate, stand out in the model
+    if (!s.mating) {
+      const lit = new Set(s.selection.filter((id) => instanceIds.has(id)));
+      const ofMate = (id: string) => { const m = s.mates.find((x) => x.id === id); if (m) { lit.add(m.a.instance); lit.add(m.b.instance); } };
+      for (const id of s.selection) {
+        ofMate(id);
+        const r = s.relations.find((x) => x.id === id); if (r) { ofMate(r.a.mate); ofMate(r.b.mate); }
+        const g = s.rigids.find((x) => x.id === id); if (g) for (const i of g.instances) lit.add(i);
+        const p = s.patterns.find((x) => x.id === id); if (p) for (const i of s.instances) if (i.pattern === p.id || p.seeds.includes(i.id)) lit.add(i.id);
+      }
+      this.scene.setSelection(lit);
+    }
+    if ((s.connecting || s.picking || (s.mating && s.mating.field)) && this.hover && !near) { const f = this.pickFrame(this.hover); if (f) marks.push({ frame: f }); }
     this.scene.setConnectors(marks);
   }
 
@@ -391,6 +454,12 @@ export class AssemblyEditor {
   }
 
   fit(): void { const box = this.scene.box(); if (!box.isEmpty()) this.viewport.fit(box); }
+  /** Bring these instances into view. */
+  zoomTo(ids: readonly string[]): void {
+    let box: ReturnType<AssemblyScene["boxOf"]> = null;
+    for (const id of ids) { const b = this.scene.boxOf(id); if (b) box = box ? box.union(b) : b.clone(); }
+    if (box && !box.isEmpty()) this.viewport.fit(box);
+  }
 
   // ---------------------------------------------------------------- selection and instance edits
   select(ids: string | string[] | null, o: { toggle?: boolean } = {}): void {
@@ -471,12 +540,18 @@ export class AssemblyEditor {
   replace(id: string, source: InstanceSource): void { this.edit((doc) => replaceSource(doc, id, source)); this.set({ inserting: null }); }
 
   // ---------------------------------------------------------------- mates
+  /** the mate type started last: "again" in the marking menu */
+  lastMate: string | null = null;
   startMate(type: string): void {
     const def = mateDef(type), doc = this.session.doc;
     if (!def || !doc || !this.state.canEdit) return;
     this.stopAnimation();
+    if (this.state.picking) this.pick(null);
+    if (this.state.exploding) this.setExploding(false);
+    this.lastMate = type;
     this.live = new Map(this.display);
-    this.set({ mating: { id: newId(), isNew: true, mateType: type, name: numberedName(matesOf(doc).map((m) => m.name), def.title), a: null, b: null, params: def.defaults(), field: "a" }, inserting: null, selection: [] });
+    // every mate starts taking faces, edges and points: what was switched off for the last one is not remembered against this one
+    this.set({ mating: { id: newId(), isNew: true, mateType: type, name: numberedName(matesOf(doc).map((m) => m.name), def.title), a: null, b: null, params: def.defaults(), field: "a" }, inserting: null, selection: [], filter: { face: true, edge: true, vertex: true } });
     this.decorate();
     this.viewport.canvas.focus();
   }
@@ -537,6 +612,8 @@ export class AssemblyEditor {
 
   private pickConnector(pick: AssemblyPick | null, explicit: string | null = null): void {
     const d = this.state.mating; if (!d || !d.field) return;
+    if (mateDef(d.mateType)?.pairs) { this.pickPair(d, pick); return; }
+    if (d.field !== "a" && d.field !== "b") return;
     const item = explicit ? this.connectors.get(explicit) : undefined;
     if (!item && !pick) return;
     const end: MateConnector = item ? { instance: item.instance, ref: item.ref, connector: item.id } : { instance: pick!.instance, ref: { kind: pick!.kind, body: pick!.piece, name: pick!.name } as GeomRef };
@@ -558,9 +635,30 @@ export class AssemblyEditor {
     this.setMateDraft(patch, true);
   }
 
+  /** A mate whose sides are two faces each (Width): first wall, second wall, then the tab's two sides. */
+  private pickPair(d: MateDraft, pick: AssemblyPick | null): void {
+    if (!pick || !d.field) return;
+    if (pick.kind !== "face") { this.host.toast("Click a flat face.", 2500); return; }
+    const ref = { kind: pick.kind, body: pick.piece, name: pick.name } as GeomRef;
+    const side = d.field[0] as "a" | "b", second = d.field.length === 2, have = d[side], other = side === "a" ? d.b : d.a;
+    let patch: Partial<MateDraft>;
+    if (!second) {
+      if (other && other.instance === pick.instance) { this.host.toast("The two sides are on two different instances.", 3500); return; }
+      patch = { [side]: { instance: pick.instance, ref }, field: (side + "2") as MateField };
+    } else {
+      if (!have || have.instance !== pick.instance) { this.host.toast("Click the opposite face of the same part.", 3500); return; }
+      if (have.ref.name === ref.name && have.ref.body === ref.body) { this.host.toast("Click the face opposite the first one.", 3000); return; }
+      patch = { [side]: { ...have, ref2: ref }, field: side === "a" ? (d.b ? (d.b.ref2 ? null : "b2") : "b") : d.a && d.a.ref2 ? null : d.a ? "a2" : "a" };
+    }
+    this.hover = null; this.scene.setHover(null);
+    // no jump into place: the tab slides the shortest way to the middle of the slot and keeps the way it faces
+    this.setMateDraft(patch, false);
+  }
+
   acceptMate(): void {
     const d = this.state.mating, doc = this.session.doc;
     if (!d || !doc) return;
+    if (mateDef(d.mateType)?.pairs && d.a && d.b && !(d.a.ref2 && d.b.ref2)) { this.host.toast("Pick two faces on each part: the two walls of the slot, then the two sides of the tab.", 4000); return; }
     if (!d.a || !d.b) { this.host.toast("Pick a connector on each of two instances: click a face, an edge or a point.", 4000); return; }
     this.stopAnimation();
     const changes = d.isNew ? addMate(doc, { mateType: d.mateType, name: d.name.trim() || "Mate", a: d.a, b: d.b, params: d.params }, d.id).changes
@@ -584,7 +682,7 @@ export class AssemblyEditor {
    * Set one of a mate's values (an angle in degrees, a distance in mm): the parts move to it, the other mates
    * still hold.  In a mate dialog the result waits for Done; otherwise it is committed at once.
    */
-  driveMate(id: string, key: string, value: number): boolean {
+  driveMate(id: string, key: string, value: number, o: { hold?: boolean } = {}): boolean {
     const def = mateDef(this.state.mating && this.state.mating.id === id ? this.state.mating.mateType : this.state.mates.find((m) => m.id === id)?.mateType || "");
     const v = def?.solve?.values?.find((x) => x.key === key);
     if (!v || !Number.isFinite(value)) return false;
@@ -592,8 +690,33 @@ export class AssemblyEditor {
     if (!this.live) this.live = new Map(this.display);
     this.refresh({ drives: [{ mate: id, key, value: v.unit === "deg" ? (value * Math.PI) / 180 : value }] });
     const ok = this.state.mateInfo[id]?.state === "ok";
-    if (!drafting && !this.anim) { const doc = this.session.doc; const changes = doc && ok ? this.settled(doc) : []; this.live = null; if (!changes.length || !this.commit(changes)) this.refresh(); }
+    if (!drafting && !this.anim && !o.hold) this.settle(ok);
     return ok;
+  }
+  /** Store where a held drive (a slider being dragged) left the parts: one undo step. */
+  settle(ok = true): void {
+    if (this.state.mating || this.anim || !this.live) return;
+    const doc = this.session.doc; const changes = doc && ok ? this.settled(doc) : []; this.live = null;
+    if (!changes.length || !this.commit(changes)) this.refresh();
+  }
+  private ranges = new Map<string, [number, number]>();
+  /** The freedoms that can be moved by a number: every value of every mate that holds, with the range a slider gives it. */
+  drivable(): { mate: MateItem; key: string; label: string; unit: "mm" | "deg"; value: number; min: number; max: number; limited: boolean }[] {
+    const out: ReturnType<AssemblyEditor["drivable"]> = [];
+    for (const m of this.state.mates) {
+      const info = this.state.mateInfo[m.id], values = mateDef(m.mateType)?.solve?.values || [];
+      if (!info || info.state !== "ok") continue;
+      for (const v of values) {
+        const p = m.params || {}, value = info.values[v.key] ?? 0, k = `${m.id}|${v.key}`;
+        const limited = !!p.limits && typeof p[v.key + "Min"] === "number" && typeof p[v.key + "Max"] === "number";
+        let range: [number, number];
+        if (limited) range = [Math.min(Number(p[v.key + "Min"]), Number(p[v.key + "Max"])), Math.max(Number(p[v.key + "Min"]), Number(p[v.key + "Max"]))];
+        else if (v.unit === "deg") range = [-180, 180];
+        else { const had = this.ranges.get(k); range = had && value >= had[0] && value <= had[1] ? had : [Math.round(value) - 50, Math.round(value) + 50]; this.ranges.set(k, range); }
+        out.push({ mate: m, key: v.key, label: values.length > 1 ? `${m.name}: ${v.label.toLowerCase()}` : m.name, unit: v.unit, value, min: range[0], max: range[1], limited });
+      }
+    }
+    return out;
   }
   /** Sweep a mate's value back and forth between its limits (or through a full turn) until stopped.  Nothing is stored. */
   animateMate(id: string, key: string): void {
@@ -628,8 +751,152 @@ export class AssemblyEditor {
   }
 
   // ---------------------------------------------------------------- exploded view and named positions
-  setExploding(on: boolean): void { if (on && this.state.mating) this.cancelMate(); this.set({ exploding: on, explode: on ? this.state.explode || 0.6 : 0 }); this.place(); this.decorate(); }
-  setExplode(k: number): void { this.set({ explode: Math.max(0, Math.min(3, k)) }); this.place(); }
+  /** A new exploded view (not saved until Save): the parts spread evenly from the middle; the manipulator pulls one further. */
+  setExploding(on: boolean): void {
+    if (on && this.state.mating) this.cancelMate();
+    this.burst = new Map();
+    this.set({ exploding: on, explode: on ? this.state.explode || 0.6 : 0, explodeView: null, explodeDirty: false });
+    this.place(); this.decorate();
+  }
+  setExplode(k: number): void { this.set({ explode: Math.max(0, Math.min(3, k)), explodeDirty: true }); this.place(); this.decorate(); }
+  /** Show a saved exploded view. */
+  openExplode(id: string): void {
+    const e = this.state.explodes.find((x) => x.id === id);
+    if (!e) return;
+    if (this.state.mating) this.cancelMate();
+    this.burst = new Map();
+    for (const [inst, d] of Object.entries(e.offsets)) if (Array.isArray(d) && d.length === 3) this.burst.set(inst, [Number(d[0]) || 0, Number(d[1]) || 0, Number(d[2]) || 0]);
+    this.set({ exploding: true, explode: 0, explodeView: id, explodeDirty: false, selection: [id] });
+    this.place(); this.decorate();
+  }
+  /** Keep the exploded view on screen: under a new name, or in the saved view it was opened from. */
+  saveExplode(name?: string): void {
+    const doc = this.session.doc, s = this.state;
+    if (!doc || !s.exploding) return;
+    const open = s.explodeView;
+    if (open && !name) { this.commit(updateExplode(doc, open, this.offsets)); this.set({ explodeDirty: false }); return; }
+    const made = addExplode(doc, this.offsets, name);
+    // what was spread evenly is now each instance's own pull, so the saved view opens as it was left
+    this.burst = new Map(this.offsets);
+    if (this.commit(made.changes)) this.set({ explode: 0, explodeView: made.item.id, explodeDirty: false, selection: [made.item.id] });
+  }
+  /** Put one instance back in its place within the exploded view. */
+  unpull(id: string): void { if (this.burst.delete(id)) { this.set({ explodeDirty: true }); this.place(); this.decorate(); } }
+
+  // ---------------------------------------------------------------- relations, rigid groups, patterns, the list's order
+  /** The mates a relation's side may take: the ones with a value of that unit (an angle, a distance). */
+  matesWith(unit: "deg" | "mm"): { mate: MateItem; key: string; label: string }[] {
+    const out: { mate: MateItem; key: string; label: string }[] = [];
+    for (const m of this.state.mates) for (const v of mateDef(m.mateType)?.solve?.values || []) if (v.unit === unit) out.push({ mate: m, key: v.key, label: (mateDef(m.mateType)?.solve?.values || []).filter((x) => x.unit === unit).length > 1 ? `${m.name} (${v.label.toLowerCase()})` : m.name });
+    return out;
+  }
+  addRelation(type: string, a: RelationEnd, b: RelationEnd, params: JsonObject): string | null {
+    const doc = this.session.doc, def = relationDef(type);
+    if (!doc || !def) return null;
+    const made = addRelation(doc, { relationType: type, title: def.title, a, b, params: { ...def.defaults(), ...params } });
+    if (!this.commit(made.changes)) return null;
+    this.select(made.item.id);
+    return made.item.id;
+  }
+  editRelation(id: string, patch: { a?: RelationEnd; b?: RelationEnd; params?: JsonObject }): void { this.edit((doc) => updateRelation(doc, id, patch)); }
+  /** Hold the selected instances together as they stand (Onshape's Group): they move as one. */
+  groupRigid(ids: string[]): void {
+    const doc = this.session.doc; if (!doc) return;
+    const made = addRigid(doc, ids, this.display);
+    if (!made) { this.host.toast("Select two or more instances to group.", 3000); return; }
+    if (this.commit(made.changes)) this.select(made.item.id);
+  }
+  /** Copies of the seeds along a direction of the assembly (linear) or about an axis (circular); they follow their seeds. */
+  addPattern(type: "linear" | "circular", seeds: string[], o: { count: number; spacing?: number; angle?: number; direction?: Vec3; origin?: Vec3; axis?: Vec3 }): void {
+    const doc = this.session.doc; if (!doc || !seeds.length) return;
+    const frames = patternFrames(doc, seeds, type === "linear" ? { direction: o.direction || [1, 0, 0] } : { origin: o.origin || [0, 0, 0], axis: o.axis || [0, 0, 1] }, this.display);
+    const made = addPattern(doc, { patternType: type, seeds, count: o.count, spacing: o.spacing, angle: o.angle, frames });
+    if (!made.item.seeds.length) { this.host.toast("A copy of a pattern cannot be the seed of another. Pick the instances the pattern was made from.", 4000); return; }
+    if (this.commit(made.changes)) { this.fitted = false; this.select(made.item.id); }
+  }
+  editPattern(id: string, patch: { count?: number; spacing?: number; angle?: number }): void { this.edit((doc) => updatePattern(doc, id, patch)); }
+  dissolvePattern(id: string): void { this.edit((doc) => dissolvePattern(doc, id)); }
+  /**
+   * Replicate: the instance has a mate in a hole (a circular edge or a cylindrical face) of another part; a copy
+   * of it, with a copy of that mate, goes in every other hole like it.  Returns how many were made.
+   */
+  replicate(id: string): number {
+    const doc = this.session.doc, inst = this.instance(id);
+    if (!doc || !inst) return 0;
+    for (const m of matesOf(doc)) {
+      if (m.suppressed || (m.a.instance !== id && m.b.instance !== id)) continue;
+      const side = m.a.instance === id ? "b" : "a", end = m[side], host = this.instance(end.instance);
+      if (!host || end.connector) continue;
+      const pieces = this.sources.piecesOf(host).pieces, piece = pieces.find((p) => p.id === end.ref.body) || pieces[0];
+      const refs = piece ? matchingRefs(piece.mesh, end.ref) : [];
+      if (!refs.length) continue;
+      const hostPose = this.display.get(host.id), from = this.geometry.frame(host, end.ref), base = storedTransform(inst);
+      if (!hostPose || !from) continue;
+      const changes: ItemChange[] = [], ids: string[] = [];
+      const copies = insertInstances(doc, refs.map((ref) => {
+        // start each copy as far from the seed as its hole is from the seed's hole, so the mate has little to do
+        const to = this.geometry.frame(host, ref), t = base.slice() as Transform;
+        if (to) { const a = applyPose(hostPose, from.o), b = applyPose(hostPose, to.o); t[3] += b[0] - a[0]; t[7] += b[1] - a[1]; t[11] += b[2] - a[2]; }
+        return { source: inst.source, name: inst.name.replace(/ \d+$/, "") || inst.name, transform: t, group: typeof inst.group === "string" ? inst.group : undefined };
+      }));
+      changes.push(...copies.changes);
+      const names = matesOf(doc).map((x) => x.name), def = mateDef(m.mateType);
+      copies.items.forEach((copy, n) => {
+        const other = { ...end, ref: refs[n] }, own = { ...(side === "a" ? m.b : m.a), instance: copy.id };
+        const name = numberedName(names, def?.title || "Mate"); names.push(name);
+        const made = addMate(doc, { mateType: m.mateType, name, a: side === "a" ? other : own, b: side === "a" ? own : other, params: { ...(m.params || {}) } });
+        // each new mate after the ones before it in this same commit
+        made.item.order = made.item.order + String(n).padStart(3, "0");
+        changes.push({ ...made.changes[0], item: made.item } as ItemChange); ids.push(copy.id);
+      });
+      if (this.commit(changes)) { this.select(ids); return ids.length; }
+      return 0;
+    }
+    return 0;
+  }
+  /** Put instances before another one of the list (null: at the end); `group`: into that folder, null: out of any. */
+  moveInstances(ids: string[], before: string | null, group?: string | null): void { this.edit((doc) => moveInstances(doc, ids, before, group)); }
+  newFolder(ids: string[] = []): void {
+    const doc = this.session.doc; if (!doc) return;
+    if (ids.length) { this.group(ids); return; }
+    const made = addFolder(doc);
+    if (this.commit(made.changes)) this.set({ renaming: made.group.id });
+  }
+  /** Open the document an instance comes from (its part studio, its board, its sub-assembly). */
+  openSource(id: string): void { const i = this.instance(id); if (i) this.host.openDoc(i.source.docId); }
+
+  // ---------------------------------------------------------------- overlays, picking for tools, the section
+  setUi(patch: AssemblyUi): void { this.set({ ui: { ...this.state.ui, ...patch } }); }
+  setFilter(patch: Partial<PickFilter>): void { const f = { ...this.state.filter, ...patch }; if (!f.face && !f.edge && !f.vertex) return; this.set({ filter: f }); }
+  private pickDone: ((pick: AssemblyPick, frame: MateFrame) => boolean | void) | null = null;
+  /**
+   * Ask for clicks in the model: `done` gets what was clicked and its connector frame in assembly space, and
+   * returns true to go on asking.  Escape, or `pick(null)`, stops.
+   */
+  pick(prompt: string | null, done?: (pick: AssemblyPick, frame: MateFrame) => boolean | void): void {
+    if (prompt && this.state.mating) this.cancelMate();
+    this.pickDone = prompt && done ? done : null;
+    this.hover = null; this.scene.setHover(null);
+    this.set({ picking: prompt && done ? { prompt } : null, connecting: false, inserting: prompt ? null : this.state.inserting });
+    this.decorate();
+    if (prompt) this.viewport.canvas.focus();
+  }
+  /** What a tool draws over the model (a measurement's two connectors): shown until set again. */
+  setToolMarks(frames: MateFrame[]): void { this.toolMarks = frames; this.decorate(); }
+  private toolMarks: MateFrame[] = [];
+  /** Cut the view open with a plane across an axis of the assembly (null: whole again).  A way of looking: not stored. */
+  setSection(cut: SectionCut | null): void {
+    const r = this.viewport.renderer;
+    if (!cut) r.clippingPlanes = [];
+    else {
+      const n = new Vector3(cut.axis === "x" ? 1 : 0, cut.axis === "y" ? 1 : 0, cut.axis === "z" ? 1 : 0).multiplyScalar(cut.flip ? 1 : -1);
+      r.clippingPlanes = [new Plane(n, (cut.flip ? -1 : 1) * cut.offset)];
+    }
+    this.set({ section: cut });
+    this.viewport.invalidate();
+  }
+  /** The extent of what is shown along an axis, for the section's slider. */
+  extent(axis: "x" | "y" | "z"): [number, number] { const b = this.scene.box(); return b.isEmpty() ? [-50, 50] : [b.min[axis], b.max[axis]]; }
 
   saveCurrentPosition(name?: string): void {
     const doc = this.session.doc; if (!doc) return;
@@ -644,7 +911,7 @@ export class AssemblyEditor {
     if (!doc || !p || this.state.mating) return;
     const start = new Map(this.display);
     for (const [inst, t] of Object.entries(p.transforms)) if (start.has(inst) && Array.isArray(t) && t.length === 12) start.set(inst, poseOf(t));
-    const problem = buildProblem(instancesOf(doc), matesOf(doc), this.connectors, MATES, this.geometry, start);
+    const problem = buildProblem(instancesOf(doc), matesOf(doc), this.connectors, MATES, this.geometry, start, this.extras(doc));
     const solved = solveProblem(problem, { reach: reachOf(problem.mates) });
     const out = new Map<string, Transform>();
     for (const [inst, pose] of solved.result.poses) out.set(inst, transformOf(pose));
@@ -654,51 +921,109 @@ export class AssemblyEditor {
   }
 
   // ---------------------------------------------------------------- the pointer
+  private onTrack = (ev: PointerEvent): void => { this.pointer = { x: ev.clientX, y: ev.clientY }; };
   private onLeave = (): void => { if (this.hover) { this.hover = null; this.scene.setHover(null); this.decorate(); } };
 
   private onDown = (ev: PointerEvent): void => {
+    if (ev.button === 2) { this.rightDown = { x: ev.clientX, y: ev.clientY, t: ev.timeStamp }; return; }
     if (ev.button !== 0) return;
     this.viewport.canvas.focus();
     const s = this.state;
-    if (!s.mating && !s.exploding && s.canEdit) {
+    if (s.ui.menu) this.setUi({ menu: null });
+    if (!s.mating && !s.picking && (s.canEdit || s.exploding)) {
       const handle = this.scene.triad.hit(ev);
-      if (handle && s.selection.length === 1) { this.startTriadDrag(handle, s.selection[0], ev); return; }
+      if (handle && s.selection.length === 1) { if (s.exploding) this.startPull(handle, s.selection[0], ev); else this.startTriadDrag(handle, s.selection[0], ev); return; }
     }
-    this.down = { x: ev.clientX, y: ev.clientY, pick: this.scene.pick(ev), toggle: ev.shiftKey || ev.ctrlKey || ev.metaKey };
+    this.down = { x: ev.clientX, y: ev.clientY, pick: this.scene.pick(ev, this.choosing() ? { kinds: this.kinds() } : {}), toggle: ev.shiftKey || ev.ctrlKey || ev.metaKey };
   };
+
+  /** true while a click in the model chooses geometry (a mate's connector, a tool's pick) and not an instance */
+  private choosing(): boolean { const s = this.state; return !!(s.connecting || s.picking || (s.mating && s.mating.field)); }
+  /** which geometry a choosing click takes: the person's filter while a mate's connector is picked; faces only for a mate of faces (Width) */
+  private kinds(): PickFilter { const m = this.state.mating; return m && mateDef(m.mateType)?.pairs ? { face: true, edge: false, vertex: false } : m ? this.state.filter : { face: true, edge: true, vertex: true }; }
+  private rightDown: { x: number; y: number; t: number } | null = null;
+  /** an instance being pulled apart in an exploded view (the manipulator's arrows) */
+  private pull: { instance: string; base: Vec3; axis: Vec3; measure(ev: { clientX: number; clientY: number }, free: boolean): number; origin: Vec3 } | null = null;
+  private startPull(handle: TriadHandle, instance: string, ev: PointerEvent): void {
+    if (handle.kind !== "move") { this.host.toast("In an exploded view parts are pulled apart, not turned: drag an arrow.", 3000); return; }
+    const grip = this.scene.triad.begin(handle, ev), b = this.burst.get(instance) || [0, 0, 0];
+    this.pull = { instance, base: [b[0], b[1], b[2]], axis: grip.axis, measure: grip.measure, origin: grip.origin };
+    this.scene.triad.setActive(handle);
+    try { this.viewport.canvas.setPointerCapture(ev.pointerId); } catch (e) { /* a synthetic event has no pointer to capture */ }
+  }
 
   private onMove = (ev: PointerEvent): void => {
     if (this.viewport.navigating) return;
+    if (this.pull) {
+      const p = this.pull, d = p.measure(ev, ev.altKey);
+      this.burst.set(p.instance, [p.base[0] + p.axis[0] * d, p.base[1] + p.axis[1] * d, p.base[2] + p.axis[2] * d]);
+      this.place();
+      this.scene.triad.setPose({ p: [p.origin[0] + p.axis[0] * d, p.origin[1] + p.axis[1] * d, p.origin[2] + p.axis[2] * d], q: [0, 0, 0, 1] });
+      const readout = `${Math.round(d * 100) / 100} mm`;
+      if (readout !== this.state.readout) this.set({ readout });
+      return;
+    }
     if (this.drag) { this.drag.pending = ev; if (!this.drag.frame) this.drag.frame = requestAnimationFrame(() => this.dragStep()); return; }
     const s = this.state, d = this.down;
     if (d) {
-      if (d.pick && !s.mating && !s.exploding && s.canEdit && Math.hypot(ev.clientX - d.x, ev.clientY - d.y) > 4) { this.startBodyDrag(d.pick, ev); this.down = null; }
+      if (d.pick && !s.mating && !s.exploding && !s.picking && !s.connecting && s.canEdit && Math.hypot(ev.clientX - d.x, ev.clientY - d.y) > 4) { this.startBodyDrag(d.pick, ev); this.down = null; }
       return;
     }
-    if (s.connecting || (s.mating && s.mating.field)) {
-      this.nearConnector = s.mating ? this.connectorAt(ev) : null;
-      const pick = this.nearConnector ? null : this.scene.pick(ev);
+    if (this.choosing()) {
+      this.nearConnector = s.mating && !mateDef(s.mating.mateType)?.pairs ? this.connectorAt(ev) : null;
+      const pick = this.nearConnector ? null : this.scene.pick(ev, { kinds: this.kinds() });
       this.hover = pick; this.scene.setHover(pick); this.decorate();
       this.viewport.canvas.style.cursor = pick || this.nearConnector ? "crosshair" : "";
     } else {
-      const over = !s.mating && !s.exploding && s.canEdit && (this.scene.triad.hit(ev) || this.scene.pick(ev, { faces: true }));
+      const over = !s.mating && (s.exploding ? this.scene.triad.hit(ev) : s.canEdit && (this.scene.triad.hit(ev) || this.scene.pick(ev, { faces: true })));
       this.viewport.canvas.style.cursor = over ? "grab" : "";
     }
   };
 
   private onUp = (ev: PointerEvent): void => {
+    if (ev.button === 2) {
+      // a right click that did not turn the view: the menu for what is under the pointer
+      const r = this.rightDown; this.rightDown = null;
+      if (!r || Math.hypot(ev.clientX - r.x, ev.clientY - r.y) > 4 || ev.timeStamp - r.t > 600 || this.drag || this.pull) return;
+      const pick = this.scene.pick(ev, { faces: true });
+      if (pick && !this.state.mating && !this.state.selection.includes(pick.instance)) this.select(pick.instance);
+      this.setUi({ menu: { x: ev.clientX, y: ev.clientY, instance: pick ? pick.instance : null } });
+      return;
+    }
     if (ev.button !== 0) return;
+    if (this.pull) {
+      this.pull = null;
+      try { this.viewport.canvas.releasePointerCapture(ev.pointerId); } catch (e) { /* not captured */ }
+      this.scene.triad.setActive(null);
+      this.set({ readout: null, explodeDirty: true }); this.decorate();
+      return;
+    }
     if (this.drag) { this.finishDrag(ev); return; }
     const d = this.down; this.down = null;
     if (!d || Math.hypot(ev.clientX - d.x, ev.clientY - d.y) >= 5) return;
     const s = this.state;
     if (s.mating) { if (s.mating.field) { const explicit = this.connectorAt(ev); if (explicit || d.pick) this.pickConnector(d.pick, explicit); } return; }
     if (s.connecting) { if (d.pick) this.addConnectorAt(d.pick); return; }
+    if (s.picking) {
+      const frame = d.pick && this.pickFrame(d.pick), done = this.pickDone;
+      if (d.pick && frame && done && !done(d.pick, frame)) this.pick(null);
+      return;
+    }
     if (d.pick) this.select(d.pick.instance, { toggle: d.toggle }); else if (!d.toggle) this.select(null);
   };
 
-  private onDouble = (ev: MouseEvent): void => { const pick = this.scene.pick(ev); if (!pick) this.fit(); };
+  /** A double click on a part opens what it comes from, to edit it in its own tab; on nothing, it fits the view. */
+  private onDouble = (ev: MouseEvent): void => {
+    const s = this.state;
+    if (s.mating || s.picking || s.connecting || s.exploding) return;
+    const pick = this.scene.pick(ev, { faces: true });
+    if (!pick) this.fit(); else this.openSource(pick.instance);
+  };
 
+  /** where the pointer was last, in the window: S opens the tool search there */
+  pointer: { x: number | null; y: number | null } = { x: null, y: null };
+  /** Runs the command a key event is bound to (ui/commands.ts sets it: the editor does not know the commands). */
+  runKey: ((ev: KeyboardEvent) => boolean) | null = null;
   /** A tool or a view may take keys first (return true when handled). */
   keyHandler: ((ev: KeyboardEvent) => boolean) | null = null;
   /** A key pressed anywhere in the assembly's frame (the view passes on the ones no field took). */
@@ -707,17 +1032,21 @@ export class AssemblyEditor {
     if (this.keyHandler && this.keyHandler(ev)) { ev.preventDefault(); return; }
     const s = this.state, mod = ev.ctrlKey || ev.metaKey;
     const done = () => { ev.preventDefault(); ev.stopPropagation(); };
-    if (ev.key === "Escape") { if (s.form) this.ask(null); else if (s.mating) this.cancelMate(); else if (s.connecting) this.setConnecting(false); else if (s.inserting) this.closeInsert(); else if (s.exploding) this.setExploding(false); else this.select(null); done(); return; }
+    if (ev.key === "Escape") { if (s.ui.menu || s.ui.palette) this.setUi({ menu: null, palette: null }); else if (s.form) this.ask(null); else if (s.mating) this.cancelMate(); else if (s.picking) this.pick(null); else if (s.connecting) this.setConnecting(false); else if (s.inserting) this.closeInsert(); else if (s.exploding) this.setExploding(false); else this.select(null); done(); return; }
     if (ev.key === "Enter" && s.mating) { this.acceptMate(); done(); return; }
     if (mod && ev.key.toLowerCase() === "z") { if (ev.shiftKey) this.redo(); else this.undo(); done(); return; }
     if (mod && ev.key.toLowerCase() === "y") { this.redo(); done(); return; }
     // the part studio's view keys (Onshape's): the arrows turn the view, Ctrl/Cmd + ← → rolls it, Shift + 1 … 7
     if (viewKey(this.viewport, ev)) { done(); return; }
-    if (s.mating || mod || ev.altKey) return;
-    if ((ev.key === "Delete" || ev.key === "Backspace") && s.canEdit && s.selection.length) { this.remove(); done(); return; }
-    if (ev.key === "F2" && s.selection.length === 1) { this.startRename(s.selection[0]); done(); return; }
-    const tool = this.tools().find((t) => t.key && t.key.toLowerCase() === ev.key.toLowerCase());
-    if (tool && !(tool.disabled && tool.disabled(this))) { tool.run(this); done(); }
+    // the tool search: Ctrl/Cmd+K, Onshape's Alt+C, and S at the pointer
+    if ((mod && !ev.shiftKey && ev.key.toLowerCase() === "k") || (ev.altKey && !mod && ev.code === "KeyC")) { this.setUi({ palette: { x: null, y: null }, menu: null }); done(); return; }
+    if (s.mating) return;
+    if (!mod && !ev.altKey && !ev.shiftKey && ev.key.toLowerCase() === "s") { this.setUi({ palette: { x: this.pointer.x, y: this.pointer.y }, menu: null }); done(); return; }
+    if (!mod && !ev.altKey && ev.key === "?") { this.setUi({ help: !s.ui.help }); done(); return; }
+    if (!mod && !ev.altKey && (ev.key === "Delete" || ev.key === "Backspace") && s.canEdit && s.selection.length) { this.remove(); done(); return; }
+    if (!mod && !ev.altKey && ev.key === "F2" && s.selection.length === 1) { this.startRename(s.selection[0]); done(); return; }
+    // every other key is a command's (ui/commands.ts), as this person has them (ui/keys.ts)
+    if (this.runKey && this.runKey(ev)) done();
   };
 
   // ---------------------------------------------------------------- dragging: every step goes through the solver
@@ -776,7 +1105,7 @@ export class AssemblyEditor {
     const goal = d.goal(ev);
     if (!goal) return;
     for (const b of d.problem.bodies) { const p = this.live.get(b.id); if (p) b.pose = p; }
-    const r = solve(d.problem.bodies, d.problem.mates, { drag: goal, reach: d.reach, maxIterations: 16 });
+    const r = solve(d.problem.bodies, d.problem.mates, { drag: goal, reach: d.reach, maxIterations: 16, relations: d.problem.relations });
     this.dragMs = r.ms;
     if (!r.ok) return;   // the mates would not hold there: stay where they did
     d.moved = true;
@@ -821,7 +1150,8 @@ export class AssemblyEditor {
     if (this.drag) cancelAnimationFrame(this.drag.frame);
     const c = this.viewport.canvas;
     c.removeEventListener("pointerdown", this.onDown); c.removeEventListener("pointermove", this.onMove); c.removeEventListener("pointerup", this.onUp);
-    c.removeEventListener("pointercancel", this.onUp); c.removeEventListener("pointerleave", this.onLeave); c.removeEventListener("dblclick", this.onDouble); c.removeEventListener("keydown", this.onKey);
+    c.removeEventListener("pointercancel", this.onUp); c.removeEventListener("pointerleave", this.onLeave); c.removeEventListener("pointermove", this.onTrack);
+    this.viewport.renderer.clippingPlanes = []; c.removeEventListener("dblclick", this.onDouble); c.removeEventListener("keydown", this.onKey);
     this.session.close(); this.boards.dispose(); this.previews.dispose(); this.sources.dispose(); this.scene.dispose(); this.viewport.dispose(); this.listeners.clear();
   }
 }

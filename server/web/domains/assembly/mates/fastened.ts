@@ -13,8 +13,10 @@ const solve: MateSolve = {
 export default defineMate({
   type: "fastened",
   title: "Fastened",
+  hint: "Fix two parts to each other: nothing moves between them.",
+  keywords: "mate joint rigid weld glue lock constrain fix bond fasten attach",
   order: 10,
-  icon: '<rect x="4" y="8" width="7" height="8"/><rect x="13" y="8" width="7" height="8"/><path d="M9 12h6"/>',
+  icon: '<rect class="f" x="2.5" y="7" width="8.5" height="10" rx="1"/><rect x="2.5" y="7" width="8.5" height="10" rx="1"/><rect class="t" x="13" y="7" width="8.5" height="10" rx="1"/><path d="M11 10h2M11 14h2"/>',
   defaults: () => ({ offset: 0, rotation: 0 }),
   schema: [OFFSET, ROTATION],
   freedom: { translation: 0, rotation: 0 },

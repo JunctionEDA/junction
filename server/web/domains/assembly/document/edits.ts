@@ -177,16 +177,41 @@ export function addMate(doc: ItemDoc, m: NewMate, id: string = newId()): { chang
 export function updateMate(doc: ItemDoc, id: string, patch: Partial<Pick<MateItem, "name" | "a" | "b" | "params" | "mateType">>): ItemChange[] {
   return modify<MateItem>(doc, id, (m) => ({ ...m, ...patch }));
 }
+/**
+ * Delete items of any kind, and what cannot be without them: an instance's mates, connectors and pattern copies;
+ * a pattern's copies; the relations of a mate (document/extras.ts has those item types; they are read here by
+ * their plain keys so this file does not depend on that one).
+ */
 export function deleteItems(doc: ItemDoc, ids: readonly string[]): ItemChange[] {
-  const instances = ids.filter((id) => isInstance(doc.items.get(id)));
-  const out = deleteInstances(doc, instances);
-  const done = new Set(out.map((c) => c.id));
+  const asked = new Set(ids);
+  // copies go with their pattern and with their seed
+  const instances = new Set(ids.filter((id) => isInstance(doc.items.get(id))));
+  const all = instancesOf(doc);
+  for (const i of all) if ((typeof i.pattern === "string" && asked.has(i.pattern)) || (typeof i.seed === "string" && typeof i.pattern === "string" && instances.has(i.seed))) instances.add(i.id);
+  const out = deleteInstances(doc, Array.from(instances));
+  const done = new Set(out.filter((c) => c.kind === "REMOVED").map((c) => c.id));
+  const remove = (i: Item) => { if (!done.has(i.id)) { out.push(removedChange(i)); done.add(i.id); } };
   for (const id of ids) {
     const i = doc.items.get(id);
     if (!i || done.has(id)) continue;
-    if (isGroup(i)) out.push(...ungroup(doc, id));
-    else if (isConnector(i)) { for (const m of matesOf(doc)) if ((m.a.connector === id || m.b.connector === id) && !done.has(m.id)) { out.push(removedChange(m)); done.add(m.id); } out.push(removedChange(i)); }
-    else if (isMate(i) || isPosition(i)) out.push(removedChange(i));
+    if (isGroup(i)) { out.push(...ungroup(doc, id)); done.add(id); }
+    else if (isConnector(i)) { for (const m of matesOf(doc)) if (m.a.connector === id || m.b.connector === id) remove(m); remove(i); }
+    else if (isMate(i) || isPosition(i) || i.type === "relation" || i.type === "pattern" || i.type === "explode" || i.type === "rigid") remove(i);
+  }
+  for (const i of doc.items.values()) {
+    if (done.has(i.id)) continue;
+    if (i.type === "relation") { const a = i.a as JsonObject | undefined, b = i.b as JsonObject | undefined; if ((a && done.has(String(a.mate))) || (b && done.has(String(b.mate)))) remove(i); }
+    else if (i.type === "pattern" && Array.isArray(i.seeds) && i.seeds.some((s) => done.has(String(s)))) {
+      // a pattern that lost a seed keeps its others; with none left it goes
+      const seeds = i.seeds.filter((s) => !done.has(String(s)));
+      if (!seeds.length) remove(i);
+      else { const frames = { ...(i.frames as JsonObject) }; for (const k of Object.keys(frames)) if (done.has(k)) delete frames[k]; const c = modifiedChange(i, { ...i, seeds, frames }); if (c) out.push(c); }
+    } else if (i.type === "rigid" && Array.isArray(i.instances) && i.instances.some((s) => done.has(String(s)))) {
+      // a rigid group holds two or more instances together; with fewer there is nothing to hold
+      const instances = i.instances.filter((s) => !done.has(String(s)));
+      if (instances.length < 2) remove(i);
+      else { const c = modifiedChange(i, { ...i, instances }); if (c) out.push(c); }
+    }
   }
   return out;
 }

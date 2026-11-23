@@ -57,7 +57,7 @@ test("the factorisations: a skyline Cholesky solves, a pivoted one finds the ran
 });
 
 test("every mate type registers a solver hook", () => {
-  assert.deepEqual(G.MATES.map((m) => m.type).sort(), ["ball", "cylindrical", "fastened", "parallel", "pin-slot", "planar", "revolute", "slider", "tangent"]);
+  assert.deepEqual(G.MATES.map((m) => m.type).sort(), ["ball", "cylindrical", "fastened", "parallel", "pin-slot", "planar", "revolute", "slider", "tangent", "width"]);
   for (const m of G.MATES) { assert.equal(typeof m.solve.residuals, "function", m.type); assert.equal(typeof m.place, "function"); }
 });
 

@@ -14,8 +14,12 @@ export interface MateDefinition {
   /** Stable id, stored in documents as `mateType`.  Never rename one that has shipped. */
   type: string;
   title: string;
-  /** inline SVG markup for a 24×24 stroke glyph (currentColor) */
+  /** inline SVG markup for a 24×24 stroke glyph, drawn as the part studio's are (mechanical ui/Glyph.tsx) */
   icon?: string;
+  /** one line on what it does: the tooltip and the tool search */
+  hint?: string;
+  /** other words people look for it by ("hinge", "joint") */
+  keywords?: string;
   defaults(): JsonObject;
   /** The fields of the mate's dialog; the two connectors are always asked for and are not listed here. */
   schema: ParamField[];
@@ -36,6 +40,8 @@ export interface MateDefinition {
   solve?: MateSolve;
   /** lower first in the toolbar; ties in title order */
   order?: number;
+  /** each connector is the middle of TWO faces of its part (Width): the dialog asks for four faces */
+  pairs?: boolean;
 }
 
 export function defineMate(def: MateDefinition): MateDefinition { return def; }

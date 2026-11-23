@@ -308,7 +308,8 @@ export class AssemblyScene {
 
   // ---------------------------------------------------------------- picking
   /** What is under the pointer: a vertex before an edge before a face, the nearest instance first. */
-  pick(ev: { clientX: number; clientY: number }, o: { only?: ReadonlySet<string>; faces?: boolean } = {}): AssemblyPick | null {
+  pick(ev: { clientX: number; clientY: number }, o: { only?: ReadonlySet<string>; faces?: boolean; /** which kinds may be answered (all, when absent) */ kinds?: { face?: boolean; edge?: boolean; vertex?: boolean } } = {}): AssemblyPick | null {
+    const want = { face: o.kinds?.face !== false, edge: !o.faces && o.kinds?.edge !== false, vertex: !o.faces && o.kinds?.vertex !== false };
     const ray = this.viewport.ray(ev), px = this.viewport.pixelSize();
     const rc = this.raycaster; rc.ray.copy(ray); rc.near = 0; rc.far = Infinity;
     const at = (v: THREE.Vector3): Vec3 => [v.x, v.y, v.z];
@@ -326,10 +327,10 @@ export class AssemblyScene {
       const w = owner.get(face.object)!, mesh = w.piece.piece.mesh;
       faceD = face.distance;
       const i = rangeOf(mesh.faces.start, mesh.faces.count, face.faceIndex * 3);
-      if (i >= 0) offer({ instance: w.inst.id, piece: w.piece.piece.id, kind: "face", name: mesh.faces.names[i], point: at(face.point) }, face.distance);
+      if (i >= 0 && want.face) offer({ instance: w.inst.id, piece: w.piece.piece.id, kind: "face", name: mesh.faces.names[i], point: at(face.point) }, face.distance);
     }
-    if (!o.faces) {
-      const slack = 6 * px;
+    const slack = 6 * px;
+    if (want.edge) {
       rc.params.Line = { threshold: 5 * px };
       const edge = rc.intersectObjects(edges, false).filter((h) => h.distance <= faceD + slack).sort((p, q) => (p.distanceToRay ?? 0) - (q.distanceToRay ?? 0))[0];
       if (edge && edge.index != null) {
@@ -337,6 +338,8 @@ export class AssemblyScene {
         const i = rangeOf(mesh.edges.start, mesh.edges.count, edge.index);
         if (i >= 0) offer({ instance: w.inst.id, piece: w.piece.piece.id, kind: "edge", name: mesh.edges.names[i], point: at(edge.point) }, edge.distance - 1e4);
       }
+    }
+    if (want.vertex) {
       rc.params.Points = { threshold: 6 * px };
       const vertex = rc.intersectObjects(points, false).filter((h) => h.distance <= faceD + slack).sort((p, q) => (p.distanceToRay ?? 0) - (q.distanceToRay ?? 0))[0];
       if (vertex && vertex.index != null) {

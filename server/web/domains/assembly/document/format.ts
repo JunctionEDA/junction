@@ -63,6 +63,8 @@ export interface MateConnector extends JsonObject {
   flip?: boolean;
   /** the id of an explicit connector item (document/edits.ts) this end uses; `ref` is then that connector's geometry */
   connector?: string;
+  /** a second face of the same instance (the Width mate): the connector is then half-way between the two */
+  ref2?: GeomRef;
 }
 
 export interface MateItem extends Item {
