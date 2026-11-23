@@ -15,6 +15,11 @@
 //! * `/api/libs/footprints`               → `{ ref, libraries: [{ name, description }] }`
 //! * `/api/libs/footprints/{lib}`         → `{ library, footprints: [{ n, d, k, p }] }` (`{lib}` may carry `.pretty`)
 //! * `/api/libs/footprints/{lib}/{name}`  → `{ library, name, fpid, footprint }` — the `.kicad_mod` text
+//! * `POST /api/libs/lookup` `{ symbols: ["Lib:Name"…], footprints: [...] }` → `{ symbols: { "Lib:Name": { library,
+//!   symbol?, parents? } }, footprints: { "Lib:Name": { library, footprint? } } }` — the library content the checks
+//!   that compare a design with its libraries need in one request (ERC_TESTER::TestLibSymbolIssues / TestPinMap /
+//!   TestFootprintLinkIssues, DRC_TEST_PROVIDER_LIBRARY_PARITY, Rescue Symbols): `library` says whether the global
+//!   table has that library, and the item is left out when the library does not hold it.
 //!
 //! The libraries come on demand from the official upstream repositories
 //! (gitlab.com/kicad/libraries/kicad-symbols and kicad-footprints) at one pinned ref: the first
@@ -76,6 +81,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/libs/footprints", get(footprint_libraries))
         .route("/api/libs/footprints/{lib}", get(footprint_index))
         .route("/api/libs/footprints/{lib}/{name}", get(footprint))
+        .route("/api/libs/lookup", axum::routing::post(lookup))
         .route("/api/libs/archive", get(archive_manifest))
         .route("/api/libs/archive/{kind}", get(archive_file))
 }
@@ -906,6 +912,114 @@ impl Libs {
     }
 }
 
+impl Libs {
+    /// Whether the global table (the official libraries) names `lib`.
+    pub async fn has_library(&self, symbols: bool, lib: &str) -> LibResult<bool> {
+        let kind = if symbols { Kind::Symbols } else { Kind::Footprints };
+        Ok(valid_name(lib) && self.table(kind).await?.iter().any(|(n, _)| n == lib))
+    }
+
+    /// One item of `Lib:Name` for the lookup: the library's presence and the item's text (a symbol with the parents it
+    /// extends, nearest first).  A library the table lists but that cannot be read answers its error.
+    async fn lookup_one(&self, symbols: bool, id: &str) -> LibResult<Value> {
+        let Some((lib, name)) = id.split_once(':') else { return Ok(json!({ "library": false })) };
+        if !self.has_library(symbols, lib).await? {
+            return Ok(json!({ "library": false }));
+        }
+        if symbols {
+            let l = self.symbols(lib).await?;
+            let Some(entry) = l.symbols.get(name) else { return Ok(json!({ "library": true })) };
+            let mut parents: Vec<&str> = Vec::new();
+            let mut next = entry.extends.as_deref();
+            while let Some(p) = next {
+                let Some(e) = l.symbols.get(p) else { break };
+                parents.push(&e.text);
+                next = e.extends.as_deref();
+                if parents.len() > 16 {
+                    break;
+                }
+            }
+            Ok(json!({ "library": true, "symbol": entry.text, "parents": parents }))
+        } else {
+            let l = self.footprints(lib).await?;
+            Ok(match l.footprints.get(name) {
+                Some(text) => json!({ "library": true, "footprint": text }),
+                None => json!({ "library": true }),
+            })
+        }
+    }
+
+    /// The official libraries `symbols` / `footprints` (nicknames) name, written under `dir` as KiCad reads them from a
+    /// library table: `symbols/<lib>.kicad_sym` (one file, KiCad's own layout of the library) and
+    /// `footprints/<lib>.pretty/<name>.kicad_mod`.  Returns the (nickname, path) rows written; a nickname the global
+    /// table does not list is left out (KiCad then reports it as not in the configuration).
+    pub async fn write_libraries(&self, dir: &FsPath, symbols: &[String], footprints: &[String])
+        -> LibResult<(Vec<(String, PathBuf)>, Vec<(String, PathBuf)>)> {
+        let io = |e: std::io::Error| LibError::Upstream(format!("library folder: {e}"));
+        let (mut syms, mut fps) = (Vec::new(), Vec::new());
+        for lib in symbols {
+            if !self.has_library(true, lib).await? {
+                continue;
+            }
+            let sources: Vec<String> = self.library_files(Kind::Symbols, lib).await?.into_iter().map(|(_, t)| t).collect();
+            let text = tokio::task::spawn_blocking(move || symbol_library_text(&sources)).await.map_err(|e| LibError::Upstream(e.to_string()))?;
+            let to = dir.join("symbols").join(format!("{lib}.kicad_sym"));
+            tokio::fs::create_dir_all(dir.join("symbols")).await.map_err(io)?;
+            tokio::fs::write(&to, text).await.map_err(io)?;
+            syms.push((lib.clone(), to));
+        }
+        for lib in footprints {
+            if !self.has_library(false, lib).await? {
+                continue;
+            }
+            let folder = dir.join("footprints").join(format!("{lib}.pretty"));
+            tokio::fs::create_dir_all(&folder).await.map_err(io)?;
+            for (file, text) in self.library_files(Kind::Footprints, lib).await? {
+                let file = file.rsplit(['/', '\\']).next().unwrap_or("").to_string();
+                if !file.ends_with(".kicad_mod") || !valid_name(file.trim_end_matches(".kicad_mod")) {
+                    continue;
+                }
+                tokio::fs::write(folder.join(&file), text).await.map_err(io)?;
+            }
+            fps.push((lib.clone(), folder));
+        }
+        Ok((syms, fps))
+    }
+}
+
+/// At most this many items in one lookup.
+const MAX_LOOKUP: usize = 4000;
+
+#[derive(serde::Deserialize, Default)]
+struct LookupReq {
+    #[serde(default)]
+    symbols: Vec<String>,
+    #[serde(default)]
+    footprints: Vec<String>,
+}
+
+async fn lookup(_user: AuthUser, Json(req): Json<LookupReq>) -> Response {
+    if req.symbols.len() + req.footprints.len() > MAX_LOOKUP {
+        return LibError::BadName.into_response();
+    }
+    let mut out = json!({ "symbols": {}, "footprints": {} });
+    for (symbols, ids) in [(true, &req.symbols), (false, &req.footprints)] {
+        let key = if symbols { "symbols" } else { "footprints" };
+        for id in ids {
+            if out[key].get(id).is_some() {
+                continue;
+            }
+            match libs().lookup_one(symbols, id).await {
+                Ok(v) => out[key][id] = v,
+                // a library that cannot be read just now: the caller cannot tell what it holds
+                Err(LibError::NotFound) | Err(LibError::BadName) => out[key][id] = json!({ "library": false }),
+                Err(e) => return e.into_response(),
+            }
+        }
+    }
+    ([(header::CONTENT_TYPE, "application/json"), (header::CACHE_CONTROL, "no-store")], out.to_string()).into_response()
+}
+
 fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -1196,6 +1310,30 @@ mod tests {
         assert!(!valid_name("a/b"));
         assert!(!valid_name("a?b=c"));
         assert!(!valid_name(""));
+    }
+
+    #[tokio::test]
+    async fn lookup_and_written_libraries() {
+        let (dir, libs) = fixture();
+        let v = libs.lookup_one(true, "Amplifier_Operational:LM358").await.unwrap();
+        assert_eq!(v["library"], true);
+        assert!(v["symbol"].as_str().unwrap().contains("LM358"));
+        assert!(v["parents"][0].as_str().unwrap().contains("LM2904"), "the parent it extends comes along");
+        assert_eq!(libs.lookup_one(true, "Device:NoSuch").await.unwrap(), json!({ "library": true }));
+        assert_eq!(libs.lookup_one(true, "NoLib:R").await.unwrap(), json!({ "library": false }));
+        let f = libs.lookup_one(false, "Resistor_SMD:R_0603_1608Metric").await.unwrap();
+        assert!(f["footprint"].as_str().unwrap().contains("R_0603_1608Metric"));
+        assert_eq!(libs.lookup_one(false, "Nope:X").await.unwrap(), json!({ "library": false }));
+
+        let out = dir.join("written");
+        let (s, f) = libs.write_libraries(&out, &["Device".into(), "Unknown".into()], &["Resistor_SMD".into()]).await.unwrap();
+        assert_eq!(s.len(), 1, "an unknown nickname is not written");
+        let text = std::fs::read_to_string(&s[0].1).unwrap();
+        assert!(text.starts_with("(kicad_symbol_lib") && text.contains("(symbol \"R\""));
+        assert_eq!(f[0].0, "Resistor_SMD");
+        assert!(f[0].1.join("R_0603_1608Metric.kicad_mod").is_file());
+        assert!(f[0].1.join("R_0805_2012Metric.kicad_mod").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

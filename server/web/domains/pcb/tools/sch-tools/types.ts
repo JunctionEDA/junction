@@ -1,6 +1,7 @@
 // sch-tools/types.ts — the shapes the schematic tools work with: points and boxes in mm, the editor
 // context app.js hands every hook (its toolCtx() seam, plus the optional extras some callers add), and
 // the module state S with the in-flight operations it holds.
+import type { OtherDoc, SheetReader } from "./sheet-instances";
 
 /** A point in mm, [x, y] (a copy of a node's (at x y rot) may carry the angle as a third entry). */
 export type Pt = number[];
@@ -58,6 +59,16 @@ export interface SchCtx extends ToolCtx {
    * open sheet's commit just pushed.
    */
   dropIntoSheet?(sheet: KItem, label: string, build: (sub: KDoc) => KChange[]): void;
+  /** A project schematic named by a Sheetfile relative to the project path `from`, read as it is now (sheet-instances.ts). */
+  readSheetFile?: SheetReader;
+  /** the hierarchy the editor knows: every sheet path by files, the sheets read so far, every path's KIID path and file */
+  sheetHierarchy?(): { paths: string[][]; docs: Map<string, KDoc>; instances?: { file: string; path: string }[] } | null;
+  /**
+   * One commit over this sheet and other files of the project (the server's op_multi): `build` reads what it needs and
+   * returns this sheet's changes and the other files'; nothing is committed when it returns null, and an Error it throws
+   * is shown.
+   */
+  commitWithSheets?(label: string, build: (read: SheetReader) => Promise<{ here: KChange[]; others: OtherDoc[] } | null>): void;
   pageNumber?: number;
   docPath?: string;
   cursor?: Pt;
@@ -115,6 +126,8 @@ export interface SchDrag {
   pasted?: boolean; libs?: string[]; label?: string;
   /** a paste in flight's caller: told whether it was placed (a placed design block's repeated placement) */
   after?: (placed: boolean) => void;
+  /** a paste with sheets: the other files' part of its commit (clipboard.ts pastedSheetSync), awaited before it commits */
+  othersFor?: Promise<OtherDoc[]> | null;
   /** a Duplicate of a hover selection: the placed copy is not left selected */
   hover?: boolean;
   /** the lines selected by one end only: SCH_MOVE_TOOL moves that end alone (index into the point list) */

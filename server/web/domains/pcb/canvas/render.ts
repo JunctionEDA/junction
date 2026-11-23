@@ -1277,6 +1277,7 @@ export const ANCHOR_COLOR = "#FF26E2", LOCKED_SHADOW_COLOR = "rgba(255,38,226,0.
 /** The overlay object layers: the locked-item shadow (under the anchors) and the footprint anchors — PCB_PAINTER::draw(FOOTPRINT, LAYER_ANCHOR): a 5 px cross, 1 px pen. */
 export function drawObjectOverlays(ctx: Ctx2D, doc: Doc, obj: ObjectsOpt, opts: RenderOpts, s: number, dpr: number, hidden: Set<string> | null, vr: number[], sCss?: number): void {
   const show = obj.show!, hide = obj.hide || new Set<string>();   // called only when obj.show is set
+  if (show.has("constraintShadow") && opts.constrainedIds && opts.constrainedIds.size) drawConstraintShadow(ctx, doc, opts.constrainedIds, opts.constraintHighlightIds || null, opts, hidden, vr);
   if (show.has("lockedShadow") && opts.lockedIds && opts.lockedIds.size) drawLockedShadow(ctx, doc, opts.lockedIds, opts, hidden, vr);
   if (show.has("viaStitching")) drawViaStitching(ctx, doc, opts, s, dpr, vr);
   // FOOTPRINT::ViewGetLOD( LAYER_ANCHOR ): from a view scale of 1.5 (MINIMAL_ZOOM_LEVEL_FOR_VISIBILITY), and only with
@@ -1493,6 +1494,19 @@ function drawViaStitching(ctx: Ctx2D, doc: Doc, opts: RenderOpts, s: number, dpr
 }
 
 export const LOCKED_SHADOW_ALPHA = 0.5, DEFAULT_SILK_LINE_WIDTH = 0.1;
+/**
+ * LAYER_CONSTRAINT_SHADOW (PCB_PAINTER::drawConstraintShadow): the locked-item shadow's shapes and margin in the
+ * constraint shadow colour (rgba(80,160,240,0.5)) on every constrained item; the selected constraint's members are
+ * drawn in that colour Brightened( 0.5 ) with twice the margin, over the rest.
+ */
+export function drawConstraintShadow(ctx: Ctx2D, doc: Doc, ids: Set<string>, highlighted: Set<string> | null, opts: RenderOpts, hidden: Set<string> | null, vr: number[]): void {
+  const oc = opts.objectColors && opts.objectColors.constraintShadow;
+  const [r, g, b] = oc ? parseColor(oc) : [80, 160, 240];
+  const plain = highlighted && highlighted.size ? new Set([...ids].filter((id) => !highlighted.has(id))) : ids;
+  if (plain.size) drawLockedShadow(ctx, doc, plain, opts, hidden, vr, rgba(r, g, b));
+  // COLOR4D::Brightened( 0.5 ): each channel halfway to white
+  if (highlighted && highlighted.size) drawLockedShadow(ctx, doc, highlighted, opts, hidden, vr, rgba(Math.round(r + (255 - r) * 0.5), Math.round(g + (255 - g) * 0.5), Math.round(b + (255 - b) * 0.5)), 2);
+}
 /** PCB_PAINTER m_lockedShadowMargin: four F.SilkS default line widths (mm). */
 export function lockedShadowMargin(silkLineWidth?: number | null): number { return 4 * (silkLineWidth && silkLineWidth > 0 ? silkLineWidth : DEFAULT_SILK_LINE_WIDTH); }
 
@@ -1515,8 +1529,8 @@ export function footprintBodyBox(it: { geom: Geom[]; bbox?: Box | null }): Box |
  * shapes are painted opaque on a scratch canvas and composited once at the layer colour's alpha (0.5), so
  * overlapping shadows (segment joints, pads inside a footprint) read as one.
  */
-export function drawLockedShadow(ctx: Ctx2D, doc: Doc, ids: Set<string>, opts: RenderOpts, hidden: Set<string> | null, vr: number[]): void {
-  const margin = lockedShadowMargin(opts.silkLineWidth);
+export function drawLockedShadow(ctx: Ctx2D, doc: Doc, ids: Set<string>, opts: RenderOpts, hidden: Set<string> | null, vr: number[], color?: string, marginScale = 1): void {
+  const margin = lockedShadowMargin(opts.silkLineWidth) * marginScale;
   const hc = opts.highContrast && opts.activeLayer ? String(opts.activeLayer) : null;
   const m = typeof (ctx as CanvasRenderingContext2D).getTransform === "function" ? (ctx as CanvasRenderingContext2D).getTransform() : null;
   const base: Mat | null = m ? [m.a, m.b, m.c, m.d, m.e, m.f] as unknown as Mat : null;
@@ -1525,10 +1539,11 @@ export function drawLockedShadow(ctx: Ctx2D, doc: Doc, ids: Set<string>, opts: R
   const t: Ctx2D = octx || ctx;
   t.save();
   if (octx) { octx.setTransform(1, 0, 0, 1, 0, 0); octx.clearRect(0, 0, W, H); octx.setTransform(base![0], base![1], base![2], base![3], base![4], base![5]); octx.globalAlpha = 1; }
-  // LAYER_LOCKED_ITEM_SHADOW of the live theme: its colour opaque, its alpha over the whole shadow
-  const [lr, lg, lb, la] = parseColor(boardColor("locked_shadow")), shadowA = Math.max(0, Math.min(1, la));
+  // LAYER_LOCKED_ITEM_SHADOW of the live theme: its colour opaque, its alpha over the whole shadow (a caller's colour,
+  // LAYER_CONSTRAINT_SHADOW's, at the shadow alpha)
+  const [lr, lg, lb, la] = color ? [...parseColor(color).slice(0, 3), LOCKED_SHADOW_ALPHA] : parseColor(boardColor("locked_shadow")), shadowA = Math.max(0, Math.min(1, la));
   if (!octx) t.globalAlpha = shadowA;
-  const color = rgba(lr, lg, lb).toUpperCase();   // the theme colour opaque, "#RRGGBB" as the canvas constants write it
+  color = rgba(lr, lg, lb).toUpperCase();   // the colour opaque, "#RRGGBB" as the canvas constants write it
   t.fillStyle = color; t.strokeStyle = color; t.lineJoin = "round"; t.lineCap = "round"; t.setLineDash([]);
   const fpHide = opts.objects && opts.objects.hide;
   for (const id of ids) {
@@ -1615,7 +1630,7 @@ export function drawMarkers(ctx: Ctx2D, markers: (Marker | null)[], docType: str
     // a selected or brightened board marker takes LAYER_DRC_HIGHLIGHTED (PCB_RENDER_SETTINGS::GetColor)
     // (a brightened schematic marker takes LAYER_BRIGHTENED: SCH_PAINTER::getRenderColor)
     ctx.fillStyle = docType !== "sch" && (m.selected || m.brightened) ? boardColor("drc_highlighted") : docType === "sch" && m.brightened ? SCH.brightened : colors[m.severity as string] || colors.error; ctx.fill();
-    if (docType !== "sch" && m.selected && Array.isArray(m.path)) drawErrorLegend(ctx, m.path as [number, number][], scale, br, bgc, bb);
+    if (docType !== "sch" && m.selected && Array.isArray(m.path)) drawErrorLegend(ctx, m.path as [number, number][], scale, br, bgc, bb, (m as { pathShapes?: LegendPiece[] }).pathShapes);
   }
   ctx.restore();
 }
@@ -1625,11 +1640,29 @@ export function drawMarkers(ctx: Ctx2D, markers: (Marker | null)[], docType: str
  * in the background colour at a third of the marker scale; then the path as a band 10 × the marker scale wide in white
  * (dark background) or black (light background) at 50 %.
  */
-function drawErrorLegend(ctx: Ctx2D, path: [number, number][], scale: number, br: number, bg: number, bb: number): void {
+type LegendPiece = { t: "seg"; a: number[]; b: number[] } | { t: "arc"; c: number[]; a: number[]; b: number[] };
+/** A legend piece as a canvas path: a segment, or an arc from a to b counter-clockwise on screen (increasing EDA_ANGLE). */
+function legendPiece(ctx: Ctx2D, p: LegendPiece): void {
+  ctx.beginPath();
+  if (p.t === "seg") { ctx.moveTo(p.a[0], p.a[1]); ctx.lineTo(p.b[0], p.b[1]); return; }
+  const r = Math.hypot(p.a[0] - p.c[0], p.a[1] - p.c[1]);
+  ctx.arc(p.c[0], p.c[1], r, Math.atan2(p.a[1] - p.c[1], p.a[0] - p.c[0]), Math.atan2(p.b[1] - p.c[1], p.b[0] - p.c[0]), false);
+}
+function drawErrorLegend(ctx: Ctx2D, path: [number, number][], scale: number, br: number, bg: number, bb: number, pieces?: LegendPiece[]): void {
   const [a, b] = path; if (!a || !b) return;
   const l = (Math.max(br, bg, bb) + Math.min(br, bg, bb)) / 510, halo = l < 0.5 ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)";
   const seg = (p: number[], q: number[]) => { ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke(); };
   ctx.save(); ctx.strokeStyle = `rgb(${br},${bg},${bb})`; ctx.lineWidth = scale / 3; ctx.lineCap = "round";
+  if (pieces && pieces.length) {
+    // a marker with shapes (a creepage path): each piece as a hairline, stops across the path's first and last pieces,
+    // then every piece at 10 × the marker scale
+    for (const p of pieces) { legendPiece(ctx, p); ctx.stroke(); }
+    const stop = (at: number[], from: number[]) => { const vx = at[0] - from[0], vy = at[1] - from[1], L = Math.hypot(vx, vy); if (!L) return; const k = (2.5 * scale) / L, px = -vy * k, py = vx * k; seg([at[0] + px, at[1] + py], [at[0] - px, at[1] - py]); };
+    const f = pieces[0], z = pieces[pieces.length - 1];
+    if (f.t === "seg") stop(f.a, f.b); if (z.t === "seg") stop(z.b, z.a);
+    ctx.strokeStyle = halo; ctx.lineWidth = 10 * scale; for (const p of pieces) { legendPiece(ctx, p); ctx.stroke(); }
+    ctx.restore(); return;
+  }
   if (a[0] === b[0] && a[1] === b[1]) {
     const len = 2.5 * scale;
     seg([a[0] - len, a[1] - len], [a[0] + len, a[1] + len]); seg([a[0] - len, a[1] + len], [a[0] + len, a[1] - len]);

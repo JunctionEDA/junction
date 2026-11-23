@@ -16,7 +16,7 @@ import { cloneNode, isList, kid, kids, num, parse, str } from "../canvas/sexpr";
 import { GENERATOR, GENERATOR_VERSION, SEXPR_SYMBOL_LIB_FILE_VERSION, minimumFileFormatVersion, usesEscapedStackedPinNotation } from "../canvas/format-version";
 import { serialize } from "../canvas/export";
 import { expandStacked } from "../canvas/stacked-pins";
-import { downgradeSchNode, migrateSchNode } from "../canvas/legacy";
+import { downgradeSchNode, migrateSchNode, upgradeLegacyNode } from "../canvas/legacy";
 import { geomBox } from "../canvas/hit";
 import { incrementString as stringIncrement } from "../canvas/sheet";
 export { expandStacked };
@@ -160,7 +160,9 @@ export function serializeLibrary(lib: SymLib): string {
   const STAMP = ["version", "generator", "generator_version"];
   let s = `(${String(lib.head[0])} (version ${version}) (generator "${GENERATOR.symlib}") (generator_version "${GENERATOR_VERSION}")`;
   s = lib.head.slice(1).reduce((acc: string, c) => (isList(c) && STAMP.includes(str(c[0])) ? acc : acc + " " + serialize(c)), s);
-  for (const n of syms) s += " " + serialize(downgradeSchNode(n, version));
+  // raised, every symbol is written from what was read (canvas/legacy.ts migrateSchNode did that on load), and the
+  // bold text width the reader takes by the version in its new form (upgradeLegacyNode)
+  for (const n of syms) s += " " + serialize(downgradeSchNode(loaded && version > loaded ? upgradeLegacyNode(n, false, loaded, version) : n, version));
   return prettify(s + ")");
 }
 

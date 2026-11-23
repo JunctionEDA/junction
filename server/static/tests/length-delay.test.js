@@ -71,6 +71,17 @@ test("calculateTimeDomainTargets: the length target moves by the track the delay
   // 60000 as more at 6000 as/mm: 10 mm more; the 0.1 ps tolerance is 1e5 / 6000 mm each way
   near(st.target.opt, 30e6, 1); near(st.target.min, 30e6 - Math.trunc(0.1e6 / 6000 * 1e6), 2); near(st.target.max, 30e6 + Math.trunc(0.1e6 / 6000 * 1e6), 2);
 });
+test("calculateTimeDomainTargets with a net chain delay target: the chain's other nets come off the target and the current delay", () => {
+  const s = P.designSettings(PRO()); const ld = P.ldContext(doc(), s); const C = P.tuningChain;
+  const st = P.meanderDefaults(); st.isTimeDomain = true; C.setTargetSignalLengthDelay(st, 500e6);   // the chain: 500 ps, ±0.1 ps
+  // MEANDER_PLACER: origPathDelay carries the 300 ps of the chain's other nets; the net's own share is 200 ps against 200 ps - 60000 as
+  P.timeDomainTargets(ld, st, { net: "SIG", layer: "F.Cu", width: 0.2, coupled: false, gap: 0 }, { length: 20e6, delay: 500e6 - 60000 }, null, 300e6);
+  near(st.target.opt, 30e6, 1); near(st.target.min, 30e6 - Math.trunc(0.1e6 / 6000 * 1e6), 2);
+  // without the chain target the net's own delay target is measured against the whole origPathDelay
+  const st2 = P.meanderDefaults(); st2.isTimeDomain = true; P.setTargetLengthDelay(st2, 500e6);
+  P.timeDomainTargets(ld, st2, { net: "SIG", layer: "F.Cu", width: 0.2, coupled: false, gap: 0 }, { length: 20e6, delay: 500e6 - 60000 }, null, 300e6);
+  near(st2.target.opt, 30e6, 1);
+});
 test("tuning profile rules: track width on the profile's layers, named after the profile", () => {
   const pro = PRO(); pro.board.design_settings.rule_severities = { tuning_profile_track_geometries: "error" };
   pro.tuning_profiles.tuning_profiles_impedance_geometric[0].layer_entries[0].width = 300000;   // F.Cu wants 0.3 mm

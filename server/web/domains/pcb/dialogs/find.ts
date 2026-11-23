@@ -9,7 +9,7 @@ import { sheetList } from "./sch-hierarchy";
 import { comboBox } from "../../../shared/components/kcombo";
 import { projectDocs, readDoc, submitDocOp } from "./project";
 import { keyName } from "../../../shared/keys";
-import { netNamesOf } from "../editor/schnets";
+import { netNamesOf, suffixRefEditing } from "../editor/schnets";
 
 interface FindState extends FindOpts { replacement: string; backward: boolean; currentSheetOnly: boolean }
 const F: FindState = { query: "", replacement: "", backward: false, matchCase: false, wholeWord: false, regex: false, pins: false, hiddenFields: false, currentSheetOnly: false, selectionOnly: false, replaceRefs: false, netNames: false };
@@ -148,12 +148,26 @@ export async function findNext(reverse = false): Promise<FindHit | null> {
   return hit;
 }
 /** MODIFIED changes replacing every replaceable hit of `hits` on `doc`. */
-function replaceChanges(doc: KDoc, hits: FindHit[]): KChange[] {
+function replaceChanges(doc: KDoc, hits: FindHit[], file?: string): KChange[] {
   const byItem = new Map<string, FindHit[]>(); for (const x of hits) if (x.replaceable) { const l = byItem.get(x.id); if (l) l.push(x); else byItem.set(x.id, [x]); }
   const out: KChange[] = []; const setRef = CollabTools.sch && (CollabTools.sch._.setReference as ((n: SNode, r: string) => void) | undefined);
+  // SCH_FIELD::Replace on a reference with reused-sheet suffixes: only the base is stored, and the sheet's suffix must
+  // survive the replacement; the new base is shared with the file's other instances (SetUserRef)
+  const se = suffixRefEditing(doc, file);
   for (const [id, list] of byItem) {
     const it = doc.items.get(id); if (!it) continue; const node = cloneNode(it.node) as SNode; let any = false;
-    for (const x of list) if (replaceInNode(node, x, F, F.replacement)) { any = true; if (x.field === "Reference" && it.kind === "symbol" && setRef) { const p = KiCadCanvas.kids(node, "property").find((q) => str(q[1]) === "Reference"); if (p) setRef(node, str(p[2])); } }
+    for (const x of list) {
+      const refField = (): SNode | undefined => KiCadCanvas.kids(node, "property").find((q) => str(q[1]) === "Reference");
+      const isRef = x.field === "Reference" && it.kind === "symbol", before = isRef && refField() ? str(refField()![2]) : "";
+      if (!replaceInNode(node, x, F, F.replacement)) continue;
+      if (isRef && se) {
+        const text = refField() ? str(refField()![2]) : "", base = se.S.baseRefOn(se.sc, se.sheet, it.node), suffix = before.startsWith(base) ? before.slice(base.length) : "";
+        if (suffix && !(text.endsWith(suffix) && text.length > suffix.length)) { refField()![2] = before; continue; }
+        any = true; se.S.setUserRef(se.sc, se.sheet, node, text.slice(0, text.length - suffix.length));
+        continue;
+      }
+      any = true; if (isRef && setRef) { const p = refField(); if (p) setRef(node, str(p[2])); }
+    }
     if (any) out.push(KiCadCanvas.replaceChange(doc, Object.assign({}, it, { node, geom: [], bbox: null })));
   }
   return out;
@@ -173,7 +187,7 @@ export async function replaceAll(): Promise<void> {
   const here = E.kdoc ? replaceChanges(E.kdoc, hitsHere()) : []; if (here.length) toolCtx().commit(here, "Find and Replace All");
     if (!F.currentSheetOnly && !F.selectionOnly) {
     for (const d of projectDocs().filter((x) => x.docType === "kicad_sch" && x.docId !== S.docId)) {
-      try { const od = await readDoc(d.docId, "kicad_sch"); otherDocs.delete(d.docId); const ch = replaceChanges(od, findHits(od, F, null, resolveLib)); if (ch.length) {
+      try { const od = await readDoc(d.docId, "kicad_sch"); otherDocs.delete(d.docId); const ch = replaceChanges(od, findHits(od, F, null, resolveLib), d.path); if (ch.length) {
           // the step is undoable on that sheet: its Ctrl+Z puts the texts back (KiCad undoes all sheets at once; here each sheet has its own list)
           const inverse = ch.map((c) => { const it = od.items.get(c.id); return it ? KiCadCanvas.replaceChange(od, it) : null; }).filter(Boolean) as KChange[];
           await submitDocOp(d.docId, ch); pushUndoFor(d.docId, { label: "Find and Replace All", changes: ch, inverse });

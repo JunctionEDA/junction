@@ -283,7 +283,8 @@ export function replayPending(sock?: WebSocket | null) {
   if (!ws || ws.readyState !== 1) return;
   for (const [clientOpId, op] of E.pendingOps as Map<string, PendingOp>) {
     if (op.docId !== state.docId) continue;   // kept: switching back to that sheet replays it
-    ws.send(JSON.stringify({ type: "op", docId: op.docId, clientOpId, baseSeq: null, changes: op.changes }));
+    if (op.also && op.also.length) ws.send(JSON.stringify({ type: "op_multi", docId: op.docId, clientOpId, changes: op.changes, also: op.also }));   // all of it again, or none: the server knows a commit it has
+    else ws.send(JSON.stringify({ type: "op", docId: op.docId, clientOpId, baseSeq: null, changes: op.changes }));
   }
 }
 
@@ -332,16 +333,21 @@ export function noteRemoteOp(msg: { changes?: KChange[] }) {
  * @param transient true for the previews streamed while a drag is in flight — the drop sends the
  *                  authoritative change, so these must not pile up in the journal or be replayed.
  */
-export function sendOp(changes: KChange[], transient?: boolean) {
+export function sendOp(changes: KChange[], transient?: boolean, also?: { docId: string; changes: KChange[] }[]) {
   if (historyActive()) { if (!transient) toast("This is an earlier version. Leave the timeline to edit."); return; }
   if (state.docId && (state.docId.startsWith("board:") || state.docId.startsWith("lib:"))) { E.editsSeen++; bumpEdits(); return; }   // a board footprint's private copy (editor/fpedit.ts)
-  const clientOpId = `web:${++E.opN}`;
+  // `also`: the same commit's changes to other documents of the project (a paste or a move that writes a sub-sheet's
+  // file too): one op_multi, which the server journals on every document in one transaction or not at all
+  const multi = !transient && !!also && also.some((a) => a.changes.length);
+  const parts = multi ? also!.filter((a) => a.changes.length) : undefined;
+  const clientOpId = multi ? `multi:web:${++E.opN}` : `web:${++E.opN}`;
   // Journal first, send second.  Anything still here when the socket comes back is replayed,
   // so an edit made during a blip (or before the join lands) survives instead of being wiped
   // by the reconnect snapshot.
-  if (!transient) { E.pendingOps.set(clientOpId, { docId: state.docId, changes }); updateTitle(); }
+  if (!transient) { E.pendingOps.set(clientOpId, parts ? { docId: state.docId, changes, also: parts } : { docId: state.docId, changes }); updateTitle(); }
   if (E.ws && E.ws.readyState === 1 && E.joinedDocId === state.docId) {
-    E.ws.send(JSON.stringify({ type: "op", docId: state.docId, clientOpId, baseSeq: null, changes }));
+    if (parts) E.ws.send(JSON.stringify({ type: "op_multi", docId: state.docId, clientOpId, changes, also: parts }));
+    else E.ws.send(JSON.stringify({ type: "op", docId: state.docId, clientOpId, baseSeq: null, changes }));
   } else if (!transient && (!E.ws || E.ws.readyState !== 1)) {
     toast("Not connected — the change is kept and sent when the connection is back");
   }

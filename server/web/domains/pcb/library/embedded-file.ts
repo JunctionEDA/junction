@@ -115,3 +115,71 @@ export function fixupEmbeddedData(fp: Node, boardFiles: Node | null | undefined)
   }
   return did;
 }
+/** (file …) `name` taken out of `files` (an (embedded_files …) node): EMBEDDED_FILES::RemoveFile.  True when it was there. */
+export function removeEmbeddedFile(files: Node | null | undefined, name: string): boolean {
+  if (!files) return false;
+  for (let j = 1; j < files.length; j++) { const c = files[j]; if (isList(c) && c[0] === "file" && String((child(c as Node, "name") || [])[1] ?? "") === name) { files.splice(j, 1); return true; } }
+  return false;
+}
+/** The names of the files in an (embedded_files …) node, in file order. */
+export function embeddedFileNames(files: Node | null | undefined): string[] {
+  const out: string[] = []; if (!files) return out;
+  for (let j = 1; j < files.length; j++) { const c = files[j]; if (isList(c) && c[0] === "file") { const n = String((child(c as Node, "name") || [])[1] ?? ""); if (n) out.push(n); } }
+  return out;
+}
+
+/** OUTLINE_FONT::EMBEDDING_PERMISSION */
+export type EmbeddingPermission = "installable" | "editable" | "printPreviewOnly" | "restricted";
+/**
+ * OUTLINE_FONT::GetEmbeddingPermission over the font file's bytes: the OS/2 table's fsType (FT_Get_Sfnt_Table
+ * FT_SFNT_OS2).  No OS/2 table, or bitmap-only embedding (0x200), is restricted; of bits 0-3, 0 is installable, an
+ * editable bit (8) editable, a preview-and-print bit (4) preview only, anything else restricted.  A collection (ttcf)
+ * is read at its first face, as FreeType opens face index 0.
+ */
+export function fontEmbeddingPermission(bytes: Uint8Array): EmbeddingPermission {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const u32 = (o: number): number => (o + 4 <= dv.byteLength ? dv.getUint32(o) : -1), u16 = (o: number): number => (o + 2 <= dv.byteLength ? dv.getUint16(o) : -1);
+  let base = 0;
+  if (u32(0) === 0x74746366) { base = u32(12); if (base < 0) return "restricted"; }   // 'ttcf': the first font's offset table
+  const tables = u16(base + 4); if (tables < 0) return "restricted";
+  for (let i = 0; i < tables; i++) {
+    const rec = base + 12 + i * 16;
+    if (u32(rec) !== 0x4f532f32) continue;                                          // 'OS/2'
+    const off = u32(rec + 8); const fsType = u16(off + 8); if (fsType < 0) return "restricted";
+    if (fsType & 0x0200) return "restricted";                                       // FT_FSTYPE_BITMAP_EMBEDDING_ONLY
+    const bits = fsType & 0x000f;
+    if (bits === 0) return "installable";                                           // FT_FSTYPE_INSTALLABLE_EMBEDDING
+    if (bits & 0x0008) return "editable";                                           // FT_FSTYPE_EDITABLE_EMBEDDING
+    if (bits & 0x0004) return "printPreviewOnly";                                   // FT_FSTYPE_PREVIEW_AND_PRINT_EMBEDDING
+    return "restricted";
+  }
+  return "restricted";
+}
+/** GetFonts' filter: the fonts a document may embed (EDITABLE or INSTALLABLE). */
+export const embeddableFont = (bytes: Uint8Array): boolean => { const p = fontEmbeddingPermission(bytes); return p === "editable" || p === "installable"; };
+
+/**
+ * The faces of a document's outline-font text, fetched as files (the font a text is drawn with: the project's own
+ * upload of that family and style, else the catalogue's), each named as the file KiCad would embed
+ * (font->GetFileName()'s name): the upload's own file name, else "<Family>-<Style>.ttf|otf".  Faces whose font the
+ * server does not have, and fonts whose license forbids embedding, are left out (KiCad draws those with its stroke font, and GetFonts has no outline font for them).
+ */
+export async function fetchFontFiles(projectId: string, faces: [string, boolean, boolean][], uploads: { family: string; styles: { bold: boolean; italic: boolean; fileName?: string }[] }[] = []): Promise<{ name: string; bytes: Uint8Array }[]> {
+  const out: { name: string; bytes: Uint8Array }[] = [], seen = new Set<string>();
+  for (const [family, bold, italic] of faces) {
+    let r: Response;
+    try { r = await fetch(`/api/projects/${projectId}/fonts/file?family=${encodeURIComponent(family)}&bold=${bold ? 1 : 0}&italic=${italic ? 1 : 0}`); } catch { continue; }
+    if (!r.ok) continue;
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    if (!embeddableFont(bytes)) continue;                                           // GetFonts: EDITABLE or INSTALLABLE only
+    const b = r.headers.get("x-font-bold") === "1", it = r.headers.get("x-font-italic") === "1";
+    const fam = decodeURIComponent(r.headers.get("x-font-family") || encodeURIComponent(family));
+    const up = uploads.find((u) => u.family.toLowerCase() === fam.toLowerCase());
+    const st = up ? up.styles.find((s) => s.bold === b && s.italic === it) : undefined;
+    const ext = bytes.length >= 4 && bytes[0] === 0x4f && bytes[1] === 0x54 && bytes[2] === 0x54 && bytes[3] === 0x4f ? "otf" : "ttf";
+    const name = st && st.fileName ? st.fileName.replace(/^.*[\/\\]/, "") : `${fam.replace(/\s+/g, "")}-${b && it ? "BoldItalic" : b ? "Bold" : it ? "Italic" : "Regular"}.${ext}`;
+    if (seen.has(name)) continue; seen.add(name);
+    out.push({ name, bytes });
+  }
+  return out;
+}

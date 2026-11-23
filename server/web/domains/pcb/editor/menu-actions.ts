@@ -29,8 +29,9 @@ import { E } from "./state";
 import { KICAD_BASE_VERSION } from "../canvas/version";
 import { PRODUCT_VERSION } from "../generated/product-version";
 import { openExportNetlist } from "./export-netlist";
-import { exportForOlderVersion, exportGenCad, exportIdf, exportSpecctraDsn } from "./kicad-jobs";
+import { exportForOlderVersion, exportGenCad, exportIdf, exportSpecctraDsn, exportStep } from "./kicad-jobs";
 import { exportSymbolsToLibrary } from "./export-symbols";
+import { rescueSymbolsTool } from "./rescue-symbols";
 import { selectedAnywhere, startMove } from "./gestures";
 import { openContextMenu } from "./contextmenu";
 import { hotkeyCyclePopup } from "./hotkey-popup";
@@ -237,7 +238,9 @@ export const MENU_HANDLERS: Record<string, ActionHandler> = {
   // ExportSpecctraDSN, ExportGenCAD and ExportIDF
   exportForOlderVersion: () => { void exportForOlderVersion(); },
   exportSymbolsToLibrary: () => { void exportSymbolsToLibrary(); },
+  rescueSymbols: () => { void rescueSymbolsTool(); },
   exportSpecctraDSN: () => { void exportSpecctraDsn(); }, exportGenCAD: () => exportGenCad(), exportIDF: () => { void exportIdf(); },
+  exportSTEP: () => { const doc = E.kdoc; exportStep(doc ? selectedIds().map((id) => doc.items.get(id)).filter((it): it is KItem => !!it && it.kind === "footprint" && !!it.ref).map((it) => it.ref as string) : []); },
   properties: () => { openSelectionProperties(); },
   zoomFitSelection, zoomIn: () => zoomAtCursor(true), zoomOut: () => zoomAtCursor(false), zoomCenter: centreOnCursor,
   panUp: () => panStep(0, 1), panDown: () => panStep(0, -1), panLeft: () => panStep(1, 0), panRight: () => panStep(-1, 0),

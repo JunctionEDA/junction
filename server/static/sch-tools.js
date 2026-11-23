@@ -2131,6 +2131,55 @@
   var SEXPR_SCHEMATIC_FILE_VERSION = 20261106;
   var GENERATOR_VERSION = KICAD_BASE_VERSION.split(".").slice(0, 2).join(".");
 
+  // web/domains/pcb/canvas/stacked-pins.ts
+  var MAX_EXPANDED_PADS = 65536;
+  var special = "[],-\\";
+  var escapedAt = (s, i) => s[i] === "\\" && i + 1 < s.length && special.includes(s[i + 1]);
+  var unescapePin = (s) => s.replace(/\\([\[\],\\-])/g, "$1");
+  function stackedItems(number) {
+    if (!number.startsWith("[") || !number.endsWith("]")) return null;
+    const parts = [], inner = number.slice(1, -1);
+    let part = "";
+    for (let i = 0; i < inner.length; i++) {
+      if (escapedAt(inner, i)) part += inner[i] + inner[++i];
+      else if (inner[i] === ",") {
+        parts.push(part.trim());
+        part = "";
+      } else part += inner[i];
+    }
+    parts.push(part.trim());
+    return parts;
+  }
+  function expandStacked(pad) {
+    const parts = stackedItems(pad);
+    if (!parts) return { pins: [pad], valid: !pad.includes("[") && !pad.includes("]") };
+    const alnum = (s) => {
+      const m = /^(.*?)(\d+)$/.exec(s);
+      return m ? [m[1], Number(m[2])] : [s, -1];
+    };
+    const out = [];
+    for (const part of parts) {
+      if (!part) continue;
+      let dash = -1;
+      for (let i = 0; i < part.length; i++) {
+        if (escapedAt(part, i)) {
+          i++;
+          continue;
+        }
+        if (part[i] === "-") {
+          dash = i;
+          break;
+        }
+      }
+      if (dash >= 0) {
+        const [sp, sv] = alnum(unescapePin(part.slice(0, dash)).trim()), [ep, ev] = alnum(unescapePin(part.slice(dash + 1)).trim());
+        if (sp !== ep || sv === -1 || ev === -1 || sv > ev || !Number.isSafeInteger(ev) || ev - sv + out.length >= MAX_EXPANDED_PADS) return { pins: [pad], valid: false };
+        for (let v = sv; v <= ev; v++) out.push(sp + v);
+      } else out.push(unescapePin(part));
+    }
+    return out.length ? { pins: out, valid: true } : { pins: [pad], valid: false };
+  }
+
   // web/domains/pcb/canvas/variant-model.ts
   var isList = Array.isArray;
   var str2 = (v) => v === void 0 || v === null ? "" : String(v);
@@ -2191,7 +2240,7 @@
     const st = variant ? symbolVariant(sym, variant, path, ver) : null;
     return st ? st.flags : symbolFlags(sym);
   }
-  function setSymbolVariant(sym, name, patch, path, ver) {
+  function setSymbolVariant(sym, name, patch, path, ver, keepEmpty = false) {
     if (isDefaultVariant(name)) throw new Error("Variant name cannot be empty or default.");
     const out = clone(sym), inst = symbolInstance(out, path);
     if (!inst) return out;
@@ -2210,10 +2259,10 @@
     const node = ["variant", ["name", name]];
     for (const [key, f, inv] of keys) if (st.flags[f] !== base[f]) node.push([key, (inv ? !st.flags[f] : st.flags[f]) ? "yes" : "no"]);
     for (const k of [...st.fields.keys()].sort(cmpCode)) node.push(["field", ["name", k], ["value", st.fields.get(k)]]);
-    if (old) {
-      for (const c of old.slice(1)) if (isList(c) && !["name", "dnp", "exclude_from_sim", "in_bom", "on_board", "in_pos_files", "field"].includes(str2(c[0]))) node.push(c);
-    }
-    const differs = node.length > 2 && (keys.some(([, f]) => st.flags[f] !== base[f]) || [...st.fields].some(([k, v]) => baseField(k) !== v) || node.slice(2).some((c) => isList(c) && !["field"].includes(str2(c[0]))));
+    const rest = old ? old.slice(1).filter((c) => isList(c) && !["name", "dnp", "exclude_from_sim", "in_bom", "on_board", "in_pos_files", "field"].includes(str2(c[0]))) : out[0] === "symbol" && kid2(out, "pin_map_override") ? [clone(kid2(out, "pin_map_override"))] : [];
+    const rank = (c) => c[0] === "symbol_override" ? 0 : c[0] === "pin_map_override" ? 1 : 2;
+    node.push(...rest.map((c, i) => [c, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([c]) => c));
+    const differs = keepEmpty || node.length > 2 && (keys.some(([, f]) => st.flags[f] !== base[f]) || [...st.fields].some(([k, v]) => baseField(k) !== v) || node.slice(2).some((c) => isList(c) && c[0] !== "field" && (c[0] !== "pin_map_override" || !pinMapOverrideIsDefault(pinMapOverrideOf(["variant", c])))));
     if (old) {
       if (differs) inst[inst.indexOf(old)] = node;
       else inst.splice(inst.indexOf(old), 1);
@@ -2221,6 +2270,1917 @@
       const others = kids2(inst, "variant");
       const after = others.filter((v) => cmpCode(str2((kid2(v, "name") || [])[1]), name) < 0).pop();
       inst.splice(after ? inst.indexOf(after) + 1 : others.length ? inst.indexOf(others[0]) : inst.length, 0, node);
+    }
+    return out;
+  }
+  var defaultPinMapOverride = () => ({ mode: "library_default", map: "", edits: /* @__PURE__ */ new Map() });
+  function pinMapOverrideOf(n) {
+    const o = kid2(n, "pin_map_override");
+    if (!o) return defaultPinMapOverride();
+    const m = kid2(o, "mode"), mp = kid2(o, "map"), edits = /* @__PURE__ */ new Map();
+    for (const e of kids2(o, "edit")) edits.set(str2(e[1]), str2(e[2]));
+    const mode2 = m ? str2(m[1]) : "library_default";
+    return { mode: ["library_default", "named_map", "identity", "delegate"].includes(mode2) ? mode2 : "library_default", map: mp ? str2(mp[1]) : "", edits };
+  }
+  var pinMapOverrideIsDefault = (o) => o.mode === "library_default" && !o.edits.size;
+  function libPinMaps(lib) {
+    const maps = /* @__PURE__ */ new Map(), footprints = [];
+    const pm = kid2(lib, "pin_maps");
+    if (pm) for (const m of kids2(pm, "pin_map")) {
+      const e = /* @__PURE__ */ new Map();
+      for (const en of kids2(m, "entry")) e.set(str2(en[1]), str2(en[2]));
+      if (!maps.has(str2(m[1]))) maps.set(str2(m[1]), e);
+    }
+    const af = kid2(lib, "associated_footprints");
+    if (af) for (const f of kids2(af, "footprint")) {
+      const m = kid2(f, "map");
+      footprints.push({ footprint: str2(f[1]), map: m ? str2(m[1]) : "" });
+    }
+    return { maps, footprints };
+  }
+  function effectivePadNumber(lib, o, footprint, pinNumber, pads) {
+    let map;
+    if (lib) {
+      const st = libPinMaps(lib);
+      if (o.mode === "named_map") map = st.maps.get(o.map);
+      if (!map && o.mode !== "identity") {
+        const a = st.footprints.find((x) => x.footprint === footprint);
+        if (a) map = st.maps.get(a.map);
+      }
+      if (o.mode !== "identity" && o.edits.has(pinNumber)) return { pad: o.edits.get(pinNumber), state: "mapped" };
+    }
+    if (map && map.has(pinNumber)) return { pad: map.get(pinNumber), state: "mapped" };
+    if (pads && hasIdentityPad(pinNumber, pads)) return { pad: pinNumber, state: "identity" };
+    return pads ? { pad: "", state: "unmapped" } : { pad: pinNumber, state: "identity" };
+  }
+  function hasIdentityPad(pinNumber, pads) {
+    if (pads.has(pinNumber)) return true;
+    const st = expandStacked(pinNumber);
+    return st.valid && st.pins.some((p) => pads.has(p));
+  }
+  var kiRound = (v) => {
+    const r = v < 0 ? -Math.round(-v) : Math.round(v);
+    return r === 0 ? 0 : r;
+  };
+  var SCH_IU_PER_MM = 1e4;
+  function libGraphicalPins(lib) {
+    const out = [];
+    for (const sub of kids2(lib, "symbol")) {
+      const m = /_(\d+)_(\d+)$/.exec(str2(sub[1]));
+      const unit = m ? +m[1] : 0, bodyStyle = m ? +m[2] : 0;
+      for (const p of kids2(sub, "pin")) {
+        const at = kid2(p, "at"), nm = kid2(p, "number");
+        out.push({ number: nm ? str2(nm[1]) : "", unit, bodyStyle, x: kiRound(+(at ? at[1] : 0) * SCH_IU_PER_MM), y: kiRound(-+(at ? at[2] : 0) * SCH_IU_PER_MM), type: isList(p[1]) ? "unspecified" : str2(p[1]) || "unspecified" });
+      }
+    }
+    return out;
+  }
+  function libUnitCount(lib) {
+    let n = 1;
+    for (const s of kids2(lib, "symbol")) {
+      const m = /_(\d+)_(\d+)$/.exec(str2(s[1]));
+      if (m) n = Math.max(n, +m[1]);
+    }
+    const uc = kid2(lib, "unit_count");
+    return uc ? Math.max(n, +str2(uc[1]) || 1) : n;
+  }
+  function libBodyStyleCount(lib) {
+    const bs = kid2(lib, "body_styles");
+    if (bs) {
+      const names = bs.slice(1).filter((v) => !isList(v)).map(str2);
+      return names.length === 1 && names[0] === "demorgan" ? 2 : Math.max(1, names.length);
+    }
+    let n = 1;
+    for (const s of kids2(lib, "symbol")) {
+      const m = /_(\d+)_(\d+)$/.exec(str2(s[1]));
+      if (m) n = Math.max(n, +m[2]);
+    }
+    return n;
+  }
+  function variantSymbolCompatibility(base, cand) {
+    const out = [];
+    const baseUnits = Math.max(libUnitCount(base), 1), candUnits = Math.max(libUnitCount(cand), 1);
+    if (candUnits < baseUnits) out.push({ error: "INSUFFICIENT_UNITS", detail: `Candidate has ${candUnits} unit(s), base requires ${baseUnits}`, pinNumber: "", unit: 0, bodyStyle: 0 });
+    const baseBody = libBodyStyleCount(base), candBody = libBodyStyleCount(cand);
+    if (baseBody > 1 && candBody < baseBody) out.push({ error: "MISSING_BODY_STYLE", detail: `Candidate has ${candBody} body style(s), base requires ${baseBody}`, pinNumber: "", unit: 0, bodyStyle: 0 });
+    const type = (p) => p.type === "inherit" ? "unspecified" : p.type;
+    const basePins = libGraphicalPins(base), candPins = libGraphicalPins(cand), matched = candPins.map(() => false);
+    for (const bp of basePins) {
+      const find = (pos, typ) => {
+        for (let i = 0; i < candPins.length; i++) {
+          const c = candPins[i];
+          if (matched[i] || c.number !== bp.number || c.unit !== bp.unit || c.bodyStyle !== bp.bodyStyle) continue;
+          if (pos && (c.x !== bp.x || c.y !== bp.y)) continue;
+          if (typ && type(c) !== type(bp)) continue;
+          return i;
+        }
+        return -1;
+      };
+      let ci = find(true, true);
+      if (ci < 0) ci = find(true, false);
+      if (ci < 0) ci = find(false, false);
+      if (ci < 0) {
+        out.push({ error: "MISSING_PIN_NUMBER", pinNumber: bp.number, unit: bp.unit, bodyStyle: bp.bodyStyle, detail: `Unit ${bp.unit}, body style ${bp.bodyStyle}: pin '${bp.number}' not found in candidate` });
+        continue;
+      }
+      matched[ci] = true;
+      const cp = candPins[ci];
+      if (cp.x !== bp.x || cp.y !== bp.y) out.push({ error: "PIN_POSITION_MISMATCH", pinNumber: bp.number, unit: bp.unit, bodyStyle: bp.bodyStyle, detail: `Unit ${bp.unit}, body style ${bp.bodyStyle}: pin '${bp.number}' position mismatch (${bp.x},${bp.y}) vs (${cp.x},${cp.y})` });
+      if (type(cp) !== type(bp)) out.push({ error: "PIN_TYPE_MISMATCH", pinNumber: bp.number, unit: bp.unit, bodyStyle: bp.bodyStyle, detail: `Unit ${bp.unit}, body style ${bp.bodyStyle}: pin '${bp.number}' type mismatch ('${type(bp)}' vs '${type(cp)}')` });
+    }
+    candPins.forEach((cp, i) => {
+      if (!matched[i]) out.push({ error: "EXTRA_PIN_NUMBER", pinNumber: cp.number, unit: cp.unit, bodyStyle: cp.bodyStyle, detail: `Unit ${cp.unit}, body style ${cp.bodyStyle}: candidate has extra pin '${cp.number}'` });
+    });
+    return out;
+  }
+
+  // web/domains/pcb/canvas/plot-params.ts
+  var FIXED = {
+    "F.Cu": 0,
+    "B.Cu": 2,
+    "F.Mask": 1,
+    "B.Mask": 3,
+    "F.SilkS": 5,
+    "B.SilkS": 7,
+    "F.Adhes": 9,
+    "B.Adhes": 11,
+    "F.Paste": 13,
+    "B.Paste": 15,
+    "Dwgs.User": 17,
+    "Cmts.User": 19,
+    "Eco1.User": 21,
+    "Eco2.User": 23,
+    "Edge.Cuts": 25,
+    "Margin": 27,
+    "B.CrtYd": 29,
+    "F.CrtYd": 31,
+    "B.Fab": 33,
+    "F.Fab": 35,
+    "Rescue": 37
+  };
+  var BY_ID = /* @__PURE__ */ new Map();
+  for (const [k, v] of Object.entries(FIXED)) BY_ID.set(v, k);
+  var LEGACY_FIXED = {
+    "F.Cu": 0,
+    "B.Cu": 31,
+    "B.Adhes": 32,
+    "F.Adhes": 33,
+    "B.Paste": 34,
+    "F.Paste": 35,
+    "B.SilkS": 36,
+    "F.SilkS": 37,
+    "B.Mask": 38,
+    "F.Mask": 39,
+    "Dwgs.User": 40,
+    "Cmts.User": 41,
+    "Eco1.User": 42,
+    "Eco2.User": 43,
+    "Edge.Cuts": 44,
+    "Margin": 45,
+    "B.CrtYd": 46,
+    "F.CrtYd": 47,
+    "B.Fab": 48,
+    "F.Fab": 49,
+    "Rescue": 59
+  };
+  var LEGACY_BY_ID = /* @__PURE__ */ new Map();
+  for (const [k, v] of Object.entries(LEGACY_FIXED)) LEGACY_BY_ID.set(v, k);
+  var CL = {
+    RED: "#840000",
+    YELLOW: "#C2C200",
+    LIGHTMAGENTA: "#C200C2",
+    LIGHTRED: "#C20000",
+    CYAN: "#008484",
+    GREEN: "#008400",
+    BLUE: "#000084",
+    DARKGRAY: "#848484",
+    MAGENTA: "#840084",
+    LIGHTGRAY: "#C2C2C2",
+    BROWN: "#848400",
+    LIGHTCYAN: "#00C2C2",
+    DARKRED: "#480000"
+  };
+  var CLASSIC_INNER = [CL.YELLOW, CL.LIGHTMAGENTA, CL.LIGHTRED, CL.CYAN, CL.GREEN, CL.BLUE, CL.DARKGRAY, CL.MAGENTA, CL.LIGHTGRAY, CL.MAGENTA, CL.RED, CL.BROWN, CL.LIGHTGRAY, CL.BLUE, CL.GREEN, CL.RED];
+  var CLASSIC_FIXED = {
+    "F.Cu": CL.RED,
+    "B.Cu": CL.GREEN,
+    "B.Adhes": CL.BLUE,
+    "F.Adhes": CL.MAGENTA,
+    "B.Paste": CL.LIGHTCYAN,
+    "F.Paste": CL.RED,
+    "B.SilkS": CL.MAGENTA,
+    "F.SilkS": CL.CYAN,
+    "B.Mask": CL.BROWN,
+    "F.Mask": CL.MAGENTA,
+    "Dwgs.User": CL.LIGHTGRAY,
+    "Cmts.User": CL.BLUE,
+    "Eco1.User": CL.GREEN,
+    "Eco2.User": CL.YELLOW,
+    "Edge.Cuts": CL.YELLOW,
+    "Margin": CL.LIGHTMAGENTA,
+    "B.CrtYd": CL.DARKGRAY,
+    "F.CrtYd": CL.LIGHTGRAY,
+    "B.Fab": CL.BLUE,
+    "F.Fab": CL.DARKGRAY
+  };
+  var CLASSIC_DRAWINGSHEET = CL.DARKRED;
+
+  // web/domains/pcb/canvas/colors.ts
+  var IS_MAC_PLATFORM = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+  var SCH_DEFAULT = Object.freeze({
+    bg: "#F5F4EF",
+    grid: "#B5B5B5",
+    gridAxes: "#000084",
+    wire: "#009600",
+    bus: "#000084",
+    junction: "#009600",
+    outline: "#840000",
+    body: "#FFFFC2",
+    pin: "#840000",
+    pinName: "#006464",
+    pinNum: "#A90000",
+    ref: "#006464",
+    value: "#006464",
+    field: "#840084",
+    label: "#0F0F0F",
+    glabel: "#840000",
+    hlabel: "#725600",
+    sheet: "#840000",
+    sheetName: "#006464",
+    sheetFile: "#725600",
+    sheetFields: "#840084",
+    sheetLabel: "#006464",
+    noconnect: "#000084",
+    notes: "#0000C2",
+    busEntry: "#009600",
+    dnp: "rgba(220,9,13,0.85)",
+    netclass: "#484848",
+    ruleArea: "#FF0000",
+    excluded: "rgba(194,194,194,0.95)",
+    hidden: "#C2C2C2",
+    privateNotes: "#4848FF",
+    frame: "#840000",
+    // LAYER_SCHEMATIC_DRAWINGSHEET ("schematic.worksheet") is `frame`; the page outline is a separate,
+    // lighter layer — DS_PAINTER::DrawBorder paints it in LAYER_SCHEMATIC_PAGE_LIMITS, not the sheet ink
+    // (common/settings/builtin_color_themes.h:78-79, eeschema/sch_view.cpp:137-138).
+    pageLimits: "#B5B5B5",
+    brightened: "#FF00FF",
+    // LAYER_BRIGHTENED: net highlighting / selection disambiguation
+    // LAYER_SELECTION_SHADOWS: KiCad Default is (.3, .7, 1.0, .6) on macOS, which "looks better with a lighter
+    // shadow", (.4, .7, 1.0, .8) elsewhere (builtin_color_themes.h)
+    selection: IS_MAC_PLATFORM ? "rgba(77,179,255,0.6)" : "rgba(102,179,255,0.8)",
+    hovered: "#0000FF",
+    // LAYER_HOVERED: hypertext under the cursor (builtin_color_themes.h:33)
+    // LAYER_BUS_JUNCTION, LAYER_SHEET_BACKGROUND (alpha 0: not drawn), LAYER_SCHEMATIC_ANCHOR, LAYER_ERC_ERR / WARN / EXCLUSION
+    busJunction: "#000084",
+    sheetBg: "rgba(255,255,255,0)",
+    anchor: "#0000FF",
+    ercErr: "rgba(230,9,13,0.8)",
+    ercWarn: "rgba(209,146,0,0.8)",
+    ercExcl: "rgba(194,194,194,0.8)"
+  });
+  var SCH = Object.assign({}, SCH_DEFAULT);
+  var PCB_COLORS = {
+    "F.Cu": "#C83434",
+    "B.Cu": "#4D7FC4",
+    "In1.Cu": "#7FC87F",
+    "In2.Cu": "#CE7D2C",
+    "In3.Cu": "#4FCBCB",
+    "In4.Cu": "#DB628B",
+    "In5.Cu": "#A7A5C6",
+    "In6.Cu": "#28CCD9",
+    "In7.Cu": "#E8B2A7",
+    "In8.Cu": "#F2EDA1",
+    "In9.Cu": "#8DCB81",
+    "In10.Cu": "#ED7C33",
+    "In11.Cu": "#5BC3EB",
+    "In12.Cu": "#F76F8E",
+    "In13.Cu": "#A7A5C6",
+    "In14.Cu": "#28CCD9",
+    "In15.Cu": "#E8B2A7",
+    "In16.Cu": "#F2EDA1",
+    "In17.Cu": "#ED7C33",
+    "In18.Cu": "#5BC3EB",
+    "In19.Cu": "#F76F8E",
+    "In20.Cu": "#A7A5C6",
+    "In21.Cu": "#28CCD9",
+    "In22.Cu": "#E8B2A7",
+    "In23.Cu": "#F2EDA1",
+    "In24.Cu": "#ED7C33",
+    "In25.Cu": "#5BC3EB",
+    "In26.Cu": "#F76F8E",
+    "In27.Cu": "#A7A5C6",
+    "In28.Cu": "#28CCD9",
+    "In29.Cu": "#E8B2A7",
+    "In30.Cu": "#F2EDA1",
+    "F.SilkS": "#F2EDA1",
+    "B.SilkS": "#E8B2A7",
+    "F.Mask": "rgba(216,100,255,0.4)",
+    "B.Mask": "rgba(2,255,238,0.4)",
+    "F.Paste": "rgba(180,160,154,0.9)",
+    "B.Paste": "rgba(0,194,194,0.9)",
+    "F.Adhes": "#840084",
+    "B.Adhes": "#000084",
+    "Edge.Cuts": "#D0D2CD",
+    "Margin": "#FF26E2",
+    "F.CrtYd": "#FF26E2",
+    "B.CrtYd": "#26E9FF",
+    "F.Fab": "#AFAFAF",
+    "B.Fab": "#585D84",
+    "Dwgs.User": "#C2C2C2",
+    "Cmts.User": "#5994DC",
+    "Eco1.User": "#B4DBD2",
+    "Eco2.User": "#D8C852"
+  };
+  var USER_COLORS = ["#C2C2C2", "#5994DC", "#B4DBD2", "#D8C852"];
+  function pcbColor(layer) {
+    if (PCB_COLORS[layer]) return PCB_COLORS[layer];
+    const u = /^User\.(\d+)$/.exec(layer);
+    if (u) return +u[1] === 9 ? "#E8B2A7" : USER_COLORS[(+u[1] - 1) % 4];
+    if (/\.Cu$/.test(layer)) return "#7FC87F";
+    return "#C2C2C2";
+  }
+  var BOARD_GAL_DEFAULT = Object.freeze({
+    anchor: "#FF26E2",
+    locked_shadow: "rgba(255,38,226,0.5)",
+    conflicts_shadow: "rgba(255,0,5,0.5)",
+    constraint_shadow: "rgba(80,160,240,0.5)",
+    constraint_under: "rgba(204,107,5,0.9)",
+    constraint_well: "rgba(46,184,77,0.9)",
+    constraint_over: "rgba(235,46,46,0.9)",
+    aux_items: "#FFFFFF",
+    background: "#001023",
+    cursor: "#FFFFFF",
+    drc_error: "rgba(215,91,107,0.8)",
+    drc_warning: "rgba(255,208,66,0.8)",
+    drc_exclusion: "rgba(255,255,255,0.8)",
+    drc_highlighted: "#FF00FF",
+    grid: "#848484",
+    grid_axes: "#C2C2C2",
+    pad_plated_hole: "#C2C200",
+    plated_hole: "#1AC4D2",
+    ratsnest: "rgba(0,248,255,0.35)",
+    select_overlay: "rgba(0,0,0,0)",
+    via_hole: "#E3B72E",
+    via_hole_walls: "#ECECEC",
+    worksheet: "#C872AB",
+    page_limits: "#848484",
+    outline_area: "rgba(100,100,100,0.35)",
+    track_net_names: "rgba(255,255,255,0.7)",
+    pad_net_names: "rgba(255,255,255,0.9)",
+    via_net_names: "rgba(50,50,50,0.9)",
+    points: "#FF26E2",
+    subgrids: "#C2C200",
+    via_stitching: "#4DCCB2"
+  });
+  var BOARD_THEME_LAYERS = Object.freeze([
+    "F.Cu",
+    ...Array.from({ length: 30 }, (_, i) => `In${i + 1}.Cu`),
+    "B.Cu",
+    "B.Adhes",
+    "F.Adhes",
+    "B.Paste",
+    "F.Paste",
+    "B.SilkS",
+    "F.SilkS",
+    "B.Mask",
+    "F.Mask",
+    "Dwgs.User",
+    "Cmts.User",
+    "Eco1.User",
+    "Eco2.User",
+    "Edge.Cuts",
+    "Margin",
+    "B.CrtYd",
+    "F.CrtYd",
+    "B.Fab",
+    "F.Fab",
+    ...Array.from({ length: 45 }, (_, i) => `User.${i + 1}`)
+  ]);
+  var BOARD = { ...BOARD_GAL_DEFAULT };
+  var PCB_LIVE = {};
+  for (const l of BOARD_THEME_LAYERS) PCB_LIVE[l] = pcbColor(l);
+  var PCB_ORDER = ["B.Fab", "B.CrtYd", "B.Adhes", "B.Paste", "B.SilkS", "B.Mask", "B.Cu"];
+  for (let i = 30; i >= 1; i--) PCB_ORDER.push("In" + i + ".Cu");
+  PCB_ORDER.push("F.Fab", "F.CrtYd", "F.Adhes", "F.Paste", "F.SilkS", "F.Mask", "F.Cu", "holes");
+  for (let i = 45; i >= 1; i--) PCB_ORDER.push("User." + i);
+  PCB_ORDER.push("Margin", "Edge.Cuts", "Eco2.User", "Eco1.User", "Cmts.User", "Dwgs.User");
+  var PCB_ZMAP = new Map(PCB_ORDER.map((l, i) => [l, i * 10]));
+
+  // web/domains/pcb/canvas/sexpr.ts
+  var isList2 = Array.isArray;
+  function kid3(node, key) {
+    for (let j = 1; j < node.length; j++) {
+      const c = node[j];
+      if (isList2(c) && c[0] === key) return c;
+    }
+    return null;
+  }
+  function kids3(node, key) {
+    const out = [];
+    for (let j = 1; j < node.length; j++) {
+      const c = node[j];
+      if (isList2(c) && c[0] === key) out.push(c);
+    }
+    return out;
+  }
+  function num2(v, d = 0) {
+    if (typeof v === "number") return v;
+    if (v === void 0 || v === null || v === "") return d;
+    const x = Number(v);
+    return isNaN(x) ? d : x;
+  }
+  function str3(v) {
+    return v === void 0 || v === null ? "" : String(v);
+  }
+  function ellipseLength(g) {
+    const a = num2((kid3(g, "major_radius") || [])[1], 0), b = num2((kid3(g, "minor_radius") || [])[1], 0);
+    if (!/ellipse_arc$/.test(String(g[0]))) {
+      const h = (a - b) / (a + b), h2 = h * h;
+      return a + b > 0 ? Math.PI * (a + b) * (1 + 3 * h2 / (10 + Math.sqrt(4 - 3 * h2))) : 0;
+    }
+    let t0 = num2((kid3(g, "start_angle") || [])[1], 0) * Math.PI / 180, t1 = num2((kid3(g, "end_angle") || [])[1], 0) * Math.PI / 180;
+    if (t1 - t0 >= 2 * Math.PI || t1 - t0 <= -2 * Math.PI) t1 = t0 + 2 * Math.PI;
+    else if (t1 < t0) t1 += 2 * Math.PI;
+    const f = (t) => {
+      const s = Math.sin(t), c = Math.cos(t);
+      return Math.sqrt(a * a * s * s + b * b * c * c);
+    };
+    const rec = (x0, x1, tol, whole, fa2, fb2, fm2, depth) => {
+      const m = 0.5 * (x0 + x1), lm = 0.5 * (x0 + m), rm = 0.5 * (m + x1), flm = f(lm), frm = f(rm);
+      const left = (m - x0) * (fa2 + 4 * flm + fm2) / 6, right = (x1 - m) * (fm2 + 4 * frm + fb2) / 6, diff = left + right - whole;
+      if (depth <= 0 || Math.abs(diff) < 15 * tol) return left + right + diff / 15;
+      return rec(x0, m, 0.5 * tol, left, fa2, fm2, flm, depth - 1) + rec(m, x1, 0.5 * tol, right, fm2, fb2, frm, depth - 1);
+    };
+    const fa = f(t0), fb = f(t1), fm = f(0.5 * (t0 + t1));
+    return rec(t0, t1, 1e-9, (t1 - t0) * (fa + 4 * fm + fb) / 6, fa, fb, fm, 20);
+  }
+
+  // web/domains/pcb/canvas/stroke-font.ts
+  var STROKE_FONT_SCALE = 1 / 21;
+  var ITALIC_TILT = 1 / 8;
+  var R = "R".charCodeAt(0);
+  var QUESTION = "?".codePointAt(0);
+
+  // web/domains/pcb/canvas/text.ts
+  var TEXT_INTERLINE = 1.68 * 0.9583;
+  var INTERLINE = 1.68 * 0.9583;
+  var MIL = 0.0254;
+  var UNESCAPE = { dblquote: '"', quote: "'", lt: "<", gt: ">", backslash: "\\", slash: "/", bar: "|", comma: ",", colon: ":", space: " ", dollar: "$", tab: "	", return: "\n", brace: "{" };
+  function unescapeText(src) {
+    if (!src || src.length <= 2) return src;
+    let out = "", prev = "", ch = "";
+    for (let i = 0; i < src.length; ++i) {
+      prev = ch;
+      ch = src[i];
+      if (ch !== "{") {
+        out += ch;
+        continue;
+      }
+      let token = "", depth = 1, terminated = false;
+      for (i = i + 1; i < src.length; ++i) {
+        ch = src[i];
+        if (ch === "{") depth++;
+        else if (ch === "}") depth--;
+        if (depth <= 0) {
+          terminated = true;
+          break;
+        }
+        token += ch;
+      }
+      if (!terminated) out += "{" + unescapeText(token);
+      else if (prev === "$" || prev === "~" || prev === "^" || prev === "_") out += "{" + unescapeText(token) + "}";
+      else if (Object.prototype.hasOwnProperty.call(UNESCAPE, token)) out += UNESCAPE[token];
+      else out += "{" + unescapeText(token) + "}";
+    }
+    return out;
+  }
+
+  // web/shared/units.ts
+  var UNITS = {
+    mm: { name: "mm", f: (v) => v, d: 4 },
+    in: { name: "in", f: (v) => v / 25.4, d: 4 },
+    mil: { name: "mils", f: (v) => v / 0.0254, d: 2 }
+  };
+  function angleText(deg2) {
+    return `${deg2.toFixed(1)}\xB0`;
+  }
+  var UNIT_TEXT = { mm: " mm", mil: " mils", in: " in" };
+  function cExp(v, n) {
+    const [m, e] = v.toExponential(n).split("e");
+    const x = Number(e);
+    return `${m}e${x < 0 ? "-" : "+"}${String(Math.abs(x)).padStart(2, "0")}`;
+  }
+  function messageText(mm, units, scale, label = true) {
+    const u = UNITS[units] ? units : "mm", short = scale === "sch", iu = short ? 1e4 : 1e6;
+    const v = UNITS[u].f(Math.round(mm * iu) / iu);
+    const digits = u === "mm" ? short ? 3 : 4 : u === "mil" ? short ? 0 : 2 : short ? 3 : 4;
+    let text = v.toFixed(digits);
+    if (v !== 0 && !/[1-9]/.test(text)) text = cExp(v, 3);
+    if (short && u === "mm") {
+      const n = text.length;
+      if (n > 4 && text[n - 4] === "." && text[n - 1] === "0") text = text.slice(0, -1);
+    }
+    return label ? text + UNIT_TEXT[u] : text;
+  }
+
+  // web/domains/pcb/canvas/geom-sch.ts
+  var PIN_TEXT_OFFSET = Math.round(24 * 0.15) * MIL;
+  var PIN_TEXT_MARGIN = 4 * MIL;
+  var TARGET_PIN_RADIUS = 15 * MIL;
+  var schFormat = {
+    textOffsetRatio: 0.15,
+    labelSizeRatio: 0.375,
+    pinSymbolSize: 25 * MIL,
+    showDnpMarkers: true,
+    overbarHeight: 1.23,
+    hopOverChoice: 0,
+    overrideItemColors: false,
+    /** SCHEMATIC_SETTINGS::m_SubpartIdSeparator (0: none) and m_SubpartFirstId ('A') — the unit notation of SubReference */
+    subpartIdSeparator: 0,
+    subpartFirstId: 65
+  };
+
+  // web/domains/pcb/canvas/barcode.ts
+  var C39 = "1112212111 2112111121 1122111121 2122111111 1112211121 2112211111 1122211111 1112112121 2112112111 1122112111 2111121121 1121121121 2121121111 1111221121 2111221111 1121221111 1111122121 2111122111 1121122111 1111222111 2111111221 1121111221 2121111211 1111211221 2111211211 1121211211 1111112221 2111112211 1121112211 1111212211 2211111121 1221111121 2221111111 1211211121 2211211111 1221211111 1211112121 2211112111 1221112111 1212121111 1212111211 1211121211 1112121211 1211212111".split(" ");
+  var C128 = "212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 221312 231212 112232 122132 122231 113222 123122 123221 223211 221132 221231 213212 223112 312131 311222 321122 321221 312212 322112 322211 212123 212321 232121 111323 131123 131321 112313 132113 132311 211313 231113 231311 112133 112331 132131 113123 113321 133121 313121 211331 231131 213113 213311 213131 311123 311321 331121 312113 312311 332111 314111 221411 431111 111224 111422 121124 121421 141122 141221 112214 112412 122114 122411 142112 142211 241211 221114 413111 241112 134111 111242 121142 121241 114212 124112 124211 411212 421112 421211 212141 214121 412121 111143 111341 131141 114113 114311 411113 411311 113141 114131 311141 411131 211412 211214 211232 211133".split(" ");
+
+  // web/domains/pcb/canvas/barcode2d.ts
+  function gf(poly) {
+    const alog = new Array(512), log = new Array(256).fill(0);
+    let v = 1;
+    for (let i = 0; i < 255; i++) {
+      alog[i] = v;
+      log[v] = i;
+      v <<= 1;
+      if (v & 256) v ^= poly;
+    }
+    for (let i = 255; i < 512; i++) alog[i] = alog[i - 255];
+    return { alog, log };
+  }
+  var GF_QR = gf(285);
+  var GF_DM = gf(301);
+  var tbl = (s) => s.split(",").map(Number);
+  var DM_C40_SHIFT = tbl("1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3");
+  var DM_C40_VALUE = tbl("0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,3,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,20,21,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,22,23,24,25,26,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31");
+  var DM_TEXT_SHIFT = tbl("1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,3,3,3,3");
+  var DM_TEXT_VALUE = tbl("0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,3,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,20,21,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,22,23,24,25,26,0,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,27,28,29,30,31");
+
+  // web/domains/pcb/canvas/geom-pcb.ts
+  var HOLE_WALL2 = 0.02 * 1.5;
+
+  // web/domains/pcb/canvas/outline-text.ts
+  var ITALIC_TILT2 = 1 / 8;
+  var FAKE_ITALIC_SLANT = Math.tan(12 * Math.PI / 180);
+
+  // web/domains/pcb/canvas/text-eval.ts
+  var EvalError = class extends Error {
+  };
+  var WS = /* @__PURE__ */ new Set([32, 9, 13, 10, 12, 11, 160, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288]);
+  var isWs = (c) => c !== "" && WS.has(c.codePointAt(0));
+  var isDigit = (c) => c >= "0" && c <= "9" && c.length === 1;
+  function isAlpha(c) {
+    if (!c) return false;
+    const cp = c.codePointAt(0);
+    return cp >= 97 && cp <= 122 || cp >= 65 && cp <= 90 || cp >= 128 && cp <= 1114111 && cp !== 65533 && !WS.has(cp);
+  }
+  var isAlnum = (c) => isAlpha(c) || isDigit(c);
+  var UNIT_MM = { thou: 25.4 / 1e3, deg: 1, mm: 1, cm: 10, in: 25.4, mil: 25.4 / 1e3, mils: 25.4 / 1e3, um: 1 / 1e3, ps: 1, fs: 1, '"': 25.4, "\xB0": 1, "ps/mm": 1, "ps/cm": 1, "ps/in": 1 };
+  var isUnit = (u) => Object.prototype.hasOwnProperty.call(UNIT_MM, u);
+  var toDefaultUnits = (v, u) => v * UNIT_MM[u] * (1 / UNIT_MM.mm);
+  var SI = { a: 1e-18, f: 1e-15, p: 1e-12, n: 1e-9, u: 1e-6, "\xB5": 1e-6, "\u03BC": 1e-6, m: 1e-3, R: 1, F: 1, k: 1e3, K: 1e3, M: 1e6, G: 1e9, T: 1e12, P: 1e15, E: 1e18 };
+  var isSi = (c) => Object.prototype.hasOwnProperty.call(SI, c);
+  function fromChars(s) {
+    if (/^-?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(s)) return parseFloat(s);
+    const m = /^(-?)(inf|infinity|nan)$/i.exec(s);
+    if (m) return m[2].toLowerCase() === "nan" ? NaN : m[1] ? -Infinity : Infinity;
+    return null;
+  }
+  var SINGLE = { "(": "LPAREN", ")": "RPAREN", "+": "PLUS", "-": "MINUS", "*": "MULTIPLY", "/": "DIVIDE", "%": "MODULO", "^": "POWER", ",": "COMMA", "<": "LT", ">": "GT" };
+  function tokenize(input) {
+    const t = Array.from(input);
+    let pos = 0, expr = false, nesting = 0;
+    const cur = () => pos < t.length ? t[pos] : "";
+    const peek = (o = 1) => pos + o < t.length ? t[pos + o] : "";
+    const fail = (msg) => {
+      throw new EvalError(msg);
+    };
+    const tok = (type, text = "", num3 = 0) => ({ type, text: text.slice(0, 1023), num: num3 });
+    const atExponent = () => {
+      const c = cur();
+      if (c !== "e" && c !== "E") return false;
+      let o = 1;
+      if (peek(o) === "+" || peek(o) === "-") ++o;
+      return isDigit(peek(o));
+    };
+    const lookUnit = () => {
+      let u = "", p = pos;
+      while (p < t.length && (isAlpha(t[p]) || t[p] === '"' || t[p] === "'")) u += t[p++];
+      return u;
+    };
+    function stringLiteral(q) {
+      pos++;
+      let content = "";
+      while (pos < t.length && cur() !== q) {
+        const c = cur();
+        if (c === "\\" && pos + 1 < t.length) {
+          const e = peek();
+          pos += 2;
+          switch (e) {
+            case "n":
+              content += "\n";
+              break;
+            case "t":
+              content += "	";
+              break;
+            case "r":
+              content += "\r";
+              break;
+            case "\\":
+              content += "\\";
+              break;
+            case '"':
+              content += '"';
+              break;
+            case "'":
+              content += "'";
+              break;
+            case "0":
+              content += "\0";
+              break;
+            case "x": {
+              let hex = "";
+              for (let i = 0; i < 2 && pos < t.length; ++i) {
+                if (/^[0-9A-Fa-f]$/.test(cur())) {
+                  hex += cur();
+                  pos++;
+                } else break;
+              }
+              content += hex ? String.fromCodePoint(parseInt(hex, 16)) : "\\x";
+              break;
+            }
+            default:
+              content += "\\" + e;
+          }
+        } else if (c === "\n") fail("Unterminated string literal");
+        else {
+          content += c;
+          pos++;
+        }
+      }
+      if (pos < t.length && cur() === q) pos++;
+      else fail("Missing closing quote in string literal");
+      return tok("STRING", content);
+    }
+    function number() {
+      let text = "", mult = 1, hasPrefix = false;
+      const canPrefix = (p) => !isSi(p) ? false : p === "R" || p === "F" ? !isAlpha(peek()) && peek() !== "_" : true;
+      const takePrefix = (p) => {
+        mult = SI[p];
+        hasPrefix = true;
+        pos++;
+      };
+      while (pos < t.length && isDigit(cur())) text += t[pos++];
+      if (pos < t.length) {
+        const c = cur();
+        if (c === "." || c === "," && !expr) {
+          text += ".";
+          pos++;
+        } else if (atExponent()) {
+        } else if (expr && isAlpha(c)) {
+          const u = lookUnit();
+          if (u) {
+            if (!isUnit(u) && canPrefix(c)) takePrefix(c);
+          } else if (canPrefix(c)) takePrefix(c);
+        } else if (canPrefix(c)) takePrefix(c);
+        if (hasPrefix && pos < t.length && isDigit(cur())) text += ".";
+      }
+      while (pos < t.length && isDigit(cur())) text += t[pos++];
+      if (atExponent()) {
+        text += t[pos++];
+        if (pos < t.length && (cur() === "+" || cur() === "-")) text += t[pos++];
+        if (pos < t.length && isDigit(cur())) {
+          while (pos < t.length && isDigit(cur())) text += t[pos++];
+        } else fail("Invalid scientific notation: missing exponent digits");
+      }
+      if (pos < t.length && !hasPrefix) {
+        const c = cur();
+        if (expr && isAlpha(c)) {
+          const u = lookUnit();
+          if (u && !isUnit(u) && canPrefix(c)) takePrefix(c);
+        } else if (canPrefix(c)) takePrefix(c);
+      }
+      let value = 0;
+      if (text && text !== ".") {
+        const v = fromChars(text);
+        if (v === null) fail("Invalid number format");
+        value = v * mult;
+        if (!isFinite(value)) fail("Number out of range");
+      }
+      if (pos < t.length && expr) {
+        const wsStart = pos;
+        while (pos < t.length && isWs(cur())) pos++;
+        let u = "";
+        while (pos < t.length && (isAlpha(cur()) || cur() === '"' || cur() === "'")) u += t[pos++];
+        if (u && isUnit(u)) value = toDefaultUnits(value, u);
+        else pos = wsStart;
+      }
+      return tok("NUMBER", "", value);
+    }
+    function identifier() {
+      let s = "";
+      while (pos < t.length && (isAlnum(cur()) || cur() === "_")) s += t[pos++];
+      return tok("IDENTIFIER", s);
+    }
+    function textContent() {
+      let s = "";
+      while (pos < t.length) {
+        const c = cur(), n = peek();
+        if ((c === "@" || c === "$") && n === "{") break;
+        s += c;
+        pos++;
+      }
+      return tok("TEXT", s);
+    }
+    function next() {
+      if (pos >= t.length) return tok("ENDS");
+      if (expr) {
+        while (pos < t.length && isWs(cur())) pos++;
+        if (pos >= t.length) return tok("ENDS");
+      }
+      const c = cur(), n = peek();
+      if ((c === "@" || c === "$") && n === "{") {
+        pos += 2;
+        expr = true;
+        nesting++;
+        return tok(c === "@" ? "AT_OPEN" : "DOLLAR_OPEN");
+      }
+      if (c === "}") {
+        pos++;
+        if (--nesting <= 0) {
+          nesting = 0;
+          expr = false;
+        }
+        return tok("CLOSE_BRACE");
+      }
+      if (c === "<" && n === "=") {
+        pos += 2;
+        return tok("LE");
+      }
+      if (c === ">" && n === "=") {
+        pos += 2;
+        return tok("GE");
+      }
+      if (c === "=" && n === "=") {
+        pos += 2;
+        return tok("EQ");
+      }
+      if (c === "!" && n === "=") {
+        pos += 2;
+        return tok("NE");
+      }
+      if (expr && SINGLE[c]) {
+        pos++;
+        return tok(SINGLE[c], c);
+      }
+      if (c === '"' || c === "'") return stringLiteral(c);
+      if (isDigit(c) || c === "." && isDigit(n)) return number();
+      if (isAlpha(c) || c === "_") return expr ? identifier() : textContent();
+      const tc = textContent();
+      return tc.text === "" ? tok("ENDS") : tc;
+    }
+    const out = [];
+    for (; ; ) {
+      const k = next();
+      out.push(k);
+      if (k.type === "ENDS" || pos >= t.length) break;
+    }
+    if (out[out.length - 1].type !== "ENDS") out.push(tok("ENDS"));
+    return out;
+  }
+  var CMP = { LT: "<", GT: ">", LE: "<=", GE: ">=", EQ: "==", NE: "!=" };
+  function parseDoc(tokens) {
+    let i = 0;
+    const peek = () => tokens[i];
+    const take = (type) => {
+      if (tokens[i].type !== type) throw new EvalError("Syntax error");
+      return tokens[i++];
+    };
+    function variable() {
+      take("DOLLAR_OPEN");
+      const id = take("IDENTIFIER");
+      take("CLOSE_BRACE");
+      return { k: "var", name: id.text };
+    }
+    function primary() {
+      const tk = peek();
+      switch (tk.type) {
+        case "NUMBER":
+          i++;
+          return { k: "num", v: tk.num };
+        case "STRING":
+          i++;
+          return { k: "str", v: tk.text };
+        case "DOLLAR_OPEN":
+          return variable();
+        case "LPAREN": {
+          i++;
+          const e = expression();
+          take("RPAREN");
+          return e;
+        }
+        case "IDENTIFIER": {
+          i++;
+          take("LPAREN");
+          const args = [];
+          if (peek().type !== "RPAREN") {
+            args.push(expression());
+            while (peek().type === "COMMA") {
+              i++;
+              args.push(expression());
+            }
+          }
+          take("RPAREN");
+          return { k: "fn", name: tk.text, args };
+        }
+        default:
+          throw new EvalError("Syntax error");
+      }
+    }
+    function factor() {
+      const tk = peek();
+      if (tk.type === "MINUS") {
+        i++;
+        return { k: "bin", op: "-", l: { k: "num", v: 0 }, r: factor() };
+      }
+      if (tk.type === "PLUS") {
+        i++;
+        return factor();
+      }
+      const base = primary();
+      if (peek().type === "POWER") {
+        i++;
+        return { k: "bin", op: "^", l: base, r: factor() };
+      }
+      return base;
+    }
+    function term() {
+      let l = factor();
+      for (; ; ) {
+        const ty = peek().type;
+        if (ty !== "MULTIPLY" && ty !== "DIVIDE" && ty !== "MODULO") return l;
+        i++;
+        l = { k: "bin", op: ty === "MULTIPLY" ? "*" : ty === "DIVIDE" ? "/" : "%", l, r: factor() };
+      }
+    }
+    function additive() {
+      let l = term();
+      for (; ; ) {
+        const ty = peek().type;
+        if (ty !== "PLUS" && ty !== "MINUS") return l;
+        i++;
+        l = { k: "bin", op: ty === "PLUS" ? "+" : "-", l, r: term() };
+      }
+    }
+    function expression() {
+      let l = additive();
+      for (; ; ) {
+        const op = CMP[peek().type];
+        if (!op) return l;
+        i++;
+        l = { k: "bin", op, l, r: additive() };
+      }
+    }
+    const nodes = [];
+    for (; ; ) {
+      const tk = peek();
+      if (tk.type === "ENDS") break;
+      if (tk.type === "TEXT") {
+        i++;
+        nodes.push({ k: "text", s: tk.text });
+      } else if (tk.type === "AT_OPEN") {
+        i++;
+        const e = expression();
+        take("CLOSE_BRACE");
+        nodes.push({ k: "calc", e });
+      } else if (tk.type === "DOLLAR_OPEN") nodes.push({ k: "calc", e: variable() });
+      else throw new EvalError("Syntax error");
+    }
+    return nodes;
+  }
+  function toDouble(v) {
+    if (typeof v === "number") return v;
+    const d = fromChars(v);
+    if (d === null) throw new EvalError(`Cannot convert '${v}' to number`);
+    return d;
+  }
+  function fmtShortest(n) {
+    if (!isFinite(n)) return isNaN(n) ? "nan" : n < 0 ? "-inf" : "inf";
+    if (n === 0) return Object.is(n, -0) ? "-0" : "0";
+    const [mant, e] = n.toExponential().split("e");
+    const exp = Number(e);
+    if (exp < -4 || exp >= 16) return `${mant}e${exp < 0 ? "-" : "+"}${String(Math.abs(exp)).padStart(2, "0")}`;
+    const neg = mant[0] === "-", digits = mant.replace("-", "").replace(".", "");
+    let s;
+    if (exp >= 0) s = digits.length > exp + 1 ? digits.slice(0, exp + 1) + "." + digits.slice(exp + 1) : digits + "0".repeat(exp + 1 - digits.length);
+    else s = "0." + "0".repeat(-exp - 1) + digits;
+    return (neg ? "-" : "") + s;
+  }
+  function fmtFixed(v, d) {
+    if (!isFinite(v)) return isNaN(v) ? "nan" : v < 0 ? "-inf" : "inf";
+    if (d < 0 || d > 100) throw new EvalError("Invalid precision");
+    const scaled = Math.abs(v) * Math.pow(10, d);
+    if (Number.isInteger(scaled * 2) && !Number.isInteger(scaled) && scaled < 9e15) {
+      const fl = Math.floor(scaled), even = fl % 2 === 0 ? fl : fl + 1;
+      const s2 = (even / Math.pow(10, d)).toFixed(d);
+      return (v < 0 || Object.is(v, -0) ? "-" : "") + s2;
+    }
+    const s = v.toFixed(d);
+    return Object.is(v, -0) || v < 0 && !s.startsWith("-") ? "-" + s : s;
+  }
+  function toStr(v) {
+    if (typeof v === "string") return v;
+    const rounded = Math.round(v) === v ? v : Math.sign(v) * Math.round(Math.abs(v));
+    if (Math.abs(v - rounded) < 1e-10 && Math.abs(rounded) < 1e15) return Object.is(rounded, -0) || rounded === 0 && v < 0 ? "-0" : rounded.toFixed(0);
+    return fmtShortest(v);
+  }
+  var toChar = (v) => {
+    const s = toStr(v);
+    return s ? s[0] : " ";
+  };
+  var cRound = (x) => Math.sign(x) * Math.round(Math.abs(x));
+  var DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  var MONTHS3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  var isLeap = (y) => y % 4 === 0 && y % 100 !== 0 || y % 400 === 0;
+  var daysInYear = (y) => isLeap(y) ? 366 : 365;
+  var daysInMonthFor = (m, y) => m === 2 && isLeap(y) ? 29 : DAYS_IN_MONTH[m - 1];
+  var P2 = (n) => String(n).padStart(2, "0");
+  var P4 = (n) => n < 0 ? "-" + String(-n).padStart(3, "0") : String(n).padStart(4, "0");
+  function daysToYmd(days) {
+    let year = 1970, rem = days;
+    if (rem >= 0) {
+      while (rem >= daysInYear(year)) {
+        rem -= daysInYear(year);
+        year++;
+      }
+    } else {
+      while (rem < 0) {
+        year--;
+        rem += daysInYear(year);
+      }
+    }
+    let month = 1;
+    while (month <= 12 && rem >= daysInMonthFor(month, year)) {
+      rem -= daysInMonthFor(month, year);
+      month++;
+    }
+    return [year, month, rem + 1];
+  }
+  function ymdToDays(y, m, d) {
+    let total = 0;
+    if (y >= 1970) for (let k = 1970; k < y; ++k) total += daysInYear(k);
+    else for (let k = y; k < 1970; ++k) total -= daysInYear(k);
+    for (let k = 1; k < m; ++k) total += daysInMonthFor(k, y);
+    return total + d - 1;
+  }
+  function stoi(s) {
+    const m = /^\s*([-+]?\d+)/.exec(s);
+    if (!m) throw new EvalError("stoi");
+    return parseInt(m[1], 10);
+  }
+  function parseDate(s) {
+    let parts = [], sep = "", cjk = false;
+    const has2 = (x) => s.indexOf(x) >= 0;
+    if ((has2("\u5E74") || has2("\uB144")) && (has2("\u6708") || has2("\uC6D4")) && (has2("\u65E5") || has2("\uC77C"))) {
+      cjk = true;
+      const bytes = new TextEncoder().encode(s), dec = new TextDecoder();
+      const at = (m) => {
+        const i = s.indexOf(m);
+        return new TextEncoder().encode(s.slice(0, i)).length;
+      };
+      const yp = at(has2("\u5E74") ? "\u5E74" : "\uB144"), mp = at(has2("\u6708") ? "\u6708" : "\uC6D4"), dp = at(has2("\u65E5") ? "\u65E5" : "\uC77C");
+      const sub = (a, n) => dec.decode(bytes.slice(a, n < 0 ? a : a + n));
+      try {
+        parts = [stoi(sub(0, yp)), stoi(sub(yp + 3, mp - yp - 3)), stoi(sub(mp + 3, dp - mp - 3))];
+      } catch (e) {
+        return null;
+      }
+    } else if (has2("-")) sep = "-";
+    else if (has2("/")) sep = "/";
+    else if (has2(".")) sep = ".";
+    if (sep) {
+      const fields = s.split(sep);
+      if (fields.length > 1 && fields[fields.length - 1] === "") fields.pop();
+      try {
+        for (const f of fields) parts.push(stoi(f));
+      } catch (e) {
+        return null;
+      }
+    } else if (!cjk && s.length === 8) {
+      let n;
+      try {
+        n = stoi(s);
+      } catch (e) {
+        return null;
+      }
+      return ymdToDays(Math.trunc(n / 1e4), Math.trunc(n / 100) % 100, n % 100);
+    } else if (!cjk) return null;
+    if (!parts.length || parts.length > 3) return null;
+    let year, month, day;
+    if (parts.length === 1) {
+      year = parts[0];
+      month = 1;
+      day = 1;
+    } else if (parts.length === 2) {
+      year = parts[0];
+      month = parts[1];
+      day = 1;
+    } else if (cjk) [year, month, day] = parts;
+    else if (sep === "/" && parts[0] <= 12 && parts[1] <= 31) {
+      month = parts[0];
+      day = parts[1];
+      year = parts[2];
+    } else if (sep === "/" && parts[1] <= 12) {
+      day = parts[0];
+      month = parts[1];
+      year = parts[2];
+    } else [year, month, day] = parts;
+    if (month < 1 || month > 12) return null;
+    if (day < 1 || day > daysInMonthFor(month, year)) return null;
+    return ymdToDays(year, month, day);
+  }
+  function formatDate(days, f) {
+    const [y, m, d] = daysToYmd(days);
+    if (f === "US" || f === "us") return `${P2(m)}/${P2(d)}/${P4(y)}`;
+    if (f === "EU" || f === "european") return `${P2(d)}/${P2(m)}/${P4(y)}`;
+    if (f === "long") return `${MONTHS[m - 1]} ${d}, ${y}`;
+    if (f === "short") return `${MONTHS3[m - 1]} ${d}, ${y}`;
+    if (["Chinese", "chinese", "CN", "cn", "\u4E2D\u6587", "Japanese", "japanese", "JP", "jp", "\u65E5\u672C\u8A9E"].indexOf(f) >= 0) return `${y}\u5E74${P2(m)}\u6708${P2(d)}\u65E5`;
+    if (["Korean", "korean", "KR", "kr", "\uD55C\uAD6D\uC5B4"].indexOf(f) >= 0) return `${y}\uB144 ${P2(m)}\uC6D4 ${P2(d)}\uC77C`;
+    return `${P4(y)}-${P2(m)}-${P2(d)}`;
+  }
+  var weekdayName = (days) => {
+    let w = (days + 3) % 7;
+    if (w < 0) w += 7;
+    return WEEKDAYS[w];
+  };
+  function formatTime(ts, f) {
+    const t = new Date(Math.trunc(ts) * 1e3), h = t.getHours(), mi = t.getMinutes(), s = t.getSeconds();
+    if (f === "12h") {
+      const h12 = h % 12 || 12;
+      return `${h12}:${P2(mi)}:${P2(s)} ${h >= 12 ? "PM" : "AM"}`;
+    }
+    if (f === "HH_MM_SS" || f === "filename") return `${P2(h)}h${P2(mi)}m${P2(s)}s`;
+    if (f === "short") return `${P2(h)}:${P2(mi)}`;
+    return `${P2(h)}:${P2(mi)}:${P2(s)}`;
+  }
+  var E24 = [100, 110, 120, 130, 150, 160, 180, 200, 220, 240, 270, 300, 330, 360, 390, 430, 470, 510, 560, 620, 680, 750, 820, 910];
+  var E192 = [
+    100,
+    101,
+    102,
+    104,
+    105,
+    106,
+    107,
+    109,
+    110,
+    111,
+    113,
+    114,
+    115,
+    117,
+    118,
+    120,
+    121,
+    123,
+    124,
+    126,
+    127,
+    129,
+    130,
+    132,
+    133,
+    135,
+    137,
+    138,
+    140,
+    142,
+    143,
+    145,
+    147,
+    149,
+    150,
+    152,
+    154,
+    156,
+    158,
+    160,
+    162,
+    164,
+    165,
+    167,
+    169,
+    172,
+    174,
+    176,
+    178,
+    180,
+    182,
+    184,
+    187,
+    189,
+    191,
+    193,
+    196,
+    198,
+    200,
+    203,
+    205,
+    208,
+    210,
+    213,
+    215,
+    218,
+    221,
+    223,
+    226,
+    229,
+    232,
+    234,
+    237,
+    240,
+    243,
+    246,
+    249,
+    252,
+    255,
+    258,
+    261,
+    264,
+    267,
+    271,
+    274,
+    277,
+    280,
+    284,
+    287,
+    291,
+    294,
+    298,
+    301,
+    305,
+    309,
+    312,
+    316,
+    320,
+    324,
+    328,
+    332,
+    336,
+    340,
+    344,
+    348,
+    352,
+    357,
+    361,
+    365,
+    370,
+    374,
+    379,
+    383,
+    388,
+    392,
+    397,
+    402,
+    407,
+    412,
+    417,
+    422,
+    427,
+    432,
+    437,
+    442,
+    448,
+    453,
+    459,
+    464,
+    470,
+    475,
+    481,
+    487,
+    493,
+    499,
+    505,
+    511,
+    517,
+    523,
+    530,
+    536,
+    542,
+    549,
+    556,
+    562,
+    569,
+    576,
+    583,
+    590,
+    597,
+    604,
+    612,
+    619,
+    626,
+    634,
+    642,
+    649,
+    657,
+    665,
+    673,
+    681,
+    690,
+    698,
+    706,
+    715,
+    723,
+    732,
+    741,
+    750,
+    759,
+    768,
+    777,
+    787,
+    796,
+    806,
+    816,
+    825,
+    835,
+    845,
+    856,
+    866,
+    876,
+    887,
+    898,
+    909,
+    920,
+    931,
+    942,
+    953,
+    965,
+    976,
+    988
+  ];
+  var SERIES = { E3: 3, e3: 3, E6: 6, e6: 6, E12: 12, e12: 12, E24: 24, e24: 24, E48: 48, e48: 48, E96: 96, e96: 96, E192: 192, e192: 192 };
+  var seriesValue = (n, i) => n <= 24 ? E24[i * (24 / n)] : E192[i * (192 / n)];
+  function eSeries(kind, value, s) {
+    const n = Object.prototype.hasOwnProperty.call(SERIES, s) ? SERIES[s] : -1;
+    if (n < 0 || value <= 0) return null;
+    const decade = Math.floor(Math.log10(value)), normalized = value / Math.pow(10, decade) * 100;
+    if (kind === "enearest") {
+      let minDiff = Number.MAX_VALUE, nearest = 100;
+      for (let i = 0; i < n; ++i) {
+        const v = seriesValue(n, i), diff = Math.abs(normalized - v);
+        if (diff < minDiff) {
+          minDiff = diff;
+          nearest = v;
+        }
+      }
+      return nearest / 100 * Math.pow(10, decade);
+    }
+    if (kind === "eup") {
+      for (let i = 0; i < n; ++i) {
+        const v = seriesValue(n, i);
+        if (v > normalized) return v / 100 * Math.pow(10, decade);
+      }
+      return seriesValue(n, 0) / 100 * Math.pow(10, decade + 1);
+    }
+    for (let i = n - 1; i >= 0; --i) {
+      const v = seriesValue(n, i);
+      if (v < normalized) return v / 100 * Math.pow(10, decade);
+    }
+    return seriesValue(n, n - 1) / 100 * Math.pow(10, decade - 1);
+  }
+  var nowSeconds = () => Math.floor(Date.now() / 1e3);
+  function evalNode(n) {
+    switch (n.k) {
+      case "num":
+        return n.v;
+      case "str":
+        return n.v;
+      // the variables of a text are expanded before it is evaluated: one left here is undefined
+      case "var":
+        throw new EvalError(`Undefined variable: ${n.name}`);
+      case "bin": {
+        const l = evalNode(n.l), r = evalNode(n.r);
+        if (n.op === "+" && (typeof l === "string" || typeof r === "string")) return toStr(l) + toStr(r);
+        if ((n.op === "==" || n.op === "!=") && typeof l === "string" && typeof r === "string") return l === r === (n.op === "==") ? 1 : 0;
+        const a = toDouble(l), b = toDouble(r);
+        switch (n.op) {
+          case "+":
+            return a + b;
+          case "-":
+            return a - b;
+          case "*":
+            return a * b;
+          case "/":
+            if (b === 0) throw new EvalError("Division by zero");
+            return a / b;
+          case "%":
+            if (b === 0) throw new EvalError("Modulo by zero");
+            return a % b;
+          case "^":
+            return Math.pow(a, b);
+          case "<":
+            return a < b ? 1 : 0;
+          case ">":
+            return a > b ? 1 : 0;
+          case "<=":
+            return a <= b ? 1 : 0;
+          case ">=":
+            return a >= b ? 1 : 0;
+          case "==":
+            return a === b ? 1 : 0;
+          case "!=":
+            return a !== b ? 1 : 0;
+        }
+        throw new EvalError("Unknown operator");
+      }
+      case "fn":
+        return evalFunction(n.name, n.args);
+    }
+    throw new EvalError("Cannot evaluate this node type");
+  }
+  function evalFunction(name, args) {
+    if (!args.length) {
+      if (name === "today") return Math.floor(nowSeconds() / 86400);
+      if (name === "now") return nowSeconds();
+      if (name === "random") return Math.random();
+    }
+    const v = args.map(evalNode), argc = v.length;
+    const S2 = (i) => toStr(v[i]);
+    const optInt = (i, d) => {
+      if (argc <= i) return d;
+      try {
+        return Math.trunc(toDouble(v[i]));
+      } catch (e) {
+        return d;
+      }
+    };
+    const optBool = (i) => {
+      if (argc <= i) return false;
+      try {
+        return toDouble(v[i]) !== 0;
+      } catch (e) {
+        return false;
+      }
+    };
+    if ((name === "format" || name === "fixed") && argc >= 1) return fmtFixed(toDouble(v[0]), optInt(1, 2));
+    if (name === "currency" && argc >= 1) {
+      const amount = toDouble(v[0]);
+      return (argc > 1 ? S2(1) : "$") + fmtFixed(amount, 2);
+    }
+    if (name === "dateformat" && argc >= 1) return formatDate(Math.trunc(toDouble(v[0])), argc > 1 ? S2(1) : "ISO");
+    if (name === "datestring" && argc === 1) {
+      const d = parseDate(S2(0));
+      if (d === null) throw new EvalError("Invalid date format: " + S2(0));
+      return d;
+    }
+    if (name === "weekdayname" && argc === 1) return weekdayName(Math.trunc(toDouble(v[0])));
+    if (name === "timeformat" && argc >= 1) return formatTime(toDouble(v[0]), argc > 1 ? S2(1) : "ISO");
+    const unknown = "<unknown>";
+    if (name === "vcsidentifier" && argc <= 1) {
+      optInt(0, 40);
+      return unknown;
+    }
+    if (name === "vcsnearestlabel" && argc <= 2) return unknown;
+    if (name === "vcslabeldistance" && argc <= 2) return "0";
+    if (name === "vcsdirty" && argc <= 1) {
+      optBool(0);
+      return "0";
+    }
+    if (name === "vcsdirtysuffix" && argc <= 2) return "";
+    if ((name === "vcsauthor" || name === "vcsauthoremail" || name === "vcscommitter" || name === "vcscommitteremail" || name === "vcsbranch") && argc === 0) return unknown;
+    if (name === "vcscommitdate" && argc <= 1) return unknown;
+    if (name === "vcsfileidentifier" && argc >= 1 && argc <= 2) return unknown;
+    if ((name === "vcsfileauthor" || name === "vcsfileauthoremail" || name === "vcsfilecommitter" || name === "vcsfilecommitteremail") && argc === 1) return unknown;
+    if (name === "vcsfilecommitdate" && argc >= 1 && argc <= 2) return unknown;
+    if (name === "upper" && argc === 1) return S2(0).toUpperCase();
+    if (name === "lower" && argc === 1) return S2(0).toLowerCase();
+    if (name === "concat" && argc >= 2) return v.map(toStr).join("");
+    if (name === "beforefirst" && argc === 2) {
+      const s = S2(0), i = s.indexOf(toChar(v[1]));
+      return i < 0 ? s : s.slice(0, i);
+    }
+    if (name === "beforelast" && argc === 2) {
+      const s = S2(0), i = s.lastIndexOf(toChar(v[1]));
+      return i < 0 ? "" : s.slice(0, i);
+    }
+    if (name === "afterfirst" && argc === 2) {
+      const s = S2(0), i = s.indexOf(toChar(v[1]));
+      return i < 0 ? "" : s.slice(i + 1);
+    }
+    if (name === "afterlast" && argc === 2) {
+      const s = S2(0), i = s.lastIndexOf(toChar(v[1]));
+      return i < 0 ? s : s.slice(i + 1);
+    }
+    if (name === "replace" && argc === 3) {
+      const s = S2(0), search = S2(1);
+      return search ? s.split(search).join(S2(2)) : s;
+    }
+    if (name === "if" && argc === 3) return toDouble(v[0]) !== 0 ? v[1] : v[2];
+    if ((name === "enearest" || name === "eup" || name === "edown") && argc >= 1 && argc <= 2) {
+      const value = toDouble(v[0]), series = argc > 1 ? S2(1) : "E24", r = eSeries(name, value, series);
+      if (r === null) throw new EvalError(`Invalid E-series: ${series}`);
+      return r;
+    }
+    const a = v.map(toDouble);
+    if (name === "abs" && argc === 1) return Math.abs(a[0]);
+    if (name === "sum" && argc >= 1) return a.reduce((s, x) => s + x, 0);
+    if (name === "round" && argc >= 1) {
+      const m = Math.pow(10, argc > 1 ? Math.trunc(a[1]) : 0);
+      return cRound(a[0] * m) / m;
+    }
+    if (name === "sqrt" && argc === 1) {
+      if (a[0] < 0) throw new EvalError("Square root of negative number");
+      return Math.sqrt(a[0]);
+    }
+    if (name === "pow" && argc === 2) return Math.pow(a[0], a[1]);
+    if (name === "floor" && argc === 1) return Math.floor(a[0]);
+    if (name === "ceil" && argc === 1) return Math.ceil(a[0]);
+    if (name === "min" && argc >= 1) return a.reduce((m, x) => x < m ? x : m);
+    if (name === "max" && argc >= 1) return a.reduce((m, x) => m < x ? x : m);
+    if (name === "avg" && argc >= 1) return a.reduce((s, x) => s + x, 0) / argc;
+    if (name === "shunt" && argc === 2) {
+      const sum = a[0] + a[1];
+      return sum > 0 ? a[0] * a[1] / sum : 0;
+    }
+    if (name === "db" && argc === 1) {
+      if (a[0] <= 0) throw new EvalError("db() argument must be positive");
+      return 10 * Math.log10(a[0]);
+    }
+    if (name === "dbv" && argc === 1) {
+      if (a[0] <= 0) throw new EvalError("dbv() argument must be positive");
+      return 20 * Math.log10(a[0]);
+    }
+    if (name === "fromdb" && argc === 1) return Math.pow(10, a[0] / 10);
+    if (name === "fromdbv" && argc === 1) return Math.pow(10, a[0] / 20);
+    throw new EvalError(`Unknown function: ${name} with ${argc} arguments`);
+  }
+  function evaluateFull(input) {
+    if (!input) return "";
+    try {
+      let out = "";
+      for (const n of parseDoc(tokenize(input))) out += n.k === "text" ? n.s : toStr(evalNode(n.e));
+      return out;
+    } catch (e) {
+      return null;
+    }
+  }
+  function evaluateText(input) {
+    let result = input;
+    const ranges = [];
+    let pos = 0;
+    while ((pos = result.indexOf("@{", pos)) >= 0) {
+      const exprStart = pos + 2;
+      let depth = 1, p = exprStart;
+      while (p < result.length && depth > 0) {
+        if (result[p] === "{") depth++;
+        else if (result[p] === "}") depth--;
+        p++;
+      }
+      if (depth === 0) {
+        ranges.push([pos, p]);
+        pos = p;
+      } else pos = exprStart;
+    }
+    for (let k = ranges.length - 1; k >= 0; k--) {
+      const [s, e] = ranges[k];
+      const v = evaluateFull("@{" + result.slice(s + 2, e - 1) + "}");
+      if (v !== null) result = result.slice(0, s) + v + result.slice(e);
+    }
+    if (result !== input) return result;
+    const full = evaluateFull(input);
+    return full === null ? input : full;
+  }
+
+  // web/domains/pcb/canvas/sheet.ts
+  var ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  function indexFromAlphabetic(s, alphabet) {
+    const alpha = alphabet || ALPHABET, radix = alpha.length;
+    let index = 0;
+    for (let i = 0; i < s.length; i++) {
+      let k = alpha.indexOf(s[i]);
+      if (k < 0) return -1;
+      if (i !== s.length - 1) k++;
+      index += k * Math.pow(radix, s.length - 1 - i);
+    }
+    return index;
+  }
+  function alphabeticFromIndex(n, alphabet) {
+    const alpha = alphabet || ALPHABET, radix = alpha.length;
+    let out = "", first = true;
+    do {
+      let mod = n % radix;
+      if (!first) mod--;
+      out = alpha[mod] + out;
+      n = Math.floor(n / radix);
+      first = false;
+    } while (n);
+    return out;
+  }
+  function incrementString(s, delta, rightIndex = 0, skipIOSQXZ = false, alphabeticMaxIndex = -1) {
+    if (!s) return null;
+    let remaining = s;
+    const parts = [];
+    let good = 0;
+    while (good <= rightIndex && remaining) {
+      let m = /\d+$/.exec(remaining);
+      if (m) {
+        parts.push({ s: m[0], type: "int" });
+        good++;
+      } else if (m = /([a-z]+|[A-Z]+)$/.exec(remaining)) {
+        parts.push({ s: m[0], type: "alpha" });
+        good++;
+      } else if (m = /[^a-zA-Z0-9]+$/.exec(remaining)) parts.push({ s: m[0], type: "skip" });
+      else break;
+      remaining = remaining.slice(0, remaining.length - m[0].length);
+    }
+    if (good <= rightIndex) return null;
+    const last = parts[parts.length - 1];
+    let stepped;
+    if (last.type === "int") {
+      const oldLen = last.s.length, padded = last.s[0] === "0";
+      const n = parseInt(last.s, 10) + delta;
+      if (!isFinite(n) || n < 0 || n > Number.MAX_SAFE_INTEGER) return null;
+      stepped = String(n);
+      if (padded && stepped.length < oldLen) stepped = "0".repeat(oldLen - stepped.length) + stepped;
+    } else {
+      const upper = last.s.toUpperCase(), wasUpper = last.s === upper;
+      const alpha = skipIOSQXZ && !/[IOSQXZ]/.test(last.s) ? "ABCDEFGHJKLMNPRTUVWY" : ALPHABET;
+      const index = indexFromAlphabetic(upper, alpha);
+      if (index < 0) return null;
+      if (index > alphabeticMaxIndex && alphabeticMaxIndex >= 0) return null;
+      const next = index + delta;
+      if (next < 0 || next > 2147483647) return null;
+      stepped = alphabeticFromIndex(next, alpha);
+      if (!wasUpper) stepped = stepped.toLowerCase();
+    }
+    last.s = stepped;
+    let out = remaining;
+    for (let i = parts.length - 1; i >= 0; i--) out += parts[i].s;
+    return out;
+  }
+  var ESC_DOLLAR = "<<<ESC_DOLLAR:";
+  var ESC_AT = "<<<ESC_AT:";
+  var RESOLVE_TEXT_RECURSION_DEPTH = 6;
+  function skipBraced(src, i) {
+    let depth = 1;
+    for (; i < src.length && depth > 0; i++) {
+      if (src[i] === "{") depth++;
+      else if (src[i] === "}") depth--;
+    }
+    return i;
+  }
+  function hasTextVars(text) {
+    return text.indexOf("${") >= 0 || text.indexOf("@{") >= 0 || text.indexOf("<<<ESC_") >= 0;
+  }
+  function expandRaw(src, resolve, depth, erc) {
+    let out = "";
+    const n = src.length;
+    for (let i = 0; i < n; ++i) {
+      if (src.startsWith(ESC_DOLLAR, i) || src.startsWith(ESC_AT, i)) {
+        const m = src.startsWith(ESC_DOLLAR, i) ? ESC_DOLLAR : ESC_AT, e = skipBraced(src, i + m.length);
+        out += src.slice(i, e);
+        i = e - 1;
+        continue;
+      }
+      if (src[i] === "\\" && i + 1 < n && (src[i + 1] === "$" || src[i + 1] === "@") && i + 2 < n && src[i + 2] === "{") {
+        const e = skipBraced(src, i + 3);
+        out += (src[i + 1] === "$" ? ESC_DOLLAR : ESC_AT) + src.slice(i + 3, e);
+        i = e - 1;
+        continue;
+      }
+      if ((src[i] === "$" || src[i] === "@") && i + 1 < n && src[i + 1] === "{") {
+        const isMath = src[i] === "@";
+        let token = "", braceDepth = 1;
+        for (i = i + 2; i < n; ++i) {
+          if (src.startsWith(ESC_DOLLAR, i) || src.startsWith(ESC_AT, i)) {
+            const m = src.startsWith(ESC_DOLLAR, i) ? ESC_DOLLAR : ESC_AT, e = skipBraced(src, i + m.length);
+            token += src.slice(i, e);
+            i = e - 1;
+            continue;
+          }
+          if (src[i] === "{") {
+            braceDepth++;
+            token += "{";
+          } else if (src[i] === "}") {
+            if (--braceDepth === 0) break;
+            token += "}";
+          } else token += src[i];
+        }
+        if (!token) continue;
+        const nested = (token.indexOf("${") >= 0 || token.indexOf("@{") >= 0) && depth < RESOLVE_TEXT_RECURSION_DEPTH;
+        if (isMath) {
+          if (nested) token = expandRaw(token, resolve, depth + 1, erc);
+          out += "@{" + token + "}";
+          continue;
+        }
+        if (nested) {
+          token = expandRaw(token, resolve, depth + 1, erc);
+          if (token.indexOf("@{") >= 0) token = evaluateText(token);
+        }
+        if (!erc && /^(ERC_WARNING|ERC_ERROR|DRC_WARNING|DRC_ERROR)/.test(token)) continue;
+        const v = resolve(token);
+        if (v === null || v === void 0) out += "${" + token + "}";
+        else if (typeof v === "object" && typeof v.ref === "string") out += "${" + v.ref + "}";
+        else out += v;
+      } else out += src[i];
+    }
+    return out;
+  }
+  function finalizeTextVars(text, internal = false) {
+    if (text.indexOf("<<<ESC_") < 0) return text;
+    return text.split(ESC_DOLLAR).join(internal ? "\\${" : "${").split(ESC_AT).join(internal ? "\\@{" : "@{");
+  }
+  function expandTextVars(text, resolve, depth, opts) {
+    const src = str3(text);
+    if (!hasTextVars(src)) return src;
+    const erc = !!(opts && opts.erc);
+    if (depth) return expandRaw(src, resolve, depth, erc);
+    let out = expandRaw(src, resolve, 0, erc);
+    if (out.indexOf("@{") >= 0) out = evaluateText(out);
+    return opts && opts.finalize === false ? out : finalizeTextVars(out, erc);
+  }
+
+  // web/domains/pcb/canvas/ref-suffix.ts
+  var REF_SUFFIX_FIELD = "Reference Suffix";
+  var MANDATORY2 = /* @__PURE__ */ new Set(["Sheetname", "Sheetfile", "Sheet name", "Sheet file"]);
+  var field = (sheet, name) => sheet ? kids3(sheet, "property").find((p) => str3(p[1]) === name) || null : null;
+  function resolveRefSuffix(text, sheet, parents) {
+    if (!text) return "";
+    let depth = 0;
+    const resolver = (token) => {
+      let f = field(sheet, token);
+      for (let ii = parents.length; !f && ii > 0; --ii) f = field(parents[ii - 1], token);
+      if (!f || str3(f[1]) === REF_SUFFIX_FIELD || MANDATORY2.has(str3(f[1]))) return null;
+      let value = unescapeText(str3(f[2]));
+      if (value.includes("${") && depth < RESOLVE_TEXT_RECURSION_DEPTH) {
+        ++depth;
+        value = expandTextVars(value, resolver, depth, { erc: true });
+        --depth;
+      }
+      return value;
+    };
+    return finalizeTextVars(expandTextVars(unescapeText(text), resolver, void 0, { erc: true, finalize: false }), true);
+  }
+  function sheetRefSuffix(sheet, parents) {
+    const f = field(sheet, REF_SUFFIX_FIELD);
+    return f ? resolveRefSuffix(str3(f[2]), sheet, parents) : "";
+  }
+  function refSuffixText(sheet) {
+    const f = field(sheet, REF_SUFFIX_FIELD);
+    return f ? str3(f[2]) : "";
+  }
+  function composeRefSuffix(sheets) {
+    let s = "";
+    sheets.forEach((sh, i) => {
+      if (sh) s += sheetRefSuffix(sh, sheets.slice(0, i));
+    });
+    return s;
+  }
+  function stripRefSuffix(ref, suffix) {
+    if (!suffix || ref.length <= suffix.length || !ref.endsWith(suffix) || ref.endsWith("?")) return null;
+    return ref.slice(0, ref.length - suffix.length);
+  }
+  function nextRefSuffix(suffix, inUse, isTaken) {
+    const used = inUse instanceof Set ? inUse : new Set(inUse);
+    const taken = (c) => used.has(c) || !!isTaken && isTaken(c);
+    if (!suffix || !taken(suffix)) return suffix;
+    const splitTail = (text, isTail) => {
+      let stem = text.length;
+      while (stem > 0 && isTail(text[stem - 1])) --stem;
+      return stem;
+    };
+    const isDigit3 = (c) => c >= "0" && c <= "9", isUpper = (c) => c >= "A" && c <= "Z", isLower = (c) => c >= "a" && c <= "z";
+    const digitStem = splitTail(suffix, isDigit3);
+    if (digitStem < suffix.length) {
+      const stem = suffix.slice(0, digitStem), width = suffix.length - digitStem;
+      let highest = 0n;
+      for (const u of used) if (u.startsWith(stem) && u.length > stem.length && splitTail(u, isDigit3) === stem.length) {
+        const v = BigInt(u.slice(stem.length));
+        if (v > highest) highest = v;
+      }
+      for (let next = highest + 1n; ; next = next + 1n & 0xFFFFFFFFFFFFFFFFn) {
+        const c = stem + next.toString().padStart(width, "0");
+        if (!taken(c)) return c;
+      }
+    }
+    const letterSeries = (isLetter, lower2) => {
+      const stem = splitTail(suffix, isLetter), run = suffix.length - stem;
+      if (run === 0 || run > 2) return null;
+      const prefix = suffix.slice(0, stem);
+      let highest = -1;
+      for (const u of used) {
+        const us = splitTail(u, isLetter);
+        if (us === stem && u.length - us <= 2 && u.startsWith(prefix)) highest = Math.max(highest, indexFromAlphabetic(u.slice(stem).toUpperCase()));
+      }
+      for (let next = highest + 1; ; next++) {
+        let letters = alphabeticFromIndex(next);
+        if (lower2) letters = letters.toLowerCase();
+        if (!taken(prefix + letters)) return prefix + letters;
+      }
+    };
+    return letterSeries(isUpper, false) ?? letterSeries(isLower, true) ?? suffix;
+  }
+  function instanceOf(node, path) {
+    for (const inst of kids3(node, "instances")) for (const pr of kids3(inst, "project")) for (const e of kids3(pr, "path")) {
+      if (str3(e[1]) !== path) continue;
+      const r = kid3(e, "reference"), u = kid3(e, "unit"), own2 = kid3(node, "unit");
+      return { ref: r ? str3(r[1]) : "", unit: u ? num2(u[1], 1) : own2 ? num2(own2[1], 1) : 1, entry: true };
+    }
+    const p = kids3(node, "property").find((q) => str3(q[1]) === "Reference"), own = kid3(node, "unit");
+    return { ref: p ? str3(p[2]) : "", unit: own ? num2(own[1], 1) : 1, entry: false };
+  }
+  var libIdOf = (node) => str3((kid3(node, "lib_id") || [])[1]);
+  var suffixKey = (uuid, path) => uuid + "\0" + path;
+  function refSuffixes(paths, mode2, unitCount) {
+    const composed = /* @__PURE__ */ new Map();
+    let hasFields = false;
+    for (const p of paths) {
+      const last = p.sheets.length ? p.sheets[p.sheets.length - 1] : null;
+      if (refSuffixText(last)) hasFields = true;
+      composed.set(p.path, composeRefSuffix(p.sheets));
+    }
+    const has2 = mode2 && [...composed.values()].some((s) => !!s);
+    const suffix = (path) => has2 ? composed.get(path) || "" : "";
+    const base = /* @__PURE__ */ new Map(), lacks = /* @__PURE__ */ new Set();
+    const packages = /* @__PURE__ */ new Map(), pk2 = (b, lib, s) => b + "\0" + lib + "\0" + s;
+    const suffixSet = /* @__PURE__ */ new Set();
+    const multi = [];
+    for (const p of paths) {
+      const sfx = composed.get(p.path) || "";
+      suffixSet.add(sfx);
+      for (const it of p.doc.items.values()) {
+        if (it.kind !== "symbol") continue;
+        const inst = instanceOf(it.node, p.path);
+        if (!inst.entry) continue;
+        const key = suffixKey(it.id, p.path), ref = inst.ref;
+        base.set(key, ref);
+        if (unitCount(p.doc, it.node) > 1) {
+          let own = null;
+          if (!sfx) own = ref;
+          else {
+            const s = stripRefSuffix(ref, sfx);
+            if (s !== null) own = s;
+          }
+          if (own !== null) {
+            base.set(key, own);
+            const k = pk2(own, libIdOf(it.node), sfx);
+            let u = packages.get(k);
+            if (!u) {
+              u = /* @__PURE__ */ new Set();
+              packages.set(k, u);
+            }
+            u.add(inst.unit);
+          }
+          if (sfx) multi.push({ key, stored: ref, suffix: sfx, unit: inst.unit, lib: libIdOf(it.node), ownBase: own });
+        } else {
+          const s = stripRefSuffix(ref, sfx);
+          if (s !== null) base.set(key, s);
+          else if (sfx && !ref.endsWith("?")) lacks.add(key);
+        }
+      }
+    }
+    const sortedSuffixes = [...suffixSet].sort();
+    const claim = (stored, lib, unit, own) => {
+      for (const s of sortedSuffixes) {
+        if (s >= own) break;
+        let b = stored;
+        if (s) b = stripRefSuffix(stored, s);
+        if (b === null) continue;
+        const u = packages.get(pk2(b, lib, s));
+        if (u && !u.has(unit)) {
+          u.add(unit);
+          return b;
+        }
+      }
+      return null;
+    };
+    for (const m of multi) {
+      const b = claim(m.stored, m.lib, m.unit, m.suffix);
+      if (b !== null) base.set(m.key, b);
+      else if (m.ownBase !== null) base.set(m.key, m.ownBase);
+      else {
+        base.set(m.key, m.stored);
+        if (!m.stored.endsWith("?")) lacks.add(m.key);
+      }
+    }
+    const pkgs = /* @__PURE__ */ new Map(), unitSfx = /* @__PURE__ */ new Map(), split = /* @__PURE__ */ new Set();
+    const groups = /* @__PURE__ */ new Map(), units = /* @__PURE__ */ new Map(), repeated = /* @__PURE__ */ new Set(), firstUnit = /* @__PURE__ */ new Map();
+    for (const p of paths) for (const it of p.doc.items.values()) {
+      if (it.kind !== "symbol" || unitCount(p.doc, it.node) <= 1) continue;
+      const inst = instanceOf(it.node, p.path);
+      if (!inst.entry) continue;
+      const f = firstUnit.get(it.id);
+      if (f === void 0) firstUnit.set(it.id, inst.unit);
+      else if (f !== inst.unit) split.add(it.id);
+      const key = suffixKey(it.id, p.path), b = base.get(key) || "";
+      if (!b || b.endsWith("?")) continue;
+      const gk = b + "\0" + libIdOf(it.node);
+      let us = units.get(gk);
+      if (!us) {
+        us = /* @__PURE__ */ new Set();
+        units.set(gk, us);
+      }
+      if (us.has(inst.unit)) repeated.add(gk);
+      else us.add(inst.unit);
+      let g = groups.get(gk);
+      if (!g) {
+        g = [];
+        groups.set(gk, g);
+      }
+      g.push({ key, unit: inst.unit, suffix: suffix(p.path) });
+    }
+    for (const [gk, members] of groups) {
+      if (repeated.has(gk)) continue;
+      let lowest = members[0].suffix;
+      for (const m of members) if (m.suffix < lowest) lowest = m.suffix;
+      for (const m of members) if (m.suffix !== lowest) pkgs.set(m.key, lowest);
+      if (members.some((m) => m.suffix !== lowest)) {
+        const um = /* @__PURE__ */ new Map();
+        for (const m of members) um.set(m.unit, m.suffix);
+        unitSfx.set(gk, um);
+      }
+    }
+    const keyOf2 = /* @__PURE__ */ new Map();
+    for (const [gk, members] of groups) for (const m of members) keyOf2.set(m.key, { gk, unit: m.unit });
+    const packageSuffix = (uuid, path) => {
+      if (!has2) return "";
+      const v = pkgs.get(suffixKey(uuid, path));
+      return v !== void 0 ? v : suffix(path);
+    };
+    return {
+      mode: mode2,
+      has: has2,
+      hasFields,
+      composed,
+      suffix,
+      paths,
+      packages: has2 ? pkgs : /* @__PURE__ */ new Map(),
+      split,
+      base: (uuid, path) => {
+        const v = base.get(suffixKey(uuid, path));
+        return v === void 0 ? null : v;
+      },
+      lacks: (uuid, path) => lacks.has(suffixKey(uuid, path)),
+      packageSuffix,
+      unitSuffix: (uuid, path, unit) => {
+        if (!has2) return "";
+        const k = keyOf2.get(suffixKey(uuid, path)), um = k ? unitSfx.get(k.gk) : void 0;
+        if (um && um.has(unit)) return um.get(unit);
+        return packageSuffix(uuid, path);
+      }
+    };
+  }
+  function storedRef(rs, base, path) {
+    return base.endsWith("?") ? base : base + rs.suffix(path);
+  }
+  function composedRef(rs, uuid, path, base, units, sub, opts) {
+    if (base.endsWith("?") || !rs.has) return base + (opts && (opts.includeUnit || opts.unit) && units > 1 ? sub : "");
+    const o = opts || {}, withUnit = !!o.unit || !!o.includeUnit && units > 1;
+    let ref = base + (withUnit ? sub : "");
+    if (o.unit && o.ownUnit !== void 0 && o.unit !== o.ownUnit) ref += rs.unitSuffix(uuid, path, o.unit);
+    else if (withUnit || units < 2) ref += rs.suffix(path);
+    else ref += rs.packageSuffix(uuid, path);
+    return ref;
+  }
+  function refSuffixCollisions(rs, includeEmpty) {
+    const out = [], first = /* @__PURE__ */ new Map();
+    for (const p of rs.paths) {
+      const s = rs.suffix(p.path);
+      if (!s && !includeEmpty) continue;
+      let m = first.get(p.doc);
+      if (!m) {
+        m = /* @__PURE__ */ new Map();
+        first.set(p.doc, m);
+      }
+      const f = m.get(s);
+      if (f) out.push([p, f]);
+      else m.set(s, p);
+    }
+    return out;
+  }
+  function recomposedRefs(before, after) {
+    const out = /* @__PURE__ */ new Map();
+    for (const p of after.paths) for (const it of p.doc.items.values()) {
+      if (it.kind !== "symbol") continue;
+      const inst = instanceOf(it.node, p.path);
+      if (!inst.entry || !inst.ref || inst.ref.endsWith("?")) continue;
+      const b = before.base(it.id, p.path);
+      if (b === null) continue;
+      const next = storedRef(after, b, p.path);
+      if (next !== inst.ref) out.set(suffixKey(it.id, p.path), next);
     }
     return out;
   }
@@ -2391,12 +4351,15 @@
   function isPseudo(lib, ref) {
     return !!lib && !!kid(lib, "power") || ref[0] === "#";
   }
-  function schReference(sheet, item) {
+  function schReference(sheet, item, rs) {
     const n = item.node, lib = K.resolveLib(sheet.doc, symbolLibId(n)) || null, [x, y] = atOf(n);
+    const b = rs && sheet.path ? rs.base(item.id, sheet.path) : null;
+    const sfx = rs && sheet.path && rs.has ? { suffix: rs.packageSuffix(item.id, sheet.path), own: rs.suffix(sheet.path) } : {};
     return {
+      ...sfx,
       sheet,
       item,
-      ref: refOn(n, sheet.path),
+      ref: b !== null && b !== "" ? b : refOn(n, sheet.path),
       numRef: -1,
       numRefStr: "",
       isNew: false,
@@ -2413,11 +4376,11 @@
       libNode: lib
     };
   }
-  function sheetReferences(sheet, only, orphans = false) {
+  function sheetReferences(sheet, only, orphans = false, rs) {
     const out = [];
     for (const it of sheet.doc.items.values()) {
       if (it.kind !== "symbol" || only && !only.has(it.id)) continue;
-      const r = schReference(sheet, it);
+      const r = schReference(sheet, it, rs);
       if (isPseudo(r.libNode, r.ref)) continue;
       if (!r.libNode && !orphans) continue;
       out.push(r);
@@ -2434,7 +4397,7 @@
     for (const unit of units) for (const h of holders) if (h.lib === null || h.lib !== ref.lib || compareValue(h.value, ref.value) !== 0 || h.unit === unit) return false;
     return true;
   }
-  function firstUnusedReference(list, ref, min, units, tracker) {
+  function firstUnusedReference(list, ref, min, units, tracker, accept) {
     const map = /* @__PURE__ */ new Map();
     const needUnits = units.some((u) => u >= 0);
     for (const r of list) {
@@ -2448,6 +4411,7 @@
     }
     const valid = units.filter((u) => u >= 0);
     for (let candidate = min; ; candidate++) {
+      if (accept && !accept(candidate)) continue;
       const holders = map.get(candidate);
       if (!holders) {
         const des = ref.ref + String(candidate);
@@ -2570,6 +4534,33 @@
     }
     const lockedOf = /* @__PURE__ */ new Map(), ikey = (r) => r.uuid + "\0" + (r.sheet ? r.sheet.path || "" : "");
     for (const key of [...locked.keys()].sort()) for (const r of locked.get(key)) if (!lockedOf.has(ikey(r))) lockedOf.set(ikey(r), locked.get(key));
+    const destinations = /* @__PURE__ */ new Map();
+    if (o.destinationsOf) list.forEach((r, i) => {
+      const d = i < originalSize ? o.destinationsOf(r) : null;
+      destinations.set(r, d || [r]);
+    });
+    const acceptFor = (ru, lockedList) => {
+      if (!destinations.size) return null;
+      const occupied = /* @__PURE__ */ new Map(), candidates = [];
+      for (const [r, dests] of destinations) {
+        if (r === ru || lockedList && compareRef(r.ref, ru.ref) === 0 && r.lib === ru.lib && compareValue(r.value, ru.value) === 0 && lockedList.some((l) => l.uuid === r.uuid && l.sheet === r.sheet)) candidates.push(...dests);
+        if (r.isNew || r.numRef < 0) continue;
+        for (const d of dests) {
+          const k = r.ref + refNumber(r) + (d.suffix || "");
+          let l = occupied.get(k);
+          if (!l) {
+            l = [];
+            occupied.set(k, l);
+          }
+          l.push(Object.assign({}, d, { unit: r.unit }));
+        }
+      }
+      return (n) => {
+        const base = ru.ref + formatRefStr(ru, n);
+        for (const c of candidates) for (const other of occupied.get(base + (c.suffix || "")) || []) if (other.unit === c.unit || other.lib !== c.lib || compareValue(other.value, c.value) !== 0) return false;
+        return true;
+      };
+    };
     let first = 0, minRefId = useSheetNum ? list[first].sheetNum * interval + 1 : start + 1, last = 0;
     for (let ii = 0; ii < list.length; ii++) {
       const ru = list[ii];
@@ -2582,7 +4573,7 @@
       if (startAtCurrent && ru.numRef > 0) minRefId = ru.numRef;
       if (ru.units <= 1) {
         if (ru.isNew) {
-          last = firstUnusedReference(list, ru, minRefId, [], o.tracker);
+          last = firstUnusedReference(list, ru, minRefId, [], o.tracker, acceptFor(ru, null));
           ru.numRef = last;
           ru.numRefStr = formatRefStr(ru, last);
         }
@@ -2593,7 +4584,7 @@
       if (lockedList) {
         const units = packageUnits(lockedList, ru);
         if (ru.isNew) {
-          last = firstUnusedReference(list, ru, minRefId, units, o.tracker);
+          last = firstUnusedReference(list, ru, minRefId, units, o.tracker, acceptFor(ru, lockedList));
           ru.numRef = last;
           ru.numRefStr = formatRefStr(ru, last);
           ru.isNew = false;
@@ -2621,7 +4612,7 @@
           }
         }
       } else if (ru.isNew) {
-        last = firstUnusedReference(list, ru, minRefId, [ru.unit], o.tracker);
+        last = firstUnusedReference(list, ru, minRefId, [ru.unit], o.tracker, acceptFor(ru, null));
         ru.numRef = last;
         ru.numRefStr = formatRefStr(ru, last);
         ru.isNew = false;
@@ -2634,10 +4625,11 @@
     const m = /* @__PURE__ */ new Map();
     for (const r of refs) {
       if (r.units <= 1 || r.ref.endsWith("?")) continue;
-      let l = m.get(r.ref);
+      const key = r.ref + (r.suffix || "");
+      let l = m.get(key);
       if (!l) {
         l = [];
-        m.set(r.ref, l);
+        m.set(key, l);
       }
       l.push(Object.assign({}, r));
     }
@@ -2720,12 +4712,14 @@
   }
   function annotateHierarchy(sheets, scope, opts) {
     const o = opts || {}, reset = o.keep === false, regroup = reset && !!o.regroup;
+    const rs = hierarchySuffixes(sheets, !!o.suffixMode);
+    const suffixMode = !!rs && rs.mode;
     const refs = [];
-    for (const s of scope.sheets) refs.push(...sheetReferences(s.sheet, s.only));
+    for (const s of scope.sheets) refs.push(...sheetReferences(s.sheet, s.only, false, rs));
     let locked = regroup ? /* @__PURE__ */ new Map() : multiUnitMap(refs);
     const prevOf = /* @__PURE__ */ new Map();
     const allRefs = [];
-    for (const s of sheets) allRefs.push(...sheetReferences(s));
+    for (const s of sheets) allRefs.push(...sheetReferences(s, null, false, rs));
     for (const r of allRefs) {
       if (!annotatedOn(r.item.node, r.sheet.path)) continue;
       let m = prevOf.get(r.item);
@@ -2733,41 +4727,93 @@
         m = /* @__PURE__ */ new Map();
         prevOf.set(r.item, m);
       }
-      m.set(r.sheet, r.units > 1 ? r.ref + subReference(r.sheet.doc, r.item.node, r.unit) : r.ref);
+      m.set(r.sheet, fullRefOf(rs, r, r.ref));
     }
-    if (reset) for (const [k, l] of [...locked]) {
-      const seen = /* @__PURE__ */ new Set();
-      if (l.some((r) => seen.has(r.unit) || (seen.add(r.unit), false))) locked.delete(k);
+    if (suffixMode) {
+      const inScope = new Set(refs.map((r) => r.sheet.doc));
+      const hit = refSuffixCollisions(rs, true).find(([p]) => inScope.has(p.doc));
+      if (hit) {
+        const [path, first] = hit, a = sheets.find((x) => x.path === first.path), b = sheets.find((x) => x.path === path.path);
+        return { changes: /* @__PURE__ */ new Map(), messages: [], errors: [], fatal: `Sheets ${humanPath(a)} and ${humanPath(b)} use ${b && b.file || ""} with the same reference suffix. Give each sheet a distinct suffix before annotating.` };
+      }
+    }
+    if (reset) removeUnitConflicts(locked);
+    const firstPath = /* @__PURE__ */ new Map();
+    for (const s of sheets) if (!firstPath.has(s.doc)) firstPath.set(s.doc, s);
+    const shares = (r) => !rs || !rs.split.has(r.uuid);
+    if (suffixMode) {
+      const reps = [], seen = /* @__PURE__ */ new Set();
+      for (const r of refs) {
+        if (!shares(r)) {
+          reps.push(r);
+          continue;
+        }
+        if (seen.has(r.uuid)) continue;
+        seen.add(r.uuid);
+        const f = firstPath.get(r.sheet.doc);
+        if (!f || f === r.sheet) reps.push(r);
+        else reps.push(schReference(f, r.item, rs));
+      }
+      refs.length = 0;
+      refs.push(...reps);
+      locked = lockedForRepresentatives(refs, locked, shares);
+      removeUnitConflicts(locked);
     }
     if (reset) for (const r of refs) r.isNew = true;
     const additional = [];
     if (!scope.all) {
-      for (const r of allRefs) if (!refs.some((x) => sameInstance(x, r))) additional.push(r);
+      const annotated = /* @__PURE__ */ new Set();
+      if (suffixMode) {
+        for (const r of refs) if (shares(r)) annotated.add(r.uuid);
+      }
+      for (const r of allRefs) if (!annotated.has(r.uuid) && !refs.some((x) => sameInstance(x, r))) additional.push(r);
     }
     for (const ref of o.reserved || []) additional.push(foreignRef(str(ref)));
+    const pathsOf = (doc) => sheets.filter((x) => x.doc === doc);
+    if (suffixMode) renumberBasesUsedBy(refs, additional, locked, rs, pathsOf, shares);
     for (const r of refs) splitInto(r);
-    annotateList(refs, locked, additional, { order: o.order === "y" ? "y" : "x", sheetInterval: o.sheetInterval, start: o.start, tracker: o.tracker });
-    const nodes = /* @__PURE__ */ new Map(), order = [], messages = [];
-    for (const r of refs) {
-      const it = r.item, sh = r.sheet;
+    annotateList(refs, locked, additional, {
+      order: o.order === "y" ? "y" : "x",
+      sheetInterval: o.sheetInterval,
+      start: o.start,
+      tracker: o.tracker,
+      destinationsOf: suffixMode ? (r) => r.item && shares(r) ? pathsOf(r.sheet.doc).map((p) => schReference(p, r.item, rs)) : null : null
+    });
+    const nodes = /* @__PURE__ */ new Map(), order = [], messages = [], docOf = /* @__PURE__ */ new Map();
+    const write = (it, sh, base, unit) => {
       let node = nodes.get(it);
       if (!node) {
         node = deep(it.node);
         nodes.set(it, node);
         order.push(it);
+        docOf.set(it, sh.doc);
       }
+      setInstanceOn(node, sh, rs ? storedRef(rs, base, sh.path || "") : base, unit);
+    };
+    const sharedFiles = [];
+    for (const r of refs) {
+      const it = r.item, sh = r.sheet;
       const ref = annotatedRef(r);
-      setInstanceOn(node, sh, ref, r.unit);
+      write(it, sh, ref, r.unit);
+      if (suffixMode && shares(r)) {
+        for (const p of pathsOf(sh.doc)) if (p !== sh) {
+          write(it, p, ref, r.unit);
+          if (!sharedFiles.includes(sh.doc)) sharedFiles.push(sh.doc);
+        }
+      }
       const multi = r.units > 1, sub = multi ? subReference(sh.doc, it.node, r.unit, false) : "";
-      const newRef = multi ? ref + subReference(sh.doc, it.node, r.unit) : ref, prev = (prevOf.get(it) || /* @__PURE__ */ new Map()).get(sh) || "";
+      const newRef = fullRefOf(rs, r, ref), prev = (prevOf.get(it) || /* @__PURE__ */ new Map()).get(sh) || "";
       const val = shownValue(it.node, ref);
       if (prev) {
         if (newRef === prev) continue;
         messages.push(multi ? `Updated ${val} (unit ${sub}) from ${prev} to ${newRef}.` : `Updated ${val} from ${prev} to ${newRef}.`);
       } else messages.push(multi ? `Annotated ${val} (unit ${sub}) as ${newRef}.` : `Annotated ${val} as ${newRef}.`);
     }
-    const changes = /* @__PURE__ */ new Map(), docOf = /* @__PURE__ */ new Map();
-    for (const r of refs) docOf.set(r.item, r.sheet.doc);
+    for (const d of sharedFiles) {
+      const f = firstPath.get(d);
+      messages.push(`References in ${f && f.file || ""} apply to every sheet that uses it.`);
+    }
+    const changes = /* @__PURE__ */ new Map();
     for (const it of order) {
       const node = nodes.get(it);
       if (K.serialize(node) === K.serialize(it.node)) continue;
@@ -2779,13 +4825,278 @@
       }
       l.push(modChange(doc, it, node));
     }
-    const check = refs.map((r) => Object.assign({}, r, { ref: annotatedRef(r), isNew: false, flag: 0, numRef: -1, numRefStr: "" }));
-    for (const s of scope.sheets) for (const r of sheetReferences(s.sheet, s.only, true)) if (!r.libNode) check.push(r);
+    const check = [];
+    if (suffixMode) {
+      for (const s of scope.sheets) for (const r of sheetReferences(s.sheet, s.only, true, rs)) {
+        const n = nodes.get(r.item);
+        if (n) {
+          const stored = refOn(n, s.sheet.path);
+          r.ref = stripRefSuffix(stored, rs.suffix(s.sheet.path || "")) ?? stored;
+        }
+        check.push(r);
+      }
+    } else {
+      check.push(...refs.map((r) => Object.assign({}, r, { ref: annotatedRef(r), isNew: false, flag: 0, numRef: -1, numRefStr: "" })));
+      for (const s of scope.sheets) for (const r of sheetReferences(s.sheet, s.only, true, rs)) if (!r.libNode) check.push(r);
+    }
     const errors = [];
     if (check.length) checkAnnotation(check, (_c, msg) => {
       errors.push(msg);
     });
     return { changes, messages, errors };
+  }
+  function recomposeChanges(sheets, before, after) {
+    const out = /* @__PURE__ */ new Map();
+    const was = hierarchySuffixes(sheets, before), now = hierarchySuffixes(sheets.map((s) => Object.assign({}, s, { sheets: s.after || s.sheets })), after);
+    if (!was || !now) return out;
+    const refs = recomposedRefs(was, now);
+    if (!refs.size) return out;
+    const nodes = /* @__PURE__ */ new Map(), docOf = /* @__PURE__ */ new Map();
+    for (const sh of sheets) for (const it of sh.doc.items.values()) {
+      const next = refs.get(suffixKey(it.id, sh.path || ""));
+      if (next === void 0) continue;
+      let node = nodes.get(it);
+      if (!node) {
+        node = deep(it.node);
+        nodes.set(it, node);
+        docOf.set(it, sh.doc);
+      }
+      setInstanceOn(node, sh, next);
+    }
+    for (const [it, node] of nodes) {
+      const doc = docOf.get(it);
+      let l = out.get(doc);
+      if (!l) {
+        l = [];
+        out.set(doc, l);
+      }
+      l.push(modChange(doc, it, node));
+    }
+    return out;
+  }
+  function humanPath(s) {
+    const h = s && s.human || "/";
+    return h.length > 1 ? h.replace(/\/$/, "") : h;
+  }
+  function hierarchySuffixes(sheets, mode2) {
+    if (!sheets.length || sheets.some((s) => !s.path)) return null;
+    return refSuffixes(sheets.map((s) => ({ doc: s.doc, path: s.path, sheets: s.sheets || [] })), mode2, (doc, node) => K.resolveLib(doc, symbolLibId(node)) ? libUnits(doc, node).units : 1);
+  }
+  function suffixCtx(raw) {
+    const r = raw;
+    if (!r || !r.sheets || !r.sheets.length) return null;
+    const rs = hierarchySuffixes(r.sheets, !!r.mode);
+    if (!rs) return null;
+    return { sheets: r.sheets, mode: !!r.mode, increment: r.increment !== false, rs };
+  }
+  function suffixCtxOf(ctx) {
+    const f = ctx && ctx.suffixSheets;
+    try {
+      return typeof f === "function" ? suffixCtx(f()) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function suffixSheetOf(sc, doc) {
+    const mine = sc.sheets.filter((s) => s.doc === doc);
+    return mine.find((s) => s.shown) || mine[0] || null;
+  }
+  var unitCountOn = (doc, node) => K.resolveLib(doc, symbolLibId(node)) ? libUnits(doc, node).units : 1;
+  function baseRefOn(sc, sheet, node) {
+    const b = sheet.path ? sc.rs.base(uuidOf(node) || "", sheet.path) : null;
+    return b !== null && b !== "" ? b : refOn(node, sheet.path);
+  }
+  function baseRefFromUser(sc, sheet, node, text) {
+    const rs = sc.rs, path = sheet.path || "", uuid = uuidOf(node) || "";
+    const onPath = !!sheet.path && instanceOf(node, path).entry, existing = onPath ? baseRefOn(sc, sheet, node) : "";
+    const own = rs.suffix(path), pkg = rs.packageSuffix(uuid, path);
+    if (onPath && text === existing) return { base: text, error: "" };
+    if (onPath && (own && text === existing + own || pkg && text === existing + pkg)) return { base: existing, error: "" };
+    const endsIn = (s) => !!s && text.length > s.length && text.endsWith(s);
+    let matched = endsIn(own) ? own.length : 0;
+    if (endsIn(pkg)) matched = Math.max(matched, pkg.length);
+    let sibling = "";
+    for (const p of sc.sheets) {
+      if (p.doc !== sheet.doc || p.path === sheet.path) continue;
+      const s = rs.suffix(p.path || "");
+      if (endsIn(s) && s.length > matched) {
+        matched = s.length;
+        sibling = p.readable || p.human || p.path || "";
+      }
+    }
+    if (sibling) return { base: text, error: `${text} ends with the reference suffix of sheet ${sibling}.` };
+    return { base: text.slice(0, text.length - matched), error: "" };
+  }
+  function setUserRef(sc, sheet, node, base) {
+    setInstanceOn(node, sheet, storedRef(sc.rs, base, sheet.path || ""));
+    if (!sc.mode) return;
+    const copies = [], unit = unitOn(node, sheet.path), multi = unitCountOn(sheet.doc, node) > 1;
+    for (const p of sc.sheets) {
+      if (p.doc !== sheet.doc || p.path === sheet.path) continue;
+      if (multi && unitOn(node, p.path) !== unit) return;
+      copies.push(p);
+    }
+    for (const p of copies) setInstanceOn(node, Object.assign({}, p, { shown: false }), storedRef(sc.rs, base, p.path || ""));
+  }
+  function composedRefLabel(sc, sheet, node, text) {
+    const path = sheet.path || "";
+    if (!sc.rs.suffix(path)) return null;
+    const { base } = baseRefFromUser(sc, sheet, node, text);
+    return base.endsWith("?") ? base : base + sc.rs.packageSuffix(uuidOf(node) || "", path);
+  }
+  function newSymbolSuffixes(sc, doc, uuid) {
+    const paths = sc.sheets.filter((s) => s.doc === doc && !!s.path);
+    if (!paths.length) return null;
+    let share = sc.mode;
+    const pathSuffixes = [];
+    for (const p of paths) {
+      const s = composeRefSuffix(p.sheets || []);
+      if (pathSuffixes.includes(s)) share = false;
+      pathSuffixes.push(s);
+    }
+    const holders = [], composedInUse = /* @__PURE__ */ new Map();
+    for (const p of sc.sheets) for (const it of p.doc.items.values()) {
+      if (it.kind !== "symbol" || it.id === uuid) continue;
+      const inst = instanceOf(it.node, p.path || ""), b = sc.rs.base(it.id, p.path || "");
+      const h = { ref: b !== null && b !== "" ? b : inst.ref, lib: symbolLibId(it.node), value: valueField(it.node), unit: inst.unit };
+      holders.push(h);
+      if (!share || h.ref.endsWith("?")) continue;
+      const composed = composedRef(sc.rs, it.id, p.path || "", h.ref, unitCountOn(p.doc, it.node), "");
+      let l = composedInUse.get(composed);
+      if (!l) {
+        l = [];
+        composedInUse.set(composed, l);
+      }
+      l.push(h);
+    }
+    const composesTaken = (base, me) => {
+      for (const s of pathSuffixes) for (const o of composedInUse.get(base + s) || []) if (o.unit === me.unit || o.lib !== me.lib || compareValue(o.value, me.value) !== 0) return true;
+      return false;
+    };
+    return { paths, holders, share, composesTaken };
+  }
+  function shareNewSymbolBase(a, me, next) {
+    const reserved = [], tried = /* @__PURE__ */ new Set();
+    for (; ; ) {
+      const ref = next(reserved.length ? a.holders.concat(reserved) : a.holders);
+      if (!a.share || me.power || ref.startsWith("#") || ref.endsWith("?")) return ref;
+      if (tried.has(ref) || !a.composesTaken(ref, me)) return ref;
+      tried.add(ref);
+      reserved.push({ ref, lib: me.lib, value: me.value, unit: me.unit });
+    }
+  }
+  function writeSharedRefs(sc, a, node, base, unit) {
+    for (const p of a.paths) {
+      const b = typeof base === "string" ? base : base.get(p.path || "");
+      if (b === void 0) continue;
+      setInstanceOn(node, p, storedRef(sc.rs, b, p.path || ""), unit === void 0 ? null : unit);
+    }
+  }
+  function fullRefOf(rs, r, base) {
+    const sub = r.units > 1 && r.item && r.sheet ? subReference(r.sheet.doc, r.item.node, r.unit) : "";
+    if (!rs || !r.sheet) return base + sub;
+    return composedRef(rs, r.uuid, r.sheet.path || "", base, r.units, sub, { includeUnit: true });
+  }
+  function removeUnitConflicts(locked) {
+    for (const [k, l] of [...locked]) {
+      const seen = /* @__PURE__ */ new Set();
+      if (l.some((r) => seen.has(r.unit) || (seen.add(r.unit), false))) locked.delete(k);
+    }
+  }
+  var memberKey = (r, shares) => r.uuid + "\0" + (shares(r) ? "" : r.sheet && r.sheet.path || "");
+  function lockedForRepresentatives(refs, locked, shares) {
+    const indexOf = /* @__PURE__ */ new Map(), parent = refs.map((_r, i) => i), inLocked = /* @__PURE__ */ new Set();
+    refs.forEach((r, i) => indexOf.set(memberKey(r, shares), i));
+    const rootOf = (i) => {
+      while (parent[i] !== i) i = parent[i] = parent[parent[i]];
+      return i;
+    };
+    for (const key of [...locked.keys()].sort()) {
+      let first = null;
+      for (const r of locked.get(key)) {
+        const i = indexOf.get(memberKey(r, shares));
+        if (i === void 0) continue;
+        inLocked.add(i);
+        if (first !== null) parent[rootOf(i)] = rootOf(first);
+        else first = i;
+      }
+    }
+    const out = /* @__PURE__ */ new Map();
+    for (const i of [...inLocked].sort((a, b) => a - b)) {
+      const g = rootOf(i), k = refs[g].ref + (refs[g].suffix || "") + ":" + g;
+      let l = out.get(k);
+      if (!l) {
+        l = [];
+        out.set(k, l);
+      }
+      l.push(refs[i]);
+    }
+    return out;
+  }
+  function renumberBasesUsedBy(refs, others, locked, rs, pathsOf, shares) {
+    const packageOf = /* @__PURE__ */ new Map(), packageUnits2 = /* @__PURE__ */ new Map(), renumberedPackages = /* @__PURE__ */ new Set();
+    for (const [key, group] of locked) for (const r of group) {
+      packageOf.set(memberKey(r, shares), key);
+      let u = packageUnits2.get(key);
+      if (!u) {
+        u = /* @__PURE__ */ new Set();
+        packageUnits2.set(key, u);
+      }
+      u.add(r.unit);
+      if (r.ref !== group[0].ref) renumberedPackages.add(key);
+    }
+    const packageFor = (r) => packageOf.get(memberKey(r, shares));
+    const joins2 = (r, other) => {
+      if (other.lib !== r.lib || compareValue(other.value, r.value) !== 0) return false;
+      const p = packageFor(r);
+      return p !== void 0 ? !packageUnits2.get(p).has(other.unit) : other.unit !== r.unit;
+    };
+    const samePackage = (r, other) => {
+      const a = packageFor(r), b = packageFor(other);
+      if (a !== void 0 && b !== void 0) return a === b;
+      return other.unit !== r.unit && other.lib === r.lib && compareValue(other.value, r.value) === 0;
+    };
+    const composedOf = (r) => r.sheet && r.item ? r.ref + (r.units > 1 ? rs.packageSuffix(r.uuid, r.sheet.path || "") : rs.suffix(r.sheet.path || "")) : r.ref;
+    const byBase = /* @__PURE__ */ new Map(), byComposed = /* @__PURE__ */ new Map();
+    const push = (m, k, r) => {
+      let l = m.get(k);
+      if (!l) {
+        l = [];
+        m.set(k, l);
+      }
+      l.push(r);
+    };
+    for (const other of others) {
+      push(byBase, other.ref, other);
+      push(byComposed, composedOf(other), other);
+    }
+    const suffixesFor = (r) => {
+      if (!shares(r)) return [rs.packageSuffix(r.uuid, r.sheet.path || "")];
+      return pathsOf(r.sheet.doc).map((p) => rs.packageSuffix(r.uuid, p.path || ""));
+    };
+    const collides = (r, suffixes) => {
+      const blocks = (m, k) => (m.get(k) || []).some((e) => !joins2(r, e));
+      if (blocks(byBase, r.ref)) return true;
+      return suffixes.some((sfx) => blocks(byComposed, r.ref + sfx));
+    };
+    const renumbered = /* @__PURE__ */ new Set(), holders = /* @__PURE__ */ new Map(), composedHolders = /* @__PURE__ */ new Map();
+    for (const r of refs) {
+      const suffixes = suffixesFor(r);
+      const clashes = (l) => !(l || []).every((x) => samePackage(r, x));
+      const conflict = collides(r, suffixes) || clashes(holders.get(r.ref)) || suffixes.some((sfx) => clashes(composedHolders.get(r.ref + sfx)));
+      if (!conflict) {
+        push(holders, r.ref, r);
+        for (const sfx of suffixes) push(composedHolders, r.ref + sfx, r);
+      } else {
+        const p = packageFor(r);
+        if (p !== void 0) renumberedPackages.add(p);
+        else renumbered.add(r);
+      }
+    }
+    for (const r of refs) {
+      const p = packageFor(r);
+      if (renumbered.has(r) || p !== void 0 && renumberedPackages.has(p)) r.isNew = true;
+    }
   }
   function annotateChanges(doc, opts) {
     const o = opts || {}, sheet = sheetOf(doc, o.sheetNumber);
@@ -2808,10 +5119,29 @@
     const n = parseInt(t, 10);
     return isFinite(n) ? n : 0;
   }
-  function incrementAnnotationChanges(doc, start, by) {
+  function incrementAnnotationChanges(doc, start, by, suffixes) {
     const st = str(start);
     if (!st || !/[?0-9]$/.test(st)) return [];
     const s0 = splitReference(st), prefix = s0.prefix, from = atoi(s0.num), changes = [];
+    const sc0 = suffixes ? suffixCtx(suffixes.raw) : null, file = suffixes && suffixes.file;
+    const sc = sc0 ? Object.assign({}, sc0, { sheets: sc0.sheets.map((x) => x.doc !== doc && file && x.file === file ? Object.assign({}, x, { doc }) : x) }) : null;
+    const paths = sc ? sc.sheets.filter((x) => x.doc === doc && !!x.path) : [];
+    if (sc && paths.length) {
+      for (const it of doc.items.values()) {
+        if (it.kind !== "symbol") continue;
+        let node = null;
+        for (const p of paths) {
+          const r = splitReference(baseRefOn(sc, p, it.node));
+          if (r.prefix !== prefix) continue;
+          const num3 = atoi(r.num);
+          if (num3 < from) continue;
+          if (!node) node = deep(it.node);
+          setUserRef(sc, p, node, prefix + String(num3 + by));
+        }
+        if (node) changes.push(modChange(doc, it, node));
+      }
+      return changes;
+    }
     for (const it of doc.items.values()) {
       if (it.kind !== "symbol") continue;
       const rf = refField(it.node);
@@ -2954,10 +5284,18 @@
     const p = kids(it.node, "property").find((q) => str(q[1]) === name);
     const cur = p ? str(p[2]) : "";
     if (p && root.KDialogs && root.KDialogs.schFieldDialog && root.KDialogs.schFieldDialog(ctx, it, name, cr ? { carried: (n) => cr.write(n) } : void 0)) return true;
-    promptImpl(title, cur, S.cursorClient, (text) => {
+    const sc = name === "Reference" ? suffixCtxOf(ctx) : null, sheet = sc ? suffixSheetOf(sc, ctx.doc) : null;
+    promptImpl(title, sc && sheet ? baseRefOn(sc, sheet, it.node) : cur, S.cursorClient, (text) => {
       if (text === null || text === void 0 || text === cur) return;
       const node = deep(it.node);
-      if (name === "Reference") setReference(node, text);
+      if (sc && sheet) {
+        const r = baseRefFromUser(sc, sheet, it.node, text);
+        if (r.error) {
+          if (ctx.toast) ctx.toast(r.error, 4e3);
+          return;
+        }
+        setUserRef(sc, sheet, node, r.base);
+      } else if (name === "Reference") setReference(node, text);
       else {
         let q = kids(node, "property").find((z) => str(z[1]) === name);
         if (!q) {
@@ -4942,7 +7280,7 @@ Link '${target}' to this file?`)) return null;
     return (v > 0 ? v : 0.9144) / 2;
   }
   var NO_CONNECT_HALF = (0.1524 + 1.2192) / 2;
-  var inflate = (b, m) => [b[0] - m, b[1] - m, b[2] + m, b[3] + m];
+  var inflate2 = (b, m) => [b[0] - m, b[1] - m, b[2] + m, b[3] + m];
   var contains = (b, p) => p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3];
   var boxIn = (outer, b) => b[0] >= outer[0] && b[2] <= outer[2] && b[1] >= outer[1] && b[3] <= outer[3];
   var boxMeets = (a, b) => a[2] >= b[0] && a[0] <= b[2] && a[3] >= b[1] && a[1] <= b[3];
@@ -5039,11 +7377,11 @@ Link '${target}' to this file?`)) return null;
   }
   function candHit(doc, c, p, acc) {
     const it = c.item;
-    if (c.kind === "pin" && it.kind === "sheet") return contains(inflate(sheetPinBox(it, c.pin), acc), p);
-    if (c.kind === "pin") return contains(inflate(pinBox(it, c.pin), Math.max(acc, PIN_SYMBOL_SIZE / 4)), p);
-    if (c.kind === "field") return contains(inflate(quadBox(c.quad), acc), p);
-    if (it.kind === "symbol") return contains(inflate(bodyBox(doc, it), acc / 2), p);
-    if (it.kind === "sheet") return contains(inflate(sheetBody(it), acc), p);
+    if (c.kind === "pin" && it.kind === "sheet") return contains(inflate2(sheetPinBox(it, c.pin), acc), p);
+    if (c.kind === "pin") return contains(inflate2(pinBox(it, c.pin), Math.max(acc, PIN_SYMBOL_SIZE / 4)), p);
+    if (c.kind === "field") return contains(inflate2(quadBox(c.quad), acc), p);
+    if (it.kind === "symbol") return contains(inflate2(bodyBox(doc, it), acc / 2), p);
+    if (it.kind === "sheet") return contains(inflate2(sheetBody(it), acc), p);
     if (isSchLine(it)) {
       const q = ptsOf(it.node);
       return segDist(p, q[0], q[1]) <= acc + penOf(it) / 2;
@@ -5061,8 +7399,8 @@ Link '${target}' to this file?`)) return null;
       const [a, b] = busEntryEnds(it);
       return segDist(p, a, b) <= (acc === 0 ? penOf(it) / 2 + 4e-4 : acc);
     }
-    if (LABELS.has(it.kind) || it.kind === "text") return contains(inflate(textBox(it), acc), p);
-    if (BOXED.has(it.kind)) return !!it.bbox && contains(inflate(it.bbox, acc), p);
+    if (LABELS.has(it.kind) || it.kind === "text") return contains(inflate2(textBox(it), acc), p);
+    if (BOXED.has(it.kind)) return !!it.bbox && contains(inflate2(it.bbox, acc), p);
     return false;
   }
   function candInBox(doc, c, box, contained) {
@@ -5560,7 +7898,7 @@ Link '${target}' to this file?`)) return null;
   var NM = 1e6;
   var toNm = (p) => [Math.round(p[0] * NM), Math.round(p[1] * NM)];
   var fromNm = (p) => [p[0] / NM, p[1] / NM];
-  var kiRound = (v) => v < 0 ? -Math.round(-v) : Math.round(v);
+  var kiRound2 = (v) => v < 0 ? -Math.round(-v) : Math.round(v);
   var crossZ = (ax, ay, bx, by) => ax * by - ay * bx;
   var NO_ARC = Object.freeze({ valid: false });
   function arcOnChord(s, e, side, centerT, radius) {
@@ -5570,7 +7908,7 @@ Link '${target}' to this file?`)) return null;
     const height = side * centerT <= 0 ? half * half / (radius + off) : radius + off;
     const mx = m[0] + n[0] * side * height, my = m[1] + n[1] * side * height;
     if (!isFinite(mx) || !isFinite(my) || Math.abs(mx) > 2147483646 || Math.abs(my) > 2147483646) return NO_ARC;
-    const mid = [kiRound(mx), kiRound(my)];
+    const mid = [kiRound2(mx), kiRound2(my)];
     if (crossZ(cx, cy, mid[0] - s[0], mid[1] - s[1]) === 0) return NO_ARC;
     return { valid: true, start: s.slice(), end: e.slice(), mid, center: [m[0] + n[0] * centerT, m[1] + n[1] * centerT], radius };
   }
@@ -5579,7 +7917,7 @@ Link '${target}' to this file?`)) return null;
     if (len2 <= 0) return cur.slice();
     const n = [-cy / len2, cx / len2], m = [(s[0] + e[0]) * 0.5, (s[1] + e[1]) * 0.5];
     const t = (cur[0] - m[0]) * n[0] + (cur[1] - m[1]) * n[1];
-    return [kiRound(m[0] + n[0] * t), kiRound(m[1] + n[1] * t)];
+    return [kiRound2(m[0] + n[0] * t), kiRound2(m[1] + n[1] * t)];
   }
   function arcThroughPoints(s, on, e) {
     const b = [e[0] - s[0], e[1] - s[1]], c = [on[0] - s[0], on[1] - s[1]], d = crossZ(b[0], b[1], c[0], c[1]);
@@ -5721,7 +8059,7 @@ Link '${target}' to this file?`)) return null;
       this.sol = sol;
       const c = sol.center;
       const s = [sol.start[0] - c[0], sol.start[1] - c[1]], e = [sol.end[0] - c[0], sol.end[1] - c[1]], m = [sol.mid[0] - c[0], sol.mid[1] - c[1]];
-      this.origin = [kiRound(c[0]), kiRound(c[1])];
+      this.origin = [kiRound2(c[0]), kiRound2(c[1])];
       this.radius = sol.radius;
       this.sa = norm360(degOf(s));
       this.ea = norm360(degOf(e));
@@ -5741,7 +8079,7 @@ Link '${target}' to this file?`)) return null;
       this.dir = v;
       if (this.snap) {
         const d = Math.SQRT1_2, units = [[1, 0], [d, d], [0, 1], [-d, d], [-1, 0], [-d, -d], [0, -1], [d, -d]];
-        const oct = (kiRound(degOf(v) / 45) % 8 + 8) % 8;
+        const oct = (kiRound2(degOf(v) / 45) % 8 + 8) % 8;
         this.dir = [units[oct][0] * len2, units[oct][1] * len2];
       }
       return true;
@@ -5796,12 +8134,12 @@ Link '${target}' to this file?`)) return null;
     startRadiusEnd() {
       if (this.usesExact()) return this.pts[0];
       const r = Math.trunc(this.radius), a = this.sa * Math.PI / 180;
-      return [this.origin[0] + kiRound(r * Math.cos(a)), this.origin[1] + kiRound(r * Math.sin(a))];
+      return [this.origin[0] + kiRound2(r * Math.cos(a)), this.origin[1] + kiRound2(r * Math.sin(a))];
     }
     endRadiusEnd() {
       if (this.usesExact()) return this.sol.valid ? this.sol.end : this.pts[0];
       const r = Math.trunc(this.radius), a = this.ea * Math.PI / 180;
-      return [this.origin[0] + kiRound(r * Math.cos(a)), this.origin[1] + kiRound(r * Math.sin(a))];
+      return [this.origin[0] + kiRound2(r * Math.cos(a)), this.origin[1] + kiRound2(r * Math.sin(a))];
     }
     startAngle() {
       let a = this.sa;
@@ -5824,7 +8162,7 @@ Link '${target}' to this file?`)) return null;
       const v = [p[0] - this.origin[0], p[1] - this.origin[1]];
       this.radius = Math.hypot(v[0], v[1]);
       this.sa = degOf(v);
-      if (this.snap) this.sa = 45 * kiRound(this.sa / 45);
+      if (this.snap) this.sa = 45 * kiRound2(this.sa / 45);
       while (this.sa < 0) this.sa += 360;
       this.ea = this.sa;
       return this.radius !== 0;
@@ -5832,7 +8170,7 @@ Link '${target}' to this file?`)) return null;
     setEnd(p) {
       const v = [p[0] - this.origin[0], p[1] - this.origin[1]];
       this.ea = degOf(v);
-      if (this.snap) this.ea = 45 * kiRound(this.ea / 45);
+      if (this.snap) this.ea = 45 * kiRound2(this.ea / 45);
       while (this.ea < 0) this.ea += 360;
       if (!this.locked) {
         let ccw = this.ea - this.sa;
@@ -5854,7 +8192,7 @@ Link '${target}' to this file?`)) return null;
       let sweep = Math.atan2(e[1] - c[1], e[0] - c[0]) - a0;
       while (sweep <= 0) sweep += 2 * Math.PI;
       const r = Math.hypot(s[0] - c[0], s[1] - c[1]), am = a0 + sweep / 2;
-      return { start: s, mid: [kiRound(c[0] + r * Math.cos(am)), kiRound(c[1] + r * Math.sin(am))], end: e, center: c };
+      return { start: s, mid: [kiRound2(c[0] + r * Math.cos(am)), kiRound2(c[1] + r * Math.sin(am))], end: e, center: c };
     }
   };
   var canvasCurves = () => globalThis.KiCadCanvas;
@@ -5891,7 +8229,7 @@ Link '${target}' to this file?`)) return null;
     let t = L ? ((p[0] - a[0]) * v[0] + (p[1] - a[1]) * v[1]) / L : 0;
     t = Math.max(0, Math.min(1, t));
     const q = [a[0] + v[0] * t, a[1] + v[1] * t];
-    return { d: Math.hypot(p[0] - q[0], p[1] - q[1]), q: [kiRound(q[0]), kiRound(q[1])] };
+    return { d: Math.hypot(p[0] - q[0], p[1] - q[1]), q: [kiRound2(q[0]), kiRound2(q[1])] };
   }
   function polylineSeedAt(vs, closed, p, tol) {
     const n = vs.length;
@@ -5948,7 +8286,7 @@ Link '${target}' to this file?`)) return null;
       const a = geo.arcFrom3(fromNm(sh.start), fromNm(sh.mid), fromNm(sh.end));
       if (!a) return null;
       const c = sh.center, ang = Math.atan2(p[1] - c[1], p[0] - c[0]), r = a.r * NM;
-      const q = [kiRound(c[0] + r * Math.cos(ang)), kiRound(c[1] + r * Math.sin(ang))];
+      const q = [kiRound2(c[0] + r * Math.cos(ang)), kiRound2(c[1] + r * Math.sin(ang))];
       if (!arcContainsAngle(a, ang) || Math.hypot(q[0] - p[0], q[1] - p[1]) > tol) return null;
       const ax = unitOf(perp(vsubA(q, c)));
       return ax ? { start: q, dir: ax, axis: true } : null;
@@ -6375,7 +8713,7 @@ Link '${target}' to this file?`)) return null;
     return null;
   }
   function findSchTangentSeed(ctx, pos) {
-    const tol = kiRound(5 / Math.max(1e-9, ctx.pxPerMm || 1) * NM);
+    const tol = kiRound2(5 / Math.max(1e-9, ctx.pxPerMm || 1) * NM);
     for (const it of ctx.doc.items.values()) {
       if (it.kind !== "arc" && it.kind !== "bezier" && it.kind !== "polyline") continue;
       const b = it.bbox, t = tol / NM;
@@ -6650,7 +8988,7 @@ Link '${target}' to this file?`)) return null;
   // web/domains/pcb/tools/sch-tools/point-edit.ts
   var PE_MIN = 0.0254;
   var RECT_LINES = [[0, 1], [1, 3], [3, 2], [2, 0]];
-  function boxOf(item) {
+  function boxOf2(item) {
     const n = item.node;
     if (item.kind === "rectangle") {
       const s = kid(n, "start"), e = kid(n, "end");
@@ -6693,7 +9031,7 @@ Link '${target}' to this file?`)) return null;
       return pts.length ? { pts, lines: pts.length > 1 ? polyLines(pts.length) : [], guides: [] } : null;
     }
     if (k === "rectangle" || k === "text_box" || k === "sheet") {
-      const [x0, y0, x1, y1] = boxOf(item);
+      const [x0, y0, x1, y1] = boxOf2(item);
       const pts = [[x0, y0], [x1, y0], [x0, y1], [x1, y1]];
       if (k !== "sheet") pts.push([(x0 + x1) / 2, (y0 + y1) / 2]);
       if (k === "rectangle") {
@@ -7175,7 +9513,7 @@ Link '${target}' to this file?`)) return null;
         kk[2] = r4(q[1]);
       }
     } else if (k === "rectangle" && idx === 5 && ep.pts.length === 6) {
-      const r = r4(rectRadiusFor(boxOf({ kind: k, node: pe.orig }), p[0]));
+      const r = r4(rectRadiusFor(boxOf2({ kind: k, node: pe.orig }), p[0]));
       const rk = kid(n, "radius"), at = rk ? n.indexOf(rk) : -1;
       if (r > 0) {
         if (rk) rk[1] = r;
@@ -7183,7 +9521,7 @@ Link '${target}' to this file?`)) return null;
       } else if (at >= 0) n.splice(at, 1);
     } else if (k === "rectangle" || k === "text_box") {
       const mn = k === "text_box" ? textBoxMinSize(pe.orig) : [0, 0];
-      const b = editBox(boxOf({ kind: k, node: pe.orig }), ep, idx, p, Math.max(PE_MIN, mn[0]), Math.max(PE_MIN, mn[1])).map(r4);
+      const b = editBox(boxOf2({ kind: k, node: pe.orig }), ep, idx, p, Math.max(PE_MIN, mn[0]), Math.max(PE_MIN, mn[1])).map(r4);
       if (k === "rectangle") {
         const s = kid(n, "start"), e = kid(n, "end");
         s[1] = b[0];
@@ -7198,7 +9536,7 @@ Link '${target}' to this file?`)) return null;
         sz[2] = r4(b[3] - b[1]);
       }
     } else if (k === "sheet") {
-      const ob = boxOf({ kind: k, node: pe.orig }), np = ep.pts.length, edge = idx - np;
+      const ob = boxOf2({ kind: k, node: pe.orig }), np = ep.pts.length, edge = idx - np;
       const fromRight = idx === 1 || idx === 3 || edge === 1, fromBottom = idx === 2 || idx === 3 || edge === 2;
       const [mw, mh] = sheetMin(pe.orig, ob, fromRight, fromBottom);
       const b = editBox(ob, ep, idx, p, mw, mh).map(r4);
@@ -7737,11 +10075,11 @@ Link '${target}' to this file?`)) return null;
     const c = [v >> 16 & 255, v >> 8 & 255, v & 255].map((x) => Math.round(x * (1 - f) + 255 * f));
     return `rgb(${c[0]},${c[1]},${c[2]})`;
   };
-  var MIL = 0.0254;
-  var DANGLING_SYMBOL_SIZE = 12 * MIL;
-  var TARGET_PIN_RADIUS = 15 * MIL;
-  var DEFAULT_PEN = 6 * MIL;
-  var TARGET_BUSENTRY_RADIUS = 12 * MIL;
+  var MIL2 = 0.0254;
+  var DANGLING_SYMBOL_SIZE = 12 * MIL2;
+  var TARGET_PIN_RADIUS2 = 15 * MIL2;
+  var DEFAULT_PEN = 6 * MIL2;
+  var TARGET_BUSENTRY_RADIUS = 12 * MIL2;
   var danglingCache = { doc: null, gen: -1, list: [] };
   S.docGen = 0;
   function danglingList(doc) {
@@ -7765,7 +10103,7 @@ Link '${target}' to this file?`)) return null;
       c.strokeStyle = col;
       if (d.what === "pin") {
         c.beginPath();
-        c.arc(d.p[0], d.p[1], TARGET_PIN_RADIUS, 0, Math.PI * 2);
+        c.arc(d.p[0], d.p[1], TARGET_PIN_RADIUS2, 0, Math.PI * 2);
         c.stroke();
         continue;
       }
@@ -8082,385 +10420,6 @@ Link '${target}' to this file?`)) return null;
     }
   }
 
-  // web/shared/units.ts
-  var UNITS = {
-    mm: { name: "mm", f: (v) => v, d: 4 },
-    in: { name: "in", f: (v) => v / 25.4, d: 4 },
-    mil: { name: "mils", f: (v) => v / 0.0254, d: 2 }
-  };
-  function angleText(deg2) {
-    return `${deg2.toFixed(1)}\xB0`;
-  }
-  var UNIT_TEXT = { mm: " mm", mil: " mils", in: " in" };
-  function cExp(v, n) {
-    const [m, e] = v.toExponential(n).split("e");
-    const x = Number(e);
-    return `${m}e${x < 0 ? "-" : "+"}${String(Math.abs(x)).padStart(2, "0")}`;
-  }
-  function messageText(mm, units, scale, label = true) {
-    const u = UNITS[units] ? units : "mm", short = scale === "sch", iu = short ? 1e4 : 1e6;
-    const v = UNITS[u].f(Math.round(mm * iu) / iu);
-    const digits = u === "mm" ? short ? 3 : 4 : u === "mil" ? short ? 0 : 2 : short ? 3 : 4;
-    let text = v.toFixed(digits);
-    if (v !== 0 && !/[1-9]/.test(text)) text = cExp(v, 3);
-    if (short && u === "mm") {
-      const n = text.length;
-      if (n > 4 && text[n - 4] === "." && text[n - 1] === "0") text = text.slice(0, -1);
-    }
-    return label ? text + UNIT_TEXT[u] : text;
-  }
-
-  // web/domains/pcb/canvas/stroke-font.ts
-  var STROKE_FONT_SCALE = 1 / 21;
-  var ITALIC_TILT = 1 / 8;
-  var R = "R".charCodeAt(0);
-  var QUESTION = "?".codePointAt(0);
-
-  // web/domains/pcb/canvas/text.ts
-  var TEXT_INTERLINE = 1.68 * 0.9583;
-  var INTERLINE = 1.68 * 0.9583;
-  var MIL2 = 0.0254;
-  var UNESCAPE = { dblquote: '"', quote: "'", lt: "<", gt: ">", backslash: "\\", slash: "/", bar: "|", comma: ",", colon: ":", space: " ", dollar: "$", tab: "	", return: "\n", brace: "{" };
-  function unescapeText(src) {
-    if (!src || src.length <= 2) return src;
-    let out = "", prev = "", ch = "";
-    for (let i = 0; i < src.length; ++i) {
-      prev = ch;
-      ch = src[i];
-      if (ch !== "{") {
-        out += ch;
-        continue;
-      }
-      let token = "", depth = 1, terminated = false;
-      for (i = i + 1; i < src.length; ++i) {
-        ch = src[i];
-        if (ch === "{") depth++;
-        else if (ch === "}") depth--;
-        if (depth <= 0) {
-          terminated = true;
-          break;
-        }
-        token += ch;
-      }
-      if (!terminated) out += "{" + unescapeText(token);
-      else if (prev === "$" || prev === "~" || prev === "^" || prev === "_") out += "{" + unescapeText(token) + "}";
-      else if (Object.prototype.hasOwnProperty.call(UNESCAPE, token)) out += UNESCAPE[token];
-      else out += "{" + unescapeText(token) + "}";
-    }
-    return out;
-  }
-
-  // web/domains/pcb/canvas/plot-params.ts
-  var FIXED = {
-    "F.Cu": 0,
-    "B.Cu": 2,
-    "F.Mask": 1,
-    "B.Mask": 3,
-    "F.SilkS": 5,
-    "B.SilkS": 7,
-    "F.Adhes": 9,
-    "B.Adhes": 11,
-    "F.Paste": 13,
-    "B.Paste": 15,
-    "Dwgs.User": 17,
-    "Cmts.User": 19,
-    "Eco1.User": 21,
-    "Eco2.User": 23,
-    "Edge.Cuts": 25,
-    "Margin": 27,
-    "B.CrtYd": 29,
-    "F.CrtYd": 31,
-    "B.Fab": 33,
-    "F.Fab": 35,
-    "Rescue": 37
-  };
-  var BY_ID = /* @__PURE__ */ new Map();
-  for (const [k, v] of Object.entries(FIXED)) BY_ID.set(v, k);
-  var LEGACY_FIXED = {
-    "F.Cu": 0,
-    "B.Cu": 31,
-    "B.Adhes": 32,
-    "F.Adhes": 33,
-    "B.Paste": 34,
-    "F.Paste": 35,
-    "B.SilkS": 36,
-    "F.SilkS": 37,
-    "B.Mask": 38,
-    "F.Mask": 39,
-    "Dwgs.User": 40,
-    "Cmts.User": 41,
-    "Eco1.User": 42,
-    "Eco2.User": 43,
-    "Edge.Cuts": 44,
-    "Margin": 45,
-    "B.CrtYd": 46,
-    "F.CrtYd": 47,
-    "B.Fab": 48,
-    "F.Fab": 49,
-    "Rescue": 59
-  };
-  var LEGACY_BY_ID = /* @__PURE__ */ new Map();
-  for (const [k, v] of Object.entries(LEGACY_FIXED)) LEGACY_BY_ID.set(v, k);
-  var CL = {
-    RED: "#840000",
-    YELLOW: "#C2C200",
-    LIGHTMAGENTA: "#C200C2",
-    LIGHTRED: "#C20000",
-    CYAN: "#008484",
-    GREEN: "#008400",
-    BLUE: "#000084",
-    DARKGRAY: "#848484",
-    MAGENTA: "#840084",
-    LIGHTGRAY: "#C2C2C2",
-    BROWN: "#848400",
-    LIGHTCYAN: "#00C2C2",
-    DARKRED: "#480000"
-  };
-  var CLASSIC_INNER = [CL.YELLOW, CL.LIGHTMAGENTA, CL.LIGHTRED, CL.CYAN, CL.GREEN, CL.BLUE, CL.DARKGRAY, CL.MAGENTA, CL.LIGHTGRAY, CL.MAGENTA, CL.RED, CL.BROWN, CL.LIGHTGRAY, CL.BLUE, CL.GREEN, CL.RED];
-  var CLASSIC_FIXED = {
-    "F.Cu": CL.RED,
-    "B.Cu": CL.GREEN,
-    "B.Adhes": CL.BLUE,
-    "F.Adhes": CL.MAGENTA,
-    "B.Paste": CL.LIGHTCYAN,
-    "F.Paste": CL.RED,
-    "B.SilkS": CL.MAGENTA,
-    "F.SilkS": CL.CYAN,
-    "B.Mask": CL.BROWN,
-    "F.Mask": CL.MAGENTA,
-    "Dwgs.User": CL.LIGHTGRAY,
-    "Cmts.User": CL.BLUE,
-    "Eco1.User": CL.GREEN,
-    "Eco2.User": CL.YELLOW,
-    "Edge.Cuts": CL.YELLOW,
-    "Margin": CL.LIGHTMAGENTA,
-    "B.CrtYd": CL.DARKGRAY,
-    "F.CrtYd": CL.LIGHTGRAY,
-    "B.Fab": CL.BLUE,
-    "F.Fab": CL.DARKGRAY
-  };
-  var CLASSIC_DRAWINGSHEET = CL.DARKRED;
-
-  // web/domains/pcb/canvas/colors.ts
-  var IS_MAC_PLATFORM = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
-  var SCH_DEFAULT = Object.freeze({
-    bg: "#F5F4EF",
-    grid: "#B5B5B5",
-    gridAxes: "#000084",
-    wire: "#009600",
-    bus: "#000084",
-    junction: "#009600",
-    outline: "#840000",
-    body: "#FFFFC2",
-    pin: "#840000",
-    pinName: "#006464",
-    pinNum: "#A90000",
-    ref: "#006464",
-    value: "#006464",
-    field: "#840084",
-    label: "#0F0F0F",
-    glabel: "#840000",
-    hlabel: "#725600",
-    sheet: "#840000",
-    sheetName: "#006464",
-    sheetFile: "#725600",
-    sheetFields: "#840084",
-    sheetLabel: "#006464",
-    noconnect: "#000084",
-    notes: "#0000C2",
-    busEntry: "#009600",
-    dnp: "rgba(220,9,13,0.85)",
-    netclass: "#484848",
-    ruleArea: "#FF0000",
-    excluded: "rgba(194,194,194,0.95)",
-    hidden: "#C2C2C2",
-    privateNotes: "#4848FF",
-    frame: "#840000",
-    // LAYER_SCHEMATIC_DRAWINGSHEET ("schematic.worksheet") is `frame`; the page outline is a separate,
-    // lighter layer — DS_PAINTER::DrawBorder paints it in LAYER_SCHEMATIC_PAGE_LIMITS, not the sheet ink
-    // (common/settings/builtin_color_themes.h:78-79, eeschema/sch_view.cpp:137-138).
-    pageLimits: "#B5B5B5",
-    brightened: "#FF00FF",
-    // LAYER_BRIGHTENED: net highlighting / selection disambiguation
-    // LAYER_SELECTION_SHADOWS: KiCad Default is (.3, .7, 1.0, .6) on macOS, which "looks better with a lighter
-    // shadow", (.4, .7, 1.0, .8) elsewhere (builtin_color_themes.h)
-    selection: IS_MAC_PLATFORM ? "rgba(77,179,255,0.6)" : "rgba(102,179,255,0.8)",
-    hovered: "#0000FF",
-    // LAYER_HOVERED: hypertext under the cursor (builtin_color_themes.h:33)
-    // LAYER_BUS_JUNCTION, LAYER_SHEET_BACKGROUND (alpha 0: not drawn), LAYER_SCHEMATIC_ANCHOR, LAYER_ERC_ERR / WARN / EXCLUSION
-    busJunction: "#000084",
-    sheetBg: "rgba(255,255,255,0)",
-    anchor: "#0000FF",
-    ercErr: "rgba(230,9,13,0.8)",
-    ercWarn: "rgba(209,146,0,0.8)",
-    ercExcl: "rgba(194,194,194,0.8)"
-  });
-  var SCH = Object.assign({}, SCH_DEFAULT);
-  var PCB_COLORS = {
-    "F.Cu": "#C83434",
-    "B.Cu": "#4D7FC4",
-    "In1.Cu": "#7FC87F",
-    "In2.Cu": "#CE7D2C",
-    "In3.Cu": "#4FCBCB",
-    "In4.Cu": "#DB628B",
-    "In5.Cu": "#A7A5C6",
-    "In6.Cu": "#28CCD9",
-    "In7.Cu": "#E8B2A7",
-    "In8.Cu": "#F2EDA1",
-    "In9.Cu": "#8DCB81",
-    "In10.Cu": "#ED7C33",
-    "In11.Cu": "#5BC3EB",
-    "In12.Cu": "#F76F8E",
-    "In13.Cu": "#A7A5C6",
-    "In14.Cu": "#28CCD9",
-    "In15.Cu": "#E8B2A7",
-    "In16.Cu": "#F2EDA1",
-    "In17.Cu": "#ED7C33",
-    "In18.Cu": "#5BC3EB",
-    "In19.Cu": "#F76F8E",
-    "In20.Cu": "#A7A5C6",
-    "In21.Cu": "#28CCD9",
-    "In22.Cu": "#E8B2A7",
-    "In23.Cu": "#F2EDA1",
-    "In24.Cu": "#ED7C33",
-    "In25.Cu": "#5BC3EB",
-    "In26.Cu": "#F76F8E",
-    "In27.Cu": "#A7A5C6",
-    "In28.Cu": "#28CCD9",
-    "In29.Cu": "#E8B2A7",
-    "In30.Cu": "#F2EDA1",
-    "F.SilkS": "#F2EDA1",
-    "B.SilkS": "#E8B2A7",
-    "F.Mask": "rgba(216,100,255,0.4)",
-    "B.Mask": "rgba(2,255,238,0.4)",
-    "F.Paste": "rgba(180,160,154,0.9)",
-    "B.Paste": "rgba(0,194,194,0.9)",
-    "F.Adhes": "#840084",
-    "B.Adhes": "#000084",
-    "Edge.Cuts": "#D0D2CD",
-    "Margin": "#FF26E2",
-    "F.CrtYd": "#FF26E2",
-    "B.CrtYd": "#26E9FF",
-    "F.Fab": "#AFAFAF",
-    "B.Fab": "#585D84",
-    "Dwgs.User": "#C2C2C2",
-    "Cmts.User": "#5994DC",
-    "Eco1.User": "#B4DBD2",
-    "Eco2.User": "#D8C852"
-  };
-  var USER_COLORS = ["#C2C2C2", "#5994DC", "#B4DBD2", "#D8C852"];
-  function pcbColor(layer) {
-    if (PCB_COLORS[layer]) return PCB_COLORS[layer];
-    const u = /^User\.(\d+)$/.exec(layer);
-    if (u) return +u[1] === 9 ? "#E8B2A7" : USER_COLORS[(+u[1] - 1) % 4];
-    if (/\.Cu$/.test(layer)) return "#7FC87F";
-    return "#C2C2C2";
-  }
-  var BOARD_GAL_DEFAULT = Object.freeze({
-    anchor: "#FF26E2",
-    locked_shadow: "rgba(255,38,226,0.5)",
-    conflicts_shadow: "rgba(255,0,5,0.5)",
-    constraint_shadow: "rgba(80,160,240,0.5)",
-    constraint_under: "rgba(204,107,5,0.9)",
-    constraint_well: "rgba(46,184,77,0.9)",
-    constraint_over: "rgba(235,46,46,0.9)",
-    aux_items: "#FFFFFF",
-    background: "#001023",
-    cursor: "#FFFFFF",
-    drc_error: "rgba(215,91,107,0.8)",
-    drc_warning: "rgba(255,208,66,0.8)",
-    drc_exclusion: "rgba(255,255,255,0.8)",
-    drc_highlighted: "#FF00FF",
-    grid: "#848484",
-    grid_axes: "#C2C2C2",
-    pad_plated_hole: "#C2C200",
-    plated_hole: "#1AC4D2",
-    ratsnest: "rgba(0,248,255,0.35)",
-    select_overlay: "rgba(0,0,0,0)",
-    via_hole: "#E3B72E",
-    via_hole_walls: "#ECECEC",
-    worksheet: "#C872AB",
-    page_limits: "#848484",
-    outline_area: "rgba(100,100,100,0.35)",
-    track_net_names: "rgba(255,255,255,0.7)",
-    pad_net_names: "rgba(255,255,255,0.9)",
-    via_net_names: "rgba(50,50,50,0.9)",
-    points: "#FF26E2",
-    subgrids: "#C2C200",
-    via_stitching: "#4DCCB2"
-  });
-  var BOARD_THEME_LAYERS = Object.freeze([
-    "F.Cu",
-    ...Array.from({ length: 30 }, (_, i) => `In${i + 1}.Cu`),
-    "B.Cu",
-    "B.Adhes",
-    "F.Adhes",
-    "B.Paste",
-    "F.Paste",
-    "B.SilkS",
-    "F.SilkS",
-    "B.Mask",
-    "F.Mask",
-    "Dwgs.User",
-    "Cmts.User",
-    "Eco1.User",
-    "Eco2.User",
-    "Edge.Cuts",
-    "Margin",
-    "B.CrtYd",
-    "F.CrtYd",
-    "B.Fab",
-    "F.Fab",
-    ...Array.from({ length: 45 }, (_, i) => `User.${i + 1}`)
-  ]);
-  var BOARD = { ...BOARD_GAL_DEFAULT };
-  var PCB_LIVE = {};
-  for (const l of BOARD_THEME_LAYERS) PCB_LIVE[l] = pcbColor(l);
-  var PCB_ORDER = ["B.Fab", "B.CrtYd", "B.Adhes", "B.Paste", "B.SilkS", "B.Mask", "B.Cu"];
-  for (let i = 30; i >= 1; i--) PCB_ORDER.push("In" + i + ".Cu");
-  PCB_ORDER.push("F.Fab", "F.CrtYd", "F.Adhes", "F.Paste", "F.SilkS", "F.Mask", "F.Cu", "holes");
-  for (let i = 45; i >= 1; i--) PCB_ORDER.push("User." + i);
-  PCB_ORDER.push("Margin", "Edge.Cuts", "Eco2.User", "Eco1.User", "Cmts.User", "Dwgs.User");
-  var PCB_ZMAP = new Map(PCB_ORDER.map((l, i) => [l, i * 10]));
-
-  // web/domains/pcb/canvas/sexpr.ts
-  var isList2 = Array.isArray;
-  function kid3(node, key) {
-    for (let j = 1; j < node.length; j++) {
-      const c = node[j];
-      if (isList2(c) && c[0] === key) return c;
-    }
-    return null;
-  }
-  function num2(v, d = 0) {
-    if (typeof v === "number") return v;
-    if (v === void 0 || v === null || v === "") return d;
-    const x = Number(v);
-    return isNaN(x) ? d : x;
-  }
-  function ellipseLength(g) {
-    const a = num2((kid3(g, "major_radius") || [])[1], 0), b = num2((kid3(g, "minor_radius") || [])[1], 0);
-    if (!/ellipse_arc$/.test(String(g[0]))) {
-      const h = (a - b) / (a + b), h2 = h * h;
-      return a + b > 0 ? Math.PI * (a + b) * (1 + 3 * h2 / (10 + Math.sqrt(4 - 3 * h2))) : 0;
-    }
-    let t0 = num2((kid3(g, "start_angle") || [])[1], 0) * Math.PI / 180, t1 = num2((kid3(g, "end_angle") || [])[1], 0) * Math.PI / 180;
-    if (t1 - t0 >= 2 * Math.PI || t1 - t0 <= -2 * Math.PI) t1 = t0 + 2 * Math.PI;
-    else if (t1 < t0) t1 += 2 * Math.PI;
-    const f = (t) => {
-      const s = Math.sin(t), c = Math.cos(t);
-      return Math.sqrt(a * a * s * s + b * b * c * c);
-    };
-    const rec = (x0, x1, tol, whole, fa2, fb2, fm2, depth) => {
-      const m = 0.5 * (x0 + x1), lm = 0.5 * (x0 + m), rm = 0.5 * (m + x1), flm = f(lm), frm = f(rm);
-      const left = (m - x0) * (fa2 + 4 * flm + fm2) / 6, right = (x1 - m) * (fm2 + 4 * frm + fb2) / 6, diff = left + right - whole;
-      if (depth <= 0 || Math.abs(diff) < 15 * tol) return left + right + diff / 15;
-      return rec(x0, m, 0.5 * tol, left, fa2, fm2, flm, depth - 1) + rec(m, x1, 0.5 * tol, right, fm2, fb2, frm, depth - 1);
-    };
-    const fa = f(t0), fb = f(t1), fm = f(0.5 * (t0 + t1));
-    return rec(t0, t1, 1e-9, (t1 - t0) * (fa + 4 * fm + fb) / 6, fa, fb, fm, 20);
-  }
-
   // web/domains/pcb/tools/sch-tools/msgpanel.ts
   var yes = (n) => !!n && str(n[1]) !== "no";
   var flag = (node, key) => {
@@ -8477,7 +10436,7 @@ Link '${target}' to this file?`)) return null;
     const e = effects(node);
     return e ? kid(e, "font") : null;
   }
-  function textWidth(node) {
+  function textWidth2(node) {
     const f = font(node), s = f ? kid(f, "size") : null;
     return s ? num(s[2] ?? s[1], 1.27) : 1.27;
   }
@@ -8518,14 +10477,14 @@ Link '${target}' to this file?`)) return null;
     return yes(kid(node, "hide")) || !!e && flag(e, "hide");
   }
   var LINE_STYLES = { solid: "Solid", dash: "Dashed", dot: "Dotted", dash_dot: "Dash-Dot", dash_dot_dot: "Dash-Dot-Dot" };
-  function strokeOf(node) {
+  function strokeOf2(node) {
     const s = kid(node, "stroke");
     if (!s) return { width: 0, type: "default" };
     const w = kid(s, "width"), t = kid(s, "type");
     return { width: w ? num(w[1], 0) : 0, type: t ? str(t[1]) : "default" };
   }
   function strokeRows(node, o, style = true, width = true) {
-    const s = strokeOf(node), out = [];
+    const s = strokeOf2(node), out = [];
     if (style) out.push({ title: "Line Style", value: LINE_STYLES[s.type] || "Default" });
     if (width) out.push({ title: "Line Width", value: len(s.width, o) });
     return out;
@@ -8669,7 +10628,7 @@ Link '${target}' to this file?`)) return null;
       { title: "Visible", value: hidden(f) ? "No" : "Yes" },
       { title: "Font", value: fontName(f) },
       { title: "Style", value: textStyleName(f) },
-      { title: "Text Size", value: len(textWidth(f), o) },
+      { title: "Text Size", value: len(textWidth2(f), o) },
       { title: "H Justification", value: h === "left" ? "Left" : h === "right" ? "Right" : "Center" },
       { title: "V Justification", value: v === "top" ? "Top" : v === "bottom" ? "Bottom" : "Center" }
     ];
@@ -8686,7 +10645,7 @@ Link '${target}' to this file?`)) return null;
     out.push(
       { title: "Font", value: fontName(n) },
       { title: "Style", value: styleName(n) },
-      { title: "Text Size", value: len(textWidth(n), o) },
+      { title: "Text Size", value: len(textWidth2(n), o) },
       { title: "Justification", value: SPIN_JUST[spinOfNode(n)] || "???" }
     );
     out.push(...connectionRows(it, o));
@@ -8699,7 +10658,7 @@ Link '${target}' to this file?`)) return null;
     out.push(
       { title: "Font", value: fontName(n) },
       { title: "Style", value: styleName(n) },
-      { title: "Text Size", value: len(textWidth(n), o) },
+      { title: "Text Size", value: len(textWidth2(n), o) },
       { title: "Justification", value: h === "left" ? "Align left" : h === "right" ? "Align right" : "Align center" }
     );
     return out;
@@ -8707,18 +10666,18 @@ Link '${target}' to this file?`)) return null;
   function textBoxRows(it, o) {
     const n = it.node, out = [{ title: "Text Box", value: ell(str(n[1]), o) }];
     if (flag(n, "exclude_from_sim")) out.push({ title: "Exclude from", value: "Simulation" });
-    const [, , w, h] = boxOf2(n);
+    const [, , w, h] = boxOf3(n);
     out.push(
       { title: "Font", value: fontName(n) },
       { title: "Style", value: styleName(n) },
-      { title: "Text Size", value: len(textWidth(n), o) },
+      { title: "Text Size", value: len(textWidth2(n), o) },
       { title: "Box Width", value: len(Math.abs(w), o) },
       { title: "Box Height", value: len(Math.abs(h), o) },
       ...strokeRows(n, o)
     );
     return out;
   }
-  function boxOf2(n) {
+  function boxOf3(n) {
     const s = kid(n, "start"), e = kid(n, "end");
     if (s && e) return [num(s[1]), num(s[2]), num(e[1]) - num(s[1]), num(e[2]) - num(s[2])];
     const a = atOf(n), sz = kid(n, "size");
@@ -8754,7 +10713,7 @@ Link '${target}' to this file?`)) return null;
         break;
       }
       case "rectangle": {
-        const [, , w, h] = boxOf2(n);
+        const [, , w, h] = boxOf3(n);
         out.push({ title: "Shape", value: "Rectangle" }, { title: "Width", value: len(Math.abs(w), o) }, { title: "Height", value: len(Math.abs(h), o) });
         break;
       }
@@ -8799,7 +10758,7 @@ Link '${target}' to this file?`)) return null;
   }
   function lineRows(it, o) {
     const n = it.node, out = [{ title: "Line Type", value: it.kind === "wire" ? "Wire" : it.kind === "bus" ? "Bus" : "Graphical" }];
-    const st = strokeOf(n);
+    const st = strokeOf2(n);
     if ((it.kind === "wire" || it.kind === "bus") && st.type === "default") out.push({ title: "Line Style", value: "from netclass" });
     else out.push(...strokeRows(n, o, true, false));
     if (it.kind === "wire" || it.kind === "bus") {
@@ -8985,7 +10944,7 @@ Link '${target}' to this file?`)) return null;
         return `${c ? num(c[1], 0) : 0} Column Table`;
       }
       case "rectangle": {
-        const [, , w, h] = boxOf2(n);
+        const [, , w, h] = boxOf3(n);
         return `Rectangle, width ${L(Math.abs(w))} height ${L(Math.abs(h))}`;
       }
       case "circle": {
@@ -9053,7 +11012,7 @@ Link '${target}' to this file?`)) return null;
     } while (u > 0);
     return s;
   }
-  var isDigit = (c) => c >= "0" && c <= "9";
+  var isDigit2 = (c) => c >= "0" && c <= "9";
   var OLD_SCHOOL = /* @__PURE__ */ new Set(["p", "n", "\xB5", "\u03BC", "u", "m", "L", "R", "F", "k", "K", "M", "G", "T"]);
   function applyModifierTakes(t) {
     if (!t.length) return false;
@@ -9065,13 +11024,13 @@ Link '${target}' to this file?`)) return null;
   function splitString(s) {
     if (!s.length) return ["", "", ""];
     let ii = s.length - 1;
-    for (; ii >= 0; ii--) if (isDigit(s[ii])) break;
+    for (; ii >= 0; ii--) if (isDigit2(s[ii])) break;
     if (ii < 0) return [s, "", ""];
     let end = s.slice(ii + 1), infix = "";
     const position = ii + 1;
     for (; ii >= 0; ii--) {
       const c = s[ii];
-      if (isDigit(c)) continue;
+      if (isDigit2(c)) continue;
       if (!infix && (ii > 0 || !end) && OLD_SCHOOL.has(c) && applyModifierTakes(c + end)) {
         infix = c;
         continue;
@@ -9170,6 +11129,32 @@ Link '${target}' to this file?`)) return null;
         mark("undefined_netclass", "error", atOf(it.node), `Netclass ${nc} is not defined`, [it.id]);
       }
     }
+    if (opts.variantSymbol) {
+      for (const it of doc.items.values()) {
+        if (it.kind !== "symbol") continue;
+        const inst = symbolInstance(it.node, opts.path);
+        if (!inst) continue;
+        const overrides = [];
+        for (const v of kids(inst, "variant")) {
+          const o = kid(v, "symbol_override"), nm = kid(v, "name");
+          if (o && nm && !overrides.some((x) => x[0] === str(nm[1]))) overrides.push([str(nm[1]), str(o[1])]);
+        }
+        if (!overrides.length) continue;
+        overrides.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+        const ln = kid(it.node, "lib_name"), library = symbolLibId(it.node);
+        const base = (ln ? K.resolveLib(doc, str(ln[1])) : null) || K.resolveLib(doc, library);
+        for (const [variantName, libId] of overrides) {
+          if (libId === library) continue;
+          const alt = opts.variantSymbol(libId);
+          if (!alt) {
+            mark("variant_symbol_invalid", "error", atOf(it.node), `Variant '${variantName}': symbol '${libId}' not found in libraries`, [it.id]);
+            continue;
+          }
+          if (!base) continue;
+          for (const issue of variantSymbolCompatibility(base, alt)) mark("variant_symbol_incompatible", "warning", atOf(it.node), `Variant '${variantName}', alternate '${libId}': ${issue.detail}`, [it.id]);
+        }
+      }
+    }
     if (opts.textVars !== false) {
       const varRef = /(^|[^\\])\$\{.*\}.*/;
       const report = (item, assertions, p) => {
@@ -9197,15 +11182,62 @@ Link '${target}' to this file?`)) return null;
       return { doc: s.doc, path, page: s.page || i + 1 };
     });
     const refs = [];
+    const rs = insts.every((s) => s.sheets) && sheets.every((sh) => sh) ? hierarchySuffixes(sheets.map((sh, i) => Object.assign(sh, { sheets: insts[i].sheets })), !!insts[0].suffixMode) : null;
     sheets.forEach((sh, i) => {
       if (!sh) return;
       const suffix = insts[i].suffix;
-      for (const r of sheetReferences(sh, null, true)) {
-        if (suffix) r.suffix = suffix;
+      for (const r of sheetReferences(sh, null, true, rs)) {
+        if (!rs && suffix) {
+          r.ref = stripRefSuffix(r.ref, suffix) ?? r.ref;
+          r.suffix = suffix;
+        }
         refs.push(r);
       }
     });
-    return { sheets, refs };
+    return { sheets, refs, rs };
+  }
+  function suffixTests(rs, insts, sheets, mark, on, itemRef2) {
+    const indexOf = (path) => sheets.findIndex((s) => !!s && s.path === path);
+    const parentOf = (path) => path.slice(0, path.lastIndexOf("/"));
+    const lastId = (path) => path.slice(path.lastIndexOf("/") + 1);
+    for (const [path, first] of refSuffixCollisions(rs, rs.mode)) {
+      const pi = indexOf(parentOf(path.path)), fi = indexOf(parentOf(first.path));
+      if (pi < 0) continue;
+      const a = insts[pi].doc.items.get(lastId(path.path)), b = fi >= 0 ? insts[fi].doc.items.get(lastId(first.path)) : void 0;
+      if (!a) continue;
+      mark(pi, "duplicate_sheet_suffix", "error", atOf(a.node), "Reused sheets have the same reference suffix", b ? [a.id, b.id] : [a.id], b ? [on(pi, itemRef2(insts[pi].doc, a)), on(fi, itemRef2(insts[fi].doc, b))] : [on(pi, itemRef2(insts[pi].doc, a))]);
+    }
+    if (!rs.mode) return;
+    const firstPath = /* @__PURE__ */ new Map();
+    const units = (doc, node) => {
+      const lib = K.resolveLib(doc, symbolLibId(node));
+      let n = 1;
+      if (lib) for (const sub of kids(lib, "symbol")) {
+        const m = str(sub[1]).match(/_(\d+)_(\d+)$/);
+        if (m) n = Math.max(n, +m[1]);
+      }
+      return n;
+    };
+    rs.paths.forEach((p) => {
+      const i = indexOf(p.path);
+      if (i < 0) return;
+      const isFirst = !firstPath.has(p.doc);
+      if (isFirst) firstPath.set(p.doc, p.path);
+      const firstUse = firstPath.get(p.doc);
+      for (const it of p.doc.items.values()) {
+        if (it.kind !== "symbol") continue;
+        const inst = instanceOf(it.node, p.path);
+        if (!inst.entry) continue;
+        const base = rs.base(it.id, p.path) || "", firstBase = rs.base(it.id, firstUse) || "";
+        const annotated = (b) => !!b && !b.endsWith("?");
+        const shown = (path, b) => composedRef(rs, it.id, path, b, units(p.doc, it.node), "");
+        let msg = "";
+        if (rs.lacks(it.id, p.path)) msg = `Reference ${base} was saved without the suffix ${rs.suffix(p.path)}`;
+        else if (!isFirst && !rs.split.has(it.id) && !base.startsWith("#") && annotated(base) && annotated(firstBase) && base !== firstBase) msg = `Reference ${shown(p.path, base)} does not share the base of ${shown(firstUse, firstBase)}`;
+        else continue;
+        mark(i, "ref_suffix_mismatch", "warning", atOf(it.node), msg, [it.id], [on(i, itemRef2(p.doc, it))]);
+      }
+    });
   }
   function checkAnnotate(insts) {
     const { refs } = annotationRefs(insts.map((s) => s.items instanceof Map ? { doc: s } : s));
@@ -9219,7 +11251,8 @@ Link '${target}' to this file?`)) return null;
     };
     const on = (i, r) => Object.assign(r, { sheet: i });
     {
-      const { sheets: annSheets, refs } = annotationRefs(insts);
+      const { sheets: annSheets, refs, rs } = annotationRefs(insts);
+      if (rs) suffixTests(rs, insts, annSheets, mark, (i, r) => on(i, r), itemRef2);
       const CODES = { unannotated: "unannotated", extra_units: "extra_units", duplicate_reference: "duplicate_reference", different_unit_value: "unit_value_mismatch" };
       if (refs.length) checkAnnotation(refs, (code, msg, a, b) => {
         const i = annSheets.indexOf(a.sheet), ia = a.item, ib = b && b.item, j = b ? annSheets.indexOf(b.sheet) : -1;
@@ -9472,7 +11505,7 @@ Link '${target}' to this file?`)) return null;
       if (l) l.push(i);
       else islands.set(r, [i]);
     });
-    const uuidOf2 = (v) => v.items[0];
+    const uuidOf3 = (v) => v.items[0];
     const refOf = (v) => {
       if (v.kind === "pin" && v.pin) return pinRef({ item: v.it, p: v.pos, net: "wire", pin: v.pin });
       if (v.kind === "sheet_pin") {
@@ -9492,11 +11525,11 @@ Link '${target}' to this file?`)) return null;
         if (aInB && !bInA) return 1;
       }
       const na = a.label ? a.label.text : "", nb = b.label ? b.label.text : "";
-      return na < nb ? -1 : na > nb ? 1 : uuidOf2(a) < uuidOf2(b) ? -1 : uuidOf2(a) > uuidOf2(b) ? 1 : 0;
+      return na < nb ? -1 : na > nb ? 1 : uuidOf3(a) < uuidOf3(b) ? -1 : uuidOf3(a) > uuidOf3(b) ? 1 : 0;
     };
     const LABELISH = /* @__PURE__ */ new Set(["label", "global_label", "hierarchical_label", "sheet_pin"]);
     for (const members of islands.values()) {
-      const vs = members.map((i) => verts[i]).sort((a, b) => uuidOf2(a) < uuidOf2(b) ? -1 : uuidOf2(a) > uuidOf2(b) ? 1 : 0);
+      const vs = members.map((i) => verts[i]).sort((a, b) => uuidOf3(a) < uuidOf3(b) ? -1 : uuidOf3(a) > uuidOf3(b) ? 1 : 0);
       const hasWire = vs.some((v) => v.kind === "wire"), hasBusLine = vs.some((v) => v.kind === "bus");
       const claims = vs.filter((v) => v.prio > 0).sort(claimCmp);
       const hasBusLabel = claims.some((v) => LABELISH.has(v.kind) && isBusConn(v)), hasSignalLabel = claims.some((v) => LABELISH.has(v.kind) && !isBusConn(v));
@@ -9643,17 +11676,17 @@ Link '${target}' to this file?`)) return null;
   }
 
   // web/shared/components/icon-ids.ts
-  var G = globalThis;
+  var G2 = globalThis;
   var REF = /\b(k-[A-Za-z0-9_]+-[ld]-r\d+)\b/g;
   function uniqueIconIds(markup) {
     if (markup.indexOf("-r") < 0 || !REF.test(markup)) return markup;
     REF.lastIndex = 0;
-    const n = (G.__kcIconIdSeq = (G.__kcIconIdSeq || 0) + 1).toString(36);
+    const n = (G2.__kcIconIdSeq = (G2.__kcIconIdSeq || 0) + 1).toString(36);
     return markup.replace(REF, (id) => `${id}-u${n}`);
   }
 
   // web/shared/components/kicon-dom.ts
-  var G2 = () => typeof window === "undefined" ? {} : window;
+  var G3 = () => typeof window === "undefined" ? {} : window;
   var NS = "http://www.w3.org/2000/svg";
   var CSS2 = `
 .kic{flex:none;vertical-align:middle}
@@ -9721,14 +11754,14 @@ Link '${target}' to this file?`)) return null;
     if (el2.dataset.want === name && el2.dataset.icon === name) return;
     el2.dataset.want = name;
     el2.dataset.icon = name;
-    const g = G2(), ic = g.KiCadIconFor ? g.KiCadIconFor(name) : void 0;
+    const g = G3(), ic = g.KiCadIconFor ? g.KiCadIconFor(name) : void 0;
     if (ic) {
       fill(el2, ic);
       return;
     }
     if (g.KiCadIconsReady) void g.KiCadIconsReady.then(() => {
       if (el2.dataset.want !== name) return;
-      const i = G2().KiCadIconFor?.(name);
+      const i = G3().KiCadIconFor?.(name);
       if (i) fill(el2, i);
     }).catch(() => void 0);
   }
@@ -11600,6 +13633,188 @@ Link '${target}' to this file?`)) return null;
     return true;
   }
 
+  // web/domains/pcb/tools/sch-tools/erc-library.ts
+  var fieldText2 = (n, name) => {
+    const p = kids(n, "property").find((q) => str(q[1]) === name);
+    return p ? str(p[2]) : "";
+  };
+  var flagOn = (n, key) => {
+    const k = n && kid(n, key);
+    return !!k && (k.length < 2 || str(k[1]) !== "no");
+  };
+  function libPins(lib) {
+    const out = [];
+    for (const sub of kids(lib, "symbol")) {
+      const m = /_(\d+)_(\d+)$/.exec(str(sub[1]));
+      for (const p of kids(sub, "pin")) {
+        const n = kid(p, "number");
+        out.push({ number: n ? str(n[1]) : "", unit: m ? +m[1] : 0, body: m ? +m[2] : 0, node: p });
+      }
+    }
+    return out;
+  }
+  function hasDuplicatePins(lib) {
+    const logical = [];
+    libPins(lib).forEach((p, i) => {
+      const e = expandStacked(p.number);
+      if (!e.valid || !e.pins.length) logical.push({ pin: i, number: p.number, unit: p.unit, body: p.body });
+      else for (const n of e.pins) logical.push({ pin: i, number: n, unit: p.unit, body: p.body });
+    });
+    logical.sort((a, b) => (a.number < b.number ? -1 : a.number > b.number ? 1 : 0) || a.body - b.body || a.unit - b.unit || a.pin - b.pin);
+    for (let i = 1; i < logical.length; i++) {
+      const prev = logical[i - 1], next = logical[i];
+      if (prev.number !== next.number || prev.pin === next.pin) continue;
+      if (prev.body !== 0 && next.body !== 0 && prev.body !== next.body) continue;
+      return true;
+    }
+    return false;
+  }
+  function pinMapFacts(lib) {
+    const pm = kid(lib, "pin_maps"), af = kid(lib, "associated_footprints"), jg = kid(lib, "jumper_pin_groups");
+    return {
+      maps: pm ? kids(pm, "pin_map").map((m) => ({ name: str(m[1]), entries: kids(m, "entry").map((e) => [str(e[1]), str(e[2])]) })) : [],
+      footprints: af ? kids(af, "footprint").map((f) => {
+        const m = kid(f, "map");
+        return { footprint: str(f[1]), map: m ? str(m[1]) : "" };
+      }) : [],
+      jumpers: jg ? jg.slice(1).filter(Array.isArray).map((g) => g.map(str)) : []
+    };
+  }
+  function effectivePad(lib, inst, footprintId, pinNumber, pads) {
+    return effectivePadNumber(lib, pinMapOverrideOf(inst), footprintId, pinNumber, pads);
+  }
+  function libraryTests(insts, lib, itemRef2, pinRef) {
+    const out = insts.map(() => []);
+    const mark = (i, code, p, text, it, ref) => {
+      out[i].push({ code, severity: "warning", x: r4(p[0]), y: r4(p[1]), text, ids: [it.id], items: [Object.assign(ref, { sheet: i })] });
+    };
+    const on = (code) => lib.enabled(code);
+    const fpPads = (id) => {
+      const f = lib.footprints.get(id);
+      if (!f || !f.footprint) return null;
+      const s = /* @__PURE__ */ new Set();
+      for (const p of kids(f.footprint, "pad")) {
+        const n = str(p[1]);
+        if (n) s.add(n);
+      }
+      return s;
+    };
+    if (on("pin_map_stale_pin") || on("pin_map_duplicate_pad") || on("pin_map_bad_pad") || on("pin_map_unmapped_pin")) {
+      const seen = /* @__PURE__ */ new Set();
+      insts.forEach((s, i) => {
+        if (seen.has(s.doc)) return;
+        seen.add(s.doc);
+        for (const it of s.doc.items.values()) {
+          if (it.kind !== "symbol") continue;
+          const ls = K.resolveLib(s.doc, str((kid(it.node, "lib_name") || kid(it.node, "lib_id") || [])[1])) || K.resolveLib(s.doc, symbolLibId(it.node));
+          if (!ls) continue;
+          const f = pinMapFacts(ls);
+          if (!f.maps.length && !f.footprints.length) continue;
+          const pins = new Set(libPins(ls).map((p) => p.number)), at = atOf(it.node);
+          const sharesJumper = (a, b) => f.jumpers.some((g) => g.includes(a) && g.includes(b));
+          for (const map of f.maps) {
+            if (on("pin_map_stale_pin")) {
+              for (const [pin] of map.entries) if (!pins.has(pin)) mark(i, "pin_map_stale_pin", at, `Pin map '${map.name}' references unknown symbol pin '${pin}'`, it, itemRef2(s.doc, it));
+            }
+            if (on("pin_map_duplicate_pad")) {
+              const padToPin = /* @__PURE__ */ new Map();
+              for (const pin of Array.from(pins).sort()) if (!map.entries.some((e) => e[0] === pin)) padToPin.set(pin, pin);
+              for (const [pin, padText] of map.entries) for (const pad of expandStacked(padText).pins) {
+                const had = padToPin.get(pad);
+                if (had === void 0) padToPin.set(pad, pin);
+                else if (had !== pin && !sharesJumper(had, pin)) mark(i, "pin_map_duplicate_pad", at, `Symbol pins '${had}' and '${pin}' both map to pad '${pad}'`, it, itemRef2(s.doc, it));
+              }
+            }
+          }
+          if (on("pin_map_bad_pad")) for (const assoc of f.footprints) {
+            const bound = f.maps.find((m) => m.name === assoc.map);
+            if (!bound) continue;
+            const pads = fpPads(assoc.footprint);
+            if (!pads || !pads.size) continue;
+            for (const [, padText] of bound.entries) for (const pad of expandStacked(padText).pins)
+              if (!pads.has(pad)) mark(i, "pin_map_bad_pad", at, `Pin map '${bound.name}' references pad '${pad}' not present on footprint '${assoc.footprint}'`, it, itemRef2(s.doc, it));
+          }
+        }
+      });
+      if (on("pin_map_unmapped_pin")) insts.forEach((s, i) => {
+        const dangling = danglingEnds(s.doc).filter((d) => d.what === "pin");
+        for (const it of s.doc.items.values()) {
+          if (it.kind !== "symbol") continue;
+          const ls = K.resolveLib(s.doc, str((kid(it.node, "lib_name") || kid(it.node, "lib_id") || [])[1])) || K.resolveLib(s.doc, symbolLibId(it.node));
+          if (!ls || !pinMapFacts(ls).footprints.length) continue;
+          const fp = fieldText2(it.node, "Footprint");
+          if (!fp) continue;
+          const pads = fpPads(fp);
+          if (!pads || !pads.size) continue;
+          for (const q of symbolPins(s.doc, it)) {
+            if (dangling.some((d) => d.item === it && Math.abs(d.p[0] - q.x) < 1e-6 && Math.abs(d.p[1] - q.y) < 1e-6)) continue;
+            if (effectivePad(ls, it.node, fp, q.number, pads).state !== "unmapped") continue;
+            const term = { item: it, p: [q.x, q.y], net: "wire", pin: q };
+            mark(i, "pin_map_unmapped_pin", [q.x, q.y], `Pin '${q.number}' is connected but maps to no pad on footprint '${fp}'`, it, pinRef(term));
+          }
+        }
+      });
+    }
+    if (on("lib_symbol_issues") || on("lib_symbol_mismatch")) {
+      const results = /* @__PURE__ */ new Map();
+      insts.forEach((s, i) => {
+        for (const it of s.doc.items.values()) {
+          if (it.kind !== "symbol") continue;
+          const embedded = K.resolveLib(s.doc, str((kid(it.node, "lib_name") || kid(it.node, "lib_id") || [])[1])) || K.resolveLib(s.doc, symbolLibId(it.node));
+          if (!embedded) continue;
+          const key = insts.findIndex((x) => x.doc === s.doc) + "|" + it.id;
+          let issues = results.get(key);
+          if (!issues) {
+            issues = [];
+            const e = lib.symbols.get(symbolLibId(it.node));
+            if (e) {
+              const libName = unescapeText(e.library), symName = unescapeText(e.name);
+              if (e.state === "missing" || e.state === "disabled") {
+                if (on("lib_symbol_issues")) issues.push({ code: "lib_symbol_issues", text: `The current configuration does not include the symbol library '${libName}'` });
+              } else if (e.state === "not_loaded") {
+                if (on("lib_symbol_issues")) issues.push({ code: "lib_symbol_issues", text: `The symbol library '${libName}' was not found at '${e.uri}'` });
+              } else if (!e.symbol) {
+                if (on("lib_symbol_issues")) issues.push({ code: "lib_symbol_issues", text: `Symbol '${symName}' not found in symbol library '${libName}'` });
+              } else if (on("lib_symbol_mismatch")) {
+                const dup = !flagOn(embedded, "duplicate_pin_numbers_are_jumpers") && hasDuplicatePins(embedded);
+                if (!dup && lib.differs(e.symbol, embedded)) issues.push({ code: "lib_symbol_mismatch", text: `Symbol '${symName}' doesn't match copy in library '${libName}'` });
+              }
+            }
+            results.set(key, issues);
+          }
+          for (const x of issues) mark(i, x.code, atOf(it.node), x.text, it, itemRef2(s.doc, it));
+        }
+      });
+    }
+    if (on("footprint_link_issues")) insts.forEach((s, i) => {
+      for (const it of s.doc.items.values()) {
+        if (it.kind !== "symbol") continue;
+        const fp = fieldText2(it.node, "Footprint");
+        if (!fp) continue;
+        const e = lib.footprints.get(fp);
+        if (!e) continue;
+        const text = e.state === "missing" ? `The current configuration does not include the footprint library '${e.library}'` : e.state === "disabled" ? `The footprint library '${e.library}' is not enabled in the current configuration` : !e.footprint ? `Footprint '${e.name}' not found in library '${e.library}'` : "";
+        if (text) mark(i, "footprint_link_issues", atOf(it.node), text, it, itemRef2(s.doc, it));
+      }
+    });
+    return out;
+  }
+  function libraryWants(docs) {
+    const symbols = /* @__PURE__ */ new Set(), footprints = /* @__PURE__ */ new Set();
+    for (const doc of docs) for (const it of doc.items.values()) {
+      if (it.kind !== "symbol") continue;
+      const id = symbolLibId(it.node);
+      if (id) symbols.add(id);
+      const fp = fieldText2(it.node, "Footprint");
+      if (fp) footprints.add(fp);
+      const ls = K.resolveLib(doc, str((kid(it.node, "lib_name") || kid(it.node, "lib_id") || [])[1])) || K.resolveLib(doc, id);
+      if (ls) {
+        for (const a of pinMapFacts(ls).footprints) if (a.footprint) footprints.add(a.footprint);
+      }
+    }
+    return { symbols, footprints };
+  }
+
   // web/domains/pcb/tools/sch-tools/erc.ts
   var PIN_TYPES2 = ["input", "output", "bidirectional", "tri_state", "passive", "free", "unspecified", "power_in", "power_out", "open_collector", "open_emitter", "no_connect"];
   var PIN_TYPE_TEXT = { input: "Input", output: "Output", bidirectional: "Bidirectional", tri_state: "Tri-state", passive: "Passive", free: "Free", unspecified: "Unspecified", power_in: "Power input", power_out: "Power output", open_collector: "Open collector", open_emitter: "Open emitter", no_connect: "Unconnected" };
@@ -11910,10 +14125,15 @@ Link '${target}' to this file?`)) return null;
         for (const t of pins) if (t.power && danglingPin(t) && !(t === pin && !other)) mark("pin_not_connected", "error", t.p, "Pin not connected", [t.item.id], [pinItemRef(t)]);
       }
     }
+    if (opts.simModelIssues) for (const [id, msg] of opts.simModelIssues) {
+      const it = doc.items.get(id);
+      if (it) mark("simulation_model_issue", "error", atOf(it.node), msg, [id]);
+    }
     sheetTests(doc, nets, mark, itemRef, pinItemRef, opts);
     busTests(doc, mark, itemRef, pinItemRef, { busAliases: busAliasesOf(doc), netOfItem: opts.netOfItem });
     if (opts.crossSheet !== false) {
       markers.push(...hierarchyTests([{ doc, key: "", nets }], itemRef, pinItemRef)[0]);
+      if (opts.libraries) markers.push(...libraryTests([{ doc }], opts.libraries, itemRef, pinItemRef)[0]);
       markers.push(...netTests([{ doc, key: "", info, root: opts.root }], opts)[0]);
     }
     if (opts.root) {
@@ -12477,6 +14697,195 @@ Link '${target}' to this file?`)) return null;
     return true;
   }
 
+  // web/domains/pcb/tools/sch-tools/sheet-instances.ts
+  var sheetFileOf2 = (node) => {
+    const p = kids(node, "property").find((q) => /^Sheet ?file$/i.test(str(q[1])));
+    return p ? str(p[2]) : "";
+  };
+  var fieldRef = (node) => {
+    const p = kids(node, "property").find((q) => str(q[1]) === "Reference");
+    return p ? str(p[2]) : "";
+  };
+  var unitOf2 = (node) => {
+    const u = kid(node, "unit");
+    return u ? +u[1] || 1 : 1;
+  };
+  function instanceEntries(node) {
+    const out = [];
+    for (const inst of kids(node, "instances")) for (const pr of kids(inst, "project")) for (const pa of kids(pr, "path")) out.push({ project: str(pr[1]), pa });
+    return out;
+  }
+  function instanceOn2(node, path) {
+    const e = instanceEntries(node).find((x) => str(x.pa[1]) === path);
+    return e ? e.pa : null;
+  }
+  function putInstance(node, project, pa) {
+    const path = str(pa[1]);
+    for (const inst of kids(node, "instances")) for (const pr2 of kids(inst, "project")) {
+      const j = pr2.findIndex((c, k) => k > 1 && Array.isArray(c) && c[0] === "path" && str(c[1]) === path);
+      if (j > 0) pr2.splice(j, 1);
+    }
+    let insts = kid(node, "instances");
+    if (!insts) {
+      insts = ["instances"];
+      node.push(insts);
+    }
+    let pr = kids(insts, "project").find((p) => str(p[1]) === project) || null;
+    if (!pr) {
+      pr = ["project", project];
+      insts.push(pr);
+    }
+    let at = pr.length;
+    for (let k = 2; k < pr.length; k++) {
+      const c = pr[k];
+      if (Array.isArray(c) && c[0] === "path" && str(c[1]) > path) {
+        at = k;
+        break;
+      }
+    }
+    pr.splice(at, 0, pa);
+  }
+  function dropInstances(node, gone) {
+    let did = false;
+    for (const inst of kids(node, "instances")) {
+      for (const pr of kids(inst, "project")) for (let k = pr.length - 1; k > 1; k--) {
+        const c = pr[k];
+        if (Array.isArray(c) && c[0] === "path" && gone(str(c[1]))) {
+          pr.splice(k, 1);
+          did = true;
+        }
+      }
+      for (let k = inst.length - 1; k > 0; k--) {
+        const c = inst[k];
+        if (Array.isArray(c) && c[0] === "project" && !kids(c, "path").length) inst.splice(k, 1);
+      }
+    }
+    for (let k = node.length - 1; k > 0; k--) {
+      const c = node[k];
+      if (Array.isArray(c) && c[0] === "instances" && c.length === 1) node.splice(k, 1);
+    }
+    return did;
+  }
+  function addMissingInstance(node, path, project, was) {
+    if (instanceOn2(node, path)) return false;
+    const all = instanceEntries(node), src = all.find((e) => e.project === project) || all[0] || null;
+    let pa;
+    if (src) {
+      pa = deep(src.pa);
+      pa[1] = path;
+    } else if (node[0] === "symbol") pa = ["path", path, ["reference", fieldRef(node)], ["unit", unitOf2(node)]];
+    else if (was) {
+      pa = deep(was);
+      pa[1] = path;
+    } else return false;
+    putInstance(node, project, pa);
+    return true;
+  }
+  var Touched = class {
+    constructor(read) {
+      this.read = read;
+      this.docs = /* @__PURE__ */ new Map();
+    }
+    async get(file, from) {
+      const want = joinPath(dirName(from), normSheetFile(file));
+      for (const d of this.docs.values()) if (d.file.path === want) return d.file;
+      const f = await this.read(file, from);
+      if (!f) return null;
+      const had = this.docs.get(f.path);
+      if (had) return had.file;
+      this.docs.set(f.path, { file: f, before: /* @__PURE__ */ new Map() });
+      return f;
+    }
+    /** Note an item of `f` before it is changed (its first state is the inverse). */
+    touch(f, it) {
+      const d = this.docs.get(f.path);
+      if (!d.before.has(it.id)) d.before.set(it.id, K.serializeItem(f.doc, it));
+    }
+    result() {
+      const out = [];
+      for (const { file, before } of this.docs.values()) {
+        if (!before.size) continue;
+        const changes = [], inverse = [];
+        for (const [id, was] of before) {
+          const it = file.doc.items.get(id);
+          if (!it) continue;
+          const now = K.serializeItem(file.doc, it);
+          if (now === was) continue;
+          changes.push({ id, kind: "MODIFIED", typeName: typeNameFor(it), sexpr: now });
+          inverse.push({ id, kind: "MODIFIED", typeName: typeNameFor(it), sexpr: was });
+        }
+        if (changes.length) out.push({ docId: file.docId, path: file.path, changes, inverse });
+      }
+      return out;
+    }
+  };
+  async function moveInstanceChanges(read, o) {
+    const t = new Touched(read);
+    for (const n of o.nodes) if (n[0] === "symbol" || n[0] === "sheet") for (const q of o.targetPaths) addMissingInstance(n, q, o.project);
+    const walk = async (file, from, olds, news, depth) => {
+      if (depth > 64) return;
+      const f = await t.get(file, from);
+      if (!f) return;
+      const gone = new Set(olds);
+      for (const it of f.doc.items.values()) {
+        if (it.kind !== "symbol" && it.kind !== "sheet") continue;
+        const node = deep(it.node), was = instanceEntries(node).find((e) => gone.has(str(e.pa[1])));
+        let did = dropInstances(node, (p) => gone.has(p));
+        for (const q of news) did = addMissingInstance(node, q, o.project, was ? was.pa : null) || did;
+        if (did) {
+          t.touch(f, it);
+          it.node.splice(0, it.node.length, ...node);
+        }
+      }
+      for (const it of Array.from(f.doc.items.values())) if (it.kind === "sheet") {
+        const sub = sheetFileOf2(it.node);
+        if (sub) await walk(sub, f.path, olds.map((p) => p + "/" + it.id), news.map((p) => p + "/" + it.id), depth + 1);
+      }
+    };
+    for (const n of o.nodes) {
+      if (n[0] !== "sheet") continue;
+      const file = sheetFileOf2(n), id = uuidOf(n) || "";
+      if (!file || !id) continue;
+      await walk(file, o.hereFile, o.herePaths.map((p) => p + "/" + id), o.targetPaths.map((p) => p + "/" + id), 0);
+    }
+    return t.result();
+  }
+  function setInstanceReference(node, path, ref) {
+    const pa = instanceOn2(node, path), r = pa ? kid(pa, "reference") : null;
+    if (r) r[1] = ref;
+  }
+  async function pastedSheetInstanceChanges(read, o) {
+    const t = new Touched(read);
+    const update = async (file, from, sheetPath, clip, depth) => {
+      if (depth > 64) return;
+      const f = await t.get(file, from);
+      if (!f) return;
+      const clipTail = "/" + clip.join("/"), list = [];
+      for (const it of f.doc.items.values()) {
+        if (it.kind !== "symbol") continue;
+        const node = deep(it.node);
+        const hit = instanceEntries(node).find((e) => str(e.pa[1]).endsWith(clipTail));
+        const pa = hit ? deep(hit.pa) : ["path", sheetPath, ["reference", fieldRef(node)], ["unit", unitOf2(node)]];
+        pa[1] = sheetPath;
+        if (!o.keep) {
+          const r = kid(pa, "reference");
+          if (r) r[1] = str(r[1]).replace(/\?$/, "").replace(/\d+$/, "") + "?";
+        }
+        putInstance(node, o.project, pa);
+        t.touch(f, it);
+        it.node.splice(0, it.node.length, ...node);
+        list.push({ node: it.node, path: sheetPath, doc: f.doc });
+      }
+      if (list.length) o.annotate(list, sheetPath);
+      for (const it of Array.from(f.doc.items.values())) if (it.kind === "sheet") {
+        const sub = sheetFileOf2(it.node);
+        if (sub) await update(sub, f.path, sheetPath + "/" + it.id, clip.concat(it.id), depth + 1);
+      }
+    };
+    for (const p of o.herePaths) for (const s of o.sheets) if (s.file) await update(s.file, o.hereFile, p + "/" + s.id, [s.clipId], 0);
+    return t.result();
+  }
+
   // web/domains/pcb/tools/sch-tools/clipboard.ts
   function annotationSettings(ctx, doc) {
     let pro = ctx ? ctx.designSettings : null;
@@ -12532,8 +14941,16 @@ Link '${target}' to this file?`)) return null;
       }
       if (it.kind === "symbol" && here && kid(node, "instances")) {
         node = deep(node);
+        const rs = opts && opts.suffixes ? opts.suffixes.rs : null;
         for (const inst of kids(node, "instances")) for (const pr of kids(inst, "project")) for (const pa of kids(pr, "path")) {
-          const q = str(pa[1]);
+          const q = str(pa[1]), b = rs ? rs.base(it.id, q) : null, r = kid(pa, "reference");
+          if (b !== null && b !== "" && r) {
+            r[1] = b;
+            if (q === here) {
+              const f = refField(node);
+              if (f) f[2] = b;
+            }
+          }
           if (q === here) pa[1] = "/";
           else if (q.startsWith(here + "/")) pa[1] = q.slice(here.length);
         }
@@ -12689,11 +15106,12 @@ ${body}
     const p = kids(node, "property").find((q) => str(q[1]) === "Value");
     return p ? str(p[2]) : "";
   };
-  var unitOf2 = (node) => {
+  var unitOf3 = (node) => {
     const u = kid(node, "unit");
     return u ? +u[1] || 1 : 1;
   };
-  function annotatePastedUnique(doc, nodes, cfg) {
+  function annotatePastedUnique(doc, nodes, cfg, more) {
+    const lk = more && more.libDoc || doc;
     const held = /* @__PURE__ */ new Map();
     const keyOf2 = (ref) => {
       const n = refNumber2(ref);
@@ -12710,18 +15128,19 @@ ${body}
       hold(u.ref, { lib: u.lib, value: u.value, unit: u.unit });
     }
     for (const r of S.otherRefs || []) if (!known.has(r)) hold(r, { lib: "", value: "", unit: -1 });
+    for (const h of more && more.held || []) if (h.ref && !/\?$/.test(h.ref)) hold(h.ref, { lib: h.lib, value: h.value, unit: h.unit });
     for (const it of doc.items.values()) {
       if (it.kind !== "symbol") continue;
       const p = refField(it.node);
       const ref = p ? str(p[2]) : "";
       if (!ref || /\?$/.test(ref)) continue;
-      hold(ref, { lib: str((kid(it.node, "lib_id") || [])[1]), value: valueOf(it.node), unit: unitOf2(it.node) });
+      hold(ref, { lib: str((kid(it.node, "lib_id") || [])[1]), value: valueOf(it.node), unit: unitOf3(it.node) });
     }
     const c = cfg || (S.annotation ? { method: S.annotation.method, sortY: S.annotation.sortY, startNum: S.annotation.startNum, sheetNumber: pageOf(doc) } : {}), step = c.method === 1 ? 100 : c.method === 2 ? 1e3 : 0, startAtCurrent = !c.reannotate && !step;
     const base = step ? (c.sheetNumber || 1) * step + 1 : (c.reannotate ? c.startNum || 0 : 0) + 1;
     const syms = nodes.filter((n) => n[0] === "symbol" && refField(n)).map((n) => {
       const at = kid(n, "at");
-      return { n, ref: str(refField(n)[2]), prefix: refPrefix(str(refField(n)[2])), x: at ? num(at[1]) : 0, y: at ? num(at[2]) : 0, uuid: uuidOf(n) || "", lib: str((kid(n, "lib_id") || [])[1]), value: valueOf(n), unit: unitOf2(n), multi: unitCountOf(doc, n) > 1 };
+      return { n, ref: str(refField(n)[2]), prefix: refPrefix(str(refField(n)[2])), x: at ? num(at[1]) : 0, y: at ? num(at[2]) : 0, uuid: uuidOf(n) || "", lib: str((kid(n, "lib_id") || [])[1]), value: valueOf(n), unit: unitOf3(n), multi: unitCountOf(lk, n) > 1 };
     });
     syms.sort((a, b) => (a.prefix < b.prefix ? -1 : a.prefix > b.prefix ? 1 : 0) || (c.sortY ? a.y - b.y || a.x - b.x : a.x - b.x || a.y - b.y) || (a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0));
     const done = /* @__PURE__ */ new Set();
@@ -12745,7 +15164,7 @@ ${body}
       let n = Math.max(1, minRef);
       while (!fits(n)) n++;
       if (tracker && !held.has(prefix + "\0" + n)) tracker.used.add(prefix + n);
-      const text = prefix + (isPowerLib(doc, s.n) ? "0" + n : n);
+      const text = prefix + (isPowerLib(lk, s.n) ? "0" + n : n);
       for (const o of pkg) {
         done.add(o);
         setReference(o.n, text);
@@ -12859,6 +15278,80 @@ ${body}
     }
     return [itemPosition(kind, node)];
   }
+  function pastedSuffixState(sc, _doc) {
+    const existing = /* @__PURE__ */ new Set(), composed = /* @__PURE__ */ new Set();
+    for (const p of sc.sheets) {
+      composed.add(sc.rs.suffix(p.path || ""));
+      const chain = p.sheets || [], last = chain.length ? chain[chain.length - 1] : null;
+      const f = last ? kids(last, "property").find((q) => str(q[1]) === REF_SUFFIX_FIELD) : null;
+      if (f && last) {
+        existing.add(str(f[2]));
+        existing.add(sheetRefSuffix(last, chain.slice(0, -1)));
+      }
+    }
+    return { existing, composed };
+  }
+  function pasteSheetSuffix(ctx, sc, st, sheet) {
+    const field2 = kids(sheet, "property").find((q) => str(q[1]) === REF_SUFFIX_FIELD);
+    if (!field2) return;
+    const screenPaths = sc.sheets.filter((x) => x.doc === ctx.doc && !!x.path);
+    const subtree = [], seen = /* @__PURE__ */ new Set();
+    const walk = (chain, node, from) => {
+      const here = chain.concat([node]);
+      subtree.push(here);
+      if (here.length > 32) return;
+      const ff = kids(node, "property").find((q) => str(q[1]) === "Sheetfile" || str(q[1]) === "Sheet file");
+      if (!ff) return;
+      const file = sheetFilePath(ctx, str(ff[2]), from);
+      if (seen.has(file)) return;
+      seen.add(file);
+      const sd = sc.sheets.find((x) => x.file === file);
+      if (!sd) return;
+      for (const it of sd.doc.items.values()) if (it.kind === "sheet") walk(here, it.node, file);
+      seen.delete(file);
+    };
+    walk([], sheet);
+    const composedBelowPaste = () => {
+      const out = [];
+      for (const p of screenPaths) for (const sub of subtree) out.push(composeRefSuffix((p.sheets || []).concat(sub)));
+      return out;
+    };
+    const resolvesTaken = (candidate) => {
+      field2[2] = candidate;
+      for (const p of screenPaths) if (st.existing.has(sheetRefSuffix(sheet, p.sheets || []))) return true;
+      for (const c of composedBelowPaste()) if (st.composed.has(c)) return true;
+      return false;
+    };
+    let pasted = str(field2[2]);
+    if (sc.increment) pasted = nextRefSuffix(pasted, st.existing, resolvesTaken);
+    field2[2] = pasted;
+    st.existing.add(pasted);
+    for (const p of screenPaths) st.existing.add(sheetRefSuffix(sheet, p.sheets || []));
+    for (const c of composedBelowPaste()) st.composed.add(c);
+  }
+  function sharePastedBases(ctx, doc, items, changes) {
+    const raw = ctx.suffixSheets;
+    const fresh = typeof raw === "function" ? raw() : null;
+    if (!fresh) return;
+    const here = fresh.sheets.find((x) => x.doc === doc && x.shown) || fresh.sheets.find((x) => x.doc === doc);
+    if (!here) return;
+    const only = new Set(items.filter((it) => it.kind === "symbol").map((it) => it.id));
+    if (!only.size) return;
+    const cfg = annotationSettings(ctx, doc);
+    const r = annotateHierarchy(
+      fresh.sheets,
+      { all: false, sheets: [{ sheet: here, only }] },
+      { order: cfg.sortY ? "y" : "x", keep: true, start: cfg.startNum, sheetInterval: cfg.method === 1 ? 100 : cfg.method === 2 ? 1e3 : 0, tracker: S.refTracker || null, suffixMode: true }
+    );
+    if (r.fatal) return;
+    for (const c of r.changes.get(doc) || []) {
+      const i = changes.findIndex((x) => x.id === c.id && x.kind === "ADDED");
+      K.applyChange(doc, c, ctx.IU || 1e4);
+      const it = doc.items.get(c.id);
+      if (i >= 0 && it) changes[i] = Object.assign({}, changes[i], { sexpr: itemSexpr(doc, it.kind, it.node) });
+      else changes.push(c);
+    }
+  }
   function pasteChanges(doc, parsed, at, opts) {
     const o = opts || {}, ctx = o.ctx || null, libs = [], dropped = [];
     const clipLibs = /* @__PURE__ */ new Map();
@@ -12880,14 +15373,24 @@ ${body}
       return true;
     }));
     const mode2 = o.pasteMode || (o.keepAnnotations ? "keep" : null) || (S.annotateAuto ? "unique" : "remove");
-    const existing = usedReferences(doc), cfg = o.annotate || annotationSettings(ctx, doc);
+    const cfg = o.annotate || annotationSettings(ctx, doc);
+    const sc = ctx ? suffixCtxOf(ctx) : null, suffixed = !!sc && sc.mode, screenPaths = sc ? sc.sheets.filter((x) => x.doc === doc && !!x.path) : [];
+    const existing = usedReferences(doc);
+    if (sc && suffixed) {
+      existing.clear();
+      for (const p of sc.sheets) for (const it of p.doc.items.values()) if (it.kind === "symbol") {
+        const b = sc.rs.base(it.id, p.path || "");
+        if (b) existing.add(b);
+      }
+    }
+    const pasteSuffixes = sc ? pastedSuffixState(sc, doc) : null;
     let forceKeep = mode2 !== "remove";
     const here = sheetPathHere(doc), project = ctx ? (sheetInstance(ctx, doc, 1) || [])[1] : void 0, projectName = here.project || (project ? str(project[1]) : "");
     const sheetNames = /* @__PURE__ */ new Set();
     for (const it of doc.items.values()) if (it.kind === "sheet") sheetNames.add(nameOf(it.node));
     const pages = usedPages(ctx, doc), groupNames = /* @__PURE__ */ new Set();
     for (const it of doc.items.values()) if (it.kind === "group") groupNames.add(str(it.node[1]));
-    const idMap = /* @__PURE__ */ new Map(), fresh = [], candidates = [];
+    const idMap = /* @__PURE__ */ new Map(), fresh = [], candidates = [], pastedSheets = [];
     for (const n of src) {
       const kind = n[0];
       if (kind === "group") {
@@ -12961,6 +15464,7 @@ ${body}
           nf[2] = candidate;
           sheetNames.add(candidate);
         }
+        if (pasteSuffixes && ctx) pasteSheetSuffix(ctx, sc, pasteSuffixes, f);
         let page = 1;
         while (pages.has(String(page))) page++;
         const si = ctx ? sheetInstance(ctx, doc, page) : null;
@@ -12968,6 +15472,8 @@ ${body}
           f.push(si);
           pages.add(String(page));
         }
+        const sf = sheetField(f, "file");
+        if (sf && str(sf[2]) && oldId) pastedSheets.push({ id: uuidOf(f) || "", clipId: oldId, file: str(sf[2]) });
       }
       idMap.set(oldId || "", (kind === "rule_area" ? ruleAreaId(f) : uuidOf(f)) || "");
       fresh.push(f);
@@ -12980,6 +15486,11 @@ ${body}
         const list = candidates.filter(always);
         if (list.length) annotatePastedUnique(doc, list, Object.assign({}, cfg, { reannotate: true }));
       }
+    }
+    if (sc && suffixed) for (const f of fresh) {
+      if (f[0] !== "symbol") continue;
+      const rf = refField(f), b = rf ? str(rf[2]) : "", u = kid(f, "unit"), unit = u ? num(u[1], 1) : 1;
+      for (const p of screenPaths) setInstanceOn(f, Object.assign({}, p, { shown: p.path === here.path }), b.endsWith("?") ? b : storedRef(sc.rs, b, p.path || ""), unit);
     }
     const grouped = /* @__PURE__ */ new Set();
     for (let i = fresh.length - 1; i >= 0; i--) {
@@ -13006,7 +15517,8 @@ ${body}
       g[1] = name;
       groupNames.add(name);
     }
-    if (!fresh.length) return { changes: [], ids: [], libs, dropped };
+    const sheetsInfo = { sheets: pastedSheets, keep: forceKeep && !!S.annotateAuto, mode: mode2, cfg, held: fresh.filter((n) => n[0] === "symbol" && refField(n)).map((n) => ({ ref: str(refField(n)[2]), lib: str((kid(n, "lib_id") || [])[1]), value: valueOf(n), unit: unitOf3(n) })) };
+    if (!fresh.length) return { changes: [], ids: [], libs, dropped, sheetsInfo };
     const idOf = (n) => (n[0] === "rule_area" ? ruleAreaId(n) : uuidOf(n)) || "", byId = /* @__PURE__ */ new Map();
     for (const n of fresh) byId.set(idOf(n), n);
     const firstChild = (g) => {
@@ -13091,6 +15603,7 @@ ${body}
       changes.push(change);
       items.push(item);
     }
+    if (sc && suffixed && mode2 === "unique") sharePastedBases(ctx, doc, items, changes);
     if (!o.noJunctions) changes.push(...junctionsForNew(doc, items));
     const ids = items.map((it) => it.id);
     if (o.group !== void 0 && items.length) {
@@ -13099,19 +15612,47 @@ ${body}
       changes.push(change);
       ids.push(item.id);
     }
-    return { changes, ids, libs, dropped };
+    return { changes, ids, libs, dropped, sheetsInfo };
+  }
+  function pastedSheetSync(ctx, info) {
+    if (!info.sheets.length || !ctx.readSheetFile) return null;
+    const here = sheetPathHere(ctx.doc), cur = currentDoc(ctx), hier = hierarchyOf(ctx);
+    const hereFile = cur ? cur.path : "";
+    const herePaths = hier && hier.instances ? hier.instances.filter((i) => i.file === hereFile).map((i) => i.path) : [];
+    if (!herePaths.length && here.path) herePaths.push(here.path);
+    const si = sheetInstance(ctx, ctx.doc, 1), project = here.project || (si ? str(si[1][1]) : "");
+    if (!herePaths.length || !project) return null;
+    const held = info.held.slice();
+    return pastedSheetInstanceChanges(ctx.readSheetFile, { hereFile, herePaths, project, sheets: info.sheets, keep: info.keep, annotate(list) {
+      const proxies = list.map((x) => {
+        const p = deep(x.node);
+        dropKid(p, "instances");
+        const pa = instanceOn2(x.node, x.path), r = pa ? kid(pa, "reference") : null;
+        setReference(p, r ? str(r[1]) : "");
+        return { x, p };
+      });
+      const always = (n) => symbolIsPower(list[0].doc, { node: n }) || str(refField(n)[2]).startsWith("#");
+      const nodes = proxies.map((q) => q.p).filter((n) => refField(n));
+      const pick = info.mode === "unique" ? nodes : nodes.filter(always);
+      if (pick.length) annotatePastedUnique(ctx.doc, pick, info.mode === "unique" ? info.cfg : Object.assign({}, info.cfg, { reannotate: true }), { held, libDoc: list[0].doc });
+      for (const q of proxies) {
+        const ref = refField(q.p) ? str(refField(q.p)[2]) : "";
+        if (ref) setInstanceReference(q.x.node, q.x.path, ref);
+        held.push({ ref, lib: str((kid(q.p, "lib_id") || [])[1]), value: valueOf(q.p), unit: unitOf3(q.p) });
+      }
+    } });
   }
   function copySelection(ctx) {
     const items = selectedItems(ctx);
     if (!items.length) return false;
-    clipWrite(ctx, clipboardText(ctx.doc, items), items.map((it) => it.id));
+    clipWrite(ctx, clipboardText(ctx.doc, items, { suffixes: suffixCtxOf(ctx) }), items.map((it) => it.id));
     return true;
   }
   function cutSelection(ctx) {
     if (!editable(ctx)) return false;
     const items = selectedItems(ctx);
     if (!items.length) return false;
-    clipWrite(ctx, clipboardText(ctx.doc, items), items.map((it) => it.id));
+    clipWrite(ctx, clipboardText(ctx.doc, items, { suffixes: suffixCtxOf(ctx) }), items.map((it) => it.id));
     const free = items.filter((it) => !isLockedItem(ctx.doc, it));
     if (!free.length) return true;
     const changes = deleteChanges(ctx.doc, free);
@@ -13143,7 +15684,7 @@ ${body}
   }
   function pasteParsed(ctx, parsed, opts) {
     const label = opts && opts.label || "Paste", live = canFollow(ctx);
-    const { changes, ids, libs, dropped } = pasteChanges(ctx.doc, parsed, opts && opts.at || snapCursor(ctx), Object.assign({ ctx }, opts, { noJunctions: live }));
+    const { changes, ids, libs, dropped, sheetsInfo } = pasteChanges(ctx.doc, parsed, opts && opts.at || snapCursor(ctx), Object.assign({ ctx }, opts, { noJunctions: live }));
     for (const file of dropped) {
       const msg = `The pasted sheet '${file}'
 was dropped because the destination already has the sheet or one of its subsheets as a parent.`, kd = kdlg();
@@ -13158,12 +15699,17 @@ was dropped because the destination already has the sheet or one of its subsheet
       if (f && str(f[2])) ensureSheetDoc(ctx, str(f[2])).catch(() => {
       });
     }
+    const sync = pastedSheetSync(ctx, sheetsInfo);
     if (live && followPaste(ctx, ids, libs, opts && opts.at || cursorOf(ctx), label, !!(opts && opts.hover))) {
-      if (opts && opts.after && S.drag) S.drag.after = opts.after;
+      if (S.drag) {
+        if (opts && opts.after) S.drag.after = opts.after;
+        if (sync) S.drag.othersFor = sync;
+      }
       return true;
     }
     if (live) changes.push(...junctionsForNew(ctx.doc, ids.map((id) => ctx.doc.items.get(id)).filter(Boolean)));
-    ctx.commit(changes, label);
+    if (sync) sync.then((others) => ctx.commit(changes, label, others.length ? { others } : void 0), () => ctx.commit(changes, label));
+    else ctx.commit(changes, label);
     setSelectionIds(ctx, opts && opts.hover ? [] : ids);
     return true;
   }
@@ -13286,7 +15832,7 @@ was dropped because the destination already has the sheet or one of its subsheet
     if (!items.length) return false;
     const st = S, hover = !!(opts && opts.hover) || !!st.dupHover;
     st.dupHover = false;
-    return pasteText(ctx, clipboardText(ctx.doc, items), { label: "Paste", refNear: cursorOf(ctx), hover });
+    return pasteText(ctx, clipboardText(ctx.doc, items, { suffixes: suffixCtxOf(ctx) }), { label: "Paste", refNear: cursorOf(ctx), hover });
   }
   function schItemAsText(doc, it) {
     const shown = (t) => {
@@ -13342,126 +15888,6 @@ was dropped because the destination already has the sheet or one of its subsheet
     setSelectionIds(ctx, sel);
     ctx.requestRender();
     return true;
-  }
-
-  // web/domains/pcb/canvas/geom-sch.ts
-  var PIN_TEXT_OFFSET = Math.round(24 * 0.15) * MIL2;
-  var PIN_TEXT_MARGIN = 4 * MIL2;
-  var TARGET_PIN_RADIUS2 = 15 * MIL2;
-  var schFormat = {
-    textOffsetRatio: 0.15,
-    labelSizeRatio: 0.375,
-    pinSymbolSize: 25 * MIL2,
-    showDnpMarkers: true,
-    overbarHeight: 1.23,
-    hopOverChoice: 0,
-    overrideItemColors: false,
-    /** SCHEMATIC_SETTINGS::m_SubpartIdSeparator (0: none) and m_SubpartFirstId ('A') — the unit notation of SubReference */
-    subpartIdSeparator: 0,
-    subpartFirstId: 65
-  };
-
-  // web/domains/pcb/canvas/barcode.ts
-  var C39 = "1112212111 2112111121 1122111121 2122111111 1112211121 2112211111 1122211111 1112112121 2112112111 1122112111 2111121121 1121121121 2121121111 1111221121 2111221111 1121221111 1111122121 2111122111 1121122111 1111222111 2111111221 1121111221 2121111211 1111211221 2111211211 1121211211 1111112221 2111112211 1121112211 1111212211 2211111121 1221111121 2221111111 1211211121 2211211111 1221211111 1211112121 2211112111 1221112111 1212121111 1212111211 1211121211 1112121211 1211212111".split(" ");
-  var C128 = "212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 221312 231212 112232 122132 122231 113222 123122 123221 223211 221132 221231 213212 223112 312131 311222 321122 321221 312212 322112 322211 212123 212321 232121 111323 131123 131321 112313 132113 132311 211313 231113 231311 112133 112331 132131 113123 113321 133121 313121 211331 231131 213113 213311 213131 311123 311321 331121 312113 312311 332111 314111 221411 431111 111224 111422 121124 121421 141122 141221 112214 112412 122114 122411 142112 142211 241211 221114 413111 241112 134111 111242 121142 121241 114212 124112 124211 411212 421112 421211 212141 214121 412121 111143 111341 131141 114113 114311 411113 411311 113141 114131 311141 411131 211412 211214 211232 211133".split(" ");
-
-  // web/domains/pcb/canvas/barcode2d.ts
-  function gf(poly) {
-    const alog = new Array(512), log = new Array(256).fill(0);
-    let v = 1;
-    for (let i = 0; i < 255; i++) {
-      alog[i] = v;
-      log[v] = i;
-      v <<= 1;
-      if (v & 256) v ^= poly;
-    }
-    for (let i = 255; i < 512; i++) alog[i] = alog[i - 255];
-    return { alog, log };
-  }
-  var GF_QR = gf(285);
-  var GF_DM = gf(301);
-  var tbl = (s) => s.split(",").map(Number);
-  var DM_C40_SHIFT = tbl("1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3");
-  var DM_C40_VALUE = tbl("0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,3,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,20,21,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,22,23,24,25,26,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31");
-  var DM_TEXT_SHIFT = tbl("1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,3,3,3,3");
-  var DM_TEXT_VALUE = tbl("0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,3,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,20,21,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,22,23,24,25,26,0,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,27,28,29,30,31");
-
-  // web/domains/pcb/canvas/geom-pcb.ts
-  var HOLE_WALL2 = 0.02 * 1.5;
-
-  // web/domains/pcb/canvas/outline-text.ts
-  var ITALIC_TILT2 = 1 / 8;
-  var FAKE_ITALIC_SLANT = Math.tan(12 * Math.PI / 180);
-
-  // web/domains/pcb/canvas/text-eval.ts
-  var UNIT_MM = { thou: 25.4 / 1e3, deg: 1, mm: 1, cm: 10, in: 25.4, mil: 25.4 / 1e3, mils: 25.4 / 1e3, um: 1 / 1e3, ps: 1, fs: 1, '"': 25.4, "\xB0": 1, "ps/mm": 1, "ps/cm": 1, "ps/in": 1 };
-
-  // web/domains/pcb/canvas/sheet.ts
-  var ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  function indexFromAlphabetic(s, alphabet) {
-    const alpha = alphabet || ALPHABET, radix = alpha.length;
-    let index = 0;
-    for (let i = 0; i < s.length; i++) {
-      let k = alpha.indexOf(s[i]);
-      if (k < 0) return -1;
-      if (i !== s.length - 1) k++;
-      index += k * Math.pow(radix, s.length - 1 - i);
-    }
-    return index;
-  }
-  function alphabeticFromIndex(n, alphabet) {
-    const alpha = alphabet || ALPHABET, radix = alpha.length;
-    let out = "", first = true;
-    do {
-      let mod = n % radix;
-      if (!first) mod--;
-      out = alpha[mod] + out;
-      n = Math.floor(n / radix);
-      first = false;
-    } while (n);
-    return out;
-  }
-  function incrementString(s, delta, rightIndex = 0, skipIOSQXZ = false, alphabeticMaxIndex = -1) {
-    if (!s) return null;
-    let remaining = s;
-    const parts = [];
-    let good = 0;
-    while (good <= rightIndex && remaining) {
-      let m = /\d+$/.exec(remaining);
-      if (m) {
-        parts.push({ s: m[0], type: "int" });
-        good++;
-      } else if (m = /([a-z]+|[A-Z]+)$/.exec(remaining)) {
-        parts.push({ s: m[0], type: "alpha" });
-        good++;
-      } else if (m = /[^a-zA-Z0-9]+$/.exec(remaining)) parts.push({ s: m[0], type: "skip" });
-      else break;
-      remaining = remaining.slice(0, remaining.length - m[0].length);
-    }
-    if (good <= rightIndex) return null;
-    const last = parts[parts.length - 1];
-    let stepped;
-    if (last.type === "int") {
-      const oldLen = last.s.length, padded = last.s[0] === "0";
-      const n = parseInt(last.s, 10) + delta;
-      if (!isFinite(n) || n < 0 || n > Number.MAX_SAFE_INTEGER) return null;
-      stepped = String(n);
-      if (padded && stepped.length < oldLen) stepped = "0".repeat(oldLen - stepped.length) + stepped;
-    } else {
-      const upper = last.s.toUpperCase(), wasUpper = last.s === upper;
-      const alpha = skipIOSQXZ && !/[IOSQXZ]/.test(last.s) ? "ABCDEFGHJKLMNPRTUVWY" : ALPHABET;
-      const index = indexFromAlphabetic(upper, alpha);
-      if (index < 0) return null;
-      if (index > alphabeticMaxIndex && alphabeticMaxIndex >= 0) return null;
-      const next = index + delta;
-      if (next < 0 || next > 2147483647) return null;
-      stepped = alphabeticFromIndex(next, alpha);
-      if (!wasUpper) stepped = stepped.toLowerCase();
-    }
-    last.s = stepped;
-    let out = remaining;
-    for (let i = parts.length - 1; i >= 0; i--) out += parts[i].s;
-    return out;
   }
 
   // web/domains/pcb/tools/sch-tools/repeat.ts
@@ -13594,9 +16020,9 @@ was dropped because the destination already has the sheet or one of its subsheet
   function incrementStringPart(text, delta, rightIndex) {
     return incrementString(text, delta, rightIndex, false, 50);
   }
-  function incrementSelection(ctx, delta, field) {
+  function incrementSelection(ctx, delta, field2) {
     if (!editable(ctx)) return false;
-    const index = field === void 0 ? 0 : field;
+    const index = field2 === void 0 ? 0 : field2;
     const INC = /* @__PURE__ */ new Set(["label", "global_label", "hierarchical_label", "text"]);
     const cr = carried(ctx);
     if (cr) {
@@ -15173,12 +17599,12 @@ was dropped because the destination already has the sheet or one of its subsheet
     }
     return out;
   }
-  var MANDATORY2 = ["Reference", "Value", "Footprint", "Datasheet", "Description"];
+  var MANDATORY3 = ["Reference", "Value", "Footprint", "Datasheet", "Description"];
   function autoplaceFields(node) {
     const all = kids(node, "property").filter((p) => !fieldHidden(p) && !str(p[1]).startsWith("ki_") && str(p[2]) !== "");
     const ord = (p) => {
-      const i = MANDATORY2.indexOf(str(p[1]));
-      return i >= 0 ? i : MANDATORY2.length;
+      const i = MANDATORY3.indexOf(str(p[1]));
+      return i >= 0 ? i : MANDATORY3.length;
     };
     return all.map((p, i) => ({ p, i })).sort((a, b) => ord(a.p) - ord(b.p) || a.i - b.i).map((e) => e.p);
   }
@@ -16178,12 +18604,9 @@ was dropped because the destination already has the sheet or one of its subsheet
     applyDrag(doc, d, 0, 0, true);
     restorePristine(doc, d);
     for (const { item } of sel) touched.push(...connPoints(doc, item));
-    const out = sel.map(({ item }) => K.removeChange(item));
-    const changes = foldChanges(out, cleanupAt(doc, out, touched, /* @__PURE__ */ new Set(), ctx.IU || 1e4));
-    ctx.commit(changes, "Move");
     setSelectionIds(ctx, []);
     const b0 = box || [0, 0, 0, 0];
-    ctx.dropIntoSheet(sheet, "Move", (sub) => {
+    const placed = (sub) => {
       let ox = -b0[0], oy = -b0[1];
       const hit = () => {
         const m = [b0[0] + ox, b0[1] + oy, b0[2] + ox, b0[3] + oy];
@@ -16199,11 +18622,38 @@ was dropped because the destination already has the sheet or one of its subsheet
       }
       ox = r4(ox);
       oy = r4(oy);
-      return nodes.map(({ kind, node }) => {
-        shiftNode(kind, node, ox, oy);
-        const id = uuidOf(node);
-        return { id, kind: "ADDED", typeName: typeNameFor({ kind }), sexpr: itemSexpr(doc, kind, node) };
+      for (const { kind, node } of nodes) shiftNode(kind, node, ox, oy);
+    };
+    const removal = () => {
+      const out = sel.map(({ item }) => K.removeChange(item));
+      return foldChanges(out, cleanupAt(doc, out, touched, /* @__PURE__ */ new Set(), ctx.IU || 1e4));
+    };
+    const added = () => nodes.map(({ kind, node }) => ({ id: uuidOf(node), kind: "ADDED", typeName: typeNameFor({ kind }), sexpr: itemSexpr(doc, kind, node) }));
+    if (ctx.commitWithSheets && ctx.readSheetFile) {
+      const cur = currentDoc(ctx), hereFile = cur ? cur.path : "", h = ctx.sheetHierarchy ? ctx.sheetHierarchy() : null;
+      const hereInst = sheetPathHere(doc);
+      ctx.commitWithSheets("Move", async (read) => {
+        const target = await read(sheet.file || "", hereFile);
+        if (!target) throw new Error(`Could not move the items into '${sheet.file || ""}'.`);
+        if (sel.some(({ item }) => doc.items.get(item.id) !== item)) return null;
+        placed(target.doc);
+        const insts = h && h.instances ? h.instances : [];
+        const herePaths = insts.filter((i) => i.file === hereFile).map((i) => i.path);
+        if (!herePaths.length && hereInst.path) herePaths.push(hereInst.path);
+        const targetPaths = Array.from(new Set(insts.filter((i) => i.file === target.path).map((i) => i.path).concat(herePaths.map((p) => p + "/" + sheet.id))));
+        const project = hereInst.project || "";
+        const deeper = project ? await moveInstanceChanges(read, { hereFile, herePaths, targetPaths, project, nodes: nodes.map((x) => x.node) }) : [];
+        const there = added(), into = deeper.find((o) => o.docId === target.docId);
+        const others = [{ docId: target.docId, path: target.path, changes: there.concat(into ? into.changes : []), inverse: there.map((c) => ({ id: c.id, kind: "REMOVED", typeName: c.typeName, properties: [] })).concat(into ? into.inverse : []) }];
+        for (const o of deeper) if (o !== into) others.push(o);
+        return { here: removal(), others };
       });
+      return;
+    }
+    ctx.commit(removal(), "Move");
+    ctx.dropIntoSheet(sheet, "Move", (sub) => {
+      placed(sub);
+      return added();
     });
   }
   function endDrag(ctx, commit) {
@@ -16237,11 +18687,15 @@ was dropped because the destination already has the sheet or one of its subsheet
         return;
       }
       const changes2 = dragChanges(ctx, d, dx, dy, true);
-      for (const id of d.local) ctx.doc.items.delete(id);
-      if (changes2.length) ctx.commit(changes2, d.label || "Paste");
-      setSelectionIds(ctx, d.hover ? [] : Array.from(d.local).filter((id) => ctx.doc.items.has(id)));
-      done();
-      if (d.after) d.after(true);
+      const place = (others) => {
+        for (const id of d.local) ctx.doc.items.delete(id);
+        if (changes2.length) ctx.commit(changes2, d.label || "Paste", others && others.length ? { others } : void 0);
+        setSelectionIds(ctx, d.hover ? [] : Array.from(d.local).filter((id) => ctx.doc.items.has(id)));
+        done();
+        if (d.after) d.after(true);
+      };
+      if (d.othersFor) d.othersFor.then(place, () => place(null));
+      else place(null);
       return;
     }
     const turned = !!d.mapPt;
@@ -17278,14 +19732,38 @@ was dropped because the destination already has the sheet or one of its subsheet
     incrementAnnotationChanges,
     ercHierarchy: (docs, opts) => {
       const infos = docs.map((d) => ercNets(d.doc));
-      const per = hierarchyTests(docs.map((d, i) => ({ doc: d.doc, key: d.key, path: d.path, page: d.page, nets: infos[i].nets })), itemRef, pinItemRef);
+      const chain = (i) => {
+        const out = [];
+        for (let k = i, n = 0; k >= 0 && n < 64; n++) {
+          const d = docs[k], p = d.parent;
+          if (p === null || p === void 0 || !d.sheetId) break;
+          const it = docs[p].doc.items.get(d.sheetId);
+          out.unshift(it ? it.node : null);
+          k = p;
+        }
+        return out;
+      };
+      const per = hierarchyTests(docs.map((d, i) => ({ doc: d.doc, key: d.key, path: d.path, page: d.page, nets: infos[i].nets, sheets: chain(i), suffixMode: !!(opts && opts.suffixMode) })), itemRef, pinItemRef);
       const nets = netTests(docs.map((d, i) => ({ doc: d.doc, key: d.key, info: infos[i], parent: d.parent, sheetId: d.sheetId, root: d.root })), opts);
-      return per.map((l, i) => withKiids(l.concat(nets[i])));
+      const libs = opts && opts.libraries ? libraryTests(docs.map((d) => ({ doc: d.doc })), opts.libraries, itemRef, pinItemRef) : null;
+      return per.map((l, i) => withKiids(l.concat(nets[i], libs ? libs[i] : [])));
     },
     // SCH_EDIT_FRAME::CheckAnnotate( handler, ANNOTATE_ALL ) over the hierarchy's sheets: the number of annotation errors
     checkAnnotate,
     annotateChanges,
     annotateHierarchy,
+    recomposeChanges,
+    nextRefSuffix,
+    suffixCtx,
+    suffixCtxOf,
+    suffixSheetOf,
+    baseRefOn,
+    baseRefFromUser,
+    setUserRef,
+    composedRefLabel,
+    newSymbolSuffixes,
+    shareNewSymbolBase,
+    writeSharedRefs,
     clearAnnotationHierarchy,
     replaceDuplicateIds,
     checkAnnotation,
@@ -17298,11 +19776,21 @@ was dropped because the destination already has the sheet or one of its subsheet
     fieldsTableRows,
     fieldsTableChanges,
     busMembers,
+    libraryWants,
     _: {
       setFollow(on) {
         S.forceFollow = !!on;
       },
       addNode,
+      hasDuplicatePins,
+      effectivePad,
+      instanceEntries,
+      putInstance,
+      dropInstances,
+      addMissingInstance,
+      moveInstanceChanges,
+      pastedSheetInstanceChanges,
+      pastedSheetSync,
       junctionMerges,
       sheetAutoplaceFields,
       annotatePastedUnique,

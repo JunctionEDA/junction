@@ -1,7 +1,8 @@
 // pcbdialogs/fp-3d-panel — the Embedded Files notebook page both Footprint Properties dialogs share
 // (PANEL_EMBEDDED_FILES: Filename / Embedded Reference, the add and delete bitmap buttons, Embed fonts, Export...).  The 3D
 // Models page is model3d.ts' models3dPanel; the node work is pcb-tools' (fp-models.ts).
-import { decodeEmbedded, embeddedFileData, embeddedFileSexpr } from "../../library/embedded-file";
+import { decodeEmbedded, embeddedFileData, embeddedFileSexpr, embeddedFileType } from "../../library/embedded-file";
+import { popupMenu } from "../../dialogs/dom";
 import { bitmapButton, errorMessage, grid, h, messageBox, type CellValue, type Field } from "./ui";
 
 /**
@@ -20,9 +21,11 @@ export interface AddedEmbeddedFile { name: string; sexpr: string; bytes: Uint8Ar
  * (onAddEmbeddedFiles / AddEmbeddedFile: a picked file whose name is already embedded with other content asks
  * Replace / Reuse Existing / Cancel; the same content keeps the existing file).
  */
-export function embeddedFilesPanel(opts: { names: string[]; ro: boolean; bytes(name: string): Uint8Array | null; embedFonts?: Field<boolean> }): { el: HTMLElement; get(): string[]; added(): AddedEmbeddedFile[] } {
+export function embeddedFilesPanel(opts: { names: string[]; ro: boolean; bytes(name: string): Uint8Array | null; embedFonts?: Field<boolean>;
+  /** the owner's GetFonts() as files (the board's or the schematic's): with it, Embed fonts is onFontEmbedClick */
+  fonts?: () => Promise<{ name: string; bytes: Uint8Array }[]>; height?: string }): { el: HTMLElement; get(): string[]; added(): AddedEmbeddedFile[]; removed(): string[] } {
   const rows: Record<string, CellValue>[] = opts.names.map((n) => ({ name: n, ref: "kicad-embed://" + n }));
-  const g = grid([{ label: "Filename", key: "name", readOnly: () => true }, { label: "Embedded Reference", key: "ref", readOnly: () => true }], rows, { ro: true, height: "260px", key: "embeddedFiles" });
+  const g = grid([{ label: "Filename", key: "name", readOnly: () => true }, { label: "Embedded Reference", key: "ref", readOnly: () => true }], rows, { ro: true, height: opts.height || "260px", key: "embeddedFiles" });
   const added = new Map<string, AddedEmbeddedFile>();
   const bytesOf = (n: string): Uint8Array | null => (added.has(n) ? added.get(n)!.bytes : opts.bytes(n));
   const same = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((v, i) => v === b[i]);
@@ -59,7 +62,33 @@ export function embeddedFilesPanel(opts: { names: string[]; ro: boolean; bytes(n
       document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
     }
   });
+  // EMBEDDED_FILES_GRID_TRICKS::showPopupMenu: "Copy Embedded Reference" on a row (its column 1 to the clipboard)
+  g.el.addEventListener("contextmenu", (ev) => {
+    const tr = (ev.target as HTMLElement).closest("tbody tr"); if (!tr || !tr.parentElement) return;
+    const i = Array.from(tr.parentElement.children).indexOf(tr), r = g.rows()[i]; if (!r) return;
+    ev.preventDefault(); g.select(i);
+    popupMenu(ev.clientX, ev.clientY, [{ label: "Copy Embedded Reference", title: "Copy the reference for this embedded file", run: () => { void navigator.clipboard?.writeText(String(r.ref)).catch(() => undefined); } }]);
+  });
+  // onFontEmbedClick: the font files go, then (checked) every font the owner's text uses is embedded afresh
+  if (opts.fonts && opts.embedFonts && !opts.ro) {
+    const fonts = opts.fonts, cb = opts.embedFonts;
+    let run = 0;
+    cb.input.addEventListener("change", () => {
+      const r = g.rows(), cur = g.selected(), keep = cur >= 0 && cur < r.length ? String(r[cur].name) : null, me = ++run;
+      for (let i = r.length - 1; i >= 0; i--) if (embeddedFileType(String(r[i].name)) === "font") { added.delete(String(r[i].name)); r.splice(i, 1); }
+      const settle = (): void => { g.refresh(); const rows = g.rows(); if (!rows.length) return; const at = keep !== null ? rows.findIndex((x) => x.name === keep) : -1; if (cur >= 0) g.select(at >= 0 ? at : Math.max(0, Math.min(cur, rows.length - 1))); };
+      if (!cb.get()) { settle(); return; }
+      void fonts().then((list) => {
+        if (me !== run || !cb.get()) return;
+        for (const f of list) {   // AddFile( font->GetFileName(), true ): replaces a file of that name
+          added.set(f.name, { name: f.name, sexpr: embeddedFileSexpr(f.name, f.bytes), bytes: f.bytes });
+          if (!r.some((x) => x.name === f.name)) r.push({ name: f.name, ref: "kicad-embed://" + f.name });
+        }
+        settle();
+      }, () => settle());
+    });
+  }
   const el = h("div", null, g.el, picker, h("div", { class: "pd-row", style: "margin-top:6px;gap:8px" }, add, del, h("span", { style: "flex:1" }), opts.embedFonts ? opts.embedFonts.el : null, exp));
   const names = (): string[] => g.rows().map((r) => String(r.name));
-  return { el, get: names, added: () => [...added.values()].filter((a) => names().includes(a.name)) };
+  return { el, get: names, added: () => [...added.values()].filter((a) => names().includes(a.name)), removed: () => opts.names.filter((n) => !names().includes(n)) };
 }

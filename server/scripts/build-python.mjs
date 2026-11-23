@@ -51,7 +51,7 @@ for (const f of ["occt-import-js.js", "occt-import-js.wasm"]) {
   if (!fs.existsSync(dst) || !fs.readFileSync(dst).equals(body)) fs.writeFileSync(dst, body);
 }
 const shim = path.join(server, "plugins", "python"); const files = {};
-const walk = (dir, base) => { for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) { const rel = base ? base + "/" + e.name : e.name; if (e.isDirectory()) { if (e.name !== "__pycache__" && e.name !== "wheels") walk(path.join(dir, e.name), rel); } else if (e.name.endsWith(".py")) files[rel] = fs.readFileSync(path.join(dir, e.name), "utf8"); } };
+const walk = (dir, base) => { for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) { const rel = base ? base + "/" + e.name : e.name; if (e.isDirectory()) { if (e.name !== "__pycache__" && e.name !== "wheels" && !(base === "" && e.name === "kicad_bom_generators")) walk(path.join(dir, e.name), rel); } else if (e.name.endsWith(".py")) files[rel] = fs.readFileSync(path.join(dir, e.name), "utf8"); } };
 walk(shim, "");
 // Browser-side helpers the shims load into the plugin's frame: the animation encoders (ffmpeg's stand-in) and the WebGL end of the OpenGL shim.
 for (const [name, entry] of [["kicad_media.js", "web/domains/pcb/plugins/media.ts"], ["kicad_gl.js", "web/domains/pcb/plugins/glfixed.ts"], ["kicad_spice.js", "web/domains/pcb/plugins/spice.ts"]]) {
@@ -59,6 +59,13 @@ for (const [name, entry] of [["kicad_media.js", "web/domains/pcb/plugins/media.t
   files[name] = Buffer.from(r.outputFiles[0].contents).toString("utf8");
 }
 fs.writeFileSync(path.join(out, "kicad-python.json"), JSON.stringify({ version: JSON.parse(fs.readFileSync(path.join(pkg, "package.json"), "utf8")).version, files }));
+// KiCad's stock BOM generator scripts (eeschema/python_scripts, installed in KiCad's plugins folder) with the modules they
+// import: the schematic's Generate Legacy BOM runs them over the intermediate XML netlist (web/domains/pcb/dialogs/bom-legacy.ts)
+{
+  const dir = path.join(shim, "kicad_bom_generators"), bom = {};
+  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith(".py")).sort()) bom[f] = fs.readFileSync(path.join(dir, f), "utf8");
+  fs.writeFileSync(path.join(out, "kicad-bom.json"), JSON.stringify({ files: bom }));
+}
 
 // ---- packages a plugin may import (plugins/python/packages.json)
 // The interpreter loads a package by name from its lock file, so the lock written here lists

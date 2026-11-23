@@ -9,7 +9,8 @@ import { connectedRun, ptKey } from "./connected";
 import { settingsOf } from "./dialogs";
 import { dpNetPair } from "./diffpair";
 import { assembleLine, peq, trackEnds } from "./dragger";
-import { IU_PER_PS, canCalculateLengthForDelay, ldContext, msgTime, netTuningProfileName } from "./length-delay";
+import { IU_PER_PS, boardTrackLength, canCalculateLengthForDelay, ldContext, msgTime, netTuningProfileName } from "./length-delay";
+import { boardChainBridging } from "./drc-chain";
 import { designSettings, netClearance } from "./drc";
 import { sizeUnits } from "./edit-commands";
 import { distSeg } from "./hit";
@@ -19,12 +20,12 @@ import { netTable } from "./netlist";
 import { evalRuleConstraint, parseDru } from "./dru";
 import { ruleSizes } from "./rule-resolver";
 import { matchDpSuffix } from "./diffpair";
-import { netOf } from "./nets";
+import { chainNets, netChainOf, netOf } from "./nets";
 import { segmentNode } from "./nodes";
 import { line } from "./overlay";
 import { arcTrackNode } from "./posture";
 import { HL, K, S, saturated } from "./state";
-import { applyRuleTarget, chainDelayIU, chainMM, coupledPath, fmtG, inTuneOutline, lineChainIU, moveSettings, nearestOnChain, polyPtsText, tuneBegin, tuneDp, tuneFinish, tuneMode, tunePick, tunePieces, tuneTrackLine, tuneUpdate, tuningPathLength } from "./tuning-tool";
+import { applyRuleTarget, chainDelayIU, chainExtras, netRepTrack, placerPathDelay, chainMM, coupledPath, fmtG, inTuneOutline, lineChainIU, moveSettings, nearestOnChain, polyPtsText, tuneBegin, tuneDp, tuneFinish, tuneMode, tunePick, tunePieces, tuneTrackLine, tuneUpdate, tuningPathLength } from "./tuning-tool";
 import { clone, color, pt, r6, widthOf } from "./util";
 import { closestOnSeg } from "./point-editor";
 import { pathHits, routeObstacles, simplifyPts } from "./walkaround";
@@ -148,7 +149,9 @@ export function regenerateTuningBranch(ctx: PcbCtx, gen: Pick<KItem, "id" | "kin
   if (info.mode === "diff_pair_skew") {
     const pair = dpNetPair(scratch, line.net); if (!pair) return null; const cp = coupledPath(scratch, pair, line.netKey, origin, ld);
     Object.assign(TP, { coupled: cp.length, coupledDelay: cp.delay, lastLength: mine.length, lastDelay: mine.delay });
-  }
+    const NT = netTable(scratch), kP = NT.key(pair.P);
+    TP.chainEx = chainExtras(ld, [line.netKey, kP === line.netKey ? NT.key(pair.N) : kP], mine.length * TUNE_IU);   // Start: initChainExtras
+  } else if (!dual) TP.chainEx = chainExtras(ld, [line.netKey], mine.length * TUNE_IU);
   const I = (p: Pt) => [p[0] * TUNE_IU, p[1] * TUNE_IU];
   const r = line.width / 2, clearance = netClearance(settingsOf(ctx), line.netKey);
   const delayOf = ist.isTimeDomain ? chainDelayIU(ld, { net: line.netKey, layer: line.layer }) : null;
@@ -162,7 +165,8 @@ export function regenerateTuningBranch(ctx: PcbCtx, gen: Pick<KItem, "id" | "kin
     const other = tuningPathLength(ld, cIt.id);
     const gap = info.gap > 0 ? info.gap : 0.1;
     const dp = { line: lineC, net: lineC.net, netKey: lineC.netKey, mineIsP: NT.key(pair.P) === line.netKey, gap, lenMine: mine.length, lenOther: other.length, delayMine: mine.delay, delayOther: other.delay };
-    st = moveSettings(Object.assign({}, TP, { dp, lineLength: Math.max(mine.length, other.length), lineDelay: Math.max(mine.delay, other.delay) }));
+    const ex = chainExtras(ld, dp.mineIsP ? [line.netKey, lineC.netKey] : [lineC.netKey, line.netKey], Math.max(mine.length, other.length) * TUNE_IU);   // P, N
+    st = moveSettings(Object.assign({}, TP, { dp, lineLength: Math.max(mine.length, other.length), lineDelay: Math.max(mine.delay, other.delay), chainEx: ex }));
     const O = routeObstacles(scratch, settingsOf(ctx), line.netKey, line.layer, null, new Set(lineC.ids));
     const hits = (ch: Chain) => pathHits(O, chPoints(ch).map((p) => [p[0] / TUNE_IU, p[1] / TUNE_IU]), r).length > 0;
     res = tuneDp({ line, origin, end, cursor: end, width: line.width, clearance, dp }, st, I, hits, delayOf);
@@ -171,7 +175,7 @@ export function regenerateTuningBranch(ctx: PcbCtx, gen: Pick<KItem, "id" | "kin
     const collides = (ch: Chain) => pathHits(O, chPoints(ch).map((p) => [p[0] / TUNE_IU, p[1] / TUNE_IU]), r).length > 0;
     const ch = lineChainIU(line);
     res = meanderMove({ pts: chPoints(ch), ch, origin: I(origin), end: I(end), cursor: I(end), st, width: Math.round(line.width * TUNE_IU),
-      clearance: Math.round(clearance * TUNE_IU), lineLength: mine.length * TUNE_IU, lineDelay: mine.delay, delayOf, collides });
+      clearance: Math.round(clearance * TUNE_IU), lineLength: mine.length * TUNE_IU, lineDelay: TP.coupled == null ? placerPathDelay(TP) : mine.delay, delayOf, collides });
   }
   // the rebuilt line(s) onto the scratch board: kept segments stay, the rest of each line is replaced
   const ops2: BranchOp[] = [], members: string[] = [];
@@ -249,7 +253,7 @@ export function tuneClick(ctx: PcbCtx, mm: Pt) {
 }
 /** The tuner's status (TUNING_STATUS_VIEW_ITEM): the net, "current length  min  max", "Net: <length>  ---  ---". */
 /** What the tuner's status box shows. */
-export interface TuneStatus { scope: string; label: string; value: string; min: string; max: string }
+export interface TuneStatus { scope: string; label: string; value: string; min: string; max: string; chain?: { value: string; min: string; max: string } | null }
 export function tuneStatus(ctx: PcbCtx): TuneStatus | null {
   const U = S.tune; const doc = ctx.doc; const units = sizeUnits();
   let net = null, len = null, delay = 0; const skew = tuneMode() === "skew";
@@ -279,7 +283,31 @@ export function tuneStatus(ctx: PcbCtx): TuneStatus | null {
     }
   }
   const value = td ? msgTime(delay) : msgValue(len, units);
-  return { scope: name ? unescapeName(name) : "", label: skew ? "current skew" : td ? "current delay" : "current length", value: (skew ? "Skew: " : "Net: ") + value, min, max };
+  // the scope line "<net> | <chain>" and, for a net on a chain, the chain's total with the chain rule's min / max
+  const NT = netTable(doc), chainName = net ? netChainOf(doc, NT.key(net)) : "";
+  let chain: TuneStatus["chain"] = null;
+  if (chainName) {
+    const ld = ldContext(doc, settingsOf(ctx)); let cmin = "---", cmax = "---";
+    const rep = [...doc.items.values()].find((it) => (it.kind === "segment" || it.kind === "arc" || it.kind === "via") && netChainOf(doc, NT.key(netOf(it.node))) === chainName);
+    const cc = rep && S.ruleConstraint ? S.ruleConstraint(doc, "net_chain_length", rep, null) : null;
+    if (cc && cc.severity !== "ignore") {
+      if (cc.timeDomain) { cmin = (cc.min || 0).toFixed(2); cmax = cc.max != null ? cc.max.toFixed(2) : "---"; }
+      else { cmin = mm((cc.min || 0) * TUNE_IU); cmax = cc.max != null ? mm(cc.max * TUNE_IU) : "---"; }
+    }
+    // the chain's routed total from the board (GetTrackLength of each net's first track), the meander's change, the bridging
+    let total = 0;
+    for (const cn of chainNets(doc, chainName)) {
+      const r = netRepTrack(ld, cn); if (!r) continue;
+      const b = boardTrackLength(ld, r.id); total += td ? b.delay + b.padToDieDelay : b.length + b.padToDie;
+    }
+    const T = U.pattern;
+    if (T && T.res) total += td ? T.res.delay - placerPathDelay(T) : T.res.length / TUNE_IU - T.lineLength;   // TuningDelayDelta / TuningLengthDelta
+    const [bl, bd] = boardChainBridging(doc, ld, chainName);
+    if (Math.trunc(bl * TUNE_IU) > 0) total += td ? bd : Math.trunc(bl * TUNE_IU) / TUNE_IU;
+    chain = { value: "Chain: " + (td ? msgTime(total) : msgValue(total, units)), min: cmin, max: cmax };
+  }
+  const scope = name ? unescapeName(name) + (chainName ? " | " + chainName : "") : "";
+  return { scope, label: skew ? "current skew" : td ? "current delay" : "current length", value: (skew ? "Skew: " : "Net: ") + value, min, max, chain };
 }
 /**
  * TUNING_STATUS_VIEW_ITEM::ViewDraw in the stroke font with KiCad's preview metrics (GetConstantGlyphHeight: header
@@ -290,7 +318,7 @@ export function tuneStatus(ctx: PcbCtx): TuneStatus | null {
 export function drawTuneStatus(c: CanvasRenderingContext2D, at: Pt, px: number, info: TuneStatus) {
   const css = (name: string, dflt: string) => { try { const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); return v || dflt; } catch (e) { return dflt; } };
   const head = 10 * px, txt = 12 * px, gw = 12 * px, mx = Math.round(12 * 0.4) * px, my = gw;
-  const scope = info.scope ? 1 : 0, valueLines = 1, total = scope + 1 + valueLines;
+  const scope = info.scope ? 1 : 0, valueLines = info.chain ? 2 : 1, total = scope + 1 + valueLines;
   const w = gw * 38 + mx * 2, h = head * total + txt * valueLines;
   const ox = at[0] + mx * 2, oy = at[1] - (h + my * 2);
   const ink = css("--color-ink", "#e0e0e0");
@@ -305,6 +333,10 @@ export function drawTuneStatus(c: CanvasRenderingContext2D, at: Pt, px: number, 
   text(info.label, ox, y, head); text("min", col1, y, head); text("max", col2, y, head);
   y = oy + (scope ? Math.round(pitch * 1.1 / px) * px : 0) + Math.round(pitch * 1.3 / px) * px;
   text(info.value, ox, y, txt); text(info.min, col1, y, txt); text(info.max, col2, y, txt);
+  if (info.chain) {   // the chain's value line with its own min / max
+    y = oy + (scope ? Math.round(pitch * 1.1 / px) * px : 0) + Math.round(pitch * 2.3 / px) * px;
+    text(info.chain.value, ox, y, txt); text(info.chain.min, col1, y, txt); text(info.chain.max, col2, y, txt);
+  }
   c.restore();
 }
 /** The tuner over the board: the picked track's run highlighted, or the pattern's line with its meanders, and the status. */

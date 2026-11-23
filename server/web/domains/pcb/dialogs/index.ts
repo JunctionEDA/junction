@@ -2,6 +2,7 @@
 // (pageSettings, findAndReplace, editSymbolFields, generateBOM, assignFootprints, schematicSetup, syncAllSheetsPins,
 // toggleGridOverrides, openPreferences), the group commands on the schematic module, their hotkeys, the project
 // settings the renderer and the ERC honour, and the preferences applied when a document opens.
+import { openBomLegacy } from "./bom-legacy";
 import { openSimulator } from "../sim/frame";
 import { openEditSymbolsLibId } from "./edit-libid";
 import { openUpdateFromPcb } from "./update-from-pcb";
@@ -9,7 +10,7 @@ import { openImportSheet } from "./import-sheet";
 import { openDiffSymbol } from "./diff-symbol";
 import { E, isSch, requestRender, setToggle, store, toast, toolCtx } from "./editor";
 import { openAssignFootprints } from "./assign-footprints";
-import { openChangeSymbols } from "./change-symbols";
+import { clearVariantSymbol, openChangeSymbols, setVariantSymbol } from "./change-symbols";
 import { openGlobalEdit } from "./global-edit";
 import { installSchItemDialogs } from "./sch-items";
 import { installSimModel } from "./sim-model";
@@ -107,6 +108,12 @@ export function installDialogs(HANDLERS: Record<string, Handler>): void {
     editSymbolFields: needDoc(() => openFieldsTable(false), true),
     // the board editor's File > Fabrication Outputs > Bill of Materials is the fabrication package; the schematic's is the fields table
     generateBOM: (() => { if (E.kdoc && !isSch()) openFabOutputs("bom"); else needDoc(() => openFieldsTable(true), true)(); }) as Handler,
+    // the schematic's Tools > Generate Legacy Bill of Materials (DIALOG_BOM); the board's is its own action
+    generateBOMLegacy: (() => {
+      if (E.kdoc && isSch()) { void openBomLegacy(); return; }
+      const m = CollabTools.pcb as ToolModule | undefined, a = m && m.actions ? m.actions.generateBOMLegacy : undefined;
+      if (E.kdoc && a) a.run(toolCtx());
+    }) as Handler,
     assignFootprints: needDoc(openAssignFootprints, true),
     schematicSetup: needDoc(() => openSchematicSetup(), true),
     syncAllSheetsPins: needDoc(openSyncSheetPins, true),
@@ -125,6 +132,8 @@ export function installDialogs(HANDLERS: Record<string, Handler>): void {
     incrementAnnotations: needDoc(openIncrementAnnotations, true),
     // DIALOG_CHANGE_SYMBOLS: Edit > Change Symbols…, Tools > Update Symbols from Library…, the symbol context menu
     changeSymbols: needDoc(() => openChangeSymbols("change"), true), changeSymbol: needDoc(() => openChangeSymbols("change"), true),
+    // SCH_EDIT_TOOL::SetVariantSymbol / ClearVariantSymbol: the symbol context menu under a design variant
+    setVariantSymbol: needDoc(() => { if (isSch()) void setVariantSymbol(); }, true), clearVariantSymbol: needDoc(() => { if (isSch()) void clearVariantSymbol(); }, true),
     updateSymbols: needDoc(() => openChangeSymbols("update"), true), updateSymbol: needDoc(() => openChangeSymbols("update"), true),
     toggleGridOverrides: (() => { const on = toggleGridOverrides(); toast(on ? "Grid overrides on" : "Grid overrides off"); }) as Handler,
     openPreferences: (() => openPreferences()) as Handler,

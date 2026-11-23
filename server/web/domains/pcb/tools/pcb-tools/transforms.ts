@@ -12,7 +12,7 @@ import { clone, corners, flipLayerName, isList, norm360, pt, r6, rotator, vadd, 
 // ================================================================ parity pass: the non-tool commands of pcbnew
 // Everything below is DOM-free geometry and node editing (the dialogs at the end are swappable) so the node
 // tests can drive it; app.js reaches it through pcb.actions and the exported query functions.
-export const PCB_KINDS = new Set(["footprint", "segment", "arc", "via", "zone", "gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_text", "gr_text_box", "gr_curve", "gr_ellipse", "gr_ellipse_arc", "gr_bbox", "dimension", "target", "image", "group", "table", "generated"]);
+export const PCB_KINDS = new Set(["footprint", "segment", "arc", "via", "zone", "gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_text", "gr_text_box", "gr_curve", "gr_ellipse", "gr_ellipse_arc", "gr_bbox", "dimension", "target", "image", "group", "table", "generated", "drill_map", "drill_chart", "stackup_table", "constraint"]);
 export const EPS = 1e-3;   // touching copper, in mm (KiCad's connectivity uses exact contact on integer nanometres)
 export const DRC_EPS = 0.0005;   // ADVANCED_CFG::m_DRCEpsilon: half a micron short of a rule is not a violation
 export const isFootprintNode = (n: SNode) => n[0] === "footprint";
@@ -50,7 +50,8 @@ export function mapNodePoints(node: SNode, fn: PointFn) {
   const mapKey = (n: SNode, key: string) => { const c = K.kid(n, key); if (!c || c.length < 3) return; const [x, y] = fn(K.num(c[1]), K.num(c[2])); c[1] = r6(x); c[2] = r6(y); };
   const mapPts = (n: SNode) => { const p = K.kid(n, "pts"); if (p) for (const xy of p.slice(1)) if (isList(xy) && xy[0] === "xy") { const [x, y] = fn(K.num(xy[1]), K.num(xy[2])); xy[1] = r6(x); xy[2] = r6(y); } };
   if (k === "footprint") return legacyFootprintFrame(node, S.doc, () => { const [x, y] = K.atOf(node); const [nx, ny] = fn(x, y); K.setAt(node, r6(nx), r6(ny)); return node; });
-  if (k === "table") {   // a table sits where its first cell does: every cell shifts with it
+  if (k === "drill_map") { const o = K.kid(node, "offset"); if (o) { const [x, y] = fn(K.num(o[1]), K.num(o[2])); o[1] = r6(x); o[2] = r6(y); } return node; }   // PCB_DRILL_MAP::Move: its offset
+  if (k === "table" || k === "drill_chart" || k === "stackup_table") {   // a table sits where its first cell does: every cell shifts with it
     const cells = K.kid(node, "cells"); const first = cells && K.kids(cells, "table_cell")[0]; const s = first && K.kid(first, "start"); if (!s) return node;
     const [ax, ay] = [K.num(s[1]), K.num(s[2])]; const [nx, ny] = fn(ax, ay); K.shiftTable(node, nx - ax, ny - ay); return node;
   }
@@ -81,7 +82,8 @@ export function rotateNode(node: SNode, cx: number, cy: number, deg: number) {
   }
   if (k === "gr_ellipse" || k === "gr_ellipse_arc" || k === "fp_ellipse" || k === "fp_ellipse_arc") return rotateEllipseNode(node, cx, cy, deg);   // EDA_SHAPE::rotate: Rotation -= angle
   if ((k === "gr_text_box" || k === "table_cell") && K.kid(node, "start") && K.kid(node, "end")) return rotateTextBoxNode(node, cx, cy, deg);
-  if (k === "table") {   // PCB_TABLE::Rotate: every cell turns (PCB_TEXTBOX::Rotate), then Normalize lays them out about cell 0
+  if (k === "drill_map") return node;   // PCB_DRILL_MAP::Rotate: the marks sit at their holes, nothing turns
+  if (k === "table" || k === "drill_chart" || k === "stackup_table") {   // PCB_TABLE::Rotate: every cell turns (PCB_TEXTBOX::Rotate), then Normalize lays them out about cell 0
     const cells = K.kid(node, "cells"); if (!cells) return node;
     for (const c of K.kids(cells, "table_cell")) if (K.kid(c, "start") && K.kid(c, "end")) rotateTextBoxNode(c, cx, cy, deg);
     (K as unknown as { tableModel: { normalizeTable(n: SNode, pcb: boolean): void } }).tableModel.normalizeTable(node, true);
@@ -154,6 +156,8 @@ export function flipNode(node: SNode, cx: number, doc: BoardDoc, cy?: number, di
     flipNode(node, cx, doc); return rotateNode(node, cx, cy, 180);
   }
   const k = node[0]; const mirror = (x: number, y: number) => [2 * cx - x, y];
+  if (k === "drill_map") { flipLayerKid(node); return node; }   // PCB_DRILL_MAP::Flip: the side changes, the offset stays
+  if (k === "drill_chart" || k === "stackup_table") return flipGeneratedTable(node, cx);
   if (k === "footprint") return legacyFootprintFrame(node, doc || S.doc, () => { flipFootprintNode(node); return mapNodePoints(node, mirror); });
   if (/_ellipse(_arc)?$/.test(String(k))) flipEllipseNode(node, cx, 0, true); else mapNodePoints(node, mirror);   // ELLIPSE::Mirror( LEFT_RIGHT )
   flipLayerKid(node);
@@ -168,6 +172,27 @@ export function flipNode(node: SNode, cx: number, doc: BoardDoc, cy?: number, di
   if (k === "pad") padMirrorX(node);   // PAD::Flip: offset, trapezoid delta and primitives mirror, the relative angle negates
   if (k === "dimension") { const gt = K.kid(node, "gr_text"); if (gt) { flipLayerKid(gt); toggleMirror(gt); setAngleKid(gt, -angleKid(gt)); } }
   if (k === "table") { const cells = K.kid(node, "cells"); if (cells) for (const c of K.kids(cells, "table_cell")) { flipLayerKid(c); toggleMirror(c); } }
+  return node;
+}
+/**
+ * PCB_GENERATED_TABLE::Flip (left / right about x = cx): PCB_TABLE::Flip turns the cells to the other side and mirrors
+ * the grid's columns (cells and widths), keeping the box's top and its mirrored left edge; then the columns of the
+ * header reverse and the trailer rows swap their texts end for end (flipGeneratedHeader).
+ */
+function flipGeneratedTable(node: SNode, cx: number): SNode {
+  const D = (K as unknown as { drillModel: { flipGeneratedHeader(n: SNode): void } }).drillModel; const TM = (K as unknown as { tableModel: { normalizeTable(n: SNode, pcb: boolean): void; tableInfo(n: SNode): { cols: number; rows: number; cells: SNode[] } } }).tableModel;
+  const box = (): number[] => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; const cells = K.kid(node, "cells"); for (const c of cells ? K.kids(cells, "table_cell") : []) for (const key of ["start", "end"]) { const p = pt(c, key); if (p) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); } } return [x0, y0, x1, y1]; };
+  const before = box(); const T = TM.tableInfo(node); const cn = K.kid(node, "cells");
+  if (cn && T.cols > 0) {
+    for (const c of T.cells) { flipLayerKid(c); toggleMirror(c); }
+    const mirrored: SNode[] = []; for (let r = 0; r < T.rows; r++) for (let c = T.cols - 1; c >= 0; c--) mirrored.push(T.cells[r * T.cols + c]);
+    cn.splice(1, T.cells.length, ...mirrored);
+    const cw = K.kid(node, "column_widths"); if (cw) cw.splice(1, cw.length - 1, ...cw.slice(1).reverse());
+    TM.normalizeTable(node, true);
+  }
+  flipLayerKid(node);
+  if (isFinite(before[0])) { const after = box(); K.shiftTable(node, r6(2 * cx - before[2] - after[0]), r6(before[1] - after[1])); }
+  D.flipGeneratedHeader(node);
   return node;
 }
 /** Mirror in place (no side change): "h" about the vertical axis through cx, "v" about the horizontal one through cy. */
@@ -337,6 +362,7 @@ export function anchorOf(item: KItem): Pt {
   if (k === "gr_poly" || k === "gr_curve" || k === "dimension" || k === "gr_text_box") { const p = firstVertex(K.kid(n, "pts")); if (p) return p; }
   if (k === "zone") { const poly = K.kid(n, "polygon"); const p = poly && firstVertex(K.kid(poly, "pts")); if (p) return p; }
   if (k === "table") { const cells = K.kid(n, "cells"); const first = cells && K.kids(cells, "table_cell")[0]; const p = first && pt(first, "start"); if (p) return p; }
+  if (k === "drill_map") { const o = K.kid(n, "offset"); if (o) return [K.num(o[1]), K.num(o[2])]; }   // PCB_DRILL_MAP::GetPosition: its offset
   if (k === "generated") { const c = K.kid(n, "origin"); const xy = c && K.kid(c, "xy"); if (xy) return [K.num(xy[1]), K.num(xy[2])]; }   // PCB_GENERATOR::GetPosition
   const b = item.bbox; return b ? [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] : [0, 0];
 }

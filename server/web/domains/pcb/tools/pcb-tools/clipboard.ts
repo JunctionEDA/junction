@@ -56,6 +56,7 @@ export function clipboardText(doc: BoardDoc, ids: Iterable<string>, ref?: Pt | n
       translateNode(node, -ref![0], -ref![1]);
       setLocked(node, false); parts.push(K.serialize(FD && FD.toFileNode ? FD.toFileNode(node) : node));
     }
+    for (const n of fullySelectedConstraints(doc, items as KItem[])) parts.push(K.serialize(n));
     return parts.join("\n") + "\n)";
   }
   const lone = top.length === 1 && !(extra && extra.length) && !!doc.items.get(top[0]) && doc.items.get(top[0])!.kind === "footprint";
@@ -70,7 +71,25 @@ export function clipboardText(doc: BoardDoc, ids: Iterable<string>, ref?: Pt | n
     parts.push(K.serialize(node));
   }
   for (const n of extra || []) { const node = clone(n); translateNode(node, -ref![0], -ref![1]); setLocked(node, false); parts.push(K.serialize(node)); }
+  for (const n of fullySelectedConstraints(doc, items as KItem[])) parts.push(K.serialize(n));
   return parts.join("\n") + "\n)";
+}
+/** CollectConstraintScopeIds: the items and everything inside them (a footprint's pads and drawings). */
+function constraintScopeIds(items: KItem[]): Set<string> {
+  const ids = new Set<string>();
+  const walk = (n: SNode) => { const u = K.uuidOf(n); if (u) ids.add(u); for (const c of n) if (isList(c) && c[0] !== "uuid") walk(c); };
+  for (const it of items) { ids.add(it.id); walk(it.node); }
+  return ids;
+}
+/** ConstraintFullySelected over the document's constraints: the ones whose every member is in the copied items. */
+function fullySelectedConstraints(doc: BoardDoc, items: KItem[]): SNode[] {
+  const scope = constraintScopeIds(items); const out: SNode[] = [];
+  for (const it of doc.items.values()) {
+    if (it.kind !== "constraint") continue;
+    const ms = K.kids(K.kid(it.node, "members") || [], "member");
+    if (ms.length && ms.every((m) => scope.has(K.str(m[1])))) out.push(clone(it.node));
+  }
+  return out;
 }
 export function parseClipboard(text: string) {
   let trees: SAtom[] | null | undefined; try { trees = K.parseAll(text); } catch (e) { return null; }
@@ -87,6 +106,8 @@ export function freshUuids(nodes: SNode[]) {
   const map = new Map<string, string>();
   const walk = (n: SNode) => { for (let i = 1; i < n.length; i++) { const c = n[i]; if (!isList(c)) continue; if ((c[0] === "uuid" || c[0] === "tstamp") && c.length > 1) { const old = K.str(c[1]); if (!map.has(old)) map.set(old, K.newUuid()); c[1] = map.get(old)!; } else walk(c); } };
   for (const n of nodes) walk(n);
+  // PCB_CONSTRAINT::RemapKIIDs: a pasted / duplicated constraint points at the copies of its members
+  for (const n of nodes) if (n[0] === "constraint") for (const m of K.kids(K.kid(n, "members") || [], "member")) { const id = K.str(m[1]); if (map.has(id)) m[1] = map.get(id)!; }
   for (const n of nodes) if (n[0] === "group" || n[0] === "generated") { const m = K.kid(n, "members"); if (m) { const ids = m.slice(1).map(K.str).filter((id) => map.has(id)).map((id) => map.get(id)!); m.splice(1, m.length - 1, ...ids); } }
   return map;
 }
@@ -174,6 +195,8 @@ export function pruneItemLayers(nodes: SNode[], doc: BoardDoc): SNode[] {
     if (fits) out.push(n); else { const u = K.kid(n, "uuid") || K.kid(n, "tstamp"); if (u) gone.add(K.str(u[1])); }
   }
   if (gone.size) for (const n of out) if (n[0] === "group" || n[0] === "generated") { const m = K.kid(n, "members"); if (m) m.splice(1, m.length - 1, ...m.slice(1).filter((id) => !gone.has(K.str(id)))); }
+  // a constraint goes with any member that could not be pasted (it would only resolve to an error)
+  if (gone.size) return out.filter((n) => n[0] !== "constraint" || !K.kids(K.kid(n, "members") || [], "member").some((m) => gone.has(K.str(m[1]))));
   return out;
 }
 /** The footprint editor keeps these loose board items of a pasted board (PCB_CONTROL::Paste); tracks, vias, zones, images go. */
@@ -232,7 +255,7 @@ export function pasteChanges(doc: BoardDoc, text: string, at: Pt | null | undefi
   for (const n of nodes) if (n[0] === "group" || n[0] === "generated") for (const id of groupMembers(n)) inGroup.add(id);
   for (const n of nodes) {
     if (at && (at[0] || at[1])) translateNode(n, at[0], at[1]);
-    const c = addedChange(doc, n); changes.push(c); ids.push(c.id);
+    const c = addedChange(doc, n); changes.push(c); if (n[0] !== "constraint") ids.push(c.id);   // constraints are not selectable
   }
   const res: { changes: PcbChange[]; ids: string[]; select?: string[]; pruned?: boolean } = { changes, ids };
   if (ids.some((id) => inGroup.has(id))) res.select = ids.filter((id) => !inGroup.has(id));
@@ -267,12 +290,13 @@ export function duplicateChanges(doc: BoardDoc, ids: Iterable<string>, offset?: 
   const isParent = (n: SNode) => n[0] === "group" || n[0] === "generated";
   const subtree = (it: KItem, acc: KItem[]): KItem[] => { acc.push(it); if (it.kind === "group" || it.kind === "generated") for (const m of groupMembers(it.node)) { const c = doc.items.get(m); if (c) subtree(c, acc); } return acc; };
   const incUsed = new Set<string>();   // numbers taken by copies made earlier in this pass
+  const idMap = new Map<string, string>();   // original uuid -> its copy's, for the constraints carried along
   for (const id of ids) {
     // a generator (a tuning pattern) is copied as PCB_GENERATOR::DeepDuplicate does: a new generator holding copies of its members
     const it = doc.items.get(id); if (!it || coveredByGroup(id)) continue;
     if (doc.fpEditor && it.kind === "property") continue;   // EDIT_TOOL::Duplicate: a footprint's fields are not duplicated
     const src = subtree(it, []);
-    const nodes = src.map((x) => clone(x.node)); freshUuids(nodes);
+    const nodes = src.map((x) => clone(x.node)); for (const [a, b] of freshUuids(nodes)) idMap.set(a, b);
     // Duplicate and Increment (footprint editor): the copy takes FOOTPRINT::GetNextPadNumber of PAD_TOOL's last number
     if (doc.fpEditor && opts && opts.increment) for (const n of nodes) if (n[0] === "pad" && canHaveNumber(n)) {
       n[1] = padMemory.lastNumber = nextPadNumber(doc, padMemory.lastNumber, incUsed); incUsed.add(String(n[1]));
@@ -290,6 +314,15 @@ export function duplicateChanges(doc: BoardDoc, ids: Iterable<string>, offset?: 
     if (g && topId) { if (!joins.has(g.id)) joins.set(g.id, []); joins.get(g.id)!.push(topId); }
   }
   for (const [gid, add] of joins) { const g = doc.items.get(gid); out.restore.push({ id: gid, node: clone(g!.node) }); out.changes.push(...groupMembersChanges(doc, g!, add, [])); }
+  // CloneFullySelectedConstraints: the constraints whose members were all duplicated, repointed at the copies (kept out of the selection)
+  for (const it of Array.from(doc.items.values())) {
+    if (it.kind !== "constraint") continue;
+    const ms = K.kids(K.kid(it.node, "members") || [], "member");
+    if (!ms.length || !ms.every((m) => idMap.has(K.str(m[1])))) continue;
+    const n = clone(it.node); freshUuids([n]);
+    for (const m of K.kids(K.kid(n, "members") || [], "member")) m[1] = idMap.get(K.str(m[1]))!;
+    out.changes.push(addedChange(doc, n));
+  }
   return out;
 }
 /**

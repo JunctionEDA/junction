@@ -6,6 +6,7 @@ import { arcLength } from "./distances";
 import { matchDpSuffix } from "./diffpair";
 import { marker, mm4, mmPair, ruled } from "./drc";
 import { tuningProfileRules } from "./length-delay";
+import { matchedLengthProviderMarkers } from "./drc-length";
 import { approxParallelT, commonParallelProjection } from "./meander";
 import { netOf } from "./nets";
 import { K, S } from "./state";
@@ -565,72 +566,11 @@ export function ruleClearance(rules: DruRule[], doc: BoardDoc, s: DesignSettings
   return null;
 }
 /**
- * DRC_TEST_PROVIDER_MATCHED_LENGTH for the custom rules: every net whose tracks a rule gives a length constraint is
- * checked as one connection (its routed track length; via heights and pad-to-die lengths are not counted), and the
- * nets one skew rule covers are compared with the longest of them (within_diff_pairs: each pair on its own).
+ * DRC_TEST_PROVIDER_MATCHED_LENGTH for the custom rules: length, net_chain_length, skew, via_count, return_path and
+ * stub_length (drc-length.ts, with the net chain topology of drc-chain.ts).
  */
 export function matchedLengthMarkers(doc: BoardDoc, s: DesignSettings, rules: DruRule[]): DrcMarker[] {
-  const out: DrcMarker[] = []; if (!rules.some((r) => r.constraints.some((c) => c.type === "length" || c.type === "skew" || c.type === "via_count"))) return out;
-  const vias = new Map<string, string[]>();   // CONNECTION::viaCount: the vias of the net
-  for (const it of doc.items.values()) { if (it.kind !== "via") continue; const name = netName(doc, it.node); if (!name) continue; const l = vias.get(name); if (l) l.push(it.id); else vias.set(name, [it.id]); }
-  const nets = new Map<string, { name: string; ids: string[]; total: number; first: KItem }>();
-  for (const it of doc.items.values()) {
-    if (it.kind !== "segment" && it.kind !== "arc") continue;
-    const name = netName(doc, it.node); if (!name) continue;
-    const a = K.kid(it.node, "start"), b = K.kid(it.node, "end"); if (!a || !b) continue;
-    const A: [number, number] = [K.num(a[1]), K.num(a[2])], B: [number, number] = [K.num(b[1]), K.num(b[2])];
-    let L = Math.hypot(B[0] - A[0], B[1] - A[1]);
-    if (it.kind === "arc") { const m = K.kid(it.node, "mid"); const c = m && K.arcFrom3(A, [K.num(m[1]), K.num(m[2])], B); if (c) L = arcLength(c); }
-    let n = nets.get(name); if (!n) nets.set(name, n = { name, ids: [], total: 0, first: it });
-    n.ids.push(it.id); n.total += L;
-  }
-  const at = (it: KItem) => { const a = K.kid(it.node, "start")!; return [K.num(a[1]), K.num(a[2])]; };
-  const groups = new Map<string, { c: DruConstraint; rule: DruRule; nets: typeof nets extends Map<string, infer V> ? V[] : never }>();
-  for (const n of nets.values()) {
-    for (let i = rules.length - 1; i >= 0; i--) {   // the rule that gives this net its length constraint
-      const r = rules[i], c = r.constraints.find((k) => k.type === "length"); if (!c || !ruleMatches(r, doc, s, n.first, null)) continue;
-      // a time-domain bound (ps / fs) is compared against propagation delays from the tuning profiles, which this checker lacks
-      if (r.severity === "ignore" || c.timeDomain) break;
-      const name = `rule '${r.name}'`, [x, y] = at(n.first);
-      if (c.min != null && n.total < c.min - 1e-6) out.push(ruled(Object.assign(marker("length_out_of_range", "error", x, y, `Track length out of range (${name} min length ${mmPair(c.min, n.total)[0]}; actual ${mmPair(c.min, n.total)[1]})`, n.ids.slice())), r.severity));
-      else if (c.max != null && n.total > c.max + 1e-6) out.push(ruled(marker("length_out_of_range", "error", x, y, `Track length out of range (${name} max length ${mmPair(c.max, n.total)[0]}; actual ${mmPair(c.max, n.total)[1]})`, n.ids.slice()), r.severity));
-      break;
-    }
-    // DRC_TEST_PROVIDER_MATCHED_LENGTH::checkViaCounts: "Too many vias on a connection (rule 'x' max count N; actual M)"
-    for (let i = rules.length - 1; i >= 0; i--) {
-      const r = rules[i], c = r.constraints.find((k) => k.type === "via_count"); if (!c || !ruleMatches(r, doc, s, n.first, null)) continue;
-      if (r.severity === "ignore") break;
-      const count = (vias.get(n.name) || []).length, name = `rule '${r.name}'`, [x, y] = at(n.first);
-      let text = "";
-      if (c.max != null && count > c.max) text = `Too many vias on a connection (${name} max count ${Math.trunc(c.max)}; actual ${count})`;
-      else if (c.min != null && count < c.min) text = `Too few vias on a connection (${name} min count ${Math.trunc(c.min)}; actual ${count})`;
-      if (text) { const m = marker("too_many_vias", "error", x, y, text, n.ids.concat(vias.get(n.name) || [])); m.layer = layerOf(n.first.node); out.push(ruled(m, r.severity)); }
-      break;
-    }
-    for (let i = rules.length - 1; i >= 0; i--) {
-      const r = rules[i], c = r.constraints.find((k) => k.type === "skew"); if (!c || !ruleMatches(r, doc, s, n.first, null)) continue;
-      if (r.severity === "ignore" || c.timeDomain) break;
-      let g = groups.get(r.name + "\u0000" + i); if (!g) groups.set(r.name + "\u0000" + i, g = { c, rule: r, nets: [] }); g.nets.push(n); break;
-    }
-  }
-  for (const g of groups.values()) {
-    let sets: (typeof g.nets)[] = [g.nets];
-    if (g.c.options && g.c.options.includes("within_diff_pairs")) {
-      sets = []; const left = new Map(g.nets.map((n) => [n.name, n]));
-      for (const n of g.nets) { if (!left.has(n.name)) continue; const m = matchDpSuffix(n.name); const o = m.rv ? left.get(m.complement) : null; if (o) { sets.push([n, o]); left.delete(n.name); left.delete(o.name); } }
-    }
-    for (const set of sets) {
-      let ref = set[0]; for (const n of set) if (n.total > ref.total) ref = n;
-      for (const n of set) {
-        const skew = Math.abs(n.total - ref.total), name = `rule '${g.rule.name}'`; let kind = "";
-        if (g.c.max != null && skew > g.c.max + 1e-6) kind = "max"; else if (g.c.min != null && n !== ref && skew < g.c.min - 1e-6) kind = "min";
-        if (!kind) continue;
-        const [x, y] = at(n.first);
-        out.push(ruled(marker("skew_out_of_range", "error", x, y, `Skew between tracks out of range (${name} ${kind} skew ${mmPair(kind === "max" ? g.c.max! : g.c.min!, n.total - ref.total)[0]}; actual ${mmPair(kind === "max" ? g.c.max! : g.c.min!, n.total - ref.total)[1]}; target net length ${mm4(ref.total)} (from ${ref.name}); actual ${mm4(n.total)})`, n.ids.slice()), g.rule.severity));
-      }
-    }
-  }
-  return out.filter((m) => s.severities[m.code] !== "ignore");
+  return matchedLengthProviderMarkers(doc, s, rules).filter((m) => s.severities[m.code] !== "ignore");
 }
 /**
  * DRC_TEST_PROVIDER_DIFF_PAIR_COUPLING for the custom rules: each differential pair a diff_pair_gap or

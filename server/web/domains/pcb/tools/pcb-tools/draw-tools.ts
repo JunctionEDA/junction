@@ -11,7 +11,8 @@ import { openForm, settingsOf } from "./dialogs";
 import { DIM_TYPE, dimensionNode, snap45 } from "./dimensions";
 import type { DimSpec } from "./dimensions";
 import { pickerImpl, promptImpl } from "./dom";
-import { POLY_TOOLS, RULE_AREA_LAYERS, constrainDraw, curveGeom, drawTrack, drawWidth, pushPt, simplifyOutline, withStroke } from "./draw-modes";
+import { commitDrawn } from "./constraint-tool";
+import { POLY_TOOLS, RULE_AREA_LAYERS, angleSnapMode, constrainDraw, curveGeom, drawTrack, drawWidth, pushPt, simplifyOutline, withStroke } from "./draw-modes";
 import { applySelection, selectionIds } from "./groups";
 import { base64Bytes, imageInfo, imageMm } from "./images";
 import { netTable } from "./netlist";
@@ -80,7 +81,7 @@ export function ellipseArcGeom(d: DrawState): EllipseGeom {
 /** DRAWING_TOOL::DrawEllipseArc's commit: "Draw Elliptical Arc", the arc selected; the tool stays for the next one. */
 function commitEllipseArc(ctx: PcbCtx, e: EllipseGeom) {
   const c = addedChange(ctx.doc, withStroke(ellipseNode(e, true, S.gfxLayer)));
-  ctx.commit([c], "Draw Elliptical Arc"); applySelection(ctx, [c.id]);
+  commitDrawn(ctx, c, "Draw Elliptical Arc", "shape"); applySelection(ctx, [c.id]);
 }
 /**
  * ACTIONS::finishInteractive or a double-click while an elliptical arc is drawn (drawManagedShape): what there is so
@@ -189,7 +190,9 @@ export function drawClick(ctx: PcbCtx, hv: Hover, t: string, ev: PtrEvent) {
   // DrawEllipse (drawShape + updateSegmentFromGeometryMgr): the ellipse inscribed in the two corners' box
   const node = draftedShape(d, withStroke(t === "gline" ? lineNode(d.start, p, layer) : t === "grect" ? rectNode(d.start, p, layer) : t === "gellipse" ? ellipseNode(ellipseFromBox(d.start, p), false, layer) : circleNode(d.start, p, layer)));
   const add = addedChange(ctx.doc, node);
-  ctx.commit([add], t === "gline" ? "Draw Line" : t === "grect" ? "Draw Rectangle" : t === "gellipse" ? "Draw Ellipse" : "Draw Circle");
+  // DrawLine: stageAutoConstraints on the line's commit (its axis kept unless the line mode is free), snapped after the push
+  if (t === "gline") commitDrawn(ctx, add, "Draw Line", "shape", angleSnapMode() !== "free");
+  else ctx.commit([add], t === "grect" ? "Draw Rectangle" : t === "gellipse" ? "Draw Ellipse" : "Draw Circle");
   // drawShape: a line whose end snapped onto an existing graphic closes a path: it is selected and the chain ends
   const closes = t === "gline" && !!(hv.snap && hv.snap.shape);
   if (t !== "gline" || closes) applySelection(ctx, [add.id]);   // DrawRectangle / DrawCircle: ACTIONS::selectItem
@@ -347,7 +350,7 @@ export function dimClick(ctx: PcbCtx, p: Pt, t: string) {
 export function commitDim(ctx: PcbCtx, type: string, d: DrawState) {
   S.draw = null;
   const add = addedChange(ctx.doc, dimensionNode(type, Object.assign({}, d, { textPos: type === "radial" || type === "leader" ? null : d.textPos, thickness: drawWidth(S.gfxLayer) }) as DimSpec, S.gfxLayer));   // the end is set by now
-  ctx.commit([add], "Draw Dimension"); ctx.requestRender();
+  commitDrawn(ctx, add, "Draw Dimension", "dim"); ctx.requestRender();   // bindDimensionEndpoints rides the dimension's commit
   if (add.id) applySelection(ctx, [add.id]);   // ACTIONS::selectItem
   // PCB_DIM_LEADER: "Run the edit immediately to set the leader text"
   const it = type === "leader" && add.id && ctx.doc.items.get(add.id);

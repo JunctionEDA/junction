@@ -28,7 +28,8 @@ import { matchDpSuffix } from "./diffpair";
 import { subtract, union } from "../../fab/poly";
 import { area as polyArea, type Pt as FabPt } from "../../fab/prims";
 import { conductors, netTable, netlist, ratsnest } from "./netlist";
-import { hasNet, netChainOf, netOf } from "./nets";
+import { chainNets, hasNet, netChainOf, netOf } from "./nets";
+import { boardChainBridging } from "./drc-chain";
 import { zoneLayers } from "./nodes";
 import { padsOf } from "./route-geom";
 import { MODE_NAMES, cornerStyleName } from "./router-settings";
@@ -228,7 +229,9 @@ export function itemDescription(doc: BoardDoc, id: string, units: string) {
   if (it.kind === "gr_text_box") return `PCB text box '${ellipsizeMenuText(K.str(n[1]))}' on ${L(layerOf(n))}`;
   if (it.kind === "dimension") { const gt = K.kid(n, "gr_text"); return `Dimension '${ellipsizeMenuText(gt ? K.str(gt[1]) : "")}' on ${L(layerOf(n))}`; }
   if (it.kind === "group") { const nm = typeof n[1] === "string" ? K.str(n[1]) : "", cnt = K.groupMemberIds(n).length; return nm ? `Group '${nm}', ${cnt} members` : `Unnamed Group, ${cnt} members`; }
+  if (it.kind === "table" && K.drillModel.isGeneratedKind(n[0])) return K.drillModel.generatedMsg(doc, n).description;   // PCB_DRILL_CHART / PCB_STACKUP_TABLE::GetItemDescription
   if (it.kind === "table") { const cc = K.kid(n, "column_count"); return `${cc ? K.num(cc[1]) : 0} column table`; }
+  if (it.kind === "drill_map") return K.drillModel.drillMapMsg(doc, n).description;
   if (it.kind === "target") return "Target";
   if (it.kind === "barcode") { const tx = K.kid(n, "text"); return `Barcode '${tx ? K.str(tx[1]) : ""}' on ${L(layerOf(n))}`; }
   const m = /^gr_(line|rect|circle|arc|poly|curve|ellipse|ellipse_arc)$/.exec(it.kind);
@@ -276,6 +279,8 @@ export function tuningMsgPanel(doc: BoardDoc, gen: KItem, s: DesignSettings, uni
   else if (pNet) add("Net", unescapeName(pNet.name));
   if (pNet) add("Resolved Netclass", unescapeName(netclassName(s, pNet.name || "")));
   add("Layer", boardLayerName(doc, K.str((K.kid(n, "layer") || [])[1]) || "F.Cu"));
+  const chainName = pNet && pNet.name ? netChainOf(doc, pNet.name) : "";
+  if (chainName) add("Net Chain", chainName);
   if (width && !mixed) add("Width", V(width));
   if (primary && pNet && pNet.name) {   // BOARD::GetTrackLength: lengths, or delays when the net has them
     const ld = ldContext(doc, s); const p = boardTrackLength(ld, primary.id);
@@ -287,8 +292,21 @@ export function tuningMsgPanel(doc: BoardDoc, gen: KItem, s: DesignSettings, uni
     else add("Routed Delay", msgTime(p.delay));
     if (p.padToDie !== 0 && p.padToDieDelay === 0) { add("Pad To Die Length", V(p.padToDie)); add("Full Length", V(p.length + p.padToDie)); }
     else if (p.padToDieDelay > 0) { add("Pad To Die Delay", msgTime(p.padToDieDelay)); add("Full Delay", msgTime(p.delay + p.padToDieDelay)); }
+    if (chainName) {   // the whole chain: this net, every other net of the chain (its first track's GetTrackLength) and the bridging
+      let oLen = 0, oDelay = 0;
+      for (const other of chainNets(doc, chainName)) {
+        if (other === pNet.name) continue;
+        const rep = ld.conds.find((c) => (c.kind === "segment" || c.kind === "arc" || c.kind === "via") && c.net === other); if (!rep) continue;
+        const o = boardTrackLength(ld, rep.id); oLen += o.length + o.padToDie; oDelay += o.delay + o.padToDieDelay;
+      }
+      const [bl, bd] = boardChainBridging(doc, ld, chainName);
+      if (p.delay === 0) add("Net Chain Full Length", V(p.length + p.padToDie + oLen + Math.trunc(bl * 1e6) / 1e6));
+      else add("Net Chain Full Delay", msgTime(p.delay + p.padToDieDelay + oDelay + bd));
+    }
   }
-  const rule = S.ruleConstraint ? S.ruleConstraint(doc, mode === "diff_pair_skew" ? "skew" : "length", primary, coupled) : null;
+  // the chain's net_chain_length rule first, the net's length rule when there is none (or it is ignored)
+  let rule = S.ruleConstraint && mode !== "diff_pair_skew" ? S.ruleConstraint(doc, "net_chain_length", primary, coupled) : null;
+  if (mode === "diff_pair_skew" || !rule || rule.severity === "ignore") rule = S.ruleConstraint ? S.ruleConstraint(doc, mode === "diff_pair_skew" ? "skew" : "length", primary, coupled) : null;
   if (mode === "diff_pair_skew") {
     if (!rule || override) add(`Target Skew: ${V(numOf("target_skew") || 0)}`, "(from tuning pattern properties)");
     else if (rule.text) add(`Skew Constraints: ${rule.text}`, `(from ${rule.name})`);
@@ -574,6 +592,10 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
       const sc = K.kid(n, "scale");
       add("Reference Image", ""); add("PPI", `${g && g.pxMm ? Math.round(25.4 / g.pxMm) : 300} `); add("Scale", `${(sc ? K.num(sc[1], 1) : 1).toFixed(6)} `);
       add("Width", V(g ? g.w : 0)); add("Height", V(g ? g.h : 0)); add("Layer", boardLayerName(doc, layerOf(n)));
+      return out;
+    }
+    if (it && (it.kind === "drill_map" || (it.kind === "table" && K.drillModel.isGeneratedKind(it.node[0])))) {   // PCB_DRILL_MAP / PCB_GENERATED_TABLE::GetMsgPanelInfo
+      for (const [a, b] of (it.kind === "drill_map" ? K.drillModel.drillMapMsg(doc, it.node) : K.drillModel.generatedMsg(doc, it.node)).rows) add(a, b);
       return out;
     }
     if (it && it.kind === "table") {   // PCB_TABLE::GetMsgPanelInfo

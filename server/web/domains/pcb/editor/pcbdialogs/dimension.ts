@@ -3,8 +3,8 @@
 // dimensions; a centre mark keeps only its layer), Dimension Text and Dimension Line.  OK writes the format, style
 // and text options into a copy of the node, then PCB_DIM_*::Update (pcb-tools' dimRead / dimUpdate / dimWrite)
 // re-derives the value text and its place, and the copy goes in as one "Edit Dimension Properties" change.
-// Driving value mode needs a length constraint bound to both ends (DimensionCanDrive), which the web editor has no
-// way to make, so the Value choice offers Driven and Arbitrary as KiCad does for an unbound dimension.
+// The Value choice (buildValueModeChoice) offers Driving only when both ends are bound (DimensionCanDrive); Driving
+// stages the dimension's FIXED_LENGTH constraint with the edit and then applies the length (resolveDrivingConstraint).
 import { comboBox } from "../../../../shared/components/kcombo";
 import { KICAD_FONT, faceOfFont, fontField, setFaceOfFont } from "../../dialogs/font-picker";
 import { box, checkField, form, h, coordField, kiconToggle, lenField, messageBox, numField, openDialog, selectField, textField, unitLabel, type Field } from "./ui";
@@ -28,6 +28,12 @@ interface DimModel {
 interface DimTools {
   dimRead(n: SNode): DimModel; dimUpdate(m: DimModel): DimModel; dimWrite(n: SNode, m: DimModel): SNode; dimBaseText(m: DimModel, nm: number): string;
   isLocked(n: SNode): boolean;
+  /** CONSTRAINT_EDIT_TOOL's driving-dimension helpers (pcb-tools/constraint-tool.ts) */
+  constraints: {
+    dimensionModeInfo(ctx: ToolCtx, id: string): { mode: "driven" | "driving" | "arbitrary"; canDrive: boolean; hasValueMode: boolean };
+    drivingValueText(ctx: ToolCtx, id: string): string | null; dimensionUnits(ctx: ToolCtx, id: string): string; valueFromString(text: string, units: string): number;
+    commitDimensionEdit(ctx: ToolCtx, id: string, node: SNode, mode: "driven" | "driving" | "arbitrary", drivingText: string | null): boolean;
+  };
 }
 const PT = (): DimTools => (window as unknown as { PcbTools: DimTools }).PcbTools;
 
@@ -119,6 +125,12 @@ export function dimensionDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode
   const node0 = item.node, type = sval(kid(node0, "type")) || "aligned", ro = !!ctx.viewOnly;
   const center = type === "center", leader = type === "leader", aligned = type === "aligned" || type === "orthogonal";
   const xref = boardXref(doc), raw0 = dimDialogValues(node0);
+  // hasValueModeChoice / buildValueModeChoice / DimensionValueMode (a dimension being drawn is not on the board yet)
+  const CT = PT().constraints; const info = !create && item.id && CT ? CT.dimensionModeInfo(ctx, item.id) : null;
+  const canDrive = !!info && info.canDrive, mode0 = info && info.mode === "driving" && canDrive ? "driving" : raw0.arbitrary ? "arbitrary" : "driven";
+  // m_valueFieldUnits: the dimension's own units, the ones a Driving length is typed in
+  const parseDriving = (text: string): number => (CT && item.id ? CT.valueFromString(text, CT.dimensionUnits(ctx, item.id)) : NaN);
+  if (mode0 === "driving") raw0.value = CT.drivingValueText(ctx, item.id) || raw0.value;   // the constraint's length, not the geometry
   // cross-references shown as ${REF:FIELD} (ConvertKIIDsToCrossReferences on the prefix, suffix and override text)
   const v0 = { ...raw0, prefix: xref.toRefs(raw0.prefix), suffix: xref.toRefs(raw0.suffix), value: raw0.arbitrary ? xref.toRefs(raw0.value) : raw0.value };
   const fields: { [k: string]: Field<string | number | boolean> } = {};
@@ -136,7 +148,7 @@ export function dimensionDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode
   };
   const measuredText = (v: DimDialogValues): string => { const m = PT().dimRead(applyDimDialog(node0, { ...v, arbitrary: false })); const u = PT().dimUpdate(m); return PT().dimBaseText({ ...u, prefix: "", suffix: "", unitsFormat: 0, override: null }, u.measured || 0); };
   // m_dimension->GetValueText(): the item's own measured text, which the value field keeps while it tracks the measurement
-  const ownValue = raw0.arbitrary ? measuredText(raw0) : raw0.value;
+  const ownValue = raw0.arbitrary || mode0 === "driving" ? measuredText({ ...raw0, value: "" }) : raw0.value;
   // updatePreviewText; valueFieldTracksMeasurement: a Driven value field shows the item's GetValueText(), only the preview follows edits
   const refresh = (): void => {
     if (fields.value && fields.valueMode && fields.valueMode.get() === "driven") (fields.value as Field<string>).set(ownValue);
@@ -158,9 +170,14 @@ export function dimensionDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode
       } else if (center) {
         body.append(box("Dimension Format", form([["Layer:", layerSel.el]], true)));
       } else {
-        const value = reg("value", textField(v0.value, { ro: ro || !v0.arbitrary, key: "value" })); value.input.title = "Measured value of this dimension";
-        const mode = reg("valueMode", selectField<string>(v0.arbitrary ? "arbitrary" : "driven", [["driven", "Driven"], ["arbitrary", "Arbitrary"]], { ro, key: "valueMode",
-          onChange: (x) => { value.input.disabled = ro || x === "driven"; refresh(); } }));
+        const value = reg("value", textField(v0.value, { ro: ro || mode0 === "driven", key: "value" })); value.input.title = "Measured value of this dimension";
+        const modes: [string, string][] = [["driven", "Driven"], ...(canDrive ? [["driving", "Driving"] as [string, string]] : []), ["arbitrary", "Arbitrary"]];
+        const mode = reg("valueMode", selectField<string>(mode0, modes, { ro, key: "valueMode",
+          onChange: (x) => {
+            value.input.disabled = ro || x === "driven";
+            if (x === "driving" && !(parseDriving(String(value.get())) > 0)) value.set(ownValue);   // a stale expression falls back to the measured value
+            refresh();
+          } }));
         mode.input.title = "Driven follows the measured geometry; Driving forces the geometry to the entered length; Arbitrary shows custom text";
         const unitsTip = "Units of this dimension (\"automatic\" to follow the units selected in the editor)";
         const units = reg("unitsMode", selectField<number>(v0.unitsMode, [[0, "Inches"], [1, "Mils"], [2, "Millimeters"], [3, "Automatic"]], { ro, key: "units" }));
@@ -225,7 +242,18 @@ export function dimensionDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode
     },
     ok() {
       if (ro) { if (create) create(null); return true; }
-      const v = current(); if (!create && JSON.stringify(v) === JSON.stringify(v0)) return true;   // nothing changed: the item stays as it is
+      const v = current();
+      const vmode = fields.valueMode ? String(fields.valueMode.get()) : "driven";
+      // TransferDataFromWindow: a non-positive Driving length keeps the dialog open
+      if (vmode === "driving" && !(parseDriving(v.value) > 0)) { messageBox("Invalid Value", "Enter a positive length for a driving dimension."); return false; }
+      if (info && info.hasValueMode && CT && (vmode === "driving" || info.mode === "driving")) {
+        // stageValueModeConstraint: the edit and the length constraint in one "Edit Dimension Properties", then "Apply Dimension Length"
+        const node = applyDimDialog(node0, { ...v, arbitrary: vmode === "arbitrary", prefix: v.prefix === v0.prefix ? raw0.prefix : xref.toKiids(v.prefix), suffix: v.suffix === v0.suffix ? raw0.suffix : xref.toKiids(v.suffix),
+          value: vmode === "arbitrary" ? xref.toKiids(v.value) : v.value });
+        CT.commitDimensionEdit(ctx, item.id, node, vmode as "driven" | "driving" | "arbitrary", vmode === "driving" ? v.value : null);
+        return true;
+      }
+      if (!create && JSON.stringify(v) === JSON.stringify(v0)) return true;   // nothing changed: the item stays as it is
       const back = (a: string, shown: string, orig: string): string => (a === shown ? orig : xref.toKiids(a));
       const node = applyDimDialog(node0, { ...v, prefix: back(v.prefix, v0.prefix, raw0.prefix), suffix: back(v.suffix, v0.suffix, raw0.suffix),
         value: v.arbitrary ? back(v.value, v0.value, raw0.value) : v.value });

@@ -10,7 +10,7 @@ import { SEXPR_BOARD_FILE_VERSION } from "../../canvas/format-version";
 import { state } from "../appstore";
 import type { Netlist, SheetFile, UpdateOptions, UpdatePlan } from "../../canvas/pcb-netlist";
 import { liveDocument, projectDocs, type ProjectDocInfo } from "../projectfile";
-import { NL } from "./canvas";
+import { BS, NL } from "./canvas";
 import { topLevelSheetsOf } from "../bootpick";
 import { box, checkField, confirmBox, h, messageBox, openDialog, reportPanel, type Field } from "./ui";
 import { store } from "../appstore";
@@ -63,16 +63,20 @@ export async function projectNetlist(): Promise<{ netlist: Netlist; root: string
     const out: string[] = []; for (const p of parts) { if (p === "..") out.pop(); else out.push(p); }
     return files.get(out.join("/")) || files.get(file) || null;
   };
-  const netlist = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve, { symbolPins: helpers.symbolPins, isPower: (d, it) => helpers.isPowerSymbol(d, String(((KiCadCanvas.kid(it.node, "lib_id") as SNode | null) || [])[1])) }, root.path.split("/").pop()!.replace(/\.kicad_sch$/, ""), NL().netlistOptions(pro));
+  const build = (): Netlist => NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve, { symbolPins: helpers.symbolPins, isPower: (d, it) => helpers.isPowerSymbol(d, String(((KiCadCanvas.kid(it.node, "lib_id") as SNode | null) || [])[1])) }, root.path.split("/").pop()!.replace(/\.kicad_sch$/, ""), { ...NL().netlistOptions(pro), footprintPads: footprintPadsOf });
+  let netlist = build();
+  // resolvePadNumbers reads the pads of the footprints the pin-to-pad maps point at: load them, then build again
+  const pinMapFps = (netlist.pinMapFootprints || []).filter((f) => !libCache.has(f));
+  if (pinMapFps.length) { await fetchFootprints(pinMapFps); netlist = build(); }
   // the net chains live in the first top-level sheet (SCHEMATIC::GetTopLevelSheet( 0 ))
   return { netlist, root: tops.length > 1 ? tops[0].path : root.path, files, chainsPath: tops.length ? tops[0].path : root.path, pro: pro && typeof pro === "object" ? pro as Record<string, unknown> : null };
 }
 
 // ---------------------------------------------------------------- the footprint library (optional service)
-const libCache = new Map<string, SNode | "missing" | null>();
+export const libCache = new Map<string, SNode | "missing" | null>();
 let libAvailable: boolean | null = null;
 /** Fetch the library footprints a plan may need; null entries mean "no library service". */
-async function fetchFootprints(fpids: string[]): Promise<void> {
+export async function fetchFootprints(fpids: string[]): Promise<void> {
   await Promise.all(fpids.filter((id) => !libCache.has(id)).map(async (fpid) => {
     const i = fpid.indexOf(":"); if (i <= 0) { libCache.set(fpid, "missing"); return; }
     if (libAvailable === false) { libCache.set(fpid, null); return; }
@@ -90,18 +94,33 @@ async function fetchFootprints(fpids: string[]): Promise<void> {
   }));
 }
 
-function boardFootprintIds(doc: KDoc): Set<string> {
+/** The pad numbers of a library footprint that has been loaded, or null when it is unknown. */
+export function footprintPadsOf(fpid: string): Set<string> | null {
+  const v = libCache.get(fpid); if (!v || v === "missing") return null;
+  const out = new Set<string>();
+  for (const c of v) if (Array.isArray(c) && c[0] === "pad" && c[1] !== undefined) { const n = String(c[1]); if (n) out.add(n); }
+  return out;
+}
+
+export function boardFootprintIds(doc: KDoc): Set<string> {
   const out = new Set<string>();
   for (const it of doc.items.values()) if (it.kind === "footprint") out.add(String(it.node[1]));
   return out;
 }
 
 /** The plan as collaboration changes: one undo step. */
-function planChanges(doc: KDoc, plan: UpdatePlan, addedIds?: string[]): KChange[] {
+export function planChanges(doc: KDoc, plan: UpdatePlan, addedIds?: string[]): KChange[] {
   const changes: KChange[] = [];
   for (const id of plan.removed) { const it = doc.items.get(id); if (it) changes.push(KiCadCanvas.removeChange(it)); }
   for (const [id, node] of plan.modified) { const it = doc.items.get(id); if (it) changes.push(KiCadCanvas.replaceChange(doc, { ...it, node })); }
   for (const node of plan.added) { const it = KiCadCanvas.createItem(doc, node); if (it) { changes.push(KiCadCanvas.addChange(doc, it)); if (addedIds && it.kind === "footprint") addedIds.push(it.id); } }
+  // the board's design variant registry (SetVariantNames / SetVariantDescription / DeleteVariant)
+  if (plan.variantsSection !== undefined) {
+    const d = doc as KDoc & { boardSetup?: { variants?: SNode | null }; variantsNode?: SNode | null };
+    const cur = (d.boardSetup && d.boardSetup.variants) || d.variantsNode || null;
+    const want = plan.variantsSection ? KiCadCanvas.parse(plan.variantsSection) as SNode | null : null;
+    if ((cur ? KiCadCanvas.serialize(cur) : "") !== (want ? KiCadCanvas.serialize(want) : "")) changes.push(BS().variantsChange(plan.variantsSection));
+  }
   return changes;
 }
 
@@ -124,7 +143,7 @@ const remembered: Partial<Record<keyof UpdateOptions, boolean>> = ((): Partial<R
 })();
 function remember(key: keyof UpdateOptions, v: boolean): void { remembered[key] = v; try { localStorage.setItem(REMEMBER_KEY, JSON.stringify(remembered)); } catch (e) { /* private window: kept for this session */ } }
 /** BOARD_DESIGN_SETTINGS' Fab-layer text defaults (StyleFromSettings for the fields the update adds). */
-function fabTextStyle(): { size: number; sizeV: number; thick: number; italic: boolean; upright: boolean } {
+export function fabTextStyle(): { size: number; sizeV: number; thick: number; italic: boolean; upright: boolean } {
   const out = { size: 1, sizeV: 1, thick: 0.15, italic: false, upright: false };
   try {
     const pro = JSON.parse((E.proSettings as string | null) || "{}") as { board?: { design_settings?: { defaults?: Record<string, unknown> } } };
@@ -252,6 +271,9 @@ export async function openUpdatePcb(ctx: ToolCtx): Promise<void> {
   const res = await projectNetlist();
   if ("error" in res) { report.set([{ severity: "error", text: res.error }]); return; }
   netlist = res.netlist;
+  // MAIL_SCH_GET_NETLIST: the board reads the schematic's KiCad netlist, with its component classes, groups and
+  // design variant registry
+  try { const X = await import("../export-netlist"); const text = await X.kicadNetlistText(); if (text) NL().readKicadNetlistExtras(netlist, text); } catch (e) { console.warn(e); }
   chains = netlistChainsOf(res.netlist, res.files, res.chainsPath, res.pro);
   await dryRun();
 }

@@ -6,6 +6,7 @@ import { drawSelection, groupExpand, renderProps } from "./selection";
 import { E } from "./state";
 import { store } from "./appstore";
 import { appClipboard, moveOp, publishUndo, redoStack, toolCtx, undoStack, unlockedForEdit } from "./tools";
+import { constraintTools } from "./panels/constraints";
 import { rulerStrings, snapped45, type RulerUnits } from "./ruler";
 import type { ItemSummary } from "./types";
 import { toast } from "./util";
@@ -21,6 +22,8 @@ export function openSelectionProperties() {
   if (!E.kdoc || !window.KDialogs) return false;
   for (const f of propertiesHooks) if (f()) return true;   // a table cell selection: Table Cell Properties
   const ctx = toolCtx();
+  // EDIT_TOOL::Properties: a badge-selected constraint edits its value (CONSTRAINT_EDIT_TOOL::TryEditSelectedConstraint)
+  if (!isSch() && !E.viewOnly) { const C = constraintTools(); try { if (C && C.tryEditSelectedConstraint(ctx)) return true; } catch (e) { console.warn(e); } }
   // DRAWING_TOOL's loops take PCB_ACTIONS::properties for the item being drawn
   if (!isSch() && CollabTools.pcb && CollabTools.pcb.draftProperties && CollabTools.pcb.draftProperties(ctx)) return true;
   if (!isSch() && CollabTools.pcb && CollabTools.pcb.tunerProperties && CollabTools.pcb.tunerProperties(ctx)) return true;

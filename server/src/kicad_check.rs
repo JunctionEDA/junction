@@ -40,8 +40,9 @@ use crate::AppState;
 const CHECK_TIMEOUT: Duration = Duration::from_secs(300);
 /// Checks running at once: each holds a whole design in memory.
 pub(crate) static CHECKING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
-/// Rules about the global libraries: the server has no footprint or symbol libraries installed, so
-/// kicad-cli would report every footprint and symbol as coming from an unknown library.
+/// Rules about the global libraries.  The checks run with the libraries this server provides as the global tables
+/// (`library_tables`), as the web's Manage Libraries dialogs show them; only when those cannot be read just now are
+/// these rules dropped, since kicad-cli would then report every footprint and symbol as coming from an unknown library.
 const LIBRARY_RULES: &[&str] = &["lib_footprint_issues", "lib_footprint_mismatch", "lib_symbol_issues", "lib_symbol_mismatch", "footprint_link_issues"];
 
 pub fn routes() -> Router<AppState> {
@@ -249,6 +250,10 @@ async fn check(cli: &str, work: &FsPath, entries: &[(String, Vec<u8>)], target: 
     args.push(out.to_string_lossy().into_owned());
     args.push(input.to_string_lossy().into_owned());
 
+    // the global library tables: the official libraries the project names, and the project's own libraries the web
+    // reads without a table row (library/sources.ts), so the library checks compare against the same configuration
+    let libraries_ok = library_tables(cli, work, &files, entries, &home.join(".config")).await;
+
     let mut cmd = tokio::process::Command::new(cli);
     cmd.args(args.iter())
         // settings and caches stay in the work folder
@@ -301,8 +306,144 @@ async fn check(cli: &str, work: &FsPath, entries: &[(String, Vec<u8>)], target: 
         let why = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.contains("Gtk-") && !l.contains("dbus")).last().unwrap_or("kicad-cli failed").to_string();
         return Err(AppError::Api(StatusCode::UNPROCESSABLE_ENTITY, "check_failed", why));
     };
-    strip_library_rules(&mut report);
+    if !libraries_ok {
+        strip_library_rules(&mut report);
+    }
     Ok(json!({ "report": report, "cli": "kicad-cli" }))
+}
+
+/// Every quoted value that directly follows `pat` in `text` (`(lib_id "` → the lib ids), unescaped.
+fn values_after(text: &str, pat: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(at) = text[from..].find(pat) {
+        let start = from + at + pat.len();
+        let b = text.as_bytes();
+        let (mut i, mut v) = (start, Vec::new());
+        while i < b.len() && b[i] != b'"' {
+            if b[i] == b'\\' && i + 1 < b.len() { i += 1; }
+            v.push(b[i]);
+            i += 1;
+        }
+        out.push(String::from_utf8_lossy(&v).into_owned());
+        from = i.min(text.len());
+    }
+    out
+}
+
+/// LIB_ID::GetLibNickname of `id` ("Device:R" → "Device"); none for an id without one.
+fn nickname(id: &str) -> Option<String> {
+    let (lib, _) = id.split_once(':')?;
+    (!lib.is_empty()).then(|| lib.to_string())
+}
+
+/// The symbol and footprint library nicknames the project's schematics and boards name: each symbol's lib_id and
+/// Footprint field, each board footprint's FPID.
+fn used_libraries(entries: &[(String, Vec<u8>)]) -> (std::collections::BTreeSet<String>, std::collections::BTreeSet<String>) {
+    let (mut syms, mut fps) = (std::collections::BTreeSet::new(), std::collections::BTreeSet::new());
+    for (path, content) in entries {
+        let text = String::from_utf8_lossy(content);
+        if path.ends_with(".kicad_sch") {
+            syms.extend(values_after(&text, "(lib_id \"").iter().filter_map(|v| nickname(v)));
+            fps.extend(values_after(&text, "(property \"Footprint\" \"").iter().filter_map(|v| nickname(v)));
+        } else if path.ends_with(".kicad_pcb") {
+            fps.extend(values_after(&text, "(footprint \"").iter().filter_map(|v| nickname(v)));
+        }
+    }
+    (syms, fps)
+}
+
+/// The nicknames a project library table (`sym-lib-table` / `fp-lib-table` beside the project file) defines.
+fn table_nicknames(entries: &[(String, Vec<u8>)], file: &str) -> std::collections::HashSet<String> {
+    let Some((_, content)) = entries.iter().find(|(p, _)| p == file) else { return Default::default() };
+    let text = String::from_utf8_lossy(content);
+    let mut out = std::collections::HashSet::new();
+    for top in crate::libs::parse_sexpr(&text) {
+        for lib in top.lists("lib") {
+            if let Some(n) = lib.list("name").and_then(|n| n.arg(1)) { out.insert(n.to_string()); }
+        }
+    }
+    out
+}
+
+/// One library table as LIBRARY_TABLE::Format writes it.
+fn lib_table(head: &str, rows: &[(String, String)]) -> String {
+    let q = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    let mut t = format!("({head}\n  (version 7)\n");
+    for (name, uri) in rows {
+        t.push_str(&format!("  (lib (name \"{}\") (type \"KiCad\") (uri \"{}\") (options \"\") (descr \"\"))\n", q(name), q(uri)));
+    }
+    t.push_str(")\n");
+    t
+}
+
+/// GetMajorMinorVersion() of the kicad-cli the checks run with (`kicad-cli version`): the folder of its settings
+/// under `<config>/kicad/`.  This tree's version when the cli does not say.
+async fn cli_major_minor(cli: &str) -> String {
+    static V: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+    V.get_or_init(|| async {
+        let mut cmd = tokio::process::Command::new(cli);
+        cmd.arg("version").stdin(std::process::Stdio::null()).kill_on_drop(true);
+        let text = match tokio::time::timeout(Duration::from_secs(30), cmd.output()).await {
+            Ok(Ok(o)) => String::from_utf8_lossy(&o.stdout).to_string(),
+            _ => String::new(),
+        };
+        major_minor(&text).unwrap_or_else(crate::projectlibs::kicad_generator_version)
+    }).await.clone()
+}
+
+/// "10.0.1" (or "10.99.0-123-gabc") → "10.0" / "10.99".
+fn major_minor(version: &str) -> Option<String> {
+    let v = version.split_whitespace().find(|w| w.chars().next().is_some_and(|c| c.is_ascii_digit()))?;
+    let mut it = v.split(|c: char| c == '.' || c == '-');
+    let (a, b) = (it.next()?, it.next()?);
+    (a.parse::<u32>().is_ok() && b.parse::<u32>().is_ok()).then(|| format!("{a}.{b}"))
+}
+
+/// Write the global sym-lib-table and fp-lib-table kicad-cli reads (`<config>/kicad/<major.minor>/`): a row for each
+/// library the project names that its own tables do not define, pointing at the project library of that name the
+/// project holds (`<name>.kicad_sym`, `<name>.pretty/`) or at this server's official library written under
+/// `work/libs`.  A nickname neither knows gets no row: KiCad reports it as not in the configuration.  False when the
+/// official libraries cannot be read just now.
+async fn library_tables(cli: &str, work: &FsPath, files: &FsPath, entries: &[(String, Vec<u8>)], config: &FsPath) -> bool {
+    let (syms, fps) = used_libraries(entries);
+    let (sym_project, fp_project) = (table_nicknames(entries, "sym-lib-table"), table_nicknames(entries, "fp-lib-table"));
+    let mut sym_rows: Vec<(String, String)> = Vec::new();
+    let mut fp_rows: Vec<(String, String)> = Vec::new();
+    let (mut want_syms, mut want_fps) = (Vec::new(), Vec::new());
+    for lib in syms.iter().filter(|l| !sym_project.contains(*l)) {
+        let held = entries.iter().map(|(p, _)| p).find(|p| p.rsplit('/').next() == Some(&format!("{lib}.kicad_sym")));
+        match held.and_then(|p| safe_join(files, path_in(entries, p))) {
+            Some(at) => sym_rows.push((lib.clone(), at.to_string_lossy().into_owned())),
+            None => want_syms.push(lib.clone()),
+        }
+    }
+    for lib in fps.iter().filter(|l| !fp_project.contains(*l)) {
+        let dir = format!("{lib}.pretty");
+        let held = entries.iter().map(|(p, _)| p).find(|p| { let mut s = p.rsplit('/'); s.next(); s.next() == Some(dir.as_str()) });
+        match held.and_then(|p| safe_join(files, path_in(entries, p))).and_then(|f| f.parent().map(FsPath::to_path_buf)) {
+            Some(at) => fp_rows.push((lib.clone(), at.to_string_lossy().into_owned())),
+            None => want_fps.push(lib.clone()),
+        }
+    }
+    let ok = match crate::libs::shared().write_libraries(&work.join("libs"), &want_syms, &want_fps).await {
+        Ok((s, f)) => {
+            sym_rows.extend(s.into_iter().map(|(n, p)| (n, p.to_string_lossy().into_owned())));
+            fp_rows.extend(f.into_iter().map(|(n, p)| (n, p.to_string_lossy().into_owned())));
+            true
+        }
+        Err(e) => {
+            tracing::warn!("check libraries: {e:?}");
+            false
+        }
+    };
+    let dir = config.join("kicad").join(cli_major_minor(cli).await);
+    if tokio::fs::create_dir_all(&dir).await.is_err() {
+        return false;
+    }
+    let a = tokio::fs::write(dir.join("sym-lib-table"), lib_table("sym_lib_table", &sym_rows)).await;
+    let b = tokio::fs::write(dir.join("fp-lib-table"), lib_table("fp_lib_table", &fp_rows)).await;
+    ok && a.is_ok() && b.is_ok()
 }
 
 /// Where a document's path lands under the work folder: shared `../` files one level up as in a download.
@@ -397,9 +538,51 @@ mod tests {
         while let Ok(Ok(b)) = rx.try_recv() { got.push(String::from_utf8(b.to_vec()).unwrap()); }
         assert_eq!(got, ["{\"phase\":\"Checking sheet names...\"}\n", "{\"phase\":\"Checking conflicts...\"}\n"]);
         let list = report["report"]["sheets"][0]["violations"].as_array().unwrap();
-        assert_eq!(list.len(), 1, "library rules dropped");
-        assert_eq!(list[0]["pos"]["x"], 1);
+        // the project names no library, so the configuration is complete and KiCad's library rules stay
+        assert_eq!(list.len(), 2, "library rules kept");
+        assert_eq!(list[1]["pos"]["x"], 1);
+        let table = std::fs::read_dir(work.0.join("home/.config/kicad")).unwrap().next().unwrap().unwrap().path();
+        assert!(std::fs::read_to_string(table.join("sym-lib-table")).unwrap().starts_with("(sym_lib_table"));
         drop(work);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn libraries_the_project_names() {
+        let entries = vec![
+            ("a.kicad_sch".to_string(), br#"(kicad_sch (symbol (lib_id "Device:R") (property "Footprint" "Resistor_SMD:R_0603" (at 0 0 0))) (symbol (lib_id "mylib:X") (property "Footprint" "" (at 0 0 0))) (symbol (lib_id "Odd\"Lib:Y")))"#.to_vec()),
+            ("b.kicad_pcb".to_string(), br#"(kicad_pcb (footprint "Capacitor_SMD:C_0402" (layer "F.Cu")) (footprint "local.pretty-less"))"#.to_vec()),
+            ("sym-lib-table".to_string(), br#"(sym_lib_table (version 7) (lib (name "mylib") (type "KiCad") (uri "${KIPRJMOD}/mylib.kicad_sym") (options "") (descr "")))"#.to_vec()),
+        ];
+        let (s, f) = used_libraries(&entries);
+        assert_eq!(s.into_iter().collect::<Vec<_>>(), ["Device", "Odd\"Lib", "mylib"]);
+        assert_eq!(f.into_iter().collect::<Vec<_>>(), ["Capacitor_SMD", "Resistor_SMD"]);
+        assert!(table_nicknames(&entries, "sym-lib-table").contains("mylib"));
+        let t = lib_table("fp_lib_table", &[("A\"b".into(), "/w/x.pretty".into())]);
+        assert_eq!(t, "(fp_lib_table\n  (version 7)\n  (lib (name \"A\\\"b\") (type \"KiCad\") (uri \"/w/x.pretty\") (options \"\") (descr \"\"))\n)\n");
+        assert_eq!(major_minor("10.0.1").as_deref(), Some("10.0"));
+        assert_eq!(major_minor("KiCad 10.99.0-12-gabc\n").as_deref(), Some("10.99"));
+        assert_eq!(major_minor("Checking sheet names..."), None);
+    }
+
+    /// A project library the project holds without a table row is a global row pointing at its file.
+    #[tokio::test]
+    async fn held_project_libraries_are_configured() {
+        let dir = std::env::temp_dir().join(format!("junction-check-test-{}", Uuid::new_v4()));
+        let files = dir.join("files");
+        let entries = vec![
+            ("a.kicad_sch".to_string(), br#"(kicad_sch (symbol (lib_id "own:X")))"#.to_vec()),
+            ("libs/own.kicad_sym".to_string(), b"(kicad_symbol_lib)".to_vec()),
+            ("b.kicad_pcb".to_string(), br#"(kicad_pcb (footprint "fps:F"))"#.to_vec()),
+            ("fps.pretty/F.kicad_mod".to_string(), b"(footprint \"F\")".to_vec()),
+        ];
+        let ok = library_tables("/nonexistent-kicad-cli", &dir, &files, &entries, &dir.join("cfg")).await;
+        assert!(ok);
+        let ver = std::fs::read_dir(dir.join("cfg/kicad")).unwrap().next().unwrap().unwrap().path();
+        let sym = std::fs::read_to_string(ver.join("sym-lib-table")).unwrap();
+        assert!(sym.contains("(name \"own\")") && sym.contains("files/libs/own.kicad_sym\")"), "{sym}");
+        let fp = std::fs::read_to_string(ver.join("fp-lib-table")).unwrap();
+        assert!(fp.contains("(name \"fps\")") && fp.contains("files/fps.pretty\")"), "{fp}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

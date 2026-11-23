@@ -101,6 +101,8 @@ export interface PanelsState {
   selVersion: number;
   /** bumped when the board's net highlight changes */
   hlVersion?: number;
+  /** bumped when the constraint badge selection or isolation changes (PANEL_CONSTRAINTS::SelectConstraint follows it) */
+  conVersion?: number;
 }
 
 export type PanelAction =
@@ -168,7 +170,15 @@ export interface PanelsApi {
   netInspector(): NetInspModel;
   netInspectorCmd(c: NetInspCmd): void;
   netInspectorFilter(text: string): void;
+  /** The board's Geometric Constraints pane (PANEL_CONSTRAINTS): its rows and the badge-selected row (editor/panels/constraints.ts). */
+  constraints(): ConstraintsModel;
+  constraintsCmd(c: ConstraintsCmd): void;
 }
+
+/** PANEL_CONSTRAINTS' data view: Item 1 / Item 2 / Constraint / State per constraint, the badge-selected one marked. */
+export interface ConstraintsModel { rows: { id: string; cells: string[] }[]; selected: string | null }
+/** select: a row (col 0 / 1: that member alone) highlights its members; activate: EditConstraintById; delete: the constraint goes. */
+export type ConstraintsCmd = { t: "select"; id: string; col: number } | { t: "activate"; id: string } | { t: "delete"; id: string };
 
 declare global {
   interface Window { CollabPanels?: PanelsApi }

@@ -18,6 +18,7 @@ import { tableGrid } from "./nodes";
 import { drawEditPoints } from "./point-editor";
 import { drawBlock } from "./block-drag";
 import { ellipseArcGeom } from "./draw-tools";
+import { drawConstraintOverlay } from "./constraint-tool";
 import { ellipseFromBox, ellipseOutline, ellipsePointAt } from "./ellipse";
 import { subGridOutline } from "./board-items";
 import { clearConstruction, constructionBatches, hasActiveConstruction, snapLineState, type CDrawable } from "./construction";
@@ -505,6 +506,7 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
   drawViaStackPreview(c, cpx);   // the microvia stack being placed (DRAWING_TOOL::PlaceMicroviaStack's preview)
   drawMicrowavePreview(c, view, ctx, px);   // MICROWAVE_TOOL: the inductor's rectangle, the footprint being placed
   drawSpreadPreview(c, previewColor);   // the tracks being spread, where they would go
+  drawConstraintOverlay(c, ctx, px, S.hover ? [S.hover.x, S.hover.y] : null);   // CONSTRAINT_OVERLAY's badges (always, or the hovered shape's)
   // cursor: the via about to be placed, and the magnetic snap marker
   const hv = S.hover;
   if (hv && S.modTool) {

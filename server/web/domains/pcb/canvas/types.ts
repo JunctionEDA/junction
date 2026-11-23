@@ -225,6 +225,8 @@ export interface Doc extends Omit<KDoc, "items" | "bbox" | "page">, SheetContext
   schSettings?: { junctionDiameter?: number; [k: string]: unknown } | null;
   path?: string;
   /** the file's top-level (embedded_files …), as read */
+  /** (embedded_fonts yes|no): the board's or the root schematic's GetAreFontsEmbedded() */
+  embeddedFonts?: boolean;
   embeddedFiles?: SNode | null;
   /** a library footprint open in the Footprint Editor (footprint-doc.ts): its header and what it was read from */
   fpEditor?: boolean; fpState?: import("./footprint-doc").FpDocState;
@@ -294,6 +296,9 @@ export interface RenderOpts {
   /** board: the grid items (PCB_GRID_ITEM, Appearance ▸ Grids, LAYER_SUBGRIDS); false hides them; their colour */
   subgrids?: boolean; gridItemColor?: string;
   selected?: Set<string> | null; highlight?: Set<string> | null; lockedIds?: Set<string> | null;
+  /** LAYER_CONSTRAINT_SHADOW (PCB_RENDER_SETTINGS::SetConstrainedItems / SetHighlightedConstraintMembers): the items a geometric
+   *  constraint binds, and the selected constraint's members drawn brighter with twice the margin */
+  constrainedIds?: Set<string> | null; constraintHighlightIds?: Set<string> | null;
   /** schematic items brightened by a cross-probe (EDA_ITEM::IsBrightened), named as `highlight` names them */ schBrightened?: Set<string> | null;
   showHiddenPins?: boolean; showHiddenText?: boolean; /** eeschema's View > Show Hidden Fields (not pcbnew's hidden text) */ showHiddenFields?: boolean; /** "id#field:Name" of hidden schematic fields drawn as if shown (EDA_ITEM::SetForceVisible: Find's matches) */ forceVisible?: Set<string> | null; zoneOutline?: boolean; padNumbers?: boolean;
   /** GetShowPageLimits (m_ShowPageLimits / eeschema's show_page_limits): the paper outline; on unless false */ pageLimits?: boolean;

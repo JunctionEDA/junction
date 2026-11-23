@@ -46,6 +46,21 @@ pub struct OpRow {
     pub changes: Value,
     /// The author's login (empty when the account is gone).
     pub login: String,
+    /// The author's id for the op (an `op_multi`'s starts with [`MULTI_OP_PREFIX`]).
+    pub client_op_id: String,
+}
+
+/// What an `op_multi`'s clientOpId starts with: the document actors ack such an op to its author when they first
+/// read it from the table (doc_actor::catch_up), since it was not written through them.
+pub const MULTI_OP_PREFIX: &str = "multi:";
+
+/// What [`insert_ops_atomic`] did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum MultiCommit {
+    /// Every op went in: the seq each document's op took, in the order given.
+    Done(Vec<(Uuid, i64)>),
+    /// The commit is in the table already (a replay after a reconnect): the seq of the first document's op.
+    Already(i64),
 }
 
 pub async fn get_user(pool: &PgPool, id: i64) -> DbResult<Option<User>> {
@@ -1162,7 +1177,7 @@ pub async fn min_op_seq(pool: &PgPool, doc_id: Uuid) -> DbResult<Option<i64>> {
 
 pub async fn ops_since(pool: &PgPool, doc_id: Uuid, since: i64) -> DbResult<Vec<OpRow>> {
     sqlx::query_as::<_, OpRow>(
-        "SELECT o.seq, o.author_id, o.client_id, o.changes, COALESCE(u.login, '') AS login
+        "SELECT o.seq, o.author_id, o.client_id, o.changes, COALESCE(u.login, '') AS login, o.client_op_id
          FROM ops o LEFT JOIN users u ON u.id = o.author_id
          WHERE o.doc_id = $1 AND o.seq > $2 ORDER BY o.seq",
     )
@@ -1262,6 +1277,94 @@ pub async fn insert_op_on(
     match row {
         Some(row) => Ok(Some(row.get("seq"))),
         None => Err(sqlx::Error::RowNotFound),
+    }
+}
+
+/// The order an `op_multi` takes the documents' sequencing locks in: by id, so two commits over the same documents
+/// never wait on each other crosswise.  The first document (the one the author has open) stays where the result
+/// reports it, the order of `docs` is not changed.
+pub fn lock_order(docs: &[Uuid]) -> Vec<Uuid> {
+    let mut v = docs.to_vec();
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// Journal one op on each of several documents in one transaction (an `op_multi`): each takes its document's
+/// sequencing lock (lock_order) and the seq after the newest op or snapshot, all under the one `client_op_id`.  A seq
+/// another writer took meanwhile (a replica without the lock) rolls everything back and tries again.  Nothing is
+/// written when the first document already has an op of that id from this client: the whole commit is there.
+pub async fn insert_ops_atomic(
+    pool: &PgPool,
+    author_id: i64,
+    client_id: &str,
+    client_op_id: &str,
+    ops: &[(Uuid, Value)],
+) -> DbResult<MultiCommit> {
+    let Some((first, _)) = ops.first() else { return Ok(MultiCommit::Done(Vec::new())) };
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let mut tx = pool.begin().await?;
+        let had: Option<i64> = sqlx::query_scalar(
+            "SELECT seq FROM ops WHERE doc_id = $1 AND client_id = $2 AND client_op_id = $3 AND author_id = $4",
+        )
+        .bind(first)
+        .bind(client_id)
+        .bind(client_op_id)
+        .bind(author_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(seq) = had {
+            return Ok(MultiCommit::Already(seq));
+        }
+        for doc in lock_order(&ops.iter().map(|(d, _)| *d).collect::<Vec<_>>()) {
+            sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+                .bind(doc)
+                .execute(&mut *tx)
+                .await?;
+        }
+        let mut done = Vec::with_capacity(ops.len());
+        let mut failed = None;
+        for (doc, changes) in ops {
+            let head: i64 = sqlx::query_scalar(
+                "SELECT GREATEST(COALESCE((SELECT MAX(seq) FROM ops WHERE doc_id = $1), 0),
+                                 COALESCE((SELECT MAX(seq) FROM snapshots WHERE doc_id = $1), 0))",
+            )
+            .bind(doc)
+            .fetch_one(&mut *tx)
+            .await?;
+            let res = sqlx::query(
+                "INSERT INTO ops (doc_id, seq, author_id, client_id, client_op_id, base_seq, changes)
+                 VALUES ($1, $2, $3, $4, $5, NULL, $6)",
+            )
+            .bind(doc)
+            .bind(head + 1)
+            .bind(author_id)
+            .bind(client_id)
+            .bind(client_op_id)
+            .bind(changes)
+            .execute(&mut *tx)
+            .await;
+            match res {
+                Ok(_) => done.push((*doc, head + 1)),
+                Err(e) => {
+                    failed = Some(e);
+                    break;
+                }
+            }
+        }
+        match failed {
+            None => {
+                tx.commit().await?;
+                return Ok(MultiCommit::Done(done));
+            }
+            Some(e) if is_seq_taken(&e) && attempt < 50 => {
+                drop(tx);
+                continue;
+            }
+            Some(e) => return Err(e),
+        }
     }
 }
 

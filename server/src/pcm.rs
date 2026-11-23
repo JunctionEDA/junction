@@ -1096,7 +1096,8 @@ fn runtime_kind(file: &str) -> Option<&'static str> {
         // npm replicad-opencascadejs, LGPL-2.1), copied here by scripts/build-python.mjs and fetched by the CAD worker
         "pyodide.asm.wasm" | "occt-import-js.wasm" | "occ-kernel.wasm" => "application/wasm",
         "python_stdlib.zip" => "application/zip",
-        "pyodide-lock.json" | "kicad-python.json" => "application/json; charset=utf-8",
+        // kicad-bom.json: KiCad's stock BOM generator scripts, run by the schematic's Generate Legacy BOM
+        "pyodide-lock.json" | "kicad-python.json" | "kicad-bom.json" => "application/json; charset=utf-8",
         // a package a plugin imports (numpy, requests, …): a wheel or archive the build put beside the interpreter
         f if (f.ends_with(".whl") || f.ends_with(".zip")) && f.len() <= 160 && !f.starts_with('.') && f.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-' | b'+')) => "application/zip",
         _ => return None,
@@ -1111,7 +1112,7 @@ pub async fn runtime(Path(file): Path<String>) -> Response {
     let Some(dir) = runtime_dir() else { return (StatusCode::SERVICE_UNAVAILABLE, "the Python runtime is not built on this server (npm run build)").into_response() };
     let Ok(body) = tokio::fs::read(dir.join(&file)).await else { return StatusCode::NOT_FOUND.into_response() };
     // The shim changes with every build of ours; the interpreter only with its version.
-    let cache = if file == "kicad-python.json" || file == "pyodide-lock.json" { "no-cache" } else { "public, max-age=86400" };
+    let cache = if file == "kicad-python.json" || file == "kicad-bom.json" || file == "pyodide-lock.json" { "no-cache" } else { "public, max-age=86400" };
     ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, cache), (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*"), (header::HeaderName::from_static("cross-origin-resource-policy"), "cross-origin")], body).into_response()
 }
 

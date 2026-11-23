@@ -22,11 +22,11 @@ import { saveProject } from "./project";
 import { itemColorsOverriddenNotice, sheetColorsOverriddenWarning } from "./prefs";
 import { kicadIcon } from "../../../shared/components/kicon-dom";
 import { PIN_SHAPE_ICONS, PIN_TYPE_ICONS } from "../symedit/model";
-import { openChangeSymbols } from "./change-symbols";
+import { openChangeSymbols, setVariantSymbol } from "./change-symbols";
 import { openSimModel } from "./sim-model";
 import { embeddedModelFiles, projectModelFiles, refPrefix, simPinsOfLib } from "./sim-files";
 import { docBase, projectDocs, readDoc, submitDocOp } from "./project";
-import { currentInstance, loadSheets, netMap } from "../editor/schnets";
+import { currentInstance, loadSheets, netMap, suffixRefEditing } from "../editor/schnets";
 import { fmtLen, parseLen, unitName } from "../editor/pcbdialogs/ui";
 import * as VM from "../canvas/variant-model";
 import { writeSheetVariant, writeSymbolVariant } from "./variant-edits";
@@ -143,8 +143,14 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
   const els: Record<string, HTMLInputElement | HTMLSelectElement> = {};
   let grid: { rows(): L.FieldRow[]; setRows(rows: L.FieldRow[]): void } | null = null;
   const angle = ((Math.round(rot) % 360) + 360) % 360;
+  // reused-sheet suffixes: the Reference field shows the base (UpdateAllScreenReferences' GetBaseRef), the typed text is
+  // parsed back to a base (BaseRefFromUser) and the base is shared with the file's other instances (SetUserRef)
+  const se = suffixRefEditing(doc);
+  if (se) { const r = L.kids(staged, "property").find((p) => L.fieldName(p) === "Reference"); if (r) r[2] = se.S.baseRefOn(se.sc, se.sheet, item.node); }
   const refOf = (): string => { const r = L.kids(staged, "property").find((p) => L.fieldName(p) === "Reference"); return r ? L.fieldValue(r) : ""; };
-  const suffix = pathRefSuffix();
+  const suffix = se ? "" : pathRefSuffix();
+  // OnUpdateUI's Composed reference: shown when the sheet path composes a suffix; the base plus the package's suffix
+  const composedOf = (text: string): string | null => (se ? se.S.composedRefLabel(se.sc, se.sheet, item.node, text) : suffix ? P.composedReference(text, suffix) : null);
   const pinMapOn = true;   // offered on any sheet: an older one is raised to PIN_MAP_VERSION on save (chooseFileFormatVersion)
   const pm = P.readPinMaps(ownLib), pm0 = JSON.stringify([pm.maps.map((m) => [m.name, Array.from(m.entries)]), Array.from(pm.footprints), pm.unmapped]);
   const embedded = lib ? L.kid(lib, "embedded_files") : null;
@@ -180,10 +186,10 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
           els.mirror = select([["", "Not mirrored"], ["x", "Around X axis"], ["y", "Around Y axis"]], mirror, undefined, { id: "kd-sym-mirror", disabled: ro });
           // OnUpdateUI: the composed reference follows the Reference cell
           const curRef = (): string => { const r = grid && grid.rows().find((x) => x.name === "Reference"); return r ? r.value : refOf(); };
-          const compRef = h("span", { id: "kd-sym-ref" }, P.composedReference(curRef(), suffix));
-          fh.addEventListener("input", () => { compRef.textContent = P.composedReference(curRef(), suffix); }); fh.addEventListener("change", () => { compRef.textContent = P.composedReference(curRef(), suffix); });
+          const compRef = h("span", { id: "kd-sym-ref" }, composedOf(curRef()) || "");
+          fh.addEventListener("input", () => { compRef.textContent = composedOf(curRef()) || ""; }); fh.addEventListener("change", () => { compRef.textContent = composedOf(curRef()) || ""; });
           g.append(h("label", { style: nUnits < 2 ? "opacity:.5" : "" }, "Unit:"), els.unit, h("label", { style: nBodies < 2 ? "opacity:.5" : "" }, "Body style:"), els.body);
-          if (suffix) g.append(h("label", null, "Composed reference:"), compRef);
+          if (composedOf(refOf()) !== null) g.append(h("label", null, "Composed reference:"), compRef);
           g.append(h("label", null, "Angle:"), els.angle, h("label", null, "Mirror:"), els.mirror);
           gb.append(g);
           const cb = (k: string, label: string, on: boolean, o: { title?: string; disabled?: boolean } = {}) => { const c = checkbox(label, on, undefined, { id: "kd-sym-" + k, disabled: ro || o.disabled, title: o.title }); els[k] = c.querySelector("input") as HTMLInputElement; return c; };
@@ -205,7 +211,8 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
           // DIALOG_CHANGE_SYMBOLS works on the symbols of the schematic: the one being placed is not one of them yet
           const PLACING = "The symbol is being placed";
           button("Update Symbol from Library...", "kd-sym-update", carried ? null : () => { if (apply()) openChangeSymbols("update"); }, carried ? PLACING : undefined);
-          button("Change Symbol...", "kd-sym-change", carried ? null : () => { if (apply()) openChangeSymbols("change"); }, carried ? PLACING : undefined);
+          // under a design variant the button is "Set Variant Symbol..." (SYMBOL_PROPS_WANT_SET_VARIANT_SYMBOL)
+          button(variant ? "Set Variant Symbol..." : "Change Symbol...", "kd-sym-change", carried ? null : () => { if (!apply()) return; if (variant) void setVariantSymbol(item.id); else openChangeSymbols("change"); }, carried ? PLACING : undefined);
           // OnClearVariantSymbol (shown only for a variant that holds a symbol override): apply the dialog, then clearVariantSymbol
           if (variant && VM.symbolVariantOverride(item.node, variant, vpath)) button("Clear Variant Symbol", "kd-sym-clearvariant", () => {
             if (!apply()) return;
@@ -259,13 +266,17 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
       const rows = rowsFromRefs(L.withoutBlankRows(grid.rows()), xref, !!variant); const dup = L.duplicateFieldName(rows, MANDATORY_SYMBOL); if (dup) { void messageBox(dup); return false; }
       const bad = L.validateFieldRows("symbol", rows); if (bad) { void messageBox(bad.message, bad.title); return false; }
       const ref = rows.find((r) => r.name === "Reference");
+      // Validate: BaseRefFromUser refuses text ending in another instance's longer suffix
+      const typed = ref && se ? se.S.baseRefFromUser(se.sc, se.sheet, item.node, ref.value) : null;
+      if (typed && typed.error) { void messageBox(typed.error); return false; }
       const n = L.clone(staged);
       const moved = rows.some((r) => L.rowMoved(r, origin));
       L.writeFields(n, rows, origin);
       // SetUserRef( currentSheet, base ) / SetUnitSelection( &GetCurrentSheet(), … ): only this sheet path's instance data
       const here = sheetPathNow(doc);
-      if (ref) L.setInstanceData(n, here.path, here.project, { reference: ref.value });
+      if (ref && !typed) L.setInstanceData(n, here.path, here.project, { reference: ref.value });
       const nu = Number(els.unit.value); if (nu !== unit) { PH().setSymbolUnit(n, nu); L.setInstanceData(n, here.path, here.project, { unit: nu }); }
+      if (typed && se) se.S.setUserRef(se.sc, se.sheet, n, typed.base);
       const nbs = Number(els.body.value); if (nBodies > 1 && nbs !== body) { const k = L.kid(n, "body_style") ? "body_style" : L.kid(n, "convert") ? "convert" : "body_style"; L.put(n, k, [nbs], ["exclude_from_sim", "in_bom", "uuid", "property"]); }
       const na = Number(els.angle.value), nm = els.mirror.value;
       if (na !== angle || nm !== mirror) { PH().setSymbolRotation(n, na); PH().setSymbolMirror(n, nm); }

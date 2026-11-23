@@ -9,6 +9,8 @@ export interface MeanderSettings {
   target: TuneRange; skew: TuneRange; overrideCustomRules: boolean; keepEndpoints: boolean;
   /** m_isTimeDomain and the delay targets (attoseconds): m_targetLengthDelay, m_targetSkewDelay */
   isTimeDomain: boolean; targetDelay: TuneRange; skewDelay: TuneRange;
+  /** m_targetSignalLength / m_targetSignalLengthDelay: the whole net chain's target (IU, attoseconds), the placer's Move derives the net's share */
+  signalTarget?: TuneRange; signalTargetDelay?: TuneRange;
 }
 /** A node of a chain with arcs: reached from the node before straight, or along an arc through m. */
 export interface ChNode { p: Pt; m?: Pt }
@@ -61,7 +63,23 @@ export const TUNE_STATUS_TEXT: Record<string, string> = { [TOO_LONG]: "too long"
 export function meanderDefaults() {
   const st = { minAmp: 200000, maxAmp: 1000000, step: 50000, spacing: 600000, crPct: 80, round: true, singleSided: false, initialSide: -1,
     target: null, overrideCustomRules: false, keepEndpoints: false, isTimeDomain: false } as unknown as MeanderSettings;   // the targets are set just below
-  setTargetLength(st, LENGTH_UNCONSTRAINED); setTargetLengthDelay(st, DELAY_UNCONSTRAINED); setTargetSkew(st, 0); setTargetSkewDelay(st, 0); return st;
+  setTargetLength(st, LENGTH_UNCONSTRAINED); setTargetLengthDelay(st, DELAY_UNCONSTRAINED); setTargetSkew(st, 0); setTargetSkewDelay(st, 0);
+  setTargetSignalLength(st, LENGTH_UNCONSTRAINED); setTargetSignalLengthDelay(st, DELAY_UNCONSTRAINED); return st;
+}
+/** MINOPTMAX<int> as a rule gives it: each bound present or not (Opt() falls back to Min(), Min() to 0). */
+export interface MinOptMax { min?: number | null; opt?: number | null; max?: number | null }
+const moOpt = (c: MinOptMax) => (c.opt != null ? c.opt : c.min != null ? c.min : 0);
+/** MEANDER_SETTINGS::SetTargetSignalLength( long long ) and ( const MINOPTMAX<int>& ) */
+export function setTargetSignalLength(st: MeanderSettings, v: number | MinOptMax) {
+  const c = typeof v === "number" ? { opt: v } : v, opt = moOpt(c);
+  st.signalTarget = opt === LENGTH_UNCONSTRAINED ? { min: 0, opt, max: opt } : { min: opt - DEFAULT_LENGTH_TOLERANCE, opt, max: opt + DEFAULT_LENGTH_TOLERANCE };
+  if (c.min != null) st.signalTarget.min = c.min; if (c.max != null) st.signalTarget.max = c.max;
+}
+/** MEANDER_SETTINGS::SetTargetSignalLengthDelay( long long ) and ( const MINOPTMAX<int>& ) */
+export function setTargetSignalLengthDelay(st: MeanderSettings, v: number | MinOptMax) {
+  const c = typeof v === "number" ? { opt: v } : v, opt = moOpt(c);
+  st.signalTargetDelay = opt === DELAY_UNCONSTRAINED ? { min: 0, opt, max: opt } : { min: opt - DEFAULT_DELAY_TOLERANCE, opt, max: opt + DEFAULT_DELAY_TOLERANCE };
+  if (c.min != null) st.signalTargetDelay.min = c.min; if (c.max != null) st.signalTargetDelay.max = c.max;
 }
 /** MEANDER_SETTINGS::SetTargetLengthDelay */
 export function setTargetLengthDelay(st: MeanderSettings, opt: number) {
@@ -76,7 +94,8 @@ export function setTargetLength(st: MeanderSettings, opt: number) {
   st.target = opt === LENGTH_UNCONSTRAINED ? { min: 0, opt, max: opt } : { min: opt - DEFAULT_LENGTH_TOLERANCE, opt, max: opt + DEFAULT_LENGTH_TOLERANCE };
 }
 export const tuneCopy = (st: MeanderSettings): MeanderSettings => Object.assign({}, st, { target: Object.assign({}, st.target), skew: Object.assign({}, st.skew),
-  targetDelay: Object.assign({}, st.targetDelay || { min: 0, opt: DELAY_UNCONSTRAINED, max: DELAY_UNCONSTRAINED }), skewDelay: Object.assign({}, st.skewDelay || { min: -DEFAULT_LENGTH_TOLERANCE, opt: 0, max: DEFAULT_LENGTH_TOLERANCE }), isTimeDomain: !!st.isTimeDomain });
+  targetDelay: Object.assign({}, st.targetDelay || { min: 0, opt: DELAY_UNCONSTRAINED, max: DELAY_UNCONSTRAINED }), skewDelay: Object.assign({}, st.skewDelay || { min: -DEFAULT_LENGTH_TOLERANCE, opt: 0, max: DEFAULT_LENGTH_TOLERANCE }), isTimeDomain: !!st.isTimeDomain,
+  signalTarget: Object.assign({}, st.signalTarget || { min: 0, opt: LENGTH_UNCONSTRAINED, max: LENGTH_UNCONSTRAINED }), signalTargetDelay: Object.assign({}, st.signalTargetDelay || { min: 0, opt: DELAY_UNCONSTRAINED, max: DELAY_UNCONSTRAINED }) });
 // vectors in IU (doubles; KiCad's VECTOR2D turtle) — the y axis points down as on the board
 export const vsubI = vsub;
 export const vlen = (a: Pt) => Math.hypot(a[0], a[1]);

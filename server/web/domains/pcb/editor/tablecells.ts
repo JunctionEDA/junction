@@ -29,7 +29,7 @@ import { selFilter } from "./selection";
 import { download } from "./pcbdialogs/ui";
 import { isSch, pxPerMm, requestRender } from "./view";
 import { toast } from "./util";
-import { msgHooks, type MsgItem } from "./msgpanel";
+import { addMsgHook, type MsgItem } from "./msgpanel";
 
 type Pt = number[];
 /** `node` is the table node the indexes were taken on: when the document's node is another (an edit, ours or a peer's), the indexes follow the cells by uuid. */
@@ -535,7 +535,7 @@ export function installTableCells(): void {
   clearHooks.push(clearCells);
   overlayHooks.push(drawCellSelection, drawCellHandles);
   propertiesHooks.push(cellProperties);
-  msgHooks.push(cellMsgPanel);
+  addMsgHook(cellMsgPanel);
   tableMenu.state = cellMenuState; tableMenu.pick = contextPick; tableMenu.actions = TABLE_ACTIONS;
   (window as unknown as { CollabTableCells?: unknown }).CollabTableCells = { newSchTableDialog, cellSelection, clearCells, selectTables, runEdit, selectRowsCols, cellProperties, editTable, exportCsv, cellUnder, promoteToTable, TABLE_ACTIONS, cellMenuState };
 }

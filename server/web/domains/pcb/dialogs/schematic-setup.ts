@@ -7,12 +7,12 @@
 // erc.rule_severities, erc.pin_map, net_settings.classes / netclass_patterns and text_variables — keeping every key the
 // dialog does not show.  The web editor itself honours the text variables, the junction dot size, the dash / gap
 // ratios, the rule severities and the pin conflicts map; the other values are stored for the desktop.
-import { E, api, rootSchematic, toast } from "./editor";
+import { E, api, applyChanges, rootSchematic, sendOp, toast } from "./editor";
 import { KD, checkbox, h, popupMenu, select, textInput, type GridApi } from "./dom";
 import { messageBox } from "./sch-items";
 import { canWriteProject } from "../editor/projectfile";
 import { state as appState } from "../editor/appstore";
-import { allNetNames, loadSheets } from "../editor/schnets";
+import { allNetNames, loadSheets, sheetHierarchy } from "../editor/schnets";
 import { netclassPatternMatches } from "../canvas/pcb-sizes";
 import { infoBar, messageBox as buttonBox } from "../editor/pcbdialogs/ui";
 import { SCH_IMPORT_OPTIONS, annotationOf, annotationPage, applyChainEdits, chainClassError, chainRowsError, chainsOf, embeddedFilesPage, importSections, netChainsPage, parityOf, parityPage, writeAnnotation, aliasNameError, clampPrecision, connectionGridError, memberNameError, resetButtonState, sortAliases, templateFieldNameError, templateNamesWithWhitespace, untitledFieldName, type ChainState } from "./schematic-setup-pages";
@@ -23,7 +23,12 @@ import { PIN_MAP_BMP } from "./pinmap-bitmaps";
 import { effectiveTheme } from "../../../shared/theme";
 import { DEFAULT_PIN_MAP, ERC_RULES, PIN_TYPE_NAMES, defaultSeverity, type Severity } from "./erc-rules";
 import { schParamInRange, str } from "./logic";
-import { loadProject, obj, proDoc, saveProject, sub, type Json, type JsonObj } from "./project";
+import { loadProject, obj, proDoc, saveProject, sub, type Json, type JsonObj, readDoc, submitDocOp } from "./project";
+import { recomposeReferences, reusedSheetSuffixes } from "./annotate";
+import { DOC_PROPS_ID } from "./logic";
+import { textFaces } from "../fonts-used";
+import { embeddedFileNode, fetchFontFiles, removeEmbeddedFile } from "../library/embedded-file";
+import type { EmbeddedFilesEdit, EmbeddedFilesState } from "./schematic-setup-pages";
 
 const MIL = 0.0254;
 const JUNCTION_SIZES = ["None", "Smallest", "Small", "Default", "Large", "Largest"], HOP_SIZES = ["None", "Smallest", "Small", "Medium", "Large", "Largest"];
@@ -91,9 +96,72 @@ function rootText(): Promise<string> {
   const r = rootSchematic(); if (!r) return Promise.resolve("");
   return api(`/api/docs/${r.docId}/content`).then((t) => (typeof t === "string" ? t : ""), () => "");
 }
+/** The root schematic's (embedded_files …) and (embedded_fonts …) as they stand now (the open sheet's copy, else read with its later ops). */
+async function rootEmbedded(): Promise<EmbeddedFilesState> {
+  const r = rootSchematic(); if (!r) return { files: null, fonts: false };
+  const d = (appState.docId === r.docId && E.kdoc ? E.kdoc : await readDoc(r.docId)) as KDoc & { embeddedFiles?: SNode | null; embeddedFonts?: boolean };
+  return { files: d.embeddedFiles || null, fonts: !!d.embeddedFonts };
+}
+/** The screens of the hierarchy (SCH_SCREENS( Root() )): file -> document. */
+async function hierarchyScreens(): Promise<Map<string, KDoc>> {
+  await loadSheets().catch(() => undefined);
+  const hz = sheetHierarchy(); return hz ? hz.docs : new Map<string, KDoc>();
+}
+/** SCH_TEXT and its labels, SCH_TEXTBOX: the items of a screen that are EDA_TEXTs (SCHEMATIC::GetFonts) */
+const SCH_TEXT_KINDS = new Set(["text", "text_box", "label", "global_label", "hierarchical_label", "directive_label", "netclass_flag"]);
+/** SCHEMATIC::GetFonts as files: the outline fonts of every sheet's text that may be embedded. */
+async function schematicFonts(): Promise<{ name: string; bytes: Uint8Array }[]> {
+  const pid = appState.project ? appState.project.projectId : ""; if (!pid) return [];
+  const want = new Map<string, [string, boolean, boolean]>();
+  for (const d of (await hierarchyScreens()).values()) {
+    const items = new Map<string, unknown>(); for (const [id, it] of d.items) if (SCH_TEXT_KINDS.has(it.kind)) items.set(id, it);
+    for (const f of textFaces({ items })) want.set(f.join("|"), f);
+  }
+  let uploads: { family: string; styles: { bold: boolean; italic: boolean; fileName?: string }[] }[] = [];
+  try { const r = await api(`/api/projects/${pid}/fonts`) as { fonts?: typeof uploads }; uploads = r.fonts || []; } catch { uploads = []; }
+  return fetchFontFiles(pid, [...want.values()], uploads);
+}
+/**
+ * PANEL_EMBEDDED_FILES::TransferDataFromWindow on the schematic: a removed file some library symbol (of any sheet) also
+ * embeds asks once whether to delete it from the symbols as well; then the root schematic takes the panel's files and
+ * the Embed fonts flag (a document-settings change on the root sheet, PAGE_SETTINGS' docProps.embeddedFiles).
+ */
+async function applyEmbeddedFiles(edit: EmbeddedFilesEdit): Promise<void> {
+  const r = rootSchematic(); if (!r) return;
+  const send = async (docId: string, changes: unknown[]): Promise<void> => {
+    if (appState.docId === docId) { sendOp(changes, false); applyChanges(changes); } else await submitDocOp(docId, changes);
+  };
+  if (edit.remove.length) {
+    const screens = await hierarchyScreens(), docs = appState.project ? appState.project.docs : [];
+    const users: { docId: string; doc: KDoc; names: string[] }[] = [];
+    for (const [file, d] of screens) {
+      const names: string[] = [];
+      for (const [name, lib] of d.lib) { const ef = KiCadCanvas.kid(lib, "embedded_files") as SNode | null; if (ef && edit.remove.some((n) => embeddedFileNode(ef, n))) names.push(name); }
+      const entry = docs.find((x) => x.path === file || x.path.endsWith("/" + file));
+      if (names.length && entry) users.push({ docId: entry.docId, doc: d, names });
+    }
+    const del = users.length ? await new Promise<boolean>((resolve) => { buttonBox("Confirmation", "Deleted embedded files are also referenced in some symbols.\nDelete from symbols as well?", [{ label: "No", fn: () => resolve(false) }, { label: "Yes", fn: () => resolve(true) }], 0); }) : false;
+    if (del) for (const u of users) {
+      // each library symbol travels with one of its instances: the change's (lib_symbols …) replaces the sheet's copy
+      const changes: unknown[] = [];
+      for (const name of u.names) {
+        const lib = KiCadCanvas.cloneNode(u.doc.lib.get(name) as SNode), ef = KiCadCanvas.kid(lib, "embedded_files") as SNode;
+        for (const n of edit.remove) removeEmbeddedFile(ef, n);
+        if (ef.length <= 1) lib.splice(lib.indexOf(ef), 1);
+        const inst = Array.from(u.doc.items.values()).find((it) => it.kind === "symbol" && (String((KiCadCanvas.kid(it.node, "lib_name") || [])[1] ?? "") || String((KiCadCanvas.kid(it.node, "lib_id") || [])[1] ?? "")) === name);
+        if (inst) changes.push({ id: inst.id, kind: "MODIFIED", typeName: KiCadCanvas.typeNameOf(inst), sexpr: `(kicad_sch (lib_symbols ${KiCadCanvas.serialize(lib)}) ${KiCadCanvas.serialize(inst.node)})` });
+      }
+      if (changes.length) await send(u.docId, changes).catch(() => toast("Could not update the symbols of a sheet", 4000));
+    }
+  }
+  const props: { put: string[]; remove: string[]; fonts?: boolean } = { put: edit.put, remove: edit.remove };
+  if (edit.fonts !== undefined) props.fonts = edit.fonts;
+  await send(r.docId, [{ id: DOC_PROPS_ID, kind: "MODIFIED", typeName: "PAGE_SETTINGS", docProps: { embeddedFiles: props } }]);
+}
 function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
   const ro = !!E.viewOnly || !canWriteProject();
   const rootP = root || rootText();
+  let embeddedEdit: (() => EmbeddedFilesEdit | null) | null = null;   // Embedded Files' TransferDataFromWindow, once the page is shown
   const sch = sub(pro, "schematic"), drawing = sub(pro, "schematic", "drawing"), erc = sub(pro, "erc"), net = sub(pro, "net_settings");
   const dv = (k: string): Json => (drawing[k] !== undefined ? drawing[k] : DRAWING_DEFAULTS[k]);
   // PANEL_SETUP_FORMATTING: m_textSize / m_lineWidth / m_pinSymbolSize / m_connectionGridSize .SetUnits( EDA_UNITS::MILS ),
@@ -341,7 +409,7 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
           } },
         ] },
         { label: "Schematic Data", pages: [
-          { label: "Embedded Files", build(pg) { embeddedFilesPage(pg, () => rootP); } },
+          { label: "Embedded Files", build(pg) { embeddedFilesPage(pg, rootEmbedded, { ro: ro || !!E.viewOnly, fonts: schematicFonts, onEdit: (get) => { embeddedEdit = get; } }); } },
         ] },
       ], { selected: page, onSelect: (label) => syncReset(label) });
       setTimeout(() => syncReset(tb ? tb.current() : null), 0);
@@ -366,11 +434,15 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
         const te = templateFieldNameError(templates.map((t) => t.name));
         if (te) { if (tb) tb.select("Field Name Templates"); void messageBox(te.message); return; }
         dlg.close();
+        const ee = embeddedEdit ? embeddedEdit() : null;
+        if (ee) await applyEmbeddedFiles(ee).catch((err: Error) => toast("Could not save the embedded files: " + err.message, 5000));
         // ApplyEdits: the chains' renames, colours, net classes and deletions go into the schematic
         if (chainsLoaded) { const { edits } = applyChainEdits(chains, chains.chains.map((c) => c.origName ?? c.name), chainClasses); await applySetupEdits(edits); }
+        // RefreshRefSuffixes: turning suffix numbering on or off recomposes the references the files hold
+        const suffixesWere = reusedSheetSuffixes();
         saveProject((p) => {
           writeInto(p);
-        }, "schematic setup").then(() => toast("Schematic setup saved to the project"), (err: Error) => toast("Could not save the project settings: " + err.message, 5000));
+        }, "schematic setup").then(() => { toast("Schematic setup saved to the project"); const now = reusedSheetSuffixes(); if (now !== suffixesWere) void recomposeReferences(suffixesWere, now); }, (err: Error) => toast("Could not save the project settings: " + err.message, 5000));
       })();
       return false;
     } });

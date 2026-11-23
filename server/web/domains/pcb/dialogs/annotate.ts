@@ -5,14 +5,14 @@
 // "Clear Annotation" resets them to "R?".  Recurse into subsheets takes in the sheets below the current one, Regroup
 // symbol units (with Reset) drops the locked unit sets, and the message panel lists AnnotateSymbols' report lines.  Other sheets are edited through their own documents, each step on
 // that sheet's undo list, as Find and Replace's Replace All does.
-import { E, appState, isSch, pushUndoFor, toast, toolCtx } from "./editor";
+import { E, appState, isSch, pushUndoFor, toast, toolCtx, undoStack, type UndoEntry } from "./editor";
 import { commitObservers } from "../editor/tools";
 import { KD, checkbox, h, textInput, type DlgApi } from "./dom";
 import { obj, projectDocs, projectJson, readDoc, saveProject, sub, submitDocOp } from "./project";
 import { effectiveTheme } from "../../../shared/theme";
 import { subsheetFiles, annotateSettingsFromProject, annotateProjectChanges, trackerToStore } from "./annotate-logic";
 import { currentInstance, instancePage, loadSheets, netMap } from "../editor/schnets";
-import { messageBox, reportPanel, type ReportLine, infoBar } from "../editor/pcbdialogs/ui";
+import { errorMessage, messageBox, reportPanel, type ReportLine, infoBar } from "../editor/pcbdialogs/ui";
 export { subsheetFiles };
 
 /** BITMAPS::annotate_down_right / annotate_right_down (24 px, light and dark), beside the two sort orders. */
@@ -22,17 +22,18 @@ const ORDER_BMP: Record<string, [string, string]> = {
 };
 
 type Scope = "all" | "sheet" | "selection";
-interface AnnotateOpts { order: "x" | "y"; keep: boolean; start: number; sheetInterval: number; sheetNumber?: number; only?: Set<string>; reserved?: string[]; regroup?: boolean; tracker?: { reuse: boolean; used: Set<string> } | null }
+interface AnnotateOpts { order: "x" | "y"; keep: boolean; start: number; sheetInterval: number; sheetNumber?: number; only?: Set<string>; reserved?: string[]; regroup?: boolean; tracker?: { reuse: boolean; used: Set<string> } | null; suffixMode?: boolean }
 /** A sheet instance as the annotation takes it (sch-tools AnnSheet). */
-interface AnnSheet { doc: KDoc; path: string | null; page: number; shown?: boolean; project?: string | null; file?: string; human?: string }
+interface AnnSheet { doc: KDoc; path: string | null; page: number; shown?: boolean; project?: string | null; file?: string; human?: string; sheets?: (SNode | null)[] }
 interface HSheet extends AnnSheet { docId: string; uuidPath: string[] }
 interface AnnScope { all: boolean; sheets: { sheet: AnnSheet; only?: Set<string> | null }[] }
 interface SchAnnotate {
   annotateChanges(doc: KDoc, opts: AnnotateOpts): KChange[];
   annotateMessages(doc: KDoc, changes: KChange[], clear?: boolean): string[];
   clearAnnotationChanges(doc: KDoc, only?: Set<string> | null): KChange[];
-  incrementAnnotationChanges?(doc: KDoc, start: string, by: number): KChange[];
-  annotateHierarchy(sheets: AnnSheet[], scope: AnnScope, opts: AnnotateOpts): { changes: Map<KDoc, KChange[]>; messages: string[]; errors: string[] };
+  incrementAnnotationChanges?(doc: KDoc, start: string, by: number, suffixes?: { raw: unknown; file?: string } | null): KChange[];
+  annotateHierarchy(sheets: AnnSheet[], scope: AnnScope, opts: AnnotateOpts): { changes: Map<KDoc, KChange[]>; messages: string[]; errors: string[]; fatal?: string };
+  recomposeChanges?(sheets: AnnSheet[], before: boolean, after: boolean): Map<KDoc, KChange[]>;
   clearAnnotationHierarchy(scope: AnnScope["sheets"]): { changes: Map<KDoc, KChange[]>; messages: string[] };
   replaceDuplicateIds(docs: KDoc[]): { changes: Map<KDoc, KChange[]>; count: number };
   inferredSelection(doc: KDoc, ids: Iterable<string>): { symbols: Set<string>; sheets: Set<string> };
@@ -152,9 +153,19 @@ async function hierarchy(): Promise<{ sheets: HSheet[]; here: HSheet | null }> {
   // SCH_SHEET_LIST::SortByPageNumbers: by page number (natural order), ties in hierarchy order; the position is the virtual page
   rows.sort((a, b) => a.text.localeCompare(b.text, undefined, { numeric: true }) || a.n - b.n);
   const firstOfFile = new Set<string>(), sheets: HSheet[] = []; let here: HSheet | null = null;
+  // the sheet symbols from the top-level sheet down to an instance: each named by its uuid on its parent instance's file
+  const sheetChain = (up: string[]): (SNode | null)[] => {
+    const out: (SNode | null)[] = [];
+    for (let k = 1; k < up.length; k++) {
+      const parent = c.instances.find((x) => x.uuidPath.length === k && x.uuidPath.every((u, j) => up[j] === u));
+      const pd = parent ? (parent === cur ? doc : c.docs.get(parent.file) as KDoc | undefined) : undefined, it = pd ? pd.items.get(up[k]) : undefined;
+      out.push(it && it.kind === "sheet" ? it.node as SNode : null);
+    }
+    return out;
+  };
   rows.forEach((r, n) => {
     const isHere = r.i === cur, d = isHere ? doc : c.docs.get(r.i.file) as KDoc;
-    const h: HSheet = { doc: d, path: "/" + r.i.uuidPath.join("/"), page: /^\s*[+-]?\d+\s*$/.test(r.text) ? parseInt(r.text, 10) : n + 1, project, file: r.i.file, human: r.i.human, docId: idOf.get(r.i.file) as string, uuidPath: r.i.uuidPath };
+    const h: HSheet = { doc: d, path: "/" + r.i.uuidPath.join("/"), page: /^\s*[+-]?\d+\s*$/.test(r.text) ? parseInt(r.text, 10) : n + 1, project, file: r.i.file, human: r.i.human, docId: idOf.get(r.i.file) as string, uuidPath: r.i.uuidPath, sheets: sheetChain(r.i.uuidPath) };
     if (isHere) here = h;
     sheets.push(h);
   });
@@ -178,17 +189,33 @@ function scopeOf(S: SchAnnotate, sheets: HSheet[], here: HSheet): AnnScope {
   if (A.recursive) { const seen = new Set<HSheet>(); for (const id of sel.sheets) for (const h of [...sheets.filter((x) => x.uuidPath.length === here.uuidPath.length + 1 && x.uuidPath[here.uuidPath.length] === id && here.uuidPath.every((u, i) => x.uuidPath[i] === u)), ...below(sheets, [...here.uuidPath, id])]) if (!seen.has(h)) { seen.add(h); out.push({ sheet: h }); } }
   return { all: false, sheets: out };
 }
-/** One step on each document: the open sheet through its tool context, the others through their own operation logs. */
-async function applyChanges(sheets: HSheet[], changes: Map<KDoc, KChange[]>, label: string, failed: string): Promise<void> {
+/**
+ * One step on each document: the open sheet through its tool context, the others through their own operation logs.
+ * With `fold` (the open sheet's undo step that caused them) the other documents' changes join that step instead, so
+ * its Undo and Redo replay them too (SCH_COMMIT holds the references below an edited sheet in the same commit).
+ */
+async function applyChanges(sheets: HSheet[], changes: Map<KDoc, KChange[]>, label: string, failed: string, fold?: UndoEntry | null): Promise<void> {
+  const folded: { docId: string; file: string; doc: KDoc; changes: KChange[]; inverse: KChange[] }[] = [];
   for (const [doc, ch] of changes) {
     if (!ch.length) continue;
     if (doc === E.kdoc) { toolCtx().commit(ch, label); continue; }
     const h = sheets.find((x) => x.doc === doc); if (!h) continue;
     const inverse = inverseOf(doc, ch);
     try { await submitDocOp(h.docId, ch); } catch (e) { say(`${failed} ${h.file || ""}: ${(e as Error).message}`, true); continue; }
-    pushUndoFor(h.docId, { label, changes: ch, inverse });
+    if (fold && undoStack.includes(fold)) folded.push({ docId: h.docId, file: h.file || "", doc, changes: ch, inverse });
+    else pushUndoFor(h.docId, { label, changes: ch, inverse });
     for (const c of ch) KiCadCanvas.applyChange(doc, c, 1e4);
   }
+  if (!folded.length || !fold) return;
+  const pu = fold.undoOthers, pr = fold.redoOthers;
+  const replay = (which: "changes" | "inverse") => (): void => {
+    for (const f of folded) {
+      submitDocOp(f.docId, f[which]).then(() => { for (const c of f[which]) KiCadCanvas.applyChange(f.doc, c, 1e4); void refreshOtherRefs(); })
+        .catch((e: Error) => { errorMessage(`${failed} ${f.file}: ${e.message}`); });
+    }
+  };
+  const undo = replay("inverse"), redo = replay("changes");
+  Object.assign(fold, { undoOthers: () => { if (pu) pu(); undo(); }, redoOthers: () => { if (pr) pr(); redo(); } });
 }
 /** The project's REFDES_TRACKER (reuse_designators, used_designators) with every designator in use (CacheExistingAnnotation). */
 function projectTracker(S: SchAnnotate, sheets: HSheet[]): { reuse: boolean; used: Set<string> } {
@@ -212,8 +239,10 @@ async function runAnnotate(): Promise<void> {
   const rep = S.replaceDuplicateIds(files);
   if (rep.count) { await applyChanges(sheets, rep.changes, "Annotate", "Could not annotate"); say(`${rep.count} duplicate time stamps were found and replaced.`); }
   // OnAnnotateClick: regroupUnits = resetAnnotation && m_checkRegroupUnits
-  const opts: AnnotateOpts = { order: A.order, keep: A.keep, start: A.numbering === "first" ? A.start : 0, sheetInterval: interval, regroup: !A.keep && A.regroup, tracker };
+  const opts: AnnotateOpts = { order: A.order, keep: A.keep, start: A.numbering === "first" ? A.start : 0, sheetInterval: interval, regroup: !A.keep && A.regroup, tracker, suffixMode: reusedSheetSuffixes() };
   const r = S.annotateHierarchy(sheets, scopeOf(S, sheets, here), opts);
+  // FindRefSuffixCollision: nothing is annotated
+  if (r.fatal) { say(r.fatal, true); return; }
   await applyChanges(sheets, r.changes, "Annotate", "Could not annotate");
   for (const l of r.messages) say(l);
   // CheckAnnotate: its errors, and "Annotation complete." only when there are none
@@ -239,8 +268,26 @@ let reuseSuffix = false, initialReuse = false;
 /** storeReusedSheetMode: the Reused Sheets choice written to the project when it changed. */
 async function storeReusedSheetMode(): Promise<void> {
   if (reuseSuffix === initialReuse || E.viewOnly) return;
+  const was = initialReuse;
   initialReuse = reuseSuffix; const on = reuseSuffix;
   await saveProject((pro) => { sub(pro, "schematic", "annotation").reused_sheet_suffixes = on; }, "annotation options");
+  await recomposeReferences(was, on);
+}
+/** SCHEMATIC_SETTINGS::m_AnnotateReusedSheetSuffixes as the project holds it. */
+export function reusedSheetSuffixes(): boolean { return obj(obj(obj(projectJson()).schematic).annotation).reused_sheet_suffixes === true; }
+/**
+ * SCHEMATIC::RefreshRefSuffixes after the suffixes in force changed (suffix numbering turned on or off, a sheet's
+ * Reference Suffix edited): the files hold composed references, so every instance below takes its base composed with
+ * the path's new suffix, each file in one step of its own.  `before` / `after` are the suffix modes; `old` gives a
+ * sheet symbol's node before an edit (the suffixes the references were composed with).
+ */
+export async function recomposeReferences(before: boolean, after: boolean, old?: (sheet: SNode) => SNode, fold?: UndoEntry | null): Promise<void> {
+  const S = sch(); if (!S || !S.recomposeChanges || E.viewOnly) return;
+  const { sheets } = await hierarchy();
+  if (!sheets.some((h) => h.path)) return;
+  const prior = old ? sheets.map((h) => Object.assign({}, h, { sheets: (h.sheets || []).map((n) => (n ? old(n) : n)) })) : sheets;
+  const changes = S.recomposeChanges(prior.map((p, i) => Object.assign(p, { after: sheets[i].sheets })), before, after);
+  await applyChanges(sheets, changes, "Update References", "Could not update references in", fold);
 }
 /** The project's REFDES_TRACKER after an annotation handed out designators (used_designators). */
 async function storeUsedDesignators(used: string): Promise<void> {
@@ -261,6 +308,28 @@ async function storeTrackedDesignators(): Promise<void> {
   await trackerSaving;
 }
 commitObservers.push((phase) => { if (phase === "after") void storeTrackedDesignators(); });
+/**
+ * SCH_COMMIT::Push's refSuffixChanged (SCH_SHEET::HasRefSuffixChanges): a sheet whose Reference Suffix changed
+ * recomposes the references below it (RefreshComposedReferences; the files hold composed references).
+ */
+let suffixEdits: Map<string, SNode> | null = null;
+commitObservers.push((phase, changes) => {
+  const doc = E.kdoc as KDoc | null; if (!doc || doc.type !== "sch") return;
+  const RS = KiCadCanvas.refSuffix;
+  if (phase === "before") {
+    for (const c of changes as KChange[]) {
+      if (c.kind !== "MODIFIED" || typeof c.sexpr !== "string") continue;
+      const it = doc.items.get(c.id as string); if (!it || it.kind !== "sheet") continue;
+      const next = KiCadCanvas.parseAll(c.sexpr).find((t) => Array.isArray(t) && t[0] === "sheet") as SNode | undefined;
+      if (next && RS.refSuffixText(next) !== RS.refSuffixText(it.node as SNode)) (suffixEdits = suffixEdits || new Map()).set(it.id, KiCadCanvas.cloneNode(it.node as SNode));
+    }
+    return;
+  }
+  if (!suffixEdits) return;
+  const old = suffixEdits; suffixEdits = null;
+  const mode = reusedSheetSuffixes(), step = undoStack[undoStack.length - 1] || null;   // the suffix edit's own undo step
+  void recomposeReferences(mode, mode, (n) => old.get(KiCadCanvas.uuidOf(n)) || n, step).then(() => refreshOtherRefs());
+});
 /**
  * DIALOG_ANNOTATE( parent, message ).  With a message (SCH_EDIT_FRAME::ModalAnnotate, from ReadyToNetlist) the dialog
  * is modal over whatever asked, its infobar shows the message, "Entire schematic" is ticked and that radio disabled.
@@ -367,11 +436,12 @@ export function openIncrementAnnotations(): void {
 }
 async function runIncrement(start: string, by: number, allSheets: boolean): Promise<void> {
   const S = sch(); if (!S || !S.incrementAnnotationChanges || !E.kdoc || E.viewOnly) return;
-  const here = S.incrementAnnotationChanges(E.kdoc, start, by);
+  const raw = (toolCtx() as unknown as { suffixSheets?: () => unknown }).suffixSheets?.() || null;
+  const here = S.incrementAnnotationChanges(E.kdoc, start, by, raw ? { raw } : null);
   if (here.length) toolCtx().commit(here, "Increment Annotations");
   if (allSheets) {
     for (const o of await otherSheets()) {
-      const ch = S.incrementAnnotationChanges(o.doc, start, by); if (!ch.length) continue;
+      const ch = S.incrementAnnotationChanges(o.doc, start, by, raw ? { raw, file: o.path } : null); if (!ch.length) continue;
       const inverse = inverseOf(o.doc, ch);
       try { await submitDocOp(o.docId, ch); } catch (e) { toast(`Could not update ${o.path}: ${(e as Error).message}`); continue; }
       pushUndoFor(o.docId, { label: "Increment Annotations", changes: ch, inverse });

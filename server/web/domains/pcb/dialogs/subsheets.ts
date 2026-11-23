@@ -47,5 +47,37 @@ export function dropIntoSheet(sheet: KItem, label: string, build: (sub: KDoc) =>
   })();
 }
 
+/**
+ * The project schematic a Sheetfile names, relative to the project path `from` (sheet-instances.ts SheetReader): the
+ * file of that path, else the one of that name anywhere in the project, read as it is now.
+ */
+export async function readSheetFile(file: string, from: string): Promise<{ docId: string; path: string; doc: KDoc } | null> {
+  const st = appState as unknown as { docs: DocEntry[] | null };
+  const dir = from.split("/").slice(0, -1).join("/"), f = String(file || "").replace(/\\/g, "/").replace(/^\/+/, ""); if (!f) return null;
+  const parts: string[] = []; for (const seg of (dir ? dir + "/" + f : f).split("/")) { if (seg === "..") parts.pop(); else if (seg && seg !== ".") parts.push(seg); }
+  const path = parts.join("/"), all = ((st.docs || []) as DocEntry[]).filter((d) => d.docType === "kicad_sch");
+  const entry = all.find((d) => d.path === path) || all.find((d) => d.path.split("/").pop() === f.split("/").pop()) || null;
+  if (!entry) return null;
+  return { docId: entry.docId, path: entry.path, doc: await readDoc(entry.docId, "kicad_sch") };
+}
+
+/**
+ * One commit over the open sheet and other files of the project: `build` reads the files it needs and returns the
+ * changes; they are applied here and journalled on every document in one transaction (net.ts sendOp's op_multi), so a
+ * dropped connection or a refusal leaves no half of it behind, and one Undo takes all of it back the same way.
+ */
+export function commitWithSheets(label: string, build: (read: typeof readSheetFile) => Promise<{ here: KChange[]; others: { docId: string; path: string; changes: KChange[]; inverse: KChange[] }[] } | null>, commit: (here: KChange[], others: { docId: string; path: string; changes: KChange[]; inverse: KChange[] }[]) => void): void {
+  if (E.viewOnly) return;
+  const docId = appState.docId;
+  void (async () => {
+    let r: Awaited<ReturnType<typeof build>> = null;
+    try { r = await build(readSheetFile); } catch (err) { void messageBox((err as Error).message || String(err)); return; }
+    if (!r || !r.here.length || appState.docId !== docId) return;     // nothing to do, or the sheet on screen changed meanwhile
+    commit(r.here, r.others);
+    // the copies of those files read before are stale now
+    for (const o of r.others) for (const k of Array.from(subSheetDocs.keys())) if (k === o.path || o.path.split("/").pop() === k.split("/").pop()) subSheetDocs.delete(k);
+  })();
+}
+
 /** Called once by installDialogs: the tool context's loadSheetDoc and dropIntoSheet go through these hooks. */
-export function installSubSheets(): void { const h = (E as unknown as { hooks: Record<string, unknown> }).hooks; h.loadSheetDoc = loadSheetDoc; h.dropIntoSheet = dropIntoSheet; }
+export function installSubSheets(): void { const h = (E as unknown as { hooks: Record<string, unknown> }).hooks; h.loadSheetDoc = loadSheetDoc; h.dropIntoSheet = dropIntoSheet; h.readSheetFile = readSheetFile; h.commitWithSheets = commitWithSheets; }

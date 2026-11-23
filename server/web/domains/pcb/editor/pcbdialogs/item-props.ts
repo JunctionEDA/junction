@@ -17,6 +17,7 @@ import { dimensionDialog } from "./dimension";
 import { barcodeDialog } from "./barcode";
 import { textBoxDialog } from "./textbox";
 import { LINE_STYLE_ICONS, tableDialog } from "./table";
+import { generatedTableDialog } from "./generated-tables";
 import { boardTextVarAutocomplete, boardXref, parentFootprintOf } from "./xref";
 import * as VM from "../../canvas/variant-model";
 import { syntaxHelpLink } from "../syntax-help";
@@ -115,6 +116,9 @@ function itemDialog(ctx: ToolCtx, item: KItem, title: string, width: number, bui
       if (create) { create(staged); return true; }
       if (K().serialize(staged) === before) return true;
       ctx.commit([K().replaceChange(doc, { ...item, node: staged, geom: [], bbox: null })], undo);
+      // EDIT_TOOL::Properties: a committed geometry edit settles the constraints, the edited item held (SolveAfterEdit)
+      const C = ((window as unknown as { PcbTools?: { constraints?: { solveAfterDialogEdit(c: ToolCtx, ids: string[]): void } } }).PcbTools || {}).constraints;
+      if (C) { try { C.solveAfterDialogEdit(ctx, [item.id]); } catch (e) { console.warn(e); } }
       return true;
     } });
 }
@@ -1228,7 +1232,7 @@ export function pcbItemDialog(ctx: ToolCtx, item: KItem): boolean {
     case "zone": return kid(item.node, "keepout") ? ruleAreaDialog(ctx, item) : Array.from(zoneLayerSet(ctx.doc, item.node)).some((l) => /\.Cu$/.test(l)) ? zoneDialog(ctx, item) : nonCopperZoneDialog(ctx, item);
     case "gr_text": return textDialog(ctx, item);
     case "gr_text_box": return textBoxDialog(ctx, item);
-    case "table": return tableDialog(ctx, item);
+    case "table": return KiCadCanvas.drillModel.isGeneratedKind(item.node[0]) ? generatedTableDialog(ctx, item) : tableDialog(ctx, item);
     case "image": return (ctx.doc as KDoc).type === "pcb" ? refImageDialog(ctx, item) : false;
     case "gr_line": case "gr_rect": case "gr_circle": case "gr_arc": case "gr_poly": case "gr_curve": case "gr_ellipse": case "gr_ellipse_arc": return shapeDialog(ctx, item);
     case "footprint": return footprintDialog(ctx, item);

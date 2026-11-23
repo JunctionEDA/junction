@@ -12,6 +12,7 @@ import { K, S, atOf, kid, kids, num, ptsOf, str } from "./state";
 import { deep, modChange, onSegMid, r4, same, segs } from "./util";
 import { busTests, hierarchyTests, sheetTests } from "./erc-tests";
 import { busAliasesOf } from "./unfold";
+import { libraryTests, type ErcLibraries } from "./erc-library";
 
 // ---------------------------------------------------------------- ERC (eeschema/erc/erc.cpp subset)
 export const PIN_TYPES = ["input", "output", "bidirectional", "tri_state", "passive", "free", "unspecified", "power_in", "power_out", "open_collector", "open_emitter", "no_connect"];
@@ -67,6 +68,8 @@ export interface ErcOpts {
   pinMap?: number[][]; sheetDocs?: SheetDocs | null; parentPins?: Iterable<string> | null; showAllErrors?: boolean;
   /** SCHEMATIC_SETTINGS m_ConnectionGridSize in mm (default 50 mil) */ connectionGrid?: number;
   /** the project's netclass names (net_settings.classes); undefined_netclass runs only when given */ netclasses?: Iterable<string> | null; defaultNetclass?: string;
+  /** TestVariantSymbols' library adapter (flattened library symbols by lib id, null when none holds it) */ variantSymbol?: ((libId: string) => SNode | null) | null;
+  /** SCHEMATIC_SETTINGS::m_AnnotateReusedSheetSuffixes (schematic.annotation.reused_sheet_suffixes) */ suffixMode?: boolean;
   /** false: the caller runs the hierarchy-wide tests itself (hierarchyTests and netTests over every sheet) */ crossSheet?: boolean;
   /** the sheet is a top-level sheet (SCH_SHEET::IsTopLevelSheet): its hierarchical labels have no parent to reach */ root?: boolean;
   /** runERC shows no summary (the ERC dialog reports the run itself) */ silent?: boolean;
@@ -76,6 +79,10 @@ export interface ErcOpts {
   netOfItem?(id: string): { name: string; bus: boolean; prio: number; members: string[] } | undefined;
   /** the sheet instance's path ("/<root uuid>/<sheet uuids>"), for the shown texts TestTextVars reads */ path?: string | null;
   /** false when unresolved_variable is ignored: TestTextVars does not run (ERC_SETTINGS::IsTestEnabled) */ textVars?: boolean;
+  /** TestSimModelIssues: the messages SIM_LIB_MGR::CreateModel reported for a symbol of this sheet instance, by its id
+   *  (the caller creates the models: the libraries they name are read asynchronously) */
+  simModelIssues?: Map<string, string> | null;
+  /** the libraries' contents for the library tests (erc-library.ts); they do not run without them */ libraries?: ErcLibraries | null;
 }
 /** ctx.sheetDocs: Sheetfile (or docId / path) -> parsed doc or its text. */
 export type SheetDocs = NonNullable<SchCtx["sheetDocs"]>;
@@ -275,12 +282,15 @@ export function ercCheck(doc: KDoc, opts?: ErcOpts | null) {
     // several pins joined by name only: a power symbol's pin that touches nothing is still a mistake
     if (pins.length > 1) for (const t of pins) if (t.power && danglingPin(t) && !(t === pin && !other)) mark("pin_not_connected", "error", t.p, "Pin not connected", [t.item.id], [pinItemRef(t)]);
   }
+  // TestSimModelIssues: a symbol whose simulation model reported anything, the marker at the symbol
+  if (opts.simModelIssues) for (const [id, msg] of opts.simModelIssues) { const it = doc.items.get(id); if (it) mark("simulation_model_issue", "error", atOf(it.node), msg, [id]); }
   // the ERC_TESTER tests of one sheet, and (alone on this sheet unless the caller checks the hierarchy) the ones across sheets
   sheetTests(doc, nets, mark, itemRef, pinItemRef, opts);
   // the connectivity engine's island tests (bus / net mixes, bus members, wired hidden power inputs)
   busTests(doc, mark, itemRef, pinItemRef, { busAliases: busAliasesOf(doc), netOfItem: opts.netOfItem });
   if (opts.crossSheet !== false) {
     markers.push(...hierarchyTests([{ doc, key: "", nets }], itemRef, pinItemRef)[0]);
+    if (opts.libraries) markers.push(...libraryTests([{ doc }], opts.libraries, itemRef, pinItemRef)[0]);
     markers.push(...netTests([{ doc, key: "", info, root: opts.root }], opts)[0]);
   }
   // ercCheckHierSheets: hierarchical labels of a top-level sheet, sheet pins against the sub-sheet's hierarchical labels

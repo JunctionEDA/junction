@@ -5,6 +5,7 @@ import { refreshCrosshair } from "./crosshair";
 import { refreshCursor } from "./cursors";
 import { applyChanges, enterSheet, publishDocs, renderObjects, setLayerVisible, snapMm, gridSnapEnabled } from "./doc";
 import { selectionIds, toolChanging } from "./gestures";
+import { constraintTools } from "./panels/constraints";
 import { sendOp } from "./net";
 import { cycleFollow, sendPresence } from "./peers";
 import { applyBoardArea, boardAreaIds, clearSelection, drawSelection, filterAllows, groupExpand, renderProps, scopeToEnteredGroup, selFilter } from "./selection";
@@ -14,7 +15,7 @@ import { api, toast } from "./util";
 import { appearanceDispatch } from "./panels/appearance";
 import { openDatasheet } from "../dialogs/browse-cells";
 import { clonePrefs, savePrefs } from "../dialogs/prefs";
-import type { CommitOpts, ItemSummary, UndoEntry } from "./types";
+import type { CommitOpts, ItemSummary, OtherDocChanges, UndoEntry } from "./types";
 import { dragG, isSch, pxPerMm, requestRender, requestRepaint, stage, worldMm } from "./view";
    // ERC/DRC markers handed over by the tool modules; the project's .kicad_pro text (design rules)
 // KiCad's clipboard is s-expression text: the modules write it here and to the system clipboard when allowed.
@@ -110,7 +111,15 @@ export function toolCtx(extra?: Record<string, unknown>) {
     // the sub-sheets the open page's sheet symbols name (Place Sheet Pins, the ERC's sheet pin checks)
     sheetDocs: subSheetDocs,
     // every sheet path as files from the root down and the sheets read so far (a pasted sheet's recursion test, its page number)
-    sheetHierarchy(): { paths: string[][]; docs: Map<string, KDoc> } | null { const f = E.hooks && (E.hooks as { sheetHierarchy?: () => { paths: string[][]; docs: Map<string, KDoc> } | null }).sheetHierarchy; return f ? f() : null; },
+    sheetHierarchy(): { paths: string[][]; docs: Map<string, KDoc>; instances: { file: string; path: string }[] } | null { const f = E.hooks && (E.hooks as { sheetHierarchy?: () => { paths: string[][]; docs: Map<string, KDoc>; instances: { file: string; path: string }[] } | null }).sheetHierarchy; return f ? f() : null; },
+    // a project schematic by its Sheetfile, read as it is now, and one commit over this sheet and other files (op_multi)
+    readSheetFile(file: string, from: string): Promise<{ docId: string; path: string; doc: KDoc } | null> { const f = E.hooks && (E.hooks as { readSheetFile?: (file: string, from: string) => Promise<{ docId: string; path: string; doc: KDoc } | null> }).readSheetFile; return f ? f(file, from) : Promise.resolve(null); },
+    commitWithSheets(label: string, build: (read: (file: string, from: string) => Promise<{ docId: string; path: string; doc: KDoc } | null>) => Promise<{ here: KChange[]; others: OtherDocChanges[] } | null>) {
+      const f = E.hooks && (E.hooks as { commitWithSheets?: (label: string, build: unknown, commit: (here: KChange[], others: OtherDocChanges[]) => void) => void }).commitWithSheets;
+      if (f) f(label, build, (here: KChange[], others: OtherDocChanges[]) => commitChanges(here, label, others.length ? { others } : undefined));
+    },
+    // the hierarchy's sheet instances with their sheet symbols and the project's suffix options (editor/schnets.ts suffixSheets)
+    suffixSheets(): unknown { const f = E.hooks && (E.hooks as { suffixSheets?: () => unknown }).suffixSheets; return f ? f() : null; },
     loadSheetDoc(sheet: KItem): Promise<KDoc | null> { const f = E.hooks && (E.hooks as { loadSheetDoc?: (s: KItem) => Promise<KDoc | null> }).loadSheetDoc; return f ? f(sheet) : Promise.resolve(null); },
     // SCH_MOVE_TOOL::moveSelectionToSheet: the items a move dropped on a sheet symbol are added to its sub-sheet
     dropIntoSheet(sheet: KItem, label: string, build: (sub: KDoc) => KChange[]) { const f = E.hooks && (E.hooks as { dropIntoSheet?: (s: KItem, l: string, b: (sub: KDoc) => KChange[]) => void }).dropIntoSheet; if (f) f(sheet, label, build); },
@@ -167,16 +176,24 @@ export function commitChanges(changes: KChange[] | null | undefined, label?: str
     else if (c.kind === "REMOVED" && it) inverse.push({ id: c.id, kind: "ADDED", typeName: c.typeName, sexpr: KiCadCanvas.serializeItem(E.kdoc, it) });
     else if (c.kind === "MODIFIED" && c.id === "footprint" && E.kdoc && E.kdoc.fpEditor) inverse.push({ id: c.id, kind: "MODIFIED", typeName: c.typeName, sexpr: KiCadCanvas.footprintDoc.footprintHeaderSexpr(E.kdoc) });   // the Footprint Editor's own footprint
     else if (c.kind === "MODIFIED" && it) inverse.push({ id: c.id, kind: "MODIFIED", typeName: c.typeName, sexpr: KiCadCanvas.serializeItem(E.kdoc, it) });
+    else if (c.typeName === "BOARD_SETUP" && E.kdoc && (c.properties || []).some((p) => p.name === "variants")) {
+      // the board's design variant registry (Update PCB): undo puts back the section as it stands now
+      const d = E.kdoc as KDoc & { boardSetup?: { variants?: SNode | null }; variantsNode?: SNode | null }, cur = (d.boardSetup && d.boardSetup.variants) || d.variantsNode || null;
+      inverse.push((KiCadCanvas as unknown as { boardSetup: { variantsChange(t: string): KChange } }).boardSetup.variantsChange(cur ? KiCadCanvas.serialize(cur) : ""));
+    }
   }
   applyChanges(changes);
-  sendOp(changes);   // journalled and replayed on reconnect even when the socket is down
+  // opts.others: what the commit writes into other documents (a sub-sheet's file), journalled with it in one transaction
+  const others = opts && opts.others && opts.others.length ? opts.others : null;
+  sendOp(changes, false, others ? others.map((o) => ({ docId: o.docId, changes: o.changes })) : undefined);   // journalled and replayed on reconnect even when the socket is down
   const top = opts && opts.amend ? undoStack[undoStack.length - 1] : null;
   const held = top && top.heldRedo ? top.heldRedo : null; if (top) delete top.heldRedo;
   for (const e of undoStack) delete e.heldRedo;   // any other edit settles a tentative step
   if (top && opts!.discard) { undoStack.pop(); if (held) { redoStack.length = 0; redoStack.push(...held); publishUndo(); return; } }   // a cancelled paste: BOARD_COMMIT::Revert leaves the redo list alone
-  else if (top) { top.changes = top.changes.concat(changes); top.inverse = inverse.concat(top.inverse); }
+  else if (top) { top.changes = top.changes.concat(changes); top.inverse = inverse.concat(top.inverse); if (others) top.others = (top.others || []).concat(others); }
   else {
     const entry: UndoEntry = { label: label || "edit", changes, inverse };
+    if (others) entry.others = others;
     // opts.tentative: items that still follow the cursor (a paste, a duplicate) — the redo list is kept aside until
     // the step is placed (amend) or cancelled (amend + discard), when it comes back
     if (opts && opts.tentative) entry.heldRedo = redoStack.slice();
@@ -222,15 +239,18 @@ export function undoLast() {
   if (moduleTakesUndo("undo")) return;
   const e = undoStack.pop(); if (!e) return;   // ACTIONS::undo is disabled (undoCond): its hotkey runs nothing and says nothing
   const redo = e.changes.map((c): KChange => { const it = E.kdoc.items.get(c.id); return c.kind === "REMOVED" ? c : (it ? { id: c.id, kind: c.kind === "ADDED" ? "ADDED" : "MODIFIED", typeName: c.typeName, sexpr: KiCadCanvas.serializeItem(E.kdoc, it) } : c); });
-  if (e.inverse.length) { applyChanges(e.inverse); sendOp(e.inverse); }   // a step held only by its hooks (a variant command) sends no empty op
+  // a step held only by its hooks (a variant command) sends no empty op; one that wrote other documents takes them back
+  // in the same transaction (the other documents' inverses in reverse order of the commit)
+  const otherInv = e.others ? e.others.slice().reverse().map((o) => ({ docId: o.docId, changes: o.inverse })) : undefined;
+  if (e.inverse.length) { applyChanges(e.inverse); sendOp(e.inverse, false, otherInv); }
   if (e.undoOthers) e.undoOthers();   // one commit over several sheets (Edit Text and Graphics) undoes them all
-  redoStack.push({ label: e.label, changes: redo, inverse: e.inverse, undoOthers: e.undoOthers, redoOthers: e.redoOthers }); publishUndo();   // pcbnew / eeschema say nothing on an undo
+  redoStack.push({ label: e.label, changes: redo, inverse: e.inverse, undoOthers: e.undoOthers, redoOthers: e.redoOthers, others: e.others }); publishUndo();   // pcbnew / eeschema say nothing on an undo
 }
 
 export function redoLast() {
   if (moduleTakesUndo("redo")) return;
   const e = redoStack.pop(); if (!e) return;   // ACTIONS::redo is disabled (RedoAvailable): its hotkey runs nothing and says nothing
-  if (e.changes.length) { applyChanges(e.changes); sendOp(e.changes); }
+  if (e.changes.length) { applyChanges(e.changes); sendOp(e.changes, false, e.others ? e.others.map((o) => ({ docId: o.docId, changes: o.changes })) : undefined); }
   if (e.redoOthers) e.redoOthers();
   undoStack.push(e); publishUndo();
 }
@@ -364,6 +384,8 @@ export function deleteAction() {
   if (schKey("Delete")) return;
   // board: EDIT_TOOL::Remove — the module's selection, or with nothing selected the item under the cursor (silent)
   const m = !isSch() && activeModule();
+  // CONSTRAINT_EDIT_TOOL::TryDeleteSelectedConstraint: Delete on a badge-selected constraint removes the constraint, not the items
+  if (!isSch() && !E.viewOnly) { const C = constraintTools(); try { if (C && C.tryDeleteSelectedConstraint(toolCtx())) return; } catch (e) { console.warn(e); } }
   if (m && m.onKey && !E.viewOnly) { try { if (m.onKey("Delete", { shiftKey: false, preventDefault() {} }, toolCtx())) return; } catch (e) { console.warn(e); } }
   if (E.selection.size > 1 && !E.viewOnly) { deleteSelection(); return; }
   if (E.selected && !E.viewOnly) deleteSelected();

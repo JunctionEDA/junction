@@ -183,8 +183,14 @@ export function guessCandidates(doc: BoardDoc, ids: string[], where: Pt, opts?: 
   if (list.length < 2) return list.map((e) => e.id);
   // a silk layer in front: single-layer silk texts and shapes; a courtyard in front (high contrast): footprints
   let preferred: CandEntry[] = [];
-  if (SILK_RE.test(active)) preferred = list.filter((e) => e.field ? SILK_RE.test(String((e.geoms[0] as { layer?: string }).layer || "")) : !e.pad && e.item.kind !== "footprint" && e.item.kind !== "zone" && (TEXTISH.has(e.item.kind) || /^gr_|^table/.test(e.item.kind)) && SILK_RE.test(layerOf(e.item.node, "")));
-  else if (CRTYD_RE.test(active) && opts.highContrast) preferred = list.filter((e) => !e.pad && !e.field && e.item.kind === "footprint");
+  // a drill map's marks sit on the holes they mark: the map on the active layer is preferred, one on another layer
+  // falls through to the via or pad under it
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i]; if (e.item.kind !== "drill_map") continue;
+    if (layerOf(e.item.node, "") === active) preferred.push(e); else if (list.length > 1) list.splice(i, 1);
+  }
+  if (SILK_RE.test(active)) preferred = preferred.concat(list.filter((e) => e.field ? SILK_RE.test(String((e.geoms[0] as { layer?: string }).layer || "")) : !e.pad && e.item.kind !== "footprint" && e.item.kind !== "zone" && (TEXTISH.has(e.item.kind) || /^gr_|^table/.test(e.item.kind)) && SILK_RE.test(layerOf(e.item.node, ""))));
+  else if (CRTYD_RE.test(active) && opts.highContrast) preferred = preferred.concat(list.filter((e) => !e.pad && !e.field && e.item.kind === "footprint"));
   if (preferred.length) { list = preferred; if (list.length === 1) return [list[0].id]; }
   // prefer exact hits to sloppy ones
   const slop = new Map<CandEntry, number>(); let minSlop = Infinity;

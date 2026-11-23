@@ -120,6 +120,10 @@ import { globalTrackViaChanges } from "./global-tracks";
 import { autoZonePriorities } from "./zone-priority";
 import { fpModelsApi } from "./fp-models";
 import { inspectConstraints, inspectClearanceReport } from "./inspect-constraints";
+import * as constraintTool from "./constraint-tool";
+import * as constraintModel from "./pcb-constraint";
+import * as constraintAdapter from "./constraint-adapter";
+import * as planegcs from "./planegcs";
 import { footprintDiffLines } from "./fp-diff";
 import { shapeModifyApi } from "./shape-modify";
 import { outsetApi } from "./outset";
@@ -127,7 +131,7 @@ import { boardStatsApi } from "./board-stats";
 import { FILTER_SELECTION_DEFAULTS, filterSelectionIds } from "./filter-selection";
 import { repairBoard } from "./repair";
 import { geomPages, setShapeGeom, shapeGeomOf, validateShapeGeom } from "./shape-geom";
-import { geographicalReannotate, reannotateOrder } from "./reannotate";
+import { geographicalReannotate, reannotateOrder, parseRefSuffixes, splitRefSuffixes } from "./reannotate";
 import { breakTrackChanges, cleanupChanges, cleanupPlan, trackEditChanges, trackLayerChanges, unusedPadLayerChanges } from "./track-edit";
 import { DRCET, DRC_RUN_TEXT, fixDrcEntry, inspectDrcAction, violatingRuleName, applyExclusions, exclusionKey, exclusionOf, legacyExclusion, projectExclusions, readExclusion, withExclusion, withoutExclusions, resolveStaleExclusions, markerTypeOf } from "./drc-exclusions";
 import { starvedThermalMarkers, isolatedCopperMarkers, padZoneConnection, thermalGap, padOutline } from "./drc-zones";
@@ -139,7 +143,8 @@ import { assertionMarkers, disallowMarkers, padAnnulus, ruleItems, sizeMarkers, 
 import { callFunc, footprintSelector, itemShape } from "./dru-eval";
 import { diffPairMarkers, evalRuleConstraint, matchedLengthMarkers, parseCondition, parseDru, ruleMatches, rulesPlausibility, wildMatch } from "./dru";
 import { isTuningPattern, regenerateTuningChanges, setCustomRules, tuneClick, tuneHiddenIds, tuneStatus, tuneMove, tuningPatternInfo, tuningRemoveChanges } from "./tuning-patterns";
-import { TUNE_MSG_DP_NETS, TUNE_MSG_SKEW_NETS, TUNE_MSG_SKEW_PICK, assembleDiffPair, coupledLength, isTuneTool, polyPtsText, timeDomainTargets, tunePieces, tuneTrackLine, tuningPatternNode } from "./tuning-tool";
+import { TUNE_MSG_DP_NETS, TUNE_MSG_SKEW_NETS, TUNE_MSG_SKEW_PICK, applyToolSettings, assembleDiffPair, chainBudget, chainExtras, coupledLength, isTuneTool, moveSettings, netBoardLength, patternTargets, polyPtsText, signalAggregate, timeDomainTargets, tunePieces, tuneTrackLine, tuningPatternNode } from "./tuning-tool";
+import { setTargetSignalLength, setTargetSignalLengthDelay } from "./meander";
 import { LINE_W, TEXT_STYLE, flipLayerName, layerClass, layerOf, norm180, norm360, pt, r6, textStyle, useFootprintEditorDefaults, widthOf } from "./util";
 import { ST_ALMOST_DONE, ST_DONE, WP_CCW, WP_CW, WP_SHORTEST, cursorDistMinimum, dir8, fromNm, hullOf, isFreePad, legPts, pathClear, pathHits, routeClearance, routeObstacles, routerWorld, simplifyPts, splitHeadTail, toNm, walkHead, walkTo, walkaroundRoute } from "./walkaround";
 import { uniqueZoneName, subtractOutline } from "./zone-modes";
@@ -716,6 +721,7 @@ export const pcb = {
 };
 root.CollabTools = root.CollabTools || {};
 root.CollabTools.pcb = pcb;
+const constraintApi = { ...constraintModel, ...constraintAdapter, ...constraintTool, planegcs };
 root.PcbTools = { blockDrag: blockDragApi, viaStack: viaStackApi, microwave: microwaveApi, spread: spreadApi, viaStackMarkers, ellipse: Ellipse, boardItems: { placePointAt, subGridClick }, shoveOptimize, areaAllows, startRefusal, obtuseOnly, routeHasOtherEnd, magneticOption, setMagneticOption, routerHover, pickSingleItem, snapToItem, zonePriorityPlan, zonePriorityAbility, zoneMergeChanges, zoneDuplicateNode, pruneItemLayers, OffsetItemState, snapAnchors, textGraphics: textGraphicsApi, layerStyle, globalDeletion: globalDeletionApi, enabledLayerPairs, resetLayerPairCycle, itemOnLayer, itemRatsnestAnchors, uniqueZoneName, subtractOutline, footprintRefChoices, footprintByRef, netNameCmp, fieldEdit: { requestField, rotateFieldChange, flipFieldChange, hideFieldChanges, footprintFieldNode }, boardFindHits, edaMatches, findStep, unescapeKiCad, nearestSnapLinePoint, angleSnapDirections, MOVE_SNAP_MSG, ANGLE_SNAP_MSG, DRAWING_TOOL_IDS, useFootprintEditorDefaults, LINE_W, TEXT_STYLE, state: S, pad: padToolApi, exchange: exchangeApi, fpProps: fpPropsApi, fpPads: fpPadsApi, fpCheck: fpCheckApi, fpUsers: fpUsersApi, setEnumParams, openForm: (spec: FormSpec) => formImpl(spec), arcEditMode, setArcEditMode, arcEditGeometry, editPoints, editPointNode, ArcGeom, arcDrawMode, setArcDrawMode, arcFromStartEndMidDrag, arcFromStartEndCenterDrag, arcFromStartTangentEnd, arcTangentSeedAt, arcTangentSeedNear, snapVec45, netTable, zoneTemplate, build45Leader, polyOutline, angleSnapMode, setAngleSnap, constrainDraw, snap90, undoChainSegment, stepDrawWidth, withStroke, dimensionLabel, unfillChanges, alignBox, splitChanges, WIDTHS, BOARD_VERSION, routeLeg, segmentNode, viaNode, lineNode, rectNode, circleNode, arcNode, polyNode, textNode, netOf, netNode, netStyle,
   wrapBoard, addedChange, replacedChange, removedChange, padsOf, snapTarget, netUnder, hitTestItem, itemAt, deleteAt, connectedRun, rotateFootprintNode, flipFootprintNode,
   flipLayerName, pt, selectMoveTo, finishSelectMove, assembleLine, dragStart, startPendingDrag, finishDrag, dragMove, dragTo, dragSolution, dragChanges, dragSegment45, optimizeDragged, changedArea, componentDragHits, isFreePad, dragCorner45, dragCornerFree, initialTrace, routableItems, nextWidth, norm180, norm360, DELETE_CURSOR,
@@ -731,7 +737,7 @@ root.PcbTools = { blockDrag: blockDragApi, viaStack: viaStackApi, microwave: mic
     for (const it of ruleItems(doc)) { const host = it.item || it.parent; if (host && !ids.has(host.id) && ruleMatches(rule, doc, s, it, null)) ids.add(host.id); }
     return [...ids];
   }, parseCondition, wildMatch, tuneStatus, matchedLengthMarkers, drcErrorLimit, setDrcUnits, itemPosition: positionOf, customRuleMarkers: (doc: BoardDoc, s: Parameters<typeof matchedLengthMarkers>[1], text: string | null, units?: Units) => { if (!text) return []; const was = setDrcUnits(units); try { return ((r) => matchedLengthMarkers(doc, s, r).concat(diffPairMarkers(doc, s, r)))(parseDru(text).rules); } finally { setDrcUnits(was); } }, diffPairMarkers, meanderDefaults, setTargetLength, meanderMove, segSegDist, layerOf, widthOf, splitLine, tunePieces, tuningPatternNode,
-  assembleTuningPath, boardTrackLength, ldContext, lengthForDelay, missingTuningProfileMarkers, origPathDelay, origPathLength, tuningProfileRules, setTargetLengthDelay, splitChain, polyPtsText, timeDomainTargets, tuneTrackLine, tuneSettingsView, applyTuneSettings, chLength, TUNE_IU, LENGTH_UNCONSTRAINED, TUNE_MSG_INSIDE, TUNE_MSG_SELECT, TUNE_MSG_PICK,
+  assembleTuningPath, boardTrackLength, ldContext, lengthForDelay, missingTuningProfileMarkers, origPathDelay, origPathLength, tuningProfileRules, setTargetLengthDelay, splitChain, polyPtsText, timeDomainTargets, tuningChain: { signalAggregate, netBoardLength, chainExtras, chainBudget, moveSettings, applyToolSettings, patternTargets, setTargetSignalLength, setTargetSignalLengthDelay }, tuneTrackLine, tuneSettingsView, applyTuneSettings, chLength, TUNE_IU, LENGTH_UNCONSTRAINED, TUNE_MSG_INSIDE, TUNE_MSG_SELECT, TUNE_MSG_PICK,
   routerWorld, routeObstacles, routeClearance, walkHead, walkTo, pathClear, pathHits, hullOf, legPts, simplifyPts, dir8, newTracer, trailAdd, tracerPosture, tracerFlip, saturated,
   walkaroundRoute, splitHeadTail, cursorDistMinimum, toNm, fromNm, WP_CW, WP_CCW, WP_SHORTEST, ST_DONE, ST_ALMOST_DONE, tanTanPt, dragArcLine, elemsLine, lineElems, arcGeom, alignToArc,
   // the new board tools
@@ -758,7 +764,7 @@ root.PcbTools = { blockDrag: blockDragApi, viaStack: viaStackApi, microwave: mic
   viaSnapPoint, viaZoneNets, alignToSegment, setNetChooser,
   handleKeyAt(doc: BoardDoc, at: Pt) { const h = at ? editHandleAt(doc, at[0], at[1], handleTol()) : null; return h ? h.h.key : null; }, connectedCopperIds,
   sliverMarkers, sliverPoints, clipperArea, PolygonTest, padAnnulus, connectionWidthMarkers, boxGrid, boxesTouch, circleOutside, ovalOutside, circleApprox, ovalApprox, splitCollinearOutlines,
-  designSettings, netclassName, netclassOf, netInNetclass, netclassConstituents, netClearance, mmPair, DEFAULT_SETTINGS, edgeShapes, chainLoops, boardOutline, courtyards, drc, markerPath, trackEditChanges, trackLayerChanges, breakTrackChanges, cleanupPlan, cleanupChanges, unusedPadLayerChanges, graphicsCleanup, teardropEditChanges, teardropCommitChanges, teardropFullUpdate, teardropAppliedDoc, viaStitchTile: poissonTile, viaStitch: { clearAllExclusions, excludeViaChanges, gridConfigOf, hasExclusions, isViaStitch, readStitch, stitchOfVia, stitchesDirtiedByFill, viaStitchOverlapMarkers, viaStitchUpdate, writeStitch, zonesNeedingRefill }, deleteTrackToTrackTeardrops, addTrackToTrackTeardrops, foldChanges, globalTrackViaChanges, autoZonePriorities, fpModels: fpModelsApi, inspectConstraints, inspectClearanceReport, footprintDiffLines, shapeModify: shapeModifyApi, outset: outsetApi, boardStats: boardStatsApi, filterSelectionIds, FILTER_SELECTION_DEFAULTS, repairBoard, geomPages, shapeGeomOf, setShapeGeom, validateShapeGeom, geographicalReannotate, reannotateOrder,
+  designSettings, netclassName, netclassOf, netInNetclass, netclassConstituents, netClearance, mmPair, DEFAULT_SETTINGS, edgeShapes, chainLoops, boardOutline, courtyards, drc, markerPath, trackEditChanges, trackLayerChanges, breakTrackChanges, cleanupPlan, cleanupChanges, unusedPadLayerChanges, graphicsCleanup, teardropEditChanges, teardropCommitChanges, teardropFullUpdate, teardropAppliedDoc, viaStitchTile: poissonTile, viaStitch: { clearAllExclusions, excludeViaChanges, gridConfigOf, hasExclusions, isViaStitch, readStitch, stitchOfVia, stitchesDirtiedByFill, viaStitchOverlapMarkers, viaStitchUpdate, writeStitch, zonesNeedingRefill }, deleteTrackToTrackTeardrops, addTrackToTrackTeardrops, foldChanges, globalTrackViaChanges, autoZonePriorities, fpModels: fpModelsApi, inspectConstraints, inspectClearanceReport, footprintDiffLines, shapeModify: shapeModifyApi, outset: outsetApi, boardStats: boardStatsApi, filterSelectionIds, FILTER_SELECTION_DEFAULTS, repairBoard, geomPages, shapeGeomOf, setShapeGeom, validateShapeGeom, geographicalReannotate, reannotateOrder, parseRefSuffixes, splitRefSuffixes,
   layersBlock, referencePoint, clipboardText, parseClipboard, freshUuids, rewriteNets, annotate, pasteChanges, placeBoardText, duplicateChanges, arrayChanges, arraySize, arrayTransform, arrayStacked, arrayOrigin, pickInteractively, cursorPoint,
   adjustColor, courtyardConflicts, drawSnapIndicator, gridOriginColor, snapTypeOf, startLayerOf, groupBox, enteredGroupIds, withinEnteredGroup, drawGroupFrames, clearanceOutlines, drawClearanceOutlines, drawStatusNote, statusNoteDims,
   padAt, padProperties, convertChanges, segmentToArcChanges, selectionLoops, justifyChanges, zonePriorityChanges, footprintAttrChanges, boardStatistics, idsOnLayer, filterIds, SELECTION_TYPES, inspectClearance, VIA_SIZES, PCB_KINDS,
@@ -770,4 +776,6 @@ root.PcbTools = { blockDrag: blockDragApi, viaStack: viaStackApi, microwave: mic
   // GRAPHIC_EDIT_TOOL: Extend Line or Arc / Trim Shape
   graphicEdit: { planExtend, planTrim, geHover, geCommitChanges, applyGeometryNode, refusalMessage, GE_OPS },
   // MULTICHANNEL_TOOL: placement rule areas, Repeat Layout, linked layouts, Apply Design Block Layout
-  multichannel: multichannelApi };
+  multichannel: multichannelApi,
+  // CONSTRAINT_EDIT_TOOL, the constraint model and the planegcs-based solver (the dimension dialog and the Properties panel use them)
+  constraints: constraintApi };

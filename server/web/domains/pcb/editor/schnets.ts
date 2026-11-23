@@ -235,7 +235,7 @@ function labelTextVar(item: KItem, token: string): string | null {
 }
 interface LabelVarCanvas { setLabelTextVar?(fn: ((item: KItem, token: string) => string | null) | null): void; refreshLabelTextVars?(doc: KDoc): boolean }
 interface SymVarCanvas {
-  symVars?: { net: unknown; unitPlaced: unknown; crossRef: unknown };
+  symVars?: { net: unknown; unitPlaced: unknown; crossRef: unknown; refSuffix?: unknown };
   symbolInstance?(n: SNode, path: string | null): { ref: string; unit: number | null } | null;
   resolveCrossReference?(sheets: { doc: KDoc; path: string | null }[], token: string, depth: number): string;
 }
@@ -282,6 +282,77 @@ function symbolCrossRef(token: string, depth: number): string | null {
   const sheets: { doc: KDoc; path: string | null }[] = [];
   for (const inst of c.instances) { const d = cur && inst.file === cur.path && E.kdoc ? E.kdoc as KDoc : c.docs.get(inst.file); if (d) sheets.push({ doc: d, path: "/" + inst.uuidPath.join("/") }); }
   return KC.resolveCrossReference(sheets, token, depth);
+}
+/** SCHEMATIC::GetRefSuffix of a sheet instance path, from the hierarchy the net map walked (the project's suffix mode). */
+const suffixCache = new WeakMap<Computed, { mode: boolean; get(path: string): string }>();
+function symbolRefSuffix(path: string): string {
+  const c = netMap(); if (!c || !c.instances.length) return "";
+  let mode = false;
+  try { const pro = JSON.parse((E.proSettings as string | null) || "{}") as { schematic?: { annotation?: { reused_sheet_suffixes?: boolean } } }; mode = !!(pro.schematic && pro.schematic.annotation && pro.schematic.annotation.reused_sheet_suffixes); } catch (e) { mode = false; }
+  if (!mode) return "";
+  let hit = suffixCache.get(c);
+  if (!hit || hit.mode !== mode) {
+    const RS = KiCadCanvas.refSuffix, out = new Map<string, string>();
+    for (const inst of c.instances) {
+      const chain: (SNode | null)[] = [];
+      for (let k = 1; k < inst.uuidPath.length; k++) {
+        const parent = c.instances.find((x) => x.uuidPath.length === k && x.uuidPath.every((u, j) => inst.uuidPath[j] === u));
+        const pd = parent ? c.docs.get(parent.file) : undefined, it = pd ? pd.items.get(inst.uuidPath[k]) : undefined;
+        chain.push(it ? it.node as SNode : null);
+      }
+      out.set("/" + inst.uuidPath.join("/"), RS.composeRefSuffix(chain));
+    }
+    hit = { mode, get: (p: string) => out.get(p) || "" }; suffixCache.set(c, hit);
+  }
+  return hit.get(path);
+}
+/** One sheet instance as the suffix tools take it (sch-tools AnnSheet, with PathHumanReadable( false ) as `readable`). */
+export interface SuffixSheet { doc: KDoc; path: string; page: number; shown: boolean; project: string; file: string; human: string; readable: string; sheets: (SNode | null)[] }
+/**
+ * The hierarchy as the reused-sheet suffix tools read it (ctx.suffixSheets): every sheet instance with its file's
+ * document (the one on screen for its own file), its sheet symbols from the top down, and the project's
+ * annotation.reused_sheet_suffixes and annotation.increment_pasted_suffix.  null until the hierarchy is read.
+ */
+export function suffixSheets(): { sheets: SuffixSheet[]; mode: boolean; increment: boolean } | null {
+  const c = netMap(), cur = curEntry(); if (!c || !c.instances.length || !cur) return null;
+  let a: { reused_sheet_suffixes?: boolean; increment_pasted_suffix?: boolean } = {};
+  try { const pro = JSON.parse((E.proSettings as string | null) || "{}") as { schematic?: { annotation?: typeof a } }; a = (pro.schematic && pro.schematic.annotation) || {}; } catch (e) { a = {}; }
+  const pro = projectDocs().find((d) => d.docType === "kicad_pro"), project = pro ? pro.path.split("/").pop()!.replace(/\.kicad_pro$/, "") : c.rootName;
+  const here = currentInstance(c), out: SuffixSheet[] = [];
+  for (const inst of c.instances) {
+    const doc = inst.file === cur.path && E.kdoc ? E.kdoc as KDoc : c.docs.get(inst.file); if (!doc) return null;
+    const chain: (SNode | null)[] = [];
+    for (let k = 1; k < inst.uuidPath.length; k++) {
+      const parent = c.instances.find((x) => x.uuidPath.length === k && x.uuidPath.every((u, j) => inst.uuidPath[j] === u));
+      const pd = parent ? (parent.file === cur.path && E.kdoc ? E.kdoc as KDoc : c.docs.get(parent.file)) : undefined, it = pd ? pd.items.get(inst.uuidPath[k]) : undefined;
+      chain.push(it && it.kind === "sheet" ? it.node as SNode : null);
+    }
+    const pg = parseInt(instancePage(c, inst), 10);
+    out.push({ doc, path: "/" + inst.uuidPath.join("/"), page: pg > 0 ? pg : out.length + 1, shown: inst === here, project, file: inst.file, human: inst.human, readable: SN().sheetNodeText(inst, c.rootName, c.instances) + "/", sheets: chain });
+  }
+  return { sheets: out, mode: a.reused_sheet_suffixes === true, increment: a.increment_pasted_suffix !== false };
+}
+(E as unknown as { hooks: Record<string, unknown> }).hooks.suffixSheets = suffixSheets;
+/** The suffix tools of sch-tools (tools/sch-tools/annotate.ts) the Reference editors use. */
+export interface SuffixRefTools {
+  suffixCtx(raw: unknown): { mode: boolean; rs: { has: boolean; suffix(path: string): string; packageSuffix(uuid: string, path: string): string } } | null;
+  suffixSheetOf(sc: unknown, doc: KDoc): { path: string | null } | null;
+  baseRefOn(sc: unknown, sheet: unknown, node: SNode): string;
+  baseRefFromUser(sc: unknown, sheet: unknown, node: SNode, text: string): { base: string; error: string };
+  setUserRef(sc: unknown, sheet: unknown, node: SNode, base: string): void;
+  composedRefLabel(sc: unknown, sheet: unknown, node: SNode, text: string): string | null;
+}
+/**
+ * The Reference editors' view of the suffixes (SCH_SYMBOL::GetBaseRef / BaseRefFromUser / SetUserRef on the current
+ * sheet): null while the hierarchy is not read, or when the sheet on screen is not in it.
+ */
+export function suffixRefEditing(doc: KDoc | null = E.kdoc as KDoc | null, file?: string): { S: SuffixRefTools; sc: { mode: boolean; rs: { has: boolean; suffix(path: string): string; packageSuffix(uuid: string, path: string): string } }; sheet: { path: string | null } } | null {
+  const S = (window as unknown as { CollabTools?: { sch?: unknown } }).CollabTools?.sch as SuffixRefTools | undefined;
+  if (!doc || !S || !S.suffixCtx) return null;
+  const raw = suffixSheets(), sc = S.suffixCtx(raw); if (!sc || !raw) return null;
+  // a sheet read on its own (Replace All on the other sheets): its file's first instance
+  const sheet = S.suffixSheetOf(sc, doc) || (file ? (raw.sheets.find((x) => x.file === file) || null) : null);
+  return sheet ? { S, sc, sheet } : null;
 }
 /** The labels that show a net's name or class are drawn again when the nets may have changed. */
 function refreshNetTexts(ctx?: ToolCtx): void {
@@ -458,10 +529,29 @@ function hierarchyPages(): string[] | null {
 }
 export function installSchNets(): void {
   const KC = KiCadCanvas as unknown as LabelVarCanvas; if (KC.setLabelTextVar) KC.setLabelTextVar(labelTextVar);
-  const SV = (KiCadCanvas as unknown as SymVarCanvas).symVars; if (SV) { SV.net = symbolNetVar; SV.unitPlaced = symbolUnitPlaced; SV.crossRef = symbolCrossRef; }
+  const SV = (KiCadCanvas as unknown as SymVarCanvas).symVars; if (SV) { SV.net = symbolNetVar; SV.unitPlaced = symbolUnitPlaced; SV.crossRef = symbolCrossRef; SV.refSuffix = symbolRefSuffix; }
+  const PH = (KiCadCanvas as unknown as { pinMapHooks?: { unit1: ((ref: string) => { node: SNode; path: string | null } | null) | null } }).pinMapHooks; if (PH) PH.unit1 = unit1Symbol;
   const m = schMod(); if (!m || !m.setNetHighlighter) return;
   (m.state as { hierarchyPages?: (() => string[] | null) | null }).hierarchyPages = hierarchyPages;
   m.setNetHighlighter({ highlightPick: userHighlightPick, clear: (ctx: ToolCtx) => { clearHighlight(ctx); netProbe.send?.([]); }, active: () => !!HL.name || !!HL.chain, docChanged, wireDriverName, labelDefaults, busAliases, stepNetItem });
+}
+/** SCH_SYMBOL::resolveDelegatedPinMapOverride's walk over Schematic()->Hierarchy(): the first unit-1 symbol whose
+ *  reference on its sheet instance is `ref` (lower case), with that instance's path. */
+function unit1Symbol(ref: string): { node: SNode; path: string | null } | null {
+  const c = netMap(); if (!c) return null;
+  for (const inst of c.instances) {
+    const doc = c.docs.get(inst.file); if (!doc) continue;
+    const path = "/" + inst.uuidPath.join("/");
+    for (const it of doc.items.values()) {
+      if (it.kind !== "symbol") continue;
+      const at = KiCadCanvas.symbolInstance(it.node, path) as { ref: string; unit: number | null } | null;
+      const unitK = KiCadCanvas.kid(it.node, "unit") as SNode | null;
+      const unit = at && at.unit !== null ? at.unit : unitK ? Number(unitK[1]) || 1 : 1;
+      const r = at ? at.ref : String(it.ref || "");
+      if (unit === 1 && r.toLowerCase() === ref) return { node: it.node, path };
+    }
+  }
+  return null;
 }
 /** editor/crossprobe.ts: where the user's net highlight goes (SendCrossProbeNetName / SetCrossProbeConnection). */
 export const netProbe = { send: null as ((names: string[]) => void) | null };
@@ -508,10 +598,11 @@ export function allNetNames(): string[] { const c = netMap(); return c ? SN().ne
  * The hierarchy for the tools (ctx.sheetHierarchy): every sheet path as the files from the root down, and the
  * sheets read so far by file (SCH_SHEET_LIST for the paste's recursion test and its page numbers).
  */
-export function sheetHierarchy(): { paths: string[][]; docs: Map<string, KDoc> } | null {
+export function sheetHierarchy(): { paths: string[][]; docs: Map<string, KDoc>; instances: { file: string; path: string }[] } | null {
   const c = netMap(); if (!c) return null;
   const byPath = new Map<string, string>(); for (const i of c.instances) byPath.set(i.uuidPath.join("/"), i.file);
   const paths = c.instances.map((i) => i.uuidPath.map((_u, n) => byPath.get(i.uuidPath.slice(0, n + 1).join("/")) || "").filter(Boolean));
-  return { paths, docs: c.docs };
+  // every sheet path as its KIID path (SCH_SHEET_PATH::Path) and the file shown there: a symbol's instances are keyed by it
+  return { paths, docs: c.docs, instances: c.instances.map((i) => ({ file: i.file, path: "/" + i.uuidPath.join("/") })) };
 }
 (E as unknown as { hooks: Record<string, unknown> }).hooks.sheetHierarchy = sheetHierarchy;

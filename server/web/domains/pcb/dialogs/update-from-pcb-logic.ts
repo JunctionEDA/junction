@@ -9,6 +9,8 @@ export interface BaOptions {
   unitSwaps?: boolean; pinSwaps?: boolean;
   /** EESCHEMA_SETTINGS input.allow_unconstrained_pin_swaps (a pin swap is only reported without it) */
   allowPinSwaps?: boolean;
+  /** SCHEMATIC_SETTINGS::m_AnnotateReusedSheetSuffixes: a new base reaches every sheet of the symbol (SetUserRef) */
+  shareBases?: boolean;
 }
 /** One placed unit of a symbol: its path, the unit it shows, and per unit number the library's pins (GetUnitPinInfo:
  *  the unit's pins with the common ones, ordered by position) with their electrical types. */
@@ -36,6 +38,9 @@ export interface SymRef {
   multi?: boolean;
   /** the sheet path (root first) and symbol uuid SCH_REFERENCE_LIST::sortByTimeStamp orders by */
   sheetPath?: string[]; uuid?: string;
+  /** SCHEMATIC::GetPackageRefSuffix of the unit's path (the suffix its board reference composes with) and
+   *  CopiesSelectDifferentUnits (its copies keep their own bases) */
+  refSuffix?: string; splitCopies?: boolean;
   value: string; footprint: string; dnp: boolean; inBom: boolean; inPos: boolean; onBoard: boolean; exSim?: boolean;
   /** non-mandatory fields */
   fields: Map<string, string>;
@@ -56,7 +61,7 @@ export interface DriverRef { kind: string; inst: number; id: string; prio: numbe
 export interface PinConn { net: string; physical: DriverRef | null; resolved: DriverRef | null }
 export interface BaLine { severity: "error" | "warning" | "action" | "info"; text: string }
 export interface SymEdit {
-  key: string; ref?: string; footprint?: string; value?: string; dnp?: boolean; inBom?: boolean; inPos?: boolean; exSim?: boolean;
+  key: string; ref?: string; /** the base the new reference strips to (ResolveBackannotatedRefs' m_base) */ refBase?: string; footprint?: string; value?: string; dnp?: boolean; inBom?: boolean; inPos?: boolean; exSim?: boolean;
   setFields: Map<string, string>; addFields: Map<string, string>; deleteFields: string[];
 }
 /**
@@ -86,6 +91,36 @@ const LP_LOCAL_LABEL = 4;
  *  the unused-symbol warnings, "Footprint re-linking canceled by user."). */
 export interface BaResult { lines: BaLine[]; edits: SymEdit[]; labels: LabelEdit[]; relinks: { fpRef: string; path: string }[]; changes: number; unitEdits: UnitEdit[]; pinSwaps: PinSwap[] }
 const cmpStr = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+/**
+ * ResolveBackannotatedRefs: the base of each requested board reference — the reference without the package's suffix,
+ * refused when it lacks it ("Cannot change %s to '%s', which lacks the sheet suffix '%s'.").  A rename is all or
+ * nothing for a footprint's units and, when bases are shared, for a symbol's sheets: a symbol asked for two bases, or
+ * a board reference one of whose requests failed, refuses every request it reaches ("…because the change cannot reach
+ * all of its units and sheets.").
+ */
+export function resolveBackannotatedRefs(reqs: { s: SymRef; boardRef: string }[], shareBases: boolean): { base: string; error: string }[] {
+  const result = reqs.map(() => ({ base: "", error: "" }));
+  const firstBase = new Map<string, string>(), refusedSymbols = new Set<string>(), refusedBoardRefs = new Set<string>();
+  const symOf = (r: SymRef): string => r.uuid || r.key;
+  const shares = (r: SymRef): boolean => shareBases && !r.splitCopies;
+  reqs.forEach(({ s, boardRef }, ii) => {
+    // A footprint whose units span sheets carries the package's suffix, not each unit's own
+    const suffix = s.refSuffix || "";
+    if (!boardRef.endsWith(suffix) || boardRef.length <= suffix.length) { result[ii].error = `Cannot change ${describeRef(s.ref)} to '${boardRef}', which lacks the sheet suffix '${suffix}'.`; return; }
+    result[ii].base = boardRef.slice(0, boardRef.length - suffix.length);
+    if (shares(s)) { const had = firstBase.get(symOf(s)); if (had === undefined) firstBase.set(symOf(s), result[ii].base); else if (had !== result[ii].base) refusedSymbols.add(symOf(s)); }
+  });
+  for (let changed = true; changed;) {
+    changed = false;
+    reqs.forEach(({ s, boardRef }, ii) => {
+      if (!result[ii].error && !refusedSymbols.has(symOf(s)) && !refusedBoardRefs.has(boardRef)) return;
+      if (!refusedBoardRefs.has(boardRef)) { refusedBoardRefs.add(boardRef); changed = true; }
+      if (shares(s) && !refusedSymbols.has(symOf(s))) { refusedSymbols.add(symOf(s)); changed = true; }
+      if (!result[ii].error) { result[ii].error = `Cannot change ${describeRef(s.ref)} to '${boardRef}', because the change cannot reach all of its units and sheets.`; result[ii].base = ""; }
+    });
+  }
+  return result;
+}
 /** SCH_REFERENCE_LIST::sortByTimeStamp: by sheet path (shorter first, then uuid by uuid), then by symbol uuid. */
 function byTimeStamp(a: SymRef, b: SymRef): number {
   const pa = a.sheetPath || [], pb = b.sheetPath || [];
@@ -151,14 +186,15 @@ export function backAnnotate(syms: SymRef[], fps: FpData[], o: BaOptions & { ann
       }
     }
   }
-  for (const { s, fp } of list) {
+  const newRefs = resolveBackannotatedRefs(list.map(({ s, fp }) => ({ s, boardRef: fp.ref })), !!o.shareBases);
+  list.forEach(({ s, fp }, idx) => {
     const e: SymEdit = { key: s.key, setFields: new Map(), addFields: new Map(), deleteFields: [] };
     let any = false;
     const skip = skipUnits.has(s.key), R = s.ref;
     if (o.references && s.ref !== fp.ref && !skip && !hasVars(s.ref)) {
-      // ResolveBackannotatedRefs without reused-sheet suffixes: only an empty board reference lacks the suffix ''
-      if (!fp.ref) head.push({ severity: "error", text: `Cannot change ${describeRef(s.ref)} to '${fp.ref}', which lacks the sheet suffix ''.` });
-      else { changes++; any = true; e.ref = fp.ref; head.push({ severity: "action", text: `Change ${describeRef(s.ref)} reference designator to '${fp.ref}'.` }); }
+      const nr = newRefs[idx];
+      if (nr.error) head.push({ severity: "error", text: nr.error });
+      else { changes++; any = true; e.ref = fp.ref; e.refBase = nr.base; head.push({ severity: "action", text: `Change ${describeRef(s.ref)} reference designator to '${fp.ref}'.` }); }
     }
     if (o.footprints && s.footprint !== fp.fpid && !skip && !hasVars(s.footprint)) { changes++; any = true; e.footprint = fp.fpid; head.push({ severity: "action", text: `Change ${describeRef(R)} footprint assignment from '${s.footprint}' to '${fp.fpid}'.` }); }
     if (o.values && s.value !== fp.value && !skip && !hasVars(s.value)) { changes++; any = true; e.value = fp.value; head.push({ severity: "action", text: `Change ${describeRef(R)} value from '${s.value}' to '${fp.value}'.` }); }
@@ -191,7 +227,7 @@ export function backAnnotate(syms: SymRef[], fps: FpData[], o: BaOptions & { ann
       for (const name of s.fields.keys()) if (!MANDATORY.has(name) && !fp.fields.has(name)) { changes++; any = true; e.deleteFields.push(name); head.push({ severity: "action", text: `Delete ${describeRef(R)} field '${name}.'` }); }
     }
     if (any) edits.push(e);
-  }
+  });
   return out();
 }
 

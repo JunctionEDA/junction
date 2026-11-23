@@ -28,7 +28,22 @@ export function netStyle(doc: KDoc) {
   if (!style) return v > 0 ? "code" : "name";   // nothing on a net yet: the version's form, else: this build's own form, and not remembered, so the first netted item decides
   NET_STYLE.set(doc, style); return style;
 }
-export function netNode(doc: KDoc, net: NetRef | null | undefined): SNode { return netStyle(doc) === "name" ? ["net", net && net.name ? net.name : ""] : ["net", net && net.code > 0 ? net.code : 0]; }
+/**
+ * A new item's (net …) in the file's own form (netStyle).  The net it copies may be written the other way (a track
+ * of a board with a net table carries the bare code, (net 3)): the name comes from the board's net table, and a
+ * code from the name, so the new copper stays on its net.
+ */
+export function netNode(doc: KDoc, net: NetRef | null | undefined): SNode {
+  const nets = (doc as KDoc & { nets?: Map<number, string> | null }).nets || null;
+  if (netStyle(doc) === "name") {
+    let name = net && net.name ? net.name : "";
+    if (!name && net && net.code > 0 && nets) name = String(nets.get(net.code) || "");
+    return ["net", name];
+  }
+  let code = net && net.code > 0 ? net.code : 0;
+  if (!code && net && net.name && nets) for (const [c, n] of nets) if (n === net.name) { code = Number(c); break; }
+  return ["net", code];
+}
 export const hasNet = (n: NetRef | null | undefined): n is NetRef => !!(n && (n.name || n.code > 0));
 export const sameNet = (a: NetRef | null | undefined, b: NetRef | null | undefined) => hasNet(a) && hasNet(b) && (a.name && b.name ? a.name === b.name : a.code === b.code);
 

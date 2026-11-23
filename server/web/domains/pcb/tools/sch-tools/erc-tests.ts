@@ -3,12 +3,14 @@
 // netclasses (one sheet), and the tests that look across the whole hierarchy: multi-unit footprints / values / missing
 // units, local vs global names, similar names, single global labels (crossSheet).
 import type { Pt, ErcMarker } from "./types";
-import { type AnnSheet, type SchRef, checkAnnotation, sheetReferences } from "./annotate";
+import { type AnnSheet, type SchRef, checkAnnotation, hierarchySuffixes, sheetReferences } from "./annotate";
+import { composedRef, refSuffixCollisions, stripRefSuffix, instanceOf, type RefSuffixes } from "../../canvas/ref-suffix";
 import { type SymPin, globalPowerPin, symbolIsPower, symbolLibId, symbolPins } from "./autoplace";
 import { terminalsOf } from "./highlight";
 import { K, atOf, kid, kids, num, ptsOf, str } from "./state";
 import { onSegMid, r4 } from "./util";
 import { unescapeText } from "../../canvas/text";
+import * as VM from "../../canvas/variant-model";
 import type { ErcItemRef, ErcNet, ErcTerm } from "./erc";
 
 type Mark = (code: string, severity: string, p: Pt, text: string, ids: Iterable<string>, refs?: ErcItemRef[], extra?: Record<string, unknown>) => void;
@@ -100,7 +102,9 @@ export function ercNetName(net: ErcNet): string {
   return "";
 }
 
-export interface SheetTestOpts { connectionGrid?: number; netclasses?: Iterable<string> | null; defaultNetclass?: string; /** the sheet instance's path (the symbols' instance path) */ path?: string | null; /** false when unresolved_variable is ignored (IsTestEnabled) */ textVars?: boolean }
+export interface SheetTestOpts { connectionGrid?: number; netclasses?: Iterable<string> | null; defaultNetclass?: string; /** the sheet instance's path (the symbols' instance path) */ path?: string | null; /** false when unresolved_variable is ignored (IsTestEnabled) */ textVars?: boolean;
+  /** TestVariantSymbols' library adapter: the flattened library symbol of a lib id, null when no library holds it; the
+   *  test runs only when given */ variantSymbol?: ((libId: string) => SNode | null) | null }
 
 /** The tests of one sheet; `nets` are ercNets(doc).nets. */
 export function sheetTests(doc: KDoc, nets: ErcNet[], mark: Mark, itemRef: (doc: KDoc, it: KItem) => ErcItemRef, pinRef: (t: ErcTerm & { pin: SymPin }) => ErcItemRef, opts: SheetTestOpts): void {
@@ -161,6 +165,28 @@ export function sheetTests(doc: KDoc, nets: ErcNet[], mark: Mark, itemRef: (doc:
       mark("undefined_netclass", "error", atOf(it.node), `Netclass ${nc} is not defined`, [it.id]);
     }
   }
+  // TestVariantSymbols: each variant's symbol override on this sheet instance (a self-referencing one skipped) must
+  // name a library symbol (variant_symbol_invalid) that is pin-compatible with the embedded base symbol
+  // (variant_symbol_incompatible, one marker per issue), the markers at the symbol's position
+  if (opts.variantSymbol) {
+    for (const it of doc.items.values()) {
+      if (it.kind !== "symbol") continue;
+      const inst = VM.symbolInstance(it.node, opts.path); if (!inst) continue;
+      const overrides: [string, string][] = [];
+      for (const v of kids(inst, "variant")) { const o = kid(v, "symbol_override"), nm = kid(v, "name"); if (o && nm && !overrides.some((x) => x[0] === str(nm[1]))) overrides.push([str(nm[1]), str(o[1])]); }
+      if (!overrides.length) continue;
+      overrides.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+      const ln = kid(it.node, "lib_name"), library = symbolLibId(it.node);
+      const base = (ln ? K.resolveLib(doc, str(ln[1])) : null) || K.resolveLib(doc, library);
+      for (const [variantName, libId] of overrides) {
+        if (libId === library) continue;
+        const alt = opts.variantSymbol(libId);
+        if (!alt) { mark("variant_symbol_invalid", "error", atOf(it.node), `Variant '${variantName}': symbol '${libId}' not found in libraries`, [it.id]); continue; }
+        if (!base) continue;
+        for (const issue of VM.variantSymbolCompatibility(base, alt)) mark("variant_symbol_incompatible", "warning", atOf(it.node), `Variant '${variantName}', alternate '${libId}': ${issue.detail}`, [it.id]);
+      }
+    }
+  }
   // TestTextVars: ${ERC_WARNING …} / ${ERC_ERROR …} assertions become generic warnings / errors with their message; any
   // other text whose shown text still holds an unescaped ${…} is an unresolved variable
   if (opts.textVars !== false) {
@@ -182,20 +208,66 @@ export function sheetTests(doc: KDoc, nets: ErcNet[], mark: Mark, itemRef: (doc:
 }
 
 /** A sheet for CheckAnnotate: its document, the instance path its symbols record and its page, when the caller knows the hierarchy. */
-export interface AnnotInstance { doc: KDoc; path?: string | null; page?: number; /** the sheet path's reference suffix (SCHEMATIC::GetRefSuffix) when the project numbers reused sheets with suffixes */ suffix?: string }
+export interface AnnotInstance {
+  doc: KDoc; path?: string | null; page?: number; /** the sheet path's reference suffix (SCHEMATIC::GetRefSuffix) when the project numbers reused sheets with suffixes */ suffix?: string;
+  /** the sheet symbols from the top-level sheet down to the instance: the suffixes are then composed here */ sheets?: (SNode | null)[];
+  /** SCHEMATIC_SETTINGS::m_AnnotateReusedSheetSuffixes (read from the first instance) */ suffixMode?: boolean;
+}
 /**
  * SCH_SHEET_LIST::GetSymbols( refs, SYMBOL_FILTER_NON_POWER, true ) for ANNOTATE_ALL: the references of every sheet
  * instance.  Without known instance paths a file counts once, however many sheets use it.
  */
-function annotationRefs(insts: AnnotInstance[]): { sheets: (AnnSheet | null)[]; refs: SchRef[] } {
+function annotationRefs(insts: AnnotInstance[]): { sheets: (AnnSheet | null)[]; refs: SchRef[]; rs: RefSuffixes | null } {
   const seenDocs = new Set<KDoc>(), sheets: (AnnSheet | null)[] = insts.map((s, i) => {
     const path = s.path !== undefined ? s.path : s.doc.instancePath || null;
     if (!path) { if (seenDocs.has(s.doc)) return null; seenDocs.add(s.doc); }
     return { doc: s.doc, path, page: s.page || i + 1 };
   });
   const refs: SchRef[] = [];
-  sheets.forEach((sh, i) => { if (!sh) return; const suffix = insts[i].suffix; for (const r of sheetReferences(sh, null, true)) { if (suffix) r.suffix = suffix; refs.push(r); } });
-  return { sheets, refs };
+  // with the sheet symbols of every path the hierarchy's suffixes are composed (SCHEMATIC::RefreshRefSuffixes)
+  const rs = insts.every((s) => s.sheets) && sheets.every((sh) => sh) ? hierarchySuffixes(sheets.map((sh, i) => Object.assign(sh!, { sheets: insts[i].sheets })), !!insts[0].suffixMode) : null;
+  sheets.forEach((sh, i) => {
+    if (!sh) return; const suffix = insts[i].suffix;
+    // a given suffix: the file's reference is the base with it composed (or the whole reference, saved without it)
+    for (const r of sheetReferences(sh, null, true, rs)) { if (!rs && suffix) { r.ref = stripRefSuffix(r.ref, suffix) ?? r.ref; r.suffix = suffix; } refs.push(r); }
+  });
+  return { sheets, refs, rs };
+}
+type SuffixMark = (i: number, code: string, severity: string, p: Pt, text: string, ids: string[], items: ErcItemRef[]) => void;
+/**
+ * ERC_TESTER::TestDuplicateSheetSuffixes and TestRefSuffixMismatch: instances of one file composing the same suffix
+ * (in suffix mode two bare instances too), marked on the sheet symbol's sheet; and in suffix mode a reference saved
+ * without its path's suffix, or a later instance of a reused sheet whose base differs from the first instance's.
+ */
+function suffixTests(rs: RefSuffixes, insts: ErcInstance[], sheets: (AnnSheet | null)[], mark: SuffixMark, on: (i: number, r: ErcItemRef) => ErcItemRef, itemRef: (doc: KDoc, it: KItem) => ErcItemRef): void {
+  const indexOf = (path: string): number => sheets.findIndex((s) => !!s && s.path === path);
+  const parentOf = (path: string): string => path.slice(0, path.lastIndexOf("/"));
+  const lastId = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
+  for (const [path, first] of refSuffixCollisions(rs, rs.mode)) {
+    const pi = indexOf(parentOf(path.path)), fi = indexOf(parentOf(first.path)); if (pi < 0) continue;
+    const a = insts[pi].doc.items.get(lastId(path.path)), b = fi >= 0 ? insts[fi].doc.items.get(lastId(first.path)) : undefined; if (!a) continue;
+    mark(pi, "duplicate_sheet_suffix", "error", atOf(a.node), "Reused sheets have the same reference suffix", b ? [a.id, b.id] : [a.id], b ? [on(pi, itemRef(insts[pi].doc, a)), on(fi, itemRef(insts[fi].doc, b))] : [on(pi, itemRef(insts[pi].doc, a))]);
+  }
+  if (!rs.mode) return;
+  const firstPath = new Map<KDoc, string>();
+  const units = (doc: KDoc, node: SNode): number => { const lib = K.resolveLib(doc, symbolLibId(node)); let n = 1; if (lib) for (const sub of kids(lib, "symbol")) { const m = str(sub[1]).match(/_(\d+)_(\d+)$/); if (m) n = Math.max(n, +m[1]); } return n; };
+  rs.paths.forEach((p) => {
+    const i = indexOf(p.path); if (i < 0) return;
+    const isFirst = !firstPath.has(p.doc); if (isFirst) firstPath.set(p.doc, p.path);
+    const firstUse = firstPath.get(p.doc)!;
+    for (const it of p.doc.items.values()) {
+      if (it.kind !== "symbol") continue;
+      const inst = instanceOf(it.node, p.path); if (!inst.entry) continue;
+      const base = rs.base(it.id, p.path) || "", firstBase = rs.base(it.id, firstUse) || "";
+      const annotated = (b: string): boolean => !!b && !b.endsWith("?");
+      const shown = (path: string, b: string): string => composedRef(rs, it.id, path, b, units(p.doc, it.node), "");
+      let msg = "";
+      if (rs.lacks(it.id, p.path)) msg = `Reference ${base} was saved without the suffix ${rs.suffix(p.path)}`;
+      else if (!isFirst && !rs.split.has(it.id) && !base.startsWith("#") && annotated(base) && annotated(firstBase) && base !== firstBase) msg = `Reference ${shown(p.path, base)} does not share the base of ${shown(firstUse, firstBase)}`;
+      else continue;
+      mark(i, "ref_suffix_mismatch", "warning", atOf(it.node), msg, [it.id], [on(i, itemRef(p.doc, it))]);
+    }
+  });
 }
 /** SCH_EDIT_FRAME::CheckAnnotate( handler, ANNOTATE_ALL ): the number of annotation errors of the whole schematic. */
 export function checkAnnotate(insts: (AnnotInstance | KDoc)[]): number {
@@ -204,7 +276,10 @@ export function checkAnnotate(insts: (AnnotInstance | KDoc)[]): number {
 }
 
 /** A sheet instance for the hierarchy-wide tests; `key` names the sheet path its markers go to. */
-export interface ErcInstance { doc: KDoc; key: string; nets: ErcNet[]; /** the instance path its symbols record ("/<root uuid>/<sheet uuid>…") and its page, when the caller knows the hierarchy */ path?: string | null; page?: number }
+export interface ErcInstance {
+  doc: KDoc; key: string; nets: ErcNet[]; /** the instance path its symbols record ("/<root uuid>/<sheet uuid>…") and its page, when the caller knows the hierarchy */ path?: string | null; page?: number;
+  /** the sheet symbols from the top-level sheet down to the instance, and the reused-sheet suffix mode (see AnnotInstance) */ sheets?: (SNode | null)[]; suffixMode?: boolean;
+}
 interface Named { inst: number; it: KItem; p: Pt; name: string; pin: boolean; global: boolean; hier: boolean; label: boolean; ref?: ErcItemRef }
 
 /**
@@ -220,7 +295,8 @@ export function hierarchyTests(insts: ErcInstance[], itemRef: (doc: KDoc, it: KI
   // ---- ERC_TESTER::TestAnnotation: SCH_REFERENCE_LIST::CheckAnnotation over every sheet instance (power and '#'
   // symbols left out); the marker carries the handler's message as it is and sits on the first item's symbol, on its sheet
   {
-    const { sheets: annSheets, refs } = annotationRefs(insts);
+    const { sheets: annSheets, refs, rs } = annotationRefs(insts);
+    if (rs) suffixTests(rs, insts, annSheets, mark, (i, r) => on(i, r), itemRef);
     const CODES: Record<string, string> = { unannotated: "unannotated", extra_units: "extra_units", duplicate_reference: "duplicate_reference", different_unit_value: "unit_value_mismatch" };
     if (refs.length) checkAnnotation(refs, (code, msg, a, b) => {
       const i = annSheets.indexOf(a.sheet), ia = a.item!, ib = b && b.item, j = b ? annSheets.indexOf(b.sheet) : -1;

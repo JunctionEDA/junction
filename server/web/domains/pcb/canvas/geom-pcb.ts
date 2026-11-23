@@ -6,6 +6,7 @@ import { expandTextVars, hasTextVars } from "./sheet";
 import { pcbTextShown } from "./pcb-textvars";
 import { arcFrom3, atOf, bezierPts, dashOf, effectsOf, faceOf, ellipsePts, fillOf, has, isList, justOf, kid, kids, netOf, num, pointInPoly, polyPtsOf, rotPt, rotator, str, widthOf, yesNo } from "./sexpr";
 import { buildImageGeom, buildTableGeom } from "./tables-images";
+import { buildDrillMapGeom } from "./drill-model";
 import { inflate, stadium, subtract, union } from "../fab/poly";
 import { arcPoints, circlePoints } from "../fab/prims";
 import { parseMarkup, strokeTextBox, textWidth, unescapeText } from "./text";
@@ -192,6 +193,8 @@ export function buildPcbGeom(doc: Doc, item: Item): void {
     buildTableGeom(doc, item, n);
   } else if (k === "image") {
     buildImageGeom(doc, item, n);
+  } else if (k === "drill_map") {
+    buildDrillMapGeom(doc, item, n);
   }
   // groups, gr_bbox, generated items: nothing to draw
 }

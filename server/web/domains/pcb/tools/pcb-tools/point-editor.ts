@@ -1,4 +1,5 @@
 // pcb-tools/point-editor.ts — the point editor (PCB_POINT_EDITOR): edit points, arcs, corners.
+import { LiveConstraintEdit, beginPointEditConstraints, constraintRemapChanges, groupEditSolveFrame, pointEditSolveFrame } from "./constraint-tool";
 import type { BoardDoc, PcbCtx, Pt } from "./types";
 
 /** A handle of the point editor: its key, where it sits, round or square, and the indicator lines it draws. */
@@ -550,9 +551,12 @@ export function addCornerChanges(doc: BoardDoc, id: string, at: Pt) {
     if (!best) return [];
     let q = closestOnSeg(at, best.a, best.b).map(r6);
     if (samePt(q, best.a) || samePt(q, best.b)) q = [r6((best.a[0] + best.b[0]) / 2), r6((best.a[1] + best.b[1]) / 2)];   // never a duplicate of a corner
-    const xs = K.kids(best.pn, "xy");
-    best.pn.splice(best.pn.indexOf(xs[best.i]) + 1, 0, ["xy", q[0], q[1]]);
-    return [replacedChange(it, node)];
+    // InsertVertex( nextNearestIdx ): after the side's first corner, or at the contour's start on its closing side
+    const xs = K.kids(best.pn, "xy"), next = best.i + 1 < xs.length ? best.i + 1 : 0;
+    best.pn.splice(next ? best.pn.indexOf(xs[best.i]) + 1 : best.pn.indexOf(xs[0]), 0, ["xy", q[0], q[1]]);
+    // a shape polygon's vertex members at or past the new vertex shift up (members only exist on its first contour)
+    const remap = it.kind === "gr_poly" && best.pn === peContours(node)[0] ? constraintRemapChanges(doc, id, [[next, 1]]) : [];
+    return [replacedChange(it, node), ...remap];
   }
   if (it.kind === "gr_line") {   // the segment splits in two at the cursor's projection
     const a = pt(it.node, "start")!, b = pt(it.node, "end")!; const q = closestOnSeg(at, a, b); if (samePt(q, a) || samePt(q, b)) return [];
@@ -608,10 +612,14 @@ export function removeCornerChanges(doc: BoardDoc, id: string, at: Pt, tol: numb
   const it = doc.items.get(id); if (!it || (it.kind !== "zone" && it.kind !== "gr_poly")) return [];
   const g = cornerAt(it.node, at, tol); if (g < 0) return [];
   const node = clone(it.node), loc = peLocate(node, g)!;
-  if (loc.pts.length > 3) loc.node.splice(loc.node.indexOf(K.kids(loc.node, "xy")[loc.index]), 1);
-  else if (loc.contour > 0) { const pg = K.kids(node, "polygon")[loc.contour]; node.splice(node.indexOf(pg), 1); }
+  let remap: KChange[] = [];
+  if (loc.pts.length > 3) {
+    loc.node.splice(loc.node.indexOf(K.kids(loc.node, "xy")[loc.index]), 1);
+    // the removed vertex's constraints retire, later vertex members shift down
+    if (it.kind === "gr_poly" && loc.contour === 0) remap = constraintRemapChanges(doc, id, [[loc.index, -1]]);
+  } else if (loc.contour > 0) { const pg = K.kids(node, "polygon")[loc.contour]; node.splice(node.indexOf(pg), 1); }
   else return [];
-  return [replacedChange(it, node)];
+  return [replacedChange(it, node), ...remap];
 }
 /** The commit label of removeCorner / chamferCorner by item. */
 export const removeCornerLabel = (it: KItem | undefined) => (it && it.kind === "zone" ? "Remove Zone Corner" : "Remove Polygon Corner");
@@ -636,7 +644,9 @@ export function chamferCornerChanges(doc: BoardDoc, id: string, at: Pt) {
   const xs = K.kids(loc.node, "xy"), at0 = loc.node.indexOf(xs[loc.index]);
   loc.node.splice(at0, 1, ["xy", pa[0], pa[1]], ["xy", pb[0], pb[1]]);
   if (it.kind === "zone") unfillZoneNode(node);   // SetNeedRefill
-  return [replacedChange(it, node)];
+  // the chamfered corner's constraints retire and the members past it shift up by one net (the insert pass first)
+  const remap = it.kind === "gr_poly" && loc.contour === 0 ? constraintRemapChanges(doc, id, [[loc.index + 1, 2], [loc.index, -1]]) : [];
+  return [replacedChange(it, node), ...remap];
 }
 /** The handle a "Move Corner to Location" would move: the one under the cursor, a corner or an edge line's midpoint. */
 export function movePointTitle(key: string) { return /^[em]\d/.test(key) ? { title: "Move Midpoint to Location", label: "Move Midpoint" } : { title: "Move Corner to Location", label: "Move Corner" }; }
@@ -729,6 +739,9 @@ export function editHandleMove(ctx: PcbCtx, mm: Pt, ev?: { ctrlKey?: boolean; me
   if (!pe.moved && Math.hypot(mm[0] - pe.start[0], mm[1] - pe.start[1]) < 1e-3) return;
   // the drag starts: a clone of the item as it was is the persistent construction geometry (pcb_point_editor.cpp)
   if (!pe.moved && !pe.ignoreGrid && pe.kind !== "generated") proposePersistentConstruction(Object.assign({}, it, { node: clone(pe.orig) }) as KItem);
+  // ... and the edited anchor's constraint drag session is built on the item as it stands (m_constraintDragSession)
+  if (!pe.moved && CONSTRAINED_KINDS.test(pe.kind)) { const h = editPoints(Object.assign({}, it, { node: pe.orig }) as KItem).find((x) => x.key === pe.key); pe.live = h ? beginPointEditConstraints(ctx, pe.id, pe.key, h.p as Pt, pe.orig) : null; }
+  if (!pe.moved && pe.kind === "group" && pe.groupOrigs) { const live = new LiveConstraintEdit(ctx); for (const [id, n] of pe.groupOrigs as Map<string, SNode>) live.own(id, n); pe.live = live; }
   const mods = { ctrlKey: !!S.peditCtrl, shiftKey: !!S.peditShift };
   let p: Pt;
   if (pe.ignoreGrid) { p = mm; pe.snapAt = null; }   // the amplitude and spacing handles ignore the grid
@@ -742,28 +755,44 @@ export function editHandleMove(ctx: PcbCtx, mm: Pt, ev?: { ctrlKey?: boolean; me
   if (pe.kind === "group") {   // the shapes follow live
     pe.moved = true; const nodes = groupEditNodes(pe.groupOrigs as Map<string, SNode>, pe.groupBox as [number, number, number, number], pe.key, p, (pe.groupInfl as number) || 0); pe.groupNodes = nodes;
     for (const [id, n] of nodes) { const m = ctx.doc.items.get(id); if (m) { m.node.length = 0; m.node.push(...clone(n)); K.replaceChange(ctx.doc, m); } }
+    if (pe.live) groupEditSolveFrame(pe.live as LiveConstraintEdit, [...nodes.keys()]);   // updateItem: the group's neighbours re-solve holding its shapes
     ctx.requestRender(); return;
   }
   // the line mode's 45 / 90 limit unless Ctrl is held; Ctrl on a polygon edge keeps its length
   pe.moved = true; pe.node = editPointNode(pe.orig, pe.kind, pe.key, p, mm, ctx.snapOn && ctx.snap ? ctx.snap : null, { ctrl: !!S.peditCtrl, gridPitch: ctx.snapOn ? ctx.gridPitch || 0 : 0, gridPitchY: ctx.snapOn ? ctx.gridPitchY || ctx.gridPitch || 0 : 0, angle: angleSnapMode() });
-  it.node.length = 0; it.node.push(...clone(pe.node!)); K.replaceChange(ctx.doc, it); ctx.requestRender();
+  it.node.length = 0; it.node.push(...clone(pe.node!)); K.replaceChange(ctx.doc, it);
+  if (pe.live) {   // updateItem: the constrained cluster follows the handle, every frame
+    const h = editPoints(it).find((x) => x.key === pe.key);
+    if (h) pointEditSolveFrame(pe.live as LiveConstraintEdit, pe.id, pe.key, h.p as Pt);
+  }
+  ctx.requestRender();
 }
+/** The point-editor kinds that are PCB_SHAPEs (the ones updateItem re-solves). */
+const CONSTRAINED_KINDS = /^(gr|fp)_(line|rect|poly|curve|circle|arc|ellipse|ellipse_arc)$/;
 export function editHandleUp(ctx: PcbCtx, commit: boolean) {
   const pe = S.pedit; S.pedit = null; if (!pe) return;
   if (commit && !pe.moved) blockClick(ctx, pe.start, false);   // IsClick on a handle: pickHandleAt (a click on nothing pickable drops the picks)
   clearConstruction(); setReferenceOnlyPoints([]); S.snapItem = null;   // the drag's grid helper and its construction geometry end with it
   const it = ctx.doc.items.get(pe.id); if (!it) { genCancelEdit(ctx); return; }
   if (pe.kind === "generated") { if (commit && pe.moved) genFinishEdit(ctx); else genCancelEdit(ctx); return; }   // genFinishEdit: "Edit Tuning Pattern"
+  const live = pe.live as LiveConstraintEdit | null | undefined;
+  const solved = live ? live.takeBack() : null;   // the constrained neighbours the drag moved, back as they were (Revert / the commit's inverse)
   if (pe.kind === "group") {   // the originals back first, then one "Move Point" over the changed shapes
     const origs = pe.groupOrigs as Map<string, SNode>, nodes = pe.groupNodes as Map<string, SNode> | undefined, changes = [];
     for (const [id, n] of origs) { const m = ctx.doc.items.get(id); if (m) { m.node.length = 0; m.node.push(...clone(n)); K.replaceChange(ctx.doc, m); } }
     if (commit && pe.moved && nodes) for (const [id, n] of nodes) { const m = ctx.doc.items.get(id); if (m && K.serialize(n) !== K.serialize(m.node)) changes.push(replacedChange(m, n)); }
+    if (commit && pe.moved && nodes && solved && live) changes.push(...live.changes(solved, new Set(nodes.keys())));
     if (changes.length) ctx.commit(changes, "Move Point");
     ctx.requestRender(); return;
   }
   it.node.length = 0; it.node.push(...clone(pe.orig)); K.replaceChange(ctx.doc, it);   // the original back first: commit records the inverse
   if (pe.kind === "image" && pe.imgOff0 && !(commit && pe.moved)) setImageOriginOffset(pe.orig, pe.imgOff0 as Pt);   // a cancelled drag keeps the old origin
-  if (commit && pe.moved && pe.node && K.serialize(pe.node) !== K.serialize(pe.orig)) ctx.commit([replacedChange(it, pe.node)], "Move Point");
+  // the item as the last frame left it (the solver may have moved its other anchors) and its neighbours, in one "Move Point"
+  const final = solved && solved.has(pe.id) ? solved.get(pe.id)! : pe.node;
+  if (commit && pe.moved && final && K.serialize(final) !== K.serialize(pe.orig)) {
+    const changes = [replacedChange(it, final)]; if (solved && live) changes.push(...live.changes(solved, new Set([pe.id])));
+    ctx.commit(changes, "Move Point");
+  }
   ctx.requestRender();
 }
 export function drawEditPoints(c: CanvasRenderingContext2D, ctx: PcbCtx, px: number) {

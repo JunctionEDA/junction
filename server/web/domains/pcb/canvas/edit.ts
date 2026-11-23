@@ -15,7 +15,7 @@ export interface FieldBox { name: string; pts: Pt[]; geom: TextGeom }
 // ---------------------------------------------------------------- editing helpers (for the tools layer)
 /** Move an item's anchor to (x, y) mm; symbols carry their fields along.  Returns the wire-format change. */
 export function moveItem(doc: Doc, item: Item, x: number, y: number, IU: number): OutChange {
-  const [ox, oy]: number[] = item.kind === "table" ? [item.x || 0, item.y || 0] : atOf(item.node);
+  const [ox, oy]: number[] = item.kind === "table" || item.kind === "drill_map" ? [item.x || 0, item.y || 0] : atOf(item.node);
   const dx = x - ox, dy = y - oy;
   if (doc.type === "sch" && (item.kind === "wire" || item.kind === "bus" || item.kind === "polyline")) {
     const p = ptsOf(item.node).map(([px, py]) => [px + dx, py + dy]); setPts(item.node, p); buildGeom(doc, item);
@@ -23,6 +23,11 @@ export function moveItem(doc: Doc, item: Item, x: number, y: number, IU: number)
   }
   if (item.kind === "table") {   // a table's position is its first cell's: every cell moves
     shiftTable(item.node, dx, dy); buildGeom(doc, item);
+    return { id: item.id, kind: "MODIFIED", typeName: typeNameOf(item), sexpr: serializeItem(doc, item) };
+  }
+  if (item.kind === "drill_map") {   // PCB_DRILL_MAP::Move: its offset
+    const o = kid(item.node, "offset"); if (o) { o[1] = +(num(o[1]) + dx).toFixed(6); o[2] = +(num(o[2]) + dy).toFixed(6); }
+    buildGeom(doc, item);
     return { id: item.id, kind: "MODIFIED", typeName: typeNameOf(item), sexpr: serializeItem(doc, item) };
   }
   setAt(item.node, x, y);
@@ -77,11 +82,13 @@ export function removeChange(item: Pick<Item, "id" | "kind" | "docType">): OutCh
 
 export const SCH_TYPE_NAMES: Record<string, string> = { symbol: "SCH_SYMBOL", wire: "SCH_LINE", bus: "SCH_LINE", polyline: "SCH_LINE", junction: "SCH_JUNCTION", label: "SCH_LABEL", global_label: "SCH_GLOBALLABEL", hierarchical_label: "SCH_HIERLABEL", no_connect: "SCH_NO_CONNECT", sheet: "SCH_SHEET", text: "SCH_TEXT", text_box: "SCH_TEXTBOX", bus_entry: "SCH_BUS_WIRE_ENTRY", rectangle: "SCH_SHAPE", circle: "SCH_SHAPE", arc: "SCH_SHAPE", netclass_flag: "SCH_DIRECTIVE_LABEL", directive_label: "SCH_DIRECTIVE_LABEL", table: "SCH_TABLE", image: "SCH_BITMAP" };
 
-export const PCB_TYPE_NAMES: Record<string, string> = { footprint: "FOOTPRINT", segment: "PCB_TRACK", arc: "PCB_ARC", via: "PCB_VIA", zone: "ZONE", gr_line: "PCB_SHAPE", gr_rect: "PCB_SHAPE", gr_circle: "PCB_SHAPE", gr_arc: "PCB_SHAPE", gr_poly: "PCB_SHAPE", gr_text: "PCB_TEXT", gr_text_box: "PCB_TEXTBOX", table: "PCB_TABLE", image: "PCB_REFERENCE_IMAGE",
+export const PCB_TYPE_NAMES: Record<string, string> = { footprint: "FOOTPRINT", segment: "PCB_TRACK", arc: "PCB_ARC", via: "PCB_VIA", zone: "ZONE", gr_line: "PCB_SHAPE", gr_rect: "PCB_SHAPE", gr_circle: "PCB_SHAPE", gr_arc: "PCB_SHAPE", gr_poly: "PCB_SHAPE", gr_text: "PCB_TEXT", gr_text_box: "PCB_TEXTBOX", table: "PCB_TABLE", image: "PCB_REFERENCE_IMAGE", drill_map: "PCB_DRILL_MAP",
   // the Footprint Editor's own children
-  pad: "PAD", property: "PCB_FIELD" };
+  pad: "PAD", property: "PCB_FIELD", constraint: "PCB_CONSTRAINT" };
 
-export function typeNameOf(item: Pick<Item, "kind"> & { docType?: string }): string {
+export function typeNameOf(item: Pick<Item, "kind"> & { docType?: string; node?: SNode }): string {
+  // a generated table is a PCB_TABLE item whose node says which kind it is
+  if (item.kind === "table" && item.node && (item.node[0] === "drill_chart" || item.node[0] === "stackup_table")) return item.node[0] === "drill_chart" ? "PCB_DRILL_CHART" : "PCB_STACKUP_TABLE";
   // kinds shared by both editors (arc, table, image) resolve through the item's document type
   const first = item.docType === "pcb" ? PCB_TYPE_NAMES : SCH_TYPE_NAMES, second = first === SCH_TYPE_NAMES ? PCB_TYPE_NAMES : SCH_TYPE_NAMES;
   return first[item.kind] || second[item.kind] || item.kind.toUpperCase();

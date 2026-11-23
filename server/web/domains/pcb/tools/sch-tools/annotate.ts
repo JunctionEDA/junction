@@ -1,5 +1,6 @@
 import type { SAtom, SchCtx } from "./types";
 import * as VM from "../../canvas/variant-model";
+import { composeRefSuffix, instanceOf, recomposedRefs, refSuffixCollisions, refSuffixes, storedRef, stripRefSuffix, suffixKey, composedRef, type RefSuffixes } from "../../canvas/ref-suffix";
 import { root } from "../root";
 import { symbolLibId } from "./autoplace";
 import { refField, setReference, unannotated } from "./clipboard";
@@ -75,6 +76,8 @@ export interface AnnSheet {
   /** the project the instance entries are written under */
   project?: string | null;
   file?: string; human?: string;
+  /** the sheet symbols from the top-level sheet down to this instance (none for the root): the Reference Suffix fields it composes */
+  sheets?: (SNode | null)[];
 }
 /** REFDES_TRACKER: the designators ever handed out, and whether one that is no longer in use may be given again. */
 export interface RefTracker { reuse: boolean; used: Set<string> }
@@ -88,6 +91,8 @@ export interface SchRef {
   units: number; power: boolean; libNode: SNode | null;
   /** SCH_REFERENCE::m_refSuffix (SCHEMATIC::GetPackageRefSuffix): the sheet suffix the board reference composes with, when the project numbers reused sheets with suffixes */
   suffix?: string;
+  /** SCHEMATIC::GetRefSuffix of the reference's own sheet path (what GetFullRef shows after the unit) */
+  own?: string;
 }
 const valueField = (node: SNode): string => { const p = kids(node, "property").find((q) => str(q[1]) === "Value"); return p ? str(p[2]) : ""; };
 const instPaths = (node: SNode): SNode[] => { const out: SNode[] = []; for (const inst of kids(node, "instances")) for (const pr of kids(inst, "project")) out.push(...kids(pr, "path")); return out; };
@@ -150,20 +155,23 @@ export function sheetOf(doc: KDoc, page?: number): AnnSheet {
 /** matchesSymbolFilter's pseudo symbol: a power symbol, or (legacy libraries) a reference starting with '#'. */
 function isPseudo(lib: SNode | null, ref: string): boolean { return (!!lib && !!kid(lib, "power")) || ref[0] === "#"; }
 /** SCH_REFERENCE( symbol, sheetPath ). */
-export function schReference(sheet: AnnSheet, item: KItem): SchRef {
+export function schReference(sheet: AnnSheet, item: KItem, rs?: RefSuffixes | null): SchRef {
   const n = item.node, lib = (K.resolveLib(sheet.doc, symbolLibId(n)) as SNode | null) || null, [x, y] = atOf(n);
-  return { sheet, item, ref: refOn(n, sheet.path), numRef: -1, numRefStr: "", isNew: false, flag: 0, unit: unitOn(n, sheet.path), value: valueField(n) || "~",
+  // the base the file's composed reference strips to, and the package's suffix (SCHEMATIC::GetPackageRefSuffix)
+  const b = rs && sheet.path ? rs.base(item.id, sheet.path) : null;
+  const sfx = rs && sheet.path && rs.has ? { suffix: rs.packageSuffix(item.id, sheet.path), own: rs.suffix(sheet.path) } : {};
+  return { ...sfx, sheet, item, ref: b !== null && b !== "" ? b : refOn(n, sheet.path), numRef: -1, numRefStr: "", isNew: false, flag: 0, unit: unitOn(n, sheet.path), value: valueField(n) || "~",
     lib: symbolLibId(n), sheetNum: sheet.page, x: Math.round(x * 1e4), y: Math.round(y * 1e4), uuid: item.id, units: lib ? libUnits(sheet.doc, n).units : 0, power: !!lib && !!kid(lib, "power"), libNode: lib };
 }
 /**
  * SCH_SHEET_PATH::GetSymbols( refs, SYMBOL_FILTER_NON_POWER, aForceIncludeOrphanSymbols ): the sheet's symbols that
  * are not power or '#' symbols, the ones without a library symbol only when asked for.
  */
-export function sheetReferences(sheet: AnnSheet, only?: Set<string> | null, orphans = false): SchRef[] {
+export function sheetReferences(sheet: AnnSheet, only?: Set<string> | null, orphans = false, rs?: RefSuffixes | null): SchRef[] {
   const out: SchRef[] = [];
   for (const it of sheet.doc.items.values()) {
     if (it.kind !== "symbol" || (only && !only.has(it.id))) continue;
-    const r = schReference(sheet, it);
+    const r = schReference(sheet, it, rs);
     if (isPseudo(r.libNode, r.ref)) continue;
     if (!r.libNode && !orphans) continue;
     out.push(r);
@@ -189,7 +197,7 @@ function unitsAvailable(ref: SchRef, holders: SchRef[], units: number[]): boolea
  * `min` that no annotated reference of the prefix holds (and, unless designators are reused, that was never handed
  * out), or one whose holders are the same library symbol and value and leave every unit of `units` free.
  */
-export function firstUnusedReference(list: SchRef[], ref: SchRef, min: number, units: number[], tracker?: RefTracker | null): number {
+export function firstUnusedReference(list: SchRef[], ref: SchRef, min: number, units: number[], tracker?: RefTracker | null, accept?: ((n: number) => boolean) | null): number {
   const map = new Map<number, SchRef[]>();
   const needUnits = units.some((u) => u >= 0);
   for (const r of list) {
@@ -199,6 +207,7 @@ export function firstUnusedReference(list: SchRef[], ref: SchRef, min: number, u
   }
   const valid = units.filter((u) => u >= 0);
   for (let candidate = min; ; candidate++) {
+    if (accept && !accept(candidate)) continue;
     const holders = map.get(candidate);
     if (!holders) {
       const des = ref.ref + String(candidate);
@@ -273,7 +282,11 @@ function packageUnits(locked: SchRef[], ref: SchRef): number[] {
   for (const r of locked) if (compareValue(r.value, ref.value) === 0 && r.lib === ref.lib) units.add(r.unit);
   return [...units].sort((a, b) => a - b);
 }
-export interface AnnotateListOpts { order?: string; sheetInterval?: number; start?: number; startAtCurrent?: boolean; tracker?: RefTracker | null }
+export interface AnnotateListOpts {
+  order?: string; sheetInterval?: number; start?: number; startAtCurrent?: boolean; tracker?: RefTracker | null;
+  /** suffix mode (aSharedSheets): the instance on every path of its file that a reference of the list numbers (null: only itself) */
+  destinationsOf?: ((r: SchRef) => SchRef[] | null) | null;
+}
 /**
  * SCH_REFERENCE_LIST::AnnotateByOptions / Annotate over split references: `list` is sorted (prefix, sheet number,
  * position) and every new reference numbered; `locked` holds the multi-unit packages that stay together (whole
@@ -293,6 +306,25 @@ export function annotateList(list: SchRef[], locked: Map<string, SchRef[]>, addi
   // which locked package each instance belongs to (the first one in the map's order)
   const lockedOf = new Map<string, SchRef[]>(), ikey = (r: SchRef) => r.uuid + "\0" + (r.sheet ? r.sheet.path || "" : "");
   for (const key of [...locked.keys()].sort()) for (const r of locked.get(key)!) if (!lockedOf.has(ikey(r))) lockedOf.set(ikey(r), locked.get(key)!);
+  // aSharedSheets: each reference's destinations, so a number is only taken where every composed reference is free
+  const destinations = new Map<SchRef, SchRef[]>();
+  if (o.destinationsOf) list.forEach((r, i) => { const d = i < originalSize ? o.destinationsOf!(r) : null; destinations.set(r, d || [r]); });
+  /** FindFirstUnusedReference's acceptNumber: no destination of the reference (or of its locked package) composes to a reference held by another part or unit. */
+  const acceptFor = (ru: SchRef, lockedList: SchRef[] | null): ((n: number) => boolean) | null => {
+    if (!destinations.size) return null;
+    const occupied = new Map<string, SchRef[]>(), candidates: SchRef[] = [];
+    for (const [r, dests] of destinations) {
+      if (r === ru || (lockedList && compareRef(r.ref, ru.ref) === 0 && r.lib === ru.lib && compareValue(r.value, ru.value) === 0 && lockedList.some((l) => l.uuid === r.uuid && l.sheet === r.sheet))) candidates.push(...dests);
+      if (r.isNew || r.numRef < 0) continue;
+      // symbols still hold the old references until allocation finishes
+      for (const d of dests) { const k = r.ref + refNumber(r) + (d.suffix || ""); let l = occupied.get(k); if (!l) { l = []; occupied.set(k, l); } l.push(Object.assign({}, d, { unit: r.unit })); }
+    }
+    return (n: number): boolean => {
+      const base = ru.ref + formatRefStr(ru, n);
+      for (const c of candidates) for (const other of occupied.get(base + (c.suffix || "")) || []) if (other.unit === c.unit || other.lib !== c.lib || compareValue(other.value, c.value) !== 0) return false;
+      return true;
+    };
+  };
   let first = 0, minRefId = useSheetNum ? list[first].sheetNum * interval + 1 : start + 1, last = 0;
   for (let ii = 0; ii < list.length; ii++) {
     const ru = list[ii];
@@ -304,13 +336,13 @@ export function annotateList(list: SchRef[], locked: Map<string, SchRef[]>, addi
     }
     if (startAtCurrent && ru.numRef > 0) minRefId = ru.numRef;
     if (ru.units <= 1) {   // one part per package (trivial case)
-      if (ru.isNew) { last = firstUnusedReference(list, ru, minRefId, [], o.tracker); ru.numRef = last; ru.numRefStr = formatRefStr(ru, last); }
+      if (ru.isNew) { last = firstUnusedReference(list, ru, minRefId, [], o.tracker, acceptFor(ru, null)); ru.numRef = last; ru.numRefStr = formatRefStr(ru, last); }
       ru.flag = 1; ru.isNew = false;
       continue;
     }
     if (lockedList) {
       const units = packageUnits(lockedList, ru);
-      if (ru.isNew) { last = firstUnusedReference(list, ru, minRefId, units, o.tracker); ru.numRef = last; ru.numRefStr = formatRefStr(ru, last); ru.isNew = false; ru.flag = 1; }
+      if (ru.isNew) { last = firstUnusedReference(list, ru, minRefId, units, o.tracker, acceptFor(ru, lockedList)); ru.numRef = last; ru.numRefStr = formatRefStr(ru, last); ru.isNew = false; ru.flag = 1; }
       for (const lr of lockedList) {
         if (sameInstance(lr, ru)) { ru.unit = lr.unit; inUse.add(fullReference(ru)); }
         if (compareValue(lr.value, ru.value) !== 0) continue;
@@ -325,7 +357,7 @@ export function annotateList(list: SchRef[], locked: Map<string, SchRef[]>, addi
       }
     } else if (ru.isNew) {
       // a unit not annotated yet: the first number that leaves this unit free; its package forms in the later passes
-      last = firstUnusedReference(list, ru, minRefId, [ru.unit], o.tracker);
+      last = firstUnusedReference(list, ru, minRefId, [ru.unit], o.tracker, acceptFor(ru, null));
       ru.numRef = last; ru.numRefStr = formatRefStr(ru, last); ru.isNew = false; ru.flag = 1;
     }
   }
@@ -336,7 +368,9 @@ export function multiUnitMap(refs: SchRef[]): Map<string, SchRef[]> {
   const m = new Map<string, SchRef[]>();
   for (const r of refs) {
     if (r.units <= 1 || r.ref.endsWith("?")) continue;
-    let l = m.get(r.ref); if (!l) { l = []; m.set(r.ref, l); }
+    // GetRef( sheet ): the package's composed reference, which keeps units on sheets of different suffixes together
+    const key = r.ref + (r.suffix || "");
+    let l = m.get(key); if (!l) { l = []; m.set(key, l); }
     l.push(Object.assign({}, r));
   }
   return m;
@@ -417,7 +451,7 @@ export interface AnnotateScope { all: boolean; sheets: { sheet: AnnSheet; only?:
 // opts: { order: "x" | "y", keep: true (incremental) | false (renumber everything), start: 0, sheetInterval: 0 | 100 | 1000, sheetNumber: 1, only: Set of ids,
 //         reserved: references in use on sheets the caller could not hand over as documents }
 /** Annotation options (see annotateChanges). */
-export interface AnnotateOpts { order?: string; keep?: boolean; /** reset only: multi-unit symbols are not kept in their old packages */ regroup?: boolean; start?: number; sheetInterval?: number; sheetNumber?: number; only?: Set<string> | null; reserved?: Iterable<string>; tracker?: RefTracker | null }
+export interface AnnotateOpts { order?: string; keep?: boolean; /** reset only: multi-unit symbols are not kept in their old packages */ regroup?: boolean; start?: number; sheetInterval?: number; sheetNumber?: number; only?: Set<string> | null; reserved?: Iterable<string>; tracker?: RefTracker | null; /** SCHEMATIC_SETTINGS::m_AnnotateReusedSheetSuffixes */ suffixMode?: boolean }
 export interface AnnotateResult {
   /** the changes of each document, in the order its symbols were annotated */
   changes: Map<KDoc, KChange[]>;
@@ -425,6 +459,8 @@ export interface AnnotateResult {
   messages: string[];
   /** CheckAnnotate's errors over the scope after the annotation */
   errors: string[];
+  /** a report line that stopped the annotation before anything changed (FindRefSuffixCollision) */
+  fatal?: string;
 }
 /** A reference held somewhere the caller has no document for: it blocks its number outright. */
 function foreignRef(ref: string): SchRef {
@@ -438,54 +474,343 @@ function foreignRef(ref: string): SchRef {
  */
 export function annotateHierarchy(sheets: AnnSheet[], scope: AnnotateScope, opts?: AnnotateOpts | null): AnnotateResult {
   const o = opts || {}, reset = o.keep === false, regroup = reset && !!o.regroup;
-  const refs: SchRef[] = []; for (const s of scope.sheets) refs.push(...sheetReferences(s.sheet, s.only));
+  // the hierarchy's reference suffixes: what each path composes and the bases the files' references strip to
+  const rs = hierarchySuffixes(sheets, !!o.suffixMode);
+  const suffixMode = !!rs && rs.mode;
+  const refs: SchRef[] = []; for (const s of scope.sheets) refs.push(...sheetReferences(s.sheet, s.only, false, rs));
   // the units that are annotated together; a regroup lets them group afresh by placement
   let locked = regroup ? new Map<string, SchRef[]>() : multiUnitMap(refs);
-  // mapExistingAnnotation: what every symbol of the hierarchy was called
+  // mapExistingAnnotation: what every symbol of the hierarchy was called (GetRef( sheet, true ): unit, then suffix)
   const prevOf = new Map<SchRef["item"], Map<AnnSheet, string>>();
-  const allRefs: SchRef[] = []; for (const s of sheets) allRefs.push(...sheetReferences(s));
+  const allRefs: SchRef[] = []; for (const s of sheets) allRefs.push(...sheetReferences(s, null, false, rs));
   for (const r of allRefs) {
     if (!annotatedOn(r.item!.node, r.sheet!.path)) continue;
     let m = prevOf.get(r.item); if (!m) { m = new Map(); prevOf.set(r.item, m); }
-    m.set(r.sheet!, r.units > 1 ? r.ref + subReference(r.sheet!.doc, r.item!.node, r.unit) : r.ref);
+    m.set(r.sheet!, fullRefOf(rs, r, r.ref));
+  }
+  // FindRefSuffixCollision: in suffix mode two instances of one file composing alike would share every reference
+  if (suffixMode) {
+    const inScope = new Set(refs.map((r) => r.sheet!.doc));
+    const hit = refSuffixCollisions(rs!, true).find(([p]) => inScope.has(p.doc));
+    if (hit) {
+      const [path, first] = hit, a = sheets.find((x) => x.path === first.path), b = sheets.find((x) => x.path === path.path);
+      return { changes: new Map(), messages: [], errors: [], fatal: `Sheets ${humanPath(a)} and ${humanPath(b)} use ${(b && b.file) || ""} with the same reference suffix. Give each sheet a distinct suffix before annotating.` };
+    }
   }
   // AnnotateReferences: a group holding one unit twice gets fresh assignments when resetting
-  if (reset) for (const [k, l] of [...locked]) { const seen = new Set<number>(); if (l.some((r) => seen.has(r.unit) || (seen.add(r.unit), false))) locked.delete(k); }
+  if (reset) removeUnitConflicts(locked);
+  const firstPath = new Map<KDoc, AnnSheet>(); for (const s of sheets) if (!firstPath.has(s.doc)) firstPath.set(s.doc, s);
+  const shares = (r: SchRef): boolean => !rs || !rs.split.has(r.uuid);
+  if (suffixMode) {
+    // UseReusedSheetRepresentatives: each symbol of a reused sheet annotates on its file's first path, the others take that base
+    const reps: SchRef[] = [], seen = new Set<string>();
+    for (const r of refs) {
+      if (!shares(r)) { reps.push(r); continue; }
+      if (seen.has(r.uuid)) continue; seen.add(r.uuid);
+      const f = firstPath.get(r.sheet!.doc);
+      if (!f || f === r.sheet) reps.push(r); else reps.push(schReference(f, r.item!, rs));
+    }
+    refs.length = 0; refs.push(...reps);
+    // LockedForRepresentatives: merging can join two symbols on one unit even when annotation is kept
+    locked = lockedForRepresentatives(refs, locked, shares);
+    removeUnitConflicts(locked);
+  }
   if (reset) for (const r of refs) r.isNew = true;
-  // the references of the rest of the hierarchy must not be duplicated (none when the whole schematic is annotated)
+  // the references of the rest of the hierarchy must not be duplicated (none when the whole schematic is annotated);
+  // in suffix mode the other instances of a renumbered symbol take its new base, so their old one is free
   const additional: SchRef[] = [];
-  if (!scope.all) for (const r of allRefs) if (!refs.some((x) => sameInstance(x, r))) additional.push(r);
+  if (!scope.all) {
+    const annotated = new Set<string>(); if (suffixMode) for (const r of refs) if (shares(r)) annotated.add(r.uuid);
+    for (const r of allRefs) if (!annotated.has(r.uuid) && !refs.some((x) => sameInstance(x, r))) additional.push(r);
+  }
   for (const ref of o.reserved || []) additional.push(foreignRef(str(ref)));
+  const pathsOf = (doc: KDoc): AnnSheet[] => sheets.filter((x) => x.doc === doc);
+  if (suffixMode) renumberBasesUsedBy(refs, additional, locked, rs!, pathsOf, shares);
   for (const r of refs) splitInto(r);
-  annotateList(refs, locked, additional, { order: o.order === "y" ? "y" : "x", sheetInterval: o.sheetInterval, start: o.start, tracker: o.tracker });
+  annotateList(refs, locked, additional, { order: o.order === "y" ? "y" : "x", sheetInterval: o.sheetInterval, start: o.start, tracker: o.tracker,
+    destinationsOf: suffixMode ? (r) => (r.item && shares(r) ? pathsOf(r.sheet!.doc).map((p) => schReference(p, r.item!, rs)) : null) : null });
   // SCH_REFERENCE::Annotate on copies of the nodes; a symbol of a shared sheet takes one entry per path
-  const nodes = new Map<KItem, SNode>(), order: KItem[] = [], messages: string[] = [];
+  const nodes = new Map<KItem, SNode>(), order: KItem[] = [], messages: string[] = [], docOf = new Map<KItem, KDoc>();
+  const write = (it: KItem, sh: AnnSheet, base: string, unit: number): void => {
+    let node = nodes.get(it); if (!node) { node = deep(it.node); nodes.set(it, node); order.push(it); docOf.set(it, sh.doc); }
+    setInstanceOn(node, sh, rs ? storedRef(rs, base, sh.path || "") : base, unit);
+  };
+  const sharedFiles: KDoc[] = [];
   for (const r of refs) {
     const it = r.item!, sh = r.sheet!;
-    let node = nodes.get(it); if (!node) { node = deep(it.node); nodes.set(it, node); order.push(it); }
     const ref = annotatedRef(r);
-    setInstanceOn(node, sh, ref, r.unit);
+    write(it, sh, ref, r.unit);
+    // SCH_SHEET_LIST::ShareReusedSheetRef: every other path of the file takes the base and the unit
+    if (suffixMode && shares(r)) for (const p of pathsOf(sh.doc)) if (p !== sh) { write(it, p, ref, r.unit); if (!sharedFiles.includes(sh.doc)) sharedFiles.push(sh.doc); }
     const multi = r.units > 1, sub = multi ? subReference(sh.doc, it.node, r.unit, false) : "";
-    const newRef = multi ? ref + subReference(sh.doc, it.node, r.unit) : ref, prev = (prevOf.get(it) || new Map<AnnSheet, string>()).get(sh) || "";
+    const newRef = fullRefOf(rs, r, ref), prev = (prevOf.get(it) || new Map<AnnSheet, string>()).get(sh) || "";
     const val = shownValue(it.node, ref);
     if (prev) {
       if (newRef === prev) continue;
       messages.push(multi ? `Updated ${val} (unit ${sub}) from ${prev} to ${newRef}.` : `Updated ${val} from ${prev} to ${newRef}.`);
     } else messages.push(multi ? `Annotated ${val} (unit ${sub}) as ${newRef}.` : `Annotated ${val} as ${newRef}.`);
   }
-  const changes = new Map<KDoc, KChange[]>(), docOf = new Map<KItem, KDoc>();
-  for (const r of refs) docOf.set(r.item!, r.sheet!.doc);
+  for (const d of sharedFiles) { const f = firstPath.get(d); messages.push(`References in ${(f && f.file) || ""} apply to every sheet that uses it.`); }
+  const changes = new Map<KDoc, KChange[]>();
   for (const it of order) {
     const node = nodes.get(it)!; if (K.serialize(node) === K.serialize(it.node)) continue;
     const doc = docOf.get(it)!; let l = changes.get(doc); if (!l) { l = []; changes.set(doc, l); }
     l.push(modChange(doc, it, node));
   }
   // CheckAnnotate over the same scope, on what the symbols are called now (symbols without a library symbol too)
-  const check: SchRef[] = refs.map((r) => Object.assign({}, r, { ref: annotatedRef(r), isNew: false, flag: 0, numRef: -1, numRefStr: "" }));
-  for (const s of scope.sheets) for (const r of sheetReferences(s.sheet, s.only, true)) if (!r.libNode) check.push(r);
+  const check: SchRef[] = [];
+  if (suffixMode) {
+    for (const s of scope.sheets) for (const r of sheetReferences(s.sheet, s.only, true, rs)) {
+      const n = nodes.get(r.item!); if (n) { const stored = refOn(n, s.sheet.path); r.ref = stripRefSuffix(stored, rs!.suffix(s.sheet.path || "")) ?? stored; }
+      check.push(r);
+    }
+  } else {
+    check.push(...refs.map((r) => Object.assign({}, r, { ref: annotatedRef(r), isNew: false, flag: 0, numRef: -1, numRefStr: "" })));
+    for (const s of scope.sheets) for (const r of sheetReferences(s.sheet, s.only, true, rs)) if (!r.libNode) check.push(r);
+  }
   const errors: string[] = [];
   if (check.length) checkAnnotation(check, (_c, msg) => { errors.push(msg); });
   return { changes, messages, errors };
+}
+/**
+ * The writes that recompose the files' references once the suffixes in force change (RefreshRefSuffixes and the next
+ * save): each sheet instance's sheet symbols as they were (`sheets`) and as they are now (`after`, the same when
+ * omitted), the suffix mode before and after.  Returns the changes per document.
+ */
+export function recomposeChanges(sheets: (AnnSheet & { after?: (SNode | null)[] })[], before: boolean, after: boolean): Map<KDoc, KChange[]> {
+  const out = new Map<KDoc, KChange[]>();
+  const was = hierarchySuffixes(sheets, before), now = hierarchySuffixes(sheets.map((s) => Object.assign({}, s, { sheets: s.after || s.sheets })), after);
+  if (!was || !now) return out;
+  const refs = recomposedRefs(was, now); if (!refs.size) return out;
+  const nodes = new Map<KItem, SNode>(), docOf = new Map<KItem, KDoc>();
+  for (const sh of sheets) for (const it of sh.doc.items.values()) {
+    const next = refs.get(suffixKey(it.id, sh.path || "")); if (next === undefined) continue;
+    let node = nodes.get(it); if (!node) { node = deep(it.node); nodes.set(it, node); docOf.set(it, sh.doc); }
+    setInstanceOn(node, sh, next);
+  }
+  for (const [it, node] of nodes) { const doc = docOf.get(it)!; let l = out.get(doc); if (!l) { l = []; out.set(doc, l); } l.push(modChange(doc, it, node)); }
+  return out;
+}
+/** SCH_SHEET_PATH::PathHumanReadable( false, true ): the sheet names down to the instance, without the trailing separator. */
+function humanPath(s: AnnSheet | undefined): string { const h = (s && s.human) || "/"; return h.length > 1 ? h.replace(/\/$/, "") : h; }
+/** The hierarchy's RefSuffixes when every sheet instance's path is known (refSuffixes over the AnnSheets), else null. */
+export function hierarchySuffixes(sheets: AnnSheet[], mode: boolean): RefSuffixes | null {
+  if (!sheets.length || sheets.some((s) => !s.path)) return null;
+  return refSuffixes(sheets.map((s) => ({ doc: s.doc, path: s.path!, sheets: s.sheets || [] })), mode, (doc, node) => (K.resolveLib(doc, symbolLibId(node)) ? libUnits(doc, node).units : 1));
+}
+// ---------------------------------------------------------------- reused-sheet suffixes while editing
+/** The hierarchy as ctx.suffixSheets() gives it, with its RefSuffixes (null while the hierarchy is not known). */
+export interface SuffixCtx { sheets: (AnnSheet & { readable?: string })[]; mode: boolean; increment: boolean; rs: RefSuffixes }
+export function suffixCtx(raw: unknown): SuffixCtx | null {
+  const r = raw as { sheets?: AnnSheet[]; mode?: boolean; increment?: boolean } | null;
+  if (!r || !r.sheets || !r.sheets.length) return null;
+  const rs = hierarchySuffixes(r.sheets, !!r.mode); if (!rs) return null;
+  return { sheets: r.sheets, mode: !!r.mode, increment: r.increment !== false, rs };
+}
+/** The context of a tool context: its ctx.suffixSheets(), when the editor has the hierarchy. */
+export function suffixCtxOf(ctx: SchCtx | null | undefined): SuffixCtx | null {
+  const f = ctx && (ctx as unknown as { suffixSheets?: () => unknown }).suffixSheets;
+  try { return typeof f === "function" ? suffixCtx(f()) : null; } catch (e) { return null; }
+}
+/** The instance a document shows among the context's sheets (the one on screen, else the file's first). */
+export function suffixSheetOf(sc: SuffixCtx, doc: KDoc): AnnSheet | null { const mine = sc.sheets.filter((s) => s.doc === doc); return mine.find((s) => s.shown) || mine[0] || null; }
+const unitCountOn = (doc: KDoc, node: SNode): number => (K.resolveLib(doc, symbolLibId(node)) ? libUnits(doc, node).units : 1);
+/**
+ * SCH_SYMBOL::GetBaseRef( sheet ): the base a path's stored reference strips to (what KiCad keeps in memory and shows
+ * in the Reference field), else the stored reference.
+ */
+export function baseRefOn(sc: SuffixCtx, sheet: AnnSheet, node: SNode): string {
+  const b = sheet.path ? sc.rs.base(uuidOf(node) || "", sheet.path) : null;
+  return b !== null && b !== "" ? b : refOn(node, sheet.path);
+}
+/**
+ * SCH_SYMBOL::BaseRefFromUser( aSheet, aText, aBase ): the base of a reference typed on a sheet path.  The base as it
+ * is, or a composed reference echoed back, keeps its base; text ending in the path's own suffix (or the package's)
+ * drops it; text ending in a longer suffix of another instance of the file is refused ("%s ends with the reference
+ * suffix of sheet %s.").  Returns the base and the message (empty when accepted).
+ */
+export function baseRefFromUser(sc: SuffixCtx, sheet: AnnSheet, node: SNode, text: string): { base: string; error: string } {
+  const rs = sc.rs, path = sheet.path || "", uuid = uuidOf(node) || "";
+  const onPath = !!sheet.path && instanceOf(node, path).entry, existing = onPath ? baseRefOn(sc, sheet, node) : "";
+  const own = rs.suffix(path), pkg = rs.packageSuffix(uuid, path);
+  // An unedited base may end in suffix text, as R12 with a suffix of 2
+  if (onPath && text === existing) return { base: text, error: "" };
+  // An echoed composed reference keeps its base even where a sibling suffix is longer
+  if (onPath && ((own && text === existing + own) || (pkg && text === existing + pkg))) return { base: existing, error: "" };
+  const endsIn = (s: string): boolean => !!s && text.length > s.length && text.endsWith(s);
+  // A unit of a package spanning sheets shows the package's suffix, which may be another sheet's
+  let matched = endsIn(own) ? own.length : 0;
+  if (endsIn(pkg)) matched = Math.max(matched, pkg.length);
+  let sibling = "";
+  // The longest suffix wins, since _B_A typed on the _A channel names the _B_A channel
+  for (const p of sc.sheets) {
+    if (p.doc !== sheet.doc || p.path === sheet.path) continue;
+    const s = rs.suffix(p.path || "");
+    if (endsIn(s) && s.length > matched) { matched = s.length; sibling = (p as { readable?: string }).readable || p.human || p.path || ""; }
+  }
+  if (sibling) return { base: text, error: `${text} ends with the reference suffix of sheet ${sibling}.` };
+  return { base: text.slice(0, text.length - matched), error: "" };
+}
+/**
+ * SCH_SYMBOL::SetUserRef( aSheet, aBase ) on a copy being edited: the path takes the base (stored with its suffix);
+ * with suffix numbering on, every other instance of the file takes it too, unless it is a multi-unit symbol whose
+ * copies select different units (those keep their own bases, which the annotator pairs into packages).
+ */
+export function setUserRef(sc: SuffixCtx, sheet: AnnSheet, node: SNode, base: string): void {
+  setInstanceOn(node, sheet, storedRef(sc.rs, base, sheet.path || ""));
+  if (!sc.mode) return;
+  const copies: AnnSheet[] = [], unit = unitOn(node, sheet.path), multi = unitCountOn(sheet.doc, node) > 1;
+  for (const p of sc.sheets) {
+    if (p.doc !== sheet.doc || p.path === sheet.path) continue;
+    if (multi && unitOn(node, p.path) !== unit) return;
+    copies.push(p);
+  }
+  for (const p of copies) setInstanceOn(node, Object.assign({}, p, { shown: false }), storedRef(sc.rs, base, p.path || ""));
+}
+/** DIALOG_SYMBOL_PROPERTIES' Composed reference: label, shown when the path composes a suffix: the base plus the package's suffix (none on an unannotated one). */
+export function composedRefLabel(sc: SuffixCtx, sheet: AnnSheet, node: SNode, text: string): string | null {
+  const path = sheet.path || ""; if (!sc.rs.suffix(path)) return null;
+  const { base } = baseRefFromUser(sc, sheet, node, text);
+  return base.endsWith("?") ? base : base + sc.rs.packageSuffix(uuidOf(node) || "", path);
+}
+/** A reference held in the hierarchy: its base, library symbol, value and unit (SCH_REFERENCE). */
+export interface BaseHolder { ref: string; lib: string; value: string; unit: number }
+/**
+ * AnnotateNewSymbol's view of the hierarchy for a symbol placed on `doc`: the instances it is placed on (every path of
+ * the file), the bases every other symbol holds (SCH_REFERENCE::m_ref), whether the paths share one base (suffix
+ * numbering on and no two paths composing alike), and composesTaken: a base that composes, on one of the paths, to a
+ * reference another symbol holds — unless that one is a free unit of the same part and value.
+ */
+export interface NewSymbolSuffixes { paths: AnnSheet[]; holders: BaseHolder[]; share: boolean; composesTaken(base: string, me: { lib: string; value: string; unit: number }): boolean }
+export function newSymbolSuffixes(sc: SuffixCtx, doc: KDoc, uuid?: string | null): NewSymbolSuffixes | null {
+  const paths = sc.sheets.filter((s) => s.doc === doc && !!s.path); if (!paths.length) return null;
+  let share = sc.mode; const pathSuffixes: string[] = [];
+  for (const p of paths) { const s = composeRefSuffix(p.sheets || []); if (pathSuffixes.includes(s)) share = false; pathSuffixes.push(s); }
+  const holders: BaseHolder[] = [], composedInUse = new Map<string, BaseHolder[]>();
+  for (const p of sc.sheets) for (const it of p.doc.items.values()) {
+    if (it.kind !== "symbol" || it.id === uuid) continue;
+    const inst = instanceOf(it.node, p.path || ""), b = sc.rs.base(it.id, p.path || "");
+    const h: BaseHolder = { ref: b !== null && b !== "" ? b : inst.ref, lib: symbolLibId(it.node), value: valueField(it.node), unit: inst.unit };
+    holders.push(h);
+    if (!share || h.ref.endsWith("?")) continue;
+    const composed = composedRef(sc.rs, it.id, p.path || "", h.ref, unitCountOn(p.doc, it.node), "");
+    let l = composedInUse.get(composed); if (!l) { l = []; composedInUse.set(composed, l); } l.push(h);
+  }
+  // A free base can compose to a reference held elsewhere, as R1 on _M2 meets a root R1_M2
+  // A free unit of the same part is no collision, since the allocator shares those on purpose
+  const composesTaken = (base: string, me: { lib: string; value: string; unit: number }): boolean => {
+    for (const s of pathSuffixes) for (const o of composedInUse.get(base + s) || []) if (o.unit === me.unit || o.lib !== me.lib || compareValue(o.value, me.value) !== 0) return true;
+    return false;
+  };
+  return { paths, holders, share, composesTaken };
+}
+/**
+ * AnnotateNewSymbol's loop for the first path: `next` annotates against the holders (and the bases reserved so far);
+ * while the paths share and the base composes to a reference in use, it is reserved and the next one is tried.  A base
+ * offered twice means the reservation did not hold, so the loop stops.  Power symbols are not shared.
+ */
+export function shareNewSymbolBase(a: NewSymbolSuffixes, me: { lib: string; value: string; unit: number; power?: boolean }, next: (used: BaseHolder[]) => string): string {
+  const reserved: BaseHolder[] = [], tried = new Set<string>();
+  for (;;) {
+    const ref = next(reserved.length ? a.holders.concat(reserved) : a.holders);
+    if (!a.share || me.power || ref.startsWith("#") || ref.endsWith("?")) return ref;
+    if (tried.has(ref) || !a.composesTaken(ref, me)) return ref;
+    tried.add(ref); reserved.push({ ref, lib: me.lib, value: me.value, unit: me.unit });
+  }
+}
+/**
+ * The new symbol's base on every path of its file (SetRef( &path, sharedBase ), or each path's own base given by path),
+ * each stored with its path's suffix.
+ */
+export function writeSharedRefs(sc: SuffixCtx, a: NewSymbolSuffixes, node: SNode, base: string | Map<string, string>, unit?: number | null): void {
+  for (const p of a.paths) {
+    const b = typeof base === "string" ? base : base.get(p.path || ""); if (b === undefined) continue;
+    setInstanceOn(node, p, storedRef(sc.rs, b, p.path || ""), unit === undefined ? null : unit);
+  }
+}
+/** SCH_SYMBOL::GetRef( sheet, true ) of a reference with base `base`: the unit, then the sheet's suffix. */
+function fullRefOf(rs: RefSuffixes | null, r: SchRef, base: string): string {
+  const sub = r.units > 1 && r.item && r.sheet ? subReference(r.sheet.doc, r.item.node, r.unit) : "";
+  if (!rs || !r.sheet) return base + sub;
+  return composedRef(rs, r.uuid, r.sheet.path || "", base, r.units, sub, { includeUnit: true });
+}
+/** removeUnitConflicts: a locked group that holds one unit twice is dropped. */
+function removeUnitConflicts(locked: Map<string, SchRef[]>): void {
+  for (const [k, l] of [...locked]) { const seen = new Set<number>(); if (l.some((r) => seen.has(r.unit) || (seen.add(r.unit), false))) locked.delete(k); }
+}
+/** packageMemberKey: a copy keeping its own base (its copies select different units) keys apart by its path. */
+const memberKey = (r: SchRef, shares: (r: SchRef) => boolean): string => r.uuid + "\0" + (shares(r) ? "" : (r.sheet && r.sheet.path) || "");
+/**
+ * SCH_REFERENCE_LIST::LockedForRepresentatives: the locked packages re-made over the representatives, packages that
+ * share a member joined (by union-find), each keyed by its first member's composed reference and index.
+ */
+function lockedForRepresentatives(refs: SchRef[], locked: Map<string, SchRef[]>, shares: (r: SchRef) => boolean): Map<string, SchRef[]> {
+  const indexOf = new Map<string, number>(), parent = refs.map((_r, i) => i), inLocked = new Set<number>();
+  refs.forEach((r, i) => indexOf.set(memberKey(r, shares), i));
+  const rootOf = (i: number): number => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+  for (const key of [...locked.keys()].sort()) {
+    let first: number | null = null;
+    for (const r of locked.get(key)!) {
+      const i = indexOf.get(memberKey(r, shares)); if (i === undefined) continue;
+      inLocked.add(i);
+      if (first !== null) parent[rootOf(i)] = rootOf(first); else first = i;
+    }
+  }
+  const out = new Map<string, SchRef[]>();
+  for (const i of [...inLocked].sort((a, b) => a - b)) {
+    const g = rootOf(i), k = refs[g].ref + (refs[g].suffix || "") + ":" + g;
+    let l = out.get(k); if (!l) { l = []; out.set(k, l); }
+    l.push(refs[i]);
+  }
+  return out;
+}
+/**
+ * SCH_REFERENCE_LIST::RenumberBasesUsedBy: a kept base that would collide once composed — with a reference outside
+ * the scope, or with another symbol given the same base — is marked for renumbering (a locked package as a whole).
+ */
+function renumberBasesUsedBy(refs: SchRef[], others: SchRef[], locked: Map<string, SchRef[]>, rs: RefSuffixes, pathsOf: (doc: KDoc) => AnnSheet[], shares: (r: SchRef) => boolean): void {
+  const packageOf = new Map<string, string>(), packageUnits = new Map<string, Set<number>>(), renumberedPackages = new Set<string>();
+  for (const [key, group] of locked) for (const r of group) {
+    packageOf.set(memberKey(r, shares), key);
+    let u = packageUnits.get(key); if (!u) { u = new Set(); packageUnits.set(key, u); } u.add(r.unit);
+    // sharing would move all but one base onto destinations nobody checked
+    if (r.ref !== group[0].ref) renumberedPackages.add(key);
+  }
+  const packageFor = (r: SchRef): string | undefined => packageOf.get(memberKey(r, shares));
+  const joins = (r: SchRef, other: SchRef): boolean => {
+    if (other.lib !== r.lib || compareValue(other.value, r.value) !== 0) return false;
+    const p = packageFor(r);
+    return p !== undefined ? !packageUnits.get(p)!.has(other.unit) : other.unit !== r.unit;
+  };
+  const samePackage = (r: SchRef, other: SchRef): boolean => {
+    const a = packageFor(r), b = packageFor(other);
+    if (a !== undefined && b !== undefined) return a === b;
+    return other.unit !== r.unit && other.lib === r.lib && compareValue(other.value, r.value) === 0;
+  };
+  const composedOf = (r: SchRef): string => (r.sheet && r.item ? r.ref + (r.units > 1 ? rs.packageSuffix(r.uuid, r.sheet.path || "") : rs.suffix(r.sheet.path || "")) : r.ref);
+  const byBase = new Map<string, SchRef[]>(), byComposed = new Map<string, SchRef[]>();
+  const push = (m: Map<string, SchRef[]>, k: string, r: SchRef): void => { let l = m.get(k); if (!l) { l = []; m.set(k, l); } l.push(r); };
+  for (const other of others) { push(byBase, other.ref, other); push(byComposed, composedOf(other), other); }
+  // a shared base shows on every copy, a copy keeping its own only there; a multi-unit symbol its package's suffix
+  const suffixesFor = (r: SchRef): string[] => {
+    if (!shares(r)) return [rs.packageSuffix(r.uuid, r.sheet!.path || "")];
+    return pathsOf(r.sheet!.doc).map((p) => rs.packageSuffix(r.uuid, p.path || ""));
+  };
+  const collides = (r: SchRef, suffixes: string[]): boolean => {
+    const blocks = (m: Map<string, SchRef[]>, k: string): boolean => (m.get(k) || []).some((e) => !joins(r, e));
+    if (blocks(byBase, r.ref)) return true;
+    // the suffix need not separate cleanly from the base, so compare what each instance will show
+    return suffixes.some((sfx) => blocks(byComposed, r.ref + sfx));
+  };
+  const renumbered = new Set<SchRef>(), holders = new Map<string, SchRef[]>(), composedHolders = new Map<string, SchRef[]>();
+  for (const r of refs) {
+    const suffixes = suffixesFor(r);
+    const clashes = (l: SchRef[] | undefined): boolean => !(l || []).every((x) => samePackage(r, x));
+    const conflict = collides(r, suffixes) || clashes(holders.get(r.ref)) || suffixes.some((sfx) => clashes(composedHolders.get(r.ref + sfx)));
+    if (!conflict) { push(holders, r.ref, r); for (const sfx of suffixes) push(composedHolders, r.ref + sfx, r); }
+    else { const p = packageFor(r); if (p !== undefined) renumberedPackages.add(p); else renumbered.add(r); }
+  }
+  for (const r of refs) { const p = packageFor(r); if (renumbered.has(r) || (p !== undefined && renumberedPackages.has(p))) r.isNew = true; }
 }
 /** One sheet annotated on its own (the tool action, a test): annotateHierarchy over the document's sheet instance. */
 export function annotateChanges(doc: KDoc, opts?: AnnotateOpts | null) {
@@ -518,9 +843,28 @@ function atoi(t: string): number { const n = parseInt(t, 10); return isFinite(n)
  * prefix and the first number (atoi, so "R?" starts at 0 and takes the unannotated ones too); every symbol whose
  * split reference has that prefix and a number at or above it moves up by `by`.
  */
-export function incrementAnnotationChanges(doc: KDoc, start: string, by: number): KChange[] {
+export function incrementAnnotationChanges(doc: KDoc, start: string, by: number, suffixes?: { raw: unknown; file?: string } | null): KChange[] {
   const st = str(start); if (!st || !/[?0-9]$/.test(st)) return [];
   const s0 = splitReference(st), prefix = s0.prefix, from = atoi(s0.num), changes: KChange[] = [];
+  // with the hierarchy known: each path's base (SCH_REFERENCE::m_ref) is split, and SetUserRef( sheet, prefix + n )
+  // stores the new base with the path's suffix and shares it with the file's other instances
+  const sc0 = suffixes ? suffixCtx(suffixes.raw) : null, file = suffixes && suffixes.file;
+  const sc = sc0 ? Object.assign({}, sc0, { sheets: sc0.sheets.map((x) => (x.doc !== doc && file && x.file === file ? Object.assign({}, x, { doc }) : x)) }) : null;
+  const paths = sc ? sc.sheets.filter((x) => x.doc === doc && !!x.path) : [];
+  if (sc && paths.length) {
+    for (const it of doc.items.values()) {
+      if (it.kind !== "symbol") continue;
+      let node: SNode | null = null;
+      for (const p of paths) {
+        const r = splitReference(baseRefOn(sc, p, it.node)); if (r.prefix !== prefix) continue;
+        const num = atoi(r.num); if (num < from) continue;
+        if (!node) node = deep(it.node);
+        setUserRef(sc, p, node, prefix + String(num + by));
+      }
+      if (node) changes.push(modChange(doc, it, node));
+    }
+    return changes;
+  }
   for (const it of doc.items.values()) {
     if (it.kind !== "symbol") continue;
     const rf = refField(it.node); if (!rf) continue;
@@ -645,10 +989,13 @@ export function editFieldPrompt(ctx: SchCtx, name: string, title: string, quiet:
   const p = kids(it.node, "property").find((q) => str(q[1]) === name); const cur = p ? str(p[2]) : "";
   // SCH_EDIT_TOOL::editFieldText: DIALOG_FIELD_PROPERTIES ("Edit Reference Designator Field", …)
   if (p && root.KDialogs && root.KDialogs.schFieldDialog && root.KDialogs.schFieldDialog(ctx, it, name, cr ? { carried: (n: SNode) => cr.write(n) } : undefined)) return true;
-  promptImpl(title, cur, S.cursorClient, (text) => {
+  const sc = name === "Reference" ? suffixCtxOf(ctx) : null, sheet = sc ? suffixSheetOf(sc, ctx.doc) : null;
+  promptImpl(title, sc && sheet ? baseRefOn(sc, sheet, it.node) : cur, S.cursorClient, (text) => {
     if (text === null || text === undefined || text === cur) return;
     const node = deep(it.node);
-    if (name === "Reference") setReference(node, text);
+    // reused-sheet suffixes: the text is parsed back to a base and shared with the file's other instances
+    if (sc && sheet) { const r = baseRefFromUser(sc, sheet, it.node, text); if (r.error) { if (ctx.toast) ctx.toast(r.error, 4000); return; } setUserRef(sc, sheet, node, r.base); }
+    else if (name === "Reference") setReference(node, text);
     else { let q = kids(node, "property").find((z) => str(z[1]) === name); if (!q) { q = ["property" as SAtom, name, "", ["at", ...atOf(node).slice(0, 2), 0], ["hide", "yes"], ["effects", fontNode(1.27)]]; insertField(node, q); } q[2] = text; }
     if (cr) { if (S.carry && uuidOf(S.carry.node) === it.id) cr.write(node); return; }
     ctx.commit([modChange(ctx.doc, it, node)], name.toLowerCase());

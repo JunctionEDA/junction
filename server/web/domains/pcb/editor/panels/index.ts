@@ -16,6 +16,7 @@ import { search, searchDispatch, searchTabs } from "./search";
 import { colorPicker, type RGBA } from "../pcbdialogs/color-picker";
 import { parseColor, rgba } from "../../canvas/colors";
 import { netInspectorCmd, netInspectorModel, setFilter as netInspectorFilter } from "./netinsp";
+import { constraintsCmd, constraintsModel, watchConstraints } from "./constraints";
 
 function dispatch(a: PanelAction): void {
   try { if (appearanceDispatch(a) || hierarchyDispatch(a) || searchDispatch(a) || netNavDispatch(a)) return; console.warn("unknown panel action", a); }
@@ -34,7 +35,7 @@ export function pickColor(color: string | null, def: string | null, opacity: boo
   }, d);
 }
 
-const api: PanelsApi = { pickColor, getState: panelStore.get, subscribe: panelStore.subscribe, dispatch, propGrid, setProp, renamePropKey, addPropKey, removePropKey, browseProp, editPinMap, searchTabs, search, netInspector: () => netInspectorModel(), netInspectorCmd, netInspectorFilter };
+const api: PanelsApi = { pickColor, getState: panelStore.get, subscribe: panelStore.subscribe, dispatch, propGrid, setProp, renamePropKey, addPropKey, removePropKey, browseProp, editPinMap, searchTabs, search, netInspector: () => netInspectorModel(), netInspectorCmd, netInspectorFilter, constraints: constraintsModel, constraintsCmd };
 window.CollabPanels = api;
 
 /** The select tool's gate for the tool modules' own picks (the app's picks go through filterAllows directly). */
@@ -74,6 +75,7 @@ setInterval(() => {
   const sig = selectionSignature(), nav = netNavSignature();
   if (sig !== selSig) { selSig = sig; panelStore.set({ selVersion: panelStore.get().selVersion + 1 }); if (E.DOC_TYPE === "kicad_sch") publishNetNav(); }
   if (nav !== navSig) { navSig = nav; publishNetNav(); }
+  if (E.DOC_TYPE === "kicad_pcb") watchConstraints();
   // the board's net highlight (PCB_NET_INSPECTOR_PANEL::OnBoardHighlightNetChanged follows it)
   const P = (window as unknown as { PcbTools?: { state: { highlightNet?: string | null } } }).PcbTools;
   const hl = E.highlightIds ? String(P && P.state.highlightNet || "") + ":" + (E.highlightIds as Set<string>).size : "";

@@ -391,6 +391,55 @@ export interface HierarchyInput {
   variant?: string;
   /** the project's text variables (.kicad_pro text_variables), for the fields' GetShownText */
   textVars?: Record<string, string>;
+  /** receives SCH_CONNECTIVITY::ExtractSimulationModelFacts: every symbol of every sheet instance that takes part in
+   *  the simulation, unit by unit (ERC_TESTER::TestSimModelIssues creates each one's model) */
+  facts?: SimModelFact[];
+}
+/** SIMULATION_MODEL_FACT: a placed symbol (its uuid, sheet instance and position) and its SIM_MODEL_INPUT. */
+export interface SimModelFact {
+  id: string; sheet: number; uuidPath: string[]; at: [number, number]; ref: string;
+  /** every field as shown on the sheet instance (Reference the instance's) */
+  fields: S.FieldLike[];
+  /** SIM_MODEL::PinNumbers( GetPins( sheet ) ), std::sort order */
+  inferencePins: string[];
+  /** SIM_MODEL::PinNumbers( GetAllLibPins() ), StrNumCmp (ignore case) order */
+  modelPins: string[];
+}
+
+/**
+ * SIM_LIB_MGR::CreateModel( SIM_MODEL_INPUT, aAllowRawFallback = true, reporter ) for one symbol: the model of its
+ * Reference, Value and Sim.* fields (migrated from older files first, as KiCad does on load), RLC and VI models
+ * inferred, a library model looked up by name.  Returns the reporter's messages (none when the model is sound).
+ */
+export function createSymbolModel(f: SimModelFact, library: (path: string) => S.SpiceLibrary | null): string[] {
+  const msgs: string[] = [], report = (m: string): void => { msgs.push(m); };
+  const prefix = f.ref.replace(/[^A-Za-z].*$/, "");
+  const findIn = (l: S.SpiceLibrary, name: string) => l.models.find((m) => m.name === name) || l.models.find((m) => m.name.toLowerCase() === name.toLowerCase());
+  const migrated = migrateSimModel(dropLegacyEnable(f.fields), { prefix, pins: f.modelPins, libraryModel: (lib, name) => { const l = library(lib); const lm = l ? findIn(l, name) : null; return lm ? lm.model : null; } });
+  // CaptureModelInput: the Reference, the Value and the Sim.* fields
+  const rows: S.FieldLike[] = migrated.filter((r) => r.name === "Reference" || r.name === "Value" || r.name.startsWith("Sim.")).map((r) => ({ name: r.name, value: r.name === "Reference" ? f.ref : r.value }));
+  const inf = S.inferSimModel(prefix, f.inferencePins, rows);
+  if (inf.ok) {
+    const put = (name: string, value: string): void => { const x = rows.find((r) => r.name === name); if (x) x.value = value; else rows.push({ name, value }); };
+    put(S.F.DEVICE, inf.deviceType);
+    if (inf.modelType) put(S.F.TYPE, inf.modelType);
+    put(S.F.PARAMS, inf.params); put(S.F.PINS, inf.pinMap);
+  }
+  const libPath = S.getFieldValue(rows, S.F.LIBRARY), name = S.getFieldValue(rows, S.F.NAME);
+  try {
+    if (libPath) {
+      const lib = library(libPath);
+      if (!lib) report(`Simulation model library not found at '${libPath}'`);
+      let base: S.SimModel | null = null;
+      if (name === "") report(`Error loading simulation model: no '${S.F.NAME}' field`);
+      else if (lib) { const lm = findIn(lib, name); if (lm) base = lm.model; else report(`Error loading simulation model: could not find base model '${name}' in library '${libPath}'`); }
+      S.createFromBase(base, f.modelPins, rows);
+    } else {
+      const r = S.createFromFields(rows, f.modelPins);
+      if (r.error) report(r.error);
+    }
+  } catch (e) { report((e as Error).message); }
+  return msgs;
 }
 
 /** StrNumCmp, case-insensitive (CreatePinList's pin order). */
@@ -475,13 +524,21 @@ export function readHierarchy(h: HierarchyInput): { symbols: SpiceSymbol[]; text
     for (const it of syms) {
       if (h.isPower(sh.doc, it)) continue;
       const ref = refOf(it.node, path);
-      if (!ref || ref.startsWith("#") || seen.has(ref)) continue;
+      if (!ref || ref.startsWith("#") || (seen.has(ref) && !h.facts)) continue;
       const node = viewOf(it.node, path, sh.doc.version);
       // ResolveExcludedFromSim: the symbol's own flag, or a rule area around it excluded from simulation
       if (yesOf(node, "exclude_from_sim", false)) continue;
       // the parser's legacy Sim.Enable "0" / Spice_Netlist_Enabled "N"
       if (legacyExcludedFromSim(kidsOf(node, "property").map((p) => ({ name: sv(p[1]), value: sv(p[2]) })))) continue;
       if (ruleAreasAround(sh.doc, it).some((ra) => yesOf(ra.node, "exclude_from_sim", false))) continue;
+      if (h.facts) {
+        const old0 = legacyOf(it.node, path), at = kidOf(it.node, "at");
+        h.facts.push({ id: it.id, sheet: sh.index, uuidPath: sh.uuidPath, at: [Number(sv((at || [])[1])) || 0, Number(sv((at || [])[2])) || 0], ref,
+          fields: kidsOf(node, "property").map((p) => ({ name: sv(p[1]), value: sv(p[1]) === "Reference" ? ref : sv(p[1]) === "Value" && old0 && old0.value ? old0.value : resolveText(node, ref, sh, sv(p[2]), 0) })),
+          inferencePins: h.symbolPins(sh.doc, it).map((p) => p.number).sort(byteCmp),
+          modelPins: (libPinsOf(sh.doc, it.node) || h.symbolPins(sh.doc, it).map((p) => p.number)).slice().sort(strNumCmpI) });
+        if (seen.has(ref)) continue;
+      }
       seen.add(ref);
       // every unit of the reference on every sheet instance
       const pins: { number: string; net: string }[] = []; const have = new Set<string>();

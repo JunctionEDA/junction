@@ -1,4 +1,6 @@
 // pcb-tools/select-move.ts — the select tool's move (EDIT_TOOL::doMoveSelection) and the stage's pointer handlers.
+import { beginMoveConstraints, diagnoseAfterMove, moveSolveFrame } from "./constraint-tool";
+import type { LiveConstraintEdit } from "./constraint-tool";
 import { applyAxisLock, axisLockKey, keyboardCursorKey, newAxisLock } from "../axis-lock";
 import { isPastDragThreshold } from "../drag-threshold";
 import type { BoardDoc, Obstacle, PadInfo, PcbChange, PcbCtx, PendingDrag, Pt, SelectMove } from "./types";
@@ -103,9 +105,14 @@ export function selectMoveTo(ctx: PcbCtx, mm: Pt, mods?: SelectMove["mods"]) {
   const sN = applyAxisLock(m.axis ? m.axis.lock : "", sn.p, [m.start[0] + m.last[0], m.start[1] + m.last[1]]);
   const dx = r6(sN[0] - m.start[0]), dy = r6(sN[1] - m.start[1]);
   if (dx === m.last[0] && dy === m.last[1]) return;
-  m.last = [dx, dy]; m.moved = true;
+  const prev = m.last; m.last = [dx, dy]; m.moved = true;
   if (m.gen) { genMoveStep(ctx, dx, dy); return; }
-  moveApply(ctx, m, dx, dy); ctx.requestRender();
+  moveApply(ctx, m, dx, dy);
+  // the constrained neighbours follow every frame (BOARD_CONSTRAINT_MOVE_SESSION::Solve, or ReSolveShapeClustersHoldingEdited
+  // for Move Individually); a frame the cluster cannot follow is undone and the cursor stays where it was
+  const cs = m.constraints as { live: LiveConstraintEdit; shapes: string[] } | undefined;
+  if (cs && !moveSolveFrame(cs.live, cs.shapes, new Set(m.orig.keys()), [dx, dy])) { m.last = prev; moveApply(ctx, m, prev[0], prev[1]); m.snapAt = null; m.guide = null; }
+  ctx.requestRender();
 }
 const sameGuide = (a: [Pt, Pt] | null | undefined, b: [Pt, Pt] | null) => (!a && !b) || (!!a && !!b && samePt(a[0], b[0]) && samePt(a[1], b[1]));
 export function finishSelectMove(ctx: PcbCtx, commit: boolean, force?: boolean) {
@@ -122,6 +129,8 @@ function finishMove(ctx: PcbCtx, m: SelectMove, commit: boolean, force?: boolean
     if (m.hover) applySelection(ctx, []); ctx.requestRender(); return false;
   }
   const [dx, dy] = m.last; moveRestore(ctx, m);            // originals back first, so commit() records a true inverse
+  const cs = m.constraints as { live: LiveConstraintEdit; shapes: string[] } | undefined;
+  const solved = cs ? cs.live.takeBack() : null;          // the neighbours the solver moved, back too (commit.Revert on a cancel)
   const unhover = () => { if (m.hover) applySelection(ctx, []); };   // a hover selection does not outlive the move
   if (!commit && m.placing) {   // Escape on a paste / duplicate that still follows the cursor takes the new items out again
     const gone = m.placing.filter((id: string) => ctx.doc.items.has(id)).map((id: string) => ctx.doc.items.get(id)!);
@@ -135,8 +144,10 @@ function finishMove(ctx: PcbCtx, m: SelectMove, commit: boolean, force?: boolean
     if (hits.length) { showViolations(hits, hits.at || cursorPoint(ctx)); ctx.requestRender(); return false; }
   }
   const changes = moveNodesAt(m, dx, dy).map(({ id, node }) => replacedChange(ctx.doc.items.get(id)!, node));
+  if (solved && cs) changes.push(...cs.live.changes(solved, new Set(m.orig.keys())));   // the last frame's constrained cluster, in the same step
   if (m.conns && m.conns.length) changes.push(...dragChanges(ctx, { sol: { lines: connLines(m, dx, dy) } }));
   ctx.commit(changes, m.conns && m.conns.length ? "Routing" : m.label || "Move", m.placing || m.amend ? { amend: true } : undefined);
+  if (cs) diagnoseAfterMove(ctx, cs.shapes);   // EDIT_TOOL::Move: CONSTRAINT_EDIT_TOOL::DiagnoseAfterMove
   unhover(); ctx.requestRender(); return true;
 }
 /**
@@ -175,6 +186,8 @@ export function beginCarryMove(ctx: PcbCtx, opts?: { placing?: string[]; ids?: s
     genStartEdit(ctx, gen, "Move"); S.move = m; moveCursor(ctx, true); displayConstraintsMsg(MOVE_SNAP_MSG[angleSnapMode()]!); ctx.requestRender(); return true;
   }
   if (opts.drag) dragEnds(doc, m);
+  // doMoveSelection's aConstraintShapes and buildConstraintMoveSession (a paste or a component drag has none)
+  if (!opts.placing && !(m.conns && m.conns.length)) { const cs = beginMoveConstraints(ctx, free, !!S.moveSeq); if (cs) m.constraints = cs; }
   m.skip = new Set(m.orig.keys()); S.move = m; moveCursor(ctx, true); displayConstraintsMsg(MOVE_SNAP_MSG[angleSnapMode()]!); ctx.requestRender(); return true;
 }
 /** KICURSOR::MOVING on the canvas while a move runs (the tool's own cursor comes back afterwards). */

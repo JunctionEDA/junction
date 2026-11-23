@@ -12,6 +12,7 @@
 // SCH_SYMBOL_VARIANTs; the writer (sch_io_kicad_sexpr.cpp:1281-1322) writes (variant (name N) [(dnp …)]
 // [(exclude_from_sim …)] [(in_bom …)] [(on_board …)] [(in_pos_files …)] (field (name F) (value V))…
 // [(symbol_override …)] [pin map]) and leaves out a variant with no differentials.
+import { expandStacked } from "./stacked-pins";
 
 type N = SNode;
 const isList = Array.isArray;
@@ -214,7 +215,7 @@ export interface SymVariantPatch { flags?: Partial<SymFlags>; fields?: Record<st
 /** The symbol with its instance's variant `name` edited (created when missing, from the symbol's flags), written in
  *  the writer's order; a variant left with no differentials is removed.  Children the web does not edit
  *  ((symbol_override …), pin maps) are kept.  Returns a copy. */
-export function setSymbolVariant(sym: N, name: string, patch: SymVariantPatch, path?: string | null, ver?: number | null): N {
+export function setSymbolVariant(sym: N, name: string, patch: SymVariantPatch, path?: string | null, ver?: number | null, keepEmpty = false): N {
   if (isDefaultVariant(name)) throw new Error("Variant name cannot be empty or default.");
   const out = clone(sym), inst = symbolInstance(out, path);
   if (!inst) return out;
@@ -230,9 +231,15 @@ export function setSymbolVariant(sym: N, name: string, patch: SymVariantPatch, p
   const node: N = ["variant", ["name", name]];
   for (const [key, f, inv] of keys) if (st.flags[f] !== base[f]) node.push([key, (inv ? !st.flags[f] : st.flags[f]) ? "yes" : "no"]);
   for (const k of [...st.fields.keys()].sort(cmpCode)) node.push(["field", ["name", k], ["value", st.fields.get(k) as string]]);
-  if (old) for (const c of old.slice(1)) if (isList(c) && !["name", "dnp", "exclude_from_sim", "in_bom", "on_board", "in_pos_files", "field"].includes(str(c[0]))) node.push(c);
-  // HasDifferentials: a flag differs, a field differs from the symbol's, or an override is held
-  const differs = node.length > 2 && (keys.some(([, f]) => st.flags[f] !== base[f]) || [...st.fields].some(([k, v]) => baseField(k) !== v) || node.slice(2).some((c) => isList(c) && !["field"].includes(str(c[0]))));
+  // the rest in the writer's order: (symbol_override …), then the pin map; a new variant snapshots the symbol's own
+  // pin map override (SCH_SYMBOL_VARIANT::InitializeAttributes)
+  const rest = old ? old.slice(1).filter((c) => isList(c) && !["name", "dnp", "exclude_from_sim", "in_bom", "on_board", "in_pos_files", "field"].includes(str(c[0]))) as N[]
+    : out[0] === "symbol" && kid(out, "pin_map_override") ? [clone(kid(out, "pin_map_override") as N)] : [];
+  const rank = (c: N): number => (c[0] === "symbol_override" ? 0 : c[0] === "pin_map_override" ? 1 : 2);
+  node.push(...rest.map((c, i) => [c, i] as [N, number]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([c]) => c));
+  // HasDifferentials: a flag differs, a field differs from the symbol's, or an override is held (a pin map one only
+  // when it is not the library default)
+  const differs = keepEmpty || (node.length > 2 && (keys.some(([, f]) => st.flags[f] !== base[f]) || [...st.fields].some(([k, v]) => baseField(k) !== v) || node.slice(2).some((c) => isList(c) && c[0] !== "field" && (c[0] !== "pin_map_override" || !pinMapOverrideIsDefault(pinMapOverrideOf(["variant", c]))))));
   if (old) { if (differs) inst[inst.indexOf(old)] = node; else inst.splice(inst.indexOf(old), 1); }
   else if (differs) {
     const others = kids(inst, "variant"); const after = others.filter((v) => cmpCode(str((kid(v, "name") || [])[1]), name) < 0).pop();
@@ -257,8 +264,15 @@ export function clearSymbolVariantOverride(sym: N, name: string, path?: string |
 
 /** A copy of the symbol as the variant shows it on its instance: flags and field texts replaced.  Same node when
  *  nothing changes. */
-export function symbolViewForVariant(sym: N, variant: string | null | undefined, path?: string | null, ver?: number | null): N {
-  const st = variant ? symbolVariant(sym, variant, path, ver) : null; if (!st) return sym;
+export function symbolViewForVariant(sym: N, variant: string | null | undefined, path?: string | null, ver?: number | null, alt?: N | null): N {
+  const st0 = variant ? symbolVariant(sym, variant, path, ver) : null; if (!st0) return sym;
+  // GetFieldText: a field the variant does not override shows the alternate library symbol's non-empty text
+  let st = st0;
+  if (alt) {
+    const fields = new Map(st0.fields);
+    for (const p of kids(sym, "property")) { const k = str(p[1]); if (k === "Reference" || fields.has(k)) continue; const f = kids(alt, "property").find((q) => str(q[1]) === k); if (f && str(f[2])) fields.set(k, str(f[2])); }
+    st = { flags: st0.flags, fields };
+  }
   const base = symbolFlags(sym);
   if (!SYM_KEYS.some(([, f]) => st.flags[f] !== base[f]) && ![...st.fields].some(([k, v]) => { const p = kids(sym, "property").find((q) => str(q[1]) === k); return !!p && str(p[2]) !== v; })) return sym;
   const out = clone(sym);
@@ -366,4 +380,231 @@ export function registryDelta(before: Map<string, string>, after: Map<string, st
 /** Apply the command's entries (`which` side) to the registry as it stands now; the other entries (a peer's) stay. */
 export function applyRegistryDelta(reg: Map<string, string>, delta: RegistryDelta[], which: "before" | "after"): void {
   for (const d of delta) { const v = d[which]; if (v === undefined) reg.delete(d.name); else reg.set(d.name, v); }
+}
+
+// ---------------------------------------------------------------- pin-to-pad map overrides (issue #2282)
+// SCH_SYMBOL keeps a base PIN_MAP_INSTANCE_OVERRIDE ((pin_map_override …) on the symbol) and each SCH_SYMBOL_VARIANT
+// its own ((pin_map_override …) inside the instance's (variant …), after (symbol_override …)).  A variant read from a
+// file without the token holds the library default; a variant created in the session snapshots the base override
+// (SCH_SYMBOL_VARIANT::InitializeAttributes).
+export type PinMapMode = "library_default" | "named_map" | "identity" | "delegate";
+export interface PinMapOverrideState { mode: PinMapMode; map: string; edits: Map<string, string> }
+export const defaultPinMapOverride = (): PinMapOverrideState => ({ mode: "library_default", map: "", edits: new Map() });
+/** The (pin_map_override …) child of `n` (a symbol or a variant), the library default without one. */
+export function pinMapOverrideOf(n: N | null | undefined): PinMapOverrideState {
+  const o = kid(n, "pin_map_override"); if (!o) return defaultPinMapOverride();
+  const m = kid(o, "mode"), mp = kid(o, "map"), edits = new Map<string, string>();
+  for (const e of kids(o, "edit")) edits.set(str(e[1]), str(e[2]));
+  const mode = (m ? str(m[1]) : "library_default") as PinMapMode;
+  return { mode: ["library_default", "named_map", "identity", "delegate"].includes(mode) ? mode : "library_default", map: mp ? str(mp[1]) : "", edits };
+}
+/** PIN_MAP_INSTANCE_OVERRIDE::IsDefault. */
+export const pinMapOverrideIsDefault = (o: PinMapOverrideState): boolean => o.mode === "library_default" && !o.edits.size;
+/** PIN_MAP_INSTANCE_OVERRIDE::operator==. */
+export function pinMapOverridesEqual(a: PinMapOverrideState, b: PinMapOverrideState): boolean {
+  if (a.mode !== b.mode || a.map !== b.map || a.edits.size !== b.edits.size) return false;
+  const ea = [...a.edits], eb = [...b.edits];
+  return ea.every(([k, v], i) => eb[i][0] === k && eb[i][1] === v);
+}
+/** formatPinMapOverride: null when IsDefault; (map …) only in named-map mode. */
+export function pinMapOverrideNode(o: PinMapOverrideState): N | null {
+  if (pinMapOverrideIsDefault(o)) return null;
+  const node: N = ["pin_map_override", ["mode", o.mode]];
+  if (o.mode === "named_map" && o.map) node.push(["map", o.map]);
+  for (const [pin, pad] of o.edits) node.push(["edit", pin, pad]);
+  return node;
+}
+/** The variant's record of `name` on the instance at `path` (exact name, as the std::map holds it). */
+export function symbolVariantNode(sym: N, name: string, path?: string | null): N | null {
+  if (isDefaultVariant(name)) return null;
+  return symVariantIn(symbolInstance(sym, path), name);
+}
+/**
+ * SCH_SYMBOL::GetPinMapOverride( aInstance, aVariantName ) before delegation is resolved: the base override, or with a
+ * variant the instance's variant record holds, its own (the library default when the file gave it none).
+ */
+export function symbolPinMapOverride(sym: N, variant?: string | null, path?: string | null): PinMapOverrideState {
+  const v = variant ? symbolVariantNode(sym, variant, path) : null;
+  return v ? pinMapOverrideOf(v) : pinMapOverrideOf(sym);
+}
+/** Put `node` (or nothing) as the (pin_map_override …) of a variant record, after its (symbol_override …). */
+function putVariantPinMap(v: N, node: N | null): void {
+  for (let i = v.length - 1; i > 0; i--) { const c = v[i]; if (isList(c) && c[0] === "pin_map_override") v.splice(i, 1); }
+  if (node) v.push(node);
+}
+/** Put the base override onto a symbol node: after (dnp …), else before its passthrough / uuid / fields. */
+export function writeSymbolPinMapOverride(sym: N, o: PinMapOverrideState): void {
+  for (let i = sym.length - 1; i > 0; i--) { const c = sym[i]; if (isList(c) && c[0] === "pin_map_override") sym.splice(i, 1); }
+  const node = pinMapOverrideNode(o); if (!node) return;
+  const dnp = sym.findIndex((c, j) => j > 0 && isList(c) && c[0] === "dnp");
+  if (dnp > 0) { sym.splice(dnp + 1, 0, node); return; }
+  const at = sym.findIndex((c, j) => j > 0 && isList(c) && ["passthrough", "locked", "fields_autoplaced", "uuid", "property"].includes(str(c[0])));
+  sym.splice(at > 0 ? at : sym.length, 0, node);
+}
+/**
+ * SCH_SYMBOL::SetPinMapOverride( aOverride, aInstance, aVariantName ): with no variant the base override; with one the
+ * instance's variant record (created, from the symbol's attributes, only when the override differs from the base one),
+ * a variant left with no differentials dropped.  Returns a copy.
+ */
+export function setSymbolPinMapOverride(sym: N, o: PinMapOverrideState, variant?: string | null, path?: string | null, ver?: number | null): N {
+  const out = clone(sym);
+  if (!variant || isDefaultVariant(variant)) { writeSymbolPinMapOverride(out, o); return out; }
+  const inst = symbolInstance(out, path); if (!inst) return out;
+  const v = symVariantIn(inst, variant);
+  if (v) { putVariantPinMap(v, pinMapOverrideNode(o)); return setSymbolVariant(out, variant, {}, str(inst[1]), ver); }
+  if (pinMapOverridesEqual(o, pinMapOverrideOf(out))) return out;
+  const made = setSymbolVariant(out, variant, {}, str(inst[1]), ver, true);
+  const mi = symbolInstance(made, str(inst[1])), mv = mi ? symVariantIn(mi, variant) : null;
+  if (mv) putVariantPinMap(mv, pinMapOverrideNode(o));
+  return setSymbolVariant(made, variant, {}, str(inst[1]), ver);
+}
+
+/** LIB_SYMBOL::GetEffectivePinMaps / GetEffectiveAssociatedFootprints of a library symbol. */
+export function libPinMaps(lib: N | null | undefined): { maps: Map<string, Map<string, string>>; footprints: { footprint: string; map: string }[] } {
+  const maps = new Map<string, Map<string, string>>(), footprints: { footprint: string; map: string }[] = [];
+  const pm = kid(lib, "pin_maps");
+  if (pm) for (const m of kids(pm, "pin_map")) { const e = new Map<string, string>(); for (const en of kids(m, "entry")) e.set(str(en[1]), str(en[2])); if (!maps.has(str(m[1]))) maps.set(str(m[1]), e); }
+  const af = kid(lib, "associated_footprints");
+  if (af) for (const f of kids(af, "footprint")) { const m = kid(f, "map"); footprints.push({ footprint: str(f[1]), map: m ? str(m[1]) : "" }); }
+  return { maps, footprints };
+}
+export type PadResolution = "mapped" | "identity" | "unmapped";
+/**
+ * SCH_PIN::GetEffectivePadNumber: the pad `pinNumber` goes to under the override `o` (delegation already resolved),
+ * given the library symbol, the footprint the symbol names (its Footprint field for the variant) and, when known, the
+ * footprint's pad numbers.  Without pads an unmapped pin keeps its number (the painter path).
+ */
+export function effectivePadNumber(lib: N | null | undefined, o: PinMapOverrideState, footprint: string, pinNumber: string, pads?: Set<string> | null): { pad: string; state: PadResolution } {
+  let map: Map<string, string> | undefined;
+  if (lib) {
+    const st = libPinMaps(lib);
+    if (o.mode === "named_map") map = st.maps.get(o.map);
+    // library default, or a named map that no longer exists, resolves through the footprint
+    if (!map && o.mode !== "identity") { const a = st.footprints.find((x) => x.footprint === footprint); if (a) map = st.maps.get(a.map); }
+    // the instance's sparse edits patch the resolved map, but not under forced identity
+    if (o.mode !== "identity" && o.edits.has(pinNumber)) return { pad: o.edits.get(pinNumber) as string, state: "mapped" };
+  }
+  if (map && map.has(pinNumber)) return { pad: map.get(pinNumber) as string, state: "mapped" };
+  if (pads && hasIdentityPad(pinNumber, pads)) return { pad: pinNumber, state: "identity" };
+  return pads ? { pad: "", state: "unmapped" } : { pad: pinNumber, state: "identity" };
+}
+/** SCH_PIN::HasIdentityPad: the number, or one of a valid stacked number's pads, is a pad of the footprint. */
+export function hasIdentityPad(pinNumber: string, pads: Set<string>): boolean {
+  if (pads.has(pinNumber)) return true;
+  const st = expandStacked(pinNumber);
+  return st.valid && st.pins.some((p) => pads.has(p));
+}
+
+// ---------------------------------------------------------------- variant symbol overrides (variant_symbol_utils.cpp)
+/** PIN_COMPARISON_DATA as the compatibility check reads it: position in schematic IU (Y up, as the parser holds it). */
+export interface CmpPin { number: string; unit: number; bodyStyle: number; x: number; y: number; type: string }
+/** KiROUND: half away from zero. */
+const kiRound = (v: number): number => { const r = v < 0 ? -Math.round(-v) : Math.round(v); return r === 0 ? 0 : r; };
+const SCH_IU_PER_MM = 1e4;
+/** LIB_SYMBOL::GetGraphicalPins( 0, 0 ) of a (flattened) library symbol, in drawing order. */
+export function libGraphicalPins(lib: N): CmpPin[] {
+  const out: CmpPin[] = [];
+  for (const sub of kids(lib, "symbol")) {
+    const m = /_(\d+)_(\d+)$/.exec(str(sub[1])); const unit = m ? +m[1] : 0, bodyStyle = m ? +m[2] : 0;
+    for (const p of kids(sub, "pin")) {
+      const at = kid(p, "at"), nm = kid(p, "number");
+      out.push({ number: nm ? str(nm[1]) : "", unit, bodyStyle, x: kiRound(+(at ? at[1] : 0) * SCH_IU_PER_MM), y: kiRound(-(+(at ? at[2] : 0)) * SCH_IU_PER_MM), type: isList(p[1]) ? "unspecified" : str(p[1]) || "unspecified" });
+    }
+  }
+  return out;
+}
+/** LIB_SYMBOL::GetUnitCount (the highest unit of the sub-symbols, or the (unit_count …) a library gives). */
+export function libUnitCount(lib: N): number {
+  let n = 1; for (const s of kids(lib, "symbol")) { const m = /_(\d+)_(\d+)$/.exec(str(s[1])); if (m) n = Math.max(n, +m[1]); }
+  const uc = kid(lib, "unit_count"); return uc ? Math.max(n, +str(uc[1]) || 1) : n;
+}
+/** LIB_SYMBOL::GetBodyStyleCount: 2 for De Morgan, else the body style names (at least 1). */
+export function libBodyStyleCount(lib: N): number {
+  const bs = kid(lib, "body_styles");
+  if (bs) { const names = bs.slice(1).filter((v) => !isList(v)).map(str); return names.length === 1 && names[0] === "demorgan" ? 2 : Math.max(1, names.length); }
+  let n = 1; for (const s of kids(lib, "symbol")) { const m = /_(\d+)_(\d+)$/.exec(str(s[1])); if (m) n = Math.max(n, +m[2]); }
+  return n;
+}
+export type VariantCompatError = "MISSING_PIN_NUMBER" | "EXTRA_PIN_NUMBER" | "PIN_POSITION_MISMATCH" | "PIN_TYPE_MISMATCH" | "INSUFFICIENT_UNITS" | "MISSING_BODY_STYLE";
+export interface VariantCompatResult { error: VariantCompatError; detail: string; pinNumber: string; unit: number; bodyStyle: number }
+/**
+ * ValidateVariantSymbolCompatibility( aBase, aCandidate ): every problem that keeps `cand` from standing in for `base`
+ * as a variant symbol (empty: compatible).  Each graphical pin needs a one-to-one match with the same number, unit,
+ * body style, position and electrical type; the candidate needs at least the base's units and, when the base has
+ * alternate body styles, as many body styles.
+ */
+export function variantSymbolCompatibility(base: N, cand: N): VariantCompatResult[] {
+  const out: VariantCompatResult[] = [];
+  const baseUnits = Math.max(libUnitCount(base), 1), candUnits = Math.max(libUnitCount(cand), 1);
+  if (candUnits < baseUnits) out.push({ error: "INSUFFICIENT_UNITS", detail: `Candidate has ${candUnits} unit(s), base requires ${baseUnits}`, pinNumber: "", unit: 0, bodyStyle: 0 });
+  const baseBody = libBodyStyleCount(base), candBody = libBodyStyleCount(cand);
+  if (baseBody > 1 && candBody < baseBody) out.push({ error: "MISSING_BODY_STYLE", detail: `Candidate has ${candBody} body style(s), base requires ${baseBody}`, pinNumber: "", unit: 0, bodyStyle: 0 });
+  // library pins without a concrete type resolve to unspecified, as SCH_PIN::GetType does
+  const type = (p: CmpPin): string => (p.type === "inherit" ? "unspecified" : p.type);
+  const basePins = libGraphicalPins(base), candPins = libGraphicalPins(cand), matched = candPins.map(() => false);
+  for (const bp of basePins) {
+    const find = (pos: boolean, typ: boolean): number => {
+      for (let i = 0; i < candPins.length; i++) {
+        const c = candPins[i];
+        if (matched[i] || c.number !== bp.number || c.unit !== bp.unit || c.bodyStyle !== bp.bodyStyle) continue;
+        if (pos && (c.x !== bp.x || c.y !== bp.y)) continue;
+        if (typ && type(c) !== type(bp)) continue;
+        return i;
+      }
+      return -1;
+    };
+    let ci = find(true, true); if (ci < 0) ci = find(true, false); if (ci < 0) ci = find(false, false);
+    if (ci < 0) { out.push({ error: "MISSING_PIN_NUMBER", pinNumber: bp.number, unit: bp.unit, bodyStyle: bp.bodyStyle, detail: `Unit ${bp.unit}, body style ${bp.bodyStyle}: pin '${bp.number}' not found in candidate` }); continue; }
+    matched[ci] = true; const cp = candPins[ci];
+    if (cp.x !== bp.x || cp.y !== bp.y) out.push({ error: "PIN_POSITION_MISMATCH", pinNumber: bp.number, unit: bp.unit, bodyStyle: bp.bodyStyle, detail: `Unit ${bp.unit}, body style ${bp.bodyStyle}: pin '${bp.number}' position mismatch (${bp.x},${bp.y}) vs (${cp.x},${cp.y})` });
+    if (type(cp) !== type(bp)) out.push({ error: "PIN_TYPE_MISMATCH", pinNumber: bp.number, unit: bp.unit, bodyStyle: bp.bodyStyle, detail: `Unit ${bp.unit}, body style ${bp.bodyStyle}: pin '${bp.number}' type mismatch ('${type(bp)}' vs '${type(cp)}')` });
+  }
+  candPins.forEach((cp, i) => { if (!matched[i]) out.push({ error: "EXTRA_PIN_NUMBER", pinNumber: cp.number, unit: cp.unit, bodyStyle: cp.bodyStyle, detail: `Unit ${cp.unit}, body style ${cp.bodyStyle}: candidate has extra pin '${cp.number}'` }); });
+  return out;
+}
+/** SCH_SYMBOL::GetVariantSymbolOverrides: the distinct (symbol_override …) ids of every variant of every instance. */
+export function symbolVariantOverrides(sym: N): string[] {
+  const out: string[] = [];
+  for (const inst of symbolInstancePaths(sym)) for (const v of kids(inst, "variant")) { const o = kid(v, "symbol_override"); if (o && str(o[1]) && !out.includes(str(o[1]))) out.push(str(o[1])); }
+  return out;
+}
+/** SCH_SYMBOL::SetVariantSymbolOverride: the instance's variant (created from the symbol's attributes) given the
+ *  alternate library symbol `libId`.  Returns a copy. */
+export function setSymbolVariantOverride(sym: N, name: string, libId: string, path?: string | null, ver?: number | null): N {
+  if (isDefaultVariant(name)) throw new Error("Variant name cannot be empty or default.");
+  const inst0 = symbolInstance(sym, path); if (!inst0) return clone(sym);
+  const ipath = str(inst0[1]);
+  const out = symVariantIn(inst0, name) ? clone(sym) : setSymbolVariant(sym, name, {}, ipath, ver, true);
+  const v = symVariantIn(symbolInstance(out, ipath), name) as N;
+  for (let i = v.length - 1; i > 0; i--) { const c = v[i]; if (isList(c) && c[0] === "symbol_override") v.splice(i, 1); }
+  v.push(["symbol_override", libId]);
+  return setSymbolVariant(out, name, {}, ipath, ver);
+}
+/**
+ * SCH_SYMBOL::GetVariantLibSymbol: the alternate library symbol the variant shows on the instance, or null when the
+ * variant has no override, overrides to the symbol's own lib id, cannot be resolved (`resolve`: the schematic's
+ * library symbols, then the project's libraries), or is not pin-compatible with the base library symbol `base`.
+ */
+export function variantLibSymbol(sym: N, variant: string | null | undefined, path: string | null | undefined, base: N | null | undefined, resolve: (libId: string) => N | null | undefined): N | null {
+  if (!variant || isDefaultVariant(variant)) return null;
+  const libId = symbolVariantOverride(sym, variant, path); if (!libId) return null;
+  if (libId === str((kid(sym, "lib_id") || [])[1])) return null;
+  const alt = resolve(libId); if (!alt) return null;
+  if (base && variantSymbolCompatibility(base, alt).length) return null;
+  return alt;
+}
+/** SCH_SYMBOL::GetFieldText( name, sheet, variant ): the variant's own text, else the alternate library symbol's
+ *  non-empty field of that name, else the symbol's. */
+export function symbolFieldForVariant(sym: N, variant: string | null | undefined, path: string | null | undefined, field: string, alt?: N | null, ver?: number | null): string {
+  const st = variant ? symbolVariant(sym, variant, path, ver) : null;
+  if (st && st.fields.has(field)) return st.fields.get(field) as string;
+  if (st && alt) { const f = kids(alt, "property").find((p) => str(p[1]) === field); if (f && str(f[2])) return str(f[2]); }
+  const p = kids(sym, "property").find((q) => str(q[1]) === field); return p ? str(p[2]) : "";
+}
+/** resolveDelegatedPinMapOverride's last step: unit 1's record (a unit 1 that itself delegates, or none: the library
+ *  default). */
+export function delegatedPinMapOverrideOf(unit1: { node: N; path: string | null } | null, variant?: string | null): PinMapOverrideState {
+  if (!unit1) return defaultPinMapOverride();
+  const o = symbolPinMapOverride(unit1.node, variant, unit1.path);
+  return o.mode === "delegate" ? defaultPinMapOverride() : o;
 }

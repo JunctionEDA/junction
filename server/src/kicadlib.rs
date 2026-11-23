@@ -9,6 +9,9 @@
 //! - `GET /api/kicad-lib/item?kind=…&lib=NAME&name=ITEM` — the item's file text.
 //! - `GET /api/kicad-lib/model?lib=NAME&name=ITEM` — the STEP file of KiCad's 3D model library
 //!   (`kind=model` in `list` names a library's models).
+//! - `GET /api/kicad-lib/index?kind=…` — every item of every library, as "Library:Name" (the
+//!   3D model migration's catalog of KiCad's STEP models: DIALOG_MIGRATE_3D_MODELS::buildCatalog
+//!   scans the whole 3D model folder).  Built once like the search's listing.
 //! - `GET /api/kicad-lib/search?kind=…&q=WORDS` — items whose name holds every word, across
 //!   all libraries.  The first search of a kind reads the whole listing (a few hundred small
 //!   requests, about half a minute) and keeps it for a day.
@@ -178,6 +181,15 @@ async fn index(kind: Kind) -> AppResult<std::sync::Arc<Vec<String>>> {
 }
 
 #[derive(Deserialize)]
+pub struct IndexQuery { kind: String }
+
+pub async fn all_items(AuthUser(_user): AuthUser, Query(q): Query<IndexQuery>) -> AppResult<Json<Value>> {
+    let kind = Kind::parse(&q.kind)?;
+    let all = index(kind).await?;
+    Ok(Json(json!({ "kind": kind.word(), "items": &*all })))
+}
+
+#[derive(Deserialize)]
 pub struct SearchQuery { kind: String, q: String }
 
 pub async fn search(AuthUser(_user): AuthUser, Query(q): Query<SearchQuery>) -> AppResult<Json<Value>> {
@@ -218,7 +230,7 @@ pub async fn item(AuthUser(_user): AuthUser, Query(q): Query<ItemQuery>) -> AppR
 }
 
 #[derive(Deserialize)]
-pub struct ModelQuery { lib: String, name: String, fallback: Option<String>, generate: Option<String> }
+pub struct ModelQuery { lib: String, name: String, fallback: Option<String>, generate: Option<String>, ext: Option<String> }
 
 /// A footprint file of KiCad's library (kept like `item`), for drawing its model.
 async fn footprint_text(lib: &str, name: &str) -> Option<String> {
@@ -288,18 +300,39 @@ pub fn pick_replacement(lib: &str, name: &str, all: &[String]) -> Option<(String
 /// The STEP file of `lib`/`name`: from the store, else from KiCad's library (and then stored).
 /// `Ok(None)` when the library has no such model.
 async fn model_bytes(state: &AppState, lib: &str, name: &str) -> AppResult<Option<Vec<u8>>> {
-    let key = format!("kicad:{}:{lib}/{name}", git_ref());
+    model_file_bytes(state, lib, name, "step").await
+}
+
+/// The extensions a model file of KiCad's library may be asked for: its STEP and VRML files, and the spellings of a
+/// STEP sibling PCB_CONTROL::CollectAndEmbed3DModels looks for beside a VRML model (the library is case-sensitive).
+const MODEL_FILE_EXTS: [&str; 11] = ["step", "stp", "STP", "STEP", "Stp", "Step", "stpz", "stpZ", "STPZ", "wrl", "wrz"];
+
+/// Whether `bytes` is a file of that extension: a STEP file, a VRML file, or a gzip stream (.stpz / .wrz).
+fn is_model_file(ext: &str, bytes: &[u8]) -> bool {
+    match ext.to_ascii_lowercase().as_str() {
+        "step" | "stp" => bytes.starts_with(b"ISO-10303-21"),
+        "wrl" => bytes.starts_with(b"#VRML"),
+        "stpz" | "wrz" => bytes.starts_with(&[0x1f, 0x8b]),
+        _ => false,
+    }
+}
+
+/// The model file `lib`/`name`.`ext` of KiCad's 3D library: from the store, else from the library (and then stored).
+/// The STEP file is stored under its own key as before; any other file under that key with its extension.
+async fn model_file_bytes(state: &AppState, lib: &str, name: &str, ext: &str) -> AppResult<Option<Vec<u8>>> {
+    if !MODEL_FILE_EXTS.contains(&ext) { return Ok(None); }
+    let key = if ext == "step" { format!("kicad:{}:{lib}/{name}", git_ref()) } else { format!("kicad:{}:{lib}/{name}.{ext}", git_ref()) };
     if let Some(bytes) = sqlx::query_scalar::<_, Vec<u8>>("SELECT step FROM part_models WHERE uuid = $1").bind(&key).fetch_optional(&state.pool).await? {
         return Ok(Some(bytes));
     }
     let miss = format!("model-miss:{key}");
     if cached(&miss, ITEM_TTL).is_some() { return Ok(None); }
-    let url = format!("{}/kicad/libraries/{}/-/raw/{}/{}{}/{}{}", base(), Kind::Model.repo(), enc(git_ref()), enc(lib), Kind::Model.dir_ext(), enc(name), Kind::Model.file_ext());
+    let url = format!("{}/kicad/libraries/{}/-/raw/{}/{}{}/{}.{}", base(), Kind::Model.repo(), enc(git_ref()), enc(lib), Kind::Model.dir_ext(), enc(name), enc(ext));
     let resp = http().get(&url).send().await.map_err(|_| unreachable("a 3D model"))?;
     if resp.status() == StatusCode::NOT_FOUND { remember(miss, &Value::Bool(true)); return Ok(None); }
     if !resp.status().is_success() { return Err(unreachable("a 3D model")); }
     let bytes = resp.bytes().await.map_err(|_| unreachable("a 3D model"))?.to_vec();
-    if bytes.len() > MAX_MODEL_BYTES || !bytes.starts_with(b"ISO-10303-21") {
+    if bytes.len() > MAX_MODEL_BYTES || !is_model_file(ext, &bytes) {
         remember(miss, &Value::Bool(true));
         return Ok(None);   // a sign-in page or an error page, not a STEP file
     }
@@ -317,6 +350,13 @@ pub(crate) async fn model_step(state: &AppState, lib: &str, name: &str) -> AppRe
 
 /// Where the library is read from, and which branch: for links to a model's own page.
 pub(crate) fn library_home() -> (&'static str, &'static str) { (base(), git_ref()) }
+
+/// The STEP model `NAME.3dshapes/ITEM.step` of KiCad's 3D library for the server's own exporters (kicad_jobs.rs);
+/// None when the name is not a library name or the library does not have it, or the library cannot be reached.
+pub async fn library_model(state: &AppState, lib: &str, name: &str) -> Option<Vec<u8>> {
+    let (lib, name) = (safe(lib).ok()?, safe(name).ok()?);
+    model_bytes(state, lib, name).await.ok().flatten()
+}
 
 /// The replacement for a model the library does not have, remembered per name (the answer only
 /// changes when the library does).
@@ -339,6 +379,15 @@ async fn replacement(lib: &str, name: &str) -> AppResult<Option<(String, String,
 /// have (see `pick_replacement`), named in the `X-Model-Replacement` header as `Library/Name`.
 pub async fn model(State(state): State<AppState>, AuthUser(_user): AuthUser, Query(q): Query<ModelQuery>) -> AppResult<Response> {
     let (lib, name) = (safe(q.lib.trim())?, safe(q.name.trim())?);
+    // `ext`: another file of the model (its VRML file, a STEP sibling's spelling), as it is, with no replacement
+    if let Some(ext) = q.ext.as_deref().map(str::trim).filter(|e| !e.is_empty() && *e != "step") {
+        if !MODEL_FILE_EXTS.contains(&ext) { return Err(AppError::BadRequest("ext is a STEP or VRML file extension".into())); }
+        let ct = match ext.to_ascii_lowercase().as_str() { "wrl" => "model/vrml", "stpz" | "wrz" => "application/gzip", _ => "model/step" };
+        return match model_file_bytes(&state, lib, name, ext).await? {
+            Some(bytes) => Ok(([(header::CONTENT_TYPE, ct), (header::CACHE_CONTROL, "private, max-age=604800")], bytes).into_response()),
+            None => Err(AppError::NotFound),
+        };
+    }
     let reply = |bytes: Vec<u8>| ([(header::CONTENT_TYPE, "model/step"), (header::CACHE_CONTROL, "private, max-age=604800")], bytes).into_response();
     if let Some(bytes) = model_bytes(&state, lib, name).await? { return Ok(reply(bytes)); }
     if q.fallback.as_deref().map(|v| !v.is_empty() && v != "0").unwrap_or(false) {
@@ -385,6 +434,18 @@ pub async fn model_match(State(_state): State<AppState>, AuthUser(_user): AuthUs
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_files_of_a_vrml_model() {
+        // CollectAndEmbed3DModels embeds the .wrl itself and looks for its STEP sibling under each of these spellings
+        for e in ["wrl", "wrz", "stp", "step", "STP", "STEP", "Stp", "Step", "stpz", "stpZ", "STPZ"] { assert!(MODEL_FILE_EXTS.contains(&e), "{e}"); }
+        assert!(!MODEL_FILE_EXTS.contains(&"kicad_mod"));
+        assert!(is_model_file("wrl", b"#VRML V2.0 utf8\n"));
+        assert!(!is_model_file("wrl", b"<html>sign in</html>"));
+        assert!(is_model_file("STEP", b"ISO-10303-21;\nHEADER;"));
+        assert!(is_model_file("wrz", &[0x1f, 0x8b, 8, 0]));
+        assert!(!is_model_file("stpz", b"ISO-10303-21;"));
+    }
 
     #[test]
     fn replacement_models() {

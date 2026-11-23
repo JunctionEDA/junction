@@ -28,8 +28,9 @@ import { messageText } from "../../../shared/units";
 import { KICAD_BASE_VERSION } from "../canvas/version";
 import { sheetList, type SheetInstance } from "./sch-hierarchy";
 import { lastFallback } from "../editor/kicad-check";
-import { allMarkers, distribute, ercProjectOpts, ercSource, forgetHierErc, onOpenSheet, onSheetOpened, runHierErc, runSheetList, type HierMarker } from "./erc-hier";
+import { allMarkers, distribute, ercProjectOpts, ercSource, forgetHierErc, onOpenSheet, onSheetOpened, runHierErc, runSheetList, variantSymbolOpts, type HierMarker } from "./erc-hier";
 import { findSearchesAllSheets } from "./find";
+import { ercLibraries, libraryFallback } from "./erc-library";
 export { ercTextReport, sevOf, shownBy };
 
 /** An item of a violation: its place and description, the item that holds it on the sheet (`id`), a symbol pin's
@@ -447,10 +448,10 @@ export function openErc(): void {
         (l) => withExclusions(l as unknown as ErcViolation[]) as unknown as HierMarker[]);
       if (!cancelled && !phases && (ercSource !== "kicad" || !mine)) for (const line of ercPhaseMessages((code) => severityOf(code, sv) !== "ignore")) report(line);
       if (cancelled) { forgetHierErc(); publishMarkers([]); }
-      else if (!mine) { forgetHierErc(); a.run(toolCtx(), Object.assign(ercProjectOpts(), { showAllErrors: opts.showAllErrors, silent: true })); }
+      else if (!mine) { forgetHierErc(); const vopts = await variantSymbolOpts(E.kdoc ? [E.kdoc as KDoc] : []); const libraries = E.kdoc ? await ercLibraries([E.kdoc as KDoc]) : null; if (!cancelled) a.run(toolCtx(), Object.assign(ercProjectOpts(), vopts, { showAllErrors: opts.showAllErrors, silent: true, libraries })); }
       else onSheetOpened();   // the canvas: this sheet's own markers (the others stay with their sheets)
       // the checks KiCad itself did not make: the browser's own engine ran, which lacks some of ERC_TESTER's tests
-      if (!cancelled && (ercSource !== "kicad" || !mine)) report(`Checked in the browser (${lastFallback || "KiCad unavailable"}): ${BROWSER_UNCHECKED}`);
+      if (!cancelled && (ercSource !== "kicad" || !mine)) report(`Checked in the browser (${lastFallback || "KiCad unavailable"}): ${BROWSER_UNCHECKED}${libraryFallback ? ` The library symbol, pin map and footprint link tests were not made: ${libraryFallback}.` : ""}`);
     } catch (e) { report(`ERC failed: ${(e as Error).message || e}`); }
     abort = null;
     if (notAnnotated) report(`${notAnnotated} symbol(s) require annotation.`, true);
@@ -593,4 +594,4 @@ export function openErc(): void {
   refresh();
 }
 /** ERC_TESTER's tests the browser's own engine does not make (they need KiCad's libraries, simulator or bus parser). */
-const BROWSER_UNCHECKED = "bus conflicts, reused-sheet reference suffixes, the pin map, wired hidden power pins, text variables, simulation models, library symbol and footprint links and design variants were not checked.";
+const BROWSER_UNCHECKED = "bus conflicts, wired hidden power pins and text variables were not checked.";

@@ -8,6 +8,7 @@ import { pcbState } from "../gestures";
 import { gridChoiceText, messageText, type GridDef } from "../../../../shared/units";
 type Units = Parameters<typeof messageText>[1];
 import { checkField, h, messageBox, openDialog, reportPanel, selectField, type Field, type ReportLine } from "./ui";
+import { schematicRefSuffixes } from "../export-netlist";
 
 type Severity = "info" | "action" | "warning" | "error";
 interface Plan { ok: boolean; bad: unknown[]; report: { severity: Severity; text: string }[]; changes: KChange[]; renames: { from: string; to: string }[] }
@@ -126,17 +127,19 @@ export function openReannotate(ctx: ToolCtx): void {
         h("div", { style: "height:8px" }), report.el);
     },
     ok() {
-      // OnApplyClick: the dialog stays open with the report
-      const plan = PT().geographicalReannotate(doc, opts());
-      lines.push(...plan.report); render();
-      if (!plan.ok) return false;
-      if (plan.bad.length) {
-        const n = plan.bad.length;
-        messageBox("Confirmation", `PCB has ${n} empty or invalid reference designations.\nYou may wish to run DRC with 'Test for parity between PCB and schematic' checked.\n \nReannotate anyway?`,
-          [{ label: "Cancel" }, { label: "OK", fn: () => apply(plan) }], 0);
-        return false;
-      }
-      apply(plan);
+      // OnApplyClick: the dialog stays open with the report; the schematic names each sheet's Reference Suffix first
+      void schematicRefSuffixes().catch(() => ({ payload: null, suffixMode: false })).then(({ payload, suffixMode }) => {
+        const plan = PT().geographicalReannotate(doc, Object.assign(opts(), { suffixes: payload, suffixMode }));
+        lines.push(...plan.report); render();
+        if (!plan.ok) return;
+        if (plan.bad.length) {
+          const n = plan.bad.length;
+          messageBox("Confirmation", `PCB has ${n} empty or invalid reference designations.\nYou may wish to run DRC with 'Test for parity between PCB and schematic' checked.\n \nReannotate anyway?`,
+            [{ label: "Cancel" }, { label: "OK", fn: () => apply(plan) }], 0);
+          return;
+        }
+        apply(plan);
+      });
       return false;
     } });
 }

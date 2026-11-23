@@ -49,6 +49,9 @@ export interface ChooserOptions {
   autoplace?: ((doc: KDoc, item: KItem) => SNode | null) | null;
   /** The board editor's grid (mm) behind the footprint previews; 0 or unset for none. */
   grid?: number;
+  /** PANEL_SYMBOL_CHOOSER::SetCompatibilityCallback: true for a symbol ("Lib:Name") that has compatibility issues;
+   *  SYMBOL_TREE_MODEL_ADAPTER::GetAttr draws its name in rgb(200,120,0), asking once per symbol as rows are shown. */
+  compat?: ((libId: string) => Promise<boolean> | boolean) | null;
 }
 
 export interface Chosen {
@@ -441,6 +444,18 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
 
     // ---- rendering (a windowed list: a search can match thousands of rows)
     let drawQueued = false;
+    /** m_compatCache: the callback's answer per lib id ("pending" while it runs) */
+    const compatCache = new Map<string, boolean | "pending">();
+    const incompatible = (id: string): boolean => {
+      if (!opts.compat) return false;
+      const c = compatCache.get(id); if (c !== undefined) return c === true;
+      let got: Promise<boolean> | boolean;
+      try { got = opts.compat(id); } catch (e) { got = false; }
+      if (typeof got === "boolean") { compatCache.set(id, got); return got; }
+      compatCache.set(id, "pending");
+      got.then((v) => { compatCache.set(id, !!v); if (v) queueDraw(); }, () => compatCache.set(id, false));
+      return false;
+    };
     function drawRows(): void {
       drawQueued = false; if (closed) return;
       rowsEl.style.height = rows.length * ROW_H + "px";
@@ -452,7 +467,7 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
         const tw = r.expandable ? `<span class="ktw${r.expanded ? "" : " shut"}" data-twist="" aria-hidden="true"></span>` : "";
         const derived = !!(r.item && r.depth === 1 && r.item.extends);
         html += `<div class="klib-row${r.depth === 0 ? " lib" : ""}${note ? " note" : ""}${derived ? " derived" : ""}${r.key === selKey ? " sel" : ""}" style="top:${i * ROW_H}px" data-i="${i}" title="${esc(r.item ? (r.item.library ? r.item.library + ":" : "") + r.item.name : r.label)}">`
-          + `<span class="klib-item" style="padding-left:${4 + r.depth * 16}px"><span class="klib-tw">${tw}</span>${(r.depth === 0 || r.key.endsWith("/@loading")) && r.group.loading ? '<span class="klib-spin"></span>' : ""}${esc(r.label)}</span>`
+          + `<span class="klib-item" style="padding-left:${4 + r.depth * 16}px${r.item && r.depth === 1 && incompatible((r.item.library ? r.item.library + ":" : "") + r.item.name) ? ";color:rgb(200,120,0)" : ""}"><span class="klib-tw">${tw}</span>${(r.depth === 0 || r.key.endsWith("/@loading")) && r.group.loading ? '<span class="klib-spin"></span>' : ""}${esc(r.label)}</span>`
           + columns.slice(1).map((c) => `<span class="klib-desc">${esc(columnText(r.depth === 2 ? undefined : r.item, c, r.description))}</span>`).join("") + `</div>`;
       }
       rowsEl.innerHTML = html;

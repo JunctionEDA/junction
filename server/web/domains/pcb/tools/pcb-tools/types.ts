@@ -256,7 +256,7 @@ export interface DesignSource {
   net_settings?: { classes?: unknown; netclass_assignments?: Record<string, string | string[]>; netclass_patterns?: unknown; net_chain_classes?: unknown };
 }
 /** A DRC finding (drc): where, how bad, the message, the items, the rule. */
-export interface DrcMarker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; /** the net of an unconnected-items marker (the dialog shows it on the items, not in the text) */ net?: string; kiids?: string[]; layer?: string; rule?: string; ruleSeverity?: boolean; /** PCB_MARKER::SetPath's start and end (the error legend) */ path?: [Pt, Pt] }
+export interface DrcMarker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; /** the net of an unconnected-items marker (the dialog shows it on the items, not in the text) */ net?: string; kiids?: string[]; layer?: string; rule?: string; ruleSeverity?: boolean; /** PCB_MARKER::SetPath's start and end (the error legend) */ path?: [Pt, Pt]; /** the error legend's pieces along the path (PCB_MARKER::SetShapes: a creepage path's segments and arcs) */ pathShapes?: ({ t: "seg"; a: Pt; b: Pt } | { t: "arc"; c: Pt; a: Pt; b: Pt })[] }
 
 /** A routing obstacle that is not copper: an NPTH hole, a rule area keeping tracks out, a board edge. */
 export interface WorldItem { id: string | null; kind: string; shape: CopperShape; bbox: Box; layers?: Set<string>; pad?: PadInfo }

@@ -26,7 +26,7 @@ import { colorPicker, type RGBA } from "../editor/pcbdialogs/color-picker";
 import { facesUsed, fontPicker, type FontPickerEl } from "./font-picker";
 import * as L from "./sch-items-logic";
 import { commitWithOtherUnits } from "./sync-units";
-import { HL, currentInstance as currentInstanceOf, netMap } from "../editor/schnets";
+import { HL, currentInstance as currentInstanceOf, netMap, suffixRefEditing } from "../editor/schnets";
 import { fmtLen, parseLen, unitName } from "../editor/pcbdialogs/ui";
 import { openSheetProperties, openSymbolProperties, setSymbolUnitHere, sheetPathNow, symbolUnits, unitLetter } from "./sch-symbol-sheet";
 import { chooserFilters } from "../library/fpchoice";
@@ -729,12 +729,16 @@ export function openFieldDialog(ctx: Ctx, item: KItem, name: string, apply?: (fi
   const libOf = (): SNode | null => { const li = L.kid(item.node, "lib_name") || L.kid(item.node, "lib_id"); return li ? (KiCadCanvas.resolveLib(doc, L.str(li[1])) as SNode | null) : null; };
   const els: Record<string, HTMLElement> = {}; let col: Swatch | null = null;
   const units0 = name === "Reference" && item.kind === "symbol" ? symbolUnits(doc, item.node) : { count: 1, unit: 1 };
+  // reused-sheet suffixes: a symbol's Reference shows its base, the text is parsed back to one (BaseRefFromUser) and
+  // shared with the file's other instances (SetUserRef)
+  const se = name === "Reference" && item.kind === "symbol" && !apply ? suffixRefEditing(doc) : null;
+  const text0 = se ? se.S.baseRefOn(se.sc, se.sheet, item.node) : null;
   KD().open({
     title: L.fieldDialogTitle(name, item.kind), width: 560, readOnly: ro,
     build(b) {
       const g = h("div", { class: "kd-fmt" });
       // the text of the sheet file name and of a generated field (IsGeneratedField) cannot be edited here
-      const text = textInput(xref ? xref.toRefs(L.fieldValue(p0)) : L.fieldValue(p0), undefined, { id: "kd-fld-text", style: "width:100%", disabled: ro || isFile || generated }); els.text = text;
+      const text = textInput(text0 !== null ? text0 : xref ? xref.toRefs(L.fieldValue(p0)) : L.fieldValue(p0), undefined, { id: "kd-fld-text", style: "width:100%", disabled: ro || isFile || generated }); els.text = text;
       // m_TextValueSelectButton (BITMAPS::small_library) on a symbol's Footprint field: the footprint chooser
       let textCell: HTMLElement = text;
       if (name === "Footprint" && item.kind === "symbol" && !ro) {
@@ -782,6 +786,8 @@ export function openFieldDialog(ctx: Ctx, item: KItem, name: string, apply?: (fi
         : item.kind === "sheet" ? (/^Sheet ?name$/i.test(name) ? "SHEET_NAME" : isFile ? "SHEET_FILENAME" : null) : null;
       const verr = fid && !isFile ? L.fieldValidationError(fid, (els.text as HTMLInputElement).value) : "";
       if (verr) { void messageBox(verr, "Field Validation Error"); (els.text as HTMLInputElement).focus(); return false; }
+      const userRef = se ? se.S.baseRefFromUser(se.sc, se.sheet, item.node, (els.text as HTMLInputElement).value) : null;
+      if (userRef && userRef.error) { void messageBox(userRef.error); return false; }
       const staged = L.clone(item.node); const p = L.kids(staged, "property").find((q) => L.fieldName(q) === name) as SNode;
       const hv = (["left", "center", "right"] as const).find((v, i) => isOn(els["h" + i])) || row0.h, vv = (["top", "center", "bottom"] as const).find((v, i) => isOn(els["v" + i])) || row0.v;
       const row = L.rowFromField(p, [0, 0], false, item.node);
@@ -796,7 +802,8 @@ export function openFieldDialog(ctx: Ctx, item: KItem, name: string, apply?: (fi
       if (apply) { apply(np); return undefined; }
       for (let j = 1; j < staged.length; j++) if (staged[j] === p) staged[j] = np;
       // a symbol's reference also lives in its instance data (SCH_SYMBOL::SetRef)
-      if (name === "Reference" && item.kind === "symbol") { const here = sheetPathNow(doc); L.setInstanceData(staged, here.path, here.project, { reference: row.value }); }   // SetUserRef( *aSheetPath, m_text )
+      if (userRef && se) se.S.setUserRef(se.sc, se.sheet, staged, userRef.base);   // SetUserRef( *aSheetPath, m_text ), m_text the base
+      else if (name === "Reference" && item.kind === "symbol") { const here = sheetPathNow(doc); L.setInstanceData(staged, here.path, here.project, { reference: row.value }); }   // SetUserRef( *aSheetPath, m_text )
       if (els.unit) { const nu = Number((els.unit as HTMLSelectElement).value); if (nu && nu !== units0.unit) setSymbolUnitHere(doc, staged, nu); }
       let out = staged;
       if (moved) L.drop(out, "fields_autoplaced");

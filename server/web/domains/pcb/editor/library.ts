@@ -83,7 +83,9 @@ const cursorMm = (): Pt => { const c = (E.lastCursorMm as Pt) || [0, 0]; const s
 
 // ---------------------------------------------------------------- schematic: a library symbol on the cursor
 
-interface SymbolSession { libId: string; lib: SNode; libName?: string; fields?: Record<string, string>; unit: number; units: number; bodyStyle: number; keep: boolean; allUnits: boolean; reference: string; nodeId: string; doc: KDoc }
+interface SymbolSession { libId: string; lib: SNode; libName?: string; fields?: Record<string, string>; unit: number; units: number; bodyStyle: number; keep: boolean; allUnits: boolean; reference: string; nodeId: string; doc: KDoc;
+  /** the base the instances of a reused sheet share (AnnotateNewSymbol's sharedBase) */
+  shared?: { sc: unknown; a: unknown; S: SuffixTools; base: Map<string, string> } | null }
 let session: SymbolSession | null = null;
 
 function schReady(): { ctx: ToolCtx; doc: KDoc; sch: SchToolModule; h: SchHelpers } {
@@ -138,7 +140,45 @@ function sessionReference(s: SymbolSession, doc: KDoc, sch: SchToolModule): stri
   const info = core.symbolInfo(s.lib), st = sch.state as { refTracker?: { reuse: boolean; used: Set<string> } | null };
   const page = parseInt(String((doc as KDoc & { pageNumber?: string }).pageNumber || ""), 10);
   const minRef = (sch._ as unknown as { newSymbolMinRef?(page: number): number }).newSymbolMinRef;
-  return core.nextReference(info.reference, usedReferences(doc, sch), !!sch.state.annotateAuto, me, { min: minRef ? minRef(page > 0 ? page : 1) : 1, power: info.power, tracker: st.refTracker || null });
+  const opts = { min: minRef ? minRef(page > 0 ? page : 1) : 1, power: info.power, tracker: st.refTracker || null };
+  // AnnotateNewSymbol with suffix numbering: the bases of the hierarchy are what the number is checked against, and the
+  // paths of a reused sheet share one base whose composed references are all free
+  const sf = suffixShare(doc, sch);
+  s.shared = null;
+  if (sf) {
+    const value = (s.fields && s.fields.Value !== undefined) ? s.fields.Value : (info.fields.find((f) => f.name === "Value") || { value: "" }).value;
+    const mine = { lib: s.libId, value, unit: s.unit, power: info.power || info.reference.startsWith("#") };
+    const next = (used: core.RefHolder[]): string => core.nextReference(info.reference, used, !!sch.state.annotateAuto, me, opts);
+    const first = sf.S.shareNewSymbolBase(sf.a, mine, next);
+    if (first.endsWith("?")) return first;
+    // without sharing (power symbols, or two paths composing alike) each path is annotated on its own, in hierarchy order
+    const bases = new Map<string, string>(), used = sf.a.holders.slice();
+    sf.a.paths.forEach((p, i) => { const b = i === 0 || (sf.a.share && !mine.power) ? first : next(used); bases.set(p.path || "", b); used.push({ ref: b, lib: s.libId, value, unit: s.unit }); });
+    s.shared = { sc: sf.sc, a: sf.a, S: sf.S, base: bases };
+    const here = sf.a.paths.find((p) => p.shown) || sf.a.paths[0];
+    return bases.get(here.path || "") || first;
+  }
+  return core.nextReference(info.reference, usedReferences(doc, sch), !!sch.state.annotateAuto, me, opts);
+}
+/** The suffix tools of sch-tools (tools/sch-tools/annotate.ts) placement uses. */
+interface SuffixTools {
+  suffixCtx(raw: unknown): unknown;
+  newSymbolSuffixes(sc: unknown, doc: KDoc, uuid?: string | null): SharePlan | null;
+  shareNewSymbolBase(a: unknown, me: { lib: string; value: string; unit: number; power?: boolean }, next: (used: core.RefHolder[]) => string): string;
+  writeSharedRefs(sc: unknown, a: unknown, node: SNode, base: string | Map<string, string>, unit?: number | null): void;
+}
+interface SharePlan { share: boolean; holders: core.RefHolder[]; paths: { path: string | null; shown?: boolean }[] }
+/** The hierarchy's suffix state for a symbol placed on `doc`, when the editor has it and suffix numbering is on. */
+function suffixShare(doc: KDoc, sch: SchToolModule): { S: SuffixTools; sc: unknown; a: SharePlan } | null {
+  const S = sch as unknown as SuffixTools, f = E.hooks && (E.hooks as { suffixSheets?: () => unknown }).suffixSheets;
+  if (!S.suffixCtx || !f) return null;
+  const sc = S.suffixCtx(f()) as { mode: boolean } | null; if (!sc || !sc.mode) return null;
+  const a = S.newSymbolSuffixes(sc, doc); return a ? { S, sc, a } : null;
+}
+/** SetRef( &path, sharedBase ) on every path of the sheet's file: each instance stores the base with its path's suffix. */
+function shareInstances(s: SymbolSession, node: SNode): void {
+  const sh = s.shared; if (!sh) return;
+  sh.S.writeSharedRefs(sh.sc, sh.a, node, sh.base, s.unit);
 }
 
 function carrySymbol(s: SymbolSession, sameReference: boolean): void {
@@ -150,6 +190,7 @@ function carrySymbol(s: SymbolSession, sameReference: boolean): void {
   let node = core.symbolInstance({ libId: s.libId, symbol: s.lib, at, unit: s.unit, bodyStyle: s.bodyStyle, fields: s.fields, reference: s.reference, project: home.project, path: home.path });
   // the sheet's library holds this symbol under another name (a power symbol converted by the preference beside the library's own copy)
   if (s.libName) (node as SNode[]).splice(1, 0, ["lib_name", s.libName] as SNode);
+  shareInstances(s, node);
   // SCH_DRAWING_TOOLS::PlaceSymbol autoplaces the fields of a new symbol when m_AutoplaceFields.enable is on
   const ap = (sch.state as { autoplace?: { enable?: boolean } }).autoplace;
   if (!ap || ap.enable !== false) {
@@ -204,7 +245,9 @@ function afterPlace(_ctx: ToolCtx, item: KItem | null): void {
     if (s.keep || unit > 1) {
       s.unit = unit;
       if (unit === 1) s.reference = sessionReference(s, doc, sch);
-      rideCursor(s, core.duplicatePlaced(item.node, unit, unit === 1 ? s.reference : null));
+      const next = core.duplicatePlaced(item.node, unit, unit === 1 ? s.reference : null);
+      if (unit === 1) shareInstances(s, next);
+      rideCursor(s, next);
       return;
     }
   } catch (e) { toast(message(e), 3500); }

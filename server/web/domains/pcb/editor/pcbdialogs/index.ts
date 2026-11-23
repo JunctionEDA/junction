@@ -7,7 +7,7 @@ import { openBoardSetup } from "./board-setup";
 import "./find";   // Edit > Find (DIALOG_FIND): registers E.hooks.boardFind / boardFindNext
 import { openExportVrml } from "./vrml";
 import { openFindByProperties } from "./find-by-props";
-import { exportCmpFile, generateBomLegacy, generateD356, generateFootprintReport } from "./fab-reports";
+import { exportCmpFile, exportHyperlynx, generateBomLegacy, generateD356, generateFootprintReport } from "./fab-reports";
 import { openFootprintFields } from "./fp-fields";
 import { clearDrcMarkers, drcReport, excludeMarker, nextMarker, openBoardStatistics, openClearance, openConstraints, openDiffFootprint, openFootprintAssociations, openDrc, prevMarker } from "./inspect";
 import { showPane } from "../panes";
@@ -30,8 +30,16 @@ import { openGlobalEditTracks } from "./global-tracks";
 import { openFilterSelection } from "./filter-selection";
 import { booleanPolygons, chamferLines, extendLines, filletLines, outsetItems, simplifyPolygons } from "./shape-modify";
 import { repairBoard } from "./repair";
+import { collectAndEmbed3DModels, embeddedCountMessage } from "./embed-models";
+import { E } from "../state";
+import { sendOp } from "../net";
+import { applyChanges } from "../doc";
+import { toast } from "../util";
 import { openReannotate } from "./reannotate";
 import { openUpdatePcb, projectNetlist, updatePcbFromSchematicEditor } from "./update-pcb";
+import { openImportNetlist } from "./import-netlist";
+import { importSpecctraSession } from "./specctra-session";
+import { migrate3DModels } from "./migrate-3d-models";
 import { noteCommit, runZoneFill, zoneFillAll, zoneFillSelected } from "./zonefill";
 import { commitObservers, toolCtx } from "../tools";
 import { installBoardCommitHooks } from "./board-commit";
@@ -74,6 +82,7 @@ export function installPcbDialogs(): void {
   action("generateD356File", "IPC-D-356 Netlist File...", "", (ctx) => { void generateD356(ctx); });
   action("generateReportFile", "Footprint Report...", "", (ctx) => { void generateFootprintReport(ctx); });
   action("generateBOMLegacy", "Bill of Materials (legacy)...", "", (ctx) => { void generateBomLegacy(ctx); });
+  action("exportHyperlynx", "Hyperlynx...", "", (ctx) => { void exportHyperlynx(ctx); });
   action("filterSelection", "Filter Selected Items...", "", openFilterSelection);   // PCB_SELECTION_TOOL::filterSelection
   // EDIT_TOOL's Shape Modification sub-menu
   action("findByProperties", "Find by Properties...", "", openFindByProperties);   // PCB_EDIT_FRAME::ShowFindByPropertiesDialog
@@ -87,6 +96,7 @@ export function installPcbDialogs(): void {
   action("intersectPolygons", "Intersect Polygons", "", booleanPolygons("intersectPolygons"));
   action("editTeardrops", "Edit Teardrops...", "", openEditTeardrops);   // GLOBAL_EDIT_TOOL::EditTeardrops
   action("repairBoard", "Repair Board", "", repairBoard);   // BOARD_EDITOR_CONTROL::RepairBoard
+  action("collect3DModels", "Collect And Embed 3D Models", "", (ctx) => { void embed3DModels(ctx); });   // PCB_CONTROL::CollectAndEmbed3DModels
   action("boardReannotate", "Geographical Reannotate...", "", openReannotate);   // BOARD_REANNOTATE_TOOL::ShowReannotateDialog
   action("removeUnusedPads", "Remove Unused Pads...", "", openUnusedPads);   // GLOBAL_EDIT_TOOL::RemoveUnusedPads
   action("updatePcbFromSchematic", "Update PCB from Schematic...", "F8", (ctx) => { void openUpdatePcb(ctx); });
@@ -99,6 +109,9 @@ export function installPcbDialogs(): void {
   action("expandToLargestTopology", "Expand Selection to Largest Matching Topology", "", (ctx) => expandSelection(ctx, true));
   action("applyDesignBlockLayout", "Apply Design Block Layout", "", (ctx) => { void applyDesignBlockLayout(ctx); });
   installMultichannel();
+  action("importNetlist", "Netlist...", "", (ctx) => { openImportNetlist(ctx); });
+  action("importSpecctraSession", "Specctra Session...", "", (ctx) => { void importSpecctraSession(ctx); });
+  action("migrate3DModels", "Migrate 3D Models...", "", (ctx) => { void migrate3DModels(ctx); });
   // GLOBAL_EDIT_TOOL::ExchangeFootprints (DIALOG_EXCHANGE_FOOTPRINTS)
   action("updateFootprint", "Update Footprint...", "", (ctx) => { openExchangeFootprints(ctx, "updateFootprint"); });
   action("updateFootprints", "Update Footprints from Library...", "", (ctx) => { openExchangeFootprints(ctx, "updateFootprints"); });
@@ -115,6 +128,8 @@ export function installPcbDialogs(): void {
   // View > Panels > Net Inspector: the docked panel (PCB_EDIT_FRAME's m_netInspectorPanel), a check item
   action("netInspector", "Net Inspector", "", () => showPane("netinsp"));
   action("showNetInspector", "Net Inspector", "", () => showPane("netinsp"));
+  // View > Panels > Geometric Constraints: PCB_EDIT_FRAME's docked PANEL_CONSTRAINTS (the footprint editor keeps the dialog)
+  action("showConstraintsPanel", "Geometric Constraints", "", () => showPane("constraints"));
   // EDIT_TOOL::EditVertices: the Edit Vertices pane for the one selected zone or polygon
   action("editVertices", "Edit Corners...", "", () => { openVertexEditor(); });
   action("boardStatistics", "Board Statistics", "", openBoardStatistics);
@@ -138,3 +153,24 @@ function installSchActions(): void {
 installPcbDialogs();
 window.addEventListener("kc-pcb-tools", installPcbDialogs);
 installSchActions();
+
+/**
+ * PCB_CONTROL::CollectAndEmbed3DModels (embed-models.ts): the board's new files first (BOARD::GetEmbeddedFiles()->AddFile,
+ * outside the commit), then the footprints' model paths as one "Embed 3D Models" step, and the info bar's count for 5 s.
+ */
+async function embed3DModels(ctx: ToolCtx): Promise<void> {
+  const doc = E.kdoc as (KDoc & { embeddedFiles?: SNode | null }) | null;
+  if (!doc || doc.type !== "pcb" || (doc as { fpEditor?: boolean }).fpEditor) return;
+  if (E.viewOnly) { ctx.toast("This board is read-only"); return; }
+  const projectModel = (globalThis as { KiCadProjectModel?: (stem: string, ext?: string) => string | null }).KiCadProjectModel || null;
+  const r = await collectAndEmbed3DModels(doc.items.values() as Iterable<{ id: string; kind: string; node: SNode }>, doc.embeddedFiles, async (url) => {
+    const res = await fetch(url, { credentials: "same-origin" }); return res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
+  }, projectModel);
+  if (E.kdoc !== doc || r.count <= 0) return;
+  const PT = (window as unknown as { PcbTools: { replacedChange(item: unknown, node: SNode): KChange } }).PcbTools;
+  if (r.files.length) { const change = (KiCadCanvas as unknown as { boardSetup: { embeddedFilesChange(files: string[]): KChange } }).boardSetup.embeddedFilesChange(r.files); sendOp([change], false); applyChanges([change]); }
+  const changes: KChange[] = [];
+  for (const f of r.footprints) { const it = doc.items.get(f.id); if (it) changes.push(PT.replacedChange(it, f.node as SNode)); }
+  if (changes.length) { ctx.commit(changes, "Embed 3D Models"); ctx.requestRender(); }
+  toast(embeddedCountMessage(r.count), 5000);
+}

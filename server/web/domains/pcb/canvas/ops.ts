@@ -102,7 +102,9 @@ export function applyChange(doc: Doc, change: WireChange, IU: number): boolean {
       const ox = item.x !== undefined ? item.x : atOf(item.node)[0], oy = item.y !== undefined ? item.y : atOf(item.node)[1];
       const dx = nx !== undefined ? nx - ox : 0, dy = ny !== undefined ? ny - oy : 0;
       const was = atOf(item.node);
-      if (item.kind === "table") shiftTable(item.node, dx, dy); else setAt(item.node, nx, ny, nrot);
+      if (item.kind === "table") shiftTable(item.node, dx, dy);
+      else if (item.kind === "drill_map") { const o = kid(item.node, "offset"); if (o) { o[1] = num(o[1]) + dx; o[2] = num(o[2]) + dy; } }   // PCB_DRILL_MAP: its offset is its position
+      else setAt(item.node, nx, ny, nrot);
       if (doc.type === "pcb" && item.kind === "footprint") refitLegacyFootprintFrame(doc, item.node, was);
       if (doc.type === "sch" && item.kind === "symbol" && (dx || dy)) for (const p of kids(item.node, "property")) { const a = kid(p, "at"); if (a) { a[1] = num(a[1]) + dx; a[2] = num(a[2]) + dy; } }
       changed = true;

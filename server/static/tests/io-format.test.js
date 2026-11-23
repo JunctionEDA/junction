@@ -256,10 +256,11 @@ test("the fold raises the stamp when what it writes needs it (chooseFileFormatVe
   assert.ok(/uses a footprint with an overall height, which file format version 20250302 cannot store\.  Saved using file format version 20261017 instead/.test(r.notice), r.notice);
   assert.ok(r.text.includes(`(generator_version "${GV}")`));
 });
-test("…but not past a version below which the stored items read differently (here: via protection)", () => {
+test("…and past a version below which the stored items read differently, those are written in the new form (here: via protection)", () => {
   const via = '\t(via\n\t\t(at 1 1)\n\t\t(size 0.6)\n\t\t(drill 0.3)\n\t\t(layers "F.Cu" "B.Cu")\n\t\t(net 1)\n\t\t(uuid "a1a1a1a1-0000-4000-8000-000000000001")\n\t)\n';
   const r = C.foldOps(K, "kicad_pcb", board(20241229, via), addFp());
-  assert.ok(!r.ok && /via protection/.test(r.reason), JSON.stringify(r));
+  assert.ok(r.ok, r.reason); assert.strictEqual(r.version, 20261017);
+  assert.ok(/\(layers "F.Cu" "B.Cu"\)\s*\(capping no\)\s*\(covering\s*\(front no\)\s*\(back no\)\s*\)\s*\(plugging\s*\(front no\)\s*\(back no\)\s*\)\s*\(filling no\)/.test(r.text), r.text);
 });
 test("a board kept before 20251028: new items use net codes, and a new code is declared in the (net N \"name\") list", () => {
   const r = C.foldOps(K, "kicad_pcb", board(20250302).replace("(height 4)", ""), [{ changes: [{ id: "f0f0f0f0-0000-4000-8000-000000000001", kind: "ADDED", sexpr: `(kicad_pcb (version 20250302) (generator "pcbnew") ${FP('(net 2 "VCC")').replace(" (height 4)", "")})` }] }]);

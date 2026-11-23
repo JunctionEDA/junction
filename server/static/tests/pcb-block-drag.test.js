@@ -143,3 +143,21 @@ test("the setting is off by default: no handles, no picks", () => {
   const { ctx } = setup(["z-1", "pl-1"]); P.state.areaAnchorPointSelection = false;
   assert.equal(B.collections(ctx).colls.length, 0); assert.equal(B.click(ctx, [60, 50], false), false); assert.equal(B.areaPickStarts(ctx, [48, 48], {}), false);
 });
+
+test("geometric constraints ride the block drag: the solver keeps them every frame, Escape puts the neighbours back", () => {
+  const doc = K.parseDoc(BOARD.replace(/\)\s*$/, `  (constraint (type horizontal) (uuid "kh") (members (member "ga" whole)))\n)`), "kicad_pcb");
+  const { ctx, log } = fakeCtx(doc); pcb.onDocChanged(ctx);
+  P.state.sel.clear(); P.state.mmPerPx = 0.05; P.state.areaAnchorPointSelection = true; P.state.blockDrag = null;
+  ctx.selection = new Set(["ga", "c-1"]); B.cancel(ctx); B.cancel(ctx);
+  B.click(ctx, [30, 0], false); assert.equal(B.begin(ctx, [30, 0], true), "start");
+  B.move(ctx, [30, 3], {});
+  assert.deepEqual(xy(doc, "ga", "end"), [30, 3], "the picked end goes where it is dragged");
+  assert.ok(Math.abs(xy(doc, "ga", "start")[1] - 3) < 1e-3, "Horizontal holds: the free end follows");
+  assert.deepEqual(xy(doc, "gb", "start"), [30, 3], "the joined line follows its joint");
+  assert.equal(B.cancel(ctx), true);
+  assert.deepEqual(xy(doc, "ga", "start"), [20, 0]); assert.deepEqual(xy(doc, "ga", "end"), [30, 0]);
+  B.click(ctx, [30, 0], false); assert.equal(B.begin(ctx, [30, 0], true), "start"); B.move(ctx, [30, 2], {});
+  assert.equal(B.release(ctx, false), true); assert.equal(log.commits.at(-1).label, "Drag block");
+  assert.ok(log.commits.at(-1).changes.some((c) => c.id === "ga"));
+  assert.ok(Math.abs(xy(doc, "ga", "start")[1] - 2) < 1e-3, "the solved neighbour is committed with the drag");
+});

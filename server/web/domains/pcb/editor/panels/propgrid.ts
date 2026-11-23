@@ -19,13 +19,13 @@ import { defaultSpokeAngle } from "../../canvas/pad-model";
 /** PADSTACK::DefaultThermalSpokeAngleForShape of a pad node (canvas/pad-model.ts). */
 const spokeDefault = (p: SNode): number => { const o = p.find((c): c is SNode => Array.isArray(c) && c[0] === "options"); const a = o && o.find((c): c is SNode => Array.isArray(c) && c[0] === "anchor"); return defaultSpokeAngle(String(p[3] ?? ""), a ? String(a[1] ?? "") : ""); };
 import * as VM from "../../canvas/variant-model";
-import { currentInstance, netMap } from "../schnets";
+import { currentInstance, netMap, suffixRefEditing } from "../schnets";
 import { fieldValidationError, unescapeString, readEndingState, writeEndingState } from "../../dialogs/sch-items-logic";
 import { chooseFootprint, noFileBrowsing, openDatasheet } from "../../dialogs/browse-cells";
 import { chooserFilters, datasheetLink, type FpChooserFilters } from "../../library/fpchoice";
 import { toast } from "../util";
 import { colorText, parseColorText } from "../../../../shared/components/panes/prop-text";
-import { composeRefSuffix, REF_SUFFIX_FIELD, PIN_MAP_VERSION, activeAssociatedFootprint, associatedFootprints, defaultOverride, effectivePadNumber, readOverride, readPinMaps, writeOverride, type PinMapMode, type PinMapOverride } from "../../dialogs/sym-props-logic";
+import { composeRefSuffix, REF_SUFFIX_FIELD, PIN_MAP_VERSION, activeAssociatedFootprint, associatedFootprints, defaultOverride, readPinMaps, type PinMapMode, type PinMapOverride } from "../../dialogs/sym-props-logic";
 import { expandStacked } from "../../symedit/model";
 import { selectedFields } from "../selection";
 import { fieldNodeOf, fieldProps as schFieldProps, parentFieldRow, replaceField, type FieldProp } from "./field-props";
@@ -184,6 +184,19 @@ function symbolProps(it: KItem, doc: KDoc): PropDef[] {
   const unitChoices: [string, string][] = []; for (let u = 1; u <= Math.max(1, units); u++) unitChoices.push([String(u), u <= 26 ? String.fromCharCode(64 + u) : String(u)]);
   out.push({ group: BASIC, name: "Unit", type: "enum", choices: unitChoices, get: (x) => { const k = h.kid(x.node, "unit"); return String(k ? h.num(k[1], 1) : 1); }, set: (n, v) => { h.setSymbolUnit(n, +(v as string)); } });
   const fieldDefs = fieldProps(it).map((d) => (SYM_MANDATORY.includes(d.name) ? d : Object.assign(d, { key: "field" as const })));
+  // SCH_SYMBOL's Reference property with reused-sheet suffixes: GetRefProp shows the base, the validator refuses text
+  // ending in another instance's suffix (BaseRefFromUser), SetRefProp shares the base (SetUserRef); "Composed
+  // Reference" (GetCurrentSheetRef) is shown when the sheet on screen composes a suffix
+  const se = suffixRefEditing(doc), ri = fieldDefs.findIndex((d) => d.name === "Reference");
+  if (se && ri >= 0) {
+    const sheet = se.sheet;
+    fieldDefs[ri] = Object.assign({}, fieldDefs[ri], {
+      get: (x: KItem) => se.S.baseRefOn(se.sc, sheet, x.node),
+      validate: (v: Raw, x: KItem) => fieldValidationError("REFERENCE", String(v)) || se.S.baseRefFromUser(se.sc, sheet, x.node, String(v)).error || null,
+      set: (n: SNode, v: Raw) => { const r = se.S.baseRefFromUser(se.sc, sheet, n, String(v)); if (r.error) return false; se.S.setUserRef(se.sc, sheet, n, r.base); },
+    });
+    if (se.sc.rs.suffix(sheet.path || "")) fieldDefs.splice(ri + 1, 0, { group: "Fields", name: "Composed Reference", type: "text", get: (x: KItem) => se.S.composedRefLabel(se.sc, sheet, x.node, se.S.baseRefOn(se.sc, sheet, x.node)) });
+  }
   // with a current variant the fields (but the Reference) and the attributes read and write the symbol instance's
   // variant (SCH_SYMBOL's property getters / setters take Schematic().GetCurrentVariant())
   const variant = currentVariant();
@@ -197,6 +210,7 @@ function symbolProps(it: KItem, doc: KDoc): PropDef[] {
       out.push(name === "Reference" ? d : { ...d, get: (x) => { const f = H().fieldList(view(x)).find((q) => H().str(q[1]) === name); return f ? H().str(f[2]) : null; }, set: (n, v) => { put(n, { fields: { [name]: String(v) } }); } });
     }
     out.push({ group: "Fields", name: "Library Link", type: "text", get: (x) => h.str((h.kid(x.node, "lib_id") || [])[1]) });
+    out.push(...pinMapProps(it, doc));
     const vflag = (name: string, f: keyof VM.SymFlags): PropDef => ({ group: "Attributes", name, type: "bool", get: (x) => VM.symbolFlagsForVariant(x.node, variant, path, ver)[f], set: (n, v) => { put(n, { flags: { [f]: !!v } }); } });
     out.push(vflag("Exclude From Simulation", "excludedFromSim"), vflag("Exclude From Bill of Materials", "excludedFromBOM"), vflag("Exclude From Board", "excludedFromBoard"),
       vflag("Exclude From Position Files", "excludedFromPosFiles"), vflag("Do not Populate", "dnp"));
@@ -227,16 +241,20 @@ export function hasPinMaps(doc: KDoc, it: KItem): boolean {
   return associatedFootprints(ownLibOf(doc, it.node)).length > 0;
 }
 const symUnit = (n: SNode): number => { const k = H().kid(n, "unit"); return k ? H().num(k[1], 1) : 1; };
-const footprintFieldOf = (n: SNode): string => { const f = H().fieldList(n).find((q) => H().str(q[1]) === "Footprint"); return f ? H().str(f[2]) : ""; };
-/** SCH_SYMBOL::GetPinMapOverride: units 2..N that delegate follow unit 1's record (resolveDelegatedPinMapOverride). */
+/** The current variant and the sheet instance on screen (Schematic()->GetCurrentVariant(), CurrentSheet()). */
+const pinMapCtx = (): { variant: string; path: string | null } => { const inst = currentInstance(); return { variant: currentVariant(), path: inst && inst.uuidPath.length ? "/" + inst.uuidPath.join("/") : null }; };
+/** GetFootprintFieldText( sheet, …, variant ): the Footprint field the current variant shows. */
+const footprintFieldOf = (n: SNode): string => { const c = pinMapCtx(); return VM.symbolFieldForVariant(n, c.variant, c.path, "Footprint"); };
+/** SCH_SYMBOL::GetPinMapOverride( CurrentSheet(), GetCurrentVariant() ): the variant's record under a variant, and
+ *  units 2..N that delegate follow unit 1's record (resolveDelegatedPinMapOverride). */
 function pinMapOverride(doc: KDoc, it: KItem): PinMapOverride {
-  const o = readOverride(it.node) || defaultOverride(); if (o.mode !== "delegate") return o;
-  const ref = String(it.ref || "").toLowerCase();
-  for (const sib of doc.items.values()) {
-    if (sib === it || sib.kind !== "symbol" || symUnit(sib.node) !== 1 || String(sib.ref || "").toLowerCase() !== ref) continue;
-    const u1 = readOverride(sib.node) || defaultOverride(); return u1.mode === "delegate" ? defaultOverride() : u1;
-  }
-  return defaultOverride();
+  const c = pinMapCtx(), o = VM.symbolPinMapOverride(it.node, c.variant, c.path); if (o.mode !== "delegate") return o;
+  const K = KiCadCanvas as unknown as { delegatedPinMapOverride?: (d: KDoc, i: KItem, v: string) => PinMapOverride };
+  return K.delegatedPinMapOverride ? K.delegatedPinMapOverride(doc, it, c.variant) : defaultOverride();
+}
+/** SetPinMapOverride( override, CurrentSheet(), GetCurrentVariant() ) onto the staged node. */
+function putPinMapOverride(doc: KDoc, n: SNode, o: PinMapOverride): void {
+  const c = pinMapCtx(); const out = VM.setSymbolPinMapOverride(n, o, c.variant, c.path, doc.version); n.length = 0; n.push(...out);
 }
 /** SCH_SYMBOL::GetPins: the library pins of the instance's unit and body style (plus the common ones). */
 function instancePinNumbers(lib: SNode, n: SNode): string[] {
@@ -259,7 +277,7 @@ function pinMapProps(it: KItem, doc: KDoc): PropDef[] {
         const o = pinMapOverride(doc, x); o.mode = String(v) as PinMapMode;
         // the active map name is seeded from the active associated footprint when switching to a named map
         if (o.mode === "named_map" && !o.map) { const a = activeAssociatedFootprint(lib, footprintFieldOf(n)); if (a) o.map = a.map; }
-        writeOverride(n, o);
+        putPinMapOverride(doc, n, o);
       } },
   ];
   if (names.length > 1) out.push({ group: G, name: "Pin Map Name", type: "enum", choices: names.map((m) => [m, m] as [string, string]),
@@ -268,14 +286,14 @@ function pinMapProps(it: KItem, doc: KDoc): PropDef[] {
       if (!names.includes(active)) { const a = activeAssociatedFootprint(lib, footprintFieldOf(x.node)); if (a) active = a.map; }
       return names.includes(active) ? active : names[0];
     },
-    set: (n, v, x) => { if (!names.includes(String(v))) return false; const o = pinMapOverride(doc, x); o.mode = "named_map"; o.map = String(v); writeOverride(n, o); } });
+    set: (n, v, x) => { if (!names.includes(String(v))) return false; const o = pinMapOverride(doc, x); o.mode = "named_map"; o.map = String(v); putPinMapOverride(doc, n, o); } });
   // one read-only row per (stacked) pin number: the pad its pin resolves to
   const seen = new Set<string>();
   for (const pin of instancePinNumbers(lib, it.node)) {
     for (const number of expandStacked(pin).pins) {
       if (!number || seen.has(number)) continue; seen.add(number);
       out.push({ group: "Effective Pin Map", name: "Pin " + number, type: "text", get: (x) => {
-        const pad = effectivePadNumber(lib, pinMapOverride(doc, x), footprintFieldOf(x.node), pin);
+        const pad = VM.effectivePadNumber(lib, pinMapOverride(doc, x), footprintFieldOf(x.node), pin).pad;
         return pad === number ? `${pad} (identity)` : pad;
       } });
     }
@@ -1166,6 +1184,16 @@ function tuningPatternProps(it: KItem, doc: KDoc): PropDef[] {
 // DIMENSION_DESC / ALIGNED_DIMENSION_DESC (pcbnew/pcb_dimension.cpp): the rows read and write what the Dimension
 // Properties dialog does (dimDialogValues / applyDimDialog), so the geometry and the text are rebuilt the same way
 const DIM_PRECISIONS: [string, string][] = ["0", "0.0", "0.00", "0.000", "0.0000", "0.00000", "0.00 in / 0 mils / 0.0 mm", "0.000 / 0 / 0.00", "0.0000 / 0.0 / 0.000", "0.00000 / 0.00 / 0.0000"].map((l, i): [string, string] => [String(i), l]);
+/** CONSTRAINT_EDIT_TOOL's driving-dimension helpers in the PCB tools bundle (pcb-tools/constraint-tool.ts). */
+interface DimConstraintTools {
+  dimensionModeInfo(ctx: unknown, id: string): { mode: "driven" | "driving" | "arbitrary"; canDrive: boolean };
+  drivingValueText(ctx: unknown, id: string): string | null; dimensionUnits(ctx: unknown, id: string): string; valueFromString(text: string, units: string): number;
+  propSetValueMode(ctx: unknown, ids: string[], mode: "driven" | "driving" | "arbitrary"): void; propSetDrivingValue(ctx: unknown, ids: string[], text: string): void;
+  solveAfterDialogEdit(ctx: unknown, ids: string[]): void;
+}
+const dimConstraints = (): DimConstraintTools | null => ((pcbTools() as unknown as { constraints?: DimConstraintTools } | null) || {}).constraints || null;
+const dimMode = (x: KItem): string => { const C = dimConstraints(); if (C && x.id) { try { return C.dimensionModeInfo(tctx(), x.id).mode; } catch (e) { /* not on the board */ } } return dimDialogValues(x.node).arbitrary ? "arbitrary" : "driven"; };
+const dimCanDrive = (x: KItem): boolean => { const C = dimConstraints(); try { return !!C && !!x.id && C.dimensionModeInfo(tctx(), x.id).canDrive; } catch (e) { return false; } };
 function dimensionProps(it: KItem, doc: KDoc): PropDef[] {
   const h = H(), D = "Dimension Properties", T = "Text Properties";
   const type = (n: SNode) => h.str((h.kid(n, "type") || [])[1]) || "aligned";
@@ -1182,11 +1210,19 @@ function dimensionProps(it: KItem, doc: KDoc): PropDef[] {
   if (center) out.push({ group: D, name: "Override Text", type: "text", get: (x) => { const f = h.kid(x.node, "format"), o = f && h.kid(f, "override_value"); return o ? h.str(o[1]) : ""; },
     set: (n, v) => { const f = h.kid(n, "format"); if (!f) return false; if (String(v)) h.setKid(f, "override_value", [String(v)], ["suppress_zeroes"]); else h.delKid(f, "override_value"); } });
   if (valueMode) out.push(
-    { group: D, name: "Value Mode", type: "enum", choices: [["0", "Driven"], ["1", "Driving"], ["2", "Arbitrary"]], get: (x) => (dimDialogValues(x.node).arbitrary ? "2" : "0"),
-      // DimensionCanDrive: both ends bound to objects by constraints, which a board here does not hold
-      validate: (v) => (v === "1" ? "Driving requires both dimension endpoints bound to objects" : null), set: (n, v) => apply(n, { arbitrary: v === "2" }) },
-    // Driven mirrors the measured geometry, so the row is greyed out
-    { group: D, name: "Value", type: "text", canWrite: (x) => dimDialogValues(x.node).arbitrary, get: (x) => dimDialogValues(x.node).value, set: (n, v) => apply(n, { arbitrary: true, value: String(v) }) });
+    // GetValueMode / ChangeValueMode, routed through SetDimensionValueMode as pcb_properties_panel.cpp does (the length
+    // constraint shares the edit's undo step, then "Apply Dimension Length")
+    { group: D, name: "Value Mode", type: "enum", choices: [["0", "Driven"], ["1", "Driving"], ["2", "Arbitrary"]], get: (x) => { const m = dimMode(x); return m === "driving" ? "1" : m === "arbitrary" ? "2" : "0"; },
+      validate: (v, x) => (v === "1" && !dimCanDrive(x) ? "Driving requires both dimension endpoints bound to objects" : null),
+      local: (v, x) => { const C = dimConstraints(); if (C) C.propSetValueMode(tctx(), [x.id], v === "1" ? "driving" : v === "2" ? "arbitrary" : "driven"); } },
+    // GetValueFieldText / ChangeValueFieldText: Driven mirrors the measured geometry, so the row is greyed out; Driving edits the length constraint
+    { group: D, name: "Value", type: "text", canWrite: (x) => dimMode(x) !== "driven", get: (x) => (dimMode(x) === "driving" && dimConstraints()?.drivingValueText(tctx(), x.id)) || dimDialogValues(x.node).value,
+      validate: (v, x) => { const C = dimConstraints(); return dimMode(x) === "driving" && C && !(C.valueFromString(String(v), C.dimensionUnits(tctx(), x.id)) > 0) ? "Enter a positive length for a driving dimension" : null; },
+      local: (v, x) => {
+        const C = dimConstraints(); if (dimMode(x) === "driving") { if (C) C.propSetDrivingValue(tctx(), [x.id], String(v)); return; }
+        const n = K().cloneNode(x.node); apply(n, { arbitrary: true, value: String(v) });
+        if (K().serialize(n) !== K().serialize(x.node)) tctx().commit([K().replaceChange(doc, Object.assign({}, x, { node: n, geom: [], bbox: null }))], "Edit Properties");
+      } });
   if (leader) out.push(row(D, "Text", "value", "text"));
   if (!leader) out.push(
     row(D, "Units", "unitsMode", "enum", { choices: [["0", "Inches"], ["1", "Mils"], ["2", "Millimeters"], ["3", "Automatic"]] }),
@@ -1234,6 +1270,7 @@ function pcbProps(it: KItem, doc: KDoc, single: boolean): PropDef[] {
     // PCB_GROUP_DESC: BOARD_ITEM's Locked (a group has no position or layer rows) and "Group Properties" / Name
     case "group": return [lockedProp(), { group: "Group Properties", name: "Name", type: "text", get: (x) => (typeof x.node[1] === "string" ? h.str(x.node[1]) : ""),
       set: (n, v) => { if (typeof n[1] === "string") n[1] = String(v); else n.splice(1, 0, String(v)); } }];
+    case "drill_map": return drillMapProps(doc);
     default: break;
   }
   const out: PropDef[] = [];
@@ -1241,6 +1278,29 @@ function pcbProps(it: KItem, doc: KDoc, single: boolean): PropDef[] {
   if (h.kid(it.node, "layer")) out.push(layerProp(doc, false, "Dwgs.User"));
   out.push(lockedProp());
   return out;
+}
+/**
+ * PCB_DRILL_MAP_DESC: BOARD_ITEM's Layer and Locked (its Position X / Y masked), then "Drill Map Properties": the
+ * offset of the marks from their holes (relative), the symbol size (at least 1 nm), the Hole Span (every span, or one
+ * of the stackup's; a span the stackup no longer has reads as every span), Outline Slots and Guide Cross.
+ */
+function drillMapProps(doc: KDoc): PropDef[] {
+  const DMod = KiCadCanvas.drillModel; const MAP = "Drill Map Properties";
+  const read = (n: SNode) => DMod.readDrillMap(n, doc as never);
+  const write = (n: SNode, f: (m: ReturnType<typeof read>) => boolean | void): boolean | void => {
+    const m = read(n); if (f(m) === false) return false;
+    const uuid = H().str((H().kid(n, "uuid") || [])[1]); const next = DMod.drillMapNode(m, uuid); n.splice(0, n.length, ...next);
+  };
+  const choices = DMod.drillMapSpanChoices(doc as never);
+  const spanIndex = (n: SNode): number => { const m = read(n); if (m.allSpans) return -1; const i = choices.findIndex((c) => c.span && DMod.sameSpan(c.span, m.span)); return i < 1 ? -1 : i - 1; };
+  return [layerProp(doc, false, "Dwgs.User"), lockedProp(),
+    { group: MAP, name: "Offset X", type: "length", get: (x) => read(x.node).offset[0], set: (n, v) => write(n, (m) => { m.offset = [r6(v as number), m.offset[1]]; }) },
+    { group: MAP, name: "Offset Y", type: "length", get: (x) => read(x.node).offset[1], set: (n, v) => write(n, (m) => { m.offset = [m.offset[0], r6(v as number)]; }) },
+    { group: MAP, name: "Symbol Size", type: "length", get: (x) => read(x.node).size, set: (n, v) => write(n, (m) => { m.size = Math.max(1e-6, r6(v as number)); }) },
+    { group: MAP, name: "Hole Span", type: "enum", choices: choices.map((c, i): [string, string] => [String(i - 1), c.label]), get: (x) => String(spanIndex(x.node)),
+      set: (n, v) => write(n, (m) => { const i = Number(v); const c = i >= 0 ? choices[i + 1] : null; if (c && c.span) { m.allSpans = false; m.span = { ...c.span }; } else m.allSpans = true; }) },
+    { group: MAP, name: "Outline Slots", type: "bool", get: (x) => read(x.node).outlineSlots, set: (n, v) => write(n, (m) => { m.outlineSlots = !!v; }) },
+    { group: MAP, name: "Guide Cross", type: "bool", get: (x) => read(x.node).guideCross, set: (n, v) => write(n, (m) => { m.guideCross = !!v; }) }];
 }
 /**
  * A pad of the footprint open in the Footprint Editor is its own item (its node is the (pad …)): PAD_DESC's rows as the
@@ -1263,7 +1323,7 @@ function fpEditorPadProps(doc: KDoc, it: KItem): PropDef[] {
 const FRIENDLY: Record<string, string> = { symbol: "Symbol", footprint: "Footprint", wire: "Wire", bus: "Bus", polyline: "Graphic Line", segment: "Track", arc: "Arc", via: "Via", label: "Label", global_label: "Global Label",
   hierarchical_label: "Hierarchical Label", netclass_flag: "Directive Label", directive_label: "Directive Label", text: "Text", gr_text: "Text", text_box: "Text Box", gr_text_box: "Text Box", junction: "Junction", zone: "Zone",
   no_connect: "No-Connect", bus_entry: "Bus Entry", pad: "Pad", sheet: "Sheet", gr_line: "Segment", gr_rect: "Rectangle", gr_circle: "Circle", gr_arc: "Arc", gr_poly: "Polygon", gr_curve: "Curve", rectangle: "Rectangle", circle: "Circle",
-  bezier: "Bezier", rule_area: "Rule Area", dimension: "Dimension", group: "Group", image: "Image", table: "Table" };
+  bezier: "Bezier", rule_area: "Rule Area", dimension: "Dimension", group: "Group", image: "Image", table: "Table", drill_map: "Drill Map" };
 /** GetFriendlyName (the panel's caption for one item): PCB_ARC "Track (arc)", ZONE by what it is, PCB_SHAPE by its shape, … */
 function friendly(it: KItem): string {
   if (it.docType === "pcb") {
@@ -1272,6 +1332,8 @@ function friendly(it: KItem): string {
     if (it.kind === "zone") { const a = h.kid(it.node, "attr"); if (h.kid(it.node, "keepout")) return "Rule Area"; if (a && h.kid(a, "teardrop")) return "Teardrop Area";
       const s = h.kid(it.node, "layer"), m = h.kid(it.node, "layers"), l = s ? h.str(s[1]) : m ? h.str(m[1]) : ""; return /\.Cu$/.test(l) ? "Copper Zone" : "Non-copper Zone"; }
     if (it.kind === "image") return "Reference Image";
+    if (it.kind === "table" && it.node[0] === "drill_chart") return "Drill Chart";
+    if (it.kind === "table" && it.node[0] === "stackup_table") return "Stackup Table";
     if (it.kind === "dimension" && h.str((h.kid(it.node, "type") || [])[1]) === "leader") return "Leader";
   }
   return it.kind === "generated" ? "Tuning Pattern" : FRIENDLY[it.kind] || it.kind;
@@ -1557,6 +1619,8 @@ function setFieldProp(doc: KDoc, picks: FieldPick[], id: string, text: string): 
     const ctx = tctx() as unknown as ToolCtx & { doc: KDoc };
     commitWithOtherUnits(Object.assign(ctx, { doc }), done[0].it, done[0].node, changes, "Edit Properties", "field:" + picks[0].name);
   } else tctx().commit(changes, "Edit Properties");
+  // the edit is authoritative: its shapes hold while the constrained neighbours follow (SolveAfterEdit, APPEND_UNDO)
+  if (!isSchDoc()) { const C = dimConstraints(); if (C) { try { C.solveAfterDialogEdit(tctx(), done.map((s) => s.it.id)); } catch (e) { console.warn(e); } } }
   panelStore.set({ selVersion: panelStore.get().selVersion + 1 });
   return null;
 }

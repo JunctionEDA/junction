@@ -7,6 +7,7 @@ import { has, isList, kid, kids, num, parse, str, uuidOf } from "./sexpr";
 import { fileVersionOf, migrateBoardNode, migrateLegacyTree } from "./legacy";
 import { KICAD_BASE_VERSION } from "./version";
 import type { Box, Doc, Item, Pt, SAtom } from "./types";
+import { refreshDrillGeometry } from "./drill-model";
 // ---------------------------------------------------------------- documents
 export function newDoc(type: "sch" | "pcb"): Doc {
   return { type, schTheme: schTheme(), items: new Map(), lib: new Map(), page: PAPER_SIZES.A4.slice(), layers: new Map(), copper: [], bbox: null, nets: new Map(), version: 0,
@@ -103,6 +104,7 @@ export function parseDoc(text: string, docType?: string): Doc {
     else if (type === "pcb" && k === "property") { (doc.boardProperties || (doc.boardProperties = {}))[str(node[1])] = str(node[2]); continue; }   // (net 3 "GND"): the board's net table
     else if (type === "pcb" && k === "setup") { const o = setupOrigins(node); doc.auxOrigin = o.aux; doc.gridOrigin = o.grid; doc.stackup = kid(node, "stackup") || null; doc.setupNode = node; continue; }   // the physical stackup is kept for impedance work   // the drill / place and grid origins
     else if (k === "embedded_files") { doc.embeddedFiles = node; continue; }
+    else if (k === "embedded_fonts") { doc.embeddedFonts = str(node[1]) === "yes"; continue; }
     else if (type === "pcb" && k === "net_chains") { doc.netChainsNode = node; continue; }   // each net's chain and terminal pads (NETINFO_ITEM)   // read by the Simulation Model dialog (kicad-embed://)
     else if (k === "symbol_instances" && type === "sch") {
       const m = new Map<string, { reference: string; unit: number; value: string; footprint: string }>();
@@ -144,13 +146,32 @@ export function upgradeLegacyArcs(node: SNode): void {
  * the Page Settings dialog; { docProps: { pageNumber } } from Edit Sheet Page Number on the root sheet): the same fields
  * parseDoc reads from the file header.  An empty titleBlock clears it.
  */
-export function applyDocProps(doc: Doc | null | undefined, props: { paper?: unknown; titleBlock?: unknown; pageNumber?: unknown } | null | undefined): boolean {
+export function applyDocProps(doc: Doc | null | undefined, props: { paper?: unknown; titleBlock?: unknown; pageNumber?: unknown; embeddedFiles?: unknown } | null | undefined): boolean {
   if (!doc || !props) return false;
   let any = false;
   if (typeof props.paper === "string" && props.paper) { const node = parse(props.paper); if (node && node[0] === "paper") { doc.page = paperSize(node); doc.paper = str(node[1]) || "A4"; doc.portrait = doc.page[1] > doc.page[0]; any = true; } }
   if (typeof props.titleBlock === "string") { const node = props.titleBlock ? parse(props.titleBlock) : null; doc.titleBlock = node && node[0] === "title_block" ? titleBlockOf(node) : {}; any = true; }
   // the root sheet's page number: the root path's (page …) of (sheet_instances …)
   if (typeof props.pageNumber === "string" && props.pageNumber) { (doc as Doc & { pageNumber?: string }).pageNumber = props.pageNumber; any = true; }
+  // the root schematic's embedded files (Schematic Setup > Embedded Files): { remove: names, put: (file …) forms, fonts }
+  const ef = props.embeddedFiles as { put?: unknown; remove?: unknown; fonts?: unknown } | null | undefined;
+  if (ef && typeof ef === "object") {
+    const nameOf = (f: SNode): string => { const n = kid(f, "name"); return n ? str(n[1]) : ""; };
+    for (const name of Array.isArray(ef.remove) ? ef.remove : []) {
+      const files = doc.embeddedFiles; if (!files) break;
+      for (let j = files.length - 1; j >= 1; j--) { const c = files[j]; if (isList(c) && c[0] === "file" && nameOf(c as SNode) === name) files.splice(j, 1); }
+      if (files.length <= 1) doc.embeddedFiles = null;
+      any = true;
+    }
+    for (const t of Array.isArray(ef.put) ? ef.put : []) {
+      const f = typeof t === "string" ? parse(t) as SNode | null : null; if (!f || f[0] !== "file") continue;
+      const files = doc.embeddedFiles || (doc.embeddedFiles = ["embedded_files"]);
+      const j = files.findIndex((c, i) => i > 0 && isList(c) && c[0] === "file" && nameOf(c as SNode) === nameOf(f));
+      if (j > 0) files[j] = f; else files.push(f);
+      any = true;
+    }
+    if (typeof ef.fonts === "boolean") { doc.embeddedFonts = ef.fonts; any = true; }
+  }
   return any;
 }
 
@@ -158,7 +179,7 @@ export const SCH_KINDS = new Set<SAtom>(["symbol", "wire", "bus", "junction", "l
   "ellipse", "ellipse_arc", "net_chain", "group"]);
 
 export const PCB_KINDS = new Set<SAtom>(["footprint", "segment", "arc", "via", "zone", "gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_text", "gr_text_box", "gr_curve", "gr_bbox", "dimension", "target", "image", "group", "table", "generated",
-  "gr_ellipse", "gr_ellipse_arc", "barcode", "point", "grid_item"]);
+  "gr_ellipse", "gr_ellipse_arc", "barcode", "point", "grid_item", "drill_map", "drill_chart", "stackup_table", "constraint"]);
 
 
 export function addItem(doc: Doc, node: SNode, givenId?: string): Item | null {
@@ -166,7 +187,8 @@ export function addItem(doc: Doc, node: SNode, givenId?: string): Item | null {
   if (doc.type === "sch" ? !SCH_KINDS.has(k) : (doc as { fpEditor?: boolean }).fpEditor ? !FP_KINDS.has(k as string) : !PCB_KINDS.has(k)) return null;
   let id = givenId || uuidOf(node);
   if (!id) id = "anon-" + (doc.items.size + 1) + "-" + Math.random().toString(36).slice(2, 8);
-  const kind = (doc as { fpEditor?: boolean }).fpEditor && (k === "property" || k === "fp_text") ? "property" : k as string;
+  // a generated table (PCB_DRILL_CHART, PCB_STACKUP_TABLE) is a PCB_TABLE whose cells the board writes: node[0] says which
+  const kind = (doc as { fpEditor?: boolean }).fpEditor && (k === "property" || k === "fp_text") ? "property" : k === "drill_chart" || k === "stackup_table" ? "table" : k as string;
   const item: Item = { id, kind, node, geom: [], bbox: null, movable: false, hiddenGeom: null, docType: doc.type };
   buildGeom(doc, item);
   doc.items.set(id, item);
@@ -175,6 +197,7 @@ export function addItem(doc: Doc, node: SNode, givenId?: string): Item | null {
 
 
 export function computeBBox(doc: Doc): void {
+  if (doc.type === "pcb") refreshDrillGeometry(doc);   // drill maps, chart symbols and ${DRILL_…} text follow the holes
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   const take = (b: Box | null) => { if (!b) return; x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]); x1 = Math.max(x1, b[2]); y1 = Math.max(y1, b[3]); };
   if (doc.type === "pcb") {

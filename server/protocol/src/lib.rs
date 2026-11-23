@@ -51,6 +51,18 @@ pub enum ClientMsg {
         base_seq: Option<i64>,
         changes: Value,
     },
+    /// One commit over several documents of a project (a paste or a move that writes a sub-sheet's file as well):
+    /// `changes` on the joined document `docId`, each of `also` on its own document, journalled in one transaction so
+    /// they all land or none does.  Acked like an `op` on `docId`; the other documents' clients get ordinary `op`s.
+    op_multi {
+        #[serde(rename = "docId")]
+        doc_id: Uuid,
+        #[serde(rename = "clientOpId")]
+        client_op_id: String,
+        changes: Value,
+        #[serde(default)]
+        also: Vec<DocChanges>,
+    },
     presence {
         #[serde(rename = "docId")]
         doc_id: Uuid,
@@ -74,6 +86,14 @@ pub enum ClientMsg {
         doc_id: Uuid,
         action: String,
     },
+}
+
+/// One document's part of an `op_multi`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocChanges {
+    #[serde(rename = "docId")]
+    pub doc_id: Uuid,
+    pub changes: Value,
 }
 
 /// A peer as described in `doc_info`, `peer_joined` and presence updates.
@@ -235,6 +255,21 @@ mod tests {
         let op = r#"{"type":"op","docId":"64912f74-6834-4aa6-98ff-55c3faec0bbf","clientOpId":"web:1","changes":[]}"#;
         let msg: ClientMsg = serde_json::from_str(op).unwrap();
         assert!(matches!(msg, ClientMsg::op { base_seq: None, .. }));
+    }
+
+    #[test]
+    fn op_multi_parses() {
+        let text = r#"{"type":"op_multi","docId":"64912f74-6834-4aa6-98ff-55c3faec0bbf","clientOpId":"multi:web:3","changes":[{"id":"a","kind":"REMOVED"}],
+                       "also":[{"docId":"74912f74-6834-4aa6-98ff-55c3faec0bbf","changes":[{"id":"a","kind":"ADDED","sexpr":"(junction)"}]}]}"#;
+        let msg: ClientMsg = serde_json::from_str(text).unwrap();
+        match msg {
+            ClientMsg::op_multi { client_op_id, also, .. } => {
+                assert_eq!(client_op_id, "multi:web:3");
+                assert_eq!(also.len(), 1);
+                assert_eq!(also[0].doc_id.to_string(), "74912f74-6834-4aa6-98ff-55c3faec0bbf");
+            }
+            _ => panic!("not an op_multi"),
+        }
     }
 
     #[test]

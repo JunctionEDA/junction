@@ -249,7 +249,9 @@ export const ATTR_FIELDS: Record<string, { flag: "dnp" | "excludeBom" | "exclude
   "${EXCLUDE_FROM_SIM}": { flag: "excludeSim", text: "Excluded from simulation" }, "${EXCLUDE_FROM_POS_FILES}": { flag: "excludePos", text: "Excluded from position files" },
 };
 export const QTY = "${QUANTITY}", ITEM_NO = "${ITEM_NUMBER}";
-export interface SymRow { id: string; ids: string[]; ref: string; values: Record<string, string>; dnp: boolean; excludeBom: boolean; excludeBoard: boolean; excludeSim: boolean; excludePos: boolean; sheet: string; editable: boolean }
+export interface SymRow { id: string; ids: string[]; ref: string; values: Record<string, string>; dnp: boolean; excludeBom: boolean; excludeBoard: boolean; excludeSim: boolean; excludePos: boolean; sheet: string; editable: boolean;
+  /** reused-sheet suffixes: the reference's base and SCH_REFERENCE::GetRefSuffix (the package's suffix; empty unannotated) */
+  refBase?: string; refSuffix?: string }
 const yes = (n: SNode, key: string, def: boolean) => { const k = kid(n, key); return k ? str(k[1]) === "yes" : def; };
 /** One row per reference designator on a sheet (the units of a multi-unit symbol share a row); power symbols (#PWR…) are left out. */
 export function symbolRows(doc: Pick<KDoc, "items">, sheet = "", editable = true, isPower?: (it: KItem) => boolean): SymRow[] {
@@ -313,6 +315,44 @@ export function renameRowField(values: Record<string, string>, oldName: string, 
 }
 export function splitRef(ref: string): [string, number] { const m = /^(.*?)(\d+)$/.exec(ref); return m ? [m[1], +m[2]] : [ref, -1]; }
 export function refCmp(a: string, b: string): number { const [pa, na] = splitRef(a), [pb, nb] = splitRef(b); return pa < pb ? -1 : pa > pb ? 1 : na - nb || (a < b ? -1 : a > b ? 1 : 0); }
+/**
+ * UTIL::FormatRefDesRanges( aBasesAndSuffixes ): each suffix's references made adjacent (in the order the suffixes
+ * first appear), then runs of consecutive numbers of one prefix and one suffix as ranges, every reference written
+ * composed (base, then suffix): "R1_L-R3_L, R1_R".  A run of two is two references; without a range delimiter, none.
+ */
+export function formatRefDesRanges(pairs: [string, string][], delim: string, range: string): string {
+  const order: string[] = []; for (const [, sfx] of pairs) if (!order.includes(sfx)) order.push(sfx);
+  const sorted = pairs.map((p, i) => ({ p, i })).sort((a, b) => order.indexOf(a.p[1]) - order.indexOf(b.p[1]) || a.i - b.i).map((x) => x.p);
+  const prefixOf = (r: string): string => r.replace(/[0-9?]+$/, ""), numOf = (r: string): number | null => { const t = r.slice(prefixOf(r).length); return /^[+-]?\d+$/.test(t) ? parseInt(t, 10) : null; };
+  const composed = (i: number): string => sorted[i][0] + sorted[i][1];
+  let out = "", i = 0;
+  while (i < sorted.length) {
+    const [ref, sfx] = sorted[i], prefix = prefixOf(ref), n = numOf(ref); let run = 1;
+    while (n !== null && i + run < sorted.length) {
+      const [nx, ns] = sorted[i + run];
+      if (prefixOf(nx) !== prefix || ns !== sfx || numOf(nx) !== n + run) break;
+      run++;
+      if (run === 2 && !range) break;
+    }
+    if (out) out += delim;
+    if (run === 1) out += composed(i);
+    else if (run === 2 || !range) out += composed(i) + delim + composed(i + 1);
+    else out += composed(i) + range + composed(i + run - 1);
+    i += run;
+  }
+  return out;
+}
+/**
+ * The Reference cell of a group with reused-sheet suffixes: the items sorted by base (cmpRowItems: StrNumCmp, then the
+ * suffix), the units of one package (same base and suffix: unitMatch) once, then formatted with their suffixes.
+ */
+export function refRangesWithSuffixes(rows: SymRow[], delim: string, range: string): string {
+  const items = rows.map((r): [string, string] => [r.refBase !== undefined ? r.refBase : r.ref, r.refSuffix || ""]);
+  items.sort((a, b) => refCmp(a[0], b[0]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
+  const uniq: [string, string][] = [];
+  for (const it of items) { const l = uniq[uniq.length - 1]; if (l && !it[0].endsWith("?") && l[0] === it[0] && l[1] === it[1]) continue; uniq.push(it); }
+  return formatRefDesRanges(uniq, delim, range);
+}
 /** SCH_REFERENCE_LIST::Shorthand: "R1, R2", runs of three or more as "R1-R3" unless the range delimiter is empty. */
 export function refShorthand(refs: string[], delim: string, range: string): string {
   const s = [...new Set(refs)].sort(refCmp), out: string[] = [];
@@ -366,7 +406,7 @@ export function bomRows(rows: SymRow[], preset: BomPreset, refDelim = ", ", refR
   const out: BomRow[] = groups.map((g) => {
     g.sort((a, b) => refCmp(a.ref, b.ref)); const cells: Record<string, string> = {};
     for (const f of preset.fields_ordered) {
-      if (f.name === "Reference") cells[f.name] = refShorthand(g.map((r) => r.ref), refDelim, refRange);
+      if (f.name === "Reference") cells[f.name] = g.some((r) => r.refSuffix) ? refRangesWithSuffixes(g, refDelim, refRange) : refShorthand(g.map((r) => r.ref), refDelim, refRange);
       else if (f.name === QTY) cells[f.name] = String(g.length);
       else if (f.name === ITEM_NO) cells[f.name] = "";
       else { const vals = [...new Set(g.map((r) => cellOf(r, f.name)))]; cells[f.name] = vals.length <= 1 ? vals[0] || "" : vals.filter((v) => v !== "").join(refDelim); }

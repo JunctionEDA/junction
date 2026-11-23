@@ -469,6 +469,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/docs/{id}/ops", get(ai::doc_ops))
         .route("/api/kicad-lib/list", get(kicadlib::list))
         .route("/api/kicad-lib/item", get(kicadlib::item))
+        .route("/api/kicad-lib/index", get(kicadlib::all_items))
         .route("/api/kicad-lib/search", get(kicadlib::search))
         .route("/api/kicad-lib/model", get(kicadlib::model))
         .route("/api/kicad-lib/model-match", get(kicadlib::model_match))

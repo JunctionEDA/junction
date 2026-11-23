@@ -5,11 +5,15 @@
 // canvas; the others wait until their sheet is opened (onSheetOpened), and the ERC dialog lists them all.
 import { E, appState, requestRender, store } from "./editor";
 import { obj, projectJson } from "./project";
-import { applySeverities, sheetOrder } from "./erc-rules";
+import { applySeverities, defaultSeverity, sheetOrder } from "./erc-rules";
+import { projectSimModelIssues } from "../editor/export-netlist";
 import { sheetList, type SheetInstance } from "./sch-hierarchy";
 import { currentSheetPath } from "../editor/variant";
 import { loadSheets, netMap, onNetsChanged } from "../editor/schnets";
 import { reportScale, serverErc, toMarker, uuidIndex } from "../editor/kicad-check";
+import { libSymbol } from "./change-symbols";
+import * as VM from "../canvas/variant-model";
+import { ercLibraries } from "./erc-library";
 
 export interface HierMarker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; docId?: string; sheetPath?: string; sheetKey?: string; selected?: boolean; [k: string]: unknown }
 interface SchErc { ercCheck(doc: KDoc, opts: Record<string, unknown>): HierMarker[]; ercHierarchy?(docs: { doc: KDoc; key: string; path?: string | null; parent?: number | null; sheetId?: string | null; root?: boolean }[], opts?: Record<string, unknown>): HierMarker[][]; state: { markers?: unknown[]; markersDoc?: KDoc | null } }
@@ -22,7 +26,19 @@ export function ercProjectOpts(): Record<string, unknown> {
   const cg = typeof sch.connection_grid_size === "number" && sch.connection_grid_size > 0 ? sch.connection_grid_size * 0.0254 : 1.27;
   const classes = Array.isArray(ns.classes) ? (ns.classes as unknown[]).map((c) => String(obj(c as never).name || "")).filter((n) => n) : null;
   const sev = obj(erc.rule_severities);
-  return { pinMap: Array.isArray(erc.pin_map) ? erc.pin_map : undefined, connectionGrid: cg, netclasses: classes, defaultNetclass: "Default", textVars: sev.unresolved_variable !== "ignore" };
+  return { pinMap: Array.isArray(erc.pin_map) ? erc.pin_map : undefined, connectionGrid: cg, netclasses: classes, defaultNetclass: "Default", textVars: sev.unresolved_variable !== "ignore", suffixMode: obj(sch.annotation).reused_sheet_suffixes === true };
+}
+/** TestVariantSymbols' library adapter for the browser's checks: every variant symbol override the sheets name, loaded
+ *  (and flattened) once per run from the project's libraries, then the official ones; none when both of its rules are
+ *  ignored. */
+export async function variantSymbolOpts(docs: KDoc[]): Promise<{ variantSymbol?: (libId: string) => SNode | null }> {
+  const sev = obj(obj(projectJson().erc).rule_severities) as Record<string, unknown>;
+  if (sev.variant_symbol_invalid === "ignore" && sev.variant_symbol_incompatible === "ignore") return {};
+  const ids = new Set<string>();
+  for (const d of docs) for (const it of d.items.values()) if (it.kind === "symbol") for (const id of VM.symbolVariantOverrides(it.node)) ids.add(id);
+  const got = new Map<string, SNode | null>();
+  await Promise.all([...ids].map(async (id) => { let x: SNode | null = null; try { x = await libSymbol(id); } catch (e) { x = null; } got.set(id, x); }));
+  return { variantSymbol: (libId) => got.get(libId) || null };
 }
 /** The markers of the last hierarchical run, by sheet instance (root first, then by page number). */
 let sheets: { docId: string; sheetPath: string; key: string; markers: HierMarker[] }[] = [], runPid: string | null = null;
@@ -89,6 +105,9 @@ export async function runHierErc(opts: { showAllErrors?: boolean; onPhase?: (msg
     return mine ? mine.markers : [];
   }
   ercSource = "browser";
+  // TestLibSymbolIssues, TestPinMap and TestFootprintLinkIssues read the libraries: they are fetched once for the run
+  (base as Record<string, unknown>).libraries = await ercLibraries(list.map((inst) => (inst.docId === here && E.kdoc ? E.kdoc : inst.doc)));
+  if (opts.signal && opts.signal.aborted) return null;
   // the net names KiCad gives (the hierarchy's net map), for the tests that compare and print them
   let netName: ((i: number, id: string, pin: string) => string | undefined) | undefined;
   let netOfItem: ((i: number, id: string) => { name: string; bus: boolean; prio: number; members: string[] } | undefined) | undefined;
@@ -104,6 +123,13 @@ export async function runHierErc(opts: { showAllErrors?: boolean; onPhase?: (msg
       };
     }
   } catch (e) { netName = undefined; netOfItem = undefined; }
+  const vopts = await variantSymbolOpts(list.map((inst) => (inst.docId === here && E.kdoc ? E.kdoc : inst.doc)));
+  // TestSimModelIssues (when the test is enabled): every symbol's model created, with the libraries it names
+  let simIssues: Map<string, Map<string, string>> | null = null;
+  if (String(sev.simulation_model_issue || defaultSeverity("simulation_model_issue")) !== "ignore") {
+    if (opts.onPhase) opts.onPhase("Checking SPICE models...");
+    try { simIssues = await projectSimModelIssues(); } catch (e) { simIssues = null; }
+  }
   for (const [li, inst] of list.entries()) {
     // the sub-sheets this instance's sheet symbols name, and the pins of the sheet symbol that names it
     const subDocs = new Map<string, KDoc>();
@@ -122,7 +148,7 @@ export async function runHierErc(opts: { showAllErrors?: boolean; onPhase?: (msg
     // the instance path the symbols record: "/<root uuid>/<sheet uuids>" (the keys leave the root out)
     const fp = fullPath(inst);
     // the tests across sheets (units, local / global and similar names, single global labels) run once below
-    try { ms = s.ercCheck(doc, Object.assign({}, base, { sheetDocs: subDocs, parentPins, showAllErrors: !!opts.showAllErrors, root: !inst.sheetItemId, crossSheet: !s.ercHierarchy ? true : false, path: fp.length ? "/" + fp.join("/") : null, netOfItem: netOfItem ? (id: string) => netOfItem!(li, id) : undefined })); } catch (e) { ms = []; }
+    try { ms = s.ercCheck(doc, Object.assign({}, base, vopts, { sheetDocs: subDocs, parentPins, showAllErrors: !!opts.showAllErrors, root: !inst.sheetItemId, crossSheet: !s.ercHierarchy ? true : false, path: fp.length ? "/" + fp.join("/") : null, netOfItem: netOfItem ? (id: string) => netOfItem!(li, id) : undefined, simModelIssues: simIssues ? simIssues.get(inst.uuidPath.join("/")) || null : null })); } catch (e) { ms = []; }
     docs.push({ doc, key: inst.uuidPath.join("/"), path: fp.length ? "/" + fp.join("/") : undefined, parent: pIdx >= 0 ? pIdx : null, sheetId: inst.sheetItemId, root: !inst.sheetItemId }); raw.push(ms);
   }
   let cross: HierMarker[][] = [];

@@ -12,6 +12,7 @@ import { boardResolve } from "./pcb-textvars";
 import type { VarResolver, VarValue } from "./sheet";
 import type { BoxRot, Doc, ImageEntry, Item, Pt, SheetContext, StrokeInfo } from "./types";
 import { schFormat } from "./geom-sch";
+import { drillChartSymbols } from "./drill-model";
 
 /** node's Buffer, when the module runs under node (tests, the MCP host); absent in a browser. */
 declare const Buffer: { from(s: string, encoding: string): ArrayLike<number> } | undefined;
@@ -180,6 +181,8 @@ export function buildTableGeom(doc: Doc, item: Item, n: SNode): void {
       line(TL[0], TR[1], bs); line(TR[1], BR[2], bs); line(BR[2], BL[3], bs); line(BL[3], TL[0], bs);
     }
   }
+  // a drill chart's shape marks in its symbol column (PCB_PAINTER::draw( PCB_DRILL_CHART ))
+  if (isPcb && n[0] === "drill_chart") drillChartSymbols(doc, item, n);
   if (item.bbox) { item.w = item.bbox[2] - item.bbox[0]; item.h = item.bbox[3] - item.bbox[1]; }
 }
 

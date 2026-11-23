@@ -222,7 +222,13 @@ export function tuningNodeWithSettings(orig: SNode, st: MeanderSettings, mode: s
   setKid(node, "corner_radius_percent", st.crPct); setKid(node, "rounded", yn(st.round)); setKid(node, "single_sided", yn(st.singleSided));
   setKid(node, "override_custom_rules", yn(st.overrideCustomRules));
   if (mode === "diff_pair_skew") { setKid(node, "target_skew", mm(st.skew.opt)); setKid(node, "target_skew_min", mm(st.skew.min)); setKid(node, "target_skew_max", mm(st.skew.max)); }
-  else { setKid(node, "target_length", mm(st.target.opt)); setKid(node, "target_length_min", mm(st.target.min)); setKid(node, "target_length_max", mm(st.target.max)); }
+  else {
+    setKid(node, "target_length", mm(st.target.opt)); setKid(node, "target_length_min", mm(st.target.min)); setKid(node, "target_length_max", mm(st.target.max));
+    // the delay target and the domain (a rule's time domain option, or the dialog's Delay button)
+    const ps = (v: number) => fmt(v / 1e6); const td = st.targetDelay;
+    if (td) { setKid(node, "target_delay", ps(td.opt)); setKid(node, "target_delay_min", ps(td.min)); setKid(node, "target_delay_max", ps(td.max)); }
+    setKid(node, "is_time_domain", yn(!!st.isTimeDomain));
+  }
   return node;
 }
 /** genStartEdit / genUpdateEdit / genFinishEdit with an edited node, in one commit labelled "Edit Tuning Pattern". */

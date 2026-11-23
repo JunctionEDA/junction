@@ -9,11 +9,12 @@
 import type { Plain, ProjectEdit } from "../../canvas/project-file";
 import type { BoardHeader, DrillProfile, LayerRow } from "../../canvas/board-setup";
 import { BS } from "./canvas";
-import { E } from "../state";
 import { prototypeZoneFill, setPrototypeZoneFill } from "./zonefill";
 import { popupMenu } from "../../dialogs/dom";
 import { zstdDecompress } from "../../dialogs/zstd";
 import { TuningProfileCalculator, defaultStackup, newTrackRowLayers, stackupFromLayers, type StackupItem, type TrackRow } from "./tuning-profile-calc";
+import { embeddedFilesPanel } from "./fp-3d-panel";
+import { decodeEmbedded, embeddedFileNames, embeddedFileNode, fileData } from "../../library/embedded-file";
 import { box, checkField, form, grid, gridButtons, h, iconButton, bitmapButton, staticBitmap, lenField, note, numField, openDialog, put, selectField, spinField, textEntryBox, textField, unitLabel, unitName, fmtLen, errorMessage, type CellValue, type Field } from "./ui";
 
 type Obj = { [key: string]: Plain };
@@ -36,6 +37,12 @@ export interface SetupCtx {
   setZoneDefaults(text: string | null): void;
   /** the full text of the board file, for the embedded files */
   boardText: string;
+  /** the board's (embedded_files …) and Embed fonts as they stand now (the open board's), over boardText's */
+  embedded?: { files: SNode | null; fonts: boolean };
+  /** BOARD::GetFonts() as the font files to embed */
+  boardFonts?(): Promise<{ name: string; bytes: Uint8Array }[]>;
+  /** the Embedded Files page's edit, read when OK applies */
+  setEmbeddedFiles?(get: () => BoardEmbeddedEdit | null): void;
   /** PANEL_ASSIGN_COMPONENT_CLASSES' m_selectionRefs: the references of the footprints selected on the board, sorted */
   selectionRefs(): string[];
   /**
@@ -438,16 +445,10 @@ export function componentClassesPage(ctx: SetupCtx) {
 }
 
 // ------------------------------------------------------------ Board Data > Embedded Files
-/** The (embedded_files (file (name ..) (data ..))) entries of the board file, by name, with their base64 data. */
-function boardEmbeddedFiles(text: string): { name: string; data: string }[] {
-  const at = text.indexOf("(embedded_files"); if (at < 0) return [];
-  let node: SNode | null = null;
-  try { node = (KiCadCanvas.parse(text.slice(at, sexprEnd(text, at))) as SNode) || null; } catch { node = null; }
-  if (!node) return [];
-  return (KiCadCanvas.kids(node, "file") as SNode[]).map((f) => {
-    const d = KiCadCanvas.kid(f, "data");
-    return { name: String((KiCadCanvas.kid(f, "name") || [])[1] ?? ""), data: d ? d.slice(1).map((x) => String(x)).join("").replace(/[|\s]/g, "") : "" };
-  }).filter((f) => f.name);
+/** The board file's (embedded_files …) node, or null. */
+function boardEmbeddedNode(text: string): SNode | null {
+  const at = text.indexOf("(embedded_files"); if (at < 0) return null;
+  try { return (KiCadCanvas.parse(text.slice(at, sexprEnd(text, at))) as SNode) || null; } catch { return null; }
 }
 /** End (exclusive) of the balanced list that starts at i. */
 function sexprEnd(s: string, i: number): number {
@@ -459,32 +460,25 @@ function sexprEnd(s: string, i: number): number {
   }
   return s.length;
 }
-/** EMBEDDED_FILES::DecompressAndDecode: base64, then the zstd frame. */
-function embeddedBytes(b64: string): Uint8Array | null {
-  try { const bin = atob(b64); const raw = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i); return zstdDecompress(raw); } catch { return null; }
-}
+/** What OK writes into the board's embedded files (PANEL_EMBEDDED_FILES::TransferDataFromWindow). */
+export interface BoardEmbeddedEdit { put: string[]; remove: string[]; fonts?: boolean }
+/**
+ * Board Data > Embedded Files: PANEL_EMBEDDED_FILES over the board's own files (the shared panel, fp-3d-panel.ts): add
+ * (with the Embedded File Conflict question), remove, Embed fonts (onFontEmbedClick over BOARD::GetFonts()), Export... and
+ * the grid's Copy Embedded Reference.  OK reads the edit through ctx.setEmbeddedFiles.
+ */
 export function embeddedFilesPage(ctx: SetupCtx) {
   return (el: HTMLElement): void => {
-    const all = boardEmbeddedFiles(ctx.boardText || "");
-    const files: Record<string, CellValue>[] = all.map((f) => ({ name: f.name, ref: "kicad-embed://" + f.name }));
-    const fonts = /\(embedded_fonts\s+yes\)/.test(ctx.boardText || "");
-    const g = grid([{ label: "Filename", key: "name", type: "ro" }, { label: "Embedded Reference", key: "ref", type: "ro" }], files, { height: "340px" });
-    const embed = checkField(fonts, "Embed fonts", { ro: true, key: "embedFonts", tip: "Store a copy of all fonts used" });
-    // PANEL_EMBEDDED_FILES::onExportFiles: the selected file, or every file, saved where the person chooses (a download here)
-    const exportFiles = (): void => {
-      const i = g.selected(), pick = i >= 0 && files[i] ? [String(files[i].name)] : files.map((f) => String(f.name));
-      for (const n of pick) {
-        const f = all.find((x) => x.name === n), bytes = f ? embeddedBytes(f.data) : null;
-        if (!bytes) { errorMessage(`Could not read the embedded file '${n}'.`); continue; }
-        const a = h("a", { href: URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/octet-stream" })), download: n }) as HTMLAnchorElement;
-        document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-      }
-    };
-    // m_browse_button "Add embedded file" draws BITMAPS::small_folder, m_delete_button small_trash
-    const add = bitmapButton("small_folder", "Add embedded file", () => undefined, { disabled: true, cls: "pd-iconbtn" }), del = iconButton("trash", "Remove embedded file", () => undefined, true);
-    const exp = h("button", { type: "button", class: "btn", "data-k": "efExport", disabled: !files.length, onclick: exportFiles }, "Export...");
-    put(el, g.el, h("div", { class: "pd-gridbar" }, add, del, h("span", { style: "flex:1" }), embed.el, exp), note("Files are embedded in the board file; adding and removing them is done in the desktop application."));
-    void E;
+    const st = ctx.embedded || { files: boardEmbeddedNode(ctx.boardText || ""), fonts: /\(embedded_fonts\s+yes\)/.test(ctx.boardText || "") };
+    const ro = ctx.roBoard;
+    const embed = checkField(st.fonts, "Embed fonts", { ro, key: "embedFonts", tip: "Store a copy of all fonts used" });
+    const panel = embeddedFilesPanel({ names: embeddedFileNames(st.files), ro, bytes: (n) => decodeEmbedded(fileData(embeddedFileNode(st.files, n))), embedFonts: embed, fonts: ctx.boardFonts, height: "340px" });
+    put(el, panel.el);
+    if (ctx.setEmbeddedFiles) ctx.setEmbeddedFiles(() => {
+      const putFiles = panel.added().map((a) => a.sexpr), remove = panel.removed(), fonts = embed.get();
+      if (!putFiles.length && !remove.length && fonts === st.fonts) return null;
+      return fonts === st.fonts ? { put: putFiles, remove } : { put: putFiles, remove, fonts };
+    });
   };
 }
 

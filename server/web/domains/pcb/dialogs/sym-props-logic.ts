@@ -109,11 +109,8 @@ export function syncUnit(src: SNode, dst: SNode, what: SyncWhat = SYNC_ALL, inst
   if (what.exclBoard) setFlagTo(out, "on_board", flagOf(src, "on_board", true));
   if (what.exclPos && (kid(src, "in_pos_files") || kid(out, "in_pos_files"))) setFlagTo(out, "in_pos_files", flagOf(src, "in_pos_files", true));
   if (what.dnp) setFlagTo(out, "dnp", flagOf(src, "dnp", false));
-  if (what.pinMap) {
-    const s = kid(src, "pin_map_override");
-    drop(out, "pin_map_override");
-    if (s) { const at = out.findIndex((c, j) => j > 0 && isList(c) && c[0] === "dnp"); if (at > 0) out.splice(at + 1, 0, clone(s)); else put(out, "pin_map_override", s.slice(1), ["passthrough", "locked", "fields_autoplaced", "uuid", "property"]); }
-  }
+  // SetPinMapOverride( GetPinMapOverride( &aSourceSheet ), &sheet ): the source's override with its delegation resolved
+  if (what.pinMap) VM.writeSymbolPinMapOverride(out, inst && inst.srcPinMap ? inst.srcPinMap : VM.symbolPinMapOverride(src));
   if (what.pins) {
     const altOf = new Map<string, string>(); for (const p of kids(src, "pin")) { const a = kid(p, "alternate"); altOf.set(str(p[1]), a ? str(a[1]) : ""); }
     for (const p of kids(out, "pin")) {
@@ -125,7 +122,9 @@ export function syncUnit(src: SNode, dst: SNode, what: SyncWhat = SYNC_ALL, inst
   return JSON.stringify(out) === JSON.stringify(dst) ? null : out;
 }
 /** The sheet paths a variant-aware sync reads from (`srcPath`) and writes to (`dstPaths`), and the variant. */
-export interface SyncInstance { variant: string; srcPath: string | null; dstPaths: (string | null)[]; ver?: number | null }
+export interface SyncInstance { variant: string; srcPath: string | null; dstPaths: (string | null)[]; ver?: number | null;
+  /** the source's GetPinMapOverride( &aSourceSheet, aVariantName ), a delegation to unit 1 already resolved */
+  srcPinMap?: VM.PinMapOverrideState }
 /**
  * SyncOtherUnits with a variant name: every copy goes through the variant setters for the other unit's sheet path
  * (SetFieldText / SetText / SetExcludedFromBOM / SetExcludedFromBoard / SetExcludedFromPosFiles / SetDNP with
@@ -160,6 +159,10 @@ function syncUnitVariant(src: SNode, dst: SNode, what: SyncWhat, inst: SyncInsta
   if (what.exclPos) fl.excludedFromPosFiles = flags.excludedFromPosFiles;
   if (what.dnp) fl.dnp = flags.dnp;
   for (const p of inst.dstPaths) out = VM.setSymbolVariant(out, inst.variant, { flags: fl, fields }, p, inst.ver);
+  if (what.pinMap) {
+    const o = inst.srcPinMap || VM.symbolPinMapOverride(src, inst.variant, inst.srcPath);
+    for (const p of inst.dstPaths) out = VM.setSymbolPinMapOverride(out, o, inst.variant, p, inst.ver);
+  }
   if (what.pins) {
     const altOf = new Map<string, string>(); for (const p of kids(src, "pin")) { const a = kid(p, "alternate"); altOf.set(str(p[1]), a ? str(a[1]) : ""); }
     for (const p of kids(out, "pin")) {

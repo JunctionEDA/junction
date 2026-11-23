@@ -76,3 +76,64 @@ export function idfFieldNames(doc: KDoc | null): string[] {
   if (doc) for (const it of doc.items.values()) if (it.kind === "footprint") for (const p of KiCadCanvas.kids(it.node, "property")) { const n = KiCadCanvas.str(p[1] as SNode); if (n && n !== "Reference") names.add(n); }
   return [...names].sort();
 }
+
+/** DIALOG_EXPORT_STEP's formats in its choice order: the label, the kicad-cli command (c_formatCommand) and the extension. */
+export const STEP_FORMATS: { label: string; cmd: string; ext: string }[] = [
+  { label: "STEP", cmd: "step", ext: "step" }, { label: "GLB (Binary glTF)", cmd: "glb", ext: "glb" }, { label: "XAO", cmd: "xao", ext: "xao" },
+  { label: "BREP (OCCT)", cmd: "brep", ext: "brep" }, { label: "PLY (ASCII)", cmd: "ply", ext: "ply" }, { label: "STL", cmd: "stl", ext: "stl" },
+  { label: "STPZ", cmd: "stpz", ext: "stpz" }, { label: "U3D", cmd: "u3d", ext: "u3d" }, { label: "PDF", cmd: "3dpdf", ext: "pdf" },
+];
+/** c_formatExtToChoice: the format a file name's extension picks, -1 for none. */
+export function stepFormatOfName(name: string): number {
+  const m = /\.([^./\\]+)$/.exec(name); if (!m) return -1;
+  const ext = m[1].toLowerCase();
+  if (ext === "stp") return 0;
+  return STEP_FORMATS.findIndex((f) => f.ext === ext);
+}
+/** OnFmtChoiceOptionChanged: the file name with the format's extension (added, or put in place of the last one). */
+export function withStepExtension(path: string, format: number): string {
+  const ext = STEP_FORMATS[format] ? STEP_FORMATS[format].ext : "step";
+  const sep = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")), dot = path.lastIndexOf(".");
+  return dot === -1 || dot < sep ? `${path}.${ext}` : `${path.slice(0, dot)}.${ext}`;
+}
+/** The dialog's choices (DIALOG_EXPORT_STEP's controls, kept per dialog as DIALOG_SHIM keeps them). */
+export interface StepOptions {
+  format: number; variant: string; exportBody: boolean; cutViasInBody: boolean; silkscreen: boolean; soldermask: boolean;
+  components: boolean; componentMode: "all" | "selected" | "filter"; componentFilter: string;
+  tracks: boolean; pads: boolean; zones: boolean; innerCopper: boolean; fuseShapes: boolean; fillAllVias: boolean; netFilter: string;
+  origin: "drill" | "grid" | "user" | "center"; userX: number; userY: number;
+  removeDnp: boolean; removeUnspecified: boolean; substModels: boolean; optimizeStep: boolean; tolerance: number;
+}
+/** DIALOG_EXPORT_STEP_BASE's initial values. */
+export const STEP_DEFAULTS: StepOptions = { format: 0, variant: "", exportBody: true, cutViasInBody: false, silkscreen: false, soldermask: false,
+  components: true, componentMode: "all", componentFilter: "", tracks: false, pads: false, zones: false, innerCopper: false, fuseShapes: false, fillAllVias: false, netFilter: "",
+  origin: "drill", userX: 0, userY: 0, removeDnp: false, removeUnspecified: false, substModels: true, optimizeStep: true, tolerance: 0 };
+/** The chaining tolerance choices (m_choiceTolerance) in mm. */
+export const STEP_TOLERANCES = [0.001, 0.01, 0.1];
+/**
+ * onExportButton's kicad-cli command line as the job's options (server/src/kicad_jobs.rs `3d`): the board center is
+ * passed as a user origin, as the dialog does; `selected` is the references of the selected footprints (getComponentFilter).
+ */
+export function stepJobBody(o: StepOptions, boardCenter: [number, number], selected: string[]): Record<string, unknown> {
+  const filter = !o.components ? "" : o.componentMode === "selected" ? selected.join(",") : o.componentMode === "filter" ? o.componentFilter : "";
+  const user = o.origin === "user" ? [o.userX, o.userY] : o.origin === "center" ? boardCenter : null;
+  return { job: "3d", format: (STEP_FORMATS[o.format] || STEP_FORMATS[0]).cmd, noUnspecified: o.removeUnspecified, noDnp: o.removeDnp, substModels: o.substModels,
+    noOptimizeStep: !o.optimizeStep, noBoardBody: !o.exportBody, noComponents: !o.components, includeTracks: o.tracks, includePads: o.pads, includeZones: o.zones,
+    includeInnerCopper: o.innerCopper, includeSilkscreen: o.silkscreen, includeSoldermask: o.soldermask, fuseShapes: o.fuseShapes, cutViasInBody: o.cutViasInBody,
+    fillAllVias: o.fillAllVias, variant: o.variant, netFilter: o.netFilter, componentFilter: o.components && o.componentMode !== "all" ? filter : "",
+    origin: user ? "user" : o.origin, userOriginX: user ? user[0] : 0, userOriginY: user ? user[1] : 0, minDistance: STEP_TOLERANCES[o.tolerance] ?? 0.01 };
+}
+/** The first five models with a non-unity scale (the dialog's "Scaled models detected" warning lists them). */
+export function scaledModels(doc: KDoc | null): string[] {
+  const out: string[] = []; if (!doc) return out;
+  const K = (globalThis as unknown as { KiCadCanvas: KiCadCanvasApi }).KiCadCanvas;
+  for (const it of doc.items.values()) {
+    if (it.kind !== "footprint") continue;
+    for (const m of K.kids(it.node, "model")) {
+      const sc = K.kid(m, "scale"), xyz = sc ? K.kid(sc, "xyz") : null;
+      if (xyz && (Number(xyz[1]) !== 1 || Number(xyz[2]) !== 1 || Number(xyz[3]) !== 1)) out.push(String(m[1]));
+    }
+    if (out.length >= 5) break;
+  }
+  return out;
+}

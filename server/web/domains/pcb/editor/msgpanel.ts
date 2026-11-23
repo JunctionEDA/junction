@@ -21,9 +21,12 @@ type RouteState = { net?: { name?: string }; netKey?: string; width?: number; la
 
 /**
  * Sub-item panels registered by other modules (tablecells.ts: a single selected table cell's
- * PCB_TABLECELL / SCH_TABLECELL::GetMsgPanelInfo).  The first hook that answers wins; null passes.
+ * PCB_TABLECELL / SCH_TABLECELL::GetMsgPanelInfo, panels/constraints.ts: a badge-selected constraint).  The first hook
+ * that answers wins; null passes.  The list has no initialiser: a module that registers as it loads may be reached
+ * through an import cycle that runs it before this module's own body (panels/constraints.ts via tools.ts).
  */
-export const msgHooks: Array<(units: string) => MsgItem[] | null> = [];
+let msgHookList: Array<(units: string) => MsgItem[] | null> | undefined;
+export function addMsgHook(h: (units: string) => MsgItem[] | null): void { (msgHookList || (msgHookList = [])).push(h); }
 
 let lastKey = "", settingsSrc: unknown = undefined, settings: unknown = null;
 
@@ -31,7 +34,7 @@ let lastKey = "", settingsSrc: unknown = undefined, settings: unknown = null;
 export function updateMsgPanel(): void {
   const doc = E.kdoc as KDoc | null;
   const P = (window as unknown as { PcbTools?: PcbApi }).PcbTools;
-  if (doc) for (const h of msgHooks) {
+  if (doc) for (const h of msgHookList || []) {
     let hi: MsgItem[] | null = null; try { hi = h(E.units); } catch (e) { console.warn(e); }
     if (!hi) continue;
     const k = "hook§" + JSON.stringify(hi); if (k !== lastKey) { lastKey = k; store.set({ msgPanel: { items: hi } }); }

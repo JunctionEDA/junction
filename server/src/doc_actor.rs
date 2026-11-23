@@ -788,6 +788,11 @@ async fn catch_up(
         .to_string();
         let author = r.client_id.clone();
         broadcast_except(clients, presence_dirty, doc_id, &author, &msg);
+        // An op_multi was written to the table, not through this actor: its author here hears of it as the ack,
+        // in its place in the stream, so their count of the document's ops stays whole.
+        if r.client_op_id.starts_with(persist::MULTI_OP_PREFIX) {
+            ack(clients, &author, doc_id, &r.client_op_id, r.seq);
+        }
     }
 }
 

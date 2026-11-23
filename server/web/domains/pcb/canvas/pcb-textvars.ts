@@ -9,6 +9,7 @@ import { unescapeText } from "./text";
 import { footprintFlagsForVariant, footprintVariant, isDefaultVariant } from "./variant-model";
 import { stringFromValue } from "../../../shared/units";
 import type { Doc } from "./types";
+import { drillTextVar } from "./drill-model";
 
 /** The host's answers the board file cannot give: a net's effective net class (the project's net settings). */
 export const pcbVars: { netClass: ((net: string) => string | null) | null } = { netClass: null };
@@ -76,6 +77,7 @@ export function boardResolve(doc: Board, token: string, depth: number, variant?:
   if (token === "VARIANT") return vname;
   if (token === "VARIANT_DESC") return vname === currentVariant(doc) ? str((doc as { variantDesc?: string }).variantDesc) : "";
   if (token === "PROJECTNAME" && (doc as { projectName?: string }).projectName !== undefined) return str((doc as { projectName?: string }).projectName);
+  { const d = drillTextVar(doc as Doc, token); if (d !== null) return d; }   // ${DRILL_OPERATIONS} ${DRILL_SITES} ${DRILL_GROUPS}
   // TITLE_BLOCK::TextVarResolver, then PROJECT::TextVarResolver (the drawing sheet's own tokens are not the board's)
   const project = (doc && (doc as { projectVars?: Record<string, unknown> | null }).projectVars) || null;
   if (WS_TOKENS.has(token)) { const v = project ? project[token] : undefined; if (v !== undefined && v !== null) return String(v); }

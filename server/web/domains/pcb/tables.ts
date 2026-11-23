@@ -157,7 +157,8 @@ export const FPEDIT_ONLY = new Set(["newLibrary", "addLibrary", "newFootprint", 
 export const FPEDIT_BLOCKED = new Set(["getAndPlace", "routeSingleTrack", "routeDiffPair", "tuneSingleTrack", "tuneDiffPair", "tuneSkew", "drawVia", "placeViaStack", "makeViaStack", "routerSpreadTracks", "drawZone", "drawCopperThievingZone", "drawViaStitchArea", "drillOrigin", "placeFootprint",
   "runDRC", "zoneFillAll", "zoneUnfillAll", "zoneFill", "zoneUnfill", "showRatsnest", "editFpInFpEditor", "editLibFpInFpEditor_board", "updateFootprint", "changeFootprint", "boardSetup", "selectLayerPair",
   "trackWidthInc", "trackWidthDec", "viaSizeInc", "viaSizeDec", "updatePcbFromSchematic", "showEeschema", "highlightNet", "clearHighlight", "toggleNetHighlight", "toggleLastNetHighlight",
-  "microwaveCreateGap", "microwaveCreateStub", "microwaveCreateStubArc", "microwaveCreateFunctionShape", "microwaveCreateLine"]);
+  "microwaveCreateGap", "microwaveCreateStub", "microwaveCreateStubArc", "microwaveCreateFunctionShape", "microwaveCreateLine",
+  "placeCharacteristics", "placeStackup", "placeDrillChart", "placeDrillMap", "showDrillGroups"]);
 
 /** The icon KiCad gives a sub-menu (ACTION_MENU::SetIcon in the menubars and the tools' context menus), by its title. */
 export const SUBMENU_ICONS: Record<string, string> = { Import: "import", Export: "export_file", "Fabrication Outputs": "fabrication", "Set Language": "language", "Drawing Mode": "add_zone", "Contrast Mode": "contrast_mode",
@@ -232,6 +233,8 @@ export const MODULE_DUPLICATES: Record<Editor, string[]> = {
     "drag45Degree", "dragFreeAngle",   // D and G: EDIT_TOOL's context menu (edit_tool.cpp:903-906), in no menu bar
     // Line Modes live on the left toolbar's radio group and Shift+Space; Ctrl++ / Ctrl+- (incWidth / decWidth) are the drawing tools' context menu
     "lineModeFree", "lineModeNext", "incWidth", "decWidth",
+    // CONSTRAINT_EDIT_TOOL: Automatic Constraints is the left toolbar's toggle; Geometric Constraints... the Constraints context sub-menu (View > Panels holds the pane)
+    "toggleAutoConstraints", "manageConstraints", "showConstraints", "hideConstraints",
     // the arc tool's modes: the Arc toolbar group and DRAWING_TOOL's context menu while Draw Arcs runs; / and Alt+/ act on the arc in progress
     "drawArcCenter", "drawArcStartEndMid", "drawArcStartEndCenter", "drawArcTangent", "drawArcStartDirEnd", "arcPosture", "cycleArcDrawMode",
     // the arc editing modes: the Arc toolbar group's own menu, Ctrl+Space and the selection menu of one arc
@@ -406,7 +409,7 @@ export const EDITOR_ONLY: Record<string, Editor> = { selectOnPCB: "sch", selectO
   layerNext: "pcb", layerPrev: "pcb", layerTop: "pcb", layerBottom: "pcb", highContrastModeCycle: "pcb", highContrastMode: "pcb", showPcbNew: "sch", showEeschema: "pcb",
   saveSheetAsDesignBlock: "sch", updateDesignBlockFromSheet: "sch", saveBoardAsDesignBlock: "pcb", updateDesignBlockFromBoard: "pcb",
   showSymbolEditor: "sch", editPageNumber: "sch", autoplaceAllSheetPins: "sch", findNetInInspector: "sch", showBusSyntaxHelp: "sch", assignNetclass: "sch", editWithLibEdit: "sch", editLibSymbolWithLibEdit: "sch",
-  exportSymbolsToLibrary: "sch", exportSpecctraDSN: "pcb", exportGenCAD: "pcb", exportIDF: "pcb" };
+  exportSymbolsToLibrary: "sch", exportSpecctraDSN: "pcb", exportGenCAD: "pcb", exportIDF: "pcb", showDrillGroups: "pcb" };
 for (const id of INNER_LAYER_ACTIONS) EDITOR_ONLY[id] = "pcb";
 /** The menus that take a module action no entry above places (kept reachable in a trailing "Other Commands" sub-menu). */
 export const MODULE_ACTION_MENUS = ["Edit", "Tools", "Inspect"];
@@ -440,8 +443,8 @@ export const LINKS: Record<string, string> = {
 };
 
 /** Docked pane ids and the KiCad "show …" action that toggles each. */
-export const PANE_ACTION: Record<string, string> = { libtree: "showLibraryTree", props: "showProperties", hier: "showHierarchy", filter: "showSelectionFilter", history: "showGitCommitPane", peers: "showPeers", comments: "showComments", appearance: "showLayersManager", search: "showSearch", netnav: "showNetNavigator", netinsp: "showNetInspector", designblocks: "showDesignBlockPanel" };
-export const PANE_TITLES: Record<string, string> = { libtree: "Libraries", props: "Properties", hier: "Schematic Hierarchy", filter: "Selection Filter", history: "History", peers: "Collaborators", comments: "Comments", chat: "Chat", appearance: "Appearance", search: "Search", netnav: "Net Navigator", netinsp: "Net Inspector", designblocks: "Design Blocks" };
+export const PANE_ACTION: Record<string, string> = { libtree: "showLibraryTree", props: "showProperties", hier: "showHierarchy", filter: "showSelectionFilter", history: "showGitCommitPane", peers: "showPeers", comments: "showComments", appearance: "showLayersManager", search: "showSearch", netnav: "showNetNavigator", netinsp: "showNetInspector", designblocks: "showDesignBlockPanel", constraints: "showConstraintsPanel" };
+export const PANE_TITLES: Record<string, string> = { libtree: "Libraries", props: "Properties", hier: "Schematic Hierarchy", filter: "Selection Filter", history: "History", peers: "Collaborators", comments: "Comments", chat: "Chat", appearance: "Appearance", search: "Search", netnav: "Net Navigator", netinsp: "Net Inspector", designblocks: "Design Blocks", constraints: "Geometric Constraints" };
 /**
  * Dock layout per editor, in KiCad's AUI order.  eeschema's left column (Layer 3) stacks Net Navigator (Position 0),
  * Schematic Hierarchy (1), Properties (2) and the Selection Filter (4) (eeschema_settings.cpp:64-125,
@@ -452,10 +455,10 @@ export const PANE_TITLES: Record<string, string> = { libtree: "Libraries", props
  */
 export const DOCKS: Record<Editor, { left: string[]; right: string[]; bottom?: string[] }> = {
   sch: { left: ["netnav", "hier", "props", "filter", "peers", "comments", "appearance"], right: ["designblocks", "history", "chat"], bottom: ["search"] },
-  pcb: { left: ["props", "peers", "comments"], right: ["appearance", "filter", "designblocks", "history", "chat"], bottom: ["netinsp", "search"] },
+  pcb: { left: ["props", "peers", "comments"], right: ["appearance", "filter", "designblocks", "history", "chat"], bottom: ["netinsp", "search", "constraints"] },
 };
 /** Panes hidden until the user opens them (per editor). */
-export const PANE_DEFAULT_HIDDEN: Record<Editor, string[]> = { sch: ["peers", "comments", "chat", "appearance", "search", "netnav", "history", "designblocks"], pcb: ["peers", "comments", "chat", "search", "history", "netinsp", "designblocks"] };
+export const PANE_DEFAULT_HIDDEN: Record<Editor, string[]> = { sch: ["peers", "comments", "chat", "appearance", "search", "netnav", "history", "designblocks"], pcb: ["peers", "comments", "chat", "search", "history", "netinsp", "designblocks", "constraints"] };
 
 export const FILTERS: Record<Editor, [string, string][]> = {
   sch: [["symbols", "Symbols"], ["pins", "Pins"], ["wires", "Wires"], ["labels", "Labels"], ["graphics", "Graphics"], ["images", "Images"], ["text", "Text"], ["other", "Other items"], ["ruleAreas", "Rule Areas"]],

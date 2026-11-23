@@ -11,7 +11,7 @@
 // Actions are named as in the C++ ("SCH_ACTIONS::rotateCCW"); the label, icon and hotkey come from
 // the generated spec (server/scripts/gen_kicad_context.py scans this file for the names).
 // Entries that only exist for features the web editor has no notion of at all (design blocks,
-// variants, the symbol / footprint editor frames) are left out.
+// the symbol / footprint editor frames) are left out.
 import type { Editor } from "../../../shared/store";
 
 /** What a condition can ask about: the selection and the state of the active tool. */
@@ -48,6 +48,9 @@ export interface MenuCtx {
   pinAlts?: boolean;
   /** the selection's (or the carried) symbol's library has several units / body styles (SCH_CONDITIONS::SingleMultiUnitSymbol / SingleMultiBodyStyleSymbol) */
   multiUnitSymbol?: boolean; multiBodyStyleSymbol?: boolean;
+  /** the schematic has a current design variant (SCH_EDIT_TOOL's variantActiveCondition) and the one selected symbol's
+   *  variant record holds a symbol override (symbolHasVariantSymbol) */
+  variantActive?: boolean; hasVariantSymbol?: boolean;
   /** SCH_SELECTION_TOOL's multipleUnitsSelection (GetSameSymbolMultiUnitSelection) and allowPinSwaps (input.allow_unconstrained_pin_swaps) */
   unitsSelection?: boolean; pinSwaps?: boolean;
   belowRoot: boolean;
@@ -58,6 +61,10 @@ export interface MenuCtx {
   zoneCanRaise?: boolean; zoneCanLower?: boolean;
   /** VIA_STITCH_TOOL: a stitch's via picked (its child menu) / a stitch with exclusions picked */
   stitchExcludable?: boolean; stitchClearable?: boolean;
+  /** board: a geometric constraint references a selected item (CONSTRAINT_EDIT_TOOL's selectionConstrained) */
+  constrained?: boolean;
+  /** board: the constraint overlay shows every constraint (OVERLAY_MODE::ALWAYS) rather than the hovered shape's */
+  constraintsAlways?: boolean;
   /** board: the selection is one group (groupEnterCondition) / a group is entered (inGroupCondition) */
   groupSelected?: boolean; inGroup?: boolean;
   /** board: MULTICHANNEL_CONTEXT_MENU's offChannel (no selected group is a repeated channel) and the number of linked
@@ -283,8 +290,9 @@ function schSelectionMenu(): CondMenu {
   m.item("SCH_ACTIONS::swap", and(onlyTypes(SCH_SWAPPABLE), moreThan(1)), 200).item("SCH_ACTIONS::properties", schProperties, 200);
   m.sub(schEditFieldsMenu(), schSingleSymbol, 200).item("SCH_ACTIONS::autoplaceFields", hasTypes(SCH_FIELD_OWNERS), 200);
   m.item("SCH_ACTIONS::editWithLibEdit", and(schSingleSymbol, idle), 200);
-  m.item("SCH_ACTIONS::changeSymbol", schSingleSymbol, 200).item("SCH_ACTIONS::updateSymbol", schSingleSymbol, 200);
-  m.item("SCH_ACTIONS::changeSymbols", schMultipleSymbols, 200).item("SCH_ACTIONS::updateSymbols", schMultipleSymbols, 200);
+  m.item("SCH_ACTIONS::changeSymbol", and(schSingleSymbol, (c) => !c.variantActive), 200).item("SCH_ACTIONS::updateSymbol", schSingleSymbol, 200);
+  m.item("SCH_ACTIONS::changeSymbols", and(schMultipleSymbols, (c) => !c.variantActive), 200).item("SCH_ACTIONS::updateSymbols", schMultipleSymbols, 200);
+  m.item("SCH_ACTIONS::setVariantSymbol", and(schSingleSymbol, (c) => !!c.variantActive), 200).item("SCH_ACTIONS::clearVariantSymbol", (c) => !!c.hasVariantSymbol, 200);
   m.sub(schConvertMenu(), onlyTypes(SCH_ALL_TEXT), 200);
   m.sub(schLockMenu(), notEmpty, 250);
   m.sep(300).item("ACTIONS::cut", idleSelection, 300).item("ACTIONS::copy", idleSelection, 300).item("ACTIONS::copyAsText", and(onlyTypes(SCH_CAN_COPY_TEXT), idle), 300);
@@ -431,8 +439,21 @@ const pcbShapeModMenu = () => new CondMenu("Shape Modification")
   .sep(shapeBoolean).item("PCB_ACTIONS::mergePolygons", shapeBoolean).item("PCB_ACTIONS::subtractPolygons", shapeBoolean).item("PCB_ACTIONS::intersectPolygons", shapeBoolean);
 /** shapeModificationCondition: the sub-menu shows when any of its items would. */
 const shapeModVisible = or(always, hasTypes(SIMPLIFY_TYPES), onlyTypes(FILLET_TYPES), and(count(1), (c) => !!c.canAddCorner || !!c.canRemoveCorner || !!c.canChamferCorner), (c) => !!c.hasCorner || !!c.hasMidpoint, (c) => !!c.editableCorners, shapeBoolean);
-/** CONSTRAINT_EDIT_TOOL's menu. */
-const pcbConstraintMenu = () => new CondMenu("Constraints", "measurement").item("PCB_ACTIONS::manageConstraints");
+/** CONSTRAINT_EDIT_TOOL::Init's menu: the relation types gated on the selection, the point families always, then removal and the list. */
+const C_SEG = set("gr_line"), C_RADIAL = set("gr_circle", "gr_arc"), C_CENTERED = set("gr_circle", "gr_arc", "gr_ellipse", "gr_ellipse_arc");
+const twoSegments = and(count(2), onlyTypes(C_SEG)), oneSegment = and(count(1), onlyTypes(C_SEG));
+const oneRadial = and(count(1), onlyTypes(C_RADIAL)), oneArc = and(count(1), onlyTypes(set("gr_arc"))), twoRadial = and(count(2), onlyTypes(C_RADIAL)), twoCentered = and(count(2), onlyTypes(C_CENTERED));
+const tangentPair: Cond = (c) => c.kinds.length === 2 && ((c.kinds[0] === "gr_line" && C_CENTERED.has(c.kinds[1])) || (c.kinds[1] === "gr_line" && C_CENTERED.has(c.kinds[0])) || c.kinds.every((k) => C_RADIAL.has(k)));
+const pcbConstraintMenu = () => new CondMenu("Constraints", "measurement")
+  .item("PCB_ACTIONS::addConstraintParallel", twoSegments).item("PCB_ACTIONS::addConstraintPerpendicular", twoSegments).item("PCB_ACTIONS::addConstraintEqualLength", twoSegments)
+  .item("PCB_ACTIONS::addConstraintCollinear", twoSegments).item("PCB_ACTIONS::addConstraintAngular", twoSegments).item("PCB_ACTIONS::addConstraintTangent", tangentPair)
+  .item("PCB_ACTIONS::addConstraintHorizontal", oneSegment).item("PCB_ACTIONS::addConstraintVertical", oneSegment).item("PCB_ACTIONS::addConstraintFixedLength", oneSegment)
+  .item("PCB_ACTIONS::addConstraintConcentric", twoCentered).item("PCB_ACTIONS::addConstraintEqualRadius", twoRadial).item("PCB_ACTIONS::addConstraintFixedRadius", oneRadial)
+  .item("PCB_ACTIONS::addConstraintArcAngle", oneArc).sep()
+  .item("PCB_ACTIONS::addConstraintCoincident", always).item("PCB_ACTIONS::addConstraintPointOnLine", always).item("PCB_ACTIONS::addConstraintMidpoint", always)
+  .item("PCB_ACTIONS::addConstraintSymmetric", always).item("PCB_ACTIONS::addConstraintFixedPosition", always).sep()
+  .item("PCB_ACTIONS::removeConstraints", (c) => !!c.constrained).item("PCB_ACTIONS::showConstraints", (c) => !c.constraintsAlways)
+  .item("PCB_ACTIONS::hideConstraints", (c) => !!c.constraintsAlways).item("PCB_ACTIONS::manageConstraints", always);
 
 /** MULTICHANNEL_CONTEXT_MENU (multichannel_tool.cpp). */
 const pcbMultichannelMenu = () => new CondMenu("Multi-Channel", "mode_module")

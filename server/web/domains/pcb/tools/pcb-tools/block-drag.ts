@@ -21,6 +21,10 @@ import { shapeBBox, shapeGap, viaLayers } from "./distances";
 import { dragChanges } from "./drag-optimize";
 import { assembleArcLine, dragCorner45, dragSegment45, elemsLine, peq, restoreArcTags, rp, trackEnds } from "./dragger";
 import { boardOutline, chainLoops, edgeShapes, netClearance, segCross } from "./drc";
+import { LiveConstraintEdit, boardHasConstraints, memberForEditPoint } from "./constraint-tool";
+import { BoardConstraintBlockSession, constraintCoMembers } from "./constraint-adapter";
+import { itemAnchors, member as cMember } from "./pcb-constraint";
+import type { CMember } from "./pcb-constraint";
 import { viaNow } from "./edit-commands";
 import { snapCursor } from "./grid-helper";
 import { groupMembers, isLocked, selectionIds } from "./groups";
@@ -435,6 +439,8 @@ export interface BlockDrag {
   grab: Pt; applied: Pt; ctrl: boolean;
   router: BRouter | null;
   validation: BlockValidation;
+  /** the constraint solve of the block (m_constraintAnchors, m_constraintTranslated, m_constraintSession), said once when it refuses a frame */
+  constraints: { live: LiveConstraintEdit; anchors: [string, CMember][]; translated: Set<string> } | null; constraintWarned: boolean;
 }
 const units = () => String(appGlobal(() => editorState()!.units as string, "mm") || "mm");
 const describe = (ctx: PcbCtx, id: string) => String(itemDescription(ctx.doc, id, units()) || (ctx.doc.items.get(id) || { kind: "Item" }).kind);
@@ -514,16 +520,37 @@ export function beginBlockDrag(ctx: PcbCtx, origin: Pt, pressInFlight: boolean):
   for (const d of deps) keep(d.id);
   if (router) { for (const id of router.rigidVias) keep(id); for (const id of router.bridges) keep(id); }
   const moving = new Set<string>(base.keys());
-  const validation = captureBaseline(doc, moving);
-  S.blockDrag = { keyboard: !pressInFlight, origins, targets, rigid, deps, base, moving, grab: grab.h.p.slice() as Pt, applied: [0, 0], ctrl: false, router, validation } as BlockDrag;
+  // Everything the gesture writes is fixed for the solver: a picked handle ends where the user put it and a carried item
+  // at its own offset, while the rest of their constraint clusters is free to move
+  let constraints: BlockDrag["constraints"] = null; const validationScope = new Set(moving);
+  if (boardHasConstraints(ctx)) {
+    const live = new LiveConstraintEdit(ctx); const board = live.board; const seeds: string[] = []; const anchors: [string, CMember][] = []; const translated = new Set<string>();
+    for (const [id, keys] of targets) {
+      const sh = board.resolve(id); if (!sh || sh.cls !== "shape") continue;
+      for (const key of keys) { const o = origins.get(id + "|" + key)!; const m = memberForEditPoint(sh, key, [Math.round(o[0] * 1e6), Math.round(o[1] * 1e6)]); if (m) anchors.push([id, m.member]); }
+      seeds.push(id);
+    }
+    // a carried container moves its graphics with it, so their offset is pinned too
+    const carryWhole = (id: string) => { for (const it of board.items().values()) if (it.top === id || it.id === id) { translated.add(it.id); seeds.push(it.id); } };
+    for (const id of rigid) { carryWhole(id); for (const m of genMembers(doc, doc.items.get(id)!)) carryWhole(m); }
+    for (const d of deps) {
+      if (d.whole) { carryWhole(d.id); continue; }   // the gesture moves a whole arc by the block offset
+      anchors.push([d.id, cMember(d.id, d.isStart ? "start" : "end")]); seeds.push(d.id);   // already placed: it pins its joint
+    }
+    const session = new BoardConstraintBlockSession();
+    if (seeds.length && session.build(board, seeds)) { live.block = session; for (const [id, n] of base) live.own(id, n); constraints = { live, anchors, translated }; }
+    for (const id of constraintCoMembers(board, moving)) validationScope.add(id);   // the solver can move them, so validation watches them
+  }
+  const validation = captureBaseline(doc, validationScope);
+  S.blockDrag = { keyboard: !pressInFlight, origins, targets, rigid, deps, base, moving, grab: grab.h.p.slice() as Pt, applied: [0, 0], ctrl: false, router, validation, constraints, constraintWarned: false } as BlockDrag;
   ctx.requestRender();
   return "start";
 }
 /** applyFrame: the reshaped items (corners first, then the picked edges from their corners), the items carried
  * whole, the joined ends that follow and the router's copper, all from where they stood, so a long drag cannot drift. */
-function applyFrame(ctx: PcbCtx, B: BlockDrag, dx: number, dy: number): boolean {
+function applyFrame(ctx: PcbCtx, B: BlockDrag, dx: number, dy: number): "applied" | "lost" | "constrained" {
   const doc = ctx.doc; const out = new Map<string, SNode>();
-  for (const id of B.base.keys()) if (!doc.items.has(id)) return false;   // a picked handle has gone (LOST_IDENTITY)
+  for (const id of B.base.keys()) if (!doc.items.has(id)) return "lost";   // a picked handle has gone (LOST_IDENTITY)
   for (const [id, keys] of B.targets) {
     const it = doc.items.get(id)!; let node = clone(B.base.get(id)!);
     const order = keys.filter((k) => !isEditLine(k)).concat(keys.filter(isEditLine));
@@ -541,13 +568,23 @@ function applyFrame(ctx: PcbCtx, B: BlockDrag, dx: number, dy: number): boolean 
   if (B.router) for (const id of [...B.router.rigidVias, ...B.router.bridges]) if (!out.has(id)) translate(id);
   for (const [id, n] of out) { const it = doc.items.get(id)!; it.node.length = 0; it.node.push(...n); K.replaceChange(doc, it); }
   B.applied = [dx, dy];
+  // the picked handles (at the positions the reshape actually used) and the carried offset are held; everything else in
+  // their clusters moves as little as the relations allow.  Every frame solves from the starting geometry.
+  if (B.constraints) {
+    const { live, anchors, translated } = B.constraints; const board = live.begin(); const pins: [CMember, Pt][] = [];
+    for (const [id, m] of anchors) { const a = itemAnchors(board.resolve(id)).find((x) => x.anchor === m.anchor && (x.anchor !== "vertex" || x.index === m.index)); if (a) pins.push([m, a.pos]); }
+    const r = live.block!.solve(pins, translated, [Math.round(dx * 1e6), Math.round(dy * 1e6)]);
+    if (r.result === "refused") { board.edits.clear(); board.invalidate(); return "constrained"; }
+    live.flush();
+  }
   if (B.router) {
     const moved = new Set<string>(B.rigid.filter((id) => doc.items.get(id)!.kind === "footprint")); for (const id of B.router.rigidVias) moved.add(id); for (const id of B.router.bridges) moved.add(id);
     const hits = blockDragHits(ctx, B.router, moved, dx, dy); B.router.hits = hits; B.router.status = !hits.length;
   }
-  return true;
+  return "applied";
 }
 function restoreBase(ctx: PcbCtx, B: BlockDrag) {
+  if (B.constraints) B.constraints.live.takeBack();   // the neighbours the solver moved go back too
   for (const [id, n] of B.base) { const it = ctx.doc.items.get(id); if (!it) continue; it.node.length = 0; it.node.push(...clone(n)); K.replaceChange(ctx.doc, it); }
 }
 /** releaseState + revert: the board back as it was, the gesture's state gone. */
@@ -565,7 +602,13 @@ export function blockDragMove(ctx: PcbCtx, mm: Pt, mods: { shiftKey?: boolean; c
   B.ctrl = !!mods.ctrlKey;   // Ctrl while moving: a picked polygon edge keeps its length (POLYGON_LINE_MODE::FIXED_LENGTH)
   const sn = snapCursor(ctx, [mm[0], mm[1]], B.moving, { shiftKey: !!mods.shiftKey, ctrlKey: !!mods.ctrlKey }, null);
   const dx = r6(sn.p[0] - B.grab[0]), dy = r6(sn.p[1] - B.grab[1]);
-  if (!applyFrame(ctx, B, dx, dy)) {   // LOST_IDENTITY: put the geometry back, the rest of this press is ignored
+  const accepted = B.applied;
+  let res = applyFrame(ctx, B, dx, dy);
+  if (res === "constrained") {   // said once, not per frame: the block keeps resisting while the cursor has no solution
+    if (!B.constraintWarned) { ctx.toast("The move would break a geometric constraint."); B.constraintWarned = true; }
+    res = applyFrame(ctx, B, accepted[0], accepted[1]) === "lost" ? "lost" : "applied";
+  }
+  if (res === "lost") {   // LOST_IDENTITY: put the geometry back, the rest of this press is ignored
     const press = !B.keyboard; endBlockDrag(ctx, false); if (press) st.consumed = -1; return;
   }
   ctx.requestRender();
@@ -575,13 +618,14 @@ export function blockDragRelease(ctx: PcbCtx, force: boolean): boolean {
   const B = S.blockDrag as BlockDrag | null; if (!B) return false;
   const [dx, dy] = B.applied;
   if (!dx && !dy) { endBlockDrag(ctx, true); return false; }   // a gesture that changed nothing leaves no undo entry
-  if (!applyFrame(ctx, B, dx, dy)) { endBlockDrag(ctx, false); return false; }
+  if (applyFrame(ctx, B, dx, dy) === "lost") { endBlockDrag(ctx, false); return false; }
   const v = validate(ctx.doc, B.validation);
   const refuse = (msg: string) => { ctx.toast(msg); endBlockDrag(ctx, true); return false; };
   if (v !== "ok") return refuse(v === "zone" ? "The move would break a zone outline." : "The move would break the board outline.");
   if (B.router && !B.router.status && !allowViolations() && !force) return refuse(drcRefusal());
   const label = B.router || B.rigid.length || B.deps.length || B.targets.size > 1 ? "Drag block" : B.origins.size > 1 ? "Move Points" : "Move Point";
   const now = new Map<string, SNode>(); for (const id of B.base.keys()) now.set(id, clone(ctx.doc.items.get(id)!.node));
+  if (B.constraints) for (const id of B.constraints.live.touched) if (!now.has(id) && ctx.doc.items.has(id)) now.set(id, clone(ctx.doc.items.get(id)!.node));   // the solver's neighbours, staged in m_commit
   const conn = B.router ? blockConnLines(B.router, dx, dy) : [];
   S.blockDrag = null; restoreBase(ctx, B);   // the originals back first, so the commit records a true inverse
   const changes: PcbChange[] = [];

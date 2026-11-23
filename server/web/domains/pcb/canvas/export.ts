@@ -295,6 +295,8 @@ const STRING_SLOTS: Record<string, number> = {
   label: 1, global_label: 1, hierarchical_label: 1, netclass_flag: 1, directive_label: 1, text: 1, text_box: 1, table_cell: 1,
   property: 2, lib_id: 1, lib_name: 1, reference: 1, page: 1, path: 1, project: 1, name: 1, number: 1, face: 1, href: 1,
   title: 1, date: 1, rev: 1, company: 1, paper: 1, generator: 1, generator_version: 1, group: 1, bus_alias: 1, members: 99, comment: -2,
+  // a variant's (symbol_override "Lib:Name") and a pin map override's (map "M") / (edit "pin" "pad")
+  symbol_override: 1, map: 1, edit: 2,
 };
 function stringSlot(node: SNode, j: number): boolean {
   const head = node[0]; if (typeof head !== "string" || j === 0 || typeof node[j] !== "string") return false;
@@ -326,6 +328,8 @@ const PCB_STRING_SLOTS: Record<string, readonly number[] | 0> = {
   label: [1], global_label: [1], hierarchical_label: [1], text: [1], text_box: [1], component_class: 0, class: 0,
   custom_property: [1, 2],   // KICAD_FORMAT::FormatCustomProperties: Quotew( key ), Quotew( value )
   link: [1], anchor: 0,      // a rule area's layout link: (placement … (link "set" … (anchor "uuid")))
+  key: 0,   // a generated table's (row_keys (key 1 "L:F.Cu")), a drill symbol (assignment (key "v1|…"))
+  member: [1],   // format( PCB_CONSTRAINT ): (member Quotew( uuid ) anchor [index])
 };
 /** Boards older than the quoted-names format (KiCad 5) keep bare layer names: see serializeItem. */
 let legacyBare = false;

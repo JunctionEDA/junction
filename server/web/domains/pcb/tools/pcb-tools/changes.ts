@@ -14,7 +14,7 @@ export function wrapBoard(node: SNode) { return `(kicad_pcb (version ${BOARD_VER
 // knows nothing of curves, dimensions, images and tables.
 export const typeNameOf = (item: Pick<KItem, "kind" | "node">) => item.kind === "arc" ? "PCB_ARC" : item.kind === "gr_curve" ? "PCB_SHAPE"
   : item.kind === "dimension" ? (DIM_CLASS[K.str((K.kid(item.node, "type") || [])[1])] || "PCB_DIM_ALIGNED")
-  : item.kind === "image" ? "PCB_REFERENCE_IMAGE" : item.kind === "table" ? "PCB_TABLE" : item.kind === "group" ? "PCB_GROUP" : item.kind === "target" ? "PCB_TARGET" : K.typeNameOf(item);
+  : item.kind === "image" ? "PCB_REFERENCE_IMAGE" : item.kind === "table" ? (item.node[0] === "drill_chart" ? "PCB_DRILL_CHART" : item.node[0] === "stackup_table" ? "PCB_STACKUP_TABLE" : "PCB_TABLE") : item.kind === "group" ? "PCB_GROUP" : item.kind === "target" ? "PCB_TARGET" : K.typeNameOf(item);
 export function upsertChange(item: Pick<KItem, "id" | "kind" | "node">, kind: KChange["kind"], net?: NetRef | null) {
   const c: PcbChange = { id: item.id, kind, typeName: typeNameOf(item), sexpr: wrapBoard(item.node) };
   const n = net || netOf(item.node); if (n.name) c.netName = n.name;   // the desktop re-resolves nets by name

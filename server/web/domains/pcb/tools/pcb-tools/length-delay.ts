@@ -371,7 +371,7 @@ const isTrack = (c: Conductor) => c.kind === "segment" || c.kind === "arc";
  * routed length (tracks + via heights), the pad-to-die length, the routed delay and the pad-to-die delay.
  */
 export function boardTrackLength(ctx: LDContext, trackId: string) {
-  const me = ctx.conds.find((c) => c.id === trackId && isTrack(c));
+  const me = ctx.conds.find((c) => c.id === trackId && (isTrack(c) || c.kind === "via"));   // any PCB_TRACK, vias too
   if (!me) return { count: 0, length: 0, padToDie: 0, delay: 0, padToDieDelay: 0 };
   const netConds = ctx.conds.filter((c) => c.net === me.net && c.kind !== "zone");
   const roots = clusterRoots(netConds); const mine = roots[netConds.indexOf(me)];

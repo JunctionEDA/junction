@@ -15,7 +15,7 @@
 //
 // footprintModels / placeMesh are pure (no DOM), for the node tests; ModelStore is the browser half.
 
-import { decodeEmbedded, embeddedFileData } from "../library/embedded-file";
+import { decodeEmbedded, embeddedFileData, embeddedFileNode, fileData } from "../library/embedded-file";
 
 export type V3 = [number, number, number];
 
@@ -90,12 +90,18 @@ function projectModel(path: string): string | null {
 /**
  * kicad-embed://<name>.step|stp: the footprint's embedded copy as an object URL, one per file content.
  * `boardFiles` is the board's own (embedded_files …), where a board KiCad saved keeps the data of its footprints' files
- * (BOARD::FixupEmbeddedData reads it from there).
+ * (BOARD::FixupEmbeddedData reads it from there).  An embedded <name>.wrl|wrz is shown from the STEP file embedded
+ * beside it (Collect And Embed 3D Models stores the first of stp, step, STP, STEP, Stp, Step with it), as this viewer
+ * reads STEP: the same model KiCad's STEP exporter takes.
  */
 const embedUrls = new Map<string, string | null>();
 function embeddedModel(node: SNode, path: string, boardFiles: SNode | null): string | null {
+  const w = /^kicad-embed:\/\/([^/\\]+)\.(?:wrl|wrz)$/i.exec(path);
+  if (w) { for (const e of ["stp", "step", "STP", "STEP", "Stp", "Step"]) { const u = embeddedModel(node, "kicad-embed://" + w[1] + "." + e, boardFiles); if (u) return u; } return null; }
   const m = /^kicad-embed:\/\/([^/\\]+\.(?:step|stp))$/i.exec(path); if (!m) return null;
-  const b64 = embeddedFileData(node, m[1], boardFiles); if (!b64) return null;
+  // FILENAME_RESOLVER over the footprint's files, then the board's (create_scene.cpp embeddedFilesStack): Collect And
+  // Embed 3D Models puts the files in the board's own (embedded_files …)
+  const b64 = embeddedFileData(node, m[1], boardFiles) ?? fileData(embeddedFileNode(boardFiles, m[1])); if (!b64) return null;
   const key = m[1] + "\n" + b64.length + b64.slice(0, 48) + b64.slice(-48) + b64.slice(b64.length >> 1, (b64.length >> 1) + 48);
   if (embedUrls.has(key)) return embedUrls.get(key)!;
   let url: string | null = null;

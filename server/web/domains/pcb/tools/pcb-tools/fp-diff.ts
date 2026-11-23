@@ -40,7 +40,7 @@ const ATTR_FLAGS: [string, string][] = [["board_only", "Not in schematic"], ["ex
   ["exclude_from_sim", "Exclude from simulation"], ["dnp", "Do not populate"]];
 
 /** padNeedsUpdate (and, when it finds nothing, padHasOverrides): its report lines for one pad pair. */
-function padLines(a: SNode, b: SNode): string[] {
+function padLines(a: SNode, b: SNode, drc = false): string[] {
   const out: string[] = [], D = `Pad ${padNum(a)}`, first = (n: SNode) => str((K.kid(n, "layers") || [])[1]) || "F.Cu";
   const pa = padAt(a), pb = padAt(b);
   if (!near(pa[0], pb[0]) || !near(pa[1], pb[1])) out.push(`${D} position differs.`);
@@ -64,20 +64,23 @@ function padLines(a: SNode, b: SNode): string[] {
   if (oval(da) !== oval(db)) out.push(`${D} drill shape differs.`);
   if (!sameNums(nums(da), nums(db))) out.push(`${D} drill size differs.`);
   if (kidText(a, "primitives") !== kidText(b, "primitives")) out.push(`${D} shape primitives differ on layer ${layer}.`);
-  if (out.length) return out;
+  // padHasOverrides only informs: it is not a difference, and the DRC asks for differences only
+  if (out.length || drc) return out;
   for (const [k, msg] of PAD_OVERRIDES) if (K.kid(a, k) && kidText(a, k) !== kidText(b, k)) out.push(msg.replace("%s", D));
   return out;
 }
 
-/** The lines FootprintNeedsUpdate reports, in its order; empty when there are no relevant differences. */
-export function footprintDiffLines(boardFp: SNode, libFp: SNode): string[] {
+/** The lines FootprintNeedsUpdate reports, in its order; empty when there are no relevant differences.  `drc`:
+ *  COMPARE_FLAGS::DRC (DRC_TEST_PROVIDER_LIBRARY_PARITY), which leaves out the design-specific attributes and the
+ *  board-level overrides. */
+export function footprintDiffLines(boardFp: SNode, libFp: SNode, drc = false): string[] {
   const a = editableCopy(boardFp).node, b = libFp, out: string[] = [];
   const fa = flags(a), fb = flags(b);
   if (fpType(fa) !== fpType(fb)) out.push("Footprint types differ.");
   if (fa.has("allow_soldermask_bridges") !== fb.has("allow_soldermask_bridges")) out.push("'Allow bridged solder mask apertures between pads' settings differ.");
-  for (const [k, l] of ATTR_FLAGS) if (fa.has(k) !== fb.has(k)) out.push(`'${l}' settings differ.`);
+  if (!drc) for (const [k, l] of ATTR_FLAGS) if (fa.has(k) !== fb.has(k)) out.push(`'${l}' settings differ.`);
   if (kidText(a, "stackup") !== kidText(b, "stackup")) out.push("Footprint stackup differs.");
-  for (const [k, msg] of OVERRIDES) if (K.kid(a, k) && kidText(a, k) !== kidText(b, k)) out.push(msg);
+  if (!drc) for (const [k, msg] of OVERRIDES) if (K.kid(a, k) && kidText(a, k) !== kidText(b, k)) out.push(msg);
   if (kidText(a, "net_tie_pad_groups") !== kidText(b, "net_tie_pad_groups")) out.push("Net tie pad groups differ.");
   const shapes = (n: SNode) => (n.filter((c) => isList(c) && SHAPES.includes(str(c[0]))) as SNode[]).map((c) => ({ n: c, k: shapeKey(c) })).sort((x, y) => (x.k < y.k ? -1 : x.k > y.k ? 1 : 0));
   const sa = shapes(a), sb = shapes(b);
@@ -90,7 +93,7 @@ export function footprintDiffLines(boardFp: SNode, libFp: SNode): string[] {
   const pads = (n: SNode) => (n.filter((c) => isList(c) && c[0] === "pad") as SNode[]).sort(cmpPads);
   const pa = pads(a), pb = pads(b);
   if (pa.length !== pb.length) out.push("Pad count differs.");
-  else pa.forEach((p, i) => out.push(...padLines(p, pb[i])));
+  else pa.forEach((p, i) => out.push(...padLines(p, pb[i], drc)));
   const zones = (n: SNode) => (n.filter((c) => isList(c) && c[0] === "zone") as SNode[]).map(shapeKey).sort();
   const za = zones(a), zb = zones(b);
   if (za.length !== zb.length) out.push("Rule area count differs.");

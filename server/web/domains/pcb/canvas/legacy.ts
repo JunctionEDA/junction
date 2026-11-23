@@ -2,7 +2,7 @@
 // (SCH_IO_KICAD_SEXPR_PARSER / PCB_IO_KICAD_SEXPR_PARSER, every m_requiredVersion gate that rewrites what was read),
 // applied in place to the parsed nodes so every reader of the document sees what KiCad sees, and a node written back
 // means what KiCad would write.
-import { cloneNode, isList, kid, kids, num, str } from "./sexpr";
+import { cloneNode, has, isList, kid, kids, num, str } from "./sexpr";
 import { convertToNewOverbarNotation } from "./text";
 
 // ---------------------------------------------------------------- what the parsers change on load in older files
@@ -233,4 +233,113 @@ export function downgradeSchNode(node: SNode, v: number): SNode {
     else if (rename(c)) out[j] = str(c[0]) === "power" ? ["power"] : ["convert", c[1]];
   }
   return out;
+}
+
+// ---------------------------------------------------------------- what a re-save at a newer version writes
+const crossed = (from: number, to: number, v: number, inclusive: boolean): boolean => from > 0 && (inclusive ? from <= v && to > v : from < v && to >= v);
+/** KiROUND: half away from zero. */
+const kiRound = (v: number): number => (v < 0 ? -Math.round(-v) : Math.round(v));
+/** KIFONT::FONT::IsStroke( name ), and no face at all (the stroke font). */
+const strokeFace = (f: SNode): boolean => { const fc = kid(f, "face"); const n = fc ? str(fc[1]) : ""; return !n || n === "KiCad Font" || n === "Default Font"; };
+/** parseMaybeAbsentBool( true ): a bare token, or (key yes). */
+const flag = (n: SNode, key: string): boolean => { const k = kid(n, key); if (k) return k.length < 2 || str(k[1]) === "yes" || str(k[1]) === "true"; return has(n, key); };
+/**
+ * EDA_TEXT::MigrateLegacyBoldStrokeWidth on every (font …) of a node: a bold stroke-font text stored its drawn width
+ * (× BOLD_STROKE_MULTIPLIER 1.6); read before 20260826 the width is divided back (at least 2 IU), which is what a newer
+ * file stores.
+ */
+function migrateBoldWidths(node: SNode, iuPerMm: number): boolean {
+  let changed = false;
+  const walk = (n: SNode): void => {
+    for (let j = 1; j < n.length; j++) {
+      const c = n[j]; if (!isList(c)) continue;
+      if (c[0] === "font" && flag(c, "bold") && strokeFace(c)) {
+        const t = kid(c, "thickness"); const iu = t ? kiRound(num(t[1]) * iuPerMm) : 0;
+        if (t && iu > 1) { const v = Math.max(2, kiRound(iu / 1.6)) / iuPerMm; if (v !== num(t[1])) { t[1] = v; changed = true; } }
+      } else walk(c);
+    }
+  };
+  walk(node); return changed;
+}
+/** RotatePoint( double*, double*, angle ) (trigo.cpp), with its exact quarter turns. */
+function rotateD(x: number, y: number, deg: number): [number, number] {
+  let a = deg % 360; if (a < 0) a += 360;
+  if (a === 0) return [x, y]; if (a === 90) return [y, -x]; if (a === 180) return [-x, -y]; if (a === 270) return [-y, x];
+  const r = a * Math.PI / 180, s = Math.sin(r), c = Math.cos(r);
+  return [y * s + x * c, y * c - x * s];
+}
+/**
+ * A legacy footprint's zone outlines and points, stored in the board frame before FIRST_FP_AFFINE_TRANSFORM (20260616),
+ * as the parser converts them (TRANSFORM_TRS::InverseApply of the footprint's (at x y rot), in integer IU): the
+ * library frame a newer file stores.  The filled polygons stay in the board frame in every version.
+ */
+function footprintToLibFrame(fp: SNode): boolean {
+  const a = kid(fp, "at"); if (!a) return false;
+  const IU = 1e6, tx = kiRound(num(a[1]) * IU), ty = kiRound(num(a[2]) * IU), rot = num(a[3]);
+  const inv = (x: number, y: number): [number, number] => { const [lx, ly] = rotateD(kiRound(x * IU) - tx, kiRound(y * IU) - ty, -rot); return [kiRound(lx) / IU, kiRound(ly) / IU]; };
+  const fix = (p: SNode): void => { const [x, y] = inv(num(p[1]), num(p[2])); p[1] = x; p[2] = y; };
+  let changed = false;
+  for (const z of kids(fp, "zone")) for (const poly of kids(z, "polygon")) {
+    const p = kid(poly, "pts"); if (!p) continue;
+    for (const q of p) if (isList(q)) { if (q[0] === "xy") { fix(q); changed = true; } else if (q[0] === "arc") for (const k of ["start", "mid", "end"]) { const e = kid(q, k); if (e) { fix(e); changed = true; } } }
+  }
+  for (const pt of kids(fp, "point")) { const at = kid(pt, "at"); if (at) { fix(at); changed = true; } }
+  return changed;
+}
+/**
+ * A via read from a board before 20250228: covering, plugging, filling and capping not named are off ("Versions before
+ * 10.0 had no protection features other than tenting"); a newer board writes each of them (FormatOptBool), since there
+ * an absent one means "from the board's rules".
+ */
+function viaProtectionExplicit(via: SNode): boolean {
+  const side = (key: string, s: string): string => { const n = kid(via, key); if (!n) return "no"; const v = kid(n, s); if (!v) return "no"; const t = str(v[1]); return t === "yes" ? "yes" : t === "none" ? "none" : "no"; };
+  const one = (key: string): string => { const n = kid(via, key); if (!n) return "no"; const t = str(n[1]); return t === "yes" ? "yes" : t === "none" ? "none" : "no"; };
+  const pair = (key: string): SNode | null => { const f = side(key, "front"), b = side(key, "back"); return f === "none" && b === "none" ? null : [key, ["front", f], ["back", b]]; };
+  const want: [string, SNode | null][] = [
+    ["capping", one("capping") === "none" ? null : ["capping", one("capping")]],
+    ["covering", pair("covering")],
+    ["plugging", pair("plugging")],
+    ["filling", one("filling") === "none" ? null : ["filling", one("filling")]],
+  ];
+  // PCB_IO_KICAD_SEXPR::format( PCB_VIA ): (tenting …) (capping) (covering) (plugging) (filling), then the padstack and the rest
+  const ORDER = ["at", "size", "drill", "backdrill", "tertiary_drill", "front_post_machining", "back_post_machining", "layers", "remove_unused_layers", "keep_end_layers", "start_end_only",
+    "locked", "free", "zone_layer_connections", "tenting", "capping", "covering", "plugging", "filling", "padstack", "teardrops", "net", "uuid", "tstamp"];
+  let changed = false;
+  for (const [key, node] of want) {
+    const at = via.findIndex((c, j) => j > 0 && isList(c) && c[0] === key);
+    if (at > 0) { if (node === null) continue; via[at] = node; changed = true; continue; }
+    if (node === null) continue;
+    const rank = ORDER.indexOf(key); let ins = via.length;
+    for (let j = 1; j < via.length; j++) { const c = via[j]; if (isList(c) && ORDER.indexOf(str(c[0])) > rank) { ins = j; break; } }
+    via.splice(ins, 0, node); changed = true;
+  }
+  return changed;
+}
+/**
+ * One stored item or library symbol, as read from a file of version `from`, written in the form a file of version `to`
+ * stores it (KiCad's re-save at the raised version writes every item from what was read): what the parsers rewrite on
+ * load (overbar, "~", KiCad 6 polylines, symbol arcs, zero overrides, spoke angles) is already in the node
+ * (migrateLegacyTree); this adds what the readers take by the version: the bold text width (20260826), the reference
+ * image scale (sch 20230121, 20260623; `imageFactor(data, version)` is legacyImageScaleFactor for the image's data),
+ * explicit via protection (20250228) and a footprint's zones and points in its own frame (20260616).
+ * Returns `node` when nothing changes, else a changed copy.
+ */
+export function upgradeLegacyNode(node: SNode, pcb: boolean, from: number, to: number, imageFactor?: (b64: string, version: number) => number): SNode {
+  if (!isList(node) || !(from > 0) || !(to > from)) return node;
+  const k = str(node[0]); const out = cloneNode(node); let changed = false;
+  if (crossed(from, to, 20260826, false) && migrateBoldWidths(out, pcb ? 1e6 : 1e4)) changed = true;
+  if (k === "image" && imageFactor && (crossed(from, to, 20260623, false) || (!pcb && crossed(from, to, 20230121, true)))) {
+    const d = kid(out, "data"), b64 = d ? d.slice(1).map((x) => str(x)).join("") : "";
+    const f = b64 ? imageFactor(b64, from) / imageFactor(b64, to) : 1;
+    if (f !== 1 && isFinite(f) && f > 0) {
+      const sc = kid(out, "scale"); let s = sc ? num(sc[1], 1) : 1; if (!(s > 0) || !isFinite(s)) s = 1;   // std::isnormal, else 1
+      const v = Number((s * f).toPrecision(6));   // fmt "{:g}"
+      if (sc) { if (v === 1) out.splice(out.indexOf(sc), 1); else sc[1] = v; }
+      else if (v !== 1) { let at = 1; for (let j = 1; j < out.length; j++) { const c = out[j]; if (isList(c) && ["at", "layer", "rotate"].indexOf(str(c[0])) >= 0) at = j + 1; } out.splice(at, 0, ["scale", v]); }
+      changed = true;
+    }
+  }
+  if (pcb && k === "via" && crossed(from, to, 20250228, false) && viaProtectionExplicit(out)) changed = true;
+  if (pcb && (k === "footprint" || k === "module") && crossed(from, to, 20260616, false) && footprintToLibFrame(out)) changed = true;
+  return changed ? out : node;
 }

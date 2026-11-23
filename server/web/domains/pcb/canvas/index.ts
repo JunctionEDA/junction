@@ -30,7 +30,7 @@ import { SvgPath, renderPng, renderSvg, serialize, serializeItem, setRenderCache
 import { buildGeom, ensureFontGeom, ensureSchTheme, inSchTheme } from "./geom";
 import { faceMetrics, kicadAscDesc, outlineBoxCorners, outlineLayout, readSfnt } from "./outline-text";
 import { ensureHatchKnockouts, hatchLines } from "./geom-pcb";
-import { ORIENT, fieldColor, hasOpTextVar, intersheetRefsText, letterSubReference, opVars, resolveLib, schDisplay, schFormat, subReference, symVars, symbolInstance, symbolTransform, unitDisplayNames, type OpTextVar, hasNetTextVar, labelVars, type LabelTextVar, resolveCrossReference, symbolResolver, textChecks } from "./geom-sch";
+import { ORIENT, fieldColor, hasOpTextVar, intersheetRefsText, letterSubReference, opVars, resolveLib, schDisplay, schFormat, subReference, symVars, symbolInstance, symbolTransform, unitDisplayNames, type OpTextVar, hasNetTextVar, labelVars, type LabelTextVar, resolveCrossReference, symbolResolver, textChecks, pinMapHooks, delegatedPinMapOverride } from "./geom-sch";
 import { bboxOf, geomBox, geomHit, geomTouchesRect, itemTouchesRect, itemVisible, hitTest, hitTestDetail, layerList, movableItems, padAt, padGeomHit, snap } from "./hit";
 import { applyChange, setAt, setPts } from "./ops";
 import { darkened, mixColor, brightenedItemColor, lockedShadowMargin, footprintBodyBox, drawLockedShadow, DRC_HIGHLIGHTED, HL_FACTOR, HC_EDGE_MIN, viaSpans, viaFlashesOn, unflashedGeoms, umbilicalLines, viaStitchOutline, viaStitchTicks, gridItemGeom, gridItemArea, gridTakesPrecedence, autoSparsePitch, DASH_RATIOS, HIDDEN_TEXT_ALPHA, HL_DIM, MARKER_COLORS, MARKER_CORNERS, MARKER_SCALE, PX_PER_MM_ZOOM1, RATSNEST_COLOR, VIA_NETNAME_COLOR, ZONE_OPACITY, brightened, dashPattern, defaultCreateCanvas, drawDrawingSheet, drawHalo, drawMarkers, drawPad, drawSelectionHalo, SCH_SELECTION_SHADOW, selectedColor, flipCentre, flipX, highlightColor, markerAt, markerPolygon, markerScale, render, busConnectedLabels, busPinTint, setViewTransform, trackNameColor, unflipX, zoomFactor, SEL_STYLE, busJunctions, directiveOnlyAreas, netStyled } from "./render";
@@ -40,13 +40,14 @@ import { PlotRecorder, blackAndWhite, dashRuns, itemsBox, luminance, plotItems, 
 import { plotParams } from "./plot-params";
 import { DRC_ITEMS } from "./drc-items";
 import { pcbNetlist } from "./pcb-netlist";
+import * as refSuffix from "./ref-suffix";
 import { schNets } from "./sch-nets";
 import { netChains } from "./net-chains";
 import { projectFile } from "./project-file";
 import { arcFrom3, atOf, bezierPts, boxOf, cloneNode, cornersInSequence, effectsOf, fillOf, kid, kids, num, parse, parseAll, pointInPoly, ptsOf, quotedMask, str, strokeOf, uuidOf } from "./sexpr";
 import { boardResolve, footprintResolve, pcbTextShown, pcbVars } from "./pcb-textvars";
 import { DEFAULT_DRAWING_SHEET, PRODUCT_NAME, TB_TOKENS, WS_TOKENS, alphabeticFromIndex, buildDrawingSheet, defaultDrawingSheet, documentDrawingSheet, drawingSheetTextChecks, hitTestDrawingSheet, expandTextVars, incrementLabel, indexFromAlphabetic, parseDrawingSheet, sheetTextPen, sheetTextVars, varResolver } from "./sheet";
-import { downgradeSchNode, migrateBoardNode, migrateSchNode } from "./legacy";
+import { downgradeSchNode, migrateBoardNode, migrateLegacyTree, migrateSchNode, upgradeLegacyNode } from "./legacy";
 import { IMAGE_CACHE, base64Bytes, imageInfo, legacyImageScaleFactor, shiftTable, tableCellShownText, cellAddr, parseCellAddress } from "./tables-images";
 import { SCH_PEN, TEXT_INTERLINE, isUrlText, lineOffsets, parseMarkup, setSchPen, textWidth, unescapeText, urlRunAt, urlRunBox, urlRuns } from "./text";
 import { drawStrokeText, linebreakText, parseStrokeMarkup, strokeAdvance, strokeGlyph, strokeLine, strokeLineWidth, strokeOrigin } from "./stroke-font";
@@ -60,6 +61,7 @@ import { parseLibSymbol, subUnitBody, PIN_TYPE_NAMES, libGraphicGeom } from "./l
 import { footprintDocApi } from "./footprint-doc";
 import { HOPOVER_MULT, hopOver, hopShapes, wireHopShape } from "./hop-over";
 import { tableModel } from "./table-model";
+import * as drillModel from "./drill-model";
 import { autoPanDirection, autoPanStep, AUTOPAN_TICK_MS } from "./autopan";
 export const api = {
   // the schematic View options that change geometry (show_pin_alt_icons): set, then the symbols of `doc` are rebuilt
@@ -121,7 +123,11 @@ export const api = {
   onFontWanted: null, fontChanged, wantFace, faceAvailable, setFontData, fontData, allFontData, loadFontsFor: null, setRenderCacheWriter,
   // outline-font text laid out as KiCad's OUTLINE_FONT places it (outline-text.ts): metrics, layout, box, painter
   faceMetrics, readSfnt, kicadAscDesc, outlineLayout, outlineBoxCorners, drawOutlineText, ensureFontGeom, fieldColor,
-  hopShapes, wireHopShape, hopOver, drawHalo, SCH_SELECTION_SHADOW, HL_DIM, brightened, highlightColor, imageInfo, base64Bytes, IMAGE_CACHE, strokeOf, boxOf, cornersInSequence, shiftTable, tableCellShownText, cellAddr, parseCellAddress, autoPanDirection, autoPanStep, AUTOPAN_TICK_MS, darkened, mixColor, brightenedItemColor, lockedShadowMargin, footprintBodyBox, drawLockedShadow, DRC_HIGHLIGHTED, HL_FACTOR, HC_EDGE_MIN, viaSpans, viaFlashesOn, unflashedGeoms, umbilicalLines, viaStitchOutline, viaStitchTicks, gridItemGeom, gridItemArea, gridTakesPrecedence, autoSparsePitch, legacyImageScaleFactor, migrateSchNode, migrateBoardNode, downgradeSchNode,
+  hopShapes, wireHopShape, hopOver, drawHalo, SCH_SELECTION_SHADOW, HL_DIM, brightened, highlightColor, imageInfo, base64Bytes, IMAGE_CACHE, strokeOf, boxOf, cornersInSequence, shiftTable, tableCellShownText, cellAddr, parseCellAddress, autoPanDirection, autoPanStep, AUTOPAN_TICK_MS, darkened, mixColor, brightenedItemColor, lockedShadowMargin, footprintBodyBox, drawLockedShadow, DRC_HIGHLIGHTED, HL_FACTOR, HC_EDGE_MIN, viaSpans, viaFlashesOn, unflashedGeoms, umbilicalLines, viaStitchOutline, viaStitchTicks, gridItemGeom, gridItemArea, gridTakesPrecedence, autoSparsePitch, legacyImageScaleFactor, migrateSchNode, migrateBoardNode, downgradeSchNode, migrateLegacyTree,
+  /** legacy.ts upgradeLegacyNode, with the reference image's PPI read from its data (legacyImageScaleFactor) */
+  upgradeLegacyNode(node: SNode, pcb: boolean, from: number, to: number): SNode {
+    return upgradeLegacyNode(node, pcb, from, to, (b64, v) => legacyImageScaleFactor(!pcb, v, imageInfo(base64Bytes(b64, 1 << 17))));
+  },
   // the drawing sheet (web/domains/pcb/canvas/sheet.ts): KiCad's built-in (kicad_wks …) description, its interpreter
   // and the text-variable resolution the title block uses; render()/renderSvg() paint what it returns
   DEFAULT_DRAWING_SHEET, parseDrawingSheet, defaultDrawingSheet, buildDrawingSheet, documentDrawingSheet, hitTestDrawingSheet,
@@ -138,7 +144,7 @@ export const api = {
   // KiCad's stroke font (web/domains/pcb/canvas/stroke-font.ts): glyphs, markup, line layout, word wrap and the painter.
   // textMode: undefined = stroke font wherever Path2D exists, canvas fonts otherwise; "stroke" / "native" force one
   textMode: undefined, currentTextMode: textMode, strokeGlyph, strokeAdvance, strokeLine, strokeLineWidth, strokeOrigin, parseStrokeMarkup, linebreakText, drawStrokeText, drawTextStroke,
-  unescapeText, displayNetName, netCode, padLabelShown, unitLetter, letterSubReference, subReference, unitDisplayNames, symbolInstance, symVars, symbolResolver, resolveCrossReference, textChecks, drawingSheetTextChecks, boardResolve, footprintResolve, pcbTextShown, pcbVars, GRID_MIN_SPACING, GRID_TICK, MIN_TEXT_PX,
+  unescapeText, displayNetName, netCode, padLabelShown, unitLetter, letterSubReference, subReference, unitDisplayNames, symbolInstance, symVars, pinMapHooks, delegatedPinMapOverride, symbolResolver, resolveCrossReference, textChecks, drawingSheetTextChecks, boardResolve, footprintResolve, pcbTextShown, pcbVars, GRID_MIN_SPACING, GRID_TICK, MIN_TEXT_PX,
   // the board editor's track / via sizes, netclass resolution and routing layer pair (web/domains/pcb/canvas/pcb-sizes.ts)
   pcbSizes,
   // the Symbol Editor's render mode (web/domains/pcb/canvas/libsym.ts): one library symbol as an editable document
@@ -148,16 +154,17 @@ export const api = {
 type Api = typeof api & {
   itemTouchesRect: typeof itemTouchesRect; itemVisible: typeof itemVisible; geomTouchesRect: typeof geomTouchesRect;
   boardItemBox: typeof boardItemBox; presenceSelection: typeof presenceSelection;
-  pcbNetlist: typeof pcbNetlist; schNets: typeof schNets; netChains: typeof netChains; boardSetup: typeof boardSetup; DRC_ITEMS: typeof DRC_ITEMS; projectFile: typeof projectFile; padModel: typeof padModel;
-  footprintDoc: typeof footprintDocApi; plot: typeof plotApi; tableModel: typeof tableModel;
+  pcbNetlist: typeof pcbNetlist; refSuffix: typeof refSuffix; schNets: typeof schNets; netChains: typeof netChains; boardSetup: typeof boardSetup; DRC_ITEMS: typeof DRC_ITEMS; projectFile: typeof projectFile; padModel: typeof padModel;
+  footprintDoc: typeof footprintDocApi; plot: typeof plotApi; tableModel: typeof tableModel; drillModel: typeof drillModel;
 };
 const plotApi = { PlotRecorder, plotRecorder, plotItems, sheetPlotItems, itemsBox, dashRuns, blackAndWhite, luminance, params: plotParams };
 (api as Api).itemTouchesRect = itemTouchesRect; (api as Api).itemVisible = itemVisible; (api as Api).geomTouchesRect = geomTouchesRect;
 (api as Api).boardItemBox = boardItemBox; (api as Api).presenceSelection = presenceSelection;   // BOARD_ITEM::GetBoundingBox for the presence payload (web/domains/pcb/canvas/kicad-bbox.ts)
-(api as Api).pcbNetlist = pcbNetlist; (api as Api).schNets = schNets; (api as Api).netChains = netChains; (api as Api).boardSetup = boardSetup; (api as Api).DRC_ITEMS = DRC_ITEMS; (api as Api).projectFile = projectFile; (api as Api).padModel = padModel;   // the board dialogs' pure halves (web/domains/pcb/editor/pcbdialogs)
+(api as Api).pcbNetlist = pcbNetlist; (api as Api).refSuffix = refSuffix; (api as Api).schNets = schNets; (api as Api).netChains = netChains; (api as Api).boardSetup = boardSetup; (api as Api).DRC_ITEMS = DRC_ITEMS; (api as Api).projectFile = projectFile; (api as Api).padModel = padModel;   // the board dialogs' pure halves (web/domains/pcb/editor/pcbdialogs)
 (api as Api).footprintDoc = footprintDocApi;
 (api as Api).plot = plotApi;   // File > Plot / Print: the painter recorded as plot items (web/domains/pcb/canvas/plot-rec.ts), the board's plot settings   // the Footprint Editor's document (web/domains/pcb/canvas/footprint-doc.ts)
 (api as Api).tableModel = tableModel;   // a table's structure edits and layout (web/domains/pcb/canvas/table-model.ts), shared by both editors   // the Footprint Editor's document (web/domains/pcb/canvas/footprint-doc.ts)
+(api as Api).drillModel = drillModel;   // the drill model, drill maps and generated tables (web/domains/pcb/canvas/drill-model.ts)
 // LAYER_PCB_BACKGROUND of the live board theme
 Object.defineProperty(api, "PCB_BG", { get: () => boardColor("background"), enumerable: true, configurable: true });
 root.KiCadCanvas = api;

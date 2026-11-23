@@ -14,9 +14,9 @@ import { loadUnits, saveUnits, unitsAppFor } from "../../../shared/units";
 import { behindTab, bringToFront } from "./pane-tabs";
 // ================================================================ KiCad frame (the React chrome reads the store)
 // Docked panes: which are open, per editor, remembered in localStorage (kui.panes.<editor>).
-export const PANE_NAMES = ["props", "hier", "filter", "history", "peers", "comments", "chat", "appearance", "search", "netnav", "netinsp", "libtree", "designblocks"];
+export const PANE_NAMES = ["props", "hier", "filter", "history", "peers", "comments", "chat", "appearance", "search", "netnav", "netinsp", "libtree", "designblocks", "constraints"];
 
-export const PANE_EDITOR_ONLY: Record<string, "sch" | "pcb" | undefined> = { hier: "sch", netnav: "sch", netinsp: "pcb" };
+export const PANE_EDITOR_ONLY: Record<string, "sch" | "pcb" | undefined> = { hier: "sch", netnav: "sch", netinsp: "pcb", constraints: "pcb" };
 
 import { PANE_DEFAULT_HIDDEN } from "../tables";
 export { PANE_DEFAULT_HIDDEN };
@@ -30,7 +30,7 @@ export function savedPanes(ed: string): Record<string, boolean> { try { return J
 
 export function loadPanes(ed: "sch" | "pcb") {
   const saved = savedPanes(ed), out: Record<string, boolean> = {};
-  for (const n of PANE_NAMES) { const allowed = n === "libtree" ? E.DOC_TYPE === "footprint" : !PANE_EDITOR_ONLY[n] || PANE_EDITOR_ONLY[n] === ed; out[n] = allowed && (saved[n] !== undefined ? !!saved[n] : !PANE_DEFAULT_HIDDEN[ed].includes(n)); }
+  for (const n of PANE_NAMES) { const allowed = n === "libtree" ? E.DOC_TYPE === "footprint" : (!PANE_EDITOR_ONLY[n] || PANE_EDITOR_ONLY[n] === ed) && !(n === "constraints" && E.DOC_TYPE === "footprint"); out[n] = allowed && (saved[n] !== undefined ? !!saved[n] : !PANE_DEFAULT_HIDDEN[ed].includes(n)); }
   out.filter = filterFollows(out, ed);
   return out;
 }
@@ -49,7 +49,7 @@ export function filterFollows(panes: Record<string, boolean>, ed: "sch" | "pcb")
 const PROJECT_PANES = new Set(["chat"]);
 export function showPane(name: string, show?: unknown) {
   const ed = editorId();
-  if (!PANE_NAMES.includes(name) || (PANE_EDITOR_ONLY[name] && PANE_EDITOR_ONLY[name] !== ed) || (name === "libtree" && E.DOC_TYPE !== "footprint")) return;
+  if (!PANE_NAMES.includes(name) || (PANE_EDITOR_ONLY[name] && PANE_EDITOR_ONLY[name] !== ed) || (name === "libtree" && E.DOC_TYPE !== "footprint") || (name === "constraints" && E.DOC_TYPE === "footprint")) return;
   if (name === "filter") return;   // follows the panes it docks with (filterFollows)
   // a pane shown behind another tab of its dock slot (pane-tabs.ts) comes to the front instead of closing
   if (show === undefined && behindTab(name, E.panes)) { bringToFront(name); return; }

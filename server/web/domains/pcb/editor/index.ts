@@ -68,6 +68,7 @@ import { fontCommitObserver, initFonts } from "./fonts";
 import { installViewSwitcher } from "./view-switcher";
 import "../mech";   // the board link: outline, holes and keep-outs driven by a part studio (web/domains/pcb/mech)
 import "./title";
+import { constraintTools } from "./panels/constraints";
 
 registerBomView();   // a PCB's bill of materials as a view of its tab (the shell opens it like a document)
 import "./cad-usage";   // on a board: the way to the part studios and assemblies that use it
@@ -165,6 +166,8 @@ stage.addEventListener("dblclick", (ev) => {
   if (!E.kdoc || !window.KDialogs || (E.tool !== "select" && E.tool !== "highlight")) return;
   if ((ev.target as Element).closest("#cmtPanel") || (ev.target as Element).closest("[data-schtools]")) return;
   const [x, y] = worldMm(ev); const ctx = toolCtx();
+  // CONSTRAINT_EDIT_TOOL::EditConstraintAt: a double click on a badge edits that constraint's value
+  if (!isSch()) { const C = constraintTools(); try { if (C && C.editConstraintAt(ctx, [x, y], 1 / Math.max(1e-9, pxPerMm()))) return; } catch (e) { console.warn(e); } }
   // SCH_EDIT_TOOL::Properties on a SCH_MARKER_T: SCH_INSPECTION_TOOL::CrossProbe brings the ERC dialog up on its row
   if (isSch()) { const mk = markerUnder([x, y]); const hk = E.hooks as { ercOpenMarker?: (m: unknown) => void }; if (mk && hk.ercOpenMarker) { hk.ercOpenMarker(mk); return; } }
   // PCB_SELECTION_TOOL: a double-click when the selection is a lone group enters it (and picks the item under the cursor)
@@ -685,6 +688,16 @@ stage.addEventListener("pointerdown", (ev) => {
       }
     }
   }
+  // PCB_SELECTION_TOOL::Main: a click on a constraint badge selects the constraint (CONSTRAINT_EDIT_TOOL::SelectConstraintAt),
+  // any other click clears the badge selection (ClearConstraintSelection) before the board pick
+  if (!isSch() && E.tool === "select" && ev.button === 0) {
+    const C = constraintTools();
+    if (C && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+      let hit = false; try { hit = C.selectConstraintAt(toolCtx(), [x, y], 1 / Math.max(1e-9, pxPerMm())); } catch (e) { console.warn(e); }
+      if (hit) { clearSelection(); drawSelection(); renderProps(); renderObjects(); requestRender(); ev.preventDefault(); return; }
+    }
+    if (C) { try { C.clearConstraintSelection(toolCtx()); } catch (e) { console.warn(e); } }
+  }
   let best = nearestFootprint(x, y, 5 / Math.max(1, E.zoom * 0.6));
   if (pinPromote) { const fp = (E.items as ItemSummary[]).find((f) => f.id === pinPromote!.id); if (fp) best = fp; }
   // DRAG_SELECTED on a board: PCB_SELECTION_TOOL::SelectionContains( DragOrigin ) comes before any new pick.  For a
@@ -1183,6 +1196,8 @@ document.addEventListener("keydown", (ev) => {
     if (cancelInteraction()) return;
     if (cmtPanel.classList.contains("open")) { closeThread(); return; }
     if (E.tool !== "select") { setTool("select"); return; }
+    // PCB_SELECTION_TOOL::Main on Esc: a badge-selected constraint is deselected first (ClearConstraintSelection)
+    if (!isSch()) { const C = constraintTools(); let was = false; try { was = !!C && C.clearConstraintSelection(toolCtx()); } catch (e) { console.warn(e); } if (was) { requestRender(); return; } }
     // PCB_SELECTION_TOOL / SCH_SELECTION_TOOL::Main on Esc: a selection is cleared and nothing else; with none, an
     // entered group is left; only with neither is the net highlight cleared (m_ESCClearsNetHighlight on the board)
     const hadSel = !!selectionIds().length || !!E.selField || !!E.selPins.length
@@ -1295,17 +1310,19 @@ async function importLibraryFiles(files: { path: string; text: string }[]): Prom
   return { added: [...sym.added, ...fp.added, ...models.added], updated: [...sym.updated, ...fp.updated, ...models.updated], failed: [...sym.failed, ...fp.failed, ...models.failed] };
 }
 // A 3D model kept in the project, for the 3D viewer and the model report (viewer3d/models.ts): the project path a
-// footprint names, without its extension, to where that document's text is read.
-(globalThis as { KiCadProjectModel?: (stem: string) => string | null }).KiCadProjectModel = (stem) => {
-  const docs = (state.project ? state.project.docs : []).filter((d) => d.docType === "model3d" && /\.(step|stp)$/i.test(d.path));
+// footprint names, without its extension, to where that document's text is read; with `ext`, the file of exactly that
+// extension (Collect And Embed 3D Models embeds the file named, a .wrl as well as a .step), else its STEP file.
+(globalThis as { KiCadProjectModel?: (stem: string, ext?: string) => string | null }).KiCadProjectModel = (stem, ext) => {
+  const extRe = ext ? new RegExp("\\." + ext.replace(/[^A-Za-z0-9]/g, "") + "$", "i") : /\.(step|stp)$/i;
+  const docs = (state.project ? state.project.docs : []).filter((d) => d.docType === "model3d" && extRe.test(d.path));
   const want = stem.toLowerCase();
-  let hit = docs.find((d) => d.path.toLowerCase().replace(/\.(step|stp)$/, "") === want);
+  let hit = docs.find((d) => d.path.toLowerCase().replace(extRe, "") === want);
   if (!hit && (want.startsWith("/") || /^[a-z]:\//.test(want))) {
     // an absolute path from someone's machine: the project file whose own path (from its first real folder on) ends it,
     // at least a folder and a file name deep; the longest such match
     let best = 0;
     for (const d of docs) {
-      const own = d.path.toLowerCase().replace(/\.(step|stp)$/, "").replace(/^(?:\.\.\/)+/, "");
+      const own = d.path.toLowerCase().replace(extRe, "").replace(/^(?:\.\.\/)+/, "");
       if (own.split("/").length >= 2 && want.endsWith("/" + own) && own.length > best) { best = own.length; hit = d; }
     }
   }

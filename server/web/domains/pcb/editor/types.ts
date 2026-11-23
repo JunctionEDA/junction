@@ -59,14 +59,20 @@ export interface UndoEntry {
   heldRedo?: UndoEntry[];
   /** one commit over several sheets: the other sheets' undo / redo */
   undoOthers?(): void; redoOthers?(): void;
+  /** the other documents one atomic commit wrote (an op_multi): undone and redone with this one in one op_multi again */
+  others?: OtherDocChanges[];
 }
+/** One other document's part of an atomic commit over several documents (net.ts sendOp, the server's op_multi). */
+export interface OtherDocChanges { docId: string; changes: KChange[]; inverse: KChange[]; path?: string }
 
 /** A change commit's options (tools.ts commitChanges). */
 /** newSheet: the commit adds a sheet whose file joined the project (Draw Sheet / Import Sheet Copy). */
-export interface CommitOpts { amend?: boolean; discard?: boolean; tentative?: boolean; newSheet?: boolean }
+/** others: what the same commit writes into other documents of the project, journalled with it in one transaction. */
+export interface CommitOpts { amend?: boolean; discard?: boolean; tentative?: boolean; newSheet?: boolean; others?: OtherDocChanges[] }
 
 /** An op of ours the server has not acknowledged yet (E.pendingOps, keyed by clientOpId). */
-export interface PendingOp { docId: string | null; changes: KChange[] }
+/** `also`: an op_multi's parts on other documents, sent again with it on a replay. */
+export interface PendingOp { docId: string | null; changes: KChange[]; also?: { docId: string; changes: KChange[] }[] }
 
 /** A server `error` frame (ws.rs): its code, and for a refused op the op's id and our role. */
 export interface ServerError { code?: string; clientOpId?: string; role?: string; docId?: string }

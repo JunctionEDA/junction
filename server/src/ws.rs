@@ -537,6 +537,86 @@ async fn handle_socket(
                     })
                     .await;
             }
+            ClientMsg::op_multi { doc_id, client_op_id, changes, also } => {
+                let refuse = |code: &str, message: &str| {
+                    json!({ "type": "error", "code": code, "docId": doc_id, "clientOpId": client_op_id, "message": message }).to_string()
+                };
+                let Some(d) = joined.get_mut(&doc_id) else {
+                    let _ = out_tx.try_send(json!({ "type": "error", "code": "not_joined", "docId": doc_id }).to_string());
+                    continue;
+                };
+                let role = current_role(&state, &who, d, true).await;
+                if role.as_deref() != Some("editor") || who.user_id.is_none() {
+                    let _ = out_tx.try_send(
+                        json!({ "type": "error", "code": "permission_denied", "docId": doc_id,
+                                "clientOpId": client_op_id, "role": role }).to_string(),
+                    );
+                    if role.is_none() {
+                        drop_doc(&mut joined, doc_id, &client_id, &out_tx).await;
+                    }
+                    continue;
+                }
+                let project_id = d.project_id;
+                let ops = match multi_plan(doc_id, &client_op_id, changes, also) {
+                    Ok(ops) => ops,
+                    Err(reason) => {
+                        let _ = out_tx.try_send(refuse("bad_op", reason));
+                        continue;
+                    }
+                };
+                // every other document must be one of the same project (the role was looked up for that project)
+                let mut kinds: HashMap<Uuid, String> = HashMap::new();
+                let mut foreign = false;
+                for (other, _) in &ops {
+                    match persist::get_document(&state.pool, *other).await {
+                        Ok(Some(doc)) if doc.project_id == project_id => {
+                            kinds.insert(*other, doc.doc_type.clone());
+                        }
+                        _ => foreign = true,
+                    }
+                }
+                if foreign {
+                    let _ = out_tx.try_send(refuse("bad_op", "a document of the commit is not in this project"));
+                    continue;
+                }
+                if user.is_some() {
+                    crate::timetrack::activity(&state, user_id, doc_id, &track_kind, true);
+                }
+                match persist::insert_ops_atomic(&state.pool, user_id, &client_id, &client_op_id, &ops).await {
+                    Ok(persist::MultiCommit::Already(seq)) => {
+                        let _ = out_tx.try_send(
+                            json!({ "type": "ack", "docId": doc_id, "clientOpId": client_op_id, "seq": seq }).to_string(),
+                        );
+                    }
+                    Ok(persist::MultiCommit::Done(seqs)) => {
+                        // each document's actor reads its op from the table, hands it to its clients and (the
+                        // author's own document) acks it in its place in the stream
+                        for (doc, seq) in &seqs {
+                            if let Some(tx) = state.registry.existing(*doc) {
+                                let _ = tx.send(DocMsg::Relay(json!({ "t": "op", "d": doc, "seq": seq }))).await;
+                            }
+                            if state.relay.others_alive() {
+                                state.relay.publish(json!({ "t": "op", "d": doc, "seq": seq }));
+                            }
+                        }
+                        for (doc, changes) in &ops {
+                            let sheet = kinds.get(doc).is_some_and(|k| k == "kicad_sch")
+                                && changes.as_array().is_some_and(|cs| cs.iter().any(|c| c["typeName"] == "SCH_SHEET"));
+                            if sheet {
+                                let state = state.clone();
+                                let doc = *doc;
+                                tokio::spawn(async move {
+                                    crate::http::notify_sheet_changed(&state, project_id, doc).await;
+                                });
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("doc {doc_id}: op_multi insert failed: {e}");
+                        let _ = out_tx.try_send(refuse("internal", "the commit could not be stored"));
+                    }
+                }
+            }
             ClientMsg::presence { doc_id, state: presence_state } => {
                 let state_json = presence_state.to_string();
                 if state_json.len() > MAX_PRESENCE_BYTES {
@@ -630,6 +710,36 @@ async fn handle_socket(
     Ok(())
 }
 
+/// The most documents one `op_multi` may write.
+const MAX_MULTI_DOCS: usize = 256;
+
+/// An `op_multi` as the ops to journal, the joined document's first: each document once, each change list valid, the
+/// clientOpId marked as a multi-document one (the actors ack those from the table).
+pub fn multi_plan(
+    doc_id: Uuid,
+    client_op_id: &str,
+    changes: Value,
+    also: Vec<kicad_collab_protocol::DocChanges>,
+) -> Result<Vec<(Uuid, Value)>, &'static str> {
+    if !client_op_id.starts_with(persist::MULTI_OP_PREFIX) {
+        return Err("an op_multi's clientOpId starts with \"multi:\"");
+    }
+    if also.len() + 1 > MAX_MULTI_DOCS {
+        return Err("too many documents in one commit");
+    }
+    let mut ops = Vec::with_capacity(also.len() + 1);
+    validate_changes(&changes)?;
+    ops.push((doc_id, changes));
+    for part in also {
+        if ops.iter().any(|(d, _)| *d == part.doc_id) {
+            return Err("a document appears twice in one commit");
+        }
+        validate_changes(&part.changes)?;
+        ops.push((part.doc_id, part.changes));
+    }
+    Ok(ops)
+}
+
 /// Structural validation only: the server never interprets change contents.
 pub fn validate_changes(changes: &Value) -> Result<(), &'static str> {
     let Some(arr) = changes.as_array() else {
@@ -675,6 +785,23 @@ mod tests {
 
         let flood = json!({ "cursor": [0, 0], "pad": "x".repeat(MAX_PRESENCE_BYTES) });
         assert!(flood.to_string().len() > MAX_PRESENCE_BYTES);
+    }
+
+    #[test]
+    fn multi_plan_checks_the_commit() {
+        let a = Uuid::parse_str("64912f74-6834-4aa6-98ff-55c3faec0bbf").unwrap();
+        let b = Uuid::parse_str("74912f74-6834-4aa6-98ff-55c3faec0bbf").unwrap();
+        let ch = json!([{ "id": "x", "kind": "ADDED", "sexpr": "(junction)" }]);
+        let part = |d: Uuid| kicad_collab_protocol::DocChanges { doc_id: d, changes: ch.clone() };
+        let ops = multi_plan(a, "multi:web:1", ch.clone(), vec![part(b)]).unwrap();
+        assert_eq!(ops.iter().map(|(d, _)| *d).collect::<Vec<_>>(), vec![a, b]);
+        assert!(multi_plan(a, "web:1", ch.clone(), vec![part(b)]).is_err());
+        assert!(multi_plan(a, "multi:web:1", ch.clone(), vec![part(a)]).is_err());
+        assert!(multi_plan(a, "multi:web:1", ch.clone(), vec![part(b), part(b)]).is_err());
+        assert!(multi_plan(a, "multi:web:1", json!([]), vec![part(b)]).is_err());
+        assert!(multi_plan(a, "multi:web:1", ch.clone(), vec![kicad_collab_protocol::DocChanges { doc_id: b, changes: json!([]) }]).is_err());
+        // the locks are taken in one order whatever order the documents come in
+        assert_eq!(persist::lock_order(&[b, a, b]), vec![a, b]);
     }
 
     #[test]

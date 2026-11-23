@@ -115,6 +115,8 @@ interface KiCadCanvasApi {
   renderPng(doc: KDoc, opts?: Record<string, unknown> | null): Promise<Blob>;
   applyDocProps(doc: KDoc | null | undefined, props: { paper?: unknown; titleBlock?: unknown } | null | undefined): boolean;
   cloneNode(node: SNode): SNode;
+  /** the reused-sheet Reference Suffix model (web/domains/pcb/canvas/ref-suffix.ts) */
+  refSuffix: typeof import("./canvas/ref-suffix");
   fieldAt(doc: KDoc, x: number, y: number, hidden?: Set<string> | null): { item: KItem; name: string } | null;
   /** the pad under (x, y) mm (web/domains/pcb/canvas/hit.ts) */
   padAt?(doc: KDoc, x: number, y: number): { item: KItem; index: number } | null;
@@ -180,6 +182,9 @@ interface KiCadCanvasApi {
   migrateSchNode(node: SNode, version: number): void;
   downgradeSchNode(node: SNode, version: number): SNode;
   migrateBoardNode(node: SNode, version: number): void;
+  migrateLegacyTree(tree: SNode, pcb: boolean, version: number): void;
+  /** canvas/legacy.ts upgradeLegacyNode: a stored item read at `from` in the form a file of version `to` stores it */
+  upgradeLegacyNode(node: SNode, pcb: boolean, from: number, to: number): SNode;
   schFormat: { textOffsetRatio: number; labelSizeRatio: number; pinSymbolSize: number; showDnpMarkers: boolean; overbarHeight: number; hopOverChoice: number };
   withSchTheme<T>(id: string, fn: () => T): T;
   ORIENT: unknown;
@@ -207,6 +212,8 @@ interface KiCadCanvasApi {
   footprintDoc: typeof import("./canvas/footprint-doc").footprintDocApi;
   /** a table's structure edits and Normalize (web/domains/pcb/canvas/table-model.ts) */
   tableModel: typeof import("./canvas/table-model").tableModel;
+  /** the drill model, drill maps and generated tables (canvas/drill-model.ts) */
+  drillModel: typeof import("./canvas/drill-model");
   /** a table cell's shown text: ${ROW} ${COL} ${ADDR} ${LAYER} ${CELL(…)} and the document's variables (web/domains/pcb/canvas/tables-images.ts) */
   tableCellShownText: typeof import("./canvas/tables-images").tableCellShownText;
   shiftTable: typeof import("./canvas/tables-images").shiftTable;
@@ -230,7 +237,8 @@ interface ToolCtx {
   docs: unknown[]; project: unknown; api(path: string, opts?: RequestInit): Promise<unknown>; docId: string | null;
   setHighlight(ids: Set<string> | null, nets?: Iterable<string>): void;
   setSelected(fp: { id: string } | null): void;
-  commit(changes: KChange[], label?: string, opts?: { amend?: boolean; newSheet?: boolean }): void;
+  /** opts.others: the same commit's changes to other documents of the project (each with its inverse), journalled with it in one transaction */
+  commit(changes: KChange[], label?: string, opts?: { amend?: boolean; newSheet?: boolean; others?: { docId: string; changes: KChange[]; inverse: KChange[]; path?: string }[] }): void;
   undo?(): void;
   applyLocal(changes: KChange[]): void;
   requestRender(): void; toast(msg: string, ms?: number): void; enterSheet(file: string): void; setTool(t: string): void; setStatus(text: string): void;
@@ -269,7 +277,7 @@ interface ToolModule {
   withinEnteredGroup?(doc: KDoc, ids: string[]): string[];
   selectedTopGroup?(ctx: ToolCtx): string | null;
   /** what the board's context menus ask of the selection: GROUP_CONTEXT_MENU::update's counts and ZONE_PRIORITY_CONTEXT_MENU::update's canRaise / canLower */
-  menuState?(ctx: ToolCtx): { grouping: { count: number; hasGroup: boolean; onlyOneGroup: boolean; hasNonGroup: boolean; hasMember: boolean }; zoneCanRaise: boolean; zoneCanLower: boolean };
+  menuState?(ctx: ToolCtx): { grouping: { count: number; hasGroup: boolean; onlyOneGroup: boolean; hasNonGroup: boolean; hasMember: boolean }; zoneCanRaise: boolean; zoneCanLower: boolean; constrained?: boolean; constraintsAlways?: boolean };
   enterGroupAt?(ctx: ToolCtx, id: string): boolean;
   leaveGroupOutside?(mm: [number, number], ctx: ToolCtx): boolean;
   exitGroup?(ctx?: ToolCtx): boolean;

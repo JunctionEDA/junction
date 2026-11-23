@@ -223,22 +223,43 @@ export function dashRatios(setup: SNode | null): DashRatios {
 // ---------------------------------------------------------------- the drill chart (PANEL_SETUP_DRILL_CHART, DRILL_SYMBOL_PROFILE)
 export const DRILL_GROUP_KEYS = ["size", "slot", "plating", "span", "operation", "hole_function", "protection", "post_machining"];
 export const DRILL_MARK_POLICIES = ["shapes", "letters", "shapes_then_letters", "size_text"];
-export interface DrillProfile { groupBy: string[]; markPolicy: string; size: number; width: number; freeze: boolean }
+/** DRILL_SYMBOL_ASSIGNMENT: a group's mark (a curated shape index, a letter, or the hole size as text) and its description. */
+export interface DrillAssignment { key: string; mode: "shape" | "letter" | "size_text"; shape: number; letter: string; descr: string }
+/**
+ * DRILL_SYMBOL_PROFILE.  `name` and `assignments` are read from the file; when an edit leaves `assignments` undefined the
+ * profile node's own (name …) and (assignment …) entries are kept as they are.
+ */
+export interface DrillProfile { groupBy: string[]; markPolicy: string; size: number; width: number; freeze: boolean; name?: string; assignments?: DrillAssignment[] }
 export const DRILL_PROFILE_DEFAULT: DrillProfile = { groupBy: ["size", "slot", "plating", "span", "operation", "post_machining"], markPolicy: "shapes_then_letters", size: 1.5, width: 0.15, freeze: true };
 export function drillProfile(setup: SNode | null): DrillProfile {
   const p = setup ? (kid(setup, "drill_symbol_profile") as SNode | null) : null;
   if (!p) return { ...DRILL_PROFILE_DEFAULT, groupBy: DRILL_PROFILE_DEFAULT.groupBy.slice() };
   const g = kid(p, "group_by") as SNode | null;
-  return { groupBy: g ? g.slice(1).map((x) => str(x)) : [], markPolicy: kidStr(p, "default_marks") || "shapes_then_letters", size: kidNum(p, "size", 1.5), width: kidNum(p, "width", 0.15), freeze: yes(p, "freeze_assignments", true) };
+  const assignments: DrillAssignment[] = [];
+  for (const a of kids(p, "assignment") as SNode[]) {
+    const m = kid(a, "mark") as SNode | null, mode = m ? str(m[1]) : "shape";
+    assignments.push({ key: kidStr(a, "key"), mode: mode === "letter" ? "letter" : mode === "size_text" ? "size_text" : "shape",
+      shape: mode === "shape" && m ? num(m[2], 0) : 0, letter: mode === "letter" && m ? str(m[2]) : "", descr: kidStr(a, "descr") });
+  }
+  // DRILL_SYMBOL_PROFILE keeps them in a std::map: sorted by key, one per key
+  const byKey = new Map<string, DrillAssignment>(); for (const a of assignments) byKey.set(a.key, a);
+  return { groupBy: g ? g.slice(1).map((x) => str(x)) : [], markPolicy: kidStr(p, "default_marks") || "shapes_then_letters", size: kidNum(p, "size", 1.5), width: kidNum(p, "width", 0.15), freeze: yes(p, "freeze_assignments", true),
+    name: kidStr(p, "name"), assignments: [...byKey.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)) };
+}
+/** formatDrillSymbolProfile's (assignment (key "k") (mark shape N | letter "A" | size_text)(descr "…")). */
+function drillAssignmentText(a: DrillAssignment): string {
+  const mark = a.mode === "shape" ? `shape ${a.shape | 0}` : a.mode === "letter" ? `letter ${quote(a.letter)}` : "size_text";
+  return `(assignment (key ${quote(a.key)}) (mark ${mark})${a.descr ? `(descr ${quote(a.descr)})` : ""})`;
 }
 /** formatDrillSymbolProfile; null for the default profile (nothing is written).  The old node's name and assignments stay. */
 function drillProfileText(d: DrillProfile, old: SNode | null): string | null {
   const keys = DRILL_GROUP_KEYS.filter((k) => d.groupBy.includes(k));
   const def = DRILL_PROFILE_DEFAULT;
   const rest = old ? old.slice(1).filter((c) => isList(c) && (c[0] === "name" || c[0] === "assignment")) as SNode[] : [];
-  if (!rest.length && keys.join() === def.groupBy.join() && d.markPolicy === def.markPolicy && Math.abs(d.size - def.size) < 1e-9 && Math.abs(d.width - def.width) < 1e-9 && d.freeze === def.freeze) return null;
-  const name = rest.filter((c) => c[0] === "name").map((c) => ser(c)).join("");
-  return `(drill_symbol_profile${name}(group_by${keys.map((k) => " " + k).join("")})(default_marks ${d.markPolicy})(size ${fmt(d.size)})(width ${fmt(d.width)})(freeze_assignments ${d.freeze ? "yes" : "no"})${rest.filter((c) => c[0] === "assignment").map((c) => ser(c)).join("")})`;
+  const name = d.assignments ? (d.name ? `(name ${quote(d.name)})` : "") : rest.filter((c) => c[0] === "name").map((c) => ser(c)).join("");
+  const assigns = d.assignments ? d.assignments.map(drillAssignmentText).join("") : rest.filter((c) => c[0] === "assignment").map((c) => ser(c)).join("");
+  if (!name && !assigns && keys.join() === def.groupBy.join() && d.markPolicy === def.markPolicy && Math.abs(d.size - def.size) < 1e-9 && Math.abs(d.width - def.width) < 1e-9 && d.freeze === def.freeze) return null;
+  return `(drill_symbol_profile${name}(group_by${keys.map((k) => " " + k).join("")})(default_marks ${d.markPolicy})(size ${fmt(d.size)})(width ${fmt(d.width)})(freeze_assignments ${d.freeze ? "yes" : "no"})${assigns})`;
 }
 
 // ---------------------------------------------------------------- writing the (setup …) section
@@ -353,8 +374,18 @@ export function boardSetupChange(sections: { layers?: string; setup?: string; ge
  * so a footprint file replaced in the web goes there as well, or KiCad would load the old one over it.
  */
 export const EMBEDDED_FILE_PROP = "embedded_file";
-export function embeddedFilesChange(files: string[]): KChange {
-  return { id: "board-setup", kind: "MODIFIED", typeName: BOARD_SETUP_TYPE, properties: files.map((v) => ({ name: EMBEDDED_FILE_PROP, after: { type: "sexpr", v } })) };
+/**
+ * Board Setup > Embedded Files (PANEL_EMBEDDED_FILES::TransferDataFromWindow): "embedded_file_remove" names a file the
+ * board no longer keeps (EMBEDDED_FILES::RemoveFile; an (embedded_files …) left empty is not written), and
+ * "embedded_fonts" carries SetAreFontsEmbedded as "yes" / "no" (the (embedded_fonts …) before the files).
+ */
+export const EMBEDDED_FILE_REMOVE_PROP = "embedded_file_remove";
+export const EMBEDDED_FONTS_PROP = "embedded_fonts";
+export function embeddedFilesChange(files: string[], more?: { remove?: string[]; fonts?: boolean }): KChange {
+  const properties: NonNullable<KChange["properties"]> = files.map((v) => ({ name: EMBEDDED_FILE_PROP, after: { type: "sexpr", v } }));
+  for (const name of (more && more.remove) || []) properties.push({ name: EMBEDDED_FILE_REMOVE_PROP, after: { type: "string", v: name } });
+  if (more && more.fonts !== undefined) properties.push({ name: EMBEDDED_FONTS_PROP, after: { type: "string", v: more.fonts ? "yes" : "no" } });
+  return { id: "board-setup", kind: "MODIFIED", typeName: BOARD_SETUP_TYPE, properties };
 }
 /**
  * The board's (net_chains …) (after the items) is a section as well: a property "net_chains" carries the whole section,
@@ -363,6 +394,21 @@ export function embeddedFilesChange(files: string[]): KChange {
 export const NET_CHAINS_PROP = "net_chains";
 export function netChainsChange(text: string): KChange {
   return { id: "board-setup", kind: "MODIFIED", typeName: BOARD_SETUP_TYPE, properties: [{ name: NET_CHAINS_PROP, after: { type: "sexpr", v: text } }] };
+}
+/**
+ * The board's design variant registry (BOARD::m_variantNames / m_variantDescriptions, the header's (variants …) that
+ * formatVariants writes after the setup, properties and nets): a property "variants" carries the whole section, or ""
+ * when the board has no variants left.
+ */
+export const VARIANTS_PROP = "variants";
+export function variantsChange(text: string): KChange {
+  return { id: "board-setup", kind: "MODIFIED", typeName: BOARD_SETUP_TYPE, properties: [{ name: VARIANTS_PROP, after: { type: "sexpr", v: text } }] };
+}
+/** formatVariants: (variants (variant (name "A") (description "…")) …), "" with no variant. */
+export function variantsSection(list: { name: string; description: string }[]): string {
+  if (!list.length) return "";
+  const q = (t: string): string => '"' + t.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"';
+  return "(variants" + list.map((v) => `(variant (name ${q(v.name)})` + (v.description ? `(description ${q(v.description)})` : "") + ")").join("") + ")";
 }
 /** The (file …) `file` into `files` (an (embedded_files …) node): in place of the one of its name, else last. */
 export function putEmbeddedFile(files: SNode, file: SNode): void {
@@ -379,6 +425,7 @@ export function applyHeaderChange(header: BoardHeader, change: KChange): BoardHe
     const v = p.after && typeof p.after.v === "string" ? (parse(p.after.v) as SNode | null) : null; if (!v) continue;
     if (p.name === "layers") out.layers = v; else if (p.name === "setup") out.setup = v; else if (p.name === "general") out.general = v; else if (p.name === "variants") out.variants = v;
   }
+  for (const p of change.properties || []) if (p.name === VARIANTS_PROP && p.after && p.after.v === "") out.variants = null;
   return out;
 }
 /** Apply a BOARD_SETUP change to an open board document: its layer table and copper stack.  True when it was one. */
@@ -395,7 +442,7 @@ export function applyBoardSetup(doc: KDoc, change: KChange): boolean {
       if (/\.Cu$/.test(name) && type !== "user") doc.copper.push(name);
     }
   }
-  const d = doc as KDoc & { boardSetup?: BoardHeader; setupNode?: SNode | null; generalNode?: SNode | null; stackup?: SNode | null; embeddedFiles?: SNode | null };
+  const d = doc as KDoc & { boardSetup?: BoardHeader; setupNode?: SNode | null; generalNode?: SNode | null; stackup?: SNode | null; embeddedFiles?: SNode | null; embeddedFonts?: boolean };
   for (const p of change.properties || []) {
     if (p.name !== EMBEDDED_FILE_PROP || !p.after || typeof p.after.v !== "string") continue;
     const f = parse(p.after.v) as SNode | null; if (!f || f[0] !== "file") continue;
@@ -403,11 +450,21 @@ export function applyBoardSetup(doc: KDoc, change: KChange): boolean {
     putEmbeddedFile(d.embeddedFiles, f);
   }
   for (const p of change.properties || []) {
+    if (!p.after || typeof p.after.v !== "string") continue;
+    if (p.name === EMBEDDED_FILE_REMOVE_PROP && d.embeddedFiles) {
+      const files = d.embeddedFiles;
+      for (let j = files.length - 1; j >= 1; j--) { const c = files[j]; if (isList(c) && c[0] === "file" && kidStr(c as SNode, "name") === p.after.v) files.splice(j, 1); }
+      if (files.length <= 1) d.embeddedFiles = null;
+    } else if (p.name === EMBEDDED_FONTS_PROP) d.embeddedFonts = p.after.v === "yes";
+  }
+  for (const p of change.properties || []) {
     if (p.name !== NET_CHAINS_PROP || !p.after || typeof p.after.v !== "string") continue;
     const node = p.after.v.trim() ? parse(p.after.v) as SNode | null : null;
     doc.netChainsNode = node && node[0] === "net_chains" ? node : null;
   }
   d.boardSetup = applyHeaderChange(d.boardSetup || { general: null, layers: null, setup: null, version: 0 }, change);
+  // the variant registry the toolbar's variant list reads (editor/variant.ts)
+  if ((change.properties || []).some((p) => p.name === VARIANTS_PROP)) (doc as KDoc & { variantsNode?: SNode | null }).variantsNode = d.boardSetup.variants || null;
   for (const p of change.properties || []) {
     // the physical stackup and the board thickness follow the sections (impedance work and the 3D view read them)
     if (p.name === "setup" && d.boardSetup.setup) { d.setupNode = d.boardSetup.setup; d.stackup = (kid(d.boardSetup.setup, "stackup") as SNode | null) || null; }
@@ -558,4 +615,4 @@ export function adjustDielectrics(layers: StackupLayer[], target: number): strin
 }
 
 export const boardSetup = { boardHeader, layerRows, layersText, setCopperCount, copperNames, layerNameError, defaultLayerName, modernLayerIds, stackupRows, stackupThickness, boardFinish, maskPaste, viaProtection, dashRatios,
-  editSetup, sectionText, setupWithPlotParams, validateDesignRules, designRuleWarnings, validateViaParameters, unitText, stackupLayers, stackupText, setupWithStackup, stackupLayersThickness, stackupFixedThickness, adjustDielectrics, drillProfile, DRILL_GROUP_KEYS, DRILL_MARK_POLICIES, DRILL_PROFILE_DEFAULT, readPlotParams, plotParamsText, boardSetupChange, embeddedFilesChange, putEmbeddedFile, EMBEDDED_FILE_PROP, netChainsChange, NET_CHAINS_PROP, applyHeaderChange, applyBoardSetup, COPPER_FINISHES, COPPER_TYPES, USER_TYPES, BOARD_SETUP_TYPE };
+  editSetup, sectionText, setupWithPlotParams, validateDesignRules, designRuleWarnings, validateViaParameters, unitText, stackupLayers, stackupText, setupWithStackup, stackupLayersThickness, stackupFixedThickness, adjustDielectrics, drillProfile, DRILL_GROUP_KEYS, DRILL_MARK_POLICIES, DRILL_PROFILE_DEFAULT, readPlotParams, plotParamsText, boardSetupChange, embeddedFilesChange, putEmbeddedFile, EMBEDDED_FILE_PROP, EMBEDDED_FILE_REMOVE_PROP, EMBEDDED_FONTS_PROP, netChainsChange, NET_CHAINS_PROP, variantsChange, variantsSection, VARIANTS_PROP, applyHeaderChange, applyBoardSetup, COPPER_FINISHES, COPPER_TYPES, USER_TYPES, BOARD_SETUP_TYPE };

@@ -25,6 +25,7 @@ import { matchDpSuffix } from "./diffpair";
 import { silkMaskMarkers } from "./drc-silk";
 import { isolatedCopperMarkers, starvedThermalMarkers } from "./drc-zones";
 import { unflashedLayers } from "./drc-flash";
+import { creepageMarkers } from "./drc-creepage";
 
 // ---------------------------------------------------------------- design settings and DRC
 // BOARD_DESIGN_SETTINGS / NETCLASS defaults (board_design_settings.h, netclass.cpp): what a board without a
@@ -792,6 +793,8 @@ function drcRun(doc: BoardDoc, settings: DesignSettings | DesignSource | string 
   out.push(...footprintCheckMarkers(doc, s));
   // physical_clearance / physical_hole_clearance (drc-physical.ts)
   out.push(...physicalClearanceMarkers(doc, s, rules));
+  // creepage along the board surface between nets (DRC_TEST_PROVIDER_CREEPAGE, drc-creepage.ts)
+  out.push(...creepageMarkers(doc, s, rules));
   // DRC_TEST_PROVIDER_MISC::testUnquotableNetclasses: a class name no rule can quote (EscapeStringLiteral: one ending
   // in a backslash) loses its implicit rules, so it is named
   if ((s.severities.generic_warning || "warning") !== "ignore") {

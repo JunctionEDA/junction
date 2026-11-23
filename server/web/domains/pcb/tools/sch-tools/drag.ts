@@ -16,6 +16,8 @@ import { endBreak } from "./transforms";
 import { addNode, deep, itemSexpr, modChange, r4, same, segDist, segs, typeNameFor } from "./util";
 import { wireModeChanged, mergeOverlap } from "./wire";
 import { isLockedItem } from "./lock";
+import { moveInstanceChanges, type OtherDoc } from "./sheet-instances";
+import { currentDoc, sheetPathHere } from "./sheets";
 
 // ---------------------------------------------------------------- drag (KiCad's "drag": attached ends stretch)
 // ---------------------------------------------------------------- connected drag (eeschema/tools/sch_move_tool.cpp)
@@ -577,18 +579,43 @@ function dropIntoSheet(ctx: SchCtx, d: SchDrag, sheet: KItem, dx: number, dy: nu
   }
   applyDrag(doc, d, 0, 0, true); restorePristine(doc, d);
   for (const { item } of sel) touched.push(...connPoints(doc, item));
-  const out = sel.map(({ item }) => K.removeChange(item));
-  const changes = foldChanges(out, cleanupAt(doc, out, touched, new Set<string>(), ctx.IU || 1e4));
-  ctx.commit(changes, "Move");
   setSelectionIds(ctx, []);                                     // ACTIONS::selectionClear
   const b0 = box || [0, 0, 0, 0];
-  ctx.dropIntoSheet!(sheet, "Move", (sub: KDoc) => {
+  /** the items laid into the sub-sheet: from its origin, stepped by 50 mil until they overlap nothing there */
+  const placed = (sub: KDoc) => {
     let ox = -b0[0], oy = -b0[1];
     const hit = () => { const m = [b0[0] + ox, b0[1] + oy, b0[2] + ox, b0[3] + oy]; for (const it of sub.items.values()) { const e = it.bbox; if (e && m[0] <= e[2] && m[2] >= e[0] && m[1] <= e[3] && m[3] >= e[1]) return true; } return false; };
     for (let guard = 0; hit() && guard < 100000; guard++) { ox += 1.27; oy += 1.27; }
     ox = r4(ox); oy = r4(oy);
-    return nodes.map(({ kind, node }) => { shiftNode(kind, node, ox, oy); const id = uuidOf(node); return { id, kind: "ADDED", typeName: typeNameFor({ kind }), sexpr: itemSexpr(doc, kind, node) } as KChange; });
-  });
+    for (const { kind, node } of nodes) shiftNode(kind, node, ox, oy);
+  };
+  const removal = () => { const out = sel.map(({ item }) => K.removeChange(item)); return foldChanges(out, cleanupAt(doc, out, touched, new Set<string>(), ctx.IU || 1e4)); };
+  const added = () => nodes.map(({ kind, node }) => ({ id: uuidOf(node), kind: "ADDED", typeName: typeNameFor({ kind }), sexpr: itemSexpr(doc, kind, node) } as KChange));
+  if (ctx.commitWithSheets && ctx.readSheetFile) {
+    // one commit over both files (and the files below a moved sheet): this sheet loses the items, the sub-sheet gains
+    // them, and the instance data follows (sheet-instances.ts moveInstanceChanges)
+    const cur = currentDoc(ctx), hereFile = cur ? cur.path : "", h = ctx.sheetHierarchy ? ctx.sheetHierarchy() : null;
+    const hereInst = sheetPathHere(doc);
+    ctx.commitWithSheets("Move", async (read) => {
+      const target = await read(sheet.file || "", hereFile);
+      if (!target) throw new Error(`Could not move the items into '${sheet.file || ""}'.`);
+      if (sel.some(({ item }) => doc.items.get(item.id) !== item)) return null;      // somebody changed them meanwhile
+      placed(target.doc);
+      const insts = h && h.instances ? h.instances : [];
+      const herePaths = insts.filter((i) => i.file === hereFile).map((i) => i.path);
+      if (!herePaths.length && hereInst.path) herePaths.push(hereInst.path);
+      const targetPaths = Array.from(new Set(insts.filter((i) => i.file === target.path).map((i) => i.path).concat(herePaths.map((p) => p + "/" + sheet.id))));
+      const project = hereInst.project || "";
+      const deeper = project ? await moveInstanceChanges(read, { hereFile, herePaths, targetPaths, project, nodes: nodes.map((x) => x.node) }) : [];
+      const there = added(), into = deeper.find((o) => o.docId === target.docId);
+      const others: OtherDoc[] = [{ docId: target.docId, path: target.path, changes: there.concat(into ? into.changes : []), inverse: there.map((c) => ({ id: c.id, kind: "REMOVED", typeName: c.typeName, properties: [] } as KChange)).concat(into ? into.inverse : []) }];
+      for (const o of deeper) if (o !== into) others.push(o);
+      return { here: removal(), others };
+    });
+    return;
+  }
+  ctx.commit(removal(), "Move");
+  ctx.dropIntoSheet!(sheet, "Move", (sub: KDoc) => { placed(sub); return added(); });
 }
 export function endDrag(ctx: SchCtx, commit: boolean) {
   const d = S.drag; S.drag = null; collisionCursor(ctx.stage, false); if (!d) return;
@@ -606,10 +633,16 @@ export function endDrag(ctx: SchCtx, commit: boolean) {
   if (d.local) {                                // a paste / duplicate in flight: never committed yet
     if (!commit) { dropLocal(ctx, d); done(); if (d.after) d.after(false); return; }
     const changes = dragChanges(ctx, d, dx, dy, true);
-    for (const id of d.local) ctx.doc.items.delete(id);
-    if (changes.length) ctx.commit(changes, d.label || "Paste");
-    setSelectionIds(ctx, d.hover ? [] : Array.from(d.local).filter((id) => ctx.doc.items.has(id)));   // SetIsHover( m_duplicateIsHoverSelection )
-    done(); if (d.after) d.after(true); return;
+    const place = (others: OtherDoc[] | null) => {
+      for (const id of d.local!) ctx.doc.items.delete(id);
+      if (changes.length) ctx.commit(changes, d.label || "Paste", others && others.length ? { others } : undefined);
+      setSelectionIds(ctx, d.hover ? [] : Array.from(d.local!).filter((id) => ctx.doc.items.has(id)));   // SetIsHover( m_duplicateIsHoverSelection )
+      done(); if (d.after) d.after(true);
+    };
+    // a paste with sheets commits with what their files get (read while it was placed): the items stay where they were
+    // put until then
+    if (d.othersFor) d.othersFor.then(place, () => place(null)); else place(null);
+    return;
   }
   const turned = !!d.mapPt;
   if (!commit || (!turned && (!d.moved || (!dx && !dy)))) { restorePristine(doc, d); done(); return; }

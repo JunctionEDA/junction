@@ -17,6 +17,7 @@
 // result is the document every open browser already shows.  The result is then read back and compared
 // with that document, item by item, and anything short of identical is refused — a document that cannot
 // be folded stays as it was (snapshot + ops), which is correct, only slower.
+import { schCompare, schRank, pcbBlock, pcbCompare, placeFresh, canonicalLayerId, type BoardOrderCtx } from "./item-order";
 import { prettify, type PrettifyMode } from "../canvas/prettify";
 import { readQuoted } from "../canvas/sexpr";
 import { CURRENT_VERSION, GENERATOR, GENERATOR_VERSION, minimumFileFormatVersion, usesEscapedStackedPinNotation, versionRaisedMessage, type FormatRequirement } from "../canvas/format-version";
@@ -30,6 +31,10 @@ export interface CanvasApi {
   applyChange(doc: any, change: any, IU: number): boolean;
   /** canvas/legacy.ts downgradeSchNode: a symbol as KiCad writes it into a schematic kept at an older version. */
   downgradeSchNode?(node: any, version: number): any;
+  /** canvas/legacy.ts migrateLegacyTree: what the parsers change while reading a file of an older version, in place. */
+  migrateLegacyTree?(tree: any, pcb: boolean, version: number): void;
+  /** canvas/legacy.ts upgradeLegacyNode: a stored item read at `from` in the form a file of version `to` stores it. */
+  upgradeLegacyNode?(node: any, pcb: boolean, from: number, to: number): any;
 }
 export interface FoldOp { seq?: number; changes?: any[] }
 /** `version`: the (version …) the result is stamped with; `notice`: KiCad's message when the edits made it raise the stamp. */
@@ -38,7 +43,7 @@ export type FoldResult = { ok: true; text: string; changed: number; version?: nu
 const SCH_KINDS = new Set(["symbol", "wire", "bus", "junction", "label", "global_label", "hierarchical_label", "netclass_flag", "directive_label", "no_connect", "sheet", "text", "text_box", "polyline", "rectangle", "circle", "arc", "bezier", "bus_entry", "image",
   "table", "rule_area", "ellipse", "ellipse_arc", "net_chain", "group"]);
 const PCB_KINDS = new Set(["footprint", "segment", "arc", "via", "zone", "gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_text", "gr_text_box", "gr_curve", "gr_bbox", "dimension", "target", "image", "group", "table", "generated",
-  "gr_ellipse", "gr_ellipse_arc", "barcode", "point", "grid_item"]);
+  "gr_ellipse", "gr_ellipse_arc", "barcode", "point", "grid_item", "constraint"]);
 /** Sections that close a file: new items go in before them. */
 const TRAILERS = new Set(["sheet_instances", "symbol_instances", "embedded_fonts", "embedded_files"]);
 const BOARD_SECTIONS = ["general", "layers", "setup"] as const;
@@ -46,10 +51,16 @@ const BOARD_SECTIONS = ["general", "layers", "setup"] as const;
 const HEADER = new Set(["version", "generator", "generator_version", "host"]);
 /** A BOARD_SETUP property carrying one (file …) for the board's own (embedded_files …) (canvas/board-setup.ts). */
 const EMBEDDED_FILE_PROP = "embedded_file";
+/** BOARD_SETUP properties of Board Setup > Embedded Files: a file the board no longer keeps (its name), and Embed fonts ("yes" / "no"). */
+const EMBEDDED_FILE_REMOVE_PROP = "embedded_file_remove", EMBEDDED_FONTS_PROP = "embedded_fonts";
 /** A BOARD_SETUP property carrying the board's whole (net_chains …) section, "" to drop it (canvas/board-setup.ts). */
 const NET_CHAINS_PROP = "net_chains";
+/** A BOARD_SETUP property carrying the board's whole (variants …) registry, "" to drop it (canvas/board-setup.ts). */
+const VARIANTS_PROP = "variants";
 
 class Refuse extends Error {}
+/** A board read item by item turned out to need a version raise past a reading boundary: read it whole and fold again. */
+class Restart extends Error {}
 const refuse = (why: string): never => { throw new Refuse(why); };
 
 // ---------------------------------------------------------------- the file as spans
@@ -132,6 +143,21 @@ function fragmentParts(frag: string, kinds: Set<string>, onItem: (id: string, te
   for (;;) { while (i < n && isWs(frag.charCodeAt(i))) i++; if (i >= n) break; const e = elementEnd(frag, i); if (e < 0) break; walk(frag.slice(i, e)); i = e; }
 }
 
+/** The net names a board's items name with (net "name"), in file order (outside quoted strings and comment lines). */
+function netNamesInOrder(file: string): string[] {
+  const out: string[] = []; const n = file.length;
+  for (let i = 0; i < n; i++) {
+    const c = file.charCodeAt(i);
+    if (c === 34) { const e = elementEnd(file, i); if (e < 0) break; i = e - 1; continue; }
+    if (c === 35) { const e = commentEnd(file, i); if (e >= 0) { i = e - 1; continue; } }
+    if (c !== 40 || file.slice(i + 1, i + 4) !== "net" || !isWs(file.charCodeAt(i + 4))) continue;
+    const j = skipBlank(file, i + 4); if (file.charCodeAt(j) !== 34) continue;   // (net N …): a code, not a name
+    const e = elementEnd(file, j); if (e < 0) break;
+    out.push(unquote(file.slice(j, e))); i = e - 1;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- writing
 
 /** A node's text laid out as KiCad lays a file out, to sit at `depth` tabs. */
@@ -153,11 +179,13 @@ function laidOut(text: string, depth: number, mode: PrettifyMode): string {
  * The file `ops` make of `file`.  `ops` are the journal after the snapshot, in order.
  */
 export function foldOps(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldResult {
-  try { return fold(k, docType, file, ops); }
-  catch (e) { if (e instanceof Refuse) return { ok: false, reason: e.message }; return { ok: false, reason: "failed: " + (e instanceof Error ? e.message : String(e)) }; }
+  try {
+    try { return fold(k, docType, file, ops, false); }
+    catch (e) { if (e instanceof Restart) return fold(k, docType, file, ops, true); throw e; }
+  } catch (e) { if (e instanceof Refuse) return { ok: false, reason: e.message }; return { ok: false, reason: "failed: " + (e instanceof Error ? e.message : String(e)) }; }
 }
 
-function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldResult {
+function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[], whole: boolean): FoldResult {
   const sch = docType === "kicad_sch"; if (!sch && docType !== "kicad_pcb") refuse("not a schematic or a board");
   const kinds = sch ? SCH_KINDS : PCB_KINDS, IU = sch ? 1e4 : 1e6;
   const top = cut(file) || refuse("the stored file is not one list");
@@ -184,7 +212,9 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
   // A schematic is read whole (a removed symbol can take its library copy with it, which depends on every other
   // symbol).  On a board an edit concerns only the item it names, so only those are read: the rest of a large
   // board is never parsed, it is copied.
-  const inDoc = (i: number): boolean => sch || (ids[i] !== "" && touched.has(ids[i]));
+  // (A raised version that changes how stored items read makes every item a candidate for rewriting: then the whole
+  // board is read.)
+  const inDoc = (i: number): boolean => sch || whole || (ids[i] !== "" && touched.has(ids[i]));
   const subset = (l: ListSpans, take: (c: Span, i: number) => boolean): string => l.open + l.children.filter((c, i) => !kinds.has(c.head) || take(c, i)).map((c) => c.lead + c.text).join("") + l.tail;
 
   // ---- the document as every browser has it
@@ -196,8 +226,17 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
 
   // ---- the edits
   let paper: string | null = null, title: string | null = null; const sections: Record<string, string> = {};
-  const embeds = new Map<string, string>();   // the board's embedded files an edit replaced or added, by name
+  const embeds = new Map<string, string>();   // the board's (the root schematic's) embedded files an edit replaced or added, by name
+  const embedsGone = new Set<string>();       // … and the ones an edit removed
+  let fontsSet: boolean | null = null;        // (embedded_fonts …) as an edit set it; null: as stored
+  const putEmbed = (text: string): void => {
+    const l = cut(text); const name = l && headOf(text.trim()) === "file" ? directValue(l, "name") : null;
+    if (name === null) refuse("an embedded file edit without a (file (name …) …)");
+    embeds.set(name!, text.trim()); embedsGone.delete(name!);
+  };
+  const dropEmbed = (name: string): void => { embeds.delete(name); embedsGone.add(name); };
   let chainsText: string | null = null;   // the board's (net_chains …) as an edit set it ("" removes it); null: as stored
+  let variantsText: string | null = null;   // the board's (variants …) as an edit set it ("" removes it); null: as stored
   const fragText = new Map<string, string>();   // the text an edit carried for an item or a library symbol
   const replacedBy = new Map<string, string>();   // an item given a new id (an ADDED with replaces): it takes the old one's place
   const noteFragment = (frag: string): void => fragmentParts(frag, kinds, (id, t) => fragText.set(id, t), (name, t) => fragText.set("lib:" + name, t));
@@ -207,20 +246,30 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
       const p = c.docProps;
       if (typeof p.paper === "string" && p.paper) { const n = k.parse(p.paper); if (n && n[0] === "paper") paper = p.paper.trim(); }
       if (typeof p.titleBlock === "string") { const n = p.titleBlock ? k.parse(p.titleBlock) : null; title = n && n[0] === "title_block" ? p.titleBlock.trim() : ""; }
+      // the root schematic's embedded files (Schematic Setup > Embedded Files): files put, files removed, Embed fonts
+      const ef = sch && p.embeddedFiles && typeof p.embeddedFiles === "object" ? p.embeddedFiles : null;
+      if (ef) {
+        for (const name of Array.isArray(ef.remove) ? ef.remove : []) if (typeof name === "string") dropEmbed(name);
+        for (const t of Array.isArray(ef.put) ? ef.put : []) if (typeof t === "string") putEmbed(t);
+        if (typeof ef.fonts === "boolean") fontsSet = ef.fonts;
+      }
       continue;
     }
     if (c.typeName === "BOARD_SETUP") {
       if (sch) continue;
       for (const p of c.properties || []) {
-        if (p && p.name === EMBEDDED_FILE_PROP && p.after && typeof p.after.v === "string") {
-          const l = cut(p.after.v); const name = l && headOf(p.after.v.trim()) === "file" ? directValue(l, "name") : null;
-          if (name === null) refuse("a board embedded file edit without a (file (name …) …)");
-          embeds.set(name!, p.after.v.trim()); continue;
-        }
+        if (p && p.name === EMBEDDED_FILE_PROP && p.after && typeof p.after.v === "string") { putEmbed(p.after.v); continue; }
+        if (p && p.name === EMBEDDED_FILE_REMOVE_PROP && p.after && typeof p.after.v === "string") { dropEmbed(p.after.v); continue; }
+        if (p && p.name === EMBEDDED_FONTS_PROP && p.after && typeof p.after.v === "string") { fontsSet = p.after.v === "yes"; continue; }
         if (p && p.name === NET_CHAINS_PROP && p.after && typeof p.after.v === "string") {
           const v = p.after.v.trim();
           if (v && headOf(v) !== "net_chains") refuse("a net chains edit that is not a (net_chains …)");
           chainsText = v; continue;
+        }
+        if (p && p.name === VARIANTS_PROP && p.after && typeof p.after.v === "string") {
+          const v = p.after.v.trim();
+          if (v && headOf(v) !== "variants") refuse("a design variants edit that is not a (variants …)");
+          variantsText = v; continue;
         }
         if (!p || !(BOARD_SECTIONS as readonly string[]).includes(p.name) || !p.after || typeof p.after.v !== "string") continue;
         const n = k.parse(p.after.v); if (!n) continue;
@@ -244,6 +293,10 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
   // touched are the stored bytes, already readable at the stored version, so only the written ones are measured
   let writeAt = fileVersion, notice: string | undefined;
   const down = (node: any): any => (sch && writeAt > 0 && k.downgradeSchNode ? k.downgradeSchNode(node, writeAt) : node);
+  let upgrading = false;   // the raise crosses a version below which stored items read differently
+  const up = (node: any): any => (upgrading ? k.upgradeLegacyNode!(node, !sch, fileVersion, writeAt) : node);
+  /** An item or library symbol in the form the new file writes it: read at the stored version, written at writeAt. */
+  const form = (node: any): any => down(up(node));
   const written: any[] = [];   // the items and library symbols the new file writes rather than copies
   for (const [id, it] of doc.items) if (before.get(id) !== ser(it.node)) written.push(it.node);
   if (sch) for (const [name, n] of doc.lib) if (libBefore.get(name) !== ser(n)) written.push(n);
@@ -254,7 +307,7 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
     const req: FormatRequirement = { version: 0, feature: null };
     const need = (r: FormatRequirement): void => { if (r.version > req.version) { req.version = r.version; req.feature = r.feature; } };
     const texts: string[] = written.map((n) => ser(down(n)));
-    for (const t of [paper, title, ...Object.values(sections), ...embeds.values()]) if (t) texts.push(t);
+    for (const t of [paper, title, ...Object.values(sections), ...embeds.values(), fontsSet !== null ? `(embedded_fonts ${fontsSet ? "yes" : "no"})` : null]) if (t) texts.push(t);
     for (const t of texts) need(minimumFileFormatVersion(t, domain));
     // the model checks the scan cannot make: escaped stacked pin numbers live inside quoted text; a footprint's
     // (height …) and an image's (rotate …) / (opacity …) are tokens older formats already use elsewhere
@@ -265,13 +318,46 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
     }
     if (req.version > fileVersion) {
       const chosen = Math.min(req.version, CURRENT_VERSION[domain]);
-      // A raised stamp changes how this reader (and KiCad's) reads what is stored below it; KiCad re-saves every
-      // item in the new form, a splice keeps their bytes, so where the stored file has such items it stays unfolded.
+      // A raised stamp changes how this reader (and KiCad's) reads what is stored below it.  KiCad re-saves every item
+      // from what it read, so each stored item that would read differently at the new version is written in its new
+      // form (below); the rest keep their bytes, which mean the same at both versions.
       const all = file + "\n" + texts.join("\n");
-      const crossing = (sch ? SCH_LEGACY_READINGS : PCB_LEGACY_READINGS).find(([upTo, inclusive, test]) => (inclusive ? fileVersion <= upTo && chosen > upTo : fileVersion < upTo && chosen >= upTo) && test(all, top!));
-      if (crossing) refuse("the edits need file format version " + chosen + " (" + (req.feature || "a newer file format feature") + "), where the stored items read differently (" + crossing[3] + ")");
+      const crossing = (sch ? SCH_LEGACY_READINGS : PCB_LEGACY_READINGS).some(([upTo, inclusive, test]) => (inclusive ? fileVersion <= upTo && chosen > upTo : fileVersion < upTo && chosen >= upTo) && test(all, top!));
+      if (crossing) {
+        if (!sch && !whole) throw new Restart();
+        if (!k.upgradeLegacyNode || !k.migrateLegacyTree) refuse("the edits need file format version " + chosen + ", where the stored items read differently, and this reader cannot rewrite them");
+        upgrading = true;
+      }
       writeAt = chosen;
       notice = versionRaisedMessage(sch ? "schematic" : "board", req.feature, fileVersion, chosen);
+    }
+  }
+
+  // ---- the stored items, library symbols and sections that read differently at the raised version: written anew
+  const rewrite = new Set<string>(), libRewrite = new Set<string>(), rewriteTop = new Map<number, string>();
+  if (upgrading) {
+    const restamped = top.open + top.children.map((c) => c.lead + (c.head === "version" ? `(version ${writeAt})` : c.text)).join("") + top.tail;
+    const atNew = k.parseDoc(restamped, docType) || refuse("the stored file could not be read at version " + writeAt);
+    for (const [id, it] of doc.items) {
+      if (!where.has(id) || ser(it.node) !== before.get(id)) continue;   // a new or edited item is written anyway
+      const now = atNew.items.get(id);
+      if (!now || ser(form(it.node)) !== ser(down(now.node))) rewrite.add(id);
+    }
+    if (sch) for (const [name, n] of doc.lib) { if (libBefore.get(name) !== ser(n)) continue; const now = atNew.lib.get(name); if (!now || ser(form(n)) !== ser(down(now))) libRewrite.add(name); }
+    // the sections no reader models (bus aliases, symbol instances, the board's net list and net classes): what the
+    // parsers make of each at the stored version, where that is not what they make of it at the new one
+    const OWN = new Set(["lib_symbols", "title_block", "net_chains", "embedded_files", "embedded_fonts", ...BOARD_SECTIONS]);
+    top.children.forEach((c, i) => {
+      if (!c.head || kinds.has(c.head) || HEADER.has(c.head) || isPaper(c.head) || OWN.has(c.head)) return;
+      const was = [docType, k.parse(c.text)], is = [docType, k.parse(c.text)]; if (!was[1] || !is[1]) return;
+      k.migrateLegacyTree!(was, !sch, fileVersion); k.migrateLegacyTree!(is, !sch, writeAt);
+      if (ser(was[1]) !== ser(is[1])) rewriteTop.set(i, laidOut(ser(was[1]), 1, mode));
+    });
+    // a KiCad 5 (page …) is the paper only up to its version; a newer file names it (paper …)
+    const pageAt = pageIsPaper && writeAt > (sch ? 20200506 : 20200119) ? top.children.findIndex((c) => c.head === "page") : -1;
+    if (pageAt >= 0 && paper === null) {
+      const l = cut(top.children[pageAt].text)!;
+      paper = "(paper " + l.children.map((c, j) => (j === 0 ? '"' + unquote(c.text).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"' : c.text)).join(" ") + ")";
     }
   }
 
@@ -298,7 +384,7 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
   // ---- the new file
   /** The text for an item or library symbol as it now stands: the edit's own text when that is what it still is. */
   const textOf = (key: string, node: any, depth: number): string => {
-    const dn = down(node); if (dn !== node) return laidOut(ser(dn), depth, mode);   // the older file's own form
+    const dn = form(node); if (dn !== node) return laidOut(ser(dn), depth, mode);   // the older (or the raised) file's own form
     const now = ser(node), sent = fragText.get(key);
     let own = false; if (sent !== undefined) { try { own = canon(sent) === now; } catch { own = false; } }
     return laidOut(own ? sent! : now, depth, mode);
@@ -311,17 +397,71 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
   // an item that only changed its id (Repair Board) is written where the old one was, not with the additions
   const inPlace = new Map<string, string>();
   for (const [old, now] of replacedBy) if (where.has(old) && !live.has(old) && freshById.has(now)) { inPlace.set(old, freshById.get(now)!); freshById.delete(now); }
-  const fresh = Array.from(freshById.values());
+  // where KiCad's next save puts each new item (mcp/item-order.ts): before a stored item, or after the last one (-1)
+  const freshAt = new Map<number, string[]>(), fresh: string[] = [];
+  if (freshById.size) {
+    const nodeAt = (i: number): any => { const id = ids[i], it = id && doc.items.get(id); if (it) return it.node; try { return k.parse(top!.children[i].text); } catch { return null; } };
+    const stored: { at: number; node: () => any }[] = []; top.children.forEach((c, i) => { if (kinds.has(c.head)) { let n: any; stored.push({ at: i, node: () => (n === undefined ? (n = nodeAt(i)) : n) }); } });
+    const freshNodes = Array.from(freshById.keys()).map((id) => doc.items.get(id).node);
+    const textOfNode = new Map<any, string>(); for (const id of freshById.keys()) textOfNode.set(doc.items.get(id).node, freshById.get(id)!);
+    let block: (n: any) => number | null, cmp: (a: any, b: any) => number;
+    if (sch) { block = (n) => (schRank(n) === null ? null : 0); cmp = (a, b) => schCompare(a, b) ?? 0; }
+    else {
+      // PCB_LAYER_ID by name: the canonical names have one id in every version (an older file's table numbers them
+      // its own way, which the parser maps); a name the board's table alone knows takes the table's id
+      const layer = new Map<string, number>(); for (const [name, l] of doc.layers || []) layer.set(name, canonicalLayerId(name) ?? Number(l.id));
+      const copper = Array.from(layer).filter(([n]) => /\.Cu$/.test(n)).map(([, id]) => id);
+      // the copper stack, top down: F.Cu, In1.Cu … B.Cu
+      const copperStack = copper.slice().sort((x, y) => (x === 2 ? 1 : y === 2 ? -1 : x - y));
+      // the net codes: a board with a (net N "name") table keeps those codes; one without (20251028 and later) gets
+      // them as the parser meets each new name (parseNet: NETINFO_LIST::AppendNet, getFreeNetCode), in file order
+      const nets = new Map<string, number>(); for (const [code, name] of doc.nets || []) if (!nets.has(name)) nets.set(name, Number(code));
+      const table = top.children.some((c) => c.head === "net"); let next = 1;
+      if (!table) { nets.clear(); nets.set("", 0); for (const name of netNamesInOrder(file)) if (!nets.has(name)) nets.set(name, next++); }
+      else for (const v of nets.values()) next = Math.max(next, v + 1);
+      // BOARD_DESIGN_SETTINGS m_TentViasFront / Back: the setup's (tenting …) (true when it has none), or the legacy
+      // plot parameter (viasonmask …)
+      const tentVias: [boolean, boolean] = [true, true];
+      { const st = top.children.find((c) => c.head === "setup"); const sn = st ? k.parse(st.text) : null;
+        const t = sn ? sn.find((c: any, j: number) => j > 0 && Array.isArray(c) && c[0] === "tenting") : null;
+        if (t) {
+          const legacy = t.slice(1).every((c: any) => !Array.isArray(c)); let f: boolean | null = null, b: boolean | null = null;
+          if (legacy) { for (const c of t.slice(1)) { if (c === "front") f = true; else if (c === "back") b = true; else if (c === "none") { f = null; b = null; } } }
+          else for (const key of ["front", "back"]) { const v = t.find((c: any, j: number) => j > 0 && Array.isArray(c) && c[0] === key); const x = v ? String(v[1]) : "none"; const r = x === "yes" ? true : x === "no" ? false : null; if (key === "front") f = r; else b = r; }
+          tentVias[0] = f ?? false; tentVias[1] = b ?? false;
+        }
+        const pp = sn ? sn.find((c: any, j: number) => j > 0 && Array.isArray(c) && c[0] === "pcbplotparams") : null;
+        const vm = pp ? pp.find((c: any, j: number) => j > 0 && Array.isArray(c) && c[0] === "viasonmask") : null;
+        if (vm) { const tent = !(String(vm[1]) === "true" || String(vm[1]) === "yes"); tentVias[0] = tent; tentVias[1] = tent; } }
+      const byId = new Map<string, number>(); ids.forEach((id, i) => { if (id) byId.set(id.toLowerCase(), i); });
+      const ctx: BoardOrderCtx = {
+        version: fileVersion, copperStack, tentVias,
+        nodeById: (id) => { const live = doc.items.get(id); if (live) return live.node; const i = byId.get(id.toLowerCase()); return i === undefined ? null : nodeAt(i); },
+        layerId: (name) => layer.get(name) ?? canonicalLayerId(name) ?? -1,
+        layerIds: (name) => (name === "*.Cu" ? copper : name === "F&B.Cu" ? [layer.get("F.Cu") ?? -1, layer.get("B.Cu") ?? -1] : /^\*\./.test(name) ? [layer.get("F" + name.slice(1)) ?? -1, layer.get("B" + name.slice(1)) ?? -1] : [layer.get(name) ?? -1]),
+        netCode: (n) => { const c = (n as any[]).find((x: any, j: number) => j > 0 && Array.isArray(x) && x[0] === "net"); if (!c) return 0; if (typeof c[1] === "number") return c[1]; const name = String(c[1]); if (!nets.has(name)) nets.set(name, next++); return nets.get(name)!; },
+      };
+      block = (n) => pcbBlock(n); cmp = (a, b) => pcbCompare(a, b, ctx);
+    }
+    const placed = placeFresh(stored, freshNodes, block, cmp);
+    const groups = new Map<number, any[]>(); for (const p of placed) { const g = groups.get(p.before) || []; g.push(p.node); groups.set(p.before, g); }
+    for (const [at, nodes] of groups) {
+      const key = (n: any): number => block(n) ?? Infinity;
+      const texts = nodes.slice().sort((x, y) => (key(x) !== key(y) ? (key(x) < key(y) ? -1 : 1) : key(x) === Infinity ? 0 : cmp(x, y))).map((n) => textOfNode.get(n)!);
+      if (at >= 0) freshAt.set(at, texts); else fresh.push(...texts);
+    }
+  }
 
   // where additions go: after the last item of the stored file, else before the sections that close it, else at the end
-  let lastItem = -1, firstTrailer = -1, paperAt = -1, titleAt = -1, libAt = -1, filesAt = -1, chainsAt = -1; const sectionAt: Record<string, number> = {};
+  let lastItem = -1, firstTrailer = -1, paperAt = -1, titleAt = -1, libAt = -1, filesAt = -1, fontsAt = -1, chainsAt = -1, variantsAt = -1; const sectionAt: Record<string, number> = {};
   top.children.forEach((c, i) => {
     if (kinds.has(c.head)) lastItem = i;
-    else if (TRAILERS.has(c.head)) { if (firstTrailer < 0) firstTrailer = i; if (c.head === "embedded_files" && filesAt < 0) filesAt = i; }
+    else if (TRAILERS.has(c.head)) { if (firstTrailer < 0) firstTrailer = i; if (c.head === "embedded_files" && filesAt < 0) filesAt = i; if (c.head === "embedded_fonts" && fontsAt < 0) fontsAt = i; }
     else if (isPaper(c.head)) { if (paperAt < 0) paperAt = i; }
     else if (c.head === "title_block") { if (titleAt < 0) titleAt = i; }
     else if (c.head === "lib_symbols") { if (libAt < 0) libAt = i; }
     else if (c.head === "net_chains" && !sch) { if (chainsAt < 0) chainsAt = i; }
+    else if (c.head === "variants" && !sch) { if (variantsAt < 0) variantsAt = i; }
     else if ((BOARD_SECTIONS as readonly string[]).includes(c.head)) { if (!(c.head in sectionAt)) sectionAt[c.head] = i; }
   });
   if ((paper !== null || title) && paperAt < 0) refuse("the stored file has no (paper …) section");
@@ -341,7 +481,7 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
       stored.add(name!);
       const node = doc.lib.get(name!);
       if (!node) { touched = true; continue; }                                   // no symbol uses it any more
-      if (ser(node) === libBefore.get(name!)) parts.push(c.lead + c.text);
+      if (ser(node) === libBefore.get(name!) && !libRewrite.has(name!)) parts.push(c.lead + c.text);
       else { touched = true; parts.push(c.lead + textOf("lib:" + name, node, 2)); }
     }
     for (const name of libBefore.keys()) if (!stored.has(name)) refuse("library symbol " + name + " is in the document but not in the file");
@@ -351,30 +491,44 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
 
   const add = (texts: string[]): void => { for (const t of texts) out.push("\n\t" + t); };
   const same = (a: string, b: string): boolean => { try { return canon(a) === canon(b); } catch { return false; } };
-  // the board's own embedded files: the stored section with the files an edit carried in place of theirs, new ones last
+  // the board's (root schematic's) own embedded files: the stored section with the files an edit carried in place of
+  // theirs, new ones last, removed ones gone; "" when none is left (WriteEmbeddedFiles is not called for an empty set)
   let filesText: string | null = null;   // null: as stored
-  if (!sch && embeds.size) {
+  if (embeds.size || embedsGone.size) {
     const l = filesAt >= 0 ? cut(top.children[filesAt].text) : null;
     if (filesAt >= 0 && !l) refuse("unreadable (embedded_files …)");
     const parts: string[] = [], done = new Set<string>(); let touched = false;
     if (l) for (const c of l.children) {
       const inner = c.head === "file" ? cut(c.text) : null, name = inner ? directValue(inner, "name") : null;
+      if (name !== null && embedsGone.has(name)) { touched = true; continue; }
       const put = name !== null ? embeds.get(name) : undefined;
       if (put === undefined) { parts.push(c.lead + c.text); continue; }
       done.add(name!);
       if (same(put, c.text)) parts.push(c.lead + c.text); else { touched = true; parts.push(c.lead + laidOut(put, 2, mode)); }
     }
     for (const [name, t] of embeds) if (!done.has(name)) { touched = true; parts.push("\n\t\t" + laidOut(t, 2, mode)); }
-    if (touched) { changed++; filesText = (l ? l.open : "(embedded_files") + parts.join("") + (l ? l.tail : "\n\t)"); }
+    if (touched) { changed++; filesText = parts.some((t) => /^\s*\(file[\s)]/.test(t)) ? (l ? l.open : "(embedded_files") + parts.join("") + (l ? l.tail : "\n\t)") : ""; }
+  }
+  // (embedded_fonts yes|no): in place, else just before the files (KiCad writes it last but for them)
+  let fontsText: string | null = null;
+  if (fontsSet !== null) {
+    fontsText = `(embedded_fonts ${fontsSet ? "yes" : "no"})`;
+    if (fontsAt >= 0 ? !same(fontsText, top.children[fontsAt].text) : true) changed++;
   }
   // the net chains: in place of the stored section, else after the items (before the sections that close the board)
   let chainsDone = chainsText === null || (chainsAt < 0 && !chainsText);
   if (!sch && chainsText !== null && (chainsAt >= 0 ? !same(chainsText, top.children[chainsAt].text) || !chainsText : !!chainsText)) changed++;
+  // the design variants (formatVariants): in place of the stored section, else after the setup, properties and nets
+  let variantsAnchor = -1; top.children.forEach((c, i) => { if (c.head === "setup" || c.head === "property" || c.head === "net") variantsAnchor = i; });
+  let variantsDone = variantsText === null || (variantsAt < 0 && !variantsText);
+  if (!sch && variantsText !== null && (variantsAt >= 0 ? !same(variantsText, top.children[variantsAt].text) || !variantsText : !!variantsText)) changed++;
+  if (!variantsDone && variantsAt < 0 && variantsAnchor < 0) refuse("the stored board has no (setup …) to put the design variants after");
   let freshDone = false;
   const hdr: Record<string, [number, string]> = {};   // header child -> its place in out, its lead
   top.children.forEach((c, i) => {
     if (i === firstTrailer && lastItem < 0 && !freshDone) { if (libText !== null && libAt < 0) out.push("\n\t" + libText); add(fresh); freshDone = true; }
     if (i === firstTrailer && !chainsDone && chainsAt < 0 && freshDone) { out.push("\n\t" + laidOut(chainsText!, 1, mode)); chainsDone = true; }
+    if (freshAt.has(i)) add(freshAt.get(i)!);
     if (HEADER.has(c.head) && !(c.head in hdr)) { hdr[c.head] = [out.length, c.lead]; out.push(c.lead + c.text); }
     else if (i === paperAt) {
       if (paper !== null && !same(paper, c.text)) { out.push(c.lead + laidOut(paper, 1, mode)); changed++; } else out.push(c.lead + c.text);
@@ -384,24 +538,29 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
       else { changed++; if (title) out.push(c.lead + laidOut(title, 1, mode)); }
     } else if (i === libAt && sch) out.push(c.lead + (libText !== null ? libText : c.text));
     else if (!sch && sectionAt[c.head] === i && sections[c.head] !== undefined && !same(sections[c.head], c.text)) { out.push(c.lead + laidOut(sections[c.head], 1, mode)); changed++; }
-    else if (i === filesAt && filesText !== null) out.push(c.lead + filesText);
+    else if (i === fontsAt && fontsText !== null) out.push(c.lead + (same(fontsText, c.text) ? c.text : fontsText));
+    else if (i === filesAt && (filesText !== null || (fontsText !== null && fontsAt < 0))) { if (fontsText !== null && fontsAt < 0) out.push(c.lead + fontsText); if (filesText !== "") out.push((fontsText !== null && fontsAt < 0 ? "\n\t" : c.lead) + (filesText !== null ? filesText : c.text)); }
     else if (i === chainsAt && chainsText !== null) { if (chainsText) out.push(c.lead + (same(chainsText, c.text) ? c.text : laidOut(chainsText, 1, mode))); chainsDone = true; }
+    else if (i === variantsAt && variantsText !== null) { if (variantsText) out.push(c.lead + (same(variantsText, c.text) ? c.text : laidOut(variantsText, 1, mode))); variantsDone = true; }
     else if (kinds.has(c.head)) {
       const id = ids[i];
       if (!id || !inDoc(i)) out.push(c.lead + c.text);                          // not named by any edit: as stored
       else if (!live.has(id)) { changed++; const t = inPlace.get(id); if (t !== undefined) out.push(c.lead + t); }   // removed (or re-id'd in place)
       else {
         const node = doc.items.get(id).node;
-        if (ser(node) === before.get(id)) out.push(c.lead + c.text);
+        if (ser(node) === before.get(id) && !rewrite.has(id)) out.push(c.lead + c.text);
         else { out.push(c.lead + textOf(id, node, 1)); changed++; }
       }
-    } else out.push(c.lead + c.text);
+    } else if (rewriteTop.has(i)) { out.push(c.lead + rewriteTop.get(i)!); changed++; }
+    else out.push(c.lead + c.text);
     if (i === netAt) add(netAdds);
+    if (i === variantsAnchor && !variantsDone && variantsAt < 0) { out.push("\n\t" + laidOut(variantsText!, 1, mode)); variantsDone = true; }
     if (i === lastItem && !freshDone) { if (libText !== null && libAt < 0) out.push("\n\t" + libText); add(fresh); freshDone = true; }
   });
   if (!freshDone) { if (libText !== null && libAt < 0) out.push("\n\t" + libText); add(fresh); }
   if (!chainsDone) out.push("\n\t" + laidOut(chainsText!, 1, mode));
-  if (filesText !== null && filesAt < 0) out.push("\n\t" + filesText);   // a board with no embedded files: the section closes it
+  if (fontsText !== null && fontsAt < 0 && filesAt < 0) out.push("\n\t" + fontsText);
+  if (filesText && filesAt < 0) out.push("\n\t" + filesText);   // a file with no embedded files: the section closes it
   out.push(top.tail);
   if (!changed) return { ok: true, text: file, changed: 0 };
   // every save writes the header afresh: (version N) (generator "eeschema"|"pcbnew") (generator_version "<major.minor>")
@@ -417,8 +576,8 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
   const topBack = cut(text) || refuse("the new file is not one list");
   const want = new Map<string, string>(), wantLib = new Map<string, string>(); let anonA = 0, anonB = 0;
   // (compared as written: a symbol in an older schematic is written in that version's form)
-  for (const [id, it] of doc.items) { if (id.startsWith("anon-")) anonA++; else want.set(id, ser(down(it.node))); }
-  if (sch) for (const [name, n] of doc.lib) wantLib.set(name, ser(down(n)));
+  for (const [id, it] of doc.items) { if (id.startsWith("anon-")) anonA++; else want.set(id, ser(form(it.node))); }
+  if (sch) for (const [name, n] of doc.lib) wantLib.set(name, ser(form(n)));
   doc = null; before.clear(); libBefore.clear(); fragText.clear();   // (a large document is not held twice)
   // items no edit named: each still there, once, as the stored text
   const seen = new Set<string>(); let unnamedWas = 0, unnamedIs = 0;
@@ -444,8 +603,8 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
     if (back.lib.size !== wantLib.size) refuse("the new file has a different set of library symbols");
     for (const [name, w] of wantLib) { const b = back.lib.get(name); if (!b || ser(down(b)) !== w) refuse("library symbol " + name + " reads back differently"); }
   }
-  const kept = (l: ListSpans): string[] => l.children.filter((c) => !kinds.has(c.head) && !HEADER.has(c.head) && !isPaper(c.head) && c.head !== "title_block" && c.head !== "lib_symbols" && !(!sch && (BOARD_SECTIONS as readonly string[]).includes(c.head)) && !(filesText !== null && c.head === "embedded_files") && !(chainsText !== null && c.head === "net_chains")).map((c) => c.text);
-  const added = new Set(netAdds), a = kept(top), b = kept(topBack!).filter((t) => !added.has(t));
+  const kept = (l: ListSpans, now?: Map<number, string>): string[] => l.children.map((c, i) => (now && now.has(i) ? { ...c, text: now.get(i)! } : c)).filter((c) => !kinds.has(c.head) && !HEADER.has(c.head) && !isPaper(c.head) && c.head !== "title_block" && c.head !== "lib_symbols" && !(!sch && (BOARD_SECTIONS as readonly string[]).includes(c.head)) && !(filesText !== null && c.head === "embedded_files") && !(fontsText !== null && c.head === "embedded_fonts") && !(chainsText !== null && c.head === "net_chains") && !(variantsText !== null && c.head === "variants")).map((c) => c.text);
+  const added = new Set(netAdds), a = kept(top, rewriteTop), b = kept(topBack!).filter((t) => !added.has(t));
   if (a.length !== b.length || a.some((t, i) => t !== b[i]) || top.open !== topBack!.open) refuse("a section no edit touched came out differently");
   const section = (l: ListSpans, name: string): string | null => { const c = l.children.find((x) => (name === "paper" ? isPaper(x.head) : x.head === name)); return c ? c.text : null; };
   const expect = (name: string, set: string | null | undefined): void => {
@@ -459,13 +618,17 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
   expect("paper", paper); expect("title_block", title);
   if (!sch) for (const name of BOARD_SECTIONS) expect(name, sections[name]);
   if (!sch) expect("net_chains", chainsText);
-  if (filesText !== null) {
-    // the files no edit carried as stored, the ones an edit carried as it carried them
+  if (!sch) expect("variants", variantsText);
+  if (fontsText !== null) expect("embedded_fonts", fontsText);
+  if (filesText === "" && topBack!.children.some((c) => c.head === "embedded_files")) refuse("the (embedded_files …) section reads back differently");
+  if (filesText) {
+    // the files no edit carried as stored, the ones an edit carried as it carried them, the removed ones gone
     const was = filesAt >= 0 ? cut(top.children[filesAt].text) : null, is = topBack!.children.filter((c) => c.head === "embedded_files");
     const back = is.length === 1 ? cut(is[0].text) : null; if (!back) refuse("the (embedded_files …) section reads back differently");
     const files = (x: ListSpans | null): Map<string, string> => { const m = new Map<string, string>(); if (x) for (const c of x.children) { const inner = c.head === "file" ? cut(c.text) : null; const n = inner ? directValue(inner, "name") : null; m.set(n ?? "#" + m.size, c.text); } return m; };
     const a0 = files(was), b0 = files(back);
     for (const [name, t] of embeds) a0.set(name, t);
+    for (const name of embedsGone) a0.delete(name);
     if (a0.size !== b0.size) refuse("the (embedded_files …) section reads back differently");
     for (const [name, t] of a0) { const b1 = b0.get(name); if (b1 === undefined || (embeds.has(name) ? !same(t, b1) : t !== b1)) refuse("embedded file " + name + " reads back differently"); }
   }
@@ -475,20 +638,24 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
 /**
  * What the parsers read differently below a version (canvas/legacy.ts, and the readers that go by the version: the
  * legacy bold pen, the image PPI scale, footprint zones and points in board frame, via protection off): [version,
- * whether the legacy reading includes that version itself, whether the file has something read that way, what].
+ * whether the legacy reading includes that version itself, whether the file may have something read that way, what].
+ * A raise across one of these compares every stored item at both versions and rewrites the ones that differ.
  */
 type LegacyReading = [number, boolean, (file: string, top: ListSpans) => boolean, string];
 const BOLD_PEN = /\(thickness [^()]*\)\s*(?:\(bold(?:\s+yes)?\)|bold\b)/;
 const SCH_LEGACY_READINGS: LegacyReading[] = [
+  [20200506, true, (_f, top) => top.children.some((c) => c.head === "page") && !top.children.some((c) => c.head === "paper"), "a KiCad 5 page size"],
   [20210606, false, (f) => f.indexOf("~") >= 0, "the old overbar notation"],
   [20210621, false, (f) => /\(bus_alias/.test(f), "bus aliases in the old overbar notation"],
   [20211123, true, (f) => /\(polyline/.test(f), "KiCad 6 polylines"],
   [20230121, true, (f) => /\(arc/.test(f), "pre-7.0 symbol arcs"],
+  [20230121, true, (f) => /\(image/.test(f), "reference images at 300 PPI"],
   [20250318, false, (f) => /"~"|[\s(]~[\s)]/.test(f), "\"~\" as an empty value"],
   [20260623, false, (f) => /\(image/.test(f), "reference image scale"],
   [20260826, false, (f) => BOLD_PEN.test(f), "bold text width"],
 ];
 const PCB_LEGACY_READINGS: LegacyReading[] = [
+  [20200119, true, (_f, top) => top.children.some((c) => c.head === "page") && !top.children.some((c) => c.head === "paper"), "a KiCad 5 page size"],
   [20210606, false, (f) => f.indexOf("~") >= 0, "the old overbar notation"],
   [20211014, true, (f) => /\bcustom\b/.test(f), "custom pad spoke angle"],
   [20240201, true, (f) => /\((?:solder_mask_margin|solder_paste_margin|solder_paste_margin_ratio|solder_paste_ratio|clearance) [-+]?0*\.?0*\)/.test(f), "a local override of 0"],

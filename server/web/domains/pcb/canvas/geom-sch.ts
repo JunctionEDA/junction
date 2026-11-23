@@ -10,7 +10,7 @@ import { MIL, SCH_PEN, layoutPen, parseMarkup, setSchTextVersion, textPen, textW
 import { linebreakText } from "./stroke-font";
 import { expandTextVars, hasTextVars, sheetTextVars, textAssertions, varResolver, type ExpandOpts, type TextAssertion } from "./sheet";
 import type { Box, Doc, Geom, GeomSink, Item, Pt, SheetContext, TextEffects, Tf } from "./types";
-import { symbolFlagsForVariant, symbolViewForVariant } from "./variant-model";
+import { delegatedPinMapOverrideOf, effectivePadNumber, libPinMaps, pinMapOverrideIsDefault, symbolFieldForVariant, symbolFlagsForVariant, symbolPinMapOverride, symbolViewForVariant, variantLibSymbol, type PinMapOverrideState } from "./variant-model";
 import { stringFromValue } from "../../../shared/units";
 /** SCH_SYMBOL::ResolveTextVar: the Sim.* fields a symbol may lack, which resolve to "" rather than staying ${…}. */
 const SIM_VARS = new Set(["SIM.DEVICE", "SIM.TYPE", "SIM.PINS", "SIM.PARAMS", "SIM.LIBRARY", "SIM.NAME"]);
@@ -30,7 +30,9 @@ export const symVars: {
   /** SCHEMATIC::ResolveCrossReference over the whole hierarchy (resolveCrossReference with every sheet instance); without
    *  it a cross-reference is looked up on the item's own sheet */
   crossRef: ((token: string, depth: number) => string | null) | null;
-} = { net: null, unitPlaced: null, crossRef: null };
+  /** SCHEMATIC::GetRefSuffix of a sheet instance path while reused-sheet suffixes are on (the file's references end in it) */
+  refSuffix?: ((path: string) => string) | null;
+} = { net: null, unitPlaced: null, crossRef: null, refSuffix: null };
 /**
  * The host's part of SCH_LABEL_BASE::ResolveTextVar: ${NET_NAME}, ${SHORT_NET_NAME} and ${NET_CLASS} of a label come
  * from the connection graph, which the editor keeps (editor/schnets.ts); null leaves the token as written.
@@ -703,7 +705,9 @@ export function symbolResolver(doc: Doc, item: Item, path?: string | null): Symb
   // GetRef( path ): the instance's reference, else the Reference field
   const refProp = fieldsOf.find((q) => str(q[1]) === "Reference"), baseRef = inst && inst.ref ? inst.ref : refProp ? str(refProp[2]) : "";
   // GetRef( path, true ): a multi-unit symbol's reference carries its unit (U2 → U2A)
-  const fullRef = unitCount > 1 ? baseRef + subReference(lib, unit) : baseRef;
+  // with reused-sheet suffixes the file holds the composed reference, and the unit goes before the suffix (U2B_M4)
+  const sfx = path && unitCount > 1 && symVars.refSuffix ? symVars.refSuffix(path) : "";
+  const fullRef = unitCount > 1 ? (sfx && baseRef.length > sfx.length && baseRef.endsWith(sfx) && !baseRef.endsWith("?") ? baseRef.slice(0, baseRef.length - sfx.length) + subReference(lib, unit) + sfx : baseRef + subReference(lib, unit)) : baseRef;
   /** SCH_SYMBOL::ResolveTextVar. */
   const resolveTok = (tok: string, depth: number): string | { ref: string } | null => {
     if (opVars.resolve && tok.startsWith("OP")) { const r = opVars.resolve("symbol", item, tok); if (r !== null) return r; }
@@ -793,6 +797,25 @@ export function symbolResolver(doc: Doc, item: Item, path?: string | null): Symb
   };
   return { resolve: resolveTok, fieldsOf, baseRef, fullRef, unitCount, lib, unit };
 }
+/**
+ * The other sheets of the hierarchy for SCH_SYMBOL::resolveDelegatedPinMapOverride: the editor installs a finder of
+ * the unit-1 symbol of a reference on any sheet instance (the open sheet's own items are searched first).
+ */
+export const pinMapHooks = { unit1: null as ((ref: string) => { node: SNode; path: string | null } | null) | null };
+/** resolveDelegatedPinMapOverride for a unit of `doc`: the record of the unit 1 that shares its reference (on the
+ *  displayed sheet instance first, then anywhere in the hierarchy), the library default without one. */
+export function delegatedPinMapOverride(doc: Doc, item: Item, variant: string | null | undefined): PinMapOverrideState {
+  const refOf = (n: SNode): string => { const i = symbolInstance(n, doc.instancePath); return i ? i.ref : str((kids(n, "property").find((q) => str(q[1]) === "Reference") || [])[2]); };
+  const unitOf = (n: SNode): number => { const i = symbolInstance(n, doc.instancePath); return i && i.unit !== null ? i.unit : kid(n, "unit") ? num(kid(n, "unit")![1], 1) : 1; };
+  const ref = refOf(item.node).toLowerCase();
+  for (const sib of doc.items.values()) {
+    if (sib === item || sib.id === item.id || sib.kind !== "symbol" || unitOf(sib.node) !== 1 || refOf(sib.node).toLowerCase() !== ref) continue;
+    return delegatedPinMapOverrideOf({ node: sib.node, path: doc.instancePath || null }, variant);
+  }
+  let other: { node: SNode; path: string | null } | null = null;
+  try { other = pinMapHooks.unit1 ? pinMapHooks.unit1(ref) : null; } catch (e) { other = null; }
+  return delegatedPinMapOverrideOf(other, variant);
+}
 export function buildSymbolGeom(doc: Doc, item: Item): void {
   const n = item.node;
   const libId = str((kid(n, "lib_name") || kid(n, "lib_id") || [])[1]);
@@ -806,7 +829,10 @@ export function buildSymbolGeom(doc: Doc, item: Item): void {
   const T = symbolTransform(rot, mirror); const Ti = internalT(T);
   const tf = (lx: number, ly: number): Pt => [ax + T[0] * lx + T[1] * ly, ay + T[2] * lx + T[3] * ly];
   item.movable = true; item.x = ax; item.y = ay; item.rot = rot; item.lib = str((kid(n, "lib_id") || [])[1]) || libId; item.unit = unit;
-  const lib = resolveLib(doc, libId) || (libId !== str((kid(n, "lib_id") || [])[1]) ? resolveLib(doc, str((kid(n, "lib_id") || [])[1])) : null);
+  const baseLib = resolveLib(doc, libId) || (libId !== str((kid(n, "lib_id") || [])[1]) ? resolveLib(doc, str((kid(n, "lib_id") || [])[1])) : null);
+  // GetEffectiveLibSymbol: under the current variant a pin-compatible alternate library symbol is drawn in its place
+  const altLib = variantLibSymbol(n, doc.variantName, doc.instancePath, baseLib, (id) => resolveLib(doc, id));
+  const lib = altLib || baseLib;
   const col = dnp ? (c: string) => dimColor(c, SCH.bg) : (c: string) => c;
   // excluded from simulation: only the marker below (SCH_PAINTER keeps the symbol's own colours)
   const alpha: number | undefined = undefined;
@@ -840,19 +866,16 @@ export function buildSymbolGeom(doc: Doc, item: Item): void {
     // instance's named map, else the map of the associated footprint that is the symbol's Footprint field, patched by
     // the instance's own edits unless the override forces the identity
     let padOf: ((pin: string) => string) | null = null;
-    const ovr = kid(n, "pin_map_override"), pmaps = kid(lib, "pin_maps");
-    if (ovr || pmaps) {
-      const modeN = ovr && kid(ovr, "mode"), mode = modeN ? str(modeN[1]) : "library_default", mapN = ovr && kid(ovr, "map");
-      const edits = new Map<string, string>(); if (ovr) for (const e of kids(ovr, "edit")) edits.set(str(e[1]), str(e[2]));
-      const maps = pmaps ? kids(pmaps, "pin_map") : [];
-      let map: SNode | undefined = mode === "named_map" && mapN ? maps.find((m) => str(m[1]) === str(mapN[1])) : undefined;
-      if (!map && mode !== "identity") {
-        const fpN = kids(n, "property").find((q) => str(q[1]) === "Footprint"), fp = fpN ? str(fpN[2]) : "", af = kid(lib, "associated_footprints");
-        const a = af ? kids(af, "footprint").find((f) => str(f[1]) === fp) : undefined, am = a && kid(a, "map");
-        if (am) map = maps.find((m) => str(m[1]) === str(am[1]));
+    {
+      // GetPinMapOverride( CurrentSheet(), GetCurrentVariant() ) with units 2..N that delegate following unit 1's
+      // record; the map is the base library symbol's (GetLibSymbolRef), the footprint the variant's Footprint field
+      let o = symbolPinMapOverride(n, doc.variantName, doc.instancePath);
+      if (o.mode === "delegate") o = delegatedPinMapOverride(doc, item, doc.variantName);
+      if (kid(n, "pin_map_override") || (baseLib && kid(baseLib, "pin_maps")) || !pinMapOverrideIsDefault(o)) {
+        const fp = symbolFieldForVariant(n, doc.variantName, doc.instancePath, "Footprint", altLib, doc.version);
+        const pm = libPinMaps(baseLib);
+        if (pm.maps.size || (o.mode !== "identity" && o.edits.size)) padOf = (pin) => effectivePadNumber(baseLib, o, fp, pin).pad;
       }
-      const entries = new Map<string, string>(); if (map) for (const en of kids(map, "entry")) entries.set(str(en[1]), str(en[2]));
-      if (entries.size || (mode !== "identity" && edits.size)) padOf = (pin) => (mode !== "identity" && edits.has(pin) ? edits.get(pin)! : entries.has(pin) ? entries.get(pin)! : pin);
     }
     /** The number a pin shows: its effective pad, and the original number kept beside it under show_remapped_pin_numbers. */
     const shownNumber = (g: SNode): PinShown | undefined => {

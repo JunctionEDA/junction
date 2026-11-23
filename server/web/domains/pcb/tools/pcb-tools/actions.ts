@@ -72,7 +72,7 @@ import { breakTrackChanges, cleanupChanges, cleanupPlan, trackEditChanges, track
 import { ALIGN_COMMIT, flippedImagesOf, mirrorAxisChanges, alignChanges, anchorOf, bboxUnion, distributeChanges, flipChanges, mirrorChanges, moveExactChanges, packNodes, positionRelativeChanges, rotateChanges, swapChanges, topLeftAnchor, transformChanges } from "./transforms";
 import { isTuningPattern, regenerateTuning, tuneStep, tuningPatternInfo } from "./tuning-patterns";
 import { editTuningPattern, selectedTuningPattern, tuningNodeWithSettings } from "./tuning-edit";
-import { isTuneTool, tuneMode, tuneUpdate } from "./tuning-tool";
+import { applyToolSettings, isTuneTool, ruleMinOptMax, setTargetMO, tuneMode, tuneUpdate } from "./tuning-tool";
 import { clone, fmt, layerOf, r6, widthOf, rotator } from "./util";
 import { flipFieldChange, footprintFieldNode, requestField, rotateFieldChange, hideFieldChanges } from "./field-edit";
 import { imageInfo } from "./images";
@@ -82,12 +82,15 @@ import { incrementString } from "../../canvas/sheet";
 import { diffPairMarkers, matchedLengthMarkers } from "./dru";
 import { sourceZone, zoneDuplicateNode, zoneMergeChanges } from "./zone-modes";
 import { zonePriorityAbility } from "./zone-priority";
+import { boardStatsData } from "./board-stats";
+import { messageText } from "../../../../shared/units";
 import { newItemDialogs } from "./assistants";
 import { mwCarrying, mwFlip, mwRotate } from "./microwave";
 import { routeSelected, unrouteSegment, cancelCurrentItem } from "./route-selected";
 import { optimizeSelected } from "./optimize-selected";
 import { cycleLayerPairPresets, setSnapMode } from "./snap-pairs";
 import { copyWithReference, interactiveOffset, moveIndividually, moveWithReference, skipMoveItem } from "./ref-move";
+import { addConstraint, addPointConstraint, getAutoConstraints, manageConstraints, removeConstraints, constraintsAlwaysShown, selectionIsConstrained, showConstraints, solveAfterTransform, toggleAutoConstraints } from "./constraint-tool";
 
 // ---------------------------------------------------------------- actions: pcbnew's non-tool commands
 export const VIA_SIZES = [[0.6, 0.3], [0.8, 0.4], [1.0, 0.5], [1.2, 0.6], [1.6, 0.8]];
@@ -282,20 +285,22 @@ export function duplicatedMsg(ctx: PcbCtx, ids: string[]) {
   const n = ids.filter((id) => !topParentOf(ctx.doc, id) || !ids.includes(topParentOf(ctx.doc, id)!.id)).length;
   if (ctx.setStatus) ctx.setStatus(`Duplicated ${n} item(s)`);
 }
+/** EDIT_TOOL::Duplicate: a second copy of a generated table says nothing the first does not, and it would land on top of it. */
+const duplicable = (ctx: PcbCtx, ids: string[]): string[] => ids.filter((id) => { const it = ctx.doc.items.get(id); return !(it && it.kind === "table" && K.drillModel.isGeneratedKind(it.node[0])); });
 act("duplicate", "Duplicate", "Ctrl+D", (ctx: PcbCtx) => {
   if (S.move) return true;   // doMoveSelection: ACTIONS::duplicate while moving is wxBell
   if (!canEdit(ctx)) return true;
   const sel = requestSelection(ctx, { locks: false, rerun: (c: PcbCtx) => runAction("duplicate", c) }); if (!sel) return true;
   // EDIT_TOOL::Duplicate: the copies follow the cursor from where the originals are; a click places them (one
   // "Duplicate" step), Escape drops them; a hover selection is not kept afterwards
-  const r = duplicateChanges(ctx.doc, sel.ids); if (!r.changes.length) return true;
+  const r = duplicateChanges(ctx.doc, duplicable(ctx, sel.ids)); if (!r.changes.length) return true;
   ctx.commit(r.changes, "Duplicate", { tentative: true }); applySelection(ctx, r.ids); duplicatedMsg(ctx, r.ids); beginCarryMove(ctx, { placing: r.ids.slice(), restore: r.restore, hover: sel.hover }); return true;
 });
 act("duplicateIncrement", "Duplicate and Increment", "Ctrl+Shift+D", (ctx: PcbCtx) => {
   if (S.move) return true;
   if (!canEdit(ctx)) return true;
   const sel = requestSelection(ctx, { locks: false, rerun: (c: PcbCtx) => runAction("duplicateIncrement", c) }); if (!sel) return true;
-  const r = duplicateChanges(ctx.doc, sel.ids, null, { increment: true }); if (!r.changes.length) return true;
+  const r = duplicateChanges(ctx.doc, duplicable(ctx, sel.ids), null, { increment: true }); if (!r.changes.length) return true;
   ctx.commit(r.changes, "Duplicate", { tentative: true }); applySelection(ctx, r.ids); duplicatedMsg(ctx, r.ids); beginCarryMove(ctx, { placing: r.ids.slice(), restore: r.restore, hover: sel.hover }); return true;
 });
 /**
@@ -517,7 +522,7 @@ act("move", "Move", "M", (ctx: PcbCtx) => {
 act("moveExactly", "Move Exactly…", "Shift+M", (ctx: PcbCtx) => {
   if (!canEdit(ctx) || S.route || S.move) return true;   // moveExact while moving: wxBell
   const sel = requestSelection(ctx, { rerun: (c: PcbCtx) => runAction("moveExactly", c) }); if (!sel) return true; const ids = sel.ids;
-  const run = (v: MoveExactResult): void => { commitSel(ctx, moveExactChanges(ctx.doc, ids, { dx: v.dx, dy: v.dy, rotation: v.rotation, about: v.about }), "Move Exactly"); if (sel.hover) applySelection(ctx, []); };
+  const run = (v: MoveExactResult): void => { commitSel(ctx, moveExactChanges(ctx.doc, ids, { dx: v.dx, dy: v.dy, rotation: v.rotation, about: v.about }), "Move Exactly"); solveAfterTransform(ctx, ids); if (sel.hover) applySelection(ctx, []); };
   if (routingDialogs.moveExact) { const items = ids.map((id) => ctx.doc.items.get(id)).filter(Boolean) as KItem[]; routingDialogs.moveExact({ single: ids.length === 1, bbox: bboxUnion(items) }, run); return true; }
   return openForm({ title: "Move Item", fields: [{ k: "dx", label: "Move X:", type: "num", value: 0, unit: "mm" }, { k: "dy", label: "Move Y:", type: "num", value: 0, unit: "mm" }, { k: "rotation", label: "Rotate:", type: "num", value: 0, unit: "deg" },
     { k: "about", label: "", type: "select", value: ids.length > 1 ? "center" : "anchor", options: [[ids.length > 1 ? "center" : "anchor", ids.length > 1 ? "Rotate around selection center" : "Rotate around item anchor"]] }],
@@ -634,7 +639,7 @@ export function rotateBy(ctx: PcbCtx, deg: number) {
   if (fr) { const ch = rotateFieldChange(ctx.doc, fr, deg); if (ch) ctx.commit([ch], "Rotate"); ctx.requestRender(); return true; }
   const sel = requestSelection(ctx, { rerun: (c: PcbCtx) => rotateBy(c, deg) }); if (!sel) return true;
   const c = modificationPoint(ctx, sel.items, true);
-  const ch = rotateChanges(ctx.doc, sel.ids, c[0], c[1], deg); if (ch.length) ctx.commit(ch, "Rotate");
+  const ch = rotateChanges(ctx.doc, sel.ids, c[0], c[1], deg); if (ch.length) { ctx.commit(ch, "Rotate"); solveAfterTransform(ctx, sel.ids); }
   endHover(ctx, sel); ctx.requestRender(); return true;
 }
 /**
@@ -661,7 +666,7 @@ export function flipBy(ctx: PcbCtx) {
   const sel = requestSelection(ctx, { rerun: (c: PcbCtx) => flipBy(c) }); if (!sel) return true;
   const items = sel.items, one = items.length === 1 && items[0]!.kind !== "gr_rect" && items[0]!.kind !== "table";
   const b = bboxUnion(items); const c: Pt = one ? anchorOf(items[0]!) : b ? [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] : [0, 0];
-  const ch = flipChanges(ctx.doc, sel.ids, c[0], c[1], flipDirection()); if (ch.length) ctx.commit(ch, "Change Side / Flip");
+  const ch = flipChanges(ctx.doc, sel.ids, c[0], c[1], flipDirection()); if (ch.length) { ctx.commit(ch, "Change Side / Flip"); solveAfterTransform(ctx, sel.ids); }
   endHover(ctx, sel); ctx.requestRender(); return true;
 }
 act("flipSelection", "Flip", "F", (ctx: PcbCtx) => flipBy(ctx));
@@ -686,7 +691,7 @@ export function mirrorBy(ctx: PcbCtx, axis: string) {
   }
   for (const it of sel.items) if (it!.kind === "footprint" && !skip.has(it!.id)) footprints++;
   const ids = sel.ids.filter((id) => !skip.has(id)); const items = ids.map((id) => doc.items.get(id)).filter((it) => it && it.kind !== "group") as KItem[];
-  if (items.length) { const c = modificationPoint(ctx, items, false); const ch = mirrorChanges(doc, ids, c[0], c[1], axis); if (ch.length) ctx.commit(ch, "Mirror"); }
+  if (items.length) { const c = modificationPoint(ctx, items, false); const ch = mirrorChanges(doc, ids, c[0], c[1], axis); if (ch.length) { ctx.commit(ch, "Mirror"); solveAfterTransform(ctx, ids); } }
   if (footprints) ctx.toast(MIRROR_FOOTPRINTS, 3500); else if (groups) ctx.toast(MIRROR_GROUPS, 3500);
   endHover(ctx, sel); ctx.requestRender(); return true;
 }
@@ -709,7 +714,7 @@ act("mirrorInteractive", "Mirror Interactive", "", (ctx: PcbCtx) => {
     const ids = sel.ids.filter((id) => ctx.doc.items.has(id));
     const finish = (flipped?: Map<string, string> | null): void => {
       const r = mirrorAxisChanges(ctx.doc, ids.filter((id) => ctx.doc.items.has(id)), a, b, (id) => groupOf(ctx.doc, id) || null, (id) => Array.from(expandGroups(ctx.doc, [id])), flipped || undefined);
-      if (r.changes.length) ctx.commit(r.changes, "Mirror");
+      if (r.changes.length) { ctx.commit(r.changes, "Mirror"); solveAfterTransform(ctx, ids); }
       if (r.skips.footprints) ctx.toast(MIRROR_FOOTPRINTS, 3500); else if (r.skips.groups) ctx.toast(MIRROR_GROUPS, 3500); else if (r.skips.items) ctx.toast(MIRROR_ARBITRARY, 3500);
       endHover(ctx, sel); ctx.requestRender();
     };
@@ -867,12 +872,23 @@ export function applyTuneSettings(st: MeanderSettings, v: TuneView, mode: string
   st.minAmp = Math.round(v.minAmp * TUNE_IU); st.maxAmp = Math.round(v.maxAmp * TUNE_IU); st.spacing = Math.round(v.spacing * TUNE_IU);
   st.round = !!v.round; st.crPct = Math.round(v.crPct); st.singleSided = !!v.singleSided;
 }
+/**
+ * The tuner's PCB_ACTIONS::properties / lengthTunerSettings (DRAWING_TOOL's tuning loop): the tool's settings, with a
+ * rule-driven pattern's own targets shown unless the rules are overridden; on OK the rule's targets stay (only manual
+ * targets are stored), and the pending pattern takes the tool's settings (ApplyToolSettings: its chain target and
+ * rule targets kept) and is re-tuned.  The pending pattern has no members yet, so the dialog has no constraint.
+ */
 export function openTuneSettings(ctx: PcbCtx) {
-  const mode = tuneMode(); const T = S.tune.pattern; const cur = T ? T.st : S.tuneSettings[mode];
+  const mode = tuneMode(); const T = S.tune.pattern; const tool = S.tuneSettings[mode];
   if (!routingDialogs.tuning) { ctx.toast("Length Tuning Settings: dialogs are unavailable here"); return true; }
-  routingDialogs.tuning({ mode: mode === "skew" ? "diff_pair_skew" : mode === "diffpair" ? "diff_pair" : "single", settings: tuneSettingsView(cur, mode) }, (v) => {
-    applyTuneSettings(S.tuneSettings[mode], v, mode);   // StoreDefaults
-    if (S.tune.pattern) { const side = S.tune.pattern.st.initialSide; S.tune.pattern.st = tuneCopy(S.tuneSettings[mode]); S.tune.pattern.st.initialSide = side; tuneUpdate(lastCtx || ctx); }   // ApplyToolSettings, updateTuningPattern
+  const ruleDriven = !!(T && T.hasRuleTarget);
+  const dlg = tuneCopy(tool);
+  if (ruleDriven && !dlg.overrideCustomRules) { const r = T!.st; dlg.target = Object.assign({}, r.target); dlg.targetDelay = Object.assign({}, r.targetDelay); dlg.skew = Object.assign({}, r.skew); dlg.skewDelay = Object.assign({}, r.skewDelay); }
+  routingDialogs.tuning({ mode: mode === "skew" ? "diff_pair_skew" : mode === "diffpair" ? "diff_pair" : "single", settings: tuneSettingsView(dlg, mode) }, (v) => {
+    const prior = tuneCopy(tool), next = tuneCopy(dlg); applyTuneSettings(next, v, mode);
+    if (ruleDriven && !next.overrideCustomRules) { next.target = prior.target; next.targetDelay = prior.targetDelay; next.skew = prior.skew; next.skewDelay = prior.skewDelay; }   // StoreDefaults without the targets
+    Object.assign(tool, next);
+    const P = S.tune.pattern; if (P) { applyToolSettings(P, tool); tuneUpdate(lastCtx || ctx); }   // applyCommonSettings, updateTuningPattern
     (lastCtx || ctx).requestRender();
   });
   return true;
@@ -898,14 +914,28 @@ export function tunerProperties(ctx: PcbCtx) {
 export function openPatternProperties(ctx: PcbCtx, gen: KItem) {
   if (!routingDialogs.tuning) { ctx.toast("Tuning Pattern Properties: dialogs are unavailable here"); return true; }
   const info = tuningPatternInfo(gen); const mode = info.mode === "diff_pair_skew" ? "skew" : "single"; const st = tuneCopy(info.st);
-  if (!st.overrideCustomRules && S.ruleConstraint) {
-    const mem = K.groupMemberIds(gen.node).map((id) => ctx.doc.items.get(id)).filter((it) => it && (it.kind === "segment" || it.kind === "arc")) as KItem[];
-    const c = S.ruleConstraint(ctx.doc, mode === "skew" ? "skew" : "length", mem[0] || null, null);
-    if (c && c.opt != null) { if (mode === "skew") setTargetSkew(st, Math.round(c.opt * TUNE_IU)); else setTargetLength(st, Math.round(c.opt * TUNE_IU)); if (mode !== "skew" && c.min != null && c.max != null) st.target = { min: Math.round(c.min * TUNE_IU), opt: Math.round(c.opt * TUNE_IU), max: Math.round(c.max * TUNE_IU) }; }
+  // the pattern's first member: a skew rule, else the chain's net_chain_length rule and the net's length rule when there is none
+  const mem = K.groupMemberIds(gen.node).map((id) => ctx.doc.items.get(id)).filter((it) => it && (it.kind === "segment" || it.kind === "arc")) as KItem[];
+  let rule = null as ReturnType<NonNullable<typeof S.ruleConstraint>>;
+  if (S.ruleConstraint && mem.length) {
+    if (mode === "skew") rule = S.ruleConstraint(ctx.doc, "skew", mem[0], null);
+    else { rule = S.ruleConstraint(ctx.doc, "net_chain_length", mem[0], null); if (!rule || rule.severity === "ignore") rule = S.ruleConstraint(ctx.doc, "length", mem[0], null); }
   }
-  routingDialogs.tuning({ mode: info.mode === "diff_pair_skew" ? "diff_pair_skew" : info.mode === "diff_pair" ? "diff_pair" : "single", settings: tuneSettingsView(st, mode) }, (v) => {
+  const mo = rule ? ruleMinOptMax(rule) : null;
+  if (rule && mo && !st.overrideCustomRules) {   // the rule's MINOPTMAX into the domain its option names; the other domain's target is an empty MINOPTMAX
+    if (mode === "skew") { if (rule.timeDomain) { setTargetMO(st, "skewDelay", mo); setTargetMO(st, "skew", {}); } else { setTargetMO(st, "skewDelay", {}); setTargetMO(st, "skew", mo); } }
+    else if (rule.timeDomain) { setTargetMO(st, "targetDelay", mo); setTargetMO(st, "target", {}); }
+    else { setTargetMO(st, "targetDelay", {}); setTargetMO(st, "target", mo); }
+    st.isTimeDomain = !!rule.timeDomain;
+  }
+  routingDialogs.tuning({ mode: info.mode === "diff_pair_skew" ? "diff_pair_skew" : info.mode === "diff_pair" ? "diff_pair" : "single", settings: Object.assign(tuneSettingsView(st, mode), { constraint: rule ? rule.name : null }) }, (v) => {
     const c = lastCtx || ctx; const cur = c.doc.items.get(gen.id); if (!cur || !canEdit(c)) return;
     const next = tuneCopy(st); applyTuneSettings(next, v, mode); next.initialSide = st.initialSide;
+    if (mo) {   // TransferDataFromWindow: a target equal to the rule's opt takes the rule's whole MINOPTMAX
+      const opt = mo.opt != null ? mo.opt : mo.min != null ? mo.min : 0;
+      if (mode === "skew") { if (next.skew.opt === opt) setTargetMO(next, "skew", mo); if (next.skewDelay.opt === opt) setTargetMO(next, "skewDelay", mo); }
+      else { if (next.target.opt === opt) setTargetMO(next, "target", mo); if (next.targetDelay.opt === opt) setTargetMO(next, "targetDelay", mo); }
+    }
     editTuningPattern(c, cur, tuningNodeWithSettings(cur.node, next, info.mode)); c.requestRender();
   });
   return true;
@@ -1252,7 +1282,7 @@ export function menuState(ctx: PcbCtx) {
   }
   if (!units.length && S.padSel) { grouping.count += 1 + (S.padAlso && S.padAlso.anchor === S.padSel ? S.padAlso.keys.filter((k) => k !== S.padSel).length : 0); grouping.hasNonGroup = true; }
   const a = zonePriorityAbility(ctx.doc, units.map((it) => it.id));
-  return { grouping, zoneCanRaise: a.canRaise, zoneCanLower: a.canLower };
+  return { grouping, zoneCanRaise: a.canRaise, zoneCanLower: a.canLower, constrained: selectionIsConstrained(ctx), constraintsAlways: constraintsAlwaysShown() };
 }
 /** PCB_GROUP_TOOL::canGroupItem (BOARD_ITEM::IsGroupableType): the message when the item cannot be in a group, else "". */
 function cannotGroup(it: KItem): string { return it.kind === "target" || it.kind === "marker" ? GROUP_MSG_TYPE : ""; }
@@ -1569,6 +1599,125 @@ let dragImpl: ((ctx: PcbCtx, free: boolean) => boolean) | null = null;
 export function setDragImpl(f: (ctx: PcbCtx, free: boolean) => boolean) { dragImpl = f; }
 act("drag45Degree", "Drag 45 Degree Mode", "D", (ctx: PcbCtx) => !!dragImpl && dragImpl(ctx, false), { tip: "Drags a track segment, or a mixed selection as one block, keeping connected tracks at 45 degrees." });
 act("dragFreeAngle", "Drag Free Angle", "G", (ctx: PcbCtx) => !!dragImpl && dragImpl(ctx, true), { tip: "Drags the nearest joint in the track without restricting the track angle." });
+// ---------------------------------------------------------------- generated tables and drill maps (PCB_CONTROL, pcb_control.cpp)
+const DM = () => K.drillModel;
+/** The editor's user units as GENERATED_TABLE_UNITS (ToGeneratedTableUnits). */
+const generatedUnits = (): "mm" | "inch" | "mils" => { const u = sizeUnits(); return u === "in" ? "inch" : u === "mil" ? "mils" : "mm"; };
+const layerHidden = (layer: string): boolean => { const h = appGlobal(() => editorState()!.hiddenLayers as Set<string> | null, null); return !!(h && h.has(layer)); };
+/**
+ * PCB_CONTROL::pickDocumentationLayer: the active layer when it is available, else the first documentation layer that
+ * is (made active); none: the info bar's error.  A hidden layer is said to be hidden.
+ */
+function pickDocumentationLayer(ctx: PcbCtx, available: (layer: string) => boolean, noLayer: string): string | null {
+  const R = sizesOf(ctx); let layer = R.activeLayer || S.gfxLayer;
+  if (!available(layer)) {
+    const next = DM().documentationLayers(ctx.doc).find(available);
+    if (!next) { ctx.toast(noLayer); return null; }
+    layer = next; S.gfxLayer = layer; R.setActiveLayer(layer);
+  }
+  if (layerHidden(layer)) ctx.toast(`Layer '${DM().userLayerName(ctx.doc, layer)}' is hidden; nothing will be shown until you make it visible.`);
+  return layer;
+}
+/** The changes that refresh the stale generated tables (RefreshGeneratedTables) and store the profile it handed out. */
+export function generatedRefreshChanges(doc: BoardDoc): PcbChange[] {
+  const r = DM().refreshGeneratedTables(doc); const out: PcbChange[] = [];
+  for (const t of r.tables) { const it = doc.items.get(t.id); if (it) out.push(replacedChange(it, t.node)); }
+  if (r.profile) out.push(DM().profileChange(doc, r.profile) as PcbChange);
+  return out;
+}
+/** PCB_CONTROL::placeGeneratedTable: built on a free documentation layer, cascaded under the ones of its kind there, placed from the origin. */
+function placeGeneratedTable(ctx: PcbCtx, kind: "drill_chart" | "stackup_table", noLayer: string, label: string) {
+  if (!canEdit(ctx) || ctx.doc.fpEditor) return true;
+  const doc = ctx.doc; const enabled = (l: string) => DM().isDocumentationLayer(l) && doc.layers.has(l);
+  const layer = pickDocumentationLayer(ctx, enabled, noLayer); if (!layer) return true;
+  const refresh = { profile: DM().cloneProfile(DM().boardProfile(doc)) };
+  let node = DM().newGeneratedNode(kind, layer, K.newUuid(), kind === "stackup_table" ? generatedUnits() : "mm");
+  node = DM().rebuildGenerated(doc, node, refresh);
+  let existing = 0; for (const it of doc.items.values()) if (it.kind === "table" && it.node[0] === kind && K.str((K.kid(it.node, "layer") || [])[1]) === layer) existing++;
+  if (existing) {
+    const T = K.tableModel.tableInfo(node); let y0 = Infinity, y1 = -Infinity;
+    for (const c of T.cells) { const { s, e } = K.tableModel.cellStartEnd(c, true); y0 = Math.min(y0, s[1], e[1]); y1 = Math.max(y1, s[1], e[1]); }
+    K.shiftTable(node, 0, r6(existing * ((y1 - y0) + 5)));
+  }
+  const c = addedChange(doc, node); const changes: PcbChange[] = [c];
+  const before = JSON.stringify(DM().boardProfile(doc)); if (JSON.stringify(refresh.profile) !== before) changes.push(DM().profileChange(doc, refresh.profile) as PcbChange);
+  placePasted(ctx, changes, [c.id], [c.id], label, [0, 0]);
+  return true;
+}
+act("placeStackup", "Add Stackup Table", "", (ctx: PcbCtx) => placeGeneratedTable(ctx, "stackup_table", "No documentation layer is enabled to hold a stackup table.", "Place Board Stackup Table"));
+act("placeDrillChart", "Add Drill Chart", "", (ctx: PcbCtx) => placeGeneratedTable(ctx, "drill_chart", "No documentation layer is enabled to hold a drill chart.", "Place Drill Chart"));
+// PCB_CONTROL::PlaceDrillMap: one map per documentation layer, at no offset, selected
+act("placeDrillMap", "Add Drill Map", "", (ctx: PcbCtx) => {
+  if (!canEdit(ctx) || ctx.doc.fpEditor) return true;
+  const doc = ctx.doc; const ok = (l: string) => DM().isDocumentationLayer(l) && doc.layers.has(l) && !DM().hasDrillMapOn(doc, l);
+  const layer = pickDocumentationLayer(ctx, ok, "Every documentation layer already has a drill map."); if (!layer) return true;
+  const m = { layer, offset: [0, 0] as Pt, size: DM().boardProfile(doc).size, allSpans: true, span: { start: "F.Cu", end: "B.Cu", backdrill: false, npth: false }, outlineSlots: true, guideCross: false, locked: false };
+  const c = addedChange(doc, DM().drillMapNode(m, K.newUuid()));
+  ctx.commit([c], "Place Drill Map"); applySelection(ctx, []); applySelection(ctx, [c.id]); ctx.requestRender();
+  return true;
+});
+/**
+ * Build_Board_Characteristics_Table (board_characteristics_table.cpp): a four-column table, a heading across it, the
+ * board's figures in label / value pairs in the user's units, no strokes, autosized, at the origin.
+ */
+export function boardCharacteristicsNode(doc: BoardDoc, layer: string): SNode {
+  const units = sizeUnits() as "mm" | "in" | "mil"; const msg = (mm: number) => messageText(mm, units, "pcb", true);
+  const setup = (doc as { setupNode?: SNode | null }).setupNode || null; const fin = DM().boardFinish(setup);
+  const stack = setup ? K.kid(setup, "stackup") : null; const dc = stack ? K.kid(stack, "dielectric_constraints") : null;
+  const st = boardStatsData(doc, { excludeNoPads: false }); const INT_MAX = 2147483647 / 1e6;
+  const loops = DM().boardOutlines(doc); let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  for (const l of loops) for (const [x, y] of l) { bx0 = Math.min(bx0, x); by0 = Math.min(by0, y); bx1 = Math.max(bx1, x); by1 = Math.max(by1, y); }
+  const bw = isFinite(bx0) ? bx1 - bx0 : 0, bh = isFinite(by0) ? by1 - by0 : 0;
+  const count = (title: string) => (st.padProps.find((p) => p.title === title) || { count: 0 }).count;
+  const castellated = st.padProps.length > 0 ? count(st.padProps[0].title) : 0, pressfit = st.padProps.length > 1 ? count(st.padProps[1].title) : 0;
+  const yn = (b: boolean) => (b ? "Yes" : "No");
+  const cells: SNode[] = []; const just: SNode = ["justify", "left"]; if (/^B\./.test(layer)) just.push("mirror");
+  const cell = (text: string, size: number, thick: number, span: number) => cells.push(["table_cell", text, ["start", 0, 0], ["end", 0, 0], ["margins", 1.0025, 1.0025, 1.0025, 1.0025], ["span", span, 1],
+    ["layer", layer], ["uuid", K.newUuid()], ["effects", ["font", ["size", size, size], ["thickness", thick]], just.slice()], ["knockout", "no"]]);
+  cell("BOARD CHARACTERISTICS", 2, 0.4, 4); for (let i = 1; i < 4; i++) cell("", 2, 0.4, 0);
+  const data = (t: string) => cell(t, 1.5, 0.2, 1);
+  data("Copper layer count: "); data(String(doc.copper.length));
+  data("Board thickness: "); data(msg(DM().stackupBoardThickness(doc)));
+  data("Board overall dimensions: "); data(`${msg(bw)} x ${msg(bh)}`);
+  data(""); data("");
+  data("Min track/spacing: "); data(`${msg(st.minTrackWidth ?? INT_MAX)} / ${msg(st.minClearance ?? INT_MAX)}`);
+  data("Min hole diameter: "); data(msg(st.minDrill ?? INT_MAX));
+  data("Copper finish: "); data(fin.copperFinish);
+  data("Impedance control: "); data(yn(!!dc && K.str(dc[1]) !== "no"));
+  data("Castellated pads: "); data(yn(castellated > 0));
+  data("Press-fit pads: "); data(yn(pressfit > 0));
+  data("Plated board edge: "); data(yn(fin.edgePlating));
+  data("Edge card connectors: "); data(fin.edgeConnector === "yes" ? "Yes" : fin.edgeConnector === "bevelled" ? "Yes, Bevelled" : "No");
+  for (let i = 0, n = cells.length % 4; i < n; i++) data("");
+  const node: SNode = ["table", ["uuid", K.newUuid()], ["layer", layer], ["column_count", 4], ["border", ["external", "no"], ["header", "no"]], ["separators", ["rows", "no"], ["cols", "no"]],
+    ["column_widths", 0, 0, 0, 0], ["row_heights", ...Array(cells.length / 4).fill(0)], ["cells", ...cells]];
+  DM().autosizeTable(node); K.tableModel.setTablePosition(node, true, [0, 0]);
+  return node;
+}
+// PCB_CONTROL::PlaceCharacteristics: on the active layer, placed from the origin
+act("placeCharacteristics", "Add Board Characteristics", "", (ctx: PcbCtx) => {
+  if (!canEdit(ctx) || ctx.doc.fpEditor) return true;
+  const layer = sizesOf(ctx).activeLayer || S.gfxLayer; const c = addedChange(ctx.doc, boardCharacteristicsNode(ctx.doc, layer));
+  placePasted(ctx, [c], [c.id], [c.id], "Place Board Characteristics", [0, 0]);
+  return true;
+});
+// CONSTRAINT_EDIT_TOOL (pcb_actions.cpp): the constraint types from the selection or by clicking, the point families
+// by clicking, removing the selection's constraints, the constraint list and the drawing tools' automatic constraints
+for (const [id, type, label] of [["addConstraintParallel", "parallel", "Parallel"], ["addConstraintPerpendicular", "perpendicular", "Perpendicular"],
+  ["addConstraintEqualLength", "equal_length", "Equal Length"], ["addConstraintCollinear", "collinear", "Collinear"], ["addConstraintAngular", "angular_dimension", "Angular Dimension"],
+  ["addConstraintTangent", "tangent", "Tangent"], ["addConstraintHorizontal", "horizontal", "Horizontal"], ["addConstraintVertical", "vertical", "Vertical"],
+  ["addConstraintFixedLength", "fixed_length", "Fixed Length"], ["addConstraintConcentric", "concentric", "Concentric"], ["addConstraintEqualRadius", "equal_radius", "Equal Radius"],
+  ["addConstraintFixedRadius", "fixed_radius", "Fixed Radius"], ["addConstraintArcAngle", "arc_angle", "Arc Angle"]] as const) act(id, label, "", (ctx: PcbCtx) => addConstraint(ctx, type));
+for (const [id, type, label] of [["addConstraintCoincident", "coincident", "Coincident..."], ["addConstraintPointOnLine", "point_on_line", "Point on Line..."],
+  ["addConstraintMidpoint", "midpoint", "Midpoint..."], ["addConstraintSymmetric", "symmetric", "Symmetric..."], ["addConstraintFixedPosition", "fixed_position", "Fix in Place..."]] as const)
+  act(id, label, "", (ctx: PcbCtx) => addPointConstraint(ctx, type));
+act("removeConstraints", "Remove Geometric Constraints", "", (ctx: PcbCtx) => (canEdit(ctx) ? removeConstraints(ctx) : true), { enabled: (ctx: PcbCtx) => selectionIsConstrained(ctx) });
+act("showConstraints", "Always Show Geometric Constraints", "", (ctx: PcbCtx) => showConstraints(ctx, true));
+act("hideConstraints", "Show Geometric Constraints on Hover Only", "", (ctx: PcbCtx) => showConstraints(ctx, false));
+act("manageConstraints", "Geometric Constraints...", "", (ctx: PcbCtx) => manageConstraints(ctx));
+// the board editor's docked Geometric Constraints pane is the same list (the Footprint Editor's modal DIALOG_CONSTRAINT_LIST)
+act("showConstraintsPanel", "Geometric Constraints", "", (ctx: PcbCtx) => manageConstraints(ctx));
+act("toggleAutoConstraints", "Automatic Constraints", "", (ctx: PcbCtx) => toggleAutoConstraints(ctx), { toggle: () => getAutoConstraints(lastCtx) });
 Object.freeze(ACTIONS);
 /** pcb.setRoutingDialogs: the routing dialogs the editor bundle hands over. */
 export function setRoutingDialogsImpl(d: RoutingDialogs) { routingDialogs = d; }

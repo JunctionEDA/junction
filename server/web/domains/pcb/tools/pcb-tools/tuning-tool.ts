@@ -1,6 +1,6 @@
 // pcb-tools/tuning-tool.ts — the length tuning tool (DRAWING_TOOL::PlaceTuningPattern).
-import type { BoardDoc, NetRef, PcbChange, PcbCtx, Pt, TrackLine } from "./types";
-import type { Chain, MeanderSettings, TuneRange } from "./meander";
+import type { BoardDoc, Conductor, NetRef, PcbChange, PcbCtx, Pt, TrackLine } from "./types";
+import type { Chain, MeanderSettings, MinOptMax, TuneRange } from "./meander";
 import { netNameOf, sizesOf } from "./app-state";
 import { removedChange, upsertChange } from "./changes";
 import { ptKey } from "./connected";
@@ -10,10 +10,11 @@ import { peq } from "./dragger";
 import { netClearance } from "./drc";
 import { distSeg } from "./hit";
 import type { LDContext, TuneLine, TuningPath } from "./length-delay";
-import { IU_PER_PS, assembleTuneLine, assembleTuningPath, delayForChain, ldContext, lengthForDelay, netTuningProfileName, origPathDelay, origPathLength } from "./length-delay";
-import { DELAY_UNCONSTRAINED, LENGTH_UNCONSTRAINED, TUNE_IU, TUNE_MSG_INSIDE, TUNE_MSG_PICK, TUNE_STATUS_TEXT, chPoints, dpMeanderMove, meanderDefaults, meanderMove, segSide, setTargetLength, setTargetLengthDelay, setTargetSkew, setTargetSkewDelay, splitChain, tuneCopy, veq } from "./meander";
+import { IU_PER_PS, assembleTuneLine, assembleTuningPath, boardTrackLength, delayForChain, ldContext, lengthForDelay, netTuningProfileName, origPathDelay, origPathLength } from "./length-delay";
+import { DELAY_UNCONSTRAINED, LENGTH_UNCONSTRAINED, TUNE_IU, TUNE_MSG_INSIDE, TUNE_MSG_PICK, TUNE_STATUS_TEXT, chPoints, dpMeanderMove, meanderDefaults, meanderMove, segSide, setTargetLength, setTargetLengthDelay, setTargetSignalLength, setTargetSignalLengthDelay, setTargetSkew, setTargetSkewDelay, splitChain, tuneCopy, veq } from "./meander";
+import { boardChainBridging, subtractBridgingClamped } from "./drc-chain";
 import { netTable } from "./netlist";
-import { netOf } from "./nets";
+import { chainNets, netChainOf, netOf } from "./nets";
 import { segmentNode } from "./nodes";
 import { arcTrackNode } from "./posture";
 import { setLayer } from "./route-tool";
@@ -33,6 +34,8 @@ export interface TunePattern {
   mode: string; coupled: number | null; dpGap?: number; dp?: TuneDp | null;
   /** origPathDelay (attoseconds), the length calculator, the skew placer's m_lastLength / m_lastDelay (mm, as) and m_coupledDelay */
   lineDelay?: number; ld?: LDContext | null; lastLength?: number; lastDelay?: number; coupledDelay?: number | null;
+  /** m_hasRuleTarget (a custom rule set the targets at CreateNew) and the placer's chain extras (initChainExtras at Start) */
+  hasRuleTarget?: boolean; chainEx?: ChainExtras | null;
 }
 /** The track under the cursor before the first click (S.tune.picker): its id. */
 export type TunePicker = string;
@@ -98,7 +101,7 @@ export function coupledPath(doc: BoardDoc, pair: { P: NetRef; N: NetRef }, mineK
  * same for the skew.  Lengths in IU, delays in attoseconds; g is the TUNING_PROFILE_GEOMETRY_CONTEXT.
  */
 export function timeDomainTargets(ld: LDContext, st: MeanderSettings, g: { net: string; layer: string; width: number; coupled: boolean; gap: number },
-  cur: { length: number; delay: number }, skew?: { lastLength: number; lastDelay: number; coupledLength: number; coupledDelay: number } | null) {
+  cur: { length: number; delay: number }, skew?: { lastLength: number; lastDelay: number; coupledLength: number; coupledDelay: number } | null, extraDelay = 0) {
   if (!st.isTimeDomain) return;
   const L = (d: number) => Math.trunc(lengthForDelay(ld, d, g) * TUNE_IU);
   if (skew) {
@@ -106,14 +109,97 @@ export function timeDomainTargets(ld: LDContext, st: MeanderSettings, g: { net: 
     st.skew = { min: target(st.skewDelay.min), opt: target(st.skewDelay.opt), max: target(st.skewDelay.max) };
     return;
   }
-  const d = st.targetDelay, diffOpt = d.opt - cur.delay;
+  // cur.delay is origPathDelay (the chain's aggregate: it carries m_signalExtraDelay, the other nets of the chain, on a
+  // single track); a chain-level target (m_targetSignalLengthDelay) is turned into this net's share and compared with
+  // the net's own delay
+  const sig = st.signalTargetDelay, useSignal = !!sig && sig.opt !== DELAY_UNCONSTRAINED;
+  const d = useSignal ? { min: Math.max(0, sig!.min - extraDelay), opt: Math.max(0, sig!.opt - extraDelay), max: 0 } : st.targetDelay;
+  if (useSignal) d.max = Math.max(d.opt, sig!.max - extraDelay);
+  const curDelay = useSignal ? cur.delay - extraDelay : cur.delay;
+  const diffOpt = d.opt - curDelay;
   const lMin = L(d.opt - d.min), lMax = L(d.max - d.opt); let lOpt = L(Math.abs(diffOpt)); lOpt = diffOpt > 0 ? lOpt : -lOpt;
   st.target = { min: cur.length + lOpt - lMin, opt: cur.length + lOpt, max: cur.length + lOpt + lMax };
 }
-export function tuneTarget(st: MeanderSettings, coupled: number | null | undefined): TuneRange {
+export function tuneTarget(st: MeanderSettings, coupled: number | null | undefined, chainOffset = 0): TuneRange {
   if (coupled == null) return st.target;
-  const c = coupled * TUNE_IU; return { min: c + st.skew.min, opt: c + st.skew.opt, max: c + st.skew.max };
+  // MEANDER_SKEW_PLACER::Move: the chain extras and the active net's unmeasured stub are the chain's, not the meander's
+  const c = coupled * TUNE_IU - chainOffset; return { min: c + st.skew.min, opt: c + st.skew.opt, max: c + st.skew.max };
 }
+
+// ---- the net chain target (PCB_TUNING_PATTERN::CreateNew's NET_CHAIN_LENGTH_CONSTRAINT, MEANDER_PLACER_BASE::initChainExtras /
+// chainNarrowingOffset, MEANDER_PLACER::Move / DP_MEANDER_PLACER::Move's per-net budget)
+const isBoardTrack = (c: Conductor) => c.kind === "segment" || c.kind === "arc" || c.kind === "via";
+/** The net's first PCB_TRACK in BOARD::Tracks() order (a track, an arc or a via), or null. */
+export const netRepTrack = (ld: LDContext, net: string) => ld.conds.find((c) => isBoardTrack(c) && c.net === net) || null;
+/**
+ * PNS_KICAD_IFACE_BASE::GetSignalAggregate: the routed length (IU) and delay (as) of every other net of the chain the
+ * two nets share (BOARD::GetTrackLength of each net's first track, pad-to-die included).  valid is false when the
+ * first net is on no chain or the second is on another.
+ */
+export function signalAggregate(ld: LDContext, netP: string, netN: string) {
+  const doc = ld.doc; const sig = netChainOf(doc, netP);
+  if (!sig || sig !== netChainOf(doc, netN)) return { valid: false, length: 0, delay: 0 };
+  let length = 0, delay = 0;
+  for (const net of chainNets(doc, sig)) {
+    if (net === netP || net === netN) continue;
+    const rep = netRepTrack(ld, net); if (!rep) continue;
+    const r = boardTrackLength(ld, rep.id);
+    length += Math.round((r.length + r.padToDie) * TUNE_IU);
+    if (r.delay > 0 || r.padToDieDelay > 0) delay += Math.round(r.delay + r.padToDieDelay);
+  }
+  return { valid: true, length, delay };
+}
+/** PNS_KICAD_IFACE_BASE::GetNetBoardLength: the routed length (IU) of the net's first track, pad-to-die included. */
+export function netBoardLength(ld: LDContext, net: string) {
+  const rep = netRepTrack(ld, net); if (!rep) return 0;
+  const r = boardTrackLength(ld, rep.id); return Math.round((r.length + r.padToDie) * TUNE_IU);
+}
+/** The placer's chain extras: m_chainExtrasLength (IU), m_chainExtrasDelay (as) and chainNarrowingOffset() (IU). */
+export interface ChainExtras { length: number; delay: number; offset: number }
+/**
+ * MEANDER_PLACER_BASE::initChainExtras + chainNarrowingOffset for the placer's CurrentNets() (the tuned net first) and
+ * its m_startPathLength (IU): the other nets of the chain, plus the tuned net's copper the tuning path does not measure.
+ */
+export function chainExtras(ld: LDContext, nets: string[], startPathLength: number): ChainExtras {
+  if (!nets.length) return { length: 0, delay: 0, offset: 0 };
+  const a = signalAggregate(ld, nets[0], nets.length >= 2 ? nets[1] : nets[0]);
+  const unmeasured = Math.max(0, netBoardLength(ld, nets[0]) - startPathLength);
+  return { length: a.length, delay: a.delay, offset: a.length + unmeasured };
+}
+/**
+ * MEANDER_PLACER::Move / DP_MEANDER_PLACER::Move: with a chain target (m_targetSignalLength) the net's budget is the
+ * chain's less the rest of the chain; it becomes the length target, or narrows the net's own (the tighter of both).
+ */
+export function chainBudget(st: MeanderSettings, otherLen: number) {
+  const sig = st.signalTarget; if (!sig || sig.opt === LENGTH_UNCONSTRAINED) return;
+  const bMin = Math.max(0, sig.min - otherLen), bOpt = Math.max(0, sig.opt - otherLen), bMax = Math.max(bOpt, sig.max - otherLen);
+  if (st.target.opt === LENGTH_UNCONSTRAINED) st.target = { min: bMin, opt: bOpt, max: bMax };
+  else st.target = { min: Math.max(st.target.min, bMin), opt: Math.min(st.target.opt, bOpt), max: Math.min(st.target.max, bMax) };
+}
+/** A rule's value as DRC_CONSTRAINT's MINOPTMAX<int> holds it: nm for a length, attoseconds for a delay (both 1e6 per mm / ps). */
+export const ruleMinOptMax = (c: { min: number | null; opt: number | null; max: number | null }): MinOptMax => {
+  const raw = (v: number | null) => (v == null ? null : Math.round(v * TUNE_IU)); return { min: raw(c.min), opt: raw(c.opt), max: raw(c.max) };
+};
+const moOpt = (c: MinOptMax) => (c.opt != null ? c.opt : c.min != null ? c.min : 0);
+/** MEANDER_SETTINGS::SetTarget*( const MINOPTMAX<int>& ): the setter with Opt(), then the constraint's own min / max. */
+export function setTargetMO(st: MeanderSettings, field: "target" | "targetDelay" | "skew" | "skewDelay", mo: MinOptMax) {
+  const set = field === "target" ? setTargetLength : field === "targetDelay" ? setTargetLengthDelay : field === "skew" ? setTargetSkew : setTargetSkewDelay;
+  set(st, moOpt(mo)); if (mo.min != null) st[field].min = mo.min; if (mo.max != null) st[field].max = mo.max;
+}
+/**
+ * PCB_TUNING_PATTERN::ApplyToolSettings: the tool's settings onto a pattern, keeping its chain target unless the tool
+ * overrides custom rules, its rule targets when a rule set them, and its time domain flag (the side stays the pattern's).
+ */
+export function applyToolSettings(T: Pick<TunePattern, "st" | "hasRuleTarget">, tool: MeanderSettings) {
+  const o = T.st, st = tuneCopy(tool);
+  if (!tool.overrideCustomRules) { st.signalTarget = Object.assign({}, o.signalTarget); st.signalTargetDelay = Object.assign({}, o.signalTargetDelay); }
+  if (T.hasRuleTarget && !tool.overrideCustomRules) {
+    st.target = Object.assign({}, o.target); st.targetDelay = Object.assign({}, o.targetDelay); st.skew = Object.assign({}, o.skew); st.skewDelay = Object.assign({}, o.skewDelay);
+  }
+  if (!tool.overrideCustomRules) st.isTimeDomain = o.isTimeDomain;
+  st.initialSide = o.initialSide; T.st = st;
+}
+type RuleHit = NonNullable<ReturnType<NonNullable<typeof S.ruleConstraint>>>;
 /** The track the tuner picks under the cursor: GENERAL_COLLECTOR on tracks and arcs, 5 px, the nearest centre wins. */
 export function tunePick(ctx: PcbCtx, mm: Pt) {
   const doc = ctx.doc; const thr = 5 * (S.mmPerPx || 0.05); const active = S.layer; const hits: { it: KItem; d2: number; onActive: boolean }[] = [];
@@ -156,14 +242,17 @@ export function tuneBegin(ctx: PcbCtx, item: KItem, mm: Pt) {
   S.tune.pattern = { item: item.id, line, layer: line.layer, net: line.net, netName: netNameOf(ctx, line.net), netKey: line.netKey, width: line.width, origin: at, end: at, cursor: mm.slice(), st,
     clearance: netClearance(s, line.netKey), lineLength: mine.length, lineDelay: mine.delay, ld, res: null, mode: tuneMode(),
     coupled: cp ? cp.length : null, coupledDelay: cp ? cp.delay : null, lastLength: mine.length, lastDelay: mine.delay };
-  patternTargets(ld, st, tuneMode(), item, dpa ? dpa.item : null);
+  S.tune.pattern.hasRuleTarget = patternTargets(ld, st, tuneMode(), item, dpa ? dpa.item : null);
+  let nets = [line.netKey];   // the placer's CurrentNets()
   if (dpa) {
     const other = tuningPathLength(ld, dpa.item.id);
     S.tune.pattern.dp = { line: dpa.line, net: dpa.net, netKey: dpa.netKey, mineIsP: dpa.mineIsP, gap: dpa.gap, lenMine: mine.length, lenOther: other.length, delayMine: mine.delay, delayOther: other.delay };
     S.tune.pattern.lineLength = Math.max(mine.length, other.length);   // origPathLength
     S.tune.pattern.lineDelay = Math.max(mine.delay, other.delay);   // origPathDelay
     S.tune.pattern.dpGap = dpa.gap;
-  }
+    nets = dpa.mineIsP ? [line.netKey, dpa.netKey] : [dpa.netKey, line.netKey];   // DP_MEANDER_PLACER: P, N
+  } else if (pair) { const NT = netTable(doc), kP = NT.key(pair.P); nets = [line.netKey, kP === line.netKey ? NT.key(pair.N) : kP]; }   // MEANDER_SKEW_PLACER: active, coupled
+  S.tune.pattern.chainEx = chainExtras(ld, nets, S.tune.pattern.lineLength * TUNE_IU);   // Start: initChainExtras, m_startPathLength
 }
 /** The nearest point of a chain (mm, arcs kept) to p and its piece. */
 export function nearestOnChain(ch: Chain, p: Pt) {
@@ -177,10 +266,48 @@ export function nearestOnChain(ch: Chain, p: Pt) {
  * turns the pattern to the time domain.
  */
 export function patternTargets(ld: LDContext, st: MeanderSettings, mode: string, a: KItem | null, b: KItem | null) {
-  if (applyRuleTarget(ld.doc, st, mode, a, b)) return true;
   const skew = mode === "skew" || mode === "diff_pair_skew";
+  if (!skew && a && !st.overrideCustomRules && S.ruleConstraint) return lengthRuleTargets(ld, st, mode, a, b);
+  if (applyRuleTarget(ld.doc, st, mode, a, b)) return true;
   if (!skew && !st.overrideCustomRules && a) { const p = profileName(ld, a); if (p && p.enableTimeDomain) st.isTimeDomain = true; }
   return false;
+}
+/**
+ * CreateNew for a single track or a pair (then ApplyToolSettings without Override Custom Rules): the net's length
+ * rule is its target; a net chain length rule (net_chain_length) on the net's chain is the chain target
+ * (SetTargetSignalLength, or SetTargetSignalLengthDelay in the time domain) less the chain's bridging through its
+ * series parts, from which the placer derives the net's budget; the chain's time domain option wins.  A chain rule
+ * alone leaves the net's targets unconstrained.  Rules with severity ignore do not count.  True when a rule applied
+ * (m_hasRuleTarget).
+ */
+function lengthRuleTargets(ld: LDContext, st: MeanderSettings, mode: string, a: KItem, b: KItem | null) {
+  const doc = ld.doc; const live = <C extends { severity?: string | null }>(c: C | null) => (c && c.severity !== "ignore" ? c : null);
+  const netC = live(S.ruleConstraint!(doc, "length", a, b)), chainC = live(S.ruleConstraint!(doc, "net_chain_length", a, b));
+  let td = netC ? !!netC.timeDomain : false, ruled = false;
+  if (chainC) {
+    const chain = netChainOf(doc, netTable(doc).key(netOf(a.node)));
+    if (chain) {
+      td = !!chainC.timeDomain;
+      const mo = ruleMinOptMax(chainC);
+      const [bl, bd] = boardChainBridging(doc, ld, chain);   // GetCachedBridgingLength: BoardChainBridging
+      const bridging = Math.trunc(bl * TUNE_IU);
+      if (bridging > 0) {   // so the copper-only budget agrees with the DRC check
+        const d = td ? Math.trunc(bd) : bridging;
+        if (mo.min != null) mo.min = subtractBridgingClamped(mo.min, d);
+        if (mo.opt != null) mo.opt = subtractBridgingClamped(mo.opt, d);
+        if (mo.max != null) mo.max = subtractBridgingClamped(mo.max, d);
+      }
+      ruled = true;
+      if (td) setTargetSignalLengthDelay(st, mo); else setTargetSignalLength(st, mo);
+    }
+  }
+  if (netC) { applyRuleTarget(doc, st, mode, a, b, td, netC); ruled = true; }
+  else {
+    if (ruled) { setTargetLength(st, LENGTH_UNCONSTRAINED); setTargetLengthDelay(st, DELAY_UNCONSTRAINED); }   // the pattern's own targets stay unconstrained
+    if (td) st.isTimeDomain = true;   // chain only: the placer derives the targets
+    else { const p = profileName(ld, a); if (p && p.enableTimeDomain) st.isTimeDomain = true; }
+  }
+  return ruled;
 }
 const profileName = (ld: LDContext, a: KItem) => { const nk = netTable(ld.doc).key(netOf(a.node)); return ld.profiles.get(netTuningProfileName(ld.s, nk)) || null; };
 /**
@@ -188,12 +315,12 @@ const profileName = (ld: LDContext, a: KItem) => { const nk = netTable(ld.doc).k
  * constraint becomes the target (MEANDER_SETTINGS::SetTargetLength( MINOPTMAX ): opt, then its min / max when given;
  * a rule without opt has MINOPTMAX's Opt() = Min()).  True when a rule applied.
  */
-export function applyRuleTarget(doc: BoardDoc, st: MeanderSettings, mode: string, a: KItem | null, b: KItem | null) {
+export function applyRuleTarget(doc: BoardDoc, st: MeanderSettings, mode: string, a: KItem | null, b: KItem | null, timeDomain?: boolean, rule?: RuleHit | null) {
   if (st.overrideCustomRules || !S.ruleConstraint || !a) return false;
   const skew = mode === "skew" || mode === "diff_pair_skew";
-  const c = S.ruleConstraint(doc, skew ? "skew" : "length", a, b); if (!c) return false;
+  const c = rule || S.ruleConstraint(doc, skew ? "skew" : "length", a, b); if (!c) return false;
   const opt = c.opt != null ? c.opt : c.min != null ? c.min : 0;
-  if (c.timeDomain) {   // DRC_CONSTRAINT::OPTIONS::TIME_DOMAIN: the values are delays (ps)
+  if (timeDomain ?? c.timeDomain) {   // DRC_CONSTRAINT::OPTIONS::TIME_DOMAIN: the values are delays (ps)
     const D = (v: number) => Math.round(v * IU_PER_PS);
     if (skew) { setTargetSkew(st, 0); setTargetSkewDelay(st, D(opt)); if (c.min != null) st.skewDelay.min = D(c.min); if (c.max != null) st.skewDelay.max = D(c.max); }
     else { setTargetLength(st, LENGTH_UNCONSTRAINED); setTargetLengthDelay(st, D(opt)); if (c.min != null) st.targetDelay.min = D(c.min); if (c.max != null) st.targetDelay.max = D(c.max); }
@@ -208,15 +335,22 @@ export function applyRuleTarget(doc: BoardDoc, st: MeanderSettings, mode: string
 /** A TrackLine's chain in IU (its arcs kept when it has them). */
 export const lineChainIU = (ln: TrackLine): Chain => (ln.ch || ln.pts.map((p): Chain[number] => ({ p }))).map((n) => (n.m ? { p: [n.p[0] * TUNE_IU, n.p[1] * TUNE_IU], m: [n.m[0] * TUNE_IU, n.m[1] * TUNE_IU] } : { p: [n.p[0] * TUNE_IU, n.p[1] * TUNE_IU] }));
 /** The pattern's targets for MEANDER_PLACER::Move: the skew window around the coupled length, or the time domain targets. */
-export function moveSettings(T: Pick<TunePattern, "st" | "coupled" | "ld" | "netKey" | "layer" | "width" | "lineLength" | "lineDelay" | "dp" | "dpGap" | "lastLength" | "lastDelay" | "coupledDelay">) {
+export function moveSettings(T: Pick<TunePattern, "st" | "coupled" | "ld" | "netKey" | "layer" | "width" | "lineLength" | "lineDelay" | "dp" | "dpGap" | "lastLength" | "lastDelay" | "coupledDelay" | "chainEx">) {
   const st = tuneCopy(T.st); st.keepEndpoints = true;
+  const ex = T.chainEx || null;
+  if (T.coupled == null) chainBudget(st, ex ? ex.offset : 0);   // the net's share of a chain target
   if (st.isTimeDomain && T.ld) {
     const g = { net: T.netKey, layer: T.layer, width: T.width, coupled: T.coupled != null || !!T.dp, gap: T.dp ? T.dp.gap : T.dpGap || 0 };
     if (T.coupled != null) timeDomainTargets(T.ld, st, g, { length: 0, delay: 0 }, { lastLength: (T.lastLength ?? T.lineLength) * TUNE_IU, lastDelay: T.lastDelay ?? T.lineDelay ?? 0, coupledLength: T.coupled * TUNE_IU, coupledDelay: T.coupledDelay || 0 });
-    else timeDomainTargets(T.ld, st, g, { length: Math.round(T.lineLength * TUNE_IU), delay: T.lineDelay || 0 });
+    else timeDomainTargets(T.ld, st, g, { length: Math.round(T.lineLength * TUNE_IU), delay: placerPathDelay(T) }, null, ex ? ex.delay : 0);
   }
-  st.target = tuneTarget(st, T.coupled); return st;
+  st.target = tuneTarget(st, T.coupled, ex ? ex.offset : 0); return st;
 }
+/**
+ * The placer's origPathDelay: MEANDER_PLACER's carries m_signalExtraDelay (the chain's other nets, set by Move), a
+ * pair's (DP_MEANDER_PLACER) and the skew placer's do not.
+ */
+export const placerPathDelay = (T: Pick<TunePattern, "lineDelay" | "dp" | "coupled" | "chainEx">) => (T.lineDelay || 0) + (!T.dp && T.coupled == null && T.chainEx ? T.chainEx.delay : 0);
 /** CalculateDelayForShapeLineChain on an IU chain through the pattern's geometry context. */
 export const chainDelayIU = (ld: LDContext, g: { net: string; layer: string }) => (ch: Chain) => delayForChain(ld, ch.map((n) => (n.m ? { p: [n.p[0] / TUNE_IU, n.p[1] / TUNE_IU], m: [n.m[0] / TUNE_IU, n.m[1] / TUNE_IU] } : { p: [n.p[0] / TUNE_IU, n.p[1] / TUNE_IU] })), g);
 export function tuneUpdate(ctx: PcbCtx) {
@@ -234,6 +368,8 @@ export function tuneUpdate(ctx: PcbCtx) {
   }
   if (last && !veq(last.A, last.B)) T.st.initialSide = segSide(last, I(T.cursor)) < 0 ? -1 : 1;   // UpdateSideFromEnd
   const st = moveSettings(T);
+  // m_settings = placer->MeanderSettings(): the net's budget derived from a chain target is the pattern's length target now
+  if (T.coupled == null && !st.isTimeDomain && T.st.signalTarget && T.st.signalTarget.opt !== LENGTH_UNCONSTRAINED) T.st.target = Object.assign({}, st.target);
   const delayOf = st.isTimeDomain && T.ld ? chainDelayIU(T.ld, { net: T.netKey, layer: T.layer }) : null;
   const doc = ctx.doc; const O = routeObstacles(doc, settingsOf(ctx), T.netKey, T.layer);
   const r = T.width / 2;
@@ -246,7 +382,7 @@ export function tuneUpdate(ctx: PcbCtx) {
   }
   const collides = (c: Chain) => pathHits(O, chPoints(c).map((p) => [p[0] / TUNE_IU, p[1] / TUNE_IU]), r).length > 0;
   T.res = meanderMove({ pts: chPoints(ch), ch, origin: I(T.origin), end: I(T.end), cursor: I(T.cursor), st, width: Math.round(T.width * TUNE_IU), clearance: Math.round(T.clearance * TUNE_IU), lineLength: T.lineLength * TUNE_IU,
-    lineDelay: T.lineDelay || 0, delayOf, collides });
+    lineDelay: T.coupled == null ? placerPathDelay(T) : T.lineDelay || 0, delayOf, collides });
   if (T.coupled != null) { T.lastLength = T.res.length / TUNE_IU; T.lastDelay = T.res.delay; }   // the skew placer's m_lastLength / m_lastDelay
   T.st.initialSide = st.initialSide;   // flipInitialSide reaches the pattern's settings (m_settings = placer->MeanderSettings())
 }

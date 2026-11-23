@@ -20,6 +20,7 @@ import { FP } from "./fpedit";
 import { ARC_EDIT_MODE_MENU, evaluate, GRID_ORIGIN, menuFor, type MenuCtx, type MenuDef, type Resolved } from "./ctxmenus";
 import { activeModuleTool, applyPickMode, clearAllSelection, selectedAnywhere, hitsAt, markerUnder, interactionBusy, pcbState, pickAt, schState, selectAt, selectionBox, selectionChanged, selectionIds, selectionItems, selectItemId, stage, startFieldMove, startMove, toolCtx, worldMm, zoomBy } from "./gestures";
 import { E } from "./state";
+import { symbolVariantOverride } from "../canvas/variant-model";
 import { boardTerminalPadState, netChainMenuRows, setTerminalPad, type ChainRow } from "./netchains";
 import { isPastDragThreshold } from "../tools/drag-threshold";
 import { placeCrosshair } from "./crosshair";
@@ -83,6 +84,15 @@ function attributeChecks(items: KItem[]): Record<string, boolean> {
   };
 }
 
+/** SCH_EDIT_TOOL::Init's variantActiveCondition and symbolHasVariantSymbol (one symbol whose variant record on the
+ *  current sheet holds a symbol override). */
+function schVariantState(sch: boolean, items: KItem[]): { variantActive: boolean; hasVariantSymbol: boolean } {
+  const v = sch ? String((E as { currentVariant?: string }).currentVariant || "") : "";
+  if (!v) return { variantActive: false, hasVariantSymbol: false };
+  const path = (E as { currentSheetPathOf?: () => string | null }).currentSheetPathOf?.() || null;
+  const one = items.length === 1 && items[0].kind === "symbol" ? items[0] : null;
+  return { variantActive: true, hasVariantSymbol: !!one && !!symbolVariantOverride(one.node, v, path) };
+}
 function menuCtx(): MenuCtx {
   const s = schState(), p = pcbState(), sch = isSch();
   // PlaceSymbol / TwoClickPlace: the item riding the cursor is the selection (selectionClear, AddItemToSel( item ))
@@ -125,6 +135,7 @@ function menuCtx(): MenuCtx {
     pinAlts: !!(E.selPins.length === 1 && E.kdoc && schPins() && schPins()!.pinAlternates(E.kdoc as KDoc, E.selPins[0])),   // ALT_PIN_FUNCTION_MENU: one pin only
     unitsSelection: sch && !!E.kdoc && !!schPins() && !!schPins()!.sameSymbolMultiUnitSelection && schPins()!.sameSymbolMultiUnitSelection!(E.kdoc as KDoc, items).length > 0,
     pinSwaps: sch && !!prefs().schEditing.unconstrainedPinSwaps,
+    ...schVariantState(sch, items),
     highlight: !!E.highlightIds, belowRoot: !!root && !topLevelSchematics().some((t) => t.doc === (state as { doc?: unknown }).doc),
     hasLocked: items.some((it) => isLocked(it.node)), hasUnlocked: items.some((it) => !isLocked(it.node)),
     groupSelected: sch ? schGroupSelected(items) : boardGroupSelected(), ...boardMenuState(sch), ...(sch ? {} : stitchState()), ...(sch ? {} : multichannelState(items as KItem[])),
@@ -230,7 +241,7 @@ function stitchState(): { stitchExcludable?: boolean; stitchClearable?: boolean 
   try { const s = stitchMenuState(); return { stitchExcludable: s.excludable, stitchClearable: s.clearable }; } catch (e) { return {}; }
 }
 /** The board module's view of the selection for the Grouping and Zone Priority sub-menus (their update() greys entries). */
-function boardMenuState(sch: boolean): Pick<MenuCtx, "grouping" | "zoneCanRaise" | "zoneCanLower"> {
+function boardMenuState(sch: boolean): Pick<MenuCtx, "grouping" | "zoneCanRaise" | "zoneCanLower" | "constrained" | "constraintsAlways"> {
   if (sch || !CollabTools.pcb || !CollabTools.pcb.menuState || !E.kdoc) return {};
   try { return CollabTools.pcb.menuState(toolCtx()); } catch (e) { return {}; }
 }

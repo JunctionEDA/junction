@@ -21,6 +21,8 @@ import { kicadActionAvailable, runKicadAction } from "../hotkeys";
 import { state as appStore } from "../appstore";
 import { lastFallback, serverDrc, toMarker, uuidIndex, reportScale } from "../kicad-check";
 import { toast } from "../util";
+import { libraryParityMarkers } from "./drc-library";
+import { projectDocs } from "../projectfile";
 
 export interface Marker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; kiids?: string[]; descs?: string[]; layer?: string; excluded?: boolean; comment?: string; selected?: boolean; ruleSeverity?: boolean; items?: { x: number; y: number; desc: string; id?: string; uuid?: string }[] }
 interface Settings { severities: Record<string, string>; netclasses: Record<string, { clearance?: number }>; clearance: number; edgeClearance: number; minTrackWidth: number; minThroughDrill: number; boardSetup?: unknown }
@@ -78,6 +80,8 @@ const last: { doc: KDoc | null; markers: Marker[]; ran: boolean; parityRan: bool
 const prefs = { refill: true, parity: false, errors: true, warnings: true, exclusions: false };
 
 /** One DRC run as DIALOG_DRC lists it: the board checks, then schematic parity when asked and the schematic can be read. */
+/** Why the last browser DRC made no library parity tests ("" when it made them). */
+let libraryParitySkipped = "";
 async function collectMarkers(doc: KDoc, parity: boolean, allTrackErrors = false, units = "mm"): Promise<{ markers: Marker[]; parityError: string }> {
   const s = settings();
   // the board's (setup …) decides the solder mask expansion, minimum web width and via tenting the mask checks use
@@ -93,6 +97,11 @@ async function collectMarkers(doc: KDoc, parity: boolean, allTrackErrors = false
       }
     }
   }
+  // DRC_TEST_PROVIDER_LIBRARY_PARITY: the footprints against their libraries
+  const sevOf = (code: string): string => s.severities[code] || (DRC_ITEMS.find((i) => i[1] === code) || ["", "", "warning"])[2];
+  const lp = await libraryParityMarkers(doc, projectDocs() as unknown as { docId: string; path: string }[], sevOf, (a, b, drc) => (PT().footprintDiffLines as (x: SNode, y: SNode, d?: boolean) => string[])(a, b, drc));
+  markers = markers.concat(lp.markers as Marker[]);
+  if (lp.skipped) libraryParitySkipped = lp.skipped;
   markers = markers.map((m) => (m.text.startsWith(drcItemTitle(m.code)) || (m as Marker & { message?: boolean }).message || !DRC_ITEMS.some((i) => i[1] === m.code) ? m : { ...m, text: `${drcItemTitle(m.code)}: ${m.text}` }));
   return { markers, parityError };
 }
@@ -383,7 +392,7 @@ export function openDrc(ctx: ToolCtx): void {
             // the error legend: the report carries positions only, so the path comes from the items' copper here
             if (P.markerPath && markers) for (const m of markers) { if ((m as { path?: unknown }).path) continue; const pth = P.markerPath(doc, m); if (pth) (m as { path?: unknown }).path = pth; } }
         }
-        if (!markers && !cancelled) { markers = (await collectMarkers(doc, prefs.parity, opts.reportAllTrackErrors, currentUnits())).markers; how = ` (checked in the browser: ${lastFallback || "no saved document"})`; if (how) report(`Checked in the browser: ${lastFallback || "no saved document"}`); }
+        if (!markers && !cancelled) { markers = (await collectMarkers(doc, prefs.parity, opts.reportAllTrackErrors, currentUnits())).markers; how = ` (checked in the browser: ${lastFallback || "no saved document"})`; if (how) report(`Checked in the browser: ${lastFallback || "no saved document"}`); if (libraryParitySkipped) { report(`Skipping library parity tests: ${libraryParitySkipped}.`); libraryParitySkipped = ""; } }
       }
     } catch (e) { report(`DRC failed: ${(e as Error).message || e}`); }
     clearInterval(tick); setTimeout(() => { gauge.style.display = "none"; }, 300);

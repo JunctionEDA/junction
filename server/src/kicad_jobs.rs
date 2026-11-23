@@ -14,6 +14,13 @@
 //! * `idf` — File > Export > IDFv3... (DIALOG_EXPORT_IDF3): `{ units: "mm"|"mils", origin: "center"|"grid"|"drill"|"user",
 //!   userOriginX, userOriginY (in the output units), noDnp, noUnspecified, explicitHeight, partNumberField }`;
 //!   a .zip of the board (.emn) and library (.emp) files.
+//! * `3d` — File > Export > STEP/GLB/BREP/XAO/PLY/STL... (DIALOG_EXPORT_STEP, which runs `kicad-cli pcb export <format>`
+//!   itself): `{ format: "step"|"glb"|"xao"|"brep"|"ply"|"stl"|"stpz"|"u3d"|"3dpdf", origin: "drill"|"grid"|"user",
+//!   userOriginX, userOriginY (mm), minDistance (mm), noUnspecified, noDnp, substModels, noOptimizeStep, noBoardBody,
+//!   noComponents, includeTracks, includePads, includeZones, includeInnerCopper, includeSilkscreen,
+//!   includeSoldermask, fuseShapes, cutViasInBody, fillAllVias, variant, netFilter, componentFilter }`; the model file.
+//!   The models the board names under KiCad's 3D library (`${KICADn_3DMODEL_DIR}/…`) are fetched from that library
+//!   (kicadlib.rs) into a folder the job's KICADn_3DMODEL_DIR variables name; the project's own models are its files.
 //! A failed run answers 422 `job_failed` with kicad-cli's own message; no kicad-cli answers 501 `no_kicad_cli`.
 
 use std::path::{Path as FsPath, PathBuf};
@@ -82,6 +89,41 @@ struct JobOpts {
     explicit_height: bool,
     #[serde(default)]
     part_number_field: String,
+    // 3d
+    #[serde(default)]
+    format: String,
+    #[serde(default)]
+    min_distance: f64,
+    #[serde(default)]
+    subst_models: bool,
+    #[serde(default)]
+    no_optimize_step: bool,
+    #[serde(default)]
+    no_board_body: bool,
+    #[serde(default)]
+    no_components: bool,
+    #[serde(default)]
+    include_tracks: bool,
+    #[serde(default)]
+    include_pads: bool,
+    #[serde(default)]
+    include_zones: bool,
+    #[serde(default)]
+    include_inner_copper: bool,
+    #[serde(default)]
+    include_silkscreen: bool,
+    #[serde(default)]
+    include_soldermask: bool,
+    #[serde(default)]
+    fuse_shapes: bool,
+    #[serde(default)]
+    cut_vias_in_body: bool,
+    #[serde(default)]
+    fill_all_vias: bool,
+    #[serde(default)]
+    net_filter: String,
+    #[serde(default)]
+    component_filter: String,
 }
 
 /// What a job writes: one file named `name`, or a folder (zipped as `name`) that kicad-cli is given as `-o`, or
@@ -163,6 +205,51 @@ fn plan(opts: &JobOpts, doc_type: &str, stem: &str) -> AppResult<(Vec<String>, O
             // IDF_EXPORTER writes the library (.emp) beside the board file (.emn)
             Output::Folder(format!("{stem}-idf"), Some(format!("{stem}.emn")))
         }
+        "3d" => {
+            need_board()?;
+            // c_formatCommand: the kicad-cli command and the file extension of each format
+            let (cmd, ext) = match opts.format.as_str() {
+                "" | "step" => ("step", "step"),
+                "glb" => ("glb", "glb"),
+                "xao" => ("xao", "xao"),
+                "brep" => ("brep", "brep"),
+                "ply" => ("ply", "ply"),
+                "stl" => ("stl", "stl"),
+                "stpz" => ("stpz", "stpz"),
+                "u3d" => ("u3d", "u3d"),
+                "3dpdf" => ("3dpdf", "pdf"),
+                _ => return Err(AppError::BadRequest("bad format".into())),
+            };
+            a.extend(["pcb".into(), "export".into(), cmd.into()]);
+            for (on, flag) in [(opts.no_unspecified, "--no-unspecified"), (opts.no_dnp, "--no-dnp"), (opts.subst_models, "--subst-models"),
+                               (opts.no_optimize_step, "--no-optimize-step"), (opts.no_board_body, "--no-board-body"),
+                               (opts.no_components, "--no-components"), (opts.include_tracks, "--include-tracks"),
+                               (opts.include_pads, "--include-pads"), (opts.include_zones, "--include-zones"),
+                               (opts.include_inner_copper, "--include-inner-copper"), (opts.include_silkscreen, "--include-silkscreen"),
+                               (opts.include_soldermask, "--include-soldermask"), (opts.fuse_shapes, "--fuse-shapes"),
+                               (opts.cut_vias_in_body, "--cut-vias-in-body"), (opts.fill_all_vias, "--fill-all-vias")] {
+                if on { a.push(flag.into()); }
+            }
+            let variant = plain(&opts.variant, "variant")?;
+            if !variant.is_empty() { a.extend(["--variant".into(), variant]); }
+            let nets = plain(&opts.net_filter, "net filter")?;
+            if !nets.is_empty() { a.extend(["--net-filter".into(), nets]); }
+            let parts = plain(&opts.component_filter, "component filter")?;
+            if !parts.is_empty() { a.extend(["--component-filter".into(), parts]); }
+            match opts.origin.as_str() {
+                "" | "drill" => a.push("--drill-origin".into()),
+                "grid" => a.push("--grid-origin".into()),
+                "user" => {
+                    if !opts.user_origin_x.is_finite() || !opts.user_origin_y.is_finite() { return Err(AppError::BadRequest("bad origin".into())); }
+                    a.push(format!("--user-origin={:.6}x{:.6}mm", opts.user_origin_x, opts.user_origin_y));
+                }
+                _ => return Err(AppError::BadRequest("bad origin".into())),
+            }
+            let tol = if opts.min_distance > 0.0 && opts.min_distance.is_finite() { opts.min_distance } else { 0.01 };
+            a.push(format!("--min-distance={tol:.3}mm"));
+            a.push("-f".into());
+            Output::File(format!("{stem}.{ext}"))
+        }
         other => return Err(AppError::BadRequest(format!("unknown job '{other}'"))),
     };
     Ok((a, out))
@@ -192,6 +279,11 @@ async fn job(State(state): State<AppState>, viewer: Viewer, Path(id): Path<Uuid>
     entries.extend(crate::projectlibs::rebuild_symbol_libraries(&entries));
     let input = path_in(&entries, &target.path);
     let work = WorkDir(std::env::temp_dir().join(format!("junction-job-{}", Uuid::new_v4())));
+    if opts.job == "3d" {
+        if let Some((_, board)) = entries.iter().find(|(p, _)| *p == target.path) {
+            write_library_models(&state, &work.0.join("models"), &String::from_utf8_lossy(board)).await?;
+        }
+    }
     let (bytes, name) = run(&cli, &work.0, &entries, &input, args, &output, &opts.target).await?;
     match output {
         Output::Report => Ok(Json(json!({ "report": serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null) })).into_response()),
@@ -241,6 +333,11 @@ async fn run(cli: &str, work: &FsPath, entries: &[(String, Vec<u8>)], input: &st
     args.push(input.to_string_lossy().into_owned());
 
     let mut cmd = tokio::process::Command::new(cli);
+    // the 3D library the job's models were fetched into (write_library_models), under every name a board may use
+    let models = work.join("models");
+    if models.is_dir() {
+        for v in MODEL_VARS { cmd.env(v, &models); }
+    }
     cmd.args(args.iter())
         .env("HOME", &home)
         .env("XDG_CONFIG_HOME", home.join(".config"))
@@ -295,6 +392,50 @@ async fn run(cli: &str, work: &FsPath, entries: &[(String, Vec<u8>)], input: &st
             Ok((zipped, format!("{name}.zip")))
         }
     }
+}
+
+/// The variables a board's models name KiCad's 3D library by (ENV_VAR::GetVersionedEnvVarName and the old KISYS3DMOD).
+const MODEL_VARS: [&str; 7] = ["KICAD10_3DMODEL_DIR", "KICAD9_3DMODEL_DIR", "KICAD8_3DMODEL_DIR", "KICAD7_3DMODEL_DIR", "KICAD6_3DMODEL_DIR", "KISYS3DMOD", "KICAD_3DMODEL_DIR"];
+
+/// The models of KiCad's 3D library a board names: `(model "${KICADn_3DMODEL_DIR}/<Lib>.3dshapes/<Name>.<ext>")` as
+/// (library, name, file name under the library folder).  A path elsewhere (the project's own, an absolute one) is
+/// left out: the project's files are written with the job.
+fn library_model_refs(board: &str) -> Vec<(String, String, String)> {
+    let mut out: Vec<(String, String, String)> = Vec::new();
+    for part in board.split("(model ").skip(1) {
+        let p = part.trim_start();
+        let Some(rest) = p.strip_prefix('"') else { continue };
+        let Some(end) = rest.find('"') else { continue };
+        let path = rest[..end].replace('\\', "/");
+        let Some(after) = path.strip_prefix("${").or_else(|| path.strip_prefix("$(")) else { continue };
+        let Some(close) = after.find(['}', ')']) else { continue };
+        let var = &after[..close];
+        if !MODEL_VARS.contains(&var) { continue; }
+        let tail = after[close + 1..].trim_start_matches('/');
+        let Some((dir, file)) = tail.split_once('/') else { continue };
+        let Some(lib) = dir.strip_suffix(".3dshapes") else { continue };
+        if file.contains('/') { continue; }
+        let stem = file.rsplit_once('.').map(|(s, _)| s).unwrap_or(file);
+        let item = (lib.to_string(), stem.to_string(), file.to_string());
+        if !out.contains(&item) { out.push(item); }
+    }
+    out
+}
+
+/// Fetch the library models `board` names into `dir` (`<Lib>.3dshapes/<file>`): a STEP name gets the model itself;
+/// a VRML one gets the STEP model beside it under the same name, which "Substitute similarly named models" picks up
+/// (STEP_PCB_MODEL's alternatives) as the desktop does with the library installed.
+async fn write_library_models(state: &AppState, dir: &FsPath, board: &str) -> AppResult<()> {
+    for (lib, name, file) in library_model_refs(board).into_iter().take(2000) {
+        let Some(bytes) = crate::kicadlib::library_model(state, &lib, &name).await else { continue };
+        let folder = dir.join(format!("{lib}.3dshapes"));
+        tokio::fs::create_dir_all(&folder).await.map_err(|e| anyhow::anyhow!("models folder: {e}"))?;
+        let lower = file.to_ascii_lowercase();
+        let target = if lower.ends_with(".step") || lower.ends_with(".stp") { file.clone() } else { format!("{name}.step") };
+        if target.contains("..") || target.contains('/') { continue; }
+        tokio::fs::write(folder.join(&target), &bytes).await.map_err(|e| anyhow::anyhow!("write model: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Every file under `dir`, as `/`-separated paths relative to it, sorted.
@@ -380,7 +521,29 @@ mod tests {
         assert!(plan(&opts(json!({ "job": "specctra" })), "kicad_sch", "t").is_err());
         assert!(plan(&opts(json!({ "job": "downgrade", "target": "--libraries=/etc" })), "kicad_pcb", "b").is_err());
         assert!(plan(&opts(json!({ "job": "idf", "origin": "moon" })), "kicad_pcb", "b").is_err());
+        // DIALOG_EXPORT_STEP's command line
+        let (a, o) = plan(&opts(json!({ "job": "3d", "format": "glb", "noDnp": true, "substModels": true, "includeTracks": true, "fuseShapes": true,
+            "origin": "user", "userOriginX": 100.5, "userOriginY": -20, "minDistance": 0.001, "netFilter": "GND*", "componentFilter": "R1,U*" })), "kicad_pcb", "b").unwrap();
+        assert_eq!(a, ["pcb", "export", "glb", "--no-dnp", "--subst-models", "--include-tracks", "--fuse-shapes", "--net-filter", "GND*",
+            "--component-filter", "R1,U*", "--user-origin=100.500000x-20.000000mm", "--min-distance=0.001mm", "-f"]);
+        assert_eq!(o, Output::File("b.glb".into()));
+        let (a, o) = plan(&opts(json!({ "job": "3d", "format": "3dpdf" })), "kicad_pcb", "b").unwrap();
+        assert_eq!(a, ["pcb", "export", "3dpdf", "--drill-origin", "--min-distance=0.010mm", "-f"]);
+        assert_eq!(o, Output::File("b.pdf".into()));
+        assert!(plan(&opts(json!({ "job": "3d", "format": "obj" })), "kicad_pcb", "b").is_err());
+        assert!(plan(&opts(json!({ "job": "3d", "netFilter": "--x" })), "kicad_pcb", "b").is_err());
         assert!(plan(&opts(json!({ "job": "rm" })), "kicad_pcb", "b").is_err());
+    }
+
+    #[test]
+    fn the_library_models_a_board_names() {
+        let b = r#"(kicad_pcb (footprint "R" (model "${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0603_1608Metric.wrl" (offset (xyz 0 0 0)))
+            (model "${KIPRJMOD}/my.step") (model "$(KISYS3DMOD)/Package_SO.3dshapes/SOIC-8.stp") (model "/abs/x.step")
+            (model "${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0603_1608Metric.wrl")))"#;
+        assert_eq!(library_model_refs(b), [
+            ("Resistor_SMD".to_string(), "R_0603_1608Metric".to_string(), "R_0603_1608Metric.wrl".to_string()),
+            ("Package_SO".to_string(), "SOIC-8".to_string(), "SOIC-8.stp".to_string()),
+        ]);
     }
 
     #[test]

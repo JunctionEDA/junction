@@ -36,6 +36,7 @@ import { statAreas } from "./stats";
 import { meshVrml, vrmlModels, writeVrml, type VrmlOptions } from "./vrml";
 import { type OdbResult, legalEntityName, writeOdb } from "./odb";
 import { cmpFile, d356, footprintReport, legacyBom } from "./reports";
+import { writeHyperlynx } from "./hyperlynx";
 import { type Ipc2581Options, type Ipc2581Result, MODES as IPC_MODES, SECTION_KEYS as IPC_SECTION_KEYS, optionalSections as ipcOptionalSections, recommendedSections as ipcRecommendedSections, requiredSections as ipcRequiredSections, resolveSections as ipcResolveSections, writeIpc2581 } from "./ipc2581";
 export const VERSION_SUFFIX = "-web";
 
@@ -289,6 +290,8 @@ export const reports = {
   legacyBom: (ctx: FabContext): string | null => legacyBom(modelOf(ctx)),
   footprintReport: (ctx: FabContext, mm: boolean, bbox: [number, number]): string => footprintReport(modelOf(ctx), { mm, date: ctx.date || new Date(), version: kicadVersion(ctx.doc), bbox }),
   d356: (ctx: FabContext, skipUnconnected: boolean): string => { const m = modelOf(ctx); return d356(m, { job: projectNameOf(ctx), auxOrigin: m.settings.auxOrigin, skipUnconnected }); },
+  /** File > Export > Hyperlynx (ExportBoardToHyperlynxFile) */
+  hyperlynx: (ctx: FabContext, fileName: string) => writeHyperlynx(modelOf(ctx), setupOf(ctx), { fileName, layerName: (l) => layerDisplayName(ctx.doc, l) }),
 };
 
 export const api = { statAreas: (ctx: FabContext, o: Parameters<typeof statAreas>[1]) => ({ ...statAreas(modelOf(ctx), o), stackupThickness: boardStackupThickness(ctx) }), odb, ipc2581, ipc2581Sections, reports, outlineText, vrmlModels: (ctx: FabContext) => vrmlModels(modelOf(ctx)), writeVrml: (ctx: FabContext, o: VrmlOptions, meshOf: Parameters<typeof writeVrml>[2]) => writeVrml(modelOf(ctx), o, meshOf), meshVrml, plotBoard, pluginPlot, drillJob, drillReport, markerParts, pnpGerber, pnpFileName, DEFAULT_VARIANT, variantNames: (variants: Node | null | undefined): string[] => boardVariantNames(variants || null, refCompare), writeSvg, writePdf, writePs, writeDxf, dxfTextString, writePng, paintPage, gerberJobFile, boardPage, plotFileName, outputPath, fillZones, filledZoneNode, storedFill, polyArea, PRESETS, presetById, plottableLayers, layerDisplayName, layerAttrs, protelExtension, model: modelOf, plotGerbers, drillFiles: drill, positions, bom: billOfMaterials, placementCsv, placementAscii, bomCsv,

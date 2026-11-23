@@ -14,7 +14,7 @@ import { NL } from "../editor/pcbdialogs/canvas";
 import { reportPanel, type ReportLine } from "../editor/pcbdialogs/ui";
 import { backAnnotate, fpData, libUnitPins, orientLabel, swapLibPins, type BaOptions, type DriverRef, type FpData, type PinConn, type SymRef, type SymUnit } from "./update-from-pcb-logic";
 import { prefs } from "./prefs";
-import { labelDefaults } from "../editor/schnets";
+import { labelDefaults, suffixRefEditing } from "../editor/schnets";
 import type { NetComponent, NetEntry, SheetFile, SheetInstance } from "../canvas/pcb-netlist";
 
 type N = SNode;
@@ -32,6 +32,8 @@ interface Loaded {
   where: Map<string, { file: string; id: string; instPath: string }>;
   files: Map<string, SheetFile>; netMap: Map<string, NetEntry> | undefined; instFiles: string[];
   board: { docId: string; doc: KDoc } | null;
+  /** the reference suffixes of the hierarchy (reused_sheet_suffixes), null while they cannot be read */
+  suffixes: NonNullable<ReturnType<typeof suffixRefEditing>> | null;
 }
 async function load(): Promise<Loaded | { error: string }> {
   const res = await projectNetlist();
@@ -69,6 +71,7 @@ async function load(): Promise<Loaded | { error: string }> {
   // SCH_SHEET_LIST::GetSymbols( SYMBOL_FILTER_NON_POWER ): every placed unit on every sheet instance, those excluded
   // from the board included
   const syms: SymRef[] = [];
+  const sx = suffixRefEditing(), rsOf = sx && sx.sc.mode ? sx.sc.rs as typeof sx.sc.rs & { split?: Set<string> } : null;
   for (const inst of insts) {
     const f = res.files.get(inst.file); if (!f) continue;
     const instPath = "/" + inst.uuidPath.join("/");
@@ -91,6 +94,7 @@ async function load(): Promise<Loaded | { error: string }> {
       const info = lib ? libUnitPins(lib) : { unitPins: new Map<number, string[]>(), pinTypes: new Map<string, string>(), hiddenPins: new Set<string>() };
       const self: SymUnit = { key, unit: ir.unit, ...info, shared: paths.size > 1, sharedSheets, sharedProjects: [...others].sort() };
       syms.push({ key, keys: [key], ref: ir.ref, power: false, multi: info.unitPins.size > 1, sheetPath: inst.uuidPath.slice(), uuid: sv(u[1]),
+        ...(rsOf ? { refSuffix: rsOf.packageSuffix(it.id, instPath), splitCopies: !!(rsOf.split && rsOf.split.has(it.id)) } : {}),
         value: prop("Value"), footprint: prop("Footprint"), dnp: flag("dnp", false), inBom: flag("in_bom", true), inPos: flag("in_pos_files", true), onBoard: flag("on_board", true), exSim: flag("exclude_from_sim", false),
         fields, pins, self, pinNumbers: lib ? new Set(info.pinTypes.keys()) : undefined, pinDrivers: pinConns.get(key) || new Map() });
     }
@@ -113,7 +117,7 @@ async function load(): Promise<Loaded | { error: string }> {
     const at = K().kid(it.node, "at") as N | null, mi = K().kid(it.node, "mirror") as N | null;
     return orientLabel(pinAngle, at ? Number(sv(at[3])) || 0 : 0, mi ? sv(mi[1]) : "");
   };
-  return { syms, fps, spinOf, where, files: res.files, netMap: res.netlist.netMap, instFiles: insts.map((i) => i.file), board: { docId: pcb.docId, doc: bdoc } };
+  return { syms, fps, spinOf, where, files: res.files, netMap: res.netlist.netMap, instFiles: insts.map((i) => i.file), board: { docId: pcb.docId, doc: bdoc }, suffixes: sx };
 }
 
 const setProp = (node: N, name: string, val: string): void => { const p = (K().kids(node, "property") as N[]).find((x) => sv(x[1]) === name); if (p) p[2] = val; };
@@ -131,7 +135,7 @@ export function openUpdateFromPcb(): void {
   const refresh = async (): Promise<void> => {
     if (!report) return;
     if (!data) { const d = await load(); if ("error" in d) { report.set([{ severity: "error", text: d.error }]); return; } data = d; }
-    const r = backAnnotate(data.syms, data.fps, { ...o, allowPinSwaps: !!prefs().schEditing.unconstrainedPinSwaps, annotated: await relinkReady(), spinOf: data.spinOf });
+    const r = backAnnotate(data.syms, data.fps, { ...o, allowPinSwaps: !!prefs().schEditing.unconstrainedPinSwaps, annotated: await relinkReady(), spinOf: data.spinOf, shareBases: !!(data.suffixes && data.suffixes.sc.mode) });
     report.set(r.lines.slice() as ReportLine[]);
     // updateData: OK is enabled whenever BackAnnotateSymbols ran
     const ok = document.getElementById("kd-ufp-update") as HTMLButtonElement | null;
@@ -145,7 +149,7 @@ export function openUpdateFromPcb(): void {
   };
   const run = async (): Promise<void> => {
     if (!data || E.viewOnly) return;
-    const r = backAnnotate(data.syms, data.fps, { ...o, allowPinSwaps: !!prefs().schEditing.unconstrainedPinSwaps, annotated: await relinkReady(), spinOf: data.spinOf });
+    const r = backAnnotate(data.syms, data.fps, { ...o, allowPinSwaps: !!prefs().schEditing.unconstrainedPinSwaps, annotated: await relinkReady(), spinOf: data.spinOf, shareBases: !!(data.suffixes && data.suffixes.sc.mode) });
     const per = new Map<string, { changes: KChange[]; inverse: KChange[] }>();
     const editItem = (file: string, id: string, fn: (n: N) => void): void => {
       const f = data!.files.get(file); if (!f) return;
@@ -166,6 +170,9 @@ export function openUpdateFromPcb(): void {
             setProp(n, "Reference", e.ref);
             const inst = K().kid(n, "instances") as N | null;
             if (inst) for (const pr of K().kids(inst, "project") as N[]) for (const p of K().kids(pr, "path") as N[]) if (sv(p[1]) === w.instPath) { const rf = K().kid(p, "reference") as N | null; if (rf) rf[1] = e.ref; }
+            // SetUserRef( m_base ): the base the board reference strips to, shared by the symbol's other paths
+            const sx = data!.suffixes, sheet = sx && e.refBase !== undefined ? (sx.sc as unknown as { sheets: { path: string | null }[] }).sheets.find((x) => x.path === w.instPath) : null;
+            if (sx && sheet) sx.S.setUserRef(sx.sc, sheet, n, e.refBase!);
           }
           if (e.footprint !== undefined) setProp(n, "Footprint", e.footprint);
           if (e.value !== undefined) setProp(n, "Value", e.value);

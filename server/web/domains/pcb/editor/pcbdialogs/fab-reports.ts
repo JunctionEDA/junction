@@ -22,6 +22,14 @@ export async function exportCmpFile(ctx: ToolCtx): Promise<void> {
   const p = await prepared(ctx, "A footprint association file"); if (!p) return;
   saveBlob(p.fab.reports.cmp(p.fctx), `${p.board}.cmp`);
 }
+/** BOARD_EDITOR_CONTROL::ExportHyperlynx: "<board>.hyp" (ExportBoardToHyperlynxFile); a malformed outline is wxLogError's message */
+export async function exportHyperlynx(ctx: ToolCtx): Promise<void> {
+  const p = await prepared(ctx, "A Hyperlynx file"); if (!p) return;
+  const fileName = (p.fctx.doc as { fileName?: string }).fileName || `${p.board}.kicad_pcb`;
+  const r = p.fab.reports.hyperlynx(p.fctx, fileName);
+  saveBlob(r.text, `${p.board}.hyp`);
+  if (r.errors.length) messageBox("Error", r.errors.join("\n"));
+}
 /** GenBOMFileFromBoard */
 export async function generateBomLegacy(ctx: ToolCtx): Promise<void> {
   const p = await prepared(ctx, "A bill of materials"); if (!p) return;

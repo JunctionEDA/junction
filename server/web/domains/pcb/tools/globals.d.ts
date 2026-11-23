@@ -58,7 +58,11 @@ interface ToolsRoot {
     /** the editor's own footprint drag (a group drag carries every footprint) */
     drag?: { moved?: boolean; group?: { fp: { id: string } }[] | null; fp?: { id: string } | null } | null;
     /** editor/crossprobe.ts: a net highlighted (or cleared, no names) by the user goes to the other editor */
-    hooks?: { netHighlighted?(names: string[]): void };
+    hooks?: { netHighlighted?(names: string[]): void; showPane?(name: string, show?: boolean): void };
+    /** editor/hotkeys.ts: run one KiCad action by id, as its menu entry does (ACTIONS::zoomFitSelection …). */
+    hotkeys?: { runKicadAction?(id: string): boolean };
+    /** canvas RenderOpts: the board renderer's settings (the constraint shadow sets go here). */
+    renderOpts?: Record<string, unknown>;
   };
   /** web/domains/pcb/editor: the chrome's store (the board tools read the view and whether a context menu is up). */
   CollabApp?: { getState(): { view?: string; contextMenu?: unknown } };

@@ -2,6 +2,7 @@
 import type { Arc3, DrawState, PcbCtx, Pt } from "./types";
 import { auxItemsColor, dimensionLabel, textNextToCursor } from "./assistants";
 import { addedChange } from "./changes";
+import { commitDrawn } from "./constraint-tool";
 import { angleSnapMode, withStroke } from "./draw-modes";
 import { applySelection } from "./groups";
 import { arcNode } from "./nodes";
@@ -75,7 +76,7 @@ export function commitArc(ctx: PcbCtx, d: DrawState) {
   const sh = d.arc!.shape(); S.draw = null;
   if (!sh) return;
   const node = withStroke(arcNode(fromNm(sh.start), fromNm(sh.mid), fromNm(sh.end), S.gfxLayer));
-  const add = addedChange(ctx.doc, node); ctx.commit([add], "Draw Arc");
+  const add = addedChange(ctx.doc, node); commitDrawn(ctx, add, "Draw Arc", "shape");
   if (add.id) applySelection(ctx, [add.id]);   // the committed arc is selected (ACTIONS::selectItem)
   // the tool goes on with the next arc; in the tangent mode it leaves from the end of this one
   const committed = { t: "arc" as const, start: sh.start, mid: sh.mid, end: sh.end, center: [sh.center[0], sh.center[1]] };
@@ -98,7 +99,7 @@ export function arcBackup(ctx: PcbCtx) {
 /** finishInteractive (Enter): the arc drawn so far is kept and the tool ends (SHAPE_DRAW_RESULT::FINISHED). */
 export function finishArc(ctx: PcbCtx, editing: () => boolean) {
   const d = S.draw!, sh = d.started ? d.arc!.shape() : null; S.draw = null;
-  if (sh && editing()) { const add = addedChange(ctx.doc, withStroke(arcNode(fromNm(sh.start), fromNm(sh.mid), fromNm(sh.end), S.gfxLayer))); ctx.commit([add], "Draw Arc"); if (add.id) applySelection(ctx, [add.id]); }
+  if (sh && editing()) { const add = addedChange(ctx.doc, withStroke(arcNode(fromNm(sh.start), fromNm(sh.mid), fromNm(sh.end), S.gfxLayer))); commitDrawn(ctx, add, "Draw Arc", "shape"); if (add.id) applySelection(ctx, [add.id]); }
   ctx.setTool("select"); ctx.requestRender();
 }
 /** EDA_ANGLE( VECTOR2D ) in radians: the cardinal and diagonal directions exact, atan2 otherwise. */

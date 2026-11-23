@@ -1,7 +1,8 @@
 import type { SchCtx, Pt } from "./types";
 import { GENERATOR_VERSION, SEXPR_SCHEMATIC_FILE_VERSION } from "../../canvas/format-version";
 import { root } from "../root";
-import { newSymbolMinRef } from "./annotate";
+import { annotateHierarchy, newSymbolMinRef, setInstanceOn, suffixCtxOf, type SuffixCtx } from "./annotate";
+import { REF_SUFFIX_FIELD, composeRefSuffix, nextRefSuffix, sheetRefSuffix, storedRef } from "../../canvas/ref-suffix";
 import { PASTE_KINDS, clipRead, clipWrite, cursorOf, editable, selectedItems, setSelectionIds, snapCursor } from "./commands";
 import { breakLinesAt, junctionAt, needsJunction } from "./connect";
 import { LABEL_KINDS, beginDrag, connPoints, isNetLine } from "./drag";
@@ -16,7 +17,8 @@ import { switchTool } from "./junction";
 import { isLockedItem } from "./lock";
 import { itemPosition } from "./transforms";
 import { symbolIsPower } from "./autoplace";
-import { addNode, deep, dropKid, ghost, r4, ruleAreaId } from "./util";
+import { addNode, deep, dropKid, ghost, itemSexpr, r4, ruleAreaId } from "./util";
+import { instanceOn, pastedSheetInstanceChanges, setInstanceReference, type OtherDoc, type PastedSheet } from "./sheet-instances";
 
 // ---------------------------------------------------------------- copy / cut / paste / duplicate
 // What the desktop puts on the clipboard (SCH_IO_KICAD_SEXPR::Format for a selection): the library
@@ -65,7 +67,7 @@ export function uniqueGroupName(doc: KDoc, base: string) {
 }
 /** Clipboard content: the items and the library symbols they draw from. */
 export interface Clip { nodes: SNode[]; libs: SNode[] }
-export function clipboardText(doc: KDoc, items: KItem[], opts?: { wrap?: boolean }) {
+export function clipboardText(doc: KDoc, items: KItem[], opts?: { wrap?: boolean; suffixes?: SuffixCtx | null }) {
   // doCopy: a selected group brings all its members along (RunOnChildren, RECURSE)
   const all: KItem[] = [], seen = new Set<string>();
   const take = (it: KItem) => { if (seen.has(it.id)) return; seen.add(it.id); all.push(it); if (it.kind === "group") for (const id of groupMembers(it.node)) { const m = doc.items.get(id); if (m) take(m); } };
@@ -82,7 +84,13 @@ export function clipboardText(doc: KDoc, items: KItem[], opts?: { wrap?: boolean
     if (it.kind === "rule_area" && kid(node, "uuid")) { node = deep(node); dropKid(node, "uuid"); }
     if (it.kind === "symbol" && here && kid(node, "instances")) {
       node = deep(node);
-      for (const inst of kids(node, "instances")) for (const pr of kids(inst, "project")) for (const pa of kids(pr, "path")) { const q = str(pa[1]); if (q === here) pa[1] = "/"; else if (q.startsWith(here + "/")) pa[1] = q.slice(here.length); }
+      // the clipboard holds what KiCad keeps in memory: the bases, without the sheet paths' suffixes (aForClipboard)
+      const rs = opts && opts.suffixes ? opts.suffixes.rs : null;
+      for (const inst of kids(node, "instances")) for (const pr of kids(inst, "project")) for (const pa of kids(pr, "path")) {
+        const q = str(pa[1]), b = rs ? rs.base(it.id, q) : null, r = kid(pa, "reference");
+        if (b !== null && b !== "" && r) { r[1] = b; if (q === here) { const f = refField(node); if (f) f[2] = b; } }
+        if (q === here) pa[1] = "/"; else if (q.startsWith(here + "/")) pa[1] = q.slice(here.length);
+      }
     }
     let s = K.serialize(node); if (it.kind === "sheet") s = s.replace(/\(page (\d+)\)/g, '(page "$1")');
     parts.push(s);
@@ -199,7 +207,10 @@ const unitOf = (node: SNode): number => { const u = kid(node, "unit"); return u 
  * Y order), and with the "sheet number x 100 / x 1000" methods the numbers start at sheet x step + 1 whatever the
  * symbol's own number (aStartAtCurrent is switched off).
  */
-export function annotatePastedUnique(doc: KDoc, nodes: SNode[], cfg?: Partial<AnnotateCfg> & { reannotate?: boolean }): void {
+export function annotatePastedUnique(doc: KDoc, nodes: SNode[], cfg?: Partial<AnnotateCfg> & { reannotate?: boolean }, more?: { held?: { ref: string; lib: string; value: string; unit: number }[]; libDoc?: KDoc }): void {
+  // more.held: references annotated earlier in the same paste (existingRefs.AddItem between the sheet paths); more.libDoc:
+  // the sheet whose library symbols the nodes use (a pasted sheet's file)
+  const lk = (more && more.libDoc) || doc;
   interface Holder { lib: string; value: string; unit: number }
   // prefix and number -> who holds it: "#PWR01" and "#PWR1" are one reference (SCH_REFERENCE::Split's m_numRef)
   const held = new Map<string, Holder[]>();
@@ -209,6 +220,7 @@ export function annotatePastedUnique(doc: KDoc, nodes: SNode[], cfg?: Partial<An
   const known = new Set<string>();
   for (const u of S.otherUnits || []) { known.add(u.ref); hold(u.ref, { lib: u.lib, value: u.value, unit: u.unit }); }
   for (const r of S.otherRefs || []) if (!known.has(r)) hold(r, { lib: "", value: "", unit: -1 });
+  for (const h of (more && more.held) || []) if (h.ref && !/\?$/.test(h.ref)) hold(h.ref, { lib: h.lib, value: h.value, unit: h.unit });
   for (const it of doc.items.values()) {
     if (it.kind !== "symbol") continue;
     const p = refField(it.node); const ref = p ? str(p[2]) : ""; if (!ref || /\?$/.test(ref)) continue;
@@ -218,7 +230,7 @@ export function annotatePastedUnique(doc: KDoc, nodes: SNode[], cfg?: Partial<An
   // without explicit settings: the project's, as the editor keeps them in S.annotation
   const c: Partial<AnnotateCfg> & { reannotate?: boolean } = cfg || (S.annotation ? { method: S.annotation.method, sortY: S.annotation.sortY, startNum: S.annotation.startNum, sheetNumber: pageOf(doc) } : {}), step = c.method === 1 ? 100 : c.method === 2 ? 1000 : 0, startAtCurrent = !c.reannotate && !step;
   const base = step ? (c.sheetNumber || 1) * step + 1 : (c.reannotate ? c.startNum || 0 : 0) + 1;
-  const syms = nodes.filter((n) => n[0] === "symbol" && refField(n)).map((n) => { const at = kid(n, "at"); return { n, ref: str(refField(n)![2]), prefix: refPrefix(str(refField(n)![2])), x: at ? num(at[1]) : 0, y: at ? num(at[2]) : 0, uuid: uuidOf(n) || "", lib: str((kid(n, "lib_id") || [])[1]), value: valueOf(n), unit: unitOf(n), multi: unitCountOf(doc, n) > 1 }; });
+  const syms = nodes.filter((n) => n[0] === "symbol" && refField(n)).map((n) => { const at = kid(n, "at"); return { n, ref: str(refField(n)![2]), prefix: refPrefix(str(refField(n)![2])), x: at ? num(at[1]) : 0, y: at ? num(at[2]) : 0, uuid: uuidOf(n) || "", lib: str((kid(n, "lib_id") || [])[1]), value: valueOf(n), unit: unitOf(n), multi: unitCountOf(lk, n) > 1 }; });
   syms.sort((a, b) => (a.prefix < b.prefix ? -1 : a.prefix > b.prefix ? 1 : 0) || (c.sortY ? a.y - b.y || a.x - b.x : a.x - b.x || a.y - b.y) || (a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0));
   const done = new Set<typeof syms[number]>();
   let group: string | null = null, minRef = base;
@@ -242,7 +254,7 @@ export function annotatePastedUnique(doc: KDoc, nodes: SNode[], cfg?: Partial<An
     let n = Math.max(1, minRef);
     while (!fits(n)) n++;
     if (tracker && !held.has(prefix + "\u0000" + n)) tracker.used.add(prefix + n);
-    const text = prefix + (isPowerLib(doc, s.n) ? "0" + n : n);
+    const text = prefix + (isPowerLib(lk, s.n) ? "0" + n : n);
     for (const o of pkg) { done.add(o); setReference(o.n, text); hold(text, { lib: o.lib, value: o.value, unit: o.unit }); }
   }
 }
@@ -267,7 +279,7 @@ export function junctionsForNew(doc: KDoc, items: KItem[]) {
 const CONNECTABLE = new Set(["symbol", "wire", "bus", "junction", "no_connect", "bus_entry", "label", "global_label", "hierarchical_label", "netclass_flag", "directive_label", "sheet"]);
 const sheetField = (node: SNode, which: "name" | "file"): SNode | null => kids(node, "property").find((q) => (which === "name" ? /^Sheet ?name$/i : /^Sheet ?file$/i).test(str(q[1]))) || null;
 /** The sheet hierarchy the editor knows (ctx.sheetHierarchy): the sheet paths as file names from the root down, and the sheets read so far. */
-interface SheetHierarchy { paths: string[][]; docs: Map<string, KDoc> }
+interface SheetHierarchy { paths: string[][]; docs: Map<string, KDoc>; instances?: { file: string; path: string }[] }
 function hierarchyOf(ctx: SchCtx | null | undefined): SheetHierarchy | null {
   const f = ctx && (ctx as unknown as { sheetHierarchy?: () => SheetHierarchy | null }).sheetHierarchy;
   try { return typeof f === "function" ? f() : null; } catch (e) { return null; }
@@ -325,6 +337,73 @@ function graphicPoints(kind: string, node: SNode): Pt[] {
   if (kind === "bezier") { const q = ptsOf(node); return q.length ? [q[0], q[q.length - 1]] : []; }
   return [itemPosition(kind, node)];
 }
+/** The suffixes in use when a paste starts: each sheet's own suffix text and resolved suffix, and every composed one. */
+interface PasteSuffixes { existing: Set<string>; composed: Set<string> }
+function pastedSuffixState(sc: SuffixCtx, _doc: KDoc): PasteSuffixes {
+  const existing = new Set<string>(), composed = new Set<string>();
+  for (const p of sc.sheets) {
+    composed.add(sc.rs.suffix(p.path || ""));
+    const chain = p.sheets || [], last = chain.length ? chain[chain.length - 1] : null;
+    const f = last ? kids(last, "property").find((q) => str(q[1]) === REF_SUFFIX_FIELD) : null;
+    if (f && last) { existing.add(str(f[2])); existing.add(sheetRefSuffix(last, chain.slice(0, -1))); }
+  }
+  return { existing, composed };
+}
+/**
+ * SCH_EDITOR_CONTROL::Paste for a sheet with a Reference Suffix field: with increment_pasted_suffix a suffix in use —
+ * the sheet's own on any path of the screen, or one the sheet or a sheet below it composes — continues its series
+ * (SCH_SHEET::NextRefSuffix); what it then holds and composes is in use for the next pasted sheet.
+ */
+function pasteSheetSuffix(ctx: SchCtx, sc: SuffixCtx, st: PasteSuffixes, sheet: SNode): void {
+  const field = kids(sheet, "property").find((q) => str(q[1]) === REF_SUFFIX_FIELD); if (!field) return;
+  const screenPaths = sc.sheets.filter((x) => x.doc === ctx.doc && !!x.path);
+  // SCH_SHEET_LIST( sheet ): the pasted sheet, then the sheets below it as the hierarchy knows its file
+  const subtree: SNode[][] = [], seen = new Set<string>();
+  const walk = (chain: SNode[], node: SNode, from?: string): void => {
+    const here = chain.concat([node]); subtree.push(here); if (here.length > 32) return;
+    const ff = kids(node, "property").find((q) => str(q[1]) === "Sheetfile" || str(q[1]) === "Sheet file"); if (!ff) return;
+    const file = sheetFilePath(ctx, str(ff[2]), from); if (seen.has(file)) return; seen.add(file);
+    const sd = sc.sheets.find((x) => x.file === file); if (!sd) return;
+    for (const it of sd.doc.items.values()) if (it.kind === "sheet") walk(here, it.node, file);
+    seen.delete(file);
+  };
+  walk([], sheet);
+  const composedBelowPaste = (): string[] => { const out: string[] = []; for (const p of screenPaths) for (const sub of subtree) out.push(composeRefSuffix((p.sheets || []).concat(sub))); return out; };
+  const resolvesTaken = (candidate: string): boolean => {
+    field[2] = candidate;
+    for (const p of screenPaths) if (st.existing.has(sheetRefSuffix(sheet, p.sheets || []))) return true;
+    for (const c of composedBelowPaste()) if (st.composed.has(c)) return true;
+    return false;
+  };
+  let pasted = str(field[2]);
+  if (sc.increment) pasted = nextRefSuffix(pasted, st.existing, resolvesTaken);
+  field[2] = pasted;
+  st.existing.add(pasted);
+  for (const p of screenPaths) st.existing.add(sheetRefSuffix(sheet, p.sheets || []));
+  for (const c of composedBelowPaste()) st.composed.add(c);
+}
+/**
+ * Paste's AnnotateSymbols( ANNOTATE_SELECTION, keep ) over the pasted symbols with suffix numbering on: the bases the
+ * reused sheet's paths share and no composed reference duplicated; the pasted items' additions take the result.
+ */
+function sharePastedBases(ctx: SchCtx, doc: KDoc, items: KItem[], changes: KChange[]): void {
+  const raw = (ctx as unknown as { suffixSheets?: () => unknown }).suffixSheets;
+  const fresh = typeof raw === "function" ? raw() as { sheets: AnnSheetLike[]; mode: boolean } | null : null; if (!fresh) return;
+  const here = fresh.sheets.find((x) => x.doc === doc && x.shown) || fresh.sheets.find((x) => x.doc === doc); if (!here) return;
+  const only = new Set(items.filter((it) => it.kind === "symbol").map((it) => it.id)); if (!only.size) return;
+  const cfg = annotationSettings(ctx, doc);
+  const r = annotateHierarchy(fresh.sheets, { all: false, sheets: [{ sheet: here, only }] },
+    { order: cfg.sortY ? "y" : "x", keep: true, start: cfg.startNum, sheetInterval: cfg.method === 1 ? 100 : cfg.method === 2 ? 1000 : 0, tracker: S.refTracker || null, suffixMode: true });
+  if (r.fatal) return;
+  for (const c of r.changes.get(doc) || []) {
+    const i = changes.findIndex((x) => x.id === c.id && x.kind === "ADDED");
+    K.applyChange(doc, c, ctx.IU || 1e4);
+    const it = doc.items.get(c.id as string);
+    if (i >= 0 && it) changes[i] = Object.assign({}, changes[i], { sexpr: itemSexpr(doc, it.kind, it.node) });
+    else changes.push(c);
+  }
+}
+type AnnSheetLike = Parameters<typeof annotateHierarchy>[0][number];
 /**
  * SCH_EDITOR_CONTROL::Paste on parsed clipboard content: fresh copies of the items, added to the document and landed
  * so that the paste's reference point is at `at` (mm).  The reference point is the position of SCH_SELECTION::
@@ -350,12 +429,17 @@ export function pasteChanges(doc: KDoc, parsed: Clip, at: Pt, opts?: PasteOpts |
   // PASTE_MODE: "keep", "remove" (the default with automatic annotation off), "unique" (the default with it on);
   // "reset" is Import Sheet's own re-annotation
   const mode = (o.pasteMode || (o.keepAnnotations ? "keep" : null)) || (S.annotateAuto ? "unique" : "remove");
-  const existing = usedReferences(doc), cfg = o.annotate || annotationSettings(ctx, doc);
+  const cfg = o.annotate || annotationSettings(ctx, doc);
+  // reused-sheet suffixes: references compare by base (SCH_REFERENCE::GetRef), and the pasted ones are bases
+  const sc = ctx ? suffixCtxOf(ctx) : null, suffixed = !!sc && sc.mode, screenPaths = sc ? sc.sheets.filter((x) => x.doc === doc && !!x.path) : [];
+  const existing = usedReferences(doc);
+  if (sc && suffixed) { existing.clear(); for (const p of sc.sheets) for (const it of p.doc.items.values()) if (it.kind === "symbol") { const b = sc.rs.base(it.id, p.path || ""); if (b) existing.add(b); } }
+  const pasteSuffixes = sc ? pastedSuffixState(sc, doc) : null;
   let forceKeep = mode !== "remove";
   const here = sheetPathHere(doc), project = ctx ? (sheetInstance(ctx, doc, 1) || [])[1] as SNode | undefined : undefined, projectName = here.project || (project ? str(project[1]) : "");
   const sheetNames = new Set<string>(); for (const it of doc.items.values()) if (it.kind === "sheet") sheetNames.add(nameOf(it.node));
   const pages = usedPages(ctx, doc), groupNames = new Set<string>(); for (const it of doc.items.values()) if (it.kind === "group") groupNames.add(str(it.node[1]));
-  const idMap = new Map<string, string>(), fresh: SNode[] = [], candidates: SNode[] = [];
+  const idMap = new Map<string, string>(), fresh: SNode[] = [], candidates: SNode[] = [], pastedSheets: PastedSheet[] = [];
   for (const n of src) {
     const kind = n[0] as string;
     if (kind === "group") { const g = deep(n), id = K.newUuid(); idMap.set(uuidOf(n) || "", id); const u = kid(g, "uuid"); if (u) u[1] = id; else g.push(["uuid", id]); fresh.push(g); continue; }
@@ -401,9 +485,12 @@ export function pasteChanges(doc: KDoc, parsed: Clip, at: Pt, opts?: PasteOpts |
         while (sheetNames.has(candidate)) candidate = baseN + uniq++;
         nf[2] = candidate; sheetNames.add(candidate);
       }
+      // a pasted sheet with a Reference Suffix takes the next free one in its series (annotation.increment_pasted_suffix)
+      if (pasteSuffixes && ctx) pasteSheetSuffix(ctx, sc!, pasteSuffixes, f);
       // the next free page number, and a sheet instance for this project
       let page = 1; while (pages.has(String(page))) page++;
       const si = ctx ? sheetInstance(ctx, doc, page) : null; if (si) { f.push(si); pages.add(String(page)); }
+      const sf = sheetField(f, "file"); if (sf && str(sf[2]) && oldId) pastedSheets.push({ id: uuidOf(f) || "", clipId: oldId, file: str(sf[2]) });
     }
     idMap.set(oldId || "", (kind === "rule_area" ? ruleAreaId(f) : uuidOf(f)) || "");
     fresh.push(f);
@@ -416,6 +503,12 @@ export function pasteChanges(doc: KDoc, parsed: Clip, at: Pt, opts?: PasteOpts |
     if (mode === "unique") annotatePastedUnique(doc, candidates, cfg);
     else { const list = candidates.filter(always); if (list.length) annotatePastedUnique(doc, list, Object.assign({}, cfg, { reannotate: true })); }
   }
+  // updatePastedSymbol on every path of the screen: each takes the pasted base, stored with its path's suffix
+  if (sc && suffixed) for (const f of fresh) {
+    if (f[0] !== "symbol") continue;
+    const rf = refField(f), b = rf ? str(rf[2]) : "", u = kid(f, "unit"), unit = u ? num(u[1], 1) : 1;
+    for (const p of screenPaths) setInstanceOn(f, Object.assign({}, p, { shown: p.path === here.path }), b.endsWith("?") ? b : storedRef(sc.rs, b, p.path || ""), unit);
+  }
   // groups: the members that came along, under their new ids; a named group gets a unique name (UniqueGroupName)
   const grouped = new Set<string>();
   for (let i = fresh.length - 1; i >= 0; i--) {
@@ -426,7 +519,9 @@ export function pasteChanges(doc: KDoc, parsed: Clip, at: Pt, opts?: PasteOpts |
     for (const m of members) grouped.add(m);
   }
   for (const g of fresh) if (g[0] === "group" && str(g[1])) { let name = str(g[1]); if (groupNames.has(name)) { let k = 1; while (groupNames.has(name + k)) k++; name = name + k; } g[1] = name; groupNames.add(name); }
-  if (!fresh.length) return { changes: [] as KChange[], ids: [] as string[], libs, dropped };
+  // updatePastedSheet( …, forceKeepAnnotations && annotateAutomatic ): what the pasted sheets' files get (pastedSheetSync)
+  const sheetsInfo = { sheets: pastedSheets, keep: forceKeep && !!S.annotateAuto, mode, cfg, held: fresh.filter((n) => n[0] === "symbol" && refField(n)).map((n) => ({ ref: str(refField(n)![2]), lib: str((kid(n, "lib_id") || [])[1]), value: valueOf(n), unit: unitOf(n) })) };
+  if (!fresh.length) return { changes: [] as KChange[], ids: [] as string[], libs, dropped, sheetsInfo };
   // the reference point
   const idOf = (n: SNode) => (n[0] === "rule_area" ? ruleAreaId(n) : uuidOf(n)) || "", byId = new Map<string, SNode>(); for (const n of fresh) byId.set(idOf(n), n);
   const firstChild = (g: SNode): SNode | null => { for (const id of groupMembers(g)) { const m = byId.get(id); if (!m) continue; if (m[0] !== "group") return m; const c = firstChild(m); if (c) return c; } return null; };
@@ -468,6 +563,8 @@ export function pasteChanges(doc: KDoc, parsed: Clip, at: Pt, opts?: PasteOpts |
   for (const n of flat) shiftNode(n[0] as string, n, dx, dy);
   const changes: KChange[] = [], items: KItem[] = [];
   for (const n of fresh) { const { item, change } = addNode(doc, n); changes.push(change); items.push(item); }
+  // a unique paste with suffix numbering: the full annotator shares the reused-sheet bases and keeps composed references whole
+  if (sc && suffixed && mode === "unique") sharePastedBases(ctx!, doc, items, changes);
   if (!o.noJunctions) changes.push(...junctionsForNew(doc, items));
   const ids = items.map((it) => it.id);
   if (o.group !== undefined && items.length) {
@@ -475,16 +572,44 @@ export function pasteChanges(doc: KDoc, parsed: Clip, at: Pt, opts?: PasteOpts |
     const { item, change } = addNode(doc, ["group", uniqueGroupName(doc, o.group), ["uuid", K.newUuid()], ...(o.groupLibId ? [["lib_id", o.groupLibId] as SNode] : []), ["members", ...members]]);
     changes.push(change); ids.push(item.id);
   }
-  return { changes, ids, libs, dropped };
+  return { changes, ids, libs, dropped, sheetsInfo };
+}
+/** What pasteChanges says about the sheets it pasted, for pastedSheetSync. */
+export type PastedSheetsInfo = { sheets: PastedSheet[]; keep: boolean; mode: string; cfg: Partial<AnnotateCfg>; held: { ref: string; lib: string; value: string; unit: number }[] };
+/**
+ * The other half of a paste with sheets (SCH_EDITOR_CONTROL::Paste's updatePastedSheet and the annotation of
+ * annotatedSymbols[ pastedSheetPath ]): the instance data the pasted sheets' files get, as changes to those documents.
+ * Every path of the sheet pasted into gets its own; the symbols there are annotated path by path after the paste's own
+ * (UNIQUE_ANNOTATIONS: ReannotateDuplicates; otherwise only the power and "#" symbols, ReannotateByOptions).
+ * Null when nothing is to be written (no pasted sheet, no way to read the project's files).
+ */
+export function pastedSheetSync(ctx: SchCtx, info: PastedSheetsInfo): Promise<OtherDoc[]> | null {
+  if (!info.sheets.length || !ctx.readSheetFile) return null;
+  const here = sheetPathHere(ctx.doc), cur = currentDoc(ctx), hier = hierarchyOf(ctx);
+  const hereFile = cur ? cur.path : "";
+  const herePaths = hier && hier.instances ? hier.instances.filter((i) => i.file === hereFile).map((i) => i.path) : [];
+  if (!herePaths.length && here.path) herePaths.push(here.path);
+  const si = sheetInstance(ctx, ctx.doc, 1) as SNode | null, project = here.project || (si ? str((si[1] as SNode)[1]) : "");
+  if (!herePaths.length || !project) return null;
+  const held = info.held.slice();
+  return pastedSheetInstanceChanges(ctx.readSheetFile, { hereFile, herePaths, project, sheets: info.sheets, keep: info.keep, annotate(list) {
+    // a proxy per symbol carries the new path's reference as its field, so the paste's own annotation numbers it
+    const proxies = list.map((x) => { const p = deep(x.node); dropKid(p, "instances"); const pa = instanceOn(x.node, x.path), r = pa ? kid(pa, "reference") : null; setReference(p, r ? str(r[1]) : ""); return { x, p }; });
+    const always = (n: SNode) => symbolIsPower(list[0].doc, { node: n }) || str(refField(n)![2]).startsWith("#");
+    const nodes = proxies.map((q) => q.p).filter((n) => refField(n));
+    const pick = info.mode === "unique" ? nodes : nodes.filter(always);
+    if (pick.length) annotatePastedUnique(ctx.doc, pick, info.mode === "unique" ? info.cfg : Object.assign({}, info.cfg, { reannotate: true }), { held, libDoc: list[0].doc });
+    for (const q of proxies) { const ref = refField(q.p) ? str(refField(q.p)![2]) : ""; if (ref) setInstanceReference(q.x.node, q.x.path, ref); held.push({ ref, lib: str((kid(q.p, "lib_id") || [])[1]), value: valueOf(q.p), unit: unitOf(q.p) }); }
+  } });
 }
 export function copySelection(ctx: SchCtx) {
   const items = selectedItems(ctx); if (!items.length) return false;
-  clipWrite(ctx, clipboardText(ctx.doc, items), items.map((it) => it.id)); return true;
+  clipWrite(ctx, clipboardText(ctx.doc, items, { suffixes: suffixCtxOf(ctx) }), items.map((it) => it.id)); return true;
 }
 export function cutSelection(ctx: SchCtx) {
   if (!editable(ctx)) return false;
   const items = selectedItems(ctx); if (!items.length) return false;
-  clipWrite(ctx, clipboardText(ctx.doc, items), items.map((it) => it.id));
+  clipWrite(ctx, clipboardText(ctx.doc, items, { suffixes: suffixCtxOf(ctx) }), items.map((it) => it.id));
   // SCH_EDITOR_CONTROL::Cut is doCopy() then ACTIONS::doDelete, whose FilterSelectionForLockedItems leaves the locked
   // items on the sheet (they are copied all the same); the undo step is the delete's
   const free = items.filter((it) => !isLockedItem(ctx.doc, it));
@@ -512,7 +637,7 @@ export function pasteText(ctx: SchCtx, text: string, opts?: PasteOpts | null) {
 }
 function pasteParsed(ctx: SchCtx, parsed: Clip, opts?: PasteOpts | null) {
   const label = (opts && opts.label) || "Paste", live = canFollow(ctx);
-  const { changes, ids, libs, dropped } = pasteChanges(ctx.doc, parsed, (opts && opts.at) || snapCursor(ctx), Object.assign({ ctx }, opts, { noJunctions: live }));
+  const { changes, ids, libs, dropped, sheetsInfo } = pasteChanges(ctx.doc, parsed, (opts && opts.at) || snapCursor(ctx), Object.assign({ ctx }, opts, { noJunctions: live }));
   for (const file of dropped) {
     const msg = `The pasted sheet '${file}'\nwas dropped because the destination already has the sheet or one of its subsheets as a parent.`, kd = kdlg();
     if (kd && kd.messageBox) void kd.messageBox(msg); else ctx.toast(msg, 6000);
@@ -523,9 +648,12 @@ function pasteParsed(ctx: SchCtx, parsed: Clip, opts?: PasteOpts | null) {
     const it = ctx.doc.items.get(id); if (!it || it.kind !== "sheet") continue;
     const f = kids(it.node, "property").find((q) => /^Sheet ?file$/i.test(str(q[1]))); if (f && str(f[2])) ensureSheetDoc(ctx, str(f[2])).catch(() => {});
   }
-  if (live && followPaste(ctx, ids, libs, (opts && opts.at) || cursorOf(ctx), label, !!(opts && opts.hover))) { if (opts && opts.after && S.drag) S.drag.after = opts.after; return true; }
+  // the pasted sheets' files get their instance data in the same commit (read now, while the paste is placed)
+  const sync = pastedSheetSync(ctx, sheetsInfo);
+  if (live && followPaste(ctx, ids, libs, (opts && opts.at) || cursorOf(ctx), label, !!(opts && opts.hover))) { if (S.drag) { if (opts && opts.after) S.drag.after = opts.after; if (sync) S.drag.othersFor = sync; } return true; }
   if (live) changes.push(...junctionsForNew(ctx.doc, ids.map((id) => ctx.doc.items.get(id)).filter(Boolean) as KItem[]));
-  ctx.commit(changes, label);
+  if (sync) sync.then((others) => ctx.commit(changes, label, others.length ? { others } : undefined), () => ctx.commit(changes, label));
+  else ctx.commit(changes, label);
   setSelectionIds(ctx, opts && opts.hover ? [] : ids);
   return true;
 }
@@ -612,7 +740,7 @@ export function duplicateSelection(ctx: SchCtx, opts?: { hover?: boolean } | nul
   // Duplicate goes through Paste like the desktop's (same reference rules, the undo step is "Paste"): the copy follows
   // the cursor by the connection point nearest to where the cursor was when Ctrl+D was pressed
   const st = S as unknown as { dupHover?: boolean }, hover = !!(opts && opts.hover) || !!st.dupHover; st.dupHover = false;
-  return pasteText(ctx, clipboardText(ctx.doc, items), { label: "Paste", refNear: cursorOf(ctx), hover });
+  return pasteText(ctx, clipboardText(ctx.doc, items, { suffixes: suffixCtxOf(ctx) }), { label: "Paste", refNear: cursorOf(ctx), hover });
 }
 /** GetSchItemAsText: the shown text of a text, label, text box or table (cells by TAB, rows by newline); nothing else. */
 export function schItemAsText(doc: KDoc, it: KItem): string {

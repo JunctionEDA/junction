@@ -116,12 +116,21 @@ export function currentSheetPath(): string | null {
 }
 (E as { currentSheetPathOf?: () => string | null }).currentSheetPathOf = currentSheetPath;
 
+/** SCH_SYMBOL's variant library symbol (GetEffectiveLibSymbol under the variant): the alternate the variant names, when
+ *  it is in the schematic's library symbols and pin-compatible with the base one. */
+function variantAltLib(doc: KDoc, it: KItem, variant: string, path: string | null): SNode | null {
+  const K = KiCadCanvas as unknown as { kid(n: SNode, k: string): SNode | null; resolveLib(doc: KDoc, name: string): SNode | null };
+  const name = (n: string): string => String(((K.kid(it.node as SNode, n) as SNode | null) || [])[1] || "");
+  const base = K.resolveLib(doc, name("lib_name") || name("lib_id"));
+  return VM.variantLibSymbol(it.node as SNode, variant, path, base, (id) => K.resolveLib(doc, id));
+}
+
 /** The item as the variant shows it (the same item when the variant changes nothing). */
 function shownItem(doc: KDoc, it: KItem, variant: string, path: string | null): KItem {
   if (it.kind !== "footprint" && it.kind !== "symbol") return it;
   const c = variantCache.get(it.id);
   if (c && c.node === it.node && c.variant === variant && c.path === path) return c.item;
-  const node = it.kind === "footprint" ? VM.footprintViewForVariant(it.node, variant) : VM.symbolViewForVariant(it.node, variant, path, doc.version);
+  const node = it.kind === "footprint" ? VM.footprintViewForVariant(it.node, variant) : VM.symbolViewForVariant(it.node, variant, path, doc.version, variantAltLib(doc, it, variant, path));
   let item = it;
   if (node !== it.node) {
     item = Object.assign({}, it, { node, geom: [], bbox: it.bbox }) as KItem;

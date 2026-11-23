@@ -63,6 +63,7 @@ const CSS = `
 .k-grid-striping .pd-grid tbody tr:nth-child(even):not(.sel) td { background: var(--panel-2); }
 .pd-grid tr.sel td { background: var(--sel); }
 .pd-grid tr.hd td { background: var(--panel-2); font-weight: 600; padding: 3px 6px; }
+.pd-grid tr.bold td { font-weight: 700; }
 .pd-grid td input[type=text], .pd-grid td k-select { border: none !important; border-radius: 0 !important; background: transparent !important; width: 100%; height: 23px; padding: 2px 6px !important; font-family: inherit !important; }
 .pd-grid td input[type=text]:focus, .pd-grid td k-select:focus-within { outline: 2px solid var(--blue); outline-offset: -2px; }
 .pd-grid td input[type=text] { min-width: 84px; }
@@ -224,7 +225,7 @@ export function openDialog(spec: DialogSpec): DialogApi | null {
   if (typeof KDialogs === "undefined" || !KDialogs) return null;
   ensureCss();
   let out: DialogApi | null = null;
-  KDialogs.open({ title: spec.title, width: spec.width, okLabel: spec.okLabel, readOnly: spec.readOnly, extra: spec.extra, ok: spec.ok, cancel: spec.cancel, modeless: spec.modeless, child: spec.child, persist: spec.persist, restored: spec.restored,
+  KDialogs.open({ title: spec.title, width: spec.width, okLabel: spec.okLabel, cancelLabel: spec.cancelLabel, readOnly: spec.readOnly, extra: spec.extra, ok: spec.ok, cancel: spec.cancel, modeless: spec.modeless, child: spec.child, persist: spec.persist, restored: spec.restored,
     build(body: HTMLElement, a: KDialogOpenApi) {
       const dlg = body.parentElement as HTMLElement;
       if (spec.width) dlg.style.maxWidth = "96vw";

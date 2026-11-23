@@ -23,6 +23,7 @@
 import { atomText, serialize } from "./export";
 import { QUOTED, cloneNode, isList, kid, kids, parse, str, uuidOf } from "./sexpr";
 import { prettify } from "./prettify";
+import { upgradeLegacyNode } from "./legacy";
 import { GENERATOR, GENERATOR_VERSION, SEXPR_FOOTPRINT_LIB_FILE_VERSION, SEXPR_FOOTPRINT_LIB_HEADER_VERSION, minimumFileFormatVersion } from "./format-version";
 import type { Doc, Item, SAtom } from "./types";
 
@@ -36,11 +37,11 @@ export const BOARD_TO_FP: Record<string, string> = Object.fromEntries(Object.ent
 
 /** Kinds a footprint document holds as items (beside the board kinds the aliases map onto). */
 export const FP_KINDS = new Set(["property", "gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_curve", "gr_ellipse", "gr_ellipse_arc", "gr_text", "gr_text_box",
-  "fp_text", "pad", "zone", "group", "dimension", "image", "table", "point", "barcode"]);
+  "fp_text", "pad", "zone", "group", "dimension", "image", "table", "point", "barcode", "constraint"]);
 
 /** The tokens of (footprint …) that are owned children (items), as written in a file. */
 const OWNED_FILE_TOKENS = new Set(["property", "fp_text", "fp_text_box", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "fp_curve", "fp_ellipse", "fp_ellipse_arc",
-  "pad", "zone", "group", "dimension", "image", "table", "point", "barcode"]);
+  "pad", "zone", "group", "dimension", "image", "table", "point", "barcode", "constraint"]);
 
 /** (property ki_fp_filters "…") is a footprint attribute written as a property, not a field. */
 const isFieldNode = (n: SNode): boolean => n[0] === "property" ? typeof n[2] === "string" && n[1] !== "ki_fp_filters" : n[0] === "fp_text" && (n[1] === "reference" || n[1] === "value");
@@ -282,6 +283,7 @@ function itemRank(kind: string): number {
   if (kind === "pad") return 32;
   if (kind === "zone") return 33;
   if (kind === "group") return 34;
+  if (kind === "constraint") return 35;   // format( FOOTPRINT ) writes the constraints after the items they reference
   return 30;   // shapes, texts, text boxes, dimensions, tables, images, barcodes: FOOTPRINT::GraphicalItems
 }
 
@@ -436,7 +438,15 @@ export function footprintModified(doc: Doc): boolean {
 }
 
 /** The .kicad_mod text of the document. */
-export function serializeFootprintDoc(doc: Doc): string {
+export function serializeFootprintDoc(doc: Doc): string { return writeFootprint(doc, null); }
+/**
+ * What PCB_IO_KICAD_SEXPR_PARSER reads differently in a footprint file below a version: the old overbar notation, a
+ * custom pad's spoke angle, a zero local override, the bold text width ([version, whether that version itself reads
+ * the old way]).  A save that raises the stamp across one writes every item from what was read (`up`: in the new
+ * form), not from its stored text.
+ */
+const FP_LEGACY_READINGS: [number, boolean][] = [[20210606, false], [20211014, true], [20240201, true], [20260826, false]];
+function writeFootprint(doc: Doc, up: ((n: SNode) => SNode) | null): string {
   const d = doc as FpDoc; const st = d.fpState;
   if (!st) throw new Error("not a footprint document");
   if (!footprintModified(doc)) return st.source;
@@ -455,9 +465,9 @@ export function serializeFootprintDoc(doc: Doc): string {
     const s = st.itemSrc.get(w.it.id); let text: string;
     if (w.c.derived) {
       const k = seen.get(w.c.sig) || 0;
-      if (derivedUuid(k, w.c.sig) === w.it.id) { seen.set(w.c.sig, k + 1); text = s && s.sig === w.c.sig ? s.text : w.c.sig; }
-      else { const f = cloneNode(w.c.file); f.push(["uuid", w.it.id]); text = serialize(f); }
-    } else text = s && s.sig === w.c.sig ? s.text : w.c.sig;
+      if (derivedUuid(k, w.c.sig) === w.it.id) { seen.set(w.c.sig, k + 1); text = up ? serialize(up(w.c.file)) : s && s.sig === w.c.sig ? s.text : w.c.sig; }
+      else { const f = cloneNode(up ? up(w.c.file) : w.c.file); f.push(["uuid", w.it.id]); text = serialize(f); }
+    } else text = up ? serialize(up(w.c.file)) : s && s.sig === w.c.sig ? s.text : w.c.sig;
     parts.push({ rank: w.rank, seq: seq++, text });
   }
   parts.sort((a, b) => a.rank - b.rank || a.seq - b.seq);
@@ -470,11 +480,15 @@ export function serializeFootprintDoc(doc: Doc): string {
   const body = parts.filter((p) => !STAMP.has(/^\(([^\s()]+)/.exec(p.text)?.[1] || "")).map((p) => p.text);
   const inner = head + (body.length ? " " + body.join(" ") : "") + ")";
   const loaded = (d.version || 0) >= SEXPR_FOOTPRINT_LIB_FILE_VERSION ? 0 : d.version || 0;
-  const libFile = (): string => prettify(`(kicad_footprint_lib (version ${SEXPR_FOOTPRINT_LIB_FILE_VERSION}) (generator "${GENERATOR.fplib}") (generator_version "${GENERATOR_VERSION}") ${inner})`);
+  // the version written; raised across a reading boundary, the items are written again in their new form
+  const again = (to: number): string | null => (!up && loaded > 0 && to > loaded && FP_LEGACY_READINGS.some(([v, incl]) => (incl ? loaded <= v && to > v : loaded < v && to >= v))
+    ? writeFootprint(doc, (n) => upgradeLegacyNode(n, true, loaded, to)) : null);
+  const libFile = (): string => again(SEXPR_FOOTPRINT_LIB_FILE_VERSION) ?? prettify(`(kicad_footprint_lib (version ${SEXPR_FOOTPRINT_LIB_FILE_VERSION}) (generator "${GENERATOR.fplib}") (generator_version "${GENERATOR_VERSION}") ${inner})`);
   if (st.lib || loaded === 0 || loaded >= SEXPR_FOOTPRINT_LIB_HEADER_VERSION) return libFile();
   let need = minimumFileFormatVersion(inner, "pcb").version;
   const ht = kid(st.fp, "height"); if (need < 20261017 && ht && Number(ht[1])) need = 20261017;   // (height …) is an older token elsewhere
   if (need >= SEXPR_FOOTPRINT_LIB_HEADER_VERSION) return libFile();
+  { const t = again(Math.max(loaded, need)); if (t !== null) return t; }
   const stamp = `(version ${Math.max(loaded, need)}) (generator "${GENERATOR.pcb}") (generator_version "${GENERATOR_VERSION}")`;
   return prettify(head + " " + stamp + (body.length ? " " + body.join(" ") : "") + ")");
 }

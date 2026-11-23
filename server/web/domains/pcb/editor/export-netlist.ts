@@ -8,7 +8,7 @@ import { E } from "./state";
 import { state } from "./appstore";
 import { box, checkField, h, messageBox, note, notebook, openDialog, reportPanel, textField, type Field, type ReportLine } from "./pcbdialogs/ui";
 import { openAnnotate } from "../dialogs/annotate";
-import { projectNetlist } from "./pcbdialogs/update-pcb";
+import { footprintPadsOf, projectNetlist } from "./pcbdialogs/update-pcb";
 import { liveDocument, loadProjectFile, projectDocs } from "./projectfile";
 import { download, fileStem } from "./download";
 import * as NK from "../sim/netlist-kicad";
@@ -94,6 +94,54 @@ export async function projectSpiceNetlist(options: number, report: (m: string, s
   return SP.spiceNetlist({ symbols, texts, options, library: (p) => libs.get(p) || null, report, subckt: model ? { name: projectName(), ports } : undefined, items });
 }
 
+/**
+ * ERC_TESTER::TestSimModelIssues over the hierarchy: each symbol of each sheet instance taking part in the simulation
+ * (ExtractSimulationModelFacts) gets its model created (SIM_LIB_MGR::CreateModel with the libraries it names read
+ * first); the messages of a symbol whose creation reported any, by sheet instance (its uuid path below the root) and
+ * symbol id.  Null when the project's netlist cannot be built.
+ */
+export async function projectSimModelIssues(): Promise<Map<string, Map<string, string>> | null> {
+  const res = await projectNetlist(); if ("error" in res) return null;
+  const sch = CollabTools.sch as (SchToolModule & SchInternals) | undefined, hp = sch && sch._; if (!hp) return null;
+  const insts = res.netlist.instances || [];
+  const docOf = (f: string): KDoc | null => { const x = res.files.get(f); return x ? (x.doc as KDoc) : null; };
+  const placed = new Map(NK.nlSheets(insts, docOf).map((s) => [s.uuidPath.join("/"), s]));
+  const parentDoc = (u: string[]): KDoc | null => { const p = insts.find((i) => i.uuidPath.length === u.length - 1 && i.uuidPath.every((x, k) => u[k] === x)); return p ? docOf(p.file) : null; };
+  const sheets = insts.map((i) => { const pl = placed.get(i.uuidPath.join("/")), pd = parentDoc(i.uuidPath);
+    return { index: i.index, uuidPath: i.uuidPath, doc: docOf(i.file) as KDoc, sheetNode: pl ? pl.sheetNode : null, parentVersion: pd ? pd.version : undefined }; }).filter((s) => s.doc);
+  const variant = currentVariant();
+  if (variant) SP.setVariantView((n, v, path, ver) => symbolViewForVariant(n, v, path, ver));
+  let textVars: Record<string, string> = {};
+  try { const pro = E.proSettings ? JSON.parse(E.proSettings as string) as Record<string, unknown> : {}; textVars = (pro.text_variables as Record<string, string>) || {}; } catch (e) { textVars = {}; }
+  const facts: SP.SimModelFact[] = [];
+  SP.readHierarchy({ sheets, netMap: res.netlist.netMap || new Map(), symbolPins: hp.symbolPins,
+    isPower: (d, it) => hp.isPowerSymbol(d, String(((KiCadCanvas.kid(it.node, "lib_id") as SNode | null) || [])[1])), variant: variant || undefined, textVars, facts });
+  const libs = await readSimLibraries(facts.map((f) => (f.fields.find((x) => x.name === S.F.LIBRARY) || { value: "" }).value));
+  const out = new Map<string, Map<string, string>>();
+  for (const f of facts) {
+    const msgs = SP.createSymbolModel(f, (p) => libs.get(p) || null); if (!msgs.length) continue;
+    const key = f.uuidPath.slice(1).join("/"); let m = out.get(key); if (!m) out.set(key, (m = new Map()));
+    m.set(f.id, msgs.join("\n").trim());   // WX_STRING_REPORTER::GetMessages, trimmed
+  }
+  return out;
+}
+/** Each SPICE library path read once (built-in, a project file, its includes expanded); null for one that cannot be read. */
+async function readSimLibraries(paths: string[]): Promise<Map<string, S.SpiceLibrary | null>> {
+  const files = projectModelFiles(projectDocs()), libs = new Map<string, S.SpiceLibrary | null>();
+  const norm = (s: string): string => s.replace(/\\/g, "/").replace(/^\$\{KIPRJMOD\}\//, "").replace(/^\.\//, "");
+  for (const p of paths) {
+    if (!p || libs.has(p)) continue;
+    const f = files.find((x) => norm(x.path) === norm(p)) || files.find((x) => norm(p).endsWith("/" + norm(x.path))) || null;
+    let text: string | null = builtinLibrary(p); try { if (text === null) text = f ? await f.load() : null; } catch (e) { text = null; }
+    if (text !== null && !S.isIbisPath(p)) {
+      const errs: string[] = [];
+      text = await S.expandSpiceIncludes(text, p, async (cands) => { for (const c of cands) { const g = files.find((x) => norm(x.path) === norm(c)); if (g) { const t = await g.load(); if (t !== null) return t; } } return null; }, errs);
+    }
+    libs.set(p, text === null ? null : S.isIbisPath(p) ? S.parseIbisLibrary(text, p) : S.parseSpiceLibrary(text));
+  }
+  return libs;
+}
+
 /** GetBuildVersion() as the netlist headers carry it */
 const BUILD_VERSION = KICAD_BASE_VERSION;
 /** PROJECT::GetProjectName: the .kicad_pro's file name without its extension. */
@@ -139,7 +187,14 @@ export async function projectNlInput(): Promise<NK.NlInput | { error: string }> 
   const rootSheetName = String(((pro.sheets as unknown[][] | undefined) || []).find((e) => Array.isArray(e) && e[0] === rootUuid)?.[1] || "");
   return { sheets, netlist: res.netlist, source: res.root, date: NK.iso8601Local(new Date()), version: BUILD_VERSION,
     textVars: (pro.text_variables as Record<string, string>) || {}, variants, rootSheetName, netClass,
+    footprintPads: footprintPadsOf,
     libUri: (nick) => (uris.has(nick) ? (uris.get(nick) as string) : `\${KICAD10_SYMBOL_DIR}/${nick}.kicad_sym`) };
+}
+
+/** The project's KiCad netlist (GNL_OPT_KICAD) as the schematic sends it to the board with Update PCB, or null. */
+export async function kicadNetlistText(): Promise<string | null> {
+  const inp = await projectNlInput(); if ("error" in inp) return null;
+  return NK.kicadNetlist(inp);
 }
 
 /** The sheets of the hierarchy as the netlist exporters walk them, or null when the project cannot be read. */
@@ -148,7 +203,36 @@ async function hierarchySheets(): Promise<NK.NlSheet[] | null> {
   if ("error" in res) return null;
   return NK.nlSheets(res.netlist.instances || [], (f) => { const x = res.files.get(f); return x ? (x.doc as KDoc) : null; });
 }
-type AnnotInstance = { doc: KDoc; path: string; page: number; suffix?: string };
+/** The sheet symbols from the top-level sheet down to an instance (none for the root). */
+function sheetChain(sheets: NK.NlSheet[], sh: NK.NlSheet): (SNode | null)[] {
+  const chain: (SNode | null)[] = [];
+  for (let k = 2; k <= sh.uuidPath.length; k++) { const a = sheets.find((x) => x.uuidPath.length === k && x.uuidPath.every((u, j) => sh.uuidPath[j] === u)); chain.push(a ? a.sheetNode : null); }
+  return chain;
+}
+/** SCHEMATIC_SETTINGS::m_AnnotateReusedSheetSuffixes of the open project. */
+function suffixModeOf(): boolean {
+  try { const pro = JSON.parse((E.proSettings as string | null) || "{}") as { schematic?: { annotation?: { reused_sheet_suffixes?: boolean } } }; return !!(pro.schematic && pro.schematic.annotation && pro.schematic.annotation.reused_sheet_suffixes); } catch (e) { return false; }
+}
+/**
+ * KIWAY MAIL_SCH_GET_REF_SUFFIXES (SCHEMATIC::FormatRefSuffixes) from the project's schematic: each sheet path's
+ * composed Reference Suffix in page order and the footprints whose package takes another sheet's; null when the
+ * project's schematic cannot be read (a standalone board).
+ */
+export async function schematicRefSuffixes(): Promise<{ payload: string | null; suffixMode: boolean }> {
+  const suffixMode = suffixModeOf();
+  const sheets = await hierarchySheets();
+  if (!sheets || !sheets.length) return { payload: null, suffixMode };
+  const RS = KiCadCanvas.refSuffix;
+  // LIB_SYMBOL::GetUnitCount of a placed symbol: its library symbol's highest unit
+  const units = (doc: KDoc, node: SNode): number => {
+    const id = String((KiCadCanvas.kid(node, "lib_name") || KiCadCanvas.kid(node, "lib_id") || [])[1] || ""), lib = KiCadCanvas.resolveLib(doc, id); let n = 1;
+    if (lib) for (const sub of KiCadCanvas.kids(lib, "symbol")) { const m = /_(\d+)_(\d+)$/.exec(String(sub[1])); if (m) n = Math.max(n, +m[1]); }
+    return n;
+  };
+  const rs = RS.refSuffixes(sheets.map((sh) => ({ doc: sh.doc, path: "/" + sh.uuidPath.join("/"), sheets: sheetChain(sheets, sh) })), suffixMode, units);
+  return { payload: RS.formatRefSuffixes(rs), suffixMode };
+}
+type AnnotInstance = { doc: KDoc; path: string; page: number; sheets?: (SNode | null)[]; suffixMode?: boolean };
 /**
  * SCH_EDIT_FRAME::CheckAnnotate( ANNOTATE_ALL ) over the hierarchy's sheet instances: the schematic module's
  * SCH_REFERENCE_LIST::CheckAnnotation (sch.checkAnnotate).  When the project numbers reused sheets with suffixes
@@ -157,15 +241,10 @@ type AnnotInstance = { doc: KDoc; path: string; page: number; suffix?: string };
 function annotationErrors(sheets: NK.NlSheet[]): number {
   const S = ((window as unknown as { CollabTools?: { sch?: { checkAnnotate?(insts: AnnotInstance[]): number } } }).CollabTools || {}).sch;
   if (!S || !S.checkAnnotate) return 0;
-  let suffixes = false;
-  try { const pro = JSON.parse((E.proSettings as string | null) || "{}") as { schematic?: { annotation?: { reused_sheet_suffixes?: boolean } } }; suffixes = !!(pro.schematic && pro.schematic.annotation && pro.schematic.annotation.reused_sheet_suffixes); } catch (e) { suffixes = false; }
+  const suffixes = suffixModeOf();
+  // each instance's sheet symbols from the top down: the schematic module composes their Reference Suffix fields
   return S.checkAnnotate(sheets.map((sh, i) => {
-    let suffix = "";
-    if (suffixes) for (let k = 2; k <= sh.uuidPath.length; k++) {
-      const a = sheets.find((x) => x.uuidPath.length === k && x.uuidPath.every((u, j) => sh.uuidPath[j] === u));
-      if (a && a.sheetNode) suffix += NK.fieldValue(a.sheetNode, "Reference Suffix");
-    }
-    return { doc: sh.doc, path: "/" + sh.uuidPath.join("/"), page: i + 1, suffix };
+    return { doc: sh.doc, path: "/" + sh.uuidPath.join("/"), page: i + 1, sheets: sheetChain(sheets, sh), suffixMode: suffixes };
   }));
 }
 /**

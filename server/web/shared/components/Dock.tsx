@@ -23,6 +23,7 @@ import { NetNavigatorPane } from "./panes/NetNavigator";
 import { LibrariesPane } from "./panes/Libraries";
 import { DesignBlocksPane } from "./panes/DesignBlocks";
 import { NetInspectorPane } from "./panes/NetInspector";
+import { ConstraintsPane } from "./panes/Constraints";
 import { FilterSummary } from "./panes/SelectionFilter";
 import { bringToFront, frontOf, frontTabs, groupKey, groupOf, subscribeFront } from "../../domains/pcb/editor/pane-tabs";
 
@@ -179,6 +180,7 @@ function paneBody(name: string): { body: ReactNode; footer?: ReactNode } | null 
     case "search": return { body: <SearchPane /> };
     case "netnav": return { body: <NetNavigatorPane /> };
     case "netinsp": return { body: <NetInspectorPane /> };
+    case "constraints": return { body: <ConstraintsPane /> };
     case "libtree": return { body: <LibrariesPane /> };
     case "designblocks": return { body: <DesignBlocksPane /> };
     default: return null;

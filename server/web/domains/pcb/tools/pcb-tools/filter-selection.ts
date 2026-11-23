@@ -13,7 +13,7 @@ export interface FilterSelectionOptions {
 export const FILTER_SELECTION_DEFAULTS: FilterSelectionOptions = { includeFootprints: true, includeLockedFootprints: true, includeTracks: true, includeVias: true,
   includeZones: true, includeItemsOnTechLayers: true, includeBoardOutlineLayer: true, includePcbTexts: true };
 const SHAPES = new Set(["gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_curve", "gr_bbox", "gr_ellipse", "gr_ellipse_arc", "target", "dimension"]);
-const TEXTS = new Set(["gr_text", "gr_text_box", "table", "property"]);
+const TEXTS = new Set(["gr_text", "gr_text_box", "table", "property", "drill_map"]);
 
 export function itemIsIncludedByFilter(it: KItem, o: FilterSelectionOptions): boolean {
   const k = it.kind;

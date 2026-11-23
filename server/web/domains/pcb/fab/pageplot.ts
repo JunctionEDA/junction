@@ -188,7 +188,10 @@ export function boardPage(m: BoardModel, r: PagePlotRequest, log: PlotLog): Plot
     const prims = plotFile(m, l, opt, log);
     primItems(prims, vp, mono ? "#000000" : r.colors[l] || "#000000", bg || paper, items);
   }
-  if (p.drillMarks && p.format !== 1) drillMarkItems(m, new Set(seq), p.drillMarks === 1, vp, items, bg || paper, opt.widthAdj || 0);
+  // one global knockout pass, skipped when a plotted layer carries a drill map (BOARD::DrillSymbolLayers): the marks
+  // would punch through the symbols they annotate
+  const mapLayers = new Set<string>(); for (const it of doc.items.values()) if (it.kind === "drill_map") { const l = it.node.find((c) => Array.isArray(c) && c[0] === "layer") as SNode | undefined; if (l && seq.includes(String(l[1]))) mapLayers.add(String(l[1])); }
+  if (p.drillMarks && p.format !== 1 && !mapLayers.size) drillMarkItems(m, new Set(seq), p.drillMarks === 1, vp, items, bg || paper, opt.widthAdj || 0);
   if (neg) for (let i = start; i < items.length; i++) items[i] = Object.assign({}, items[i], { color: invert(items[i].color) });
   const out: PlotPage = { w: page[0], h: page[1], name: r.layerName, items, background: bg, viewBox };
   // PlotInteractiveLayer: a property menu over each footprint, a bookmark under "Footprints"

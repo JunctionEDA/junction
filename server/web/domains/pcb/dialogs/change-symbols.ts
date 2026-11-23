@@ -8,7 +8,8 @@
 // (KiCadLibrary.fetch), embedded in the sheet's lib_symbols, and each matching symbol rebuilt from it with the
 // options (change-symbols-logic.ts updateSymbolNode).  The sheet on screen is one commit; the other sheets are
 // edited through their own documents, each step on that sheet's undo list, as Annotate does.
-import { reportPanel, type ReportLine } from "../editor/pcbdialogs/ui";
+import { messageBox, reportPanel, type ReportLine } from "../editor/pcbdialogs/ui";
+import * as VM from "../canvas/variant-model";
 import { bitmapButton } from "../../../shared/components/kicon-dom";
 import { E, appState, pushUndoFor, toolCtx } from "./editor";
 import { KD, checkbox, h, textInput, type DlgApi } from "./dom";
@@ -19,7 +20,7 @@ import { fetchItem } from "../library/sources";
 import { readPinMaps, writePinMaps } from "./sym-props-logic";
 
 type Mode = "update" | "change";
-interface LibApi { fetch(kind: "symbol", id: string): Promise<{ symbol?: string; libId?: string }>; openChooser(kind: "symbol", opts?: { title?: string; filter?: string; browser?: boolean; picker?: boolean; preselect?: string }): Promise<{ libId?: string } | null> }
+interface LibApi { fetch(kind: "symbol", id: string): Promise<{ symbol?: string; libId?: string }>; openChooser(kind: "symbol", opts?: { title?: string; filter?: string; browser?: boolean; picker?: boolean; preselect?: string; compat?: ((libId: string) => Promise<boolean> | boolean) | null }): Promise<{ libId?: string } | null> }
 const libApi = (): LibApi | null => (window as unknown as { KiCadLibrary?: LibApi }).KiCadLibrary || null;
 interface SchHelpers { autoplaceNode(doc: KDoc, item: KItem, opts?: unknown): SNode | null }
 const schH = (): SchHelpers | null => { const m = CollabTools.sch; return m && m._ ? m._ as unknown as SchHelpers : null; };
@@ -221,4 +222,64 @@ export function openChangeSymbols(mode: Mode): void {
     ],
   });
   void api;
+}
+
+// ---------------------------------------------------------------- SCH_EDIT_TOOL::SetVariantSymbol / ClearVariantSymbol
+/** The one selected symbol (RequestSelection( { SCH_SYMBOL_T } ).Front()), the current variant and sheet path. */
+/** Another sheet's symbol (the Symbol Fields Table's row): its document and sheet instance path. */
+export interface VariantSymbolSheet { docId: string; doc: KDoc; path: string | null }
+function variantTarget(id?: string, sheet?: VariantSymbolSheet): { it: KItem; variant: string; path: string | null; doc: KDoc; sheet?: VariantSymbolSheet } | null {
+  const doc = sheet ? sheet.doc : E.kdoc as KDoc | null; if (!doc || doc.type !== "sch") return null;
+  const variant = String((E as { currentVariant?: string }).currentVariant || ""); if (!variant) return null;
+  let it: KItem | null = null;
+  for (const sid of id ? [id] : selectedIds()) { const x = doc.items.get(sid); if (x && x.kind === "symbol") { it = x; break; } }
+  if (!it) return null;
+  const path = sheet ? sheet.path : (E as { currentSheetPathOf?: () => string | null }).currentSheetPathOf?.() || null;
+  return { it, variant, path, doc, sheet };
+}
+/** SCH_COMMIT::Push: the sheet on screen through the tools, another sheet through its own document and undo list. */
+async function commitVariantSymbol(t: { it: KItem; doc: KDoc; sheet?: VariantSymbolSheet }, change: KChange, label: string): Promise<void> {
+  if (!t.sheet || t.sheet.doc === E.kdoc) { toolCtx().commit([change], label); return; }
+  const inverse = [KiCadCanvas.replaceChange(t.doc, t.it)];
+  await submitDocOp(t.sheet.docId, [change]); pushUndoFor(t.sheet.docId, { label, changes: [change], inverse });
+}
+/** The message SetVariantSymbol shows for a candidate that is not pin-compatible with the base symbol. */
+export function variantCompatMessage(picked: string, base: string, issues: VM.VariantCompatResult[]): string {
+  let msg = `The selected symbol '${picked}' is not pin-compatible with the base symbol '${base}'.\n\n`;
+  for (const issue of issues) msg += "\u2022 " + issue.detail + "\n";
+  return msg + "\n" + "Choose a symbol with equivalent pins and pin positions.";
+}
+/**
+ * SCH_EDIT_TOOL::SetVariantSymbol: pick an alternate library symbol for the selected symbol under the current design
+ * variant (the symbol chooser on the symbol's own lib id, pin-incompatible symbols drawn in orange), check it against
+ * the base symbol (ValidateVariantSymbolCompatibility) and record it as the variant's symbol override, the alternate
+ * embedded in the sheet's library symbols (IncludeVariantSymbols).
+ */
+export async function setVariantSymbol(id?: string, sheet?: VariantSymbolSheet): Promise<void> {
+  const t = variantTarget(id, sheet); if (!t) return;
+  const api = libApi(); if (!api) return;
+  const doc = t.doc, n = t.it.node;
+  const libIdOf = (k: string): string => { const x = KiCadCanvas.kid(n, k) as SNode | null; return x ? String(x[1]) : ""; };
+  const baseId = libIdOf("lib_id");
+  const baseFlat = (KiCadCanvas.resolveLib(doc, libIdOf("lib_name") || baseId) || KiCadCanvas.resolveLib(doc, baseId)) as SNode | null;
+  // compatFunc: a candidate that cannot be loaded counts as compatible
+  const compat = baseFlat ? async (id: string): Promise<boolean> => { const c = await libSymbol(id); return !!c && VM.variantSymbolCompatibility(baseFlat, c).length > 0; } : null;
+  const got = await api.openChooser("symbol", { preselect: baseId, compat });
+  const picked = got && got.libId ? got.libId : ""; if (!picked || !core.parseLibId(picked).name) return;
+  const cand = await libSymbol(picked);
+  if (!cand) { messageBox("Error", `Could not load symbol '${picked}' from library.`); return; }
+  if (baseFlat) {
+    const issues = VM.variantSymbolCompatibility(baseFlat, cand);
+    if (issues.length) { messageBox("Variant Symbol Compatibility", variantCompatMessage(picked, baseId, issues)); return; }
+  }
+  const cur = doc.items.get(t.it.id); if (!cur) return;
+  const node = VM.setSymbolVariantOverride(cur.node, t.variant, picked, t.path, doc.version);
+  await commitVariantSymbol({ ...t, it: cur }, { id: cur.id, kind: "MODIFIED", typeName: "SCH_SYMBOL", sexpr: "(lib_symbols " + KiCadCanvas.serialize(cand) + ") " + KiCadCanvas.serialize(node) } as KChange, "Set Variant Symbol");
+}
+/** SCH_EDIT_TOOL::ClearVariantSymbol: the variant's symbol override on the current sheet dropped. */
+export async function clearVariantSymbol(id?: string, sheet?: VariantSymbolSheet): Promise<void> {
+  const t = variantTarget(id, sheet); if (!t) return;
+  if (!VM.symbolVariantOverride(t.it.node, t.variant, t.path)) return;
+  const node = VM.clearSymbolVariantOverride(t.it.node, t.variant, t.path, t.doc.version);
+  await commitVariantSymbol(t, KiCadCanvas.replaceChange(t.doc, { ...t.it, node, geom: [], bbox: null }), "Clear Variant Symbol");
 }

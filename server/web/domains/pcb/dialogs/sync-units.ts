@@ -9,6 +9,7 @@ import * as L from "./sch-items-logic";
 import * as P from "./sym-props-logic";
 import { netMap, currentInstance } from "../editor/schnets";
 import { currentVariant } from "../editor/variant";
+import * as VM from "../canvas/variant-model";
 
 interface SchH { isPowerSymbol(d: KDoc, name: string): boolean }
 const SH = (): SchH | null => { const m = CollabTools.sch; return m && m._ ? m._ as unknown as SchH : null; };
@@ -25,7 +26,10 @@ export function commitWithOtherUnits(ctx: ToolCtx & { doc: KDoc }, item: KItem, 
   const all = changes.slice();
   // SyncOtherUnits( aSourceSheet, …, aVariantName ): each other unit is written on the sheet paths it was found on
   const variant = currentVariant(), ver = doc.version;
-  const instOf = (id: string): P.SyncInstance => ({ variant, srcPath: units.srcPath, dstPaths: units.paths.get(id) || [], ver });
+  // GetPinMapOverride( &aSourceSheet, aVariantName ): a source unit that delegates hands on unit 1's record
+  let srcPinMap = VM.symbolPinMapOverride(out, variant, units.srcPath);
+  if (srcPinMap.mode === "delegate") { const K = KiCadCanvas as unknown as { delegatedPinMapOverride?: (d: KDoc, i: KItem, v: string) => VM.PinMapOverrideState }; srcPinMap = K.delegatedPinMapOverride ? K.delegatedPinMapOverride(doc, Object.assign({}, item, { node: out }) as KItem, variant) : VM.defaultPinMapOverride(); }
+  const instOf = (id: string): P.SyncInstance => ({ variant, srcPath: units.srcPath, dstPaths: units.paths.get(id) || [], ver, srcPinMap });
   for (const it of units.here) { const node = P.syncUnit(out, it.node, what, instOf(it.id)); if (node) all.push(KiCadCanvas.replaceChange(doc, Object.assign({}, it, { node, geom: [], bbox: null }) as KItem)); }
   // `if( !commit.Empty() ) commit.Push()`: a symbol being placed stages nothing of its own
   if (all.length) ctx.commit(all, label);

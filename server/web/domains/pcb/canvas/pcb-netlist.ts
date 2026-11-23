@@ -11,9 +11,11 @@ import { expandStacked } from "./stacked-pins";
 import { busConnection, isBusLabel, matchBusMember, type BusAliases, type BusConnection } from "./busname";
 import { expandTextVars, hasTextVars } from "./sheet";
 import { unescapeText } from "./text";
-import { footprintVariant, footprintVariantNode, setFootprintVariant, symbolFlags, symbolFlagsForVariant, symbolInstance, symbolVariant, type FpFlags, strNumCmp } from "./variant-model";
+import { delegatedPinMapOverrideOf, effectivePadNumber, isDefaultVariant, symbolPinMapOverride, footprintVariant, footprintVariantNode, setFootprintVariant, symbolFlags, symbolFlagsForVariant, symbolInstance, symbolVariant, type FpFlags, strNumCmp } from "./variant-model";
 import { boardItemBox } from "./kicad-bbox";
 import { padPolygon } from "./geom-pcb";
+import { refSuffixes, type RefSuffixes } from "./ref-suffix";
+import { deriveGroupUuid, kiidFromName, kiidPath } from "./kiid";
 
 type Pt = [number, number];
 
@@ -54,7 +56,13 @@ export interface NetComponent {
   variants?: NetVariant[];
   /** COMPONENT::GetGroup: the schematic group the symbol belongs to (its uuid and name) */
   group?: { uuid: string; name: string; /** the symbol group's design block link (NETLIST_GROUP::libId), "" for none */ libId?: string };
+  /** COMPONENT::GetComponentClassNames: the KiCad netlist's (component_classes …) of the symbol (every unit's
+   *  "Component Class" fields, the rule areas and sheets around them), sorted; unset when the netlist was not read */
+  componentClasses?: string[];
 }
+/** NETLIST_GROUP: a schematic group as the KiCad netlist hands it to the board: its name, the board group's uuid
+ *  (deriveGroupUuid), its instance path, design block link and members (instance paths of symbols and groups). */
+export interface NetlistGroup { name: string; uuid: string; path: string; libId: string; members: string[] }
 /** COMPONENT_VARIANT: a flag only when the variant changes it, the fields whose text the variant changes. */
 export interface NetVariant { name: string; dnp?: boolean; excludedFromBOM?: boolean; excludedFromSim?: boolean; excludedFromPosFiles?: boolean; fields: Map<string, string> }
 export interface Netlist {
@@ -71,6 +79,48 @@ export interface Netlist {
    *  and directive labels on each net and of the directive labels on the border of a rule area its items lie in;
    *  a bus hands its classes to its members */
   netclassLabels?: Map<string, Set<string>>;
+  /** the library footprints ("lib:name") of the symbols with a pin-to-pad map: resolvePadNumbers needs their pads */
+  pinMapFootprints?: string[];
+  /** NETLIST::m_groups (the KiCad netlist's (groups …)), when it was read */
+  groups?: NetlistGroup[];
+  /** NETLIST::GetVariantNames / GetVariantDescription (the KiCad netlist's (variants …)), when it was read */
+  variantRegistry?: { name: string; description: string }[];
+}
+
+export { kiidFromName, deriveGroupUuid };
+/**
+ * What pcbnew's KICAD_NETLIST_PARSER reads from the KiCad netlist the schematic sends with Update PCB beyond the
+ * components and nets: each component's (component_classes …), the (groups …) (NETLIST::AssignGroups puts each
+ * component in the group whose members name its instance path, or its uuid alone) and the (variants …) registry.
+ */
+export function readKicadNetlistExtras(netlist: Netlist, text: string): void {
+  const root = parse(text) as SNode | null; if (!root) return;
+  const val = (n: SNode | null, k: string): string => { const x = n ? kid(n, k) as SNode | null : null; return x ? str(x[1]) : ""; };
+  const byRef = new Map<string, NetComponent>(); for (const c of netlist.components) if (!byRef.has(c.ref)) byRef.set(c.ref, c);
+  for (const c of netlist.components) c.componentClasses = [];
+  for (const comp of kids(kid(root, "components") as SNode, "comp") as SNode[]) {
+    const c = byRef.get(val(comp, "ref")); if (!c) continue;
+    const cc = kid(comp, "component_classes") as SNode | null;
+    c.componentClasses = cc ? (kids(cc, "class") as SNode[]).map((x) => str(x[1])) : [];
+  }
+  const groups: NetlistGroup[] = [];
+  for (const g of kids(kid(root, "groups") as SNode, "group") as SNode[]) {
+    const uuid = val(g, "uuid"), members = (kids(kid(g, "members") as SNode, "member") as SNode[]).map((m) => val(m, "uuid"));
+    groups.push({ name: val(g, "name"), uuid: deriveGroupUuid(uuid), path: kiidPath(uuid).join("/"), libId: val(g, "lib_id"), members: members.map((m) => kiidPath(m).join("/")) });
+  }
+  netlist.groups = groups;
+  // AssignGroups: an instance path matches the component of that sheet path holding the uuid, a bare uuid any component
+  const compPath = (c: NetComponent): { base: string; ids: string[] } => {
+    const first = kiidPath(c.paths[0] || ""); return { base: first.slice(0, -1).join("/"), ids: c.paths.map((p) => kiidPath(p).pop() || "") };
+  };
+  for (const c of netlist.components) delete c.group;
+  for (const g of groups) for (const m of g.members) {
+    const steps = m.split("/").filter(Boolean); if (!steps.length) continue;
+    const last = steps[steps.length - 1], base = steps.slice(0, -1).join("/");
+    const c = netlist.components.find((x) => { const p = compPath(x); return (steps.length === 1 || p.base === base) && p.ids.includes(last); });
+    if (c) c.group = { uuid: g.uuid, name: g.name };
+  }
+  netlist.variantRegistry = (kids(kid(root, "variants") as SNode, "variant") as SNode[]).map((v) => ({ name: val(v, "name"), description: val(v, "description") }));
 }
 /** An item that can drive a net, with its CONNECTION_SUBGRAPH::GetDriverPriority (NONE 0, PIN 1, SHEET_PIN 2,
  *  HIER_LABEL 3, LOCAL_LABEL 4, LOCAL_POWER_PIN 5, GLOBAL_POWER_PIN 6, GLOBAL 7). */
@@ -94,7 +144,10 @@ export interface NetEntry { name: string; bus: boolean; members: NetMember[]; bu
   /** a net's winning driver (its priority is CONNECTION_SUBGRAPH::GetDriverPriority's) */
   driver?: DriverItem }
 /** What the project adds to the sheets: its bus aliases (schematic.bus_aliases) and text variables (text_variables). */
-export interface NetlistOptions { busAliases?: BusAliases; textVars?: Record<string, string> | null }
+export interface NetlistOptions { busAliases?: BusAliases; textVars?: Record<string, string> | null;
+  /** the pad numbers of a library footprint ("lib:name"), or null when it is unknown (resolvePadNumbers' footprint pads) */
+  footprintPads?: (fpid: string) => Set<string> | null;
+  /** schematic.annotation.reused_sheet_suffixes: references compose with their sheets' Reference Suffix */ refSuffixMode?: boolean }
 export interface SheetInstance { index: number; human: string; file: string; uuidPath: string[]; sheetName: string }
 
 // ---------------------------------------------------------------- small s-expression helpers
@@ -149,7 +202,9 @@ const KP_NONE = 0, KP_PIN = 1, KP_SHEET_PIN = 2, KP_HIER = 3, KP_LOCAL = 4, KP_L
 /** `shape`: a sheet pin's (compareDrivers rule 4); `path` / `id`: stableDriverIdentity of a weak driver (the sheet path, the sheet pin's uuid). */
 interface Driver { prio: number; name: string; depth: number; shape?: string; path?: string; id?: string; src?: DriverItem }
 /** `onBoard`: PRIORITY::PIN (false: PRIORITY::NONE, a symbol excluded from the board or a #-reference); `path`: its sheet path. */
-interface PinRef { comp: string | null; ref: string; unitRef: string; pin: SymPin; pins: SymPin[]; uuid: string; power: boolean; inNetlist: boolean; onBoard: boolean; path: string; src?: DriverItem }
+interface PinRef { comp: string | null; ref: string; unitRef: string; pin: SymPin; pins: SymPin[]; uuid: string; power: boolean; inNetlist: boolean; onBoard: boolean; path: string; src?: DriverItem;
+  /** the symbol, its sheet instance path, library symbol and Footprint field (SCH_PIN::GetEffectivePadNumber) */
+  sym?: { node: SNode; inst: string; lib: SNode | null; footprint: string; unit: number } }
 /** `netPrefix`: PathHumanReadable with the sheet names escaped (a "/" in a name is {slash}), the prefix of the sheet's local nets. */
 interface Instance { sheet: SheetFile; uuidPath: string[]; human: string; depth: number; index: number; sheetUuids: string[]; name: string; netPrefix: string; parent: Instance | null; sheetNode: SNode | null }
 /** getElectricalTypeLabel: ${CONNECTION_TYPE} of a global / hierarchical label or a sheet pin. */
@@ -306,6 +361,9 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
   const addDriver = (n: number, d: Driver): void => { const l = drivers.get(n); if (l) l.push(d); else drivers.set(n, [d]); };
   const components = new Map<string, NetComponent>();
   const compPins = new Map<string, PinRef[]>();
+  /** the first unit 1 of each reference (GetPinMapOverride's delegate: the unit-1 sibling anywhere in the hierarchy) */
+  const unit1Syms = new Map<string, NonNullable<PinRef["sym"]>>();
+  const pinMapFps = new Set<string>();
 
   // ---- the sheet instances, breadth first
   const tops: TopSheetFile[] = Array.isArray(root) ? root : [{ sheet: root, name: "" }];
@@ -328,6 +386,17 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
         netPrefix: inst.netPrefix + escapeNetName(name) + "/", parent: inst, sheetNode: it.node });
     }
   }
+  // ---- SCHEMATIC::RefreshRefSuffixes: a multi-unit package spanning suffixed sheets composes with its units' lowest
+  // suffix (GetPackageRefSuffix), so its footprint is one component whatever sheet each unit sits on
+  const chainOf = (inst: Instance): (SNode | null)[] => { const out: (SNode | null)[] = []; for (let x: Instance | null = inst; x && x.parent; x = x.parent) out.unshift(x.sheetNode); return out; };
+  const rs: RefSuffixes | null = opts && opts.refSuffixMode ? refSuffixes(instances.map((inst) => ({ doc: inst.sheet.doc, path: "/" + inst.uuidPath.join("/"), sheets: chainOf(inst) })), true, unitCount) : null;
+  /** SCH_SYMBOL::GetRef( path ): the base with the package's suffix; and whether the unit is on the sheet of that suffix (packageOwnedElsewhere's owner). */
+  const composed = (id: string, path: string, stored: string): { ref: string; owner: boolean } => {
+    if (!rs || !rs.has || stored.endsWith("?")) return { ref: stored, owner: true };
+    const b = rs.base(id, path), pkg = rs.packageSuffix(id, path);
+    return { ref: (b === null ? stored : b) + pkg, owner: pkg === rs.suffix(path) };
+  };
+  const ownerSeen = new Set<NetComponent>();
   // ---- the bus aliases: the project's (schematic.bus_aliases) and those older sheets carry ((bus_alias "N" (members …)))
   const busAliases = new Map<string, string[]>();
   const givenAliases = opts && opts.busAliases;
@@ -550,7 +619,7 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
         const legacyValue = legacyRoot && legacyRoot.legacySymbolInstances && legacyRoot.legacySymbolInstances.get("/" + [...inst.uuidPath.slice(1), it.id].join("/"));
         const power = h.isPower(doc, it), rawValue = legacyValue && legacyValue.value ? legacyValue.value : propVal(n, "Value"), localPower = power && (h.isLocalPower ? h.isLocalPower(doc, it) : libIsLocalPower(doc, n));
         const value = power ? netText(rawValue, n, "symbol", inst) : rawValue;
-        const { ref, unit } = instanceRef(n, path, project, legacyRoot ? legacyRoot.legacySymbolInstances : undefined);
+        const ir = instanceRef(n, path, project, legacyRoot ? legacyRoot.legacySymbolInstances : undefined), unit = ir.unit, cref = composed(it.id, path, ir.ref), ref = cref.ref;
         const inNetlist = !ref.startsWith("#") && !power, onBoard = yes(n, "on_board", true);
         const pins = h.symbolPins(doc, it);
         const units = unitCount(doc, n), unitRef = units > 1 ? ref + unitLetter(unit) : ref;
@@ -594,13 +663,18 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
               }
               const variants = componentVariants(n, "/" + inst.uuidPath.join("/"), ref, (doc as KDoc).version); if (variants.length) comp.variants = variants;
               const grp = symGroup.get(it.id); if (grp) comp.group = grp;
-              components.set(ref, comp); compPins.set(ref, []); compUnits.set(comp, units);
+              components.set(ref, comp); compPins.set(ref, []); compUnits.set(comp, units); if (cref.owner) ownerSeen.add(comp);
               if (symLib) comp.unitInfo = libUnitPinInfo(symLib, units);
-            } else { if (unit === 1) comp.paths.unshift(path); else comp.paths.push(path); }
+            } else if (rs && rs.has && cref.owner && !ownerSeen.has(comp)) { comp.paths.unshift(path); ownerSeen.add(comp); }   // the footprint is the unit's on the package suffix's sheet
+            else if (unit === 1 && (!rs || !rs.has || cref.owner)) comp.paths.unshift(path); else comp.paths.push(path);
             // a placed unit whose library copy differs (a unit-specific edit) gives that unit's slot from its own copy
             if (symLib && comp.unitInfo && unit >= 1 && unit <= comp.unitInfo.length) { const own = libUnitPinInfo(symLib, units); if (own[unit - 1]) comp.unitInfo[unit - 1] = own[unit - 1]; }
           }
         }
+        const symInfo = { node: n, inst: "/" + inst.uuidPath.join("/"), lib: resolveLib(doc, kidStr(n, "lib_name") || kidStr(n, "lib_id")) || null,
+          footprint: symText(propVal(n, "Footprint"), n, inst, { ref, unit, units, lib: null, power, localPower: !!localPower }), unit };
+        if (unit === 1 && inNetlist && !unit1Syms.has(ref.toLowerCase())) unit1Syms.set(ref.toLowerCase(), symInfo);
+        if (inNetlist && /^[^:]+:.+$/.test(symInfo.footprint) && (kid(n, "pin_map_override") || (symInfo.lib && kid(symInfo.lib, "pin_maps")))) pinMapFps.add(symInfo.footprint);
         const byNumber = new Map<string, number[]>(), pinTerms: { pin: SymPin; t: number }[] = [];
         for (const pin of pins) {
           const t = terminal([pin.x, pin.y], false);
@@ -621,7 +695,7 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
           if (pin.type === "no_connect") ncNodes.add(t);
           // GetDriverPriority: PRIORITY::PIN for a symbol that reaches the board, PRIORITY::NONE for a #-reference
           // (a PWR_FLAG's pin) or a symbol excluded from the board: those name a net only when no other pin is on it
-          const pr: PinRef = { comp: comp ? ref : null, ref, unitRef, pin, pins, uuid: it.id, power, inNetlist, onBoard: inNetlist && onBoard, path, src };
+          const pr: PinRef = { comp: comp ? ref : null, ref, unitRef, pin, pins, uuid: it.id, power, inNetlist, onBoard: inNetlist && onBoard, path, src, sym: symInfo };
           const l = pinsAt.get(t); if (l) l.push(pr); else pinsAt.set(t, [pr]);
           if (comp) (compPins.get(ref) as PinRef[]).push(pr);
         }
@@ -783,6 +857,17 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
     }
   }
   const nameOf = (g: Group): string => (named.get(g) as Named).name;
+  const padNumbersOf = (p: PinRef): string[] => {
+    const sy = p.sym; if (!sy) return expandStacked(p.pin.number).pins;
+    let o = symbolPinMapOverride(sy.node, "", sy.inst);
+    if (o.mode === "delegate") { const u = unit1Syms.get(p.ref.toLowerCase()); o = delegatedPinMapOverrideOf(u && u !== sy ? { node: u.node, path: u.inst } : null, ""); }
+    const fp = sy.footprint;
+    let fpPads = fp && /^[^:]+:.+$/.test(fp) && opts && opts.footprintPads ? opts.footprintPads(fp) : null;
+    if (fpPads && !fpPads.size) fpPads = null;
+    const r = effectivePadNumber(sy.lib, o, fp, p.pin.number, fpPads);
+    if (fpPads && r.state === "unmapped") return [];
+    return expandStacked(r.pad).pins;
+  };
   for (const g of groups.values()) {
     const netPins = g.pins.filter((p) => p.comp);
     if (!netPins.length) continue;
@@ -794,7 +879,10 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
       // carries a no-connect MARKER (hasNoConnect: a SCH_NO_CONNECT_T item, not the pin's electrical type)
       const shown = p.pin.name === "~" ? "" : p.pin.name;
       const type = p.pin.type + (g.ncMarker && netPins.length === 1 ? "+no_connect" : "");
-      const pads = expandStacked(p.pin.number).pins;
+      // resolvePadNumbers (GNL_OPT_KICAD: the default variant): the footprint pad(s) the pin goes to; a pin the
+      // pin-to-pad map leaves unmapped reaches no pad
+      const pads = padNumbersOf(p);
+      if (!pads.length) continue;
       let members = nets.get(name);
       if (!members) { members = []; nets.set(name, members); }
       for (const pad of pads) {
@@ -863,18 +951,19 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
     for (const m of bus.members) assign(groupName(uf.find(m)), cs);
   }
   const instOut: SheetInstance[] = instances.map((i) => ({ index: i.index, human: i.human, file: i.sheet.file, uuidPath: i.uuidPath, sheetName: i.name }));
-  return { components: Array.from(components.values()), nets, warnings, netMap, instances: instOut, pinDrivers, netclassLabels };
+  return { components: Array.from(components.values()), nets, warnings, netMap, instances: instOut, pinDrivers, netclassLabels, pinMapFootprints: Array.from(pinMapFps) };
 }
 
 /** The project file's part of the netlist: schematic.bus_aliases and text_variables of a parsed .kicad_pro (or its text). */
 export function netlistOptions(pro: unknown): NetlistOptions {
   let j: unknown = pro;
   if (typeof pro === "string") { try { j = pro ? JSON.parse(pro) : null; } catch (e) { j = null; } }
-  const o = (j && typeof j === "object" ? j : {}) as { schematic?: { bus_aliases?: unknown }; text_variables?: unknown };
+  const o = (j && typeof j === "object" ? j : {}) as { schematic?: { bus_aliases?: unknown; annotation?: { reused_sheet_suffixes?: unknown } }; text_variables?: unknown };
   const out: NetlistOptions = {};
   const ba = o.schematic && o.schematic.bus_aliases;
   if (ba && typeof ba === "object") { const m = new Map<string, string[]>(); for (const [k, v] of Object.entries(ba as Record<string, unknown>)) if (k && Array.isArray(v)) m.set(k, v.map(String)); out.busAliases = m; }
   if (o.text_variables && typeof o.text_variables === "object") out.textVars = o.text_variables as Record<string, string>;
+  if (o.schematic && o.schematic.annotation && o.schematic.annotation.reused_sheet_suffixes === true) out.refSuffixMode = true;
   return out;
 }
 
@@ -919,6 +1008,9 @@ export interface UpdatePlan {
   /** the uuids of the footprints among `added` */
   addedIds: string[];
   warnings: number; errors: number;
+  /** the board's (variants …) registry the update leaves (board-setup.ts variantsSection, "" for none); unset when the
+   *  registry is not touched (the dry run, or no variant on either side) */
+  variantsSection?: string;
 }
 
 const MANDATORY = new Set(["Reference", "Value", "Datasheet", "Description"]);
@@ -1007,6 +1099,18 @@ function fpUnits(fp: SNode): { name: string; pins: string[] }[] {
 }
 const FP_AFTER_PATH = ["sheetname", "sheetfile", "units", "solder_mask_margin", "solder_paste_margin", "solder_paste_margin_ratio", "clearance", "zone_connect", "attr", "stackup", "private_layers", "net_tie_pad_groups", "duplicate_pad_numbers_are_jumpers", "jumper_pad_groups", "fp_text", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "fp_curve", "fp_text_box", "pad", "zone", "group", "embedded_fonts", "model"];
 const after = (key: string): string[] => FP_AFTER_PATH.slice(FP_AFTER_PATH.indexOf(key) + 1);
+/** BOARD::GetVariantNames / GetVariantDescription: the board header's (variants (variant (name …) (description …)) …). */
+function boardVariantRegistry(doc: KDoc): { name: string; description: string }[] {
+  const d = doc as KDoc & { boardSetup?: { variants?: SNode | null }; variantsNode?: SNode | null };
+  const node = (d.boardSetup && d.boardSetup.variants) || d.variantsNode || null;
+  return node ? (kids(node, "variant") as SNode[]).map((v) => ({ name: kidStr(v, "name"), description: kidStr(v, "description") })).filter((v) => v.name) : [];
+}
+/** formatVariants (board-setup.ts variantsSection). */
+function variantsSectionText(list: { name: string; description: string }[]): string {
+  if (!list.length) return "";
+  const q = (t: string): string => '"' + t.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"';
+  return "(variants" + list.map((v) => `(variant (name ${q(v.name)})` + (v.description ? `(description ${q(v.description)})` : "") + ")").join("") + ")";
+}
 
 /**
  * What "Update PCB" would do to `doc` for `netlist`: the report (in the dry-run wording of the desktop's dialog, or with
@@ -1248,7 +1352,7 @@ export function planUpdate(doc: KDoc, netlist: Netlist, o: UpdateOptions = {}): 
   };
 
   // ---- BOARD_NETLIST_UPDATER::updateFootprintGroup: each footprint goes to the board group of its symbol's group
-  interface BGroup { id: string | null; node: SNode; members: string[]; dirty: boolean }
+  interface BGroup { id: string | null; node: SNode; members: string[]; dirty: boolean; drop?: boolean }
   const groups = new Map<string, BGroup>();
   if (o.transferGroups) for (const it of doc.items.values()) if (it.kind === "group") { const node = clone(it.node), m = kid(node, "members") as SNode | null; groups.set(kidStr(node, "uuid") || it.id, { id: it.id, node, members: m ? m.slice(1).map(str) : [], dirty: false }); }
   const groupName = (g: BGroup): string => (typeof g.node[1] === "string" ? str(g.node[1]) : "");
@@ -1257,13 +1361,38 @@ export function planUpdate(doc: KDoc, netlist: Netlist, o: UpdateOptions = {}): 
     const want = c.group ? c.group.uuid : "";
     const cur = Array.from(groups.entries()).find(([, g]) => g.members.includes(fpId));
     if ((cur ? cur[0] : "") === want) return;
-    if (cur) { say("action", T(`Remove ${shown} from group '${groupName(cur[1])}'.`, `Removed ${shown} from group '${groupName(cur[1])}'.`)); cur[1].members = cur[1].members.filter((m) => m !== fpId); cur[1].dirty = true; }
+    if (cur) { say("action", T(`Remove ${shown} from group '${groupName(cur[1])}'.`, `Removed ${shown} from group '${groupName(cur[1])}'.`)); cur[1].members = cur[1].members.filter((m) => m !== fpId); cur[1].dirty = true; if (cur[1].members.length < 2) cur[1].drop = true; }
     if (c.group) {
       say("action", T(`Add ${shown} to group '${c.group.name}'.`, `Added ${shown} to group '${c.group.name}'.`));
       let g = groups.get(want);
       if (!g) { g = { id: null, node: ["group", c.group.name, ["uuid", want], ["members"]], members: [], dirty: true }; groups.set(want, g); }
       g.members.push(fpId); g.dirty = true;
     }
+  };
+
+  // ---- BOARD_NETLIST_UPDATER::updateComponentClass: the footprint's static component class (its constituents joined
+  // by "," in Cmp order) follows the netlist's component classes
+  const applyClass = (fp: SNode, c: NetComponent, shown: string, quiet: boolean): boolean => {
+    if (!c.componentClasses) return false;
+    const cc = kid(fp, "component_classes") as SNode | null;
+    const curNames = cc ? (kids(cc, "class") as SNode[]).map((x) => str(x[1])) : [];
+    const want = Array.from(new Set(c.componentClasses)).sort(codeCmp);
+    const curName = curNames.join(","), newName = want.join(",");
+    if (curName === newName) return false;
+    if (!quiet) {
+      if (!curName && newName) say("action", T(`Change ${shown} component class to '${newName}'.`, `Changed ${shown} component class to '${newName}'.`));
+      else if (curName && !newName) say("action", T(`Remove ${shown} component class (currently '${curName}').`, `Removed ${shown} component class (was '${curName}').`));
+      else say("action", T(`Change ${shown} component class from '${curName}' to '${newName}'.`, `Changed ${shown} component class from '${curName}' to '${newName}'.`));
+    }
+    // SetStaticComponentClass: written after the fields, before ki_fp_filters and the (path …)
+    delKid(fp, "component_classes");
+    if (want.length) {
+      const node: SNode = ["component_classes", ...want.map((n) => qnode("class", [n]))];
+      let at = fp.findIndex((x, k) => k > 0 && isList(x) && ((x[0] === "property" && str(x[1]) === "ki_fp_filters") || x[0] === "path" || FP_AFTER_PATH.includes(str(x[0]))));
+      if (at < 0) at = fp.length;
+      fp.splice(at, 0, node);
+    }
+    return true;
   };
 
   // ---- estimateFootprintInsertionPosition: under the board edges (their centre, 10 mm below), the page's centre on an empty board
@@ -1373,6 +1502,7 @@ export function planUpdate(doc: KDoc, netlist: Netlist, o: UpdateOptions = {}): 
       shownOf.set(s, r.shown);
       applyGroup(s.id, c, r.shown);
       applyNets(r.shown, s.node, c, s.quiet);
+      applyClass(s.node, c, r.shown, s.quiet);
       applyUnits(s.node, c, r.shown, s.quiet);
     }
     // the dry run has no footprint yet for the ones it adds: applyComponentVariants sees the others only
@@ -1429,9 +1559,53 @@ export function planUpdate(doc: KDoc, netlist: Netlist, o: UpdateOptions = {}): 
     }
   }
 
-  // ---- BOARD_NETLIST_UPDATER::updateGroups: the board groups the netlist knows take its name and design block link
-  // (a group the update adds exists only in the real run, where it is named and linked here)
-  if (o.transferGroups) {
+  // ---- BOARD_NETLIST_UPDATER::updateGroups: the netlist's parent groups a board group lacks, group names, design
+  // block links and the nesting of groups (the dry run sees only the groups already on the board)
+  if (o.transferGroups && netlist.groups) {
+    const nl = netlist.groups;
+    const onBoard = (): [string, BGroup][] => Array.from(groups.entries()).filter(([, g]) => applied || g.id !== null);
+    const findBoard = (uuid: string): BGroup | null => { const g = groups.get(uuid); return g && (applied || g.id !== null) ? g : null; };
+    const byUuid = (uuid: string): NetlistGroup | undefined => nl.find((g) => g.uuid === uuid);
+    const byPath = (path: string): NetlistGroup | undefined => (path ? nl.find((g) => g.path === path) : undefined);
+    const parentOf = (path: string): NetlistGroup | undefined => (path ? nl.find((g) => g.members.includes(path)) : undefined);
+    const boardParent = (uuid: string): [string, BGroup] | undefined => Array.from(groups.entries()).find(([, g]) => (applied || g.id !== null) && g.members.includes(uuid));
+    const libOf = (g: BGroup): string => kidStr(g.node, "lib_id");
+    const addBoardGroup = (ng: NetlistGroup): BGroup => { const g: BGroup = { id: null, node: ["group", ng.name, ["uuid", ng.uuid], ["members"]], members: [], dirty: true }; groups.set(ng.uuid, g); return g; };
+    for (let ii = 0; ii < onBoard().length; ii++) {
+      const [uuid, child] = onBoard()[ii];
+      const cn = byUuid(uuid); if (!cn) continue;
+      const pn = parentOf(cn.path); if (!pn || findBoard(pn.uuid)) continue;
+      if (!applied) { say("action", `Add group '${groupName(child)}' to group '${pn.name}'.`); continue; }
+      addBoardGroup(pn);
+    }
+    for (const [uuid, g] of onBoard()) {
+      const ng = byUuid(uuid); if (!ng) continue;
+      if (ng.name !== groupName(g)) {
+        say("action", T(`Change group name from '${groupName(g)}' to '${ng.name}'.`, `Changed group name from '${groupName(g)}' to '${ng.name}'.`));
+        if (applied) { if (typeof g.node[1] === "string") g.node[1] = ng.name; else g.node.splice(1, 0, ng.name); g.dirty = true; }
+      }
+      if (ng.libId !== libOf(g)) {
+        say("action", T(`Change group library link from '${libOf(g)}' to '${ng.libId}'.`, `Changed group library link from '${libOf(g)}' to '${ng.libId}'.`));
+        if (applied) { if (ng.libId) setKid(g.node, "lib_id", [ng.libId], ["members"]); else delKid(g.node, "lib_id"); g.dirty = true; }
+      }
+      for (const m of ng.members) {
+        const mg = byPath(m); if (!mg) continue;
+        const child = findBoard(mg.uuid); if (!child || child === g) continue;
+        const bp = boardParent(mg.uuid); if (bp && bp[1] === g) continue;
+        say("action", T(`Add group '${groupName(child)}' to group '${groupName(g)}'.`, `Added group '${groupName(child)}' to group '${groupName(g)}'.`));
+        if (applied) { if (bp) { bp[1].members = bp[1].members.filter((x) => x !== mg.uuid); bp[1].dirty = true; } g.members.push(mg.uuid); g.dirty = true; }
+      }
+    }
+    for (const [uuid, child] of onBoard()) {
+      const cn = byUuid(uuid); const bp = boardParent(uuid);
+      if (!cn || !bp) continue;
+      const pn = byUuid(bp[0]); if (!pn) continue;
+      if (pn.members.includes(cn.path)) continue;
+      say("action", T(`Remove group '${groupName(child)}' from group '${groupName(bp[1])}'.`, `Removed group '${groupName(child)}' from group '${groupName(bp[1])}'.`));
+      if (applied) { bp[1].members = bp[1].members.filter((x) => x !== uuid); bp[1].dirty = true; }
+    }
+  } else if (o.transferGroups) {
+    // a netlist built in the browser without the KiCad netlist's (groups …): the groups its symbols name
     const netGroups = new Map<string, { name: string; libId: string }>();
     for (const c of netlist.components) if (c.group && !netGroups.has(c.group.uuid)) netGroups.set(c.group.uuid, { name: c.group.name, libId: c.group.libId || "" });
     for (const [uuid, g] of groups) {
@@ -1456,7 +1630,7 @@ export function planUpdate(doc: KDoc, netlist: Netlist, o: UpdateOptions = {}): 
   // ---- group nesting and the staged group nodes
   for (const g of groups.values()) {
     if (!g.dirty) continue;
-    if (g.id && g.members.length < 2) { removed.push(g.id); continue; }   // a group of fewer than two items goes
+    if (g.id && g.drop && g.members.length < 2) { removed.push(g.id); continue; }   // updateFootprintGroup: a group left with fewer than two items goes
     if (!g.members.length) continue;
     const i = g.node.findIndex((x, k) => k > 0 && Array.isArray(x) && x[0] === "members");
     const m: SNode = ["members", ...g.members]; if (i > 0) g.node[i] = m; else g.node.push(m);
@@ -1520,10 +1694,47 @@ export function planUpdate(doc: KDoc, netlist: Netlist, o: UpdateOptions = {}): 
     for (const node of added) for (const p of padsOf(node)) { const n = netNameOf(doc, p); if (n) current2.add(n); }
     for (const n of Array.from(boardNets).sort(codeCmp)) if (!current2.has(n)) say("action", `Removed unused net ${n}.`);
   }
+  // ---- the board's design variant registry from the netlist's (the real run only): names matched without regard to
+  // case, descriptions updated, the board's other variants deleted with every footprint's record of them
+  let variantsSection: string | undefined;
+  if (applied && netlist.variantRegistry) {
+    const reg = boardVariantRegistry(doc), want = netlist.variantRegistry;
+    if (want.length || reg.length) {
+      say("info", "Updating design variants...");
+      const find = (name: string): { name: string; description: string } | undefined => reg.find((v) => v.name.toLowerCase() === name.toLowerCase());
+      const updated: { name: string; description: string }[] = [];
+      for (const v of want) {
+        let actual = find(v.name);
+        if (!actual) {
+          if (isDefaultVariant(v.name)) continue;   // BOARD::AddVariant
+          actual = { name: v.name, description: "" }; reg.push(actual);
+          say("action", `Added variant '${actual.name}'.`);
+        }
+        if (v.description !== actual.description) { actual.description = v.description; say("action", `Updated description for variant '${actual.name}'.`); }
+        updated.push(actual);
+      }
+      for (const v of reg.slice()) {
+        if (want.some((w) => w.name.toLowerCase() === v.name.toLowerCase())) continue;
+        reg.splice(reg.indexOf(v), 1);
+        // BOARD::DeleteVariant: FOOTPRINT::DeleteVariant on every footprint
+        for (const fp of fps) {
+          if (removed.includes(fp.id)) continue;
+          const node = modified.get(fp.id) || nodeOf.get(fp.id) || fp.node;
+          if (!footprintVariantNode(node, v.name)) continue;
+          const nn = clone(node);
+          for (let i = nn.length - 1; i > 0; i--) { const x = nn[i]; if (isList(x) && x[0] === "variant" && str((kid(x as SNode, "name") as SNode || [])[1]).toLowerCase() === v.name.toLowerCase()) nn.splice(i, 1); }
+          modified.set(fp.id, nn);
+        }
+        say("action", `Removed variant '${v.name}'.`);
+      }
+      const final = updated.length ? updated : reg;
+      variantsSection = variantsSectionText(final);
+    }
+  }
   for (const w of netlist.warnings) say("warning", w);
   report.push({ severity: "action", text: "" }, { severity: "action", text: "" });
   say("info", `Total warnings: ${warnings}, errors: ${errors}.`);
-  return { report, modified, removed, added, addedIds, warnings, errors };
+  return { report, modified, removed, added, addedIds, warnings, errors, ...(variantsSection !== undefined ? { variantsSection } : {}) };
 }
 
 // ---------------------------------------------------------------- BOARD_COMMIT's net propagation
@@ -1828,4 +2039,4 @@ export function projectBoardPath(docs: { docId: string; path: string; docType: s
   return { path: path || (doc ? doc.path : ""), doc };
 }
 
-export const pcbNetlist = { newBoardText, projectBoardPath, instanceRef, buildNetlist, planUpdate, componentVariants, schematicParity, footprintFromLibrary, escapeNetName, unescapeNetName, busVector, netlistOptions, unitCount };
+export const pcbNetlist = { newBoardText, projectBoardPath, instanceRef, buildNetlist, planUpdate, readKicadNetlistExtras, kiidFromName, deriveGroupUuid, componentVariants, schematicParity, footprintFromLibrary, escapeNetName, unescapeNetName, busVector, netlistOptions, unitCount };

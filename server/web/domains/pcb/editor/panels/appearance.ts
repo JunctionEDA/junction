@@ -22,6 +22,7 @@ import { editProject, type Plain, type ProjectEdit } from "../../canvas/project-
 import { adoptProjectFile, canWriteProject, saveProjectFile } from "../projectfile";
 import { messageBox } from "../../dialogs/cvpcb/widgets";
 import { activeBoardColors, boardThemeId, isReadOnlyTheme, migrateBoardColors, prefs, saveUserBoardColors, setSessionBoardColor } from "../../dialogs/prefs";
+import { constraintTools } from "./constraints";
 
 // ---------------------------------------------------------------- layers
 // APPEARANCE_CONTROLS::rebuildLayers: copper front → back, then this technical / user sequence.
@@ -425,13 +426,17 @@ export function applyAppearance(): void {
   migrateLegacyColors();
   ro.layerColors = undefined;
   const hide = new Set(user.objHidden.filter((id) => !["grid", "ratsnest", "anchors", "lockedShadow", "drawingSheet", "drcWarnings", "drcErrors", "drcExclusions", "conflicts", "boardArea", "subgrids", "viaStitching", "constraintShadow"].includes(id)));
-  const show = new Set<string>(); for (const id of ["anchors", "lockedShadow", "boardArea", "viaStitching"]) if (!user.objHidden.includes(id)) show.add(id);
+  const show = new Set<string>(); for (const id of ["anchors", "lockedShadow", "boardArea", "viaStitching", "constraintShadow"]) if (!user.objHidden.includes(id)) show.add(id);
   // every opacity row goes to the renderer: zones and images default to 0.6, which is not the renderer's own default
   const opacity: Record<string, number> = {}; for (const o of OBJECTS) if (o.opacity) opacity[o.id] = objOpacity(o);
   ro.objects = { hide, show, opacity };
   const P = pcbTools();
   if (show.has("lockedShadow") && P) { const ids = new Set<string>(); for (const it of doc.items.values()) { try { if (P.isLocked(it.node)) ids.add(it.id); } catch (e) { /* not lockable */ } } ro.lockedIds = ids; }
   else ro.lockedIds = undefined;
+  // LAYER_CONSTRAINT_SHADOW: updateConstrainedItems after each change of the board (the selected constraint's members brighter)
+  const C = show.has("constraintShadow") ? constraintTools() : null;
+  if (C) { try { const sh = C.constraintShadowIds(tctx()); ro.constrainedIds = sh.constrained.size ? sh.constrained : undefined; ro.constraintHighlightIds = sh.highlighted; } catch (e) { ro.constrainedIds = undefined; } }
+  else { ro.constrainedIds = undefined; ro.constraintHighlightIds = undefined; }
   // the Objects swatches the user changed (the user's colour theme): the renderer's object layers and the grid
   ro.objectColors = undefined;
   ro.frame = user.objHidden.includes("drawingSheet") ? false : undefined;

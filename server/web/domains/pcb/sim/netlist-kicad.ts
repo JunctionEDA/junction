@@ -12,7 +12,7 @@ import type { Netlist, NetEntry, SheetInstance } from "../canvas/pcb-netlist";
 import { prettify } from "../canvas/prettify";
 import { unescapeText } from "../canvas/text";
 import { strNumCmp as strNumCmpCase } from "../canvas/variant-model";
-import { symbolFlags, symbolFlagsForVariant, symbolVariant, type SymFlags } from "../canvas/variant-model";
+import { effectivePadNumber, symbolFieldForVariant, symbolFlags, symbolFlagsForVariant, symbolPinMapOverride, symbolVariant, symbolVariantOverride, variantLibSymbol, delegatedPinMapOverrideOf, type SymFlags } from "../canvas/variant-model";
 
 type N = SNode;
 const isList = Array.isArray;
@@ -143,6 +143,10 @@ export interface NlInput {
   rootSheetName?: string;
   /** NET_SETTINGS::GetEffectiveNetClass( net )->GetName() */
   netClass?(net: string): string;
+  /** KIFACE_FOOTPRINT_PAD_NUMBERS_SERVICE: the pad numbers of a library footprint ("lib:name"), null when unknown */
+  footprintPads?(fpid: string): Set<string> | null;
+  /** SCHEMATIC::GetCurrentVariant: the BOM netlist's exclusions and field values are the current variant's */
+  currentVariant?: string;
 }
 
 interface Sym {
@@ -314,10 +318,42 @@ function formatX(n: XN): string {
   return s;
 }
 const finishX = (root: XN): string => prettify(formatX(root) + ")\n");
+/** wxXmlDocument::OutputStringEnt: &, <, > (and in attributes " and the control characters) as entities. */
+const xmlEnt = (s: string, inAttr: boolean): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, inAttr ? "&quot;" : '"').replace(/\r/g, "&#xD;").replace(inAttr ? /[\t\n]/g : /$^/g, (c) => (c === "\t" ? "&#x9;" : "&#xA;"));
+/** wxXmlDocument::Save( stream, 2 ): the declaration, then each element on its own line indented by two spaces per
+ *  level; an element whose first child is text keeps its content on its line; an empty element is closed with "/>". */
+function xmlSave(root: XN): string {
+  const out: string[] = ['<?xml version="1.0" encoding="UTF-8"?>\n'];
+  const node = (n: XN, indent: number): void => {
+    out.push("<" + n.name); for (const [k, v] of n.attrs) out.push(` ${k}="${xmlEnt(v, true)}"`);
+    if (!n.text.length && !n.kids.length) { out.push("/>"); return; }
+    out.push(">");
+    if (n.text.length) { for (const t of n.text) out.push(xmlEnt(t, false)); }
+    else { for (const c of n.kids) { out.push("\n" + " ".repeat(indent + 2)); node(c, indent + 2); } out.push("\n" + " ".repeat(indent)); }
+    out.push("</" + n.name + ">");
+  };
+  node(root, 0);
+  out.push("\n");
+  return out.join("");
+}
 
 // ---------------------------------------------------------------- the KiCad netlist
-export function kicadNetlist(inp: NlInput): string {
+export function kicadNetlist(inp: NlInput): string { return finishX(makeRoot(inp, false)); }
+/**
+ * The intermediate XML netlist of the legacy BOM generators (NETLIST_EXPORTER_XML::WriteNetlist( GNL_ALL |
+ * GNL_OPT_BOM ), <project>.xml): the symbols excluded from the BOM of the current variant left out (and their pins
+ * from the nets), the fields of the current variant, no groups or variants sections, net names unescaped, the extra
+ * units' uuids followed by a space, written by wxXmlDocument::Save.
+ */
+export function xmlNetlist(inp: NlInput): string { return xmlSave(makeRoot(inp, true)); }
+
+/** NETLIST_EXPORTER_XML::makeRoot( GNL_ALL | GNL_OPT_KICAD ) or ( GNL_ALL | GNL_OPT_BOM ) */
+function makeRoot(inp: NlInput, forBOM: boolean): XN {
   const root = attr(xn("export"), "version", "E");
+  // m_exportVariant: blank for the board, the current variant for the BOM
+  const exportVariant = forBOM ? inp.currentVariant || "" : "";
+  const symFlags = (s: Sym, v: string): SymFlags => (v ? symbolFlagsForVariant(s.node, v, s.path, s.sheet.doc.version) : s.flags);
   // ---- design
   const design = add(root, xn("design"));
   add(design, xn("source", inp.source));
@@ -334,7 +370,9 @@ export function kicadNetlist(inp: NlInput): string {
     for (let c = 1; c <= 9; c++) { const xc = add(xt, xn("comment")); attr(xc, "number", String(c)); attr(xc, "value", exp(tb["comment" + c] || "")); }
   });
   // ---- components
-  const excluded = (s: Sym): boolean => s.flags.excludedFromBoard || sheetFlags(inp.sheets, s.sheet).excludedFromBoard;
+  const cur = inp.currentVariant || "";
+  const excluded = (s: Sym): boolean => (forBOM ? symFlags(s, cur).excludedFromBOM || sheetFlags(inp.sheets, s.sheet, cur).excludedFromBOM
+    : symFlags(s, cur).excludedFromBoard || sheetFlags(inp.sheets, s.sheet, cur).excludedFromBoard);
   const walk = walkSymbols(inp, excluded);
   const comps = add(root, xn("components"));
   const libParts = new Map<string, LibInfo>();
@@ -352,7 +390,7 @@ export function kicadNetlist(inp: NlInput): string {
     const units = all.filter((o) => o.ref.toUpperCase() === sym.ref.toUpperCase());
     let value = "", footprint = "", datasheet = "", description = "";
     const fields = new Map<string, string>();
-    const shown = (o: Sym, name: string): string => { const f = fieldsFor(o, ""); return resolver(o, inp, f)(f.get(name) || ""); };
+    const shown = (o: Sym, name: string): string => { const f = fieldsFor(o, exportVariant); return resolver(o, inp, f)(f.get(name) || ""); };
     if (sym.lib && sym.lib.unitCount > 1) {
       const ranked = units.slice().sort((a, b) => a.unit - b.unit || cmp(a.uuid, b.uuid));
       const pick = (name: string): string => { for (const o of ranked) { const c = shown(o, name); if (c) return c; } return ""; };
@@ -388,12 +426,13 @@ export function kicadNetlist(inp: NlInput): string {
     // (one of several top-level sheets: its own name, which its path "/<name>/" carries)
     else { prop("Sheetname", sym.sheet.human !== "/" ? sym.sheet.human.slice(1, -1) : inp.rootSheetName || ""); prop("Sheetfile", sym.sheet.file.split("/").pop() || sym.sheet.file); }
     const sf = sheetFlags(inp.sheets, sym.sheet), f = sym.flags;
-    if (f.excludedFromBOM || sf.excludedFromBOM) prop("exclude_from_bom");
-    if (f.excludedFromSim || sf.excludedFromSim) prop("exclude_from_sim");
-    if (f.excludedFromBoard || sf.excludedFromBoard) prop("exclude_from_board");
-    if (f.excludedFromPosFiles) prop("exclude_from_pos_files");
-    if (f.dnp || sf.dnp) prop("dnp");
-    if (variantNames.length) {
+    const xf0 = symFlags(sym, exportVariant), xs0 = sheetFlags(inp.sheets, sym.sheet, exportVariant);
+    if (xf0.excludedFromBOM || xs0.excludedFromBOM) prop("exclude_from_bom");
+    if (xf0.excludedFromSim || xs0.excludedFromSim) prop("exclude_from_sim");
+    if (xf0.excludedFromBoard || xs0.excludedFromBoard) prop("exclude_from_board");
+    if (xf0.excludedFromPosFiles) prop("exclude_from_pos_files");
+    if (xf0.dnp || xs0.dnp) prop("dnp");
+    if (!forBOM && variantNames.length) {
       let xvs: XN | null = null;
       for (const vn of variantNames) {
         let xv: XN | null = null;
@@ -405,12 +444,32 @@ export function kicadNetlist(inp: NlInput): string {
         bin("exclude_from_sim", f.excludedFromSim || sf.excludedFromSim, ef.excludedFromSim || es.excludedFromSim);
         bin("exclude_from_pos_files", f.excludedFromPosFiles, ef.excludedFromPosFiles);
         const st = symbolVariant(sym.node, vn, sym.path, sym.sheet.doc.version);
-        if (st && st.fields.size) {
+        const override = symbolVariantOverride(sym.node, vn, sym.path);
+        if (override) { const p = attr(xn("property"), "name", "symbol_override"); attr(p, "value", override); put(p); }
+        if (st && (st.fields.size || override)) {
           let xfs: XN | null = null;
+          const res = resolver(sym, inp, fieldsFor(sym, vn));
+          const field = (name: string, v: string): void => { if (!xfs) xfs = xn("fields"); attr(add(xfs, xn("field", unescapeString(res(v)))), "name", unescapeString(name)); };
           for (const [k, v] of st.fields) {
             if (v === (k === "Reference" ? sym.ref : fieldValue(sym.node, k))) continue;
-            if (!xfs) xfs = xn("fields");
-            attr(add(xfs, xn("field", unescapeString(resolver(sym, inp, fieldsFor(sym, vn))(v)))), "name", unescapeString(k));
+            field(k, v);
+          }
+          if (override) {
+            // the fields the alternate library symbol gives where they differ from the base symbol's, then the ones only
+            // the alternate has (GetVariantLibSymbol: the sheet's library symbols, pin-compatible with the base)
+            const doc = sym.sheet.doc, baseLib = doc.lib.get(sv((kidOf(sym.node, "lib_name") || kidOf(sym.node, "lib_id") || [])[1])) || null;
+            const alt = variantLibSymbol(sym.node, vn, sym.path, baseLib, (id) => doc.lib.get(id) || null);
+            for (const p of kidsOf(sym.node, "property")) {
+              const name = fieldParts(p).name; if (st.fields.has(name)) continue;
+              const base = name === "Reference" ? sym.ref : fieldValue(sym.node, name);
+              const shown = name === "Reference" ? sym.ref : symbolFieldForVariant(sym.node, vn, sym.path, name, alt, doc.version);
+              if (shown !== base) field(name, shown);
+            }
+            if (alt) for (const p of kidsOf(alt, "property")) {
+              const f = fieldParts(p);
+              if (f.name.startsWith("ki_") || kidsOf(sym.node, "property").some((q) => fieldParts(q).name === f.name) || st.fields.has(f.name) || !f.value) continue;
+              field(f.name, f.value);
+            }
           }
           put(xfs);
         }
@@ -434,12 +493,13 @@ export function kicadNetlist(inp: NlInput): string {
       for (const [path, cs] of sheetClasses) if (path.length <= o.sheet.uuidPath.length && path.every((u, i) => o.sheet.uuidPath[i] === u)) for (const c of cs) classes.add(c);
     }
     if (classes.size) { const xcc = add(xc, xn("component_classes")); for (const c of [...classes].sort(cmp)) add(xcc, xn("class", unescapeString(c))); }
-    const xts = add(xc, xn("tstamps")); for (const e of extra) xts.text.push(e.uuid); xts.text.push(sym.uuid);
+    // (a space after each extra unit's uuid in the .xml, which wxXmlDocument writes as one text)
+    const xts = add(xc, xn("tstamps")); for (const e of extra) xts.text.push(forBOM ? e.uuid + " " : e.uuid); xts.text.push(sym.uuid);
     const xu = add(xc, xn("units"));
     if (sym.lib) for (const u of unitPinInfo(sym.lib)) { const x1 = attr(add(xu, xn("unit")), "name", u.name); const xp = add(x1, xn("pins")); for (const n of u.pins) attr(add(xp, xn("pin")), "num", n); }
   }
-  // ---- groups
-  const groups = add(root, xn("groups"));
+  // ---- groups (GNL_OPT_KICAD only)
+  const groups = forBOM ? xn("groups") : add(root, xn("groups"));
   const visits = new Map<KDoc, number>(); for (const s of inp.sheets) visits.set(s.doc, (visits.get(s.doc) || 0) + 1);
   for (const sh of inp.sheets) {
     const prefix = pathAsString(sh);
@@ -459,7 +519,7 @@ export function kicadNetlist(inp: NlInput): string {
     }
   }
   // ---- variants
-  const xvars = add(root, xn("variants"));
+  const xvars = forBOM ? xn("variants") : add(root, xn("variants"));
   for (const v of (inp.variants || []).slice().sort((a, b) => cmp(a.name, b.name))) { const x = attr(add(xvars, xn("variant")), "name", v.name); if (v.description) attr(x, "description", v.description); }
   // ---- libparts (LIB_SYMBOL_LESS_THAN: by lib id)
   const xlp = add(root, xn("libparts")), libraries = new Set<string>();
@@ -486,17 +546,36 @@ export function kicadNetlist(inp: NlInput): string {
   const xlibs = add(root, xn("libraries"));
   for (const nick of [...libraries].sort(cmp)) { const uri = inp.libUri ? inp.libUri(nick) : null; if (uri === null) continue; const x = attr(add(xlibs, xn("library")), "logical", nick); add(x, xn("uri", uri)); }
   // ---- nets
+  // NETLIST_EXPORTER_BASE::resolvePadNumbers for the board netlist (m_exportVariant empty): the base pin map override on
+  // the sheet instance (a delegating unit follows unit 1's), the library symbol's maps, the resolved Footprint field
+  // and, when the footprint's pads are known, the pad check (an unmapped pin drops out)
+  const unit1 = new Map<string, Sym>();
+  for (const o of walk.length ? walk[0].all : []) if (o.unit === 1 && !unit1.has(o.ref.toLowerCase())) unit1.set(o.ref.toLowerCase(), o);
+  const padNumbers = (s: Sym, pinNumber: string): string[] => {
+    let o = symbolPinMapOverride(s.node, "", s.path);
+    if (o.mode === "delegate") { const u = unit1.get(s.ref.toLowerCase()); o = delegatedPinMapOverrideOf(u && !(u.item.id === s.item.id && u.path === s.path) ? { node: u.node, path: u.path } : null, ""); }
+    const lib = s.sheet.doc.lib.get(sv((kidOf(s.node, "lib_name") || kidOf(s.node, "lib_id") || [])[1])) || null;
+    const fp = resolver(s, inp, fieldsFor(s, ""))(fieldValue(s.node, "Footprint"));
+    let pads = fp && /^[^:]+:.+$/.test(fp) && inp.footprintPads ? inp.footprintPads(fp) : null;
+    if (pads && !pads.size) pads = null;
+    const r = effectivePadNumber(lib, o, fp, pinNumber, pads);
+    if (pads && r.state === "unmapped") return [];
+    return expandStackedPins(r.pad).nums;
+  };
   const xnets = add(root, xn("nets"));
-  const nets = exportNets(inp, walk.map((w) => w.sym), (s) => excluded(s));
+  const byName = exportNets(inp, walk.map((w) => w.sym), (s) => excluded(s));
+  // (the .xml's nets are ordered by their unescaped names)
+  const nets = forBOM ? byName.slice().sort((a, b) => strNumCmp(unescapeString(a.name), unescapeString(b.name))) : byName;
   nets.forEach((net, i) => {
     let xnet: XN | null = null;
     const nodes = net.nodes;
     const stacked = nodes.length <= 1 || nodes.slice(1).every((n) => n.symId === nodes[0].symId && n.inst === nodes[0].inst && n.pin.x === nodes[0].pin.x && n.pin.y === nodes[0].pin.y && n.pin.name === nodes[0].pin.name);
     for (const nd of nodes) {
       if (nd.ref.startsWith("#")) continue;
-      const e = expandStackedPins(nd.pin.number), nums = e.nums;
+      // resolvePadNumbers: the footprint pad(s) the pin goes to; an unmapped pin contributes none
+      const nums = padNumbers(nd.sym, nd.pin.number);
       if (!nums.length) continue;
-      if (!xnet) { xnet = add(xnets, xn("net")); attr(xnet, "code", String(i + 1)); attr(xnet, "name", net.name); attr(xnet, "class", inp.netClass ? inp.netClass(net.name) : "Default"); }
+      if (!xnet) { xnet = add(xnets, xn("net")); attr(xnet, "code", String(i + 1)); attr(xnet, "name", forBOM ? unescapeString(net.name) : net.name); attr(xnet, "class", inp.netClass ? inp.netClass(net.name) : "Default"); }
       for (const num of nums) {
         const x = add(xnet, xn("node")); attr(x, "ref", nd.ref); attr(x, "pin", num);
         if (nd.pin.name || nums.length > 1) attr(x, "pinfunction", nd.pin.name ? nd.pin.name + "_" + num : num);
@@ -504,10 +583,10 @@ export function kicadNetlist(inp: NlInput): string {
       }
     }
   });
-  return finishX(root);
+  return root;
 }
 
-interface NetNode { ref: string; symId: string; inst: number; pin: LibPin }
+interface NetNode { ref: string; symId: string; inst: number; pin: LibPin; sym: Sym }
 /** m_exportNets with each net's symbol pins (the pin's library data), nets by StrNumCmp of the name, the nodes by
  *  reference then shown pin number, duplicates removed. */
 function exportNets(inp: NlInput, _syms: Sym[], excluded: (s: Sym) => boolean): { name: string; nc: boolean; nodes: NetNode[] }[] {
@@ -525,7 +604,7 @@ function exportNets(inp: NlInput, _syms: Sym[], excluded: (s: Sym) => boolean): 
       if (excluded(s)) continue;
       const lp = graphicalPins(s.lib, s.unit, 0).find((p) => p.number === m.pin) || s.lib.pins.find((p) => p.number === m.pin);
       if (!lp) continue;
-      nodes.push({ ref: s.ref, symId: s.item.id, inst: m.inst, pin: lp });
+      nodes.push({ ref: s.ref, symId: s.item.id, inst: m.inst, pin: lp, sym: s });
     }
     nodes.sort((a, b) => (a.ref === b.ref ? cmp(a.pin.number, b.pin.number) : cmp(a.ref, b.ref)));
     const uniq = nodes.filter((n, i) => !nodes.slice(0, i).some((o) => o.ref === n.ref && o.pin.number === n.pin.number));

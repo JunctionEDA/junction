@@ -7,6 +7,7 @@ import { bitmapButton } from "../../../shared/components/kicon-dom";
 import { E, appState, toast, toolCtx, cloneNode } from "./editor";
 import { KD, checkbox, download, h, popupMenu, promptFields, promptText, select, textInput, unsavedChangesBox, type GridApi, type GridColumn } from "./dom";
 import { messageBox } from "./sch-items";
+import { clearVariantSymbol, setVariantSymbol } from "./change-symbols";
 import { datasheetButton, docFiles, footprintButton } from "./browse-cells";
 import { commonChooserFilters, type FpChooserFilters } from "../library/fpchoice";
 import { fieldNamesAreDuplicates } from "./sch-items-logic";
@@ -18,6 +19,7 @@ import { openDocId, pushUndoFor, store } from "./editor";
 import { variantDocView, variantEditNode } from "./variant-edits";
 import * as VM from "../canvas/variant-model";
 import { currentSheetPath, setCurrentVariant, variantNamesForUI } from "../editor/variant";
+import { suffixRefEditing } from "../editor/schnets";
 import { addVariant, type VariantPrompts, fieldsTableCopyVariant, fieldsTableDeleteVariant, fieldsTableEditVariantDescription, fieldsTableRenameVariant } from "../editor/variant-ops";
 /** DIALOG_SYMBOL_FIELDS_TABLE::SetupColumnProperties: the symbols' fields, then "any templateFieldNames which aren't
  *  already present" (hidden, not grouped: withAllFields adds new names that way). */
@@ -136,7 +138,12 @@ export function openFieldsTable(exportTab = false): void {
     };
     for (const [docId, d] of docs) {
       if (!use.has(docId)) continue;
+      // SCH_REFERENCE::GetRefSuffix with reused-sheet suffixes: each row's base and its package's suffix, so units of one
+      // channel group together and ranges keep to one channel (FormatRefDesRanges)
+      const entry = projectDocs().find((x) => x.docId === docId), se = suffixRefEditing(docId === here && E.kdoc ? E.kdoc as KDoc : d, entry ? entry.path : undefined);
       for (const r of symbolRows(variantDocView(d, variant, pathOf(docId)), docId, !ro, powerIn(d))) {
+        const it = d.items.get(r.id), path = se ? se.sheet.path || "" : "";
+        if (se && it && se.sc.rs.has) { const b = se.S.baseRefOn(se.sc, se.sheet, it.node), sfx = b.endsWith("?") ? "" : se.sc.rs.packageSuffix(r.id, path); if (r.ref === b + sfx || r.ref === b + se.sc.rs.suffix(path)) { r.refBase = b; r.refSuffix = sfx; } }
         if (scope === "Selection" && !selSheets.has(docId) && !r.ids.some((id) => selection.has(id))) continue;
         const prev = r.ref && !/\?$/.test(r.ref) ? byRef.get(r.ref) : undefined; const members = r.ids.map((id) => ({ docId, id }));
         if (prev) { prev.members.push(...members); continue; }
@@ -144,7 +151,7 @@ export function openFieldsTable(exportTab = false): void {
       }
     }
     // edits made before a rescope / reload stay on screen
-    for (const r of out) for (const m of r.members) { const e = edits.get(editKey(m)); if (!e) continue; Object.assign(r.values, e.values); for (const gone of e.remove || []) delete r.values[gone]; for (const [f, v] of Object.entries(e.flags)) (r as unknown as Record<string, boolean>)[f] = v; if (e.values.Reference !== undefined) r.ref = e.values.Reference; }
+    for (const r of out) for (const m of r.members) { const e = edits.get(editKey(m)); if (!e) continue; Object.assign(r.values, e.values); for (const gone of e.remove || []) delete r.values[gone]; for (const [f, v] of Object.entries(e.flags)) (r as unknown as Record<string, boolean>)[f] = v; if (e.values.Reference !== undefined) { r.ref = e.values.Reference; delete r.refBase; delete r.refSuffix; } }
     rows = out; preset = withAllFields(preset, tableFieldNames(rows));
   };
   const markUnsaved = () => { dirtySettings = true; if (presetName !== UNSAVED) { presetName = UNSAVED; fillPresetSel(); } };
@@ -213,6 +220,18 @@ export function openFieldsTable(exportTab = false): void {
           const url = str(r[c.key]).trim();
           items.push({ label: "Show Datasheet", title: "Show datasheet in browser", disabled: !url || url === "~", run: () => { if (/^https?:/i.test(url)) window.open(url, "_blank", "noopener"); else toast("Datasheet: " + url); } }, { sep: true });
         }
+        // showFieldsTablePopupMenu under a design variant: a row of one symbol offers Set Variant Symbol... and, when
+        // its variant record holds a symbol override, Clear Variant Symbol (SyncSelection, then the actions)
+        const curVariant = String((E as { currentVariant?: string }).currentVariant || "");
+        if (curVariant && members.length === 1) {
+          const m = members[0], d = docs.get(m.docId), it = d && d.items.get(m.id);
+          if (d && it && it.kind === "symbol") {
+            const sheet = { docId: m.docId, doc: d, path: pathOf(m.docId) };
+            const sync = (): void => { if (m.docId === S.docId) { try { toolCtx().setSelection([m.id]); } catch (e) { /* the selection is best effort */ } } };
+            items.push({ sep: true }, { label: "Set Variant Symbol...", run: () => { sync(); void setVariantSymbol(m.id, sheet); } });
+            if (VM.symbolVariantOverride(it.node, curVariant, sheet.path)) items.push({ label: "Clear Variant Symbol", run: () => { sync(); void clearVariantSymbol(m.id, sheet); } });
+          }
+        }
         // appendPopupMenuItems: with a variant besides the default, the cell's value in another variant
         const names = variantNamesForUI();
         if (names.length >= 2) {
@@ -230,7 +249,7 @@ export function openFieldsTable(exportTab = false): void {
       onChange(r, key, value) {
         if (!key) return; const a = ATTR_FIELDS[key];
         for (const x of r._g.rows as Row[]) {
-          if (a) (x as unknown as Record<string, boolean>)[a.flag] = !!value; else { x.values[key] = str(value); if (key === "Reference") x.ref = str(value); }
+          if (a) (x as unknown as Record<string, boolean>)[a.flag] = !!value; else { x.values[key] = str(value); if (key === "Reference") { x.ref = str(value); delete x.refBase; delete x.refSuffix; } }
           for (const m of x.members) { const e = editOf(m); if (a) e.flags[a.flag] = !!value; else { e.values[key] = str(value); if (e.remove) e.remove.delete(key); } }
         }
         refreshGrid();

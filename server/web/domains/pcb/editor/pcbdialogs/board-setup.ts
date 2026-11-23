@@ -27,7 +27,9 @@ import { adoptProjectFile, canWriteProject, liveDocument, loadProjectFile, proje
 import { BS } from "./canvas";
 import { put, box, checkField, currentUnits, focusError, form, grid, gridButtons, h, iconButton, bitmapButton, staticBitmap, infoBar, lenField, listDialog, messageBox, note, numField, openDialog, selectField, spinField, textEntryBox, unitLabel, unitName, fmtLen, fmtLenU, parseLen, swatch, type CellValue, type Field, type TreeGroup, treeBook } from "./ui";
 import { colorPicker, fromHex, toHex, type RGBA } from "./color-picker";
-import { drillChartPage, viaStacksPage, zonesPage, tuningPatternsPage, tuningProfilesPage, componentClassesPage, embeddedFilesPage, IMPORT_OPTIONS, type PageError, type SetupCtx } from "./board-setup-pages";
+import { drillChartPage, viaStacksPage, zonesPage, tuningPatternsPage, tuningProfilesPage, componentClassesPage, embeddedFilesPage, IMPORT_OPTIONS, type BoardEmbeddedEdit, type PageError, type SetupCtx } from "./board-setup-pages";
+import { textFaces } from "../../fonts-used";
+import { embeddedFileNode, fetchFontFiles, removeEmbeddedFile } from "../../library/embedded-file";
 import { ruleAtLine, ruleErrors, ruleReport, rulesEditor, type RuleMessage } from "./rules-editor";
 import { markdownToHtml } from "../markdown";
 import { RULES_HELP_MD } from "../../generated/rules-help";
@@ -876,8 +878,9 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     register("Violation Severity", { edits: () => Array.from(pick, ([code, v]) => ({ path: [...DS, "rule_severities", code], value: v })) });
   };
 
-  let drillEdit: DrillProfile | null = null; let zoneDefaultsEdit: string | null | undefined;
-  const sctx = (): SetupCtx => ({ pro, ds, header, roPro, roBoard, boardText, register: (label, edits) => register(label, { edits }), validate, layerRows: () => layerRows, setDrillProfile: (p) => { drillEdit = p; }, setZoneDefaults: (t) => { zoneDefaultsEdit = t; },
+  let drillEdit: DrillProfile | null = null; let zoneDefaultsEdit: string | null | undefined; let embeddedEdit: (() => BoardEmbeddedEdit | null) | null = null;
+  const liveBoard = E.kdoc && E.kdoc.type === "pcb" && !(E.kdoc as { fpEditor?: boolean }).fpEditor ? E.kdoc as KDoc & { embeddedFiles?: SNode | null; embeddedFonts?: boolean } : null;
+  const sctx = (): SetupCtx => ({ pro, ds, header, roPro, roBoard, boardText, embedded: liveBoard ? { files: liveBoard.embeddedFiles || null, fonts: !!liveBoard.embeddedFonts } : undefined, boardFonts, setEmbeddedFiles: (get) => { embeddedEdit = get; }, register: (label, edits) => register(label, { edits }), validate, layerRows: () => layerRows, setDrillProfile: (p) => { drillEdit = p; }, setZoneDefaults: (t) => { zoneDefaultsEdit = t; },
     selectionRefs: () => {
       const sel = (CollabTools as unknown as { pcb?: { state?: { sel?: Set<string> } } }).pcb?.state?.sel, doc = E.kdoc;
       if (!sel || !doc) return [];
@@ -1088,6 +1091,8 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
           if (g !== BS().sectionText(header.general)) sections.general = g;
         }
       }
+      const ee = canBoard && embeddedEdit ? embeddedEdit() : null;
+      if (ee) applyEmbeddedFiles(ctx, ee);
       // the rule document, once, when any page changed it (imported rules count even when no page was shown)
       syncCustomRules();
       const rulesText = canWriteProject() && ruleDoc.modified ? ruleDoc.getText() : null;
@@ -1181,4 +1186,39 @@ async function save(ctx: ToolCtx, proText: string | null, edits: ProjectEdit[], 
   if (failed.length) ctx.toast(`Board Setup: could not save the ${failed.join(" and ")}`, 5000);
   else if (done.length) ctx.toast(`Board Setup: ${done.join(", ")} saved`);
   ctx.requestRender();
+}
+
+/** BOARD::GetFonts as files: the outline fonts of the board's own text (Drawings(), not the footprints') that may be embedded. */
+async function boardFonts(): Promise<{ name: string; bytes: Uint8Array }[]> {
+  const doc = E.kdoc, pid = state.project ? (state.project as { projectId: string }).projectId : "";
+  if (!doc || !pid) return [];
+  const items = new Map<string, unknown>(); for (const [id, it] of doc.items) if (it.kind === "gr_text" || it.kind === "gr_text_box" || it.kind === "dimension") items.set(id, it);
+  let uploads: { family: string; styles: { bold: boolean; italic: boolean; fileName?: string }[] }[] = [];
+  try { const r = await api(`/api/projects/${pid}/fonts`) as { fonts?: typeof uploads }; uploads = r.fonts || []; } catch { uploads = []; }
+  return fetchFontFiles(pid, textFaces({ items }), uploads);
+}
+/**
+ * PANEL_EMBEDDED_FILES::TransferDataFromWindow on the board: a removed file some footprint also embeds asks once whether
+ * to delete it from the footprints as well (they change as one "Board Setup" step); the board takes the panel's files
+ * and the Embed fonts flag (a BOARD_SETUP change, canvas/board-setup.ts).
+ */
+function applyEmbeddedFiles(ctx: ToolCtx, edit: BoardEmbeddedEdit): void {
+  const doc = E.kdoc;
+  const change = BS().embeddedFilesChange(edit.put, { remove: edit.remove, fonts: edit.fonts });
+  sendOp([change], false); applyChanges([change]);
+  if (!doc || doc.type !== "pcb" || !edit.remove.length) return;
+  const users = (Array.from(doc.items.values()) as KItem[]).filter((it) => { if (it.kind !== "footprint") return false; const ef = KiCadCanvas.kid(it.node, "embedded_files") as SNode | null; return !!ef && edit.remove.some((n) => embeddedFileNode(ef, n)); });
+  if (!users.length) return;
+  messageBox("Confirmation", "Deleted embedded files are also referenced in some footprints.\nDelete from footprints as well?", [{ label: "No" }, { label: "Yes", fn: () => {
+    if (E.kdoc !== doc) return;
+    const PT = (window as unknown as { PcbTools: { replacedChange(item: unknown, node: SNode): KChange } }).PcbTools;
+    const changes: KChange[] = [];
+    for (const it of users) {
+      const node = KiCadCanvas.cloneNode(it.node), ef = KiCadCanvas.kid(node, "embedded_files") as SNode;
+      for (const n of edit.remove) removeEmbeddedFile(ef, n);
+      if (ef.length <= 1) node.splice(node.indexOf(ef), 1);
+      changes.push(PT.replacedChange(it, node));
+    }
+    ctx.commit(changes, "Board Setup"); ctx.requestRender();
+  } }], 0);
 }
