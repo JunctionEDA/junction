@@ -1,0 +1,190 @@
+[
+  {
+    "name": "cad_script_guide",
+    "title": "How to write a custom feature",
+    "write": false,
+    "description": "Everything needed to write a custom feature for a part studio: the guide (what a script is, how to think about one, the rules of its sandbox), the Feature API's type file (the only functions a script can call), and the examples that ship (lightening a plate with a truss, isogrid or hex pattern; a slot between two holes; a bracket; a vent pattern; engraved text). Read this once before writing a script.",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_script_list",
+    "title": "List a project's custom features",
+    "write": false,
+    "description": "The custom features of a project (the scripts in its library, which every part studio of the project offers under Custom features, This project): each one's name, what it does, its parameters with their types, defaults and limits, and its version.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "Project id or exact name, as listed by list_projects."
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_script_read",
+    "title": "Read a custom feature's script",
+    "write": false,
+    "description": "The source of one of a project's custom features, with its parameters.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "Project id or exact name, as listed by list_projects."
+        },
+        "script": {
+          "type": "string",
+          "description": "The custom feature's name or id, as listed by cad_script_list."
+        }
+      },
+      "required": [
+        "project",
+        "script"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_script_validate",
+    "title": "Check a custom feature's script",
+    "write": false,
+    "description": "Read a script in the sandbox without building anything: whether it declares a feature, and its title and parameters, or what is wrong with it and on which line. Use it for a quick check of syntax and of the declaration; cad_script_run is what shows whether the feature works.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "The whole script."
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_script_run",
+    "title": "Run a custom feature on a part studio",
+    "write": false,
+    "description": "Try a custom feature on a part studio: it is built as the next feature, on a copy, and nothing changes. The answer is what happened: an error with the line it came from, or the warnings, what the script reported, the volume before and after (and the mass with a density), every body with its volume, whether the result is a sound solid, the console output, and a picture of the result. Give the script as source (text being worked on) or script (one of the project's, by name). Scripts run in a sandbox with half a minute of work; one that runs out fails with 'took too long'.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "Project id or exact name, as listed by list_projects."
+        },
+        "document": {
+          "type": "string",
+          "description": "Which part studio: its path as listed by get_project. May be left out when the project has only one."
+        },
+        "source": {
+          "type": "string",
+          "description": "The whole script to run."
+        },
+        "script": {
+          "type": "string",
+          "description": "Instead of source: the name or id of one of the project's custom features."
+        },
+        "params": {
+          "type": "object",
+          "description": "Parameter values by key (numbers in mm or degrees, booleans, enum keys, text). A face or edge parameter takes { kind, body, name } with names from cad_get_bodies (names: true); left out, pick parameters are empty, as in a new feature, and the others take their defaults.",
+          "additionalProperties": true
+        },
+        "view": {
+          "type": "string",
+          "enum": [
+            "iso",
+            "top",
+            "bottom",
+            "front",
+            "back",
+            "left",
+            "right"
+          ],
+          "description": "The view of the picture (iso)."
+        },
+        "width_px": {
+          "type": "number",
+          "description": "Picture width, 300 to 1400 (900)."
+        },
+        "picture": {
+          "type": "boolean",
+          "description": "false leaves the picture out."
+        },
+        "density": {
+          "type": "number",
+          "description": "g/cm³, to report the mass before and after (aluminium 2.7, steel 7.85)."
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_script_write",
+    "title": "Save a custom feature to a project",
+    "write": true,
+    "description": "Save a script to the project's library, where everybody in the project finds it in the Custom features drop-down of every part studio. A script that does not read is refused. With script, the named custom feature is replaced (features already made from it keep the version they were made with, and their rows offer the update); otherwise a new one is added under name, or under the script's own title. With add_to, the feature is also added to that part studio, with params, when it builds a sound result there (undo_changes takes the feature back). Run the script with cad_script_run first and write it when the result is right.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "Project id or exact name, as listed by list_projects."
+        },
+        "source": {
+          "type": "string",
+          "description": "The whole script."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name in the project's library. Left out: the script's title (or, when replacing, the name it has)."
+        },
+        "script": {
+          "type": "string",
+          "description": "The name or id of the custom feature to replace."
+        },
+        "add_to": {
+          "type": "string",
+          "description": "A part studio (its path as listed by get_project) to add the feature to as well."
+        },
+        "params": {
+          "type": "object",
+          "description": "With add_to: the feature's parameter values by key, as for cad_script_run.",
+          "additionalProperties": true
+        },
+        "view": {
+          "type": "string",
+          "enum": [
+            "iso",
+            "top",
+            "bottom",
+            "front",
+            "back",
+            "left",
+            "right"
+          ],
+          "description": "With add_to: the view of the picture (iso)."
+        }
+      },
+      "required": [
+        "project",
+        "source"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

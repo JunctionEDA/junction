@@ -2011,7 +2011,130 @@ What is particular to them:
   kernel's mass properties are poor across a curve's inner knots. Slices are surfaces or curves, not sketches:
   the profile field lists Sketch features only, and takes a slice as a flat face.
 
+## Custom features people write (`script/`)
+
+A person (or the assistant, or an agent over MCP) can write a feature as a short JavaScript file: a title, an
+icon, parameters and an `evaluate`. The page people read is [`docs/WRITING_CUSTOM_FEATURES.md`](../../../../docs/WRITING_CUSTOM_FEATURES.md)
+(written from `script/assets/prompts/guide.md`, which is also what the assistant reads); the API is
+`script/assets/feature-api.d.ts`, **the one description of it**: the editor's completion and hover
+(`script/apidoc.ts`), the guide and the assistant all read that file, and a test type-checks every shipped
+example against it and checks the sandbox defines every name in it.
+
+| File (under `mechanical/`) | What |
+|---|---|
+| `script/assets/feature-api.d.ts`, `prelude.js` | The API as types, and its inside-the-sandbox half (the `ctx`, `Body`, `Face`, `Edge`, `Geo2`, `V3` a script sees). |
+| `script/assets/exemplars/*.js` | The features that ship as scripts: Lighten plate (truss, isogrid, hex), Hole-to-hole slot, Angle bracket, Vent pattern, Engrave text. |
+| `script/assets/prompts/*.md` | The guide, the assistant's instructions, each tool's description. Improve these, not code. |
+| `script/sandbox.ts`, `limits.ts` | The QuickJS interpreter a script runs in, its limits, its errors. |
+| `script/host.ts` | The fixed table of operations a script can ask for, on the feature's `EvalContext`. |
+| `script/geom2d.ts` | `Geo2`: regions, offsets and booleans (Clipper2), rounding, arcs read back from polygons, Delaunay, Voronoi, cell patterns, text. Pure. |
+| `script/run.ts`, `runner.ts`, `features/script.ts` | Building a `script:…` feature in the worker. |
+| `script/report.ts`, `report-text.ts`, `png.ts` | Running a script on a part studio and saying what came of it (the one report the editor, the assistant and MCP read); what a part looks like to a script's author. |
+| `script/manifest.ts` | What a script declares, as data: types, the checks on stored data, the dialog's schema from it. Pure. |
+| `script/library.ts`, `store.ts` | The project's library: where scripts are kept and every edit of them; the page's live view of it. |
+| `script/ui/` | The editor (`EditorPanel`, `CodeEditor`, `editor-state`), the library dialog, the assistant's box, the difference view. |
+| `script/assistant/` | The assistant's loop (`loop.ts`) and the model client (`client.ts`). |
+| `services/script-*.ts` | `script-describe`, `script-last-run`, `script-run`, `script-part-summary`. |
+| `mcp/script-host.ts`, `mcp/script-tools.json` | The `cad_script_*` tools. |
+| `panels/script-editor.tsx`, `tools/script-new.ts`, `tools/script-library.ts` | Where the page picks all of this up. |
+
+`scripts/gen-cad-script-assets.mjs` (run by `gen-cad-registry.mjs`) writes the assets and the interpreter's
+`.wasm` into `generated/` as modules, and the docs page.
+
+### Where a script lives, and what a feature made from it is
+
+- **The library is the project's own document** (`project.jproj`): one item per script,
+  `{ id: "cfs:<id>", type: "feature-script", name, source, manifest, order }`, beside the tab order. So scripts
+  are shared live with everybody in the project, versioned, archived and synced with it, and offered in every
+  part studio of it. The source is one value: two people saving one script at once, the later wins, and the
+  editor says when the script changed under it.
+- **A feature made from a script is an ordinary feature item** whose `featureType` is
+  `script:<script id>.<hash of the source>` and whose `params` hold the script under `$script`
+  (`{ id, name, hash, source, manifest }`) and one value per parameter beside it. **It carries its own copy**:
+  a part studio builds the same wherever it is built (an assembly, Compare, an earlier version, the assistant's
+  host) and whatever happens to the library, with no input filter. `library.ts versionOf` says how the copy
+  stands against the library; the feature's row says "update" (one click, `updatedFeature`: the new type and
+  script, the values kept, new parameters at their defaults) or "own copy" when the script is gone.
+- **In the worker** `kernel/regen.ts` hands a type `x:y` it has no definition for to the definition `x`:
+  `features/script.ts` builds every `script:…` feature from the source it carries.
+- **On the page** `featureDef` and `studio.definitions()` also ask `core/dynamic.ts`, where `script/store.ts`
+  answers with a definition per script version (the library's, the editor's working ones, the ones the open
+  studio's features carry): title, icon, schema and defaults from the manifest. That is why the dialog, the
+  toolbar (Custom features ▸ **This project**), the tool search, the feature list, the Parameters table and
+  the collaboration guard need no case for scripts.
+- **A stored manifest is somebody else's data.** It is read only through `manifest.ts cleanManifest` /
+  `cleanScriptRef`, which keep what they recognise. An icon is a name from `ICONS` or path data checked
+  character by character; it is never markup from a document (`Glyph` sets innerHTML). The worker never reads
+  the stored manifest at all: it reads the source again in the sandbox.
+
+### The sandbox: what the isolation is
+
+Scripts are shared, so one person's script runs in another person's browser, and on the server in the
+assistant's host. A script is **never given to the JavaScript engine of the page, the worker or node**. It is
+text handed to QuickJS compiled to WebAssembly (`quickjs-emscripten`), which has the language and nothing else:
+no `fetch`, `XMLHttpRequest`, `WebSocket`, `importScripts`, `postMessage`, `self`, `indexedDB`, DOM, `process`,
+`require`, module loader, timers or clock. The only way out is one function taking two strings and returning
+one (`__host(op, argsJson)`), answered from a fixed table (`host.ts`); values cross as JSON, and bodies, faces
+and edges cross as names. A script can therefore read the model of its own part studio at its place in the
+feature list and change that working copy, and nothing else: not another document, the page, cookies, the
+network or the kernel's raw bindings.
+
+Bounds: 64 MB of interpreter memory, a capped stack, 50 000 API calls, and a time allowance that is counted in
+interpreter work (the same script stops at the same place on any machine) with a wall-clock limit of 30 s
+behind it; each API call is bounded in what it may bring (regions, points, bodies). A fresh interpreter per
+evaluation. No `Date`, and `Math.random` repeats, so a feature rebuilds the same. Whatever a script does wrong
+ends as a `FeatureError` with a sentence and, where there is one, the line; the engine leaves the model as the
+feature found it and the next features run. **The soundness check of `regen.ts` applies to script features as
+to any other.**
+
+What it does not protect against: one kernel call cannot be interrupted, so a script can spend its whole
+allowance in a few heavy operations (the page stays responsive; the worker is busy, as for any slow feature); a
+script can make a wrong or ugly part; and a bug in QuickJS or in the engine's WebAssembly is outside it. If
+the engine under the interpreter throws (its own stack, an abort), that instance is dropped and the next run
+gets a fresh one (`loadSandbox`).
+
+### The editor, and writing with the assistant
+
+- **The preview is a real feature draft** (`studio.startFeature` / `setDraft({ featureType })`): the generated
+  dialog is the real dialog, the preview the real regeneration, "Add to part" the dialog's ✓. Each pause in
+  typing asks `script-describe`; a script that reads moves the draft to the new version, one that does not
+  leaves the last good preview up with the problem on its line. Console output and reports come from
+  `script-last-run`. Nothing reaches the project until Save. `window.JunctionScriptEditor` while it is open.
+- **The assistant** (`assistant/loop.ts`) is a plain tool loop: `run_script` (build a candidate on the part on
+  an engine of the worker's own, answer with the report and a picture), `get_part`, `propose_script` (refused
+  unless that exact source has just built a sound result). The proposal is shown as a difference with the
+  preview moved to it; Accept changes the buffer, Discard puts the preview back.
+- **The model is the person's own.** The server holds no model key (`server/src/ai.rs`): the person pastes an
+  API key and picks a model from the list the key can use (`assistant/client.ts`, the official SDK, called
+  from the browser). Both are kept in that browser's localStorage, so any script running on this site could
+  read them: the settings say to use a key made for this, with a spending limit. No model is named in code.
+  A page may set `window.JunctionScriptAssistant.model` to another `ModelClient` (the browser test's scripted
+  one).
+- **Over MCP** an outside agent has the same loop: `cad_script_guide` (the guide, the types, the examples),
+  `cad_script_list`, `cad_script_read`, `cad_script_validate`, `cad_script_run` (a trial; the same report and
+  picture), `cad_script_write` (save to the library; with `add_to` also add the feature to a part studio when it
+  builds a sound result there).
+
+### Adding to the API
+
+Add the function to `feature-api.d.ts` with its comment, to `prelude.js` (a method that calls the host), and
+to `host.ts` (the operation: check every argument, bound what it may bring, fail with a sentence). A `Geo2`
+function goes in `geom2d.ts` and the list in `prelude.js`. `cad-script-api.test.js` fails if the three disagree.
+Keep it small and stable: scripts in people's projects are written against it, and a feature's own copy of its
+script is run as it is for as long as the part exists. A change that old scripts would get wrong needs a new
+function, not a new meaning.
+
+Tests: `cad-script-sandbox`, `cad-script-api`, `cad-script-exemplars`, `cad-script-library` (node, the real
+kernel and interpreter), `scripts/cad-script-ui.mjs` (the browser, two people), `scripts/cad-script-mcp.mjs`
+(the MCP endpoint).
+
 ## Limits, in one place
+
+- **Custom features people write.** A script's own copy in a feature is not merged: updating takes the
+  library's version whole. The editor's completion knows the API's names and the type of a few usual variable
+  names (`ctx`, `face`, `body`, `Geo2`), not the types of expressions. The assistant needs the person's own API
+  key, kept in their browser. One kernel call inside a script cannot be interrupted. `face.outline()` gives
+  lines and circular arcs; any other curve comes as points. Text is set in one font.
 
 - **Sketcher.** No ellipse, spline or text. Use edge takes straight and circular edges, and what it draws does
   not follow the model afterwards (the source is recorded as `from`). A sketch cannot use a feature that comes

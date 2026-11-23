@@ -24,7 +24,7 @@ export function diffLines(before: string, after: string): DiffLine[] {
     let i = 0, j = 0;
     while (i < n || j < m) {
       if (i < n && j < m && x[i] === y[j]) { out.push({ kind: "same", text: x[i], a: head + i + 1, b: head + j + 1 }); i++; j++; }
-      else if (j < m && (i >= n || lcs[i * w + j + 1] >= lcs[(i + 1) * w + j])) { out.push({ kind: "add", text: y[j], b: head + j + 1 }); j++; }
+      else if (j < m && (i >= n || lcs[i * w + j + 1] > lcs[(i + 1) * w + j])) { out.push({ kind: "add", text: y[j], b: head + j + 1 }); j++; }
       else { out.push({ kind: "del", text: x[i], a: head + i + 1 }); i++; }
     }
   }

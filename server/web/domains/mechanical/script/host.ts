@@ -473,8 +473,12 @@ export function makeHost(ctx: EvalContext, values: { [key: string]: unknown }, d
       if (o.through) depth = -extentAlong(f.body.shape, frame.origin, frame.normal)[0] + 1;
       else { depth = num(o.depth, "face.cut: depth"); if (!(depth > 0)) throw new HostFail("The depth of a cut must be more than zero."); }
       return kernelTry("The cut", () => {
+        const before = k.volume(f.body.shape);
         const r = arcsElsePolygons((arcs) => k.boolean("cut", { shape: f.body.shape, faces: f.body.topo.faces }, named(prisms(a[1], frame, 0, -depth, "face.cut", "floor", "wall", arcs)), fid, ctx.own));
-        return { value: B(replace(f.body, r, "The cut")), mutated: true };
+        const out = replace(f.body, r, "The cut");
+        // a shape drawn in the wrong coordinates misses the part and says nothing: say it
+        if (before - k.volume(out.shape) < 1e-6 && diag.warnings.length < 20) { const m = "A cut removed nothing: its shape lies outside the part (2D points are in the face's own plane; face.toLocal turns a model point into them)."; diag.warnings.push(m); ctx.warn(m); }
+        return { value: B(out), mutated: true };
       });
     },
     "face.add": (a) => {

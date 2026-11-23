@@ -294,8 +294,8 @@ declare const Geo2: {
   ngon(centre: Pt, radius: number, sides: number, angle?: number): Loop;
   /** The shape a round cutter of `width` leaves going from `a` to `b`. */
   slot(a: Pt, b: Pt, width: number): Loop;
-  /** Line segments given a width (round ends), merged: ribs along the edges of a triangulation. */
-  thicken(segments: [Pt, Pt][], width: number): Region[];
+  /** Line segments, each [[x1, y1], [x2, y2]], given a width with round ends and merged: ribs along the edges of a triangulation. */
+  thicken(segments: number[][][], width: number): Region[];
   /** Text outlines.  `size` is the height of a capital letter, `at` the start of the baseline. */
   text(text: string, opts: { size: number; at?: Pt; angle?: number; align?: "left" | "centre" | "right" }): Region[];
 

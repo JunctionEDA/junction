@@ -35,7 +35,8 @@ export function parseApi(dts: string): ApiIndex {
     if (!t || t.startsWith("//")) { if (!t) doc = []; continue; }
     let m: RegExpExecArray | null;
     if (!current) {
-      if ((m = /^interface (\w+)/.exec(t))) { current = m[1]; types[current] = types[current] || []; doc = []; continue; }
+      // (an interface written on one line has no members of its own to list)
+      if ((m = /^interface (\w+)/.exec(t))) { types[m[1]] = types[m[1]] || []; if (!/\}$/.test(t)) current = m[1]; doc = []; continue; }
       if ((m = /^declare const (\w+): \{$/.exec(t))) { current = m[1]; types[current] = []; add(null, m[1], `const ${m[1]}`, "property"); doc = []; continue; }
       if ((m = /^declare function (\w+)(\(.*)$/.exec(t))) { add(null, m[1], `${m[1]}${m[2]}`, "method"); doc = []; continue; }
       if ((m = /^declare const (\w+): (.*)$/.exec(t))) { add(null, m[1], `${m[1]}: ${m[2]}`, "property"); doc = []; continue; }

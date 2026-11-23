@@ -35,11 +35,8 @@ function remember(featureId: string, run: LastRun): void {
   if (lastRuns.size > 200) lastRuns.delete(lastRuns.keys().next().value as string);
 }
 
-let sandbox: Promise<Sandbox> | null = null;
-export function sandboxOnce(): Promise<Sandbox> {
-  if (!sandbox) { sandbox = loadSandbox(); sandbox.catch(() => { sandbox = null; }); }
-  return sandbox;
-}
+/** The interpreter: loaded on first use, and again if a run left it unusable (script/sandbox.ts loadSandbox). */
+export function sandboxOnce(): Promise<Sandbox> { return loadSandbox(); }
 
 /** Manifests by source hash: reading a script's declaration again for every rebuild would cost a few milliseconds each. */
 const described = new Map<string, ReturnType<Sandbox["describe"]>>();

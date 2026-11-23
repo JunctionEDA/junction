@@ -20,7 +20,7 @@ import type { PartSummary, RunReport } from "./report-text";
 export { reportText, type PartSummary, type RunReport } from "./report-text";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-const r3 = (v: number) => Math.round(v * 1000) / 1000;
+const r3 = (v: number) => Math.round(v * 1000) / 1000 || 0;   // (never -0)
 
 export interface RunOptions { image?: { view?: string; width?: number } | false; density?: number }
 

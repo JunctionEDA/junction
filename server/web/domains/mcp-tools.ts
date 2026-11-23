@@ -8,5 +8,6 @@
 import type { McpDomainTools } from "../platform/mcp/host";
 import { ASSEMBLY_TOOLS } from "./assembly/mcp/host";
 import { MECHANICAL_TOOLS } from "./mechanical/mcp/host";
+import { SCRIPT_TOOLS } from "./mechanical/mcp/script-host";
 
-export const DOMAIN_TOOLS: readonly McpDomainTools[] = [MECHANICAL_TOOLS, ASSEMBLY_TOOLS];
+export const DOMAIN_TOOLS: readonly McpDomainTools[] = [MECHANICAL_TOOLS, SCRIPT_TOOLS, ASSEMBLY_TOOLS];

@@ -54,7 +54,7 @@ export function EditorPanel({ studio }: { studio: PartStudio }) {
     const fit = () => { canvas.style.right = `${el.offsetWidth}px`; };
     fit();
     const ro = new ResizeObserver(fit); ro.observe(el);
-    const t = window.setTimeout(() => studio.fit(), 60);
+    const t = window.setTimeout(() => studio.fit(), 250);
     return () => { ro.disconnect(); clearTimeout(t); canvas.style.right = "0"; };
   }, [s.open, wide, studio]);
   if (!s.open) return null;

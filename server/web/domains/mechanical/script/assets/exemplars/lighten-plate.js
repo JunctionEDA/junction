@@ -56,10 +56,9 @@ feature({
       pockets = Geo2.intersection(cells, field);
     }
 
-    // 3. no slivers (shrink and grow back: what is narrower than the limit does not come back), then corners
-    //    a cutter can make
-    pockets = tidy(pockets, p);
-    if (p.through) pockets = keepInOnePiece(ctx, outline, pockets, p);
+    // 3. no slivers, corners a cutter can make
+    pockets = tidy(pockets, field, p);
+    if (p.through) pockets = keepInOnePiece(ctx, outline, field, pockets, p);
     if (!pockets.length) throw ctx.fail("No pocket fits with these sizes. Use a narrower rib, smaller margins or a larger cell.");
 
     face.cut(pockets, p.through ? { through: true } : { depth: p.depth });
@@ -70,11 +69,18 @@ feature({
   },
 });
 
-function tidy(pockets, p) {
+// No slivers, and corners a cutter can make.  Opening a shape (shrink, then grow back round) drops what is
+// narrower than the limit but rounds every corner by as much; cutting the original to a little more than the
+// opened shape gives the corners back, and they are then rounded by the corner radius alone.
+function tidy(pockets, field, p) {
   const w = Math.max(p.narrowest, 2 * p.fillet) / 2;
-  if (w > 0) pockets = Geo2.offset(Geo2.offset(pockets, -w, "miter"), w, "miter");
-  // the spikes of material that point into a pocket are rounded too, by less than half a rib so that no rib is eaten
-  return Geo2.round(pockets, p.fillet, Math.min(p.fillet, 0.4 * p.rib));
+  if (w > 0) {
+    const wide = Geo2.offset(Geo2.offset(pockets, -w, "miter"), w);
+    pockets = Geo2.intersection(pockets, Geo2.offset(wide, w));
+  }
+  // the spikes of material that point into a pocket are rounded too, by less than half a rib so that no rib is
+  // eaten; cut back to the field, the margins hold exactly
+  return Geo2.intersection(Geo2.round(pockets, p.fillet, Math.min(p.fillet, 0.4 * p.rib)), field);
 }
 
 // Two anchors next to each other on the outline: the edge between them runs along the margin, not across the plate.
@@ -85,7 +91,7 @@ function neighbours(i, j, n) {
 
 // A through pocket that surrounds an island (a boss the pattern's ribs miss) would cut it loose: give each
 // island three spokes, and refuse if the plate would still come apart.
-function keepInOnePiece(ctx, outline, pockets, p) {
+function keepInOnePiece(ctx, outline, field, pockets, p) {
   const spokes = [];
   for (const pocket of pockets) {
     for (const island of pocket.holes) {
@@ -97,7 +103,7 @@ function keepInOnePiece(ctx, outline, pockets, p) {
     }
   }
   let out = pockets;
-  if (spokes.length) out = tidy(Geo2.difference(pockets, Geo2.thicken(spokes, p.rib)), p);
+  if (spokes.length) out = tidy(Geo2.difference(pockets, Geo2.thicken(spokes, p.rib)), field, p);
   const pieces = Geo2.difference(outline, out).length;
   if (pieces > 1) throw ctx.fail("With these sizes the pockets would cut the plate into " + pieces + " pieces. Use a wider rib or margin, or a pocket depth instead of Through.");
   return out;

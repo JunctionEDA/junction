@@ -147,7 +147,8 @@ export function round(shape: unknown, radius: number, reflex = 0): Region[] {
   if (!(radius >= 0) || !(reflex >= 0)) throw new Geo2Error("round needs a radius of zero or more.");
   let out = regions(shape);
   if (radius > 1e-9) out = offset(offset(out, -radius, "miter"), radius, "round");
-  if (reflex > 1e-9) out = offset(offset(out, reflex, "round"), -reflex, "round");
+  // (grown with sharp corners and shrunk with round ones: the corners that point outwards come back exactly)
+  if (reflex > 1e-9) out = offset(offset(out, reflex, "miter"), -reflex, "round");
   return out;
 }
 
@@ -168,9 +169,7 @@ function circle3(a: readonly number[], b: readonly number[], c: readonly number[
  * the arc it was, so the solid built from it has cylindrical faces, not facets.
  */
 export function fitArcs(input: readonly (readonly number[])[], tol = FIT_TOL): Loop {
-  // corners that are not corners first: points within a few microns of the line between their neighbours
-  const kept = input.length > 4 ? mainCorners(input, 0.003) : input.map((_, i) => i);
-  const poly = kept.map((i) => input[i]);
+  const poly = input;
   const n = poly.length;
   if (n < 4) return poly.map((p) => [p[0], p[1]] as Vertex);
   const P = (i: number) => poly[((i % n) + n) % n];
@@ -416,6 +415,13 @@ export function delaunay(points: Pt[]): { triangles: [number, number, number][];
     for (const [a, b] of count.values()) { const t = make(a, b, i); if (t) tris.push(t); }
   }
   const triangles = tris.filter((t) => t.v.every((v) => v < n)).map((t) => t.v);
+  // points all on one line make no triangle: they are joined in order along it
+  if (!triangles.length) {
+    const distinct = order.filter((i, k) => k === 0 || dist(points[i], points[order[k - 1]]) > 1e-9);
+    const chain: [number, number][] = [];
+    for (let k = 1; k < distinct.length; k++) chain.push([Math.min(distinct[k - 1], distinct[k]), Math.max(distinct[k - 1], distinct[k])]);
+    return { triangles: [], edges: chain.sort((a, b) => a[0] - b[0] || a[1] - b[1]) };
+  }
   triangles.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
   const es = new Map<string, [number, number]>();
   for (const t of triangles) for (let e = 0; e < 3; e++) { const a = Math.min(t[e], t[(e + 1) % 3]), b = Math.max(t[e], t[(e + 1) % 3]); es.set(`${a},${b}`, [a, b]); }

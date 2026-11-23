@@ -71,7 +71,7 @@ export function duplicateScript(items: Iterable<Item>, id: string): { changes: I
 }
 
 /** The file a script is exported as, and read back from: its source, as it is. */
-export const exportName = (name: string): string => `${name.replace(/[\\/:*?"<>|]+/g, " ").trim() || "custom feature"}.feature.js`;
+export const exportName = (name: string): string => `${name.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "custom feature"}.feature.js`;
 export const importName = (file: string): string => file.replace(/\.feature\.js$|\.js$|\.txt$/i, "").trim().slice(0, 80);
 
 // ---------------------------------------------------------------- features made from scripts

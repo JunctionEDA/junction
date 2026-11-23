@@ -71,20 +71,42 @@ function decode(b64: string): Uint8Array {
   return new Uint8Array(g.Buffer.from(b64, "base64"));
 }
 
-/** Load the interpreter (once).  Everything else here is synchronous. */
-export async function loadSandbox(): Promise<Sandbox> { return new Sandbox(await quickjs()); }
+/**
+ * Load the interpreter.  One instance serves every run; if a run ever leaves it in a state it cannot vouch for
+ * (the engine under it threw: its own stack ran out, an abort), that instance is dropped and the next call
+ * loads a fresh one, so a script cannot break custom features for the scripts that come after it.
+ */
+export async function loadSandbox(): Promise<Sandbox> {
+  if (current && !current.spent) return current;
+  if (current) { loading = null; current = null; }
+  current = new Sandbox(await quickjs());
+  return current;
+}
+let current: Sandbox | null = null;
 
 interface Vm { rt: QuickJSRuntime; vm: QuickJSContext; hooks: QuickJSHandle; state: { ticks: number; calls: number; deadline: number; stopped: "" | "timeout"; limits: Limits }; dispose(): void }
 
 export class Sandbox {
+  /** this instance of the interpreter is not to be used again (loadSandbox makes another) */
+  spent = false;
   constructor(private readonly q: QuickJSWASMModule) {}
+  /** What to make of something other than a ScriptError coming out of the interpreter: the instance is given up. */
+  private gaveWay(e: unknown): ScriptError {
+    this.spent = true;
+    const text = e instanceof Error ? e.message : String(e);
+    if (/call stack|recursion|stack overflow/i.test(text)) return new ScriptError("The script called itself too deeply. Look for a function that calls itself without end.", "throw");
+    if (/memory|out of bounds|Aborted/i.test(text)) return new ScriptError(TOO_BIG, "memory");
+    return new ScriptError(`The script could not be run: ${text}`, "throw");
+  }
 
   private open(source: string, limits: Limits, host: HostCall): Vm {
     if (typeof source !== "string") throw new ScriptError("The script is not text.", "syntax");
     if (source.length > MAX_SOURCE) throw new ScriptError("The script is longer than 200 000 characters.", "syntax");
     const rt = this.q.newRuntime();
     rt.setMemoryLimit(limits.memory);
-    rt.setMaxStackSize(768 << 10);
+    // well under the WebAssembly stack the interpreter itself runs on, so that a script that calls itself for ever
+    // meets the interpreter's limit (an error it reports) and not the engine's (which would take the interpreter down)
+    rt.setMaxStackSize(192 << 10);
     const state: Vm["state"] = { ticks: 0, calls: 0, deadline: Date.now() + limits.ms, stopped: "", limits };
     rt.setInterruptHandler(() => {
       if (state.stopped) return true;
@@ -94,7 +116,12 @@ export class Sandbox {
     // no Date: a feature must build the same thing every time
     const vm = rt.newContext({ intrinsics: { BaseObjects: true, Date: false, Eval: true, StringNormalize: true, RegExp: true, JSON: true, Proxy: true, MapSet: true, TypedArrays: true, Promise: true } });
     let hooks: QuickJSHandle | null = null;
-    const dispose = () => { try { if (hooks) hooks.dispose(); } catch (e) { /* gone */ } try { vm.dispose(); } catch (e) { /* gone */ } try { rt.dispose(); } catch (e) { /* a leaked handle: the memory goes with the module */ } };
+    const dispose = () => {
+      // an instance that gave way is left as it is: freeing a runtime with values still alive aborts the module
+      if (this.spent) return;
+      try { if (hooks) hooks.dispose(); } catch (e) { /* gone */ }
+      try { vm.dispose(); rt.dispose(); } catch (e) { this.spent = true; }
+    };
     try {
       const fn = vm.newFunction("__host", (opH, argsH) => {
         let out: string;
@@ -115,7 +142,7 @@ export class Sandbox {
       this.unwrap(vm, state, vm.evalCode("delete globalThis.__hooks", "prelude.js")).dispose();
       this.unwrap(vm, state, vm.evalCode(source, FILE)).dispose();
       return { rt, vm, hooks, state, dispose };
-    } catch (e) { dispose(); throw e; }
+    } catch (e) { const out = e instanceof ScriptError ? e : this.gaveWay(e); dispose(); throw out; }
   }
 
   /** The value of a call into the interpreter, or the ScriptError that says why there is none. */
@@ -152,6 +179,7 @@ export class Sandbox {
       const r = readManifest(JSON.parse(text));
       return { manifest: r.problems.length ? null : r.manifest, problems: r.problems.map((message) => ({ message })) };
     } catch (e) {
+      if (!(e instanceof ScriptError)) e = this.gaveWay(e);
       if (e instanceof ScriptError) return { manifest: null, problems: [{ message: e.kind === "timeout" ? "The script takes too long just to be read. Do the work inside evaluate(ctx, p), not at the top of the file." : e.message, line: e.line }] };
       return { manifest: null, problems: [{ message: `The script could not be read: ${e instanceof Error ? e.message : String(e)}` }] };
     } finally { if (v) v.dispose(); }
@@ -170,6 +198,7 @@ export class Sandbox {
       // a script that swallowed the stop in a try/catch has still run out of time
       if (v.state.stopped === "timeout") throw new ScriptError(TOO_LONG(limits.ms), "timeout");
       return { ticks: v.state.ticks, calls: v.state.calls, ms: Date.now() - t0 };
-    } finally { v.dispose(); }
+    } catch (e) { throw e instanceof ScriptError ? e : this.gaveWay(e); }
+    finally { v.dispose(); }
   }
 }

@@ -206,6 +206,13 @@ export class OpenStudio extends OpenDoc {
     return { k, engine: this.engine, result };
   }
 
+  /** A feature list of this studio as the worker's input, the boards its Board features name supplied (what `regen` builds from). */
+  async inputs(doc: ItemDoc, o: { features?: ReturnType<typeof featuresOf>; rollback?: number } = {}): Promise<ReturnType<typeof studioInputs>> {
+    studioInputs(doc, { ...o, filters: [this.boards.filter] });   // opens the boards it names
+    await this.boards.settled(15000);
+    return studioInputs(doc, { ...o, filters: [this.boards.filter] });
+  }
+
   override close(): void { super.close(); this.boards.close(); if (this.engine) this.engine.dispose(); this.engine = null; }
 }
 
@@ -245,7 +252,7 @@ export function studioOf(req: McpRequest, entry: McpDocEntry): OpenStudio {
   s.conn = { base: req.base, token: req.token, agent: req.agent }; s.lastUsed = Date.now();
   return s;
 }
-async function studio(req: McpRequest): Promise<OpenStudio> { return studioOf(req, findStudio(needProject(req), req.args && req.args.document)); }
+export async function studio(req: McpRequest): Promise<OpenStudio> { return studioOf(req, findStudio(needProject(req), req.args && req.args.document)); }
 
 // ---------------------------------------------------------------- what the kernel says
 

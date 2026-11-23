@@ -41,6 +41,8 @@ const GUIDE: &str = include_str!("../web/domains/pcb/mcp/guide.md");
 /// code (web/domains/pcb/mcp/host.ts takes each domain's tool table).
 const DOMAIN_TOOLS: &[(&str, &str)] = &[
     ("mechanical", include_str!("../web/domains/mechanical/mcp/tools.json")),
+    // custom features: the cad_script_* tools (web/domains/mechanical/mcp/script-host.ts)
+    ("mechanical", include_str!("../web/domains/mechanical/mcp/script-tools.json")),
     ("assembly", include_str!("../web/domains/assembly/mcp/tools.json")),
 ];
 /// The domains whose tools are Mechanical CAD's (`cad_*`): shown only to a person who has it turned on.
