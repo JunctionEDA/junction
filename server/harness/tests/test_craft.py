@@ -253,3 +253,91 @@ class Untangle(Boards):
         got = b.untangle(budget_s=30)
         self.assertEqual((got["before"], got["after"], got["tried"]), (0, 0, []), got)
 
+
+
+class FanOut(Boards):
+    """board.fan_plan() writes a fine-pitch chip's fan-out as one route plan (the routing AI's pattern: a via per pin in
+    two staggered rows, a corridor from each via straight for where the net goes, under the chip when that is behind
+    it); board.refan() takes up the chip's band and lays it again from that plan, keep-best."""
+
+    def chip_board(self, *extra, east_far=True):
+        # a 0.5 mm pitch chip, ten pads down its west and east sides 6 mm apart: the west pins go to headers far west; the east pins too (behind the
+        # chip for them) or to headers far east; U1.11 is ground and U1.20 goes to a pad just east of it
+        nets = {str(i + 1): f"S{i + 1}" for i in range(10)}
+        nets.update({str(i): f"E{i}" for i in range(12, 20)})
+        nets.update({"11": "GND", "20": "N20"})
+        parts = [part(f"J{i + 1}", (2, 4 + i * 2.2), [("1", 0, 0, 1.0, 1.0, f"S{i + 1}")]) for i in range(10)]
+        parts += [part(f"K{i}", (4 if east_far else 38, 3 + (i - 12) * 3), [("1", 0, 0, 1.0, 1.0, f"E{i}")]) for i in range(12, 20)]
+        parts += [part("R20", (24, 13.5), [("1", 0, 0, 0.6, 0.6, "N20")]), part("G1", (30, 28), [("1", 0, 0, 1.0, 1.0, "GND")])]
+        pads = [(str(i + 1), -3.0, (i - 4.5) * 0.5, 0.8, 0.25, nets.get(str(i + 1), "")) for i in range(10)]
+        pads += [(str(20 - i), 3.0, (i - 4.5) * 0.5, 0.8, 0.25, nets.get(str(20 - i), "")) for i in range(10)]
+        return self.open(edge(BOX), part("U1", (20, 15), pads, value="MCU", lib="Package_DFN_QFN:QFN"), *parts, *extra)
+
+    def test_a_via_per_pin_staggered_and_a_corridor_for_where_the_net_goes(self):
+        b = self.chip_board()
+        fp = b.fan_plan("U1")
+        esc, paths = fp["escapes"], fp["paths"]
+        self.assertNotIn("U1.11", esc, "ground is never escaped")
+        self.assertNotIn("U1.20", esc, "a pin whose pad is just in front keeps the chip's layer")
+        self.assertEqual(len(esc), 18, esc)
+        west = [esc[f"U1.{i}"] for i in range(1, 11)]
+        self.assertTrue(all(w["via"] and w["thin"] for w in west), west)
+        xs = [round(w["to"][-1][0], 3) for w in west]      # as buses: a staircase 0.4 mm a step from 0.5 mm past the pad ends (x = 16.6)
+        self.assertEqual(max(xs), 16.1, xs)
+        self.assertTrue(all(abs(a - c) >= 0.38 for a, c in zip(xs, xs[1:])), xs)
+        rows = [round(w["to"][-1][0], 3) for w in (b.fan_plan("U1", bus=False)["escapes"][f"U1.{i}"] for i in range(1, 11))]
+        self.assertEqual(sorted(set(rows)), [15.5, 16.1], rows)      # two staggered rows, 0.5 and 1.1 mm out
+        self.assertTrue(all(a != c for a, c in zip(rows, rows[1:])), "neighbours staggered")
+        ys = [w["to"][-1][1] for w in west]
+        self.assertTrue(all(abs(b_ - a - 0.5) < 1e-3 for a, b_ in zip(ys, ys[1:])), "on the row's pitch line")
+        self.assertTrue(all(isinstance(f[-1], str) for f in fp["fallback"].values()))
+        for i in range(12, 20):      # behind the chip: from the via east of the chip under it to the west, on B.Cu
+            self.assertIn("behind the chip", fp["pins"][f"U1.{i}"])
+            (vx, _, lv), (ex, _, le) = paths[f"E{i}"][0], paths[f"E{i}"][-1]
+            self.assertIn("under it to the corner", fp["pins"][f"U1.{i}"])
+            self.assertGreater(vx, 23.4)
+            self.assertLess(ex, 18.0)      # across the chip (its west pads end at 17.4)
+            self.assertEqual((lv, le), ("B.Cu", "B.Cu"))
+        self.assertTrue(fp["order"][0].startswith("E"), "the pins behind the chip are laid first")
+        self.assertEqual(b.info()["vias"] or 0, 0, "nothing is laid")
+        self.assertEqual(b.fan_plan("U1", nets=["S3"])["order"], ["S3"])
+
+    def test_refan_lays_the_band_again_and_keeps_it_only_when_it_helps(self):
+        # W passes through the chip's band (x = 15.5): refan takes it up with the chip's escapes, routes the chip's open
+        # nets from the planned fan-out and W again; F, far away, stays where it is
+        extra = [part("R1", (15.5, 3), [("1", 0, 0, 0.8, 0.8, "W")]), part("R2", (15.5, 27), [("1", 0, 0, 0.8, 0.8, "W")]), track("W", [(15.5, 3), (15.5, 27)], width=0.2),
+                 part("R3", (36, 3), [("1", 0, 0, 0.8, 0.8, "F")]), part("R4", (36, 27), [("1", 0, 0, 0.8, 0.8, "F")]), track("F", [(36, 3), (36, 27)], width=0.2)]
+        b = self.chip_board(*extra, east_far=False)
+        far = {it["id"] for it in b._all_items(["segment"]) if '"F"' in it["sexpr"]}
+        before = b.info()["unrouted_connections"]
+        got = b.refan("U1", time_s=20, tries=[(2.0, False)])
+        self.assertEqual(got["before"], before)
+        self.assertLess(got["after"], before, got["tried"])
+        self.assertEqual(len(got["kept"]), 1, got)
+        self.assertNotIn("W", b.unrouted(), "what the take-up moved is laid again")
+        self.assertTrue(far <= {it["id"] for it in b._all_items(["segment"])}, "copper outside the band stays")
+        self.assertTrue(any("via" in v for v in got["plan"].values()), got["plan"])
+
+    def test_refan_refuses_a_part_that_is_not_a_fine_pitch_chip(self):
+        b = self.open(edge(BOX), part("R1", (5, 15), [("1", 0, 0, 1.0, 1.0, "S")]))
+        with self.assertRaises(kh.HarnessError):
+            b.refan("R1")
+        with self.assertRaises(kh.HarnessError):
+            b.fan_plan("R1")
+
+    def test_check_moves_a_via_off_a_taken_spot_and_keeps_its_neighbours_apart(self):
+        # a ground via sits where U1.3's via would go 0.5 mm past its pad (x = 16.1 on its lane, y = 15 - 1.25)
+        b = self.chip_board(via("GND", (16.1, 13.75)))
+        fp = b.fan_plan("U1", check=True, bus=False)
+        xs = {i: round(fp["escapes"][f"U1.{i}"]["to"][-1][0], 3) for i in range(1, 11)}
+        self.assertNotAlmostEqual(xs[3], 16.1, places=2)
+        self.assertTrue(all(abs(xs[i] - xs[i + 1]) >= 0.38 for i in range(1, 10)), xs)
+
+    def test_an_escape_no_route_used_comes_up_with_its_stub(self):
+        b = self.chip_board()
+        b.escape({"U1.3": {"to": [[16.6, 13.75], [16.1, 13.75]], "via": True}})
+        self.assertEqual(b.info().get("vias"), 1)
+        gone = craft._drop_unused_escapes(b)
+        self.assertGreaterEqual(gone, 2, "the via and its stub")
+        self.assertEqual(b.info().get("vias") or 0, 0)
+        self.assertEqual([it for it in b._all_items(["segment"])], [])
