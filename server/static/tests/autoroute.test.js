@@ -592,6 +592,17 @@ test("plan paths: a written path through a via is laid with it, on the layers it
   apply(doc, res); assert.deepEqual(errors(doc, null), []); assert.equal(P.ratsnest(doc).length, 0);
 });
 
+test("plan paths: a strict written path is laid on its layers or not at all, also by the ladder", () => {
+  // a wall on F.Cu (existing copper, never moved) lies across A's way.  A's path names F.Cu only: strict leaves A open,
+  // even with the ladder's extra-via rung; not strict, A hops under the wall on B.Cu
+  const make = () => board(smd(100, 50, "A"), smd(120, 60, "A"), WALL);
+  const paths = { A: [[[102, 52, "F.Cu"], [118, 58, "F.Cu"]]] };
+  const strict = R.route(K, P, make(), null, { ripup: "ladder", plan: { paths, strict: true } });
+  assert.equal(strict.routed, 0, JSON.stringify(strict.connections.map((c) => [c.net, c.routed, c.layers])));
+  const loose = R.route(K, P, make(), null, { plan: { paths } });
+  assert.equal(loose.routed, 1); assert.equal(loose.vias, 2);
+});
+
 test("view: the router looks at a chip's rows instead of routing: pins, free tracks per layer and depth, open connections with their plan", () => {
   // a row of eight 0.25 x 1 mm pads at 0.5 mm pitch (a fine-pitch row, pads pointing south), each net going to a pad below
   // (and a second row of eight without nets 3 mm north, the other side of the chip)

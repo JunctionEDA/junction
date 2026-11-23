@@ -341,3 +341,58 @@ class FanOut(Boards):
         self.assertGreaterEqual(gone, 2, "the via and its stub")
         self.assertEqual(b.info().get("vias") or 0, 0)
         self.assertEqual([it for it in b._all_items(["segment"])], [])
+
+
+class WrittenPaths(Boards):
+    """board.cross(): connections laid along the AI's written paths (strict: inside the corridor or not at all), the
+    copper in their way taken up and laid again, keep-best; board.move_pair() and its rules for a pair laid again."""
+
+    def wall_board(self):
+        # S from R1 to R2 straight across; W, a wall of another net, crosses its way on F.Cu
+        return self.open(edge(BOX), part("R1", (5, 15), [("1", 0, 0, 1.0, 1.0, "S")]), part("R2", (35, 15), [("1", 0, 0, 1.0, 1.0, "S")]),
+                         part("R3", (20, 3), [("1", 0, 0, 1.0, 1.0, "W")]), part("R4", (20, 27), [("1", 0, 0, 1.0, 1.0, "W")]),
+                         track("W", [(20, 3), (20, 27)], width=0.25))
+
+    def test_a_strict_path_is_laid_inside_its_corridor_or_not_at_all(self):
+        b = self.wall_board()
+        b.route(nets=["S"], fill=False, time_s=10, plan={"paths": {"S": [[5, 15, "F.Cu"], [35, 15, "F.Cu"]]}, "strict": True})
+        self.assertIn("S", b.unrouted(), "the wall shuts the corridor on F.Cu and a strict path does not go round it on B.Cu")
+        loose = b.route(nets=["S"], fill=False, time_s=10, plan={"paths": {"S": [[5, 15, "F.Cu"], [35, 15, "F.Cu"]]}})
+        self.assertEqual(loose["left_of_asked"], {}, "without strict the router leaves the corridor")
+        self.assertIn("S", (loose.get("plan") or {}).get("given_outside") or [], loose.get("plan"))
+
+    def test_cross_takes_up_what_is_in_the_way_lays_the_path_and_the_rest_again(self):
+        b = self.wall_board()
+        got = b.cross({"S": [[5, 15, "F.Cu"], [35, 15, "F.Cu"]]}, time_s=10)
+        self.assertTrue(got["kept"], got)
+        self.assertEqual((got["before"], got["after"]), (1, 0), got)
+        self.assertEqual(got["laid"], {"S": "inside"}, got)
+        self.assertEqual(got["moved"], ["W"])
+        self.assertEqual(b.unrouted(), {})
+        s = [it for it in b._all_items(["segment"]) if '"S"' in it["sexpr"]]
+        self.assertTrue(s and all('"F.Cu"' in it["sexpr"] for it in s), "S stays on its written layer")
+
+    def test_cross_that_does_not_help_is_taken_back(self):
+        b = self.wall_board()
+        ids = {it["id"] for it in b._all_items(["segment"])}
+        got = b.cross({"S": [[5, 15, "F.Cu"], [35, 15, "F.Cu"]]}, claim=False, time_s=10)
+        self.assertFalse(got["kept"], got)
+        self.assertEqual(got["laid"], {"S": "open"}, got)
+        self.assertEqual({it["id"] for it in b._all_items(["segment"])}, ids, "everything back as it was")
+
+    def test_a_pair_laid_again_keeps_the_rules(self):
+        def st(vp, vn, mp, mn):
+            return {"/DP": {"vias": vp, "mm": mp}, "/DN": {"vias": vn, "mm": mn}}
+        before = st(1, 1, 30.0, 30.2)
+        self.assertEqual(craft._pair_ok(before, st(0, 0, 28.0, 28.1), set()), "")
+        self.assertEqual(craft._pair_ok(before, st(1, 1, 31.0, 31.3), set()), "")
+        self.assertIn("vias", craft._pair_ok(before, st(1, 0, 31.0, 31.0), set()))
+        self.assertIn("more vias", craft._pair_ok(before, st(2, 2, 31.0, 31.0), set()))
+        self.assertIn("skew", craft._pair_ok(before, st(1, 1, 31.0, 32.5), set()))
+        self.assertIn("open", craft._pair_ok(before, st(0, 0, 28.0, 28.0), {"/DN"}))
+        self.assertEqual(craft._pair_ok(st(2, 0, 30.0, 30.0), st(2, 0, 30.0, 30.2), set()), "", "unequal only as it was before")
+
+    def test_move_pair_needs_a_pair_near_the_pin(self):
+        b = self.wall_board()
+        with self.assertRaises(kh.HarnessError):
+            b.move_pair("R1.1")

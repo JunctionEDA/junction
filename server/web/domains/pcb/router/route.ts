@@ -76,8 +76,10 @@ const PLAN_RIP = 0.5, PLAN_RIPS = 1;
  *  layer first (default false); open: with mask, mm round each end the corridor never closes (1); steer: which
  *  connections the corridor steers ("moved": those the negotiation moved off their direct path, the default; "all";
  *  "none"); order: false keeps the usual order instead of laying the fought-over connections first in their tier;
- *  rip: false takes routes up as without a plan instead of the fought-over ones first. */
-export type Plan = boolean | { tile?: number; iters?: number; layerCost?: number; outside?: number; mask?: boolean; vias?: boolean; open?: number; steer?: "moved" | "all" | "none"; order?: boolean; rip?: boolean; paths?: PlanPaths; ring?: number };
+ *  rip: false takes routes up as without a plan instead of the fought-over ones first; strict: a connection with a
+ *  written path is laid inside its corridor (and on its layers, at a steep price per mm off them) or not at all, also
+ *  by the repair ladder, which otherwise drops the steering. */
+export type Plan = boolean | { tile?: number; iters?: number; layerCost?: number; outside?: number; mask?: boolean; vias?: boolean; open?: number; steer?: "moved" | "all" | "none"; order?: boolean; rip?: boolean; paths?: PlanPaths; ring?: number; strict?: boolean };
 /** Paths written by the routing AI (or a person), by net: each a list of points [x, y, layer] in mm that one
  *  connection of the net runs through, in order (the track leaves a point on its layer; two points on different
  *  layers put a via at the second).  A net with several connections takes one list per connection, matched to the
@@ -86,7 +88,7 @@ export type Plan = boolean | { tile?: number; iters?: number; layerCost?: number
  *  by default) first and on the whole board only when that finds nothing, and pays well for leaving it. */
 export type PlanPaths = Record<string, [number, number, string | number][][]>;
 /** What a written path pays for each mm outside its corridor and off its layer, in mm of track. */
-const GIVEN_OUTSIDE = 2, GIVEN_LAYER = 1;
+const GIVEN_OUTSIDE = 2, GIVEN_LAYER = 1, STRICT_LAYER = 12;
 /** What the router reports instead of routing when asked to look (RouteOptions.view): a chip's surroundings for the routing AI. */
 export interface ViewReport {
   ref?: string; box: Box; tile: number; layers: string[];
@@ -262,7 +264,7 @@ export interface RouteResult {
   groups?: { clusters: number; inside: number; insideRouted: number; insideVias: number; critical: string[]; members: Record<string, string[]> };   // connections that lie inside one cluster, and how they came out
   fanout?: { escapes: number; ring: number; via: number; used: number; boxed: Boxed[]; rows?: number; kept?: boolean; open?: [number, number] };   // the escapes laid before routing, and the pins that got none; with routeRuns: the rows escaped, whether that run was kept, and the open connections without / with escapes
   ladder?: LadderReport;   // ripup "ladder": connections each rung laid (rescued, by rescue rung in rungs; mincut; permuted, and the orders tried; feedback), transactions tried and rolled back
-  plan?: { tile: number; tiles: [number, number]; conns: number; iterations: number; overflowFirst: number; overflow: number; crossings: number; relayered: number; moved: number; contested: number; viaConns: number; ms: number; inside: number; outside: number; given?: number; givenInside?: number; givenMissed?: string[] };
+  plan?: { tile: number; tiles: [number, number]; conns: number; iterations: number; overflowFirst: number; overflow: number; crossings: number; relayered: number; moved: number; contested: number; viaConns: number; ms: number; inside: number; outside: number; given?: number; givenInside?: number; givenMissed?: string[]; givenOutside?: string[] };
   view?: ViewReport;   // the global plan: overflow (mm) before and after negotiation, how many connections it moved off their direct path (only those are steered) and had to fight for (they go first), and how many steered searches found their route inside the corridor
 }
 export interface Progress { done: number; total: number; routed: number; pass: number; net: string }
@@ -1316,6 +1318,16 @@ export class Router {
           if (relaxed) extra = (nodes) => { let off = 0; for (let i = 0; i + 1 < nodes.length; i++) { const a = nodes[i], b = nodes[i + 1]; if (a.l === b.l && !want[a.l]) off += Math.hypot(b.ix - a.ix, b.iy - a.iy) * G.g; } return off * 4 * this.W.length; };
         }
       }
+      // A strict written path (plan.strict) keeps its corridor even in the ladder's rescue, which drops the steering,
+      // and its layers: the route may use only the layers the path names (and an end's own layer where the path has
+      // none of its layers, to leave a surface pad).
+      const cor00 = this.gplan && !collect && !net.zoneCells ? this.gplan.corridors.get(conn.id) : undefined, strict = !!(cor00 && cor00.given && this.planOpts().strict);
+      if (strict) {
+        const GT = this.gplan!.nx * this.gplan!.ny, want = G.routable.map(() => false);
+        for (const q of cor00!.path) want[(q / GT) | 0] = true;
+        for (const e of [A, B]) if (!e.layers.some((l) => want[l])) for (const l of e.layers) want[l] = true;
+        rt = rt.map((v, l) => v && want[l]);
+      }
       if (soft && !collect) {   // looking through this run's routes: prefer the way that disturbs the fewest of them
         const full = conn.cls.full, plan = extra;
         extra = (nodes) => { let hit = 0; for (let i = 0; i + 1 < nodes.length; i++) { const a = nodes[i], b = nodes[i + 1]; if (a.l !== b.l) continue; const n = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy); const m = full[a.l]; for (let k = 0; k <= n; k++) if (m[(a.iy + sy * k) * G.W + a.ix + sx * k]) hit++; } return hit * G.g * 12 * this.W.length + (plan ? plan(nodes) : 0); };
@@ -1363,10 +1375,10 @@ export class Router {
       // on costs extra (`outside`, `layerCost`).  With `mask` the search first looks inside the corridor only, and at
       // the whole board when nothing is found there.  Not a net with a pour (it may end anywhere in it), and not a
       // one-layer try of a connection the plan sends through a via.
-      const cor0 = this.gplan && !collect && !net.zoneCells && !this.noSteer ? this.gplan.corridors.get(conn.id) : undefined, steerAs = cor0 ? this.planOpts().steer : "none", cor = cor0 && (cor0.given || steerAs === "all" || (steerAs === "moved" && cor0.moved)) ? cor0 : undefined;
+      const cor0 = cor00 && (!this.noSteer || strict) ? cor00 : undefined, steerAs = cor0 ? this.planOpts().steer : "none", cor = cor0 && (cor0.given || steerAs === "all" || (steerAs === "moved" && cor0.moved)) ? cor0 : undefined;
       let steer = extra;
       if (cor && !(cor.vias > 0 && maxVias <= 0)) {
-        const pl = this.gplan!, kk = pl.k, po = this.planOpts(); const lc = G.routable.filter(Boolean).length > 1 ? (cor.given ? Math.max(po.layerCost, GIVEN_LAYER) : po.layerCost) : 0, oc = cor.given ? Math.max(po.outside, GIVEN_OUTSIDE) : po.outside, lay = cor.layer, tl = cor.tiles, before = extra;
+        const pl = this.gplan!, kk = pl.k, po = this.planOpts(); const lc = G.routable.filter(Boolean).length > 1 ? (cor.given ? Math.max(po.layerCost, strict ? STRICT_LAYER : GIVEN_LAYER) : po.layerCost) : 0, oc = cor.given ? Math.max(po.outside, GIVEN_OUTSIDE) : po.outside, lay = cor.layer, tl = cor.tiles, before = extra;
         if (lc > 0 || oc > 0) steer = (nodes) => { let off = 0, out = 0; for (let i = 0; i + 1 < nodes.length; i++) { const a = nodes[i], b = nodes[i + 1]; if (a.l !== b.l) continue; const n = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy); const step = Math.hypot(sx, sy) * G.g;
           for (let q = 0; q < n; q++) { const r = (((a.iy + sy * q) / kk) | 0) * pl.nx + (((a.ix + sx * q) / kk) | 0); if (!tl[r]) out += step; else { const want = lay[r]; if (want >= 0 && want !== a.l) off += step; } } }
           return (off * lc + out * oc) * this.W.length + (before ? before(nodes) : 0); };
@@ -1378,21 +1390,22 @@ export class Router {
           this.planStat.outside++;
         }
       }
+      if (strict) return null;   // a strict path: inside its corridor or not at all
       const margins = [Math.max(14, Math.round(span * 0.35)), Math.max(50, Math.round(span * 1.2)), Math.max(G.W, G.H)];
       for (let i = 0; i < margins.length; i++) {
         const m = margins[i]; const win: Win = { x0: Math.max(0, x0 - m), y0: Math.max(0, y0 - m), x1: Math.min(G.W - 1, x1 + m), y1: Math.min(G.H - 1, y1 + m) };
         const res = probe({ G, maps, vmaps, src, tgt, term, win, pref: this.pref, W: this.W, allowVias: gd.allowVias && maxVias > 0, maxSteps: 6e6, collect, routable: rt, maxVias: maxVias === Infinity ? undefined : maxVias, extra: steer });
-        if (res) { if (steer !== extra) { const n = res.nodes; let inside = true; for (const x of n) if (!cor!.tiles[((x.iy / this.gplan!.k) | 0) * this.gplan!.nx + ((x.ix / this.gplan!.k) | 0)]) { inside = false; break; } this.planStat[inside ? "inside" : "outside"]++; } return finish(res); }
+        if (res) { if (steer !== extra) { const n = res.nodes; let inside = true; for (const x of n) if (!cor!.tiles[((x.iy / this.gplan!.k) | 0) * this.gplan!.nx + ((x.ix / this.gplan!.k) | 0)]) { inside = false; break; } this.planStat[inside ? "inside" : "outside"]++; if (!inside && cor!.given) this.givenOut.add(conn.net); } return finish(res); }
         if (win.x0 === 0 && win.y0 === 0 && win.x1 === G.W - 1 && win.y1 === G.H - 1) break;
       }
       return null;
     } finally { this.lift(net, -1, conn.cls); }
   }
   // ------------------------------------------------------------------ global plan (globalplan.ts)
-  private gplan: PlanResult | null = null; private planRef: RuleClass | null = null; private planBlk: Uint8Array | null = null; private planStat = { inside: 0, outside: 0, givenInside: 0 }; private givenMissed: string[] = [];
-  private planOpts(): { tile: number; iters: number; layerCost: number; outside: number; mask: boolean; vias: boolean; open: number; steer: "moved" | "all" | "none"; order: boolean; rip: boolean; paths: PlanPaths | null; ring: number } {
+  private gplan: PlanResult | null = null; private planRef: RuleClass | null = null; private planBlk: Uint8Array | null = null; private planStat = { inside: 0, outside: 0, givenInside: 0 }; private givenMissed: string[] = []; private givenOut = new Set<string>();
+  private planOpts(): { tile: number; iters: number; layerCost: number; outside: number; mask: boolean; vias: boolean; open: number; steer: "moved" | "all" | "none"; order: boolean; rip: boolean; paths: PlanPaths | null; ring: number; strict: boolean } {
     const o = this.opts.plan ?? PLAN; const q = typeof o === "object" ? o : {};
-    return { tile: q.tile || 0, iters: q.iters || 16, layerCost: q.layerCost ?? 0.5, outside: q.outside ?? 0.5, mask: !!q.mask, vias: !!q.vias, open: q.open ?? 1, steer: q.steer || "moved", order: q.order !== false, rip: q.rip !== false, paths: q.paths && typeof q.paths === "object" ? q.paths : null, ring: q.ring ?? 0.5 };
+    return { tile: q.tile || 0, iters: q.iters || 16, layerCost: q.layerCost ?? 0.5, outside: q.outside ?? 0.5, mask: !!q.mask, vias: !!q.vias, open: q.open ?? 1, steer: q.steer || "moved", order: q.order !== false, rip: q.rip !== false, paths: q.paths && typeof q.paths === "object" ? q.paths : null, ring: q.ring ?? 0.5, strict: !!q.strict };
   }
   /** How many rounds of the plan's negotiation fought over the connection (0: the plan never had to move it). */
   private contested(c: Conn): number { const cor = this.gplan && this.gplan.corridors.get(c.id); return cor && this.planOpts().rip ? cor.contest : 0; }
@@ -1445,7 +1458,7 @@ export class Router {
     let viaConns = 0; for (const c of pl.corridors.values()) if (c.vias > 0) viaConns++;
     let given = 0; for (const c of pl.corridors.values()) if (c.given) given++;
     return { tile: r3(pl.T), tiles: [pl.nx, pl.ny], conns: pl.corridors.size, iterations: pl.iterations, overflowFirst: r3(pl.overflowFirst), overflow: r3(pl.overflow), crossings: pl.crossings, relayered: pl.relayered, moved: pl.moved, contested: pl.contested, viaConns, ms: pl.ms, inside: this.planStat.inside, outside: this.planStat.outside,
-      ...(given || this.givenMissed.length ? { given, givenInside: this.planStat.givenInside, givenMissed: this.givenMissed.length ? this.givenMissed : undefined } : {}) };
+      ...(given || this.givenMissed.length ? { given, givenInside: this.planStat.givenInside, givenMissed: this.givenMissed.length ? this.givenMissed : undefined, givenOutside: this.givenOut.size ? Array.from(this.givenOut).map((n) => n.replace(/^\//, "")) : undefined } : {}) };
   }
   /** The routing AI's look at a part before it writes a plan (RouteOptions.view): for each pin row of the part, its
    *  pins (net, and whether a connection from it is open), and per routing layer how many reference tracks still
@@ -2057,7 +2070,7 @@ export class Router {
     const pl = this.gplan, ref = this.planRef; if (!pl || !ref) return null; const G = this.G, k = pl.k, nx = pl.nx, ny = pl.ny;
     const book: [number, number, number, number, number][] = []; const pairs: [number, number][] = []; const affected: Conn[] = [];
     for (const c of failed) {
-      const cor = pl.corridors.get(c.id); if (!cor) continue; const { p } = this.whereOf(c);
+      const cor = pl.corridors.get(c.id); if (!cor || (cor.given && this.planOpts().strict)) continue; const { p } = this.whereOf(c);   // a strict written path is never planned again
       const tx = Math.min(nx - 1, Math.max(0, Math.floor((p[0] - G.ox) / G.g / k))), ty = Math.min(ny - 1, Math.max(0, Math.floor((p[1] - G.oy) / G.g / k))), t = ty * nx + tx;
       const layers = cor.layer[t] >= 0 ? [cor.layer[t]] : G.routable.map((r, l) => r ? l : -1).filter((l) => l >= 0); let any = false;
       for (const [ex, ey, side, bx, by] of [[tx, ty, 0, tx + 1, ty], [tx - 1, ty, 0, tx - 1, ty], [tx, ty, 1, tx, ty + 1], [tx, ty - 1, 1, tx, ty - 1]]) {
@@ -2099,6 +2112,7 @@ export class Router {
    *  tees and lengths; the copper itself is exact). */
   private fineLay(conn: Conn): boolean {
     const G = this.G, net = this.netOf(conn.net), cls = conn.cls, gd = net.guide, h = G.g / 2; if (conn.planeOnly !== undefined) return false;
+    const gc = this.gplan && this.gplan.corridors.get(conn.id); if (gc && gc.given && this.planOpts().strict) return false;   // a strict written path is laid in its corridor (find) or not at all
     const comp = this.components(net); if (comp[conn.a.cluster] === comp[conn.b.cluster]) return false;
     const span = Math.max(Math.abs(conn.a.p[0] - conn.b.p[0]), Math.abs(conn.a.p[1] - conn.b.p[1])), m = Math.max(2, 0.3 * span);
     const ix0 = Math.max(0, Math.floor((Math.min(conn.a.p[0], conn.b.p[0]) - m - G.ox) / G.g)), ix1 = Math.min(G.W - 1, Math.ceil((Math.max(conn.a.p[0], conn.b.p[0]) + m - G.ox) / G.g));

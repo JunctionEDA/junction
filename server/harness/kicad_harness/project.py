@@ -2783,14 +2783,14 @@ class Board(_Doc):
 
     def route(self, nets: list | None = None, order: list | None = None, widths: dict | None = None, layers: list | None = None,
               net_options: dict | None = None, keepouts: list | None = None, allow_vias: bool = True, time_s: float | None = None,
-              fill: bool = True, max_vias: int | None = None, kinds: dict | None = None, separate=None, fence=None,
+              fill: bool = True, max_vias: int | None = 2, kinds: dict | None = None, separate=None, fence=None,
               ground_vias: bool = True, fanout_lanes=None, via_cost: float | None = None, groups=None, explain: bool = False,
               keep_rules: bool = False, escapes=None, plan=None, ripup: str | None = None) -> dict:
         """Autoroute the missing connections (every unrouted net by default) and report what was done.
 
         order: the few nets to lay first (USB pair, crystal); widths: {net: mm} for supply nets; net_options and
         keepouts are passed to the engine as they are.  Route a whole board in one call.
-        max_vias: the most vias one pad-to-pad connection may use (2 keeps every track to one trip to the other side).
+        max_vias: the most vias one pad-to-pad connection may use (default 2, the owner's rule: one trip to the other side and back; None lifts it).
         groups: {name: [refs]}, the clusters (a chip with the parts that serve it).  The engine lays the critical nets
         first, then wires every cluster inside itself, then power, then the tracks between clusters.  Parts not named
         are grouped from the board (a small part belongs to the nearest chip it shares a net with); False turns the

@@ -148438,7 +148438,7 @@ function build3(input) {
           const fence = e.fence === false ? false : e.fence && typeof e.fence === "object" ? { spacing: num13(e.fence.spacing), nets: Array.isArray(e.fence.nets) ? e.fence.nets.map((n2) => boardNet2(doc2, text2(n2, "net")).name) : void 0, returnVias: e.fence.return_vias === false ? false : void 0 } : void 0;
           const planPaths = e.plan && typeof e.plan === "object" && e.plan.paths && typeof e.plan.paths === "object" ? Object.fromEntries(Object.entries(e.plan.paths).filter(([, v]) => Array.isArray(v)).map(([n2, v]) => [boardNet2(doc2, n2).name, v.filter(Array.isArray)])) : void 0;
           const view = e.view && typeof e.view === "object" ? { ref: typeof e.view.ref === "string" ? e.view.ref : void 0, box: Array.isArray(e.view.box) && e.view.box.length === 4 ? e.view.box.map(Number) : void 0, depths: Array.isArray(e.view.depths) ? e.view.depths.map(Number).filter((v) => isFinite(v) && v >= 0) : void 0, margin: num13(e.view.margin) } : void 0;
-          const res = R2.route(k, P3, doc2, P3.designSettings(ed.proSettings || null), { separate, fence, nets: nets2, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : void 0, timeMs: Math.round(1e3 * Math.min(900, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : void 0, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : void 0, planes: e.planes === true ? true : void 0, criticalFirst: e.critical_first === false ? false : void 0, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : void 0, escapes: e.escapes === true || e.escapes === false ? e.escapes : typeof e.escapes === "number" && e.escapes >= 0 ? e.escapes : e.escapes && typeof e.escapes === "object" ? { depth: num13(e.escapes.depth), spread: num13(e.escapes.spread), small: e.escapes.small === true ? true : void 0 } : void 0, plan: e.plan === true || e.plan === false ? e.plan : e.plan && typeof e.plan === "object" ? { tile: num13(e.plan.tile), iters: num13(e.plan.iters), layerCost: num13(e.plan.layer_cost), outside: num13(e.plan.outside), mask: e.plan.mask === true ? true : void 0, vias: e.plan.vias === true ? true : void 0, open: num13(e.plan.open), steer: e.plan.steer === "all" || e.plan.steer === "none" || e.plan.steer === "moved" ? e.plan.steer : void 0, order: e.plan.order === false ? false : void 0, rip: e.plan.rip === false ? false : void 0, paths: planPaths, ring: num13(e.plan.ring) } : void 0, view, ripup: e.ripup === "mincut" || e.ripup === "near" || e.ripup === "ladder" ? e.ripup : void 0, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : void 0 });
+          const res = R2.route(k, P3, doc2, P3.designSettings(ed.proSettings || null), { separate, fence, nets: nets2, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : void 0, timeMs: Math.round(1e3 * Math.min(900, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : void 0, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : void 0, planes: e.planes === true ? true : void 0, criticalFirst: e.critical_first === false ? false : void 0, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : void 0, escapes: e.escapes === true || e.escapes === false ? e.escapes : typeof e.escapes === "number" && e.escapes >= 0 ? e.escapes : e.escapes && typeof e.escapes === "object" ? { depth: num13(e.escapes.depth), spread: num13(e.escapes.spread), small: e.escapes.small === true ? true : void 0 } : void 0, plan: e.plan === true || e.plan === false ? e.plan : e.plan && typeof e.plan === "object" ? { tile: num13(e.plan.tile), iters: num13(e.plan.iters), layerCost: num13(e.plan.layer_cost), outside: num13(e.plan.outside), mask: e.plan.mask === true ? true : void 0, vias: e.plan.vias === true ? true : void 0, open: num13(e.plan.open), steer: e.plan.steer === "all" || e.plan.steer === "none" || e.plan.steer === "moved" ? e.plan.steer : void 0, order: e.plan.order === false ? false : void 0, rip: e.plan.rip === false ? false : void 0, paths: planPaths, ring: num13(e.plan.ring), strict: e.plan.strict === true ? true : void 0 } : void 0, view, ripup: e.ripup === "mincut" || e.ripup === "near" || e.ripup === "ladder" ? e.ripup : void 0, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : void 0 });
           const failed = (res.failed || []).map((f2) => ({ net: f2.net, from: f2.a.map(r45), to: f2.b.map(r45) }));
           if (view) {
             details.push({ autoroute: { view: res.view, connections: res.total, plan: res.plan ? { given: res.plan.given, given_missed: res.plan.givenMissed, overflow_mm: res.plan.overflow, ms: res.plan.ms } : void 0 } });
@@ -148468,7 +148468,7 @@ function build3(input) {
             unrouted: conns.length ? conns.filter((c) => !c.routed).slice(0, 40).map((c) => ({ net: c.net, from: c.from && c.from.pad, to: c.to && c.to.pad, reason: c.reason, detail: c.detail, blocked_by_nets: c.blockedBy && c.blockedBy.nets })) : failed.slice(0, 40),
             longest_detours: conns.filter((c) => c.routed && c.detourRatio > 1.6).sort((a, b) => b.detourRatio - a.detourRatio).slice(0, 12).map((c) => ({ net: c.net, from: c.from && c.from.pad, to: c.to && c.to.pad, length_mm: r45(c.length), detour_ratio: r45(c.detourRatio), vias: c.vias, layers: c.layers })),
             fanout: res.fanout && res.fanout.escapes + res.fanout.boxed.length ? { escapes: res.fanout.escapes, ring: res.fanout.ring, via: res.fanout.via, used: res.fanout.used, rows: res.fanout.rows, kept: res.fanout.kept, open: res.fanout.open, boxed: res.fanout.boxed.slice(0, 20).map((b) => ({ pad: b.pad, net: b.net, reason: b.reason, blocked_by: b.blockedBy })) } : void 0,
-            plan: res.plan ? { tile_mm: res.plan.tile, tiles: res.plan.tiles, connections: res.plan.conns, iterations: res.plan.iterations, overflow_first_mm: res.plan.overflowFirst, overflow_mm: res.plan.overflow, crossings_left: res.plan.crossings, relayered: res.plan.relayered, moved: res.plan.moved, contested: res.plan.contested, via_connections: res.plan.viaConns, ms: res.plan.ms, inside: res.plan.inside, outside: res.plan.outside, given: res.plan.given, given_inside: res.plan.givenInside, given_missed: res.plan.givenMissed } : void 0,
+            plan: res.plan ? { tile_mm: res.plan.tile, tiles: res.plan.tiles, connections: res.plan.conns, iterations: res.plan.iterations, overflow_first_mm: res.plan.overflowFirst, overflow_mm: res.plan.overflow, crossings_left: res.plan.crossings, relayered: res.plan.relayered, moved: res.plan.moved, contested: res.plan.contested, via_connections: res.plan.viaConns, ms: res.plan.ms, inside: res.plan.inside, outside: res.plan.outside, given: res.plan.given, given_inside: res.plan.givenInside, given_missed: res.plan.givenMissed, given_outside: res.plan.givenOutside } : void 0,
             ladder: res.ladder ? { rescued: res.ladder.rescued, rescue_rungs: res.ladder.rungs, mincut: res.ladder.mincut, permuted: res.ladder.permuted, orders: res.ladder.orders, feedback: res.ladder.feedback, tried: res.ladder.tried, rolled_back: res.ladder.rolledBack } : void 0,
             groups: res.groups && res.groups.inside ? { clusters: res.groups.clusters, inside: res.groups.inside, routed: res.groups.insideRouted, vias: res.groups.insideVias } : void 0,
             // explain: true asks for the reasoning behind the run: which nets went first, which parts formed which cluster, and every connection that changed layer or wandered
@@ -176519,6 +176519,7 @@ var PLAN_RIP = 0.5;
 var PLAN_RIPS = 1;
 var GIVEN_OUTSIDE = 2;
 var GIVEN_LAYER = 1;
+var STRICT_LAYER = 12;
 var GROUP_REACH = 5;
 var VIA_PRICE = 2.5;
 var CUT_RIP_MM = 4;
@@ -176617,6 +176618,7 @@ var Router = class _Router {
     this.planBlk = null;
     this.planStat = { inside: 0, outside: 0, givenInside: 0 };
     this.givenMissed = [];
+    this.givenOut = /* @__PURE__ */ new Set();
     /** What taking a laid route up and laying it again costs, in mm of detour (Copper's rip price): 4 mm, times its
      *  width over the narrowest, eight times for a critical net, less for a route that already wanders, and more each
      *  time taking it up did not pay.  A route the global plan had to fight for costs PLAN_RIP of that: it is taken up
@@ -178662,6 +178664,13 @@ var Router = class _Router {
           };
         }
       }
+      const cor00 = this.gplan && !collect && !net.zoneCells ? this.gplan.corridors.get(conn.id) : void 0, strict = !!(cor00 && cor00.given && this.planOpts().strict);
+      if (strict) {
+        const GT = this.gplan.nx * this.gplan.ny, want2 = G5.routable.map(() => false);
+        for (const q4 of cor00.path) want2[q4 / GT | 0] = true;
+        for (const e of [A, B]) if (!e.layers.some((l) => want2[l])) for (const l of e.layers) want2[l] = true;
+        rt = rt.map((v, l) => v && want2[l]);
+      }
       if (soft && !collect) {
         const full3 = conn.cls.full, plan2 = extra;
         extra = (nodes) => {
@@ -178777,11 +178786,11 @@ var Router = class _Router {
         }
         return { res, owner, flip, esc: [src.esc, tgt ? tgt.esc : void 0] };
       };
-      const cor0 = this.gplan && !collect && !net.zoneCells && !this.noSteer ? this.gplan.corridors.get(conn.id) : void 0, steerAs = cor0 ? this.planOpts().steer : "none", cor = cor0 && (cor0.given || steerAs === "all" || steerAs === "moved" && cor0.moved) ? cor0 : void 0;
+      const cor0 = cor00 && (!this.noSteer || strict) ? cor00 : void 0, steerAs = cor0 ? this.planOpts().steer : "none", cor = cor0 && (cor0.given || steerAs === "all" || steerAs === "moved" && cor0.moved) ? cor0 : void 0;
       let steer = extra;
       if (cor && !(cor.vias > 0 && maxVias <= 0)) {
         const pl = this.gplan, kk = pl.k, po = this.planOpts();
-        const lc = G5.routable.filter(Boolean).length > 1 ? cor.given ? Math.max(po.layerCost, GIVEN_LAYER) : po.layerCost : 0, oc = cor.given ? Math.max(po.outside, GIVEN_OUTSIDE) : po.outside, lay = cor.layer, tl = cor.tiles, before = extra;
+        const lc = G5.routable.filter(Boolean).length > 1 ? cor.given ? Math.max(po.layerCost, strict ? STRICT_LAYER : GIVEN_LAYER) : po.layerCost : 0, oc = cor.given ? Math.max(po.outside, GIVEN_OUTSIDE) : po.outside, lay = cor.layer, tl = cor.tiles, before = extra;
         if (lc > 0 || oc > 0) steer = (nodes) => {
           let off = 0, out2 = 0;
           for (let i = 0; i + 1 < nodes.length; i++) {
@@ -178819,6 +178828,7 @@ var Router = class _Router {
           this.planStat.outside++;
         }
       }
+      if (strict) return null;
       const margins = [Math.max(14, Math.round(span * 0.35)), Math.max(50, Math.round(span * 1.2)), Math.max(G5.W, G5.H)];
       for (let i = 0; i < margins.length; i++) {
         const m = margins[i];
@@ -178833,6 +178843,7 @@ var Router = class _Router {
               break;
             }
             this.planStat[inside2 ? "inside" : "outside"]++;
+            if (!inside2 && cor.given) this.givenOut.add(conn.net);
           }
           return finish(res);
         }
@@ -178846,7 +178857,7 @@ var Router = class _Router {
   planOpts() {
     const o = this.opts.plan ?? PLAN;
     const q4 = typeof o === "object" ? o : {};
-    return { tile: q4.tile || 0, iters: q4.iters || 16, layerCost: q4.layerCost ?? 0.5, outside: q4.outside ?? 0.5, mask: !!q4.mask, vias: !!q4.vias, open: q4.open ?? 1, steer: q4.steer || "moved", order: q4.order !== false, rip: q4.rip !== false, paths: q4.paths && typeof q4.paths === "object" ? q4.paths : null, ring: q4.ring ?? 0.5 };
+    return { tile: q4.tile || 0, iters: q4.iters || 16, layerCost: q4.layerCost ?? 0.5, outside: q4.outside ?? 0.5, mask: !!q4.mask, vias: !!q4.vias, open: q4.open ?? 1, steer: q4.steer || "moved", order: q4.order !== false, rip: q4.rip !== false, paths: q4.paths && typeof q4.paths === "object" ? q4.paths : null, ring: q4.ring ?? 0.5, strict: !!q4.strict };
   }
   /** How many rounds of the plan's negotiation fought over the connection (0: the plan never had to move it). */
   contested(c) {
@@ -178958,7 +178969,7 @@ var Router = class _Router {
       ms: pl.ms,
       inside: this.planStat.inside,
       outside: this.planStat.outside,
-      ...given || this.givenMissed.length ? { given, givenInside: this.planStat.givenInside, givenMissed: this.givenMissed.length ? this.givenMissed : void 0 } : {}
+      ...given || this.givenMissed.length ? { given, givenInside: this.planStat.givenInside, givenMissed: this.givenMissed.length ? this.givenMissed : void 0, givenOutside: this.givenOut.size ? Array.from(this.givenOut).map((n2) => n2.replace(/^\//, "")) : void 0 } : {}
     };
   }
   /** The routing AI's look at a part before it writes a plan (RouteOptions.view): for each pin row of the part, its
@@ -180016,7 +180027,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     const affected = [];
     for (const c of failed) {
       const cor = pl.corridors.get(c.id);
-      if (!cor) continue;
+      if (!cor || cor.given && this.planOpts().strict) continue;
       const { p } = this.whereOf(c);
       const tx = Math.min(nx - 1, Math.max(0, Math.floor((p[0] - G5.ox) / G5.g / k))), ty = Math.min(ny - 1, Math.max(0, Math.floor((p[1] - G5.oy) / G5.g / k))), t = ty * nx + tx;
       const layers = cor.layer[t] >= 0 ? [cor.layer[t]] : G5.routable.map((r, l) => r ? l : -1).filter((l) => l >= 0);
@@ -180080,6 +180091,8 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
   fineLay(conn) {
     const G5 = this.G, net = this.netOf(conn.net), cls = conn.cls, gd = net.guide, h3 = G5.g / 2;
     if (conn.planeOnly !== void 0) return false;
+    const gc = this.gplan && this.gplan.corridors.get(conn.id);
+    if (gc && gc.given && this.planOpts().strict) return false;
     const comp = this.components(net);
     if (comp[conn.a.cluster] === comp[conn.b.cluster]) return false;
     const span = Math.max(Math.abs(conn.a.p[0] - conn.b.p[0]), Math.abs(conn.a.p[1] - conn.b.p[1])), m = Math.max(2, 0.3 * span);

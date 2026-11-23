@@ -79,7 +79,8 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
 
     untangle=True (off by default: tens of seconds a try on a large board), or a budget in seconds: what is still open
     at the end gets board.untangle(), each open end laid again locally, keep-best, before unbox (its first tries add no
-    via).  Default budget max(900, 4 * time_s).
+    via; the first routes the open net alone, the last moves a differential pair aside: board.move_pair).  Default
+    budget max(900, 4 * time_s); the benchmark's Ember: 11 -> 8 open with untangle=1500.
 
     unbox=True (off by default: minutes per chip): what fine-pitch chips still leave open at the end gets board.unbox(),
     the routing AI's staggered dogbone trios with the copper in their way cleared, keep-best (Cyberboard 6 -> 2 open,
@@ -90,7 +91,8 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     under the chip for a pad behind it): the first routing pass lays the escapes and holds the corridors, the later
     passes keep the corridors.  With the gate the board is also routed without it and the better run stays.
     refan=["U9"] (or True: every fine-pitch chip still holding an open pin) lays such a chip's fan-out again at the
-    end, after untangle and unbox (board.refan, keep-best).
+    end, after untangle and unbox (board.refan, keep-best).  After any of these repairs the escape vias no route went
+    on from come up with their stubs (gated: kept when nothing opens and no error is added).
 
     fanout=True escapes every fine-pitch chip (20 pins or more, 0.65 mm pitch or finer) to a staggered ring of vias
     before routing (board.fanout): for a dense QFN whose pins are left open because neighbouring tracks box them in.
@@ -469,6 +471,12 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                             step("thermals again", self.fix_thermals)
                             gated("corners again", self.fix_corners)
             out["routed"]["left"] = step("unrouted", self.unrouted) or {}
+        # the repairs leave escape vias no route went on from (a try's escape kept with a route that left elsewhere):
+        # each comes up with its stub, kept when nothing opens and no error is added (a dangling via is one)
+        if out.get("routed") and (untangle or unbox or refan or chip_escapes):
+            gone = gated("unused escapes", lambda: _drop_unused_escapes(self))
+            if gone:
+                out["routed"]["unused_escapes_removed"] = gone
     info = self.info()
     out["size_mm"], out["layers"], out["vias"] = info.get("size_mm"), len(info.get("copper_layers") or []), info.get("vias")
     chk = step("drc", lambda: self.check(limit=4))
@@ -1818,6 +1826,7 @@ def _partner(net: str, nets) -> str | None:
 # laid again coupled), "net" (the open net whole: a piece left dangling elsewhere comes up too); the escape laid for
 # the open pin or None)
 UNTANGLE_TIERS = (
+    (0.0, "", None),      # nothing taken up: the open net routed alone, at most 2 vias a connection (Ember's C_CC1, which design() ran out of budget for)
     (1.0, "", None),
     (1.5, "supplies", None),
     (1.5, "supplies net", None),
@@ -1826,6 +1835,7 @@ UNTANGLE_TIERS = (
     (1.5, "supplies net", "via 1.1 clear small"),
     (2.5, "supplies pairs net", None),
     (2.5, "supplies net", "via 0.8 clear small"),
+    (2.0, "move pair", None),      # a pin a differential pair boxes in: the pair moved aside as one unit (board.move_pair)
 )
 
 
@@ -1842,16 +1852,19 @@ def _open_ends(self) -> list:
 
 
 def _untangle(self, nets: list | None = None, refs: list | None = None, budget_s: float = 600, time_s: float = 8, tiers=None,
-              sideways: int = 0, follow: int = 2, keep_rules: bool = True, layers: list | None = None, ripup: str | None = None, log=None) -> dict:
+              sideways: int = 0, follow: int = 2, keep_rules: bool = True, layers: list | None = None, ripup: str | None = None, protect=(), log=None) -> dict:
     """Close the connections a finished board still leaves open by laying the copper round each open end again,
     locally: a try takes up only the copper within a few mm of the open end and routes only the nets it took up (and
     the open one, first), so it costs seconds, not a whole-board route (Ember: 15 to 40 s a try against 100 s).
 
     For each open connection (the rules check's spot; refs= or nets= narrow it), the tries in UNTANGLE_TIERS, the least
-    disturbance first, each at the spot and then at the net's other pins nearby before the next tier: the signal copper within 1 mm; within 1.5 mm with the supplies' escapes too (a supply's stub
+    disturbance first, each at the spot and then at the net's other pins nearby before the next tier: the net routed
+    alone with nothing taken up (max_vias=2, ripup="ladder"); the signal copper within 1 mm; within 1.5 mm with the supplies' escapes too (a supply's stub
     and via between two signal pins is what boxes them in on a 0.4 mm QFN: Cyberboard's SWDIO between +3.3V and the
     USB pair); the same with a differential pair in reach taken up whole and laid again coupled; the open pin's own
-    escape to a via 0.6 or 1.1 mm out, clearing what is in the way (board.escape "via D clear"); then 2.5 mm.  Ground
+    escape to a via 0.6 or 1.1 mm out, clearing what is in the way (board.escape "via D clear"); then 2.5 mm; last,
+    where a differential pair runs within 2 mm of the pin, the pair moved aside as one unit (board.move_pair: the pin
+    first, the pair laid again coupled, kept only if the pair keeps its vias and skew).  Ground
     copper never comes up.  Each try runs in board.trial() and stays only when fewer connections are open (at the same
     count, fewer rules errors); a net the try opened that was routed before gets one local follow-up, then its loose
     ends joined by a via where one fits (board.mend).  sideways=N (off by default) also keeps up to N tries that leave
@@ -1859,6 +1872,7 @@ def _untangle(self, nets: list | None = None, refs: list | None = None, budget_s
     BUZZER's via that way).  Rules errors are counted (a DRC, ~10 s) only for a
     try that is not already worse.  It loops until a pass keeps nothing or budget_s is spent.
 
+    protect=[nets] are never taken up (board.cross keeps the nets it just laid along their paths that way).
     tiers=[(radius, "" | "supplies" | "pairs", escape or None), ...] replaces the default tries.  time_s is the
     router's budget per try (work done, not the clock).  Returns {"before", "after", "tried": [one line per try],
     "kept": [...]}; call board.fix_corners() and board.finish() after it, as after any routing."""
@@ -1894,6 +1908,10 @@ def _untangle(self, nets: list | None = None, refs: list | None = None, budget_s
         """One local try: take up the copper round (x, y) (what `extra` allows), lay `esc` for the pin, route the nets
         taken up with `net` first.  Returns (nets routed, nets taken up whole, ids removed)."""
         taken, whole, ids = {net}, set(), []
+        if radius <= 0:      # the net alone, nothing else moved
+            with contextlib.suppress(HarnessError):
+                self.route(nets=[net], fill=False, keep_rules=keep_rules, layers=layers, ground_vias=False, time_s=time_s, ripup="ladder", max_vias=2)
+            return taken, whole, ids
         for it in self.whats_at((x, y), radius=radius):
             n = it.get("net")
             if it["kind"] not in ("segment", "arc", "via") or not n or _GROUNDISH.match(n) or n in protect:
@@ -1939,7 +1957,10 @@ def _untangle(self, nets: list | None = None, refs: list | None = None, budget_s
             for (radius, extra, esc), (x, y, pin) in [(t, e) for t in tiers for e in ends]:
                 if _t.time() - t0 > budget_s:
                     break
-                if esc and not pin:
+                if (esc and not pin) or (radius <= 0 and (x, y) != ends[0][:2]):      # the net alone: once, not at every end
+                    continue
+                if extra == "move pair" and not (pin and any(it.get("net") and it["net"] != net and _PAIR.search(it["net"]) and _partner(it["net"], all_nets)
+                                                             for it in self.whats_at((x, y), radius=radius))):
                     continue
                 key = (shape0, net, round(x, 2), round(y, 2), radius, extra, esc)
                 if key in done:
@@ -1948,7 +1969,11 @@ def _untangle(self, nets: list | None = None, refs: list | None = None, budget_s
                 t1 = _t.time()
                 try:
                     with self.trial() as tr:
-                        taken, whole, ids = lay_round(net, x, y, pin, radius, extra, esc, protect=())
+                        if extra == "move pair":      # the pair within reach comes up whole, the pin goes first, the pair is laid again coupled
+                            mp = _move_pair(self, pin, time_s=max(time_s, 15), layers=layers, keep_rules=keep_rules, budget_s=300, log=say)
+                            taken, whole, ids = {net}, set(mp["pair"]), []
+                        else:
+                            taken, whole, ids = lay_round(net, x, y, pin, radius, extra, esc, protect=protect)
                         # what the try left open that was routed before gets one follow-up of its own (its end, 1 mm,
                         # signals and supplies, the net this try freed left alone): a depth-two search, still local
                         for _ in range(follow):
@@ -1957,7 +1982,7 @@ def _untangle(self, nets: list | None = None, refs: list | None = None, budget_s
                                 break
                             for n2, x2, y2, rs2 in _open_ends(self):
                                 if n2 in fresh:
-                                    t2, w2, i2 = lay_round(n2, x2, y2, None, 1.0, "supplies", None, protect={net})
+                                    t2, w2, i2 = lay_round(n2, x2, y2, None, 1.0, "supplies", None, protect={net, *protect})
                                     ids += i2; taken |= t2
                                     break
                         fresh = set(self.unrouted()) - shape0
@@ -1989,6 +2014,278 @@ def _untangle(self, nets: list | None = None, refs: list | None = None, budget_s
             break
     self.project.note(f"board: untangled open ends locally, open connections {start[0]} -> {best[0]}")
     return {"before": start[0], "after": best[0], "tried": tried, "kept": kept}
+
+# ---------------------------------------------------------------- a differential pair moved aside as one unit
+
+def _pair_state(self, nets) -> dict:
+    """Per net: {"vias", "mm"} of its copper (tracks and arcs end to end), to judge a pair laid again."""
+    names = _net_names(self)
+    st = {n: {"vias": 0, "mm": 0.0} for n in nets}
+    for it in self._all_items(["segment", "arc", "via"]):
+        x = _parse_item(it, names)
+        if not x or x["net"] not in st:
+            continue
+        if x["kind"] == "via":
+            st[x["net"]]["vias"] += 1
+        else:
+            (ax, ay), (bx, by) = x["pts"]
+            st[x["net"]]["mm"] += math.hypot(bx - ax, by - ay)
+    return st
+
+
+def _pair_ok(before: dict, after: dict, open_nets) -> str:
+    """'' when a pair laid again keeps the person's rules, else why not: both lines routed, the two lines with the
+    same number of vias (one each, side by side, where a via cannot be avoided; or each as many as before) and no more
+    than before, and the length difference no worse than before by more than 0.5 mm."""
+    p, n = list(after)
+    if p in open_nets or n in open_nets:
+        return "a line of the pair is open"
+    if after[p]["vias"] != after[n]["vias"] and (after[p]["vias"], after[n]["vias"]) != (before[p]["vias"], before[n]["vias"]):
+        return f"the lines took {after[p]['vias']} and {after[n]['vias']} vias"
+    if after[p]["vias"] + after[n]["vias"] > before[p]["vias"] + before[n]["vias"]:
+        return f"more vias than before ({before[p]['vias'] + before[n]['vias']} -> {after[p]['vias'] + after[n]['vias']})"
+    if abs(after[p]["mm"] - after[n]["mm"]) > abs(before[p]["mm"] - before[n]["mm"]) + 0.5:
+        return f"skew {abs(before[p]['mm'] - before[n]['mm']):.2f} -> {abs(after[p]['mm'] - after[n]['mm']):.2f} mm"
+    return ""
+
+
+def _move_pair(self, pin: str, pair: list | None = None, escapes=("via 1.0 clear small", "via 1.3 clear small", "via 0.6 clear small", None),
+               radius: float = 1.0, time_s: float = 20, layers: list | None = None, keep_rules: bool = True, budget_s: float = 900, log=None) -> dict:
+    """Free a pin that a protected differential pair boxes in (Cyberboard's SWDIO at U4.54 beside /DP), by moving the pair
+    aside as one unit, keep-best.  Each try (in board.trial()): both lines of the pair come up whole, with the signal
+    copper within `radius` mm of the pin and the pin's own net; the pin's escape is laid (`escapes`, one try each, as
+    board.escape takes them; None lets the router leave the pad) and its net routed first; then the pair is laid again
+    as one coupled run, with no via first and then with as many vias per line as it had (the router puts a via pair
+    side by side), and last whatever else came up.  A try stays only when fewer connections are open (at the same
+    count, fewer rules errors) and the pair keeps the person's rules: both lines routed, the same number of vias on
+    each (or exactly the counts it had) and no more than before, the length difference no worse than before by more than 0.5 mm.  pair=["/DP", "/DN"]
+    names it; by default the pair nearest the pin.  Returns {"before", "after", "pair", "tried", "kept"}."""
+    import time as _t
+    t0 = _t.time()
+    say = log or (lambda s: None)
+    pad = self.pad(pin)
+    net = pad["net"]
+    at = (float(pad["x"]), float(pad["y"]))
+    all_nets = set(self.nets())
+    if pair is None:
+        for it in self.whats_at(at, radius=2.0):
+            n_ = it.get("net") or ""
+            if it["kind"] in ("segment", "arc", "via", "pad") and n_ != net and _PAIR.search(n_) and _partner(n_, all_nets):
+                pair = [n_, _partner(n_, all_nets)]
+                break
+    if not pair:
+        raise HarnessError(f"move_pair: no differential pair within 2 mm of {pin}")
+    pair = [self._net(n) for n in pair]
+    before = _pair_state(self, pair)
+    start = best = _standing(self)
+    tried, kept = [], []
+    vias0 = max(before[pair[0]]["vias"], before[pair[1]]["vias"])
+    for esc in escapes:
+        for pv in sorted({0, vias0}):
+            if _t.time() - t0 > budget_s:
+                tried.append("budget spent")
+                break
+            t1 = _t.time()
+            with self.trial() as tr:
+                taken = {net}
+                for it in self.whats_at(at, radius=radius):
+                    n_ = it.get("net")
+                    if it["kind"] in ("segment", "arc", "via") and n_ and n_ not in pair and not _kept_net(n_):
+                        with contextlib.suppress(HarnessError):
+                            self._edit({"op": "remove", "id": it["id"]})
+                        taken.add(n_)
+                self.flush()
+                self.unroute(*pair, keep=())
+                if not _kept_net(net):
+                    self.unroute(net, keep=())
+                why = ""
+                if esc:
+                    with contextlib.suppress(HarnessError):
+                        e_ = _escape(self, {pin: esc})
+                        taken |= set(e_.get("moved") or [])
+                        if e_.get("skipped"):
+                            why = f" (escape skipped: {e_['skipped'].get(pin, '')[:60]})"
+                kw = dict(fill=False, keep_rules=keep_rules, layers=layers, ground_vias=False, time_s=time_s)
+                with contextlib.suppress(HarnessError):
+                    self.route(nets=[net], ripup="ladder", **kw)
+                with contextlib.suppress(HarnessError):
+                    self.route(nets=pair, net_options={n: {"max_vias": pv} for n in pair}, **kw)
+                rest = sorted((taken - {net}) & set(self.unrouted()))
+                if rest:
+                    with contextlib.suppress(HarnessError):
+                        self.route(nets=rest, ripup="ladder", **kw)
+                fresh = set(self.unrouted()) - set(pair) - {net}
+                if fresh:
+                    with contextlib.suppress(HarnessError):
+                        _mend(self, nets=sorted(fresh))
+                now = _standing(self)
+                after = _pair_state(self, pair)
+                bad = _pair_ok(before, after, set(self.unrouted()))
+                tr.keep = not bad and (now[0] < best[0] or (now[0] == best[0] and now[1] < best[1]))
+                line = (f"{pin} {esc or 'router escape'}, pair with at most {pv} via{'s' if pv != 1 else ''} a line: open {best[0]} -> {now[0]}, errors {best[1]} -> {now[1]}"
+                        f", pair vias {before[pair[0]]['vias']}+{before[pair[1]]['vias']} -> {after[pair[0]]['vias']}+{after[pair[1]]['vias']}"
+                        f"{'; ' + bad if bad else ''}{why} ({round(_t.time() - t1)} s)")
+                tried.append(line)
+                say(line)
+            if tr.keep:
+                kept.append(line)
+                best = now
+                break
+        if kept:
+            break
+    self._geom = None
+    self.project.note(f"board: moved the pair {'/'.join(pair)} aside for {pin}, open connections {start[0]} -> {best[0]}")
+    return {"before": start[0], "after": best[0], "pair": pair, "tried": tried, "kept": kept}
+
+
+def _seg_hits(x: dict, a, c, reach: float) -> bool:
+    """A parsed item (segment or via) comes within `reach` mm of the line a-c."""
+    if x["kind"] == "via":
+        return _seg_dist(x["pts"][0], a, c) <= reach + x.get("size", 0.5) / 2
+    d = 0.0 if _cross(x["pts"][0], x["pts"][1], a, c) else _segs_dist(x["pts"][0], x["pts"][1], a, c)
+    return d <= reach + x.get("width", 0.2) / 2
+
+
+def _claim(self, path: list, width: float = 0.2, keep=(), protect=(), via: float = 0.45) -> tuple:
+    """Take up the copper of other nets that lies in a written path's way: tracks on the path's layer and vias within
+    a track's room of each leg, and everything within a via's room (`via` mm) of each point where the path changes
+    layer (never ground, supplies, pairs, crystal or antenna lines, nor `protect`).  Returns (ids removed, their nets)."""
+    rules = (self.project.transport.call("get_board_info", {}).get("design_rules") or {})
+    nc = (rules.get("net_classes") or {}).get("Default") or {}
+    clr = float(nc.get("clearance") or 0.15)
+    reach = width / 2 + clr
+    names = _net_names(self)
+    xs = [float(q[0]) for q in path]
+    ys = [float(q[1]) for q in path]
+    near = {"x": (min(xs) + max(xs)) / 2, "y": (min(ys) + max(ys)) / 2, "radius": math.hypot(max(xs) - min(xs), max(ys) - min(ys)) / 2 + 1.0}
+    items = [x for x in (_parse_item(it, names) for it in self._all_items(["segment", "arc", "via"], near=near)) if x]
+    ids, nets = [], set()
+    turns = [(float(q1[0]), float(q1[1])) for q0, q1 in zip(path, path[1:]) if (str(q0[2]) if len(q0) > 2 else "F.Cu") != (str(q1[2]) if len(q1) > 2 else "F.Cu")]
+    for x in items:
+        n = x["net"]
+        if not n or n in keep or n in protect or _kept_net(n):
+            continue
+        if any(_seg_hits(x, t_, t_, via / 2 + clr) for t_ in turns):
+            ids.append(x["id"]); nets.add(n)
+            continue
+        for q0, q1 in zip(path, path[1:]):
+            lay = str(q0[2]) if len(q0) > 2 else "F.Cu"
+            if x["kind"] != "via" and x["layer"] != lay:
+                continue
+            if _seg_hits(x, (float(q0[0]), float(q0[1])), (float(q1[0]), float(q1[1])), reach):
+                ids.append(x["id"]); nets.add(n)
+                break
+    for i in ids:
+        with contextlib.suppress(HarnessError):
+            self._edit({"op": "remove", "id": i})
+    self.flush()
+    self._geom = None
+    return ids, nets
+
+
+def _cross_path(self, paths: dict, escapes: dict | None = None, order: list | None = None, ring: float = 0.5, claim: bool = True, time_s: float = 30,
+                layers: list | None = None, keep_rules: bool = True, max_vias: int | None = 2, follow_s: float = 180, refan: str | None = None, log=None) -> dict:
+    """Lay connections along paths you wrote, keep-best: the way the routing AI crosses under a crowded chip on an
+    inner or the back layer (Ember's ENC_A under U9 on B.Cu, FAULT_IN and TEMP_ALERT round its corners on In1 / In2).
+
+    paths: {net: [[x, y, layer], ...]} as board.route(plan={"paths"}) takes them, each from the pin's escape via (or
+    the pin) to the far end; two points on different layers put a via at the second.  Name the nets whose route
+    holds the room you want too (Ember's BUTTON, on B.Cu under U9 where ENC_A goes: a path for it up on In2).
+    escapes: {pin: spec} as board.escape takes them ({"to": [x, y], "via": True, "thin": True, "small": True} for the
+    stub and via you chose), laid first.  With claim=True the copper of other signal nets in the paths' way (tracks
+    on each leg's layer, vias anywhere along it, and round each escape's stub and via) comes up first (never ground,
+    supplies, pairs, crystal or antenna lines).  The nets are routed in `order` (default: as given) with the paths
+    strict (plan.strict: inside the corridor, `ring` mm round the path, and on its layers, or not at all; the
+    ladder's rescue keeps it too) and at most `max_vias` vias a connection, the escape via counted; then the nets
+    taken up are laid again (ripup="ladder"); a net the take-up left open gets its loose ends joined (board.mend), then
+    up to `follow_s` seconds of board.untangle on it that never takes up the nets just laid; refan="U9" then lays that
+    chip's sides still holding a pin the take-up left open again (board.refan with the paths' nets protected: about
+    5 minutes a side; the escapes beside a crossing's own are what it boxes in).  Kept only when fewer connections are open (at the same count, fewer rules errors).  Returns {"before", "after",
+    "kept", "laid": {net: "inside" | "outside" | "open"}, "moved": [nets taken up], "line"}."""
+    import time as _t
+    t0 = _t.time()
+    say = log or (lambda s: None)
+    paths = {self._net(n): [list(q) for q in pts] for n, pts in paths.items()}
+    escapes = dict(escapes or {})
+    order = [self._net(n) for n in (order or list(paths))]
+    start = _standing(self)
+    open0 = set(self.unrouted())
+    res: dict = {"laid": {}}
+    pin_net = {}
+    for pin in escapes:
+        with contextlib.suppress(HarnessError):
+            pin_net[pin] = self.pad(pin)["net"]
+    with self.trial() as tr:
+        moved: set = set()
+        ours = set(paths) | set(pin_net.values())
+        if claim:
+            for pin, spec in escapes.items():
+                if isinstance(spec, dict) and spec.get("to"):
+                    to = spec["to"] if isinstance(spec["to"][0], (list, tuple)) else [spec["to"]]
+                    pp = self.pad(pin)
+                    stub = [[pp["x"], pp["y"], "F.Cu"]] + [[t_[0], t_[1], "F.Cu"] for t_ in to]
+                    if spec.get("via"):
+                        stub.append([to[-1][0], to[-1][1], "B.Cu"])      # the via at the stub's end: every layer
+                    _ids, ns = _claim(self, stub, width=0.2, keep=ours, via=0.45)      # room for the stub and its via
+                    moved |= ns
+            for pts in paths.values():
+                _ids, ns = _claim(self, pts, keep=ours)
+                moved |= ns
+        for n in ours:
+            if not _kept_net(n):
+                self.unroute(n, keep=())
+        if escapes:
+            with contextlib.suppress(HarnessError):
+                e_ = _escape(self, escapes)
+                res["escapes"] = e_
+                moved |= set(e_.get("moved") or [])
+        esc_net = {pin_net.get(p) for p in escapes if not str(escapes[p]).startswith("out")}
+        for n in order + [x for x in ours if x not in order]:
+            if n not in self.unrouted():
+                res["laid"][n] = "inside" if n in paths else "laid"
+                continue
+            kw = dict(fill=False, keep_rules=keep_rules, layers=layers, ground_vias=False, time_s=time_s, ripup="ladder")
+            if max_vias is not None:
+                kw["max_vias"] = max(0, max_vias - (1 if n in esc_net else 0))
+            try:
+                r = self.route(nets=[n], plan={"paths": {n: paths[n]}, "strict": True, "ring": ring} if n in paths else None, **kw)
+                pl = r.get("plan") or {}
+                if n in self.unrouted():
+                    res["laid"][n] = "open"
+                elif n in paths:
+                    res["laid"][n] = "outside" if n.lstrip("/") in (pl.get("given_outside") or []) else "inside"
+                else:
+                    res["laid"][n] = "laid"
+            except HarnessError as e:
+                res["laid"][n] = "open (" + str(e).split("(autoroute): ")[-1][:80] + ")"
+        rest = sorted((moved - ours) & set(self.unrouted()))
+        if rest:
+            with contextlib.suppress(HarnessError):
+                self.route(nets=rest, fill=False, keep_rules=keep_rules, layers=layers, ground_vias=False, time_s=time_s, ripup="ladder")
+        fresh = set(self.unrouted()) & moved
+        if fresh:
+            with contextlib.suppress(HarnessError):
+                _mend(self, nets=sorted(fresh))
+        fresh = set(self.unrouted()) & moved
+        if fresh and follow_s > 0 and all(v in ("inside", "laid") for v in res["laid"].values()):
+            with contextlib.suppress(HarnessError):
+                _untangle(self, nets=sorted(fresh), budget_s=follow_s, layers=layers, keep_rules=keep_rules, protect=tuple(ours))
+        fresh = set(self.unrouted()) & moved
+        if fresh and refan and all(v in ("inside", "laid") for v in res["laid"].values()):
+            with contextlib.suppress(HarnessError):
+                _refan(self, refan, nets=sorted(fresh | moved), layers=layers, protect=tuple(ours), budget_s=900)
+        now = _standing(self)
+        tr.keep = now[0] < start[0] or (now[0] == start[0] and now[1] < start[1])
+        opened = sorted(set(self.unrouted()) - open0)
+        sk = (res.get("escapes") or {}).get("skipped")
+        line = (", ".join(f"{n.lstrip('/')} {v}" for n, v in res["laid"].items()) + f"; {len(moved)} nets taken up"
+                + (f" ({', '.join(sorted(moved))})" if moved and len(moved) <= 6 else "")
+                + (f", escapes skipped: {sk}" if sk else "") + (f", opened {', '.join(opened)}" if opened else "")
+                + f": open {start[0]} -> {now[0]}, errors {start[1]} -> {now[1]} ({round(_t.time() - t0)} s)")
+        say(line)
+    self._geom = None
+    return {"before": start[0], "after": now[0] if tr.keep else start[0], "kept": tr.keep, "laid": res["laid"], "moved": sorted(moved), "line": line}
+
 
 # ---------------------------------------------------------------- a chip's fan-out laid again as one planned unit
 
@@ -2287,7 +2584,7 @@ def _net_names(self) -> dict:
 
 
 def _refan(self, ref: str, band: float = 2.0, tries=None, nets: list | None = None, layers: list | None = None, time_s: float = 60, near_mm: float = 1.5,
-           budget_s: float = 900, depths=(0.5, 1.1), small: bool = True, log=None) -> dict:
+           budget_s: float = 900, depths=(0.5, 1.1), small: bool = True, protect=(), log=None) -> dict:
     """Lay a crowded fine-pitch chip's fan-out again as one planned unit, keep-best (each try in board.trial()), for
     when single escapes, trios and local re-routes round its open pins only move the blockage (Ember's U9).
 
@@ -2307,7 +2604,8 @@ def _refan(self, ref: str, band: float = 2.0, tries=None, nets: list | None = No
        as buses and a pin whose net goes on behind the chip crosses under it (board.route(plan={paths, order},
        ripup="ladder")); a net the try opened elsewhere gets its loose ends joined (board.mend), the escape vias no
        route used come up with their stubs, and the square bends are cut (board.fix_corners).
-    A try stays only when fewer connections are open (at the same count, fewer rules errors).  Returns {"before",
+    A try stays only when fewer connections are open (at the same count, fewer rules errors).  protect=[nets] are
+    never taken up nor laid again (board.cross keeps its paths that way).  Returns {"before",
     "after", "tried": [one line per try], "kept": [...], "plan": {pin: line} of the kept tries}."""
     import time as _t
     t0 = _t.time()
@@ -2361,7 +2659,7 @@ def _refan(self, ref: str, band: float = 2.0, tries=None, nets: list | None = No
             return any(inside((ax + (bx - ax) * i / k, ay + (by - ay) * i / k)) for i in range(k + 1))
 
         def movable(n, sup=sup):
-            if not n or n.startswith("unconnected-") or (want is not None and n not in want and not (sup and _sup_name(n))):
+            if not n or n.startswith("unconnected-") or n in protect or (want is not None and n not in want and not (sup and _sup_name(n))):
                 return False
             return not _kept_net(n) or bool(sup and _sup_name(n) and not _GROUNDISH.match(n))
 
@@ -2398,7 +2696,7 @@ def _refan(self, ref: str, band: float = 2.0, tries=None, nets: list | None = No
             self._geom = None
             left0 = set(self.unrouted())
             try:
-                fp = _fan_plan(self, ref, targets=tg, nets=[n for n in moved if n in pins] + [n for n in left0 if n in pins], layers=layers, depths=depths,
+                fp = _fan_plan(self, ref, targets=tg, nets=[n for n in moved if n in pins and n not in protect] + [n for n in left0 if n in pins and n not in protect], layers=layers, depths=depths,
                                small=small, near_mm=near_mm, supplies=sup, sides=[side] if side else None, check=True, bus=bus)
                 esc = _escape(self, fp["escapes"])
                 # a pin whose straight 0.1 mm stub is blocked (a supply's via, a capacitor's pad): a 45-degree leg either
@@ -2461,3 +2759,5 @@ def install(Board) -> None:
     Board.mend = _mend
     Board.fan_plan = _fan_plan
     Board.refan = _refan
+    Board.move_pair = _move_pair
+    Board.cross = _cross_path
