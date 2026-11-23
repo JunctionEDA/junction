@@ -3,7 +3,7 @@ import { schTheme, withSchTheme } from "./colors";
 import { buildPcbGeom } from "./geom-pcb";
 import { buildSchGeom } from "./geom-sch";
 import { flipH, flipV, justOf, rotator, str, splitLines } from "./sexpr";
-import { INTERLINE, parseMarkup, textWidth, unescapeText } from "./text";
+import { INTERLINE, parseMarkup, strokeTextBox, unescapeText } from "./text";
 import { FONT_GEN, outlineBoxCorners } from "./outline-text";
 import type { Box, Doc, Geom, GeomSink, Item, SAtom, TextExtra, TextGeom } from "./types";
 // ---------------------------------------------------------------- geometry builders
@@ -26,10 +26,9 @@ export function G<T extends Geom>(item: GeomSink, g: T): T {
     // an outline face: KiCad's text box for it (EDA_TEXT::GetTextBox), from the face's own metrics
     const oc = outlineBoxCorners(g); if (oc) { for (const [px, py] of oc) bboxAdd(item, px, py); return g; }
     // approximate extents so culling/hit-testing sees the text: along the reading direction per justification
-    const w = textWidth(g.text, g.size, g.w), h = g.size;
-    const x0 = g.h === "left" ? 0 : g.h === "right" ? -w : -w / 2, y0 = g.v === "top" ? 0 : g.v === "bottom" ? -h : -h / 2;
+    const [x0, y0, x1, y1] = strokeTextBox(g);   // EDA_TEXT::GetTextBox
     const R = rotator(g.rot || 0);
-    for (const [px, py] of [[x0, y0], [x0 + w, y0], [x0, y0 + h], [x0 + w, y0 + h]]) { const [rx, ry] = R(g.mirror ? -px : px, py); bboxAdd(item, g.x + rx, g.y + ry); }
+    for (const [px, py] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]) { const [rx, ry] = R(g.mirror ? -px : px, py); bboxAdd(item, g.x + rx, g.y + ry); }
   }
   return g;
 }
@@ -112,7 +111,7 @@ export function textLines(item: GeomSink, x: number, y: number, text: SAtom | nu
     : Object.assign({}, e, { olBlock: { x, y, line: i, lines: lines.length, first: unescapeText(lines[0] || ""), kind: e.olKind, lift: e.olLift, all } });
   if (lines.length === 1) return textGeom(item, x, y, lines[0], size, color, rot, just, layer, block(0, extra));
   if (extra && extra.dxfText) extra = Object.assign({}, extra, { dxfText: undefined });   // DXF_PLOTTER::PlotText draws a multiline text as graphics
-  const j = justOf(just || [], extra && extra.defH, extra && extra.defV); const il = size * INTERLINE;
+  const j = justOf(just || [], extra && extra.defH, extra && extra.defV); const il = size * INTERLINE * ((extra && extra.lineSpacing) || 1);   // EDA_TEXT::GetInterline × GetLineSpacing
   const off0 = j.v === "top" ? 0 : j.v === "bottom" ? -(lines.length - 1) * il : -(lines.length - 1) * il / 2;
   const R = rotator(rot || 0); const out: TextGeom[] = [];
   lines.forEach((ln, i) => { const [dx, dy] = R(0, off0 + i * il); out.push(textGeom(item, x + dx, y + dy, ln, size, color, rot, just, layer, block(i, extra))); });

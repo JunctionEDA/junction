@@ -14,6 +14,7 @@
 //   New Library      a <name>.pretty row in the project's fp-lib-table
 //   Insert into PCB  the board tab (BroadcastChannel "kc-fpedit") carries it on the cursor, as KiCad's placement
 import { loadPinnedLibs, setLibPinned } from "../library/pinned";
+import { GENERATOR, GENERATOR_VERSION, SEXPR_FOOTPRINT_LIB_FILE_VERSION } from "../canvas/format-version";
 import { setStatusBar, state, store } from "./appstore";
 import { keyName } from "../../../shared/keys";
 import { getInactiveMode, setInactiveMode } from "./panels/appearance";
@@ -36,8 +37,8 @@ const W = window as unknown as { PcbTools: Any; KDialogs?: Any; KiCadLibrary?: A
 const FD = (): Any => KiCadCanvas.footprintDoc;
 const PT = () => W.PcbTools;
 const str = (v: unknown) => (v === undefined || v === null ? "" : String(v));
-/** The file version the web writes new footprints with (pcb-tools BOARD_VERSION): never newer than the board writer. */
-const NEW_FILE_VERSION = 20260728;
+/** The file version a new footprint is written with: FormatFootprintLibFile's SEXPR_FOOTPRINT_LIB_FILE_VERSION. */
+const NEW_FILE_VERSION = SEXPR_FOOTPRINT_LIB_FILE_VERSION;
 
 interface BoardCopy { boardDocId: string; fpUuid: string; uuidMap: Record<string, string>; link: string; reference: string; boardPath: string; text: string }
 /** A footprint of a library outside the project (the official libraries): read-only, opened as a private copy. */
@@ -215,7 +216,7 @@ export function onFootprintOpened(snapSeq: number): void {
   libTableRows().then(publishLibs).catch(() => publishLibs());
   void loadOfficialLibs();
   // FOOTPRINT_EDIT_FRAME::UpdateMsgPanel's infobar: a footprint of a library that cannot be written
-  if (isFpReadOnlyLib()) toast("Library is read-only.  Changes cannot be saved to this library.", 8000);
+  if (isFpReadOnlyLib()) toast("Library is read-only.  Changes cannot be saved to this library.", 0);   // ShowMessage: stays until closed
   refreshTitle();
   clearInterval(FP.timer);
   FP.timer = window.setInterval(() => { if (!isFpEdit()) { clearInterval(FP.timer); FP.timer = 0; document.title = FP.title = ""; return; } refreshTitle(); }, 700);
@@ -437,7 +438,7 @@ async function insertIntoBoard(): Promise<void> {
   if (isFpPrivate()) { await saveToBoard(); return; }
   const text = FD().serializeFootprintDoc(E.kdoc); const { lib, name } = fpLibIdOf(state.doc!.path);
   const r = await ask({ type: "insert", projectId: state.project!.projectId, fpid: `${lib}:${name}`, text });
-  if (!r) { toast("No board currently open.", 3500); return; }
+  if (!r) { toast("No board currently open.", 8000, undefined, "error"); return; }
   if (!r.ok) toast(r.msg || "No board currently open.", 3500);
 }
 
@@ -448,11 +449,12 @@ export function newFootprintText(name: string, attr: string): string {
   const q = (s: string) => JSON.stringify(s);
   const eff = (t: number) => `(effects (font (size 1 1) (thickness ${t})))`;
   const field = (n: string, v: string, y: number, layer: string, t: number, hide: boolean) => `(property ${q(n)} ${q(v)} (at 0 ${y} 0) (layer ${q(layer)})${hide ? " (hide yes)" : ""} (uuid ${q(nowUuid())}) ${eff(t)})`;
-  const src = `(footprint ${q(name)} (version ${NEW_FILE_VERSION}) (generator "pcbnew") (generator_version "10.0") (layer "F.Cu")`
+  // FormatFootprintLibFile: (kicad_footprint_lib (version …) (generator "kicad_footprint_editor") (generator_version …) (footprint …))
+  const src = `(kicad_footprint_lib (version ${NEW_FILE_VERSION}) (generator "${GENERATOR.fplib}") (generator_version "${GENERATOR_VERSION}") (footprint ${q(name)} (layer "F.Cu")`
     + ` ${field("Reference", "REF**", -0.5, "F.SilkS", 0.1, false)} ${field("Value", name, 1, "F.Fab", 0.15, false)}`
     + ` ${field("Datasheet", "", 0, "F.Fab", 0.15, true)} ${field("Description", "", 0, "F.Fab", 0.15, true)}`
     + (attr ? ` (attr ${attr})` : "")
-    + ` (fp_text user "\${REFERENCE}" (at 0 2.5 0) (layer "F.Fab") (uuid ${q(nowUuid())}) ${eff(0.15)}) (embedded_fonts no))`;
+    + ` (fp_text user "\${REFERENCE}" (at 0 2.5 0) (layer "F.Fab") (uuid ${q(nowUuid())}) ${eff(0.15)}) (embedded_fonts no)))`;
   return FD().prettify(src);
 }
 /** A new .kicad_mod document holding `text` (snapshot 0), then opened. */
@@ -840,7 +842,7 @@ function boardDatasheet(): void {
   if (!it || it.kind !== "footprint") return;
   const fields: Record<string, string> = {}; for (const p of KiCadCanvas.kids(it.node, "property")) fields[str(p[1])] = str(p[2]);
   const d = KiCadCanvas.kid(it.node, "descr"); const url = footprintDocUrl(fields, d ? str(d[1]) : "");
-  if (!url) { toast("No datasheet defined.", 3500); return; }
+  if (!url) { toast("No datasheet defined.", 8000, undefined, "error"); return; }
   if (/^[a-z][a-z0-9+.-]*:/i.test(url)) window.open(url, "_blank", "noopener"); else toast(`Unable to open '${url}'.`, 3500);
 }
 /** FOOTPRINT_EDITOR_CONTROL::EditLibraryFootprint: the board copy's library footprint (by its FPID). */
@@ -981,7 +983,7 @@ function editPad(): void {
   // PAD_TOOL::enterPadEditMode: the contrast mode is remembered and Normal becomes Dimmed while the pad is edited
   padEditContrast = getInactiveMode(); if (padEditContrast === "normal") setInactiveMode("dim");
   const it = doc.items.get(id); if (it) E.activeLayer = PT().fpPads.principalLayer(it.node);
-  toast(`Pad Edit Mode.  Press ${keyName("Ctrl+E")} again to exit.`, 24 * 3600 * 1000);
+  toast(`Pad Edit Mode.  Press ${keyName("Ctrl+E")} again to exit.`, 0);   // infoBar->ShowMessage( msg, wxICON_INFORMATION )
 }
 /** Somebody saved this footprint (the server's "saved" notice): the saved file is what this copy compares against,
  *  so the '*' goes when the copy here is that file (KiCad's library cache follows the file in the same way). */
@@ -1029,7 +1031,7 @@ function importFootprint(): void {
   const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".kicad_mod,.mod";
   inp.addEventListener("change", async () => {
     const f = inp.files && inp.files[0]; if (!f) return;
-    const text = await f.text(); const t = KiCadCanvas.parse(text);
+    const text = await f.text(); const t = FD().unwrapFootprintLib(KiCadCanvas.parse(text));
     if (!t || (t[0] !== "footprint" && t[0] !== "module")) { toast(`File '${f.name}' is not a KiCad footprint file.`, 4000); return; }
     await libTableRows();
     const lib = await pickLibrary("Import Footprint"); if (!lib) return;
@@ -1062,10 +1064,10 @@ function showFootprintUsers(): void {
 let lastBoardPick = "";
 async function loadFromBoard(): Promise<void> {
   const project = state.project; if (!project) return;
-  const board = project.docs.find((d) => d.docType === "kicad_pcb"); if (!board) { toast("No board currently open.", 3500); return; }
+  const board = project.docs.find((d) => d.docType === "kicad_pcb"); if (!board) { toast("No board currently open.", 8000, undefined, "error"); return; }
   let file = "";
   try { file = (await liveDocument(board.docId)).file; } catch { const r = await fetch(`/api/docs/${board.docId}/content`, { credentials: "same-origin" }); file = r.ok ? await r.text() : ""; }
-  if (!file) { toast("No board currently open.", 3500); return; }
+  if (!file) { toast("No board currently open.", 8000, undefined, "error"); return; }
   const bd = KiCadCanvas.parseDoc(file, "kicad_pcb");
   const fps = Array.from(bd.items.values()).filter((i) => i.kind === "footprint").map((i) => ({ id: i.id, ref: i.ref || "?" })).sort((a, b) => PT().pad.strNumCmp(a.ref, b.ref));
   if (!fps.length) { toast("The board has no footprints", 3500); return; }

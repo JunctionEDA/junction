@@ -7,7 +7,8 @@
 // keep pcb-tools' Pad Properties; dimensions open Dimension Properties from ./dimension).
 import { KICAD_FONT, faceOfFont, fontField, setFaceOfFont } from "../../dialogs/font-picker";
 import { trackViaDialog } from "./track-via";
-import { bitmapButton, box, checkField, errorMessage, fmtLenU, form, grid, gridButtons, h, coordField, iconToggle, lenField, messageBox, notebook, numField, openDialog, selectField, textField, unitLabel, type CellValue, type Field } from "./ui";
+import * as IPM from "./item-props-model";
+import { bitmapButton, box, checkField, errorMessage, fmtLen, fmtLenU, form, grid, gridButtons, h, coordField, iconToggle, lenField, messageBox, notebook, numField, openDialog, parseLen, selectField, spinField, textField, unitLabel, type CellValue, type Field } from "./ui";
 import { comboBox } from "../../../../shared/components/kcombo";
 import { E } from "../state";
 import { kicadActionAvailable, runKicadAction } from "../hotkeys";
@@ -177,9 +178,16 @@ function zoneDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => 
     const v0 = zoneValues(node);
     const panel = zoneSettingsPanel(v0, ro);
     const zm = h("button", { type: "button", class: "btn", "data-k": "openZoneManager" }, "Open Zone Manager...");
-    zm.addEventListener("click", () => { const dlg = zm.closest(".kd-overlay, .kd-dialog"); const esc = dlg && dlg.querySelector<HTMLButtonElement>(".kd-foot button"); if (esc) esc.click(); setTimeout(() => runKicadAction("zonesManager"), 0); });
+    // onZoneManager: TransferDataFromWindow (the edits validated and applied, as OK does), then the Zone Manager
+    zm.addEventListener("click", () => {
+      const dlg = body.parentElement as HTMLElement | null;
+      const btns = dlg ? Array.from(dlg.querySelectorAll<HTMLButtonElement>(".kd-foot > button")) : [];
+      const ok = btns[btns.length - 1]; if (ok) ok.click();
+      if (dlg && dlg.isConnected) return;   // the edits did not validate: the dialog stays
+      setTimeout(() => runKicadAction("zonesManager"), 0);
+    });
     body.append(h("div", { class: "pd-zone" },
-      h("div", { class: "pd-zonelayers" }, h("div", { class: "pd-colhead" }, "Layers:"), h("div", { class: "pd-list", style: "padding:4px 8px;max-height:330px" }, ...layerChecks.map((l) => l.f.el)), h("div", { class: "pd-row", style: "margin-top:8px" }, zm)),
+      h("div", { class: "pd-zonelayers" }, h("div", { class: "pd-colhead" }, "Layers:"), h("div", { class: "pd-list", style: "padding:4px 8px;max-height:330px" }, ...layerChecks.map((l) => l.f.el)), create ? null : h("div", { class: "pd-row", style: "margin-top:8px" }, zm)),
       h("div", null, form([["Zone name:", name.el, null, "A unique name for this zone, used to identify it in DRC rules"], ["Net name:", net.el]], true), locked.el, panel.el)));
     return (n) => {
       const on = layerChecks.filter((l) => l.f.get()).map((l) => l.name);
@@ -214,13 +222,13 @@ function zoneLayerSet(doc: KDoc, node: SNode): Set<string> {
   return out;
 }
 /** The layers list on the left of the zone dialogs; apply writes (layer …) or (layers …) when the ticks changed. */
-function zoneLayerList(doc: KDoc, node: SNode, opts: [string, string][], ro: boolean): { el: HTMLElement; checked(): string[]; apply(n: SNode): string | void } {
+function zoneLayerList(doc: KDoc, node: SNode, opts: [string, string][], ro: boolean, noneMsg = "No layer selected.", header = "Layers:"): { el: HTMLElement; checked(): string[]; apply(n: SNode): string | void } {
   const cur = zoneLayerSet(doc, node);
   const checks = opts.map(([name, label]) => ({ name, f: checkField(cur.has(name), label, { ro, key: "layer-" + name }) }));
-  const el = h("div", { class: "pd-zonelayers" }, h("div", { class: "pd-colhead" }, "Layers:"), h("div", { class: "pd-list", style: "padding:4px 8px;max-height:330px" }, ...checks.map((l) => l.f.el)));
+  const el = h("div", { class: "pd-zonelayers" }, h("div", { class: "pd-colhead" }, header), h("div", { class: "pd-list", style: "padding:4px 8px;max-height:330px" }, ...checks.map((l) => l.f.el)));
   const checked = (): string[] => checks.filter((l) => l.f.get()).map((l) => l.name);
   return { el, checked, apply(n) {
-    const on = checked(); if (!on.length) return "No layer selected.";
+    const on = checked(); if (!on.length) return noneMsg;
     const was = opts.map((o) => o[0]).filter((x) => cur.has(x));
     if (on.join(" ") === was.join(" ")) return undefined;   // untouched: a wildcard stays as written
     put(n, "layer", null); put(n, "layers", null);
@@ -228,22 +236,24 @@ function zoneLayerList(doc: KDoc, node: SNode, opts: [string, string][], ro: boo
     return undefined;
   } };
 }
-function outlineFields(node: SNode, ro: boolean): { outline: Field<string>; pitch: Field<number>; apply(n: SNode): void } {
+function outlineFields(node: SNode, ro: boolean): { outline: Field<string>; pitch: Field<number>; validate(): ApplyError | null; apply(n: SNode): void } {
   const hatch = kid(node, "hatch");
   const outline = selectField<string>(sval(hatch) || "edge", [["none", "Line"], ["edge", "Hatched"], ["full", "Fully hatched"]], { ro, key: "outline" });
   const pitch = lenField(nval(hatch, 2, 0.5), { ro, key: "hatchPitch" });
   pitch.input.title = "Distance between parallel lines used for hatching the area";
-  return { outline, pitch, apply(n) {
+  // m_outlineHatchPitch.Validate( ZONE_BORDER_HATCH_MINDIST_MM, ZONE_BORDER_HATCH_MAXDIST_MM )
+  const validate = (): ApplyError | null => { const e = IPM.rangeError("Outline hatch pitch", pitch.get(), IPM.HATCH_PITCH_MIN, IPM.HATCH_PITCH_MAX, fmtLenU); return e ? { msg: e, focus: pitch } : null; };
+  return { outline, pitch, validate, apply(n) {
     if (outline.get() !== (sval(hatch) || "edge") || Math.abs(pitch.get() - nval(hatch, 2, 0.5)) > 1e-9 || !hatch) put(n, "hatch", `(hatch ${outline.get()} ${f6(pitch.get())})`, ["priority", "connect_pads", "min_thickness"]);
   } };
 }
 
 // ---------------------------------------------------------------- Rule Area Properties (DIALOG_RULE_AREA_PROPERTIES)
-type PlacementKind = "none" | "sheetname" | "component_class" | "group";
 function ruleAreaDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void): boolean {
   const doc = ctx.doc as KDoc;
   return itemDialog(ctx, item, "Rule Area Properties", 708, (node, body, ro) => {
-    const layers = zoneLayerList(doc, node, withCurrent(copperLayers(doc), ""), ro);
+    // LSET::AllNonCuMask() | LSET::AllCuMask( copperLayerCount ): every layer of the board
+    const layers = zoneLayerList(doc, node, allLayers(doc), ro, "No layers selected.");
     const name = textField(sval(kid(node, "name")), { ro, key: "name" }); name.input.title = "A unique name for this rule area for use in DRC rules";
     const ko = kid(node, "keepout") || ["keepout"];
     const notAllowed = (k: string, dflt: boolean): boolean => { const c = kid(ko, k); return c ? sval(c) === "not_allowed" : dflt; };
@@ -254,51 +264,58 @@ function ruleAreaDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null)
     const fps = checkField(notAllowed("footprints", false), "Keep out footprints", { ro, key: "koFootprints", tip: "Raise a DRC error if a footprint courtyard overlaps this area" });
     // Placement: the multichannel tool's source, a sheet, a component class or a group (PANEL_RULE_AREA_PROPERTIES_PLACEMENT)
     const pl = kid(node, "placement"), plOn = !!pl && sval(kid(pl, "enabled")) === "yes";
-    const plKind0: PlacementKind = !plOn ? "none" : kid(pl as SNode, "component_class") ? "component_class" : kid(pl as SNode, "group") ? "group" : "sheetname";
-    const plSrc0 = plOn ? sval(kid(pl as SNode, plKind0)) : "";
-    const sheets = new Set<string>(), classes = new Set<string>(), groups = new Set<string>();
-    for (const it of doc.items.values()) {
-      if (it.kind === "footprint") {
-        const sn = kid(it.node, "sheetname"); if (sn && sval(sn)) sheets.add(sval(sn));
-        const cc = kid(it.node, "component_classes"); if (cc) for (const c of cc.slice(1)) if (isList(c) && c[0] === "class") classes.add(String(c[1]));
-      } else if (it.kind === "group" && typeof it.node[1] === "string" && it.node[1]) groups.add(String(it.node[1]));
-    }
-    let plKind: PlacementKind = plKind0;
-    const radios: HTMLInputElement[] = [];
-    const radio = (k: PlacementKind, label: string, control?: Field<string>): HTMLElement => {
-      const r = h("input", { type: "radio", name: "pd-placement", checked: plKind0 === k, disabled: ro, "data-k": "placement-" + k }) as HTMLInputElement;
-      r.addEventListener("change", () => { if (r.checked) plKind = k; });
-      radios.push(r);
+    const kind0: IPM.PlacementKind = pl && kid(pl, "component_class") ? "component_class" : pl && kid(pl, "group") ? "group" : "sheetname";
+    const src0 = pl ? sval(kid(pl, kind0)) : "";
+    const lists = IPM.placementSources(doc as unknown as Parameters<typeof IPM.placementSources>[0], (n) => (K() as unknown as { groupMemberIds(n: unknown[]): string[] }).groupMemberIds(n));
+    // m_lastPlacementSourceType: the radio last clicked (the zone's own type to start with)
+    let lastKind: IPM.PlacementKind = kind0;
+    let plKind: "none" | IPM.PlacementKind = plOn ? kind0 : "none";
+    const radio = (k: "none" | IPM.PlacementKind, label: string, control?: Field<number>): HTMLElement => {
+      const r = h("input", { type: "radio", name: "pd-placement", checked: plKind === k, disabled: ro, "data-k": "placement-" + k }) as HTMLInputElement;
+      r.addEventListener("change", () => { if (!r.checked) return; plKind = k; if (k !== "none") lastKind = k; });
       return h("div", { class: "kd-row" }, h("label", { class: "pd-check" }, r, label), control ? control.el : null);
     };
-    const pick = (set: Set<string>, kind: PlacementKind, key: string): Field<string> => selectField<string>(plKind0 === kind ? plSrc0 : "", withCurrent([["", ""], ...Array.from(set).sort().map((x): [string, string] => [x, x])], plKind0 === kind ? plSrc0 : ""), { ro, key });
-    const sheet = pick(sheets, "sheetname", "placementSheet"), cls = pick(classes, "component_class", "placementClass"), grp = pick(groups, "group", "placementGroup");
+    // wxComboBox lists without a blank entry: the first preselected, the zone's source "Not found on board: …" when gone
+    const combo = (names: string[], kind: IPM.PlacementKind, key: string): { f: Field<number>; value(): string } => {
+      const c = IPM.placementCombo(names, src0, kind === kind0);
+      const f = selectField<number>(c.selected, c.labels.map((l, i): [number, string] => [i, l]), { ro, key });
+      return { f, value: () => (c.labels.length ? c.value(Number(f.get())) : "") };
+    };
+    const sheet = combo(lists.sheets, "sheetname", "placementSheet"), cls = combo(lists.classes, "component_class", "placementClass"), grp = combo(lists.groups, "group", "placementGroup");
     const locked = checkField(PT().isLocked(node), "Locked", { ro, key: "locked" });
     const out = outlineFields(node, ro);
     const keepPage = h("div", { style: "padding:6px 8px;display:grid;gap:4px" }, tracks.el, vias.el, pads.el, pour.el, fps.el);
-    const placePage = h("div", { style: "padding:6px 8px;display:grid;gap:4px" }, radio("none", "No placement"), radio("sheetname", "Place items from sheet:", sheet),
-      radio("component_class", "Place items matching component class:", cls), radio("group", "Place items in group:", grp));
+    const placePage = h("div", { style: "padding:6px 8px;display:grid;gap:4px" }, radio("none", "No placement"), radio("sheetname", "Place items from sheet:", sheet.f),
+      radio("component_class", "Place items matching component class:", cls.f), radio("group", "Place items in group:", grp.f));
+    // the most useful page: Placement when no keepout is set and placement is on (HasKeepoutParametersSet)
+    const anyKeepout = [tracks, vias, pads, pour, fps].some((c) => c.get());
     body.append(h("div", { class: "pd-zone" }, layers.el,
       h("div", null,
         form([["Area name:", name.el]], true),
         notebook([
           { label: "Keepouts", build(el) { el.append(keepPage); } },
           { label: "Placement", build(el) { el.append(placePage); } },
-        ]).el,
+        ], { start: !anyKeepout && plOn ? 1 : 0 }).el,
         h("div", { style: "padding:6px 0" }, form([["Outline display:", out.outline.el], ["Outline hatch pitch:", out.pitch.el, unitLabel()]]), locked.el))));
+    const name0 = sval(kid(node, "name"));
     return (n) => {
+      // TransferDataFromWindow: placement, then "No layers selected.", then the hatch pitch's range
+      const kind = plKind === "none" ? lastKind : plKind;
+      const src = (kind === "sheetname" ? sheet : kind === "component_class" ? cls : grp).value();
       const err = layers.apply(n); if (err) return err;
-      if (name.get().trim()) put(n, "name", `(name ${quote(name.get().trim())})`, ["hatch", "priority", "connect_pads"]); else put(n, "name", null);
+      const bad = out.validate(); if (bad) return bad;
+      // a changed name is made unique among the board's zones (GetUniqueZoneName)
+      let nm = name.get();
+      if (nm !== name0) nm = (window as unknown as { PcbTools: { uniqueZoneName(d: KDoc, b: string): string } }).PcbTools.uniqueZoneName(doc, nm);
+      if (nm.trim()) put(n, "name", `(name ${quote(nm)})`, ["hatch", "priority", "connect_pads"]); else put(n, "name", null);
       if (locked.get() !== PT().isLocked(n)) PT().setLocked(n, locked.get());
       out.apply(n);
+      // m_ZonePriority = 0: a rule area has no priority
+      put(n, "priority", null);
       const v = (f: Field<boolean>): string => (f.get() ? "not_allowed" : "allowed");
       put(n, "keepout", `(keepout (tracks ${v(tracks)}) (vias ${v(vias)}) (pads ${v(pads)}) (copperpour ${v(pour)}) (footprints ${v(fps)}))`, ["placement", "fill", "polygon"]);
-      const src = plKind === "sheetname" ? sheet.get() : plKind === "component_class" ? cls.get() : plKind === "group" ? grp.get() : "";
-      if (plKind !== plKind0 || src !== plSrc0) {
-        const kindTok = plKind === "none" ? (plKind0 === "none" ? "sheetname" : plKind0) : plKind;
-        put(n, "placement", `(placement (enabled ${plKind === "none" ? "no" : "yes"}) (${kindTok} ${quote(plKind === "none" ? "" : src)}))`, ["fill", "polygon"]);
-      }
-      void radios;
+      const enabled = plKind !== "none";
+      if (!pl || enabled !== plOn || kind !== kind0 || src !== src0) put(n, "placement", IPM.placementText(enabled, kind, src, quote), ["fill", "polygon"]);
       return undefined;
     };
   }, create, "Edit Zone Properties");
@@ -308,30 +325,58 @@ function ruleAreaDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null)
 function nonCopperZoneDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | null) => void): boolean {
   const doc = ctx.doc as KDoc;
   return itemDialog(ctx, item, "Non Copper Zone Properties", 640, (node, body, ro) => {
-    const layers = zoneLayerList(doc, node, allLayers(doc).filter(([n]) => !/\.Cu$/.test(n)), ro);
+    const layers = zoneLayerList(doc, node, allLayers(doc).filter(([n]) => !/\.Cu$/.test(n)), ro, "No layer selected.", "Layers");
     const locked = checkField(PT().isLocked(node), "Locked", { ro, key: "locked" });
     const out = outlineFields(node, ro);
     const fill = kid(node, "fill") || ["fill"];
-    const minW = lenField(nval(kid(node, "min_thickness"), 1, 0.25), { ro, key: "minWidth" });
+    const minW0 = nval(kid(node, "min_thickness"), 1, 0.25);
+    const minW = lenField(minW0, { ro, key: "minWidth" });
     const smooth = selectField<string>(sval(kid(fill, "smoothing")) || "none", [["none", "None"], ["chamfer", "Chamfer"], ["fillet", "Fillet"]], { ro, key: "smoothing" });
     const radius = lenField(nval(kid(fill, "radius")), { ro, key: "radius" });
+    const radiusLabel = h("label", null, "Chamfer distance:");
     const hatchMode = sval(kid(fill, "mode")) === "hatch";
     const ftype = selectField<string>(hatchMode ? "hatch" : "solid", [["solid", "Solid fill"], ["hatch", "Hatch pattern"]], { ro, key: "fillType" });
     const orient = numField(nval(kid(fill, "hatch_orientation")), { ro, key: "hatchOrientation", digits: 1 });
-    const hw = lenField(nval(kid(fill, "hatch_thickness"), 1, 1), { ro, key: "hatchWidth" }), hg = lenField(nval(kid(fill, "hatch_gap"), 1, 1.5), { ro, key: "hatchGap" });
-    const effort = numField(nval(kid(fill, "hatch_smoothing_level")), { ro, key: "smoothingEffort", digits: 0 });
+    // a hatch width / gap the zone does not have: max( min width × 4, 1 mm ) / max( min width × 6, 1.5 mm ), never below the min width
+    const hw0 = nval(kid(fill, "hatch_thickness")), hg0 = nval(kid(fill, "hatch_gap"));
+    const hw = lenField(Math.max(hw0 > 0 ? hw0 : Math.max(minW0 * 4, 1), minW0), { ro, key: "hatchWidth" }), hg = lenField(Math.max(hg0 > 0 ? hg0 : Math.max(minW0 * 6, 1.5), minW0), { ro, key: "hatchGap" });
+    // m_spinCtrlSmoothLevel 0..3, m_spinCtrlSmoothValue 0..1 step 0.1
+    const effort = spinField(nval(kid(fill, "hatch_smoothing_level")), { min: 0, max: 3, ro, key: "smoothingEffort" });
     effort.input.title = "Value of smoothing effort\n0 = no smoothing\n1 = chamfer\n2 = round corners\n3 = round corners (finer shape)";
-    const amount = numField(nval(kid(fill, "hatch_smoothing_value"), 1, 0.1), { ro, key: "smoothingAmount", digits: 2 });
+    const amount = spinField(nval(kid(fill, "hatch_smoothing_value"), 1, 0.1), { min: 0, max: 1, step: 0.1, digits: 1, ro, key: "smoothingAmount" });
     amount.input.title = "Ratio between smoothed corners size and the gap between lines\n0 = no smoothing\n1.0 = max radius/chamfer size (half gap value)";
+    const hatchLabels = ["Orientation:", "Hatch width:", "Hatch gap:", "Smoothing effort:", "Smoothing amount:"].map((t) => h("label", null, t));
+    const hatchUnits = [unitLabel("degree"), unitLabel(), unitLabel()];
+    // OnUpdateUI: "Chamfer distance:" / "Fillet radius:", disabled for None; OnStyleSelection: the hatch controls only for a hatch
+    const sync = (): void => {
+      const sm = smooth.get();
+      if (sm !== "none") radiusLabel.textContent = sm === "chamfer" ? "Chamfer distance:" : "Fillet radius:";
+      (radius.input as HTMLInputElement).disabled = ro || sm === "none"; radiusLabel.classList.toggle("dim", sm === "none");
+      const on = ftype.get() === "hatch";
+      for (const c of [orient, hw, hg]) (c.input as HTMLInputElement).disabled = ro || !on;
+      effort.enable(!ro && on); amount.enable(!ro && on);
+      for (const l of [...hatchLabels, ...hatchUnits]) l.classList.toggle("dim", !on);
+    };
+    smooth.input.addEventListener("change", sync); ftype.input.addEventListener("change", sync);
+    const lrow = (f: HTMLElement, label: HTMLElement, ctrl: HTMLElement, unit?: HTMLElement): void => { f.append(label, ctrl, unit || h("span")); };
+    const fillForm = h("div", { class: "pd-form" });
+    lrow(fillForm, h("label", null, "Fill type:"), ftype.el);
+    lrow(fillForm, hatchLabels[0], orient.el, hatchUnits[0]); lrow(fillForm, hatchLabels[1], hw.el, hatchUnits[1]); lrow(fillForm, hatchLabels[2], hg.el, hatchUnits[2]);
+    lrow(fillForm, hatchLabels[3], effort.el); lrow(fillForm, hatchLabels[4], amount.el);
+    const shapeForm = form([["Outline style:", out.outline.el], ["Outline hatch pitch:", out.pitch.el, unitLabel()], ["Minimum width:", minW.el, unitLabel()], ["Corner smoothing:", smooth.el]]);
+    lrow(shapeForm, radiusLabel, radius.el, unitLabel());
     body.append(h("div", { class: "pd-zone" }, layers.el,
-      h("div", null,
-        box("Shape", form([["Outline style:", out.outline.el], ["Outline hatch pitch:", out.pitch.el, unitLabel()], ["Minimum width:", minW.el, unitLabel()],
-          ["Corner smoothing:", smooth.el], ["Chamfer distance:", radius.el, unitLabel()]]), locked.el),
-        box("Fill", form([["Fill type:", ftype.el], ["Orientation:", orient.el, unitLabel("degree")], ["Hatch width:", hw.el, unitLabel()], ["Hatch gap:", hg.el, unitLabel()],
-          ["Smoothing effort:", effort.el], ["Smoothing amount:", amount.el]])))));
+      h("div", null, box("Shape", shapeForm, locked.el), box("Fill", fillForm))));
+    sync();
     return (n) => {
+      // TransferDataFromWindow: the outline hatch pitch's range, a hatch's width and gap against the min width, then the layers
+      const bad = out.validate(); if (bad) return bad;
+      if (ftype.get() === "hatch") {
+        const mw = minW.get();
+        const ew = IPM.rangeError("Hatch width", hw.get(), mw, Infinity, fmtLenU); if (ew) return { msg: ew, focus: hw };
+        const eg = IPM.rangeError("Hatch gap", hg.get(), mw, Infinity, fmtLenU); if (eg) return { msg: eg, focus: hg };
+      }
       const err = layers.apply(n); if (err) return err;
-      if (minW.get() < 0.001) return { msg: `Minimum width must be at least ${fmtLenU(0.001)}.`, focus: minW };
       if (locked.get() !== PT().isLocked(n)) PT().setLocked(n, locked.get());
       out.apply(n);
       put(n, "min_thickness", `(min_thickness ${f6(minW.get())})`, ["filled_areas_thickness", "fill", "polygon"]);
@@ -341,7 +386,7 @@ function nonCopperZoneDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | 
       if (ftype.get() === "hatch") {
         put(f, "mode", "(mode hatch)", ["thermal_gap", "thermal_bridge_width", "smoothing", "radius", "island_removal_mode", "hatch_thickness"]);
         put(f, "hatch_thickness", `(hatch_thickness ${f6(hw.get())})`); put(f, "hatch_gap", `(hatch_gap ${f6(hg.get())})`); put(f, "hatch_orientation", `(hatch_orientation ${f6(orient.get())})`);
-        put(f, "hatch_smoothing_level", `(hatch_smoothing_level ${Math.max(0, Math.min(3, Math.round(effort.get())))})`); put(f, "hatch_smoothing_value", `(hatch_smoothing_value ${f6(amount.get())})`);
+        put(f, "hatch_smoothing_level", `(hatch_smoothing_level ${Math.round(effort.get())})`); put(f, "hatch_smoothing_value", `(hatch_smoothing_value ${f6(amount.get())})`);
       } else if (hatchMode) { put(f, "mode", null); }
       return undefined;
     };
@@ -542,6 +587,12 @@ function fontFlags(doc: KDoc, font: SNode, flag: "bold" | "italic", on: boolean)
   if (!on) return;
   if (modern) put(font, flag, `(${flag} yes)`, flag === "bold" ? ["italic", "color"] : ["color"]); else font.push(flag);
 }
+/** EDA_TEXT::MigrateLegacyBoldStrokeWidth: a board older than 20260826 stores a bold stroke text's width × 1.6; the
+ *  attribute is the stored value / 1.6, at least 2 IU. */
+const legacyBold = (doc: KDoc, bold: boolean, face: string): boolean => { const v = Number((doc as KDoc & { version?: number }).version) || 0; return v > 0 && v < 20260826 && bold && (!face || face === KICAD_FONT); };
+const boldAttr = (stored: number): number => Math.max(2, Math.round(stored * 1e6 / 1.6)) / 1e6;
+/** EDA_TEXT::legacyBoldStrokeWidth: the stored value again while the attribute is still the migrated one, else attribute × 1.6. */
+const boldStored = (attr: number, was: number): number => (was > 0 && boldAttr(was) === attr ? was : Math.round(attr * 1e6 * 1.6) / 1e6);
 // EDA_TEXT: TEXT_MIN_SIZE_MM / TEXT_MAX_SIZE_MM; GetPenSizeForNormal; ClampTextPenSize (not strict)
 const TEXT_MIN_SIZE = 0.001, TEXT_MAX_SIZE = 250;
 const penForNormal = (size: number): number => +(size / 8).toFixed(6);
@@ -581,7 +632,9 @@ function textControls(doc: KDoc, node: SNode, ro: boolean, posLabels: [string, s
   const w = lenField(nval(sz, 2, 1), { ro, key: "width" }), ht = lenField(nval(sz, 1, 1), { ro, key: "height" });
   // GetAutoThickness: no (thickness) in the file; the field shows the base width, frozen
   const auto0 = !!font && !kid(font, "thickness");
-  const th = lenField(auto0 ? penForNormal(nval(sz, 2, 1)) : fx.thick, { ro: ro || auto0, key: "thickness" });
+  const face00 = faceOfFont(font), legacy0 = !auto0 && fx.thick > 1e-6 && legacyBold(doc, fx.bold, face00);
+  const thick0 = legacy0 ? boldAttr(fx.thick) : fx.thick;   // the width attribute, as KiCad's dialog shows it
+  const th = lenField(auto0 ? penForNormal(nval(sz, 2, 1)) : thick0, { ro: ro || auto0, key: "thickness" });
   const autoTh = iconToggle("link", "Adjust the text thickness", auto0, { ro, key: "autoThickness", onChange: (on) => { (th.input as HTMLInputElement).disabled = ro || on; if (on) th.set(penForNormal(w.get())); } });
   w.input.addEventListener("change", () => { if (autoTh.get()) th.set(penForNormal(w.get())); });   // onTextSize
   const face0 = faceOfFont(font);
@@ -611,7 +664,9 @@ function textControls(doc: KDoc, node: SNode, ro: boolean, posLabels: [string, s
       let tv = th.get();
       const maxPen = +(Math.min(Math.abs(w.get()), Math.abs(ht.get())) * 0.25).toFixed(6);
       if (tv > maxPen) { tv = maxPen; clamped = true; }
-      if (auto0 || Math.abs(tv - fx.thick) > 1e-9) put(f, "thickness", `(thickness ${f6(tv)})`, ["bold", "italic", "color"]);
+      // EDA_TEXT::Format: in a board older than 20260826 a bold stroke text writes legacyBoldStrokeWidth()
+      const stored = legacyBold(doc, bold.get(), face.get()) && tv > 1e-6 ? boldStored(tv, legacy0 ? fx.thick : 0) : tv;
+      if (auto0 || Math.abs(stored - fx.thick) > 1e-9) put(f, "thickness", `(thickness ${f6(stored)})`, ["bold", "italic", "color"]);
     }
     if (bold.get() !== fx.bold) fontFlags(doc, f, "bold", bold.get());
     if (italic.get() !== fx.italic) fontFlags(doc, f, "italic", italic.get());
@@ -691,7 +746,7 @@ export function fpFieldDialog(ctx: ToolCtx, item: KItem, name: string): boolean 
       if (upright.get() === FH().fieldUnlocked(q)) FH().setFieldUnlocked(q, !upright.get());
       return undefined;
     };
-  }, undefined, "Edit " + name + " Field");
+  }, undefined, "Edit Text Properties");   // commit.Push( _( "Edit Text Properties" ) ) for every text, a field too
 }
 /** DIALOG_TEXT_PROPERTIES on a new text (DRAWING_TOOL::PlaceText): done gets the edited node, or null on Cancel. */
 export function newTextDialog(ctx: ToolCtx, node: SNode, done: (node: SNode | null) => void): boolean {
@@ -704,12 +759,10 @@ export function newTextDialog(ctx: ToolCtx, node: SNode, done: (node: SNode | nu
 const SHAPE_NAMES: Record<string, string> = { gr_line: "Line", gr_rect: "Rectangle", gr_circle: "Circle", gr_arc: "Arc", gr_poly: "Polygon", gr_curve: "Bezier" };
 // lineTypeNames (stroke_params.cpp): no "Default" entry, a default stroke (LINE_STYLE::DEFAULT, -1) shows as Solid
 const LINE_STYLES: [string, string][] = [["solid", "Solid"], ["dash", "Dashed"], ["dot", "Dotted"], ["dash_dot", "Dash-Dot"], ["dash_dot_dot", "Dash-Dot-Dot"]];
-// SEXPR_BOARD_FILE_VERSION: what an older board can't hold without a format bump
-const SHAPE_HATCH_VERSION = 20250222, ROUNDRECT_VERSION = 20250829, SHAPE_MASK_VERSION = 20241010;
 type Geom = { kind: string } & Record<string, unknown>;
 interface GeomGroup { title: string; x?: string; y?: string; size?: boolean; field?: string; kind?: "len" | "angle" }
 interface GeomPage { title: string; groups: GeomGroup[]; get(g: Geom): Record<string, number>; set(v: Record<string, number>, g: Geom): Geom | null; validate?(v: Record<string, number>): string | null }
-interface GeomApi { geomPages(kind: string): GeomPage[]; shapeGeomOf(n: SNode): Geom | null; setShapeGeom(n: SNode, g: Geom): void }
+interface GeomApi { geomPages(kind: string): GeomPage[]; shapeGeomOf(n: SNode): Geom | null; setShapeGeom(n: SNode, g: Geom): void; validateShapeGeom(g: Geom): string | null }
 const GT = (): GeomApi => (window as unknown as { PcbTools: GeomApi }).PcbTools;
 /** s_lastTabForShape */
 const lastShapeTab = new Map<string, number>();
@@ -741,20 +794,24 @@ function shapeDialog(ctx: ToolCtx, item: KItem): boolean {
         wrap.append(h("div", null, h("div", { class: "pd-lbl", style: "font-weight:600;margin-bottom:2px" }, g.title),
           form([[g.size ? "Width:" : "X:", fx.el, unitLabel()], [g.size ? "Height:" : "Y:", fy.el, unitLabel()]])));
       }
-      wrap.addEventListener("change", () => { const ng = pages[pi].set(read(pi), geom as Geom); if (ng) { geom = ng; refresh(pi); } });
+      // the syncer follows each keystroke (BindCtrls on wxEVT_TEXT); a value not yet a number waits
+      const sync = (): void => { const v = read(pi); if (Object.values(v).some((x) => !isFinite(x))) return; const ng = pages[pi].set(v, geom as Geom); if (ng) { geom = ng; refresh(pi); } };
+      wrap.addEventListener("input", sync); wrap.addEventListener("change", sync);
       return wrap;
     };
     const nb = pages.length ? notebook(pages.map((pg, pi) => ({ label: pg.title, build: (el: HTMLElement) => { el.append(pageEl(pi)); } })),
       { start: Math.min(lastShapeTab.get(kind) || 0, pages.length - 1) }) : null;
+    // the first control of the shown page gets the focus
+    if (nb) requestAnimationFrame(() => { const first = Object.values(fields[nb.current()])[0]; if (first && document.contains(first.input)) { (first.input as HTMLInputElement).focus(); (first.input as HTMLInputElement).select(); } });
     // the polygon has no syncer: its points are edited on the canvas
     const locked = checkField(PT().isLocked(node), "Locked", { ro, key: "locked" });
     const r0 = kind === "gr_rect" ? nval(kid(node, "radius"), 1, 0) : 0;
-    const rrOk = version >= ROUNDRECT_VERSION || r0 > 0;
-    const roundRect = checkField(r0 > 0, "Rounded rectangle", { ro: ro || !rrOk, key: "roundRect" });
-    const cornerR = lenField(r0 > 0 ? r0 : NaN, { ro: ro || !rrOk, key: "cornerRadius", allowEmpty: true });
+    // rounded rectangles (20250829), hatched fills (20250222) and solder mask (20241010) are offered on any board: the
+    // save raises an older file's version to what they need (chooseFileFormatVersion)
+    const roundRect = checkField(r0 > 0, "Rounded rectangle", { ro, key: "roundRect" });
+    const cornerR = lenField(r0 > 0 ? r0 : NaN, { ro, key: "cornerRadius", allowEmpty: true });
     roundRect.input.addEventListener("change", () => { if (!roundRect.get()) (cornerR.input as HTMLInputElement).value = ""; });   // onRoundedRectChanged
     cornerR.input.addEventListener("input", () => roundRect.set(true));   // onCornerRadius
-    if (!rrOk) roundRect.el.title = cornerR.input.title = "This board's file format has no rounded rectangles.";
     const stroke = kid(node, "stroke"), legacyW = kid(node, "width");
     const width = lenField(stroke ? nval(kid(stroke, "width")) : nval(legacyW), { ro, key: "lineWidth" });
     const style0 = ((t: string) => (LINE_STYLES.some(([k]) => k === t) ? t : "solid"))(sval(stroke ? kid(stroke, "type") : null));
@@ -762,19 +819,27 @@ function shapeDialog(ctx: ToolCtx, item: KItem): boolean {
     const closed = kind === "gr_rect" || kind === "gr_circle" || kind === "gr_poly";
     const fk = kid(node, "fill"), fv = sval(fk);
     const fill0 = fv === "solid" || fv === "yes" ? "solid" : fv === "hatch" || fv === "reverse_hatch" || fv === "cross_hatch" ? fv : "none";
-    const hatchOk = version >= SHAPE_HATCH_VERSION || fill0 !== "none" && fill0 !== "solid";
-    const fillOpts: [string, string][] = [["none", "None"], ["solid", "Solid"], ...(hatchOk ? [["hatch", "Hatch"], ["reverse_hatch", "Reverse Hatch"], ["cross_hatch", "Cross-hatch"]] as [string, string][] : [])];
+    const fillOpts: [string, string][] = [["none", "None"], ["solid", "Solid"], ["hatch", "Hatch"], ["reverse_hatch", "Reverse Hatch"], ["cross_hatch", "Cross-hatch"]];
     const fill = selectField<string>(fill0, fillOpts, { ro: ro || !closed, key: "fill" });
     const ly = sval(kid(node, "layer")) || (() => { const ls = kid(node, "layers"); return ls ? sval(ls) : ""; })();
     const layer = selectField<string>(ly, withCurrent(allLayers(doc), ly), { ro, key: "layer" });
     const net = netField(doc, node, ro);
     const lsNode = kid(node, "layers"), mask0 = !!lsNode && lsNode.slice(1).some((x) => /\.Mask$/.test(String(x)));
     const mm0 = kid(node, "solder_mask_margin");
-    const maskOk = version >= SHAPE_MASK_VERSION || mask0;
-    const hasMask = checkField(mask0, "Solder mask", { ro: ro || !maskOk, key: "solderMask" });
-    const maskMargin = lenField(mm0 ? nval(mm0) : NaN, { ro: ro || !maskOk, key: "maskMargin", allowEmpty: true });
+    const hasMask = checkField(mask0, "Solder mask", { ro, key: "solderMask" });
+    const maskMargin = lenField(mm0 ? nval(mm0) : NaN, { ro, key: "maskMargin", allowEmpty: true });
     maskMargin.input.title = "This is the local clearance between the shape and the solder mask opening.\nLeave blank to use the value defined in the Board Setup.";
     const nowrap = "display:flex;align-items:center;gap:10px;white-space:nowrap";
+    // createLineEndingControls: Start / End Shape with Length, Width and Thickness, for an open shape only (!IsClosed())
+    const open = kind === "gr_line" || kind === "gr_arc" || kind === "gr_curve";
+    const endings = (["start_shape", "end_shape"] as const).map((key) => {
+      const v0 = IPM.readEndingValues(node, key), p = key === "start_shape" ? "start" : "end";
+      return { key, v0, style: selectField<string>(v0.style, IPM.LINE_ENDING_CHOICES, { ro, key: p + "Shape" }),
+        length: lenField(v0.length, { ro, key: p + "Length" }), width: lenField(v0.width, { ro, key: p + "Width" }), thick: lenField(v0.thickness, { ro, key: p + "Thickness" }) };
+    });
+    const endingsEl = open ? h("div", { style: "margin:8px 0" },
+      h("div", { class: "pd-cols2" }, ...endings.map((e) => form([[e.key === "start_shape" ? "Start Shape:" : "End Shape:", e.style.el], ["Length:", e.length.el, unitLabel()], ["Width:", e.width.el, unitLabel()], ["Thickness:", e.thick.el, unitLabel()]]))),
+      h("p", { class: "pd-note", style: "font-style:italic" }, "Set line ending sizes to 0 for automatic (5\u00d7 line width).")) : null;
     const techEl = h("div", null, h("div", { class: "pd-lbl", style: "font-weight:600;margin:8px 0 2px" }, "Technical Layers"), h("hr", { class: "pd-sep" }),
       h("div", { style: nowrap }, hasMask.el, h("label", null, "Expansion:"), h("span", { style: "flex:1" }, maskMargin.el), unitLabel()));
     const netLabel = h("label", null, "Net:");
@@ -782,8 +847,8 @@ function shapeDialog(ctx: ToolCtx, item: KItem): boolean {
     const enable = (): void => {
       const l = layer.get(), copper = doc.copper.includes(l), ext = isExtCopper(l);
       (net.input as HTMLElement & { disabled: boolean }).disabled = ro || !copper; netLabel.classList.toggle("dim", !copper);
-      (hasMask.input as HTMLInputElement).disabled = ro || !ext || !maskOk; techEl.classList.toggle("dim", !ext);
-      (maskMargin.input as HTMLInputElement).disabled = ro || !ext || !hasMask.get() || !maskOk;
+      (hasMask.input as HTMLInputElement).disabled = ro || !ext; techEl.classList.toggle("dim", !ext);
+      (maskMargin.input as HTMLInputElement).disabled = ro || !ext || !hasMask.get();
     };
     layer.input.addEventListener("change", enable); hasMask.input.addEventListener("change", enable);
     const f = h("div", { class: "pd-form wide" });
@@ -792,11 +857,17 @@ function shapeDialog(ctx: ToolCtx, item: KItem): boolean {
     row("Line width:", width.el, unitLabel()); row("Line style:", style.el);
     if (closed) row("Fill:", fill.el);
     row(netLabel, net.el); row("Layer:", layer.el);
-    body.append(...(nb ? [nb.el] : []), h("div", { class: "pd-row", style: "margin:8px 0" }, locked.el), f, techEl);
+    body.append(...(nb ? [nb.el] : []), ...(endingsEl ? [endingsEl] : []), h("div", { class: "pd-row", style: "margin:8px 0" }, locked.el), f, techEl);
     enable();
     return (n) => {
       const errors: string[] = [];
-      if (nb) { const pi = nb.current(), pg = pages[pi], e = pg.validate ? pg.validate(read(pi)) : null; if (e) errors.push(e); }
+      // m_geomSync->Validate: the geometry whichever page is shown
+      if (nb && geom) {
+        let e: string | null = null;
+        for (let pi = 0; pi < pages.length && !e; pi++) { const pg = pages[pi]; e = pg.validate ? pg.validate(read(pi)) : null; }
+        if (!e) e = GT().validateShapeGeom(geom);
+        if (e) errors.push(e);
+      }
       const solid = fill.get() === "solid", w = width.get();
       if ((kind === "gr_line" || kind === "gr_arc") && !(w > 0)) errors.push("Line width must be greater than zero.");
       else if (kind === "gr_circle" && !solid && !(w > 0)) errors.push("Line width must be greater than zero for an unfilled circle.");
@@ -822,6 +893,11 @@ function shapeDialog(ctx: ToolCtx, item: KItem): boolean {
         const yn = fv === "yes" || fv === "no" || (!fk && version >= 20240000);
         const tok = fill.get() === "solid" ? (yn ? "yes" : "solid") : fill.get() === "none" ? (yn ? "no" : "none") : fill.get();
         put(n, "fill", `(fill ${tok})`, ["locked", "layer", "layers", "uuid"]);
+      }
+      if (open) for (const e of endings) {
+        const v: IPM.EndingValues = { style: e.style.get(), length: e.length.get(), width: e.width.get(), thickness: e.thick.get(), strokeType: e.v0.strokeType };
+        const t = IPM.endingText(e.key, v, f6), t0 = IPM.endingText(e.key, e.v0, f6);
+        if (t !== t0) put(n, e.key, t, [...(e.key === "start_shape" ? ["end_shape"] : []), "fill", "locked", "layer", "layers", "solder_mask_margin", "net", "uuid", "tstamp"]);
       }
       const L = layer.get(), ext = isExtCopper(L), mask = ext && hasMask.get();
       if (L !== ly || mask !== mask0) {
@@ -884,18 +960,21 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
     const relRot = (abs: number): number => +(abs - fpRot0).toFixed(3);
     const rows: Record<string, CellValue>[] = props(node).map((p) => {
       const fx = FH().fieldEffects(p), a = FH().fieldAt(p), e = kid(p, "effects"), f = e ? kid(e, "font") : null, sz = f ? kid(f, "size") : null;
-      return { name: String(p[1]), label: MAND.includes(String(p[1])) ? label(String(p[1])) : String(p[1]), value: xref.toRefs(fieldText(p)), show: !FH().fieldHidden(p), w: nval(sz, 2, fx.size), ht: nval(sz, 1, fx.size), th: fx.thick || 0.15, italic: fx.italic, layer: FH().fieldLayer(p), rot: relRot(a[2] || 0), x: a[0], y: a[1] };
+      const ly = kid(p, "layer");
+      return { name: String(p[1]), label: MAND.includes(String(p[1])) ? label(String(p[1])) : String(p[1]), value: xref.toRefs(fieldText(p)), show: !FH().fieldHidden(p), w: nval(sz, 2, fx.size), ht: nval(sz, 1, fx.size), th: fx.thick || 0.15, italic: fx.italic, layer: FH().fieldLayer(p), rot: relRot(a[2] || 0), upright: !FH().fieldUnlocked(p), x: a[0], y: a[1], knockout: !!ly && ly.includes("knockout"), mirror: fx.mirror };
     });
     const mandRow = (r: Record<string, CellValue>): boolean => MAND.includes(String(r.name));
-    const g = grid([{ label: "Name", key: "label", width: "130px", readOnly: (r) => mandRow(r) }, { label: "Value", key: "value" }, { label: "Show", key: "show", type: "check" }, { label: "Width", key: "w", type: "len" }, { label: "Height", key: "ht", type: "len" }, { label: "Thickness", key: "th", type: "len" },
-      { label: "Italic", key: "italic", type: "check" }, { label: "Layer", key: "layer", type: "select", options: allLayers(doc), width: "120px" }, { label: "Orientation", key: "rot", type: "num" }, { label: "X Offset", key: "x", type: "len" }, { label: "Y Offset", key: "y", type: "len" }], rows, { ro, height: "170px" });
+    // PCB_FIELDS_COL_ORDER; ShowHideColumns( "0 1 2 3 4 5 7" ), the rest shown from the header's menu (GRID_TRICKS)
+    const g = grid([{ label: "Name", key: "label", width: "130px", readOnly: (r) => mandRow(r) }, { label: "Value", key: "value", hidden: false }, { label: "Show", key: "show", type: "check", hidden: false }, { label: "Width", key: "w", type: "len", hidden: false }, { label: "Height", key: "ht", type: "len", hidden: false }, { label: "Thickness", key: "th", type: "len", hidden: false },
+      { label: "Italic", key: "italic", type: "check", hidden: true }, { label: "Layer", key: "layer", type: "select", options: allLayers(doc), width: "120px", hidden: false }, { label: "Orientation", key: "rot", type: "num", hidden: true }, { label: "Keep Upright", key: "upright", type: "check", hidden: true },
+      { label: "X Offset", key: "x", type: "len", hidden: true }, { label: "Y Offset", key: "y", type: "len", hidden: true }, { label: "Knockout", key: "knockout", type: "check", hidden: true }, { label: "Mirrored", key: "mirror", type: "check", hidden: true }], rows, { ro, height: "170px" });
     const at = K().atOf(node), side0 = sval(kid(node, "layer")) || "F.Cu";
     // OnAddField: "Field<n>", hidden, on the side's Fab layer at the footprint origin, styled by StyleFromSettings (the
     // board's Fab text size, thickness, italic, keep upright; mirrored on the back); OnDeleteField keeps the mandatory four
     const fab = side0 === "B.Cu" ? "B.Fab" : "F.Fab", fabStyle = PT().layerStyle(fab);
-    const gbar = gridButtons(g, () => ({ name: "", label: "Field" + (g.rows().length + MAND.filter((m) => !g.rows().some((r) => r.name === m)).length), value: "", show: false, w: fabStyle.w, ht: fabStyle.h, th: fabStyle.thick, italic: fabStyle.italic, layer: fab, rot: 0, x: 0, y: 0 }),
+    const gbar = gridButtons(g, () => ({ name: "", label: "Field" + (g.rows().length + MAND.filter((m) => !g.rows().some((r) => r.name === m)).length), value: "", show: false, w: fabStyle.w, ht: fabStyle.h, th: fabStyle.thick, italic: fabStyle.italic, layer: fab, rot: 0, upright: fabStyle.upright, x: 0, y: 0, knockout: false, mirror: side0 === "B.Cu" }),
       { ro, addTip: "Add field", delTip: "Delete field", canDelete: (r) => { if (!mandRow(r)) return true; messageBox("Error", `The first ${MAND.length} fields are mandatory.`); return false; } });
-    const x = coordField(at[0], "x", { ro, key: "x" }), y = coordField(at[1], "y", { ro, key: "y" }), rot = orientationField(at[2] || 0, ro, "orientation", ["0", "90", "-90", "180"]);
+    const x = coordField(at[0], "x", { ro, key: "x" }), y = coordField(at[1], "y", { ro, key: "y" }), rot = orientationField(at[2] || 0, ro, "orientation");
     const side = selectField<string>(side0, [["F.Cu", "Front"], ["B.Cu", "Back"]], { ro, key: "side" });
     const locked = checkField(PT().isLocked(node), "Locked", { ro, key: "locked" });
     // m_componentHeight: (height …), 0 / blank for none
@@ -918,7 +997,14 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
     const flags = FLAGS.map(([k, l]) => ({ k, f: checkField(flagOf(k), l, { ro, key: k }) }));
     // clearance overrides: blank means "use the Board Setup value"
     const ov = (key: string, k: string): Field<number> => lenField(kid(node, key) ? nval(kid(node, key)) : NaN, { ro, key: k, allowEmpty: true });
-    const clr = ov("clearance", "padClearance"), mask = ov("solder_mask_margin", "maskExpansion"), paste = ov("solder_paste_margin", "pasteClearance");
+    const clr = ov("clearance", "padClearance"), mask = ov("solder_mask_margin", "maskExpansion");
+    // MARGIN_OFFSET_BINDER: one field for the absolute paste margin and / or the ratio
+    const pasteAbs0 = kid(node, "solder_paste_margin") ? nval(kid(node, "solder_paste_margin")) : NaN, pasteRatio0 = kid(node, "solder_paste_margin_ratio") ? nval(kid(node, "solder_paste_margin_ratio")) : NaN;
+    const paste = h("input", { type: "text", value: IPM.marginText(pasteAbs0, pasteRatio0, fmtLen), disabled: ro, "data-k": "pasteClearance",
+      title: "Local solder paste clearance for this footprint.\nEnter an absolute value (e.g., -0.1mm), a percentage (e.g., -5%), or both (e.g., -0.1mm - 5%).\nIf blank, the global value is used." }) as HTMLInputElement;
+    paste.addEventListener("blur", () => { const v = IPM.parseMarginText(paste.value, parseLen); if (v) paste.value = IPM.marginText(v.abs, v.ratio, fmtLen); });   // onKillFocus
+    const bridges0 = !!PH().footprintAttrs(node).allow_soldermask_bridges;
+    const bridges = checkField(bridges0, "Allow bridged solder mask apertures between pads", { ro, key: "allowSolderMaskBridges" });
     const zc = kid(node, "zone_connect"), zone = selectField<string>(zc ? String(zc[1]) : "", [["", "Use zone setting"], ["2", "Solid"], ["1", "Thermal relief"], ["0", "None"]], { ro, key: "zoneConnect" });
     const general = h("div", null, box("Fields", g.el, gbar),
       h("div", { class: "pd-cols2" },
@@ -926,8 +1012,11 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
         box("Fabrication Attributes", form([["Footprint type:", type.el]], true), ...flags.map((f) => f.f.el))),
       form([["Library link:", h("span", { class: "pd-value" }, String(node[1] ?? ""))]], true), fpButtons(ctx, item, body));
     const clearances = h("div", null, h("p", { class: "pd-note" }, "Leave values blank to use Board Setup values."),
-      box("Clearances", form([["Pad clearance:", clr.el, unitLabel()], ["Solder mask expansion:", mask.el, unitLabel()], ["Solder paste clearance:", paste.el, unitLabel()]])),
-      box("Pad Connections", form([["Pad connection to zones:", zone.el]], true)));
+      box("Clearances", form([["Pad clearance:", clr.el, unitLabel(), "This is the local net clearance for all pad of this footprint\nIf 0, the Netclass values are used\nThis value can be superseded by a pad local value."],
+        ["Solder mask expansion:", mask.el, unitLabel(), "This is the local clearance between pads and the solder mask for this footprint.\nThis value can be superseded by a pad local value.\nIf 0, the global value is used."], bridges.el,
+        ["Solder paste clearance:", paste, unitLabel(), "Solder paste clearance relative to pad size.\nEnter an absolute value (e.g., -0.1mm), a percentage (e.g., -5%), or both (e.g., -0.1mm - 5%).\nThis value can be superseded by local values for a footprint or a pad."]]),
+        h("p", { class: "pd-note" }, "Note: solder mask and paste values are used only for pads on copper layers.")),
+      box("Pad Connections", form([["Pad connection to zones:", zone.el], ["Jumper groups:", h("span", { class: "pd-value", "data-k": "jumperGroups", style: IPM.jumperGroupsText(node) === "none" ? "font-style:italic" : "" }, IPM.jumperGroupsText(node))]], true)));
     // PANEL_FP_PROPERTIES_3D_MODEL, the same panel as the footprint editor's dialog; its preview shows the footprint as
     // PANEL_PREVIEW_3D_MODEL's dummy copy does (flipped to the front, unrotated, at the origin)
     const PTX = window as unknown as { PcbTools: { exchange: { editableCopy(n: SNode): { node: SNode } } } };
@@ -957,12 +1046,23 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
       const variantFields: Record<string, string> = {};
       // field names: none empty, none twice (TransferDataFromWindow / OnGridCellChanging)
       const names: string[] = [];
-      for (const r of g.rows()) {
+      for (const [ri, r] of g.rows().entries()) {
         const nm = mandRow(r) ? String(r.name) : String(r.label).trim();
         if (!nm) return "Fields must have a name.";
         if (names.some((o) => duplicates(nm, o)) || (!mandRow(r) && RESERVED.includes(nm.toLowerCase()))) return `Field name '${nm}' already in use.`;
         names.push(nm);
+        // TEXT_MIN_SIZE_MM .. TEXT_MAX_SIZE_MM, then ClampTextPenSize: the cell set to the limit, focused
+        const bad = IPM.footprintFieldRowError(Number(r.w), Number(r.ht), Number(r.th), fmtLenU);
+        if (bad) {
+          r[bad.col] = bad.reset; g.refresh(); tabs.show(0);
+          const cell = g.el.querySelectorAll("tbody tr")[ri]?.querySelector<HTMLInputElement>(`input[data-col="${bad.col}"]`) || null;
+          return { msg: bad.msg, focus: cell };
+        }
       }
+      // m_netClearance.Validate( 0, INT_MAX ), m_solderPaste.Validate()
+      if (isFinite(clr.get())) { const ec = IPM.rangeError("Pad clearance", clr.get(), 0, Infinity, fmtLenU); if (ec) { tabs.show(1); return { msg: ec, focus: clr }; } }
+      const pasteV = IPM.parseMarginText(paste.value, parseLen);
+      if (!pasteV) { tabs.show(1); return { msg: "Solder paste clearance could not be parsed as a distance and/or percentage offset.", focus: paste }; }
       // deleted user fields go, renamed ones take their new name, added ones are written after the last field
       for (const p of props(n)) if (!MAND.includes(String(p[1])) && !g.rows().some((r) => r.name === String(p[1]))) n.splice(n.indexOf(p), 1);
       for (const r of g.rows()) {
@@ -990,7 +1090,10 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
         if (isFinite(w) && isFinite(ht) && f && (w !== nval(sz, 2, fx.size) || ht !== nval(sz, 1, fx.size))) put(f, "size", `(size ${f6(ht)} ${f6(w)})`, ["thickness", "bold", "italic"]);
         if (isFinite(th) && f && th !== (fx.thick || 0.15)) put(f, "thickness", `(thickness ${f6(th)})`, ["bold", "italic", "color"]);
         if (f && !!r.italic !== fx.italic) fontFlags(doc, f, "italic", !!r.italic);
-        if (String(r.layer) && String(r.layer) !== FH().fieldLayer(p)) put(p, "layer", `(layer ${quote(String(r.layer))})`, ["hide", "uuid", "effects"]);
+        const lyNode = kid(p, "layer"), ko0 = !!lyNode && lyNode.includes("knockout");
+        if ((String(r.layer) && String(r.layer) !== FH().fieldLayer(p)) || !!r.knockout !== ko0) put(p, "layer", `(layer ${quote(String(r.layer) || FH().fieldLayer(p))}${r.knockout ? " knockout" : ""})`, ["hide", "uuid", "effects"]);
+        if (!!r.upright === FH().fieldUnlocked(p)) FH().setFieldUnlocked(p, !r.upright);
+        if (!!r.mirror !== fx.mirror) FH().setFieldEffects(p, { mirror: !!r.mirror });
         // PFC_ORIENTATION: SetTextAngle( value + the footprint's orientation ), written normalised
         if (Number(r.x) !== a[0] || Number(r.y) !== a[1] || Number(r.rot) !== relRot(a[2] || 0)) FH().setFieldAt(p, Number(r.x) || 0, Number(r.y) || 0, norm360((Number(r.rot) || 0) + fpRot0));
       }
@@ -1007,10 +1110,16 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
         for (const f of flags) if (vflags && f.k in vflags && f.f.get() !== vflags[f.k as keyof VM.FpFlags]) { vpatch[f.k as keyof VM.FpFlags] = f.f.get(); vchanged = true; }
         if (vchanged) { const out = VM.setFootprintVariant(n, variant, { flags: vpatch, fields: variantFields }); n.splice(0, n.length, ...out); }
       } else for (const f of flags) next[f.k] = f.f.get();
-      if (next.type !== attrs.type || flags.some((f) => !!next[f.k] !== !!attrs[f.k])) PH().setFootprintAttrs(n, next);
+      next.allow_soldermask_bridges = bridges.get();
+      if (next.type !== attrs.type || flags.some((f) => !!next[f.k] !== !!attrs[f.k]) || bridges.get() !== bridges0) PH().setFootprintAttrs(n, next);
       const AFTER = ["solder_paste_margin", "solder_paste_margin_ratio", "clearance", "zone_connect", "attr", "net_tie_pad_groups", "fp_text", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "pad", "embedded_fonts", "model"];
       const setOv = (key: string, f: Field<number>, before: string[]): void => { const v = f.get(); if (isFinite(v)) { if (!kid(n, key) || nval(kid(n, key)) !== v) put(n, key, `(${key} ${f6(v)})`, before); } else put(n, key, null); };
-      setOv("solder_mask_margin", mask, AFTER); setOv("solder_paste_margin", paste, AFTER.slice(1)); setOv("clearance", clr, AFTER.slice(3));
+      setOv("solder_mask_margin", mask, AFTER); setOv("clearance", clr, AFTER.slice(3));
+      // SetLocalSolderPasteMargin / SetLocalSolderPasteMarginRatio from the one field
+      const pv = pasteV as { abs: number; ratio: number };
+      const same = (a: number, b: number): boolean => (isNaN(a) && isNaN(b)) || Math.abs(a - b) < 1e-9;
+      if (!same(pv.abs, pasteAbs0)) put(n, "solder_paste_margin", isNaN(pv.abs) ? null : `(solder_paste_margin ${f6(pv.abs)})`, AFTER.slice(1));
+      if (!same(pv.ratio, pasteRatio0)) put(n, "solder_paste_margin_ratio", isNaN(pv.ratio) ? null : `(solder_paste_margin_ratio ${f6(pv.ratio)})`, AFTER.slice(2));
       if (zone.get() !== (zc ? String(zc[1]) : "")) put(n, "zone_connect", zone.get() === "" ? null : `(zone_connect ${zone.get()})`, AFTER.slice(4));
       // format( FOOTPRINT* ): (height …) after descr / tags and before the fields, written only when non-zero
       const hv = height.get(), hNow = isFinite(hv) && hv > 0 ? hv : 0;
@@ -1046,7 +1155,8 @@ export function targetDialog(ctx: ToolCtx, item: KItem): boolean {
     setTimeout(() => { (size.input as HTMLInputElement).focus(); (size.input as HTMLInputElement).select(); }, 0);   // SetInitialFocus( m_sizeCtrl )
     return (n) => {
       const s = size.get(), w = width.get();
-      if (!(s > 0)) return "Size must be greater than 0.";
+      // m_Size.Validate( Mils2IU( 1 ), INT_MAX )
+      const es = IPM.rangeError("Size", s, IPM.TARGET_MIN_SIZE, Infinity, fmtLenU); if (es) return { msg: es, focus: size };
       n[1] = shape.get() ? "x" : "plus";
       put(n, "size", `(size ${f6(s)})`, ["width", "layer", "uuid"]);
       put(n, "width", w > 0 ? `(width ${f6(w)})` : null, ["layer", "uuid"]);

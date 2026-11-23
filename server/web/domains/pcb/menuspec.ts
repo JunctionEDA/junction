@@ -5,7 +5,7 @@
 // Help > List Hotkeys need all of them, looked up per editor because eeschema and pcbnew reuse short ids
 // ("properties", "mirrorH", "highlightNet", …) for different actions.
 import bundled from "./generated/kicad-menu-spec.json";
-import { IS_MAC } from "../../shared/keys";
+import { IS_MAC, kicadKeyName, splitKey } from "../../shared/keys";
 
 // One copy of the table on the app page: editor.js (loaded first) carries it and publishes it; ui.js is built
 // with MENU_SPEC_SHARED=true (package.json), which drops its own copy and reads the published one.
@@ -14,7 +14,7 @@ const G = globalThis as { KiCadMenuSpec?: unknown };
 const raw = typeof MENU_SPEC_SHARED !== "undefined" && MENU_SPEC_SHARED ? G.KiCadMenuSpec || { actions: {} } : (G.KiCadMenuSpec = bundled);
 
 export type EditorKind = "sch" | "pcb";
-export interface MenuActionMeta { id: string; label: string; tip: string | null; icon: string | null; key: string | null; alt?: string; name?: string; defKey?: string | null; defAlt?: string }
+export interface MenuActionMeta { id: string; label: string; tip: string | null; icon: string | null; key: string | null; alt?: string; name?: string; defKey?: string | null; defAlt?: string; /** TOOL_ACTION_SCOPE AS_CONTEXT */ ctx?: number }
 
 /** KiCad gives a handful of actions another default on macOS (redo, the zoom keys, Add Filled Zone, Repeat Last Item). */
 export { IS_MAC };
@@ -85,11 +85,13 @@ export function hotkeyRows(editor: EditorKind): HotkeyRow[] {
   return out;
 }
 
-/** Normalise a hotkey in the spec's notation so two spellings compare equal ("Ctrl+Shift+Z"). */
+/**
+ * Normalise a hotkey in the spec's notation so two spellings compare equal ("Ctrl+Shift+Z"): the modifiers in one
+ * order, a letter in upper case and the web's key names as KiCad's ("Enter" is "Return", "Backspace" "Back").
+ */
 export function normKey(key: string): string {
-  const parts = key.split("+"); let k = parts.pop() || "";
-  if (k === "" && key.endsWith("+")) { k = "+"; parts.pop(); }
-  const mods = ["Ctrl", "Shift", "Alt"].filter((m) => parts.includes(m));
+  const s = splitKey(key), k = kicadKeyName(s.key);
+  const mods = [s.ctrl ? "Ctrl" : "", s.shift ? "Shift" : "", s.alt ? "Alt" : "", s.meta ? "Meta" : "", s.super ? "Win" : "", s.altGr ? "AltGr" : ""].filter(Boolean);
   return [...mods, k.length === 1 ? k.toUpperCase() : k].join("+");
 }
 

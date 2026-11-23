@@ -53,7 +53,7 @@ test("Footprint Properties: unchanged dialog makes no change; edits touch only w
   const h = ch.find((c) => c.id === "footprint"); assert.ok(h);
   assert.match(h.sexpr, /\(tags "resistor 0603"\)/); assert.match(h.sexpr, /\(clearance 0\.2\)/); assert.match(h.sexpr, /\(zone_connect 2\)/);
   assert.match(h.sexpr, /\(attr smd dnp\)/); assert.match(h.sexpr, /\(private_layers "F\.SilkS" "User\.2"\)/); assert.match(h.sexpr, /\(net_tie_pad_groups "1, 2"\)/);
-  assert.match(h.sexpr, /\(opacity 0\.5\)/);
+  assert.match(h.sexpr, /\(opacity 0\.5000\)/);   // format( FP_3DMODEL ): "(opacity {:.4f})", the text kept as written
   assert.equal(ch.filter((c) => c.kind === "ADDED").length, 1, "the new field is added");
   assert.ok(ch.some((c) => c.kind === "MODIFIED" && c.id === "22222222-2222-4222-8222-222222222222"));
   apply(doc, ch);

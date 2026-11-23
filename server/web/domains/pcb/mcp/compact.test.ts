@@ -4,6 +4,7 @@
 // format version is the stored one.
 import { foldOps, type CanvasApi, type FoldOp } from "./compact";
 import { embeddedFileSexpr } from "../library/embedded-file";
+import { GENERATOR_VERSION } from "../canvas/format-version";
 
 declare const require: (m: string) => unknown;
 declare const process: { exit(code: number): void; env: Record<string, string | undefined>; cwd(): string };
@@ -139,7 +140,9 @@ for (const [demo, name, type] of [["stickhub", "StickHub.kicad_sch", "kicad_sch"
     ok(str(kid(files[0], "checksum")[1]) === str(kid(parse(fileA2), "checksum")[1]), "embedded file: the new checksum");
     ok(serialize(files[0]) === serialize(parse(fileA2)), "embedded file: the new data");
     ok(r.text.includes(fileB), "embedded file: the other file byte for byte");
-    ok(r.text.slice(0, r.text.indexOf("(embedded_files")) === board.slice(0, board.indexOf("(embedded_files")), "embedded file: the rest of the file byte for byte");
+    // (the header is written afresh: KiCad's generator and this build's generator_version)
+    const restamped = board.replace('(generator "pcbnew")', `(generator "pcbnew") (generator_version "${GENERATOR_VERSION}")`);
+    ok(r.text.slice(0, r.text.indexOf("(embedded_files")) === restamped.slice(0, restamped.indexOf("(embedded_files")), "embedded file: the rest of the file byte for byte");
     ok(!/\(data "/.test(r.text) && /\(data \|KLUv\/[A-Za-z0-9+\/=]*\n\t\t\t\t[A-Za-z0-9+\/=]+\n/.test(r.text), "embedded file: the data lines bare, one per line, as WriteEmbeddedFiles lays them out");
     const again = foldOps(k, "kicad_pcb", r.text, edit(fileA2));
     ok(again.ok && again.text === r.text, "embedded file: the same file again changes nothing");

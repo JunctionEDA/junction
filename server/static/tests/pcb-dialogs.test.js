@@ -183,7 +183,8 @@ test("netlist: KiCad's net names — local label, global power, sheet pin throug
 });
 const pad = (n, net) => `(pad "${n}" smd roundrect (at ${n === "1" ? -0.8 : 0.8} 0) (size 0.9 0.95) (layers "F.Cu" "F.Paste" "F.Mask") (roundrect_rratio 0.25)${net ? ` (net "${net}")` : ""} (uuid "pad-${Math.random().toString(36).slice(2)}"))`;
 const fp = (ref, value, x, uuid, p, n1, n2) => `(footprint "Resistor_SMD:R_0603_1608Metric" (layer "F.Cu") (uuid "${uuid}") (at ${x} 20) (property "Reference" "${ref}" (at 0 -1.4 0) (layer "F.SilkS") (uuid "${uuid}-r") (effects (font (size 1 1) (thickness 0.15)))) (property "Value" "${value}" (at 0 1.4 0) (layer "F.Fab") (uuid "${uuid}-v") (effects (font (size 1 1) (thickness 0.15)))) (path "${p}") (sheetname "/") (sheetfile "demo.kicad_sch") (attr smd) ${pad("1", n1)} ${pad("2", n2)})`;
-const PCB = `(kicad_pcb (version 20241229) (generator "pcbnew") (general (thickness 1.6)) (paper "A4") ${LAYERS}
+// (a board that names its nets: 20251028 or later; formatNetRef writes codes into an older one)
+const PCB = `(kicad_pcb (version 20251028) (generator "pcbnew") (general (thickness 1.6)) (paper "A4") ${LAYERS}
   ${fp("R1", "10k", 10, "f1", "/aaaaaaaa-0000-0000-0000-000000000001", "/SIG", "/OLD")}
   ${fp("R2", "999", 20, "f2", "/aaaaaaaa-0000-0000-0000-000000000002", "/SIG", "GND")}
   ${fp("R9", "0R", 30, "f9", "/cccccccc-0000-0000-0000-000000000009", "", "")}
@@ -232,7 +233,8 @@ test("update PCB: delete unused footprints, and a library footprint is added bel
   const a = K.serialize(plan.added[0]);
   assert.ok(a.startsWith('(footprint "Resistor_SMD:R_0603_1608Metric"') && a.includes('(property "Reference" "R3"') && a.includes('(property "Value" "1k"') && a.includes(`(path "/${U_SHEET}/bbbbbbbb-0000-0000-0000-000000000003")`), a.slice(0, 500));
   assert.ok(a.includes('(net "/sub/IN")') && a.includes('(net "/sub/LOCAL")') && !a.includes('"x3"'), "pads get their nets and fresh uuids");
-  assert.ok(K.atOf(plan.added[0])[1] > 20, "placed below the board");
+  // estimateFootprintInsertionPosition: a board with no Edge.Cuts outline puts it at the origin
+  assert.deepStrictEqual(K.atOf(plan.added[0]).slice(0, 2), [0, 0], "no board edges: the origin");
   assert.ok(K.addItem(K.parseDoc(PCB, "kicad_pcb"), plan.added[0]), "the new footprint is a board item");
 });
 test("schematic parity: missing and extra footprints, value and pad net mismatches", () => {
@@ -259,7 +261,7 @@ test("validateDesignRules: KiCad's ranges and message, in the editor's units", (
   assert.strictEqual(e.length, 1); assert.strictEqual(e[0].setting, "min_clearance");
   assert.strictEqual(e[0].message, "Value must be between 0 mm and 25 mm.");
   assert.strictEqual(B.validateDesignRules({ min_copper_edge_clearance: -0.02 })[0].message, "Value must be between -0.01 mm and 25 mm.");
-  assert.strictEqual(B.validateDesignRules({ max_error: 0.5 }, "mil")[0].message, "Value must be between 0.04 mils and 3.94 mils.");
+  assert.strictEqual(B.validateDesignRules({ max_error: 0.5 }, "mil")[0].message, "Value must be between 0.03937 mils and 3.93701 mils.");
   assert.strictEqual(B.validateDesignRules({ min_resolved_spokes: 100 })[0].message, "Value must be between 0 and 99.");
   assert.strictEqual(B.validateDesignRules({}, "mm", { pasteRatio: 1.5 })[0].setting, "solder_paste_margin_ratio");
   assert.strictEqual(B.validateDesignRules({}, "mm", { maskExpansion: 30 })[0].setting, "solder_mask_expansion");

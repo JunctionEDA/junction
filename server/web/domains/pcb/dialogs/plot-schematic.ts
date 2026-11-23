@@ -31,7 +31,6 @@ export const SCH_PLOT_DEFAULTS: SchPlotPrefs = { format: 1, pageSize: 0, frame: 
 const FORMATS = ["Postscript", "PDF", "SVG", "DXF", "PNG"];
 const EXT = ["ps", "pdf", "svg", "dxf", "png"];
 
-let lastReport: ReportLine[] = [];
 
 export async function openPlotSchematic(): Promise<void> {
   const ctx = toolCtx();
@@ -86,7 +85,8 @@ function show(fab: KiCadFabApi, variants: string[]): void {
   const dpi = numField(pref.dpi, { key: "dpi", digits: 0 });
   const aa = checkField(pref.antialias, "Anti-alias", { key: "antialias" });
   const openAfter = checkField(pref.openAfter, "Open file after plot", { key: "openAfter", tip: "Open output file with associated application after successful plot" });
-  const report = reportPanel("130px"); report.set(lastReport);
+  // the messages panel only appends: earlier runs stay until the dialog is closed
+  const report = reportPanel("130px"); const lines: ReportLine[] = [];
   const pngBox = box("PNG Options", h("div", { class: "pd-row" }, h("span", { class: "pd-lbl" }, "DPI:"), dpi.el, aa.el));
 
   const en = (f: { input: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement; el: HTMLElement }, on: boolean): void => { f.input.disabled = !on; f.el.classList.toggle("disabled", !on); };
@@ -106,8 +106,7 @@ function show(fab: KiCadFabApi, variants: string[]): void {
 
   async function plot(all: boolean): Promise<void> {
     const o = prefsNow(); savePrefs(KEY, o);
-    const lines: ReportLine[] = []; const say = (severity: string, text: string): void => { lines.push({ severity, text }); report.set(lines.slice()); lastReport = lines.slice(); };
-    report.set([]);
+    const say = (severity: string, text: string): void => { lines.push({ severity, text }); report.set(lines.slice()); };
     const dir = outDir.get().replace(/\\/g, "/");
     if (dir !== storedDir) void saveDirectory(dir);
     let sheets: SheetInstance[];
@@ -125,7 +124,9 @@ function show(fab: KiCadFabApi, variants: string[]): void {
     const fileStem = (s: SheetInstance): string => [rootStem, ...s.sheetPath.split("/").filter(Boolean)].join("-").replace(/[/\\]/g, "_");
     const pageIndex = new Map<string, number>(); list.forEach((s, i) => pageIndex.set(s.page, i + 1));
     const variant = selectedVariant();
-    const pages: PlotPage[] = list.map((s) => sheetPage(s, sheets.length || 1, o, pageIndex, variant));
+    // plotOneSheetDXF plots at the sheet's own page size whatever the Page size choice
+    const po: SchPlotPrefs = o.format === 3 ? Object.assign({}, o, { pageSize: 0 }) : o;
+    const pages: PlotPage[] = list.map((s) => sheetPage(s, sheets.length || 1, po, pageIndex, variant));
     const f = o.format;
     const files: { name: string; path: string; data: string | Uint8Array }[] = [];
     const add = (name: string, data: string | Uint8Array): void => { const path = fab.outputPath(dir, projectDir, name); files.push({ name, path, data }); say("action", `Plotted to '${path}'.`); };
@@ -189,7 +190,8 @@ export function sheetPage(s: SheetInstance, count: number, o: SchPlotPrefs, page
   if (o.pageSize === 1) paper = [297, 210]; else if (o.pageSize === 2) paper = [279.4, 215.9];
   if (o.pageSize && H > W) paper = [paper[1], paper[0]];
   const k = Math.min(paper[0] / W, paper[1] / H);
-  const x0 = -(paper[0] / k - W) / 2, y0 = -(paper[1] / k - H) / 2;
+  // SetViewport( VECTOR2I( 0, 0 ), …, scale, false ): the scaled sheet starts at the paper's top left corner
+  const x0 = 0, y0 = 0;
   const items: PlotItem[] = PLOT().plotItems(doc, { frame: o.frame, mono: !o.color, theme: o.color ? o.theme : null, x0, y0, width: paper[0] / k, height: paper[1] / k, scale: k });
   if (o.minWidth > 0) for (const it of items) if ((it.k === "line" || (it.k === "circle" && !it.fill)) && it.w < o.minWidth) it.w = o.minWidth;
   const P = (x: number, y: number): [number, number] => [(x - x0) * k, (y - y0) * k];

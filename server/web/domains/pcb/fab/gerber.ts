@@ -34,6 +34,14 @@ export interface GerberOptions {
   netAttributes?: boolean;
   /** "Disable aperture macros": rounded and rotated rectangles, rotated ovals and custom pads become regions. */
   disableMacros?: boolean;
+  /** %TF.SameCoordinates key (sameCoordinatesKey); "Original" when absent. */
+  sameCoordinates?: string;
+}
+
+/** AddGerberX2Header's registration id: "Original", or PX<x>PY<y> (the aux origin in nm, lower-case hex) when the board's plot options use the aux origin and both its coordinates are non-zero. */
+export function sameCoordinatesKey(useAuxOrigin: boolean, auxOrigin: Pt): string {
+  const x = Math.round(auxOrigin[0] * 1e6), y = Math.round(auxOrigin[1] * 1e6);
+  return useAuxOrigin && x && y ? `PX${(x >>> 0).toString(16)}PY${(y >>> 0).toString(16)}` : "Original";
 }
 
 /** FormatStringToGerber: the characters a Gerber field cannot hold, escaped as \\uXXXX (a backslash itself too). */
@@ -59,9 +67,9 @@ export function f6(v: number): string {
   return s === "-0.000000" ? "0.000000" : s;
 }
 
-/** A field of a %TF attribute: commas, asterisks, percent signs and non-ASCII are not allowed in one. */
+/** replaceReservedCharsField + ToAscii: a comma becomes _, * and % become \\u002A / \\u0025, a non-ASCII character becomes _. */
 export function attrField(s: string): string {
-  return s.replace(/[^\x20-\x7e]/g, "_").replace(/[,*%\\]/g, "_").trim();
+  return s.replace(/,/g, "_").replace(/\*/g, "\\u002A").replace(/%/g, "\\u0025").replace(/[^\x00-\x7f]/g, "_");
 }
 
 const AM_ROUNDRECT = `%AMRoundRect*
@@ -272,7 +280,7 @@ export function writeGerber(prims: Prim[], attrs: GerberAttrs, opt: GerberOption
   out.push(tf(`GenerationSoftware,${opt.software}`));
   out.push(tf(`CreationDate,${opt.date}`));
   out.push(tf(`ProjectId,${attrField(opt.project.name) || "board"},${opt.project.guid},${attrField(opt.project.rev) || "rev?"}`));
-  out.push(tf("SameCoordinates,Original"));
+  out.push(tf(`SameCoordinates,${opt.sameCoordinates || "Original"}`));
   out.push(attrs.fileFunctionLine !== undefined ? attrs.fileFunctionLine : tf(`FileFunction,${attrs.fileFunction}`));
   if (attrs.polarity) out.push(tf(`FilePolarity,${attrs.polarity}`));
   out.push(`%FSLAX4${prec}Y4${prec}*%`);
@@ -291,14 +299,20 @@ export function writeGerber(prims: Prim[], attrs: GerberAttrs, opt: GerberOption
   return out.join("\n") + "\n";
 }
 
-/** A deterministic GUID-shaped id for %TF.ProjectId from the project name (KiCad hashes the file name the same way in spirit). */
+/** GbrMakeProjectGUIDfromString: the name padded with X to 16 characters, its character codes as hex in the pattern xxxxxxxx-xxxx-4xxx-9xxx-xxxxxxxxxxxx. */
 export function projectGuid(name: string): string {
-  let h1 = 0x811c9dc5, h2 = 0x01000193, h3 = 0xdeadbeef, h4 = 0x41c6ce57;
-  for (let i = 0; i < name.length; i++) {
-    const c = name.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 0x01000193); h2 = Math.imul(h2 ^ c, 0x85ebca6b); h3 = Math.imul(h3 ^ c, 0xc2b2ae35); h4 = Math.imul(h4 ^ c, 0x27d4eb2f);
-  }
-  const hex = (v: number): string => (v >>> 0).toString(16).padStart(8, "0");
-  const s = hex(h1) + hex(h2) + hex(h3) + hex(h4);
-  return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20, 32)}`;
+  const b = name.length < 16 ? name + "X".repeat(16 - name.length) : name;
+  const c = (i: number): number => b.charCodeAt(i);
+  const h = (v: number, n: number): string => v.toString(16).padStart(n, "0");
+  let g = "", i = 0;
+  for (let k = 0; k < 4; k++) g += h(c(i++) & 0xff, 2);
+  g += "-";
+  for (let k = 0; k < 2; k++) g += h(c(i++) & 0xff, 2);
+  g += "-4";
+  { let cc = (c(i++) << 4) & 0xff0; cc += (c(i) >> 4) & 0x0f; g += h(cc, 3); }
+  g += "-9";
+  { let cc = (c(i++) & 0x0f) << 8; cc += c(i++) & 0xff; g += h(cc, 3); }
+  g += "-";
+  for (let k = 0; k < 6; k++) g += h(c(i++) & 0xff, 2);
+  return g;
 }

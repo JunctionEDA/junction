@@ -131,7 +131,10 @@ def parse_actions(mac=False):
                 r = re.search(r"\." + key + r"\(\s*_?\(?\s*((?:\"(?:[^\"\\]|\\.)*\"\s*)+)", body)
                 if not r:
                     return None
-                return "".join(p.replace('\\"', '"') for p in re.findall(r"\"((?:[^\"\\]|\\.)*)\"", r.group(1)))
+                # the C string literal's escapes (\n, \t, \", \\) become the characters they stand for
+                esc = {"n": "\n", "t": "\t"}
+                return "".join(re.sub(r"\\(.)", lambda e: esc.get(e.group(1), e.group(1)), p)
+                               for p in re.findall(r"\"((?:[^\"\\]|\\.)*)\"", r.group(1)))
 
             icon = re.search(r"\.Icon\(\s*BITMAPS::(\w+)", body)
             hk = re.search(r"\.DefaultHotkey\(\s*([^)]*)\)", body)
@@ -144,6 +147,9 @@ def parse_actions(mac=False):
             nm = re.search(r"\.Name\(\s*\"([^\"]+)\"", body)
             if nm:
                 a["name"] = nm.group(1)   # the TOOL_ACTION name a user.hotkeys file keys its lines by
+            sc = re.search(r"\.Scope\(\s*(AS_\w+)", body)
+            if not sc or sc.group(1) == "AS_CONTEXT":
+                a["ctx"] = 1   # TOOL_ACTION_ARGS' default scope: HOTKEY_STORE::CheckKeyConflicts lets two of these in different tools share a key
             if alt and fmt_hotkey(alt.group(1)):
                 a["alt"] = fmt_hotkey(alt.group(1))
             out[f"{cls}::{name}"] = a

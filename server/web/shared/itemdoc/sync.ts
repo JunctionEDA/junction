@@ -140,7 +140,7 @@ export class ItemDocSession {
       if (applyChanges(doc, [c]).size) { touched.add(c.id); done.push(c); if (inv) inverse.unshift(inv); }
     }
     if (!done.length) return false;
-    if (undo === "push") { this.undoStack.push({ undo: inverse, redo: done, at: Date.now() }); if (this.undoStack.length > 200) this.undoStack.shift(); this.redoStack.length = 0; }
+    if (undo === "push") { this.undoStack.push({ undo: inverse, redo: done, at: Date.now() }); this.redoStack.length = 0; }
     const op: Pending = { clientOpId: `web:${Date.now().toString(36)}:${++this.opN}`, changes: done };
     this.pending.push(op);       // journal first, send second: a dropped socket replays it
     this.keep();

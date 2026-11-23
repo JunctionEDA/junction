@@ -18,6 +18,8 @@
 // with that document, item by item, and anything short of identical is refused — a document that cannot
 // be folded stays as it was (snapshot + ops), which is correct, only slower.
 import { prettify, type PrettifyMode } from "../canvas/prettify";
+import { readQuoted } from "../canvas/sexpr";
+import { CURRENT_VERSION, GENERATOR, GENERATOR_VERSION, minimumFileFormatVersion, usesEscapedStackedPinNotation, versionRaisedMessage, type FormatRequirement } from "../canvas/format-version";
 
 /** The canvas functions used (window.KiCadCanvas in the host, the modules themselves in a test). */
 export interface CanvasApi {
@@ -26,9 +28,12 @@ export interface CanvasApi {
   serialize(node: any): string;
   parseDoc(text: string, type: string): any;
   applyChange(doc: any, change: any, IU: number): boolean;
+  /** canvas/legacy.ts downgradeSchNode: a symbol as KiCad writes it into a schematic kept at an older version. */
+  downgradeSchNode?(node: any, version: number): any;
 }
 export interface FoldOp { seq?: number; changes?: any[] }
-export type FoldResult = { ok: true; text: string; changed: number } | { ok: false; reason: string };
+/** `version`: the (version …) the result is stamped with; `notice`: KiCad's message when the edits made it raise the stamp. */
+export type FoldResult = { ok: true; text: string; changed: number; version?: number; notice?: string } | { ok: false; reason: string };
 
 const SCH_KINDS = new Set(["symbol", "wire", "bus", "junction", "label", "global_label", "hierarchical_label", "netclass_flag", "directive_label", "no_connect", "sheet", "text", "text_box", "polyline", "rectangle", "circle", "arc", "bezier", "bus_entry", "image",
   "table", "rule_area", "ellipse", "ellipse_arc", "net_chain", "group"]);
@@ -37,6 +42,8 @@ const PCB_KINDS = new Set(["footprint", "segment", "arc", "via", "zone", "gr_lin
 /** Sections that close a file: new items go in before them. */
 const TRAILERS = new Set(["sheet_instances", "symbol_instances", "embedded_fonts", "embedded_files"]);
 const BOARD_SECTIONS = ["general", "layers", "setup"] as const;
+/** The header every writer puts first, written afresh by every save (KiCad 5 boards say (host pcbnew …) instead). */
+const HEADER = new Set(["version", "generator", "generator_version", "host"]);
 /** A BOARD_SETUP property carrying one (file …) for the board's own (embedded_files …) (canvas/board-setup.ts). */
 const EMBEDDED_FILE_PROP = "embedded_file";
 
@@ -46,6 +53,18 @@ const refuse = (why: string): never => { throw new Refuse(why); };
 // ---------------------------------------------------------------- the file as spans
 
 const isWs = (c: number): boolean => c === 32 || c === 9 || c === 10 || c === 13;
+/** DSNLEXER: a line whose first non-blank character is '#' is a comment.  End of that line when s[i] starts one, else -1. */
+function commentEnd(s: string, i: number): number {
+  if (s.charCodeAt(i) !== 35) return -1;
+  for (let k = i - 1; k >= 0; k--) { const c = s.charCodeAt(k); if (c === 10 || c === 13) break; if (c !== 32 && c !== 9) return -1; }
+  let j = i; while (j < s.length && s.charCodeAt(j) !== 10 && s.charCodeAt(j) !== 13) j++;
+  return j;
+}
+/** Past the blanks and comment lines from i. */
+function skipBlank(s: string, i: number): number {
+  const n = s.length;
+  for (;;) { while (i < n && isWs(s.charCodeAt(i))) i++; const e = commentEnd(s, i); if (e < 0) return i; i = e; }
+}
 /** End (exclusive) of the element starting at i: a quoted string, a bare atom or a balanced list.  -1 when the text ends first. */
 function elementEnd(s: string, i: number): number {
   const n = s.length, c = s.charCodeAt(i);
@@ -55,6 +74,7 @@ function elementEnd(s: string, i: number): number {
     while (j < n) {
       const d = s.charCodeAt(j);
       if (d === 34) { j = elementEnd(s, j); if (j < 0) return -1; continue; }
+      if (d === 35) { const e = commentEnd(s, j); if (e >= 0) { j = e; continue; } }
       if (d === 40) depth++;
       else if (d === 41 && --depth === 0) return j + 1;
       j++;
@@ -69,13 +89,12 @@ interface Span { lead: string; text: string; head: string }
 interface ListSpans { open: string; children: Span[]; tail: string }
 /** A list cut into "(head", its elements (each with the whitespace before it) and what follows the last one. */
 function cut(text: string): ListSpans | null {
-  let i = 0; const n = text.length;
-  while (i < n && isWs(text.charCodeAt(i))) i++;
+  const n = text.length; const i = skipBlank(text, 0);
   if (text.charCodeAt(i) !== 40) return null;
   const headEnd = elementEnd(text, i + 1); if (headEnd < 0) return null;
   const children: Span[] = []; let prev = headEnd;
   for (;;) {
-    let j = prev; while (j < n && isWs(text.charCodeAt(j))) j++;
+    const j = skipBlank(text, prev);
     if (j >= n) return null;
     if (text.charCodeAt(j) === 41) return { open: text.slice(0, headEnd), children, tail: text.slice(prev) };
     const e = elementEnd(text, j); if (e < 0) return null;
@@ -85,7 +104,8 @@ function cut(text: string): ListSpans | null {
   }
 }
 function headOf(t: string): string { if (t.charCodeAt(0) !== 40) return ""; const e = elementEnd(t, 1); return e < 0 ? "" : t.slice(1, e); }
-const unquote = (t: string): string => { if (t.charCodeAt(0) !== 34) return t; try { return JSON.parse(t); } catch { return t.slice(1, -1); } };
+/** A quoted string's text, decoded as DSNLEXER decodes it (canvas/sexpr.ts readQuoted). */
+const unquote = (t: string): string => (t.charCodeAt(0) !== 34 ? t : readQuoted(t, 1).s);
 /** The first argument of a list when it is an atom or a string. */
 function firstArg(t: string): string | null { const l = cut(t); if (!l || !l.children.length || l.children[0].head) return null; return unquote(l.children[0].text); }
 function directValue(l: ListSpans, name: string): string | null { for (const c of l.children) if (c.head === name) return firstArg(c.text); return null; }
@@ -138,7 +158,11 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
   const sch = docType === "kicad_sch"; if (!sch && docType !== "kicad_pcb") refuse("not a schematic or a board");
   const kinds = sch ? SCH_KINDS : PCB_KINDS, IU = sch ? 1e4 : 1e6;
   const top = cut(file) || refuse("the stored file is not one list");
-  if (headOf(file.trimStart()) !== docType) refuse("the stored file is not a " + docType);
+  // KiCad 5 files name the paper (page A3): the parsers read it as (paper …) up to 20200119 (board) / 20200506 (schematic)
+  const fileVersion = Number(directValue(top!, "version")) || 0;
+  const pageIsPaper = fileVersion > 0 && fileVersion <= (sch ? 20200506 : 20200119) && !top!.children.some((c) => c.head === "paper");
+  const isPaper = (head: string): boolean => head === "paper" || (pageIsPaper && head === "page");
+  if (headOf(file.slice(skipBlank(file, 0))) !== docType) refuse("the stored file is not a " + docType);
   // KiCad 9 and later keep (font …), (stroke …) and (fill …) on one line; write new text the way the file is written
   const mode: PrettifyMode = /\(font \(/.test(file) ? "compactText" : "normal";
   const ser = (n: any): string => k.serialize(n);
@@ -206,9 +230,66 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
     if (ok && typeof frag === "string") noteFragment(frag);
   }
 
+  // ---- the file version: the stored one, raised only when what the edits wrote needs it (SCH_IO_KICAD_SEXPR /
+  // PCB_IO_KICAD_SEXPR chooseFileFormatVersion over the body formatted at the loaded version); the items no edit
+  // touched are the stored bytes, already readable at the stored version, so only the written ones are measured
+  let writeAt = fileVersion, notice: string | undefined;
+  const down = (node: any): any => (sch && writeAt > 0 && k.downgradeSchNode ? k.downgradeSchNode(node, writeAt) : node);
+  const written: any[] = [];   // the items and library symbols the new file writes rather than copies
+  for (const [id, it] of doc.items) if (before.get(id) !== ser(it.node)) written.push(it.node);
+  if (sch) for (const [name, n] of doc.lib) if (libBefore.get(name) !== ser(n)) written.push(n);
+  const walk = (n: any, fn: (x: any) => void): void => { if (!Array.isArray(n)) return; fn(n); for (let j = 1; j < n.length; j++) walk(n[j], fn); };
+  const child = (n: any, key: string): any => n.find((c: any, j: number) => j > 0 && Array.isArray(c) && c[0] === key) || null;
+  if (fileVersion > 0) {
+    const domain = sch ? "sch" : "pcb";
+    const req: FormatRequirement = { version: 0, feature: null };
+    const need = (r: FormatRequirement): void => { if (r.version > req.version) { req.version = r.version; req.feature = r.feature; } };
+    const texts: string[] = written.map((n) => ser(down(n)));
+    for (const t of [paper, title, ...Object.values(sections), ...embeds.values()]) if (t) texts.push(t);
+    for (const t of texts) need(minimumFileFormatVersion(t, domain));
+    // the model checks the scan cannot make: escaped stacked pin numbers live inside quoted text; a footprint's
+    // (height …) and an image's (rotate …) / (opacity …) are tokens older formats already use elsewhere
+    for (const n of written) {
+      if (sch && req.version < 20260622) walk(n, (x) => { if (x[0] !== "pin") return; const num = child(x, "number"); if (num && typeof num[1] === "string" && usesEscapedStackedPinNotation(num[1])) need({ version: 20260622, feature: "escaped special characters in stacked pin notation" }); });
+      if (!sch && n[0] === "footprint" && req.version < 20261017) { const h = child(n, "height"); if (h && Number(h[1])) need({ version: 20261017, feature: "a footprint with an overall height" }); }
+      if (!sch && n[0] === "image" && req.version < 20261025) { const r = child(n, "rotate"), o = child(n, "opacity"); if ((r && Number(r[1])) || (o && Number(o[1]) < 1)) need({ version: 20261025, feature: "a rotated or translucent reference image" }); }
+    }
+    if (req.version > fileVersion) {
+      const chosen = Math.min(req.version, CURRENT_VERSION[domain]);
+      // A raised stamp changes how this reader (and KiCad's) reads what is stored below it; KiCad re-saves every
+      // item in the new form, a splice keeps their bytes, so where the stored file has such items it stays unfolded.
+      const all = file + "\n" + texts.join("\n");
+      const crossing = (sch ? SCH_LEGACY_READINGS : PCB_LEGACY_READINGS).find(([upTo, inclusive, test]) => (inclusive ? fileVersion <= upTo && chosen > upTo : fileVersion < upTo && chosen >= upTo) && test(all, top!));
+      if (crossing) refuse("the edits need file format version " + chosen + " (" + (req.feature || "a newer file format feature") + "), where the stored items read differently (" + crossing[3] + ")");
+      writeAt = chosen;
+      notice = versionRaisedMessage(sch ? "schematic" : "board", req.feature, fileVersion, chosen);
+    }
+  }
+
+  // ---- a board kept before 20251028 names nets by number, and the parser resolves a number only through the board's
+  // (net N "name") list (formatHeader writes one per net): a number the written items use that the stored list lacks
+  // is declared, after the stored list (else after the setup), in code order
+  const netAdds: string[] = [];
+  if (!sch && writeAt > 0 && writeAt < 20251028) {
+    const declared = new Set<number>();
+    for (const c of top.children) if (c.head === "net") { const l = cut(c.text); const a = l && l.children[0]; if (a && !a.head) declared.add(Number(a.text)); }
+    const missing = new Map<number, string>();
+    for (const n of written) walk(n, (x) => {
+      const net = child(x, "net"); if (!net || typeof net[1] !== "number" || net[1] <= 0 || declared.has(net[1])) return;
+      const nn = child(x, "net_name"), name = typeof net[2] === "string" ? net[2] : nn && typeof nn[1] === "string" ? nn[1] : doc.nets && doc.nets.get(net[1]);
+      if (typeof name === "string" && !missing.has(net[1])) missing.set(net[1], name);
+    });
+    const q = (t: string): string => '"' + t.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r") + '"';
+    for (const code of Array.from(missing.keys()).sort((a, b) => a - b)) netAdds.push(`(net ${code} ${q(missing.get(code)!)})`);
+  }
+  let netAt = -1, setupAt = -1; top.children.forEach((c, i) => { if (c.head === "net") netAt = i; else if (c.head === "setup" && setupAt < 0) setupAt = i; });
+  if (netAt < 0) netAt = setupAt; if (!netAdds.length) netAt = -1;
+  if (netAdds.length && netAt < 0) refuse("the stored board has no (setup …) to declare new nets after");
+
   // ---- the new file
   /** The text for an item or library symbol as it now stands: the edit's own text when that is what it still is. */
   const textOf = (key: string, node: any, depth: number): string => {
+    const dn = down(node); if (dn !== node) return laidOut(ser(dn), depth, mode);   // the older file's own form
     const now = ser(node), sent = fragText.get(key);
     let own = false; if (sent !== undefined) { try { own = canon(sent) === now; } catch { own = false; } }
     return laidOut(own ? sent! : now, depth, mode);
@@ -228,7 +309,7 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
   top.children.forEach((c, i) => {
     if (kinds.has(c.head)) lastItem = i;
     else if (TRAILERS.has(c.head)) { if (firstTrailer < 0) firstTrailer = i; if (c.head === "embedded_files" && filesAt < 0) filesAt = i; }
-    else if (c.head === "paper") { if (paperAt < 0) paperAt = i; }
+    else if (isPaper(c.head)) { if (paperAt < 0) paperAt = i; }
     else if (c.head === "title_block") { if (titleAt < 0) titleAt = i; }
     else if (c.head === "lib_symbols") { if (libAt < 0) libAt = i; }
     else if ((BOARD_SECTIONS as readonly string[]).includes(c.head)) { if (!(c.head in sectionAt)) sectionAt[c.head] = i; }
@@ -277,9 +358,11 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
     if (touched) { changed++; filesText = (l ? l.open : "(embedded_files") + parts.join("") + (l ? l.tail : "\n\t)"); }
   }
   let freshDone = false;
+  const hdr: Record<string, [number, string]> = {};   // header child -> its place in out, its lead
   top.children.forEach((c, i) => {
     if (i === firstTrailer && lastItem < 0 && !freshDone) { if (libText !== null && libAt < 0) out.push("\n\t" + libText); add(fresh); freshDone = true; }
-    if (i === paperAt) {
+    if (HEADER.has(c.head) && !(c.head in hdr)) { hdr[c.head] = [out.length, c.lead]; out.push(c.lead + c.text); }
+    else if (i === paperAt) {
       if (paper !== null && !same(paper, c.text)) { out.push(c.lead + laidOut(paper, 1, mode)); changed++; } else out.push(c.lead + c.text);
       if (title && titleAt < 0) { out.push("\n\t" + laidOut(title, 1, mode)); changed++; }
     } else if (i === titleAt) {
@@ -298,19 +381,28 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
         else { out.push(c.lead + textOf(id, node, 1)); changed++; }
       }
     } else out.push(c.lead + c.text);
+    if (i === netAt) add(netAdds);
     if (i === lastItem && !freshDone) { if (libText !== null && libAt < 0) out.push("\n\t" + libText); add(fresh); freshDone = true; }
   });
   if (!freshDone) { if (libText !== null && libAt < 0) out.push("\n\t" + libText); add(fresh); }
   if (filesText !== null && filesAt < 0) out.push("\n\t" + filesText);   // a board with no embedded files: the section closes it
   out.push(top.tail);
-  const text = out.join("");
   if (!changed) return { ok: true, text: file, changed: 0 };
+  // every save writes the header afresh: (version N) (generator "eeschema"|"pcbnew") (generator_version "<major.minor>")
+  const gen = `(generator "${GENERATOR[sch ? "sch" : "pcb"]}")`, genVer = `(generator_version "${GENERATOR_VERSION}")`;
+  const setHdr = (key: string, t: string): void => { const [at, lead] = hdr[key]; out[at] = lead + t; };
+  if (hdr.version && writeAt !== fileVersion) setHdr("version", `(version ${writeAt})`);
+  if (hdr.host) { setHdr("host", gen + " " + genVer); if (hdr.generator) setHdr("generator", ""); if (hdr.generator_version) setHdr("generator_version", ""); }
+  else if (hdr.generator) { setHdr("generator", gen); if (hdr.generator_version) setHdr("generator_version", genVer); else out[hdr.generator[0]] += " " + genVer; }
+  else if (hdr.version) out[hdr.version[0]] += " " + gen + " " + genVer;
+  const text = out.join("");
 
   // ---- read it back: it must be the document, and everything else must be the stored bytes
   const topBack = cut(text) || refuse("the new file is not one list");
   const want = new Map<string, string>(), wantLib = new Map<string, string>(); let anonA = 0, anonB = 0;
-  for (const [id, it] of doc.items) { if (id.startsWith("anon-")) anonA++; else want.set(id, ser(it.node)); }
-  if (sch) for (const [name, n] of doc.lib) wantLib.set(name, ser(n));
+  // (compared as written: a symbol in an older schematic is written in that version's form)
+  for (const [id, it] of doc.items) { if (id.startsWith("anon-")) anonA++; else want.set(id, ser(down(it.node))); }
+  if (sch) for (const [name, n] of doc.lib) wantLib.set(name, ser(down(n)));
   doc = null; before.clear(); libBefore.clear(); fragText.clear();   // (a large document is not held twice)
   // items no edit named: each still there, once, as the stored text
   const seen = new Set<string>(); let unnamedWas = 0, unnamedIs = 0;
@@ -329,22 +421,25 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
     ids.forEach((id, i) => { if (id && !inDoc(i) && !seen.has(id)) refuse("item " + id + " is missing from the new file"); });
   }
   const back = k.parseDoc(backText, docType) || refuse("the new file could not be read back");
-  for (const [id, it] of back.items) { if (id.startsWith("anon-")) { anonB++; continue; } const w = want.get(id); if (w === undefined) refuse("item " + id + " is in the new file but not in the document"); if (ser(it.node) !== w) refuse("item " + id + " reads back differently"); }
+  for (const [id, it] of back.items) { if (id.startsWith("anon-")) { anonB++; continue; } const w = want.get(id); if (w === undefined) refuse("item " + id + " is in the new file but not in the document"); if (ser(down(it.node)) !== w) refuse("item " + id + " reads back differently"); }
   for (const id of want.keys()) if (!back.items.has(id)) refuse("item " + id + " is missing from the new file");
   if (anonA !== anonB) refuse("the new file has a different number of unnamed items");
   if (sch) {
     if (back.lib.size !== wantLib.size) refuse("the new file has a different set of library symbols");
-    for (const [name, w] of wantLib) { const b = back.lib.get(name); if (!b || ser(b) !== w) refuse("library symbol " + name + " reads back differently"); }
+    for (const [name, w] of wantLib) { const b = back.lib.get(name); if (!b || ser(down(b)) !== w) refuse("library symbol " + name + " reads back differently"); }
   }
-  const kept = (l: ListSpans): string[] => l.children.filter((c) => !kinds.has(c.head) && c.head !== "paper" && c.head !== "title_block" && c.head !== "lib_symbols" && !(!sch && (BOARD_SECTIONS as readonly string[]).includes(c.head)) && !(filesText !== null && c.head === "embedded_files")).map((c) => c.text);
-  const a = kept(top), b = kept(topBack!);
+  const kept = (l: ListSpans): string[] => l.children.filter((c) => !kinds.has(c.head) && !HEADER.has(c.head) && !isPaper(c.head) && c.head !== "title_block" && c.head !== "lib_symbols" && !(!sch && (BOARD_SECTIONS as readonly string[]).includes(c.head)) && !(filesText !== null && c.head === "embedded_files")).map((c) => c.text);
+  const added = new Set(netAdds), a = kept(top), b = kept(topBack!).filter((t) => !added.has(t));
   if (a.length !== b.length || a.some((t, i) => t !== b[i]) || top.open !== topBack!.open) refuse("a section no edit touched came out differently");
-  const section = (l: ListSpans, name: string): string | null => { const c = l.children.find((x) => x.head === name); return c ? c.text : null; };
+  const section = (l: ListSpans, name: string): string | null => { const c = l.children.find((x) => (name === "paper" ? isPaper(x.head) : x.head === name)); return c ? c.text : null; };
   const expect = (name: string, set: string | null | undefined): void => {
     const was = section(top!, name), is = section(topBack!, name);
     const want = set === undefined || set === null ? was : set === "" ? null : set;
     if ((want === null) !== (is === null) || (want !== null && !same(want, is!))) refuse("the (" + name + " …) section reads back differently");
   };
+  if (fileVersion > 0 && Number(directValue(topBack!, "version")) !== writeAt) refuse("the new file has the wrong (version …)");
+  const genBack = topBack!.children.filter((c) => c.head === "generator" || c.head === "generator_version").map((c) => c.text).join(" ");
+  if (topBack!.children.some((c) => c.head === "host") || (top.children.some((c) => HEADER.has(c.head) && c.head !== "version") && genBack !== gen + " " + genVer)) refuse("the new file has the wrong (generator …)");
   expect("paper", paper); expect("title_block", title);
   if (!sch) for (const name of BOARD_SECTIONS) expect(name, sections[name]);
   if (filesText !== null) {
@@ -357,5 +452,31 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
     if (a0.size !== b0.size) refuse("the (embedded_files …) section reads back differently");
     for (const [name, t] of a0) { const b1 = b0.get(name); if (b1 === undefined || (embeds.has(name) ? !same(t, b1) : t !== b1)) refuse("embedded file " + name + " reads back differently"); }
   }
-  return { ok: true, text, changed };
+  return writeAt !== fileVersion ? { ok: true, text, changed, version: writeAt, notice } : { ok: true, text, changed };
 }
+
+/**
+ * What the parsers read differently below a version (canvas/legacy.ts, and the readers that go by the version: the
+ * legacy bold pen, the image PPI scale, footprint zones and points in board frame, via protection off): [version,
+ * whether the legacy reading includes that version itself, whether the file has something read that way, what].
+ */
+type LegacyReading = [number, boolean, (file: string, top: ListSpans) => boolean, string];
+const BOLD_PEN = /\(thickness [^()]*\)\s*(?:\(bold(?:\s+yes)?\)|bold\b)/;
+const SCH_LEGACY_READINGS: LegacyReading[] = [
+  [20210606, false, (f) => f.indexOf("~") >= 0, "the old overbar notation"],
+  [20210621, false, (f) => /\(bus_alias/.test(f), "bus aliases in the old overbar notation"],
+  [20211123, true, (f) => /\(polyline/.test(f), "KiCad 6 polylines"],
+  [20230121, true, (f) => /\(arc/.test(f), "pre-7.0 symbol arcs"],
+  [20250318, false, (f) => /"~"|[\s(]~[\s)]/.test(f), "\"~\" as an empty value"],
+  [20260623, false, (f) => /\(image/.test(f), "reference image scale"],
+  [20260826, false, (f) => BOLD_PEN.test(f), "bold text width"],
+];
+const PCB_LEGACY_READINGS: LegacyReading[] = [
+  [20210606, false, (f) => f.indexOf("~") >= 0, "the old overbar notation"],
+  [20211014, true, (f) => /\bcustom\b/.test(f), "custom pad spoke angle"],
+  [20240201, true, (f) => /\((?:solder_mask_margin|solder_paste_margin|solder_paste_margin_ratio|solder_paste_ratio|clearance) [-+]?0*\.?0*\)/.test(f), "a local override of 0"],
+  [20250228, false, (f) => /\(via[\s)]/.test(f), "via protection"],
+  [20260616, false, (_f, top) => top.children.some((c) => c.head === "footprint" && /\((?:zone|point)[\s)]/.test(c.text)), "footprint zones and points in board coordinates"],
+  [20260623, false, (f) => /\(image/.test(f), "reference image scale"],
+  [20260826, false, (f) => BOLD_PEN.test(f), "bold text width"],
+];

@@ -17,6 +17,10 @@ import { fitBox, requestRender, visibleRectNm } from "../view";
 import { showPane } from "../panes";
 import { openBoardSetup } from "../pcbdialogs/board-setup";
 import { KC, isSchDoc, kdoc, listPick, loadJson, panelStore, pcbTools, projectId, saveJson, textEntry, tctx } from "./core";
+import { activeAfterHide, appearanceNets, objectVisibilityChange, presetActiveLayer, ratsnestCycle, ratsnestFromRadio, ratsnestRadio, showNetclassNets, sortNetClasses } from "./appearance-model";
+import { editProject, type Plain, type ProjectEdit } from "../../canvas/project-file";
+import { adoptProjectFile, canWriteProject, saveProjectFile } from "../projectfile";
+import { messageBox } from "../../dialogs/cvpcb/widgets";
 
 // ---------------------------------------------------------------- layers
 // APPEARANCE_CONTROLS::rebuildLayers: copper front → back, then this technical / user sequence.
@@ -40,6 +44,8 @@ function layerRank(l: string): number {
   const u = /^User\.(\d+)$/.exec(l); if (u) return 200 + +u[1];
   return 400;
 }
+/** LSET::UIOrder rank of a layer (copper front → back, then the technical and user layers). */
+export const layerUiRank = layerRank;
 /** BOARD::GetLayerName: the user's name when the board gives one, else LayerName() (common/layer_id.cpp). */
 export function layerDisplayName(doc: KDoc | null, key: string): string {
   const row = doc ? doc.layers.get(key) : undefined;
@@ -55,7 +61,8 @@ function layerTip(key: string): string {
 function boardLayerKeys(doc: KDoc): string[] {
   const names = new Set<string>();
   for (const [k, row] of doc.layers) if (typeof k === "string" && (k.includes(".") || k === "Margin") && row) names.add(k);
-  for (const it of doc.items.values()) for (const g of it.geom) if (g.layer && g.layer !== "holes" && (g.layer.includes(".") || g.layer === "Margin")) names.add(g.layer);
+  // rebuildLayers lists board->GetEnabledLayers(): the board's (layers) table; items' layers only for a file without one
+  if (!names.size) for (const it of doc.items.values()) for (const g of it.geom) if (g.layer && g.layer !== "holes" && (g.layer.includes(".") || g.layer === "Margin")) names.add(g.layer);
   if (!names.size) for (const l of ["F.Cu", "B.Cu"]) names.add(l);
   return Array.from(names).sort((a, b) => layerRank(a) - layerRank(b) || a.localeCompare(b));
 }
@@ -111,21 +118,25 @@ function objOpacity(o: ObjectDef): number { const v = user.objOpacity[o.id]; ret
 const SEVERITY: Record<string, string> = { drcWarnings: "warning", drcErrors: "error", drcExclusions: "exclusion" };
 
 // ---------------------------------------------------------------- presets (LAYER_PRESET)
-interface Preset { name: string; layers: string[]; hiddenObjects?: string[]; flip: boolean; active?: string }
+// hiddenObjects: the preset's hidden Objects rows (LAYER_PRESET::renderLayers); `objAll` marks a list that holds every
+// hidden row (older saved presets left out the rows hidden by default).  Built-in presets carry none: they take the
+// objects of the last built-in preset (m_lastBuiltinPreset).  seqFirst: a built-in preset's first layer of its whole
+// LSET, layers this board lacks included (doApplyLayerPreset).
+interface Preset { name: string; layers: string[]; hiddenObjects?: string[]; objAll?: boolean; flip: boolean; active?: string; seqFirst?: string | null }
 const FRONT_TECH = ["F.SilkS", "F.Mask", "F.Adhes", "F.Paste", "F.CrtYd", "F.Fab"], BACK_TECH = FRONT_TECH.map((l) => "B" + l.slice(1));
 /** The built-in presets that cannot be deleted, evaluated against the board's layers. */
 function builtinPresets(all: string[]): Preset[] {
   const cu = all.filter(isCu), has = (ls: string[]) => all.filter((l) => ls.includes(l));
   const edge = (ls: string[]) => Array.from(new Set(ls.concat(all.includes("Edge.Cuts") ? ["Edge.Cuts"] : [])));
   const out: Preset[] = [
-    { name: "All Layers", layers: all.slice(), flip: false },
-    { name: "No Layers", layers: [], flip: false },
-    { name: "All Copper Layers", layers: edge(cu), flip: false },
-    { name: "Inner Copper Layers", layers: edge(cu.filter((l) => l !== "F.Cu" && l !== "B.Cu")), flip: false },
-    { name: "Front Layers", layers: edge(has(["F.Cu", ...FRONT_TECH])), flip: false },
-    { name: "Front Assembly View", layers: edge(has(["F.SilkS", "F.Mask", "F.Fab", "F.CrtYd"])), hiddenObjects: [], flip: false, active: "F.SilkS" },
-    { name: "Back Layers", layers: edge(has(["B.Cu", ...BACK_TECH])), flip: true },
-    { name: "Back Assembly View", layers: edge(has(["B.SilkS", "B.Mask", "B.Fab", "B.CrtYd"])), hiddenObjects: [], flip: true, active: "B.SilkS" },
+    { name: "All Layers", layers: all.slice(), flip: false, seqFirst: "F.Cu" },
+    { name: "No Layers", layers: [], flip: false, seqFirst: null },
+    { name: "All Copper Layers", layers: edge(cu), flip: false, seqFirst: "F.Cu" },
+    { name: "Inner Copper Layers", layers: edge(cu.filter((l) => l !== "F.Cu" && l !== "B.Cu")), flip: false, seqFirst: "In1.Cu" },
+    { name: "Front Layers", layers: edge(has(["F.Cu", ...FRONT_TECH])), flip: false, seqFirst: "F.Cu" },
+    { name: "Front Assembly View", layers: edge(has(["F.SilkS", "F.Mask", "F.Fab", "F.CrtYd"])), flip: false, active: "F.SilkS", seqFirst: "F.Mask" },
+    { name: "Back Layers", layers: edge(has(["B.Cu", ...BACK_TECH])), flip: true, seqFirst: "B.Cu" },
+    { name: "Back Assembly View", layers: edge(has(["B.SilkS", "B.Mask", "B.Fab", "B.CrtYd"])), flip: true, active: "B.SilkS", seqFirst: "B.Mask" },
   ];
   return out;
 }
@@ -133,7 +144,9 @@ function builtinPresets(all: string[]): Preset[] {
 // ---------------------------------------------------------------- persisted state
 interface UserPrefs { colors: Record<string, string>; objHidden: string[]; objOpacity: Record<string, number>; netColorMode: NetColorMode; ratsnestMode: RatsnestMode; opacityAbs?: boolean; rowsV2?: boolean }
 interface Viewport { name: string; rect: [number, number, number, number] }
-interface ProjectPrefs { hidden: string[] | null; netColors: Record<string, string>; classColors: Record<string, string>; hiddenNets: string[]; hiddenClasses: string[]; presets: Preset[]; viewports: Viewport[]; viewport: string | null; contrastMode?: InactiveMode }
+// netColors / classColors: only colours this session could not write into the project file ("" = cleared); colorsV2
+// marks prefs from after the colours moved into the project (older ones kept them here only and are dropped)
+interface ProjectPrefs { hidden: string[] | null; netColors: Record<string, string>; classColors: Record<string, string>; hiddenNets: string[]; hiddenClasses: string[]; presets: Preset[]; viewports: Viewport[]; viewport: string | null; contrastMode?: InactiveMode; colorsV2?: boolean }
 
 const USER_KEY = "kui.appearance";
 // the Footprint Editor keeps its own (FOOTPRINT_EDITOR_SETTINGS beside PCBNEW_SETTINGS)
@@ -144,10 +157,20 @@ let user: UserPrefs = Object.assign({ colors: {}, objHidden: OBJECTS.filter((o) 
 // rows added after a user's prefs were saved start as KiCad has them (Board Area Shadow hidden)
 if (!user.rowsV2) { if (!user.objHidden.includes("boardArea")) user.objHidden.push("boardArea"); user.rowsV2 = true; }
 // the Zones slider used to scale the fixed 0.6 zone opacity; it is the opacity itself now (as KiCad's): keep the look
+// the Ratsnest radio's None is the global ratsnest switch, not a mode (UpdateDisplayOptions / onRatsnestMode)
+if (user.ratsnestMode === "none") { user.ratsnestMode = "all"; if (!user.objHidden.includes("ratsnest")) user.objHidden.push("ratsnest"); }
 if (!user.opacityAbs) { if (typeof user.objOpacity.zones === "number") user.objOpacity.zones = Math.round(user.objOpacity.zones * 60) / 100; user.opacityAbs = true; }
 let proj: ProjectPrefs = emptyProj(); let projFor = "";
-function emptyProj(): ProjectPrefs { return { hidden: null, netColors: {}, classColors: {}, hiddenNets: [], hiddenClasses: [], presets: [], viewports: [], viewport: null }; }
-function loadProj(): void { const k = projKey(); if (k === projFor) return; projFor = k; proj = Object.assign(emptyProj(), loadJson<Partial<ProjectPrefs>>(k, {})); }
+function emptyProj(): ProjectPrefs { return { hidden: null, netColors: {}, classColors: {}, hiddenNets: [], hiddenClasses: [], presets: [], viewports: [], viewport: null, colorsV2: true }; }
+/** m_lastBuiltinPreset.renderLayers: the hidden Objects rows the built-in presets apply (null: GAL_SET::DefaultVisible). */
+let lastBuiltinHidden: string[] | null = null;
+function loadProj(): void {
+  const k = projKey(); if (k === projFor) return; projFor = k; proj = Object.assign(emptyProj(), loadJson<Partial<ProjectPrefs>>(k, {}));
+  if (!proj.colorsV2) { proj.netColors = {}; proj.classColors = {}; proj.colorsV2 = true; }
+  // APPEARANCE_CONTROLS::SetUserViewports: the viewport choice starts at "---" each time the board is loaded
+  proj.viewport = null;
+  lastBuiltinHidden = null;
+}
 const saveUser = () => saveJson(USER_KEY, user);
 const saveProj = () => saveJson(projKey(), proj);
 
@@ -155,7 +178,7 @@ const saveProj = () => saveJson(projKey(), proj);
 interface NetInfo { name: string; code: number; netclass: string }
 let netCache: { doc: KDoc | null; version: number; pro: unknown; nets: NetInfo[]; classes: string[] } = { doc: null, version: -1, pro: null, nets: [], classes: [] };
 
-interface ProNetSettings { classes?: { name?: string }[]; netclass_assignments?: Record<string, string | string[]> | null; netclass_patterns?: { netclass?: string; pattern?: string }[] }
+interface ProNetSettings { classes?: { name?: string; pcb_color?: string }[]; net_colors?: Record<string, string> | null; netclass_assignments?: Record<string, string | string[]> | null; netclass_patterns?: { netclass?: string; pattern?: string }[] }
 function netSettings(): ProNetSettings {
   try { const j = E.proSettings ? JSON.parse(E.proSettings as string) : null; return (j && j.net_settings) || {}; } catch (e) { return {}; }
 }
@@ -164,8 +187,9 @@ function nets(): { nets: NetInfo[]; classes: string[] } {
   const doc = kdoc(), P = pcbTools(), version = store.get().document.version;
   if (!doc || !P || isSchDoc()) return { nets: [], classes: [] };
   if (netCache.doc === doc && netCache.version === version && netCache.pro === E.proSettings) return netCache;
-  const ns = netSettings(); const classes = ["Default"];
+  const ns = netSettings(); let classes = ["Default"];
   for (const c of ns.classes || []) if (c && c.name && !classes.includes(c.name)) classes.push(c.name);
+  classes = sortNetClasses(classes);   // rebuildNets: Default, then std::sort( names )
   const pats = (ns.netclass_patterns || []).filter((p) => p && p.pattern && p.netclass).map((p) => ({ re: wildcard(String(p.pattern)), cls: String(p.netclass) }));
   const assigned = ns.netclass_assignments || {};
   const classOf = (name: string): string => {
@@ -186,6 +210,60 @@ export function classSchematicColor(name: string): string | null {
   if (!v) return null;
   const [r, g, b, a] = parseColor(v);
   return a <= 0 ? null : rgba(r, g, b, a);
+}
+
+/** A colour as COLOR4D's JSON (ToCSSString): "rgb(r, g, b)" when opaque, else "rgba(r, g, b, a)" with three decimals. */
+function cssColor(c: string): string {
+  const [r, g, b, a] = parseColor(c), al = Math.round(Math.max(0, Math.min(1, a)) * 255);
+  return al === 255 ? `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})` : `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, ${(al / 255).toFixed(3)})`;
+}
+/** A project colour, null when it is unspecified (COLOR4D::UNSPECIFIED is transparent black). */
+function projColor(v: unknown): string | null {
+  const t = typeof v === "string" ? v.replace(/\s+/g, "") : "";
+  if (!t) return null;
+  const [r, g, b, a] = parseColor(t);
+  return a <= 0 ? null : rgba(r, g, b, a);
+}
+/** NETCLASS::GetPcbColor (rebuildNets): the class's "pcb_color" in the project; this session's when the project file could not be written. */
+function classPcbColor(name: string): string | null {
+  if (Object.prototype.hasOwnProperty.call(proj.classColors, name)) return proj.classColors[name] || null;
+  const c = (netSettings().classes || []).find((x) => x && x.name === name);
+  return c ? projColor(c.pcb_color) : null;
+}
+/** NET_SETTINGS::m_netColorAssignments ("net_colors" in the project): the net's colour; this session's when the file could not be written. */
+function netPcbColor(name: string): string | null {
+  if (Object.prototype.hasOwnProperty.call(proj.netColors, name)) return proj.netColors[name] || null;
+  const m = netSettings().net_colors;
+  return m && typeof m === "object" ? projColor(m[name]) : null;
+}
+/** Write project-file edits and make the editor use the new file; false when it could not be saved. */
+async function saveProjectEdits(edits: ProjectEdit[]): Promise<boolean> {
+  const text = (E.proSettings as string | null) || null; if (!text || !canWriteProject()) return false;
+  let res: { text: string; changed: ProjectEdit[] };
+  try { res = editProject(text, edits); } catch (e) { return false; }
+  if (!res.changed.length) return true;
+  adoptProjectFile(res.text);
+  return saveProjectFile(res.text, res.changed);
+}
+/** onNetclassColorChanged / ID_CLEAR_NET_COLOR: NETCLASS::SetPcbColor, kept in the project's net settings. */
+function setClassColor(name: string, color: string | null): void {
+  const ns = netSettings(); const classes = Array.isArray(ns.classes) ? ns.classes.map((c) => Object.assign({}, c)) : [];
+  const i = classes.findIndex((c) => c && c.name === name);
+  if (i < 0) { proj.classColors[name] = color || ""; saveProj(); return; }
+  classes[i].pcb_color = color ? cssColor(color) : "rgba(0, 0, 0, 0.000)";
+  proj.classColors[name] = color || ""; saveProj();   // shown at once; dropped when the file takes it
+  void saveProjectEdits([{ path: ["net_settings", "classes"], value: classes as unknown as Plain }]).then((ok) => {
+    if (ok) { delete proj.classColors[name]; saveProj(); applyAppearance(); publishAppearance(); }
+  });
+}
+/** NET_GRID_TABLE::SetValueAsCustom( COL_COLOR ): the net's colour, saved with the project's net settings ("net_colors"). */
+function setNetColor(name: string, color: string | null): void {
+  const ns = netSettings(); const map: Record<string, string> = Object.assign({}, ns.net_colors && typeof ns.net_colors === "object" ? ns.net_colors : {});
+  if (color) map[name] = cssColor(color); else delete map[name];
+  proj.netColors[name] = color || ""; saveProj();
+  void saveProjectEdits([{ path: ["net_settings", "net_colors"], value: map as unknown as Plain }]).then((ok) => {
+    if (ok) { delete proj.netColors[name]; saveProj(); applyAppearance(); publishAppearance(); }
+  });
 }
 
 /** The net class a net belongs to (project net settings: assignments, then patterns, else Default). */
@@ -234,7 +312,10 @@ export function viewportsMRU(): string[] { publishAppearance(); return viewportM
 /** APPEARANCE_CONTROLS::ApplyLayerPreset( name ): apply it and move it to the front of the MRU. */
 export function applyLayerPresetByName(name: string): void {
   const p = allPresets(layerKeys()).find((x) => x.name === name); if (!p) return;
-  applyPreset(p); presetMRU = toFront(presetMRU, name); publishAppearance();
+  // onLayerPresetChanged: leaving a built-in preset (or none) keeps the objects shown for the next built-in one
+  const doc = kdoc(), cur = doc ? currentPreset(layerRows(doc)) : null;
+  if (!cur || BUILTIN_NAMES.includes(cur)) lastBuiltinHidden = hiddenObjectsNow();
+  applyPreset(p, presetHidden(p)); presetMRU = toFront(presetMRU, name); publishAppearance();
 }
 /** APPEARANCE_CONTROLS::ApplyViewport( name ). */
 export function applyViewportByName(name: string): void {
@@ -242,12 +323,21 @@ export function applyViewportByName(name: string): void {
   E.viewTouched = true; fitBox(v.rect, 1); proj.viewport = v.name; saveProj(); viewportMRU = toFront(viewportMRU, name); publishAppearance();
 }
 function sameSet(a: string[], b: string[]): boolean { if (a.length !== b.length) return false; const s = new Set(a); return b.every((x) => s.has(x)); }
+/** getVisibleObjects, as the hidden Objects rows. */
+function hiddenObjectsNow(): string[] { return OBJECTS.filter((o) => !o.spacer && o.canHide !== false && !objectVisible(o.id)).map((o) => o.id); }
+const DEFAULT_HIDDEN = (): string[] => OBJECTS.filter((o) => o.defaultHidden).map((o) => o.id);
+/** The hidden Objects rows a preset applies: a built-in one those of the last built-in preset (onLayerPresetChanged). */
+function presetHidden(p: Preset): string[] {
+  if (BUILTIN_NAMES.includes(p.name) || !p.hiddenObjects) return lastBuiltinHidden || DEFAULT_HIDDEN();
+  return p.objAll ? p.hiddenObjects : Array.from(new Set(DEFAULT_HIDDEN().concat(p.hiddenObjects)));
+}
+/** syncLayerPresetSelection: the preset whose layers, objects and flip match what is shown. */
 function currentPreset(layers: LayerInfo[]): string | null {
   const vis = layers.filter((l) => l.visible).map((l) => l.key), flip = !!E.renderOpts.flip;
-  const hiddenObjs = OBJECTS.filter((o) => !o.spacer && o.canHide !== false && !objectVisible(o.id)).map((o) => o.id);
+  const hiddenObjs = hiddenObjectsNow();
   for (const p of allPresets(layers.map((l) => l.key))) {
     if (!sameSet(p.layers, vis) || p.flip !== flip) continue;
-    if (p.hiddenObjects && !sameSet(p.hiddenObjects, hiddenObjs.filter((o) => !OBJECTS.find((d) => d.id === o)!.defaultHidden))) continue;
+    if (!sameSet(presetHidden(p), hiddenObjs)) continue;
     return p.name;
   }
   return null;
@@ -265,8 +355,10 @@ export function publishAppearance(): void {
       color: OBJECT_COLORS[o.id] ? objectColor(o.id) : undefined, defaultColor: OBJECT_COLORS[o.id] });
   const n = nets(); const s = pcbState();
   const hiddenNets = s ? s.hiddenNets : new Set(proj.hiddenNets);
-  const netRows: NetRow[] = n.nets.map((x) => ({ name: x.name, code: x.code, color: proj.netColors[x.name] || null, visible: !hiddenNets.has(x.name), netclass: x.netclass }));
-  const classRows: NetClassRow[] = n.classes.map((name) => ({ name, color: proj.classColors[name] || null, visible: !proj.hiddenClasses.includes(name), schColor: classSchematicColor(name) }));
+  // NET_GRID_TABLE::Rebuild: nets with a code above 0, no "unconnected-(" nets, sorted by name
+  const netRows: NetRow[] = appearanceNets(n.nets).map((x) => ({ name: x.name, code: x.code, color: netPcbColor(x.name), visible: !hiddenNets.has(x.name), netclass: x.netclass }))
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const classRows: NetClassRow[] = n.classes.map((name) => ({ name, color: name === "Default" ? null : classPcbColor(name), visible: !proj.hiddenClasses.includes(name), schColor: classSchematicColor(name) }));
   const names = layers.map((l) => l.key);
   const reset = mruFor !== projFor; mruFor = projFor;
   presetMRU = syncMRU(presetMRU, allPresets(names).map((p) => p.name), reset);
@@ -274,7 +366,7 @@ export function publishAppearance(): void {
   viewportMRU = syncMRU(viewportMRU, vps.map((v) => v.name), reset);
   const ap: AppearanceState = {
     fpEditor: fp, layers, active: E.activeLayer || "", objects, nets: netRows, netClasses: classRows,
-    inactive: inactiveMode(), flip: !!E.renderOpts.flip, netColorMode: user.netColorMode, ratsnestMode: user.ratsnestMode,
+    inactive: inactiveMode(), flip: !!E.renderOpts.flip, netColorMode: user.netColorMode, ratsnestMode: ratsnestRadio(objectVisible("ratsnest"), user.ratsnestMode),
     presets: allPresets(names).map((p) => p.name), builtinPresets: builtinPresets(names).sort(byName).map((p) => p.name), preset: currentPreset(layers),
     viewports: vps.map((v) => v.name), viewport: proj.viewport,
   };
@@ -308,7 +400,7 @@ export function applyAppearance(): void {
   } else ro.boardArea = undefined;
   // net colours: a net's own colour wins over its class colour (NET_GRID_TABLE / netclass colours)
   const n = nets(); const byName = new Map<string, string>(), byCode = new Map<number, string>();
-  for (const x of n.nets) { const c = proj.netColors[x.name] || proj.classColors[x.netclass]; if (c) { byName.set(x.name, c); if (x.code > 0) byCode.set(x.code, c); } }
+  for (const x of n.nets) { const c = netPcbColor(x.name) || (x.netclass === "Default" ? null : classPcbColor(x.netclass)); if (c) { byName.set(x.name, c); if (x.code > 0) byCode.set(x.code, c); } }
   ro.netColors = user.netColorMode === "all" && byCode.size ? byCode : undefined;
   // boards that name nets inline carry no net codes: colour by item (pads by their index in the footprint)
   let itemColors: Map<string, string | (string | undefined)[]> | undefined;
@@ -323,9 +415,9 @@ export function applyAppearance(): void {
   ro.itemColors = itemColors && itemColors.size ? itemColors : undefined;
   const s = pcbState();
   if (s) {
-    const hiddenNets = new Set(proj.hiddenNets);
-    for (const x of n.nets) if (proj.hiddenClasses.includes(x.netclass)) hiddenNets.add(x.name);
-    s.hiddenNets = hiddenNets;
+    // the ratsnest hides nets one by one (hideNetInRatsnest); a class eye only writes its nets into that set (showNetclass)
+    s.hiddenNets = new Set(proj.hiddenNets);
+    (s as { ratsnestMode?: string }).ratsnestMode = user.ratsnestMode === "visible" ? "visible" : "all";   // RATSNEST_MODE
     s.ratsnestColors = user.netColorMode !== "off" && byName.size ? byName : null;
     s.ratsnestBase = user.colors["obj:ratsnest"] || null;
     s.netColorMode = user.netColorMode;
@@ -368,7 +460,8 @@ export function cycleNetColorMode(): void {
 /** PCB_CONTROL::RatsnestModeCycle ("Ratsnest Mode (3-state)"): hidden -> all layers -> visible layers -> hidden. */
 export function cycleRatsnestMode(): void {
   if (isSchDoc() || !kdoc()) return;
-  appearanceDispatch({ t: "ratsnestMode", mode: user.ratsnestMode === "none" ? "all" : user.ratsnestMode === "all" ? "visible" : "none" });
+  const r = ratsnestCycle(objectVisible("ratsnest"), user.ratsnestMode);
+  appearanceDispatch({ t: "ratsnestMode", mode: r.show ? r.mode : "none" });
 }
 const CONTRAST_LABELS: [InactiveMode, string][] = [["normal", "Normal"], ["dim", "Dimmed"], ["hide", "Hidden"]];
 /** View ▸ Inactive Layer View Mode (ACTIONS::highContrastMode, PCB_CONTROL::HighContrastMode): normal ⇄ dimmed. */
@@ -401,27 +494,35 @@ export function layerAlphaStep(dir: 1 | -1): boolean {
   saveUser(); applyAppearance(); publishAppearance();
   return true;
 }
-function applyPreset(p: Preset): void {
+/**
+ * APPEARANCE_CONTROLS::doApplyLayerPreset: the layers, the objects (`hidden`; null keeps them), the active layer (the
+ * preset's, else the first of its layers when the current one is not among them) and the flip (null keeps it).
+ */
+function applyPreset(p: Preset, hidden: string[] | null, flip: boolean | null = p.flip): void {
   setVisibleLayers(p.layers);
-  if (p.hiddenObjects) { user.objHidden = OBJECTS.filter((o) => o.defaultHidden).map((o) => o.id).concat(p.hiddenObjects.filter((o) => !OBJECTS.find((d) => d.id === o)?.defaultHidden)); saveUser(); setGridAndRatsnest(); }
-  setFlip(p.flip);
-  if (p.active && layerKeys().includes(p.active)) setActiveLayer(p.active);
+  if (hidden) { const keep = user.objHidden.filter((id) => !OBJECTS.some((o) => o.id === id && !o.spacer && o.canHide !== false)); user.objHidden = keep.concat(hidden); saveUser(); setGridAndRatsnest(); }
+  const all = layerKeys(), a = presetActiveLayer(p, String(E.activeLayer || ""), all);
+  if (a) setActiveLayer(a);
+  if (flip !== null) setFlip(flip);
 }
 function setGridAndRatsnest(): void {
   const wantGrid = !user.objHidden.includes("grid");
   if (!!E.gridOn !== wantGrid) { E.gridOn = wantGrid; setToggles({ toggleGrid: wantGrid }); store.slice("viewport", { gridOn: wantGrid }); }
+  const s = pcbState(); if (s) s.showRatsnest = !user.objHidden.includes("ratsnest");
 }
 
 function layerMenu(cmd: LayerMenuCmd): void {
   const all = layerKeys(), hidden = new Set(E.hiddenLayers as Set<string>);
   const cu = all.filter(isCu), nonCu = all.filter((l) => !isCu(l));
-  const preset = (name: string) => { const p = builtinPresets(all).find((x) => x.name === name); if (p) applyPreset(p); };
+  // OnLayerContextMenu: an unnamed preset with the current objects and flip, only its layers from the built-in one
+  const preset = (name: string) => { const p = builtinPresets(all).find((x) => x.name === name); if (p) applyPreset({ name: "", layers: p.layers, flip: p.flip, seqFirst: p.seqFirst }, null, null); };
+  const afterHide = () => { const a = activeAfterHide(all.filter((l) => !hidden.has(l)), String(E.activeLayer || "")); if (a) setActiveLayer(a); setHidden(hidden); };
   switch (cmd) {
     case "showAllCu": for (const l of cu) hidden.delete(l); setHidden(hidden); break;
-    case "hideAllCu": for (const l of cu) hidden.add(l); setHidden(hidden); break;
-    case "hideAllButActive": setHidden(new Set(all.filter((l) => l !== E.activeLayer))); break;
+    case "hideAllCu": for (const l of cu) hidden.add(l); afterHide(); break;
+    case "hideAllButActive": applyPreset({ name: "", layers: all.filter((l) => l === E.activeLayer), flip: false }, null, null); break;
     case "showAllNonCu": for (const l of nonCu) hidden.delete(l); setHidden(hidden); break;
-    case "hideAllNonCu": for (const l of nonCu) hidden.add(l); setHidden(hidden); break;
+    case "hideAllNonCu": for (const l of nonCu) hidden.add(l); afterHide(); break;
     case "showAll": preset("All Layers"); break;
     case "hideAll": preset("No Layers"); break;
     case "frontAssembly": preset("Front Assembly View"); break;
@@ -433,6 +534,13 @@ function layerMenu(cmd: LayerMenuCmd): void {
 }
 
 // ---------------------------------------------------------------- nets
+/** APPEARANCE_CONTROLS::showNetclass: show or hide the ratsnest of every net of the class; the class eye is remembered (m_HiddenNetclasses). */
+function showNetclass(name: string, show: boolean): void {
+  const classNets = nets().nets.filter((n) => n.netclass === name).map((n) => n.name);
+  proj.hiddenNets = showNetclassNets(proj.hiddenNets, classNets, show);
+  const hc = new Set(proj.hiddenClasses); if (show) hc.delete(name); else hc.add(name); proj.hiddenClasses = Array.from(hc);
+  saveProj();
+}
 export function netIds(names: string[], kinds?: string[]): Set<string> {
   const doc = kdoc(), P = pcbTools(), out = new Set<string>(); if (!doc || !P) return out;
   for (const name of names) for (const id of P.netItemIds(doc, name)) { const it = doc.items.get(id); if (it && (!kinds || kinds.includes(it.kind))) out.add(id); }
@@ -448,7 +556,7 @@ export function netCommand(cmd: NetCmd, names: string[], label: string): void {
     }
     ctx.setHighlight(ids.size ? ids : null, names);
     const s = pcbState(); if (s) s.highlightNet = names[0] || null;
-    if (!ids.size) toast(`Nothing on ${label}`);
+    if (!ids.size && names.length) toast(`Nothing on ${label}`);
     return;
   }
   if (cmd === "select" || cmd === "unselect") {
@@ -465,14 +573,14 @@ async function savePreset(): Promise<void> {
   const st = panelStore.get().appearance; const builtin = st.builtinPresets;
   const name = await textEntry("Save Layer Preset", "Layer preset name:", st.preset && !builtin.includes(st.preset) ? st.preset : "");
   if (name === null) return; const nm = name.trim(); if (!nm) return;
-  if (builtin.includes(nm)) { toast("Default presets cannot be modified. Please use a different name.", 3500); return; }
-  const p: Preset = { name: nm, layers: st.layers.filter((l) => l.visible).map((l) => l.key), hiddenObjects: OBJECTS.filter((o) => !o.spacer && o.canHide !== false && !o.defaultHidden && !objectVisible(o.id)).map((o) => o.id), flip: st.flip, active: st.active };
+  if (builtin.includes(nm)) { await messageBox("Error", "Default presets cannot be modified.\nPlease use a different name."); return; }
+  // LAYER_PRESET( name, getVisibleLayers(), getVisibleObjects(), UNSELECTED_LAYER, flip ): no active layer of its own
+  const p: Preset = { name: nm, layers: st.layers.filter((l) => l.visible).map((l) => l.key), hiddenObjects: hiddenObjectsNow(), objAll: true, flip: st.flip };
   const i = proj.presets.findIndex((x) => x.name === nm);
   if (i >= 0) { if (!await confirmBox("Save Layer Preset", "Overwrite existing preset?", "Overwrite")) return; proj.presets[i] = p; } else proj.presets.push(p);
   saveProj(); publishAppearance(); presetMRU = toFront(presetMRU, nm); publishAppearance();
 }
 async function deletePreset(): Promise<void> {
-  if (!proj.presets.length) { toast("No user presets to delete"); return; }
   const name = await listPick("Delete Preset", "Select preset:", "Presets", proj.presets.map((p) => p.name));
   if (!name) return;
   proj.presets = proj.presets.filter((p) => p.name !== name); saveProj(); publishAppearance();
@@ -486,7 +594,6 @@ async function saveViewport(): Promise<void> {
   proj.viewport = nm; saveProj(); publishAppearance(); viewportMRU = toFront(viewportMRU, nm); publishAppearance();
 }
 async function deleteViewport(): Promise<void> {
-  if (!proj.viewports.length) { toast("No viewports to delete"); return; }
   const name = await listPick("Delete Viewport", "Select viewport:", "Viewports", proj.viewports.map((v) => v.name));
   if (!name) return;
   proj.viewports = proj.viewports.filter((v) => v.name !== name); if (proj.viewport === name) proj.viewport = null; saveProj(); publishAppearance();
@@ -501,7 +608,7 @@ export function appearanceDispatch(a: PanelAction): boolean {
     case "layerColor": if (a.color) user.colors[a.key] = a.color; else delete user.colors[a.key]; saveUser(); break;
     case "layerMenu": layerMenu(a.cmd); break;
     case "objVisible": {
-      const set = new Set(user.objHidden); if (a.on) set.delete(a.id); else set.add(a.id); user.objHidden = Array.from(set); saveUser();
+      user.objHidden = objectVisibilityChange(user.objHidden, a.id, a.on); saveUser();   // onObjectVisibilityChanged
       if (a.id === "grid") setGridAndRatsnest();
       if (a.id === "ratsnest") { const s = pcbState(); if (s) s.showRatsnest = a.on; }
       break;
@@ -515,21 +622,23 @@ export function appearanceDispatch(a: PanelAction): boolean {
     case "inactive": setInactive(a.mode); break;
     case "flip": setFlip(a.on); break;
     case "netVisible": { const s = new Set(proj.hiddenNets); if (a.on) s.delete(a.name); else s.add(a.name); proj.hiddenNets = Array.from(s); saveProj(); break; }
-    case "netColor": if (a.color) proj.netColors[a.name] = a.color; else delete proj.netColors[a.name]; saveProj(); break;
+    case "netColor": setNetColor(a.name, a.color); break;
     case "netCmd":
       if (a.cmd === "showAll") { proj.hiddenNets = []; saveProj(); }
-      else if (a.cmd === "hideOthers") { proj.hiddenNets = nets().nets.map((n) => n.name).filter((n) => n !== a.name); saveProj(); }
+      // NET_GRID_TABLE::HideOtherNets: every listed net but this one
+      else if (a.cmd === "hideOthers") { const listed = appearanceNets(nets().nets).map((n) => n.name); proj.hiddenNets = Array.from(new Set(proj.hiddenNets.filter((n) => !listed.includes(n)).concat(listed.filter((n) => n !== a.name)))); saveProj(); }
       else netCommand(a.cmd, [a.name], a.name);
       break;
-    case "classVisible": { const s = new Set(proj.hiddenClasses); if (a.on) s.delete(a.name); else s.add(a.name); proj.hiddenClasses = Array.from(s); saveProj(); break; }
-    case "classColor": if (a.color) proj.classColors[a.name] = a.color; else delete proj.classColors[a.name]; saveProj(); break;
+    case "classVisible": showNetclass(a.name, a.on); break;
+    case "classColor": setClassColor(a.name, a.color); break;
     case "classCmd":
-      if (a.cmd === "showAll") { proj.hiddenClasses = []; saveProj(); }
-      else if (a.cmd === "hideOthers") { proj.hiddenClasses = nets().classes.filter((c) => c !== a.name); saveProj(); }
+      if (a.cmd === "showAll") { for (const c of nets().classes) showNetclass(c, true); }
+      else if (a.cmd === "hideOthers") { for (const c of nets().classes) showNetclass(c, c === a.name); }
       else netCommand(a.cmd, nets().nets.filter((n) => n.netclass === a.name).map((n) => n.name), a.name);
       break;
     case "netColorMode": user.netColorMode = a.mode; saveUser(); break;
-    case "ratsnestMode": { user.ratsnestMode = a.mode; saveUser(); const s = pcbState(); if (s) s.showRatsnest = a.mode !== "none"; user.objHidden = user.objHidden.filter((o) => o !== "ratsnest").concat(a.mode === "none" ? ["ratsnest"] : []); break; }
+    // onRatsnestMode: All / Visible set the mode and show the ratsnest, None only hides it
+    case "ratsnestMode": { const r = ratsnestFromRadio(a.mode, user.ratsnestMode); user.ratsnestMode = r.mode; user.objHidden = user.objHidden.filter((o) => o !== "ratsnest").concat(r.show ? [] : ["ratsnest"]); saveUser(); const s = pcbState(); if (s) s.showRatsnest = r.show; break; }
     case "preset": applyLayerPresetByName(a.name); break;
     case "presetSave": void savePreset(); return true;
     case "presetDelete": void deletePreset(); return true;

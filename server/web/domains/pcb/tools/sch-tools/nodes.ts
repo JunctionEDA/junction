@@ -13,6 +13,16 @@ export function labelJustify(kind: string, rot: number): SNode {
   const right = rot === 180 || rot === 270;
   return kind === "label" || kind === "text" ? ["justify", right ? "right" : "left", "bottom"] : ["justify", right ? "right" : "left"];
 }
+/**
+ * SCH_IO_KICAD_SEXPR::saveField: (property "Name" "Value" (at x y a)), (hide yes) when hidden, then always
+ * (show_name yes|no) and (do_not_autoplace yes|no), then the effects.
+ */
+export function fieldNode(name: string, value: string, at: SNode, o: { hidden?: boolean; showName?: boolean; noAutoplace?: boolean; effects: SNode }): SNode {
+  const n: SNode = ["property", name, value, at];
+  if (o.hidden) n.push(["hide", "yes"]);
+  n.push(["show_name", o.showName ? "yes" : "no"], ["do_not_autoplace", o.noAutoplace ? "yes" : "no"], o.effects);
+  return n;
+}
 export function labelNode(kind: string, text: string, p: Pt, rot: number): SNode {
   rot = ((Math.round(rot || 0) % 360) + 360) % 360;
   const at: SNode = ["at", r4(p[0]), r4(p[1]), rot];
@@ -22,7 +32,7 @@ export function labelNode(kind: string, text: string, p: Pt, rot: number): SNode
   if (kind === "global_label") n.push(["fields_autoplaced", "yes"]);
   n.push(["effects", fontNode(1.27), labelJustify(kind, rot)], ["uuid", K.newUuid()]);
   // KiCad always stores the intersheet-refs field on global labels
-  if (kind === "global_label") n.push(["property", "Intersheetrefs", "${INTERSHEET_REFS}", ["at", r4(p[0]), r4(p[1]), 0], ["hide", "yes"], ["effects", fontNode(1.27), ["justify", "left"]]]);
+  if (kind === "global_label") n.push(fieldNode("Intersheetrefs", "${INTERSHEET_REFS}", ["at", r4(p[0]), r4(p[1]), 0], { hidden: true, effects: ["effects", fontNode(1.27), ["justify", "left"]] }));
   return n;
 }
 // Sheet-level graphic shapes (sch_io_kicad_sexpr_common.cpp formatRect/Circle/Arc/Poly): stroke, fill, then the uuid.
@@ -124,8 +134,8 @@ export function sheetNode(a: Pt, b: Pt, name: string, file: string): SNode {
   const border = hexColorNode(S.sheetBorder), back = hexColorNode(S.sheetBackground);
   return ["sheet", ["at", x0, y0], ["size", r4(x1 - x0), r4(y1 - y0)], ["exclude_from_sim", "no"], ["in_bom", "yes"], ["on_board", "yes"], ["dnp", "no"], ["fields_autoplaced", "yes"],
     ["stroke", ["width", SHEET_BORDER], ["type", "solid"], ...(border ? [border] : [])], ["fill", back || ["color", 0, 0, 0, 0]], ["uuid", K.newUuid()],
-    ["property", "Sheetname", name, ["at", x0, r4(y0 - SHEET_NAME_OFF), 0], ["effects", fontNode(1.27), ["justify", "left", "bottom"]]],
-    ["property", "Sheetfile", file, ["at", x0, r4(y1 + SHEET_FILE_OFF), 0], ["effects", fontNode(1.27), ["justify", "left", "top"]]]];
+    fieldNode("Sheetname", name, ["at", x0, r4(y0 - SHEET_NAME_OFF), 0], { effects: ["effects", fontNode(1.27), ["justify", "left", "bottom"]] }),
+    fieldNode("Sheetfile", file, ["at", x0, r4(y1 + SHEET_FILE_OFF), 0], { effects: ["effects", fontNode(1.27), ["justify", "left", "top"]] })];
 }
 // Sheet pin on one side of the sheet: SCH_SHEET_PIN::SetSide picks the spin style (left edge reads
 // rightwards = justify left, right edge leftwards = justify right, top like right, bottom like left)
@@ -257,7 +267,7 @@ export function classLabelNode(name: string, p: Pt, rot: number): SNode {
   rot = ((Math.round(rot || 0) % 360) + 360) % 360;
   return ["netclass_flag", "", ["length", FLAG_LENGTH], ["shape", "round"], ["at", r4(p[0]), r4(p[1]), rot], ["fields_autoplaced", "yes"],
     ["effects", fontNode(1.27), ["justify", "left", "bottom"]], ["uuid", K.newUuid()],
-    ["property", "Netclass", name, flagFieldAt(p, rot), ["effects", fontNode(1.27), ["justify", "left", "bottom"]]]];
+    fieldNode("Netclass", name, flagFieldAt(p, rot), { effects: ["effects", fontNode(1.27), ["justify", "left", "bottom"]] })];
 }
 export const MANDATORY = ["Reference", "Value", "Footprint", "Datasheet", "Description"];
 export function symbolNode(doc: KDoc, libId: string, p: Pt, rot: number, mirror?: string): SNode {
@@ -277,12 +287,11 @@ export function symbolNode(doc: KDoc, libId: string, p: Pt, rot: number, mirror?
     if (name === "Reference") val = (val || "U") + "?";                       // the desktop annotates
     else if (name === "Value" && !val) val = libId.split(":").pop() as string;
     const [lx, ly, lr] = lp ? atOf(lp) : [0, 0, 0]; const [px, py] = tf(lx, ly);
-    const out: SNode = ["property", name, val, ["at", px, py, lr || 0]];
     const h = lp && kid(lp, "hide");
     const hidden = lp ? (h ? str(h[1]) !== "no" : lp.includes("hide")) : name !== "Reference" && name !== "Value";
-    if (hidden) out.push(["hide", "yes"]);
-    const ef = lp && kid(lp, "effects"); out.push(ef ? deep(ef) : ["effects", fontNode(1.27)]);
-    return out;
+    const flag = (key: string): boolean => { const f = lp && kid(lp, key); return !!f && (f.length < 2 || str(f[1]) !== "no"); };
+    const ef = lp && kid(lp, "effects");
+    return fieldNode(name, val, ["at", px, py, lr || 0], { hidden, showName: flag("show_name"), noAutoplace: flag("do_not_autoplace"), effects: ef ? deep(ef) : ["effects", fontNode(1.27)] });
   };
   for (const name of MANDATORY) n.push(prop(name, fromLib(name)));
   for (const lp of libProps) if (!MANDATORY.includes(str(lp[1]))) n.push(prop(str(lp[1]), lp));

@@ -38,12 +38,16 @@ export function constantZoomScale(scale: number, rotation: number, wheelDelta: n
 }
 /** ACCELERATING_ZOOM_CONTROLLER: remembers the previous event's time and direction. */
 export class AcceleratingZoom {
-  private prevT = -Infinity; private prevPositive = false;
-  constructor(private scale = DEFAULT_ACCELERATION_SCALE, private timeout = ACC_TIMEOUT_MS) {}
+  private prevT: number; private prevPositive = false;
+  /** `created`: the time of construction (the constructor stamps m_prevTimestamp, zoom_controller.cpp:80) */
+  constructor(private scale = DEFAULT_ACCELERATION_SCALE, private timeout = ACC_TIMEOUT_MS, created = nowMs()) { this.prevT = created; }
   scaleFor(rotation: number, wheelDelta: number, now: number): number {
     const minStep = 1.05, dt = now - this.prevT; this.prevT = now;
     let z: number;
-    if (dt < this.timeout && (rotation > 0) === this.prevPositive) { z = Math.max(2.05 * this.scale / 5 - dt / this.timeout, minStep); if (rotation < 0) z = 1 / z; }
+    if (dt < this.timeout && (rotation > 0) === this.prevPositive) {
+      // timeDiff / m_accTimeout divides two std::chrono::milliseconds: an integer quotient, 0 inside the timeout
+      const q = Math.trunc(dt / this.timeout);
+      z = Math.max(2.05 * this.scale / 5 - q, minStep); if (rotation < 0) z = 1 / z; }
     else z = rotation > 0 ? minStep : 1 / minStep;
     this.prevPositive = rotation > 0;
     const n = notchCount(rotation, wheelDelta); if (n > 1) z = Math.pow(z, n);
@@ -51,15 +55,17 @@ export class AcceleratingZoom {
   }
 }
 
-/** The zoom controller WX_VIEW_CONTROLS::LoadSettings picks (wx_view_controls.cpp:58-73, 197-215). */
-export function makeZoomController(s: WheelSettings, platform: Platform): (rotation: number, wheelDelta: number, now: number) => number {
+const nowMs = (): number => (typeof performance !== "undefined" ? performance.now() : 0);
+
+/** The zoom controller WX_VIEW_CONTROLS::LoadSettings picks (wx_view_controls.cpp:58-73, 197-215); `created` is now. */
+export function makeZoomController(s: WheelSettings, platform: Platform, created = nowMs()): (rotation: number, wheelDelta: number, now: number) => number {
   if (s.zoomSpeedAuto) {
     if (platform === "mac") return (r, d) => constantZoomScale(MAC_SCALE, r, d);
     if (platform === "linux") return (r, d) => constantZoomScale(GTK3_SCALE, r, d);
-    if (s.zoomAcceleration) { const a = new AcceleratingZoom(); return (r, d, t) => a.scaleFor(r, d, t); }
+    if (s.zoomAcceleration) { const a = new AcceleratingZoom(DEFAULT_ACCELERATION_SCALE, ACC_TIMEOUT_MS, created); return (r, d, t) => a.scaleFor(r, d, t); }
     return (r, d) => constantZoomScale(MSW_SCALE, r, d);
   }
-  if (s.zoomAcceleration) { const a = new AcceleratingZoom(s.zoomSpeed); return (r, d, t) => a.scaleFor(r, d, t); }
+  if (s.zoomAcceleration) { const a = new AcceleratingZoom(s.zoomSpeed, ACC_TIMEOUT_MS, created); return (r, d, t) => a.scaleFor(r, d, t); }
   const scale = MANUAL_SCALE_FACTOR * s.zoomSpeed;
   return (r, d) => constantZoomScale(scale, r, d);
 }

@@ -1,5 +1,6 @@
 // editor/fpwizard-model.ts — what a footprint wizard answers (see fpwizard.ts for the requests), checked and shown.
 import { evalExpr, formatLength } from "../tools/props/numeric";
+import { GENERATOR_VERSION } from "../canvas/format-version";
 
 export interface WizardParam { name: string; value: string; units: string; hint: string; designator: string; error: string }
 export interface WizardPage { name: string; params: WizardParam[] }
@@ -117,6 +118,6 @@ export function wizardMsgPanel(t: Node | null): { title: string; value: string }
 export function wizardFootprintTree(t: Node, version: number, parse: (s: string) => unknown): Node {
   const drop = new Set(["at", "uuid", "path", "sheetname", "sheetfile", "locked", "placed", "version", "generator", "generator_version"]);
   for (let i = t.length - 1; i >= 2; i--) { const c = t[i]; if (Array.isArray(c) && drop.has(String(c[0]))) t.splice(i, 1); }
-  t.splice(2, 0, parse(`(version ${version})`), parse('(generator "pcbnew")'), parse('(generator_version "10.0")'));
+  t.splice(2, 0, parse(`(version ${version})`), parse('(generator "pcbnew")'), parse(`(generator_version "${GENERATOR_VERSION}")`));
   return t;
 }

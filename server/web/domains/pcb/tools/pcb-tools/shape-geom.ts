@@ -92,6 +92,28 @@ export function geomPages(kind: ShapeGeom["kind"]): GeomPage[] {
   }
 }
 
+/**
+ * GEOM_SYNCER::Validate over the working geometry, whichever page shows it (DIALOG_SHAPE_PROPERTIES::Validate runs the
+ * syncer, not only the visible page): the rectangle's, arc's and circle's checks in their order; null when it is good.
+ */
+export function validateShapeGeom(g: ShapeGeom): string | null {
+  const nm = (v: number): number => Math.round(v * 1e6);   // internal units
+  const same = (a: Pt, b: Pt): boolean => nm(a[0]) === nm(b[0]) && nm(a[1]) === nm(b[1]);
+  if (g.kind === "rect") return same(g.start, g.end) ? "Rectangle cannot be zero-sized." : null;
+  if (g.kind === "circle") return !(nm(Math.hypot(g.end[0] - g.center[0], g.end[1] - g.center[1])) > 0) ? "Radius must be greater than 0" : null;
+  if (g.kind === "arc") {
+    if (same(g.start, g.mid) || same(g.mid, g.end)) return "Arc must have at least 2 distinct points";
+    const a = arcAngles(g);
+    if (!a) return "Arc must have at least 2 distinct points";
+    if (!(nm(r6(a.sweep)) > 0)) return "Arc angle must be greater than 0";
+    if (!(nm(a.r) > 0)) return "Radius must be greater than 0";
+    // CalcArcCenter: a centre that rounds onto an end point, or one beyond the coordinate range, is no arc
+    const ci: Pt = [nm(a.c[0]) / 1e6, nm(a.c[1]) / 1e6], rIU = a.r * 1e6;
+    const maxOffset = Math.max(Math.abs(a.c[0] * 1e6), Math.abs(a.c[1] * 1e6)) + rIU;
+    if (maxOffset >= 2147483647 / 2 || same(ci, g.start) || same(ci, g.end)) return `Invalid Arc with radius ${rIU.toFixed(6)} and angle ${a.sweep.toFixed(6)}.`;
+  }
+  return null;
+}
 /** A board shape node's geometry (gr_rect / gr_line / gr_arc / gr_circle / gr_curve); null for a polygon. */
 export function shapeGeomOf(n: SNode): ShapeGeom | null {
   const p = (k: string): Pt => { const c = K.kid(n, k); return c ? [K.num(c[1]), K.num(c[2])] : [0, 0]; };

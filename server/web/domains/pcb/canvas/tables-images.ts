@@ -7,7 +7,7 @@ import { atOf, boolOf, boxOf, colorOf, cornersInSequence, effectsOf, faceOf, fil
 import { SCH_PEN, textPen } from "./text";
 import { linebreakText } from "./stroke-font";
 import { unescapeText } from "./text";
-import { expandTextVars, sheetTextVars, varResolver } from "./sheet";
+import { expandTextVars, hasTextVars, sheetTextVars, varResolver } from "./sheet";
 import type { VarResolver, VarValue } from "./sheet";
 import type { BoxRot, Doc, ImageEntry, Item, Pt, SheetContext, StrokeInfo } from "./types";
 
@@ -48,7 +48,7 @@ export function tableCellShownText(doc: SheetContext | Doc | null | undefined, t
   const cellsN = kid(table, "cells"); const cellNodes = cellsN ? kids(cellsN, "table_cell") : [];
   const rows = Math.ceil(cellNodes.length / cols);
   const cell = cellNodes[index]; const text = cell ? str(cell[1]) : "";
-  if (text.indexOf("${") < 0) return text;
+  if (!hasTextVars(text)) return text;
   const row = Math.floor(index / cols), col = index % cols, d = depth || 0;
   // GetLayerName: the board's own (user) name for the layer when it gives one
   const lc = pcb ? layerOf(table, "Dwgs.User") : "";
@@ -124,7 +124,7 @@ export function buildTableGeom(doc: Doc, item: Item, n: SNode): void {
       if (fill) G(item, { t: "rect", x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0, wd: 0, color: fill, fill, layer, z: zBg, noStroke: true });
     }
     let text = str(cn[1]); if (ef.hide || !text) continue;
-    if (text.indexOf("${") >= 0) { text = tableCellShownText(doc, n, ci, isPcb); if (!text) continue; }   // GetShownText: ${ROW} ${COL} ${ADDR} …
+    if (hasTextVars(text)) { text = tableCellShownText(doc, n, ci, isPcb); if (!text) continue; }   // GetShownText: ${ROW} ${COL} ${ADDR} …
     const mg = kid(cn, "margins"); const dm = ef.size * 0.75;
     const lm = mg ? num(mg[1]) : dm, tm = mg ? num(mg[2]) : dm, rm = mg ? num(mg[3]) : dm, bm = mg ? num(mg[4]) : dm;
     // a cell is a text box: its text wraps to the cell's inner width (GetShownText → FONT::LinebreakText)
@@ -146,7 +146,7 @@ export function buildTableGeom(doc: Doc, item: Item, n: SNode): void {
       const vert = ((Math.round(b.rot) % 180) + 180) % 180 === 90; let tx: number, ty: number;
       if (vert) { ty = j.h === "left" ? b.y1 - bm : j.h === "right" ? b.y0 + tm : (b.y0 + b.y1) / 2; tx = j.v === "top" ? b.x0 + lm : j.v === "bottom" ? b.x1 - rm : (b.x0 + b.x1) / 2; }
       else { tx = j.h === "left" ? b.x0 + lm : j.h === "right" ? b.x1 - rm : (b.x0 + b.x1) / 2; ty = j.v === "top" ? b.y0 + tm : j.v === "bottom" ? b.y1 - bm : (b.y0 + b.y1) / 2; }
-      textLines(item, tx, ty, text, ef.size, ef.color || SCH.notes, b.rot, [j.h, j.v], layer, { z, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX });
+      textLines(item, tx, ty, text, ef.size, ef.color || SCH.notes, b.rot, [j.h, j.v], layer, { z, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing });
     }
   }
   // borders: SCH_TABLE::DrawBorders / PCB_TABLE::DrawBorders
@@ -205,8 +205,8 @@ export function base64Bytes(b64: unknown, limit?: number): Uint8Array {
 
 /** Pixel size, MIME type and PPI from a PNG (IHDR / pHYs), JPEG (SOFn / JFIF density), BMP (BITMAPINFOHEADER) or GIF
  *  (logical screen) header — the types KiCad's image dialog offers: BITMAP_BASE::updatePPI rules, 300 PPI default. */
-export function imageInfo(bytes: ArrayLike<number>): { mime: string; w: number; h: number; ppi: number } {
-  const info = { mime: "image/png", w: 0, h: 0, ppi: 300 };
+export function imageInfo(bytes: ArrayLike<number>): { mime: string; w: number; h: number; ppi: number; legacyPpi: number } {
+  const info = { mime: "image/png", w: 0, h: 0, ppi: 300, legacyPpi: 0 };
   const be32 = (i: number) => ((bytes[i] << 24) | (bytes[i + 1] << 16) | (bytes[i + 2] << 8) | bytes[i + 3]) >>> 0, be16 = (i: number) => (bytes[i] << 8) | bytes[i + 1];
   if (bytes.length >= 24 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
     info.w = be32(16); info.h = be32(20);
@@ -214,7 +214,11 @@ export function imageInfo(bytes: ArrayLike<number>): { mime: string; w: number; 
       const len = be32(p), type = String.fromCharCode(bytes[p + 4], bytes[p + 5], bytes[p + 6], bytes[p + 7]);
       if (type === "IDAT" || type === "IEND") break;
       // pHYs in pixels per metre: wx reports px/cm, KiCad rounds px/cm × 2.54
-      if (type === "pHYs" && p + 17 <= bytes.length && bytes[p + 16] === 1) { const dpcm = be32(p + 8) / 100; if (dpcm > 1) info.ppi = Math.round(dpcm * 2.54); }
+      if (type === "pHYs" && p + 17 <= bytes.length && bytes[p + 16] === 1) {
+        const dpcm = be32(p + 8) / 100; if (dpcm > 1) info.ppi = Math.round(dpcm * 2.54);
+        // BITMAP_BASE::GetLegacyPPI: the pixels / cm truncated to an integer before × 2.54 (37.8 → 37 → 94)
+        const t = Math.trunc(dpcm); if (t > 1) info.legacyPpi = Math.round(t * 2.54);
+      }
       // a pHYs without a unit: wx hands the number over as it is and KiCad takes it for pixels per inch
       else if (type === "pHYs" && p + 17 <= bytes.length && bytes[p + 16] === 0) { const d = be32(p + 8); if (d > 1) info.ppi = d; }
       p += 12 + len;
@@ -243,7 +247,21 @@ export function imageInfo(bytes: ArrayLike<number>): { mime: string; w: number; 
   } else if (bytes.length >= 10 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
     info.mime = "image/gif"; info.w = bytes[6] | (bytes[7] << 8); info.h = bytes[8] | (bytes[9] << 8);   // no resolution: 300 PPI
   }
+  if (!info.legacyPpi) info.legacyPpi = info.ppi;   // every other resolution was a whole number already
   return info;
+}
+
+/**
+ * What the parsers multiply a stored image scale by (sch_io_kicad_sexpr_parser.cpp / pcb_io_kicad_sexpr_parser.cpp):
+ * schematics up to 20230121 assumed 300 PPI (scale × PPI / 300); files before 20260623 computed the PPI from pixels
+ * / cm truncated to an integer (scale × PPI / legacy PPI).  1 for a current file.
+ */
+export function legacyImageScaleFactor(sch: boolean, version: number, e: { ppi?: number; legacyPpi?: number } | null | undefined): number {
+  if (!e || !(version > 0)) return 1;
+  const ppi = e.ppi || 300;
+  if (sch && version <= 20230121) return ppi / 300;
+  if (version < 20260623) { const legacy = e.legacyPpi || 0; if (legacy > 0 && legacy !== ppi) return ppi / legacy; }
+  return 1;
 }
 
 export function notifyAsset(id: string, ok: boolean): void {
@@ -256,7 +274,7 @@ export function imageEntry(id: string, b64: string, hash?: string): ImageEntry {
   const key = id + ":" + (hash || strHash(b64));
   let e = IMAGE_CACHE.get(key); if (e) return e;
   const info = imageInfo(base64Bytes(b64, 1 << 17));
-  e = { key, id, url: b64 ? "data:" + info.mime + ";base64," + b64 : "", mime: info.mime, w: info.w, h: info.h, ppi: info.ppi, img: null, loaded: false, failed: false };
+  e = { key, id, url: b64 ? "data:" + info.mime + ";base64," + b64 : "", mime: info.mime, w: info.w, h: info.h, ppi: info.ppi, legacyPpi: info.legacyPpi, img: null, loaded: false, failed: false };
   if (IMAGE_CACHE.size >= IMAGE_CACHE_MAX) IMAGE_CACHE.delete(IMAGE_CACHE.keys().next().value as string);
   IMAGE_CACHE.set(key, e);
   const Img = root.Image;
@@ -275,6 +293,7 @@ export function buildImageGeom(doc: Doc, item: Item, n: SNode): void {
   const dataN = kid(n, "data"); let d = dataN ? DATA_CACHE.get(dataN) : null;
   if (!d) { const b64 = dataN ? dataN.slice(1).map(str).join("") : ""; d = { b64, hash: strHash(b64) }; if (dataN) DATA_CACHE.set(dataN, d); }
   const e = imageEntry(item.id, d.b64, d.hash);
+  scale *= legacyImageScaleFactor(!isPcb, doc.version, e);   // the scale KiCad reads from an older file
   const pxMm = 25.4 / (e.ppi || 300);
   const w = (e.w * pxMm * scale) || 10, h = (e.h * pxMm * scale) || 10;   // unknown pixel size: a 10 mm placeholder
   const layer = isPcb ? layerOf(n, "Dwgs.User") : "Images";

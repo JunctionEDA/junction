@@ -80,15 +80,21 @@ function surface(front: boolean | undefined, back: boolean | undefined): Surf {
 }
 const drillOpt = (via: SNode, key: string): Drl => { const n = kid(via, key); if (!n) return "board"; const v = str(n); return v === "yes" ? "yes" : v === "no" ? "no" : "board"; };
 /** getViaConfiguration: the preset index (IPC4761_CUSTOM when the via's features match none). */
-export function protectionPreset(via: SNode): number {
-  const [tf, tb] = frontBack(via, "tenting"), [cf, cb] = frontBack(via, "covering"), [pf, pb] = frontBack(via, "plugging");
-  const c: Prot = { tent: surface(tf, tb), cover: surface(cf, cb), plug: surface(pf, pb), fill: drillOpt(via, "filling"), cap: drillOpt(via, "capping") };
+export function protectionPreset(via: SNode, fileVersion = 0): number {
+  const [tf, tb] = frontBack(via, "tenting"); let [cf, cb] = frontBack(via, "covering"), [pf, pb] = frontBack(via, "plugging");
+  let fill = drillOpt(via, "filling"), cap = drillOpt(via, "capping");
+  // "Versions before 10.0 had no protection features other than tenting": a board before 20250228 reads them as off
+  if (fileVersion > 0 && fileVersion < 20250228) {
+    if (cf === undefined) cf = false; if (cb === undefined) cb = false; if (pf === undefined) pf = false; if (pb === undefined) pb = false;
+    if (fill === "board") fill = "no"; if (cap === "board") cap = "no";
+  }
+  const c: Prot = { tent: surface(tf, tb), cover: surface(cf, cb), plug: surface(pf, pb), fill, cap };
   const i = IPC4761.findIndex(([, p]) => p.tent === c.tent && p.cover === c.cover && p.plug === c.plug && p.fill === c.fill && p.cap === c.cap);
   return i < 0 ? IPC4761_CUSTOM : i;
 }
 /** setViaConfiguration: a preset below CUSTOM rewrites the five features; the via's own text is kept when it already says the same. */
-export function setProtectionPreset(via: SNode, preset: number, parse: Parse): void {
-  if (preset < 0 || preset >= IPC4761_CUSTOM || protectionPreset(via) === preset) return;
+export function setProtectionPreset(via: SNode, preset: number, parse: Parse, fileVersion = 0): void {
+  if (preset < 0 || preset >= IPC4761_CUSTOM || protectionPreset(via, fileVersion) === preset) return;
   const p = IPC4761[preset][1];
   const fb = (s: Surf): [string, string] => (s === "board" ? ["none", "none"] : [s === "front" || s === "both" ? "yes" : "no", s === "back" || s === "both" ? "yes" : "no"]);
   const surf = (key: string, s: Surf): void => {
@@ -100,6 +106,10 @@ export function setProtectionPreset(via: SNode, preset: number, parse: Parse): v
   surf("tenting", p.tent); surf("covering", p.cover); surf("plugging", p.plug);
   setChild(via, "capping", p.cap === "board" ? null : `(capping ${p.cap})`, VIA_ORDER, parse);
   setChild(via, "filling", p.fill === "board" ? null : `(filling ${p.fill})`, VIA_ORDER, parse);
+  // PCB_IO_KICAD_SEXPR::format( PCB_VIA ) writing a board older than 20250228: covering, plugging, capping and filling all
+  // off are left out (that is what such a board reads them as)
+  if (fileVersion > 0 && fileVersion < 20250228 && p.cover === "none" && p.plug === "none" && p.cap === "no" && p.fill === "no")
+    for (const key of ["covering", "plugging", "capping", "filling"]) setChild(via, key, null, VIA_ORDER, parse);
 }
 
 // ---------------------------------------------------------------- backdrill (secondary / tertiary drill)

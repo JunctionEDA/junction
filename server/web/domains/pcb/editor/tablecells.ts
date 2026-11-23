@@ -16,19 +16,19 @@
 // a peer receives the same single change and undo puts the original node back.  Move / Rotate / Flip / Mirror /
 // Drag on a cell selection act on the parent table (SCH_COLLECTOR's "promoted to parent table").
 import { appClipboard, runModuleAction, toolCtx } from "./tools";
+import { GENERATOR_VERSION, SEXPR_BOARD_FILE_VERSION } from "../canvas/format-version";
 import { tableMenu } from "./contextmenu";
 import { overlayHooks } from "./overlays";
 import { propertiesHooks } from "./pointer";
 import { clearHooks } from "./selection";
-import { clearAllSelection, interactionBusy, pcbState, schState, selectionChanged, selectionIds, stage, worldMm } from "./gestures";
+import { clearAllSelection, handleAutoPanning, interactionBusy, pcbState, schState, selectionChanged, selectionIds, stage, worldMm } from "./gestures";
 import { keyHooks } from "./hotkeys";
 import { E } from "./state";
 import { cellPropsDialog, errorMessage, newSchTableDialog, tablePropsDialog } from "./tabledialogs";
 import { selFilter } from "./selection";
 import { download } from "./pcbdialogs/ui";
-import { applyView, isSch, pxPerMm, requestRender } from "./view";
+import { isSch, pxPerMm, requestRender } from "./view";
 import { toast } from "./util";
-import { breakFollow } from "./peers";
 import { msgHooks, type MsgItem } from "./msgpanel";
 
 type Pt = number[];
@@ -140,30 +140,14 @@ function onMove(ev: PointerEvent): void {
   ev.stopImmediatePropagation();
   if (!p.dragging && Math.hypot(ev.clientX - p.client[0], ev.clientY - p.client[1]) < 4) return;
   if (!p.dragging) { p.dragging = true; if (!p.shift && !p.ctrl) clearAllSelection(false); }
-  lastClient = [ev.clientX, ev.clientY];
   dragTo(p, worldMm(ev));
-  autoPan();
+  handleAutoPanning(ev, autoPanWanted);
 }
 
 // ---------------------------------------------------------------- auto-pan (selectTableCells runs with SetAutoPan( true ))
-let lastClient: Pt = [0, 0], panRaf = 0, panT = 0;
-/** WX_VIEW_CONTROLS::onTimer while AUTO_PANNING: the cursor in the border pans the view, and the range follows the cursor. */
-function autoPan(): void {
-  // m_autoPanEnabled && m_autoPanSettingEnabled: Preferences > Mouse and Touchpad "Automatically pan while moving object" (off by default)
-  if (panRaf || !E.autoPan) return;
-  const tick = (t: number) => {
-    panRaf = 0; const p = press; if (!p || !p.dragging) return;
-    const r = stage.getBoundingClientRect();
-    const [dx, dy] = KiCadCanvas.autoPanStep(lastClient[0] - r.left, lastClient[1] - r.top, r.width, r.height, E.autoPanSpeed || 5);
-    if (!dx && !dy) { panT = 0; return; }
-    const ticks = panT ? Math.min(12, Math.max(0, t - panT) / KiCadCanvas.AUTOPAN_TICK_MS) : 1; panT = t;
-    E.viewTouched = true; E.panX -= dx * ticks; E.panY -= dy * ticks; breakFollow(); applyView();
-    dragTo(p, worldMm({ clientX: lastClient[0], clientY: lastClient[1] }));
-    panRaf = requestAnimationFrame(tick);
-  };
-  panRaf = requestAnimationFrame(tick);
-}
-function stopAutoPan(): void { if (panRaf) cancelAnimationFrame(panRaf); panRaf = 0; panT = 0; }
+// WX_VIEW_CONTROLS::handleAutoPanning / onTimer are gestures.ts's: each tick refreshes the mouse, and the pointer move
+// it dispatches comes back through onMove, so the range follows the cursor.
+const autoPanWanted = (): boolean => !!press && press.dragging;
 
 function dragTo(p: Press, mm: Pt): void {
   const cells = dragRange(p, mm);
@@ -172,7 +156,7 @@ function dragTo(p: Press, mm: Pt): void {
   requestRender();
 }
 
-function endPress(): void { stopAutoPan(); window.removeEventListener("pointermove", onMove, true); window.removeEventListener("pointerup", onUp, true); press = null; }
+function endPress(): void { window.removeEventListener("pointermove", onMove, true); window.removeEventListener("pointerup", onUp, true); press = null; }
 
 function onUp(ev: PointerEvent): void {
   const p = press; if (!p) return;
@@ -334,7 +318,7 @@ function copyCells(): boolean {
   const cur = E.lastCursorMm as Pt | null | undefined;
   const node = cellsClipboardNode(c.item.node, c.cells, isPcb(), cur && cur.length >= 2 ? cur : null);
   let text = KiCadCanvas.serialize(node);
-  if (isPcb()) text = `(kicad_pcb (version ${(E.kdoc as unknown as { version?: number }).version || 20260728}) (generator "kicad-collab-web") (generator_version "10.0")\n${text}\n)`;
+  if (isPcb()) text = `(kicad_pcb (version ${(E.kdoc as unknown as { version?: number }).version || SEXPR_BOARD_FILE_VERSION}) (generator "pcbnew") (generator_version "${GENERATOR_VERSION}")\n${text}\n)`;
   appClipboard.set(text);
   return true;
 }

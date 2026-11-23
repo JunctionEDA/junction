@@ -37,9 +37,9 @@ export function barcodeNode(x: number, y: number, layer: string): SNode {
   const { size } = textStyle(layer);
   return ["barcode", ["at", r6(x), r6(y), 0], ["layer", layer], ["size", 40, 40], ["text", ""], ["text_height", size], ["type", "qr"], ["ecc_level", "L"], ["hide", "no"], ["knockout", "no"], ["uuid", K.newUuid()]];
 }
-/** SEXPR_BOARD_FILE_VERSION 20250914 added PCB_BARCODE: an older board cannot store one (the web never bumps the format). */
+/** SEXPR_BOARD_FILE_VERSION 20250914 added PCB_BARCODE; KiCad allows it in any board and the save raises the file version (mcp/compact.ts) (chooseFileFormatVersion). */
 export const BARCODE_FILE_VERSION = 20250914;
-export const barcodeAllowed = (doc: BoardDoc | null | undefined) => !doc || !(Number((doc as { version?: unknown }).version) > 0) || Number((doc as { version?: unknown }).version) >= BARCODE_FILE_VERSION;
+export const barcodeAllowed = (_doc: BoardDoc | null | undefined): boolean => true;
 export const BARCODE_NEEDS_VERSION_MSG = "Barcodes need a board in the KiCad 10 file format (version 20250914 or later); this board is saved in an older format, which cannot store them.";
 /** EDA_TEXT::Format for a new item on a layer: the class's size and thickness, a justification, mirrored on the back. */
 export function effectsNode(layer: string, just?: string[]): SNode {
@@ -190,15 +190,16 @@ export function thievingZoneNode(doc: BoardDoc, pts: Pt[], layer: string): SNode
 }
 /**
  * The board file version that first knows copper thieving ((fill (mode thieving)) and (thieving …), SEXPR_BOARD_FILE_VERSION
- * 20260513, pcb_io_kicad_sexpr.h).  The parser refuses those tokens in an older file and the writer would raise the
- * board's version to it, so a board in an older format (a KiCad 10 project) is never given a thieving fill: the
- * format version of a user's board is not bumped.
+ * 20260513, pcb_io_kicad_sexpr.h).  The parser refuses those tokens in an older file, and the writer raises the
+ * board's version to it (chooseFileFormatVersion), so KiCad offers it on any board.
  */
 export const THIEVING_FILE_VERSION = 20260513;
-export const thievingAllowed = (doc: BoardDoc | null | undefined) => !doc || !(Number((doc as { version?: unknown }).version) > 0) || Number((doc as { version?: unknown }).version) >= THIEVING_FILE_VERSION;
+export const thievingAllowed = (_doc: BoardDoc | null | undefined): boolean => true;
 export const THIEVING_NEEDS_VERSION_MSG = "Copper thieving needs a board in the KiCad 11 file format (version 20260513 or later); this board is saved in an older format, which cannot store it.";
 export function zoneNode(doc: BoardDoc, pts: Pt[], layer: string, net: NetRef | null): SNode {
   const node: SNode = ["zone"]; const nn = netNode(doc, net); if (nn[1]) node.push(nn);   // (net …) only for a real net
+  // formatNetRef CODE_THEN_NET_NAME: a zone in a board kept before 20251028 says (net N) (net_name "name")
+  if (nn[1] && typeof nn[1] === "number") node.push(["net_name", net && net.name ? net.name : ""]);
   node.push(["layer", layer], ["uuid", K.newUuid()], zoneHatchNode());
   const prio = zonePriority(doc); if (prio > 0) node.push(["priority", prio]);
   node.push(zoneConnectNode(), ["min_thickness", r6(zoneDefaultSettings().minThickness)], zoneFillNode(), ["polygon", ["pts", ...pts.map(xy)]]);

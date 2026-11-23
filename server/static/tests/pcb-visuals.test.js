@@ -103,7 +103,8 @@ test("high contrast: a blind via that does not reach the active copper layer is 
   const offB = draw({ highContrast: true, activeLayer: "B.Cu" }, d).filter((o) => o.op === "fill").length;
   const onF = draw({ highContrast: true, activeLayer: "F.Cu" }, d).filter((o) => o.op === "fill").length;
   assert(onF > offB, "the blind via drawn on F.Cu, hidden on B.Cu (" + onF + " vs " + offB + ")");
-  assert(rings(on("F.SilkS")) >= 1, "a front technical layer counts as F.Cu");
+  // (with a technical layer active the holes are dimmed too, so count every fill)
+  assert(on("F.SilkS").filter((o) => o.op === "fill").length > offB, "a front technical layer counts as F.Cu");
 });
 
 test("a footprint field selected on its own: repainted alone, with its umbilical line to the footprint anchor in LAYER_ANCHOR", () => {

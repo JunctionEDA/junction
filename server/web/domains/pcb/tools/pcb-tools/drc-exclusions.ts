@@ -7,11 +7,19 @@ import type { BoardDoc } from "./types";
 import { K } from "./state";
 
 /** settings key → DrcErrorType (api_pcb_enums.cpp ToProtoEnum<PCB_DRC_CODE>), without the DRCET_ prefix. */
-export const DRCET: Record<string, string> = { unconnected_items: "UNCONNECTED_ITEMS", shorting_items: "SHORTING_ITEMS", items_not_allowed: "ALLOWED_ITEMS", text_on_edge_cuts: "TEXT_ON_EDGECUTS", clearance: "CLEARANCE", creepage: "CREEPAGE", tracks_crossing: "TRACKS_CROSSING", copper_edge_clearance: "EDGE_CLEARANCE", copper_outside_board: "COPPER_OUTSIDE_BOARD", isolated_copper: "ISOLATED_COPPER", starved_thermal: "STARVED_THERMAL", via_dangling: "DANGLING_VIA", track_dangling: "DANGLING_TRACK", hole_clearance: "HOLE_CLEARANCE", hole_to_hole: "DRILLED_HOLES_TOO_CLOSE", holes_co_located: "DRILLED_HOLES_COLOCATED", connection_width: "CONNECTION_WIDTH", track_width: "TRACK_WIDTH", track_angle: "TRACK_ANGLE", track_segment_length: "TRACK_SEGMENT_LENGTH", annular_width: "ANNULAR_WIDTH", drill_out_of_range: "DRILL_OUT_OF_RANGE", via_diameter: "VIA_DIAMETER", padstack: "PADSTACK", padstack_invalid: "PADSTACK_INVALID", microvia_drill_out_of_range: "MICROVIA_DRILL_OUT_OF_RANGE", malformed_microvia_stack_span: "MALFORMED_MICROVIA_STACK_SPAN", microvia_stack_not_filled: "MICROVIA_STACK_NOT_FILLED", microvia_stack_depth: "MICROVIA_STACK_DEPTH", hole_aspect_ratio: "HOLE_ASPECT_RATIO", microvia_crosses_core: "MICROVIA_CROSSES_CORE", courtyards_overlap: "OVERLAPPING_FOOTPRINTS", missing_courtyard: "MISSING_COURTYARD", malformed_courtyard: "MALFORMED_COURTYARD", pth_inside_courtyard: "PTH_IN_COURTYARD", npth_inside_courtyard: "NPTH_IN_COURTYARD", item_on_disabled_layer: "DISABLED_LAYER_ITEM", invalid_outline: "INVALID_OUTLINE", duplicate_footprints: "DUPLICATE_FOOTPRINT", missing_footprint: "MISSING_FOOTPRINT", extra_footprint: "EXTRA_FOOTPRINT", net_conflict: "NET_CONFLICT", footprint_symbol_mismatch: "SCHEMATIC_PARITY", footprint_filters_mismatch: "FOOTPRINT_FILTERS", footprint_symbol_field_mismatch: "SCHEMATIC_FIELDS_PARITY", lib_footprint_issues: "LIB_FOOTPRINT_ISSUES", lib_footprint_mismatch: "LIB_FOOTPRINT_MISMATCH", unresolved_variable: "UNRESOLVED_VARIABLE", assertion_failure: "ASSERTION_FAILURE", generic_warning: "GENERIC_WARNING", generic_error: "GENERIC_ERROR", copper_sliver: "COPPER_SLIVER", solder_mask_bridge: "SOLDERMASK_BRIDGE", silk_over_copper: "SILK_MASK_CLEARANCE", silk_edge_clearance: "SILK_EDGE_CLEARANCE", silk_overlap: "SILK_CLEARANCE", text_height: "TEXT_HEIGHT", text_thickness: "LINE_WIDTH", line_width: "LINE_WIDTH", length_out_of_range: "LENGTH_OUT_OF_RANGE", net_chain_stub_length: "NET_CHAIN_STUB_TOO_LONG", net_chain_return_path: "NET_CHAIN_RETURN_PATH_BREAK", net_chain_tuning_profiles: "NET_CHAIN_TUNING_PROFILES", skew_out_of_range: "SKEW_OUT_OF_RANGE", too_many_vias: "VIA_COUNT_OUT_OF_RANGE", diff_pair_gap_out_of_range: "DIFF_PAIR_GAP_OUT_OF_RANGE", diff_pair_uncoupled_length_too_long: "DIFF_PAIR_UNCOUPLED_LENGTH_TOO_LONG", footprint: "FOOTPRINT", footprint_type_mismatch: "FOOTPRINT_TYPE_MISMATCH", through_hole_pad_without_hole: "PAD_TH_WITH_NO_HOLE", footprint_scaled_with_pads: "FOOTPRINT_SCALED_WITH_PADS", mirrored_text_on_front_layer: "MIRRORED_TEXT_ON_FRONT_LAYER", nonmirrored_text_on_back_layer: "NONMIRRORED_TEXT_ON_BACK_LAYER", missing_tuning_profile: "MISSING_TUNING_PROFILE", tuning_profile_track_geometries: "TUNING_PROFILE_IMPLICIT_RULES", track_on_post_machined_layer: "TRACK_ON_POST_MACHINED_LAYER", track_not_centered_on_via: "TRACK_NOT_CENTERED_ON_VIA" };
+export const DRCET: Record<string, string> = { unconnected_items: "UNCONNECTED_ITEMS", shorting_items: "SHORTING_ITEMS", items_not_allowed: "ALLOWED_ITEMS", text_on_edge_cuts: "TEXT_ON_EDGECUTS", clearance: "CLEARANCE", creepage: "CREEPAGE", tracks_crossing: "TRACKS_CROSSING", copper_edge_clearance: "EDGE_CLEARANCE", copper_outside_board: "COPPER_OUTSIDE_BOARD", isolated_copper: "ISOLATED_COPPER", starved_thermal: "STARVED_THERMAL", via_dangling: "DANGLING_VIA", track_dangling: "DANGLING_TRACK", hole_clearance: "HOLE_CLEARANCE", hole_to_hole: "DRILLED_HOLES_TOO_CLOSE", holes_co_located: "DRILLED_HOLES_COLOCATED", connection_width: "CONNECTION_WIDTH", track_width: "TRACK_WIDTH", track_angle: "TRACK_ANGLE", track_segment_length: "TRACK_SEGMENT_LENGTH", annular_width: "ANNULAR_WIDTH", drill_out_of_range: "DRILL_OUT_OF_RANGE", via_diameter: "VIA_DIAMETER", padstack: "PADSTACK", padstack_invalid: "PADSTACK_INVALID", microvia_drill_out_of_range: "MICROVIA_DRILL_OUT_OF_RANGE", malformed_microvia_stack_span: "MALFORMED_MICROVIA_STACK_SPAN", microvia_stack_not_filled: "MICROVIA_STACK_NOT_FILLED", microvia_stack_depth: "MICROVIA_STACK_DEPTH", hole_aspect_ratio: "HOLE_ASPECT_RATIO", microvia_crosses_core: "MICROVIA_CROSSES_CORE", microvia_spans_dielectrics: "MICROVIA_SPANS_DIELECTRICS", courtyards_overlap: "OVERLAPPING_FOOTPRINTS", missing_courtyard: "MISSING_COURTYARD", malformed_courtyard: "MALFORMED_COURTYARD", pth_inside_courtyard: "PTH_IN_COURTYARD", npth_inside_courtyard: "NPTH_IN_COURTYARD", item_on_disabled_layer: "DISABLED_LAYER_ITEM", invalid_outline: "INVALID_OUTLINE", duplicate_footprints: "DUPLICATE_FOOTPRINT", missing_footprint: "MISSING_FOOTPRINT", extra_footprint: "EXTRA_FOOTPRINT", net_conflict: "NET_CONFLICT", footprint_symbol_mismatch: "SCHEMATIC_PARITY", footprint_filters_mismatch: "FOOTPRINT_FILTERS", footprint_symbol_field_mismatch: "SCHEMATIC_FIELDS_PARITY", lib_footprint_issues: "LIB_FOOTPRINT_ISSUES", lib_footprint_mismatch: "LIB_FOOTPRINT_MISMATCH", unresolved_variable: "UNRESOLVED_VARIABLE", assertion_failure: "ASSERTION_FAILURE", generic_warning: "GENERIC_WARNING", generic_error: "GENERIC_ERROR", copper_sliver: "COPPER_SLIVER", solder_mask_bridge: "SOLDERMASK_BRIDGE", silk_over_copper: "SILK_MASK_CLEARANCE", silk_edge_clearance: "SILK_EDGE_CLEARANCE", silk_overlap: "SILK_CLEARANCE", text_height: "TEXT_HEIGHT", text_thickness: "LINE_WIDTH", line_width: "LINE_WIDTH", length_out_of_range: "LENGTH_OUT_OF_RANGE", net_chain_stub_length: "NET_CHAIN_STUB_TOO_LONG", net_chain_return_path: "NET_CHAIN_RETURN_PATH_BREAK", net_chain_tuning_profiles: "NET_CHAIN_TUNING_PROFILES", skew_out_of_range: "SKEW_OUT_OF_RANGE", too_many_vias: "VIA_COUNT_OUT_OF_RANGE", diff_pair_gap_out_of_range: "DIFF_PAIR_GAP_OUT_OF_RANGE", diff_pair_uncoupled_length_too_long: "DIFF_PAIR_UNCOUPLED_LENGTH_TOO_LONG", footprint: "FOOTPRINT", footprint_type_mismatch: "FOOTPRINT_TYPE_MISMATCH", through_hole_pad_without_hole: "PAD_TH_WITH_NO_HOLE", footprint_scaled_with_pads: "FOOTPRINT_SCALED_WITH_PADS", mirrored_text_on_front_layer: "MIRRORED_TEXT_ON_FRONT_LAYER", nonmirrored_text_on_back_layer: "NONMIRRORED_TEXT_ON_BACK_LAYER", missing_tuning_profile: "MISSING_TUNING_PROFILE", tuning_profile_track_geometries: "TUNING_PROFILE_IMPLICIT_RULES", track_on_post_machined_layer: "TRACK_ON_POST_MACHINED_LAYER", track_not_centered_on_via: "TRACK_NOT_CENTERED_ON_VIA" };
 /** PCB_MARKER::ToProto stores the layer only for these (it is part of their identity). */
 const LAYER_STORED = new Set(["copper_sliver", "generic_warning", "generic_error", "unconnected_items", "starved_thermal"]);
 const LEGACY_LAYER_FIELD = new Set(["copper_sliver", "generic_warning", "generic_error"]);
-export interface ExMarker { code: string; x: number; y: number; ids: string[]; kiids?: string[]; layer?: string; excluded?: boolean; comment?: string; severity?: string }
+export interface ExMarker { code: string; x: number; y: number; ids: string[]; kiids?: string[]; layer?: string; excluded?: boolean; comment?: string; severity?: string; drawingSheet?: boolean }
+/** PCB_MARKER's constructor: MARKER_PARITY for these codes, MARKER_RATSNEST for unconnected items, else MARKER_DRC. */
+const PARITY_CODES = new Set(["missing_footprint", "duplicate_footprints", "extra_footprint", "net_conflict", "footprint_symbol_mismatch", "footprint_symbol_field_mismatch", "footprint_filters_mismatch"]);
+/** The MarkerType proto name of a marker (MT_DRAWING_SHEET for a marker on LAYER_DRAWINGSHEET). */
+export function markerTypeOf(code: string, drawingSheet?: boolean): string {
+  if (drawingSheet) return "MT_DRAWING_SHEET";
+  return code === "unconnected_items" ? "MT_RATSNEST" : PARITY_CODES.has(code) ? "MT_PARITY" : "MT_DRC";
+}
+const CODE_OF_DRCET = (): Map<string, string> => { const m = new Map<string, string>(); for (const [k, v] of Object.entries(DRCET)) if (!m.has("DRCET_" + v)) m.set("DRCET_" + v, k); return m; };
 export interface DrcExclusionJson { marker: { error_type: string; position?: { x_nm?: string; y_nm?: string }; items?: { value: string }[]; layer?: string; marker_type?: string }; comment?: string }
 
 /** BoardLayer enum name of a layer (BL_F_Cu, BL_In1_Cu, BL_B_Cu …). */
@@ -31,7 +39,7 @@ export function exclusionOf(doc: BoardDoc | null, m: ExMarker, comment?: string)
   const items = (m.kiids && m.kiids.length ? m.kiids : m.ids.map((id) => kiidOf(doc, id))).filter((v) => v && v !== "00000000-0000-0000-0000-000000000000");
   if (items.length) marker.items = items.map((value) => ({ value }));
   if (LAYER_STORED.has(m.code)) marker.layer = boardLayerEnum(m.layer || "F.Cu");
-  marker.marker_type = "MT_DRC";
+  marker.marker_type = markerTypeOf(m.code, m.drawingSheet);
   const out: DrcExclusionJson = { marker }; if (comment) out.comment = comment;
   return out;
 }
@@ -46,14 +54,25 @@ export function exclusionKey(ex: DrcExclusionJson | null): string {
 export function legacyExclusion(data: string, comment: string): DrcExclusionJson | null {
   const p = data.split("|"); if (p.length < 5 || !DRCET[p[0]]) return null;
   const code = p[0], x = parseInt(p[1], 10) || 0, y = parseInt(p[2], 10) || 0;
-  let ids = [p[3], p[4]], layer = "F.Cu";
+  let ids = [p[3], p[4]], layer = "F.Cu", drawingSheet = false;
   if (LEGACY_LAYER_FIELD.has(code)) { ids = [p[3]]; layer = p[4] || "F.Cu"; }
-  else if (code === "unconnected_items" && p.length > 6) ids = [p[5], p[6]];
-  return exclusionOf(null, { code, x: x / 1e6, y: y / 1e6, ids: ids.filter(Boolean), layer }, comment);
+  else if (code === "unconnected_items") {
+    // pre-9.0.4 entries carry the two KIIDs in [3], [4]; later ones in [5], [6]; six fields are rejected
+    if (p.length === 5) ids = [p[3], p[4]]; else if (p.length >= 7) ids = [p[5], p[6]]; else return null;
+  }
+  else if (code === "starved_thermal") { if (p.length === 6) layer = p[5] || "F.Cu"; }   // pre-7.0 entries had no layer
+  else if (code === "unresolved_variable" && !p[3] && !p[4]) { ids = []; drawingSheet = true; }   // a drawing-sheet marker
+  return exclusionOf(null, { code, x: x / 1e6, y: y / 1e6, ids: ids.filter(Boolean), layer, drawingSheet }, comment);
 }
 /** One drc_exclusions entry, whatever its schema, as ProtoJSON (null when it cannot be read). */
 export function readExclusion(entry: unknown): DrcExclusionJson | null {
-  if (entry && typeof entry === "object" && !Array.isArray(entry)) return (entry as DrcExclusionJson).marker ? entry as DrcExclusionJson : null;
+  if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+    const ex = entry as DrcExclusionJson; if (!ex.marker) return null;
+    // an entry the web wrote before markers carried their type: MT_DRC on an unconnected or parity code is that code's type
+    const code = CODE_OF_DRCET().get(ex.marker.error_type || "");
+    if (code && (!ex.marker.marker_type || ex.marker.marker_type === "MT_DRC")) { const t = markerTypeOf(code); if (t !== "MT_DRC") return { ...ex, marker: { ...ex.marker, marker_type: t } }; }
+    return ex;
+  }
   if (Array.isArray(entry) && entry.length) return legacyExclusion(String(entry[0]), entry.length > 1 ? String(entry[1]) : "");
   if (typeof entry === "string") return legacyExclusion(entry, "");
   return null;
@@ -72,6 +91,35 @@ export function applyExclusions<M extends ExMarker>(doc: BoardDoc | null, marker
     if (ex) { m.excluded = true; m.comment = ex.comment || ""; } else { delete m.excluded; delete m.comment; }
   }
   return markers;
+}
+/**
+ * BOARD::ResolveDRCExclusions( true ) after a run: an exclusion no marker matched comes back as an excluded marker
+ * (PCB_MARKER::FromProto) when every item it names still resolves; one naming a deleted item, or one that cannot be
+ * read, leaves the project.  `resolve` maps a KIID to the board item holding it (null when gone).  Returns the
+ * re-created markers and the entries the project keeps (matched first, then the re-created ones, as KiCad inserts them).
+ */
+export function resolveStaleExclusions(doc: BoardDoc | null, markers: ExMarker[], entries: unknown[], resolve: (kiid: string) => string | null): { added: ExMarker[]; entries: unknown[]; changed: boolean } {
+  const codeOf = CODE_OF_DRCET();
+  const have = new Set(markers.map((m) => exclusionKey(exclusionOf(doc, m))));
+  const kept: unknown[] = [], recreated: unknown[] = [], added: ExMarker[] = [], seen = new Set<string>();
+  let changed = false;
+  for (const e of entries) {
+    const ex = readExclusion(e); const k = exclusionKey(ex);
+    if (!ex || !k || seen.has(k)) { changed = true; continue; }
+    seen.add(k);
+    if (have.has(k)) { kept.push(e); continue; }
+    const code = codeOf.get(ex.marker.error_type || "");
+    if (!code) { changed = true; continue; }
+    const kiids = (ex.marker.items || []).map((i) => i.value).filter((v) => v && v !== "00000000-0000-0000-0000-000000000000");
+    const ids: string[] = []; let gone = false;
+    for (const u of kiids) { const id = resolve(u); if (!id) { gone = true; break; } if (!ids.includes(id)) ids.push(id); }
+    if (gone) { changed = true; continue; }
+    const p = ex.marker.position || {};
+    const layer = ex.marker.layer && /^BL_/.test(ex.marker.layer) ? ex.marker.layer.slice(3).replace(/_/g, ".") : undefined;
+    added.push({ code, x: (Number(p.x_nm) || 0) / 1e6, y: (Number(p.y_nm) || 0) / 1e6, ids, kiids, ...(layer ? { layer } : {}), excluded: true, comment: ex.comment || "", ...(ex.marker.marker_type === "MT_DRAWING_SHEET" ? { drawingSheet: true } : {}) });
+    recreated.push(e);
+  }
+  return { added, entries: kept.concat(recreated), changed };
 }
 /** The entries with one exclusion added (or its comment replaced: erase, then insert). */
 export function withExclusion(entries: unknown[], ex: DrcExclusionJson): unknown[] {

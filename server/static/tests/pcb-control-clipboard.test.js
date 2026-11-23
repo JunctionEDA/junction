@@ -442,7 +442,8 @@ test("Zone display: unfilled-zones warning, Toggle Zone Display, ratsnest and ne
   assert.match(src, /zoneDisplayToggle: \(\) => \{ const outline = !E\.renderOpts\.zoneOutline;/);
   assert.match(src, /ratsnestModeCycle: \(\) => cycleRatsnestMode\(\), netColorModeCycle: \(\) => cycleNetColorMode\(\)/);
   assert.ok(ap.includes('user.netColorMode === "all" ? "ratsnest" : user.netColorMode === "ratsnest" ? "off" : "all"'));
-  assert.ok(ap.includes('user.ratsnestMode === "none" ? "all" : user.ratsnestMode === "all" ? "visible" : "none"'));
+  // RatsnestModeCycle: hidden → all → visible → hidden, the hidden state being the global ratsnest switch (appearance-model.ts)
+  assert.ok(ap.includes('ratsnestCycle(objectVisible("ratsnest"), user.ratsnestMode)'));
   assert.ok(editorSrc("dialogs", "maintenance.ts").includes('"kc.dontshow."'), "Reset \"Don't Show Again\" clears the answer");
 });
 

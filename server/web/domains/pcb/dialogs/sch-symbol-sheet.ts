@@ -138,7 +138,7 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
   const angle = ((Math.round(rot) % 360) + 360) % 360;
   const refOf = (): string => { const r = L.kids(staged, "property").find((p) => L.fieldName(p) === "Reference"); return r ? L.fieldValue(r) : ""; };
   const suffix = pathRefSuffix();
-  const pinMapOn = version >= P.PIN_MAP_VERSION;
+  const pinMapOn = true;   // offered on any sheet: an older one is raised to PIN_MAP_VERSION on save (chooseFileFormatVersion)
   const pm = P.readPinMaps(ownLib), pm0 = JSON.stringify([pm.maps.map((m) => [m.name, Array.from(m.entries)]), Array.from(pm.footprints), pm.unmapped]);
   const embedded = lib ? L.kid(lib, "embedded_files") : null;
   let nb: { select(i: number): void } | null = null;
@@ -181,7 +181,7 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
           gb.append(g);
           const cb = (k: string, label: string, on: boolean, o: { title?: string; disabled?: boolean } = {}) => { const c = checkbox(label, on, undefined, { id: "kd-sym-" + k, disabled: ro || o.disabled, title: o.title }); els[k] = c.querySelector("input") as HTMLInputElement; return c; };
           gb.append(h("div", { style: "display:flex;gap:15px;margin-top:13px" }, cb("pinnum", "Show pin numbers", !pinHidden(lib, "pin_numbers"), { title: "Show or hide pin numbers" }), cb("pinname", "Show pin names", !pinHidden(lib, "pin_names"), { title: "Show or hide pin names" })));
-          gb.append(cb("localpower", "Local power", P.isLocalPower(lib), { title: "Local power symbols create labels that are limited to the sheet in which they are used", disabled: !isPower || version < P.LOCAL_POWER_VERSION }));
+          gb.append(cb("localpower", "Local power", P.isLocalPower(lib), { title: "Local power symbols create labels that are limited to the sheet in which they are used", disabled: !isPower }));
           // Attributes, in KiCad's order, with Passthrough: at the bottom
           const att = h("div", { style: "flex:6;min-width:0;display:flex;flex-direction:column" }); const ab = KD().staticBox(att, "Attributes"); ab.style.flex = "1";
           ab.append(cb("exsim", "Exclude from simulation", flag(staged, "exclude_from_sim", false)), h("div", { style: "height:10px" }),

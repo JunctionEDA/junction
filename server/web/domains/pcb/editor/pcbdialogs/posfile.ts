@@ -35,7 +35,8 @@ function show(fab: KiCadFabApi, boardOutDir: string, plotAux: boolean, variants:
   const cur = String((E as { currentVariant?: string }).currentVariant || "");   // the board's current variant (the toolbar's)
   const variant = selectField<string>(cur && variants.includes(cur) ? cur : variants[0], variants.map((v) => [v, v] as [string, string]), { key: "variant" });
   const selectedVariant = (): string => (variant.get() !== variants[0] ? variant.get() : "");
-  const outDir = textField(pref.outputDir !== null ? pref.outputDir : boardOutDir, { key: "outputDir" });
+  // TransferDataToWindow sets the directory only for a job: empty the first time, then the dialog's remembered state
+  const outDir = textField(pref.outputDir !== null ? pref.outputDir : "", { key: "outputDir" });
   outDir.input.title = "Target directory for plot files. Can be absolute or relative to the board file location.";
   const format = selectField<number>(pref.format, [[0, "Plain text"], [1, "CSV"], [2, "Gerber X3"]], { key: "format", onChange: () => update() });
   const units = selectField<number>(pref.mm ? 1 : 0, [[0, "Inches"], [1, "Millimeters"]], { key: "units" });
@@ -47,7 +48,8 @@ function show(fab: KiCadFabApi, boardOutDir: string, plotAux: boolean, variants:
   const auxOrigin = checkField(pref.auxOrigin, "Use drill/place file origin", { key: "auxOrigin" });
   const negateX = checkField(pref.negateX, "Use negative X coordinates for footprints on bottom layer", { key: "negateX" });
   const single = checkField(pref.single, "Generate single file with both front and back positions", { key: "single" });
-  const report = reportPanel("140px");
+  // CreateAsciiFiles / CreateGerberFiles only append: earlier runs stay until the dialog is closed
+  const report = reportPanel("140px"); const lines: ReportLine[] = [];
 
   // the onUpdateUI* handlers
   function update(): void {
@@ -63,7 +65,7 @@ function show(fab: KiCadFabApi, boardOutDir: string, plotAux: boolean, variants:
     remember();
     const fctx = await fabContext(); if (!fctx) return;
     fctx.variant = selectedVariant();
-    const lines: ReportLine[] = []; const say = (severity: string, text: string): void => { lines.push({ severity, text }); report.set(lines.slice()); };
+    const say = (severity: string, text: string): void => { lines.push({ severity, text }); report.set(lines.slice()); };
     if (format.get() === 2) { await createGerberFiles(fctx, say); return; }
     const csv = format.get() === 1, inch = units.get() === 0;
     const rows = (side: "both" | "front" | "back"): Placement[] => fab.positions(fctx, { side, smdOnly: smdOnly.get(), excludeThroughHole: excludeTH.get(), excludeDnp: excludeDnp.get(), useAuxOrigin: auxOrigin.get(), negateBottomX: negateX.get() })

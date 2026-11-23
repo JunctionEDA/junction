@@ -102,6 +102,79 @@ export function coreDist(s1: CopperShape, s2: CopperShape): number {
   return Infinity;   // zone against zone: the filler's business
 }
 export const shapeGap = (s1: CopperShape, s2: CopperShape) => Math.max(0, coreDist(s1, s2) - shapeOffset(s1) - shapeOffset(s2));
+/** SEG::NearestPoint( p ): the point of a..b nearest p. */
+export function nearestOnSeg(p: Pt, a: Pt, b: Pt): Pt {
+  const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy; const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+  return [a[0] + t * dx, a[1] + t * dy];
+}
+/** SEG::NearestPoint( SEG ): where the two cross, else the point of a..b nearest c..d (KiCad's four candidates in order). */
+export function segNearestToSeg(a: Pt, b: Pt, c: Pt, d: Pt): { p: Pt; d2: number } {
+  if (segsIntersect(a, b, c, d)) {
+    const r = [b[0] - a[0], b[1] - a[1]], q = [d[0] - c[0], d[1] - c[1]], den = r[0] * q[1] - r[1] * q[0];
+    if (Math.abs(den) > 1e-15) { const t = ((c[0] - a[0]) * q[1] - (c[1] - a[1]) * q[0]) / den; return { p: [a[0] + t * r[0], a[1] + t * r[1]], d2: 0 }; }
+    // collinear overlap: the first of the four candidates that lies on the other segment
+    for (const p of [a, b, c, d]) if (dPS(p, a, b) < 1e-9 && dPS(p, c, d) < 1e-9) return { p: p.slice() as Pt, d2: 0 };
+  }
+  const o0 = nearestOnSeg(a, c, d), o1 = nearestOnSeg(b, c, d), o2 = nearestOnSeg(c, a, b), o3 = nearestOnSeg(d, a, b);
+  const outs: Pt[] = [a, b, o2, o3];
+  const dist = [Math.hypot(o0[0] - a[0], o0[1] - a[1]), Math.hypot(o1[0] - b[0], o1[1] - b[1]), Math.hypot(o2[0] - c[0], o2[1] - c[1]), Math.hypot(o3[0] - d[0], o3[1] - d[1])];
+  let k = 0; for (let i = 1; i < 4; i++) if (dist[i] < dist[k]) k = i;
+  return { p: outs[k].slice() as Pt, d2: dist[k] * dist[k] };
+}
+/** A shape's core as segments (a point is a segment of no length; a rectangle or polygon its closed outline). */
+function coreSegs(s: CopperShape): [Pt, Pt][] {
+  if (s.t === "circle") return [[[s.x, s.y], [s.x, s.y]]];
+  if (s.t === "seg") return [[s.a, s.b]];
+  if (s.t === "path") return s.pts.slice(0, -1).map((p, i) => [p, s.pts[i + 1]] as [Pt, Pt]);
+  const P = s.t === "rect" ? rectCore(s) : s.pts; return P.map((p, i) => [p, P[(i + 1) % P.length]] as [Pt, Pt]);
+}
+/**
+ * SHAPE::NearestPoints: the closest pair of points of the two shapes' outlines — the closest points of their cores
+ * (a segment pair's nearest points are an end of one and its projection on the other), each moved toward the other by
+ * its own radius.  Used for a marker's two-point path (DRC_TEST_PROVIDER::reportTwoShapeGeometry).
+ */
+export function nearestPoints(s1: CopperShape, s2: CopperShape): [Pt, Pt] {
+  let best: [Pt, Pt] = [[0, 0], [0, 0]], bd = Infinity;
+  for (const [a, b] of coreSegs(s1)) for (const [c, d] of coreSegs(s2)) {
+    if (segsIntersect(a, b, c, d) && !(a[0] === b[0] && a[1] === b[1]) && !(c[0] === d[0] && c[1] === d[1])) { const p = segNearestToSeg(a, b, c, d).p; return [p, p]; }
+    for (const [p, q] of [[a, nearestOnSeg(a, c, d)], [b, nearestOnSeg(b, c, d)], [nearestOnSeg(c, a, b), c], [nearestOnSeg(d, a, b), d]] as [Pt, Pt][]) {
+      const dd = Math.hypot(q[0] - p[0], q[1] - p[1]); if (dd < bd) { bd = dd; best = [p, q]; }
+    }
+  }
+  const [p, q] = best, L = Math.hypot(q[0] - p[0], q[1] - p[1]); if (!(L > 0)) return [p.slice() as Pt, q.slice() as Pt];
+  const r1 = shapeOffset(s1), r2 = shapeOffset(s2), ux = (q[0] - p[0]) / L, uy = (q[1] - p[1]) / L;
+  return [[p[0] + ux * r1, p[1] + uy * r1], [q[0] - ux * r2, q[1] - uy * r2]];
+}
+/**
+ * SHAPE::Collide's aLocation for item `s1` tested against `s2` (shape_collisions.cpp): two circles meet half way
+ * between their centres; a circle reports the point of the other shape nearest its centre (SHAPE_CIRCLE::Collide( SEG )),
+ * where its outline crosses a segment through the centre; any other shape reports the point of its own core nearest the
+ * other (SEG::NearestPoint( SEG ): the crossing, else the nearest of the four end candidates).
+ */
+export function collisionPoint(s1: CopperShape, s2: CopperShape): Pt {
+  if (s1.t === "circle" && s2.t === "circle") return [(s1.x + s2.x) / 2, (s1.y + s2.y) / 2];
+  if (s1.t === "circle") {
+    const c: Pt = [s1.x, s1.y]; let best: Pt = c, bd = Infinity;
+    for (const [a, b] of coreSegs(s2)) {
+      const pn = nearestOnSeg(c, a, b), d = Math.hypot(pn[0] - c[0], pn[1] - c[1]);
+      if (d < bd) { bd = d; best = pn; }
+    }
+    if (bd < 1e-9 && s1.r > 0) {
+      // Intersect( aSeg )[0]: the first point of the circle on the segment through its centre
+      for (const [a, b] of coreSegs(s2)) {
+        const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy); if (!(l > 0) || dPS(c, a, b) > 1e-9) continue;
+        const ux = dx / l, uy = dy / l;
+        for (const k of [-1, 1]) { const q: Pt = [c[0] + k * s1.r * ux, c[1] + k * s1.r * uy]; if (dPS(q, a, b) < 1e-9) return q; }
+      }
+    }
+    return best;
+  }
+  let best: Pt | null = null, bd = Infinity;
+  for (const [a, b] of coreSegs(s1)) for (const [c, d] of coreSegs(s2)) {
+    const r = segNearestToSeg(a, b, c, d); if (r.d2 < bd) { bd = r.d2; best = r.p; if (bd === 0) return best; }
+  }
+  return best || [0, 0];
+}
 export function shapeBBox(s: CopperShape): Box {
   const o = shapeOffset(s); let pts: Pt[];
   if (s.t === "circle") pts = [[s.x, s.y]]; else if (s.t === "seg") pts = [s.a, s.b]; else if (s.t === "path" || s.t === "poly") pts = s.pts; else pts = rectCore(s);

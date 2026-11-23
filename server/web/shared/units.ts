@@ -47,6 +47,27 @@ export function messageText(mm: number, units: Units, scale: IuScale, label = tr
   if (short && u === "mm") { const n = text.length; if (n > 4 && text[n - 4] === "." && text[n - 1] === "0") text = text.slice(0, -1); }
   return label ? text + UNIT_TEXT[u] : text;
 }
+/** eda_units.cpp removeTrailingZeros: trailing zeros go, and the decimal point with them when nothing is left after it. */
+function removeTrailingZeros(text: string): string {
+  let len = text.length, removeLast = 0;
+  while (--len > 0 && text[len] === "0") removeLast++;
+  if (len >= 0 && (text[len] === "." || text[len] === ",")) removeLast++;
+  return text.slice(0, text.length - removeLast);
+}
+/**
+ * EDA_UNIT_UTILS::UI::StringFromValue for a distance (what UNIT_BINDER and the properties panel show): "%.10f" mm,
+ * mils "%.3f" in the schematic and "%.5f" on a board, inches "%.6f" / "%.8f", trailing zeros removed; a non-zero value
+ * that would print as "0" / "-0" is printed again with "%.10f".  The value is held to the editor's internal units
+ * first, as KiCad's are integers.  `label` appends " mm", " mils" or " in".
+ */
+export function stringFromValue(mm: number, units: Units, scale: IuScale, label = true): string {
+  const u = UNITS[units] ? units : "mm", iu = scale === "sch" ? 1e4 : 1e6;
+  const v = UNITS[u].f(Math.round(mm * iu) / iu);
+  const digits = u === "mil" ? (scale === "sch" ? 3 : 5) : u === "in" ? (scale === "sch" ? 6 : 8) : 10;
+  let text = removeTrailingZeros(v.toFixed(digits));
+  if (v !== 0 && (text === "0" || text === "-0")) text = removeTrailingZeros(v.toFixed(10));
+  return label ? text + UNIT_TEXT[u] : text;
+}
 /** EDA_DRAW_FRAME::GetUnitPair: metric shows the last imperial unit second (mils at first), imperial shows mm. */
 export function unitPair(units: Units, lastImperial: Units = "mil"): [Units, Units] {
   return units === "mm" ? ["mm", lastImperial === "in" ? "in" : "mil"] : [units, "mm"];
@@ -59,12 +80,12 @@ export function gridMessageText(x: number, y: number, units: Units, scale: IuSca
   const xs = messageText(x, units, scale, label), ys = messageText(y, units, scale, label);
   return xs === ys ? xs : `${xs} x ${ys}`;
 }
-/** A grid as KiCad's settings keep it (GRID): an optional name and the size in mm (square grids only on the web). */
-export interface GridDef { mm: number; name?: string }
-/** One entry of GRID_MENU::BuildChoiceList: "Name: " when named, then the size in the user units and, in brackets, the other system. */
+/** A grid as KiCad's settings keep it (GRID): an optional name and the size in mm, X (`mm`) and Y (`my`, X when absent). */
+export interface GridDef { mm: number; my?: number; name?: string }
+/** One entry of GRID_MENU::BuildChoiceList: "Name: " when named, then GRID::MessageText in the user units and, in brackets, the other system. */
 export function gridChoiceText(g: GridDef, units: Units, lastImperial: Units, scale: IuScale): string {
-  const [pri, sec] = unitPair(units, lastImperial);
-  return `${g.name ? g.name + ": " : ""}${messageText(g.mm, pri, scale)} (${messageText(g.mm, sec, scale)})`;
+  const [pri, sec] = unitPair(units, lastImperial), y = g.my && g.my > 0 ? g.my : g.mm;
+  return `${g.name ? g.name + ": " : ""}${gridMessageText(g.mm, y, pri, scale, true)} (${gridMessageText(g.mm, y, sec, scale, true)})`;
 }
 /** EDA_DRAW_FRAME::DisplayUnitsMsg: the status bar's units field. */
 export function unitsMsg(units: Units): string { return units === "in" ? "inches" : units === "mil" ? "mils" : "mm"; }

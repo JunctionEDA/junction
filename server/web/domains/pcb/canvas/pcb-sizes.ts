@@ -493,11 +493,10 @@ export class PcbSizes {
   }
   /** PCB_CONTROL::LayerToggle / the router's via: the other layer of the routing pair (anything but the top goes to the top). */
   pairedLayer(layer: string): string { return layer === this.layerPair[0] ? this.layerPair[1] : this.layerPair[0]; }
-  /** Snap a coordinate pair to the grid measured from the grid origin. */
-  snapToGrid(mm: [number, number], pitch: number): [number, number] {
-    if (!(pitch > 0)) return [mm[0], mm[1]];
-    const [ox, oy] = this.gridOrigin; const r = (v: number, o: number) => +(Math.round((v - o) / pitch) * pitch + o).toFixed(6);
-    return [r(mm[0], ox), r(mm[1], oy)];
+  /** Snap a coordinate pair to the grid measured from the grid origin (GAL::GetGridPoint: X and Y each on its own pitch). */
+  snapToGrid(mm: [number, number], pitch: number, pitchY = pitch): [number, number] {
+    const [ox, oy] = this.gridOrigin; const r = (v: number, o: number, p: number) => (p > 0 ? +(Math.round((v - o) / p) * p + o).toFixed(6) : v);
+    return [r(mm[0], ox, pitch), r(mm[1], oy, pitchY)];
   }
 }
 

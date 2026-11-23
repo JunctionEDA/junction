@@ -4,6 +4,7 @@
 // values" from the Board Setup defaults shown in the grid).  Apply and Close stores one "Edit Text and Graphics" step.
 import { E } from "../state";
 import { boardSelection } from "./exchange";
+import { selectedFields } from "../selection";
 import { checkField, errorMessage, fmtLen, h, openDialog, parseLen, unitName, type Field } from "./ui";
 import { gridCheck } from "../../../../shared/components/kicon-dom";
 
@@ -44,6 +45,10 @@ export function openTextAndGraphics(ctx: ToolCtx): void {
   const doc = E.kdoc as KDoc | null;
   if (!doc || doc.type !== "pcb") { ctx.toast("This needs a board"); return; }
   const ro = !!E.viewOnly;
+  // m_isBoardEditor: the Footprint Editor relabels the footprint rows and hides the board rows and the parent filters
+  const boardEd = !doc.fpEditor;
+  const FP_LABELS: Record<string, string> = { footprintTexts: "Text items", footprintGraphics: "Graphic items", footprintDimensions: "Dimension items" };
+  const BOARD_ONLY = new Set(["boardGraphics", "boardText", "boardDimensions"]);
   const checks = new Map<string, Field<boolean>>();
   const layers = Array.from(doc.layers.keys()) as string[];
   const layerSelect = (withLeave: boolean, key: string, value: string): HTMLSelectElement => {
@@ -52,7 +57,8 @@ export function openTextAndGraphics(ctx: ToolCtx): void {
     for (const l of layers) s.append(h("option", { value: l }, PT().boardLayerName(doc, l)));
     s.value = value; return s;
   };
-  const lenInput = (key: string): HTMLInputElement => h("input", { type: "text", "data-k": key, placeholder: LEAVE, style: "width:150px" }) as HTMLInputElement;
+  // UNIT_BINDER::SetValue( INDETERMINATE_ACTION ): the indeterminate text is the field's value
+  const lenInput = (key: string): HTMLInputElement => h("input", { type: "text", "data-k": key, value: LEAVE, style: "width:150px" }) as HTMLInputElement;
   let specified: HTMLInputElement, defaultsRb: HTMLInputElement;
   const enables: ((on: boolean) => void)[] = [];
   let grid: HTMLElement;
@@ -61,8 +67,10 @@ export function openTextAndGraphics(ctx: ToolCtx): void {
     build(body) {
       // Scope
       const scope = h("div", { style: "display:grid;grid-template-columns:1fr 1fr;gap:2px 24px" });
-      for (const [k, label, tip] of SCOPE) {
+      for (const [k, label0, tip] of SCOPE) {
+        if (!boardEd && (!k || BOARD_ONLY.has(k))) continue;
         if (!k) { scope.append(h("span")); continue; }
+        const label = !boardEd && FP_LABELS[k] ? FP_LABELS[k] : label0;
         const f = checkField(!!memory.checks[k], label, { key: k, tip, onChange: (on) => { memory.checks[k] = on; if (k === "footprintDimensions" || k === "boardDimensions") relabel(); } }); checks.set(k, f); scope.append(f.el);
       }
       // Filter Items
@@ -76,7 +84,8 @@ export function openTextAndGraphics(ctx: ToolCtx): void {
       const fpText = h("input", { type: "text", "data-k": "footprintFilter", value: memory.footprint }) as HTMLInputElement;
       fpText.addEventListener("input", () => { memory.footprint = fpText.value; byFp.set(true); memory.checks.footprintFilterOpt = true; });
       const selOnly = checkField(!!memory.checks.selectedItemsFilter, "Selected items only", { key: "selectedItemsFilter", onChange: (on) => { memory.checks.selectedItemsFilter = on; } }); checks.set("selectedItemsFilter", selOnly);
-      const filters = h("div", { style: "display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center" }, byLayer.el, layerFilter, byRef.el, refText, byFp.el, fpText, selOnly.el, h("span"));
+      const filters = h("div", { style: "display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center" }, byLayer.el, layerFilter, ...(boardEd ? [byRef.el, refText, byFp.el, fpText] : []), selOnly.el, h("span"));
+      if (!boardEd) scope.style.gridTemplateColumns = "1fr";
       // Action: specified values
       specified = h("input", { type: "radio", name: "tg-action", "data-k": "setToSpecifiedValues" }) as HTMLInputElement;
       defaultsRb = h("input", { type: "radio", name: "tg-action", "data-k": "setToLayerDefaults" }) as HTMLInputElement;
@@ -93,7 +102,7 @@ export function openTextAndGraphics(ctx: ToolCtx): void {
       let autoOn = false;
       // onTextSize: GetPenSizeForNormal( min( width, height ) ) = size / 8
       const autoValue = (): void => { if (!autoOn) return; const w = parseLen(textW.value), hh = parseLen(textH.value); if (textW.value.trim() && textH.value.trim() && isFinite(w) && isFinite(hh)) thick.value = fmtLen(Math.min(w, hh) / 8); else thick.value = "(auto)"; };
-      auto.addEventListener("click", () => { autoOn = !autoOn; auto.setAttribute("aria-pressed", String(autoOn)); auto.classList.toggle("on", autoOn); if (autoOn) { autoValue(); thick.disabled = true; } else { thick.disabled = !specified.checked; thick.value = ""; } });
+      auto.addEventListener("click", () => { autoOn = !autoOn; auto.setAttribute("aria-pressed", String(autoOn)); auto.classList.toggle("on", autoOn); if (autoOn) { autoValue(); thick.disabled = true; } else { thick.disabled = !specified.checked; thick.value = LEAVE; } });
       textW.addEventListener("input", autoValue); textH.addEventListener("input", autoValue);
       const center = checkField(false, "Center on footprint", { key: "centerOnFP", tip: "Move footprint texts to the center of their parent" });
       const u = (): HTMLElement => h("span", { class: "unit" }, unitName());
@@ -148,11 +157,11 @@ export function openTextAndGraphics(ctx: ToolCtx): void {
         const scopeOut: Record<string, boolean> = {}; for (const [k] of SCOPE) if (k) scopeOut[k] = !!checks.get(k)?.get();
         return { job: {
           scope: scopeOut,
-          filter: { layer: byLayer.get() ? layerFilter.value : null, reference: byRef.get() && refText.value ? refText.value : null, footprint: byFp.get() && fpText.value ? fpText.value : null, selectedOnly: selOnly.get() },
+          filter: { layer: byLayer.get() ? layerFilter.value : null, reference: boardEd && byRef.get() && refText.value ? refText.value : null, footprint: boardEd && byFp.get() && fpText.value ? fpText.value : null, selectedOnly: selOnly.get() },
           specified: specified.checked,
           values: { layer: layerCtrl.value || null, visible: visible.get(), lineWidth: lw, kicadFont: fontSel.value === "kicad", font: fontSel.value === "kicad" ? "" : fontSel.value.startsWith("face:") ? fontSel.value.slice(5) : null, textWidth: tw, textHeight: th, thickness: tk, autoThickness: autoOn,
             bold: bold.get(), italic: italic.get(), keepUpright: upright.get(), centerOnFootprint: center.get() },
-          selection: boardSelection(ctx) } };
+          selection: boardSelection(ctx), selectedFields: selectedFields() } };
       };
     },
     ok() {

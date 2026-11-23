@@ -8,12 +8,14 @@ import { E, isSch, requestRender, setToggles, store, toast } from "./editor";
 import { colorPicker, fromHex, toHex } from "../editor/pcbdialogs/color-picker";
 import { IS_MAC, keyName, modName } from "../../../shared/keys";
 import { hotkeysPanel } from "./hotkeys-panel";
-import type { UserHotkeys } from "../menuspec";
+import { menuMeta, type UserHotkeys } from "../menuspec";
+import { formatLength } from "../tools/props/numeric";
 import { KD, checkbox, h, popupMenu, promptText, select, textInput } from "./dom";
 import { SCH_COLOR_ITEMS, hiddenByBackground, newUserTheme, schExtraColors, sameColor, themeNameError, type UserSchTheme } from "./color-themes";
 import { colorSwatch, colorText, parseColor, type RGBA } from "../../../shared/components/colorswatch";
 import { lenField, messageBox } from "../editor/pcbdialogs/ui";
-import { loadUnits, messageText, unitName } from "../../../shared/units";
+import { gridMessageText, loadUnits, messageText, unitName } from "../../../shared/units";
+import { saveUserSchTheme } from "./prefs";
 import { DEFAULT_PREFS, SIM_MOUSE_DEFAULTS, SIM_TRACKPAD_DEFAULTS, schThemeList, GRID_MIN_SPACING_RANGE, GRID_THICKNESS_CHOICES, clonePrefs, editorId, gridLabel, savePrefs, scaleOf, type EditorId, type GalPrefs, type Prefs, type SimWheel } from "./prefs";
 import { clearDialogState, clearDontShowAgain, clearFileHistory, resetProgramSettings } from "./maintenance";
 import { askConfirm } from "../../../shared/components/msgbox";
@@ -36,27 +38,47 @@ function parseUserLen(text: string): number | null {
   return u === "mm" ? v : u === "in" || u === '"' ? v * 25.4 : v * MIL;
 }
 /**
- * DIALOG_GRID_SETTINGS ("Grid Settings"): Name (optional), X and Y in the user units, Linked.  It opens over the
- * Preferences dialog; OK checks the range (0.001 to 1000 mm).  The web editor's grids are square, so Y follows X.
+ * UNIT_BINDER::Validate( 0.001, 1000, MM ) of a grid size field: "X must be at least 0.001 mm." / "… must be less than
+ * 1000 mm." with the bound in the user units (StringFromValue with the unit text); a value that is no number is 0.
  */
-export function gridSettingsDialog(grid: { mm: number; name: string } | null, ed: EditorId): Promise<{ mm: number; name: string } | null> {
+export function gridRangeMessage(label: string, mm: number | null, u: Units, ed: EditorId): string {
+  const v = mm === null ? 0 : mm, scale = scaleOf(ed);
+  if (v < 0.001) return `${label} must be at least ${formatLength(0.001, u, scale)}.`;
+  if (v > 1000) return `${label} must be less than ${formatLength(1000, u, scale)}.`;
+  return "";
+}
+/**
+ * DIALOG_GRID_SETTINGS ("Grid Settings"): Name (optional), X and Y in the user units, Linked.  It opens over the
+ * Preferences dialog; an existing grid shows Linked ticked when X == Y (Y then disabled), a new one unticked.
+ * Unticking Linked copies X into Y (OnLinkedChecked).  OK checks the range (0.001 to 1000 mm) of X, and of Y when not
+ * linked; a linked grid takes X for Y.
+ */
+export function gridSettingsDialog(grid: { mm: number; my?: number; name: string } | null, ed: EditorId): Promise<{ mm: number; my: number; name: string } | null> {
   return new Promise((resolve) => {
     const u = units(), show = (mm: number): string => messageText(mm, u, scaleOf(ed), false).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+    const gy = grid ? (grid.my && grid.my > 0 ? grid.my : grid.mm) : 0, isLinked = !!grid && Math.abs(gy - grid.mm) < 1e-9;
     const name = h("input", { type: "text", id: "kd-grid-name", value: grid ? grid.name : "" });
-    const x = h("input", { type: "text", id: "kd-grid-x", value: grid ? show(grid.mm) : "" }), y = h("input", { type: "text", id: "kd-grid-y", value: grid ? show(grid.mm) : "", disabled: true });
-    const linked = h("input", { type: "checkbox", id: "kd-grid-linked", checked: true, disabled: true });
-    x.addEventListener("input", () => { y.value = x.value; });
+    const x = h("input", { type: "text", id: "kd-grid-x", value: grid ? show(grid.mm) : "" }) as HTMLInputElement, y = h("input", { type: "text", id: "kd-grid-y", value: grid ? show(gy) : "", disabled: isLinked }) as HTMLInputElement;
+    const linked = h("input", { type: "checkbox", id: "kd-grid-linked", checked: isLinked }) as HTMLInputElement;
+    linked.addEventListener("change", () => { if (!linked.checked) y.value = x.value; y.disabled = linked.checked; });
     const unit = (): HTMLElement => h("span", { class: "ro" }, u === "mil" ? "mils" : u);
     const body = h("div", { class: "kd-body" }, h("div", { class: "kv", style: "grid-template-columns:max-content 1fr max-content;align-items:center" },
       h("label", { for: "kd-grid-name" }, "Name:"), name, h("span", { class: "ro" }, "(optional)"),
       h("label", { for: "kd-grid-x" }, "X:"), x, unit(),
-      h("span"), h("label", { class: "kd-chk", title: "The web editor's grids are square: Y is always X" }, linked, "Linked"), h("span"),
+      h("span"), h("label", { class: "kd-chk" }, linked, "Linked"), h("span"),
       h("label", { for: "kd-grid-y" }, "Y:"), y, unit()));
     const done = (ok: boolean): void => {
       if (!ok) { ov.remove(); resolve(null); return; }
       const mm = parseUserLen(x.value);
-      if (mm === null || mm < 0.001 || mm > 1000) { messageBox("Error", "Grid size X out of range."); x.focus(); return; }
-      ov.remove(); resolve({ mm: +mm.toFixed(6), name: name.value.trim() });
+      // TransferDataFromWindow: m_gridSizeX.Validate( 0.001, 1000, MM ) fails, so "Grid size X out of range."; the
+      // binder's own message (DisplayErrorMessage from its delayed focus event) comes up over it and focuses the field.
+      // Y likewise when it is not linked to X.
+      const bx = gridRangeMessage("X", mm, u, ed);
+      if (bx) { messageBox("Error", "Grid size X out of range."); messageBox("Error", bx); x.focus(); x.select(); return; }
+      const my = linked.checked ? mm : parseUserLen(y.value);
+      const by = linked.checked ? "" : gridRangeMessage("Y", my, u, ed);
+      if (by) { messageBox("Error", "Grid size Y out of range."); messageBox("Error", by); y.focus(); y.select(); return; }
+      ov.remove(); resolve({ mm: +(mm as number).toFixed(6), my: +(my as number).toFixed(6), name: name.value });
     };
     const okB = h("button", { class: "btn primary", type: "button", onclick: () => done(true) }, "OK"), cancel = h("button", { class: "btn", type: "button", onclick: () => done(false) }, "Cancel");
     const dlg = h("div", { class: "kd-dialog", role: "dialog", "aria-label": "Grid Settings", style: "width:360px;min-width:0" }, h("div", { class: "kd-title" }, h("span", null, "Grid Settings")), body, h("div", { class: "kd-foot" }, cancel, okB));
@@ -91,9 +113,12 @@ export function resetPage(key: string, st: Staged): void {
     case "Schematic Editor/Simulator": st.p.sim = d.sim; break;
     case "Schematic Editor/Grids": st.p.grids.sch = d.grids.sch; break;
     case "Schematic Editor/Editing Options": st.p.schEditing = d.schEditing; break;
-    case "Schematic Editor/Colors": st.p.schColors = { ...d.schColors, user: st.p.schColors.user }; break;
+    // PANEL_COLOR_SETTINGS::ResetPanel: every colour of the theme on show back to its default; a read-only theme and
+    // the theme choice stay as they are
+    case "Schematic Editor/Colors": { const u = st.p.schColors.user.find((x) => x.id === st.p.schColors.theme); if (u) resetUserThemeColors(u); break; }
     case "Footprint Editor/Display Options": st.p.gal.fp = d.gal.fp; break;
     case "Footprint Editor/Grids": st.p.grids.fp = d.grids.fp; break;
+    case "Footprint Editor/Origins & Axes": st.p.fpOrigin = d.fpOrigin; break;
     case "Footprint Editor/Editing Options": st.p.fpEditing = d.fpEditing; break;
     case "PCB Editor/Display Options": st.p.pcbDisplay = { ...d.pcbDisplay, showPageLimits: st.p.pcbDisplay.showPageLimits }; st.p.gal.pcb = d.gal.pcb; break;
     case "PCB Editor/Grids": st.p.grids.pcb = d.grids.pcb; break;
@@ -104,6 +129,15 @@ export function resetPage(key: string, st: Staged): void {
   }
 }
 
+/**
+ * COLOR_SETTINGS::GetDefaultColor for every swatch of a user schematic theme (KiCad's default theme).  ResetPanel sets
+ * the swatches without their change event, so nothing is saved before OK.
+ */
+export function resetUserThemeColors(u: UserSchTheme): void {
+  const D: Record<string, string> = { ...KiCadCanvas.schThemeColors("default"), ...schExtraColors("default") };
+  for (const [k] of SCH_COLOR_ITEMS) if (D[k] !== undefined) u.colors[k] = D[k];
+  if (D.wire !== undefined) u.colors.busEntry = D.wire;
+}
 /** Preferences…; `page` is a page label or "Section/Page" ("PCB Editor/Grids"); without one, the page last used. */
 export function openPreferences(page?: string, staged?: Staged): void {
   const p: Prefs = staged ? staged.p : clonePrefs();
@@ -133,49 +167,67 @@ export function openPreferences(page?: string, staged?: Staged): void {
   const gridsPage = (ed: EditorId) => (pg: HTMLElement) => {
     const g = p.grids[ed], o = g.overrides, pre = `kd-pref-${ed}`;
     g.names = g.sizes.map((_, i) => (g.names && g.names[i]) || "");
-    if (ed === here) { const at = g.sizes.findIndex((mm) => Math.abs(mm - E.gridPitch) < 1e-9); if (at >= 0) g.last = at; }
+    g.ys = g.sizes.map((x, i) => (g.ys && g.ys[i] > 0 ? g.ys[i] : x));
+    if (ed === here) { const ix = E.gridIdx, at = typeof ix === "number" && ix >= 0 && Math.abs((g.sizes[ix] ?? NaN) - E.gridPitch) < 1e-9 ? ix : g.sizes.findIndex((mm) => Math.abs(mm - E.gridPitch) < 1e-9); if (at >= 0) g.last = at; }
     const cols = h("div", { style: "display:grid;grid-template-columns:260px 1fr;gap:20px" }), L = h("div"), R = h("div"); cols.append(L, R); pg.append(cols);
     const list = h("k-select", { size: 12, id: `${pre}-gridlist`, style: "width:100%;height:230px" });
-    const text = (i: number): string => gridLabel({ mm: g.sizes[i], name: g.names![i] }, ed);
+    const text = (i: number): string => gridLabel({ mm: g.sizes[i], my: g.ys[i], name: g.names![i] }, ed);
     const choices = () => g.sizes.map((_, i) => [String(i), text(i)] as [string, string]);
     const fast1 = select(choices(), String(g.fast1), (v) => { g.fast1 = +v; }, { id: `${pre}-fast1` }), fast2 = select(choices(), String(g.fast2), (v) => { g.fast2 = +v; }, { id: `${pre}-fast2` });
     const ovSel: Record<string, HTMLSelectElement> = {};
-    const fill = (sel?: number) => {
-      const cur = sel ?? Math.max(0, Math.min(g.sizes.length - 1, g.last ?? 0));
-      list.replaceChildren(...g.sizes.map((_, i) => h("option", { value: String(i) }, text(i)))); list.selectedIndex = cur; g.last = cur;
-      for (const [sel2, idx] of [[fast1, g.fast1], [fast2, g.fast2]] as [HTMLSelectElement, number][]) { sel2.replaceChildren(...choices().map(([v, l]) => h("option", { value: v }, l))); sel2.value = String(Math.max(0, Math.min(idx, g.sizes.length - 1))); }
-      for (const [k, s2] of Object.entries(ovSel)) { const mm = (o as unknown as Record<string, number>)[k + "Mm"]; const at = g.sizes.findIndex((x) => Math.abs(x - mm) < 1e-6); s2.replaceChildren(...g.sizes.map((x, i) => h("option", { value: String(x) }, text(i)))); s2.value = String(g.sizes[at >= 0 ? at : 0]); (o as unknown as Record<string, number>)[k + "Mm"] = g.sizes[at >= 0 ? at : 0]; }
+    const ovMm = o as unknown as Record<string, number>;
+    const ovIndex = (k: string): number => { const at = g.sizes.findIndex((x) => Math.abs(x - ovMm[k + "Mm"]) < 1e-6); return at >= 0 ? at : 0; };
+    // RebuildGridSizes: the lists are rebuilt and each selection is put back by its text; one that is gone falls back
+    // to the first grid (the grid list, Grid 1 and the overrides) or the last (Grid 2)
+    type Saved = { cur: string; f1: string; f2: string; ov: Record<string, string> };
+    const snapshot = (): Saved => {
+      const t = (i: number): string => (i >= 0 && i < g.sizes.length ? text(i) : "");
+      const ov: Record<string, string> = {}; for (const k of Object.keys(ovSel)) ov[k] = t(ovIndex(k));
+      return { cur: t(list.selectedIndex >= 0 ? list.selectedIndex : (g.last ?? 0)), f1: t(g.fast1), f2: t(g.fast2), ov };
+    };
+    const fill = (saved?: Saved, sel?: number) => {
+      const texts = g.sizes.map((_, i) => text(i)), find = (t: string, dflt: number): number => { const i = t ? texts.indexOf(t) : -1; return i >= 0 ? i : dflt; };
+      const sv = saved || { cur: texts[Math.max(0, Math.min(g.sizes.length - 1, g.last ?? 0))] || "", f1: texts[g.fast1] || "", f2: texts[g.fast2] || "", ov: Object.fromEntries(Object.keys(ovSel).map((k) => [k, texts[ovIndex(k)] || ""])) };
+      const cur = sel ?? find(sv.cur, 0);
+      list.replaceChildren(...g.sizes.map((_, i) => h("option", { value: String(i) }, texts[i]))); list.selectedIndex = cur; g.last = cur;
+      g.fast1 = find(sv.f1, 0); g.fast2 = find(sv.f2, g.sizes.length - 1);
+      for (const [sel2, idx] of [[fast1, g.fast1], [fast2, g.fast2]] as [HTMLSelectElement, number][]) { sel2.replaceChildren(...choices().map(([v, l]) => h("option", { value: v }, l))); sel2.value = String(idx); }
+      for (const [k, s2] of Object.entries(ovSel)) { const at = find(sv.ov[k], 0); s2.replaceChildren(...g.sizes.map((x, i) => h("option", { value: String(i) }, texts[i]))); s2.value = String(at); ovMm[k + "Mm"] = g.sizes[at]; }
     };
     list.addEventListener("change", () => { g.last = list.selectedIndex; });
-    const exists = (mm: number, skip: number): boolean => g.sizes.some((x, i) => i !== skip && Math.abs(x - mm) < 1e-6);
-    const dup = (mm: number): void => { messageBox("Error", `Grid size '${messageText(mm, units(), scaleOf(ed))}' already exists.`); };
-    const add = (): void => { void gridSettingsDialog(null, ed).then((r) => { if (!r) return; if (exists(r.mm, -1)) { dup(r.mm); return; }
-      const row = list.selectedIndex < 0 ? g.sizes.length : list.selectedIndex; g.sizes.splice(row, 0, r.mm); g.names!.splice(row, 0, r.name);
-      if (g.fast1 >= row) g.fast1++; if (g.fast2 >= row) g.fast2++; fill(row); }); };
+    // GRID::operator==: the same X, Y and name (two grids of one size may differ by name)
+    type G = { mm: number; my: number; name: string };
+    const same = (r: G, i: number): boolean => Math.abs(g.sizes[i] - r.mm) < 1e-6 && Math.abs(g.ys[i] - r.my) < 1e-6 && (g.names![i] || "") === r.name;
+    const dupOf = (r: G): number => g.sizes.findIndex((_, i) => same(r, i));
+    const dup = (i: number): void => { messageBox("Error", `Grid size '${gridMessageText(g.sizes[i], g.ys[i], units(), scaleOf(ed), true)}' already exists.`); };
+    const add = (): void => { void gridSettingsDialog(null, ed).then((r) => { if (!r) return; const d = dupOf(r); if (d >= 0) { dup(d); return; }
+      const saved = snapshot(), row = Math.max(0, list.selectedIndex); g.sizes.splice(row, 0, r.mm); g.ys.splice(row, 0, r.my); g.names!.splice(row, 0, r.name); fill(saved, row); }); };
     const edit = (): void => { const row = list.selectedIndex; if (row < 0) return;
-      void gridSettingsDialog({ mm: g.sizes[row], name: g.names![row] }, ed).then((r) => { if (!r) return; if (exists(r.mm, row)) { dup(r.mm); return; } g.sizes[row] = r.mm; g.names![row] = r.name; fill(row); }); };
-    const swap = (i: number, j: number): void => { [g.sizes[i], g.sizes[j]] = [g.sizes[j], g.sizes[i]]; [g.names![i], g.names![j]] = [g.names![j], g.names![i]]; };
+      void gridSettingsDialog({ mm: g.sizes[row], my: g.ys[row], name: g.names![row] }, ed).then((r) => { if (!r || same(r, row)) return; const d = dupOf(r); if (d >= 0) { dup(d); return; } const saved = snapshot(); g.sizes[row] = r.mm; g.ys[row] = r.my; g.names![row] = r.name; fill(saved, row); }); };
+    const swap = (i: number, j: number): void => { [g.sizes[i], g.sizes[j]] = [g.sizes[j], g.sizes[i]]; [g.ys[i], g.ys[j]] = [g.ys[j], g.ys[i]]; [g.names![i], g.names![j]] = [g.names![j], g.names![i]]; };
     list.addEventListener("dblclick", edit);
     // PANEL_GRID_SETTINGS' STD_BITMAP_BUTTONs: small_plus, edit, small_up, small_down, then small_trash apart
     L.append(h("div", { style: "font-weight:600;margin-bottom:6px" }, "Grids"), list, h("div", { class: "kd-grid-btns", style: "display:flex;gap:5px;margin-top:6px" },
       bitmapButton("small_plus", "Add", add, { id: `${pre}-gridadd` }),
       bitmapButton("edit", "Edit", edit, { id: `${pre}-gridedit` }),
-      bitmapButton("small_up", "Move up", () => { const i = list.selectedIndex; if (i > 0) { swap(i - 1, i); fill(i - 1); } }, { id: `${pre}-gridup` }),
-      bitmapButton("small_down", "Move down", () => { const i = list.selectedIndex; if (i >= 0 && i < g.sizes.length - 1) { swap(i + 1, i); fill(i + 1); } }, { id: `${pre}-griddown` }),
+      bitmapButton("small_up", "Move up", () => { const i = list.selectedIndex; if (i > 0) { const sv = snapshot(); swap(i - 1, i); fill(sv, i - 1); } }, { id: `${pre}-gridup` }),
+      bitmapButton("small_down", "Move down", () => { const i = list.selectedIndex; if (i >= 0 && i < g.sizes.length - 1) { const sv = snapshot(); swap(i + 1, i); fill(sv, i + 1); } }, { id: `${pre}-griddown` }),
       h("span", { style: "flex:1" }),
-      bitmapButton("small_trash", "Remove", () => { const i = list.selectedIndex; if (i < 0 || g.sizes.length <= 1) return; g.sizes.splice(i, 1); g.names!.splice(i, 1);
-        g.fast1 = Math.min(g.fast1 > i ? g.fast1 - 1 : g.fast1, g.sizes.length - 1); g.fast2 = Math.min(g.fast2 > i ? g.fast2 - 1 : g.fast2, g.sizes.length - 1); fill(i !== 0 ? i - 1 : 0); }, { id: `${pre}-griddel` })));
+      bitmapButton("small_trash", "Remove", () => { const i = list.selectedIndex; if (i < 0 || g.sizes.length <= 1) return; const sv = snapshot(); g.sizes.splice(i, 1); g.ys.splice(i, 1); g.names!.splice(i, 1);
+        fill(sv, i !== 0 ? i - 1 : undefined); }, { id: `${pre}-griddel` })));
+    // m_grid1HotKey / m_grid2HotKey: ACTIONS::gridFast1 / gridFast2's hotkeys as they are now (the user's included)
+    const hkText = (id: string): string => { const a = menuMeta(null, id); return `(${keyName(a && a.key ? a.key : "")})`; };
     const fb = KD().staticBox(R, "Fast Grid Switching");
-    fb.append(h("div", { style: "display:grid;grid-template-columns:max-content minmax(0,240px) max-content;gap:6px 10px;align-items:center" }, h("label", null, "Grid 1:"), fast1, h("span", { class: "ro" }, `(${keyName("Alt+1")})`), h("label", null, "Grid 2:"), fast2, h("span", { class: "ro" }, `(${keyName("Alt+2")})`)));
+    fb.append(h("div", { style: "display:grid;grid-template-columns:max-content minmax(0,240px) max-content;gap:6px 10px;align-items:center" }, h("label", null, "Grid 1:"), fast1, h("span", { class: "ro" }, hkText("gridFast1")), h("label", null, "Grid 2:"), fast2, h("span", { class: "ro" }, hkText("gridFast2"))));
     const ob = KD().staticBox(R, "Grid Overrides"), og = h("div", { style: "display:grid;grid-template-columns:max-content minmax(0,240px);gap:6px 10px;align-items:center" });
-    const ov = (key: "connected" | "wires" | "vias" | "text" | "graphics", label: string) => { const s2 = select([], "", (v) => { (o as unknown as Record<string, number>)[key + "Mm"] = +v; }, { id: `${pre}-ov-${key}` }); ovSel[key] = s2;
+    const ov = (key: "connected" | "wires" | "vias" | "text" | "graphics", label: string) => { const s2 = select([], "", (v) => { ovMm[key + "Mm"] = g.sizes[+v]; }, { id: `${pre}-ov-${key}` }); ovSel[key] = s2;
       og.append(checkbox(label, o[key], (on) => { o[key] = on; }, { id: `${pre}-ovon-${key}` }), s2); };
     // PANEL_GRID_SETTINGS relabels the overrides for the board editor, and the footprint editor has no wires or vias
     if (ed === "fp") ov("connected", "Pads:");
     else { ov("connected", ed === "pcb" ? "Footprints/pads:" : "Connected items:"); ov("wires", ed === "pcb" ? "Tracks:" : "Wires:"); }
     if (ed === "pcb") ov("vias", "Vias:");
     ov("text", "Text:"); ov("graphics", "Graphics:");
-    ob.append(og); KD().staticBox(R, "Grid Display").append(checkbox("Show grid axes", !!g.axes, (on) => { g.axes = on; }, { id: `${pre}-gridaxes` })); fill();
+    ob.append(og); fill();
   };
   // PANEL_GAL_OPTIONS, the left column of the Schematic and Footprint Editor Display Options pages: the grid's look and
   // the cursor of that frame (the PCB and Symbol Editor pages are built on their own branches of this dialog)
@@ -191,7 +243,9 @@ export function openPreferences(page?: string, staged?: Staged): void {
       h("label", { style: "align-self:start" }, "Style:"), radios("style", [["dots", "Dots"], ["lines", "Lines"], ["crosses", "Small crosses"]], g.style, (v) => { g.style = v as GalPrefs["style"]; }), h("span"),
       h("label", null, "Grid thickness:"), select(GRID_THICKNESS_CHOICES.map((w) => [String(w), w.toFixed(1)] as [string, string]), String(g.lineWidth), (v) => { g.lineWidth = +v; }, { id: `${pre}-thickness`, style: "width:80px" }), h("span", { class: "ro" }, "pixels"),
       h("label", null, "Minimum grid spacing:"), spacing, h("span", { class: "ro" }, "pixels")),
-      h("div", { style: "margin-top:6px" }, checkbox("Show major grid", g.showMajor, (on) => { g.showMajor = on; }, { id: `${pre}-major` })));
+      h("div", { style: "margin-top:6px" }, checkbox("Show major grid", g.showMajor, (on) => { g.showMajor = on; }, { id: `${pre}-major` })),
+      // GRID_SETTINGS axes_enabled: PANEL_GRID_SETTINGS has no box for it, so it sits with the grid's look
+      h("div", { style: "margin-top:6px" }, checkbox("Show grid axes", !!p.grids[ed].axes, (on) => { p.grids[ed].axes = on; }, { id: `kd-pref-${ed}-gridaxes` })));
     KD().staticBox(host, "Cursor").append(radios("cursor", [["small", "Small crosshairs"], ["full", "Full window crosshairs"], ["45", "45 degree crosshairs"]], g.crosshair, (v) => { g.crosshair = v as GalPrefs["crosshair"]; }),
       h("div", { style: "margin-top:6px" }, checkbox("Always show crosshairs", g.alwaysShow, (on) => { g.alwaysShow = on; }, { id: `${pre}-always` })));
   };
@@ -200,11 +254,13 @@ export function openPreferences(page?: string, staged?: Staged): void {
   let bgConfirmed = false;
   const colorsPage = (pg: HTMLElement): void => {
     const sc = p.schColors, saved = JSON.parse(JSON.stringify(sc.user)) as UserSchTheme[];
-    const NEW = "__new__";
+    const NEW = "__new__", SEP = "__sep__";
     const userOf = (id: string): UserSchTheme | undefined => sc.user.find((u) => u.id === id);
     const colorsOf = (id: string): Record<string, string> => { const u = userOf(id); return u ? { ...KiCadCanvas.schThemeColors("default"), ...schExtraColors("default"), ...u.colors } : { ...KiCadCanvas.schThemeColors(id), ...schExtraColors(id) }; };
-    const choices = (): [string, string][] => [...schThemeList(p).map(([id, n]) => [id, userOf(id) ? n : `${n} (read-only)`] as [string, string]), [NEW, "New Theme..."]];
+    // PANEL_COLOR_SETTINGS::createThemeList: the themes, "---", then New Theme...
+    const choices = (): [string, string][] => [...schThemeList(p).map(([id, n]) => [id, userOf(id) ? n : `${n} (read-only)`] as [string, string]), [SEP, "---"], [NEW, "New Theme..."]];
     const theme = select(choices(), sc.theme, (v) => {
+      if (v === SEP) { theme.value = sc.theme; return; }   // OnThemeChanged: the separator puts the theme back
       if (v !== NEW) { sc.theme = v; paint(); return; }
       theme.value = sc.theme;
       void promptText("Add Color Theme", "New theme name:", "", (name) => { const err = themeNameError(name, schThemeList(p).map(([, n]) => n)); if (err) { messageBox("Add Color Theme", err); return false; } return true; }).then((name) => {
@@ -226,7 +282,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
       grid.replaceChildren();
       for (const [k, label] of SCH_COLOR_ITEMS) {
         const sw = colorSwatch(parseColor(C[k]), { opacity: true, readOnly: !u, key: `sch-color-${k}`, title: label.replace("&&", "&"),
-          onChange: (c) => { if (!u || !c) return; u.colors[k] = colorText(c); if (k === "wire") u.colors.busEntry = u.colors[k]; if (k === "bg") paint(); } });
+          onChange: (c) => { if (!u || !c) return; u.colors[k] = colorText(c); if (k === "wire") u.colors.busEntry = u.colors[k]; saveUserSchTheme(u); saved.splice(0, saved.length, ...JSON.parse(JSON.stringify(sc.user)) as UserSchTheme[]); if (k === "bg") paint(); } });
         // COLOR_SWATCH::SetSwatchBackground: a translucent colour is shown over the theme's background
         sw.el.style.boxShadow = `0 0 0 2px ${bg}`;
         sw.el.addEventListener("contextmenu", (ev) => {
@@ -271,11 +327,24 @@ export function openPreferences(page?: string, staged?: Staged): void {
             ui.append(h("div", { class: "kd-row" }, h("label", { style: "color:var(--ink-2)" }, "Appearance:"),
               select([["light", "Light"], ["dark", "Dark"], ["system", "System"]], uiMode, (v) => { uiMode = v as ThemeMode; }, { id: "kd-pref-uitheme", style: "width:160px" })),
               h("p", { class: "kd-note", style: "margin:8px 0 0" }, "System follows the light or dark setting of your computer.  Also in Preferences > Appearance."));
-            // panel_common_settings' Appearance box: m_highContrastCtrl (0..1, step 0.1)
+            // the User Interface check boxes that act in a browser (focus following between the windows of the desktop
+            // editors, the icon theme and toolbar icon size have no counterpart in the web editor); m_showScrollbars
+            // (appearance.show_scrollbars) and m_disableCustomCursors (the inverse of appearance.use_custom_cursors)
+            const line = (el: HTMLElement): HTMLElement => h("div", { style: "margin-top:6px" }, el);
+            ui.append(...[
+              checkbox("Show icons in menus", p.common.menuIcons !== false, (on) => { p.common.menuIcons = on; }, { id: "kd-pref-menuicons" }),
+              checkbox("Show scrollbars in editors", !!p.common.showScrollbars, (on) => { p.common.showScrollbars = on; },
+                { id: "kd-pref-scrollbars", title: "This change takes effect when relaunching the editor." }),
+              checkbox("Show popup indicator when toggling settings with hotkeys", p.common.hotkeyFeedback !== false, (on) => { p.common.hotkeyFeedback = on; },
+                { id: "kd-pref-hotkeyfeedback", title: "When enabled, certain hotkeys that cycle between settings will show a popup indicator briefly to indicate the change in settings." }),
+              checkbox("Use alternating row colors in tables", !!p.common.gridStriping, (on) => { p.common.gridStriping = on; }, { id: "kd-pref-gridstriping" }),
+              checkbox("Disable custom cursors", p.common.useCustomCursors === false, (on) => { p.common.useCustomCursors = !on; },
+                { id: "kd-pref-nocustomcursors", title: "When enabled, KiCad will use default system cursors instead of custom ones" })].map(line));
+            // panel_common_settings' Appearance box: m_highContrastCtrl, the factor in percent ("%.0f") and m_highContrastUnits "%"
             const ap = KD().staticBox(pg, "Appearance");
-            const dim = h("input", { type: "number", min: "0", max: "1", step: "0.1", value: String(p.common.hcDimming), id: "kd-pref-hcdim", style: "width:80px" }) as HTMLInputElement;
-            dim.addEventListener("change", () => { const v = Math.max(0, Math.min(1, +dim.value)); if (isFinite(v)) { p.common.hcDimming = v; dim.value = String(v); } });
-            ap.append(h("div", { class: "kd-row" }, h("label", { style: "color:var(--ink-2)" }, "High-contrast mode dimming factor:"), dim));
+            const dim = h("input", { type: "text", value: dimmingText(p.common.hcDimming), id: "kd-pref-hcdim", style: "width:80px" }) as HTMLInputElement;
+            dim.addEventListener("change", () => { p.common.hcDimming = dimmingFactor(dim.value); });
+            ap.append(h("div", { class: "kd-row" }, h("label", { style: "color:var(--ink-2)" }, "High-contrast mode dimming factor:"), dim, h("span", null, "%")));
             // panel_common_settings' Editing box: m_NonImmediateActions (input.immediate_actions is its inverse)
             const edt = KD().staticBox(pg, "Editing");
             edt.append(checkbox("First hotkey selects tool", p.common.immediateActions === false, (on) => { p.common.immediateActions = !on; },
@@ -320,6 +389,22 @@ export function openPreferences(page?: string, staged?: Staged): void {
         { label: "Footprint Editor", pages: [
           { label: "Display Options", build(pg) { displayCols(pg, "fp"); } },
           { label: "Grids", build: gridsPage("fp") },
+          { label: "Origins & Axes", build(pg) {
+            // PANEL_PCBNEW_DISPLAY_ORIGIN( FRAME_FOOTPRINT_EDITOR ): the Display Origin box is hidden; the axes are
+            // FOOTPRINT_EDITOR_SETTINGS' own
+            const o = p.fpOrigin;
+            const group = (title: string, name: string, rows: [string, string][], value: string, set: (v: string) => void) => {
+              const box = h("div", { style: "margin-bottom:12px" }, h("div", { style: "margin-bottom:4px" }, title));
+              for (const [v, label] of rows) {
+                const r = h("input", { type: "radio", name, value: v, id: `kd-pref-${name}-${v}` }) as HTMLInputElement; r.checked = v === value;
+                r.addEventListener("change", () => { if (r.checked) set(v); });
+                box.append(h("label", { class: "kd-row", style: "margin-left:16px;gap:6px" }, r, label));
+              }
+              pg.append(box);
+            };
+            group("X Axis", "fp-xaxis", [["right", "Increases right"], ["left", "Increases left"]], o.invertX ? "left" : "right", (v) => { o.invertX = v === "left"; });
+            group("Y Axis", "fp-yaxis", [["up", "Increases up"], ["down", "Increases down"]], o.invertY ? "up" : "down", (v) => { o.invertY = v === "up"; });
+          } },
           { label: "Editing Options", build(pg) {
             // PANEL_EDIT_OPTIONS( isFootprintEditor ): FOOTPRINT_EDITOR_SETTINGS' own rotation step, m_sizerBoardEdit
             // hidden, and Ctrl only toggles the selection (m_rbHighlightNet hidden); the options book shows the empty fpPage
@@ -448,10 +533,15 @@ export function openPreferences(page?: string, staged?: Staged): void {
       lastPage = pageKey() || lastPage; if (hk) hk.apply(); if (uiMode !== getThemeMode()) setThemeMode(uiMode); savePrefs(p); applySchView(view, p); if (contrast !== getInactiveMode()) setInactiveMode(contrast); if (pcbTools() && arcEdit !== pcbTools()!.arcEditMode()) pcbTools()!.setArcEditMode(arcEdit);
       // PANEL_EDIT_OPTIONS::TransferDataFromWindow: m_AngleSnapMode = checked ? DEG45 : DIRECT (only when the box changed, so a 90 degree mode stays)
       const t = pcbTools(); if (t && t.setAngleSnap && hv45 !== (snap0 !== "free")) t.setAngleSnap(null, hv45 ? "45" : "free");
-      const rs = ratsnestState(); if (rs && curved !== curved0) rs.setCurvedRatsnest(curved); toast("Preferences saved");
+      const rs = ratsnestState(); if (rs && curved !== curved0) rs.setCurvedRatsnest(curved);
       if (plug && JSON.stringify(plugRows.map((r) => [r.id, r.visible])) !== JSON.stringify(plugRows0.map((r) => [r.id, r.visible]))) void plug.saveActionOrder(plugRows.map((r) => [r.id, r.visible] as [string, boolean]));
       if (waka) waka.apply().catch((e) => toast(`WakaTime settings were not saved: ${e instanceof Error ? e.message : String(e)}`)); } });
 }
+
+/** PANEL_COMMON_SETTINGS::applySettingsToPanel: the dimming factor as a whole percent ("%.0f"). */
+export function dimmingText(f: number): string { return (f * 100).toFixed(0); }
+/** PANEL_COMMON_SETTINGS::TransferDataFromWindow: the typed percent / 100 (80 when the text is no number, wxString::ToDouble). */
+export function dimmingFactor(text: string): number { const t = text.trim(); const v = /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(t) ? Number(t) : 80; return v / 100; }
 
 /** isScrollModSetValid: zoom, pan left / right and pan up / down each on a different modifier. */
 export function scrollModsValid(m: Prefs["mouse"]): boolean { return m.zoomMod !== m.panHMod && m.panHMod !== m.panVMod && m.panVMod !== m.zoomMod; }

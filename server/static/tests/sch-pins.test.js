@@ -88,7 +88,8 @@ test("Properties: a selected pin shows SCH_PIN's rows (name, number, type, style
   const v = (r) => r.map((x) => [x.name, x.type, x.value]);
   assert.deepStrictEqual(v(_.pinProperties(doc, { id: "u1", number: "2" })), [["Pin Name", "text", "OUT"], ["Pin Number", "text", "2"], ["Electrical Type", "enum", "output"], ["Graphic Style", "enum", "line"], ["Orientation", "enum", "180"], ["Length", "length", 2.54]]);
   const q = _.pinProperties(doc, { id: "u1", number: "3" });
-  assert.strictEqual(q[0].value, "~", "GetName keeps the raw name");
+  // the sheet is a 20250114 file: SCH_IO_KICAD_SEXPR_PARSER reads a "~" pin name as empty before 20250318
+  assert.strictEqual(q[0].value, "", "GetName: the name as the parser read it");
   assert.strictEqual(q[4].choices.find((c) => c[0] === q[4].value)[1], "Down", "270 is PIN_DOWN");
   assert.strictEqual(q[2].choices.find((c) => c[0] === q[2].value)[1], "Bidirectional");
   assert.strictEqual(_.pinProperties(doc, { id: "u1", number: "9" }), null, "a pin that is gone");

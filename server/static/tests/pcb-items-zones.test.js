@@ -19,7 +19,7 @@ function runTest(name, fn) { try { fn(); passed++; console.log("  ok   " + name)
 const val = (list, title) => { const c = list.find((x) => x.title === title); return c ? c.value : undefined; };
 
 // ---------------------------------------------------------------- the Properties panel, bundled with its editor-state modules stubbed
-const STUB = /(\/editor\/state|\/panels\/core|\/panels\/appearance|\/editor\/util|browse-cells|library\/fpchoice|editor\/schnets|sync-units|pcbdialogs\/item-props|editor\/userorigin|editor\/appstore|panes\/prop-text|kcombo|kicon-dom|dialogs\/dom|pcbdialogs\/xref|dialogs\/sch-symbol-sheet|editor\/selection)(\.ts)?$/;
+const STUB = /(\/editor\/state|\/panels\/core|\/panels\/appearance|\/editor\/util|browse-cells|library\/fpchoice|editor\/schnets|sync-units|pcbdialogs\/item-props|editor\/userorigin|editor\/appstore|panes\/prop-text|kcombo|kicon-dom|dialogs\/dom|pcbdialogs\/xref|dialogs\/sch-symbol-sheet|editor\/selection|editor\/variant|cvpcb\/widgets)(\.ts)?$/;
 const STUBS = {};
 const stubPlugin = { name: "stub", setup(b) {
   b.onResolve({ filter: /.*/ }, (a) => { if (!a.path.startsWith(".")) return undefined; const full = path.resolve(a.resolveDir, a.path); return STUB.test(full) ? { path: full, namespace: "stub" } : undefined; });
@@ -31,6 +31,9 @@ const E = { selection: new Set(), selPins: [], units: "mm", viewOnly: false, sel
 const commits = [];
 const PG = { doc: null };
 STUBS["/editor/state"] = { E };
+const asked = [];
+STUBS["cvpcb/widgets"] = { askBox: (title) => { asked.push(title); return new Promise(() => {}); } };   // the Yes / No box, left unanswered
+STUBS["/editor/variant"] = { currentVariant: () => "" };   // the default variant (variant.ts pulls in the whole editor)
 STUBS["/editor/userorigin"] = { fromDisplayAbsAxis: (v) => v, toDisplayAbsAxis: (v) => v };
 STUBS["/panels/core"] = { KC: () => K, isSchDoc: () => false, kdoc: () => PG.doc, pcbTools: () => P, tctx: () => ({ doc: PG.doc, commit: (ch, what) => commits.push({ ch, what }) }), panelStore: { get: () => ({ selVersion: 0 }), set: () => {} } };
 STUBS["/panels/appearance"] = { layerDisplayName: (d, l) => l, netClassOf: () => "Default" };
@@ -235,8 +238,11 @@ test("properties: negative solder paste margin is accepted; footprint Layer flip
   const fl = setProp(doc, ["fp-1"], "Basic Properties/Layer", "B.Cu"); assert.ok(typeof fl !== "string", fl);
   const n = nodeOf(fl); assert.strictEqual(K.atOf(n)[2], 150);
   const g = grid(doc, ["fp-1"]); assert.ok(g.rows["Basic Properties/Scale X"] && g.rows["Attributes/Exclude From Simulation"] && g.rows["Overrides/Zone Connection Style"]);
-  const sc = setProp(doc, ["fp-1"], "Basic Properties/Scale X", "2"); assert.match(changeText(sc), /\(transform \(translate 10 10\) \(rotate 30\) \(scale 2 1\)\)/);
-  assert.strictEqual(setProp(doc, ["fp-1"], "Basic Properties/Scale X", "0"), null, "SetTransformScale refuses zero");
+  // PCB_PROPERTIES_PANEL::valueChanging: scaling a footprint with pads asks "Scale footprint with pads?" first
+  commits.length = 0; assert.strictEqual(setProp(doc, ["fp-1"], "Basic Properties/Scale X", "2"), null); assert.deepStrictEqual(asked, ["Scale footprint with pads?"]);
+  const bare = BOARD(`(footprint "L:R" (layer "F.Cu") (at 10 10 30) (uuid "fp-1") (attr smd))`);
+  commits.length = 0; const sc = setProp(bare, ["fp-1"], "Basic Properties/Scale X", "2"); assert.match(changeText(sc), /\(transform \(translate 10 10\) \(rotate 30\) \(scale 2 1\)\)/);
+  assert.strictEqual(setProp(doc, ["fp-1"], "Basic Properties/Scale X", "0"), "Scale must be a positive number.", "valueChanging vetoes zero (ShowInfoBarError)");
 });
 
 test("properties: via sanitising and ValidateViaParameters messages", () => {

@@ -173,10 +173,12 @@ function annotationErrors(sheets: NK.NlSheet[]): number {
  * reason and the work goes on only when it is annotated once that dialog is closed), then "Error: duplicate sheet
  * names. Continue?" when two sheets on one sheet share a name.
  */
-export async function readyToNetlist(annotateMessage: string): Promise<boolean> {
+export async function readyToNetlist(annotateMessage: string, opts?: { annotate?: boolean; state?: { cancelled: boolean } }): Promise<boolean> {
   let sheets = await hierarchySheets();
   if (!sheets) return true;   // the export itself reports what could not be read
   if (annotationErrors(sheets) > 0) {
+    // the Annotate dialog works on the schematic editor's sheets: from the board the schematic stays as it is
+    if (opts && opts.annotate === false) return false;
     await openAnnotate({ message: annotateMessage });
     sheets = await hierarchySheets();
     if (!sheets || annotationErrors(sheets) > 0) return false;
@@ -184,7 +186,7 @@ export async function readyToNetlist(annotateMessage: string): Promise<boolean> 
   if (NK.duplicateSheetNames(sheets) > 0) {
     // IsOK( this, ... ): a Yes / No question, No (and Escape) stops
     const go = await new Promise<boolean>((done) => { if (!messageBox("Confirmation", "Error: duplicate sheet names. Continue?", [{ label: "No", fn: () => done(false) }, { label: "Yes", fn: () => done(true) }], 0)) done(true); });
-    if (!go) return false;
+    if (!go) { if (opts && opts.state) opts.state.cancelled = true; return false; }
   }
   return true;
 }

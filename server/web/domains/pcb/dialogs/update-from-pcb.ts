@@ -10,10 +10,11 @@ import { messageBox } from "./sch-items";
 import { submitDocOp } from "./project";
 import { liveDocument, projectDocs } from "../editor/projectfile";
 import { projectNetlist } from "../editor/pcbdialogs/update-pcb";
+import { NL } from "../editor/pcbdialogs/canvas";
 import { reportPanel, type ReportLine } from "../editor/pcbdialogs/ui";
 import { backAnnotate, fpData, libUnitPins, swapLibPins, type BaOptions, type FpData, type SymRef, type SymUnit } from "./update-from-pcb-logic";
 import { prefs } from "./prefs";
-import type { NetEntry, SheetFile } from "../canvas/pcb-netlist";
+import type { NetComponent, NetEntry, SheetFile, SheetInstance } from "../canvas/pcb-netlist";
 
 type N = SNode;
 const K = (): typeof KiCadCanvas => KiCadCanvas;
@@ -33,44 +34,62 @@ async function load(): Promise<Loaded | { error: string }> {
   const res = await projectNetlist();
   if ("error" in res) return res;
   const docs = projectDocs();
-  const pcb = docs.find((d) => d.docType === "kicad_pcb");
+  const pcb = NL().projectBoardPath(docs).doc;   // the project's <project>.kicad_pcb
   if (!pcb) return { error: "This project has no board." };
   const live = await liveDocument(pcb.docId);
   const bdoc = K().parseDoc(live.file, "kicad_pcb") as KDoc;
   for (const op of live.ops) for (const c of op.changes || []) { try { K().applyChange(bdoc, c, 1e6); } catch { /* an op this reader cannot take */ } }
   const fps: FpData[] = [];
-  for (const it of bdoc.items.values()) if (it.kind === "footprint") fps.push(fpData(it.node));
+  for (const it of bdoc.items.values()) {
+    if (it.kind !== "footprint") continue;
+    const attr = K().kid(it.node, "attr") as N | null;
+    if (attr && attr.slice(1).map(sv).includes("board_only")) continue;   // board-only footprints are not in the PCB's netlist
+    fps.push(fpData(it.node));
+  }
   const where = new Map<string, { file: string; id: string; instPath: string }>();
   const insts = res.netlist.instances || [];
+  const pro = docs.find((d) => d.docType === "kicad_pro"), project = pro ? pro.path.split("/").pop()!.replace(/\.kicad_pro$/, "") : "";
+  const compOf = new Map<string, NetComponent>(); for (const c of res.netlist.components) for (const pth of c.paths) compOf.set(pth, c);
+  const instByPath = new Map(insts.map((i) => [i.uuidPath.join("/"), i] as [string, SheetInstance]));
+  // GetSheetNamesFromPaths: the sheet names along an instance path joined by "/", else the readable path
+  const friendly = (path: string): string => {
+    const u = path.split("/").filter(Boolean), names: string[] = [];
+    for (let k = 1; k <= u.length; k++) { const i = instByPath.get(u.slice(0, k).join("/")); if (i && k > 1 && i.sheetName) names.push(i.sheetName); }
+    return names.length ? names.join("/") : (instByPath.get(u.join("/"))?.human || path);
+  };
+  // SCH_SHEET_LIST::GetSymbols( SYMBOL_FILTER_NON_POWER ): every placed unit on every sheet instance, those excluded
+  // from the board included
+  const syms: SymRef[] = [];
   for (const inst of insts) {
     const f = res.files.get(inst.file); if (!f) continue;
+    const instPath = "/" + inst.uuidPath.join("/");
     for (const it of f.doc.items.values()) {
       if (it.kind !== "symbol") continue;
+      const lib = f.doc.lib.get(libKey(it.node)); if (lib && K().kid(lib, "power")) continue;
       const u = K().kid(it.node, "uuid") as N | null; if (!u) continue;
-      where.set("/" + inst.uuidPath.slice(1).concat(sv(u[1])).join("/"), { file: inst.file, id: it.id, instPath: "/" + inst.uuidPath.join("/") });
+      const key = "/" + inst.uuidPath.slice(1).concat(sv(u[1])).join("/");
+      where.set(key, { file: inst.file, id: it.id, instPath });
+      const c = compOf.get(key), ir = NL().instanceRef(it.node, instPath, project);
+      const flag = (k: string, dflt: boolean): boolean => { const n = K().kid(it.node, k) as N | null; return n ? sv(n[1]) !== "no" : dflt; };
+      const fields = new Map<string, string>(), prop = (name: string): string => { const q = (K().kids(it.node, "property") as N[]).find((x) => sv(x[1]) === name); return q ? sv(q[2]) : ""; };
+      for (const q of K().kids(it.node, "property") as N[]) { const name = sv(q[1]); if (!/^(Reference|Value|Footprint|Datasheet|Description)$/.test(name)) fields.set(name, sv(q[2])); }
+      const pins = new Map<string, string>(); if (c) for (const [pad, pp] of c.pins) pins.set(pad, pp.net);
+      // SymbolHasSheetInstances: the instance paths and the other projects the symbol item carries
+      const paths = new Set<string>(), others = new Set<string>();
+      const ins = K().kid(it.node, "instances") as N | null;
+      if (ins) for (const pr of K().kids(ins, "project") as N[]) { const pn = sv(pr[1]); if (pn && pn !== project) others.add(pn); for (const pp of K().kids(pr, "path") as N[]) paths.add(sv(pp[1])); }
+      const sharedSheets = paths.size > 1 ? [...new Set([...paths].filter(Boolean).map(friendly))].sort() : [];
+      const info = lib ? libUnitPins(lib) : { unitPins: new Map<number, string[]>(), pinTypes: new Map<string, string>(), hiddenPins: new Set<string>() };
+      const self: SymUnit = { key, unit: ir.unit, ...info, shared: paths.size > 1, sharedSheets, sharedProjects: [...others].sort() };
+      syms.push({ key, keys: [key], ref: ir.ref, power: false, multi: info.unitPins.size > 1, sheetPath: inst.uuidPath.slice(), uuid: sv(u[1]),
+        value: prop("Value"), footprint: prop("Footprint"), dnp: flag("dnp", false), inBom: flag("in_bom", true), inPos: flag("in_pos_files", true), onBoard: flag("on_board", true), exSim: flag("exclude_from_sim", false),
+        fields, pins, self });
     }
   }
-  // SymbolHasSheetInstances: one symbol item placed through several sheet instances (a reused sheet)
-  const placements = new Map<string, number>();
-  for (const c of res.netlist.components) for (const pth of c.paths) { const w = where.get(pth); if (w) placements.set(w.file + "\n" + w.id, (placements.get(w.file + "\n" + w.id) || 0) + 1); }
-  const syms: SymRef[] = [];
-  for (const c of res.netlist.components) {
-    const w = where.get(c.paths[0]); if (!w) continue;
-    const f = res.files.get(w.file)!, item = f.doc.items.get(w.id)!;
-    const posN = K().kid(item.node, "in_pos_files") as N | null;
-    const fields = new Map<string, string>(); for (const [k, v] of Object.entries(c.fields || {})) fields.set(k, v);
-    const pins = new Map<string, string>(); for (const [pad, p] of c.pins) pins.set(pad, p.net);
-    // the placed units with their library's pins per unit (unit and pin swaps)
-    const units: SymUnit[] = [];
-    for (const pth of c.paths) {
-      const wu = where.get(pth); if (!wu) continue;
-      const fu = res.files.get(wu.file)!, iu = fu.doc.items.get(wu.id); if (!iu) continue;
-      const lib = fu.doc.lib.get(libKey(iu.node)); if (!lib) continue;
-      const un = K().kid(iu.node, "unit") as N | null;
-      units.push({ key: pth, unit: un ? Number(un[1]) || 1 : 1, ...libUnitPins(lib), shared: (placements.get(wu.file + "\n" + wu.id) || 0) > 1 });
-    }
-    syms.push({ key: c.paths[0], keys: c.paths.slice(), ref: c.ref, power: false, value: c.value, footprint: c.footprint, dnp: c.dnp, inBom: !c.excludeFromBom, inPos: !posN || sv(posN[1]) !== "no", onBoard: !c.excludeFromBoard, fields, pins, units });
-  }
+  // GetMultiUnitSymbols: the units of a multi-unit symbol, grouped by reference
+  const groups = new Map<string, SymRef[]>();
+  for (const s of syms) if (s.multi) { if (!groups.has(s.ref)) groups.set(s.ref, []); groups.get(s.ref)!.push(s); }
+  for (const g of groups.values()) { const keys = g.map((s) => s.key), units = g.map((s) => s.self!); for (const s of g) { s.keys = keys; s.units = units; } }
   return { syms, fps, where, files: res.files, netMap: res.netlist.netMap, instFiles: insts.map((i) => i.file), board: { docId: pcb.docId, doc: bdoc } };
 }
 
@@ -89,14 +108,21 @@ export function openUpdateFromPcb(): void {
   const refresh = async (): Promise<void> => {
     if (!report) return;
     if (!data) { const d = await load(); if ("error" in d) { report.set([{ severity: "error", text: d.error }]); return; } data = d; }
-    const r = backAnnotate(data.syms, data.fps, { ...o, allowPinSwaps: !!prefs().schEditing.unconstrainedPinSwaps });
-    const lines: ReportLine[] = r.lines.slice();
-    lines.push({ severity: "info", text: `Total warnings: ${r.lines.filter((l) => l.severity === "warning").length}, errors: ${r.lines.filter((l) => l.severity === "error").length}.` });
-    report.set(lines);
+    const r = backAnnotate(data.syms, data.fps, { ...o, allowPinSwaps: !!prefs().schEditing.unconstrainedPinSwaps, annotated: await relinkReady() });
+    report.set(r.lines.slice() as ReportLine[]);
+    // updateData: OK is enabled whenever BackAnnotateSymbols ran
+    const ok = document.getElementById("kd-ufp-update") as HTMLButtonElement | null;
+    if (ok) ok.disabled = r.lines.some((l) => l.text === "Select at least one property to back annotate.");
+  };
+  // checkForUnusedSymbols: re-linking asks for a fully annotated schematic (ReadyToNetlist)
+  const relinkReady = async (): Promise<boolean> => {
+    if (!o.relink) return true;
+    const { readyToNetlist } = await import("../editor/export-netlist");
+    return readyToNetlist("Re-linking footprints requires a fully annotated schematic.");
   };
   const run = async (): Promise<void> => {
     if (!data || E.viewOnly) return;
-    const r = backAnnotate(data.syms, data.fps, { ...o, allowPinSwaps: !!prefs().schEditing.unconstrainedPinSwaps });
+    const r = backAnnotate(data.syms, data.fps, { ...o, allowPinSwaps: !!prefs().schEditing.unconstrainedPinSwaps, annotated: await relinkReady() });
     const per = new Map<string, { changes: KChange[]; inverse: KChange[] }>();
     const editItem = (file: string, id: string, fn: (n: N) => void): void => {
       const f = data!.files.get(file); if (!f) return;
@@ -110,9 +136,8 @@ export function openUpdateFromPcb(): void {
       if (prev >= 0) acc.changes[prev] = ch; else { acc.changes.push(ch); acc.inverse.push(K().replaceChange(cur, it) as KChange); }
     };
     for (const e of r.edits) {
-      const s = data.syms.find((x) => x.key === e.key); if (!s) continue;
-      for (const k of s.keys) {
-        const w = data.where.get(k); if (!w) continue;
+      {
+        const w = data.where.get(e.key); if (!w) continue;
         editItem(w.file, w.id, (n) => {
           if (e.ref !== undefined) {
             setProp(n, "Reference", e.ref);
@@ -124,6 +149,7 @@ export function openUpdateFromPcb(): void {
           if (e.dnp !== undefined) setYesNo(n, "dnp", e.dnp);
           if (e.inBom !== undefined) setYesNo(n, "in_bom", e.inBom);
           if (e.inPos !== undefined) setYesNo(n, "in_pos_files", e.inPos);
+          if (e.exSim !== undefined) setYesNo(n, "exclude_from_sim", e.exSim);
           for (const [name, val] of e.setFields) setProp(n, name, val);
           for (const name of e.deleteFields) { const i = n.findIndex((c, j) => j > 0 && Array.isArray(c) && c[0] === "property" && sv((c as N)[1]) === name); if (i > 0) n.splice(i, 1); }
           const at = (K().kid(n, "at") as N | null) || ["at", 0, 0];
@@ -194,8 +220,9 @@ export function openUpdateFromPcb(): void {
       }
       if (changes.length) { try { await submitDocOp(b.docId, changes); } catch (e) { await messageBox(`Could not update the board: ${(e as Error).message}`); } }
     }
+    // OnUpdateClick: the report of the run just applied; OK stays disabled until an option changes
     data = null;
-    await refresh();
+    if (report) report.set(r.lines.slice() as ReportLine[]);
     const ok = document.getElementById("kd-ufp-update") as HTMLButtonElement | null; if (ok) ok.disabled = true;
   };
   KD().open({

@@ -42,7 +42,7 @@ export const isSchDoc = (): boolean => E.DOC_TYPE === "kicad_sch";
 
 /** The pcb tool module's helper table (window.PcbTools): connectivity, nets, the module's own selection. */
 export interface PcbToolsLite {
-  state: { sel: Set<string>; showRatsnest: boolean; hiddenNets: Set<string>; ratsnestColors?: Map<string, string> | null; ratsnestBase?: string | null; netColorMode?: string; showCourtyardConflicts?: boolean; hiddenSeverities?: Set<string> | null; highlightNet?: string | null };
+  state: { sel: Set<string>; showRatsnest: boolean; ratsnestMode?: string; hiddenNets: Set<string>; ratsnestColors?: Map<string, string> | null; ratsnestBase?: string | null; netColorMode?: string; showCourtyardConflicts?: boolean; hiddenSeverities?: Set<string> | null; highlightNet?: string | null };
   boardNets(doc: KDoc): { name: string; code: number }[];
   netItemIds(doc: KDoc, key: string): Set<string>;
   netlist(doc: KDoc): Netlist;

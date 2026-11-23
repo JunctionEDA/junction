@@ -163,6 +163,8 @@ export interface RoutingState {
   /** "Track: use netclass width", then one entry per pre-defined width — index = BOARD_DESIGN_SETTINGS::m_trackWidthIndex */
   trackLabels: string[]; trackIndex: number;
   viaLabels: string[]; viaIndex: number;
+  /** BOARD_DESIGN_SETTINGS::UseCustomTrackViaSize(): both choices show no entry */
+  custom?: boolean;
   /** BOARD_DESIGN_SETTINGS::m_ViaStackPresets' names (.kicad_pro board.design_settings.via_stack_presets) and the one in use */
   viaStacks: string[]; viaStackIndex: number;
   layers: RoutingLayer[]; layerPair: [string, string];
@@ -192,8 +194,10 @@ export interface CtxItem {
   why?: string;
   /** dispatch({ type: "contextMenu", run }) runs the row */
   run?: number;
-  /** document item the row stands for: hovering the row brightens it (Clarify Selection) */
+  /** document item the row stands for: hovering the row brightens it (Clarify Selection); several ids joined by "\n" */
   hover?: string;
+  /** the label's &-mnemonic: typing it picks the row (Clarify Selection's "&1", "Select &All", "Show &More Choices...") */
+  mnemonic?: string;
   sub?: CtxItem[];
 }
 export interface ContextMenuState { id: number; x: number; y: number; title?: string; items: CtxItem[] }
@@ -247,7 +251,7 @@ export interface AppState {
     /** PCB_BASE_FRAME::GetOriginTransforms: the user origin the board's status bar counts from and its axis senses
         (Preferences > PCB Editor > Origins & Axes); absent: the page origin, X right, Y down */
     userOrigin?: [number, number]; invertX?: boolean; invertY?: boolean;
-    gridOn: boolean; gridPitch: number;
+    gridOn: boolean; gridPitch: number; /** the current grid's Y (GRID::y; gridPitch is its X) */ gridPitchY?: number; /** grid.last_size_idx (-1: not a list entry) */ gridIdx?: number;
     /** the grids of Preferences > Grids in their order (GRID_SETTINGS::grids), shown with gridChoiceText in the user units */
     gridChoices: GridDef[];
     snapOn: boolean;
@@ -291,7 +295,8 @@ export interface AppState {
   status: { message: string; mode: string; constraint: string };
   /** EDA_MSG_PANEL: the columns (title over value) of the selection's GetMsgPanelInfo, the board summary or the router */
   msgPanel: { items: { title: string; value: string }[] };
-  toast: { id: number; text: string; ms: number; link?: { text: string; run: () => void } } | null;
+  /** the infobar: `ms` 0 stays until closed (WX_INFOBAR::ShowMessage), otherwise it goes after `ms` (ShowMessageFor); `severity` picks the icon */
+  toast: { id: number; text: string; ms: number; link?: { text: string; run: () => void }; severity?: "info" | "warning" | "error" } | null;
   popover: PopoverState | null;
   contextMenu: ContextMenuState | null;
   routing: RoutingState;
@@ -318,7 +323,7 @@ export type AppAction =
   | { type: "setTrackWidth"; index: number | "edit" }
   | { type: "setViaSize"; index: number | "edit" }
   | { type: "setViaStack"; index: number | "edit" }
-  | { type: "setGrid"; pitch: number }
+  | { type: "setGrid"; pitch: number; index?: number }
   /** the aux toolbar's zoom choice: "auto" fits the screen, a number is a KiCad zoom factor (zoom_defines.h) */
   | { type: "setZoom"; zoom: number | "auto" }
   | { type: "setFilter"; key: string; on: boolean }

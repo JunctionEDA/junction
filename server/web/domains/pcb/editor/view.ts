@@ -1,7 +1,7 @@
 // editor — GENERATED SOURCE MODULE (split from the former static/app.js; static/dist/editor.js is the esbuild output of web/domains/pcb/editor/index.ts — edit these modules, not the bundle).
 import { updateMsgPanel } from "./msgpanel";
 import { state, store } from "./appstore";
-import { drawCursorLayer, refreshCrosshair } from "./crosshair";
+import { drawCursorLayer, placeCrosshair, refreshCrosshair } from "./crosshair";
 import { drawComments } from "./comments";
 import { refreshPreview } from "../ai/proposals";
 import { loadBase } from "./doc";
@@ -18,8 +18,10 @@ import { activeModule, toolCtx } from "./tools";
 import { drawAppOverlays } from "./overlays";
 import { toast } from "./util";
 import { ZOOM_LIST, fitMargin, nextZoomPreset } from "./zoomlist";
+import { focusScreenPoint } from "../dialogs/erc-rules";
 import type { PeerEntry, PeerGhost } from "./types";
 import { initPeerCursors, syncPeerCursors, type PeerCursorSpec } from "./peercursors";
+import { updateScrollbars } from "./scrollbars";
 // ================================================================ EDITOR
 export const stage = $("#stage"), world = $("#world"), base = $("#base"), overlay = $("#overlay");
 
@@ -125,7 +127,7 @@ function schPaintState(selected: Set<string> | null): { dangling?: Set<string>; 
 function boardBrightened(): Set<string> | null {
   if (isSch()) return null;
   const out = new Set<string>();
-  if (E.hoverPinned && E.hoverId) out.add(E.hoverId as string);
+  if (E.hoverPinned && E.hoverId) { out.add(E.hoverId as string); for (const id of (E.hoverExtra || []) as string[]) out.add(id); }
   // a dialog's row brightens its item (DIALOG_FP_EDIT_PAD_TABLE::OnSelectCell)
   const dlg = (E as { dialogBrightened?: Set<string> | null }).dialogBrightened; if (dlg) for (const id of dlg) out.add(id);
   const pcb = CollabTools.pcb; if (pcb && pcb.brightenedIds) { try { for (const id of pcb.brightenedIds()) out.add(id); } catch (e) { /* older module */ } }
@@ -156,7 +158,7 @@ export function drawCanvas() {
   const peers = peerPaintIds(E.kdoc);
   const selected = peers.selected.size ? new Set([...(localSelection || []), ...peers.selected]) : localSelection;
   const highlight = E.highlightIds || (peers.highlight.size ? peers.highlight : null);
-  paintDocument(variantView(E.kdoc) as KDoc, cctx, view, Object.assign({ hidden: E.hiddenLayers, grid: E.gridOn ? E.gridPitch : 0, selected, highlight, brightened: boardBrightened(), enteredGroup: boardEnteredGroup(), skip: skip || undefined, rollover: E.hyperHover ? E.hyperHover.id : undefined, rolloverGeom: E.hyperHover && E.hyperHover.geom || null, rolloverRun: E.hyperHover && E.hyperHover.run || null }, schPaintState(selected), E.renderOpts), force, E.zoomAnim ? { to: E.zoomAnim.to, cx: E.zoomAnim.cx, cy: E.zoomAnim.cy } : null, requestRestRender);
+  paintDocument(variantView(E.kdoc) as KDoc, cctx, view, Object.assign({ hidden: E.hiddenLayers, grid: E.gridOn ? E.gridPitch : 0, gridY: E.gridOn ? E.gridPitchY : 0, selected, highlight, brightened: boardBrightened(), enteredGroup: boardEnteredGroup(), skip: skip || undefined, rollover: E.hyperHover ? E.hyperHover.id : undefined, rolloverGeom: E.hyperHover && E.hyperHover.geom || null, rolloverRun: E.hyperHover && E.hyperHover.run || null }, schPaintState(selected), E.renderOpts), force, E.zoomAnim ? { to: E.zoomAnim.to, cx: E.zoomAnim.cx, cy: E.zoomAnim.cy } : null, requestRestRender);
   // A peer's items mid-drag: drawn where the peer has them (presence `at`), translucent, over everything else.
   if (ghosts.length) {
     const off: HTMLCanvasElement = E.ghostCanvas || (E.ghostCanvas = document.createElement("canvas"));
@@ -209,7 +211,7 @@ export function applyView() {
   // Everything on the overlay is sized in screen pixels, so a zoom or fit
   // must redraw peers too (they otherwise keep the previous scale until the
   // next presence message).
-  drawComments(); drawSelection(); drawPeers(E.peerState); refreshCrosshair(); refreshPreview();
+  drawComments(); drawSelection(); drawPeers(E.peerState); refreshCrosshair(); refreshPreview(); updateScrollbars();
   requestRepaint();
   if (E.presenting) sendPresence(null);
 }
@@ -278,19 +280,24 @@ export function fitBox(box: number[], margin?: number) {
   world.style.width = sw + "px";
   const ppm = sw / mmW();                       // px per mm at zoom 1
   const [bx, by, bw, bh] = box;
-  // a fit may go below the manual zoom-out limit (a very large board still has to fit), never above the zoom-in one
-  E.zoom = Math.min(zoomLimits()[1], Math.max(1e-4, Math.min(sw / (bw * ppm), sh / (bh * ppm)) * (margin || 1)));
+  // ZoomToFit goes through VIEW::SetScale, which clamps to the view's scale limits like every other zoom
+  const [zlo, zhi] = zoomLimits();
+  E.zoom = Math.min(zhi, Math.max(zlo, Math.min(sw / (bw * ppm), sh / (bh * ppm)) * (margin || 1)));
   E.panX = sw / 2 - ((bx - mmX0()) + bw / 2) * ppm * E.zoom;
   E.panY = sh / 2 - ((by - mmY0()) + bh / 2) * ppm * E.zoom;
   E.lastStageW = sw; E.lastStageH = sh;   // the resize observer must not rescale pans computed at this size
   applyView();
 }
 
-/** The zoom range as E.zoom values: KiCad's zoom-factor range for the editor (include/zoom_defines.h, 0.05–100 / 0.13–300). */
+/**
+ * The zoom range as E.zoom values: the view's scale limits (VIEW::SetScaleLimits from sch_draw_panel.cpp:73 /
+ * pcb_draw_panel_gal.cpp:250, include/zoom_defines.h ZOOM_MIN/MAX_LIMIT_EESCHEMA 0.01–100, _PCBNEW 0.1–50000), which
+ * differ from the zoom list's ends.
+ */
 export function zoomLimits() {
   const ppm = stage.clientWidth / mmW(); if (!(ppm > 0)) return [0.2, 400];
   const z1 = Number(KiCadCanvas.PX_PER_MM_ZOOM1) || 3.58;   // css px per mm at KiCad zoom factor 1
-  const [lo, hi] = isSch() ? [0.05, 100] : [0.13, 300];
+  const [lo, hi] = isSch() ? [0.01, 100] : [0.1, 50000];
   return [(lo * z1) / ppm, (hi * z1) / ppm];
 }
 
@@ -298,7 +305,7 @@ export function zoomBy(factor: number, cx?: number, cy?: number) {
   E.viewTouched = true;
   if (cx === undefined) { cx = stage.clientWidth / 2; cy = stage.clientHeight / 2; }
   const [lo, hi] = zoomLimits();
-  const next = Math.min(Math.max(hi, E.zoom), Math.max(Math.min(lo, E.zoom), E.zoom * factor));   // a view outside the range (a fit) can still zoom back in
+  const next = Math.min(hi, Math.max(lo, E.zoom * factor));   // VIEW::SetScale clamps to m_minScale / m_maxScale
   E.panX = cx! - (cx! - E.panX) * (next / E.zoom);
   E.panY = cy! - (cy! - E.panY) * (next / E.zoom);
   E.zoom = next; breakFollow(); applyView();
@@ -307,6 +314,31 @@ export function zoomBy(factor: number, cx?: number, cy?: number) {
   sendPresence(null);
 }
 
+
+/**
+ * EDA_DRAW_FRAME::FocusOnLocation( aPos ) (common/eda_draw_frame.cpp:1114-1158): the view is centred on the point
+ * only when it lies off the viewport or within 10 % (of the viewport's width) of its edge, or behind one of the open
+ * dialogs or within 10 % of it; then VIEW::SetCenter( aPos, dialog rectangles ) puts it in the middle of the largest
+ * part of the canvas the dialogs leave free.  The zoom never changes.  The crosshair always goes to the point
+ * (SetCrossHairCursorPosition).
+ */
+export function focusOnLocation(x: number, y: number): void {
+  const s = stage.getBoundingClientRect();
+  if (s.width > 0) {
+    const w = world.getBoundingClientRect(), p: [number, number] = [w.left - s.left + ((flipMmX(x) - mmX0()) / mmW()) * w.width, w.top - s.top + ((y - mmY0()) / mmH()) * w.height];
+    const to = focusScreenPoint(p, { w: s.width, h: s.height }, openDialogRects().map((r) => ({ x: r.left - s.left, y: r.top - s.top, w: r.width, h: r.height })));
+    if (to) { E.viewTouched = true; E.panX += to[0] - p[0]; E.panY += to[1] - p[1]; applyView(); }
+  }
+  setCrossHairCursorPosition(x, y);
+}
+/** findDialogs(): the dialogs open over the frame (their screen rectangles). */
+export function openDialogRects(): DOMRect[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(".kd-dialog")).filter((d) => d.offsetParent !== null).map((d) => d.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0);
+}
+/** VIEW_CONTROLS::SetCrossHairCursorPosition: the crosshair (and the status bar's X / Y) at a design point. */
+export function setCrossHairCursorPosition(x: number, y: number): void {
+  E.lastCursorMm = [x, y]; placeCrosshair([x, y], [x, y]); store.slice("viewport", { cursor: [x, y] });
+}
 
 /** Flip Board View is on: the canvas draws the board mirrored in X about its centre (KiCadCanvas.flipCentre). */
 export function viewFlipped(): boolean { return !isSch() && !!E.kdoc && !!(E.renderOpts && E.renderOpts.flip); }

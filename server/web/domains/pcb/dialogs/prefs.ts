@@ -3,10 +3,12 @@
 import { E, GRID_CHOICES, gridListKey, isSch, requestRender, setToggle, setToggles, store, toolCtx, updateGridStatus } from "./editor";
 import { syncCrosshairRadio, syncSchModes } from "../editor/panes";
 import { publishUserOrigin } from "../editor/userorigin";
-import { hotkeyCyclePopup } from "../editor/hotkey-popup";
+import { setUseCustomCursors } from "../editor/cursors";
+import { initScrollbars } from "../editor/scrollbars";
+import { hotkeyCyclePopup, setHotkeyFeedback } from "../editor/hotkey-popup";
 import { effectiveTheme, subscribeTheme } from "../../../shared/theme";
 import { PCB_DEFAULT_GRIDS, PCB_DEFAULT_GRID_IDX, PCB_GRID_OVERRIDES, SCH_GRID_OVERRIDES, gridPitchFor, schGridClassOfKind, schGridClassOfTool, type GridOverrides } from "./logic";
-import { gridChoiceText, messageText, type GridDef, type IuScale } from "../../../shared/units";
+import { gridChoiceText, gridMessageText, type GridDef, type IuScale } from "../../../shared/units";
 import type { Units } from "../../../shared/store";
 import { IS_MAC } from "../../../shared/keys";
 import type { ScrollMod } from "../editor/wheel-model";
@@ -21,7 +23,7 @@ export type SchThemeId = string;
  * WINDOW_SETTINGS::grid: the grid list in KiCad's order (sizes in mm, square grids; names[i] is GRID::name, "" when
  * unnamed), last = grid.last_size (the grid the editor opens on), fast1 / fast2 = Alt+1 / Alt+2, axes = axes_enabled.
  */
-export interface GridPrefs { sizes: number[]; names?: string[]; last?: number; fast1: number; fast2: number; overrides: GridOverrides; axes?: boolean }
+export interface GridPrefs { sizes: number[]; /** GRID::y of each grid (mm), beside sizes (GRID::x) */ ys: number[]; names?: string[]; last?: number; fast1: number; fast2: number; overrides: GridOverrides; axes?: boolean }
 import { clampGal, galDefaults, type GalPrefs } from "./gal-options";
 import { isDarkBackground, type UserSchTheme } from "./color-themes";
 export { GRID_MIN_SPACING_RANGE, GRID_THICKNESS_CHOICES, clampGal, type GalPrefs } from "./gal-options";
@@ -79,9 +81,18 @@ export interface Prefs {
   schFieldNames: { name: string; visible: boolean; url: boolean }[];
   /** COMMON_SETTINGS appearance.hicontrast_dimming_factor (0.8) */
   /** immediateActions: COMMON_SETTINGS input.immediate_actions (on unless "First hotkey selects tool" is ticked) */
-  common: { hcDimming: number; immediateActions: boolean };
+  /**
+   * COMMON_SETTINGS on Preferences > Common: appearance.hicontrast_dimming_factor, input.immediate_actions, and the
+   * options that mean something in a browser: input.hotkey_feedback, appearance.grid_striping,
+   * appearance.use_custom_cursors (on), appearance.show_scrollbars (off) and appearance.use_icons_in_menus
+   */
+  common: { hcDimming: number; immediateActions: boolean; useCustomCursors: boolean; showScrollbars: boolean; hotkeyFeedback?: boolean; gridStriping?: boolean; menuIcons?: boolean };
+  /** Pgm().GetLocalEnvVariables(): the variables the user added in Configure Paths (kicad_common.json environment.vars) */
+  envVars?: { name: string; path: string }[];
   /** PCB Editor > Origins & Axes (PCBNEW_SETTINGS m_Display.m_DisplayOrigin, m_DisplayInvertXAxis / YAxis) */
   pcbOrigin: { origin: "page" | "aux" | "grid"; invertX: boolean; invertY: boolean };
+  /** Footprint Editor > Origins & Axes (FOOTPRINT_EDITOR_SETTINGS m_DisplayInvertXAxis / YAxis); the origin is pcbOrigin's */
+  fpOrigin: { invertX: boolean; invertY: boolean };
   /** PCB Editor > Snapping, Object Snapping (PCBNEW_SETTINGS::m_MagneticItems): pads and tracks capture the cursor never, when routing tracks, or always; graphics never or always */
   pcbSnapping: { pads: "never" | "trackTool" | "always"; tracks: "never" | "trackTool" | "always"; graphics: boolean };
   /**
@@ -100,8 +111,8 @@ export interface Prefs {
 }
 const MIL = 0.0254;
 const IS_WIN = typeof navigator !== "undefined" && /Win/.test(navigator.platform || navigator.userAgent || "");
-function schGrids(): GridPrefs { return { sizes: [100 * MIL, 50 * MIL, 25 * MIL, 10 * MIL], names: ["", "", "", ""], last: 1, fast1: 1, fast2: 2, overrides: { ...SCH_GRID_OVERRIDES }, axes: false }; }
-function pcbGrids(): GridPrefs { return { sizes: PCB_GRID_SIZES.slice(), names: Array(PCB_GRID_SIZES.length).fill(""), last: PCB_DEFAULT_GRID_IDX, fast1: PCB_DEFAULT_GRID_IDX, fast2: PCB_DEFAULT_GRID_IDX + 1, overrides: { ...PCB_GRID_OVERRIDES }, axes: false }; }
+function schGrids(): GridPrefs { return { sizes: [100 * MIL, 50 * MIL, 25 * MIL, 10 * MIL], ys: [100 * MIL, 50 * MIL, 25 * MIL, 10 * MIL], names: ["", "", "", ""], last: 1, fast1: 1, fast2: 2, overrides: { ...SCH_GRID_OVERRIDES }, axes: false }; }
+function pcbGrids(): GridPrefs { return { sizes: PCB_GRID_SIZES.slice(), ys: PCB_GRID_SIZES.slice(), names: Array(PCB_GRID_SIZES.length).fill(""), last: PCB_DEFAULT_GRID_IDX, fast1: PCB_DEFAULT_GRID_IDX, fast2: PCB_DEFAULT_GRID_IDX + 1, overrides: { ...PCB_GRID_OVERRIDES }, axes: false }; }
 /** APP_SETTINGS_BASE::DefaultGridSizeList for pcbnew and the footprint editor: 1000 mil down to 1 mil, then 5 mm down to 0.01 mm. */
 const PCB_GRID_SIZES = PCB_DEFAULT_GRIDS;
 /** SIM_MOUSE_WHEEL_ACTION (eeschema/sim/sim_preferences.h) */
@@ -123,12 +134,14 @@ export const DEFAULT_PREFS: Prefs = {
   pcbDisplay: { showPadNumbers: true, showNetNames: true, showPageLimits: true, netNamesMode: 3, trackClearance: 2, padClearance: true,
     viaColorForTHPads: false, forceShowFieldsWhenFPSelected: true, live3DRefresh: false,
     crossProbing: { onSelection: true, centerOnItems: true, zoomToFit: true, autoHighlight: true, flashSelection: false } },
-  common: { hcDimming: 0.8, immediateActions: true },
+  common: { hcDimming: 0.8, immediateActions: true, useCustomCursors: true, showScrollbars: false, hotkeyFeedback: true, gridStriping: false, menuIcons: !IS_MAC },
+  envVars: [],
   symDisplay: { showHiddenPins: true, showHiddenFields: true, showETypes: true, showAltIcons: true },
   symEditing: { lineWidth: 0, textSize: 50 * 0.0254, pinLength: 100 * 0.0254, pinNumSize: 50 * 0.0254, pinNameSize: 50 * 0.0254, pinPitch: 100 * 0.0254, labelDelta: 1, dragPinsWithEdges: true },
   symColors: { useSch: true, theme: "default" },
   schFieldNames: [],
   pcbOrigin: { origin: "page", invertX: false, invertY: false },
+  fpOrigin: { invertX: false, invertY: false },
   pcbSnapping: { pads: "trackTool", tracks: "trackTool", graphics: true },
   pcbEditing: { rotationAngle: 90, trackDragAction: "drag", ctrlClickHighlight: false, ratsnestThickness: 0.5, escClearsNetHighlight: true, showCourtyardCollisions: true, autoRefillZones: false, allowFreePads: false },
   fpEditing: { rotationAngle: 90 },
@@ -166,12 +179,14 @@ function migrate(raw: unknown): unknown {
   if (mouse && typeof mouse === "object" && !("leftDrag" in mouse)) delete mouse.centerOnZoom;
   const grids = raw && typeof raw === "object" ? (raw as { grids?: Record<string, Record<string, unknown>> }).grids : undefined;
   if (!grids || typeof grids !== "object") return raw;
+  // grid lists saved before grids had a Y size are square: Y is X
+  for (const g of Object.values(grids)) if (g && typeof g === "object" && Array.isArray(g.sizes) && !Array.isArray(g.ys)) g.ys = (g.sizes as unknown[]).slice();
   const sch = grids.sch; if (sch && typeof sch === "object" && typeof sch.last !== "number") sch.last = 1;
   const pcb = grids.pcb; if (!pcb || typeof pcb !== "object" || typeof pcb.last === "number") return raw;
   const sizes = Array.isArray(pcb.sizes) ? (pcb.sizes as unknown[]).map(Number) : [];
   if (sizes.length === LEGACY_PCB_SIZES.length && sizes.every((mm, i) => near(mm, LEGACY_PCB_SIZES[i]))) {
     const at = (i: unknown, fallback: number): number => { const mm = sizes[Number(i)]; const k = mm === undefined ? -1 : PCB_GRID_SIZES.findIndex((x) => near(x, mm)); return k >= 0 ? k : fallback; };
-    pcb.sizes = PCB_GRID_SIZES.slice(); pcb.names = Array(PCB_GRID_SIZES.length).fill("");
+    pcb.sizes = PCB_GRID_SIZES.slice(); pcb.ys = PCB_GRID_SIZES.slice(); pcb.names = Array(PCB_GRID_SIZES.length).fill("");
     pcb.last = at(0, 15); pcb.fast1 = at(pcb.fast1, 15); pcb.fast2 = at(pcb.fast2, 16);
     const o = pcb.overrides as Record<string, unknown> | undefined;
     // the old overrides were all 0.25 mm: they take KiCad's sizes, keeping which ones are on
@@ -181,7 +196,11 @@ function migrate(raw: unknown): unknown {
 }
 /** names[] runs beside sizes[] (settings saved before grids had names have none) */
 function normalize(p: Prefs): Prefs {
-  for (const g of Object.values(p.grids)) { const n = g.names || []; g.names = g.sizes.map((_, i) => (typeof n[i] === "string" ? n[i] : "")); }
+  for (const g of Object.values(p.grids)) {
+    const n = g.names || [], y = Array.isArray(g.ys) ? g.ys : [];
+    g.names = g.sizes.map((_, i) => (typeof n[i] === "string" ? n[i] : ""));
+    g.ys = g.sizes.map((x, i) => (typeof y[i] === "number" && y[i] > 0 ? y[i] : x));
+  }
   for (const k of Object.keys(p.gal) as EditorId[]) p.gal[k] = clampGal(p.gal[k]);
   return p;
 }
@@ -194,14 +213,27 @@ export function savePrefs(p: Prefs): void {
   cache = normalize(merge(DEFAULT_PREFS, p)); try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch (e) { /* no storage */ }
   applyPrefs(true);
   // the Grids page's list selection is the current grid (PANEL_GRID_SETTINGS::TransferDataFromWindow sets grid.last_size)
-  if (E.kdoc) { const mm = defaultGrid(); if (Math.abs(mm - E.gridPitch) > 1e-9) { E.gridPitch = mm; updateGridStatus(); requestRender(); } }
+  if (E.kdoc) { const mm = defaultGrid(), i = defaultGridIndex(); if (Math.abs(mm - E.gridPitch) > 1e-9 || E.gridIdx !== i) { E.gridPitch = mm; E.gridIdx = i; updateGridStatus(); requestRender(); } }
   // the Symbol Editor frame re-reads its own grids
   try { window.dispatchEvent(new Event("kc:prefs")); } catch (e) { /* no window */ }
+}
+/**
+ * PANEL_COLOR_SETTINGS::updateColor → saveCurrentTheme: an edited user theme is written at once (KiCad saves its
+ * colors/*.json on every change), whatever becomes of the rest of the dialog.
+ */
+export function saveUserSchTheme(u: UserSchTheme): void {
+  const cur = clonePrefs(), copy = JSON.parse(JSON.stringify(u)) as UserSchTheme;
+  const at = cur.schColors.user.findIndex((x) => x.id === u.id);
+  if (at >= 0) cur.schColors.user[at] = copy; else cur.schColors.user.push(copy);
+  cache = normalize(merge(DEFAULT_PREFS, cur)); try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch (e) { /* no storage */ }
+  applyPrefs(true);
 }
 export function clonePrefs(): Prefs { return JSON.parse(JSON.stringify(prefs())) as Prefs; }
 
 /** The grids of one editor as KiCad's GRID list: size and name, in the list's order. */
-export function gridDefs(g: GridPrefs): GridDef[] { return g.sizes.map((mm, i) => ({ mm, name: (g.names && g.names[i]) || "" })); }
+export function gridDefs(g: GridPrefs): GridDef[] {
+  return g.sizes.map((mm, i) => { const my = g.ys && g.ys[i]; const d: GridDef = { mm, name: (g.names && g.names[i]) || "" }; if (my && Math.abs(my - mm) > 1e-9) d.my = my; return d; });
+}
 /** GRID_MENU::BuildChoiceList's text for one grid, in the editor's current units ("1.2700 mm (50.00 mils)"). */
 export function gridLabel(g: GridDef | number, ed: EditorId = editorId()): string {
   const units = (E.units === "in" || E.units === "mil" ? E.units : "mm") as Units;
@@ -212,10 +244,13 @@ export const GRID_PAGE: Record<EditorId, string> = { sch: "Schematic Editor/Grid
 /** The document's editor: the schematic, the board, or the Footprint Editor for a footprint (the Symbol Editor frame passes "sym" itself). */
 export function editorId(): EditorId { return isSch() ? "sch" : E.DOC_TYPE === "footprint" ? "fp" : "pcb"; }
 /** The grid the editor opens on (grid.last_size). */
-export function defaultGrid(ed: EditorId = editorId()): number { const g = prefs().grids[ed]; return g.sizes[Math.max(0, Math.min(g.sizes.length - 1, g.last ?? 0))]; }
-/** Remember the grid picked (KiCad saves grid.last_size with the window settings); nothing else is re-applied. */
-export function rememberGrid(mm: number, ed: EditorId = editorId()): void {
-  const p = prefs(), g = p.grids[ed], i = g.sizes.findIndex((x) => Math.abs(x - mm) < 1e-9); if (i < 0 || g.last === i) return;
+export function defaultGrid(ed: EditorId = editorId()): number { const g = prefs().grids[ed]; return g.sizes[defaultGridIndex(ed)]; }
+/** grid.last_size's place in the list. */
+export function defaultGridIndex(ed: EditorId = editorId()): number { const g = prefs().grids[ed]; return Math.max(0, Math.min(g.sizes.length - 1, g.last ?? 0)); }
+/** Remember the grid picked (KiCad saves grid.last_size with the window settings); nothing else is re-applied.  `idx`: its place in the list, when known. */
+export function rememberGrid(mm: number, ed: EditorId = editorId(), idx?: number): void {
+  const p = prefs(), g = p.grids[ed];
+  const i = idx !== undefined && idx >= 0 && Math.abs((g.sizes[idx] ?? NaN) - mm) < 1e-9 ? idx : g.sizes.findIndex((x) => Math.abs(x - mm) < 1e-9); if (i < 0 || g.last === i) return;
   g.last = i; try { localStorage.setItem(KEY, JSON.stringify(p)); } catch (e) { /* no storage */ }
 }
 
@@ -289,22 +324,35 @@ export function applyPcbToolPrefs(p: Prefs = prefs()): void {
   pcbS.magnetic = { pads: p.pcbSnapping.pads, tracks: p.pcbSnapping.tracks, graphics: p.pcbSnapping.graphics !== false };
   pcbS.allowFreePads = !!p.pcbEditing.allowFreePads;
 }
+/** PANEL_COMMON_SETTINGS' options that act on the whole page: the hotkey popup, table striping, cursors, menu icons. */
+export function applyCommonAppearance(p: Prefs = prefs()): void {
+  setHotkeyFeedback(p.common.hotkeyFeedback !== false);
+  setUseCustomCursors(p.common.useCustomCursors !== false);
+  if (typeof document === "undefined") return;
+  const root = document.documentElement;
+  root.classList.toggle("k-grid-striping", !!p.common.gridStriping);
+  root.classList.toggle("k-no-menu-icons", p.common.menuIcons === false);
+}
 export function applyPrefs(full = true): void {
   const p = prefs();
   // WX_VIEW_CONTROLS::LoadSettings: the wheel routing and the zoom controller (editor/wheel-model.ts) read these
   const m = p.mouse;
   E.wheel = { zoomMod: m.zoomMod, panHMod: m.panHMod, panVMod: m.panVMod, reverseZoom: m.reverseZoom, reversePanH: m.reversePanH, horizontalPan: m.horizontalPan,
     zoomAcceleration: m.zoomAccel, zoomSpeed: Math.max(1, Math.min(10, m.zoomSpeed)), zoomSpeedAuto: m.autoZoomSpeed, centerOnZoom: m.centerOnZoom, touchpadMode: m.touchpadMode };
-  E.zoomController = null;
+  // WX_VIEW_CONTROLS::LoadSettings builds the zoom controller now; its constructor stamps the previous-event time
+  E.zoomController = null; E.zoomControllerSince = typeof performance !== "undefined" ? performance.now() : 0;
   E.middleDragPan = m.middleDrag !== "none"; E.rightDragPan = m.rightDrag !== "none";
   E.middleDrag = m.middleDrag; E.rightDrag = m.rightDrag; E.leftDrag = m.leftDrag; E.motionPanMod = m.motionPanMod;
   E.autoPan = m.autoPan; E.autoPanSpeed = m.autoPanSpeed;
   E.pinSelectsSymbol = !!p.schEditing.pinSelectsSymbol;   // selection.select_pin_selects_symbol (the click collector reads it)
   E.gridFor = activeGridPitch;
+  applyCommonAppearance(p);
   // EE_GRID_HELPER::GetGridSize( grid class ) for the schematic tools (Pin Helpers' wire stub uses GRID_WIRES)
   (E as unknown as { gridForClass?: (cls: string) => number }).gridForClass = (cls: string) => gridPitchFor(cls as Parameters<typeof gridPitchFor>[0], prefs().grids.sch.overrides, E.gridPitch as number);
   applyColorTheme(p);
-  E.pcbOrigin = p.pcbOrigin; publishUserOrigin();
+  E.pcbOrigin = p.pcbOrigin; E.fpOrigin = p.fpOrigin; publishUserOrigin();
+  // CURSOR_STORE::GetCursor reads use_custom_cursors each time; EDA_DRAW_PANEL_GAL reads show_scrollbars once, as it is made
+  initScrollbars(!!p.common.showScrollbars);   // (applyCommonAppearance set the cursors)
   const ed = editorId(), g = p.grids[ed];
   if (E.kdoc) {
     const choices = gridDefs(g);
@@ -337,9 +385,12 @@ export function applyPrefs(full = true): void {
     } else {
       E.renderOpts.padNumbers = p.pcbDisplay.showPadNumbers; E.renderOpts.netNames = p.pcbDisplay.showNetNames; E.renderOpts.pageLimits = p.pcbDisplay.showPageLimits;
       E.renderOpts.netNamesMode = p.pcbDisplay.netNamesMode;
+      // PCB_RENDER_SETTINGS m_UseViaColorForNormalTHPadstacks, m_ForceShowFieldsWhenFPSelected
+      E.renderOpts.viaColorForTHPads = !!p.pcbDisplay.viaColorForTHPads; E.renderOpts.forceShowFields = p.pcbDisplay.forceShowFieldsWhenFPSelected !== false;
       (E.renderOpts as { hcDimming?: number }).hcDimming = p.common.hcDimming;
       E.renderOpts.ratsnestThickness = Math.max(0.5, Math.min(10, +p.pcbEditing.ratsnestThickness || 0.5));   // the spin control's 0.5..10
       E.escClearsHighlight = p.pcbEditing.escClearsNetHighlight; E.ctrlClickHighlight = p.pcbEditing.ctrlClickHighlight;
+      (E as { immediateActions?: boolean }).immediateActions = p.common.immediateActions !== false;   // input.immediate_actions: a board tool's hotkey primes it (hotkeys.ts)
       applyPcbToolPrefs(p);
       setToggles({ showPadNumbers: p.pcbDisplay.showPadNumbers, showNetNames: p.pcbDisplay.showNetNames });
     }
@@ -365,12 +416,16 @@ export function toggleGridOverrides(): boolean {
  */
 export function fastGrid(n: 1 | 2 | "cycle"): number | null {
   const g = prefs().grids[editorId()];
-  if (n === "cycle") { const cur = g.sizes.findIndex((s) => Math.abs(s - E.gridPitch) < 1e-9); n = cur === g.fast1 ? 2 : 1; }
+  if (n === "cycle") {
+    // grid.last_size_idx == grid.fast_grid_1 ? fast grid 2 : fast grid 1
+    const ix = E.gridIdx, cur = typeof ix === "number" && ix >= 0 && Math.abs((g.sizes[ix] ?? NaN) - E.gridPitch) < 1e-9 ? ix : g.sizes.findIndex((s) => Math.abs(s - E.gridPitch) < 1e-9);
+    n = cur === g.fast1 ? 2 : 1;
+  }
   const idx = n === 1 ? g.fast1 : g.fast2, mm = g.sizes[idx]; if (!mm) return null;
-  E.gridPitch = mm; rememberGrid(mm); updateGridStatus(); requestRender();
+  E.gridPitch = mm; E.gridIdx = idx; rememberGrid(mm, editorId(), idx); updateGridStatus(); requestRender();
   // GridPreset( idx, aFromHotkey = true ) posts GridChangedByKeyEvent; only eeschema's SCH_EDITOR_CONTROL::GridFeedback
   // answers it, with the HOTKEY_CYCLE_POPUP "Grid" list of every grid (hotkey_feedback is on by default)
   // GRID::UserUnitsMessageText: each size in the frame's units only
-  if (editorId() === "sch") { const u = (E.units === "in" || E.units === "mil" ? E.units : "mm") as Units; hotkeyCyclePopup("Grid", g.sizes.map((x) => messageText(x, u, "sch")), idx); }
+  if (editorId() === "sch") { const u = (E.units === "in" || E.units === "mil" ? E.units : "mm") as Units; hotkeyCyclePopup("Grid", g.sizes.map((x, i) => gridMessageText(x, (g.ys && g.ys[i]) || x, u, "sch", true)), idx); }
   return mm;
 }

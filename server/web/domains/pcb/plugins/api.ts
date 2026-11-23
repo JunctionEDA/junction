@@ -8,6 +8,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as design from "../ai/design";
+import { GENERATOR_VERSION, SEXPR_BOARD_FILE_VERSION } from "../canvas/format-version";
 import { ED, K, ToolError } from "../ai/design";
 import { added, buildProposal, modified, removed } from "../ai/proposals";
 import { appState } from "../../../shared/store";
@@ -83,7 +84,7 @@ export const reads: Record<string, (a: any) => Promise<unknown>> = {
     const { ed, doc, open } = liveDoc(); const k = K();
     if (doc.type !== "pcb") throw new ApiError("The open document is a schematic; KiCad's Python plugins work on a board. Open the board first.", "not_board");
     const q = (v: unknown) => '"' + String(v == null ? "" : v).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"';
-    const out: string[] = [`(kicad_pcb (version ${doc.version || 20241229}) (generator "pcbnew") (generator_version "10.0")`, `(general (thickness ${r3(doc.thickness || 1.6)}))`, `(paper ${q(doc.paper || "A4")}${doc.portrait ? " portrait" : ""})`];
+    const out: string[] = [`(kicad_pcb (version ${doc.version || SEXPR_BOARD_FILE_VERSION}) (generator "pcbnew") (generator_version "${GENERATOR_VERSION}")`, `(general (thickness ${r3(doc.thickness || 1.6)}))`, `(paper ${q(doc.paper || "A4")}${doc.portrait ? " portrait" : ""})`];
     const tb = doc.titleBlock || {}; const tbl: string[] = [];
     for (const f of ["title", "date", "rev", "company"]) if (tb[f]) tbl.push(`(${f} ${q(tb[f])})`);
     for (let i = 1; i <= 9; i++) if (tb["comment" + i]) tbl.push(`(comment ${i} ${q(tb["comment" + i])})`);

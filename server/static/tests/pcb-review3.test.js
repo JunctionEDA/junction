@@ -73,17 +73,15 @@ test("Create Array of a tuning pattern copies the generator into each cell (ARRA
   for (const id of mem) { assert.ok(r.ids.includes(id)); assert.ok(!["m1", "m2", "m3"].includes(id)); }
 });
 
-test("copper thieving is refused on a board in the KiCad 10 format; a newer or new board may use it", () => {
+test("copper thieving is offered on any board: a KiCad 10 board is raised to 20260513 on save (chooseFileFormatVersion)", () => {
   assert.equal(P.THIEVING_FILE_VERSION, 20260513);
-  assert.equal(P.thievingAllowed(doc0()), false);
-  assert.equal(P.thievingAllowed(K.parseDoc(TUNED.replace("20260206", "20260513"), "kicad_pcb")), true);
-  assert.equal(P.thievingAllowed(K.parseDoc(TUNED.replace("(version 20260206) ", ""), "kicad_pcb")), true, "a board without a version is written in the current format");
+  assert.equal(P.thievingAllowed(doc0()), true);
   const doc = doc0(); const log = { toasts: [], tool: null };
   const ctx = { K, doc, IU, isSch: false, zoom: 1, pxPerMm: 4, gridPitch: 0.05, snapOn: true, selected: null, items: [], viewOnly: false, live: true, snap: (m) => m, worldMm: () => [0, 0],
-    requestRender() {}, applyLocal() {}, setSelected() {}, commit() { throw new Error("no commit expected"); }, toast(m) { log.toasts.push(m); }, setTool(t) { log.tool = t; pcb.onActivate(t, ctx); } };
+    requestRender() {}, applyLocal() {}, setSelected() {}, commit() {}, toast(m) { log.toasts.push(m); }, setTool(t) { log.tool = t; pcb.onActivate(t, ctx); } };
   pcb.onDocChanged(ctx); ctx.setTool("thievingzone");
-  assert.equal(log.tool, "select", "the tool does not start"); assert.equal(P.state.modTool, null);
-  assert.ok(/KiCad 11 file format/.test(log.toasts.at(-1)), log.toasts.at(-1));
+  assert.equal(log.tool, "thievingzone", "the tool starts"); assert.ok(!log.toasts.some((m) => /file format/.test(m)));
+  ctx.setTool("select");
 });
 
 test("Fill Mode thieving then solid keeps the zone's pad connection (ZONE::SetFillMode); a drawn thieving zone connects no pads", () => {

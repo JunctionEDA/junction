@@ -6,8 +6,7 @@
 // (the BOARD_LISTENER callbacks that clear m_upToDate); each hit is selected and brought into view.
 import { comboBox } from "../../../../shared/components/kcombo";
 import { E } from "../state";
-import { applyView, flipMmX, mmH, mmW, mmX0, mmY0, stage, world } from "../view";
-import { centerOn } from "../comments";
+import { applyView, focusOnLocation, mmW, stage } from "../view";
 import { clearSelection, filterAllows } from "../selection";
 import { keyName } from "../../../../shared/keys";
 import { setStatusBar } from "../appstore";
@@ -42,38 +41,8 @@ function setStatus(t: string): void { if (statusEl) statusEl.textContent = t; }
 function boardKey(): string { const P = PT(); return E.kdoc ? `${E.kdoc.items.size}|${P ? P.state.docVer : 0}|${P ? P.state.markers.length : 0}|${(E.kdoc as unknown as { __id?: string }).__id || ""}` : ""; }
 let lastDoc: unknown = null;
 
-/** A board point (mm) in client pixels. */
-function toClient(x: number, y: number): [number, number] {
-  const w = world.getBoundingClientRect();
-  return [w.left + ((flipMmX(x) - mmX0()) / mmW()) * w.width, w.top + ((y - mmY0()) / mmH()) * w.height];
-}
-type Rect = { l: number; t: number; r: number; b: number };
-const grow = (q: Rect, d: number): Rect => ({ l: q.l - d, t: q.t - d, r: q.r + d, b: q.b + d });
-const inside = (q: Rect, p: [number, number]) => p[0] >= q.l && p[0] <= q.r && p[1] >= q.t && p[1] <= q.b;
-/** EDA_DRAW_FRAME::FocusOnLocation: the view moves only when the point is off screen (or within 10 % of the edge) or
- *  behind a dialog (or within 10 % of it); it is then centred in the largest part of the canvas the dialogs leave free
- *  (VIEW::SetCenter( aPos, obscuringScreenRects )). */
-export function focusOnLocation(x: number, y: number): void {
-  const s = stage.getBoundingClientRect(); const view: Rect = { l: s.left, t: s.top, r: s.right, b: s.bottom };
-  const dialogs: Rect[] = Array.from(document.querySelectorAll<HTMLElement>(".kd-dialog")).filter((d) => d.offsetParent !== null).map((d) => { const r = d.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; });
-  const p = toClient(x, y);
-  let center = !inside(grow(view, -(view.r - view.l) / 10), p);
-  for (const d of dialogs) if (inside(grow(d, (d.r - d.l) / 10), p)) center = true;
-  if (!center) return;
-  // the free areas beside the dialogs, inside the canvas: the largest one gets the point at its centre
-  let best: Rect = view, area = 0;
-  const cands: Rect[] = [view];
-  for (const d of dialogs) {
-    if (d.r < view.l || d.l > view.r || d.b < view.t || d.t > view.b) continue;
-    cands.length = 0;
-    cands.push({ ...view, r: Math.min(view.r, d.l) }, { ...view, l: Math.max(view.l, d.r) }, { ...view, b: Math.min(view.b, d.t) }, { ...view, t: Math.max(view.t, d.b) });
-    break;
-  }
-  for (const c of cands) { const a = Math.max(0, c.r - c.l) * Math.max(0, c.b - c.t); if (a > area) { area = a; best = c; } }
-  centerOn(x, y);   // the point at the canvas centre, then shifted to the free area's centre
-  const want: [number, number] = [(best.l + best.r) / 2, (best.t + best.b) / 2], now = toClient(x, y);
-  E.panX += want[0] - now[0]; E.panY += want[1] - now[1]; applyView();
-}
+/** EDA_DRAW_FRAME::FocusOnLocation (editor/view.ts). */
+export { focusOnLocation };
 
 /** PCB_SELECTION_TOOL::FindItem: select the hit and bring it into view, zooming out (never in) when it does not fit. */
 function focusHit(hit: Hit): void {

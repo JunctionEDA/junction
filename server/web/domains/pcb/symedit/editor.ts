@@ -1162,7 +1162,7 @@ export class SymbolEditor {
     /** The row a navigation key goes to (by its id: a commit re-renders the grid before the focus moves). */
     function propTarget(from: HTMLElement, nav: PropNav): string | null {
       const cells = Array.from(grid.querySelectorAll<HTMLElement>("[data-prop]"));
-      const to = navTarget(cells.map((c) => ({ readOnly: (c as HTMLInputElement).disabled })), cells.indexOf(from), nav);
+      const to = navTarget(cells.map((c) => ({ readOnly: (c as HTMLInputElement).disabled, disabled: (c as HTMLInputElement).disabled })), cells.indexOf(from), nav);
       const t = cells[to]; if (!t || t === from) return null;
       const row = t.closest<HTMLElement>("[data-prop-row]"); return row ? row.dataset.propRow || null : null;
     }

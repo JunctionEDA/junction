@@ -12,8 +12,8 @@
 //   PCB_TEXT    EDA_TEXT::GetTextBox turned about the text position
 //   PAD         the pad shape's box (a turned rectangle, not its circumscribed circle)
 //   FOOTPRINT   the position grown by 0.25 mm, merged with its graphics, pads, zones and visible texts
-import { kid, kids, num, rotator, splitLines } from "./sexpr";
-import { textWidth } from "./text";
+import { kid, kids, num, rotator } from "./sexpr";
+import { strokeTextBox } from "./text";
 
 export type BoxIU = [number, number, number, number];
 interface Geom { t: string; x?: number; y?: number; x1?: number; y1?: number; x2?: number; y2?: number; w?: number; h?: number | string; r?: number; rot?: number; pts?: number[][];
@@ -50,14 +50,8 @@ function addGeom(b: Box, g: Geom): void {
     if (g.shape === "oval") { const rr = Math.min(w, h) / 2, l = Math.max(w, h) / 2 - rr; const ex = (w >= h ? c : s) * l, ey = (w >= h ? s : c) * l; b.add(x - ex, y - ey, rr); b.add(x + ex, y + ey, rr); return; }
     const ex = (w * c + h * s) / 2, ey = (w * s + h * c) / 2; b.add(x - ex, y - ey); b.add(x + ex, y + ey);
   } else if (g.t === "text" && !g.noBox) {
-    // EDA_TEXT::GetTextBox for the stroke font: the string's width, the size grown by the 0.17 "fudge" that
-    // covers descenders, placed by the justification, then turned about the anchor
-    const size = g.size || 1, lines = splitLines(g.text || "");
-    let w = 0; for (const l of lines) w = Math.max(w, textWidth(l, g.sizeX || size, typeof g.w === "number" ? g.w : 0));
-    const fudge = size * 0.17, h = size + fudge + (lines.length - 1) * size * 1.68 * 0.9583;
-    const hj = String(g.h || "center");
-    const x0 = hj === "left" ? 0 : hj === "right" ? -w : -w / 2;
-    const y0 = g.v === "top" ? -fudge : g.v === "bottom" ? -h + fudge : -h / 2;
+    // EDA_TEXT::GetTextBox for the stroke font (strokeTextBox), turned about the anchor
+    const [x0, y0, x1, y1] = strokeTextBox({ ...g, w: typeof g.w === "number" ? g.w : 0 } as Parameters<typeof strokeTextBox>[0]), w = x1 - x0, h = y1 - y0;
     const R = rotator(g.rot || 0) as (x: number, y: number) => [number, number];
     for (const [px, py] of [[x0, y0], [x0 + w, y0], [x0, y0 + h], [x0 + w, y0 + h]]) { const [rx, ry] = R(g.mirror ? -px : px, py); b.add((g.x || 0) + rx, (g.y || 0) + ry); }
   }

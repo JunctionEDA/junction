@@ -41,6 +41,11 @@ export const ACTION_LIST = [
   act("repeatLast", "Repeat Last Item", "Insert", (ctx: SchCtx) => repeatLast(ctx)),
   act("increment", "Increment", "", (ctx: SchCtx) => incrementSelection(ctx, 1)),
   act("decrement", "Decrement", "", (ctx: SchCtx) => incrementSelection(ctx, -1)),
+  // ACTIONS::incrementPrimary … decrementSecondary (common/tool/actions.cpp:462-488): INCREMENT{ delta, index }
+  act("incrementPrimary", "Increment Primary", "", (ctx: SchCtx) => incrementSelection(ctx, 1, 0)),
+  act("decrementPrimary", "Decrement Primary", "", (ctx: SchCtx) => incrementSelection(ctx, -1, 0)),
+  act("incrementSecondary", "Increment Secondary", "", (ctx: SchCtx) => incrementSelection(ctx, 1, 1)),
+  act("decrementSecondary", "Decrement Secondary", "", (ctx: SchCtx) => incrementSelection(ctx, -1, 1)),
   act("toLabel", "Change to Label", "", (ctx: SchCtx) => convertSelection(ctx, "label")),
   act("toGLabel", "Change to Global Label", "", (ctx: SchCtx) => convertSelection(ctx, "global_label")),
   act("toHLabel", "Change to Hierarchical Label", "", (ctx: SchCtx) => convertSelection(ctx, "hierarchical_label")),

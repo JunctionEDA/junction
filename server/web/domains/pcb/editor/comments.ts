@@ -15,7 +15,7 @@ import { clearAllSelection, selectItemId, selectionChanged } from "./gestures";
 import { E } from "./state";
 import { setTool } from "./tools";
 import { ago, api, toast } from "./util";
-import { applyView, cmtG, cmtPanel, flipMmX, mmH, mmW, mmX0, mmY0, pxPerMm, requestRender, stage, world, worldMm } from "./view";
+import { applyView, cmtG, cmtPanel, flipMmX, mmH, mmW, mmX0, mmY0, pxPerMm, requestRender, setCrossHairCursorPosition, stage, world, worldMm } from "./view";
 import { closeMark } from "../../../shared/components/kicon-dom";
 import { focusScreenPoint } from "../dialogs/erc-rules";
 
@@ -201,6 +201,10 @@ export function centerOn(xMm: number, yMm: number): void {
  * leave free; the zoom is kept.
  */
 export function focusOnLocation(xMm: number, yMm: number, allowScroll: boolean, dialogs: { left: number; top: number; width: number; height: number }[] = []): void {
+  focusView(xMm, yMm, allowScroll, dialogs);
+  setCrossHairCursorPosition(xMm, yMm);   // SetCrossHairCursorPosition( aPos ), scrolled or not
+}
+function focusView(xMm: number, yMm: number, allowScroll: boolean, dialogs: { left: number; top: number; width: number; height: number }[]): void {
   if (!allowScroll) return;
   const w = worldEl.clientWidth, h = (w * mmH()) / mmW(), sr = stageEl.getBoundingClientRect();
   const sx = E.panX + ((xMm - mmX0()) / mmW()) * w * E.zoom, sy = E.panY + ((yMm - mmY0()) / mmH()) * h * E.zoom;

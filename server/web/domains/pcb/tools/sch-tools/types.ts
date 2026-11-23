@@ -176,7 +176,7 @@ export interface Placed { kind: string; node: SNode }
 export type SchState = {
   ctx: SchCtx | null; tool: string; wire: SchWire | null; carry: SchCarry | null; drag: SchDrag | null;
   /** a press on a wire, label, ...: a drag moves it, or draws a selection box when nothing was selected before (box) */
-  pending: { item: KItem; mm: Pt; box?: boolean; client?: [number, number] } | null; sel: string | null; hover: string | null;
+  pending: { item: KItem; mm: Pt; box?: boolean; client?: [number, number]; t?: number } | null; sel: string | null; hover: string | null;
   cursor: Pt | null; cursorClient: Pt | null; prompt: HTMLElement | null; picker: HTMLElement | null; dom: boolean;
   draw: SchDraw | null; highlight: Set<string> | null; sheetJob: SheetJob | null; imageWait: boolean;
   /** Place > Import Sheet "Place as sheet" (SCH_ACTIONS::drawSheetFromFile): the next drawn sheet's name and file */

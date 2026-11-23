@@ -2,13 +2,17 @@
 import { copperCtx, sliverMarkers } from "./drc-sliver";
 import { connectionWidthMarkers } from "./drc-connwidth";
 import type { Box, Conductor, CopperShape, DesignSettings, DesignSource, DrcMarker, NetclassRules, BoardDoc, PolyShape, Pt } from "./types";
-import { arcPoints, boxGrid, boxesTouch, firstEdgeConflict, polysOverlap, shapeBBox, shapeGap, shareLayer } from "./distances";
+import { arcPoints, boxGrid, boxesTouch, collisionPoint, nearestPoints, firstEdgeConflict, polysOverlap, shapeBBox, shapeGap, shareLayer, viaLayers } from "./distances";
+import { netOf } from "./nets";
+import { footprintCheckMarkers } from "./drc-footprints";
 import { pointInPoly } from "./hit";
 import { netlist, ratsnest } from "./netlist";
 import { K } from "./state";
 import { boardElements } from "./drc-silk";
 import { DRC_EPS, EPS } from "./transforms";
 import { isList, layerDefaults, layerOf, pt, r6, rotator, widthOf } from "./util";
+import { messageText } from "../../../../shared/units";
+import type { Units } from "../../../../shared/store";
 import { evalRuleConstraint, parseDru, ruleClearance } from "./dru";
 import { assertionMarkers, disallowMarkers, ruleItems, sizeMarkers, trackAngleMarkers } from "./drc-rules";
 import type { DruRule } from "./dru";
@@ -112,12 +116,29 @@ export function netclassOf(s: DesignSettings, net: string | null | undefined): P
   }
   return out;
 }
+/** NETCLASS::ContainsNetclassWithName on the net's effective class: a constituent's name Matches() the (wildcard) filter (a net with no class is in Default). */
+export function netInNetclass(s: DesignSettings, net: string | null | undefined, filter: string): boolean {
+  const re = new RegExp("^" + filter.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
+  const c = netclassConstituents(s, net);
+  return (c.length ? c : ["Default"]).some((n) => re.test(n));
+}
 export const netClearance = (s: DesignSettings, net: string | null | undefined): number => { const nc = netclassOf(s, net); return nc && nc.clearance !== undefined ? nc.clearance : s.clearance; };
-export const mm4 = (v: number) => v.toFixed(4) + " mm";
-/** DRC_TEST_PROVIDER::formatMsg: when the two read the same at 4 places, both are written to the nanometre. */
+/** The user units DRC_ENGINE::RunTests( aUnits ) formats its messages in (the frame's), set for one drc() run. */
+let msgUnits: Units = "mm";
+export const setDrcUnits = (u: Units | null | undefined): Units => { const was = msgUnits; msgUnits = u === "in" || u === "mil" ? u : "mm"; return was; };
+/** MessageTextFromValue in the run's user units: "%.4f mm", "%.2f mils", "%.4f in". */
+export const mm4 = (v: number) => messageText(v, msgUnits, "pcb");
+/** DRC_TEST_PROVIDER::formatMsg: when the two read the same in MessageTextFromValue, both are written by StringFromValue
+ *  ("%.10f" mm, "%.5f" mils, "%.8f" in of the nanometre value, trailing zeros removed). */
 export const mmPair = (need: number, actual: number): [string, string] => {
   const a = mm4(need), b = mm4(actual); if (a !== b) return [a, b];
-  const fine = (v: number) => v.toFixed(6).replace(/0+$/, "").replace(/\.$/, "") + " mm"; return [fine(need), fine(actual)];
+  const fine = (mm: number) => {
+    const iu = Math.round(mm * 1e6) / 1e6, v = msgUnits === "in" ? iu / 25.4 : msgUnits === "mil" ? iu / 0.0254 : iu;
+    const trim = (t: string) => t.replace(/0+$/, "").replace(/\.$/, "");
+    let t = trim(v.toFixed(msgUnits === "in" ? 8 : msgUnits === "mil" ? 5 : 10)); if (v !== 0 && (t === "0" || t === "-0")) t = trim(v.toFixed(10));
+    return t + (msgUnits === "in" ? " in" : msgUnits === "mil" ? " mils" : " mm");
+  };
+  return [fine(need), fine(actual)];
 };
 /** Edge.Cuts geometry as shapes (lines with their half width) and the polylines they form, board items and footprint drawings alike. */
 export function edgeShapes(doc: BoardDoc, o?: { layer?: string; zeroWidth?: boolean }) {
@@ -212,6 +233,10 @@ export function segCross(p1: Pt, p2: Pt, p3: Pt, p4: Pt): Pt | null {
   return [p1[0] + t * d1[0], p1[1] + t * d1[1]];
 }
 export const marker = (code: string, severity: string, x: number, y: number, text: string, ids: string[]): DrcMarker => ({ code, severity, x: r6(x), y: r6(y), text, ids });
+/** DRC_ENGINE::RunTests' per-code error limit: EXTENDED_ERROR_LIMIT for clearance and unconnected items, else ERROR_LIMIT. */
+export const drcErrorLimit = (code: string): number => (code === "clearance" || code === "unconnected_items" ? 499 : 199);
+/** PCB_MARKER::GetSeverity: a violating rule with its own (severity …) decides over the project's rule_severities. */
+export const ruled = (m: DrcMarker, sev: string | null | undefined): DrcMarker => { if (sev === "warning" || sev === "error") { m.severity = sev; m.ruleSeverity = true; } return m; };
 /** The markers' items as KiCad identifies them (RC_ITEM KIIDs): a pad by its own uuid, not its footprint's. */
 export const withKiids = (m: DrcMarker, kiids: string[]): DrcMarker => { m.kiids = Array.from(new Set(kiids.filter(Boolean))); return m; };
 const tieCache = new WeakMap<object, Map<string, number>>();
@@ -221,6 +246,15 @@ function tiedPads(fp: { node: SNode }, a: string, b: string): boolean {
   if (!m) { m = new Map(); const g = K.kid(fp.node, "net_tie_pad_groups"); if (g) g.slice(1).forEach((grp, i) => { for (const n of K.str(grp as SNode).split(/[\s,]+/).filter(Boolean)) m!.set(n, i); }); tieCache.set(fp, m); }
   const x = m.get(a); return x !== undefined && x === m.get(b);
 }
+/**
+ * DRC_ENGINE::IsNetTieExclusion( netCode, layer, pos, collidingItem ): the colliding item belongs to a net-tie footprint and
+ * the collision point lies (within the DRC epsilon) on one of its pads that is in a net-tie group and carries the net.
+ */
+export function netTieExcluded(conds: Conductor[], net: string, layer: string, pos: Pt, other: Conductor): boolean {
+  const fp = other.item; if (!fp || fp.kind !== "footprint" || !K.kid(fp.node, "net_tie_pad_groups")) return false;
+  const P = { t: "circle" as const, x: pos[0], y: pos[1], r: 0 };
+  return conds.some((p) => p.kind === "pad" && p.item === fp && tiedPads(fp, p.pad.number, p.pad.number) && (p.net || "") === net && p.layers.has(layer) && shapeGap(p.shape, P) <= DRC_EPS);
+}
 export const boxCenter = (a: Box, b: Box) => [(Math.max(a[0], b[0]) + Math.min(a[2], b[2])) / 2, (Math.max(a[1], b[1]) + Math.min(a[3], b[3])) / 2];
 /**
  * The DRC subset: copper clearance (pads, tracks, arcs, vias against different nets on a shared layer), copper to
@@ -229,7 +263,13 @@ export const boxCenter = (a: Box, b: Box) => [(Math.max(a[0], b[0]) + Math.min(a
  */
 /** Rules a footprint can break on its own, as its library drew it: waived when every item named is that one footprint. */
 export const FOOTPRINT_OWN = new Set(["clearance", "shorting_items", "hole_clearance", "hole_to_hole", "holes_co_located", "solder_mask_bridge", "silk_over_copper", "silk_overlap", "malformed_courtyard", "missing_courtyard", "pth_inside_courtyard", "npth_inside_courtyard", "isolated_copper"]);
-export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | string | null | undefined, opts?: { unconnected?: boolean; outline?: boolean; rules?: DruRule[] | string | null; footprintOwn?: boolean; allTrackErrors?: boolean }) {
+type DrcOpts = { unconnected?: boolean; outline?: boolean; rules?: DruRule[] | string | null; footprintOwn?: boolean; allTrackErrors?: boolean; units?: Units };
+/** `opts.units`: the user units the messages are written in (DRC_ENGINE::RunTests( aUnits )), mm by default. */
+export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | string | null | undefined, opts?: DrcOpts) {
+  const was = setDrcUnits(opts && opts.units);
+  try { return drcRun(doc, settings, opts); } finally { setDrcUnits(was); }
+}
+function drcRun(doc: BoardDoc, settings: DesignSettings | DesignSource | string | null | undefined, opts?: DrcOpts) {
   const s = settings && (settings as DesignSettings).netclasses ? settings as DesignSettings : designSettings(settings); opts = opts || {}; const out: DrcMarker[] = [];
   const nl = netlist(doc); const conds = nl.conductors.filter((c) => c.kind !== "zone");
   const clr = (c: Conductor) => netClearance(s, c.net);
@@ -297,6 +337,7 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
         const tr = allTrackErrors ? null : trackOf(a, b), trKey = tr ? tr.id + "|" + layer : "";
         if (tr && trackDone.has(trKey)) continue;
         let need = Math.max(pairClr(a, b), pairClr(b, a), s.minClearance || 0), by = "";   // Board Setup > Constraints: the board minimum is a floor
+        if ((s.minClearance || 0) > Math.max(pairClr(a, b), pairClr(b, a))) by = "board minimum";   // EvalRules renames the constraint
         const ov = override(a, b);
         if (ov) { need = ov.need; by = ov.name; }
         else if (clrRules.length && boxesTouch(a.bbox, b.bbox, maxClr)) {
@@ -305,6 +346,9 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
         }
         if (!need || !boxesTouch(a.bbox, b.bbox, need)) continue;
         const gap = shapeGap(shapeOn(a, layer), shapeOn(b, layer)); if (gap >= need - DRC_EPS) continue;
+        // a copper item entering a net-tie pad of its own net is allowed, whichever side is tested first
+        { const [T, O] = firstOf(a, b); const pos = collisionPoint(shapeOn(T, layer), shapeOn(O, layer));
+          if (netTieExcluded(nl.conductors, T.net || "", layer, pos, O) || netTieExcluded(nl.conductors, O.net || "", layer, pos, T)) continue; }
         if (tr) trackDone.add(trKey);
         if (a.kind === "segment" && b.kind === "segment") {   // DRC_TEST_PROVIDER_COPPER_CLEARANCE: crossing tracks are their own violation
           const sa = a.shape as { a: Pt; b: Pt }, sb = b.shape as { a: Pt; b: Pt }; const X = segCross(sa.a, sa.b, sb.a, sb.b);
@@ -314,7 +358,7 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
         if (gap <= 0) {
           const pad = a.kind === "pad" || b.kind === "pad"; const [p, q] = a.id <= b.id ? [a, b] : [b, a];
           if (pad ? !!(a.net && b.net) : !!q.net) {
-            const [x, y] = boxCenter(a.bbox, b.bbox);
+            const [T, O] = firstOf(a, b); const [x, y] = collisionPoint(shapeOn(T, layer), shapeOn(O, layer));   // SHAPE::Collide's location
             out.push(withKiids(marker("shorting_items", "error", x, y, `Items shorting two nets (nets ${p.net || "<no net>"} and ${q.net || "<no net>"})`, Array.from(new Set([a.id, b.id]))), [uid(a), uid(b)])); continue;
           }
         }
@@ -322,9 +366,12 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
         // the pads near it; of two tracks or two pads the lower uuid tests the other)
         const [A, B] = firstOf(a, b);
         const ca = pairClr(A, B), cb = pairClr(B, A); const cls = cb > ca ? netclassName(s, B.net) + (cb < clr(B) ? "' diff pair" : "'") : netclassName(s, A.net) + (ca < clr(A) ? "' diff pair" : "'");
-        const [x, y] = boxCenter(a.bbox, b.bbox);
+        const [x, y] = collisionPoint(shapeOn(A, layer), shapeOn(B, layer));
         const [tn, tg] = mmPair(need, gap);
-        out.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${by || `netclass '${cls}`} clearance ${tn}; actual ${tg})`, Array.from(new Set([a.id, b.id]))), [uid(a), uid(b)]));
+        const cm = withKiids(marker("clearance", "error", x, y, `Clearance violation (${by || `netclass '${cls}`} clearance ${tn}; actual ${tg})`, Array.from(new Set([a.id, b.id]))), [uid(a), uid(b)]);
+        // reportTwoShapeGeometry: the path between the two shapes' nearest points (the marker position when they touch)
+        cm.path = gap > 0 ? nearestPoints(shapeOn(A, layer), shapeOn(B, layer)) : [[x, y], [x, y]]; cm.layer = layer;
+        out.push(cm);
       }
     }
   }
@@ -333,7 +380,7 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
   {
     const zones = nl.conductors.filter((c) => c.kind === "zone"); const zg = boxGrid(zones, (c) => c.bbox);
     const zoneLocal = (z: Conductor): number => { const cp = K.kid(z.item.node, "connect_pads"); const v = cp && K.kid(cp, "clearance"); return v ? K.num(v[1]) : 0; };
-    const seen = new Map<string, { gap: number; need: number; name: string; c: Conductor; z: Conductor }>();
+    const seen = new Map<string, { gap: number; need: number; name: string; c: Conductor; z: Conductor; layer: string }>();
     for (const c of conds) {
       for (const z of zg.query(c.bbox, maxClr + 1)) {
         if (z.net && z.net === c.net) continue; const layer = [...c.layers].find((l) => z.layers.has(l)); if (!layer) continue;
@@ -349,10 +396,10 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
         if (!(need > 0) || !boxesTouch(c.bbox, z.bbox, need)) continue;
         const gap = shapeGap(shapeOn(c, layer), z.shape); if (gap >= need - DRC_EPS) continue;
         const key = c.id + "|" + (c.kind === "pad" ? c.index : "") + "|" + z.id + "|" + layer; const prev = seen.get(key);
-        if (!prev || gap < prev.gap) seen.set(key, { gap: Math.max(0, gap), need, name, c, z });
+        if (!prev || gap < prev.gap) seen.set(key, { gap: Math.max(0, gap), need, name, c, z, layer });
       }
     }
-    for (const v of seen.values()) { const [x, y] = boxCenter(v.c.bbox, v.z.bbox); const [tn, tg] = mmPair(v.need, v.gap); out.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${v.name} clearance ${tn}; actual ${tg})`, [v.c.id, v.z.id]), [uid(v.c), uid(v.z)])); }
+    for (const v of seen.values()) { const [x, y] = collisionPoint(shapeOn(v.c, v.layer), v.z.shape); const [tn, tg] = mmPair(v.need, v.gap); out.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${v.name} clearance ${tn}; actual ${tg})`, [v.c.id, v.z.id]), [uid(v.c), uid(v.z)])); }
     // testZonesToZones: the fills of two zones of different nets on one layer, nearer than their clearance (the rules',
     // else the netclasses' raised to the zones' own clearance and the board minimum); one marker per pair and layer
     // zones in board order (m_DRCCopperZones), each with its fill outlines on the layer in file order
@@ -404,6 +451,7 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
       const gapTo = (e: G, o: CopperShape) => { let g = Infinity; for (const sh of shp(e)) g = Math.min(g, shapeGap(sh, o)); return g; };
       const gNeed = (na: string | null, nb: string | null, c: Conductor | null) => {
         const ca = netClearance(s, na), cb = c ? clr(c) : netClearance(s, nb); const need = Math.max(ca, cb, s.minClearance || 0);
+        if ((s.minClearance || 0) > Math.max(ca, cb)) return { need, name: "board minimum" };
         return { need, name: `netclass '${cb >= ca ? (c ? netclassName(s, c.net) : netclassName(s, nb)) : netclassName(s, na)}'` };
       };
       // DRC_ENGINE::IsNetTieExclusion: a drawing of a net-tie footprint meeting copper of a net one of its tied pads carries
@@ -411,9 +459,11 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
       const tieExcluded = (e: G, net: string | null, layer: string) => !!net && tiePads(e.fp).some((p) => p.net === net && p.layers.has(layer) && gapTo(e, shapeOn(p, layer)) <= DRC_EPS);
       const padNo = (c: Conductor) => (c.kind === "pad" ? c.pad.number : "");
       const seenG = new Set<string>();
-      const report = (aId: string, aKiid: string, aNet: string | null, aBox: Box, bId: string, bKiid: string, bNet: string | null, bBox: Box, gap: number, need: number, name: string, layer: string, zone = false) => {
+      // the collision point (SHAPE::Collide's location): the item a pass tests first against the other
+      const hitAt = (first: CopperShape[], other: CopperShape[]): Pt => { let best: [CopperShape, CopperShape] | null = null, g = Infinity; for (const p of first) for (const q of other) { const d = shapeGap(p, q); if (d < g) { g = d; best = [p, q]; } } return best ? collisionPoint(best[0], best[1]) : [0, 0]; };
+      const report = (aId: string, aKiid: string, aNet: string | null, aBox: Box, bId: string, bKiid: string, bNet: string | null, bBox: Box, gap: number, need: number, name: string, layer: string, zone = false, at?: Pt) => {
         const key = [aKiid, bKiid].sort().join("|") + "|" + layer; if (seenG.has(key)) return; seenG.add(key);
-        const [x, y] = boxCenter(aBox, bBox);
+        const [x, y] = at || boxCenter(aBox, bBox);
         // the pair in uuid order: the second item's net decides a short
         const later = aKiid > bKiid ? aNet : bNet;
         if (!zone && gap <= 0 && later !== null) {
@@ -439,7 +489,7 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
           // copper of a net the footprint ties is waived where it meets the tie (issue14008: KiCad lets every such via through)
           if (tieExcluded(e, cNet, layer)) continue;
           if (c.kind === "pad" && e.fp && e.fp === c.item && !text && tiedPads(c.item, c.pad.number, c.pad.number)) continue;
-          report(e.id, gkiid(e), eNet, e.bbox, c.id, uid(c), cNet, c.bbox, gap, need, name, layer);
+          report(e.id, gkiid(e), eNet, e.bbox, c.id, uid(c), cNet, c.bbox, gap, need, name, layer, false, hitAt([cs], shp(e)));
         }
         // a shape against texts and other shapes (once per pair; not two shapes of one footprint)
         if (!text) {
@@ -453,7 +503,7 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
             if (!boxesTouch(e.bbox, o.bbox, need)) continue;
             let gap = Infinity; for (const sh of shp(o)) gap = Math.min(gap, gapTo(e, sh));
             if (!(gap < need - DRC_EPS)) continue;
-            report(e.id, gkiid(e), eNet, e.bbox, o.id, gkiid(o), oNet, o.bbox, gap, need, name, layer);
+            report(e.id, gkiid(e), eNet, e.bbox, o.id, gkiid(o), oNet, o.bbox, gap, need, name, layer, false, hitAt(shp(e), shp(o)));
           }
         }
         // against the zones (testItemAgainstZone / testKnockoutTextAgainstZone)
@@ -469,14 +519,14 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
             if (inherited === zNet) continue;
             const { need, name } = gNeed(null, zNet, fills[0]);
             if (!(gap < need - DRC_EPS)) continue;
-            if (gap <= 0 && inherited !== undefined) { const [x, y] = boxCenter(e.bbox, fills[0].bbox); out.push(withKiids(marker("shorting_items", "error", x, y, `Items shorting two nets (nets ${inherited || "<no net>"} and ${zNet || "<no net>"})`, [e.id, zi.id]), [gkiid(e), uid(fills[0])])); continue; }
-            report(e.id, gkiid(e), null, e.bbox, zi.id, uid(fills[0]), zNet, fills[0].bbox, gap, need, name, layer, true); continue;
+            if (gap <= 0 && inherited !== undefined) { const [x, y] = hitAt(shp(e), fills.map((z) => z.shape)); out.push(withKiids(marker("shorting_items", "error", x, y, `Items shorting two nets (nets ${inherited || "<no net>"} and ${zNet || "<no net>"})`, [e.id, zi.id]), [gkiid(e), uid(fills[0])])); continue; }
+            report(e.id, gkiid(e), null, e.bbox, zi.id, uid(fills[0]), zNet, fills[0].bbox, gap, need, name, layer, true, hitAt(shp(e), fills.map((z) => z.shape))); continue;
           }
           if (zNet && eNet === zNet) continue;
           if (e.fp && zNet && tiePads(e.fp).some((p) => p.layers.has(layer) && (p.net === zNet || tiePads(e.fp).some((q) => q.net === zNet && tiedPads(e.fp!, padNo(p), padNo(q)))) && gapTo(e, shapeOn(p, layer)) <= DRC_EPS)) continue;
           const { need, name } = gNeed(eNet, zNet, fills[0]);
           if (!(need > 0) || !(gap < need - DRC_EPS)) continue;
-          report(e.id, gkiid(e), eNet, e.bbox, zi.id, uid(fills[0]), zNet, fills[0].bbox, gap, need, name, layer, true);
+          report(e.id, gkiid(e), eNet, e.bbox, zi.id, uid(fills[0]), zNet, fills[0].bbox, gap, need, name, layer, true, hitAt(shp(e), fills.map((z) => z.shape)));
         }
       }
     }
@@ -530,8 +580,8 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
     }
   }
   // connectivity
-  if (opts.unconnected !== false) for (const l of ratsnest(doc, nl)) out.push(marker("unconnected_items", "error", l.a[0], l.a[1], `Missing connection between items (net '${l.name}')`, l.ids.slice()));
-  for (const net of nl.nets.values()) for (const cl of net.shorts) { const p = cl.anchors[0] ? cl.anchors[0].p : [0, 0]; out.push(marker("shorting_items", "error", p[0], p[1], `Items shorting two nets (${Array.from(cl.nets).join(", ")})`, Array.from(new Set(cl.items.map((c) => c.id))))); }
+  // (DRC_TEST_PROVIDER_CONNECTIVITY sets no detail; shorts come from the clearance pass alone)
+  if (opts.unconnected !== false) for (const l of ratsnest(doc, nl)) out.push(Object.assign(marker("unconnected_items", "error", l.a[0], l.a[1], "Missing connection between items", l.ids.slice()), { net: l.name }));
   // tracks and vias
   const condGrid = boxGrid(conds, (c) => c.bbox), zoneGrid = boxGrid(nl.conductors.filter((c) => c.kind === "zone"), (c) => c.bbox);
   const touches = (p: Pt, layer: string, self: Conductor) => { const pb = [p[0], p[1], p[0], p[1]];
@@ -576,7 +626,14 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
       for (const o of zoneGrid.query(c.bbox, EPS)) {
                 const l = o.layers.values().next().value!; if (c.layers.has(l) && shapeGap(o.shape, shapeOn(c, l)) <= EPS) starts.add(l);
       }
-      if (starts.size === 0 ? !!c.net : starts.size === 1) out.push(marker("via_dangling", "warning", a[0], a[1], "Via is not connected or connected on only one layer", [c.id]));
+      if (starts.size === 0 ? !!c.net : starts.size === 1) {
+        // EvalRules( VIA_DANGLING_CONSTRAINT, via, nullptr, layer ): a rule saying ignore suppresses it, else it is the violating rule
+        const h = rules.length ? evalRuleConstraint(rules, "via_dangling", doc, s, ruleItem(c, layerOf(c.item.node, stack[0])), null) : null;
+        if (h && h.severity === "ignore") continue;
+        const m = marker("via_dangling", "warning", a[0], a[1], "Via is not connected or connected on only one layer", [c.id]);
+        if (h) { m.rule = h.name.replace(/^rule '([\s\S]*)'$/, "$1"); ruled(m, h.severity); }
+        out.push(m);
+      }
     }
   }
   // copper slivers and connection widths over the merged copper of each layer / net (drc-sliver.ts, drc-connwidth.ts)
@@ -591,9 +648,54 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
   // courtyards
   // the courtyard cache is deflated by maxError (5 um) so touching courtyards stay legal
   const fps = Array.from(doc.items.values()).filter((it) => it.kind === "footprint"); const cy = fps.map((fp) => { const c = courtyards(fp); for (const l of Object.keys(c)) c[l] = c[l].map((p) => deflatePoly(p, 0.005)); return c; });
+  // DRC_TEST_PROVIDER_COURTYARD_CLEARANCE: EvalRules( COURTYARD_CLEARANCE_CONSTRAINT, fpA, fpB, F_Cu / B_Cu ) (the implicit
+  // "board setup constraints courtyard" rule is 0); the marker sits at the collision point and names the rule only when
+  // the clearance is above 0
+  const cyRules = rules.filter((r) => r.constraints.some((k) => k.type === "courtyard_clearance"));
+  const cyMax = Math.max(0, ...cyRules.flatMap((r) => r.constraints.filter((k) => k.type === "courtyard_clearance").map((k) => k.min || 0)));
   for (let i = 0; i < fps.length; i++) for (let j = i + 1; j < fps.length; j++) {
-    if (!fps[i].bbox || !fps[j].bbox || !boxesTouch(fps[i].bbox!, fps[j].bbox!, 0)) continue;
-    for (const layer of ["F.CrtYd", "B.CrtYd"]) { let hit = false; for (const P of cy[i][layer]) for (const Q of cy[j][layer]) if (polysOverlap(P, Q)) hit = true; if (hit) { const [x, y] = boxCenter(fps[i].bbox!, fps[j].bbox!); out.push(marker("courtyards_overlap", "error", x, y, `Courtyards overlap (${fps[i].ref || "footprint"} and ${fps[j].ref || "footprint"} on ${layer})`, [fps[i].id, fps[j].id])); } }
+    if (!fps[i].bbox || !fps[j].bbox || !boxesTouch(fps[i].bbox!, fps[j].bbox!, cyMax)) continue;
+    for (const layer of ["F.CrtYd", "B.CrtYd"]) {
+      if (!cy[i][layer].length || !cy[j][layer].length) continue;
+      const cu = layer === "F.CrtYd" ? "F.Cu" : "B.Cu";
+      const h = cyRules.length ? evalRuleConstraint(cyRules, "courtyard_clearance", doc, s, { kind: "footprint", node: fps[i].node, item: fps[i], layer: cu } as never, { kind: "footprint", node: fps[j].node, item: fps[j], layer: cu } as never) : null;
+      if (h && h.severity === "ignore") continue;
+      const clr = h && h.min != null ? h.min : 0; if (clr < 0) continue;
+      let at: Pt | null = null, actual = Infinity;
+      for (const P of cy[i][layer]) for (const Q of cy[j][layer]) {
+        const sp = { t: "poly" as const, pts: P, solid: true }, sq = { t: "poly" as const, pts: Q, solid: true };
+        const d = polysOverlap(P, Q) ? 0 : shapeGap(sp, sq);
+        if (clr > 0 ? d < clr - DRC_EPS : polysOverlap(P, Q)) { if (d < actual) { actual = d; at = collisionPoint(sp, sq); } }
+      }
+      if (!at) continue;
+      let text = "Courtyards overlap";
+      if (clr > 0) { const [tn, ta] = mmPair(clr, actual); text += ` (${h!.name} clearance ${tn}; actual ${ta})`; }
+      const m = marker("courtyards_overlap", "error", at[0], at[1], text, [fps[i].id, fps[j].id]); m.layer = layer;
+      out.push(h ? ruled(m, h.severity) : m);
+    }
+  }
+  // DRC_TEST_PROVIDER_CONNECTIVITY: a track ending inside a via away from its centre, unless another track on that layer
+  // connected to the via ends on the centre (default severity ignore, drc_item.cpp)
+  if ((s.severities.track_not_centered_on_via || "ignore") !== "ignore") {
+    const copper = doc.copper && doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"], netKey = (n: SNode) => { const r = netOf(n); return r.name || String(r.code); };
+    const vias = [...doc.items.values()].filter((it) => it.kind === "via").map((it) => { const at = pt(it.node, "at"), sz = K.kid(it.node, "size"); return at ? { it, at, r: (sz ? K.num(sz[1], 0.8) : 0.8) / 2, layers: viaLayers(it.node, copper), net: netKey(it.node) } : null; }).filter(Boolean) as { it: KItem; at: Pt; r: number; layers: Set<string>; net: string }[];
+    const tracks = [...doc.items.values()].filter((it) => (it.kind === "segment" || it.kind === "arc") && pt(it.node, "start") && pt(it.node, "end"));
+    const same = (p: Pt, q: Pt) => Math.round(p[0] * 1e6) === Math.round(q[0] * 1e6) && Math.round(p[1] * 1e6) === Math.round(q[1] * 1e6);
+    const inVia = (v: { at: Pt; r: number }, p: Pt) => Math.hypot(p[0] - v.at[0], p[1] - v.at[1]) <= v.r;   // PCB_VIA::HitTest( point )
+    const linked = (t: KItem, v: typeof vias[number]) => netKey(t.node) === v.net && v.layers.has(layerOf(t.node)) && (inVia(v, pt(t.node, "start")!) || inVia(v, pt(t.node, "end")!));
+    for (const t of tracks) {
+      const a = pt(t.node, "start")!, b = pt(t.node, "end")!, layer = layerOf(t.node);
+      for (const v of vias) {
+        if (!linked(t, v)) continue;
+        const startIn = inVia(v, a), endIn = inVia(v, b);
+        if (tracks.some((o) => layerOf(o.node) === layer && linked(o, v) && (same(pt(o.node, "start")!, v.at) || same(pt(o.node, "end")!, v.at)))) continue;
+        if ((startIn && !same(a, v.at)) || (endIn && !same(b, v.at))) {
+          const p = startIn && !same(a, v.at) ? a : b;
+          const m = marker("track_not_centered_on_via", "warning", p[0], p[1], "Track endpoint not centered on via", [t.id, v.it.id]); m.layer = layer; out.push(m);
+          break;
+        }
+      }
+    }
   }
   // outline
   const ol = boardOutline(doc);
@@ -617,6 +719,8 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
   // hole to hole, text dimensions and mirroring, courtyard definitions and holes in courtyards, Edge.Cuts text,
   // keepout areas and disabled layers (drc-more.ts)
   out.push(...moreDrcMarkers(doc, s, rules));
+  // footprint attributes, scaling, pad checks and net-tie pad groups (drc-footprints.ts)
+  out.push(...footprintCheckMarkers(doc, s));
   // silkscreen overlaps, silk clipped by mask or by the board edge, solder mask bridges (drc-silk.ts)
   out.push(...silkMaskMarkers(doc, s, rules));
   // thermal reliefs short of spokes (drc-zones.ts)
@@ -627,5 +731,9 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
   // (the Design Rules Checker dialog passes footprintOwn: true to list them as KiCad does)
   const kept = opts.footprintOwn ? out : out.filter((m) => !(FOOTPRINT_OWN.has(m.code) && inOne(m)));
   // the project's rule severities: ignored rules drop out, the rest take the severity the project gives them
-  return kept.filter((m) => s.severities[m.code] !== "ignore").map((m) => { const sev = s.severities[m.code]; if (sev === "warning" || sev === "error") m.severity = sev; return m; });
+  // (a marker whose rule set its own severity keeps it: PCB_MARKER::GetSeverity)
+  const shown = kept.filter((m) => s.severities[m.code] !== "ignore").map((m) => { const sev = s.severities[m.code]; if (!m.ruleSeverity && (sev === "warning" || sev === "error")) m.severity = sev; return m; });
+  // DRC_ENGINE::ReportViolation: at most ERROR_LIMIT (199) violations of a code, EXTENDED_ERROR_LIMIT (499) for clearance and unconnected items
+  const left = new Map<string, number>();
+  return shown.filter((m) => { const n = left.has(m.code) ? left.get(m.code)! : drcErrorLimit(m.code); if (n <= 0) return false; left.set(m.code, n - 1); return true; });
 }

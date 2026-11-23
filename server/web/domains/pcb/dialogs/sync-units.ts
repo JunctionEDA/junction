@@ -118,3 +118,106 @@ export function toggleAttribute(ctx: ToolCtx & { doc: KDoc }, items: KItem[], is
   commitOtherSheets(label, [...there.values()], (n) => { const out = set(n, on); return JSON.stringify(out) === JSON.stringify(n) ? null : out; }, changes.length > 0);
   return true;
 }
+
+// ---------------------------------------------------------------- SCH_EDIT_FRAME::SelectUnit
+
+/** LIB_SYMBOL::GetUnitDisplayName( unit, false ): the unit's own (unit_name …), else its letters ("A", "B", … "AA"). */
+export function unitDisplayLetters(lib: SNode | null, unit: number): string {
+  if (lib) for (const sub of L.kids(lib, "symbol")) {
+    const m = /_(\d+)_(\d+)$/.exec(L.str(sub[1])), un = L.kid(sub, "unit_name");
+    if (m && +m[1] === unit && un && L.str(un[1])) return L.str(un[1]);
+  }
+  let n = unit, s = ""; while (n > 0) { n--; s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26); }
+  return s;
+}
+/** SCH_SHEET_PATH::PathHumanReadable( true, true ): "/Sub" for a sub-sheet, "" for the root ("Root" in the message). */
+export function sheetNameForMessage(human: string | null | undefined): string {
+  const t = String(human || "").replace(/\/+$/, "");
+  return t || "Root";
+}
+const UNIT_PLACED_KEY = "kc.dontshow.unitAlreadyPlaced";
+/** KIDIALOG( msg, "Unit Already Placed", wxYES_NO | wxCANCEL | wxICON_WARNING ) with its Yes / No labels and "Do not show
+ *  again": resolves "swap" (Yes), "duplicate" (No) or null (Cancel); a remembered answer is returned without asking. */
+function askUnitPlaced(message: string, swapLabel: string, dupLabel: string): Promise<"swap" | "duplicate" | null> {
+  let kept: string | null = null; try { kept = localStorage.getItem(UNIT_PLACED_KEY); } catch { kept = null; }
+  if (kept === "swap" || kept === "duplicate") return Promise.resolve(kept);
+  return new Promise((resolve) => {
+    const ov = document.createElement("div"); ov.className = "kd-overlay"; ov.style.zIndex = "10050";
+    const dlg = document.createElement("div"); dlg.className = "kd-dialog"; dlg.setAttribute("role", "alertdialog"); dlg.style.cssText = "width:max-content;min-width:440px;max-width:min(640px, calc(100vw - 32px))";
+    const title = document.createElement("div"); title.className = "kd-title"; title.textContent = "Unit Already Placed";
+    const body = document.createElement("div"); body.className = "kd-body";
+    const p = document.createElement("p"); p.style.cssText = "margin:4px 0 8px;white-space:pre-wrap"; p.textContent = message;
+    const lbl = document.createElement("label"); lbl.style.cssText = "display:flex;gap:6px;align-items:center";
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.style.cssText = "width:auto;margin:0"; lbl.append(cb, "Do not show again");
+    body.append(p, lbl);
+    const foot = document.createElement("div"); foot.className = "kd-foot";
+    const spacer = document.createElement("span"); spacer.className = "spacer";
+    const done = (r: "swap" | "duplicate" | null): void => {
+      ov.remove(); window.removeEventListener("keydown", key, true);
+      if (r && cb.checked) { try { localStorage.setItem(UNIT_PLACED_KEY, r); } catch { /* no storage */ } }
+      resolve(r);
+    };
+    const btn = (text: string, r: "swap" | "duplicate" | null, primary = false): HTMLButtonElement => { const b = document.createElement("button"); b.type = "button"; b.className = "btn" + (primary ? " primary" : ""); b.textContent = text; b.addEventListener("click", () => done(r)); return b; };
+    const swap = btn(swapLabel, "swap", true);
+    foot.append(spacer, swap, btn(dupLabel, "duplicate"), btn("Cancel", null));
+    const key = (ev: KeyboardEvent): void => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopImmediatePropagation(); done(null); } };
+    window.addEventListener("keydown", key, true);
+    dlg.append(title, body, foot); ov.append(dlg); document.body.append(ov); swap.focus();
+  });
+}
+
+/**
+ * SCH_EDIT_FRAME::SelectUnit( symbol, unit ): when another symbol of the same reference holds the unit somewhere in the
+ * hierarchy (FindSymbolByRefAndUnit), "Symbol unit '%s' is already placed (on sheet '%s')" offers to swap the two
+ * units or to duplicate the unit; the symbol's fields are autoplaced again when they were; the commit is "Swap Units"
+ * or "Change Unit".  True when the request was taken (the answer may still be Cancel).
+ */
+export function selectUnit(ctx: ToolCtx & { doc: KDoc }, item: KItem, unit: number): boolean {
+  const doc = ctx.doc, node0 = item.node;
+  const lib = (KiCadCanvas.resolveLib(doc, L.str((L.kid(node0, "lib_id") || [])[1])) as SNode | null) || null;
+  const count = libUnits(doc, node0);
+  const c = netMap(), here = currentInstance(c);
+  const pro = projectDocs().find((d) => d.docType === "kicad_pro");
+  const project = pro ? (pro.path.split("/").pop() || "").replace(/\.kicad_pro$/, "") : null;
+  const path = here && here.uuidPath.length ? "/" + here.uuidPath.join("/") : null;
+  const unitAt = (n: SNode, p: string | null): number => { const e = L.instanceEntry(n, p, project); return e && L.kid(e, "unit") ? L.num((L.kid(e, "unit") as SNode)[1], 1) : L.num((L.kid(n, "unit") || [0, 1])[1], 1); };
+  const current = unitAt(node0, path);
+  if (count <= 1 || current === unit) return true;
+  if (unit > count) unit = count;
+  // FindSymbolByRefAndUnit over the hierarchy: the first symbol of this reference holding the unit
+  const units = otherUnitsOf(doc, item);
+  let holder: { item: KItem; path: string; file: string | null; human: string } | null = null;
+  const humanOf = (p: string | null): string => { const inst = c ? c.instances.find((i) => "/" + i.uuidPath.join("/") === p) : null; return inst ? inst.human : here ? here.human : ""; };
+  if (units) {
+    for (const it of units.here) for (const p of units.paths.get(it.id) || [path || ""]) if (!holder && unitAt(it.node, p) === unit) holder = { item: it, path: p, file: null, human: humanOf(p) };
+    for (const t of units.there) for (const id of t.ids) {
+      const it = t.doc.items.get(id); if (!it || holder) continue;
+      for (const p of units.paths.get(id) || []) if (!holder && unitAt(it.node, p) === unit) holder = { item: it, path: p, file: t.file, human: humanOf(p) };
+    }
+  }
+  const apply = (swap: boolean): void => {
+    const helpers = (CollabTools as unknown as { props: { helpers: { setSymbolUnit(n: SNode, u: number): void } } }).props.helpers;
+    const node = KiCadCanvas.cloneNode ? (KiCadCanvas.cloneNode as (n: SNode) => SNode)(node0) : JSON.parse(JSON.stringify(node0)) as SNode;
+    helpers.setSymbolUnit(node, unit); L.setInstanceData(node, path, project, { unit });
+    let out = node;
+    // m_AutoplaceFields.enable: fields autoplaced (AUTO or MANUAL) are autoplaced again with their algorithm
+    const sch = CollabTools.sch, ap = sch ? (sch.state as { autoplace?: { enable?: boolean } }).autoplace : null, fa = L.kid(node, "fields_autoplaced");
+    if (sch && (!ap || ap.enable !== false) && fa && L.str(fa[1]) !== "no") {
+      try { const placed = (sch._ as unknown as { autoplaceNode(d: KDoc, it: KItem): SNode | null }).autoplaceNode(doc, Object.assign({}, item, { node }) as KItem); if (placed) out = placed; } catch { /* the fields stay where they are */ }
+    }
+    const changes: KChange[] = [KiCadCanvas.replaceChange(doc, Object.assign({}, item, { node: out, geom: [], bbox: null }) as KItem)];
+    // Swap: the other symbol gets the unit this one had
+    const giveOld = (n: SNode, p: string): SNode => { const m = KiCadCanvas.cloneNode ? (KiCadCanvas.cloneNode as (x: SNode) => SNode)(n) : JSON.parse(JSON.stringify(n)) as SNode; helpers.setSymbolUnit(m, current); L.setInstanceData(m, p, project, { unit: current }); return m; };
+    if (swap && holder && !holder.file) changes.push(KiCadCanvas.replaceChange(doc, Object.assign({}, holder.item, { node: giveOld(holder.item.node, holder.path), geom: [], bbox: null }) as KItem));
+    const label = swap ? "Swap Units" : "Change Unit";
+    ctx.commit(changes, label);
+    if (swap && holder && holder.file) { const h = holder; commitOtherSheets(label, [{ file: h.file!, ids: [h.item.id] }], (n) => giveOld(n, h.path)); }
+  };
+  if (!holder) { apply(false); return true; }
+  const target = unitDisplayLetters(lib, unit), currName = unitDisplayLetters(lib, current);
+  void askUnitPlaced(`Symbol unit '${target}' is already placed (on sheet '${sheetNameForMessage(holder.human)}')`, `Swap '${target}' and '${currName}'`, `Duplicate '${target}'`).then((r) => {
+    if (r === null || ctx.doc !== doc || !doc.items.has(item.id)) return;
+    apply(r === "swap");
+  });
+  return true;
+}

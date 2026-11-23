@@ -12,31 +12,41 @@ export interface BaOptions {
 }
 /** One placed unit of a symbol: its path, the unit it shows, and per unit number the library's pins (GetUnitPinInfo:
  *  the unit's pins with the common ones, ordered by position) with their electrical types. */
-export interface SymUnit { key: string; unit: number; unitPins: Map<number, string[]>; pinTypes: Map<string, string>; shared?: boolean }
+export interface SymUnit { key: string; unit: number; unitPins: Map<number, string[]>; pinTypes: Map<string, string>; shared?: boolean;
+  /** hidden pins (a hidden power_in pin is a power pin: SCH_PIN::IsPower) */
+  hiddenPins?: Set<string>;
+  /** SymbolHasSheetInstances: the friendly names of the sheets the symbol item is placed on (when more than one) and
+   *  the other projects whose instances it carries */
+  sharedSheets?: string[]; sharedProjects?: string[] }
 /** A footprint as PCB_EDIT_FRAME's back-annotation netlist describes it. */
 export interface FpData {
   ref: string; path: string; fpid: string; value: string;
-  dnp: boolean; excludeFromBom: boolean; excludeFromPos: boolean;
+  dnp: boolean; excludeFromBom: boolean; excludeFromSim: boolean; excludeFromPos: boolean;
   /** every field except Reference and Value */
   fields: Map<string, string>;
   /** pad number -> board net name */
   pads: Map<string, string>;
 }
-/** One schematic symbol instance (all units share it; `units` are the items to edit). */
+/** One placed unit of a schematic symbol on one sheet instance (an SCH_REFERENCE of SYMBOL_FILTER_NON_POWER). */
 export interface SymRef {
-  /** the first unit's path ("/<sheet uuid>…/<symbol uuid>"), what a footprint's (path) names; `keys` every unit's */
+  /** this unit's full path ("/<sheet uuid>…/<symbol uuid>"), what a footprint's (path) names; `keys` every unit's of
+   *  a multi-unit symbol (GetMultiUnitSymbols, in sheet order), else this one */
   key: string; keys: string[]; ref: string; power: boolean;
-  value: string; footprint: string; dnp: boolean; inBom: boolean; inPos: boolean; onBoard: boolean;
+  /** a symbol whose library has more than one unit (m_multiUnitsRefs) */
+  multi?: boolean;
+  /** the sheet path (root first) and symbol uuid SCH_REFERENCE_LIST::sortByTimeStamp orders by */
+  sheetPath?: string[]; uuid?: string;
+  value: string; footprint: string; dnp: boolean; inBom: boolean; inPos: boolean; onBoard: boolean; exSim?: boolean;
   /** non-mandatory fields */
   fields: Map<string, string>;
   /** pin number -> schematic net name */
   pins: Map<string, string>;
-  /** the placed units, for unit and pin swaps */
-  units?: SymUnit[];
+  /** the placed units of the symbol, for unit swaps; `self` this one's (pin swaps, its pins) */
+  units?: SymUnit[]; self?: SymUnit;
 }
 export interface BaLine { severity: "error" | "warning" | "action" | "info"; text: string }
 export interface SymEdit {
-  key: string; ref?: string; footprint?: string; value?: string; dnp?: boolean; inBom?: boolean; inPos?: boolean;
+  key: string; ref?: string; footprint?: string; value?: string; dnp?: boolean; inBom?: boolean; inPos?: boolean; exSim?: boolean;
   setFields: Map<string, string>; addFields: Map<string, string>; deleteFields: string[];
 }
 export interface LabelEdit { from: string; to: string; ref: string; pin: string }
@@ -53,91 +63,118 @@ export const describeRef = (r: string): string => (r ? r : "<no reference design
 /** A board net named after a pad ("Net-(R1-Pad2)", "unconnected-(…)") was not named by anyone. */
 const autoNet = (n: string): boolean => /^(Net-\(|unconnected-\()/.test(n) || n === "";
 
-/** BackAnnotateSymbols: the report and the edits, for the dry run and the update alike. */
+/** BackAnnotateSymbols: the report and the edits, for the dry run and the update alike.  The lines are ReportHead's
+ *  (every change, "has no assigned symbol", "linked to same symbol") followed by ReportTail's ("Cannot find symbol",
+ *  the unused-symbol warnings, "Footprint re-linking canceled by user."). */
 export interface BaResult { lines: BaLine[]; edits: SymEdit[]; labels: LabelEdit[]; relinks: { fpRef: string; path: string }[]; changes: number; unitEdits: UnitEdit[]; pinSwaps: PinSwap[] }
-export function backAnnotate(syms: SymRef[], fps: FpData[], o: BaOptions): BaResult {
-  const lines: BaLine[] = [], edits: SymEdit[] = [], labels: LabelEdit[] = [], relinks: { fpRef: string; path: string }[] = [], unitEdits: UnitEdit[] = [], pinSwaps: PinSwap[] = [];
+const cmpStr = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+/** SCH_REFERENCE_LIST::sortByTimeStamp: by sheet path (shorter first, then uuid by uuid), then by symbol uuid. */
+function byTimeStamp(a: SymRef, b: SymRef): number {
+  const pa = a.sheetPath || [], pb = b.sheetPath || [];
+  if (pa.length !== pb.length) return pa.length - pb.length;
+  for (let i = 0; i < pa.length; i++) { const c = cmpStr(pa[i], pb[i]); if (c) return c; }
+  return cmpStr(a.uuid || "", b.uuid || "");
+}
+export function backAnnotate(syms: SymRef[], fps: FpData[], o: BaOptions & { annotated?: boolean }): BaResult {
+  const head: BaLine[] = [], tail: BaLine[] = [], edits: SymEdit[] = [], labels: LabelEdit[] = [], relinks: { fpRef: string; path: string }[] = [], unitEdits: UnitEdit[] = [], pinSwaps: PinSwap[] = [];
+  const out = (): BaResult => ({ lines: [...head, ...tail], edits, labels, relinks, changes, unitEdits, pinSwaps });
   let changes = 0;
   if (!o.relink && !o.values && !o.footprints && !o.references && !o.netNames && !o.attributes && !o.otherFields) {
-    lines.push({ severity: "error", text: "Select at least one property to back annotate." });
-    return { lines, edits, labels, relinks, changes, unitEdits, pinSwaps };
+    tail.push({ severity: "error", text: "Select at least one property to back annotate." });
+    return out();
   }
   const refs = syms.filter((s) => !s.power);
-  const byKey = new Map<string, SymRef>(); for (const s of refs) for (const k of s.keys) byKey.set(k, s);
-  const byRef = new Map<string, SymRef>(); for (const s of refs) if (!byRef.has(s.ref)) byRef.set(s.ref, s);
-  // getPcbModulesFromString / getChangeList
-  const linked = new Map<SymRef, FpData>();
-  const used = new Map<SymRef, FpData>();
+  // getPcbModulesFromString: the footprints by path (by reference when re-linking), in the map's order
+  const pcb = new Map<string, FpData>();
   for (const fp of fps) {
     const path = o.relink ? fp.ref : fp.path;
-    if (!path) { lines.push({ severity: "warning", text: `Footprint '${describeRef(fp.ref)}' has no assigned symbol.` }); continue; }
-    const s = o.relink ? byRef.get(fp.ref) : byKey.get(fp.path);
-    if (!s) { lines.push({ severity: "error", text: `Cannot find symbol for footprint '${describeRef(fp.ref)}'.` }); continue; }
-    const other = used.get(s);
-    if (other) { lines.push({ severity: "error", text: `Footprints '${describeRef(other.ref)}' and '${describeRef(fp.ref)}' linked to same symbol.` }); continue; }
-    used.set(s, fp); linked.set(s, fp);
-    if (o.relink && fp.path !== s.key) relinks.push({ fpRef: fp.ref, path: s.key });
+    if (!path) { head.push({ severity: "warning", text: `Footprint '${describeRef(fp.ref)}' has no assigned symbol.` }); continue; }
+    const other = pcb.get(path);
+    if (other) { head.push({ severity: "error", text: `Footprints '${describeRef(other.ref)}' and '${describeRef(fp.ref)}' linked to same symbol.` }); continue; }
+    pcb.set(path, fp);
   }
-  // checkForUnusedSymbols
-  for (const s of refs) if (!linked.has(s) && s.onBoard) lines.push({ severity: "warning", text: `Footprint '${describeRef(s.ref)}' is not present on PCB. Corresponding symbols in schematic must be manually deleted (if desired).` });
-  // applyChangelist
-  // the references after the update: a footprint's new reference may not land on another symbol's
-  const finalRef = new Map<SymRef, string>(); for (const s of refs) finalRef.set(s, o.references && !o.relink && linked.has(s) ? linked.get(s)!.ref : s.ref);
-  const count = new Map<string, number>(); for (const r of finalRef.values()) count.set(r, (count.get(r) || 0) + 1);
-  // applyChangelist: unit swaps first (they change which pins the label pass looks at)
-  const skipPins = new Map<SymRef, Set<string>>();
+  // getChangeList: a footprint of a multi-unit symbol brings every unit of it
+  const multi = new Map<string, SymRef[]>();
+  for (const s of refs) if (s.multi) { const k = s.keys.join("\n"); if (!multi.has(k)) multi.set(k, []); multi.get(k)!.push(s); }
+  const multiLists = [...multi.values()].sort((a, b) => cmpStr(a[0].ref, b[0].ref));
+  let list: { s: SymRef; fp: FpData }[] = [];
+  for (const [path, fp] of [...pcb].sort((a, b) => cmpStr(a[0], b[0]))) {
+    const find = (l: SymRef[]): SymRef | undefined => (o.relink ? l.find((s) => s.ref === path) : l.find((s) => s.key === path));
+    const ml = multiLists.find((l) => !!find(l));
+    if (ml) { for (const s of ml) list.push({ s, fp }); continue; }
+    const s = find(refs);
+    if (s) list.push({ s, fp });
+    else tail.push({ severity: "error", text: `Cannot find symbol for footprint '${describeRef(fp.ref)}'.` });
+  }
+  // checkForUnusedSymbols: both lists by path; the symbols passed over before each linked one, excluded from the board
+  const sorted = refs.slice().sort(byTimeStamp);
+  list = list.map((x, i) => ({ x, i })).sort((a, b) => byTimeStamp(a.x.s, b.x.s) || a.i - b.i).map((e) => e.x);
+  let i = 0;
+  for (const item of list) {
+    while (i < sorted.length && sorted[i].key !== item.s.key) {
+      if (!sorted[i].onBoard) tail.push({ severity: "warning", text: `Footprint '${describeRef(sorted[i].ref)}' is not present on PCB. Corresponding symbols in schematic must be manually deleted (if desired).` });
+      ++i;
+    }
+    ++i;
+  }
+  if (o.relink && o.annotated === false) tail.push({ severity: "error", text: "Footprint re-linking canceled by user." });
+  for (const { s, fp } of list) if (o.relink && fp.path !== s.key && !relinks.some((r) => r.fpRef === fp.ref)) relinks.push({ fpRef: fp.ref, path: s.key });
+  // applyChangelist: unit swaps first (per footprint, over the units linked to it); swapped units are SKIP_STRUCT
+  const skipUnits = new Set<string>();
   if (o.netNames && o.unitSwaps) {
-    for (const [s, fp] of linked) {
-      const plan = unitSwapPlan(s, fp); if (!plan) continue;
-      const skip = new Set<string>();
+    const perFp = new Map<FpData, SymRef[]>(); for (const { s, fp } of list) { if (!perFp.has(fp)) perFp.set(fp, []); perFp.get(fp)!.push(s); }
+    for (const [fp, items] of perFp) {
+      const s = items[0], plan = unitSwapPlan({ ...s, units: items.map((x) => x.self).filter((u): u is SymUnit => !!u) }, fp); if (!plan) continue;
       for (const st of plan) {
-        lines.push({ severity: "action", text: `Swap ${describeRef(s.ref)} unit ${unitLetter(st.aUnit)} with unit ${unitLetter(st.bUnit)}.` }); changes++;
+        head.push({ severity: "action", text: `Swap ${describeRef(s.ref)} unit ${unitLetter(st.aUnit)} with unit ${unitLetter(st.bUnit)}.` }); changes++;
         unitEdits.push({ key: st.a.key, unit: st.bUnit }, { key: st.b.key, unit: st.aUnit });
-        // the swapped units' symbols are SKIP_STRUCT: no label changes for their pins
-        for (const u of [st.a, st.b]) for (const list of u.unitPins.values()) for (const n of list) skip.add(n);
+        skipUnits.add(st.a.key); skipUnits.add(st.b.key);
       }
-      skipPins.set(s, skip);
     }
   }
-  for (const [s, fp] of linked) {
+  for (const { s, fp } of list) {
     const e: SymEdit = { key: s.key, setFields: new Map(), addFields: new Map(), deleteFields: [] };
     let any = false;
-    if (o.references && !o.relink && s.ref !== fp.ref && !hasVars(s.ref)) {
-      if ((count.get(fp.ref) || 0) > 1) lines.push({ severity: "error", text: `Cannot change ${s.ref} to '${fp.ref}', because the change will cause duplicated references.` });
-      else { changes++; any = true; e.ref = fp.ref; lines.push({ severity: "action", text: `Change ${describeRef(s.ref)} reference designator to '${fp.ref}'.` }); }
+    const skip = skipUnits.has(s.key), R = s.ref;
+    if (o.references && s.ref !== fp.ref && !skip && !hasVars(s.ref)) {
+      // ResolveBackannotatedRefs without reused-sheet suffixes: only an empty board reference lacks the suffix ''
+      if (!fp.ref) head.push({ severity: "error", text: `Cannot change ${describeRef(s.ref)} to '${fp.ref}', which lacks the sheet suffix ''.` });
+      else { changes++; any = true; e.ref = fp.ref; head.push({ severity: "action", text: `Change ${describeRef(s.ref)} reference designator to '${fp.ref}'.` }); }
     }
-    const R = s.ref;
-    if (o.footprints && s.footprint !== fp.fpid && !hasVars(s.footprint)) { changes++; any = true; e.footprint = fp.fpid; lines.push({ severity: "action", text: `Change ${describeRef(R)} footprint assignment from '${s.footprint}' to '${fp.fpid}'.` }); }
-    if (o.values && s.value !== fp.value && !hasVars(s.value)) { changes++; any = true; e.value = fp.value; lines.push({ severity: "action", text: `Change ${describeRef(R)} value from '${s.value}' to '${fp.value}'.` }); }
-    if (o.attributes && s.dnp !== fp.dnp) { changes++; any = true; e.dnp = fp.dnp; lines.push({ severity: "action", text: `Change ${describeRef(R)} 'Do not populate' from '${tf(s.dnp)}' to '${tf(fp.dnp)}'.` }); }
-    if (o.attributes && !s.inBom !== fp.excludeFromBom) { changes++; any = true; e.inBom = !fp.excludeFromBom; lines.push({ severity: "action", text: `Change ${describeRef(R)} 'Exclude from bill of materials' from '${tf(!s.inBom)}' to '${tf(fp.excludeFromBom)}'.` }); }
-    if (o.attributes && !s.inPos !== fp.excludeFromPos) { changes++; any = true; e.inPos = !fp.excludeFromPos; lines.push({ severity: "action", text: `Change ${describeRef(R)} 'Exclude from position files' from '${tf(!s.inPos)}' to '${tf(fp.excludeFromPos)}'.` }); }
+    if (o.footprints && s.footprint !== fp.fpid && !skip && !hasVars(s.footprint)) { changes++; any = true; e.footprint = fp.fpid; head.push({ severity: "action", text: `Change ${describeRef(R)} footprint assignment from '${s.footprint}' to '${fp.fpid}'.` }); }
+    if (o.values && s.value !== fp.value && !skip && !hasVars(s.value)) { changes++; any = true; e.value = fp.value; head.push({ severity: "action", text: `Change ${describeRef(R)} value from '${s.value}' to '${fp.value}'.` }); }
+    if (o.attributes && s.dnp !== fp.dnp && !skip) { changes++; any = true; e.dnp = fp.dnp; head.push({ severity: "action", text: `Change ${describeRef(R)} 'Do not populate' from '${tf(s.dnp)}' to '${tf(fp.dnp)}'.` }); }
+    if (o.attributes && !s.inBom !== fp.excludeFromBom && !skip) { changes++; any = true; e.inBom = !fp.excludeFromBom; head.push({ severity: "action", text: `Change ${describeRef(R)} 'Exclude from bill of materials' from '${tf(!s.inBom)}' to '${tf(fp.excludeFromBom)}'.` }); }
+    if (o.attributes && !!s.exSim !== fp.excludeFromSim && !skip) { changes++; any = true; e.exSim = fp.excludeFromSim; head.push({ severity: "action", text: `Change ${describeRef(R)} 'Exclude from simulation' from '${tf(!!s.exSim)}' to '${tf(fp.excludeFromSim)}'.` }); }
+    if (o.attributes && !s.inPos !== fp.excludeFromPos && !skip) { changes++; any = true; e.inPos = !fp.excludeFromPos; head.push({ severity: "action", text: `Change ${describeRef(R)} 'Exclude from position files' from '${tf(!s.inPos)}' to '${tf(fp.excludeFromPos)}'.` }); }
     // applyPinSwaps: reciprocal pad net swaps become pin swaps before the labels are looked at
-    const swapped = o.pinSwaps && o.netNames ? pinSwapsFor(s, fp, !!o.allowPinSwaps, skipPins.get(s), lines, pinSwaps) : new Set<string>();
+    const swapped = o.pinSwaps && o.netNames && !skip ? pinSwapsFor(s, fp, !!o.allowPinSwaps, head, pinSwaps) : new Set<string>();
     changes += swapped.size / 2;
-    if (o.netNames) {
-      const skip = skipPins.get(s);
-      for (const [pad, boardNet] of fp.pads) {
-        if (swapped.has(pad) || (skip && skip.has(pad))) continue;
+    if (o.netNames && !skip) {
+      const mine = s.self ? new Set(s.self.unitPins.get(s.self.unit) || []) : null;
+      for (const pad of [...fp.pads.keys()].sort(cmpStr)) {
+        const boardNet = fp.pads.get(pad)!;
+        if (swapped.has(pad)) continue;
+        if (mine && !mine.has(pad)) continue;   // another unit's pin: not connected on this unit's sheet
         const schNet = s.pins.get(pad);
         if (schNet === undefined) continue;
         if (schNet === boardNet || autoNet(boardNet) || autoNet(schNet) || labels.some((l) => l.from === schNet)) continue;
         changes++; labels.push({ from: schNet, to: boardNet, ref: R, pin: pad });
-        lines.push({ severity: "action", text: `Change ${describeRef(R)} pin ${pad} net label from '${schNet}' to '${boardNet}'.` });
+        head.push({ severity: "action", text: `Change ${describeRef(R)} pin ${pad} net label from '${schNet}' to '${boardNet}'.` });
       }
     }
     if (o.otherFields) {
       for (const [name, val] of fp.fields) {
         if (name === "Reference" || name === "Value" || name === "Footprint") continue;
         const cur = s.fields.get(name);
-        if (cur !== undefined && !hasVars(cur) && cur !== val) { changes++; any = true; e.setFields.set(name, val); lines.push({ severity: "action", text: `Change ${describeRef(R)} field '${name}' value to '${val}'.` }); }
-        if (cur === undefined && !MANDATORY.has(name)) { changes++; any = true; e.addFields.set(name, val); lines.push({ severity: "action", text: `Add ${describeRef(R)} field '${name}' with value '${val}'.` }); }
+        if (cur !== undefined && !hasVars(cur) && cur !== val) { changes++; any = true; e.setFields.set(name, val); head.push({ severity: "action", text: `Change ${describeRef(R)} field '${name}' value to '${val}'.` }); }
+        if (cur === undefined && !MANDATORY.has(name)) { changes++; any = true; e.addFields.set(name, val); head.push({ severity: "action", text: `Add ${describeRef(R)} field '${name}' with value '${val}'.` }); }
       }
-      for (const name of s.fields.keys()) if (!MANDATORY.has(name) && !fp.fields.has(name)) { changes++; any = true; e.deleteFields.push(name); lines.push({ severity: "action", text: `Delete ${describeRef(R)} field '${name}.'` }); }
+      for (const name of s.fields.keys()) if (!MANDATORY.has(name) && !fp.fields.has(name)) { changes++; any = true; e.deleteFields.push(name); head.push({ severity: "action", text: `Delete ${describeRef(R)} field '${name}.'` }); }
     }
     if (any) edits.push(e);
   }
-  return { lines, edits, labels, relinks, changes, unitEdits, pinSwaps };
+  return out();
 }
 
 /** LIB_SYMBOL::LetterSubReference / SubReference( unit, false ): A … Z, AA … */
@@ -183,53 +220,59 @@ export function unitSwapPlan(s: SymRef, fp: FpData): { a: SymUnit; b: SymUnit; a
 }
 
 /**
- * BACK_ANNOTATE::applyPinSwaps for each placed unit: two pins of one unit whose board nets are each other's schematic
- * nets swap places (power pins left out).  Without "Allow unconstrained pin swaps", or on a symbol shared by several
- * sheet instances, the swap is only reported and the labels are changed as usual.  Returns the pins swapped.
+ * BACK_ANNOTATE::applyPinSwaps for one placed unit: two pins whose board nets are each other's schematic nets swap
+ * places (power pins left out: a power_in pin that is hidden).  Without "Allow unconstrained pin swaps", or on a
+ * symbol shared by several sheet instances or projects, the swap is only reported and the labels are changed as
+ * usual.  Returns the pins swapped.
  */
-function pinSwapsFor(s: SymRef, fp: FpData, allow: boolean, skip: Set<string> | undefined, lines: BaLine[], out: PinSwap[]): Set<string> {
-  const swapped = new Set<string>();
-  for (const u of s.units || []) {
-    const pins = u.unitPins.get(u.unit) || [];
-    const mism: { pin: string; cur: string; want: string }[] = [];
-    for (const [pin, want] of fp.pads) {
-      if (!pins.includes(pin) || (skip && skip.has(pin))) continue;
-      const t = u.pinTypes.get(pin) || ""; if (t === "power_in" || t === "power_out") continue;
-      const cur = s.pins.get(pin) || "";
-      if (!want || !cur || want === cur) continue;
-      mism.push({ pin, cur, want });
-    }
-    if (mism.length < 2) continue;
-    const done = new Array(mism.length).fill(false);
-    for (let i = 0; i < mism.length; i++) {
-      if (done[i]) continue;
-      const j = mism.findIndex((m, k) => k !== i && !done[k] && m.cur === mism[i].want && m.want === mism[i].cur);
-      if (j < 0) continue;
+function pinSwapsFor(s: SymRef, fp: FpData, allow: boolean, lines: BaLine[], out: PinSwap[]): Set<string> {
+  const swapped = new Set<string>(), u = s.self; if (!u) return swapped;
+  const pins = u.unitPins.get(u.unit) || [];
+  const mism: { pin: string; cur: string; want: string }[] = [];
+  for (const pin of [...fp.pads.keys()].sort(cmpStr)) {
+    const want = fp.pads.get(pin)!;
+    if (!pins.includes(pin)) continue;
+    if (u.pinTypes.get(pin) === "power_in" && u.hiddenPins && u.hiddenPins.has(pin)) continue;   // SCH_PIN::IsPower
+    const cur = s.pins.get(pin) || "";
+    if (!want || !cur || want === cur) continue;
+    mism.push({ pin, cur, want });
+  }
+  if (mism.length < 2) return swapped;
+  const projects = u.sharedProjects || [], sheets = u.sharedSheets || [], shared = !!u.shared || projects.length > 0;
+  const done = new Array(mism.length).fill(false);
+  for (let i = 0; i < mism.length; i++) {
+    if (done[i]) continue;
+    const j = mism.findIndex((m, k) => k !== i && !done[k] && m.cur === mism[i].want && m.want === mism[i].cur);
+    if (j < 0) continue;
+    const a = mism[i].pin, b = mism[j].pin;
+    if (!allow || shared) {
+      const text = projects.length ? `Would swap ${s.ref} pins ${a} and ${b} to match PCB, but the symbol is shared across other projects (${projects.join(", ")}).`
+        : sheets.length ? `Would swap ${describeRef(s.ref)} pins ${a} and ${b} to match PCB, but the symbol is used by multiple sheet instances (${sheets.join(", ")}).`
+        : shared ? `Would swap ${describeRef(s.ref)} pins ${a} and ${b} to match PCB, but the symbol is shared.`
+        : `Would swap ${describeRef(s.ref)} pins ${a} and ${b} to match PCB, but unconstrained pin swaps are disabled in the schematic preferences.`;
+      lines.push({ severity: "info", text });
       done[i] = done[j] = true;
-      const a = mism[i].pin, b = mism[j].pin;
-      if (!allow || u.shared) {
-        lines.push({ severity: "info", text: u.shared ? `Would swap ${describeRef(s.ref)} pins ${a} and ${b} to match PCB, but the symbol is shared.`
-          : `Would swap ${describeRef(s.ref)} pins ${a} and ${b} to match PCB, but unconstrained pin swaps are disabled in the schematic preferences.` });
-        continue;
-      }
-      swapped.add(a); swapped.add(b); out.push({ key: u.key, a, b });
-      lines.push({ severity: "action", text: `Swap ${describeRef(s.ref)} pins ${a} and ${b} to match PCB.` });
+      continue;
     }
+    done[i] = done[j] = true;
+    swapped.add(a); swapped.add(b); out.push({ key: u.key, a, b });
+    lines.push({ severity: "action", text: `Swap ${describeRef(s.ref)} pins ${a} and ${b} to match PCB.` });
   }
   return swapped;
 }
 
 /** LIB_SYMBOL::GetUnitPinInfo on a (flattened) library symbol: per unit, its pins and the common ones (any body style)
  *  ordered by position (x, then y downwards), each number once; with every pin's electrical type. */
-export function libUnitPins(lib: N): { unitPins: Map<number, string[]>; pinTypes: Map<string, string> } {
+export function libUnitPins(lib: N): { unitPins: Map<number, string[]>; pinTypes: Map<string, string>; hiddenPins: Set<string> } {
   const subs = kids(lib, "symbol").map((sub) => { const m = /_(\d+)_(\d+)$/.exec(sv(sub[1])); return { unit: m ? +m[1] : 0, pins: kids(sub, "pin") }; });
   let count = 1; for (const sb of subs) count = Math.max(count, sb.unit);
-  const unitPins = new Map<number, string[]>(), pinTypes = new Map<string, string>();
+  const unitPins = new Map<number, string[]>(), pinTypes = new Map<string, string>(), hiddenPins = new Set<string>();
   for (let u = 1; u <= count; u++) {
     const list: { n: string; x: number; y: number }[] = [];
     for (const sb of subs) if (sb.unit === 0 || sb.unit === u) for (const p of sb.pins) {
       const num = kid(p, "number"), at = kid(p, "at"); if (!num) continue;
       const n = sv(num[1]); pinTypes.set(n, sv(p[1]));
+      const hd = kid(p, "hide"); if (p.some((c) => c === "hide") || (hd && sv(hd[1]) !== "no")) hiddenPins.add(n);
       list.push({ n, x: at ? Number(at[1]) || 0 : 0, y: at ? -(Number(at[2]) || 0) : 0 });
     }
     list.sort((a, b) => a.x - b.x || a.y - b.y);
@@ -237,7 +280,7 @@ export function libUnitPins(lib: N): { unitPins: Map<number, string[]>; pinTypes
     for (const p of list) if (!seen.has(p.n)) { seen.add(p.n); nums.push(p.n); }
     unitPins.set(u, nums);
   }
-  return { unitPins, pinTypes };
+  return { unitPins, pinTypes, hiddenPins };
 }
 
 /** SwapPinGeometry on the library copy: the two pins (in every body style of the unit's sub-symbols) trade position,
@@ -272,7 +315,7 @@ export function fpData(fp: N): FpData {
   for (const t of kids(fp, "fp_text")) { if (sv(t[1]) === "reference" && !ref) ref = sv(t[2]); if (sv(t[1]) === "value" && !value) value = sv(t[2]); }
   const attr = kid(fp, "attr"), flags = attr ? attr.slice(1).map(sv) : [];
   const pads = new Map<string, string>();
-  for (const pad of kids(fp, "pad")) { const num = sv(pad[1]), net = kid(pad, "net"); if (!num || !net) continue; const name = sv(net.length > 2 ? net[2] : net[1]); if (!pads.has(num)) pads.set(num, name); }
+  for (const pad of kids(fp, "pad")) { const num = sv(pad[1]), net = kid(pad, "net"); if (!net) continue; const name = sv(net.length > 2 ? net[2] : net[1]); if (name) pads.set(num, name); }
   const path = kid(fp, "path");
-  return { ref, path: path ? sv(path[1]) : "", fpid: sv(fp[1]), value, dnp: flags.includes("dnp"), excludeFromBom: flags.includes("exclude_from_bom"), excludeFromPos: flags.includes("exclude_from_pos_files"), fields, pads };
+  return { ref, path: path ? sv(path[1]) : "", fpid: sv(fp[1]), value, dnp: flags.includes("dnp"), excludeFromBom: flags.includes("exclude_from_bom"), excludeFromSim: flags.includes("exclude_from_sim"), excludeFromPos: flags.includes("exclude_from_pos_files"), fields, pads };
 }

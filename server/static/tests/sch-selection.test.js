@@ -55,8 +55,9 @@ test("CollectHits: one threshold, max( 5 px, |grid| / 2 ), for every item; a sym
   const { d, c } = fresh();
   const thr = _.selectThreshold(c); assert.ok(Math.abs(thr - Math.hypot(1.27, 1.27) / 2) < 1e-9);
   // 0.8 mm off a wire: inside the 0.898 mm threshold (the old 5 px = 0.625 mm would miss it)
-  assert.deepStrictEqual(collected(c, [38, 49.06]), ["w1"]);
-  assert.deepStrictEqual(collected(c, [38, 49.3]), []);
+  // the label above the wire is hit too: its text box (EDA_TEXT::GetTextBox) reaches 0.17 x the text height below its baseline
+  assert.deepStrictEqual(collected(c, [38, 49.06]), ["l1", "w1"]);
+  assert.deepStrictEqual(collected(c, [38, 49.5]), []);
   const body = _.bodyBox(d, d.items.get("u1"));
   assert.ok(collected(c, [50.8, body[3] + thr / 2 - 0.02]).includes("u1"), "threshold / 2 outside the body box");
   assert.ok(!collected(c, [50.8, body[3] + thr / 2 + 0.05]).includes("u1"));

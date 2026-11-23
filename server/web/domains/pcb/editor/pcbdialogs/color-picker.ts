@@ -49,7 +49,10 @@ export function fromHex(text: string): RGBA | null {
   return { r: ((v >> 16) & 255) / 255, g: ((v >> 8) & 255) / 255, b: (v & 255) / 255, a: 1 };
 }
 
-let lastTab = 0;   // m_ColorPicker.default_tab
+const TAB_KEY = "kicad.colorPicker.defaultTab";
+/** m_ColorPicker.default_tab: kept in the user's settings across sessions. */
+let lastTab = ((): number => { try { const v = parseInt(localStorage.getItem(TAB_KEY) || "", 10); return v === 1 ? 1 : 0; } catch { return 0; } })();
+function saveTab(i: number): void { lastTab = i; try { localStorage.setItem(TAB_KEY, String(i)); } catch { /* storage unavailable */ } }
 /**
  * DIALOG_COLOR_PICKER( parent, aCurrentColor, aAllowOpacityControl, nullptr, aDefaultColor ): `done` gets the colour
  * when OK closes it (nothing on Cancel).  `def` null is COLOR4D::UNSPECIFIED (the Clear Color button).
@@ -117,7 +120,7 @@ export function colorPicker(current: RGBA | null, allowOpacity: boolean, done: (
     ctx.save(); ctx.strokeStyle = "#000000"; ctx.lineWidth = 2 * dpr; ctx.strokeRect(c + x - cs / 2, c - y - cs / 2, cs, cs); ctx.restore();
   };
   /** COLOR_SWATCH::MakeBitmap: the colour over a checkerboard where it is translucent. */
-  const swatchStyle = (c: RGBA): string => `background:linear-gradient(rgba(${b255(c.r)},${b255(c.g)},${b255(c.b)},${c.a}),rgba(${b255(c.r)},${b255(c.g)},${b255(c.b)},${c.a})),repeating-conic-gradient(#c0c0c0 0 25%, #ffffff 0 50%) 0 0 / 8px 8px`;
+  const swatchStyle = (c: RGBA): string => `background:linear-gradient(rgba(${b255(c.r)},${b255(c.g)},${b255(c.b)},${c.a}),rgba(${b255(c.r)},${b255(c.g)},${b255(c.b)},${c.a})),repeating-conic-gradient(#d9d9d9 0 25%, #ffffff 0 50%) 0 0 / 8px 8px`;   // MakeBitmap( c, WHITE ): WHITE and WHITE.Darkened( 0.15 )
   const oldRect = h("span", { "data-k": "oldColor", style: `display:inline-block;width:20px;height:20px;border:1px solid var(--line);${swatchStyle(prev)}` });
   const newRect = h("span", { "data-k": "newColor", style: `display:inline-block;width:20px;height:20px;border:1px solid var(--line);${swatchStyle(col)}` });
   const paintNew = (): void => { newRect.setAttribute("style", `display:inline-block;width:20px;height:20px;border:1px solid var(--line);${swatchStyle(col)}`); };
@@ -223,7 +226,7 @@ export function colorPicker(current: RGBA | null, allowOpacity: boolean, done: (
           }
           p.append(g);
         } },
-      ], { start: lastTab, onShow: (i) => { lastTab = i; } });
+      ], { start: lastTab, onShow: (i) => { saveTab(i); } });
       const upper = h("div", { style: "display:flex;gap:10px;align-items:stretch" }, h("div", { style: "flex:1 1 auto;min-width:0" }, nb.el));
       if (allowOpacity) upper.append(h("div", { style: "display:flex;flex-direction:column;align-items:center;padding-top:25px" }, h("label", { style: "margin-bottom:6px" }, "Opacity:"), alpha.el));
       const reset = h("button", { type: "button", class: "btn", "data-k": "resetColor" }, def ? "Reset to Default" : "Clear Color");

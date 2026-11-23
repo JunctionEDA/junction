@@ -2,7 +2,7 @@
 import { PCB_KINDS, SCH_KINDS, addItem } from "./doc";
 import { FP_KINDS, applyFootprintHeader } from "./footprint-doc";
 import { buildGeom } from "./geom";
-import { atOf, isList, kid, kids, num, parseAll, ptsOf, str, uuidOf } from "./sexpr";
+import { atOf, isList, kid, kids, num, parseAll, ptsOf, rotator, str, uuidOf } from "./sexpr";
 import { shiftTable } from "./tables-images";
 import type { Doc, WireChange } from "./types";
 // ---------------------------------------------------------------- ops
@@ -101,13 +101,33 @@ export function applyChange(doc: Doc, change: WireChange, IU: number): boolean {
     if (nx !== undefined || ny !== undefined || nrot !== undefined) {
       const ox = item.x !== undefined ? item.x : atOf(item.node)[0], oy = item.y !== undefined ? item.y : atOf(item.node)[1];
       const dx = nx !== undefined ? nx - ox : 0, dy = ny !== undefined ? ny - oy : 0;
+      const was = atOf(item.node);
       if (item.kind === "table") shiftTable(item.node, dx, dy); else setAt(item.node, nx, ny, nrot);
+      if (doc.type === "pcb" && item.kind === "footprint") refitLegacyFootprintFrame(doc, item.node, was);
       if (doc.type === "sch" && item.kind === "symbol" && (dx || dy)) for (const p of kids(item.node, "property")) { const a = kid(p, "at"); if (a) { a[1] = num(a[1]) + dx; a[2] = num(a[2]) + dy; } }
       changed = true;
     }
     if (changed) { buildGeom(doc, item); return true; }
   }
   return false;
+}
+
+/**
+ * Boards before FIRST_FP_AFFINE_TRANSFORM (20260616) keep a footprint's zone outlines and (point …) positions in the
+ * board frame (pcb_io_kicad_sexpr.cpp writes them through the footprint transform only from that version on).  After
+ * the footprint's placement changed from `was` ([x, y, angle]) to what its node now says, carry them along.
+ */
+export function refitLegacyFootprintFrame(doc: Pick<Doc, "version">, node: SNode, was: readonly number[]): void {
+  if (!(doc.version > 0 && doc.version < 20260616)) return;
+  const [x1, y1, a1] = atOf(node), [x0, y0, a0] = was;
+  if (x0 === x1 && y0 === y1 && a0 === a1) return;
+  const toLocal = rotator(-a0), toBoard = rotator(a1);
+  const r = (v: number): number => Math.round(v * 1e6) / 1e6;
+  const map = (x: number, y: number): [number, number] => { const [lx, ly] = toLocal(x - x0, y - y0); const [bx, by] = toBoard(lx, ly); return [r(x1 + bx), r(y1 + by)]; };
+  for (const z of kids(node, "zone")) for (const poly of [z, ...kids(z, "polygon"), ...kids(z, "filled_polygon")]) {
+    const p = kid(poly, "pts"); if (p) for (const q of kids(p, "xy")) { const [x, y] = map(num(q[1]), num(q[2])); q[1] = x; q[2] = y; }
+  }
+  for (const pt of kids(node, "point")) { const a = kid(pt, "at"); if (a) { const [x, y] = map(num(a[1]), num(a[2])); a[1] = x; a[2] = y; } }
 }
 
 export function setPts(node: SNode, pts: readonly (readonly number[])[]): void {

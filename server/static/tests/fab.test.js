@@ -166,7 +166,7 @@ test("only the layers asked for are plotted, under the board's own layer names",
   assert.deepStrictEqual(F.plottableLayers(doc), ["F.Cu", "B.Cu", "F.Adhes", "B.Adhes", "F.Paste", "B.Paste", "F.SilkS", "B.SilkS", "F.Mask", "B.Mask", "Edge.Cuts", "F.CrtYd", "B.CrtYd", "F.Fab", "B.Fab"]);
   const g = F.plotGerbers(ctx, { layers: ["B.SilkS", "Edge.Cuts"] });
   assert.deepStrictEqual(g.files.map((f) => f.name), ["t-B_Silkscreen.gbr", "t-Edge_Cuts.gbr"]);
-  assert.strictEqual(F.protelExtension("In2.Cu", ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"]), "g3");
+  assert.strictEqual(F.protelExtension("In2.Cu", ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"]), "g2");   // CopperLayerToOrdinal
 });
 
 const mini = (version, items) => `(kicad_pcb (version ${version}) (generator "pcbnew") (general (thickness 1.6)) (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (5 "F.SilkS" user) (25 "Edge.Cuts" user))

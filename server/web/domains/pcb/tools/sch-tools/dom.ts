@@ -1,6 +1,7 @@
 import type { SchCtx, Pt, Mods, PtrEvent } from "./types";
 import { lineEndAt, selectThreshold, setSelEnd } from "./line-ends";
 import { root } from "../root";
+import { isPastDragThreshold } from "../drag-threshold";
 import { hasModifier, modifiersState } from "../../editor/selmodes";
 import { cancelCarry, placeText, startCarry } from "./carry";
 import { cancelPinPlace } from "./sheets";
@@ -162,7 +163,7 @@ export function onDownCapture(ev: PointerEvent) {
   // selectPoint without a modifier: ClearSelection() first, so symbols (or other items) selected with it go
   if (ctx.selection && ctx.selection.size && ctx.setSelection) { const keepEnds = S.selEnds; ctx.setSelection([]); S.selEnds = keepEnds; } else ctx.setSelected(null);
   if (!already) setSelEnd(hit.id, lineEndAt(hit, mm, selectThreshold(ctx)));
-  S.pending = { item: hit, mm, box: nothingSelected, client: [ev.clientX, ev.clientY] };
+  S.pending = { item: hit, mm, box: nothingSelected, client: [ev.clientX, ev.clientY], t: ev.timeStamp };
   try { ctx.stage.setPointerCapture(ev.pointerId); } catch (e) { /* not a real pointer */ }
   ctx.requestRender();
 }
@@ -216,7 +217,8 @@ export function onMoveCapture(ev: PointerEvent) {
   if (S.pedit) { pointEditMove(ctx, mm, ev); return; }
   if (S.drag) { moveDrag(ctx, mm, ev); return; }
   if (S.pending) {
-    if (Math.hypot(mm[0] - S.pending.mm[0], mm[1] - S.pending.mm[1]) > 0.4) {
+    const pc = S.pending.client;
+    if (pc ? isPastDragThreshold(ev.clientX - pc[0], ev.clientY - pc[1], S.pending.t === undefined ? undefined : ev.timeStamp - S.pending.t) : isPastDragThreshold((mm[0] - S.pending.mm[0]) * ctx.pxPerMm, (mm[1] - S.pending.mm[1]) * ctx.pxPerMm)) {
       const p = S.pending; S.pending = null;
       const ed = (globalThis as unknown as { CollabEditor?: { boxSel?: unknown; selMode?: string } }).CollabEditor;
       if (p.box && ed) {
@@ -244,12 +246,11 @@ export function onUpCapture(ev?: PtrEvent) {
   if (pend && S.sel === pend.item.id && !S.drag) setSelEnd(pend.item.id, lineEndAt(pend.item, pend.mm, selectThreshold(ctx)));   // the click's selectPoint
   if (S.pedit) pointEditEnd(ctx, true);
   if (S.drag && S.drag.byPointer) { endDrag(ctx, true); return; }
-  if (press && ev && Math.hypot(ev.clientX! - press.client[0], ev.clientY! - press.client[1]) < CLICK_PX && curTool() === "select" && !S.drag && !S.wire) {
+  if (press && ev && !isPastDragThreshold(ev.clientX! - press.client[0], ev.clientY! - press.client[1]) && curTool() === "select" && !S.drag && !S.wire) {
     // after the release has run its course (the press may have selected the symbol under the pin): start the line
     setTimeout(() => { if (curTool() === "select" && !S.drag && !S.wire && !S.carry) { autostartAt(ctx, press.mm, press.mods); ctx.requestRender(); } }, 0);
   }
 }
-export const CLICK_PX = 4;                                          // a press that travels less than this is a click (the box-select threshold)
 export function onKeyCapture(ev: KeyboardEvent) {
   const ctx = S.ctx; if (!ctx || !schActive()) return;
   const tgt = ev.target as (Partial<HTMLInputElement> & { closest?: Element["closest"] }) | null;

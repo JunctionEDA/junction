@@ -37,6 +37,13 @@ export function updateMsgPanel(): void {
     return;
   }
   if (doc && isSch()) { updateSchMsgPanel(doc); return; }
+  // a DRC marker picked on the board (PCB_MARKER is a selectable item): PCB_MARKER::GetMsgPanelInfo
+  const bm = doc && P ? ((P as unknown as { state?: { markers?: BoardMarkerSel[] } }).state?.markers || []).find((m) => m && m.selected) : null;
+  if (doc && bm) {
+    const key = ["drcmarker", bm.code, bm.text, bm.severity, bm.comment || "", (bm.ids || []).join(","), E.units].join("§");
+    if (key !== lastKey) { lastKey = key; store.set({ msgPanel: { items: boardMarkerMsgPanel(doc, bm) } }); }
+    return;
+  }
   if (!doc || !P || !P.msgPanelInfo) { if (lastKey) { lastKey = ""; store.set({ msgPanel: { items: [] } }); } return; }
   const pcb = CollabTools.pcb && (CollabTools.pcb.state as unknown as { route?: RouteState; sel?: Set<string>; padSel?: string | null; highlightNet?: string | null });
   const rt = pcb ? pcb.route || null : null;
@@ -52,6 +59,19 @@ export function updateMsgPanel(): void {
   try { items = P.msgPanelInfo(variantView(doc) as KDoc, ids, { settings, units: E.units, route: rt && rt.width ? rt : null, net: pcb && pcb.highlightNet && E.highlightIds ? pcb.highlightNet : null, ellipsize: ellipsizeEnd, toDisplay: (p: [number, number]) => [toDisplayAbsAxis(p[0], "x"), toDisplayAbsAxis(p[1], "y")] }); } catch (e) { console.warn(e); }
   if (doc.fpEditor && !items.length) items = footprintMsgPanel(doc);
   store.set({ msgPanel: { items } });
+}
+
+interface BoardMarkerSel { code: string; severity: string; text: string; ids: string[]; excluded?: boolean; comment?: string; selected?: boolean; drawingSheet?: boolean; descs?: string[] }
+/** PCB_MARKER::GetMsgPanelInfo: Type, Violation, Severity (none for an exclusion), the main | aux item descriptions and Excluded. */
+export function boardMarkerMsgPanel(doc: KDoc, m: BoardMarkerSel): MsgItem[] {
+  const D = (window as unknown as { PcbTools?: { itemDescription?: (d: KDoc, id: string, u: string) => string } }).PcbTools;
+  const excluded = !!m.excluded || m.severity === "exclusion";
+  const out: MsgItem[] = [{ title: "Type", value: "Marker" }, { title: "Violation", value: m.text }];
+  if (!excluded) { if (m.severity === "ignore") out.push({ title: "Severity", value: "Ignore" }); else if (m.severity === "warning") out.push({ title: "Severity", value: "Warning" }); else if (m.severity === "error") out.push({ title: "Severity", value: "Error" }); }
+  const desc = (i: number): string => { const id = (m.ids || [])[i]; if (m.descs && m.descs[i]) return m.descs[i]; return id && D && D.itemDescription && doc.items.has(id) ? D.itemDescription(doc, id, E.units) : ""; };
+  out.push(m.drawingSheet ? { title: "Drawing Sheet", value: "" } : { title: desc(0), value: desc(1) });
+  if (excluded) out.push({ title: "Excluded", value: m.comment || "" });
+  return out;
 }
 
 type SchSel = { id: string; pin?: string; field?: string };

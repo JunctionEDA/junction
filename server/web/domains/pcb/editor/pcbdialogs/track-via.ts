@@ -6,7 +6,7 @@
 // not share shows "-- mixed values --" and is left alone unless edited; a check box they do not share is in its
 // third state.  OK validates as TransferDataFromWindow does (DisplayError and the bad field focused) and stores
 // one "Edit Track/Via Properties" commit.
-import { box, checkField, coordField, errorMessage, fmtLen, fmtLenU, form, h, openDialog, parseLen, selectField, unitLabel, unitName, type Field } from "./ui";
+import { box, checkField, coordField, errorMessage, fmtLen, fmtLenU, form, h, messageBox, openDialog, parseLen, selectField, unitLabel, unitName, type Field } from "./ui";
 import * as M from "./track-via-model";
 import { setNet } from "./item-props";
 
@@ -20,6 +20,15 @@ const PT = (): { isLocked(n: SNode): boolean; setLocked(n: SNode, on: boolean): 
 const layerLabel = (doc: KDoc, name: string): string => { const l = doc.layers.get(name); return l && l.userName ? l.userName : name; };
 const quote = (s: string): string => '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
 
+interface NetPlan { connected: string[]; changingPads: { fpId: string; index: number; ref: string; number: string }[]; shortingNets: string[] }
+/** A pad's (net …) in the form the board's pads use (code and name, or the name), none for no net. */
+function setPadNet(doc: KDoc, pad: SNode, name: string): void {
+  const PMod = (KiCadCanvas as unknown as { padModel: { setPadChild(p: SNode, k: string, t: string | null): void } }).padModel;
+  const cur = M.kid(pad, "net");
+  const numbered = cur ? typeof cur[1] === "number" : Array.from(doc.items.values()).some((it) => it.kind === "footprint" && (K().kids(it.node, "pad") as SNode[]).some((p) => { const n = M.kid(p, "net"); return !!n && typeof n[1] === "number"; }));
+  const code = (CollabTools as unknown as { props: { helpers: { netCodeOf(d: KDoc, n: string): number } } }).props.helpers.netCodeOf(doc, name);
+  PMod.setPadChild(pad, "net", !name ? null : numbered ? `(net ${code} ${quote(name)})` : `(net ${quote(name)})`);
+}
 /** The value every item shares, or undefined when they differ. */
 export function common<T>(values: T[], eq: (a: T, b: T) => boolean = (a, b) => a === b): T | undefined {
   if (!values.length) return undefined; const v = values[0]; return values.every((x) => eq(x, v)) ? v : undefined;
@@ -131,13 +140,15 @@ export function trackViaDialog(ctx: ToolCtx, items: KItem[]): boolean {
       if (tracks.length) {
         const st = (k: "start" | "end", i: 1 | 2): (number | undefined) => common(tracks.map((t) => { const p = M.kid(t.node, k); return p ? +p[i] : 0; }), near);
         const sx = mixLen(st("start", 1), "sx", { coord: "x" }), sy = mixLen(st("start", 2), "sy", { coord: "y" }), ex = mixLen(st("end", 1), "ex", { coord: "x" }), ey = mixLen(st("end", 2), "ey", { coord: "y" });
-        if (tracks.some((t) => t.kind === "arc")) for (const f of [sx, sy, ex, ey]) f.enable(false);
         const w0 = common(tracks.map((t) => { const w = M.kid(t.node, "width"); return w ? +w[1] : 0; }), near);
         const width = mixLen(w0, "width"); trackWidth = width; fields.width = width;
         const tw = sizes.trackWidths.slice(1);
-        const predef = selectField<string>(w0 !== undefined ? String(tw.findIndex((w) => near(w, w0))) : "-1", [["-1", ""], ...tw.map((w, i): [string, string] => [String(i), fmtLen(w)])], { key: "predefTrack",
+        // m_predefinedTrackWidthsCtrl: the board's widths only (wxNOT_FOUND shows no entry)
+        const predef = selectField<string>(w0 !== undefined ? String(tw.findIndex((w) => near(w, w0))) : "-1", tw.map((w, i): [string, string] => [String(i), fmtLen(w)]), { key: "predefTrack",
           onChange: (s) => { const i = +s; if (i >= 0) { width.set(tw[i]); width.input.focus(); width.input.select(); } } });
-        width.input.addEventListener("input", () => { const v = width.get(); const i = typeof v === "number" ? tw.findIndex((w) => near(w, v)) : -1; predef.set(String(i)); });   // onWidthEdit
+        const pick = (sel: Field<string>, i: number): void => { (sel.input as HTMLSelectElement).selectedIndex = i; };   // wxNOT_FOUND: nothing shown
+        if (w0 === undefined || tw.findIndex((w) => near(w, w0)) < 0) pick(predef, -1);
+        width.input.addEventListener("input", () => { const v = width.get(); const i = typeof v === "number" ? tw.findIndex((w) => near(w, v)) : -1; pick(predef, i); });   // onWidthEdit
         const l0 = common(tracks.map((t) => M.trackLayer(t.node)));
         const layer = mixChoice<string>(l0, layerOpts(), "layer", () => onTrackEdit());
         const mask = tri(common(tracks.map((t) => M.trackHasMask(t.node))), "Solder mask", "trackMask", undefined, () => onTrackEdit());
@@ -161,8 +172,8 @@ export function trackViaDialog(ctx: ToolCtx, items: KItem[]): boolean {
             h("div", { class: "pd-row", style: "flex-wrap:nowrap" }, mask.el, marginLabel, margin.el, marginUnit)))));
         onTrackEdit();
         trackApply = (n) => {
-          const isArc = n[0] === "arc";
-          const setPt = (k: "start" | "end", x: MixLen, y: MixLen): void => { if (isArc) return; const p = M.kid(n, k); if (!p) return; const nx = x.get(), ny = y.get(); const vx = typeof nx === "number" ? nx : +p[1], vy = typeof ny === "number" ? ny : +p[2]; if (!near(vx, +p[1]) || !near(vy, +p[2])) M.setChild(n, k, `(${k} ${M.f6(vx)} ${M.f6(vy)})`, M.TRACK_ORDER, parse); };
+          // SetStartX / SetStartY / SetEndX / SetEndY on a track and an arc alike (an arc keeps its mid point)
+          const setPt = (k: "start" | "end", x: MixLen, y: MixLen): void => { const p = M.kid(n, k); if (!p) return; const nx = x.get(), ny = y.get(); const vx = typeof nx === "number" ? nx : +p[1], vy = typeof ny === "number" ? ny : +p[2]; if (!near(vx, +p[1]) || !near(vy, +p[2])) M.setChild(n, k, `(${k} ${M.f6(vx)} ${M.f6(vy)})`, M.TRACK_ORDER, parse); };
           setPt("start", sx, sy); setPt("end", ex, ey);
           const w = width.get(); if (typeof w === "number" && !near(w, +(M.kid(n, "width") || [0, 0])[1])) M.setChild(n, "width", `(width ${M.f6(w)})`, M.TRACK_ORDER, parse);
           const l = layer.get() ?? M.trackLayer(n), mk = mask.get() ?? M.trackHasMask(n);
@@ -185,10 +196,12 @@ export function trackViaDialog(ctx: ToolCtx, items: KItem[]): boolean {
         const dia = mixLen(dia0, "size"), drill = mixLen(common(vias.map((v) => +(M.kid(v.node, "drill") || [0, 0])[1]), near), "drill");
         fields.size = dia; fields.drill = drill;
         const vd = sizes.vias.slice(1);
-        const predefVia = selectField<string>(String(vd.findIndex((v) => dia0 !== undefined && near(v.diameter, dia0) && near(v.drill, +((M.kid(first, "drill") || [0, 0])[1])))),
-          [["-1", ""], ...vd.map((v, i): [string, string] => [String(i), `${fmtLen(v.diameter)} / ${fmtLen(v.drill)}`])], { key: "predefVia",
+        const viaSel0 = vd.findIndex((v) => dia0 !== undefined && near(v.diameter, dia0) && near(v.drill, +((M.kid(first, "drill") || [0, 0])[1])));
+        const predefVia = selectField<string>(String(viaSel0), vd.map((v, i): [string, string] => [String(i), `${fmtLen(v.diameter)} / ${fmtLen(v.drill)}`]), { key: "predefVia",
             onChange: (s) => { const i = +s; if (i >= 0) { dia.set(vd[i].diameter); drill.set(vd[i].drill); } } });
-        for (const f of [dia, drill]) f.input.addEventListener("input", () => predefVia.set("-1"));   // onViaEdit
+        const noVia = (): void => { (predefVia.input as HTMLSelectElement).selectedIndex = -1; };   // SetSelection( wxNOT_FOUND )
+        if (viaSel0 < 0) noVia();
+        for (const f of [dia, drill]) f.input.addEventListener("input", noVia);   // onViaEdit
         const modeSel = selectField<string>(stack.mode, [["normal", "Normal"], ["front_inner_back", "Front/Inner/Back"], ["custom", "Custom"]], { key: "padstackMode", onChange: (m) => { syncDia(); stack.mode = m as M.PadstackMode; stackDirty = true; afterMode(); } });
         const editSel = h("k-select", { "data-k": "editLayer" }) as HTMLSelectElement;
         /** onEditLayerChanged: the shown diameter goes into the stack before the new layer's is shown. */
@@ -210,7 +223,7 @@ export function trackViaDialog(ctx: ToolCtx, items: KItem[]): boolean {
         const l0 = mixChoice<string>(s0, layerOpts(), "startLayer", () => onViaEdit()), l1 = mixChoice<string>(e0, layerOpts(), "endLayer", () => onViaEdit());
         const ringLabel = h("label", null, "Annular rings:"), ringPad = h("span");
         const ring = mixChoice<number>(common(vias.map((v) => M.annularMode(v.node))), [[0, "All copper layers"], [1, "Start, end, and connected layers"], [2, "Connected layers only"], [3, "Start and end layers only"]], "annularRings");
-        const prot0 = common(vias.map((v) => M.protectionPreset(v.node)));
+        const prot0 = common(vias.map((v) => M.protectionPreset(v.node, Number(doc.version) || 0)));
         const protOpts: [number, string][] = M.IPC4761.map(([name], i): [number, string] => [i, name]);
         if (prot0 === M.IPC4761_CUSTOM) protOpts.push([M.IPC4761_CUSTOM, "-- leave unchanged --"]);   // INDETERMINATE_ACTION for a custom feature list
         const prot = mixChoice<number>(prot0, protOpts, "protection");
@@ -341,8 +354,10 @@ export function trackViaDialog(ctx: ToolCtx, items: KItem[]): boolean {
           const a = l0.get(), b = l1.get();
           if (a && b && a === b) return { msg: "Via start layer and end layer cannot be the same", focus: l0 };
           const m = bdMode.get();
-          if (m === 2 || m === 3) { const s = bfSize.get(); if (typeof s === "number" && typeof dr === "number" && s < dr) return { msg: "Backdrill diameter is too small.", focus: bfSize }; }
-          if (m === 1 || m === 3) { const s = bbSize.get(); if (typeof s === "number" && typeof dr === "number" && s < dr) return { msg: "Tertiary backdrill diameter is too small.", focus: bbSize }; }
+          // aPrimaryDrill.value_or( GEOMETRY_MIN_SIZE ): a mixed or empty drill is checked against the minimum size
+          const minBd = typeof dr === "number" ? dr : minSize;
+          if (m === 2 || m === 3) { const s = bfSize.get(); if (typeof s === "number" && s < minBd) return { msg: "Backdrill diameter is too small.", focus: bfSize }; }
+          if (m === 1 || m === 3) { const s = bbSize.get(); if (typeof s === "number" && s < minBd) return { msg: "Tertiary backdrill diameter is too small.", focus: bbSize }; }
           return null;
         };
         viaApply = (n) => {
@@ -379,7 +394,7 @@ export function trackViaDialog(ctx: ToolCtx, items: KItem[]): boolean {
           if (typeof ml === "number") td.maxLen = ml; if (typeof mw === "number") td.maxWidth = mw;
           if (typeof bl2 === "number") td.bestLength = bl2 / 100; if (typeof bw === "number") td.bestWidth = bw / 100; if (typeof fr === "number") td.filter = fr / 100;
           M.setTeardrops(n, td, M.VIA_ORDER, parse);
-          const pr = prot.get(); if (pr !== undefined) M.setProtectionPreset(n, pr, parse);
+          const pr = prot.get(); if (pr !== undefined) M.setProtectionPreset(n, pr, parse, Number(doc.version) || 0);
         };
       }
 
@@ -391,7 +406,6 @@ export function trackViaDialog(ctx: ToolCtx, items: KItem[]): boolean {
       };
       applyItems = (n: SNode, it: KItem) => {
         if (isTrack(it)) trackApply(n); else viaApply(n);
-        const nn = net.get(); if (nn !== undefined && nn !== PH().netNameOf(doc, n)) setNet(doc, n, nn);
         const lk = locked.get(); if (lk !== undefined && lk !== PT().isLocked(n)) { const r = PT().setLocked(n, lk); if (r && r !== n) n.splice(0, n.length, ...r); }
       };
       // SetInitialFocus: the track width, else the net, else the via diameter
@@ -405,13 +419,59 @@ export function trackViaDialog(ctx: ToolCtx, items: KItem[]): boolean {
         errorMessage(err.msg, () => { if (target && document.contains(target)) { (target as HTMLElement).focus(); if (target instanceof HTMLInputElement && target.type === "text") target.select(); } });
         return false;
       }
-      const changes: unknown[] = [];
-      for (const it of all) {
-        const staged = (K().cloneNode as (n: SNode) => SNode)(it.node), before = K().serialize(staged);
-        applyItems(staged, it);
-        if (K().serialize(staged) !== before) changes.push(K().replaceChange(doc, { ...it, node: staged, geom: [], bbox: null }));
+      // the per-item edits first (the net is not one of them), then the net change over the connected copper
+      const staged = new Map<string, SNode>();
+      for (const it of all) { const n = (K().cloneNode as (n: SNode) => SNode)(it.node); applyItems(n, it); staged.set(it.id, n); }
+      const nn = (fields.net as unknown as { get(): string | undefined }).get();
+      const plan = (window as unknown as { PcbTools: { trackNetChangePlan(d: KDoc, ids: string[], st: Map<string, SNode>, net: string): NetPlan } }).PcbTools
+        .trackNetChangePlan(doc, all.map((i) => i.id), staged, nn === undefined ? "\u0000" : nn);
+      const shown = nn === undefined ? INDETERMINATE_STATE : nn || "<no net>";
+      const finish = (changeNets: boolean): void => {
+        const changes: unknown[] = [];
+        const nodes = new Map(staged);
+        if (changeNets && nn !== undefined) {
+          for (const id of plan.connected) {
+            const it = doc.items.get(id); if (!it) continue;
+            const n = nodes.get(id) || (K().cloneNode as (n: SNode) => SNode)(it.node);
+            if (nn !== PH().netNameOf(doc, n)) setNet(doc, n, nn);
+            nodes.set(id, n);
+          }
+        }
+        for (const [id, n] of nodes) {
+          const it = doc.items.get(id) || all.find((x) => x.id === id); if (!it) continue;
+          if (K().serialize(n) !== K().serialize(it.node)) changes.push(K().replaceChange(doc, { ...it, node: n, geom: [], bbox: null }));
+        }
+        if (changeNets && nn !== undefined && plan.changingPads.length) {
+          const fps = new Map<string, SNode>();
+          for (const p of plan.changingPads) {
+            const fp = doc.items.get(p.fpId); if (!fp) continue;
+            let fn = fps.get(p.fpId); if (!fn) { fn = (K().cloneNode as (n: SNode) => SNode)(fp.node); fps.set(p.fpId, fn); }
+            const pad = (K().kids(fn, "pad") as SNode[])[p.index]; if (pad) setPadNet(doc, pad, nn);
+          }
+          for (const [id, fn] of fps) { const fp = doc.items.get(id) as KItem; changes.push(K().replaceChange(doc, { ...fp, node: fn, geom: [], bbox: null })); }
+        }
+        if (changes.length) ctx.commit(changes as never[], "Edit Track/Via Properties");
+      };
+      const padStep = (): void => {
+        if (nn === undefined) { finish(false); return; }
+        if (!plan.changingPads.length) { finish(true); return; }
+        // confirmPadChange
+        const ps = plan.changingPads;
+        const msg = ps.length === 1 ? `Changing the net will also update ${ps[0].ref} pad ${ps[0].number} to ${shown}.`
+          : ps.length === 2 ? `Changing the net will also update ${ps[0].ref} pad ${ps[0].number} and ${ps[1].ref} pad ${ps[1].number} to ${shown}.`
+          : `Changing the net will also update ${ps.length} connected pads to ${shown}.`;
+        messageBox("Confirmation", msg, [{ label: "Leave Nets Unchanged", fn: () => { finish(false); if (api) api.close(); } }, { label: "Change Nets", fn: () => { finish(true); if (api) api.close(); } }]);
+      };
+      if (plan.shortingNets.length || (nn !== undefined && plan.changingPads.length)) {
+        // the questions are asked over the dialog; it closes once they are answered (TransferDataFromWindow returns true)
+        if (plan.shortingNets.length) {
+          const msg = plan.shortingNets.length === 1 ? `Applying these changes will short net ${shown} with ${plan.shortingNets[0]}.` : `Applying these changes will short net ${shown} with other nets.`;
+          // confirmShortingNets: "Cancel Changes" reverts the whole commit
+          messageBox("Confirmation", msg, [{ label: "Cancel Changes", fn: () => { if (api) api.close(); } }, { label: "Apply Anyway", fn: () => { if (nn !== undefined && plan.changingPads.length) padStep(); else { finish(nn !== undefined); if (api) api.close(); } } }]);
+        } else padStep();
+        return false;
       }
-      if (changes.length) ctx.commit(changes as never[], "Edit Track/Via Properties");
+      finish(nn !== undefined);
       return true;
     } });
   return !!api;

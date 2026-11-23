@@ -2,7 +2,7 @@
 // A modeless dialog: Find walks the hits (left to right, top to bottom, then on to the project's other sheets unless
 // "Search the current sheet only" is ticked), selecting and centring each; Replace / Replace All edit references
 // (when allowed), values, fields, labels and text as ordinary collab changes.
-import { E, appState, applyView, centerOn, openDocId, pushUndoFor, toolCtx, cloneNode } from "./editor";
+import { E, appState, applyView, focusOnLocation, openDialogRects, openDocId, pushUndoFor, toolCtx, cloneNode } from "./editor";
 import { KD, checkbox, h, textInput, type DlgApi } from "./dom";
 import { findHits, findHighlightIds, findOptionChanged, hitOrder, replaceInNode, str, pushFindHistory, type FindHit, type FindOpts } from "./logic";
 import { sheetList } from "./sch-hierarchy";
@@ -67,7 +67,18 @@ function focusHit(hit: FindHit): void {
     const ctx = toolCtx() as ReturnType<typeof toolCtx> & { selectField?: (id: string, name: string) => void };
     if (hit.field && (hit.kind === "symbol" || hit.kind === "sheet") && ctx.selectField) ctx.selectField(hit.id, hit.field); else ctx.setSelection([hit.id]);
   }
-  centerOn(hit.x, hit.y);
+  // m_frame->FocusOnLocation( item->GetBoundingBox().GetCenter() ): moves only when the item is out of sight or behind a dialog
+  const c = hitCentre(hit);
+  focusOnLocation(c[0], c[1], true, openDialogRects());
+}
+/** The found item's bounding box centre: the field's own box for a field match, else the item's. */
+function hitCentre(hit: FindHit): [number, number] {
+  const it = E.kdoc ? (E.kdoc as KDoc).items.get(hit.id) : null;
+  if (it && hit.field) {
+    const fb = KiCadCanvas.fieldBoxes(it, null).find((b) => b.name === hit.field);
+    if (fb && fb.pts.length) { const xs = fb.pts.map((p) => p[0]), ys = fb.pts.map((p) => p[1]); return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2]; }
+  } else if (it && hit.sub === undefined && hit.what !== "Pin" && it.bbox && it.bbox[2] >= it.bbox[0]) return [(it.bbox[0] + it.bbox[2]) / 2, (it.bbox[1] + it.bbox[3]) / 2];
+  return [hit.x, hit.y];
 }
 /** The project's sheets in page order (SCH_SHEET_LIST::SortByPageNumbers), each file once. */
 async function sheetOrder(): Promise<string[]> {

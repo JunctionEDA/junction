@@ -51,6 +51,8 @@ export function symbolNodeOf(src: string | SNode, name?: string): SNode {
     const all = kids(n, "symbol");
     const want = name ? all.find((s) => text(s[1]) === name || parseLibId(text(s[1])).name === name) : all[0];
     if (!want) throw new Error("the library has no symbol " + (name || ""));
+    // what the library parser changes while reading an older file (canvas/legacy.ts)
+    const v = kid(n, "version"); if (v && K().migrateSchNode) K().migrateSchNode(want, Number(v[1]) || 0);
     n = want;
   }
   if (head(n) !== "symbol") throw new Error("not a library symbol");
@@ -361,8 +363,11 @@ const FP_OWNED = new Set(["property", "fp_text", "fp_text_box", "fp_line", "fp_r
  * come without nets, and it sits unrotated on the front at `at`.
  */
 export function footprintInstance(o: FootprintInstanceOpts): SNode {
-  const src = typeof o.footprint === "string" ? parseOne(o.footprint) : clone(o.footprint);
+  let src = typeof o.footprint === "string" ? parseOne(o.footprint) : clone(o.footprint);
+  if (head(src) === "kicad_footprint_lib" && K().footprintDoc) src = K().footprintDoc.unwrapFootprintLib(src);   // a 10.99 footprint file: its (footprint …)
   if (head(src) !== "footprint" && head(src) !== "module") throw new Error("not a footprint");
+  // what the footprint parser changes while reading an older file (canvas/legacy.ts); no (version …) reads as 20201115
+  { const v = kid(src, "version"); if (K().migrateBoardNode) K().migrateBoardNode(src, v ? Number(v[1]) || 0 : 20201115); }
   const out = parseOne(`(footprint ${q(o.fpid)} (layer "F.Cu") (uuid ${q(o.uuid || K().newUuid())}) (at ${mm(o.at[0], 6)} ${mm(o.at[1], 6)}))`);
   const freshen = (n: SNode) => {
     for (let i = n.length - 1; i >= 1; i--) {
@@ -405,44 +410,230 @@ export function footprintInstance(o: FootprintInstanceOpts): SNode {
 }
 
 /** What a footprint's index row needs, from its text. */
-export function footprintInfo(footprint: string | SNode): { name: string; description: string; keywords: string; pads: number } {
+export function footprintInfo(footprint: string | SNode): { name: string; description: string; keywords: string; pads: number; datasheet: string } {
   const n = typeof footprint === "string" ? parseOne(footprint) : footprint;
   const numbers = new Set(kids(n, "pad").map((p) => text(p[1])).filter((s) => s !== ""));
-  const d = kid(n, "descr"), t = kid(n, "tags");
-  return { name: parseLibId(text(n[1])).name, description: d ? text(d[1]) : "", keywords: t ? text(t[1]) : "", pads: numbers.size };
+  const d = kid(n, "descr"), t = kid(n, "tags"), ds = kids(n, "property").find((p) => text(p[1]) === "Datasheet");
+  return { name: parseLibId(text(n[1])).name, description: d ? text(d[1]) : "", keywords: t ? text(t[1]) : "", pads: numbers.size, datasheet: ds ? text(ds[2]) : "" };
 }
 
 // ---------------------------------------------------------------- the chooser's search
 
-export interface SearchRow { name: string; description?: string; keywords?: string; library?: string }
-
 /**
- * Score a row against the filter like the library tree does: every whitespace-separated term
- * must be found in the name, the keywords, the description or the library; a match in the
- * name counts most, an exact or leading match more still.  0 means filtered out.
+ * A row of the library tree for the search.  `kind` "symbol" adds LIB_SYMBOL's own terms (the "units=N" relational
+ * term and the default footprint); `fields` / `columns` are LIB_TREE_NODE::m_Fields and the shown columns, whose values
+ * are searched too (RebuildSearchTerms).
  */
-export function searchScore(row: SearchRow, query: string): number {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!terms.length) return 1;
-  const name = row.name.toLowerCase(), kw = (row.keywords || "").toLowerCase(), desc = (row.description || "").toLowerCase(), lib = (row.library || "").toLowerCase();
-  const nameScore = (t: string): number =>
-    name === t ? 1000 : name.startsWith(t) ? 500 - Math.min(200, name.length - t.length) : name.includes(t) ? 250 - Math.min(100, name.indexOf(t)) : 0;
-  let score = 0;
-  for (const t of terms) {
-    let s = 0;
-    const colon = t.indexOf(":");
-    if (colon > 0 && lib === t.slice(0, colon)) s = colon === t.length - 1 ? 20 : nameScore(t.slice(colon + 1));   // "lib:name", as a lib id is written
-    else s = nameScore(t);
-    if (!s) {
-      if (kw.split(/\s+/).includes(t)) s = 120;
-      else if (kw.includes(t)) s = 80;
-      else if (desc.includes(t)) s = 40;
-      else if (lib.includes(t)) s = 20;
-    }
-    if (!s) return 0;
-    score += s;
+export interface SearchRow { name: string; description?: string; keywords?: string; library?: string; kind?: "symbol" | "footprint"; units?: number; footprint?: string; fields?: Record<string, string>; columns?: string[] }
+
+/** SEARCH_TERM: a text of the item, its weight, and whether it is the item's name / LIB_ID (the exact-match tier). */
+export interface SearchTerm { text: string; score: number; isName?: boolean }
+
+/** EDA_PATTERN_MATCH_RELATIONAL::m_units */
+const REL_UNITS: Record<string, number> = { p: 1e-12, n: 1e-9, u: 1e-6, m: 1e-3, "": 1, k: 1e3, meg: 1e6, g: 1e9, t: 1e12, ki: 1024, mi: 1048576, gi: 1073741824, ti: 1099511627776 };
+const hasUnit = (u: string): boolean => Object.prototype.hasOwnProperty.call(REL_UNITS, u);
+/** wxString::ToCDouble over the whole text. */
+const cDouble = (s: string): number | null => (/^[-+]?(\d+\.?\d*|\.\d+)$/.test(s) ? parseFloat(s) : null);
+type Finder = (candidate: string) => number;   // the match position, -1 for none
+
+/** EDA_PATTERN_MATCH_REGEX: only an explicit regular expression ("/…" or "^…$"); null when the pattern is not one. */
+function regexFinder(p: string): Finder | null {
+  let src: string;
+  if (p.startsWith("^") && p.endsWith("$")) src = p;
+  else if (p.startsWith("/")) { src = p.slice(1); if (src.endsWith("/")) src = src.slice(0, -1); }
+  else return null;
+  let re: RegExp; try { re = new RegExp(src); } catch { return null; }
+  return (c) => { const m = re.exec(c); return m ? m.index : -1; };
+}
+/** EDA_PATTERN_MATCH_WILDCARD: '?' one character, '*' any run, the rest literal; unanchored. */
+function wildcardFinder(p: string): Finder | null {
+  let src = "";
+  for (const c of p) src += c === "?" ? "." : c === "*" ? ".*" : ".*+?^${}()|[]/\\".includes(c) ? "\\" + c : c;
+  let re: RegExp; try { re = new RegExp(src); } catch { return null; }
+  return (c) => { const m = re.exec(c); return m ? m.index : -1; };
+}
+/** EDA_PATTERN_MATCH_RELATIONAL: "key<op>value[unit]" against "key=value[unit]" / "key:value[unit]" words of the text. */
+function relationalFinder(p: string): Finder | null {
+  const m = /^(\w+)(<|<=|=|>=|>)([-+]?[\d.]*)(\w*)$/.exec(p); if (!m) return null;
+  const key = m[1].toLowerCase(), rel = m[2], val = m[3], unit = m[4].toLowerCase();
+  let value = 0; const any = val === "";
+  if (!any) { const v = cDouble(val); if (v === null) return null; value = v; }
+  if (!hasUnit(unit)) return null;
+  value *= REL_UNITS[unit];
+  const findOne = (token: string): number => {
+    const d = /(\w+)[=:]([-+]?[\d.]+)(\w*)/.exec(token); if (!d) return -1;
+    if (d[1].toLowerCase() !== key) return -1;
+    let v = cDouble(d[2]); if (v === null) return -1;
+    const u = d[3].toLowerCase(); if (hasUnit(u)) v *= REL_UNITS[u];
+    const hit = any || (rel === "<" ? v < value : rel === "<=" ? v <= value : rel === "=" ? v === value : rel === ">=" ? v >= value : v > value);
+    return hit ? d.index : -1;
+  };
+  return (c) => {
+    const re = /[^ \t\r\n]+/g; let t: RegExpExecArray | null;
+    while ((t = re.exec(c))) { const at = findOne(t[0]); if (at >= 0) return t.index + at; }
+    return -1;
+  };
+}
+
+/** EDA_COMBINED_MATCHER( term, CTX_LIBITEM ): the regex, wildcard, relational and substring matchers the term makes. */
+export interface CombinedMatcher { pattern: string; finders: Finder[] }
+export function combinedMatcher(pattern: string): CombinedMatcher {
+  const finders: Finder[] = [];
+  for (const f of [regexFinder(pattern), wildcardFinder(pattern), relationalFinder(pattern)]) if (f) finders.push(f);
+  finders.push((c) => c.indexOf(pattern));
+  return { pattern, finders };
+}
+/** EDA_COMBINED_MATCHER::Find: the smallest position any matcher finds, -1 when none does. */
+export function matcherFind(m: CombinedMatcher, candidate: string): number {
+  let pos = -1;
+  for (const f of m.finders) { const at = f(candidate); if (at >= 0 && (pos < 0 || at < pos)) pos = at; }
+  return pos;
+}
+/** LIB_TREE_MODEL_ADAPTER::UpdateSearchString: a leading "::" dropped, the text split on blanks, lower-cased, at most 100 terms. */
+export function compileLibSearch(query: string): CombinedMatcher[] {
+  let s = query || ""; if (s.startsWith("::")) s = s.slice(2);
+  const out: CombinedMatcher[] = [];
+  for (const t of s.split(/[ \t\r\n]+/)) { if (!t) continue; if (out.length >= 100) break; out.push(combinedMatcher(t.toLowerCase())); }
+  return out;
+}
+const normTerm = (t: string): string => { const s = String(t || "").toLowerCase().trim(); return s.length > 1000 ? s.slice(0, 1000) : s; };
+/** EDA_COMBINED_MATCHER::ScoreTerms: 8x the weight for a term equal to the pattern (the exact tier when it is a name),
+ *  2x when found at its start, 1x when found elsewhere. */
+export function scoreTerms(m: CombinedMatcher, terms: SearchTerm[]): { score: number; exact: boolean } {
+  let score = 0, exact = false;
+  for (const term of terms) {
+    const text = normTerm(term.text);
+    if (m.pattern === text) { score += 8 * term.score; if (term.isName) exact = true; }
+    else { const pos = matcherFind(m, text); if (pos === 0) score += 2 * term.score; else if (pos > 0) score += term.score; }
   }
-  return score;
+  return { score, exact };
+}
+/** LIB_TREE_NODE_ITEM::UpdateScore: 1, plus every term's score; a term that scores nothing leaves the item out (0). */
+export function scoreItem(matchers: CombinedMatcher[], terms: SearchTerm[]): { score: number; exact: boolean } {
+  let score = 1, exact = false;
+  for (const m of matchers) {
+    const r = scoreTerms(m, terms);
+    if (r.score === 0) return { score: 0, exact: false };
+    score += r.score; exact = exact || r.exact;
+  }
+  return { score, exact };
+}
+/** LIB_SYMBOL::rebuildCaches / FOOTPRINT_INFO::cacheSearchTerms, plus the shown columns' field values (weight 4). */
+export function libSearchTerms(row: SearchRow): SearchTerm[] {
+  const lib = row.library || "", kw = row.keywords || "";
+  const out: SearchTerm[] = [{ text: lib, score: 4 }, { text: row.name, score: 8, isName: true }, { text: lib + ":" + row.name, score: 16, isName: true }];
+  for (const k of kw.split(/[ \t\r\n]+/)) if (k) out.push({ text: k, score: 4 });
+  out.push({ text: kw, score: 1 }, { text: row.description || "", score: 1 });
+  if (row.kind === "symbol") {
+    out.push({ text: `units=${row.units || 1}`, score: 1 });
+    if (row.footprint) out.push({ text: row.footprint, score: 1 });
+  }
+  if (row.fields && row.columns) for (const [name, value] of Object.entries(row.fields)) if (row.columns.includes(name)) out.push({ text: value, score: 4 });
+  return out;
+}
+/** The item's score and exact-match flag for a filter text (or its compiled matchers); score 0 filters it out. */
+export function searchMatch(row: SearchRow, query: string | CombinedMatcher[]): { score: number; exact: boolean } {
+  return scoreItem(typeof query === "string" ? compileLibSearch(query) : query, libSearchTerms(row));
+}
+/** The score alone (1 for an empty filter, 0 filtered out). */
+export function searchScore(row: SearchRow, query: string): number { return searchMatch(row, query).score; }
+
+// ---------------------------------------------------------------- the chooser's details pane
+
+const escHtml = (s: unknown): string => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const unescapeName = (s: string): string => { try { const u = (K() as unknown as { unescapeText?: (t: string) => string }).unescapeText; return u ? u(s) : s; } catch { return s; } };
+/** LinkifyHTML */
+export function linkifyHtml(s: string): string {
+  return s.replace(/\b(https?|ftp|file):\/\/([-\w+&@#/%?=~|!:,.;]*[^.,:;<>()\s¶])/gi, (all) => `<a href="${all}">${all}</a>`);
+}
+/** IsURL (string_utils.cpp) */
+const hasUrl = (s: string): boolean => /(https?|ftp|file):\/\/([-\w+&@#/%?=~|!:,.;]*[^.,:;<>\s¶])/i.test(s);
+const linkCell = (text: string): string => `<a href="${escHtml(text)}">${escHtml(text.length > 75 ? text.slice(0, 72) + "..." : text)}</a>`;
+
+/** LIB_SYMBOL::GetUnitDisplayName: the symbol's own (unit_name …) or "A" / "Unit A". */
+export function unitDisplayName(unit: number, names?: (string | undefined)[] | null, label = true): string {
+  const own = names && names[unit - 1];
+  if (own) return own;
+  const letters = unitName(unit).slice(5);
+  return label ? "Unit " + letters : letters;
+}
+
+export interface SymbolDetails {
+  name: string;
+  /** the parent's name and description for a derived symbol (LIB_SYMBOL::IsRoot false) */
+  parent?: { name: string; description: string } | null;
+  description: string; keywords: string;
+  /** the flattened symbol's fields in file order (ki_* metadata left out) */
+  fields: { name: string; value: string }[];
+  unit: number; units: number; unitNames?: (string | undefined)[] | null;
+}
+/** GenerateAliasInfo (eeschema/generate_alias_info.cpp): the HTML of the chooser's details pane for a symbol. */
+export function symbolDetailsHtml(d: SymbolDetails): string {
+  let html = `<b>${escHtml(unescapeName(d.name))}</b>`;
+  if (d.parent) html += `<br><i>Derived from ${escHtml(unescapeName(d.parent.name || "Unknown"))} (${escHtml(d.parent.description || "")})</i>`;
+  html += "<br>" + linkifyHtml(escHtml(unescapeName(d.description || "")).replace(/\n/g, "<br>"));
+  if (d.keywords) html += "<br>Keywords: " + escHtml(d.keywords);
+  // LIB_SYMBOL::GetFields: by ordinal, the mandatory fields (which every LIB_SYMBOL has) first
+  const byName = new Map<string, string>(); const order: string[] = [];
+  for (const f of d.fields) if (!byName.has(f.name)) { byName.set(f.name, f.value); order.push(f.name); }
+  const names = MANDATORY_FIELDS.concat(order.filter((n) => !MANDATORY_FIELDS.includes(n)));
+  let rows = "";
+  for (const name of names) {
+    const text = byName.get(name) || "";
+    let cell: string;
+    if (name === "Value") continue;                                  // it only repeats the name
+    if (name === "Reference") cell = escHtml(text + "?" + (d.units > 1 ? unitDisplayName(d.unit > 0 ? d.unit : 1, d.unitNames, false) : ""));
+    else if (name === "Datasheet") cell = !text || text === "~" ? escHtml(text) : linkCell(text);
+    else cell = hasUrl(text) ? linkCell(text) : escHtml(text);
+    rows += `<tr><td><b>${escHtml(name)}</b></td><td>${cell}</td></tr>`;
+  }
+  return html + `<hr><table border=0>${rows}</table>`;
+}
+/** GetFootprintDocumentationURL: the Datasheet field, else the first http(s) link of the description. */
+export function footprintDocumentationUrl(datasheet: string, description: string): string | null {
+  if (datasheet) return datasheet;
+  let idx = description.indexOf("http:"); if (idx < 0) idx = description.indexOf("https:");
+  if (idx < 0) return null;
+  let url = "", nesting = 0;
+  for (const ch of description.slice(idx)) {
+    const c = ch.codePointAt(0)!;
+    if (c <= 0x20 || c >= 0x7f || ch === '"') break;
+    if (ch === "(") nesting++;
+    else if (ch === ")" && --nesting < 0) break;
+    url += ch;
+  }
+  if (".,:;".includes(url.slice(-1)) && url) url = url.slice(0, -1);
+  return url || null;
+}
+/** GenerateFootprintInfo (pcbnew/generate_footprint_info.cpp): the details pane for a footprint. */
+export function footprintDetailsHtml(d: { name: string; description: string; keywords: string; datasheet?: string }): string {
+  const doc = footprintDocumentationUrl(d.datasheet || "", d.description || "") || "";
+  const desc = linkifyHtml(escHtml(unescapeName(d.description || "")).replace(/\n/g, "<br>"));
+  return `<b>${escHtml(d.name)}</b><br>${desc}<hr><table border=0>`
+    + `<tr><td><b>Keywords</b></td><td>${escHtml(d.keywords || "")}</td></tr>`
+    + `<tr><td><b>Documentation</b></td><td><a href="${escHtml(doc)}">${escHtml(doc.length > 75 ? doc.slice(0, 72) + "..." : doc)}</a></td></tr></table>`;
+}
+
+/** StrNumCmp( a, b, IGNORE_CASE ): digit runs compare as numbers, other characters upper-cased (LIB_TREE_NODE::AssignIntrinsicRanks). */
+export function strNumCmpNoCase(a: string, b: string): number {
+  let i = 0, j = 0;
+  const digit = (c: string | undefined) => c !== undefined && c >= "0" && c <= "9";
+  while (i < a.length && j < b.length) {
+    let c1: string | undefined = a[i], c2: string | undefined = b[j];
+    if (digit(c1) && digit(c2)) {
+      let n1 = 0, n2 = 0;
+      do { n1 = n1 * 10 + (a.charCodeAt(i) - 48); i++; } while (i < a.length && digit(a[i]));
+      do { n2 = n2 * 10 + (b.charCodeAt(j) - 48); j++; } while (j < b.length && digit(b[j]));
+      if (n1 !== n2) return n1 < n2 ? -1 : 1;
+      c1 = i < a.length ? a[i] : "\0"; c2 = j < b.length ? b[j] : "\0";
+    }
+    if (c1 !== c2) { const u1 = c1!.toUpperCase(), u2 = c2!.toUpperCase(); if (u1 !== u2) return u1 < u2 ? -1 : 1; }
+    if (i < a.length) i++;
+    if (j < b.length) j++;
+  }
+  if (i >= a.length && j < b.length) return -1;
+  if (i < a.length && j >= b.length) return 1;
+  return 0;
 }
 
 /** KiCad's test for a power symbol in the chooser's filter: the (power) flag or a #PWR / #FLG reference. */

@@ -3,7 +3,7 @@ import { addItem } from "./doc";
 import { serializeItem } from "./export";
 import { buildGeom } from "./geom";
 import { resolveLib, symbolTransform } from "./geom-sch";
-import { setAt, setPts } from "./ops";
+import { refitLegacyFootprintFrame, setAt, setPts } from "./ops";
 import { atOf, kid, kids, num, ptsOf, str, uuidOf } from "./sexpr";
 import { shiftTable } from "./tables-images";
 import { textWidth } from "./text";
@@ -26,6 +26,8 @@ export function moveItem(doc: Doc, item: Item, x: number, y: number, IU: number)
     return { id: item.id, kind: "MODIFIED", typeName: typeNameOf(item), sexpr: serializeItem(doc, item) };
   }
   setAt(item.node, x, y);
+  // boards before 20260616 keep a footprint's zone outlines and points in the board frame: they move with it
+  if (doc.type === "pcb" && item.kind === "footprint") refitLegacyFootprintFrame(doc, item.node, [ox, oy, atOf(item.node)[2]]);
   if (doc.type === "sch" && item.kind === "symbol") for (const p of kids(item.node, "property")) { const a = kid(p, "at"); if (a) { a[1] = num(a[1]) + dx; a[2] = num(a[2]) + dy; } }
   buildGeom(doc, item);
   return { id: item.id, kind: "MODIFIED", typeName: typeNameOf(item), properties: [

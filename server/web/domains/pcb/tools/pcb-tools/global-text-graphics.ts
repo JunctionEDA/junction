@@ -19,13 +19,15 @@ export interface TextGraphicsValues {
   font?: string | null; textWidth?: number | null; textHeight?: number | null;
   thickness?: number | null; autoThickness?: boolean; bold?: boolean | null; italic?: boolean | null; keepUpright?: boolean | null; centerOnFootprint?: boolean;
 }
-export interface TextGraphicsJob { scope: TextGraphicsScope; filter: TextGraphicsFilter; specified: boolean; values: TextGraphicsValues; selection?: Set<string> }
+export interface TextGraphicsJob { scope: TextGraphicsScope; filter: TextGraphicsFilter; specified: boolean; values: TextGraphicsValues; selection?: Set<string>;
+  /** the footprint fields selected on their own (footprint id + field name): candidate->IsSelected() on a PCB_FIELD */
+  selectedFields?: { id: string; name: string }[] }
 
-const SHAPES = new Set(["gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_curve", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "fp_curve"]);
+const SHAPES = new Set(["gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_curve", "gr_ellipse", "gr_ellipse_arc", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "fp_curve", "fp_ellipse", "fp_ellipse_arc"]);
 /** PCB_SHAPE_T || PCB_BARCODE_T: the graphics the scope visits (a barcode is no PCB_SHAPE: it has no stroke). */
 const GRAPHICS = new Set([...SHAPES, "barcode"]);
 /** The text items that store keep-upright: PCB_TEXT / PCB_FIELD (format writes (unlocked) only for those, never text boxes or cells). */
-const storesUpright = (n: SNode) => n[0] === "fp_text" || n[0] === "property";
+const storesUpright = (n: SNode, fpDoc = false) => n[0] === "fp_text" || n[0] === "property" || (fpDoc && n[0] === "gr_text");
 const isText = (n: SNode) => n[0] === "gr_text" || n[0] === "fp_text" || n[0] === "gr_text_box" || n[0] === "fp_text_box" || n[0] === "property" || n[0] === "table_cell";
 const isField = (n: SNode) => n[0] === "property" || (n[0] === "fp_text" && (n[1] === "reference" || n[1] === "value"));
 const fieldName = (n: SNode) => (n[0] === "fp_text" ? (n[1] === "reference" ? "Reference" : "Value") : K.str(n[1]));
@@ -72,7 +74,7 @@ function setLineWidth(n: SNode, w: number): void {
 const dimText = (n: SNode) => K.kid(n, "gr_text") || K.kid(n, "fp_text");
 
 /** processItem: the specified values, or StyleFromSettings( bds, false ). */
-function processNode(n: SNode, job: TextGraphicsJob, inFootprint: boolean, fpCenterLocal: [number, number] | null): void {
+function processNode(n: SNode, job: TextGraphicsJob, inFootprint: boolean, fpCenterLocal: [number, number] | null, fpDoc = false): void {
   const v = job.values;
   const text = isText(n) ? n : null;
   const shape = SHAPES.has(String(n[0])) || n[0] === "gr_text_box" || n[0] === "fp_text_box" ? n : null;
@@ -93,7 +95,7 @@ function processNode(n: SNode, job: TextGraphicsJob, inFootprint: boolean, fpCen
         const fontChoice = v.font !== undefined && v.font !== null ? v.font : v.kicadFont ? "" : null;
         if (fontChoice !== null) { const f = font(t); const face = K.kid(f, "face"); if (face) f.splice(f.indexOf(face), 1); if (fontChoice) f.splice(1, 0, ["face", fontChoice]); }
         if (inFootprint) {
-          if (v.keepUpright !== null && v.keepUpright !== undefined && storesUpright(t)) setKeepUpright(t, v.keepUpright);
+          if (v.keepUpright !== null && v.keepUpright !== undefined && storesUpright(t, fpDoc)) setKeepUpright(t, v.keepUpright);
           if (v.centerOnFootprint && fpCenterLocal) { const at = K.kid(t, "at"); if (at) { at[1] = r6(fpCenterLocal[0]); at[2] = r6(fpCenterLocal[1]); } }
         }
       }
@@ -114,7 +116,7 @@ function processNode(n: SNode, job: TextGraphicsJob, inFootprint: boolean, fpCen
   const t = text || (dim ? dimText(dim) : null);
   if (t) {
     setSize(t, st.w, st.h); setThickness(t, st.thick); setFontFlag(font(t), "italic", st.italic);
-    if (inFootprint && text && storesUpright(text)) setKeepUpright(t, st.upright);
+    if (inFootprint && text && storesUpright(text, fpDoc)) setKeepUpright(t, st.upright);
   }
   if (dim) {
     setLineWidth(dim, st.line);
@@ -142,7 +144,16 @@ export function editTextAndGraphics(doc: KDoc, job: TextGraphicsJob): [string, S
   const out: [string, SNode][] = [];
   const sc = job.scope, f = job.filter, sel = job.selection || new Set<string>();
   const layerOk = (n: SNode) => !f.layer || layerOfNode(n) === f.layer;
-  const memberOfSelectedGroup = (id: string) => { for (const it of doc.items.values()) if (it.kind === "group" && sel.has(it.id) && K.groupMemberIds(it.node).includes(id)) return true; return false; };
+  // visitItem: the item, else its parent footprint, else the nearest selected ancestor group (GetParentGroup walked up)
+  const parentGroup = (id: string) => { for (const it of doc.items.values()) if (it.kind === "group" && K.groupMemberIds(it.node).includes(id)) return it.id; return null; };
+  const memberOfSelectedGroup = (id: string) => {
+    const seen = new Set<string>();
+    for (let g = parentGroup(id); g && !seen.has(g); g = parentGroup(g)) { if (sel.has(g)) return true; seen.add(g); }
+    return false;
+  };
+  const selFields = job.selectedFields || [];
+  const fieldSelected = (fpId: string, c: SNode) => isField(c) && selFields.some((x) => x.id === fpId && x.name === fieldName(c));
+  if (doc.fpEditor) return editFootprintDoc(doc, job, sel, memberOfSelectedGroup);
   for (const it of doc.items.values()) {
     if (it.kind !== "footprint") continue;
     const n = K.cloneNode(it.node); let changed = false;
@@ -151,7 +162,7 @@ export function editTextAndGraphics(doc: KDoc, job: TextGraphicsJob): [string, S
     let center: [number, number] | null = null;
     if (it.bbox) { const [fx, fy, fa] = K.atOf(n); const c = [(it.bbox[0] + it.bbox[2]) / 2 - fx, (it.bbox[1] + it.bbox[3]) / 2 - fy]; const r = rotator(-fa)(c[0], c[1]); center = [r[0], r[1]]; }
     const visit = (c: SNode) => {
-      if (job.filter.selectedOnly && !sel.has(it.id) && !memberOfSelectedGroup(it.id)) return;
+      if (job.filter.selectedOnly && !fieldSelected(it.id, c) && !sel.has(it.id) && !memberOfSelectedGroup(it.id)) return;
       if (!layerOk(c)) return;
       if (f.reference && !wildCompare(f.reference, ref)) return;
       if (f.footprint && !wildCompare(f.footprint, K.str(n[1]))) return;
@@ -190,6 +201,49 @@ export function editTextAndGraphics(doc: KDoc, job: TextGraphicsJob): [string, S
     else if (k === "table") { if (sc.boardText) for (const cell of K.kids(K.kid(n, "cells") || n, "table_cell")) changed = visit(cell) || changed; }
     else if (k === "dimension") { if (sc.boardDimensions) changed = visit(n); }
     else if (GRAPHICS.has(k)) { if (sc.boardGraphics) changed = visit(n); }
+    if (changed) out.push([it.id, n]);
+  }
+  return out;
+}
+
+/**
+ * The Footprint Editor (m_isBoardEditor false): the one footprint's children are the document's items, so the scope
+ * rows "Text items" / "Graphic items" / "Dimension items" and the field rows visit those, the board drawings and the
+ * reference / library link filters are skipped, and the parent's centre is the footprint's bounding box centre.
+ */
+function editFootprintDoc(doc: KDoc, job: TextGraphicsJob, sel: Set<string>, inSelectedGroup: (id: string) => boolean): [string, SNode][] {
+  const out: [string, SNode][] = [];
+  const sc = job.scope, f = job.filter;
+  let bb: [number, number, number, number] | null = null;
+  for (const it of doc.items.values()) {
+    if (!it.bbox || it.kind === "group" || (it.kind === "property" && K.kid(it.node, "hide"))) continue;
+    bb = bb ? [Math.min(bb[0], it.bbox[0]), Math.min(bb[1], it.bbox[1]), Math.max(bb[2], it.bbox[2]), Math.max(bb[3], it.bbox[3])] : [it.bbox[0], it.bbox[1], it.bbox[2], it.bbox[3]];
+  }
+  const center: [number, number] | null = bb ? [(bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2] : null;
+  for (const it of doc.items.values()) {
+    const n = K.cloneNode(it.node); const k = String(n[0]);
+    const visit = (c: SNode): boolean => {
+      if (f.selectedOnly && !sel.has(it.id) && !inSelectedGroup(it.id)) return false;
+      if (f.layer && layerOfNode(c) !== f.layer) return false;
+      const before = K.serialize(c); processNode(c, job, true, center, true); return K.serialize(c) !== before;
+    };
+    let changed = false;
+    if (isField(n)) {
+      const name = fieldName(n);
+      if (name === "Reference") { if (sc.references) changed = visit(n); }
+      else if (name === "Value") { if (sc.values) changed = visit(n); }
+      else if (/^ki_/.test(name)) continue;
+      else if (sc.otherFootprintFields) changed = visit(n);
+      else if (sc.references && textOf(n) === "${REFERENCE}") changed = visit(n);
+      else if (sc.values && textOf(n) === "${VALUE}") changed = visit(n);
+    } else if (k === "gr_text" || k === "gr_text_box") {
+      const txt = K.str(n[1]);
+      if (sc.footprintTexts) changed = visit(n);
+      else if (sc.references && txt === "${REFERENCE}") changed = visit(n);
+      else if (sc.values && txt === "${VALUE}") changed = visit(n);
+    } else if (k === "table") { if (sc.footprintTexts) for (const cell of K.kids(K.kid(n, "cells") || n, "table_cell")) changed = visit(cell) || changed; }
+    else if (k === "dimension") { if (sc.footprintDimensions) changed = visit(n); }
+    else if (GRAPHICS.has(k)) { if (sc.footprintGraphics) changed = visit(n); }
     if (changed) out.push([it.id, n]);
   }
   return out;

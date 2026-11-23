@@ -331,6 +331,58 @@ export function sheetItemIds(doc: BoardDoc, sheetPath: string, nl: Netlist, opts
   const out = new Set<string>(fps); selectConnections(doc, fps, nl, out, opts); return out;
 }
 
+// ---------------------------------------------------------------- cross-probing
+/** One SelectionSpec of a SyncSelection message: a footprint by reference, a pad by reference and number, or a
+ *  schematic sheet by its full KIID path (root sheet first). */
+export interface SyncSpec { footprint?: string; pad?: { ref: string; number: string }; sheetPath?: string[] }
+/** FOOTPRINT::IsWithinSchematicSheet: the footprint's path (which omits the root sheet) starts with the sheet's. */
+function withinSheet(it: KItem, sheet: string[]): boolean {
+  if (!sheet.length) return false;
+  const p = K.kid(it.node, "path"), path = (p ? K.str(p[1]) : "").split("/").filter(Boolean);
+  if (path.length < sheet.length - 1) return false;
+  for (let i = 1; i < sheet.length; i++) if (path[i - 1] !== sheet[i]) return false;
+  return true;
+}
+/**
+ * kiapi::board::FindItemsFromSyncSelection: the board items a cross-probe names, ordered by the spec that found them
+ * (footprint ids, and pads as "footprintId#padIndex").
+ */
+export function findItemsFromSyncSelection(doc: BoardDoc, specs: SyncSpec[]): string[] {
+  const pairs: [number, string][] = [];
+  for (const it of doc.items.values()) {
+    if (it.kind !== "footprint") continue;
+    const ref = it.ref || "";
+    specs.forEach((spec, index) => {
+      if (spec.footprint !== undefined) { if (ref === spec.footprint) pairs.push([index, it.id]); }
+      else if (spec.pad) { if (ref === spec.pad.ref) for (const p of padsOf(it)) if (p.number === spec.pad.number) pairs.push([index, it.id + "#" + p.index]); }
+      else if (spec.sheetPath) { if (withinSheet(it, spec.sheetPath)) pairs.push([index, it.id]); }
+    });
+  }
+  return pairs.map((x, i) => [x, i] as [[number, string], number]).sort((a, b) => a[0][0] - b[0][0] || a[1] - b[1]).map((x) => x[0][1]);
+}
+/**
+ * PCB_SELECTION_TOOL::ZoomFitCrossProbeBBox (the scaled zoom): the factor the view's scale is divided by for a
+ * cross-probed box of w x h mm in a viewport of vw x vh mm, or null when the zoom stays.  The box grows by 20 % of
+ * its width (KiROUND in nm) on every side; its height over the default text height (1 mm) is bent through KiCad's
+ * table; a box too wide for that uses the plain fit; nothing changes while the ratio lies within 0.5 .. 1.
+ */
+export function crossProbeZoomRatio(w: number, h: number, vw: number, vh: number): number | null {
+  w = Math.abs(w); h = Math.abs(h); if (w === 0) return null;
+  const grow = Math.round(w * 0.2 * 1e6) / 1e6, bx = w + 2 * grow, by = h + 2 * grow;
+  const compRatio = by / 1;
+  const lut: [number, number][] = [[1, 8], [1.5, 5], [3, 3], [4.5, 2.5], [8, 2], [12, 1.7], [16, 1.5], [24, 1.3], [32, 1]];
+  let bent = lut[lut.length - 1][1];
+  if (compRatio >= lut[0][0]) {
+    for (let i = 0; i < lut.length - 1; i++) if (lut[i][0] <= compRatio && lut[i + 1][0] >= compRatio) { bent = lut[i][1] + (lut[i + 1][1] - lut[i][1]) * (compRatio - lut[i][0]) / (lut[i + 1][0] - lut[i][0]); break; }
+  } else bent = lut[0][1];
+  vw = Math.max(10 / 1e6, Math.abs(vw)); vh = Math.max(10 / 1e6, vh);
+  let ratio = Math.max(-1, Math.abs(by / vh));
+  const kicadRatio = Math.max(Math.abs(bx / vw), Math.abs(by / vh));
+  if (bx > vw * ratio * bent) { ratio = kicadRatio; bent = 1; }
+  ratio *= bent;
+  return ratio < 0.5 || ratio > 1 ? ratio : null;
+}
+
 // ---------------------------------------------------------------- ratsnest neighbours
 export interface RatLine { ids: string[]; a: Pt; b: Pt; length: number; net: string }
 /** The pads of a selection (a footprint's, or a pad on its own) as { fp, x, y }. */

@@ -71,6 +71,8 @@ export const E: any = {
   crosshairMode: "small",
   renderOpts: {},
   measure: null,
+  measureCursor: null,   // MeasureTool's resolved (snapped) cursor, forced as the crosshair position
+  measureSnap: null,     // the anchor it snapped to: { p, t } for the snap indicator
   zoomRect: null,
   activeLayer: "",
   markers: [],

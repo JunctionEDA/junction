@@ -10,7 +10,7 @@ export const TOOL_MAP: Record<Editor, Record<string, string>> = {
     placeNoConnect: "noconnect", placeJunction: "junction", placeLabel: "label", placeClassLabel: "classlabel", placeGlobalLabel: "glabel",
     placeHierLabel: "hlabel", drawRuleArea: "rulearea", drawSheet: "sheet", placeSheetPin: "sheetpin", placeSchematicText: "text", drawTextBox: "textbox", drawTable: "table",
     drawRectangle: "rect", drawCircle: "circle", drawEllipse: "ellipse", drawEllipseArc: "ellipse_arc", drawArc: "arc", drawArcCenter: "arc", drawArcStartEndMid: "arc", drawArcStartEndCenter: "arc", drawArcTangent: "arc", drawArcStartDirEnd: "arc", drawBezier: "bezier", drawPolygon: "polygon", drawLines: "lines", placeImage: "image",
-    deleteTool: "delete", zoomTool: "zoomtool", measureTool: "measure" },
+    deleteTool: "delete", zoomTool: "zoomtool" },   // ACTIONS::measureTool is PCB_VIEWER_TOOLS' (and gerbview's): eeschema has none
   pcb: { selectSetRect: "select", selectSetLasso: "select", routeSingleTrack: "route", routeDiffPair: "routediff", tuneSingleTrack: "tunesingle", tuneDiffPair: "tunediff", tuneSkew: "tuneskew", drawVia: "via", drawZone: "zone", drawCopperThievingZone: "thievingzone", drawRuleArea: "rulearea", drawLine: "gline", drawArc: "garc", drawArcCenter: "garc", drawArcStartEndMid: "garc", drawArcStartEndCenter: "garc", drawArcTangent: "garc", drawArcStartDirEnd: "garc", drawRectangle: "grect",
     drawCircle: "gcircle", drawPolygon: "gpoly", drawBezier: "gcurve", placeReferenceImage: "image", placeText: "gtext", placeBarcode: "barcode", drawTextBox: "gtextbox", drawTable: "table",
     drawAlignedDimension: "dimaligned", drawOrthogonalDimension: "dimortho", drawCenterDimension: "dimcenter", drawRadialDimension: "dimradial", drawLeader: "leader",
@@ -90,14 +90,16 @@ export const MENUS: Record<Editor, [string, MenuEntry[]][]> = {
   pcb: [
     ["&File", ["appendBoard", "compareBoardWithFile", "compareBoardWithHistory|Compare Board with History...", "-", "save", "saveCopy", "revert", "-", "rescueAutosave", "-",
       ["Import", ["importNetlist|Netlist...", "importSpecctraSession|Specctra Session...", "placeImportedGraphics|Graphics...", "openNonKicadBoard"]],
-      ["Export", ["exportSpecctraDSN|Specctra DSN...", "exportGenCAD|GenCAD...", "exportVRML|VRML...", "exportIDF|IDFv3...", "exportSTEP|STEP/GLB/BREP/XAO/PLY/STL...", "exportCmpFile|Footprint Association (.cmp) File...", "exportHyperlynx|Hyperlynx...",
+      ["Export", ["exportSpecctraDSN|Specctra DSN...", "exportForOlderVersion|For Older KiCad Version...", "exportGenCAD|GenCAD...", "exportVRML|VRML...", "exportIDF|IDFv3...", "exportSTEP|STEP/GLB/BREP/XAO/PLY/STL...", "exportCmpFile|Footprint Association (.cmp) File...", "exportHyperlynx|Hyperlynx...",
         "-", "exportFootprints|Footprints..."]],
-      ["Fabrication Outputs", ["generateGerbers", "generateDrillFiles", "generateIPC2581File", "generateODBPPFile", "generatePosFile", "generateReportFile", "generateD356File", "generateBOM", "generateBOMLegacy", "-", "fabPackage"]],
+      ["Fabrication Outputs", ["generateGerbers", "generateDrillFiles", "generateIPC2581File", "generateODBPPFile", "generatePosFile", "generateReportFile", "generateD356File", "generateBOM", "generateBOMLegacy"]],
+      // the web's one-click fabrication package, beside KiCad's submenu rather than in it
+      "fabPackage",
       "-", ...COLLAB_FILE, "-", "boardSetup", "-", "pageSettings", "print", "plot", "-", "close"]],
     ["&Edit", ["undo", "redo", "-", "cut", "copy", "paste", "pasteSpecial", "doDelete", "-", ["&Select", ["selectAll", "unselectAll"]],
       "-", "find", "findByProperties", "-", "extendGraphic", "trimGraphic", "editTracksAndVias", "editTextAndGraphics", "mirrorInteractive", "editTeardrops", "changeFootprints", "swapLayers", "gridOrigin",
       "-", "zoneFillAll", "zoneUnfillAll", "regenerateAllTuning", "-", "deleteTool", "globalDeletions"]],
-    ["&View", [["Panels", ["showProperties", "showSearch", "showLayersManager", "showNetInspector", "showConstraintsPanel", "showGitCommitPane", "-", "showPeers", "showComments"]],
+    ["&View", [["Panels", ["showProperties", "showSearch", "showLayersManager", "showNetInspector", "showConstraintsPanel", "showGitCommitPane", "showDesignBlockPanel|Design Blocks", "-", "showPeers", "showComments"]],
       "-", "showFootprintBrowser", "show3DViewer", "-", "zoomInCenter", "zoomOutCenter", "zoomFitScreen", "zoomFitObjects", "zoomFitSelection", "zoomTool", "zoomRedraw", "-",
       ["&Drawing Mode", ["zoneDisplayFilled", "zoneDisplayOutline", "-", "padDisplayMode", "viaDisplayMode", "trackDisplayMode", "-", "graphicsOutlines", "textOutlines"]],
       ["&Contrast Mode", ["highContrastMode", "layerAlphaDec", "layerAlphaInc"]],
@@ -119,7 +121,7 @@ export const MENUS: Record<Editor, [string, MenuEntry[]][]> = {
       ["Multi-Channel", ["generatePlacementRuleAreas", "expandToMatchingTopology", "expandToLargestTopology", "repeatLayout", "updateLinkedLayouts", "unlinkLayout"]],
       // the web's own autorouter and placer are external tools, listed like the API plugins' actions above KiCad's two entries
       "-", ["External Plugins", ["module:autoroute", "module:autoplace", "-", "pluginsReload", "pluginsShowFolder"]]]],
-    ["P&references", ["configurePaths", "showFootprintLibTable", "openPreferences", "-", LANG_MENU]],
+    ["P&references", ["configurePaths", "showFootprintLibTable", "showDesignBlockLibTable", "openPreferences", "-", LANG_MENU]],
     ["&Help", HELP_MENU],
   ],
 };
@@ -177,6 +179,8 @@ export const MODULE_ALIAS: Record<Editor, Record<string, string>> = {
   pcb: { flip: "flipSelection", rotateCcw: "rotateSelection", rotateCw: "rotateSelectionCw", mirrorH: "mirrorH", mirrorV: "mirrorV", moveExact: "moveExactly", showNetInspector: "netInspector",
     distributeHorizontallyGaps: "distributeH", distributeVerticallyGaps: "distributeV", distributeHorizontallyCenters: "distributeHCenters", distributeVerticallyCenters: "distributeVCenters" },
 };
+/** PCB_ACTIONS::layerInner1..30 ("Switch to Inner Layer N"): hotkey-only, no menubar entry (LayerIDToAction). */
+export const INNER_LAYER_ACTIONS: string[] = Array.from({ length: 30 }, (_, i) => "layerInner" + (i + 1));
 /** Module action ids that only repeat another one (the same command under a second name), or that KiCad offers only in a context menu: never listed on their own. */
 export const MODULE_DUPLICATES: Record<Editor, string[]> = {
   sch: ["highlightNet",
@@ -185,7 +189,7 @@ export const MODULE_DUPLICATES: Record<Editor, string[]> = {
     // the arc tool's modes: the Arc toolbar group and EE_GRAPHIC_TOOL's context menu while Draw Arcs runs; / and Alt+/ act on the arc in progress
     "drawArcCenter", "drawArcStartEndMid", "drawArcStartEndCenter", "drawArcTangent", "drawArcStartDirEnd", "arcPosture", "cycleArcDrawMode",
     // commands KiCad's menubar does not list: the selection's context menus and their hotkeys carry them
-    "duplicate", "repeatLast", "increment", "decrement", "selectConnection", "selectNode", "nextNetItem", "previousNetItem",
+    "duplicate", "repeatLast", "increment", "decrement", "incrementPrimary", "decrementPrimary", "incrementSecondary", "decrementSecondary", "selectConnection", "selectNode", "nextNetItem", "previousNetItem",
     "rotateSelection", "rotateSelectionCW", "mirrorSelectionX", "mirrorSelectionY", "swap", "moveExactly",
     "alignToGrid", "alignTop", "alignBottom", "alignLeft", "alignRight", "alignCenterX", "alignCenterY",
     "editReference", "editValue", "editFootprint", "autoplace", "showDatasheet", "nextUnit", "previousUnit", "placeNextSymbolUnit", "cycleBodyStyle",
@@ -204,6 +208,8 @@ export const MODULE_DUPLICATES: Record<Editor, string[]> = {
     // PCB_CONTROL's hotkey-only cycles (Shift+V, Shift+S) and the two snap modes they flip between
     "layerPairPresetsCycle", "magneticSnapToggle", "magneticSnapActiveLayer", "magneticSnapAllLayers",
     "duplicateIncrement",   // Duplicate and Increment: a hotkey (Ctrl+Shift+D) and the selection menu, in no menu bar
+    // EDIT_TOOL::Increment: ACTIONS::increment and its primary / secondary forms, hotkey-only (and Shift+Alt / Ctrl+Alt wheel)
+    "increment", "incrementPrimary", "decrementPrimary", "incrementSecondary", "decrementSecondary",
     // PCB_SELECTION_TOOL's context menu only: Enter Group / Leave Group
     "enterGroup", "leaveGroup",
     "highlightNetSelection", "cleanupTracks", "pack", "zoneFill", "zoneUnfill", "pointEditorAddCorner", "pointEditorRemoveCorner", "pointEditorChamferCorner", "pointEditorMoveCorner", "pointEditorMoveMidpoint",
@@ -261,6 +267,8 @@ export interface ActionState {
   legacyLibIds: boolean;
   /** the check conditions that follow the selection (Edit > Attributes), by action id */
   checks: Record<string, boolean>;
+  /** the board editor's enable-condition inputs (PCB_EDIT_FRAME::setupUIConditions); absent outside it */
+  pcb?: PcbEnableFacts | null;
 }
 /** Edit > Attributes: check items whose mark follows the selection (SCH_EDIT_TOOL::Init attribDNPCond …); KiCad sets
  *  no enable condition on them. */
@@ -277,10 +285,13 @@ const SCH_MORE_THAN_ONE = new Set(["alignLeft", "alignCenterX", "alignRight", "a
  *   rotateCW / rotateCCW / mirrorH / mirrorV: NotEmpty      align…, group: MoreThan( 1 )      ungroup: HasType( SCH_GROUP_T )
  *   zoomFitSelection and the Attributes check items: no condition
  *   remapSymbols: SCH_SCREENS::HasNoFullyDefinedLibIds
+ * The board editor's actions follow PCB_EDIT_FRAME::setupUIConditions (pcbEnableWhy) where KiCad gives them a
+ * condition, and the selection rule of NEEDS_SELECTION otherwise.
  */
 /** Entries greyed by their enable condition even where the web has no command behind them. */
 export const CONDITION_FIRST = new Set(["remapSymbols"]);
 export function conditionWhy(editor: string | null, id: string, st: ActionState): string | null {
+  if (editor === "pcb" && st.pcb) { const w = id === "redo" ? undefined : pcbEnableWhy(id, st.pcb, st.undo); if (w !== undefined) return w; }
   if (id === "undo") return st.undo > 0 || (editor === "sch" && st.drawingWire) ? null : "Nothing to undo";
   if (id === "redo") return st.redo > 0 ? null : "Nothing to redo";
   if (editor === "sch") {
@@ -294,12 +305,64 @@ export function conditionWhy(editor: string | null, id: string, st: ActionState)
   }
   return NEEDS_SELECTION.has(id) && st.selCount === 0 ? "Nothing selected" : null;
 }
+/** What the board editor's enable conditions read (PCB_EDIT_FRAME::setupUIConditions), taken as a menu opens or the toolbar draws. */
+export interface PcbEnableFacts {
+  /** the selection's item kinds ("segment", "via", "footprint", "group", "generator", "zone", "pad" for a picked pad, …) */
+  kinds: string[];
+  hasLocked: boolean; hasUnlocked: boolean;
+  /** a selected BOARD_CONNECTED_ITEM with a net code above 0 (haveNetCond) */
+  haveNet: boolean;
+  /** PCB_EDITOR_CONDITIONS::HasItems: the board is not empty */
+  boardHasItems: boolean;
+  /** SELECTION_CONDITIONS::Idle && NoActiveTool: no tool but the selection tool runs and nothing is being edited */
+  idleNoTool: boolean;
+  /** BOARD_INSPECTION_TOOL::IsNetHighlightSet */
+  netHighlightSet: boolean;
+  /** LAYER_ZONES visible and m_ZoneOpacity > 0 (enableZoneControlCondition) */
+  zonesEnabled: boolean;
+  /** a drawing tool is drawing or the router is routing (undoCond) */
+  drawingOrRouting: boolean;
+}
+const TRACK_KINDS = ["segment", "arc", "via"];
+// BOARD_CONNECTED_ITEM: tracks, arcs, vias, pads, zones and the graphic shapes (PCB_SHAPE)
+const CONNECTED_KINDS = ["segment", "arc", "via", "pad", "zone", "gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_curve", "gr_ellipse", "gr_ellipse_arc"];
+const onlyKinds = (f: PcbEnableFacts, ks: string[]): boolean => f.kinds.length > 0 && f.kinds.every((k) => ks.includes(k));
+const hasKinds = (f: PcbEnableFacts, ks: string[]): boolean => f.kinds.some((k) => ks.includes(k));
+/**
+ * PCB_EDIT_FRAME::setupUIConditions' ENABLE( … ) conditions for the board editor's menus and toolbars: why the entry
+ * is greyed out, null when it is enabled, undefined when KiCad gives the action no enable condition here.
+ */
+export function pcbEnableWhy(id: string, f: PcbEnableFacts, undoCount: number): string | null | undefined {
+  const no = (ok: boolean, why: string): string | null => (ok ? null : why);
+  switch (id) {
+    case "undo": return no(f.drawingOrRouting || undoCount > 0, "Nothing to undo");
+    case "cut": case "copy": case "selectAll": case "unselectAll": case "doDelete": case "duplicate": return no(f.boardHasItems, "The board is empty");
+    case "paste": case "pasteSpecial": return no(f.idleNoTool, "Finish the current tool first");
+    case "rotateCw": case "rotateCcw": case "mirrorH": case "mirrorV": case "mirrorInteractive": return no(f.kinds.length > 0, "Nothing selected");
+    case "group": return no(f.kinds.length > 1, "Select more than one item");
+    case "ungroup": return no(hasKinds(f, ["group", "generator"]), "No group selected");
+    case "lock": return no(f.hasUnlocked, "No unlocked items selected");
+    case "unlock": return no(f.hasLocked, "No locked items selected");
+    case "zoneDisplayFilled": case "zoneDisplayOutline": case "zoneDisplayFractured": case "zoneDisplayTriangulated": return no(f.zonesEnabled, "Zones are hidden");
+    case "toggleNetHighlight": return no(f.netHighlightSet, "No net is highlighted");
+    case "showNetInRatsnest": case "hideNetInRatsnest": return no(f.haveNet, "No net in the selection");
+    case "selectNet": case "deselectNet": return no(onlyKinds(f, TRACK_KINDS), "Select tracks or vias");
+    case "selectUnconnected": return no(onlyKinds(f, ["footprint", "pad"]), "Select footprints or pads");
+    case "grabUnconnected": return no(f.kinds.length > 0 && f.kinds.every((k) => k === "footprint" || CONNECTED_KINDS.includes(k)), "Select footprints or connected items");
+    case "selectSameSheet": return no(onlyKinds(f, ["footprint"]), "Select footprints");
+    case "selectOnSchematic": return no(hasKinds(f, ["pad", "footprint", "group"]), "Select footprints, pads or groups");
+    case "zoneDuplicate": case "drawZoneCutout": case "drawSimilarZone": return no(f.kinds.length === 1 && onlyKinds(f, ["zone"]), "Select one zone");
+    case "zoneMerge": return no(f.kinds.length > 1 && onlyKinds(f, ["zone"]), "Select more than one zone");
+    case "saveSelectionAsDesignBlock": return no(f.kinds.length > 0, "Nothing selected");
+    default: return undefined;
+  }
+}
 /** Entries that never change the document: everything else is greyed out for a view-only visitor, as in a read-only frame. */
 export const READ_ONLY_OK = new Set(["compareSchematicWithFile", "compareSchematicWithHistory", "compareBoardWithFile", "compareBoardWithHistory", "saveCurrSheetCopyAs", "saveCopy", "drawSheetOnClipboard", "exportNetlist", "collabCopyLink", "collabComments", "collabProposals", "collabFollow", "collabHistory", "collabLeave", "showProjectManager", "collabLeaveSession", "collabJoinSession", "collabCompare", "collabGithub", "close", "pluginsReload", "pluginsShowFolder", "showGitCommitPane", "archive", "clone",
   "openInKicad", "print", "plot", "home", "copy", "copyAsText", "selectAll", "unselectAll", "selectConnection", "selectNode", "nextNetItem", "previousNetItem", "find", "showDatasheet",
   "selectNet", "deselectNet", "selectSameSheet", "module:selectAllOnLayer", "selectUnconnected", "filterSelection", "runERC", "runDRC", "clearMarkers", "boardStatistics", "measureTool", "inspectClearance", "inspectConstraints", "showFootprintAssociations", "diffFootprint",
   "highlightNetTool", "highlightNet", "clearHighlight", "toggleNetHighlight", "toggleLastNetHighlight", "localRatsnestTool", "hideNetInRatsnest", "showNetInRatsnest", "showPcbNew", "showEeschema", "theme", "themeLight", "themeDark", "themeSystem", "languageEnglish",
-  "layerTop", "layerBottom", "layerNext", "layerPrev", "showNetInspector", "showBusSyntaxHelp", "findNetInInspector", "showPeers", "showComments"]);
+  "layerTop", "layerBottom", "layerNext", "layerPrev", ...INNER_LAYER_ACTIONS, "ratsnestModeCycle", "netColorModeCycle", "showNetInspector", "showBusSyntaxHelp", "findNetInInspector", "showPeers", "showComments"]);
 /**
  * Keys a tool module binds to something other than KiCad's default, taken before the module sees them
  * (editor/hotkeys.ts preemptKey): "spec" runs KiCad's action for the key — and swallows the key when the web has
@@ -328,6 +391,7 @@ export const EDITOR_ONLY: Record<string, Editor> = { selectOnPCB: "sch", selectO
   navigatePrevious: "sch", navigateNext: "sch", navigateBack: "sch", navigateForward: "sch", navigateUp: "sch", leaveSheet: "sch", toggleHiddenPins: "sch", toggleHiddenFields: "sch", toggleERCErrors: "sch", toggleERCWarnings: "sch", toggleERCExclusions: "sch", prevMarker: "sch", nextMarker: "sch",
   layerNext: "pcb", layerPrev: "pcb", layerTop: "pcb", layerBottom: "pcb", highContrastModeCycle: "pcb", highContrastMode: "pcb", showPcbNew: "sch", showEeschema: "pcb",
   showSymbolEditor: "sch", editPageNumber: "sch", autoplaceAllSheetPins: "sch", findNetInInspector: "sch", showBusSyntaxHelp: "sch", assignNetclass: "sch", editWithLibEdit: "sch", editLibSymbolWithLibEdit: "sch" };
+for (const id of INNER_LAYER_ACTIONS) EDITOR_ONLY[id] = "pcb";
 /** The menus that take a module action no entry above places (kept reachable in a trailing "Other Commands" sub-menu). */
 export const MODULE_ACTION_MENUS = ["Edit", "Tools", "Inspect"];
 

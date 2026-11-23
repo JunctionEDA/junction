@@ -245,7 +245,9 @@ test("Gerber X2 drill: IPC-4761 protection files, tenting only when asked (GERBE
   assert.ok(/%TA.AperFunction,Tenting\*%\n%ADD10C,0.600000\*%/.test(tf), "the via's pad diameter, Tenting aperture");
   assert.strictEqual((tf.match(/D03\*/g) || []).length, 1, "only the tented via (v2 opts out)");
   // per-via and board-level covering / plugging / filling / capping
-  const B2 = BOARD.replace("(tenting (front yes) (back yes)) (aux", "(tenting (front yes) (back yes)) (covering (front no) (back no)) (plugging (front no) (back yes)) (capping no) (filling yes) (aux")
+  // via protection beyond tenting is a 10.0 feature: a board stamped before 20250228 reads a via's missing covering /
+  // plugging / filling / capping as off (PCB_IO_KICAD_SEXPR_PARSER), so this board carries a 10.0 stamp
+  const B2 = BOARD.replace("(version 20241229)", "(version 20250228)").replace("(tenting (front yes) (back yes)) (aux", "(tenting (front yes) (back yes)) (covering (front no) (back no)) (plugging (front no) (back yes)) (capping no) (filling yes) (aux")
     .replace('(tenting (front no) (back no)) (net 1)', '(tenting (front no) (back no)) (capping yes) (covering (front yes) (back none)) (filling no) (net 1)');
   const ctx2 = Object.assign({}, ctx, { doc: K.parseDoc(B2, "kicad_pcb"), setup: B2 });
   const r = F.drillJob(ctx2, Object.assign({}, base, { genDrill: false }));

@@ -12,6 +12,7 @@ export const DRC_ITEMS: [string, string, string][] = [
   ["Thermal relief connection to zone incomplete", "starved_thermal", "error"],
   ["Design for Manufacturing", "", ""],
   ["Board edge clearance violation", "copper_edge_clearance", "error"],
+  ["Copper outside board outline", "copper_outside_board", "warning"],
   ["Hole clearance violation", "hole_clearance", "error"],
   ["Drilled hole too close to other hole", "hole_to_hole", "warning"],
   ["Drilled holes co-located", "holes_co_located", "warning"],
@@ -24,8 +25,9 @@ export const DRC_ITEMS: [string, string, string][] = [
   ["Microvia stack has malformed span", "malformed_microvia_stack_span", "error"],
   ["Microvia under microvia not filled", "microvia_stack_not_filled", "warning"],
   ["Microvia stack too deep", "microvia_stack_depth", "error"],
-  ["Microvia too deep for its diameter", "microvia_aspect_ratio", "error"],
+  ["Hole too deep for its diameter", "hole_aspect_ratio", "error"],
   ["Microvia crosses core material", "microvia_crosses_core", "warning"],
+  ["Microvia spans more than one dielectric", "microvia_spans_dielectrics", "warning"],
   ["Via diameter", "via_diameter", "error"],
   ["Courtyards overlap", "courtyards_overlap", "error"],
   ["Footprint has no courtyard defined", "missing_courtyard", "ignore"],
@@ -81,8 +83,13 @@ export const DRC_ITEMS: [string, string, string][] = [
   ["Through hole pad has no hole", "through_hole_pad_without_hole", "error"],
   ["Footprint with pads is scaled (physical part size unchanged)", "footprint_scaled_with_pads", "warning"],
   ["Missing tuning profile", "missing_tuning_profile", "warning"],
+  // heading_internal: DRC_ITEM types with no user-editable severities (always the last group)
   ["Padstack is not valid", "padstack_invalid", "error"],
   ["Error", "generic_error", "error"],
-  ["Warning", "generic_warning", "error"],
+  ["Warning", "generic_warning", "warning"],
 ];
+/** The internal group after heading_internal (padstack_invalid, generic_error, generic_warning). */
+export const DRC_INTERNAL = new Set(["padstack_invalid", "generic_error", "generic_warning"]);
+/** DRC_ITEM::GetItemsWithSeverities: every item before heading_internal (the Ignored Tests list, the Violation Severity page). */
+export const DRC_ITEMS_WITH_SEVERITIES: [string, string, string][] = DRC_ITEMS.filter((i) => !DRC_INTERNAL.has(i[1]));
 export const drcItemTitle = (code: string): string => { for (const i of DRC_ITEMS) if (i[1] === code) return i[0]; return code; };

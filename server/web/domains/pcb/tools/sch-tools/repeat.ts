@@ -7,6 +7,7 @@ import { anchorOf, cloneNode, shiftNode } from "./orient";
 import { LINE_KINDS, S, TEXT_KINDS, kids, str, uuidOf } from "./state";
 import { autoRotateOf, setAutoRotate, supportsAutoRotate } from "./autorotate";
 import { addNode, deep, modChange, r4, segDist, segs } from "./util";
+import { incrementString } from "../../canvas/sheet";
 
 // ---------------------------------------------------------------- repeat last item (Insert)
 // SaveCopyForRepeatItem: what Insert repeats is a list (a whole wire, an unfold's entry, label and wire);
@@ -114,70 +115,38 @@ export function repeatLast(ctx: SchCtx) {
   return true;
 }
 /**
- * STRING_INCREMENTER::Increment (common/increment.cpp) as the schematic uses it (no IOSQXZ skipping): the string is
- * cut from the right into integer runs, same-case letter runs and skipped separators; the part `rightIndex` counts
- * (0 the rightmost, 1 the one before it) steps by delta.  An integer keeps its zero padding and does not go below
- * zero; a letter run steps as a spreadsheet column (Z -> AA) while its index is at most 50.  null when there is no
- * such part or it cannot step.
+ * STRING_INCREMENTER::Increment (common/increment.cpp) as the schematic uses it: SetSkipIOSQXZ( m_isSymbolEditor ) —
+ * off here — and m_AlphabeticMaxIndex 50.  The part `rightIndex` counts (0 the rightmost) steps by delta; null when
+ * there is no such part or it cannot step.
  */
 export function incrementStringPart(text: string, delta: number, rightIndex: number): string | null {
-  if (!text) return null;
-  let rest = text; const parts: { s: string; t: "int" | "alpha" | "skip" }[] = []; let good = 0;
-  while (good <= rightIndex && rest.length) {
-    let m: RegExpMatchArray | null;
-    if ((m = rest.match(/\d+$/))) { parts.push({ s: m[0], t: "int" }); good++; }
-    else if ((m = rest.match(/([a-z]+|[A-Z]+)$/))) { parts.push({ s: m[0], t: "alpha" }); good++; }
-    else if ((m = rest.match(/[^a-zA-Z0-9]+$/))) parts.push({ s: m[0], t: "skip" });
-    else break;
-    rest = rest.slice(0, rest.length - m[0].length);
-  }
-  if (good <= rightIndex) return null;
-  const part = parts[parts.length - 1];
-  if (part.t === "int") {
-    const n = parseInt(part.s, 10) + delta; if (!isFinite(n) || n < 0) return null;
-    let out = String(n); if (part.s.startsWith("0") && out.length < part.s.length) out = "0".repeat(part.s.length - out.length) + out;
-    part.s = out;
-  } else if (part.t === "alpha") {
-    const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ", up = part.s.toUpperCase(), wasUpper = part.s === up;
-    let index = 0; for (let i = 0; i < up.length; i++) { let ai = A.indexOf(up[i]); if (ai < 0) return null; if (i !== up.length - 1) ai++; index += ai * Math.pow(26, up.length - 1 - i); }
-    if (index > 50) return null;                       // m_AlphabeticMaxIndex
-    let next = index + delta; if (next < 0) return null;
-    let out = "", first = true; do { let mod = next % 26; if (!first) mod--; out = A[mod] + out; next = Math.floor(next / 26); first = false; } while (next);
-    part.s = wasUpper ? out : out.toLowerCase();
-  } else return null;
-  return rest + parts.slice().reverse().map((q) => q.s).join("");
+  return incrementString(text, delta, rightIndex, false, 50);
 }
 /**
- * ACTIONS::increment (SCH_TOOL_BASE::Increment).  With `field` given (the selection tool's Shift+Alt+wheel: 0, the
- * primary part; Ctrl+Alt+wheel: 1, the secondary) the selected labels and texts, which must all be of one type, step
- * that part of their text; without it the last number steps (Repeat's increment).
+ * ACTIONS::increment / incrementPrimary / decrementPrimary / incrementSecondary / decrementSecondary
+ * (SCH_TOOL_BASE::Increment, eeschema/tools/sch_tool_base.cpp:107-232): the selected labels, global and hierarchical
+ * labels and texts, which must all be of one type, step part `field` of their text (0, the primary part, when none is
+ * given; the selection tool's Shift+Alt+wheel passes 0, Ctrl+Alt+wheel 1).  One "Increment" step.  The label or text
+ * on the cursor of a placement (TwoClickPlace hands the action its commit) steps the same way.
  */
 export function incrementSelection(ctx: SchCtx, delta: number, field?: number) {
   if (!editable(ctx)) return false;
+  const index = field === undefined ? 0 : field;
+  const INC = new Set(["label", "global_label", "hierarchical_label", "text"]);
   // TwoClickPlace: ACTIONS::increment acts on the label or text on the cursor
   const cr = carried(ctx);
   if (cr) {
-    if (!TEXT_KINDS.has(cr.item.kind) && cr.item.kind !== "text_box") return false;
-    const t = incrementText(cr.item.node[1], delta); if (t === null || t === str(cr.item.node[1])) return false;
+    if (!INC.has(cr.item.kind)) return false;
+    const t = incrementStringPart(str(cr.item.node[1]), delta, index); if (t === null || t === str(cr.item.node[1])) return false;
     const n = deep(cr.item.node); n[1] = t; cr.write(n); return true;
   }
   const changes: KChange[] = [];
-  if (field !== undefined) {
-    const INC = new Set(["label", "global_label", "hierarchical_label", "text"]);
-    const items = selectedItems(ctx).filter((it) => INC.has(it.kind)); if (!items.length) return false;
-    if (items.some((it) => it.kind !== items[0].kind)) return false;   // "Incrementing multiple types at once seems confusing"
-    for (const it of items) {
-      const t = incrementStringPart(str(it.node[1]), delta, field); if (t === null || t === str(it.node[1])) continue;
-      const n = deep(it.node); n[1] = t; changes.push(modChange(ctx.doc, it, n));
-    }
-    if (!changes.length) return false;
-    ctx.commit(changes, "Increment"); return true;
-  }
-  for (const it of selectedItems(ctx)) {
-    if (!TEXT_KINDS.has(it.kind) && it.kind !== "text_box") continue;
-    const t = incrementText(it.node[1], delta); if (t === null || t === str(it.node[1])) continue;
+  const items = selectedItems(ctx).filter((it) => INC.has(it.kind)); if (!items.length) return false;
+  if (items.some((it) => it.kind !== items[0].kind)) return false;   // "Incrementing multiple types at once seems confusing"
+  for (const it of items) {
+    const t = incrementStringPart(str(it.node[1]), delta, index); if (t === null || t === str(it.node[1])) continue;
     const n = deep(it.node); n[1] = t; changes.push(modChange(ctx.doc, it, n));
   }
   if (!changes.length) return false;
-  ctx.commit(changes, delta < 0 ? "decrement" : "increment"); return true;
+  ctx.commit(changes, "Increment"); return true;
 }

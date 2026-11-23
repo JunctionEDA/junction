@@ -2,7 +2,7 @@
 import { SCH, SCH_LAYERS, pcbColor, pcbZ } from "./colors";
 import { boxUnion } from "./geom";
 import { kids, pointInPoly, rotator } from "./sexpr";
-import { textWidth } from "./text";
+import { strokeTextBox } from "./text";
 import { outlineBoxCorners, outlineLayout } from "./outline-text";
 import type { Box, CircleGeom, Doc, Geom, Item, PadGeom, PolyGeom, Pt } from "./types";
 
@@ -35,7 +35,11 @@ export function geomBox(g: Geom): Box | null {
   case "text": {
     const oc = outlineBoxCorners(g);   // an outline face: its own text box (EDA_TEXT::GetTextBox)
     if (oc) { const xs = oc.map((p) => p[0]), ys = oc.map((p) => p[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; }
-    const tw = textWidth(g.text || "", g.size || 1, g.w || 0), th = g.size || 1; const r = Math.max(tw, th); return [g.x - r, g.y - r, g.x + r, g.y + r];
+    // the box of EDA_TEXT::GetTextBox turned with the text: its corners' extent
+    const [x0, y0, x1, y1] = strokeTextBox(g), R = rotator(g.rot || 0);
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    for (const [px, py] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]) { const [rx, ry] = R(g.mirror ? -px : px, py); bx0 = Math.min(bx0, g.x + rx); by0 = Math.min(by0, g.y + ry); bx1 = Math.max(bx1, g.x + rx); by1 = Math.max(by1, g.y + ry); }
+    return [bx0, by0, bx1, by1];
   }
   default: return null;
   }
@@ -73,10 +77,9 @@ export function geomHit(g: Geom, x: number, y: number, tol: number): boolean {
       let lx = dx * c - dy * sn; const ly = dx * sn + dy * c; if (OL.mirror) lx = -lx;
       const [x0, y0, x1, y1] = OL.box; return lx >= x0 - tol && lx <= x1 + tol && ly >= y0 - tol && ly <= y1 + tol;
     }
-    const tw = textWidth(g.text || "", g.sizeX || g.size || 1, g.w || 0), th = g.size || 1;
-    const x0 = g.h === "left" ? 0 : g.h === "right" ? -tw : -tw / 2, y0 = g.v === "top" ? 0 : g.v === "bottom" ? -th : -th / 2;
+    const [x0, y0, x1, y1] = strokeTextBox(g);
     let [lx, ly] = rotator(-(g.rot || 0))(x - g.x, y - g.y); if (g.mirror) lx = -lx;
-    return lx >= x0 - tol && lx <= x0 + tw + tol && ly >= y0 - tol && ly <= y0 + th + tol;
+    return lx >= x0 - tol && lx <= x1 + tol && ly >= y0 - tol && ly <= y1 + tol;
   }
   case "image": { const b = geomBox(g); return !!b && x >= b[0] - tol && x <= b[2] + tol && y >= b[1] - tol && y <= b[3] + tol; }
   default: return false;

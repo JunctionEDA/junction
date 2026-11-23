@@ -83,11 +83,12 @@ export function tickFormatForScale(scale: number, units: RulerUnits): { format: 
   return { format: TICK_FORMATS[f], space };
 }
 
-/** GetConstantGlyphHeight (the non-HiDPI table), in IU at `scale` pixels per IU. */
-export function glyphDims(scale: number, rel = 0): { size: number; stroke: number; shadow: number; pitch: number } {
-  const sizes = [8, 10, 12, 14, 15, 16, 18];
+/** GetConstantGlyphHeight, in IU at `scale` (logical) pixels per IU: the HiDPI table and factors on a canvas whose
+ *  scale factor is > 1 (HIDPI_GL_CANVAS; the GAL's world scale stays in logical pixels there). */
+export function glyphDims(scale: number, rel = 0, hidpi = false): { size: number; stroke: number; shadow: number; pitch: number } {
+  const sizes = hidpi ? [7, 8, 9, 11, 13, 14, 16] : [8, 10, 12, 14, 15, 16, 18];
   const h = sizes[3 + rel] / scale;
-  return { size: h, stroke: h * 0.2, shadow: h * 0.15, pitch: h * 1.9 };
+  return hidpi ? { size: h, stroke: h * 0.15, shadow: h * 0.1, pitch: h * 1.7 } : { size: h, stroke: h * 0.2, shadow: h * 0.15, pitch: h * 1.9 };
 }
 
 /** One stroke of the ruler: a line, or a text run (KiCad stroke font, centred vertically). */
@@ -101,6 +102,8 @@ export interface RulerView {
   screen: Pt;                          // the canvas size in pixels
   viewport: [number, number, number, number];   // the visible area, IU: x0, y0, x1, y1
   textWidth(text: string, size: number, pen: number): number;   // FONT::StringBoundaryLimits().x
+  mirrored?: boolean;                  // VIEW::IsMirroredX / GAL::IsFlippedX (Flip Board View)
+  hidpi?: boolean;                     // the canvas' scale factor is > 1 (GetConstantGlyphHeight's HiDPI table)
 }
 
 const resize = (v: Pt, len: number): Pt => { const n = Math.hypot(v[0], v[1]); return n ? [v[0] * len / n, v[1] * len / n] : [0, 0]; };
@@ -116,11 +119,13 @@ function ticksAlongLine(ops: RulerOp[], view: RulerView, origin: Pt, line: Pt, m
   const rulerLen = Math.hypot(line[0], line[1]);
   if (!(rulerLen > 0) || !(space > 0) || !isFinite(rulerLen)) return;
   const lastRulerTick = Math.max(0, Math.ceil(rulerLen / space) - 1);
-  const dims = glyphDims(view.scale, -1);
+  const dims = glyphDims(view.scale, -1, view.hidpi);
   const labelAngle = -edaAngle(tickLine[0], tickLine[1]);
-  const labelOffset = resize(tickLine, majorLen);
+  let labelOffset = resize(tickLine, majorLen);
   let stroke = dims.stroke, shadowX = 0;
   if (shadow) { stroke += 2 * dims.shadow; shadowX = dims.shadow * 1.2; }
+  if (view.mirrored) { labelOffset = [-labelOffset[0], -labelOffset[1]]; shadowX = -shadowX; }
+  const isign = view.mirrored ? -1 : 1;
   let h: "left" | "right", rot: number;
   if (edaAngle(line[0], line[1]) > 0) {
     h = "left"; rot = labelAngle;
@@ -142,16 +147,16 @@ function ticksAlongLine(ops: RulerOp[], view: RulerView, origin: Pt, line: Pt, m
     let len = minorLen, label = false;
     if (i % format.majorStep === 0) { label = true; len *= MAJOR_TICK_LENGTH_FACTOR; }
     else if (format.midStep && i % format.midStep === 0) { label = true; len *= MID_TICK_LENGTH_FACTOR; }
-    ops.push({ kind: "line", a: pos, b: [pos[0] + dir[0] * len, pos[1] + dir[1] * len], w: stroke / 2, shadow });
+    ops.push({ kind: "line", a: pos, b: [pos[0] + dir[0] * len * isign, pos[1] + dir[1] * len * isign], w: stroke / 2, shadow });
     if (label) ops.push({ kind: "text", text: dimensionLabel("", space * i, units, false), at: add(pos, labelOffset), size: dims.size, pen: stroke, rot, h, shadow });
   }
 }
 
 /** drawBacksideTicks */
 function backsideTicks(ops: RulerOp[], view: RulerView, origin: Pt, line: Pt, tickLen: number, divisions: number, shadow: boolean): void {
-  const dims = glyphDims(view.scale, -1);
+  const dims = glyphDims(view.scale, -1, view.hidpi);
   const space = Math.hypot(line[0], line[1]) / divisions;
-  const back = resize(rotM90(line), tickLen);
+  const back = resize(rotM90(line), tickLen * (view.mirrored ? -1 : 1));
   const inf = tickLen * 4, vp = view.viewport;
   for (let i = 0; i < divisions + 1; i++) {
     const p = add(origin, resize(line, space * i));
@@ -162,21 +167,22 @@ function backsideTicks(ops: RulerOp[], view: RulerView, origin: Pt, line: Pt, ti
 
 /** DrawTextNextToCursor */
 function textNextToCursor(ops: RulerOp[], view: RulerView, cursor: Pt, quadrant: Pt, strings: string[], shadow: boolean): void {
-  const dims = glyphDims(view.scale);
+  const dims = glyphDims(view.scale, 0, view.hidpi);
+  const flipped = !!view.mirrored;
   const pos: Pt = [cursor[0], cursor[1]];
   if (quadrant[1] > 0) pos[1] -= dims.pitch * (strings.length + 1);
   let h: "left" | "right";
-  if (quadrant[0] < 0) { h = "left"; pos[0] += 15 / view.scale; }
-  else { h = "right"; pos[0] -= 15 / view.scale; }
+  if (quadrant[0] < 0) { h = flipped ? "right" : "left"; pos[0] += 15 / view.scale; }
+  else { h = flipped ? "left" : "right"; pos[0] -= 15 / view.scale; }
   const sx = shadow ? Math.trunc(Math.trunc(dims.shadow) * 1.2) : 0;   // an int in IU, scaled by 1.2 and truncated again
-  pos[0] += h === "left" ? -sx : sx;
+  pos[0] += (h === "left") !== flipped ? -sx : sx;
   const pen = shadow ? dims.stroke + 2 * dims.shadow : dims.stroke;
   for (const s of strings) { pos[1] += dims.pitch; ops.push({ kind: "text", text: s, at: [pos[0], pos[1]], size: dims.size, pen, rot: 0, h, shadow }); }
 }
 
 /** RULER_ITEM::ViewDraw for one layer (the drop-shadow layer, then the overlay layer). */
 function rulerPass(ops: RulerOp[], view: RulerView, origin: Pt, end: Pt, units: RulerUnits, shadow: boolean, flip: [boolean, boolean]): void {
-  const dims = glyphDims(view.scale);
+  const dims = glyphDims(view.scale, 0, view.hidpi);
   const lineW = dims.stroke * 0.8 + (shadow ? dims.shadow : 0);
   ops.push({ kind: "line", a: origin, b: end, w: lineW, shadow });
   const vec: Pt = [end[0] - origin[0], end[1] - origin[1]];

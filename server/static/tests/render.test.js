@@ -158,7 +158,9 @@ test("board dimension, target, chamfered and trapezoid pads, blind via, keepout"
   const [cx, cy] = R(3, 0); near(trap.pts.reduce((a, p) => a + p[0], 0) / 4, cx, 1e-6); near(trap.pts.reduce((a, p) => a + p[1], 0) / 4, cy, 1e-6);
   const widths = [Math.hypot(trap.pts[1][0] - trap.pts[0][0], trap.pts[1][1] - trap.pts[0][1]), Math.hypot(trap.pts[3][0] - trap.pts[2][0], trap.pts[3][1] - trap.pts[2][1])]; near(Math.abs(widths[0] - widths[1]), 1, 1e-6, "rect_delta skews the two parallel sides by the delta");
   const thr = fp.geom.filter((g) => g.t === "pad" && g.layer !== "holes" && /\.Cu$/.test(g.layer)).map((g) => g.layer); assert.deepStrictEqual(thr.sort(), ["B.Cu", "F.Cu", "In1.Cu"]);
-  const hole = fp.geom.find((g) => g.layer === "holes" && g.fill === "#001023"); assert(hole && hole.shape === "oval"); const [hx, hy] = R(6.1, 0); near(hole.x, hx, 1e-6); near(hole.y, hy, 1e-6);
+  // PAD::ShapePos: the drill offset moves the copper, the hole stays at the pad's position
+  const hole = fp.geom.find((g) => g.layer === "holes" && g.fill === "#001023"); assert(hole && hole.shape === "oval"); const [hx, hy] = R(6, 0); near(hole.x, hx, 1e-6); near(hole.y, hy, 1e-6);
+  const cu3 = fp.geom.find((g) => g.t === "pad" && g.layer === "F.Cu" && g.padIndex === 2); const [sx, sy] = R(6.1, 0); near(cu3.x, sx, 1e-6); near(cu3.y, sy, 1e-6);
   const ref = texts(fp, (g) => g.text === "R9")[0]; assert.strictEqual(ref.rot, 90); assert.strictEqual(ref.mirror, false);
 });
 test("board text: keep-upright only for locked footprint text, mirror only from the file", () => {
@@ -280,10 +282,10 @@ class FakeImage { constructor() { FakeImage.made.push(this); this.naturalWidth =
 FakeImage.made = [];
 
 test("image headers: PNG IHDR/pHYs and JPEG SOF/JFIF give pixel size and PPI (300 by default)", () => {
-  const png = K.imageInfo(K.base64Bytes(pngB64(4, 2, 3780))); assert.deepStrictEqual(png, { mime: "image/png", w: 4, h: 2, ppi: 96 });
-  assert.deepStrictEqual(K.imageInfo(K.base64Bytes(pngB64(7, 3, 0))), { mime: "image/png", w: 7, h: 3, ppi: 300 });
-  assert.deepStrictEqual(K.imageInfo(K.base64Bytes(JPEG_B64)), { mime: "image/jpeg", w: 20, h: 10, ppi: 150 });
-  assert.deepStrictEqual(K.imageInfo(K.base64Bytes("AAAA")), { mime: "image/png", w: 0, h: 0, ppi: 300 });
+  const png = K.imageInfo(K.base64Bytes(pngB64(4, 2, 3780))); assert.deepStrictEqual(png, { mime: "image/png", w: 4, h: 2, ppi: 96, legacyPpi: 94 });   // GetLegacyPPI: 37.8 px/cm truncated to 37
+  assert.deepStrictEqual(K.imageInfo(K.base64Bytes(pngB64(7, 3, 0))), { mime: "image/png", w: 7, h: 3, ppi: 300, legacyPpi: 300 });
+  assert.deepStrictEqual(K.imageInfo(K.base64Bytes(JPEG_B64)), { mime: "image/jpeg", w: 20, h: 10, ppi: 150, legacyPpi: 150 });
+  assert.deepStrictEqual(K.imageInfo(K.base64Bytes("AAAA")), { mime: "image/png", w: 0, h: 0, ppi: 300, legacyPpi: 300 });
   assert.strictEqual(K.base64Bytes("").length, 0);
 });
 test("schematic image: base64 atoms join, size = px × 25.4/PPI × scale centred on `at`, placeholder until loaded, onAssetLoaded hook, cache", () => {
@@ -294,7 +296,8 @@ test("schematic image: base64 atoms join, size = px × 25.4/PPI × scale centred
   try {
     const doc = K.parseDoc(SCH_HEAD + body + ")"); const it = doc.items.get("im1"); assert(it && it.kind === "image");
     const g = it.geom.find((x) => x.t === "image"); assert(g, "image geometry record");
-    const pxMm = 25.4 / 96; near(g.w, 4 * pxMm * 2, 1e-9); near(g.h, 2 * pxMm * 2, 1e-9); near(g.x + g.w / 2, 100, 1e-9); near(g.y + g.h / 2, 50, 1e-9);
+    // a 20250114 file: the parser rescales by PPI / legacy PPI (96 / 94) before 20260623
+    const pxMm = 25.4 / 96 * 96 / 94; near(g.w, 4 * pxMm * 2, 1e-9); near(g.h, 2 * pxMm * 2, 1e-9); near(g.x + g.w / 2, 100, 1e-9); near(g.y + g.h / 2, 50, 1e-9);
     assert.strictEqual(g.layer, "Images"); assert(g.z < 0 && g.z > K.SCH_Z.shapesBg && g.z < K.SCH_Z.sheet, "LAYER_DRAW_BITMAPS: over every background fill, under the items"); assert.strictEqual(g.color, K.SCH.notes);
     assert.strictEqual(g.entry.url, "data:image/png;base64," + b64); assert.strictEqual(FakeImage.made.length, 1); assert.strictEqual(FakeImage.made[0].src, g.entry.url);
     assert(!g.entry.loaded);
@@ -824,7 +827,7 @@ test("netNames: track labels sized to the track, skipped when short or too thin 
   assert.strictEqual(K.trackNameColor("#C83434"), "rgba(255,255,255,0.7)"); assert.strictEqual(K.trackNameColor("#F2EDA1"), "rgba(0,0,0,0.7)", "dark labels on bright copper");
   ctx = fullCtx(1000, 800); K.render(doc, ctx, { ppm: 10, zoom: 1, panX: 0, panY: 0, x0: -5, y0: -5, dpr: 1 }, { netNames: true });
   assert(!textOps(ctx).some((o) => o.args[0] === "GND"), "zoomed out (1 mm = 10 px < 4 mm at zoom 1): no track or via names");
-  ctx = fullCtx(1000, 800); K.render(doc, ctx, V40, { netNames: true, hidden: new Set(["F.Cu"]) }); assert(!textOps(ctx).some((o) => o.args[0] === "GND" && Math.abs(o.tf[1]) < 1e-9), "hidden layer hides its labels");
+  ctx = fullCtx(1000, 800); K.render(doc, ctx, V40, { netNames: true, hidden: new Set(["F.Cu"]) }); assert(!textOps(ctx).some((o) => o.args[0] === "GND" && o.fill === "rgba(255,255,255,0.7)" && Math.abs(o.tf[1]) < 1e-9), "hidden layer hides its track labels (the through via still flashes on B.Cu and keeps its name)");
   ctx = fullCtx(1000, 800); K.render(doc, ctx, V40, { netNames: true, highContrast: true, activeLayer: "B.Cu" }); assert.strictEqual(textOps(ctx, "GND").filter((o) => o.fill === "rgba(255,255,255,0.7)").length, 1, "no names on dimmed tracks");
   ctx = fullCtx(1000, 800); K.render(doc, ctx, V40, { netNames: true, outlineTracks: true }); assert(!textOps(ctx).some((o) => o.args[0] === "GND" && o.fill === "rgba(255,255,255,0.7)"), "sketch tracks carry no names");
 });
@@ -1225,7 +1228,7 @@ test("KiCad 10 boards name nets instead of numbering them: codes are assigned pe
   const net = (id) => doc.items.get(id).net;
   assert(net("s1") > 0 && net("s1") === net("s3") && net("s2") > 0 && net("s2") !== net("s1") && net("v1") === net("s2"));
   assert.strictEqual(doc.nets.get(net("s1")), "VCC"); assert.strictEqual(doc.nets.get(net("s2")), "GND");
-  const fp = doc.items.get("fp"); const lbl = texts(fp, (g) => g.padNet);
+  const fp = doc.items.get("fp"); const lbl = texts(fp, (g) => g.padNet && K.padLabelShown(g, true, true));
   assert.deepStrictEqual(lbl.map((g) => g.text), ["VPP/MCLR"], "the pad shows the short, unescaped net name; a pad without a net shows none");
   assert(fp.geom.find((g) => g.pad && g.padNumber === "1" && g.t === "pad").net > 0);
   // old files keep their numbers
@@ -1240,7 +1243,7 @@ test("pad labels follow PCB_PAINTER: box-based size and direction, netname colou
     pad(3, '(pad "12" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu") (net 2 "VCC") (uuid "p3"))') +
     pad(4, '(pad "1" smd rect (at 0 0) (size 2 2) (layers "B.Cu") (net 0 "") (pintype "passive+no_connect") (uuid "p4"))') +
     pad(5, '(pad "7" smd rect (at 0 0 45) (size 2 2) (layers "F.Cu") (uuid "p5"))'));
-  const lab = (n, tag) => texts(doc.items.get("fp" + n), (g) => g[tag])[0];
+  const lab = (n, tag) => texts(doc.items.get("fp" + n), (g) => g[tag] && K.padLabelShown(g, true, true))[0];   // the layout with numbers and net names on
   // 2×4 pad: the box is taller than wide → read along the long side, sized from the short one
   const n1 = lab(1, "padNum"), t1 = lab(1, "padNet");
   assert.strictEqual(n1.rot, 90); assert.strictEqual(t1.rot, 90);
@@ -1251,7 +1254,7 @@ test("pad labels follow PCB_PAINTER: box-based size and direction, netname colou
   assert.strictEqual(lab(2, "padNum").rot, 0); near(lab(2, "padNum").y, -size / 1.7, 1e-9);
   // through-hole: white @ 0.7 above the holes; round pads shrink the net name by 0.9
   const n3 = lab(3, "padNum"), t3 = lab(3, "padNet");
-  assert.strictEqual(n3.color, "rgba(255,255,255,0.7)"); assert.strictEqual(n3.z, K.pcbZ("holes") + 1);
+  assert.strictEqual(n3.color, "rgba(255,255,255,0.7)"); assert.strictEqual(n3.z, K.pcbZ("Dwgs.User") + 21, "LAYER_PAD_NETNAMES over every board layer");
   near(t3.size, Math.min(1.5 * 2 / 5, 2 / 2.5) * 0.85 * 0.9, 1e-9);
   assert.deepStrictEqual(n3.padLayers, ["F.Cu", "In1.Cu", "B.Cu"]);
   // SMD: on its copper layer, just above the pads; a no-connect pad shows "x"
@@ -1263,7 +1266,7 @@ test("pad labels follow PCB_PAINTER: box-based size and direction, netname colou
   const shown = (ppm, opts) => { const c = fullCtx(1600, 600); K.render(doc, c, view(ppm), Object.assign({ frame: false }, opts)); return textOps(c).map((o) => o.args[0]).sort(); };
   assert.deepStrictEqual(shown(20), ["1", "1", "1", "12", "7", "GND", "GND", "VCC", "x"]);
   assert.deepStrictEqual(shown(0.5), [], "far out: nothing");
-  assert.deepStrictEqual(shown(20, { netNames: false }), ["1", "1", "1", "12", "7"]);
+  assert.deepStrictEqual(shown(20, { netNames: false }), ["1", "1", "1", "12", "7", "x"], "the no-connect \"x\" does not follow the net-name option (PCB_PAINTER::draw( PAD ))");
   assert.deepStrictEqual(shown(20, { padNumbers: false }), ["GND", "GND", "VCC", "x"]);
   assert.deepStrictEqual(shown(20, { hidden: new Set(["F.Cu"]) }), ["1", "12", "VCC", "x"], "a through-hole pad keeps its label while any of its layers shows");
   assert.deepStrictEqual(shown(20, { hidden: new Set(["F.Cu", "In1.Cu", "B.Cu"]) }), []);

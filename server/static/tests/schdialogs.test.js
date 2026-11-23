@@ -57,8 +57,8 @@ test("find: plain, case, whole word, regex", () => {
   const ids = (o) => L.findHits(doc, o).map((h) => h.id + (h.field ? ":" + h.field : "")).sort();
   assert.deepStrictEqual(ids({ query: "vpp" }), ["l1", "l2", "t1"]);
   assert.deepStrictEqual(ids({ query: "VPP", matchCase: true }), ["l1", "t1"]);
-  assert.deepStrictEqual(ids({ query: "VPP", wholeWord: true }), [], "KiCad's whole-word match is the whole text");
-  assert.deepStrictEqual(ids({ query: "vpp_on", wholeWord: true }), ["l1"]); assert.deepStrictEqual(ids({ query: "vpp*" }), ["l1", "l2"], "wildcards");
+  assert.deepStrictEqual(ids({ query: "VPP", wholeWord: true }), ["t1"], "EDA_ITEM::Matches whole word: bounded by non-word characters, _ is a word character");
+  assert.deepStrictEqual(ids({ query: "vpp_on", wholeWord: true }), ["l1"]); assert.deepStrictEqual(ids({ query: "vpp*" }), [], "no wildcards: * is a plain character");
   assert.deepStrictEqual(ids({ query: "^R1\\d*$", regex: true }), ["s1:Reference", "s4:Reference"]);
   assert.deepStrictEqual(ids({ query: "10k" }), ["s1:Value", "s2:Value", "s4:Value"]);
   assert.deepStrictEqual(ids({ query: "0603" }), [], "hidden fields are skipped by default");

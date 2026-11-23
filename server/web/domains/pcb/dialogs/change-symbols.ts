@@ -19,7 +19,7 @@ import { fetchItem } from "../library/sources";
 import { readPinMaps, writePinMaps } from "./sym-props-logic";
 
 type Mode = "update" | "change";
-interface LibApi { fetch(kind: "symbol", id: string): Promise<{ symbol?: string; libId?: string }>; openChooser(kind: "symbol", opts?: { title?: string; filter?: string; browser?: boolean }): Promise<{ libId?: string } | null> }
+interface LibApi { fetch(kind: "symbol", id: string): Promise<{ symbol?: string; libId?: string }>; openChooser(kind: "symbol", opts?: { title?: string; filter?: string; browser?: boolean; picker?: boolean; preselect?: string }): Promise<{ libId?: string } | null> }
 const libApi = (): LibApi | null => (window as unknown as { KiCadLibrary?: LibApi }).KiCadLibrary || null;
 interface SchHelpers { autoplaceNode(doc: KDoc, item: KItem, opts?: unknown): SNode | null }
 const schH = (): SchHelpers | null => { const m = CollabTools.sch; return m && m._ ? m._ as unknown as SchHelpers : null; };
@@ -109,7 +109,7 @@ export function openChangeSymbols(mode: Mode): void {
   };
   // m_matchIdBrowserButton / m_newIdBrowserButton: STD_BITMAP_BUTTONs with BITMAPS::small_library (dialog_change_symbols.cpp:83-84)
   const browse = (set: (id: string) => void, input: () => HTMLInputElement) => bitmapButton("small_library", "Browse library", async () => {
-    const lib = libApi(); if (!lib) return; const got = await lib.openChooser("symbol", { title: "Choose Symbol", filter: input().value.split(":").pop() || "" }); if (got && got.libId) { input().value = got.libId; set(got.libId); void refreshFields(); }
+    const lib = libApi(); if (!lib) return; const got = await lib.openChooser("symbol", { picker: true, preselect: input().value.trim() }); if (got && got.libId) { input().value = got.libId; set(got.libId); void refreshFields(); }
   });
   const opt = (key: keyof L.UpdateOptions, label: string, tip?: string) => {
     const row = checkbox(label, !!o[key], (on) => { (o as unknown as Record<string, boolean>)[key] = on; }, { id: "kd-chs-o-" + key, title: tip });

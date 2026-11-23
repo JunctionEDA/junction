@@ -1,4 +1,5 @@
 import type { SchCtx, Pt } from "./types";
+import { GENERATOR_VERSION, SEXPR_SCHEMATIC_FILE_VERSION } from "../../canvas/format-version";
 import { root } from "../root";
 import { newSymbolMinRef } from "./annotate";
 import { PASTE_KINDS, clipRead, clipWrite, cursorOf, editable, selectedItems, setSelectionIds, snapCursor } from "./commands";
@@ -80,7 +81,7 @@ export function clipboardText(doc: KDoc, items: KItem[], opts?: { wrap?: boolean
     parts.push(s);
   }
   const body = parts.join("\n");
-  return opts && opts.wrap ? `(kicad_sch (version 20250114) (generator "kicad-collab-web") (generator_version "9.0")\n${body}\n)` : body;
+  return opts && opts.wrap ? `(kicad_sch (version ${SEXPR_SCHEMATIC_FILE_VERSION}) (generator "eeschema") (generator_version "${GENERATOR_VERSION}")\n${body}\n)` : body;
 }
 // Both clipboard forms: a bare item sequence (the desktop's) or a (kicad_sch …) document.
 export function parseClipboard(text: string): Clip | null {

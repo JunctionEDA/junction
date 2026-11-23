@@ -11,6 +11,7 @@
 // Pure functions; KiCadCanvas.boardSetup for the node tests.
 import { kid, kids, num, parse, quotedMask, str } from "./sexpr";
 import { type PlotParams, plotParamsText, readPlotParams } from "./plot-params";
+import { stringFromValue } from "../../../shared/units";
 
 const isList = Array.isArray;
 const quote = (s: string): string => '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
@@ -205,6 +206,14 @@ export function maskPaste(setup: SNode | null): MaskPaste {
     pasteRatio: kidNum(setup, "pad_to_paste_clearance_ratio"), allowBridges: yes(setup, "allow_soldermask_bridges_in_footprints", false),
     tentFront: tent ? (legacy ? tent.includes("front") : yes(tent, "front", true)) : true, tentBack: tent ? (legacy ? tent.includes("back") : yes(tent, "back", true)) : true };
 }
+/** BOARD_DESIGN_SETTINGS' via protection defaults (m_FillVias … m_CoverViasBack), read from (tenting) (covering) (plugging) (capping) (filling). */
+export interface ViaProtection { fill: boolean; cap: boolean; plugFront: boolean; plugBack: boolean; tentFront: boolean; tentBack: boolean; coverFront: boolean; coverBack: boolean }
+export function viaProtection(setup: SNode | null): ViaProtection {
+  const m = maskPaste(setup);
+  const side = (key: string): SNode | null => setup ? (kid(setup, key) as SNode | null) : null;
+  return { fill: yes(setup, "filling", false), cap: yes(setup, "capping", false), plugFront: yes(side("plugging"), "front", false), plugBack: yes(side("plugging"), "back", false),
+    tentFront: m.tentFront, tentBack: m.tentBack, coverFront: yes(side("covering"), "front", false), coverBack: yes(side("covering"), "back", false) };
+}
 export interface DashRatios { dash: number; gap: number }
 export function dashRatios(setup: SNode | null): DashRatios {
   const pp = setup ? (kid(setup, "pcbplotparams") as SNode | null) : null;
@@ -249,7 +258,7 @@ function replaceOrInsert(setup: SNode, key: string, text: string | null, before:
   setup.splice(at, 0, node);
 }
 const AFTER_MASK = ["solder_mask_min_width", "pad_to_paste_clearance", "pad_to_paste_clearance_ratio", "allow_soldermask_bridges_in_footprints", "tenting", "covering", "plugging", "capping", "filling", "zone_defaults", "aux_axis_origin", "grid_origin", "pcbplotparams"];
-export interface SetupEdit { maskPaste?: MaskPaste; finish?: BoardFinish; dash?: DashRatios; copper?: string[]; boardThickness?: number; drillProfile?: DrillProfile; stackup?: string }
+export interface SetupEdit { maskPaste?: MaskPaste; finish?: BoardFinish; dash?: DashRatios; copper?: string[]; boardThickness?: number; drillProfile?: DrillProfile; stackup?: string; vias?: ViaProtection }
 /**
  * A copy of the (setup …) node with the edits laid in, in formatSetup's order and omission rules (a zero
  * minimum web width, paste clearance or ratio is not written).  `copper` re-syncs the stackup's copper and
@@ -266,6 +275,15 @@ export function editSetup(setup: SNode | null, e: SetupEdit): SNode {
     replaceOrInsert(out, "pad_to_paste_clearance_ratio", m.pasteRatio ? `(pad_to_paste_clearance_ratio ${fmt(m.pasteRatio)})` : null, AFTER_MASK.slice(3));
     replaceOrInsert(out, "allow_soldermask_bridges_in_footprints", `(allow_soldermask_bridges_in_footprints ${m.allowBridges ? "yes" : "no"})`, AFTER_MASK.slice(4));
     replaceOrInsert(out, "tenting", `(tenting (front ${m.tentFront ? "yes" : "no"}) (back ${m.tentBack ? "yes" : "no"}))`, AFTER_MASK.slice(5));
+  }
+  if (e.vias) {
+    // formatSetup: (tenting …) (covering …) (plugging …) (capping …) (filling …)
+    const v = e.vias, yn = (b: boolean): string => (b ? "yes" : "no");
+    replaceOrInsert(out, "tenting", `(tenting (front ${yn(v.tentFront)}) (back ${yn(v.tentBack)}))`, AFTER_MASK.slice(5));
+    replaceOrInsert(out, "covering", `(covering (front ${yn(v.coverFront)}) (back ${yn(v.coverBack)}))`, AFTER_MASK.slice(6));
+    replaceOrInsert(out, "plugging", `(plugging (front ${yn(v.plugFront)}) (back ${yn(v.plugBack)}))`, AFTER_MASK.slice(7));
+    replaceOrInsert(out, "capping", `(capping ${yn(v.cap)})`, AFTER_MASK.slice(8));
+    replaceOrInsert(out, "filling", `(filling ${yn(v.fill)})`, AFTER_MASK.slice(9));
   }
   if (e.drillProfile) {
     // formatDrillSymbolProfile: written after grid_origin, before the plot parameters; a default profile writes nothing
@@ -387,12 +405,7 @@ export function applyBoardSetup(doc: KDoc, change: KChange): boolean {
 // ---------------------------------------------------------------- design rule validation (BOARD_DESIGN_SETTINGS)
 export interface RuleIssue { setting: string; message: string }
 /** A millimetre value as StringFromValue( units, aAddUnitsText = true ) writes it in an error message. */
-export function unitText(mm: number, units: "mm" | "in" | "mil"): string {
-  const per = units === "in" ? 25.4 : units === "mil" ? 0.0254 : 1, digits = units === "in" ? 4 : units === "mil" ? 2 : 4;
-  let t = (mm / per).toFixed(digits); if (t.includes(".")) t = t.replace(/0+$/, "").replace(/\.$/, "");
-  if (t === "-0") t = "0";
-  return t + " " + (units === "mil" ? "mils" : units);
-}
+export function unitText(mm: number, units: "mm" | "in" | "mil"): string { return stringFromValue(mm, units, "pcb", true); }
 const RANGES: [string, number, number][] = [
   ["min_clearance", 0, 25], ["min_connection", 0, 100], ["min_track_width", 0, 25], ["min_via_annular_width", 0, 25], ["min_via_diameter", 0, 25],
   ["min_through_hole_diameter", 0, 25], ["min_microvia_diameter", 0, 10], ["min_microvia_drill", 0, 10], ["min_hole_to_hole", 0, 10], ["min_hole_clearance", 0, 100],
@@ -509,5 +522,5 @@ export function adjustDielectrics(layers: StackupLayer[], target: number): strin
   return null;
 }
 
-export const boardSetup = { boardHeader, layerRows, layersText, setCopperCount, copperNames, layerNameError, defaultLayerName, modernLayerIds, stackupRows, stackupThickness, boardFinish, maskPaste, dashRatios,
+export const boardSetup = { boardHeader, layerRows, layersText, setCopperCount, copperNames, layerNameError, defaultLayerName, modernLayerIds, stackupRows, stackupThickness, boardFinish, maskPaste, viaProtection, dashRatios,
   editSetup, sectionText, setupWithPlotParams, validateDesignRules, designRuleWarnings, validateViaParameters, unitText, stackupLayers, stackupText, setupWithStackup, stackupLayersThickness, stackupFixedThickness, adjustDielectrics, drillProfile, DRILL_GROUP_KEYS, DRILL_MARK_POLICIES, DRILL_PROFILE_DEFAULT, readPlotParams, plotParamsText, boardSetupChange, embeddedFilesChange, putEmbeddedFile, EMBEDDED_FILE_PROP, applyHeaderChange, applyBoardSetup, COPPER_FINISHES, COPPER_TYPES, USER_TYPES, BOARD_SETUP_TYPE };

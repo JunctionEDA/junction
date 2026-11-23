@@ -236,16 +236,53 @@ export function plotParamsText(p: PlotParams, version: number): string {
   return "(pcbplotparams " + t.join(" ") + ")";
 }
 
-/** The fields the file stores (PCB_PLOT_PARAMS::IsSameAs compares these). */
-const STORED: (keyof PlotParams)[] = ["disableApertMacros", "useGerberExtensions", "useGerberX2", "includeNetlistInfo", "createJobFile", "gerberPrecision", "dashRatio", "gapRatio", "svgPrecision",
-  "pngDpi", "pngAntialias", "plotFrameRef", "dxfSketch", "useAuxOrigin", "pdfFrontPopups", "pdfBackPopups", "pdfMetadata", "pdfSingle", "dxfPolygonMode", "dxfImperial", "dxfUsePcbnewFont",
-  "negative", "a4Output", "blackAndWhite", "sketchPadsOnFab", "plotPadNumbers", "hideDnpOnFab", "sketchDnpOnFab", "crossoutDnpOnFab", "subtractMaskFromSilk", "format", "mirror", "drillMarks",
-  "scaleSelection", "outputDirectory"];
+/** PCB_PLOT_PARAMS::IsSameAs, `a` being the settings compared against (m_plotOpts): the layer selection as a set,
+ *  Plot on All Layers as an ordered sequence, and the format-dependent fields only for the format of `a`. */
 export function samePlotParams(a: PlotParams, b: PlotParams): boolean {
-  for (const k of STORED) if (a[k] !== b[k]) return false;
-  const setEq = (x: string[], y: string[]): boolean => { const s = new Set(x); return x.length === y.length && y.every((n) => s.has(n)) && new Set(y).size === s.size; };
-  if (!setEq([...new Set(a.layerSelection)], [...new Set(b.layerSelection)])) return false;
-  return setEq([...new Set(a.plotOnAllLayers)], [...new Set(b.plotOnAllLayers)]);
+  const s1 = new Set(a.layerSelection), s2 = new Set(b.layerSelection);
+  if (s1.size !== s2.size || [...s1].some((n) => !s2.has(n))) return false;
+  if (a.plotOnAllLayers.length !== b.plotOnAllLayers.length || a.plotOnAllLayers.some((n, i) => b.plotOnAllLayers[i] !== n)) return false;
+  const f = a.format, P = PLOT_FORMAT;
+  const ne = (k: keyof PlotParams, d?: unknown): boolean => (a[k] === undefined ? d : a[k]) !== (b[k] === undefined ? d : b[k]);
+  if (f === P.GERBER && (ne("useGerberExtensions") || ne("disableApertMacros") || ne("useGerberX2") || ne("includeNetlistInfo") || ne("createJobFile") || ne("gerberPrecision"))) return false;
+  if (ne("dashRatio") || ne("gapRatio") || ne("plotFrameRef")) return false;
+  if (f === P.DXF && (ne("dxfSketch") || ne("dxfPolygonMode") || ne("dxfImperial") || ne("dxfSingle", false))) return false;
+  if (ne("svgPrecision") || ne("pngDpi") || ne("pngAntialias")) return false;
+  if (f !== P.POST && ne("useAuxOrigin")) return false;
+  if ((f === P.POST || f === P.SVG || f === P.PDF) && (ne("negative") || ne("mirror"))) return false;
+  if (f === P.PDF && (ne("pdfFrontPopups") || ne("pdfBackPopups") || ne("pdfMetadata"))) return false;
+  if (ne("plotReference", true) || ne("plotValue", true) || ne("sketchPadsOnFab") || ne("plotPadNumbers") || ne("hideDnpOnFab") || ne("sketchDnpOnFab") || ne("crossoutDnpOnFab")
+    || ne("subtractMaskFromSilk") || ne("format")) return false;
+  if (f !== P.GERBER && (ne("drillMarks") || ne("scaleSelection"))) return false;
+  if (f === P.POST && (ne("a4Output") || ne("fineScaleX", 1) || ne("fineScaleY", 1) || ne("widthAdjust", 0))) return false;
+  // m_textMode: the DXF stroke-font choice (dxfusepcbnewfont)
+  if (ne("dxfUsePcbnewFont") || ne("blackAndWhite") || ne("outputDirectory")) return false;
+  return true;
+}
+
+/** The board colours of "KiCad Classic" (common/settings/builtin_color_themes.h s_classicTheme, COLOR4D names through
+ *  color4d.cpp's B, G, R table), for the Plot dialog's Color theme. */
+const CL = { RED: "#840000", YELLOW: "#C2C200", LIGHTMAGENTA: "#C200C2", LIGHTRED: "#C20000", CYAN: "#008484", GREEN: "#008400", BLUE: "#000084", DARKGRAY: "#848484",
+  MAGENTA: "#840084", LIGHTGRAY: "#C2C2C2", BROWN: "#848400", LIGHTCYAN: "#00C2C2", DARKRED: "#480000" };
+const CLASSIC_INNER = [CL.YELLOW, CL.LIGHTMAGENTA, CL.LIGHTRED, CL.CYAN, CL.GREEN, CL.BLUE, CL.DARKGRAY, CL.MAGENTA, CL.LIGHTGRAY, CL.MAGENTA, CL.RED, CL.BROWN, CL.LIGHTGRAY, CL.BLUE, CL.GREEN, CL.RED];
+const CLASSIC_FIXED: Record<string, string> = { "F.Cu": CL.RED, "B.Cu": CL.GREEN, "B.Adhes": CL.BLUE, "F.Adhes": CL.MAGENTA, "B.Paste": CL.LIGHTCYAN, "F.Paste": CL.RED,
+  "B.SilkS": CL.MAGENTA, "F.SilkS": CL.CYAN, "B.Mask": CL.BROWN, "F.Mask": CL.MAGENTA, "Dwgs.User": CL.LIGHTGRAY, "Cmts.User": CL.BLUE, "Eco1.User": CL.GREEN,
+  "Eco2.User": CL.YELLOW, "Edge.Cuts": CL.YELLOW, "Margin": CL.LIGHTMAGENTA, "B.CrtYd": CL.DARKGRAY, "F.CrtYd": CL.LIGHTGRAY, "B.Fab": CL.BLUE, "F.Fab": CL.DARKGRAY };
+/** s_classicTheme's colour of a board layer (User.N are all BLUE); null for a layer it does not list. */
+export function classicLayerColor(layer: string): string | null {
+  if (CLASSIC_FIXED[layer]) return CLASSIC_FIXED[layer];
+  const m = /^In(\d+)\.Cu$/.exec(layer); if (m && +m[1] >= 1 && +m[1] <= 30) return CLASSIC_INNER[(+m[1] - 1) % 16];
+  if (/^User\.\d+$/.test(layer)) return CL.BLUE;
+  return null;
+}
+/** LAYER_DRAWINGSHEET of s_classicTheme (DARKRED); s_defaultTheme's is CSS_COLOR( 200, 114, 171 ). */
+export const CLASSIC_DRAWINGSHEET = CL.DARKRED;
+
+/** DIALOG_PLOT::formatUsesColorTheme / updateColorThemeControl: the Color theme choice is enabled for SVG, PDF and PNG,
+ *  and for SVG and PDF only while their Output mode is Color. */
+export function colorThemeEnabled(format: number, blackAndWhite: boolean): boolean {
+  if (format !== PLOT_FORMAT.SVG && format !== PLOT_FORMAT.PDF && format !== PLOT_FORMAT.PNG) return false;
+  return format === PLOT_FORMAT.PNG || !blackAndWhite;
 }
 
 /** The scale of a (scaleselection N): 0 is auto (null). */
@@ -267,4 +304,4 @@ export function widthAdjustLimits(proText: string | null | undefined): [number, 
   const nm = 1e-6, r6 = (v: number): number => Math.round(v * 1e6) / 1e6;
   return [r6(-(minTrack - nm)), r6(clearance - nm)];
 }
-export const plotParams = { widthAdjustLimits, readPlotParams, plotParamsText, samePlotParams, defaultPlotParams, lsetHex, lsetNames, fmtHex, parseHex, layerId, layerName, seqStackupForPlotting, allCuNames, dialogLayerSelection, scaleOf, PLOT_FORMAT, DRILL_MARKS };
+export const plotParams = { widthAdjustLimits, readPlotParams, plotParamsText, samePlotParams, defaultPlotParams, lsetHex, lsetNames, fmtHex, parseHex, layerId, layerName, seqStackupForPlotting, allCuNames, dialogLayerSelection, scaleOf, classicLayerColor, CLASSIC_DRAWINGSHEET, colorThemeEnabled, PLOT_FORMAT, DRILL_MARKS };

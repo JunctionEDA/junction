@@ -5,6 +5,7 @@ import { $, NS } from "./dom";
 import { sendOp } from "./net";
 import { editorId } from "./panes";
 import { E } from "./state";
+import { isPastDragThreshold } from "../tools/drag-threshold";
 import { activeModule, deleteSelected, moveOp, rotateSelected, toolCtx } from "./tools";
 import { esc } from "./util";
 
@@ -321,10 +322,10 @@ export function finishBoardLasso(): void {
 }
 export function finishBoxSel(ev: { clientX: number; clientY: number }) {
   const b: BoxSel | null = E.boxSel; E.boxSel = null; requestRepaint(); if (!b || !E.kdoc) return;
-  const moved = Math.hypot(ev.clientX - b.startClient[0], ev.clientY - b.startClient[1]);
+  const moved = isPastDragThreshold(ev.clientX - b.startClient[0], ev.clientY - b.startClient[1]);
   // a board lasso stays open after its first stroke: clicks add corners, a double-click closes it (finishBoardLasso)
-  if (b.lasso && !isSch() && (moved >= 4 || b.pts.length > 3)) { b.open = true; E.boxSel = b; requestRepaint(); return; }
-  if (moved < 4 && !(b as BoxSel & { live?: boolean }).live) {
+  if (b.lasso && !isSch() && (moved || b.pts.length > 3)) { b.open = true; E.boxSel = b; requestRepaint(); return; }
+  if (!moved && !(b as BoxSel & { live?: boolean }).live) {
     if (b.clickHighlight) { const pm = CollabTools.pcb as unknown as { highlightNetAt?: (c: unknown, at: number[]) => unknown } | undefined; if (pm && pm.highlightNetAt) { pm.highlightNetAt(toolCtx(), b.start); requestRender(); } }
     return;
   }

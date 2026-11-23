@@ -8,6 +8,7 @@ import { E } from "../state";
 import { store } from "../appstore";
 import { box, checkField, currentUnits, fmtLen, h, lenField, numField, openDialog, parseLen, put, selectField, unitLabel, unitName, type DialogApi, type Field } from "./ui";
 import "../../../../shared/components/kselect";
+import { focusOnBoardItem } from "./cleanup-graphics";
 
 type Pt = [number, number];
 type MoveExactResult = { dx: number; dy: number; rotation: number; about: "anchor" | "center" | Pt };
@@ -40,11 +41,13 @@ const resetBtn = (tip: string, fn: () => void): HTMLButtonElement => { const b =
 // ---------------------------------------------------------------- Move Item
 export function openMoveExact(req: { single: boolean; bbox: number[] | null }, done: (v: MoveExactResult) => void): void {
   // m_hash_key: the title, the anchor and the frame, so the state is not shared between the two cases
-  const key = "Move Item" + (req.single ? "" : "|with_selection") + "|pcb_editor";
+  // FRAME_PCB_EDITOR only: the drill/place origin anchor and the "|pcb_editor" key (not in the Footprint Editor)
+  const boardEd = !(E.kdoc && (E.kdoc as { fpEditor?: boolean }).fpEditor);
+  const key = "Move Item" + (req.single ? "" : "|with_selection") + (boardEd ? "|pcb_editor" : "");
   const st = loadState<{ x: string; y: string; rot: string; anchor: number; polar: boolean; units: string }>(key);
   const pair = xyPair(["Move X:", "Move Y:"], ["moveX", "moveY"]);
   const rot = numField(0, { key: "rotate" });
-  const anchors: [number, string][] = [[0, req.single ? "Rotate around item anchor" : "Rotate around selection center"], [1, "Rotate around local coordinates origin"], [2, "Rotate around drill/place origin"]];
+  const anchors: [number, string][] = [[0, req.single ? "Rotate around item anchor" : "Rotate around selection center"], [1, "Rotate around local coordinates origin"], ...(boardEd ? [[2, "Rotate around drill/place origin"] as [number, string]] : [])];
   const anchor = selectField<number>(0, anchors, { key: "anchor" });
   const polar = checkField(false, "Use polar coordinates", { key: "polar" });
   // m_stateX / m_stateY / m_stateRadius / m_stateTheta (OnPolarChanged keeps the exact values across switches)
@@ -93,7 +96,7 @@ export function openMoveExact(req: { single: boolean; bbox: number[] | null }, d
         if (st.polar) { polar.set(true); pair.setPolar(true, ["Distance:", "Angle:"]); }
         if (st.units === currentUnits()) { const x = parseLen(st.x); if (!isNaN(x)) pair.x.set(x); if (st.polar) pair.yAng.set(Number(st.y) || 0); else { const y = parseLen(st.y); if (!isNaN(y)) pair.yLen.set(y); } }
         else if (st.polar) pair.yAng.set(Number(st.y) || 0);
-        rot.set(Number(st.rot) || 0); anchor.set(Math.min(2, Math.max(0, st.anchor | 0)));
+        rot.set(Number(st.rot) || 0); anchor.set(Math.min(anchors.length - 1, Math.max(0, st.anchor | 0)));
         sx = pair.isPolar() ? 0 : pair.x.get(); sy = pair.isPolar() ? 0 : pair.yLen.get();
       }
       setTimeout(() => { pair.x.input.focus(); (pair.x.input as HTMLInputElement).select(); check(); }, 0);
@@ -134,7 +137,8 @@ export function openPositionRelative(req: { ctx: unknown; selAnchor: Pt }, done:
   };
   setInfo(again ? again.anchorText : lastAnchor ? lastAnchor.text : undefined);
   const pair = xyPair(["Offset X:", "Offset Y:"], ["offsetX", "offsetY"]);
-  const polar = checkField(false, "Use polar coordinates", { key: "polar" });
+  // dialog_position_relative_base.cpp: m_polarCoords->SetValue( true )
+  const polar = checkField(true, "Use polar coordinates", { key: "polar" });
   let sx = 0, sy = 0, sr = 0, sq = 0;
   const readXY = (): Pt => [pair.x.get(), pair.isPolar() ? pair.yAng.get() : pair.yLen.get()];
   const tips = (): void => {
@@ -176,8 +180,9 @@ export function openPositionRelative(req: { ctx: unknown; selAnchor: Pt }, done:
         btn("Select Item...", () => pick("item"), "Click and select a board item.\nThe anchor position will be the position of the selected item."), btn("Select Point...", () => pick("point"))),
         h("hr", { class: "pd-sep" }), f, polar.el);
       const restore = again || (st ? { ...st } : null);
+      if (!restore || restore.polar) { polar.set(true); pair.setPolar(true, ["Distance:", "Angle:"]); tips(); }
+      else polar.set(false);
       if (restore) {
-        if (restore.polar) { polar.set(true); pair.setPolar(true, ["Distance:", "Angle:"]); tips(); }
         const sameUnits = again || (st && st.units === currentUnits());
         if (sameUnits) { const x = parseLen(restore.x); if (!isNaN(x)) pair.x.set(x); if (restore.polar) pair.yAng.set(Number(restore.y) || 0); else { const y = parseLen(restore.y); if (!isNaN(y)) pair.yLen.set(y); } }
       }
@@ -249,10 +254,15 @@ export function openCleanupTracks(req: CleanupRequest): void {
   const label = (): void => { if (api && api.okButton) api.okButton.textContent = firstRun ? "Build Changes" : "Update PCB"; };
   // OnCheckBox: any change empties the changes list and asks for a new build
   const reset = (): void => { list.replaceChildren(); req.focus(null); firstRun = true; label(); };
-  const build = (): void => {
-    const items = req.plan(opts());
-    list.replaceChildren(...items.map((it) => { const row = h("div", { class: "ln action", tabindex: "0" }, it.text); row.addEventListener("click", () => { for (const r of Array.from(list.children)) r.classList.toggle("sel", r === row); req.focus(it.ids); }); return row; }));
-    if (!items.length) list.append(h("div", { class: "ln" }, "No changes."));
+  // doCleanup's reporter page ("Checking zones..." on the first run with the refill on, "Rebuilding connectivity..."),
+  // then the changes list; OnSelectItem focuses the change's item (FocusOnItem)
+  const build = (checkZones: boolean): void => {
+    const o = opts();
+    list.replaceChildren(...[...(checkZones && o.refill ? ["Checking zones..."] : []), "Rebuilding connectivity..."].map((t) => h("div", { class: "ln", "data-k": "progress" }, t)));
+    setTimeout(() => {
+      const items = req.plan(o);
+      list.replaceChildren(...items.map((it) => { const row = h("div", { class: "ln action", tabindex: "0" }, it.text); row.addEventListener("click", () => { for (const r of Array.from(list.children)) r.classList.toggle("sel", r === row); req.focus(it.ids); if (it.ids[0]) focusOnBoardItem(it.ids[0]); }); return row; }));
+    }, 0);
   };
   api = openDialog({ title: "Cleanup Tracks and Vias", width: 620, okLabel: "Build Changes", persist: true,
     build(body) {
@@ -268,7 +278,7 @@ export function openCleanupTracks(req: CleanupRequest): void {
     cancel() { req.focus(null); return true; },
     ok() {
       // TransferDataFromWindow: the first press is a dry run that lists the changes; the second one applies them
-      if (firstRun) { build(); firstRun = false; label(); return false; }
+      if (firstRun) { build(true); firstRun = false; label(); return false; }
       req.apply(opts()); return true;
     } });
 }

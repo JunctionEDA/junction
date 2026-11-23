@@ -8,8 +8,10 @@
 // (setup …) section of the board — solder mask and paste clearances, via tenting, the drill / place origin —
 // is passed beside the document, because the editor's document keeps items only.
 import { boardFinish, boardHeader, stackupRows, stackupThickness } from "../canvas/board-setup";
+import { kid, str } from "../canvas/sexpr";
+import { expandTextVars } from "../canvas/sheet";
 import { type DrillFile, type DrillOptions, boardHoles, drillFiles } from "./drill";
-import { type GerberAttrs, projectGuid, writeGerber } from "./gerber";
+import { type GerberAttrs, projectGuid, sameCoordinatesKey, writeGerber } from "./gerber";
 import { type BoardModel, type FabDoc, type Node, DEFAULT_VARIANT, boardModel, boardVariantNames, isCopper } from "./model";
 import { type BomLine, type BomOptions, type Placement, type PlacementOptions, bom, bomCsv, placementAscii, placementCsv, placements, refCompare } from "./parts";
 import { PlotLog, type PlotOptions, centrePoints, plotFile, renderCacheFor } from "./plot";
@@ -48,11 +50,11 @@ export function layerDisplayName(doc: FabDoc, layer: string): string {
   const info = doc.layers.get(layer);
   return (info && info.userName) || DISPLAY[layer] || layer;
 }
-/** GetGerberProtelExtension: gtl, gbl, g2 … for inner copper, gto, gts, gm1 …; gbr for everything else. */
+/** GetGerberProtelExtension: gtl, gbl, g1 … for inner copper (g + CopperLayerToOrdinal: In1.Cu is g1), gto, gts, gm1 …; gbr for everything else. */
 export function protelExtension(layer: string, copper: string[]): string {
   if (PROTEL[layer]) return PROTEL[layer];
-  const i = copper.indexOf(layer);
-  if (i > 0) return "g" + (i + 1);
+  const n = /^In(\d+)\.Cu$/.exec(layer);
+  if (n && copper.includes(layer)) return "g" + Number(n[1]);
   return "gbr";
 }
 /** %TF.FileFunction and %TF.FilePolarity of a layer (GetGerberFileFunctionAttribute). */
@@ -103,6 +105,18 @@ function setupNode(setup: Node | string | null | undefined): Node | null {
 }
 /** The (setup …) node of a context. */
 export function setupOf(ctx: FabContext): Node | null { return setupNode(ctx.setup); }
+/** ExpandTextVars( GetTitleBlock().GetRevision(), GetProject(), FOR_GUI ): the revision with the project's text variables expanded. */
+export function revisionOf(ctx: FabContext): string {
+  const rev = (ctx.doc.titleBlock && ctx.doc.titleBlock.rev) || "";
+  const vars = (ctx.doc as unknown as { projectVars?: Record<string, unknown> | null }).projectVars || null;
+  return expandTextVars(rev, (t: string) => { const v = vars ? vars[t] : undefined; return v === undefined || v === null ? null : String(v); });
+}
+/** The board's own PCB_PLOT_PARAMS::GetUseAuxOrigin: (setup (pcbplotparams (useauxorigin yes))). */
+export function boardUsesAuxOrigin(ctx: FabContext): boolean {
+  const s = setupOf(ctx) as unknown as unknown[] | null;
+  const pp = s ? kid(s, "pcbplotparams") : null; const v = pp ? kid(pp, "useauxorigin") : null;
+  return !!v && /^(yes|true)$/.test(str(v[1]));
+}
 /** BOARD_STACKUP::BuildBoardThicknessFromStackup of the board's (stackup …); null when it has none (the default stackup) */
 export function boardStackupThickness(ctx: FabContext): number | null { const rows = stackupRows(setupOf(ctx) as unknown as SNode | null); return rows.length ? stackupThickness(rows) : null; }
 function boardSpecs(ctx: FabContext) {
@@ -138,11 +152,11 @@ export function plotGerbers(ctx: FabContext, o: GerberJobOptions = {}): GerberRe
     hideDnpOnFab: o.hideDnpOnFab, sketchDnpOnFab: o.sketchDnpOnFab, crossoutDnpOnFab: o.crossoutDnpOnFab };
   const date = isoDate(ctx.date || new Date());
   const origin: Pt = o.useAuxOrigin ? m.settings.auxOrigin : [0, 0];
-  const rev = (ctx.doc.titleBlock && ctx.doc.titleBlock.rev) || "rev?";
+  const rev = revisionOf(ctx) || "rev?";
   const files: OutFile[] = []; const prims = new Map<string, Prim[]>();
   for (const layer of layers) {
     const ps = plotFile(m, layer, plot, log); prims.set(layer, ps);
-    const text = writeGerber(ps, layerAttrs(layer, m.copper), { x2: o.useGerberX2 !== false, origin, software: `KiCad,Pcbnew,${kicadVersion(ctx.doc)}`, date, project: { name, guid: projectGuid(name), rev }, precision: o.precision });
+    const text = writeGerber(ps, layerAttrs(layer, m.copper), { x2: o.useGerberX2 !== false, origin, software: `KiCad,Pcbnew,${kicadVersion(ctx.doc)}`, date, project: { name, guid: projectGuid(name + ".kicad_pcb"), rev }, sameCoordinates: sameCoordinatesKey(!!o.useAuxOrigin, m.settings.auxOrigin), precision: o.precision });
     const ext = o.useProtelExtensions ? protelExtension(layer, m.copper) : "gbr";
     files.push({ name: `${name}-${layerDisplayName(ctx.doc, layer).replace(/\./g, "_")}.${ext}`, text, layer });
   }
@@ -243,7 +257,7 @@ async function pcbwayQuoteZip(ctx: FabContext, pkg: FabPackage): Promise<Uint8Ar
   entries.push({ name: `${pkg.name}.d356`, data: reports.d356(ctx, false) });
   entries.push({ name: `${pkg.name}-job.gbrjob`, data: gerberJobFile({
     m: modelOf(ctx), setup, files: pkg.files.flatMap(({ name, layer }) => layer ? [{ name, layer }] : []),
-    projectName: pkg.name, guid: projectGuid(pkg.name), rev: ctx.doc.titleBlock?.rev || "", version: kicadVersion(ctx.doc),
+    projectName: pkg.name, guid: projectGuid(pkg.name + ".kicad_pcb"), rev: revisionOf(ctx), version: kicadVersion(ctx.doc),
     date: isoDate(date), thickness: specs.thickness ?? undefined, edge: pkg.prims.get("Edge.Cuts"),
     layerName: (l) => layerDisplayName(ctx.doc, l),
   }) });

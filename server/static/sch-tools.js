@@ -292,6 +292,27 @@
     "group"
   ]);
 
+  // web/domains/pcb/tools/drag-threshold.ts
+  function detect(re) {
+    if (typeof navigator === "undefined") return false;
+    const nav = navigator;
+    const p = nav.platform || nav.userAgentData && nav.userAgentData.platform || nav.userAgent || "";
+    return re.test(p);
+  }
+  var ON_WINDOWS = detect(/Win/i);
+  var ON_MAC = detect(/Mac|iPhone|iPad|iPod/i);
+  var DRAG_DISTANCE_THRESHOLD = 8;
+  var DRAG_TIME_THRESHOLD_MS = 300;
+  function dragMinPx(platform = ON_WINDOWS ? "win" : ON_MAC ? "mac" : "linux") {
+    return platform === "win" ? 4 : DRAG_DISTANCE_THRESHOLD;
+  }
+  function isPastDragThreshold(dxPx, dyPx, heldMs, platform) {
+    const plat = platform || (ON_WINDOWS ? "win" : ON_MAC ? "mac" : "linux");
+    const t = dragMinPx(plat);
+    if (Math.abs(dxPx) > t || Math.abs(dyPx) > t) return true;
+    return plat === "mac" && heldMs !== void 0 && heldMs > DRAG_TIME_THRESHOLD_MS;
+  }
+
   // web/shared/keys.ts
   function detectMac() {
     if (typeof navigator === "undefined") return false;
@@ -302,6 +323,39 @@
     return /Macintosh|Mac OS X|iPhone|iPad/.test(nav.userAgent || "");
   }
   var IS_MAC = detectMac();
+  var HOTKEY_NAMES = [
+    ...Array.from({ length: 24 }, (_, i) => `F${i + 1}`),
+    "Esc",
+    "Del",
+    "Tab",
+    "Back",
+    "Ins",
+    "Home",
+    "End",
+    "PgUp",
+    "PgDn",
+    "Up",
+    "Down",
+    "Left",
+    "Right",
+    "Return",
+    "Space",
+    ...Array.from({ length: 10 }, (_, i) => `Num Pad ${i}`),
+    "Num Pad +",
+    "Num Pad -",
+    "Num Pad *",
+    "Num Pad /",
+    "Num Pad .",
+    "Num Pad Enter",
+    "Num Pad F1",
+    "Num Pad F2",
+    "Num Pad F3",
+    "Num Pad F4",
+    "",
+    "Click",
+    "DblClick",
+    "Wheel"
+  ];
 
   // web/domains/pcb/editor/selmodes.ts
   function detectWindows() {
@@ -345,17 +399,17 @@
   function mul(A, B) {
     return [A[0] * B[0] + A[1] * B[2], A[0] * B[1] + A[1] * B[3], A[2] * B[0] + A[3] * B[2], A[2] * B[1] + A[3] * B[3]].map((v) => v || 0);
   }
-  function tFrom(rot, mirror) {
-    let T = ROT[(Math.round(rot) % 360 + 360) % 360] || ROT[0];
+  function tFrom(rot2, mirror) {
+    let T = ROT[(Math.round(rot2) % 360 + 360) % 360] || ROT[0];
     if (mirror === "y") T = mul(MY, T);
     if (mirror === "x") T = mul(MX, T);
     return T;
   }
   var ORIENTS = [[0, ""], [90, ""], [180, ""], [270, ""], [0, "x"], [90, "x"], [270, "x"], [0, "y"], [90, "y"], [180, "y"], [270, "y"]];
   function orientOf(T) {
-    for (const [rot, m] of ORIENTS) {
-      const U = tFrom(rot, m);
-      if (U[0] === T[0] && U[1] === T[1] && U[2] === T[2] && U[3] === T[3]) return { rot, mirror: m };
+    for (const [rot2, m] of ORIENTS) {
+      const U = tFrom(rot2, m);
+      if (U[0] === T[0] && U[1] === T[1] && U[2] === T[2] && U[3] === T[3]) return { rot: rot2, mirror: m };
     }
     return { rot: 0, mirror: "" };
   }
@@ -364,8 +418,8 @@
     return { rot: atOf(node)[2], mirror: m ? str(m[1]) : "" };
   }
   function orientSymbol(node, op) {
-    const { rot, mirror } = symOrient(node);
-    const o = orientOf(mul(OP_M[op], tFrom(rot, mirror)));
+    const { rot: rot2, mirror } = symOrient(node);
+    const o = orientOf(mul(OP_M[op], tFrom(rot2, mirror)));
     const [ax, ay] = atOf(node);
     setAt(node, void 0, void 0, o.rot);
     dropKid(node, "mirror");
@@ -383,18 +437,18 @@
     }
     return o;
   }
-  function setTextRot(kind, node, rot) {
-    rot = (rot % 360 + 360) % 360;
+  function setTextRot(kind, node, rot2) {
+    rot2 = (rot2 % 360 + 360) % 360;
     const a = kid(node, "at");
     if (!a) return;
-    if (a.length >= 4) a[3] = rot;
-    else a.push(rot);
+    if (a.length >= 4) a[3] = rot2;
+    else a.push(rot2);
     let ef = kid(node, "effects");
     if (!ef) {
       ef = ["effects", fontNode(1.27)];
       node.push(ef);
     }
-    replaceKid(ef, labelJustify(kind, rot));
+    replaceKid(ef, labelJustify(kind, rot2));
   }
   function flipHJustify(node) {
     const ef = kid(node, "effects"), j = ef && kid(ef, "justify");
@@ -476,7 +530,7 @@
   function autoplaceLabelFields(kind, node) {
     const props = kids(node, "property");
     if (!props.length) return;
-    const [x, y, r0] = atOf(node), rot = (Math.round(r0 || 0) % 360 + 360) % 360, size = K.effectsOf(node).size;
+    const [x, y, r0] = atOf(node), rot2 = (Math.round(r0 || 0) % 360 + 360) % 360, size = K.effectsOf(node).size;
     const margin = 2 * K.schFormat.textOffsetRatio * size;
     let accumulated = size / 2, labelLen = -1;
     if (kind === "global_label") accumulated += margin + labelPen(node) + margin;
@@ -493,17 +547,17 @@
       }
       if (isr && labelLen < 0) labelLen = labelBodyLen(kind, node);
       let dx = 0, dy = 0;
-      if (rot === 180) {
+      if (rot2 === 180) {
         setFieldAngle(p, 0);
         setFieldHJustify(p, "right");
         if (isr) dx = -(labelLen + margin);
         else dy = accumulated + h / 2;
-      } else if (rot === 90) {
+      } else if (rot2 === 90) {
         setFieldAngle(p, 90);
         setFieldHJustify(p, "left");
         if (isr) dy = -(labelLen + margin);
         else dx = accumulated + h / 2;
-      } else if (rot === 270) {
+      } else if (rot2 === 270) {
         setFieldAngle(p, 90);
         setFieldHJustify(p, "right");
         if (isr) dy = labelLen + margin;
@@ -593,12 +647,12 @@
       return true;
     }
     if (TEXT_KINDS.has(kind)) {
-      const rot = atOf(node)[2];
+      const rot2 = atOf(node)[2];
       const flip = axis === "y" ? { 0: 180, 180: 0 } : { 90: 270, 270: 90 };
       const fields = kids(node, "property").length > 0;
       if (fields) mirrorLabelFields(kind, node, axis, lone);
-      if (flip[rot] === void 0) return fields;
-      setTextRot(kind, node, flip[rot]);
+      if (flip[rot2] === void 0) return fields;
+      setTextRot(kind, node, flip[rot2]);
       return true;
     }
     return false;
@@ -696,19 +750,25 @@
   function busEntryNode(p, dx, dy) {
     return ["bus_entry", ["at", r4(p[0]), r4(p[1])], ["size", dx, dy], ["stroke", ["width", 0], ["type", "default"]]];
   }
-  function labelJustify(kind, rot) {
-    const right = rot === 180 || rot === 270;
+  function labelJustify(kind, rot2) {
+    const right = rot2 === 180 || rot2 === 270;
     return kind === "label" || kind === "text" ? ["justify", right ? "right" : "left", "bottom"] : ["justify", right ? "right" : "left"];
   }
-  function labelNode(kind, text, p, rot) {
-    rot = (Math.round(rot || 0) % 360 + 360) % 360;
-    const at = ["at", r4(p[0]), r4(p[1]), rot];
-    if (kind === "label") return ["label", text, at, ["effects", fontNode(1.27), labelJustify(kind, rot)]];
-    if (kind === "text") return ["text", text, ["exclude_from_sim", "no"], at, ["effects", fontNode(1.27), labelJustify(kind, rot)]];
+  function fieldNode(name, value, at, o) {
+    const n = ["property", name, value, at];
+    if (o.hidden) n.push(["hide", "yes"]);
+    n.push(["show_name", o.showName ? "yes" : "no"], ["do_not_autoplace", o.noAutoplace ? "yes" : "no"], o.effects);
+    return n;
+  }
+  function labelNode(kind, text, p, rot2) {
+    rot2 = (Math.round(rot2 || 0) % 360 + 360) % 360;
+    const at = ["at", r4(p[0]), r4(p[1]), rot2];
+    if (kind === "label") return ["label", text, at, ["effects", fontNode(1.27), labelJustify(kind, rot2)]];
+    if (kind === "text") return ["text", text, ["exclude_from_sim", "no"], at, ["effects", fontNode(1.27), labelJustify(kind, rot2)]];
     const n = [kind, text, ["shape", "input"], at];
     if (kind === "global_label") n.push(["fields_autoplaced", "yes"]);
-    n.push(["effects", fontNode(1.27), labelJustify(kind, rot)], ["uuid", K.newUuid()]);
-    if (kind === "global_label") n.push(["property", "Intersheetrefs", "${INTERSHEET_REFS}", ["at", r4(p[0]), r4(p[1]), 0], ["hide", "yes"], ["effects", fontNode(1.27), ["justify", "left"]]]);
+    n.push(["effects", fontNode(1.27), labelJustify(kind, rot2)], ["uuid", K.newUuid()]);
+    if (kind === "global_label") n.push(fieldNode("Intersheetrefs", "${INTERSHEET_REFS}", ["at", r4(p[0]), r4(p[1]), 0], { hidden: true, effects: ["effects", fontNode(1.27), ["justify", "left"]] }));
     return n;
   }
   var stroke0 = () => ["stroke", ["width", 0], ["type", "default"]];
@@ -837,14 +897,14 @@
       ["stroke", ["width", SHEET_BORDER], ["type", "solid"], ...border ? [border] : []],
       ["fill", back || ["color", 0, 0, 0, 0]],
       ["uuid", K.newUuid()],
-      ["property", "Sheetname", name, ["at", x0, r4(y0 - SHEET_NAME_OFF), 0], ["effects", fontNode(1.27), ["justify", "left", "bottom"]]],
-      ["property", "Sheetfile", file, ["at", x0, r4(y1 + SHEET_FILE_OFF), 0], ["effects", fontNode(1.27), ["justify", "left", "top"]]]
+      fieldNode("Sheetname", name, ["at", x0, r4(y0 - SHEET_NAME_OFF), 0], { effects: ["effects", fontNode(1.27), ["justify", "left", "bottom"]] }),
+      fieldNode("Sheetfile", file, ["at", x0, r4(y1 + SHEET_FILE_OFF), 0], { effects: ["effects", fontNode(1.27), ["justify", "left", "top"]] })
     ];
   }
   var PIN_SIDE = { right: [0, "right"], top: [90, "right"], left: [180, "left"], bottom: [270, "left"] };
   function sheetPinNode(name, p, side, textSize = 1.27) {
-    const [rot, just] = PIN_SIDE[side] || PIN_SIDE.left;
-    return ["pin", name, "input", ["at", r4(p[0]), r4(p[1]), rot], ["uuid", K.newUuid()], ["effects", fontNode(textSize), ["justify", just]]];
+    const [rot2, just] = PIN_SIDE[side] || PIN_SIDE.left;
+    return ["pin", name, "input", ["at", r4(p[0]), r4(p[1]), rot2], ["uuid", K.newUuid()], ["effects", fontNode(textSize), ["justify", just]]];
   }
   function tableNode(a, b, rows, cols, grid) {
     const [x0, y0, x1, y1] = corners(a, b);
@@ -971,14 +1031,14 @@
   var FLAG_LENGTH = 2.54;
   var FLAG_SYMBOL = 0.508;
   var FLAG_MARGIN = r4(0.15 * 1.27);
-  function flagFieldAt(p, rot) {
-    const off = rot === 180 ? [FLAG_SYMBOL + FLAG_MARGIN, FLAG_LENGTH] : rot === 90 ? [-FLAG_LENGTH, -(FLAG_SYMBOL + FLAG_MARGIN)] : rot === 270 ? [FLAG_LENGTH, -(FLAG_SYMBOL + FLAG_MARGIN)] : [FLAG_SYMBOL + FLAG_MARGIN, -FLAG_LENGTH];
-    return ["at", r4(p[0] + off[0]), r4(p[1] + off[1]), rot === 90 || rot === 270 ? 90 : 0];
+  function flagFieldAt(p, rot2) {
+    const off = rot2 === 180 ? [FLAG_SYMBOL + FLAG_MARGIN, FLAG_LENGTH] : rot2 === 90 ? [-FLAG_LENGTH, -(FLAG_SYMBOL + FLAG_MARGIN)] : rot2 === 270 ? [FLAG_LENGTH, -(FLAG_SYMBOL + FLAG_MARGIN)] : [FLAG_SYMBOL + FLAG_MARGIN, -FLAG_LENGTH];
+    return ["at", r4(p[0] + off[0]), r4(p[1] + off[1]), rot2 === 90 || rot2 === 270 ? 90 : 0];
   }
   function placeFlagFields(node) {
     const at = kid(node, "at");
     if (!at) return;
-    const x = num(at[1]), y = num(at[2]), rot = (Math.round(num(at[3]) || 0) % 360 + 360) % 360, ef = K.effectsOf(node);
+    const x = num(at[1]), y = num(at[2]), rot2 = (Math.round(num(at[3]) || 0) % 360 + 360) % 360, ef = K.effectsOf(node);
     const lenN = kid(node, "length"), shapeN = kid(node, "shape"), shape = shapeN ? str(shapeN[1]) : "round";
     let margin = K.schFormat.textOffsetRatio * ef.size;
     if (ef.italic) margin *= 1.5;
@@ -986,8 +1046,8 @@
     let origin = lenN ? num(lenN[1]) : FLAG_LENGTH;
     for (const pr of kids(node, "property")) {
       if (str(pr[2]) === "") continue;
-      const off = rot === 180 ? [symbolWidth + margin, origin] : rot === 90 ? [-origin, -(symbolWidth + margin)] : rot === 270 ? [origin, -(symbolWidth + margin)] : [symbolWidth + margin, -origin];
-      const a = ["at", r4(x + off[0]), r4(y + off[1]), rot === 90 || rot === 270 ? 90 : 0];
+      const off = rot2 === 180 ? [symbolWidth + margin, origin] : rot2 === 90 ? [-origin, -(symbolWidth + margin)] : rot2 === 270 ? [origin, -(symbolWidth + margin)] : [symbolWidth + margin, -origin];
+      const a = ["at", r4(x + off[0]), r4(y + off[1]), rot2 === 90 || rot2 === 270 ? 90 : 0];
       const i = pr.findIndex((c) => Array.isArray(c) && c[0] === "at");
       if (i >= 0) pr[i] = a;
       else pr.splice(3, 0, a);
@@ -1003,26 +1063,26 @@
       origin -= K.effectsOf(pr).size + margin;
     }
   }
-  function classLabelNode(name, p, rot) {
-    rot = (Math.round(rot || 0) % 360 + 360) % 360;
+  function classLabelNode(name, p, rot2) {
+    rot2 = (Math.round(rot2 || 0) % 360 + 360) % 360;
     return [
       "netclass_flag",
       "",
       ["length", FLAG_LENGTH],
       ["shape", "round"],
-      ["at", r4(p[0]), r4(p[1]), rot],
+      ["at", r4(p[0]), r4(p[1]), rot2],
       ["fields_autoplaced", "yes"],
       ["effects", fontNode(1.27), ["justify", "left", "bottom"]],
       ["uuid", K.newUuid()],
-      ["property", "Netclass", name, flagFieldAt(p, rot), ["effects", fontNode(1.27), ["justify", "left", "bottom"]]]
+      fieldNode("Netclass", name, flagFieldAt(p, rot2), { effects: ["effects", fontNode(1.27), ["justify", "left", "bottom"]] })
     ];
   }
   var MANDATORY = ["Reference", "Value", "Footprint", "Datasheet", "Description"];
-  function symbolNode(doc, libId, p, rot, mirror) {
+  function symbolNode(doc, libId, p, rot2, mirror) {
     const lib = K.resolveLib(doc, libId);
-    const T = tFrom(rot || 0, mirror || "");
+    const T = tFrom(rot2 || 0, mirror || "");
     const tf = (lx, ly) => [r4(p[0] + T[0] * lx + T[1] * ly), r4(p[1] + T[2] * lx + T[3] * ly)];
-    const n = ["symbol", ["lib_id", libId], ["at", r4(p[0]), r4(p[1]), rot || 0]];
+    const n = ["symbol", ["lib_id", libId], ["at", r4(p[0]), r4(p[1]), rot2 || 0]];
     if (mirror) n.push(["mirror", mirror]);
     n.push(["unit", 1], ["body_style", 1], ["exclude_from_sim", "no"], ["in_bom", "yes"], ["on_board", "yes"], ["dnp", "no"], ["uuid", K.newUuid()]);
     const isPrivate = (lp) => str(lp[1]) === "private" && lp.length > 3 && !Array.isArray(lp[2]) && !Array.isArray(lp[3]);
@@ -1034,13 +1094,14 @@
       else if (name === "Value" && !val) val = libId.split(":").pop();
       const [lx, ly, lr] = lp ? atOf(lp) : [0, 0, 0];
       const [px, py] = tf(lx, ly);
-      const out = ["property", name, val, ["at", px, py, lr || 0]];
       const h = lp && kid(lp, "hide");
       const hidden2 = lp ? h ? str(h[1]) !== "no" : lp.includes("hide") : name !== "Reference" && name !== "Value";
-      if (hidden2) out.push(["hide", "yes"]);
+      const flag2 = (key) => {
+        const f = lp && kid(lp, key);
+        return !!f && (f.length < 2 || str(f[1]) !== "no");
+      };
       const ef = lp && kid(lp, "effects");
-      out.push(ef ? deep(ef) : ["effects", fontNode(1.27)]);
-      return out;
+      return fieldNode(name, val, ["at", px, py, lr || 0], { hidden: hidden2, showName: flag2("show_name"), noAutoplace: flag2("do_not_autoplace"), effects: ef ? deep(ef) : ["effects", fontNode(1.27)] });
     };
     for (const name of MANDATORY) n.push(prop2(name, fromLib(name)));
     for (const lp of libProps) if (!MANDATORY.includes(str(lp[1]))) n.push(prop2(str(lp[1]), lp));
@@ -1320,9 +1381,9 @@
     for (const it of doc.items.values()) {
       if (it.kind !== "sheet") continue;
       for (const pin of kids(it.node, "pin")) {
-        const [x, y, rot] = atOf(pin);
+        const [x, y, rot2] = atOf(pin);
         if (!same([x, y], p)) continue;
-        const r = (Math.round(rot || 0) % 360 + 360) % 360;
+        const r = (Math.round(rot2 || 0) % 360 + 360) % 360;
         return { x, y, side: r === 0 ? "right" : r === 90 ? "top" : r === 180 ? "left" : "bottom", item: it };
       }
     }
@@ -1555,7 +1616,7 @@
   }
   function pointIndex(doc, skip) {
     const ix = { lines: [], dots: [], entries: [], others: [], cells: /* @__PURE__ */ new Map(), dotCells: /* @__PURE__ */ new Map(), lineCells: /* @__PURE__ */ new Map() };
-    const strokeOf2 = (it) => K.serialize(kid(it.node, "stroke") || []);
+    const strokeOf3 = (it) => K.serialize(kid(it.node, "stroke") || []);
     const bucket = (cells, q, i) => {
       const k = cellKey(q[0], q[1]), l = cells.get(k);
       if (l) {
@@ -1565,7 +1626,7 @@
     for (const it of doc.items.values()) {
       if (skip && skip.has(it.id)) continue;
       if (it.kind === "wire" || it.kind === "bus") {
-        const st = strokeOf2(it);
+        const st = strokeOf3(it);
         for (const [a, b] of segs(it)) {
           const i = ix.lines.length;
           ix.lines.push({ layer: it.kind, a, b, stroke: st });
@@ -2060,6 +2121,13 @@
       S.internalSwitch = false;
     }
   }
+
+  // web/domains/pcb/canvas/version.ts
+  var KICAD_BASE_VERSION = "10.99.0";
+
+  // web/domains/pcb/canvas/format-version.ts
+  var SEXPR_SCHEMATIC_FILE_VERSION = 20261106;
+  var GENERATOR_VERSION = KICAD_BASE_VERSION.split(".").slice(0, 2).join(".");
 
   // web/domains/pcb/canvas/variant-model.ts
   var isList = Array.isArray;
@@ -2748,10 +2816,10 @@
       if (!rf) continue;
       const r = splitReference(str(rf[2]));
       if (r.prefix !== prefix) continue;
-      const num2 = atoi(r.num);
-      if (num2 < from) continue;
+      const num3 = atoi(r.num);
+      if (num3 < from) continue;
       const node = deep(it.node);
-      setReference(node, prefix + String(num2 + by));
+      setReference(node, prefix + String(num3 + by));
       changes.push(modChange(doc, it, node));
     }
     return changes;
@@ -2981,9 +3049,11 @@
       return false;
     }
     const sheet = sheetOf(ctx.doc), cur = unitOn(it.node, sheet.path), next = (cur - 1 + dir + units) % units + 1;
+    const hook = root.CollabEditor && root.CollabEditor.selectUnit;
+    if (hook) return hook(ctx, it, next);
     const node = deep(it.node);
     setInstanceOn(node, sheet, null, next);
-    ctx.commit([modChange(ctx.doc, it, node)], "unit");
+    ctx.commit([modChange(ctx.doc, it, node)], "Change Unit");
     return true;
   }
   function cycleBodyStyle(ctx) {
@@ -3003,7 +3073,7 @@
       cr.write(node);
       return true;
     }
-    ctx.commit([modChange(ctx.doc, it, node)], "body style");
+    ctx.commit([modChange(ctx.doc, it, node)], "Change Body Style");
     return true;
   }
   function unplacedUnits(doc, it) {
@@ -3990,8 +4060,8 @@
     if (c.kind === "item" && it.kind === "symbol") return pathInPoly(poly, boxPath(bodyBox(doc, it)), true, contained);
     return pathInPoly(poly, boxPath(candBox(doc, c)), true, contained);
   }
-  function areaCandidates(ctx, area) {
-    const doc = ctx.doc, ed = editor(), contained = area.contained, box = area.box || null, poly = area.poly || null;
+  function areaCandidates(ctx, area2) {
+    const doc = ctx.doc, ed = editor(), contained = area2.contained, box = area2.box || null, poly = area2.poly || null;
     const hidden2 = ed.hiddenLayers || null, showHidden = !!(ed.renderOpts && ed.renderOpts.showHiddenPins);
     const hit = (c, cont) => box ? candInBox(doc, c, box, cont) : candInPoly(doc, c, poly, cont);
     const boxContained = (b) => box ? boxIn(box, b) : pathInPoly(poly, boxPath(b), true, true);
@@ -4097,12 +4167,12 @@
     return s ? num(s[2], num(s[1], 1.27)) : 1.27;
   }
   function textRect(item) {
-    const n = item.node, [x, y, rot] = atOf(n), size = fontSize(n), lines = str(n[1]).split("\n");
+    const n = item.node, [x, y, rot2] = atOf(n), size = fontSize(n), lines = str(n[1]).split("\n");
     const longest = Math.max(1, ...lines.map((l) => l.length));
     let w = longest * size * 0.75 + size * 0.4;
     if (item.kind !== "label" && item.kind !== "text") w += size * 1.6;
     const v0 = -size * 1.4, v1 = (lines.length - 1) * size * 1.5 + size * 0.2;
-    const th = (Math.round(rot) % 360 + 360) % 360 * Math.PI / 180, cs = Math.cos(th), sn = Math.sin(th);
+    const th = (Math.round(rot2) % 360 + 360) % 360 * Math.PI / 180, cs = Math.cos(th), sn = Math.sin(th);
     const map = (u, v) => [x + u * cs + v * sn, y - u * sn + v * cs];
     const c = [map(0, v0), map(w, v0), map(w, v1), map(0, v1)];
     return [Math.min(...c.map((q) => q[0])), Math.min(...c.map((q) => q[1])), Math.max(...c.map((q) => q[0])), Math.max(...c.map((q) => q[1]))];
@@ -4646,8 +4716,8 @@
   function sheetFileFor(name) {
     return normSheetFile(str(name).trim().replace(/[\\/:*?"<>|]+/g, "_"));
   }
-  function emptySheetDoc() {
-    return `(kicad_sch (version 20250114) (generator "kicad-collab-web") (generator_version "9.0") (uuid "${K.newUuid()}") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "1"))))
+  function emptySheetDoc(version = 0) {
+    return `(kicad_sch (version ${version || SEXPR_SCHEMATIC_FILE_VERSION}) (generator "eeschema") (generator_version "${GENERATOR_VERSION}") (uuid "${K.newUuid()}") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "1"))))
 `;
   }
   async function ensureSheetDoc(ctx, file) {
@@ -4659,7 +4729,7 @@
     if (typeof ctx.api !== "function" || !ctx.project || !ctx.project.projectId) throw new Error("this session cannot create sheet files");
     const res = await ctx.api(`/api/projects/${ctx.project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path: target, docType: "kicad_sch" }) });
     if (!res || !res.docId) throw new Error("no document id returned");
-    if (!res.existing) await ctx.api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: emptySheetDoc() });
+    if (!res.existing) await ctx.api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: emptySheetDoc(Number(ctx.doc?.version) || 0) });
     const entry = { docId: res.docId, path: res.path || target, docType: "kicad_sch" };
     if (Array.isArray(ctx.docs) && !ctx.docs.some((d) => d && d.docId === entry.docId)) ctx.docs.push(entry);
     return { file, docId: entry.docId, created: !res.existing };
@@ -4807,14 +4877,14 @@ Link '${target}' to this file?`)) return null;
     return [r4(clamp(g[0], edge.x, edge.x + edge.w)), r4(edge.y + edge.h)];
   }
   function sheetAt(doc, p, tol) {
-    let best = null, area = Infinity;
+    let best = null, area2 = Infinity;
     for (const it of doc.items.values()) {
       if (it.kind !== "sheet") continue;
       const [x, y] = atOf(it.node), s = kid(it.node, "size"), w = num(s && s[1], 0), h = num(s && s[2], 0);
       if (p[0] < x - tol || p[0] > x + w + tol || p[1] < y - tol || p[1] > y + h + tol) continue;
-      if (w * h < area) {
+      if (w * h < area2) {
         best = it;
-        area = w * h;
+        area2 = w * h;
       }
     }
     return best;
@@ -5564,7 +5634,8 @@ Link '${target}' to this file?`)) return null;
     const br = d[0] * 0.299 + d[1] * 0.587 + d[2] * 0.117;
     const shade = (f, dark2) => "rgba(" + d.map((v) => Math.round(255 * (dark2 ? v * (1 - f) : v + (1 - v) * f))).join(",") + ",0.8)";
     const [bf, dark] = br > 0.5 ? [0.7, true] : br > 0.2 ? [0.4, false] : [0.7, false];
-    return { fill: "rgb(" + d.map((v) => Math.round(255 * v)).join(",") + ")", border: shade(bf, dark) };
+    const hf = br > 0.5 ? 0.5 : br > 0.2 ? 0.3 : 0.5;
+    return { fill: "rgb(" + d.map((v) => Math.round(255 * v)).join(",") + ")", border: shade(bf, dark), highlight: shade(hf, dark) };
   }
   function parseRgb(c) {
     if (!c) return null;
@@ -5761,8 +5832,8 @@ Link '${target}' to this file?`)) return null;
     const sc = kid(n, "scale"), r = kid(n, "rotate");
     return { pos: [num(a[1]), num(a[2])], w: item.w || 10, h: item.h || 10, rot: r ? num(r[1], 0) : 0, scale: sc ? num(sc[1], 1) : 1 };
   }
-  function imageBoundingSize(w, h, rot) {
-    const a = (rot % 360 + 360) % 360;
+  function imageBoundingSize(w, h, rot2) {
+    const a = (rot2 % 360 + 360) % 360;
     if (a === 0 || a === 180) return [w, h];
     if (a === 90 || a === 270) return [h, w];
     const c = Math.abs(Math.cos(a * Math.PI / 180)), s = Math.abs(Math.sin(a * Math.PI / 180));
@@ -5878,7 +5949,7 @@ Link '${target}' to this file?`)) return null;
     const x0 = iu(box[0]), y0 = iu(box[1]), x1 = iu(box[2]), y1 = iu(box[3]);
     let pinsLeft = x1, pinsRight = x0, pinsTop = y1, pinsBottom = y0;
     for (const pin of kids(node, "pin")) {
-      const [x, y, rot] = atOf(pin), r = (Math.round(rot || 0) % 360 + 360) % 360;
+      const [x, y, rot2] = atOf(pin), r = (Math.round(rot2 || 0) % 360 + 360) % 360;
       const ef = kid(pin, "effects"), f = ef && kid(ef, "font"), sz = f && kid(f, "size"), th = iu(sz ? num(sz[1], 1.27) : 1.27);
       const pen = textPenIU(pin), margin = Math.round(K.schFormat.textOffsetRatio * th), height = th + pen + margin, half = Math.trunc(height / 2);
       if (r === 90 || r === 270) {
@@ -5907,8 +5978,8 @@ Link '${target}' to this file?`)) return null;
     let h = ext + 0.17 * ext + (lines - 1) * size * 1.68 * 0.9583 * (ls ? num(ls[1], 1) : 1);
     if (text.includes("~{")) h += ext / 6;
     const mg = kid(node, "margins"), m = mg ? [num(mg[1]), num(mg[2]), num(mg[3]), num(mg[4])] : [TEXTBOX_MARGIN, TEXTBOX_MARGIN, TEXTBOX_MARGIN, TEXTBOX_MARGIN];
-    const rot = Math.round(num((kid(node, "at") || [])[3], 0)) % 180;
-    return rot === 90 ? [r4(h + m[0] + m[2]), 0] : [0, r4(h + m[1] + m[3])];
+    const rot2 = Math.round(num((kid(node, "at") || [])[3], 0)) % 180;
+    return rot2 === 90 ? [r4(h + m[0] + m[2]), 0] : [0, r4(h + m[1] + m[3])];
   }
   var crossZ2 = (a, b) => a[0] * b[1] - a[1] * b[0];
   var unit2 = (v) => {
@@ -5961,16 +6032,16 @@ Link '${target}' to this file?`)) return null;
     if (!det) return out(keep);
     v1 = [(v1[0] * u2[1] - v1[1] * u2[0]) / det, (-v1[0] * u1[1] + v1[1] * u1[0]) / det];
     v2 = [(v2[0] * u2[1] - v2[1] * u2[0]) / det, (-v2[0] * u1[1] + v2[1] * u1[0]) / det];
-    const R = Math.hypot(v1[0], v1[1]);
-    if (v2[0] === R) return out(keep);
+    const R2 = Math.hypot(v1[0], v1[1]);
+    if (v2[0] === R2) return out(keep);
     let flip = false;
-    if (v2[0] > R) {
+    if (v2[0] > R2) {
       flip = true;
-      v2[0] = 2 * R - v2[0];
+      v2[0] = 2 * R2 - v2[0];
     }
-    const delta = (R * R - v2[0] * v2[0] - v2[1] * v2[1]) / (2 * v2[0] - 2 * R);
-    if (Math.abs(v2[1] / (R - v2[0])) > 50 || !isFinite(delta)) return out(keep);
-    const v4 = flip ? [2 * R + delta, 0] : [-delta, 0];
+    const delta = (R2 * R2 - v2[0] * v2[0] - v2[1] * v2[1]) / (2 * v2[0] - 2 * R2);
+    if (Math.abs(v2[1] / (R2 - v2[0])) > 50 || !isFinite(delta)) return out(keep);
+    const v4 = flip ? [2 * R2 + delta, 0] : [-delta, 0];
     const nc = [c[0] + v4[0] * u1[0] + v4[1] * u2[0], c[1] + v4[0] * u1[1] + v4[1] * u2[1]];
     return out(movingStart ? from(nc, p, e) : from(nc, s, p));
   }
@@ -7002,6 +7073,146 @@ Link '${target}' to this file?`)) return null;
     return label ? text + UNIT_TEXT[u] : text;
   }
 
+  // web/domains/pcb/canvas/stroke-font.ts
+  var STROKE_FONT_SCALE = 1 / 21;
+  var ITALIC_TILT = 1 / 8;
+  var R = "R".charCodeAt(0);
+  var QUESTION = "?".codePointAt(0);
+
+  // web/domains/pcb/canvas/text.ts
+  var TEXT_INTERLINE = 1.68 * 0.9583;
+  var INTERLINE = 1.68 * 0.9583;
+  var MIL2 = 0.0254;
+  var UNESCAPE = { dblquote: '"', quote: "'", lt: "<", gt: ">", backslash: "\\", slash: "/", bar: "|", comma: ",", colon: ":", space: " ", dollar: "$", tab: "	", return: "\n", brace: "{" };
+  function unescapeText(src) {
+    if (!src || src.length <= 2) return src;
+    let out = "", prev = "", ch = "";
+    for (let i = 0; i < src.length; ++i) {
+      prev = ch;
+      ch = src[i];
+      if (ch !== "{") {
+        out += ch;
+        continue;
+      }
+      let token = "", depth = 1, terminated = false;
+      for (i = i + 1; i < src.length; ++i) {
+        ch = src[i];
+        if (ch === "{") depth++;
+        else if (ch === "}") depth--;
+        if (depth <= 0) {
+          terminated = true;
+          break;
+        }
+        token += ch;
+      }
+      if (!terminated) out += "{" + unescapeText(token);
+      else if (prev === "$" || prev === "~" || prev === "^" || prev === "_") out += "{" + unescapeText(token) + "}";
+      else if (Object.prototype.hasOwnProperty.call(UNESCAPE, token)) out += UNESCAPE[token];
+      else out += "{" + unescapeText(token) + "}";
+    }
+    return out;
+  }
+
+  // web/domains/pcb/canvas/colors.ts
+  var IS_MAC_PLATFORM = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+  var SCH_DEFAULT = Object.freeze({
+    bg: "#F5F4EF",
+    grid: "#B5B5B5",
+    gridAxes: "#000084",
+    wire: "#009600",
+    bus: "#000084",
+    junction: "#009600",
+    outline: "#840000",
+    body: "#FFFFC2",
+    pin: "#840000",
+    pinName: "#006464",
+    pinNum: "#A90000",
+    ref: "#006464",
+    value: "#006464",
+    field: "#840084",
+    label: "#0F0F0F",
+    glabel: "#840000",
+    hlabel: "#725600",
+    sheet: "#840000",
+    sheetName: "#006464",
+    sheetFile: "#725600",
+    sheetFields: "#840084",
+    sheetLabel: "#006464",
+    noconnect: "#000084",
+    notes: "#0000C2",
+    busEntry: "#009600",
+    dnp: "rgba(220,9,13,0.85)",
+    netclass: "#484848",
+    ruleArea: "#FF0000",
+    excluded: "rgba(194,194,194,0.95)",
+    hidden: "#C2C2C2",
+    privateNotes: "#4848FF",
+    frame: "#840000",
+    // LAYER_SCHEMATIC_DRAWINGSHEET ("schematic.worksheet") is `frame`; the page outline is a separate,
+    // lighter layer — DS_PAINTER::DrawBorder paints it in LAYER_SCHEMATIC_PAGE_LIMITS, not the sheet ink
+    // (common/settings/builtin_color_themes.h:78-79, eeschema/sch_view.cpp:137-138).
+    pageLimits: "#B5B5B5",
+    brightened: "#FF00FF",
+    // LAYER_BRIGHTENED: net highlighting / selection disambiguation
+    // LAYER_SELECTION_SHADOWS: KiCad Default is (.3, .7, 1.0, .6) on macOS, which "looks better with a lighter
+    // shadow", (.4, .7, 1.0, .8) elsewhere (builtin_color_themes.h)
+    selection: IS_MAC_PLATFORM ? "rgba(77,179,255,0.6)" : "rgba(102,179,255,0.8)",
+    hovered: "#0000FF",
+    // LAYER_HOVERED: hypertext under the cursor (builtin_color_themes.h:33)
+    // LAYER_BUS_JUNCTION, LAYER_SHEET_BACKGROUND (alpha 0: not drawn), LAYER_SCHEMATIC_ANCHOR, LAYER_ERC_ERR / WARN / EXCLUSION
+    busJunction: "#000084",
+    sheetBg: "rgba(255,255,255,0)",
+    anchor: "#0000FF",
+    ercErr: "rgba(230,9,13,0.8)",
+    ercWarn: "rgba(209,146,0,0.8)",
+    ercExcl: "rgba(194,194,194,0.8)"
+  });
+  var SCH = Object.assign({}, SCH_DEFAULT);
+  var PCB_ORDER = ["B.Fab", "B.CrtYd", "B.Adhes", "B.Paste", "B.SilkS", "B.Mask", "B.Cu"];
+  for (let i = 30; i >= 1; i--) PCB_ORDER.push("In" + i + ".Cu");
+  PCB_ORDER.push("F.Fab", "F.CrtYd", "F.Adhes", "F.Paste", "F.SilkS", "F.Mask", "F.Cu", "holes");
+  for (let i = 45; i >= 1; i--) PCB_ORDER.push("User." + i);
+  PCB_ORDER.push("Margin", "Edge.Cuts", "Eco2.User", "Eco1.User", "Cmts.User", "Dwgs.User");
+  var PCB_ZMAP = new Map(PCB_ORDER.map((l, i) => [l, i * 10]));
+
+  // web/domains/pcb/canvas/sexpr.ts
+  var isList2 = Array.isArray;
+  function kid3(node, key) {
+    for (let j = 1; j < node.length; j++) {
+      const c = node[j];
+      if (isList2(c) && c[0] === key) return c;
+    }
+    return null;
+  }
+  function num2(v, d = 0) {
+    if (typeof v === "number") return v;
+    if (v === void 0 || v === null || v === "") return d;
+    const x = Number(v);
+    return isNaN(x) ? d : x;
+  }
+  function ellipseLength(g) {
+    const a = num2((kid3(g, "major_radius") || [])[1], 0), b = num2((kid3(g, "minor_radius") || [])[1], 0);
+    if (!/ellipse_arc$/.test(String(g[0]))) {
+      const h = (a - b) / (a + b), h2 = h * h;
+      return a + b > 0 ? Math.PI * (a + b) * (1 + 3 * h2 / (10 + Math.sqrt(4 - 3 * h2))) : 0;
+    }
+    let t0 = num2((kid3(g, "start_angle") || [])[1], 0) * Math.PI / 180, t1 = num2((kid3(g, "end_angle") || [])[1], 0) * Math.PI / 180;
+    if (t1 - t0 >= 2 * Math.PI || t1 - t0 <= -2 * Math.PI) t1 = t0 + 2 * Math.PI;
+    else if (t1 < t0) t1 += 2 * Math.PI;
+    const f = (t) => {
+      const s = Math.sin(t), c = Math.cos(t);
+      return Math.sqrt(a * a * s * s + b * b * c * c);
+    };
+    const rec = (x0, x1, tol, whole, fa2, fb2, fm2, depth) => {
+      const m = 0.5 * (x0 + x1), lm = 0.5 * (x0 + m), rm = 0.5 * (m + x1), flm = f(lm), frm = f(rm);
+      const left = (m - x0) * (fa2 + 4 * flm + fm2) / 6, right = (x1 - m) * (fm2 + 4 * frm + fb2) / 6, diff = left + right - whole;
+      if (depth <= 0 || Math.abs(diff) < 15 * tol) return left + right + diff / 15;
+      return rec(x0, m, 0.5 * tol, left, fa2, fm2, flm, depth - 1) + rec(m, x1, 0.5 * tol, right, fm2, fb2, frm, depth - 1);
+    };
+    const fa = f(t0), fb = f(t1), fm = f(0.5 * (t0 + t1));
+    return rec(t0, t1, 1e-9, (t1 - t0) * (fa + 4 * fm + fb) / 6, fa, fb, fm, 20);
+  }
+
   // web/domains/pcb/tools/sch-tools/msgpanel.ts
   var yes = (n) => !!n && str(n[1]) !== "no";
   var flag = (node, key) => {
@@ -7009,8 +7220,7 @@ Link '${target}' to this file?`)) return null;
     return k ? str(k[1] ?? "yes") !== "no" : node.includes(key);
   };
   function unescapeString(s) {
-    const MAP = { dblquote: '"', quote: "'", lt: "<", gt: ">", backslash: "\\", slash: "/", bar: "|", comma: ",", colon: ":", space: " ", dollar: "$", tab: "	", return: "\n", brace: "{" };
-    return s.replace(/\{(\w+)\}/g, (m, k) => k in MAP ? MAP[k] : m);
+    return unescapeText(s);
   }
   function effects(node) {
     return kid(node, "effects");
@@ -7105,9 +7315,9 @@ Link '${target}' to this file?`)) return null;
     }
     return style >= 1 && style <= named.length ? named[style - 1] : "?";
   }
-  var fieldNode = (node, name) => kids(node, "property").find((p) => str(p[1]) === name) || null;
+  var fieldNode2 = (node, name) => kids(node, "property").find((p) => str(p[1]) === name) || null;
   var fieldText = (node, name) => {
-    const f = fieldNode(node, name);
+    const f = fieldNode2(node, name);
     return f ? str(f[2]) : "";
   };
   function libOf(doc, node) {
@@ -7165,7 +7375,7 @@ Link '${target}' to this file?`)) return null;
       else out.push({ title: "Library", value: nick || "Undefined!!!" });
       const fp = ell(fieldText(n, "Footprint"), o);
       out.push({ title: "Footprint", value: fp || "<Unknown>" });
-      const kw = fieldNode(lib, "ki_keywords");
+      const kw = fieldNode2(lib, "ki_keywords");
       out.push({ title: `Description: ${fieldText(n, "Description")}`, value: `Keywords: ${kw ? str(kw[2]) : ""}` });
     } else {
       out.push({ title: "Reference", value: ref }, { title: "Value", value: ell(value, o) });
@@ -7202,7 +7412,7 @@ Link '${target}' to this file?`)) return null;
     return out;
   }
   function fieldRows(it, name, o) {
-    const f = fieldNode(it.node, name);
+    const f = fieldNode2(it.node, name);
     if (!f) return [];
     const h = hJust(f), v = vJust(f);
     return [
@@ -7303,6 +7513,19 @@ Link '${target}' to this file?`)) return null;
       case "polyline":
         out.push({ title: "Shape", value: "Polygon" }, { title: "Points", value: String(pts().length) });
         break;
+      case "ellipse":
+      case "ellipse_arc": {
+        const v = (k) => num((kid(n, k) || [])[1], 0);
+        out.push(
+          { title: "Shape", value: it.kind === "ellipse" ? "Ellipse" : "Elliptical Arc" },
+          { title: "Length", value: len(ellipseLength(n), o) },
+          { title: "Major Radius", value: len(v("major_radius"), o) },
+          { title: "Minor Radius", value: len(v("minor_radius"), o) },
+          { title: "Rotation", value: angleText(v("rotation_angle")) }
+        );
+        if (it.kind === "ellipse_arc") out.push({ title: "Start Angle", value: angleText(v("start_angle")) }, { title: "End Angle", value: angleText(v("end_angle")) });
+        break;
+      }
       default:
         break;
     }
@@ -7403,6 +7626,8 @@ Link '${target}' to this file?`)) return null;
       case "circle":
       case "arc":
       case "bezier":
+      case "ellipse":
+      case "ellipse_arc":
         return shapeRows(it, o);
       case "sheet":
         return sheetRows(doc, it, o);
@@ -7446,7 +7671,7 @@ Link '${target}' to this file?`)) return null;
     if (!it) return "";
     const n = it.node, L = (mm) => messageText(mm, units, "sch", true), text = () => ellipsizeMenuText(str(n[1]));
     if (sub && sub.field !== void 0) {
-      const f = fieldNode(n, sub.field), content = f ? ellipsizeMenuText(str(f[2])) : "";
+      const f = fieldNode2(n, sub.field), content = f ? ellipsizeMenuText(str(f[2])) : "";
       return content ? `Field ${unescapeString(sub.field)} '${content}'` : `Field ${unescapeString(sub.field)} (empty)`;
     }
     switch (it.kind) {
@@ -7555,14 +7780,14 @@ Link '${target}' to this file?`)) return null;
     if (!n.startsWith("[") || !n.endsWith("]")) return false;
     const inner = n.slice(1, -1), parts = inner.split(/(?<!\\),/).map((s) => s.trim()).filter((s) => s);
     if (!parts.length) return false;
-    const parse = (t) => {
+    const parse2 = (t) => {
       const m = t.match(/^(.*?)(\d+)$/);
       return m ? [m[1], parseInt(m[2], 10)] : [t, -1];
     };
     for (const part of parts) {
       const dash = part.search(/(?<!\\)-/);
       if (dash < 0) continue;
-      const [sp, sv] = parse(part.slice(0, dash).replace(/\\(.)/g, "$1").trim()), [ep, ev] = parse(part.slice(dash + 1).replace(/\\(.)/g, "$1").trim());
+      const [sp, sv] = parse2(part.slice(0, dash).replace(/\\(.)/g, "$1").trim()), [ep, ev] = parse2(part.slice(dash + 1).replace(/\\(.)/g, "$1").trim());
       if (sp !== ep || sv === -1 || ev === -1 || sv > ev) return false;
     }
     return true;
@@ -7644,10 +7869,10 @@ Link '${target}' to this file?`)) return null;
         mark("field_name_whitespace", "warning", p, `Field name has leading or trailing whitespace: '${name}'`, [it.id], [itemRef2(doc, it), { x: r4(p[0]), y: r4(p[1]), desc: `Field ${name}` }]);
       }
     }
-    const netOf = /* @__PURE__ */ new Map();
+    const netOf2 = /* @__PURE__ */ new Map();
     for (const n of nets) {
       const name = ercNetName(n);
-      for (const t of n.terms) netOf.set(t, name);
+      for (const t of n.terms) netOf2.set(t, name);
     }
     const termsBySym = /* @__PURE__ */ new Map();
     for (const n of nets) for (const t of n.terms) if (t.pin) {
@@ -7666,7 +7891,7 @@ Link '${target}' to this file?`)) return null;
         const bad = [];
         for (const t of pins) {
           if (t.pin.type !== "power_out" && t.pin.type !== "power_in") continue;
-          const g = isGroundName(netOf.get(t) || "");
+          const g = isGroundName(netOf2.get(t) || "");
           if (g) hasGround = true;
           if (isGroundName(t.pin.name) && !g) bad.push(t);
         }
@@ -7948,7 +8173,7 @@ Link '${target}' to this file?`)) return null;
       }
       return i;
     };
-    const union = (a, b) => {
+    const union2 = (a, b) => {
       a = find(a);
       b = find(b);
       if (a !== b) parent[b] = a;
@@ -7965,9 +8190,9 @@ Link '${target}' to this file?`)) return null;
         byKey.get(t.key).push(i);
       }
     });
-    for (const [it, idx] of byItem) if (conducts(it)) for (let k = 1; k < idx.length; k++) union(idx[0], idx[k]);
+    for (const [it, idx] of byItem) if (conducts(it)) for (let k = 1; k < idx.length; k++) union2(idx[0], idx[k]);
     for (const idx of byPoint.values()) for (let a = 0; a < idx.length; a++) for (let b = a + 1; b < idx.length; b++) if (terms[idx[a]].item !== terms[idx[b]].item && joins(terms[idx[a]], terms[idx[b]])) {
-      union(idx[a], idx[b]);
+      union2(idx[a], idx[b]);
       touch[idx[a]] = touch[idx[b]] = true;
     }
     for (const [it, idx] of byItem) {
@@ -7976,7 +8201,7 @@ Link '${target}' to this file?`)) return null;
       terms.forEach((u, i) => {
         if (u.item === it || !joins(lineT, u)) return;
         if (sg.some(([a, b]) => onSegMid(u.p, a, b))) {
-          union(idx[0], i);
+          union2(idx[0], i);
           touch[i] = true;
         }
       });
@@ -7988,7 +8213,7 @@ Link '${target}' to this file?`)) return null;
       g.terms.push(t);
       t.sg = g;
     });
-    for (const idx of byKey.values()) for (let k = 1; k < idx.length; k++) union(idx[0], idx[k]);
+    for (const idx of byKey.values()) for (let k = 1; k < idx.length; k++) union2(idx[0], idx[k]);
     const nets = /* @__PURE__ */ new Map();
     terms.forEach((t, i) => {
       const r = find(i);
@@ -8247,7 +8472,7 @@ Link '${target}' to this file?`)) return null;
       }
       return k;
     };
-    const union = (a, b) => {
+    const union2 = (a, b) => {
       a = find(a);
       b = find(b);
       if (a !== b) parent[Math.max(a, b)] = Math.min(a, b);
@@ -8259,14 +8484,14 @@ Link '${target}' to this file?`)) return null;
         if (t.key && t.key.startsWith("global:")) {
           const had = byGlobal.get(t.key);
           if (had === void 0) byGlobal.set(t.key, k);
-          else union(had, k);
+          else union2(had, k);
         }
         if (isPinTerm(t)) {
           const name = nameOfPin(p.i, t);
           if (name) {
             const had = byName.get(name);
             if (had === void 0) byName.set(name, k);
-            else union(had, k);
+            else union2(had, k);
           }
         }
       }
@@ -8282,16 +8507,16 @@ Link '${target}' to this file?`)) return null;
     parts.forEach((p, k) => {
       for (const t of p.net.terms) if (t.sheetPin !== void 0) {
         const c = childOf.get(p.i + "|" + t.item.id), h = c === void 0 ? void 0 : hierNet.get(c + "|" + t.sheetPin);
-        if (h !== void 0) union(k, h);
+        if (h !== void 0) union2(k, h);
       }
     });
-    const merged = /* @__PURE__ */ new Map(), netOf = /* @__PURE__ */ new Map();
+    const merged = /* @__PURE__ */ new Map(), netOf2 = /* @__PURE__ */ new Map();
     parts.forEach((p, k) => {
       const r = find(k);
       let m = merged.get(r);
       if (!m) merged.set(r, m = { parts: [], pins: [], nc: false, open: false, name: "", labels: 0 });
       m.parts.push(p);
-      netOf.set(p.net, m);
+      netOf2.set(p.net, m);
       for (const t of p.net.terms) {
         if (isPinTerm(t)) m.pins.push({ t, i: p.i });
         else if (isLabelTerm(t)) m.labels++;
@@ -8382,7 +8607,7 @@ Link '${target}' to this file?`)) return null;
       const dangling = danglingEnds(s.doc);
       for (const nc of s.info.looseNc) mark(i, "no_connect_dangling", "warning", atOf(nc.node), 'Unconnected "no connection" flag', [nc.id], [itemRef(s.doc, nc)]);
       for (const g of s.info.subgraphs) {
-        const m = g.net ? netOf.get(g.net) : void 0;
+        const m = g.net ? netOf2.get(g.net) : void 0;
         if (!m) continue;
         const sgPins = g.terms.filter(isPinTerm), sgLabels = g.terms.filter(isLabelTerm);
         const hierPins = g.terms.filter((t) => t.sheetPin !== void 0), hierPorts = g.terms.filter((t) => t.item.kind === "hierarchical_label");
@@ -8442,7 +8667,7 @@ Link '${target}' to this file?`)) return null;
         let mu = multi.get(t.item);
         if (mu === void 0) multi.set(t.item, mu = unitsOf(s.doc, t.item) > 1);
         if (!mu) continue;
-        const name = (t.item.ref || "") + ":" + t.pin.number, m = netOf.get(net);
+        const name = (t.item.ref || "") + ":" + t.pin.number, m = netOf2.get(net);
         const l = shared.get(name);
         if (l) l.push({ net: m, t, i });
         else shared.set(name, [{ net: m, t, i }]);
@@ -8477,7 +8702,7 @@ Link '${target}' to this file?`)) return null;
         for (const number of Array.from(byNumber.keys()).sort()) {
           const l = byNumber.get(number);
           if (l.length < 2) continue;
-          const net = (t) => t.sg && t.sg.net ? netOf.get(t.sg.net) : void 0, firstNet = net(l[0]);
+          const net = (t) => t.sg && t.sg.net ? netOf2.get(t.sg.net) : void 0, firstNet = net(l[0]);
           const conflict = l.slice(1).find((t) => net(t) !== firstNet);
           if (!conflict) continue;
           const nm = (n) => n && n.name || "<no net>";
@@ -9523,12 +9748,12 @@ Link '${target}' to this file?`)) return null;
     const [dx, dy] = SCREEN_OP[op](p[0] - C[0], p[1] - C[1]);
     return [r4(C[0] + dx), r4(C[1] + dy)];
   }
-  function setFlagRot(node, rot, cw = false) {
-    rot = (rot % 360 + 360) % 360;
+  function setFlagRot(node, rot2, cw = false) {
+    rot2 = (rot2 % 360 + 360) % 360;
     const a = kid(node, "at");
     if (!a) return;
-    if (a.length >= 4) a[3] = rot;
-    else a.push(rot);
+    if (a.length >= 4) a[3] = rot2;
+    else a.push(rot2);
     rotateLabelFields("netclass_flag", node, cw, (_k, n) => placeFlagFields(n));
   }
   function sideOfEdge(p, box) {
@@ -9537,7 +9762,7 @@ Link '${target}' to this file?`)) return null;
     return d[0][0];
   }
   function transformNode(kind, node, op, C, lone = false, end = null) {
-    const rot = op === "ccw" || op === "cw";
+    const rot2 = op === "ccw" || op === "cw";
     const mapAt = (n) => {
       const a = kid(n, "at");
       if (!a) return;
@@ -9559,7 +9784,7 @@ Link '${target}' to this file?`)) return null;
       }
       case "text": {
         const p0 = anchorOf(kind, node);
-        if (rot) rotateText90(node, op === "cw");
+        if (rot2) rotateText90(node, op === "cw");
         else mirrorTextSpin(node, op === "y");
         moveTo(p0);
         return true;
@@ -9568,7 +9793,7 @@ Link '${target}' to this file?`)) return null;
       case "global_label":
       case "hierarchical_label": {
         const p0 = anchorOf(kind, node);
-        if (rot) rotateNode(kind, node, op === "cw");
+        if (rot2) rotateNode(kind, node, op === "cw");
         else mirrorNode(kind, node, op, lone);
         moveTo(p0);
         return true;
@@ -9576,7 +9801,7 @@ Link '${target}' to this file?`)) return null;
       case "netclass_flag":
       case "directive_label": {
         const p0 = anchorOf(kind, node), r0 = atOf(node)[2] || 0;
-        if (rot) setFlagRot(node, r0 + (op === "cw" ? 270 : 90), op === "cw");
+        if (rot2) setFlagRot(node, r0 + (op === "cw" ? 270 : 90), op === "cw");
         else {
           const flip = op === "y" ? { 90: 270, 270: 90 } : { 0: 180, 180: 0 };
           mirrorLabelFields(kind, node, op, lone);
@@ -9595,7 +9820,7 @@ Link '${target}' to this file?`)) return null;
         return true;
       case "image": {
         mapAt(node);
-        if (rot) {
+        if (rot2) {
           const r = kid(node, "rotate"), a = (((r ? num(r[1], 0) : 0) + (op === "ccw" ? 90 : 270)) % 360 + 360) % 360, v = r4(a);
           if (!v) {
             if (r) node.splice(node.indexOf(r), 1);
@@ -9663,7 +9888,7 @@ Link '${target}' to this file?`)) return null;
           if (k) k[1] = v;
           else node.push([key, v]);
         };
-        if (rot) set("rotation_angle", phi + (op === "ccw" ? -90 : 90));
+        if (rot2) set("rotation_angle", phi + (op === "ccw" ? -90 : 90));
         else {
           set("rotation_angle", -phi);
           if (kind === "ellipse_arc") {
@@ -9695,10 +9920,10 @@ Link '${target}' to this file?`)) return null;
         if (!s) return false;
         const [x0, y0, x1, y1] = corners(mapPoint(op, C, [x, y]), mapPoint(op, C, [x + num(s[1]), y + num(s[2])]));
         const vertical = a === 90 || a === 270;
-        setAt(node, x0, y0, rot ? vertical ? 0 : 90 : a);
+        setAt(node, x0, y0, rot2 ? vertical ? 0 : 90 : a);
         s[1] = r4(x1 - x0);
         s[2] = r4(y1 - y0);
-        if (!rot && (op === "y" && !vertical || op === "x" && vertical)) {
+        if (!rot2 && (op === "y" && !vertical || op === "x" && vertical)) {
           const ef = kid(node, "effects"), j = ef && kid(ef, "justify");
           if (j) {
             const i = j.indexOf("left") > 0 ? j.indexOf("left") : j.indexOf("right");
@@ -9709,7 +9934,7 @@ Link '${target}' to this file?`)) return null;
       }
       case "table": {
         const cells = kid(node, "cells");
-        if (!cells || !rot) return false;
+        if (!cells || !rot2) return false;
         if (lone) C = tableCentre(node);
         const before = tableRawCentre(node);
         for (const c of kids(cells, "table_cell")) {
@@ -9749,7 +9974,7 @@ Link '${target}' to this file?`)) return null;
           replaceKid(ef, ["justify", just]);
         }
         const auto = kid(node, "fields_autoplaced") && str(kid(node, "fields_autoplaced")[1]) !== "no";
-        if (rot && auto) autoplaceSheetFields(node);
+        if (rot2 && auto) autoplaceSheetFields(node);
         else for (const pr of kids(node, "property")) shiftAt(pr, r4(x0 - x), r4(y0 - y));
         return true;
       }
@@ -9917,8 +10142,8 @@ Link '${target}' to this file?`)) return null;
     ctx.commit(changes, op === "x" || op === "y" ? "Mirror" : "Rotate");
     return true;
   }
-  function moveExactChanges(ctx, items, dx, dy, rot) {
-    const doc = ctx.doc, turns = (Math.round((rot || 0) / 90) % 4 + 4) % 4, C = rotationCentre(items);
+  function moveExactChanges(ctx, items, dx, dy, rot2) {
+    const doc = ctx.doc, turns = (Math.round((rot2 || 0) / 90) % 4 + 4) % 4, C = rotationCentre(items);
     const out = [], touched = [], keep = /* @__PURE__ */ new Set();
     for (const it of items) {
       if (!DRAG_KINDS.has(it.kind)) continue;
@@ -9940,8 +10165,8 @@ Link '${target}' to this file?`)) return null;
     if (!editable(ctx)) return false;
     const items = selectedItems(ctx);
     if (!items.length) return false;
-    const apply = (dx, dy, rot) => {
-      const changes = moveExactChanges(ctx, items, dx, dy, rot);
+    const apply = (dx, dy, rot2) => {
+      const changes = moveExactChanges(ctx, items, dx, dy, rot2);
       if (changes.length) ctx.commit(changes, "move exactly");
       return changes.length > 0;
     };
@@ -10685,7 +10910,7 @@ Link '${target}' to this file?`)) return null;
       parts.push(s);
     }
     const body = parts.join("\n");
-    return opts && opts.wrap ? `(kicad_sch (version 20250114) (generator "kicad-collab-web") (generator_version "9.0")
+    return opts && opts.wrap ? `(kicad_sch (version ${SEXPR_SCHEMATIC_FILE_VERSION}) (generator "eeschema") (generator_version "${GENERATOR_VERSION}")
 ${body}
 )` : body;
   }
@@ -11471,6 +11696,126 @@ was dropped because the destination already has the sheet or one of its subsheet
     return true;
   }
 
+  // web/domains/pcb/canvas/geom-sch.ts
+  var PIN_TEXT_OFFSET = Math.round(24 * 0.15) * MIL2;
+  var PIN_TEXT_MARGIN = 4 * MIL2;
+  var TARGET_PIN_RADIUS2 = 15 * MIL2;
+  var schFormat = {
+    textOffsetRatio: 0.15,
+    labelSizeRatio: 0.375,
+    pinSymbolSize: 25 * MIL2,
+    showDnpMarkers: true,
+    overbarHeight: 1.23,
+    hopOverChoice: 0,
+    overrideItemColors: false,
+    /** SCHEMATIC_SETTINGS::m_SubpartIdSeparator (0: none) and m_SubpartFirstId ('A') — the unit notation of SubReference */
+    subpartIdSeparator: 0,
+    subpartFirstId: 65
+  };
+
+  // web/domains/pcb/canvas/barcode.ts
+  var C39 = "1112212111 2112111121 1122111121 2122111111 1112211121 2112211111 1122211111 1112112121 2112112111 1122112111 2111121121 1121121121 2121121111 1111221121 2111221111 1121221111 1111122121 2111122111 1121122111 1111222111 2111111221 1121111221 2121111211 1111211221 2111211211 1121211211 1111112221 2111112211 1121112211 1111212211 2211111121 1221111121 2221111111 1211211121 2211211111 1221211111 1211112121 2211112111 1221112111 1212121111 1212111211 1211121211 1112121211 1211212111".split(" ");
+  var C128 = "212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 221312 231212 112232 122132 122231 113222 123122 123221 223211 221132 221231 213212 223112 312131 311222 321122 321221 312212 322112 322211 212123 212321 232121 111323 131123 131321 112313 132113 132311 211313 231113 231311 112133 112331 132131 113123 113321 133121 313121 211331 231131 213113 213311 213131 311123 311321 331121 312113 312311 332111 314111 221411 431111 111224 111422 121124 121421 141122 141221 112214 112412 122114 122411 142112 142211 241211 221114 413111 241112 134111 111242 121142 121241 114212 124112 124211 411212 421112 421211 212141 214121 412121 111143 111341 131141 114113 114311 411113 411311 113141 114131 311141 411131 211412 211214 211232 211133".split(" ");
+
+  // web/domains/pcb/canvas/barcode2d.ts
+  function gf(poly) {
+    const alog = new Array(512), log = new Array(256).fill(0);
+    let v = 1;
+    for (let i = 0; i < 255; i++) {
+      alog[i] = v;
+      log[v] = i;
+      v <<= 1;
+      if (v & 256) v ^= poly;
+    }
+    for (let i = 255; i < 512; i++) alog[i] = alog[i - 255];
+    return { alog, log };
+  }
+  var GF_QR = gf(285);
+  var GF_DM = gf(301);
+  var tbl = (s) => s.split(",").map(Number);
+  var DM_C40_SHIFT = tbl("1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3");
+  var DM_C40_VALUE = tbl("0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,3,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,20,21,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,22,23,24,25,26,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31");
+  var DM_TEXT_SHIFT = tbl("1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,3,3,3,3");
+  var DM_TEXT_VALUE = tbl("0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,3,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,20,21,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,22,23,24,25,26,0,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,27,28,29,30,31");
+
+  // web/domains/pcb/canvas/geom-pcb.ts
+  var HOLE_WALL2 = 0.02 * 1.5;
+
+  // web/domains/pcb/canvas/outline-text.ts
+  var ITALIC_TILT2 = 1 / 8;
+  var FAKE_ITALIC_SLANT = Math.tan(12 * Math.PI / 180);
+
+  // web/domains/pcb/canvas/text-eval.ts
+  var UNIT_MM = { thou: 25.4 / 1e3, deg: 1, mm: 1, cm: 10, in: 25.4, mil: 25.4 / 1e3, mils: 25.4 / 1e3, um: 1 / 1e3, ps: 1, fs: 1, '"': 25.4, "\xB0": 1, "ps/mm": 1, "ps/cm": 1, "ps/in": 1 };
+
+  // web/domains/pcb/canvas/sheet.ts
+  var ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  function indexFromAlphabetic(s, alphabet) {
+    const alpha = alphabet || ALPHABET, radix = alpha.length;
+    let index = 0;
+    for (let i = 0; i < s.length; i++) {
+      let k = alpha.indexOf(s[i]);
+      if (k < 0) return -1;
+      if (i !== s.length - 1) k++;
+      index += k * Math.pow(radix, s.length - 1 - i);
+    }
+    return index;
+  }
+  function alphabeticFromIndex(n, alphabet) {
+    const alpha = alphabet || ALPHABET, radix = alpha.length;
+    let out = "", first = true;
+    do {
+      let mod = n % radix;
+      if (!first) mod--;
+      out = alpha[mod] + out;
+      n = Math.floor(n / radix);
+      first = false;
+    } while (n);
+    return out;
+  }
+  function incrementString(s, delta, rightIndex = 0, skipIOSQXZ = false, alphabeticMaxIndex = -1) {
+    if (!s) return null;
+    let remaining = s;
+    const parts = [];
+    let good = 0;
+    while (good <= rightIndex && remaining) {
+      let m = /\d+$/.exec(remaining);
+      if (m) {
+        parts.push({ s: m[0], type: "int" });
+        good++;
+      } else if (m = /([a-z]+|[A-Z]+)$/.exec(remaining)) {
+        parts.push({ s: m[0], type: "alpha" });
+        good++;
+      } else if (m = /[^a-zA-Z0-9]+$/.exec(remaining)) parts.push({ s: m[0], type: "skip" });
+      else break;
+      remaining = remaining.slice(0, remaining.length - m[0].length);
+    }
+    if (good <= rightIndex) return null;
+    const last = parts[parts.length - 1];
+    let stepped;
+    if (last.type === "int") {
+      const oldLen = last.s.length, padded = last.s[0] === "0";
+      const n = parseInt(last.s, 10) + delta;
+      if (!isFinite(n) || n < 0 || n > Number.MAX_SAFE_INTEGER) return null;
+      stepped = String(n);
+      if (padded && stepped.length < oldLen) stepped = "0".repeat(oldLen - stepped.length) + stepped;
+    } else {
+      const upper = last.s.toUpperCase(), wasUpper = last.s === upper;
+      const alpha = skipIOSQXZ && !/[IOSQXZ]/.test(last.s) ? "ABCDEFGHJKLMNPRTUVWY" : ALPHABET;
+      const index = indexFromAlphabetic(upper, alpha);
+      if (index < 0) return null;
+      if (index > alphabeticMaxIndex && alphabeticMaxIndex >= 0) return null;
+      const next = index + delta;
+      if (next < 0 || next > 2147483647) return null;
+      stepped = alphabeticFromIndex(next, alpha);
+      if (!wasUpper) stepped = stepped.toLowerCase();
+    }
+    last.s = stepped;
+    let out = remaining;
+    for (let i = parts.length - 1; i >= 0; i--) out += parts[i].s;
+    return out;
+  }
+
   // web/domains/pcb/tools/sch-tools/repeat.ts
   function rememberPlaced(kind, node) {
     if (kind === "junction") return;
@@ -11599,60 +11944,16 @@ was dropped because the destination already has the sheet or one of its subsheet
     return true;
   }
   function incrementStringPart(text, delta, rightIndex) {
-    if (!text) return null;
-    let rest = text;
-    const parts = [];
-    let good = 0;
-    while (good <= rightIndex && rest.length) {
-      let m;
-      if (m = rest.match(/\d+$/)) {
-        parts.push({ s: m[0], t: "int" });
-        good++;
-      } else if (m = rest.match(/([a-z]+|[A-Z]+)$/)) {
-        parts.push({ s: m[0], t: "alpha" });
-        good++;
-      } else if (m = rest.match(/[^a-zA-Z0-9]+$/)) parts.push({ s: m[0], t: "skip" });
-      else break;
-      rest = rest.slice(0, rest.length - m[0].length);
-    }
-    if (good <= rightIndex) return null;
-    const part = parts[parts.length - 1];
-    if (part.t === "int") {
-      const n = parseInt(part.s, 10) + delta;
-      if (!isFinite(n) || n < 0) return null;
-      let out = String(n);
-      if (part.s.startsWith("0") && out.length < part.s.length) out = "0".repeat(part.s.length - out.length) + out;
-      part.s = out;
-    } else if (part.t === "alpha") {
-      const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ", up = part.s.toUpperCase(), wasUpper = part.s === up;
-      let index = 0;
-      for (let i = 0; i < up.length; i++) {
-        let ai = A.indexOf(up[i]);
-        if (ai < 0) return null;
-        if (i !== up.length - 1) ai++;
-        index += ai * Math.pow(26, up.length - 1 - i);
-      }
-      if (index > 50) return null;
-      let next = index + delta;
-      if (next < 0) return null;
-      let out = "", first = true;
-      do {
-        let mod = next % 26;
-        if (!first) mod--;
-        out = A[mod] + out;
-        next = Math.floor(next / 26);
-        first = false;
-      } while (next);
-      part.s = wasUpper ? out : out.toLowerCase();
-    } else return null;
-    return rest + parts.slice().reverse().map((q) => q.s).join("");
+    return incrementString(text, delta, rightIndex, false, 50);
   }
   function incrementSelection(ctx, delta, field) {
     if (!editable(ctx)) return false;
+    const index = field === void 0 ? 0 : field;
+    const INC = /* @__PURE__ */ new Set(["label", "global_label", "hierarchical_label", "text"]);
     const cr = carried(ctx);
     if (cr) {
-      if (!TEXT_KINDS.has(cr.item.kind) && cr.item.kind !== "text_box") return false;
-      const t = incrementText(cr.item.node[1], delta);
+      if (!INC.has(cr.item.kind)) return false;
+      const t = incrementStringPart(str(cr.item.node[1]), delta, index);
       if (t === null || t === str(cr.item.node[1])) return false;
       const n = deep(cr.item.node);
       n[1] = t;
@@ -11660,32 +11961,18 @@ was dropped because the destination already has the sheet or one of its subsheet
       return true;
     }
     const changes = [];
-    if (field !== void 0) {
-      const INC = /* @__PURE__ */ new Set(["label", "global_label", "hierarchical_label", "text"]);
-      const items = selectedItems(ctx).filter((it) => INC.has(it.kind));
-      if (!items.length) return false;
-      if (items.some((it) => it.kind !== items[0].kind)) return false;
-      for (const it of items) {
-        const t = incrementStringPart(str(it.node[1]), delta, field);
-        if (t === null || t === str(it.node[1])) continue;
-        const n = deep(it.node);
-        n[1] = t;
-        changes.push(modChange(ctx.doc, it, n));
-      }
-      if (!changes.length) return false;
-      ctx.commit(changes, "Increment");
-      return true;
-    }
-    for (const it of selectedItems(ctx)) {
-      if (!TEXT_KINDS.has(it.kind) && it.kind !== "text_box") continue;
-      const t = incrementText(it.node[1], delta);
+    const items = selectedItems(ctx).filter((it) => INC.has(it.kind));
+    if (!items.length) return false;
+    if (items.some((it) => it.kind !== items[0].kind)) return false;
+    for (const it of items) {
+      const t = incrementStringPart(str(it.node[1]), delta, index);
       if (t === null || t === str(it.node[1])) continue;
       const n = deep(it.node);
       n[1] = t;
       changes.push(modChange(ctx.doc, it, n));
     }
     if (!changes.length) return false;
-    ctx.commit(changes, delta < 0 ? "decrement" : "increment");
+    ctx.commit(changes, "Increment");
     return true;
   }
 
@@ -11829,9 +12116,9 @@ was dropped because the destination already has the sheet or one of its subsheet
   function placeLabel(kind) {
     return kind === "symbol" ? "Place Symbol" : kind === "image" ? "Place Image" : kind === "text" ? "Add Text" : kind === "hierarchical_label" ? "Add Hierarchical Label" : kind === "label" || kind === "global_label" || kind === "netclass_flag" || kind === "directive_label" ? "Add Label" : kind.replace("_", " ");
   }
-  function placeText(ctx, kind, text, p, rot) {
+  function placeText(ctx, kind, text, p, rot2) {
     const doc = ctx.doc;
-    const { item, change } = addNode(doc, labelNode(kind, text, p, rot || 0));
+    const { item, change } = addNode(doc, labelNode(kind, text, p, rot2 || 0));
     ctx.commit([change], placeLabel(kind));
     rememberPlaced(item.kind, item.node);
     S.sel = item.id;
@@ -12172,7 +12459,7 @@ was dropped because the destination already has the sheet or one of its subsheet
     const press = d.press;
     d.press = null;
     if (!ctx || !mm || !ev || ev.clientX === void 0 || d.shape !== "sheet" || d.await || d.pts.length !== 1) return;
-    if (Math.hypot(ev.clientX - press[0], ev.clientY - press[1]) < CLICK_PX) return;
+    if (!isPastDragThreshold(ev.clientX - press[0], ev.clientY - press[1])) return;
     drawClick(ctx, "sheet", drawPoint(ctx, mm));
   }
   function undoRedo(ctx, which) {
@@ -12676,7 +12963,7 @@ was dropped because the destination already has the sheet or one of its subsheet
       S.selEnds = keepEnds;
     } else ctx.setSelected(null);
     if (!already) setSelEnd(hit.id, lineEndAt(hit, mm, selectThreshold(ctx)));
-    S.pending = { item: hit, mm, box: nothingSelected, client: [ev.clientX, ev.clientY] };
+    S.pending = { item: hit, mm, box: nothingSelected, client: [ev.clientX, ev.clientY], t: ev.timeStamp };
     try {
       ctx.stage.setPointerCapture(ev.pointerId);
     } catch (e) {
@@ -12739,7 +13026,8 @@ was dropped because the destination already has the sheet or one of its subsheet
       return;
     }
     if (S.pending) {
-      if (Math.hypot(mm[0] - S.pending.mm[0], mm[1] - S.pending.mm[1]) > 0.4) {
+      const pc = S.pending.client;
+      if (pc ? isPastDragThreshold(ev.clientX - pc[0], ev.clientY - pc[1], S.pending.t === void 0 ? void 0 : ev.timeStamp - S.pending.t) : isPastDragThreshold((mm[0] - S.pending.mm[0]) * ctx.pxPerMm, (mm[1] - S.pending.mm[1]) * ctx.pxPerMm)) {
         const p = S.pending;
         S.pending = null;
         const ed = globalThis.CollabEditor;
@@ -12784,7 +13072,7 @@ was dropped because the destination already has the sheet or one of its subsheet
       endDrag(ctx, true);
       return;
     }
-    if (press && ev && Math.hypot(ev.clientX - press.client[0], ev.clientY - press.client[1]) < CLICK_PX && curTool() === "select" && !S.drag && !S.wire) {
+    if (press && ev && !isPastDragThreshold(ev.clientX - press.client[0], ev.clientY - press.client[1]) && curTool() === "select" && !S.drag && !S.wire) {
       setTimeout(() => {
         if (curTool() === "select" && !S.drag && !S.wire && !S.carry) {
           autostartAt(ctx, press.mm, press.mods);
@@ -12793,7 +13081,6 @@ was dropped because the destination already has the sheet or one of its subsheet
       }, 0);
     }
   }
-  var CLICK_PX = 4;
   function onKeyCapture(ev) {
     const ctx = S.ctx;
     if (!ctx || !schActive()) return;
@@ -12916,10 +13203,10 @@ was dropped because the destination already has the sheet or one of its subsheet
   }
   var SPIN_ROT = [0, 90, 180, 270];
   function newLabelNode(ctx, kind, p) {
-    const d = labelDefaults(), spin = S.lastTextSpin || 0, rot = SPIN_ROT[spin] || 0;
+    const d = labelDefaults(), spin = S.lastTextSpin || 0, rot2 = SPIN_ROT[spin] || 0;
     let node;
     if (kind === "netclass_flag") {
-      node = classLabelNode("", p, rot);
+      node = classLabelNode("", p, rot2);
       const sh = kid(node, "shape");
       if (sh && S.lastFlagShape) sh[1] = S.lastFlagShape;
       const nc = kids(node, "property").find((q) => str(q[1]) === "Netclass");
@@ -12942,7 +13229,7 @@ was dropped because the destination already has the sheet or one of its subsheet
       }
       return node;
     }
-    node = labelNode(kind, "", p, rot);
+    node = labelNode(kind, "", p, rot2);
     const e = kid(node, "effects"), f = kid(e, "font");
     replaceKid(f, ["size", d.textSize, d.textSize]);
     if (S.lastTextBold) f.push(["bold", "yes"]);
@@ -13001,9 +13288,9 @@ was dropped because the destination already has the sheet or one of its subsheet
       if (name) placeClassLabel(ctx, name, p, 0);
     });
   }
-  function placeClassLabel(ctx, name, p, rot) {
+  function placeClassLabel(ctx, name, p, rot2) {
     const doc = ctx.doc;
-    const { item, change } = addNode(doc, classLabelNode(name, p, rot || 0));
+    const { item, change } = addNode(doc, classLabelNode(name, p, rot2 || 0));
     ctx.commit([change], "directive label");
     rememberPlaced(item.kind, item.node);
     S.sel = item.id;
@@ -13019,9 +13306,9 @@ was dropped because the destination already has the sheet or one of its subsheet
     const libId = str((kid(n, "lib_name") || kid(n, "lib_id") || [])[1]);
     const lib = K.resolveLib(doc, libId) || K.resolveLib(doc, str((kid(n, "lib_id") || [])[1]));
     if (!lib) return out;
-    const [ax, ay, rot] = atOf(n), mN = kid(n, "mirror"), T = K.symbolTransform(rot, mN ? str(mN[1]) : "");
+    const [ax, ay, rot2] = atOf(n), mN = kid(n, "mirror"), T = K.symbolTransform(rot2, mN ? str(mN[1]) : "");
     const unit = kid(n, "unit") ? num(kid(n, "unit")[1], 1) : 1, styleN = kid(n, "body_style") || kid(n, "convert"), style = styleN ? num(styleN[1], 1) : 1;
-    const key = ax + "," + ay + "," + rot + "," + (mN ? str(mN[1]) : "") + "," + unit + "," + style;
+    const key = ax + "," + ay + "," + rot2 + "," + (mN ? str(mN[1]) : "") + "," + unit + "," + style;
     const hit = PIN_CACHE.get(n);
     if (hit && hit.lib === lib && hit.key === key) return hit.pins.slice();
     const pins = symbolPinsOf(lib, ax, ay, T, unit, style);
@@ -13038,10 +13325,10 @@ was dropped because the destination already has the sheet or one of its subsheet
       for (const g of kids(sub, "pin")) {
         const [px, py, pr] = atOf(g), lenN = kid(g, "length"), len2 = lenN ? num(lenN[1]) : 2.54;
         const dir = (Math.round(pr) % 360 + 360) % 360, d = dir === 0 ? [1, 0] : dir === 90 ? [0, 1] : dir === 180 ? [-1, 0] : [0, -1];
-        const pos = tf(px, py), root2 = tf(px + d[0] * len2, py + d[1] * len2);
+        const pos = tf(px, py), root3 = tf(px + d[0] * len2, py + d[1] * len2);
         const h = kid(g, "hide");
         const hidden2 = h ? str(h[1]) !== "no" : g.includes("hide");
-        let ox = pos[0] - root2[0], oy = pos[1] - root2[1];
+        let ox = pos[0] - root3[0], oy = pos[1] - root3[1];
         const ol = Math.hypot(ox, oy) || 1;
         ox = Math.round(ox / ol);
         oy = Math.round(oy / ol);
@@ -13053,7 +13340,7 @@ was dropped because the destination already has the sheet or one of its subsheet
         out.push({
           x: pos[0],
           y: pos[1],
-          root: root2,
+          root: root3,
           number: str((kid(g, "number") || [])[1]),
           name: str((kid(g, "name") || [])[1]),
           type: str(g[1]) || "passive",
@@ -13135,7 +13422,7 @@ was dropped because the destination already has the sheet or one of its subsheet
   function bodyBoxIU(doc, item) {
     const n = item.node, libId = str((kid(n, "lib_name") || kid(n, "lib_id") || [])[1]);
     const lib = K.resolveLib(doc, libId) || K.resolveLib(doc, symbolLibId(n));
-    const [ax, ay, rot] = atOf(n), mN = kid(n, "mirror"), T = K.symbolTransform(rot, mN ? str(mN[1]) : "");
+    const [ax, ay, rot2] = atOf(n), mN = kid(n, "mirror"), T = K.symbolTransform(rot2, mN ? str(mN[1]) : "");
     let b = null;
     const pt = (x, y) => [toIU(x), -toIU(y)];
     const take = (pts, grow) => {
@@ -13209,16 +13496,16 @@ was dropped because the destination already has the sheet or one of its subsheet
   function allPinsIU(doc, n) {
     const lib = K.resolveLib(doc, str((kid(n, "lib_name") || kid(n, "lib_id") || [])[1])) || K.resolveLib(doc, symbolLibId(n));
     if (!lib) return [];
-    const [ax, ay, rot] = atOf(n), mN = kid(n, "mirror"), T = K.symbolTransform(rot, mN ? str(mN[1]) : ""), ox = toIU(ax), oy = toIU(ay);
+    const [ax, ay, rot2] = atOf(n), mN = kid(n, "mirror"), T = K.symbolTransform(rot2, mN ? str(mN[1]) : ""), ox = toIU(ax), oy = toIU(ay);
     const tf = (x, y) => [ox + T[0] * x + T[1] * y, oy + T[2] * x + T[3] * y];
     const out = [];
     for (const sub of drawnSubs(lib, n, true)) for (const g of kids(sub, "pin")) {
       const [px, py, pr] = atOf(g), lenN = kid(g, "length"), L = toIU(lenN ? num(lenN[1]) : 2.54);
       const dir = (Math.round(pr) % 360 + 360) % 360, d = dir === 0 ? [1, 0] : dir === 90 ? [0, 1] : dir === 180 ? [-1, 0] : [0, -1];
-      const x = toIU(px), y = toIU(py), pos = tf(x, y), root2 = tf(x + d[0] * L, y + d[1] * L);
+      const x = toIU(px), y = toIU(py), pos = tf(x, y), root3 = tf(x + d[0] * L, y + d[1] * L);
       const v = [T[0] * d[0] + T[1] * d[1], T[2] * d[0] + T[3] * d[1]];
       const side = v[0] > 0 ? "left" : v[0] < 0 ? "right" : v[1] > 0 ? "top" : "bottom";
-      out.push({ side, hidden: yesFlag(g, "hide"), pos, root: root2 });
+      out.push({ side, hidden: yesFlag(g, "hide"), pos, root: root3 });
     }
     return out;
   }
@@ -13249,7 +13536,7 @@ was dropped because the destination already has the sheet or one of its subsheet
     const power = (inst ? inst.ref : refP ? str(refP[2]) : "").startsWith("#");
     const fields = autoplaceFields(node).filter((p) => !yesFlag(p, "do_not_autoplace"));
     if (!fields.length) return null;
-    const [, , rot] = atOf(node), mN = kid(node, "mirror"), mirror = mN ? str(mN[1]) : "", T = K.symbolTransform(rot, mirror);
+    const [, , rot2] = atOf(node), mN = kid(node, "mirror"), mirror = mN ? str(mN[1]) : "", T = K.symbolTransform(rot2, mirror);
     const fieldRot = T[1] !== 0 ? 90 : 0;
     const flipStored = (T[1] !== 0 ? T[1] : T[0]) < 0;
     const body = bodyBoxIU(doc, { node }), symW = body[2] - body[0], symH = body[3] - body[1];
@@ -13265,7 +13552,7 @@ was dropped because the destination already has the sheet or one of its subsheet
       sides[i] = sides[j];
       sides[j] = t;
     };
-    const orient = (Math.round(rot) % 360 + 360) % 360;
+    const orient = (Math.round(rot2) % 360 + 360) % 360;
     if (power) {
       if (orient === 0) {
         swap(0, 1);
@@ -13320,8 +13607,8 @@ was dropped because the destination already has the sheet or one of its subsheet
     });
     const horiz = (c) => !!c.line && c.line.length > 1 && toIU(c.line[0][1]) === toIU(c.line[c.line.length - 1][1]);
     const page = doc.page, ds = doc.drawingSheet, su = ds && ds.setup || { left: 10, right: 10, top: 10, bottom: 10 };
-    const area = page ? [toIU(su.left), toIU(su.top), toIU(page[0] - su.right), toIU(page[1] - su.bottom)] : null;
-    const checkArea = !!area && area[2] - area[0] > 0 && area[3] - area[1] > 0;
+    const area2 = page ? [toIU(su.left), toIU(su.top), toIU(page[0] - su.right), toIU(page[1] - su.bottom)] : null;
+    const checkArea = !!area2 && area2[2] - area2[0] > 0 && area2[3] - area2[1] > 0;
     const collision = (sp) => {
       const [x, y] = place(sp, fbox), box = [x, y, x + fbox.w, y + fbox.h];
       let coll = "none";
@@ -13329,7 +13616,7 @@ was dropped because the destination already has the sheet or one of its subsheet
         if (c.line && !SIDES[sp.side][0]) coll = horiz(c) && coll !== "objects" ? "hwires" : "objects";
         else coll = "objects";
       }
-      if (checkArea && !(box[0] >= area[0] && box[1] >= area[1] && box[2] <= area[2] && box[3] <= area[3])) coll = "objects";
+      if (checkArea && !(box[0] >= area2[0] && box[1] >= area2[1] && box[2] <= area2[2] && box[3] <= area2[3])) coll = "objects";
       return coll;
     };
     sides.reverse();
@@ -14496,7 +14783,7 @@ was dropped because the destination already has the sheet or one of its subsheet
     }
     const parallel = (a, b) => Math.abs((a[1][0] - a[0][0]) * (b[1][1] - b[0][1]) - (a[1][1] - a[0][1]) * (b[1][0] - b[0][0])) <= 1e-9;
     const isEnd = (s, q) => same(s[0], q) || same(s[1], q);
-    const strokeOf2 = (it) => {
+    const strokeOf3 = (it) => {
       const st = kid(it.node, "stroke");
       return st ? K.serialize(st) : "";
     };
@@ -14507,7 +14794,7 @@ was dropped because the destination already has the sheet or one of its subsheet
         a.dead = true;
         continue;
       }
-      if (a.item.kind !== b.item.kind || strokeOf2(a.item) !== strokeOf2(b.item)) continue;
+      if (a.item.kind !== b.item.kind || strokeOf3(a.item) !== strokeOf3(b.item)) continue;
       const m = mergeOverlap([b.seg[0], b.seg[1]], [a.seg[0], a.seg[1]], null);
       if (!m) continue;
       a.dead = true;
@@ -14629,13 +14916,13 @@ was dropped because the destination already has the sheet or one of its subsheet
   }
   function convertNode(item, toKind, gridPitch) {
     const n = item.node, from = item.kind;
-    let text = str(n[1]), p = atOf(n).slice(0, 2), rot = atOf(n)[2] || 0;
+    let text = str(n[1]), p = atOf(n).slice(0, 2), rot2 = atOf(n)[2] || 0;
     const shapeN = kid(n, "shape"), shape = shapeN && (from === "global_label" || from === "hierarchical_label") ? str(shapeN[1]) : null;
     if (from === "netclass_flag" || from === "directive_label") {
       const nc = kids(n, "property").find((q) => str(q[1]) === "Netclass");
       text = nc ? str(nc[2]) : "<empty>";
     }
-    if (from === "text") rot = 0;
+    if (from === "text") rot2 = 0;
     if (from === "text_box") {
       const s = kid(n, "size"), mg = kid(n, "margins"), size = fontSize(n);
       const m = mg ? [num(mg[1]), num(mg[2]), num(mg[3]), num(mg[4])] : [TEXTBOX_MARGIN, TEXTBOX_MARGIN, TEXTBOX_MARGIN, TEXTBOX_MARGIN];
@@ -14644,13 +14931,13 @@ was dropped because the destination already has the sheet or one of its subsheet
         const inf = LABEL_SIZE_RATIO * size;
         box = [box[0] - inf, box[1] - inf, box[2] + inf, box[3] + inf];
       }
-      const ef = kid(n, "effects"), j = ef && kid(ef, "justify"), right = !!(j && j.includes("right")), vertical = rot === 90 || rot === 270;
+      const ef = kid(n, "effects"), j = ef && kid(ef, "justify"), right = !!(j && j.includes("right")), vertical = rot2 === 90 || rot2 === 270;
       const cx = (box[0] + box[2]) / 2, cy = (box[1] + box[3]) / 2;
       if (vertical) {
-        rot = right ? 270 : 90;
+        rot2 = right ? 270 : 90;
         p = right ? [cx, box[1]] : [cx, box[3]];
       } else {
-        rot = right ? 180 : 0;
+        rot2 = right ? 180 : 0;
         p = right ? [box[2], cy] : [box[0], cy];
       }
       const g = gridPitch || 1.27;
@@ -14661,16 +14948,16 @@ was dropped because the destination already has the sheet or one of its subsheet
       const r = TEXT_KINDS.has(from) ? textRect(item) : item.bbox || [p[0], p[1] - 1.27, p[0] + 5, p[1]];
       const size = fontSize(n), mg = r4(0.75 * size), slop = r4(mg / 20);
       let x0 = r[0] - mg, y0 = r[1] - mg, x1 = r[2] + mg, y1 = r[3] + mg;
-      if (rot === 90 || rot === 270) {
-        if (rot === 270) y1 += slop;
+      if (rot2 === 90 || rot2 === 270) {
+        if (rot2 === 270) y1 += slop;
         else y0 -= slop;
-      } else if (rot === 180) x0 -= slop;
+      } else if (rot2 === 180) x0 -= slop;
       else x1 += slop;
       out = textBoxNode(text, [x0, y0], [x1, y1]);
-    } else if (toKind === "netclass_flag" || toKind === "directive_label") out = classLabelNode(from === "netclass_flag" || from === "directive_label" ? text : text, p, rot);
-    else if (toKind === "text") out = labelNode("text", text, p, rot);
+    } else if (toKind === "netclass_flag" || toKind === "directive_label") out = classLabelNode(from === "netclass_flag" || from === "directive_label" ? text : text, p, rot2);
+    else if (toKind === "text") out = labelNode("text", text, p, rot2);
     else {
-      out = labelNode(toKind, validNetname(text), p, rot);
+      out = labelNode(toKind, validNetname(text), p, rot2);
       if (shape && toKind !== "label") replaceKid(out, ["shape", shape]);
     }
     if (!uuidOf(out)) out.push(["uuid", K.newUuid()]);
@@ -15293,6 +15580,11 @@ was dropped because the destination already has the sheet or one of its subsheet
     act("repeatLast", "Repeat Last Item", "Insert", (ctx) => repeatLast(ctx)),
     act("increment", "Increment", "", (ctx) => incrementSelection(ctx, 1)),
     act("decrement", "Decrement", "", (ctx) => incrementSelection(ctx, -1)),
+    // ACTIONS::incrementPrimary … decrementSecondary (common/tool/actions.cpp:462-488): INCREMENT{ delta, index }
+    act("incrementPrimary", "Increment Primary", "", (ctx) => incrementSelection(ctx, 1, 0)),
+    act("decrementPrimary", "Decrement Primary", "", (ctx) => incrementSelection(ctx, -1, 0)),
+    act("incrementSecondary", "Increment Secondary", "", (ctx) => incrementSelection(ctx, 1, 1)),
+    act("decrementSecondary", "Decrement Secondary", "", (ctx) => incrementSelection(ctx, -1, 1)),
     act("toLabel", "Change to Label", "", (ctx) => convertSelection(ctx, "label")),
     act("toGLabel", "Change to Global Label", "", (ctx) => convertSelection(ctx, "global_label")),
     act("toHLabel", "Change to Hierarchical Label", "", (ctx) => convertSelection(ctx, "hierarchical_label")),

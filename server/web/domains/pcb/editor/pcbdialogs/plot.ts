@@ -32,6 +32,7 @@ import { openGendrill } from "./gendrill";
 import { deliver, docDir, loadPrefs, projectLastPlotPath, savePrefs, saveProjectLastPlotPath, whenDialogsClosed } from "./plot-out";
 import { bitmapButton, box, checkField, ensureCss as kitCss, errorMessage, h, iconButton, numField, reportPanel, selectField, textField, type Field, type ReportLine } from "./ui";
 import { kicadIcon } from "../../../../shared/components/kicon-dom";
+import { prefs, schThemeList } from "../../dialogs/prefs";
 
 interface LayerRow { key: string; name: string; color: string }
 const layerRows = (): LayerRow[] => ((store as unknown as { get(): { document: { layers?: LayerRow[] } } }).get().document.layers || []);
@@ -54,7 +55,11 @@ let lastReport: ReportLine[] = [];
 const isCu = (l: string): boolean => /\.Cu$/.test(l);
 const FAB_TECH = new Set(["F.Adhes", "B.Adhes", "F.Paste", "B.Paste", "F.SilkS", "B.SilkS", "F.Mask", "B.Mask", "F.Fab", "B.Fab"]);
 
-export interface PlotDialogOptions { gerber?: boolean; params?: PlotParams; outputDir?: string; allOrder?: string[]; allChecked?: string[]; variant?: string }
+export interface PlotDialogOptions { gerber?: boolean; params?: PlotParams; outputDir?: string; allOrder?: string[]; allChecked?: string[]; variant?: string;
+  /** reopened after Generate Drill Files: reInitDialog takes the output directory and the origin back from the board's plot settings */
+  afterDrill?: boolean;
+  /** the Color theme choice while the dialog is reopened over a DRC, Board Setup or drill visit */
+  colorTheme?: string }
 
 /** StringFromValue( …, true ) in millimetres. */
 const mmText = (v: number): string => `${Number(v.toFixed(6))} mm`;
@@ -74,6 +79,8 @@ export async function openPlotDialog(opts: PlotDialogOptions = {}): Promise<void
   if (opts.gerber) p.format = 1;
   // the project's last plot path wins over the board's output directory (DIALOG_PLOT::init_Dialog)
   if (lastPath && !opts.params) p.outputDirectory = lastPath;
+  // CreateDrillFile: m_plotOpts = GetPlotSettings(); reInitDialog() (the drill dialog's updateConfig may have changed them)
+  if (opts.afterDrill) { p.outputDirectory = stored.outputDirectory; p.useAuxOrigin = stored.useAuxOrigin; }
   const user = loadPrefs(USER_KEY, USER_DEFAULTS);
   const mask = BS().maskPaste(header ? header.setup : null);
   show(fab, ctx, p, stored, version, user, !!(mask.maskExpansion || mask.maskMinWidth), opts, fab.variantNames(header ? header.variants : null), lastPath);
@@ -158,6 +165,13 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
   const zoneCheck = checkField(user.checkZones, "Check zone fills before plotting", { key: "checkZones" });
   const drillMarks = selectField<number>(p.drillMarks, [[0, "None"], [1, "Small"], [2, "Actual size"]], { key: "drillMarks" });
   const scale = selectField<number>(p.scaleSelection, [[0, "Auto"], [1, "1:1"], [2, "3:2"], [3, "2:1"], [4, "3:1"]], { key: "scale" });
+  // Color theme: GetColorSettingsList (the built-in themes, then the user's), the board editor's theme preselected
+  // (setColorThemeSelection); the board editor shows KiCad Default with the Appearance panel's colours
+  const themes = schThemeList(prefs());
+  const EDITOR_THEME = "default";
+  const themeSel = selectField<string>(opts.colorTheme && themes.some(([id]) => id === opts.colorTheme) ? opts.colorTheme : themes.some(([id]) => id === EDITOR_THEME) ? EDITOR_THEME : themes[0][0], themes, { key: "colorTheme" });
+  themeSel.input.title = "Select the color theme to use for plotting";
+  const themeLbl = h("span", { class: "pd-lbl" }, "Color theme:");
   const auxOrigin = checkField(p.useAuxOrigin, "Use drill/place file origin", { key: "useAuxOrigin", tip: "Use the drill/place file origin as the coordinate origin for plotted files" });
   const mirror = checkField(p.mirror, "Mirrored plot", { key: "mirror" });
   const negative = checkField(p.negative, "Negative plot", { key: "negative" });
@@ -181,7 +195,7 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
   const dxfSingle = checkField(!!p.dxfSingle, "Single document", { key: "dxfSingle", tip: "Export selected layers into a single DXF" });
   // SVG Options
   const svgPrec = numField(p.svgPrecision, { key: "svgPrecision", digits: 0 }); svgPrec.input.title = "This number defines how many digits are exported that are below 1 mm.\nUser unit is 10^-<N> mm\nChoose 4 if you are not sure.";
-  const svgMode = selectField<number>(p.blackAndWhite ? 1 : 0, [[0, "Color"], [1, "Black and white"]], { key: "svgMode" });
+  const svgMode = selectField<number>(p.blackAndWhite ? 1 : 0, [[0, "Color"], [1, "Black and white"]], { key: "svgMode", onChange: () => syncEnables() });
   const svgFit = checkField(user.svgFitPage, "Fit page to board", { key: "svgFitPage" });
   // PDF Options
   const pdfMode = selectField<number>(p.blackAndWhite ? 1 : 0, [[0, "Color"], [1, "Black and white"]], { key: "pdfMode", onChange: () => syncEnables() });
@@ -246,6 +260,9 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
     // OnChangeDXFPlotMode: the contour mode plots text with the stroke font
     en(dxfFont, !dxfContours.get()); if (dxfContours.get()) dxfFont.set(true);
     const bw = pdfMode.get() === 1; bgSwatch.setDisabled(bw || ro); bgLabel.classList.toggle("disabled", bw);
+    // updateColorThemeControl
+    const fmt = fmtSel.get(), themeOn = P.colorThemeEnabled(fmt, fmt === 5 ? svgMode.get() === 1 : fmt === 4 ? bw : false);
+    en(themeSel, themeOn); themeLbl.classList.toggle("disabled", !themeOn);
   }
 
   // ---------------------------------------------------------------- applyPlotSettings
@@ -253,7 +270,8 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
   const say = (severity: ReportLine["severity"], text: string): void => { reportLines.push({ severity, text }); report.set(reportLines.slice()); lastReport = reportLines.slice(); };
   function current(): PlotParams {
     const fmt = fmtSel.get();
-    const t: PlotParams = Object.assign({}, p);
+    // a default PCB_PLOT_PARAMS tempOptions keeping only the dash ratios: the options of the other formats go back to their defaults
+    const t: PlotParams = Object.assign(P.defaultPlotParams(), { dashRatio: p.dashRatio, gapRatio: p.gapRatio });
     t.subtractMaskFromSilk = subtract.get(); t.plotFrameRef = sheetRef.get(); t.sketchPadsOnFab = sketchPads.get(); t.plotPadNumbers = padNumbers.get();
     t.plotValue = true; t.plotReference = true;
     t.hideDnpOnFab = plotDnp.get() && hideDnp.input.checked; t.sketchDnpOnFab = t.crossoutDnpOnFab = plotDnp.get() && crossDnp.input.checked;
@@ -264,11 +282,16 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
     else if (fmt === 6) t.blackAndWhite = false;
     else t.blackAndWhite = true;
     t.format = fmt;
-    t.disableApertMacros = noMacros.get(); t.useGerberExtensions = protel.get(); t.useGerberX2 = x2.get(); t.includeNetlistInfo = netAttrs.get(); t.createJobFile = jobFile.get();
-    t.gerberPrecision = coordFmt.get() === 0 ? 5 : 6;
-    t.svgPrecision = Math.max(3, Math.min(6, Math.round(svgPrec.get()))); svgPrec.set(t.svgPrecision);
-    t.pngDpi = Math.max(72, Math.min(2400, Math.round(pngDpi.get()))); pngDpi.set(t.pngDpi);
-    t.pngAntialias = pngAa.get(); t.svgFitPageToBoard = svgFit.get();
+    if (fmt === 1) {
+      t.disableApertMacros = noMacros.get(); t.useGerberExtensions = protel.get(); t.useGerberX2 = x2.get(); t.includeNetlistInfo = netAttrs.get(); t.createJobFile = jobFile.get();
+      t.gerberPrecision = coordFmt.get() === 0 ? 5 : 6;
+    } else if (fmt === 5) {
+      t.svgPrecision = Math.max(3, Math.min(6, Math.round(svgPrec.get()))); svgPrec.set(t.svgPrecision);
+      t.svgFitPageToBoard = svgFit.get();
+    } else if (fmt === 6) {
+      t.pngDpi = Math.max(72, Math.min(2400, Math.round(pngDpi.get()))); pngDpi.set(t.pngDpi);
+      t.pngAntialias = pngAa.get();
+    }
     // PCB_PLOTTER::DialogLayerSelection: the copper layers the board does not have stay selected
     t.layerSelection = P.dialogLayerSelection(enabled.filter((l) => layerChecks.get(l)!.checked), enabled);
     t.plotOnAllLayers = allOrder.filter((l) => allChecked.has(l));
@@ -296,8 +319,10 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
     user.checkZones = zoneCheck.get(); user.fineScaleX = t.fineScaleX; user.fineScaleY = t.fineScaleY; user.widthAdjust = t.widthAdjust; user.pdfBackground = pdfBg; user.svgFitPage = svgFit.get();
     savePrefs(USER_KEY, user);
     if (!ro && t.outputDirectory !== lastPlotPath) { lastPlotPath = t.outputDirectory; void saveProjectLastPlotPath(t.outputDirectory); }
-    if (!ro && !P.samePlotParams(stored, t)) {
-      saving = saveToBoard(t, version).then((ok) => { if (ok) Object.assign(stored, t); return ok; });
+    // tempOptions holds the PostScript adjustments only for a job: they are the user's, not the board's
+    const temp: PlotParams = Object.assign({}, t, { fineScaleX: undefined, fineScaleY: undefined, widthAdjust: undefined });
+    if (!ro && !P.samePlotParams(stored, temp)) {
+      saving = saveToBoard(temp, version).then((ok) => { if (ok) Object.assign(stored, temp); return ok; });
     }
     return t;
   }
@@ -320,9 +345,18 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
       }
       const fctx = await fabContext(); if (!fctx) return;
       fctx.variant = selectedVariant();
+      // SetColorSettings( formatUsesColorTheme() ? getColorSettings() : getEditorColorSettings() )
       const colors: Record<string, string> = {}; for (const r of layerRows()) colors[r.key] = r.color;
+      const theme = t.format === 4 || t.format === 5 || t.format === 6 ? themeSel.get() : EDITOR_THEME;
+      let sheetColor = SHEET_COLOR;
+      if (theme !== EDITOR_THEME) {
+        const pcbColor = (KiCadCanvas as unknown as { pcbColor(l: string): string }).pcbColor;
+        // a theme without board colours answers COLOR_SETTINGS::GetDefaultColor: KiCad Default's
+        for (const l of new Set([...Object.keys(colors), ...enabled])) colors[l] = (theme === "classic" && P.classicLayerColor(l)) || pcbColor(l);
+        if (theme === "classic") sheetColor = P.CLASSIC_DRAWINGSHEET;
+      }
       const vars = (E.proSettings ? ((): Record<string, string> => { try { return JSON.parse(E.proSettings).text_variables || {}; } catch (e) { return {}; } })() : {}) as Record<string, string>;
-      const res = await fab.plotBoard(fctx, { params: t, layers: [...enabled.filter((l) => t.layerSelection.includes(l)), ...t.layerSelection.filter((l) => !enabled.includes(l))], common: t.plotOnAllLayers, colors, sheetColor: SHEET_COLOR, background: t.backgroundColor,
+      const res = await fab.plotBoard(fctx, { params: t, layers: [...enabled.filter((l) => t.layerSelection.includes(l)), ...t.layerSelection.filter((l) => !enabled.includes(l))], common: t.plotOnAllLayers, colors, sheetColor, background: t.backgroundColor,
         outputDir: t.outputDirectory, boardDir: docDir(), author: vars.AUTHOR, subject: vars.SUBJECT });
       for (const l of res.report) say(l.severity, l.text);
       await deliver(fab, res.files, `${fctx.projectName}-plot.zip`);
@@ -331,7 +365,11 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
     } finally { busy = false; status.textContent = ""; }
   }
 
-  const keep = (): PlotDialogOptions => ({ params: current(), outputDir: outDir.get(), allOrder: allOrder.slice(), allChecked: [...allChecked], variant: variantSel.get() });
+  // a reopened dialog shows every format's controls as they were left, not only the selected format's
+  const controls = (): Partial<PlotParams> => ({ disableApertMacros: noMacros.get(), useGerberExtensions: protel.get(), useGerberX2: x2.get(), includeNetlistInfo: netAttrs.get(),
+    createJobFile: jobFile.get(), gerberPrecision: coordFmt.get() === 0 ? 5 : 6, svgPrecision: svgPrec.get(), pngDpi: pngDpi.get(), pngAntialias: pngAa.get(),
+    pdfFrontPopups: frontPop.get(), pdfBackPopups: backPop.get(), pdfMetadata: pdfMeta.get(), pdfSingle: pdfSingle.get() });
+  const keep = (): PlotDialogOptions => ({ params: Object.assign(current(), controls()), outputDir: outDir.get(), allOrder: allOrder.slice(), allChecked: [...allChecked], variant: variantSel.get(), colorTheme: themeSel.get() });
   const reopen = (o: PlotDialogOptions): void => { void openPlotDialog(o); };
 
   // ---------------------------------------------------------------- the dialog
@@ -339,7 +377,7 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
     title: "Plot", width: 980, noEnter: true,
     buttons: [
       { label: "Plot", primary: true, isDefault: true, id: "plot", fn: () => { void plot(); } },
-      { label: "Generate Drill Files...", id: "drill", fn: () => { const t = applyPlotSettings(); const o = keep(); lastAllLayersOrder = allOrder.slice(); whenDialogsClosed(() => reopen(o)); void openGendrill({ params: t }); } },
+      { label: "Generate Drill Files...", id: "drill", fn: () => { const t = applyPlotSettings(); const o = Object.assign(keep(), { outputDir: undefined, afterDrill: true }); lastAllLayersOrder = allOrder.slice(); whenDialogsClosed(() => reopen(o)); void openGendrill({ params: t }); } },
       { label: "Close", close: true, id: "close" },
     ],
     cancel: () => { lastAllLayersOrder = allOrder.slice(); },
@@ -354,7 +392,7 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
           box("Plot on All Layers", allList, h("div", { class: "pd-row" }, upBtn, downBtn)),
           box("General Options",
             sheetRef.el, subtract.el, plotDnp.el, h("div", { class: "pl-indent" }, hideDnp.el, crossDnp.el), sketchPads.el, h("div", { class: "pl-indent" }, padNumbers.el), zoneCheck.el,
-            h("div", { class: "pl-grid" }, lbl("Drill marks:"), drillMarks.el, lbl("Scaling:"), scale.el), auxOrigin.el, mirror.el, negative.el)),
+            h("div", { class: "pl-grid" }, lbl("Drill marks:"), drillMarks.el, lbl("Scaling:"), scale.el, themeLbl, themeSel.el), auxOrigin.el, mirror.el, negative.el)),
         ...Object.values(boxes), alert, status, report.el,
         h("div", { class: "pd-row pl-drc" }, drcBtn, drcWarn));
       drcBtn.addEventListener("click", () => { const o = keep(); applyPlotSettings(); whenDialogsClosed(() => reopen(o)); openDrc(ctx); });

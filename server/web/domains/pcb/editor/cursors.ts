@@ -14,17 +14,35 @@ import { lassoSigned } from "./selection";
 import { isSch, stage, viewFlipped } from "./view";
 import { ctrlDown, modifierCursorOf, modifiersState } from "./selmodes";
 import { activeModule, moduleTool, toolCtx } from "./tools";
+import { IS_MAC } from "../../../shared/keys";
 
 // wxCURSOR_BULLSEYE (a stock cursor the browser does not have): a target with its hotspot in the middle
 const BULLSEYE = 'url("data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#fff" stroke-width="3"/><circle cx="12" cy="12" r="9" fill="none" stroke="#000" stroke-width="1.2"/><circle cx="12" cy="12" r="5" fill="none" stroke="#fff" stroke-width="3"/><circle cx="12" cy="12" r="5" fill="none" stroke="#000" stroke-width="1.2"/><circle cx="12" cy="12" r="1.6" fill="#000"/></svg>') + '") 12 12, crosshair';
 
-/** The CSS cursor for a KICURSOR name ("LINE_WIRE"), or "" when it is not one. */
-export function kicursorCss(name: string): string {
+/** COMMON_SETTINGS appearance.use_custom_cursors (Preferences > Common, on by default). */
+let useCustomCursors = true;
+export function setUseCustomCursors(on: boolean): void { if (useCustomCursors === on) return; useCustomCursors = on; refreshCursor(); }
+
+/**
+ * CURSOR_STORE::GetStockCursor: MOVING is wxCURSOR_SIZING, BULLSEYE, HAND and ARROW are stock too — each only where
+ * KIPLATFORM::UI::IsStockCursorOk accepts it (wxCURSOR_SIZING on macOS only; GTK and MSW draw MOVING's bitmap).
+ */
+function stockCursor(name: string, mac: boolean): string | null {
   if (name === "ARROW" || name === "DEFAULT") return "default";
   if (name === "HAND") return "pointer";
   if (name === "BULLSEYE") return BULLSEYE;
+  if (name === "MOVING" && mac) return "move";
+  return null;
+}
+/**
+ * The CSS cursor for a KICURSOR name ("LINE_WIRE"), or "" when it is not one (CURSOR_STORE::GetCursor): the stock
+ * cursor when there is one, else KiCad's bitmap; with "Use custom cursors" off every other name is the arrow.
+ */
+export function kicursorCss(name: string, custom = useCustomCursors, mac = IS_MAC): string {
+  const stock = stockCursor(name, mac); if (stock) return stock;
   const img = KICURSOR_IMAGES[name];
-  return img ? `url("${img[0]}") ${img[1]} ${img[2]}, default` : "";
+  if (!img) return "";
+  return custom ? `url("${img[0]}") ${img[1]} ${img[2]}, default` : "default";
 }
 
 /** A tool's declared cursor as CSS: a KICURSOR name, the older "crosshair" (PENCIL), "move" (MOVING), "text" (TEXT), or CSS. */

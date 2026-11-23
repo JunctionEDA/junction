@@ -383,7 +383,22 @@ export function installSchNets(): void {
   const KC = KiCadCanvas as unknown as LabelVarCanvas; if (KC.setLabelTextVar) KC.setLabelTextVar(labelTextVar);
   const m = schMod(); if (!m || !m.setNetHighlighter) return;
   (m.state as { hierarchyPages?: (() => string[] | null) | null }).hierarchyPages = hierarchyPages;
-  m.setNetHighlighter({ highlightPick, clear: (ctx: ToolCtx) => clearHighlight(ctx), active: () => !!HL.name, docChanged, wireDriverName, labelDefaults, busAliases, stepNetItem });
+  m.setNetHighlighter({ highlightPick: userHighlightPick, clear: (ctx: ToolCtx) => { clearHighlight(ctx); netProbe.send?.([]); }, active: () => !!HL.name, docChanged, wireDriverName, labelDefaults, busAliases, stepNetItem });
+}
+/** editor/crossprobe.ts: where the user's net highlight goes (SendCrossProbeNetName / SetCrossProbeConnection). */
+export const netProbe = { send: null as ((names: string[]) => void) | null };
+/**
+ * highlightNet() as the user runs it: a new net is cross-probed with SignalNames (the net, or a bus's net members,
+ * sorted); nothing under the cursor sends a clear; the same net again (the bus-members toggle) sends nothing.
+ */
+function userHighlightPick(ctx: ToolCtx, pick: Pick | null): void {
+  const before = HL.name;
+  highlightPick(ctx, pick);
+  if (!HL.name) { netProbe.send?.([]); return; }
+  if (HL.name === before) return;
+  const c = netMap(), e = c ? c.map.get(HL.name) : undefined; if (!e) { netProbe.send?.([]); return; }
+  const names = new Set<string>(); if (!e.bus) names.add(HL.name); else for (const m of e.busMembers) names.add(m);
+  netProbe.send?.([...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
 /** DIALOG_ASSIGN_NETCLASS's previewer: the items of these nets on the sheet on screen brightened (the highlight stays its own). */

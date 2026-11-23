@@ -263,9 +263,9 @@ export function matchProperties(): boolean {
   const d = doc(); if (!d) return false;
   if (run) return true;
   const sel = selectedItems();
-  if (sel.length !== 1) { toast("Select one item to copy properties from."); return true; }
+  if (sel.length !== 1) { toast("Select one item to copy properties from.", 8000, undefined, "error"); return true; }
   const src = sel[0];
-  if (!familyOf(src)) { toast("The selected source item has no properties to match."); return true; }
+  if (!familyOf(src)) { toast("The selected source item has no properties to match.", 8000, undefined, "error"); return true; }
   if (!enabledCount(src)) toast("No properties are enabled for this kind of item.  Press Ctrl+, to choose some.", 4000);
   hookKeys();
   const r: Run = { sourceId: src.id, hover: null, box: null, down: null, listeners: [] }; run = r;
@@ -297,7 +297,7 @@ export function matchProperties(): boolean {
     const ev = e as PointerEvent; if (ev.button !== 0 || !r.box) return; ev.stopImmediatePropagation();
     const b = r.box; r.box = null; const wasBox = !!E.boxSel; E.boxSel = null;
     const s = source(); const mm = worldMm(ev);
-    if (!s) { toast("The Match Properties source no longer exists."); requestRender(); return; }
+    if (!s) { toast("The Match Properties source no longer exists.", 8000, undefined, "error"); requestRender(); return; }
     if (wasBox) { const targets = boxedBoardItems(b.start, mm).filter((it) => it.id !== s.id && compatible(s, it)); brighten([]); applyToTargets(s, targets); }
     else { const t = pick(mm); if (t) { brighten([]); applyToTargets(s, [t]); } }
     updateHover(mm);

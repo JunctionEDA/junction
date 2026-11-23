@@ -151,7 +151,8 @@ test("back-annotation: value, footprint, reference, attributes, fields, net labe
 test("back-annotation: unmatched footprints and symbols, nothing selected, re-link by reference", () => {
   const fp = { ref: "R9", path: "/zz", fpid: "R:R", value: "1k", dnp: false, excludeFromBom: false, excludeFromPos: false, fields: new Map(), pads: new Map() };
   const r = BA.backAnnotate([sym()], [fp], ALL);
-  assert.deepEqual(r.lines.map((l) => l.severity + ":" + l.text), ["error:Cannot find symbol for footprint 'R9'.", "warning:Footprint 'R1' is not present on PCB. Corresponding symbols in schematic must be manually deleted (if desired)."]);
+  // checkForUnusedSymbols warns only for symbols excluded from the board, passed over before a linked one
+  assert.deepEqual(r.lines.map((l) => l.severity + ":" + l.text), ["error:Cannot find symbol for footprint 'R9'."]);
   assert.equal(BA.backAnnotate([sym()], [fp], { relink: false, references: false, footprints: false, values: false, netNames: false, attributes: false, otherFields: false }).lines[0].text, "Select at least one property to back annotate.");
   const rl = BA.backAnnotate([sym({ ref: "R9" })], [fp], Object.assign({}, ALL, { relink: true, references: false }));
   assert.deepEqual(rl.relinks, [{ fpRef: "R9", path: "/a" }]);
@@ -160,17 +161,18 @@ test("back-annotation: unmatched footprints and symbols, nothing selected, re-li
 const quadUnits = () => { const unitPins = new Map([[1, ["1", "2"]], [2, ["3", "4"]]]), pinTypes = new Map([["1", "input"], ["2", "output"], ["3", "input"], ["4", "output"]]);
   return [{ key: "/u1", unit: 1, unitPins, pinTypes }, { key: "/u2", unit: 2, unitPins, pinTypes }]; };
 test("back-annotation: a gate swap on the board is a unit swap with 'Prefer symbol unit swaps', labels otherwise", () => {
-  const s = sym({ ref: "U1", keys: ["/u1", "/u2"], key: "/u1", pins: new Map([["1", "/A"], ["2", "/B"], ["3", "/C"], ["4", "/D"]]), units: quadUnits() });
+  const units = quadUnits(), pins = new Map([["1", "/A"], ["2", "/B"], ["3", "/C"], ["4", "/D"]]);
+  const s = [0, 1].map((i) => sym({ ref: "U1", keys: ["/u1", "/u2"], key: units[i].key, multi: true, sheetPath: ["r"], uuid: units[i].key, pins, units, self: units[i] }));
   const fp = { ref: "U1", path: "/u1", fpid: "P:SO8", value: "1k", dnp: false, excludeFromBom: false, excludeFromPos: false, fields: new Map(), pads: new Map([["1", "/C"], ["2", "/D"], ["3", "/A"], ["4", "/B"]]) };
   const o = Object.assign({}, ALL, { footprints: false, values: false, references: false, attributes: false, otherFields: false });
-  const r = BA.backAnnotate([s], [fp], Object.assign({}, o, { unitSwaps: true }));
+  const r = BA.backAnnotate(s, [fp], Object.assign({}, o, { unitSwaps: true }));
   assert.deepStrictEqual(r.lines.map((l) => l.text), ["Swap U1 unit A with unit B."]);
   assert.deepStrictEqual(r.unitEdits, [{ key: "/u1", unit: 2 }, { key: "/u2", unit: 1 }]); assert.equal(r.labels.length, 0);
-  const off = BA.backAnnotate([s], [fp], Object.assign({}, o, { unitSwaps: false }));
+  const off = BA.backAnnotate(s, [fp], Object.assign({}, o, { unitSwaps: false }));
   assert.equal(off.unitEdits.length, 0); assert.equal(off.labels.length, 4);
 });
 test("back-annotation: two pads trading nets are a pin swap, only reported without unconstrained pin swaps", () => {
-  const s = sym({ ref: "U1", keys: ["/u1"], key: "/u1", pins: new Map([["1", "/A"], ["2", "/B"]]), units: [{ key: "/u1", unit: 1, unitPins: new Map([[1, ["1", "2"]]]), pinTypes: new Map([["1", "input"], ["2", "input"]]) }] });
+  const s = sym({ ref: "U1", keys: ["/u1"], key: "/u1", pins: new Map([["1", "/A"], ["2", "/B"]]), self: { key: "/u1", unit: 1, unitPins: new Map([[1, ["1", "2"]]]), pinTypes: new Map([["1", "input"], ["2", "input"]]) } });
   const fp = { ref: "U1", path: "/u1", fpid: "P:X", value: "1k", dnp: false, excludeFromBom: false, excludeFromPos: false, fields: new Map(), pads: new Map([["1", "/B"], ["2", "/A"]]) };
   const o = Object.assign({}, ALL, { footprints: false, values: false, references: false, attributes: false, otherFields: false, pinSwaps: true });
   const no = BA.backAnnotate([s], [fp], o);

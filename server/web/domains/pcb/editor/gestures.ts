@@ -1,7 +1,7 @@
 // gestures.ts — KiCad's mouse model on the stage, and the one place that knows every piece of
 // selection / drag state the editor keeps.
 //
-//  · right button: a click opens the context menu (contextmenu.ts), a drag past DRAG_THRESHOLD_PX pans;
+//  · right button: a click opens the context menu (contextmenu.ts), a drag past the drag threshold pans;
 //    middle button drag pans at once (KiCad's default, MOUSE_DRAG_ACTION::PAN on the middle button)
 //  · wheel: zoom about the cursor; Shift+wheel pans up/down, Ctrl+wheel pans left/right
 //    (common/settings/common_settings.cpp: scroll_modifier_zoom 0, _pan_v WXK_SHIFT, _pan_h WXK_CONTROL;
@@ -28,6 +28,7 @@ import { applyView, canvas as canvasRaw, dragG as dragGRaw, isSch, pxPerMm, requ
 import { toast } from "./util";
 import { DEFAULT_WHEEL, makeZoomController, wheelAction, type WheelSettings } from "./wheel-model";
 import { IS_MAC } from "../../../shared/keys";
+import { isPastDragThreshold } from "../tools/drag-threshold";
 
 // typed faces of the untyped editor modules this file leans on
 type Mm = [number, number];
@@ -39,8 +40,8 @@ export const stage = stageRaw as HTMLElement;
 const moveOp = moveOpRaw as unknown as (fp: Fp, nx: number, ny: number) => KChange;
 const canvas = canvasRaw as HTMLCanvasElement, dragG = dragGRaw as SVGGElement;
 
-/** Right-button travel (CSS px) before a press becomes a pan instead of a context-menu click. */
-export const DRAG_THRESHOLD_PX = 5;
+// a press becomes a drag (a right-button pan instead of a context-menu click) past TOOL_DISPATCHER::IsPastDragThreshold
+// (tools/drag-threshold.ts), the one test every button and tool shares
 
 interface PcbState { sel: Set<string>; move?: { sticky?: boolean } | null; drag?: { bySelect?: boolean } | null; pending?: unknown; route?: unknown; draw?: { shape: string; pts?: unknown[] } | null }
 interface SchState { sel: string | null; hover?: string | null; drag?: { byPointer?: boolean; moved?: boolean } | null; pending?: unknown; wire?: unknown; draw?: { shape: string; pts: unknown[]; await?: boolean } | null; carry?: unknown; highlight?: unknown; selEnds?: Map<string, number> | null }
@@ -70,7 +71,12 @@ export const selectionHooks: (() => void)[] = [];
 
 /** The ERC marker drawn under a point (the markers the View options show), or null. */
 export function markerUnder(mm: Mm): Marker | null {
-  if (!isSch()) return null;
+  // the board's DRC markers as the canvas draws them (PcbTools.state.markers: the DRC dialog's shown severities)
+  if (!isSch()) {
+    const t = pcbTools() as unknown as { state?: { markers?: Marker[] } } | null; const list = t && t.state && t.state.markers ? t.state.markers.filter(Boolean) : [];
+    if (!list.length) return null;
+    return (KiCadCanvas.markerAt as (l: Marker[], x: number, y: number, tol: number, s: number) => Marker | null)(list, mm[0], mm[1], 0, (KiCadCanvas.MARKER_SCALE as { pcb: number }).pcb);
+  }
   const ro = (E.renderOpts || {}) as { showErcExclusions?: boolean; showErcWarnings?: boolean; showErcErrors?: boolean };
   const list = ((E.markers || []) as Marker[]).filter((m) => m && (m.severity === "exclusion" ? ro.showErcExclusions === true : m.severity === "warning" ? ro.showErcWarnings !== false : ro.showErcErrors !== false));
   const scale = (KiCadCanvas.MARKER_SCALE as { sch: number }).sch;
@@ -81,6 +87,7 @@ type Marker = { x: number; y: number; severity?: string; selected?: boolean };
 export function clearAllSelection(publish = true): void {
   clearSelection();
   if (isSch() && ((E.markers || []) as Marker[]).some((m) => m && m.selected)) { for (const m of E.markers as Marker[]) if (m) delete m.selected; requestRender(); }
+  if (!isSch()) { const hk = E.hooks as { drcSelectMarker?: (m: unknown) => void }; const t = pcbTools() as unknown as { state?: { markers?: Marker[] } } | null; if (hk.drcSelectMarker && t && t.state && (t.state.markers || []).some((m) => m && m.selected)) hk.drcSelectMarker(null); }
   const p = pcbState(); if (p && p.sel && p.sel.size) p.sel.clear();
   const s = schState(); if (s) { s.sel = null; s.hover = null; s.selEnds = null; }
   E.hoverId = null;
@@ -563,14 +570,87 @@ export function drawHover(ctx: CanvasRenderingContext2D, view: KView): void {
   ctx.save();
   try {
     KiCadCanvas.setViewTransform(ctx, view);
-    drawHalo(ctx, d, new Set([id]), s, dpr, E.hiddenLayers, { color: (KiCadCanvas.SCH as Record<string, string>).selection, alpha: 1, extraPx: 2, extraMm: 2 * 0.0254, strokesOnly: true });
+    drawHalo(ctx, d, new Set([id, ...((E.hoverExtra || []) as string[]).filter((x) => d.items.has(x))]), s, dpr, E.hiddenLayers, { color: (KiCadCanvas.SCH as Record<string, string>).selection, alpha: 1, extraPx: 2, extraMm: 2 * 0.0254, strokesOnly: true });
   } catch (e) { console.warn(e); } finally { ctx.restore(); }
+}
+
+// ---------------------------------------------------------------- refreshMouse
+/** The pointer is over the stage (or captured by it), and the mouse buttons the last real pointer event held. */
+let pointerOver = false, lastButtons = 0;
+/**
+ * WX_VIEW_CONTROLS::refreshMouse( true ) (wx_view_controls.cpp:1249-1267): after the view moved under a pointer that
+ * did not (a wheel or key pan, a wheel zoom, an auto-pan tick, a touchpad gesture), the cursor position is taken again
+ * from the mouse and a motion event goes to the tools: the crosshair, the X / Y status fields, a moved item, a wire or
+ * a track being drawn follow the pointer's new design position.  The browser has no such event, so a pointer move at
+ * the pointer's last position is dispatched with the keys and buttons now held.
+ */
+export function refreshMouse(evenOutside = false): void {
+  const c = E.lastClient as number[] | null; if (!c || !(pointerOver || evenOutside) || !E.kdoc) return;
+  const m = heldModifiers();
+  stage.dispatchEvent(new PointerEvent("pointermove", { clientX: c[0], clientY: c[1], button: -1, buttons: lastButtons, bubbles: true, cancelable: true,
+    pointerType: "mouse", isPrimary: true, pointerId: 1, shiftKey: m.shift, altKey: m.alt, ctrlKey: !IS_MAC && m.ctrl, metaKey: IS_MAC && m.ctrl }));
+}
+
+// ---------------------------------------------------------------- auto-pan
+/**
+ * Whether the running tool asked for auto-panning (VIEW_CONTROLS::SetAutoPan( true )): the move, drag and every
+ * selection box or area, the measure and zoom-window tools while they draw, the drawing tools once a shape or a
+ * placement is under way, the router while it routes, a point being edited (interactionBusy()).  A tool module may
+ * answer for itself through autoPan().
+ */
+function autoPanWanted(): boolean {
+  if (interactionBusy()) return true;
+  const m = activeModule() as { autoPan?: () => boolean } | null;
+  if (m && typeof m.autoPan === "function") { try { return !!m.autoPan(); } catch (e) { return false; } }
+  if (isSch()) { const s = schState() as (SchState & { carry?: unknown }) | null; return !!(s && (s.wire || s.draw || s.carry)); }
+  const p = pcbState(); return !!(p && (p.route || p.draw));
+}
+/** AUTO_PANNING: the timer runs; `apClient` is the pointer the last motion reported. */
+let apRaf = 0, apT = 0, apClient: [number, number] | null = null, apWanted: () => boolean = autoPanWanted;
+function stopAutoPanning(): void { if (apRaf) cancelAnimationFrame(apRaf); apRaf = 0; apT = 0; }
+/**
+ * WX_VIEW_CONTROLS::handleAutoPanning (wx_view_controls.cpp:1125-1193), run on every motion while auto-pan is on
+ * (Preferences > Mouse and Touchpad "Automatically pan while moving object") and the tool asked for it: a pointer in
+ * the border (2 % of the shorter side, at least 2 px) or past it starts the timer, one outside stops it.  A motion
+ * that came from a keyboard cursor step leaves the state alone.  `wanted` is the tool's SetAutoPan; tablecells.ts
+ * passes its own (its drag sees the motion before the stage does).  True while auto-panning.
+ */
+export function handleAutoPanning(ev: { clientX: number; clientY: number }, wanted: () => boolean = autoPanWanted): boolean {
+  if ((window as unknown as { KiCadKeyboardCursor?: string | null }).KiCadKeyboardCursor) return !!apRaf;
+  if (!E.autoPan || E.pan || !wanted()) { stopAutoPanning(); return false; }   // DRAG_PANNING / DRAG_ZOOMING: false
+  const r = stage.getBoundingClientRect();
+  const [dx, dy] = KiCadCanvas.autoPanDirection(ev.clientX - r.left, ev.clientY - r.top, r.width, r.height);
+  apClient = [ev.clientX, ev.clientY]; apWanted = wanted;
+  if (!dx && !dy) { stopAutoPanning(); return false; }
+  if (!apRaf) apRaf = requestAnimationFrame(autoPanTick);
+  return true;
+}
+/**
+ * WX_VIEW_CONTROLS::onTimer in AUTO_PANNING (725-787): auto-pan switched off, the tool done with it, a drag pan
+ * started or the window without focus ends it; otherwise the view moves by autoPanStep for each elapsed tick
+ * (250 / 60 ms) and the mouse is refreshed, so the item under the cursor follows.
+ */
+function autoPanTick(t: number): void {
+  apRaf = 0;
+  const c = apClient;
+  if (!c || !E.autoPan || E.pan || !E.kdoc || !apWanted() || (typeof document.hasFocus === "function" && !document.hasFocus())) { apT = 0; return; }
+  const r = stage.getBoundingClientRect();
+  const [dx, dy] = KiCadCanvas.autoPanStep(c[0] - r.left, c[1] - r.top, r.width, r.height, E.autoPanSpeed || 5);
+  if (!dx && !dy) { apT = 0; return; }
+  const ticks = apT ? Math.min(12, Math.max(0, t - apT) / (KiCadCanvas.AUTOPAN_TICK_MS as number)) : 1; apT = t;
+  apRaf = requestAnimationFrame(autoPanTick);   // m_panTimer.Start(): the next tick (a motion below may stop it)
+  E.viewTouched = true; E.panX -= dx * ticks; E.panY -= dy * ticks; breakFollow(); applyView();
+  // the pointer may have left the canvas past the border: KiCad's onLeave hands that position to onMotion, and the
+  // pan goes on toward it
+  E.lastClient = [c[0], c[1]];
+  refreshMouse(true);
 }
 
 // ---------------------------------------------------------------- wheel
 let ctrlHeld = false;
 function panBy(dx: number, dy: number, mm: Mm): void {
   E.viewTouched = true; E.panX += dx; E.panY += dy; breakFollow(); applyView(); sendPresence(mm, undefined);
+  refreshMouse();
 }
 function onWheel(ev: WheelEvent): void {
   ev.preventDefault();
@@ -578,21 +658,32 @@ function onWheel(ev: WheelEvent): void {
   const dx = ev.deltaX * unit, dy = ev.deltaY * unit, mm = worldMm(ev);
   const s: WheelSettings = Object.assign({}, DEFAULT_WHEEL, E.wheel || {});
   // a pinch arrives as ctrl+wheel with no Ctrl key held: a native zoom gesture (WX_VIEW_CONTROLS::onMagnify)
-  if (ev.ctrlKey && !ctrlHeld) { zoomAtPointer(Math.pow(1.01, -dy), ev, r, s); return; }
+  // onMagnify zooms about the pointer and never centres, whatever "Center and warp cursor on zoom" says
+  if (ev.ctrlKey && !ctrlHeld) { zoomBy(Math.pow(1.01, -dy), ev.clientX - r.left, ev.clientY - r.top); requestZoomEnd(); refreshMouse(); return; }
   // wx ControlDown() is Cmd on macOS (the physical Control key is RawControlDown, not a scroll modifier)
   const ctrl = IS_MAC ? ev.metaKey : ev.ctrlKey;
   // "Native gestures": two-finger movement on a touchpad pans (a pixel-precise delta on both axes, or a fraction)
   if (s.touchpadMode === "native" && ev.deltaMode === 0 && !ev.shiftKey && !ctrl && !ev.altKey && (dx !== 0 && dy !== 0 || dy % 1 !== 0 || dx % 1 !== 0)) { panBy(-dx, -dy, mm); return; }
-  const act = wheelAction({ deltaX: dx, deltaY: dy, shiftKey: ev.shiftKey, ctrlKey: ctrl, altKey: ev.altKey }, s, r.width, r.height);
+  // wx delivers the vertical and the horizontal wheel axes as separate events (onWheel pans X for one, Y for the
+  // other), so a diagonal two-finger scroll pans on both axes
+  let vdx = dx;
+  if (dx !== 0 && dy !== 0 && !ev.shiftKey) {
+    const ah = wheelAction({ deltaX: dx, deltaY: 0, shiftKey: false, ctrlKey: ctrl, altKey: ev.altKey }, s, r.width, r.height);
+    if (ah && ah.kind === "pan") panBy(ah.dx, ah.dy, mm);
+    vdx = 0;
+  }
+  const act = wheelAction({ deltaX: vdx, deltaY: dy, shiftKey: ev.shiftKey, ctrlKey: ctrl, altKey: ev.altKey }, s, r.width, r.height);
   if (!act) {                                                                // KiCad forwards multi-modifier scrolls to the tools
     // SCH_SELECTION_TOOL: Shift+Alt+wheel runs ACTIONS::increment on the primary part (field 0), Ctrl+Alt+wheel on the secondary
     const field = ev.shiftKey && ev.altKey && !ctrl ? 0 : ctrl && ev.altKey && !ev.shiftKey ? 1 : -1;
     const inc = CollabTools.sch && CollabTools.sch._ && (CollabTools.sch._ as unknown as { incrementSelection?: (c: unknown, delta: number, field?: number) => unknown }).incrementSelection;
     if (field >= 0 && isSch() && E.tool === "select" && !E.viewOnly && inc && dy !== 0) { try { inc(toolCtx(), dy < 0 ? 1 : -1, field); requestRender(); } catch (e) { console.warn(e); } }
+    // PCB_SELECTION_TOOL does the same (EDIT_TOOL::Increment)
+    else if (field >= 0 && !isSch() && CollabTools.pcb && E.tool === "select" && !E.viewOnly && dy !== 0) { runModuleAction(dy < 0 ? (field ? "incrementSecondary" : "incrementPrimary") : (field ? "decrementSecondary" : "decrementPrimary")); requestRender(); }
     return;
   }
   if (act.kind === "pan") { panBy(act.dx, act.dy, mm); return; }
-  if (!E.zoomController || E.zoomControllerFor !== E.wheel) { E.zoomController = makeZoomController(s, IS_MAC ? "mac" : /Win/.test(navigator.platform || navigator.userAgent || "") ? "win" : "linux"); E.zoomControllerFor = E.wheel; }
+  if (!E.zoomController || E.zoomControllerFor !== E.wheel) { E.zoomController = makeZoomController(s, IS_MAC ? "mac" : /Win/.test(navigator.platform || navigator.userAgent || "") ? "win" : "linux", typeof E.zoomControllerSince === "number" ? E.zoomControllerSince : performance.now()); E.zoomControllerFor = E.wheel; }
   // macOS reports a scroll distance rather than notches (wheelDelta 0); elsewhere a notch is 120
   const factor = (E.zoomController as (r: number, d: number, t: number) => number)(act.rotation, IS_MAC ? 0 : 120, performance.now());
   zoomAtPointer(factor, ev, r, s);
@@ -607,7 +698,7 @@ function onWheel(ev: WheelEvent): void {
  * until the pointer moves.
  */
 function zoomAtPointer(factor: number, ev: { clientX: number; clientY: number }, r: DOMRect, s: WheelSettings): void {
-  if (!s.centerOnZoom) { zoomBy(factor, ev.clientX - r.left, ev.clientY - r.top); requestZoomEnd(); return; }
+  if (!s.centerOnZoom) { zoomBy(factor, ev.clientX - r.left, ev.clientY - r.top); requestZoomEnd(); refreshMouse(); return; }
   const cx = r.width / 2, cy = r.height / 2;
   const warped = E.wheelWarp && E.wheelWarp[0] === ev.clientX && E.wheelWarp[1] === ev.clientY;
   if (!warped) { E.viewTouched = true; E.panX += cx - (ev.clientX - r.left); E.panY += cy - (ev.clientY - r.top); breakFollow(); applyView(); }
@@ -638,7 +729,7 @@ function onDownCapture(ev: PointerEvent): void {
     // PCB_SELECTION_TOOL / SCH_SELECTION_TOOL: a middle double click is Zoom to Fit, with Ctrl Zoom to Objects.  Only
     // the selection tools' loops take IsDblClick( BUT_MIDDLE ): in the router, a drawing tool or a move it only pans
     const now = performance.now(), m = midDown; midDown = { t: now, x: ev.clientX, y: ev.clientY };
-    if (m && E.tool === "select" && !interactionBusy() && now - m.t < DBL_CLICK_MS && Math.hypot(ev.clientX - m.x, ev.clientY - m.y) < DRAG_THRESHOLD_PX) {
+    if (m && E.tool === "select" && !interactionBusy() && now - m.t < DBL_CLICK_MS && !isPastDragThreshold(ev.clientX - m.x, ev.clientY - m.y)) {
       midDown = null; const hk = E.hotkeys as { runKicadAction?: (id: string) => boolean } | undefined;
       if (hk && hk.runKicadAction) hk.runKicadAction(ev.ctrlKey || ev.metaKey ? "zoomFitObjects" : "zoomFitScreen");
       return;
@@ -648,7 +739,7 @@ function onDownCapture(ev: PointerEvent): void {
   }
   if (ev.button === 2) {
     ev.preventDefault(); ev.stopImmediatePropagation();
-    E.rdown = { x: ev.clientX, y: ev.clientY, id: ev.pointerId };
+    E.rdown = { x: ev.clientX, y: ev.clientY, t: ev.timeStamp, id: ev.pointerId };
     try { stage.setPointerCapture(ev.pointerId); } catch { /* synthetic pointer */ }
     return;
   }
@@ -659,6 +750,16 @@ function onDownCapture(ev: PointerEvent): void {
     if (m) {
       ev.preventDefault(); ev.stopImmediatePropagation();
       clearAllSelection(false); const hk = E.hooks as { ercSelectMarker?: (m: unknown) => void }; if (hk.ercSelectMarker) hk.ercSelectMarker(m);
+      selectionChanged(); return;
+    }
+  }
+  // PCB_SELECTION_TOOL: a DRC marker (PCB_MARKER_T) is selected alone and the DRC dialog, when open, picks its row
+  // (DIALOG_DRC::SelectMarker)
+  if (ev.button === 0 && !isSch() && E.tool === "select" && !interactionBusy() && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+    const m = markerUnder(worldMm(ev)); const hk = E.hooks as { drcSelectMarker?: (m: unknown) => void };
+    if (m && hk.drcSelectMarker && !pcbPick(worldMm(ev))) {
+      ev.preventDefault(); ev.stopImmediatePropagation();
+      clearAllSelection(false); hk.drcSelectMarker(m);
       selectionChanged(); return;
     }
   }
@@ -688,14 +789,15 @@ function chordedButton(ev: PointerEvent): boolean {
     else if (!down(2)) { if (E.rdown) E.rdown = null; else if (E.pan) { E.pan = null; stage.classList.remove("panning"); } }
     return true;
   }
-  if (ev.button === 0 && !down(1) && (E.pan || E.rdown) && interactionBusy()) {
-    // the left button let go while the view pans: every tool gets its release (the item drops where it is, a box
-    // selects), and the pan goes on
-    const pan = E.pan, rdown = E.rdown; E.pan = null; E.rdown = null;
-    try {
+  if (ev.button === 0 && !down(1) && (E.pan || E.rdown)) {
+    // the left button let go while the view pans or drag-zooms: every tool gets its release (the item drops where it
+    // is, a box selects), and the pan ends (WX_VIEW_CONTROLS::onButton in DRAG_PANNING / DRAG_ZOOMING: any button up
+    // goes back to IDLE; a new middle press is needed to pan again)
+    E.pan = null; E.rdown = null; stage.classList.remove("panning");
+    if (interactionBusy()) {
       stage.dispatchEvent(new PointerEvent("pointerup", { clientX: ev.clientX, clientY: ev.clientY, button: 0, buttons: ev.buttons, pointerId: ev.pointerId,
         pointerType: "mouse", isPrimary: true, bubbles: true, cancelable: true, shiftKey: ev.shiftKey, ctrlKey: ev.ctrlKey, metaKey: ev.metaKey, altKey: ev.altKey }));
-    } finally { if (!E.pan) E.pan = pan; if (!E.rdown) E.rdown = rdown; }
+    }
     return true;
   }
   return false;
@@ -710,10 +812,17 @@ function panMove(ev: PointerEvent): void {
   E.viewTouched = true; E.panX = ev.clientX - E.pan.x; E.panY = ev.clientY - E.pan.y; breakFollow(); applyView();
 }
 function onMoveCapture(ev: PointerEvent): void {
+  if (ev.isTrusted) { pointerOver = true; lastButtons = ev.buttons; }
   if (buttonLost(ev)) { cancelInteraction(); }
   chordedButton(ev);
-  if (E.rdown && !E.pan && E.rightDragPan !== false && Math.hypot(ev.clientX - E.rdown.x, ev.clientY - E.rdown.y) > DRAG_THRESHOLD_PX) { const r = E.rdown; E.rdown = null; startPan(ev, r.x, r.y, E.rightDrag === "zoom"); }
+  // ZOOM_TOOL::Main: in the zoom tool a right drag draws the area too, and zooms out on the release
+  if (E.rdown && !E.pan && E.tool === "zoomtool" && !E.zoomRect && isPastDragThreshold(ev.clientX - E.rdown.x, ev.clientY - E.rdown.y, E.rdown.t === undefined ? undefined : ev.timeStamp - E.rdown.t)) {
+    const r = E.rdown; E.rdown = null; E.zoomRect = { start: [r.x, r.y], out: true };
+  }
+  if (E.rdown && !E.pan && E.rightDragPan !== false && isPastDragThreshold(ev.clientX - E.rdown.x, ev.clientY - E.rdown.y, E.rdown.t === undefined ? undefined : ev.timeStamp - E.rdown.t)) { const r = E.rdown; E.rdown = null; startPan(ev, r.x, r.y, E.rightDrag === "zoom"); }
   panMove(ev);
+  // m_autoPanEnabled && m_autoPanSettingEnabled: every motion goes through handleAutoPanning
+  if (E.autoPan || apRaf) handleAutoPanning(ev);
   queueHover(ev);
 }
 function onUpCapture(ev: PointerEvent): void {
@@ -738,13 +847,16 @@ export function installGestures(open: OpenMenu): void {
     if (/^(SELECT|K-SELECT|BUTTON|INPUT|TEXTAREA)$/.test(ae.tagName) || ae.isContentEditable) ae.blur();
   }, true);
   stage.addEventListener("pointerdown", onDownCapture, true);
+  // the buttons held, for the pointer moves refreshMouse dispatches
+  stage.addEventListener("pointerdown", (ev) => { if (ev.isTrusted) { pointerOver = true; lastButtons = ev.buttons; } }, true);
+  window.addEventListener("pointerup", (ev) => { if (ev.isTrusted) lastButtons = ev.buttons; }, true);
   stage.addEventListener("pointermove", onMoveCapture, true);
   stage.addEventListener("pointerup", onUpCapture, true);
   stage.addEventListener("pointercancel", () => { cancelInteraction(); }, true);
-  stage.addEventListener("pointerleave", () => { placeCrosshair(null); if (setRollover(null, heldModifiers())) requestRender(); if (E.hoverId) { E.hoverId = null; requestRepaint(); } stage.classList.remove("over-sel"); });
+  stage.addEventListener("pointerleave", (ev) => { pointerOver = false; if (apRaf) handleAutoPanning(ev); placeCrosshair(null); if (setRollover(null, heldModifiers())) requestRender(); if (E.hoverId) { E.hoverId = null; requestRepaint(); } stage.classList.remove("over-sel"); });
   stage.addEventListener("auxclick", (ev) => ev.preventDefault());           // no autoscroll / paste on a middle click
   stage.addEventListener("mousedown", (ev) => { if (ev.button === 1) ev.preventDefault(); });
-  window.addEventListener("blur", () => { ctrlHeld = false; cancelInteraction(); });
+  window.addEventListener("blur", () => { ctrlHeld = false; stopAutoPanning(); cancelInteraction(); });
   window.addEventListener("keydown", (ev) => { if (ev.key === "Control") ctrlHeld = true; }, true);
   window.addEventListener("keyup", (ev) => { if (ev.key === "Control") ctrlHeld = false; }, true);
   // Esc while something is being dragged puts it back and nothing else: registered ahead of the tool
@@ -753,7 +865,10 @@ export function installGestures(open: OpenMenu): void {
     if (ev.key !== "Escape" || state.view !== "editor" || E.contextMenuOpen || !interactionBusy()) return;
     const t = ev.target as Element | null; if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
     if (window.KDialogs && window.KDialogs.isOpen()) return;
+    // ZOOM_TOOL::selectRegion: cancelInteractive during the drag cancels it and leaves the tool
+    const zooming = !!E.zoomRect && E.tool === "zoomtool";
     ev.preventDefault(); ev.stopImmediatePropagation(); cancelInteraction();
+    if (zooming) setTool("select");
   }, true);
   watchPixels();
 }

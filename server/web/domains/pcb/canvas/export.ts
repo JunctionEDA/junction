@@ -1,10 +1,12 @@
 // kicad-canvas — GENERATED SOURCE MODULE (split from the former static/kicad-canvas.js; static/kicad-canvas.js is now the esbuild output of web/domains/pcb/canvas/index.ts — edit these modules, not the bundle).
 import { PCB_BG, PCB_PAGE_LIMITS, PCB_SHEET, SCH, schTheme } from "./colors";
+import { SEXPR_BOARD_FILE_VERSION } from "./format-version";
 import { buildGeom, inSchTheme } from "./geom";
+import { padLabelShown } from "./geom-pcb";
 import { bboxOf } from "./hit";
 import { FONT_EM, FONT_FAMILY, HIDDEN_TEXT_ALPHA, OUTLINE_OVERBAR, cssFamily, dashPattern, faceAvailable, makeCanvas, render, textMode, tracePath } from "./render";
 import { outlineLayout, type OutlineLayout } from "./outline-text";
-import { QUOTED, isList, kid, quotedMask, str, splitLines } from "./sexpr";
+import { QUOTED, isBareSlot, isList, isQuotedSlot, kid, quotedMask, str, splitLines } from "./sexpr";
 import { documentDrawingSheet } from "./sheet";
 import { TEXT_INTERLINE, lineOffsets, textWidth } from "./text";
 import { strokeLine, strokeOrigin } from "./stroke-font";
@@ -181,11 +183,13 @@ export function exportBox(doc: Doc, opts: ExportOpts): { ids: Set<string> | null
 export function svgDrawingSheet(doc: Doc, hairline: number): string[] {
   const isPcb = doc.type === "pcb";
   const ink = isPcb ? PCB_SHEET : SCH.frame;
-  const out: string[] = [];
+  const out: string[] = []; let images = 0;
   for (const it of documentDrawingSheet(doc)) {
     if (it.t === "line") out.push(`<line x1="${fmt(it.x1)}" y1="${fmt(it.y1)}" x2="${fmt(it.x2)}" y2="${fmt(it.y2)}" stroke="${ink}" stroke-width="${fmt(it.w)}"/>`);
     else if (it.t === "rect") out.push(`<rect x="${fmt(it.x)}" y="${fmt(it.y)}" width="${fmt(it.w)}" height="${fmt(it.h)}" fill="none" stroke="${ink}" stroke-width="${fmt(it.lw)}"/>`);
-    else if (it.t === "text") out.push(svgGeom({ t: "text", x: it.x, y: it.y, text: it.text, size: it.size, w: it.w, color: it.color || ink,
+    else if (it.t === "image") out.splice(images++, 0, `<image x="${fmt(it.x)}" y="${fmt(it.y)}" width="${fmt(it.w)}" height="${fmt(it.h)}" preserveAspectRatio="none" href="${it.url}"/>`);   // bitmaps first (DS_DRAW_ITEM_LIST::Print)
+    else if (it.t === "poly") { for (const pl of it.polys) if (pl.length >= 3) out.push(`<path d="M${pl.map((p) => fmt(p[0]) + " " + fmt(p[1])).join("L")}Z" fill="${ink}" stroke="none"/>`); }
+    else if (it.t === "text") out.push(svgGeom({ t: "text", x: it.x, y: it.y, text: it.text, size: it.size, sizeX: it.sizeX, w: it.w, color: it.color || ink,
       rot: it.rot, h: it.h, v: it.v, bold: it.bold, italic: it.italic, multiline: it.multiline }, hairline, isPcb, null));
   }
   out.push(`<rect x="0" y="0" width="${fmt(doc.page[0])}" height="${fmt(doc.page[1])}" fill="none" stroke="${isPcb ? PCB_PAGE_LIMITS : SCH.pageLimits}" stroke-width="${fmt(hairline)}"/>`);
@@ -222,7 +226,7 @@ export function renderSvg(doc: Doc, opts?: ExportOpts | null): string {
     if (ids && !ids.has(it.id)) continue;
     const b = it.bbox; if (b && (b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1)) continue;
     for (const g of it.geom) {
-      if (hidden.has(g.layer) || (opts.zoneOutline && g.zoneFill) || (opts.padNumbers === false && g.padNum)) continue;
+      if (hidden.has(g.layer) || (opts.zoneOutline && g.zoneFill) || (g.padText && !padLabelShown(g, opts.padNumbers !== false, (opts as { netNames?: boolean }).netNames !== false))) continue;   // one of the pad label layouts, as on screen
       take(g);
     }
     if (it.hiddenGeom) for (const g of it.hiddenGeom) { if (hidden.has(g.layer) || (g.hiddenText ? !(isPcb ? opts.showHiddenText : opts.showHiddenFields) : !opts.showHiddenPins)) continue; take(g); }
@@ -278,7 +282,7 @@ export function atomText(v: unknown, quoted: boolean): string {
   const s = String(v);
   if (quoted || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)   // KiCad always quotes uuids
       || !(/^[A-Za-z_][\w.:*-]*$/.test(s) || /^0x[0-9a-fA-F_]+$/.test(s)))   // a plot layer mask (layerselection 0x00000000_…) is a bare token too
-    return '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"';
+    return '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r") + '"';
   return s;
 }
 
@@ -344,8 +348,13 @@ export function serialize(node: SAtom): string {
   for (let j = 0; j < node.length; j++) {
     if (j) out += " ";
     const c = node[j];
-    if (bars && typeof c === "string" && !(j < 30 && ((q >> j) & 1) === 1) && /^\|?[A-Za-z0-9+/=]*\|?$/.test(c)) { out += c; continue; }
-    out += isList(c) ? serialize(c) : atomText(c, (j < 30 && ((q >> j) & 1) === 1) || stringSlot(node, j) || (!q && typeof c === "string" && isStringSlot(node, j)));
+    const wasQuoted = isQuotedSlot(node, j);
+    if (bars && typeof c === "string" && !wasQuoted && /^\|?[A-Za-z0-9+/=]*\|?$/.test(c)) { out += c; continue; }
+    // A bare number-shaped token the reader kept as text ("0603", a tstamp 5E123456) goes back bare.
+    if (!wasQuoted && typeof c === "string" && isBareSlot(node, j) && /^[^\s()"\\]+$/.test(c)) { out += c; continue; }
+    // KICAD_FORMAT::FormatStreamData writes every base64 row of an image's (data …) quoted.
+    const dataRow = node[0] === "data" && !bars && j > 0 && typeof c === "string";
+    out += isList(c) ? serialize(c) : atomText(c, wasQuoted || dataRow || stringSlot(node, j) || (!q && typeof c === "string" && isStringSlot(node, j)));
   }
   return out + ")";
 }
@@ -362,7 +371,7 @@ export function wrapFragment(doc: Pick<Doc, "type" | "version">, body: string): 
 }
 
 /** The board file version the desktop writes; only a fallback — a parsed document's own version wins. */
-export const BOARD_FILE_VERSION = 20260728;
+export const BOARD_FILE_VERSION = SEXPR_BOARD_FILE_VERSION;
 
 export function serializeItem(doc: Pick<Doc, "type" | "version" | "lib">, item: Pick<Item, "kind" | "node">): string {
   if (doc.type === "sch") {

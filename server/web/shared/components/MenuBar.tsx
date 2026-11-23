@@ -14,7 +14,7 @@
 //
 // A tool-module action KiCad's menus do not place (CollabTools.<m>.actions) keeps its hotkey and context menu only.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
-import { FPEDIT_MENUS, HOME_MENUS, LINKS, MENUS, MENU_CHECKS, READ_ONLY_OK, SCH_ATTRIBUTE_CHECKS, SUBMENU_ICONS, CONDITION_FIRST, conditionWhy, type ActionState, type MenuEntry } from "../../domains/pcb/tables";
+import { FPEDIT_MENUS, HOME_MENUS, LINKS, MENUS, MENU_CHECKS, READ_ONLY_OK, SCH_ATTRIBUTE_CHECKS, SUBMENU_ICONS, CONDITION_FIRST, conditionWhy, type ActionState, type MenuEntry, NEEDS_SELECTION } from "../../domains/pcb/tables";
 import { dispatch, useApp, type AppState, type Editor, type ModuleAction } from "../store";
 import { iconFor, isOn, keyFor, labelFor, runUiAction, unavailable, useAvail, type Avail } from "../../domains/pcb/actions";
 import { menuKey } from "../keys";
@@ -193,7 +193,7 @@ function AppMenu({ inEditor }: { inEditor: boolean }) {
                 aria-disabled={e.why ? "true" : undefined} title={e.why || undefined}
                 className={cx(ROW, e.why ? "bg-transparent text-ink-3" : sel === i ? "bg-accent text-on-accent" : "bg-transparent")}
                 onMouseMove={() => setSel(e.why ? -1 : i)} onClick={() => { if (!e.why) run(e); }}>
-                <span className="w-5 h-4 mr-1.5 shrink-0 flex items-center justify-center">{e.icon ? <KIcon name={e.icon} size={16} /> : null}</span>
+                <span className="w-5 h-4 mr-1.5 shrink-0 flex items-center justify-center">{e.icon ? <span className={MENU_ICON}><KIcon name={e.icon} size={16} /></span> : null}</span>
                 {e.note
                   ? <span className="flex-1 flex flex-col min-w-0"><span>{e.label}</span>
                       <span className={cx("text-xs whitespace-normal max-w-[250px] leading-snug", sel === i ? "text-on-accent opacity-80" : "text-ink-3")}>{e.note}</span></span>
@@ -211,6 +211,8 @@ function AppMenu({ inEditor }: { inEditor: boolean }) {
 const PANEL = "dd fixed min-w-[230px] bg-panel border border-line rounded-md p-1 z-50 shadow-panel overflow-y-auto overflow-x-hidden";
 const ROW = "mi flex items-center w-full text-left border-0 py-[5px] pl-1.5 pr-2.5 rounded-xs text-ink no-underline hover:no-underline cursor-default whitespace-nowrap";
 const KBD = "ml-6 text-xs font-mono font-normal leading-[normal] text-ink-3";
+/** COMMON_SETTINGS appearance.use_icons_in_menus off (Preferences > Common, the root's k-no-menu-icons): no entry icons */
+const MENU_ICON = "flex [.k-no-menu-icons_&]:hidden";
 
 interface PanelProps {
   nodes: MenuNode[]; depth: number; anchor: () => DOMRect | null; parentPanel: () => DOMRect | null;
@@ -250,7 +252,7 @@ function Panel({ nodes, depth, anchor, parentPanel, sel, open, c, onHover, onEnt
           return (
             <div key={"sub" + n.title} data-idx={i} data-sub={n.title} role="menuitem" aria-haspopup="true" aria-expanded={openIdx === i}
               className={cx(ROW, "sub", active ? "bg-accent text-on-accent" : "bg-transparent")} onMouseMove={() => onHover(depth, i)} onClick={() => onOpenSub(depth, i)}>
-              <span className="w-5 h-4 mr-1.5 shrink-0 flex items-center justify-center">{icon ? <KIcon name={icon} size={16} /> : null}</span>
+              <span className="w-5 h-4 mr-1.5 shrink-0 flex items-center justify-center">{icon ? <span className={MENU_ICON}><KIcon name={icon} size={16} /></span> : null}</span>
               <span className="flex-1">{n.title}</span><MenuArrow className="ml-6" />
               {openIdx === i ? <Panel nodes={n.nodes} depth={depth + 1} anchor={rectOf(i)} parentPanel={ownRect} sel={sel} open={open} c={c} onHover={onHover} onEnterPanel={onEnterPanel} onRun={onRun} onOpenSub={onOpenSub} /> : null}
             </div>
@@ -266,7 +268,7 @@ function Panel({ nodes, depth, anchor, parentPanel, sel, open, c, onHover, onEnt
         const title = id === "undo" && c.undo.undo ? `${c.undo.undo} step${c.undo.undo === 1 ? "" : "s"}` : id === "redo" && c.undo.redo ? `${c.undo.redo} step${c.undo.redo === 1 ? "" : "s"}` : why || off || undefined;
         const body: ReactNode = (
           <>
-            <span className="w-5 h-4 mr-1.5 shrink-0 flex items-center justify-center text-base leading-none" data-check={checkable ? (on ? "on" : "off") : undefined}>{checkable ? <MenuCheck on={on} /> : icon ? <KIcon name={icon} size={16} /> : null}</span>
+            <span className="w-5 h-4 mr-1.5 shrink-0 flex items-center justify-center text-base leading-none" data-check={checkable ? (on ? "on" : "off") : undefined}>{checkable ? <MenuCheck on={on} /> : icon ? <span className={MENU_ICON}><KIcon name={icon} size={16} /></span> : null}</span>
             <span className="flex-1">{label}</span>{k ? <kbd className={cx(KBD, active && !off && "text-on-accent")}>{menuKey(k)}</kbd> : null}
           </>
         );

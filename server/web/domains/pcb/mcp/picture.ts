@@ -9,6 +9,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { PCB_BG, PCB_PAGE_LIMITS, PCB_SHEET, SCH } from "../canvas/colors";
 import { exportBox, fmt, svgGeom } from "../canvas/export";
+import { padLabelShown } from "../canvas/geom-pcb";
 import { HIDDEN_TEXT_ALPHA, drawTextStroke } from "../canvas/render";
 import { documentDrawingSheet } from "../canvas/sheet";
 
@@ -94,10 +95,13 @@ export function renderPicture(doc: any, opts: any): string {
   const frame = opts.frame !== undefined ? opts.frame : (!isPcb && !ids && !opts.bbox);
   if (frame) {
     const ink = isPcb ? PCB_SHEET : SCH.frame;
+    const imgAt = out.length; let images = 0;   // the bitmaps go first (DS_DRAW_ITEM_LIST::Print)
     for (const it of documentDrawingSheet(doc) as any[]) {
       if (it.t === "line") out.push(`<line x1="${fmt(it.x1)}" y1="${fmt(it.y1)}" x2="${fmt(it.x2)}" y2="${fmt(it.y2)}" stroke="${ink}" stroke-width="${fmt(it.w)}"/>`);
       else if (it.t === "rect") out.push(`<rect x="${fmt(it.x)}" y="${fmt(it.y)}" width="${fmt(it.w)}" height="${fmt(it.h)}" fill="none" stroke="${ink}" stroke-width="${fmt(it.lw)}"/>`);
-      else if (it.t === "text") out.push(textPaths({ t: "text", x: it.x, y: it.y, text: it.text, size: it.size, w: it.w, color: it.color || ink, rot: it.rot, h: it.h, v: it.v, bold: it.bold, italic: it.italic, multiline: it.multiline }, hairline, bg));
+      else if (it.t === "image") out.splice(imgAt + images++, 0, `<image x="${fmt(it.x)}" y="${fmt(it.y)}" width="${fmt(it.w)}" height="${fmt(it.h)}" preserveAspectRatio="none" href="${it.url}"/>`);
+      else if (it.t === "poly") { for (const pl of it.polys) if (pl.length >= 3) out.push(`<path d="M${pl.map((p: number[]) => fmt(p[0]) + " " + fmt(p[1])).join("L")}Z" fill="${ink}" stroke="none"/>`); }
+      else if (it.t === "text") out.push(textPaths({ t: "text", x: it.x, y: it.y, text: it.text, size: it.size, sizeX: it.sizeX, w: it.w, color: it.color || ink, rot: it.rot, h: it.h, v: it.v, bold: it.bold, italic: it.italic, multiline: it.multiline }, hairline, bg));
     }
     out.push(`<rect x="0" y="0" width="${fmt(doc.page[0])}" height="${fmt(doc.page[1])}" fill="none" stroke="${isPcb ? PCB_PAGE_LIMITS : SCH.pageLimits}" stroke-width="${fmt(hairline)}"/>`);
   }
@@ -108,7 +112,7 @@ export function renderPicture(doc: any, opts: any): string {
     if (ids && !ids.has(it.id)) continue;
     if (opts.zones === false && it.kind === "zone") continue;
     const b = it.bbox; if (b && (b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1)) continue;
-    for (const g of it.geom) { if (hidden.has(g.layer) || (opts.padNumbers === false && g.padNum) || (opts.copperOnly && g.layer && /Silk|Fab|CrtYd|Courtyard|Paste|Mask|User|Cmts|Dwgs|Eco|Margin/i.test(g.layer))) continue; take(g); }
+    for (const g of it.geom) { if (hidden.has(g.layer) || (g.padText && !padLabelShown(g, opts.padNumbers !== false, (opts as { netNames?: boolean }).netNames !== false)) || (opts.copperOnly && g.layer && /Silk|Fab|CrtYd|Courtyard|Paste|Mask|User|Cmts|Dwgs|Eco|Margin/i.test(g.layer))) continue; take(g); }
   }
   for (const z of Array.from(buckets.keys()).sort((a, b) => a - b)) for (const g of buckets.get(z)!) {
     const s = one(g); if (!s) continue;

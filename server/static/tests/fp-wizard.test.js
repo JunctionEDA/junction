@@ -41,7 +41,9 @@ test("a wizard's answer is checked into pages, values, messages and a footprint"
 test("the exported footprint is at the origin with a new footprint's header; the rest is untouched", () => {
   const src = '(footprint "Ring_8" (version 20241229) (generator "kicad_collaborative_wizard") (generator_version "10.0") (layer "F.Cu") (at 10 20 90) (locked yes) (property "Reference" "REF**" (at 0 -8) (layer "F.Fab")) (pad "1" smd circle (at 5 0) (size 1.2 1.2) (layers "F.Cu" "F.Mask")))';
   const t = M.wizardFootprintTree(SX.parse(src), 20260728, SX.parse);
-  assert.strictEqual(EX.serialize(t), '(footprint "Ring_8" (version 20260728) (generator "pcbnew") (generator_version "10.0") (layer "F.Cu") (property "Reference" "REF**" (at 0 -8) (layer "F.Fab")) (pad "1" smd circle (at 5 0) (size 1.2 1.2) (layers "F.Cu" "F.Mask")))');
+  // (generator_version: GetMajorMinorVersion() of this build)
+  const gv = /KICAD_BASE_VERSION = "(\d+\.\d+)/.exec(require("fs").readFileSync(require("./web-path").webPath("canvas/version.ts"), "utf8"))[1];
+  assert.strictEqual(EX.serialize(t), '(footprint "Ring_8" (version 20260728) (generator "pcbnew") (generator_version "' + gv + '") (layer "F.Cu") (property "Reference" "REF**" (at 0 -8) (layer "F.Fab")) (pad "1" smd circle (at 5 0) (size 1.2 1.2) (layers "F.Cu" "F.Mask")))');
 });
 
 const py = spawnSync("python3", ["--version"]);

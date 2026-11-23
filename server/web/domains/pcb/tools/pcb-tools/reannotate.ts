@@ -54,15 +54,25 @@ function roundToGrid(c: number, grid: number): number {
   if (Math.abs(r) > grid / 2) c += c < 0 ? -grid : grid;
   return c;
 }
-/** StrNumCmp: digit runs compare as numbers. */
-export function strNumCmp(a: string, b: string): number {
-  const re = /(\d+)|(\D+)/g, xa = a.match(re) || [], xb = b.match(re) || [];
-  for (let i = 0; i < Math.min(xa.length, xb.length); i++) {
-    const p = xa[i], q = xb[i], np = /^\d/.test(p), nq = /^\d/.test(q);
-    if (np && nq) { const d = Number(p) - Number(q); if (d) return d < 0 ? -1 : 1; }
-    else { const d = p.toUpperCase().localeCompare(q.toUpperCase()); if (d) return d < 0 ? -1 : 1; }
+/** StrNumCmp: digit runs compare as numbers; other characters one by one, upper-cased unless caseSensitive
+ *  (CMP_T::CASE_SENSITIVE compares them as they are). */
+export function strNumCmp(a: string, b: string, caseSensitive = false): number {
+  let i = 0, j = 0; const dig = (c: string): boolean => c >= "0" && c <= "9";
+  while (i < a.length && j < b.length) {
+    let c1 = a[i], c2 = b[j];
+    if (dig(c1) && dig(c2)) {
+      let n1 = 0, n2 = 0;
+      do { n1 = n1 * 10 + (a.charCodeAt(i) - 48); i++; } while (i < a.length && dig(a[i]));
+      do { n2 = n2 * 10 + (b.charCodeAt(j) - 48); j++; } while (j < b.length && dig(b[j]));
+      if (n1 !== n2) return n1 < n2 ? -1 : 1;
+      c1 = i < a.length ? a[i] : "\0"; c2 = j < b.length ? b[j] : "\0";
+    }
+    if (!caseSensitive) { if (c1 !== c2) { const u1 = c1.toUpperCase(), u2 = c2.toUpperCase(); if (u1 !== u2) return u1 < u2 ? -1 : 1; } }
+    else if (c1 !== c2) return c1 < c2 ? -1 : 1;
+    if (i < a.length) i++;
+    if (j < b.length) j++;
   }
-  return xa.length - xb.length;
+  return i >= a.length && j < b.length ? -1 : i < a.length && j >= b.length ? 1 : 0;
 }
 /** wxString::Matches: * and ? wildcards over the whole string. */
 const matches = (s: string, pat: string): boolean => new RegExp("^" + pat.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$").test(s);
@@ -155,7 +165,7 @@ export function geographicalReannotate(doc: BoardDoc, o: ReannotateOpts): Reanno
   };
   if (front.length) build(front, o.frontStart, o.frontPrefix, o.removeFrontPrefix);
   if (back.length) build(back, o.backStart, o.backPrefix, o.removeBackPrefix);
-  changes.sort((a, b) => strNumCmp(a.from, b.from));
+  changes.sort((a, b) => strNumCmp(a.from, b.from, true));   // StrNumCmp( a, b ): CMP_T::CASE_SENSITIVE
   // LogChangePlan
   let plan = "Reference Designator Prefixes in Use\n-------------------------------------------------------------\n";
   plan += prefixes.map((p, i) => p.prefix + ((i + 1) % 16 === 0 ? "\n" : " ")).join("");

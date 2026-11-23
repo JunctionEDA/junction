@@ -46,7 +46,7 @@ import { DIM_TYPE } from "./dimensions";
 import { pickTwoPoints } from "./dom";
 import { angleSnapMode, nextLineMode, setAngleSnap, stepDrawWidth } from "./draw-modes";
 import { askText } from "./draw-tools";
-import { drc, mm4, netclassName, netclassOf } from "./drc";
+import { drc, mm4, netclassName, netclassOf, netInNetclass } from "./drc";
 import { cycleVia, cycleWidth, sizeUnits, stepLayer } from "./edit-commands";
 import { enterGroup, exitGroup, selectedTopGroup, withinEnteredGroup, enteredGroup } from "./group-edit";
 import { applySelection, expandGroups, groupChanges, groupMembers, groupMembersChanges, groupOf, isLocked, lockChanges, selectedItems, selectionIds, topParentOf, ungroupChanges, groupNode, parentOf, setLocked } from "./groups";
@@ -73,7 +73,8 @@ import { clone, fmt, layerOf, r6, widthOf, rotator } from "./util";
 import { flipFieldChange, footprintFieldNode, requestField, rotateFieldChange, hideFieldChanges } from "./field-edit";
 import { imageInfo } from "./images";
 import { imageNode, textNode } from "./nodes";
-import { padMemory, typeFromPad } from "./pad-tool";
+import { canHaveNumber, padMemory, typeFromPad } from "./pad-tool";
+import { incrementString } from "../../canvas/sheet";
 import { diffPairMarkers, matchedLengthMarkers } from "./dru";
 import { sourceZone, zoneDuplicateNode, zoneMergeChanges } from "./zone-modes";
 import { zonePriorityAbility } from "./zone-priority";
@@ -243,6 +244,30 @@ act("duplicateIncrement", "Duplicate and Increment", "Ctrl+Shift+D", (ctx: PcbCt
   const r = duplicateChanges(ctx.doc, sel.ids, null, { increment: true }); if (!r.changes.length) return true;
   ctx.commit(r.changes, "Duplicate", { tentative: true }); applySelection(ctx, r.ids); duplicatedMsg(ctx, r.ids); beginCarryMove(ctx, { placing: r.ids.slice(), restore: r.restore, hover: sel.hover }); return true;
 });
+/**
+ * EDIT_TOOL::Increment (pcbnew/tools/edit_tool.cpp:3904-3990) for ACTIONS::increment / incrementPrimary /
+ * decrementPrimary / incrementSecondary / decrementSecondary: STRING_INCREMENTER with SkipIOSQXZ on steps part `index`
+ * of each selected PCB text and, in the footprint editor only, each pad number (not an NPTH or aperture pad); one
+ * "Increment" step.
+ */
+export function incrementItems(ctx: PcbCtx, delta: number, index: number, id: string): boolean {
+  if (!canEdit(ctx)) return true;
+  const sel = requestSelection(ctx, { filter: (it: KItem) => it.kind === "gr_text" || it.kind === "pad", rerun: (c: PcbCtx) => runAction(id, c) }); if (!sel) return true;
+  const changes: KChange[] = [];
+  for (const it of sel.items) {
+    if (it.kind === "pad" && (!ctx.doc.fpEditor || !canHaveNumber(it.node))) continue;
+    if (it.kind !== "pad" && it.kind !== "gr_text") continue;
+    const t = incrementString(K.str(it.node[1]), delta, index, true, 50); if (t === null) continue;
+    const n = clone(it.node); n[1] = t; changes.push(replacedChange(it, n));
+  }
+  if (changes.length) ctx.commit(changes, "Increment");
+  endHover(ctx, sel); ctx.requestRender(); return true;
+}
+act("increment", "Increment", "", (ctx: PcbCtx) => incrementItems(ctx, 1, 0, "increment"));
+act("incrementPrimary", "Increment Primary", "", (ctx: PcbCtx) => incrementItems(ctx, 1, 0, "incrementPrimary"));
+act("decrementPrimary", "Decrement Primary", "", (ctx: PcbCtx) => incrementItems(ctx, -1, 0, "decrementPrimary"));
+act("incrementSecondary", "Increment Secondary", "", (ctx: PcbCtx) => incrementItems(ctx, 1, 1, "incrementSecondary"));
+act("decrementSecondary", "Decrement Secondary", "", (ctx: PcbCtx) => incrementItems(ctx, -1, 1, "decrementSecondary"));
 // EDIT_TOOL::copyToClipboardAsText: the selection or the item under the cursor (a hover selection is cleared), nothing
 // filtered and nothing said; texts, fields, dimensions, text boxes and tables give their text, trimmed, one per line,
 // and the clipboard is left alone when there is none
@@ -864,7 +889,7 @@ act("cleanupTracks", "Cleanup Tracks & Vias…", "", (ctx: PcbCtx) => {
   const layerOf = (it: KItem): string => { const l = K.kid(it.node, "layer"); if (l) return K.str(l[1]); const ls = K.kid(it.node, "layers"); return ls ? K.str(ls[1]) : ""; };
   // DIALOG_CLEANUP_TRACKS_AND_VIAS::doCleanup's filter: true leaves the item alone
   const opts = (o: CleanupDialogOpts): CleanupOpts => ({ shorts: o.shorts, vias: o.vias, danglingVias: o.danglingVias, merge: o.merge, dangling: o.dangling, inPads: o.inPads,
-    filter: (it: KItem) => (o.selectedOnly && !selNow.has(it.id)) || (o.net !== null && netName(it) !== o.net) || (o.netclass !== null && netclassName(settings, netName(it)) !== o.netclass) || (o.layer !== null && layerOf(it) !== o.layer) });
+    filter: (it: KItem) => (o.selectedOnly && !selNow.has(it.id)) || (o.net !== null && netName(it) !== o.net) || (o.netclass !== null && !netInNetclass(settings, netName(it), o.netclass)) || (o.layer !== null && layerOf(it) !== o.layer) });
   const req: CleanupRequest = {
     nets: boardNets(doc).map((n) => n.name), netclasses: ["Default", ...Object.keys(settings.netclasses).filter((n) => n !== "Default")], copper: copperOf(doc),
     activeLayer: ctx.activeLayer || S.layer, highlightNet: typeof S.highlightNet === "string" ? S.highlightNet : null, currentNetclass: "Default",
@@ -896,7 +921,14 @@ act("unrouteSelected", "Unroute Selected", "", (ctx: PcbCtx) => {
   if (remove.size) ctx.commit(deleteChanges(ctx.doc, Array.from(remove)), "Unroute Selected");
   applySelection(ctx, keep); S.padSel = pads.sel; S.padAlso = pads.also; ctx.requestRender(); return true;
 });
-act("deleteFull", "Delete Full Track", "Shift+Delete", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select a track first"); if (!ids) return true; const run = connectedRun(ctx.doc, ids); for (const id of ids) run.add(id); S.sel.clear(); return commitSel(ctx, deleteChanges(ctx.doc, Array.from(run)), "delete full track"); });
+// EDIT_TOOL::Remove in "alternative" mode: a selection holding a track or a via is first expanded to its full connection
+// (RunAction( PCB_ACTIONS::selectConnection )), then the whole selection is deleted
+act("deleteFull", "Delete Full Track", "Shift+Delete", (ctx: PcbCtx) => {
+  const ids = selectionOrToast(ctx, "Select a track first"); if (!ids) return true;
+  const hasTrack = ids.some((id) => { const it = ctx.doc.items.get(id); return !!it && (it.kind === "segment" || it.kind === "via"); });
+  const run = hasTrack ? expandConnection(ctx.doc, ids, { passes: walkFilter(ctx), inScope: walkScope(ctx), accuracy: 5 / Math.max(1e-6, ctx.pxPerMm || 1) }) : new Set(ids);
+  S.sel.clear(); return commitSel(ctx, deleteChanges(ctx.doc, Array.from(run).filter((id) => ctx.doc.items.has(id))), "delete full track");
+});
 // inspection
 act("runDRC", "Design Rules Checker…", "", (ctx: PcbCtx) => {
   bind(ctx); const s = settingsOf(ctx); S.markers = drc(ctx.doc, s, { rules: S.dru ? S.dru.rules : null }).concat(S.dru ? matchedLengthMarkers(ctx.doc, s, S.dru.rules).concat(diffPairMarkers(ctx.doc, s, S.dru.rules)) : []); ctx.requestRender();
@@ -945,10 +977,31 @@ export function highlightNetAt(ctx: PcbCtx, at?: Pt | null, useSelection = false
   if (!keys.size) { const p = at || (ctx.cursor ? ctx.cursor.slice() as Pt : cursorPoint(ctx)); const k = nl.table.key(netUnder(ctx.doc, p[0], p[1], null)); if (k) keys = new Set([k]); }
   // m_lastHighlighted takes the nets that were showing whenever the highlight changes; m_currentlyHighlighted the new ones
   const shown = shownHighlight();
-  if (!keys.size) { if (shown.length) S.hlLast = shown; S.hlCurrent = []; showHighlight(ctx, []); return true; }
-  const key = keys.values().next().value; if (keys.size === 1 && S.highlightNet === key) { if (shown.length) S.hlLast = shown; S.hlCurrent = []; showHighlight(ctx, []); return true; }
+  if (!keys.size) { if (shown.length) S.hlLast = shown; S.hlCurrent = []; showHighlight(ctx, []); sendNetHighlight(); return true; }
+  const key = keys.values().next().value; if (keys.size === 1 && S.highlightNet === key) { if (shown.length) S.hlLast = shown; S.hlCurrent = []; showHighlight(ctx, []); sendNetHighlight(); return true; }
   if (shown.length) S.hlLast = shown;
-  S.hlCurrent = Array.from(keys); showHighlight(ctx, S.hlCurrent, nl); return true;   // no infobar: the net shows in the message panel
+  S.hlCurrent = Array.from(keys); showHighlight(ctx, S.hlCurrent, nl); sendNetHighlight(); return true;   // no infobar: the net shows in the message panel
+}
+/** SendCrossProbeNetName: highlightNet() names the net it highlighted to the schematic, or nothing when it cleared it. */
+function sendNetHighlight(): void {
+  const f = root.CollabEditor && root.CollabEditor.hooks && root.CollabEditor.hooks.netHighlighted; if (!f) return;
+  const key = S.highlightNet; f(key && !key.startsWith("#") ? [key] : []);
+}
+/**
+ * PCB_EDIT_FRAME::HandleRemoteNetHighlight: the nets the schematic highlighted are highlighted here (those the board
+ * has; none clears the highlight).  Returns the box (mm) of the first one's zones, tracks, vias and pads, where the
+ * view centres, or null.
+ */
+export function remoteNetHighlight(ctx: PcbCtx, names: string[]): [number, number, number, number] | null {
+  bind(ctx);
+  if (!names.length || (names.length === 1 && !names[0])) { if (shownHighlight().length) showHighlight(ctx, []); return null; }
+  const nl = netlist(ctx.doc), found = names.filter((n) => nl.nets.has(n));
+  showHighlight(ctx, found, nl); if (!found.length) return null;
+  const net = nl.nets.get(found[0])!; let b: [number, number, number, number] | null = null;
+  const merge = (q: number[] | null | undefined) => { if (q) b = b ? [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])] : [q[0], q[1], q[2], q[3]]; };
+  for (const z of new Set(net.zones.map((c) => c.item))) merge(z.bbox);
+  for (const c of [...net.tracks, ...net.vias, ...net.pads]) merge(c.bbox);
+  return b;
 }
 /** The nets the canvas highlights now (RENDER_SETTINGS::GetHighlightNetCodes: empty while the highlight is off). */
 function shownHighlight(): string[] { return S.highlightNet ? (S.hlShown.length ? S.hlShown.slice() : [S.highlightNet]) : []; }
@@ -961,7 +1014,7 @@ function showHighlight(ctx: PcbCtx, keys: string[], nl?: ReturnType<typeof netli
 }
 act("highlightNet", "Highlight Net", "`", (ctx: PcbCtx) => highlightNetAt(ctx));
 act("highlightNetSelection", "Highlight Net of Selection", "", (ctx: PcbCtx) => highlightNetAt(ctx, null, true));
-act("clearHighlight", "Clear Net Highlighting", "~", (ctx: PcbCtx) => { S.hlCurrent = []; S.hlLast = []; showHighlight(ctx, []); return true; });
+act("clearHighlight", "Clear Net Highlighting", "~", (ctx: PcbCtx) => { S.hlCurrent = []; S.hlLast = []; showHighlight(ctx, []); sendNetHighlight(); return true; });
 // BOARD_INSPECTION_TOOL::HighlightNet, toggleNetHighlight: the current highlight goes off, and comes back on the next press
 act("toggleNetHighlight", "Toggle Net Highlight", "Alt+`", (ctx: PcbCtx) => { bind(ctx); const turnOn = !shownHighlight().length && S.hlCurrent.length > 0; showHighlight(ctx, turnOn ? S.hlCurrent : []); return true; });
 // toggleLastNetHighlight: the nets highlighted before the current ones come back, and the two sets swap

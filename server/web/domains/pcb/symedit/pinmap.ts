@@ -95,7 +95,7 @@ export function pinMapPage(pg: HTMLElement, st: PinMapState, ro: boolean): void 
       const browse = bitmapButton("small_library", "Browse footprints", async () => {
         curCol = c;
         const L = (window as unknown as { KiCadLibrary?: { openChooser(k: "footprint", o?: { title?: string }): Promise<{ fpid?: string; libId?: string } | null> } }).KiCadLibrary;
-        if (!L) return; const ch = await L.openChooser("footprint", { title: "Choose Footprint" }); const id = ch && (ch.fpid || ch.libId); if (id) void setFootprint(c, id);
+        if (!L) return; const ch = await L.openChooser("footprint"); const id = ch && (ch.fpid || ch.libId); if (id) void setFootprint(c, id);
       }, { flat: true, disabled: ro, key: "fpBrowse" });
       const cell = h("td", { style: td }, h("div", { style: "display:flex;gap:2px;align-items:center" }, inp, browse)); cell.addEventListener("contextmenu", (ev) => colMenu(ev, c));
       fr.append(cell);

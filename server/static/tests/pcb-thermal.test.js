@@ -37,7 +37,7 @@ test("one spoke of the default two is starved, with KiCad's message, layer and i
 test("two spokes satisfy the default", () => { assert.equal(run({ fills: [right, left] }).length, 0); });
 test("Board Setup's minimum and a min_resolved_spokes rule decide the count", () => {
   assert.equal(run({ fills: [right] }, { board: { design_settings: { rules: { min_resolved_spokes: 1 } } } }).length, 0);
-  const m = run({ fills: [right, left] }, null, `(version 1)\n(rule "four" (constraint min_resolved_spokes (min 4)) (condition "A.Type == 'Pad'"))`);
+  const m = run({ fills: [right, left] }, null, `(version 1)\n(rule "four" (constraint min_resolved_spokes 4) (condition "A.Type == 'Pad'"))`);
   assert.equal(m.length, 1); assert.match(m[0].text, /\(layer F\.Cu; rule 'four' min spoke count 4; actual 2\)$/);
 });
 test("a solid or no connection is not a thermal relief; the pad and footprint override the zone", () => {

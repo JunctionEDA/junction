@@ -23,6 +23,7 @@
 import { atomText, serialize } from "./export";
 import { QUOTED, cloneNode, isList, kid, kids, parse, str, uuidOf } from "./sexpr";
 import { prettify } from "./prettify";
+import { GENERATOR, GENERATOR_VERSION, SEXPR_FOOTPRINT_LIB_FILE_VERSION, SEXPR_FOOTPRINT_LIB_HEADER_VERSION, minimumFileFormatVersion } from "./format-version";
 import type { Doc, Item, SAtom } from "./types";
 
 /** File token -> the board token the item carries in the editor. */
@@ -175,6 +176,27 @@ export interface FpDocState {
   headerSig: string;
   /** ids in file order */
   order: string[];
+  /** the file had the (kicad_footprint_lib (version …) … (footprint …)) header */
+  lib?: boolean;
+}
+
+/**
+ * A (kicad_footprint_lib (version V) (generator …) (generator_version …) (footprint …)) file (PCB_IO_KICAD_SEXPR_PARSER
+ * case T_kicad_footprint_lib): the footprint, with the header's (version) put inside it as a bare file has it, so the
+ * readers of a footprint node see the version.  Any other tree as it is.
+ */
+export function unwrapFootprintLib(tree: SNode): SNode {
+  if (!isList(tree) || tree[0] !== "kicad_footprint_lib") return tree;
+  const fp = kid(tree, "footprint"); if (!fp) return tree;
+  const v = kid(tree, "version"); if (v && !kid(fp, "version")) fp.splice(2, 0, ["version", v[1]]);
+  return fp;
+}
+/** The (footprint …) of a (kicad_footprint_lib …) file and its text, and the header's version; null for a bare file. */
+function libFileFootprint(tree: SNode, text: string): { tree: SNode; text: string; version: number } | null {
+  if (!isList(tree) || tree[0] !== "kicad_footprint_lib") return null;
+  const j = tree.findIndex((c, i) => i > 0 && isList(c) && c[0] === "footprint"); if (j < 0) throw new Error("not a footprint");
+  const sp = childSpans(text)[j]; const v = kid(tree, "version");
+  return { tree: tree[j] as SNode, text: sp ? text.slice(sp[0], sp[1]) : serialize(tree[j]), version: v ? Number(v[1]) || 0 : 0 };
 }
 
 type FpDoc = Doc;
@@ -195,13 +217,16 @@ const LAYER_IDS: Record<string, number> = { "F.Cu": 0, "B.Cu": 2, "In1.Cu": 4, "
  * Fill `doc` (a fresh pcb Doc) from a .kicad_mod tree.  `addItem` is the document's own (doc.ts), passed in so this
  * module does not import doc.ts.
  */
-export function loadFootprintDoc(doc: Doc, tree: SNode, text: string, addItem: (doc: Doc, node: SNode, id?: string) => Item | null): void {
+export function loadFootprintDoc(doc: Doc, tree: SNode, source: string, addItem: (doc: Doc, node: SNode, id?: string) => Item | null): void {
   const d = doc as FpDoc;
   d.fpEditor = true;
+  const wrapped = libFileFootprint(tree, source); let text = source;
+  if (wrapped) { tree = wrapped.tree; text = wrapped.text; }
   const spans = childSpans(text);
   const header: SNode = [tree[0], tree[1]];
   const hq = QUOTED.get(tree); if (hq) QUOTED.set(header, hq & 3);
-  const st: FpDocState = { fp: header, source: text, headerSrc: new Map(), itemSrc: new Map(), headerSig: "", order: [] };
+  const st: FpDocState = { fp: header, source, headerSrc: new Map(), itemSrc: new Map(), headerSig: "", order: [], lib: !!wrapped };
+  if (wrapped) d.version = wrapped.version;
   d.fpState = st;
   for (const [name, type] of FP_EDITOR_LAYERS) { d.layers.set(name, { id: LAYER_IDS[name] ?? 0, type, userName: "" }); if (type === "signal") d.copper.push(name); }
   const seen = new Map<string, number>();
@@ -438,15 +463,30 @@ export function serializeFootprintDoc(doc: Doc): string {
   parts.sort((a, b) => a.rank - b.rank || a.seq - b.seq);
   const q = QUOTED.get(st.fp) || 0;
   const head = "(" + str(st.fp[0]) + " " + atomText(st.fp[1], st.fp[0] === "footprint" || (q & 2) === 2);   // KiCad quotes the name; a (module …) kept it bare
-  return prettify(head + (parts.length ? " " + parts.map((p) => p.text).join(" ") : "") + ")");
+  // FP_CACHE::Save: the stamp is written afresh.  A file read without the (kicad_footprint_lib …) header at a version
+  // before SEXPR_FOOTPRINT_LIB_HEADER_VERSION stays bare at that version, raised only as far as its body needs;
+  // anything else (a new footprint, a file that had the header, a body nothing older holds) is FormatFootprintLibFile
+  const STAMP = new Set(["version", "generator", "generator_version"]);
+  const body = parts.filter((p) => !STAMP.has(/^\(([^\s()]+)/.exec(p.text)?.[1] || "")).map((p) => p.text);
+  const inner = head + (body.length ? " " + body.join(" ") : "") + ")";
+  const loaded = (d.version || 0) >= SEXPR_FOOTPRINT_LIB_FILE_VERSION ? 0 : d.version || 0;
+  const libFile = (): string => prettify(`(kicad_footprint_lib (version ${SEXPR_FOOTPRINT_LIB_FILE_VERSION}) (generator "${GENERATOR.fplib}") (generator_version "${GENERATOR_VERSION}") ${inner})`);
+  if (st.lib || loaded === 0 || loaded >= SEXPR_FOOTPRINT_LIB_HEADER_VERSION) return libFile();
+  let need = minimumFileFormatVersion(inner, "pcb").version;
+  const ht = kid(st.fp, "height"); if (need < 20261017 && ht && Number(ht[1])) need = 20261017;   // (height …) is an older token elsewhere
+  if (need >= SEXPR_FOOTPRINT_LIB_HEADER_VERSION) return libFile();
+  const stamp = `(version ${Math.max(loaded, need)}) (generator "${GENERATOR.pcb}") (generator_version "${GENERATOR_VERSION}")`;
+  return prettify(head + " " + stamp + (body.length ? " " + body.join(" ") : "") + ")");
 }
 
 /** After a save: what was written is the new baseline (no '*'). */
 export function markFootprintSaved(doc: Doc, text: string): void {
   const d = doc as FpDoc; const st = d.fpState; if (!st) return;
-  const tree = parse(text); if (!tree) return;
+  const source = text; let tree = parse(text); if (!tree) return;
+  const wrapped = libFileFootprint(tree, text); if (wrapped) { tree = wrapped.tree; text = wrapped.text; }
+  st.lib = !!wrapped; { const v = wrapped ? wrapped.version : Number((kid(tree, "version") || [])[1]) || 0; if (v) d.version = v; }
   const spans = childSpans(text);
-  st.source = text; st.headerSrc = new Map(); st.itemSrc = new Map(); st.order = [];
+  st.source = source; st.headerSrc = new Map(); st.itemSrc = new Map(); st.order = [];
   // re-key the sources by the parsed children: the header nodes are matched by their text, the items by id
   const headerBySig = new Map<string, SNode[]>();
   for (const c of st.fp.slice(2)) if (isList(c)) { const k = serialize(c); const l = headerBySig.get(k) || []; l.push(c); headerBySig.set(k, l); }
@@ -504,5 +544,5 @@ export function footprintDocUrl(fields: Record<string, string>, descr: string): 
   return url || null;
 }
 
-export const footprintDocApi = { footprintDocUrl, serializeFootprintDoc, footprintModified, markFootprintSaved, footprintHeaderSexpr, footprintName, footprintFields, footprintNode,
+export const footprintDocApi = { footprintDocUrl, unwrapFootprintLib, serializeFootprintDoc, footprintModified, markFootprintSaved, footprintHeaderSexpr, footprintName, footprintFields, footprintNode,
   toFileNode, toBoardNode, fpItemKind, fieldName, fieldText, isMandatoryField, cmpPads, cmpDrawings, strNumCmp, layerOrdinal, isOwnedFileNode, headerKids, derivedUuid, applyFootprintHeader, prettify, FP_EDITOR_LAYERS, FP_TO_BOARD, BOARD_TO_FP };

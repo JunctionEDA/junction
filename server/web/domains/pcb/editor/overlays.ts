@@ -7,6 +7,7 @@
 import { rulerOps, shadowColor, type RulerUnits } from "./ruler";
 import { areaFill } from "./selmodes";
 import { E } from "./state";
+import { store } from "./appstore";
 /** Flip Board View is on (view.ts viewFlipped; this module is drawn by view.ts and does not import it). */
 const viewFlipped = (): boolean => !!(E.kdoc && E.renderOpts && E.renderOpts.flip);
 
@@ -71,18 +72,24 @@ function drawRuler(ctx: CanvasRenderingContext2D, view: OverlayView, sch: boolea
   const dpr = view.dpr || 1, s = view.ppm * view.zoom;   // CSS pixels per mm
   const cv = ctx.canvas, W = cv.width / dpr, H = cv.height / dpr;
   const toMm = (p: Pt): Pt => [p[0] / IU, p[1] / IU];
+  // GAL::ToScreen and VIEW::GetViewport through the context's own transform (the flipped board view included)
+  const m = ctx.getTransform(), inv = m.inverse(), base = [m.a, m.b, m.c, m.d, m.e, m.f], minPen = 1 / (s * dpr);
+  const corners = [[0, 0], [cv.width, 0], [0, cv.height], [cv.width, cv.height]].map(([x, y]) => [(inv.a * x + inv.c * y + inv.e) * IU, (inv.b * x + inv.d * y + inv.f) * IU]);
   const rv = {
     scale: s / IU,
-    toScreen: (p: Pt): Pt => [(p[0] / IU - view.x0) * s + view.panX, (p[1] / IU - view.y0) * s + view.panY],
+    toScreen: (p: Pt): Pt => { const x = p[0] / IU, y = p[1] / IU; return [(m.a * x + m.c * y + m.e) / dpr, (m.b * x + m.d * y + m.f) / dpr]; },
     screen: [W, H] as Pt,
-    viewport: [(view.x0 - view.panX / s) * IU, (view.y0 - view.panY / s) * IU, (view.x0 + (W - view.panX) / s) * IU, (view.y0 + (H - view.panY) / s) * IU] as [number, number, number, number],
+    viewport: [Math.min(...corners.map((c) => c[0])), Math.min(...corners.map((c) => c[1])), Math.max(...corners.map((c) => c[0])), Math.max(...corners.map((c) => c[1]))] as [number, number, number, number],
     textWidth: (t: string, size: number, pen: number) => K.strokeLineWidth(t) * size + pen,
+    mirrored: m.a < 0,                    // VIEW::IsMirroredX: Flip Board View
+    hidpi: dpr > 1,                       // HIDPI_GL_CANVAS::GetScaleFactor() > 1
   };
   const units = (E.units === "in" || E.units === "mil" ? E.units : "mm") as RulerUnits;
-  const ops = rulerOps(origin, end, units, rv);
+  // RULER_ITEM's m_flipX / m_flipY: the board editor's Invert X / Y axis display options (the schematic has none)
+  const vp = store.get().viewport as { invertX?: boolean; invertY?: boolean };
+  const ops = rulerOps(origin, end, units, rv, sch ? [false, false] : [!!vp.invertX, !!vp.invertY]);
   const color = auxColor(sch);            // LAYER_AUX_ITEMS / LAYER_SCHEMATIC_AUX_ITEMS
   const shadow = shadowColor(color);
-  const m = ctx.getTransform(), base = [m.a, m.b, m.c, m.d, m.e, m.f], minPen = 1 / (s * dpr);
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   for (const op of ops) {
     const c = op.shadow ? shadow : color;
@@ -104,6 +111,10 @@ export function drawAppOverlays(ctx: CanvasRenderingContext2D, view: OverlayView
   if (sch) drawFieldUmbilical(ctx, px);
   const ms = E.measure as { a: Pt; b?: Pt } | null;
   if (ms && ms.b) drawRuler(ctx, view, sch, ms.a, ms.b);
+  // the measure tool's PCB_GRID_HELPER: the SNAP_INDICATOR on the anchor the cursor took
+  const sn = !sch && E.tool === "measure" ? (E.measureSnap as { p: Pt; t: string } | null) : null;
+  const pm = sn ? (globalThis as unknown as { PcbTools?: { drawSnapIndicator?: (c: CanvasRenderingContext2D, p: Pt, t: string, cpx: number) => void } }).PcbTools : undefined;
+  if (sn && pm && pm.drawSnapIndicator) pm.drawSnapIndicator(ctx, sn.p, sn.t, 1 / (view.ppm * view.zoom));
   const bs = E.boxSel as { start: Pt; cur: Pt; pts: Pt[]; lasso: boolean; add?: boolean; mode?: string | null } | null;
   if (bs) {
     const { additive, subtractive } = areaFill(bs, sch);   // SELECTION_AREA::ViewDraw

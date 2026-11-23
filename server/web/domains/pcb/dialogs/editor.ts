@@ -15,10 +15,10 @@ export interface UndoEntry { label: string; changes: unknown[]; inverse: unknown
 export interface EditorState {
   kdoc: (KDoc & { schSettings?: { junctionDiameter: number }; paper?: string; portrait?: boolean; titleBlock?: Record<string, string>; sheetCount?: number; pageNumber?: string }) | null;
   viewOnly: boolean; DOC_TYPE: string; units: string; tool: string; zoom: number; viewTouched: boolean; gridPitch: number; proSettings: string | null; druText: string | null;
-  selection: Set<string>; selected: { id: string } | null; drag: { fp?: { id: string } } | null; fdrag: unknown; renderOpts: Record<string, unknown>; pcbOrigin?: { origin: "page" | "aux" | "grid"; invertX: boolean; invertY: boolean };
+  selection: Set<string>; selected: { id: string } | null; drag: { fp?: { id: string } } | null; fdrag: unknown; renderOpts: Record<string, unknown>; pcbOrigin?: { origin: "page" | "aux" | "grid"; invertX: boolean; invertY: boolean }; fpOrigin?: { invertX: boolean; invertY: boolean };
   /** the canvas cursor (Preferences > Display Options > Cursor, View > Crosshair) */
   crosshairMode?: "small" | "full" | "45"; alwaysShowCursor?: boolean;
-  zoomStep?: number; middleDragPan?: boolean; rightDragPan?: boolean; wheel?: unknown; zoomController?: unknown; middleDrag?: string; rightDrag?: string; leftDrag?: string; pinSelectsSymbol?: boolean; motionPanMod?: string; autoPan?: boolean; autoPanSpeed?: number; gridFor?: () => number; gridDefault?: () => number; gridPicked?: (mm: number) => void; lastImperial?: string; dialogs?: unknown;
+  zoomStep?: number; middleDragPan?: boolean; rightDragPan?: boolean; wheel?: unknown; zoomController?: unknown; zoomControllerSince?: number; middleDrag?: string; rightDrag?: string; leftDrag?: string; pinSelectsSymbol?: boolean; motionPanMod?: string; autoPan?: boolean; autoPanSpeed?: number; gridFor?: () => number; gridDefault?: () => number; gridPicked?: (mm: number, idx?: number) => void; gridDefaultIdx?: () => number; gridIdx?: number; lastImperial?: string; dialogs?: unknown;
   /** PCBNEW_SETTINGS m_ESCClearsNetHighlight and m_CtrlClickHighlight (Preferences > PCB Editor > Editing Options) */ escClearsHighlight?: boolean; ctrlClickHighlight?: boolean;
 }
 export const E = state.E as EditorState;
@@ -30,11 +30,12 @@ export const setTool = tools.setTool as (t: string) => void;
 export const pushUndoFor = tools.pushUndoFor as unknown as (docId: string, entry: UndoEntry) => void;
 export const applyChanges = doc.applyChanges as unknown as (changes: unknown[]) => void;
 export const sendOp = net.sendOp as unknown as (changes: unknown[], transient?: boolean) => void;
-export const toast = util.toast as unknown as (msg: string, ms?: number) => void;
+export const toast = util.toast as unknown as (msg: string, ms?: number, link?: { text: string; run: () => void }, severity?: "info" | "warning" | "error") => void;
 export const api = util.api as unknown as (path: string, opts?: RequestInit) => Promise<unknown>;
 export const isSch = view.isSch as () => boolean;
 export const requestRender = view.requestRender as () => void;
 export const applyView = view.applyView as () => void;
+export const openDialogRects = view.openDialogRects as () => { left: number; top: number; width: number; height: number }[];
 export const centerOn = comments.centerOn as (xMm: number, yMm: number) => void;
 export const focusOnLocation = comments.focusOnLocation as (xMm: number, yMm: number, allowScroll: boolean, dialogs?: { left: number; top: number; width: number; height: number }[]) => void;
 export const openDocId = doc.openDocId as (id: string) => void;

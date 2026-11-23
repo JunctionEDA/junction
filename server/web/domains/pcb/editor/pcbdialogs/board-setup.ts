@@ -20,15 +20,15 @@ import { state } from "../appstore";
 import { api, toast } from "../util";
 import { sendOp } from "../net";
 import { applyChanges } from "../doc";
-import { DRC_ITEMS } from "../../canvas/drc-items";
+import { DRC_ITEMS_WITH_SEVERITIES } from "../../canvas/drc-items";
 import { DEFAULTS_DEFAULTS, DIMENSION_DEFAULTS, LAYER_CLASSES, NETCLASS_DEFAULTS, NETCLASS_INT_KEYS, RULE_DEFAULTS, editProject, parseProject, toPlain, type Plain, type ProjectEdit } from "../../canvas/project-file";
 import type { BoardHeader, LayerRow } from "../../canvas/board-setup";
 import { adoptProjectFile, canWriteProject, liveDocument, loadProjectFile, projectDoc, saveProjectFile, saveTextDocument } from "../projectfile";
 import { BS } from "./canvas";
-import { put, box, checkField, currentUnits, focusError, form, grid, gridButtons, h, iconButton, bitmapButton, staticBitmap, infoBar, lenField, messageBox, note, numField, openDialog, selectField, spinField, textEntryBox, unitLabel, unitName, fmtLen, fmtLenU, parseLen, swatch, type CellValue, type Field, type TreeGroup, treeBook } from "./ui";
+import { put, box, checkField, currentUnits, focusError, form, grid, gridButtons, h, iconButton, bitmapButton, staticBitmap, infoBar, lenField, listDialog, messageBox, note, numField, openDialog, selectField, spinField, textEntryBox, unitLabel, unitName, fmtLen, fmtLenU, parseLen, swatch, type CellValue, type Field, type TreeGroup, treeBook } from "./ui";
 import { colorPicker, fromHex, toHex, type RGBA } from "./color-picker";
 import { drillChartPage, viaStacksPage, zonesPage, tuningPatternsPage, tuningProfilesPage, componentClassesPage, embeddedFilesPage, IMPORT_OPTIONS, type PageError, type SetupCtx } from "./board-setup-pages";
-import { ruleAtLine, ruleErrors, rulesEditor } from "./rules-editor";
+import { ruleAtLine, ruleErrors, ruleReport, rulesEditor, type RuleMessage } from "./rules-editor";
 import { markdownToHtml } from "../markdown";
 import { RULES_HELP_MD } from "../../generated/rules-help";
 import { keysInText } from "../../../../shared/keys";
@@ -102,6 +102,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
   // board-file state shared between the layer and stackup pages
   let layerRows: LayerRow[] = BS().layerRows(header ? header.layers : null);
   const layers0 = BS().layersText(layerRows);
+  const enabled0 = layerRows.filter((r) => r.enabled).map((r) => r.name);   // m_pcb->GetEnabledLayers() when the dialog opened
   let layersTouched = false, refreshLayers: (() => void) | null = null, refreshStackup: (() => void) | null = null;
   const setupEdit: Parameters<ReturnType<typeof BS>["editSetup"]>[1] = {};
   if (!dru) druText = "(version 2)\n";     // PANEL_SETUP_RULES::TransferDataToWindow for a board without a rules file
@@ -109,9 +110,17 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
   const bar = infoBar();
   let book: ReturnType<typeof treeBook> | null = null;
   /** PAGED_DIALOG::SetError: the info bar for 10 s, the page shown, the control (or grid cell) focused */
-  const setError = (page: string, e: PageError): void => { if (book) book.show(page, true); bar.show(e.msg, 10000); focusError(e.ctrl, e.row, e.col); };
+  const setError = (page: string, e: PageError): void => { if (book) book.show(page, true); bar.show(e.msg, 10000, "warning"); focusError(e.ctrl, e.row, e.col); };
 
   // ------------------------------------------------------------ Board Stackup
+  // PANEL_SETUP_LAYERS::initialize_*_tech_layers: the check boxes' tool tips (the other fixed layers have none)
+  const LAYER_TIPS: Record<string, string> = {
+    "F.Fab": "If you want a fabrication layer for the front side of the board", "F.Adhes": "If you want an adhesive template for the front side of the board",
+    "F.Paste": "If you want a solder paste layer for front side of the board", "F.SilkS": "If you want a silk screen layer for the front side of the board",
+    "F.Mask": "If you want a solder mask layer for the front of the board", "B.Mask": "If you want a solder mask layer for the back side of the board",
+    "B.SilkS": "If you want a silk screen layer for the back side of the board", "B.Paste": "If you want a solder paste layer for the back side of the board",
+    "B.Adhes": "If you want an adhesive layer for the back side of the board", "B.Fab": "If you want a fabrication layer for the back side of the board",
+    "Cmts.User": "If you want a separate layer for comments or notes", "Dwgs.User": "If you want a layer for documentation drawings" };
   const layersPage = (el: HTMLElement): void => {
     const host = h("div", { class: "pd-layers" });
     const boxes = new Map<string, HTMLInputElement>();
@@ -119,7 +128,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       host.replaceChildren(); boxes.clear();
       const table = h("table", { class: "pd-layertable" });
       for (const r of layerRows) {
-        const cb = h("input", { type: "checkbox", checked: r.enabled, disabled: roBoard || r.mandatory || r.copper, title: r.copper ? "Use the Physical Stackup page to change the number of copper layers." : r.mandatory ? "This layer is required and cannot be disabled" : "If you want this layer in your board, check this box" });
+        const cb = h("input", { type: "checkbox", checked: r.enabled, disabled: roBoard || r.mandatory || r.copper, title: r.copper ? "Use the Physical Stackup page to change the number of copper layers." : LAYER_TIPS[r.name] || "" });
         cb.addEventListener("change", () => { r.enabled = cb.checked; layersTouched = true; });
         boxes.set(r.name, cb);
         const shown = r.userName || (r.copper || r.userDefined ? r.name : BS().defaultLayerName(r.name));
@@ -132,7 +141,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
         let type: HTMLElement;
         if (r.copper || r.userDefined) {
           const opts = r.copper ? BS().COPPER_TYPES : BS().USER_TYPES;
-          const s = h("k-select", { disabled: roBoard, title: r.copper ? "Copper layer type for Freerouter and other external routers.\nPower plane layers are removed from Freerouter's layer menus." : "Layer type" });
+          const s = h("k-select", { disabled: roBoard, title: r.copper ? "Copper layer type for Freerouter and other external routers.\nPower plane layers are removed from Freerouter's layer menus." : "Auxiliary layers do not flip with board side, while back and front layers do." });
           for (const [v, label] of opts) { const o = h("option", { value: v }, label); if (v === r.type) o.selected = true; s.append(o); }
           s.addEventListener("change", () => { r.type = s.value; layersTouched = true; });
           type = s;
@@ -143,22 +152,20 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     };
     refreshLayers = draw; draw();
     const add = h("button", { type: "button", disabled: roBoard }, "Add User Defined Layer...");
+    // addUserDefinedLayer: EDA_LIST_DIALOG "Add User-defined Layer" over the user layers not shown yet
     add.addEventListener("click", () => {
       const used = new Set(layerRows.filter((r) => r.userDefined).map((r) => r.name));
-      let n = 1; while (n <= 45 && used.has(`User.${n}`)) n++;
-      if (n > 45) { bar.show("All user defined layers are in use", 10000); return; }
-      layerRows.push({ name: `User.${n}`, id: 39 + 2 * (n - 1), type: "user", userName: "", enabled: true, copper: false, mandatory: false, description: "", userDefined: true });
-      layerRows.sort((a, b) => (a.userDefined && b.userDefined ? a.id - b.id : 0));
-      layersTouched = true; draw();
+      const free: string[] = []; for (let n = 1; n <= 45; n++) if (!used.has(`User.${n}`)) free.push(`User.${n}`);
+      if (!free.length) { messageBox("Error", "All user-defined layers have already been added."); return; }
+      listDialog("Add User-defined Layer", ["Layers"], free.map((l) => [l]), (row) => {
+        const name = row && row[0]; const n = name ? Number(name.slice(5)) : NaN; if (!name || !(n >= 1)) return;
+        layerRows.push({ name, id: 39 + 2 * (n - 1), type: "user", userName: "", enabled: true, copper: false, mandatory: false, description: "", userDefined: true });
+        layerRows.sort((a, b) => (a.userDefined && b.userDefined ? a.id - b.id : 0));
+        layersTouched = true; draw();
+      }, { listLabel: "Select layer to add:", child: true });
     });
     put(el, h("div", { class: "pd-row" }, add), host, roBoard ? null : note(BOARD_NOTE));
-    validate("Board Editor Layers", () => {
-      // a layer that still carries items is not switched off here: Board Setup does not delete design content
-      const used = new Map<string, number>();
-      if (E.kdoc) for (const it of E.kdoc.items.values()) { const seen = new Set<string>(); for (const g of it.geom || []) if (g.layer && !seen.has(g.layer)) { seen.add(g.layer); used.set(g.layer, (used.get(g.layer) || 0) + 1); } }
-      for (const r of layerRows) if (!r.enabled && (used.get(r.name) || 0) > 0) return { msg: `Layer ${r.userName || r.name} still carries ${used.get(r.name)} item(s) and cannot be removed here. Move or delete them first.`, ctrl: boxes.get(r.name) };
-      return null;
-    });
+    // the items on a removed layer are listed and deleted on OK (removedLayersCheck), not refused here
   };
 
   // stackup items as the Physical Stackup page edits them; null until the page is built
@@ -170,9 +177,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     stack = fromHeader();
     /** The copper layer count changes (the Copper layers choice, or a manufacturer stackup with another count). */
     const setCount = (n: number): boolean => {
-      const inner = layerRows.filter((r) => r.copper).map((r) => r.name).slice(n - 1, -1);   // the inner layers that go away
-      const busy = inner.filter((name) => E.kdoc && Array.from((E.kdoc as KDoc).items.values()).some((it) => (it.geom || []).some((g) => g.layer === name)));
-      if (busy.length) { setError("Physical Stackup", { msg: `Items have been found on ${busy.join(", ")}: move or delete them before removing the layer.`, ctrl: count.input }); count.set(cuNow()); return false; }
+      // the items on the inner layers that go are listed and deleted on OK (removedLayersCheck)
       layerRows = BS().setCopperCount(layerRows, n); layersTouched = true;
       setupEdit.copper = layerRows.filter((r) => r.copper).map((r) => r.name);
       setupEdit.boardThickness = header && header.general ? Number((KiCadCanvas.kid(header.general, "thickness") as SNode | null)?.[1]) || 1.6 : 1.6;
@@ -289,7 +294,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     };
     const removeDiel = (): void => {
       const withSubs = (stack || []).filter((l) => l.subs && l.subs.length);
-      if (!withSubs.length) { bar.show("No sub-layer to remove: a dielectric layer can only lose the sub-layers added to it.", 10000); return; }
+      if (!withSubs.length) { bar.show("No sub-layer to remove: a dielectric layer can only lose the sub-layers added to it.", 10000, "warning"); return; }
       void import("../../dialogs/dom").then((m) => { const r = removeBtn.getBoundingClientRect(); m.popupMenu(r.left, r.bottom, withSubs.map((l) => ({ label: l.name.replace("dielectric", "Layer"), run: () => { (l.subs as unknown[]).pop(); touched = true; draw(); } }))); });
     };
     const adjust = (): void => {
@@ -332,11 +337,34 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     const finish = selectField<string>(f.copperFinish, (BS().COPPER_FINISHES.includes(f.copperFinish) ? BS().COPPER_FINISHES : [f.copperFinish, ...BS().COPPER_FINISHES]).map((x): [string, string] => [x, x]), { ro: roBoard, key: "copperFinish" });
     const edge = selectField<string>(f.edgeConnector, [["no", "None"], ["yes", "Yes"], ["bevelled", "Yes, bevelled"]], { ro: roBoard, key: "edgeConnector" });
     edge.input.title = "Options for edge card connectors.";
-    put(el, plated.el, form([["Copper finish:", finish.el], ["Edge card connectors:", edge.el]]), roBoard ? null : note(BOARD_NOTE));
+    // PANEL_SETUP_BOARD_FINISH's via protection group (VIA_PROTECTION_RULES gates which choices are allowed)
+    const v0 = BS().viaProtection(header ? header.setup : null);
+    const onVia = (): void => { enableVias(); let cleared = false; for (const c of viaChecks) if (c.input.disabled && c.get()) { c.set(false); cleared = true; } if (cleared) enableVias(); };
+    const vc = (v: boolean, label: string, tip: string, key: string): Field<boolean> => checkField(v, label, { ro: roBoard, key, tip, onChange: onVia });
+    const PLUG = "Plugged: the hole is partly filled from this side.", TENT = "Tented: vias are covered with solder mask.\nNot tented: vias are not covered with solder mask.", COVER = "Covered: a second coat is applied over the via on this side.";
+    const fillV = vc(v0.fill, "", "Filled: the hole is completely filled.", "fillVias"), capV = vc(v0.cap, "", "Capped: copper is plated over the filled hole, giving a flat solderable surface.", "capVias");
+    const plugF = vc(v0.plugFront, "front", PLUG, "plugViasFront"), plugB = vc(v0.plugBack, "back", PLUG, "plugViasBack");
+    const tentF = vc(v0.tentFront, "front", TENT, "tentViasFront"), tentB = vc(v0.tentBack, "back", TENT, "tentViasBack");
+    const coverF = vc(v0.coverFront, "front", COVER, "coverViasFront"), coverB = vc(v0.coverBack, "back", COVER, "coverViasBack");
+    const viaChecks = [fillV, capV, plugF, plugB, tentF, tentB, coverF, coverB];
+    const enable = (c: Field<boolean>, on: boolean): void => { if (roBoard) return; c.input.disabled = !on; c.el.classList.toggle("disabled", !on); };
+    function enableVias(): void {
+      const filled = fillV.get();
+      enable(capV, filled); enable(plugF, !filled); enable(plugB, !filled);
+      enable(coverF, filled || tentF.get() || plugF.get()); enable(coverB, filled || tentB.get() || plugB.get());
+    }
+    enableVias();
+    const pair = (a: Field<boolean>, b: Field<boolean>): HTMLElement => h("div", { class: "pd-row" }, a.el, b.el);
+    put(el, plated.el, form([["Copper finish:", finish.el], ["Edge card connectors:", edge.el]]),
+      h("div", { class: "pd-row" }, h("label", null, "Settings for Vias with Protection Features Set to \"From rules\":")),
+      form([["Fill vias:", fillV.el], ["Cap vias:", capV.el], ["Plug vias:", pair(plugF, plugB)], ["Tent vias:", pair(tentF, tentB)], ["Cover vias:", pair(coverF, coverB)]]),
+      roBoard ? null : note(BOARD_NOTE));
     finishNow = () => ({ copperFinish: finish.get(), edgeConnector: edge.get() as "no" | "yes" | "bevelled", edgePlating: plated.get(), hasStackup: f.hasStackup });
     validate("Board Finish", () => {
       const now = (finishNow as () => ReturnType<ReturnType<typeof BS>["boardFinish"]>)();
       if (now.copperFinish !== f.copperFinish || now.edgeConnector !== f.edgeConnector || now.edgePlating !== f.edgePlating) setupEdit.finish = now;
+      const vias = { fill: fillV.get(), cap: capV.get(), plugFront: plugF.get(), plugBack: plugB.get(), tentFront: tentF.get(), tentBack: tentB.get(), coverFront: coverF.get(), coverBack: coverB.get() };
+      if ((Object.keys(vias) as (keyof typeof vias)[]).some((k) => vias[k] !== v0[k])) setupEdit.vias = vias;
       return null;
     });
   };
@@ -445,7 +473,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     validate("Text Variables", () => {
       // PANEL_TEXT_VARIABLES::TransferDataFromWindow: a name is required, and unique
       const rs = g.rows(), seen = new Set<string>();
-      for (let i = 0; i < rs.length; i++) { const n = String(rs[i].name).trim(); if (!n && !String(rs[i].value)) continue; if (!n) return { msg: "Text variable cannot be empty.", ctrl: g.el, row: i, col: 0 }; if (seen.has(n)) return { msg: `Variable name '${n}' already in use.`, ctrl: g.el, row: i, col: 0 }; seen.add(n); }
+      for (let i = 0; i < rs.length; i++) { const n = String(rs[i].name).trim(); if (!n && !String(rs[i].value)) continue; if (!n) return { msg: "Variable name cannot be empty.", ctrl: g.el, row: i, col: 0 }; if (seen.has(n)) return { msg: `Variable name '${n}' already in use.`, ctrl: g.el, row: i, col: 0 }; seen.add(n); }
       return null;
     });
   };
@@ -465,6 +493,8 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     const spokes = spinField(numOr(rules.min_resolved_spokes, 2), { min: 0, max: 99, ro: roPro, key: "min_resolved_spokes" }); fields.push({ key: "min_resolved_spokes", f: spokes, int: true });
     spokes.el.style.width = "64px";
     const R = "If set, this can only be reduced by custom rules.";
+    // m_maxErrorTitle's own tool tip (the control keeps the other one)
+    const maxErrorRow = (r: [HTMLElement, HTMLElement, HTMLElement, string]): [HTMLElement, HTMLElement, HTMLElement, string] => [r[0], r[1], r[2], "This is the maximum distance between a circle and the polygonal shape that approximate it.\nThe error max defines the number of segments of this polygon."];
     const slow = h("div", { class: "pd-small" }, `Note: zone filling can be slow when < ${fmtLenU(0.005)}.`);
     put(el, h("div", { class: "pd-cols2" },
       h("div", null,
@@ -487,7 +517,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
         box("Silk", form([
           len("min_silk_clearance", "Minimum item clearance:", "Minimum clearance between two items on the same silkscreen layer. If set this can improve legibility.  (Note: does not apply to multiple shapes within a single footprint.)"),
           len("min_text_height", "Minimum text height:", ""), len("min_text_thickness", "Minimum text thickness:", "")])),
-        box("Arc/Circle Approximations", form([len("max_error", "Maximum allowed deviation:", "The maximum allowed deviation between a true arc or circle and segments used to approximate it.  Smaller values produce smoother graphics at the expense of performance."), slow])),
+        box("Arc/Circle Approximations", form([maxErrorRow(len("max_error", "Maximum allowed deviation:", "The maximum allowed deviation between a true arc or circle and segments used to approximate it.  Smaller values produce smoother graphics at the expense of performance.")), slow])),
         // m_filletBitmap (zone_fillet) beside the fillets option, m_spokeBitmap (thermal_spokes) beside the spoke count
         box("Zone Fill Strategy", h("div", { class: "pd-row", style: "align-items:center" }, staticBitmap("zone_fillet", 24), chk("zones_allow_external_fillets", "Allow fillets/chamfers outside zone outline", "", "top")),
           form([[label("Minimum thermal relief spoke count:", "thermal_spokes"), spokes.el]])),
@@ -653,6 +683,12 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
         const j = names.findIndex((n, k) => k !== i && n.toLowerCase() === names[i].toLowerCase());
         if (j >= 0) return { msg: "Netclass name already in use.", ctrl: g.el, row: Math.max(i, j), col: 0 };
       }
+      // validateNetclassClearance: a clearance above MAXIMUM_CLEARANCE (500 mm) is clipped to it, with the message
+      const rows = g.rows();
+      for (let i = 0; i < rows.length; i++) {
+        const v = Number(rows[i].clearance);
+        if (isFinite(v) && v > 500) { rows[i].clearance = 500; g.refresh(); return { msg: `Clearance was too large.  It has been clipped to ${fmtLenU(500)}.`, ctrl: g.el, row: i, col: 1 }; }
+      }
       return null;
     });
   };
@@ -660,20 +696,33 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
   const rulesPage = (el: HTMLElement): void => {
     const ro = !canWriteProject();
     const report = h("div", { class: "pd-errors", "data-k": "errorsReport" });
-    const say = (lines: { severity: string; text: string; line?: number; col?: number }[]): void => {
+    // "ERROR: <a href='line:offset'>message</a>rest": the link text is the message, the link goes to its place
+    const say = (lines: { severity: string; text: string; line?: number; col?: number; rest?: string }[]): void => {
       report.replaceChildren(...lines.map((l) => { const d = h("div", { class: "ln " + l.severity });
-        if (l.line !== undefined) { const a = h("a", { href: "#", "data-k": "errorLink" }, `${l.line}:${l.col || 1} ${l.text}`); a.addEventListener("click", (ev) => { ev.preventDefault(); if (rulesEd) rulesEd.gotoLine(l.line as number, l.col); }); d.append(l.severity === "error" ? "ERROR: " : "", a); }
+        if (l.line) { const a = h("a", { href: "#", "data-k": "errorLink", "data-at": `${l.line}:${l.col || 1}` }, l.text); a.addEventListener("click", (ev) => { ev.preventDefault(); if (rulesEd) rulesEd.gotoLine(l.line as number, l.col); }); d.append(l.severity === "error" ? "ERROR: " : "", a, l.rest || ""); }
         else d.append(l.text);
         return d; }));
     };
-    const compile = (t: string): { errors: string[] } | null => { const tools = (globalThis as { PcbTools?: { parseDru?: (t: string) => { errors: string[] } } }).PcbTools; return tools && tools.parseDru ? tools.parseDru(t) : null; };
-    const check = (): void => { const errs = ruleErrors(rulesEd ? rulesEd.get() : "", compile); say(errs.length ? errs.map((e) => ({ severity: "error", text: e.message, line: e.line, col: e.col })) : []); };
+    const compile = (t: string): { errors: string[]; messages?: RuleMessage[] } | null => { const tools = (globalThis as { PcbTools?: { parseDru?: (t: string) => { errors: string[]; messages?: RuleMessage[] } } }).PcbTools; return tools && tools.parseDru ? tools.parseDru(t) : null; };
+    // OnCompile: Parse's messages, then checkPlausibility's warnings over the parsed rules (not after a PARSE_ERROR)
+    const plausibility = (t: string): string[] => {
+      const tools = (globalThis as { PcbTools?: { parseDru?: (t: string) => { rules: unknown[]; messages?: RuleMessage[] }; rulesPlausibility?: (r: unknown[], en: Set<string>, nc: Set<string>, ln: (l: string) => string) => string[]; boardLayerName?: (d: KDoc, l: string) => string } }).PcbTools;
+      if (!tools || !tools.parseDru || !tools.rulesPlausibility) return [];
+      const parsed = tools.parseDru(t);
+      if ((parsed.messages || []).some((x) => (x as RuleMessage & { fatal?: boolean }).fatal)) return [];
+      const enabled = new Set(enabled0);   // board->GetEnabledLayers(), not the Layers page's pending state
+      const pro = (E.proSettings ? (() => { try { return JSON.parse(E.proSettings as string) as { net_settings?: { classes?: { name?: string }[] } }; } catch { return null; } })() : null);
+      const classes = new Set(((pro && pro.net_settings && pro.net_settings.classes) || []).map((c) => String(c && c.name || "")).filter((n) => n && n !== "Default"));
+      const doc = E.kdoc as KDoc | null;
+      return tools.rulesPlausibility(parsed.rules, enabled, classes, (l) => (doc && tools.boardLayerName ? tools.boardLayerName(doc, l) : l));
+    };
+    const check = (): void => { const t = rulesEd ? rulesEd.get() : ""; say([...ruleReport(t, compile).map((e) => ({ severity: e.severity || "error", text: e.message, line: e.line, col: e.col, rest: e.rest })), ...plausibility(t).map((w) => ({ severity: "warning", text: w }))]); };
     const showMatching = (): void => {
       const text = rulesEd ? rulesEd.get() : "", line = rulesEd ? rulesEd.caretLine() : 1;
       const name = ruleAtLine(text, line);
       if (name === null) { say([{ severity: "action", text: "Place the cursor inside a (rule ...) block to show matching items." }]); return; }
       if (!name) { say([{ severity: "action", text: "The rule under the cursor has no name; add a name to identify it." }]); return; }
-      const errs = ruleErrors(text, compile); if (errs.length) { say(errs.map((e) => ({ severity: "error", text: e.message, line: e.line, col: e.col }))); return; }
+      const errs = ruleErrors(text, compile); if (errs.length) { say(errs.map((e) => ({ severity: "error", text: e.message, line: e.line, col: e.col, rest: e.rest }))); return; }
       const tools = (globalThis as { PcbTools?: { ruleMatchingItems?: (d: KDoc, s: unknown, t: string, n: string) => string[] | null; designSettings?: (p: unknown) => unknown } }).PcbTools;
       const ids = tools && tools.ruleMatchingItems && E.kdoc ? tools.ruleMatchingItems(E.kdoc, tools.designSettings ? tools.designSettings(E.proSettings || null) : {}, text, name) : null;
       if (!ids) { say([{ severity: "error", text: `Rule '${name}' could not be located after parsing.` }]); return; }
@@ -701,7 +750,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
   const severityPage = (el: HTMLElement): void => {
     const sev = obj(ds.rule_severities), table = h("table", { class: "pd-sevtable" });
     const pick = new Map<string, string>();
-    for (const [title, code, def] of DRC_ITEMS) {
+    for (const [title, code, def] of DRC_ITEMS_WITH_SEVERITIES) {   // GetItemsWithSeverities: not the internal group
       if (!code) { table.append(h("tr", { class: "hd" }, h("td", { colspan: "4" }, title))); continue; }
       const cur = typeof sev[code] === "string" ? String(sev[code]) : def; pick.set(code, cur);
       const tr = h("tr", null, h("td", null, title));
@@ -769,7 +818,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
         const v = validators.get(from); const e = v ? v() : null; if (e) { setError(from, e); return false; } return true; } });
       body.append(bar.el, book.el);
       body.addEventListener("click", () => { if (book) lastPage = book.current(); });
-      if (!proText || !canWriteProject()) bar.show("Project is missing or read-only. Some settings will not be editable.");
+      if (!proText || !canWriteProject()) bar.show("Project is missing or read-only. Some settings will not be editable.", 0, "warning");
     },
     cancel() {
       if (!rulesModified()) return true;
@@ -778,13 +827,62 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     },
     ok() {
       for (const label of order) { if (!book || !book.built(label)) continue; const v = validators.get(label); const e = v ? v() : null; if (e) { setError(label, e); return false; } }
+      if (!removedLayersCheck()) return false;
+      return finishOk();
+    } });
+  /**
+   * PANEL_SETUP_LAYERS::TransferDataFromWindow for the layers being removed: "Footprints have some items on removed
+   * layers" (IsOK) for non-copper layers footprints use, then DIALOG_ITEMS_LIST "Warning" over the board items on
+   * them; accepted, the selection is cleared and BOARD::RemoveAllItemsOnLayer runs for each, then the rest applies.
+   * false while one of those questions is open (it finishes the OK itself).
+   */
+  let removalAccepted = false;
+  function removedLayersCheck(): boolean {
+    const doc = E.kdoc as KDoc | null;
+    if (removalAccepted || !canBoard || !header || !layersTouched || !doc || doc.type !== "pcb") return true;
+    const removed = enabled0.filter((l) => !layerRows.some((r) => r.name === l && r.enabled));
+    if (!removed.length) return true;
+    const GD = (window as unknown as { PcbTools: { globalDeletion: { removedLayerItems(d: KDoc, l: string[], u: string, n?: (l: string) => string): { id: string; desc: string }[]; removeItemsOnLayers(d: KDoc, l: string[]): KChange[] }; boardLayerName(d: KDoc, l: string): string; applySelection?(c: ToolCtx, ids: string[]): void } }).PcbTools;
+    const layerName = (l: string): string => GD.boardLayerName(doc, l);
+    // getRemovedLayersWithItems / getNonRemovableLayers
+    const onFp = (fp: SNode, l: string): boolean => { const walk = (n: SNode): boolean => n.some((c) => Array.isArray(c) && ((c[0] === "layer" && c[1] === l) || (c[0] === "layers" && c.slice(1).includes(l)) || walk(c as SNode))); return walk(fp); };
+    const fps = Array.from(doc.items.values()).filter((it) => it.kind === "footprint");
+    const notRemovable = removed.filter((l) => !/\.Cu$/.test(l) && fps.some((fp) => onFp(fp.node, l)));
+    const items = GD.globalDeletion.removedLayerItems(doc, removed, currentUnits(), layerName);
+    const proceed = (): void => {
+      removalAccepted = true;
+      const changes = GD.globalDeletion.removeItemsOnLayers(doc, removed);
+      if (changes.length) { if (GD.applySelection) GD.applySelection(ctx, []); ctx.commit(changes, "Board Setup"); }   // ACTIONS::selectionClear first
+      if (finishOk() && dlg) dlg.close();
+    };
+    const warnItems = (): void => {
+      if (!items.length) { proceed(); return; }
+      // DIALOG_ITEMS_LIST: the message, "Show Details" with the descriptions (a click selects the item on the board)
+      const details = h("div", { class: "pd-report", "data-k": "itemsList", style: "display:none;height:160px;min-height:0;margin-top:6px" });
+      for (const it of items) { const ln = h("div", { class: "ln action", tabindex: "0" }, it.desc); ln.addEventListener("click", () => { for (const r of Array.from(details.children)) r.classList.toggle("sel", r === ln); if (GD.applySelection) GD.applySelection(ctx, [it.id]); ctx.requestRender(); }); details.append(ln); }
+      const toggle = h("a", { href: "#", "data-k": "showDetails" }, "Show Details");
+      toggle.addEventListener("click", (ev) => { ev.preventDefault(); const on = details.style.display === "none"; details.style.display = on ? "" : "none"; toggle.textContent = on ? "Hide Details" : "Show Details"; });
+      openDialog({ title: "Warning", width: 520, child: true,
+        build(body) { body.append(h("p", { style: "margin:4px 0 8px;white-space:pre-wrap" }, "Items have been found on removed layers. This operation will delete all items from removed layers and cannot be undone."), toggle, details); },
+        ok() { setTimeout(proceed, 0); return true; } });
+    };
+    if (notRemovable.length) {
+      messageBox("Confirmation", `Footprints have some items on removed layers:\n${notRemovable.map((l) => layerName(l) + "\n").join("")}These items will be no longer accessible\nDo you wish to continue?`,
+        [{ label: "No" }, { label: "Yes", fn: () => setTimeout(warnItems, 0) }], 0);
+      return false;
+    }
+    if (!items.length) return true;
+    warnItems();
+    return false;
+  }
+  function finishOk(): boolean {
       const edits: ProjectEdit[] = [];
       if (canPro) for (const p of pages.values()) edits.push(...p.edits().filter((e) => initial.get(pathKey(e)) !== JSON.stringify(e.value)));
       const sections: { layers?: string; setup?: string; general?: string } = {};
       if (canBoard && header) {
         if (layersTouched) { const text = BS().layersText(layerRows); if (text !== layers0) sections.layers = text; }
         if (drillEdit) setupEdit.drillProfile = drillEdit;
-        if (setupEdit.maskPaste || setupEdit.finish || setupEdit.dash || setupEdit.copper || setupEdit.drillProfile || setupEdit.stackup) sections.setup = BS().sectionText(BS().editSetup(header.setup, setupEdit));
+        if (setupEdit.maskPaste || setupEdit.finish || setupEdit.vias || setupEdit.dash || setupEdit.copper || setupEdit.drillProfile || setupEdit.stackup) sections.setup = BS().sectionText(BS().editSetup(header.setup, setupEdit));
         if (setupEdit.stackup && header.general && setupEdit.boardThickness) {
           const g = BS().sectionText(header.general).replace(/\(thickness [^)]*\)/, `(thickness ${+setupEdit.boardThickness.toFixed(6)})`);
           if (g !== BS().sectionText(header.general)) sections.general = g;
@@ -795,7 +893,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       void save(ctx, proText, edits, sections, dru ? dru.docId : null, rulesText);
       rules0 = rulesText === null ? rules0 : rulesText;
       return true;
-    } });
+  }
 }
 /** DIALOG_IMPORT_SETTINGS: "Import from:" another board of the person's projects, the options to import, Import Settings. */
 function importSettingsDialog(onImport: (sel: string[], src: { pro: string | null; header: BoardHeader | null; rules: string | null }) => Promise<void>): void {
@@ -845,25 +943,13 @@ function importSettingsDialog(onImport: (sel: string[], src: { pro: string | nul
 }
 let lastPage = "";
 
-/** S-expression well-formedness of a rules file: the first problem found, or "". */
+/** The first error DRC_RULES_PARSER reports for a rules file ("ERROR: <message><rest>"), or "". */
 export function ruleSyntaxError(text: string): string {
-  let depth = 0, line = 1, inStr = false, any = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (c === "\n") line++;
-    if (inStr) { if (c === "\\") i++; else if (c === '"') inStr = false; continue; }
-    if (c === "#") { while (i < text.length && text[i] !== "\n") i++; line++; continue; }
-    if (c === '"') inStr = true;
-    else if (c === "(") { depth++; any = true; }
-    else if (c === ")") { depth--; if (depth < 0) return `ERROR: unexpected ')' at line ${line}.`; }
-  }
-  if (inStr) return "ERROR: unterminated string.";
-  if (depth) return `ERROR: ${depth} unclosed '('.`;
-  if (any && !/^\s*(#[^\n]*\n\s*)*\(version\s+\d+\)/.test(text)) return "ERROR: missing (version 1) header.";
-  // DRC_RULES_PARSER compiles each condition: an unknown property or function, or a function missing its argument, is an error
-  const tools = (globalThis as { PcbTools?: { parseDru?: (t: string) => { errors: string[] } } }).PcbTools;
+  const tools = (globalThis as { PcbTools?: { parseDru?: (t: string) => { errors: string[]; messages?: RuleMessage[] } } }).PcbTools;
   const res = tools && tools.parseDru ? tools.parseDru(text) : null;
-  if (res && res.errors.length) return "ERROR: " + res.errors[0].replace(/^rule '/, "Rule '");
+  const e = res && res.messages ? res.messages.find((m) => m.severity === "error") : null;
+  if (e) return `ERROR: ${e.text}${e.rest || ""}`;
+  if (res && !res.messages && res.errors.length) return "ERROR: " + res.errors[0];
   return "";
 }
 

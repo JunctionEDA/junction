@@ -195,7 +195,7 @@ ok("a library footprint becomes a board footprint", () => {
   // field overrides (the vendor import path)
   const v = L.footprintInstance({ fpid: "X:Y", footprint: FP, at: [0, 0], fields: { Value: "10k", LCSC: "C25804" } });
   assert.strictEqual(str(prop(v, "Value")[2]), "10k"); assert.strictEqual(str(prop(v, "Reference")[2]), "REF**"); assert.strictEqual(str(prop(v, "LCSC")[2]), "C25804");
-  assert.deepStrictEqual(L.footprintInfo(FP), { name: "R_0603_1608Metric", description: "Resistor SMD 0603", keywords: "resistor", pads: 2 });
+  assert.deepStrictEqual(L.footprintInfo(FP), { name: "R_0603_1608Metric", description: "Resistor SMD 0603", keywords: "resistor", pads: 2, datasheet: "" });
   assert.throws(() => L.footprintInstance({ fpid: "a:b", footprint: "(symbol \"x\")", at: [0, 0] }), /not a footprint/);
 });
 

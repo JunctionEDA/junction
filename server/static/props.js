@@ -344,21 +344,49 @@
     return [...names].filter((l) => !copperOnly || /\.Cu$/.test(l)).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   }
 
+  // web/shared/units.ts
+  var UNITS = {
+    mm: { name: "mm", f: (v) => v, d: 4 },
+    in: { name: "in", f: (v) => v / 25.4, d: 4 },
+    mil: { name: "mils", f: (v) => v / 0.0254, d: 2 }
+  };
+  var UNIT_TEXT = { mm: " mm", mil: " mils", in: " in" };
+  function removeTrailingZeros(text) {
+    let len = text.length, removeLast = 0;
+    while (--len > 0 && text[len] === "0") removeLast++;
+    if (len >= 0 && (text[len] === "." || text[len] === ",")) removeLast++;
+    return text.slice(0, text.length - removeLast);
+  }
+  function stringFromValue(mm2, units, scale, label = true) {
+    const u = UNITS[units] ? units : "mm", iu = scale === "sch" ? 1e4 : 1e6;
+    const v = UNITS[u].f(Math.round(mm2 * iu) / iu);
+    const digits = u === "mil" ? scale === "sch" ? 3 : 5 : u === "in" ? scale === "sch" ? 6 : 8 : 10;
+    let text = removeTrailingZeros(v.toFixed(digits));
+    if (v !== 0 && (text === "0" || text === "-0")) text = removeTrailingZeros(v.toFixed(10));
+    return label ? text + UNIT_TEXT[u] : text;
+  }
+
   // web/domains/pcb/tools/props/numeric.ts
   var UNIT_MM = { mm: 1, cm: 10, um: 1e-3, "\xB5m": 1e-3, "in": 25.4, '"': 25.4, inch: 25.4, mil: 0.0254, mils: 0.0254, thou: 0.0254 };
-  function evalExpr(text, defUnit) {
+  function evalExpr(text, defUnit, vars = /* @__PURE__ */ new Map()) {
     const src = str(text).trim().replace(/,/g, ".");
     if (!src) return NaN;
     const scale = defUnit ? UNIT_MM[defUnit] || 1 : 1;
-    let i = 0;
+    let i = 0, bad = false;
+    let valid = true;
     const ws = () => {
       while (i < src.length && /\s/.test(src[i])) i++;
     };
+    const ident = () => {
+      const m = /^[A-Za-z][A-Za-z0-9]*/.exec(src.slice(i));
+      return m ? m[0] : null;
+    };
+    const UNIT_RE = /^(mm|cm|um|µm|inch|in|"|mils|mil|thou|°|deg)(?![A-Za-z0-9])/i;
     function primary() {
       ws();
       if (src[i] === "(") {
         i++;
-        const v2 = sum();
+        const v2 = expr();
         ws();
         if (src[i] !== ")") return NaN;
         i++;
@@ -372,10 +400,29 @@
         i++;
         return primary();
       }
+      const id = UNIT_RE.test(src.slice(i)) ? null : ident();
+      if (id) {
+        i += id.length;
+        valid = true;
+        const has2 = vars.has(id);
+        if (!has2) bad = true;
+        let v2 = has2 ? vars.get(id) : 0;
+        ws();
+        const u2 = UNIT_RE.exec(src.slice(i));
+        if (u2) {
+          i += u2[0].length;
+          const key = u2[0].toLowerCase();
+          if (key === "\xB0" || key === "deg") return defUnit ? NaN : v2;
+          if (!defUnit) return NaN;
+          v2 = v2 / scale * UNIT_MM[key];
+        }
+        return v2;
+      }
       const m = /^(\d+\.?\d*(?:e[-+]?\d+)?|\.\d+(?:e[-+]?\d+)?)/i.exec(src.slice(i));
       if (!m) return NaN;
       i += m[0].length;
       let v = parseFloat(m[0]);
+      valid = true;
       ws();
       const u = /^(mm|cm|um|µm|inch|in|"|mils|mil|thou|°|deg)/i.exec(src.slice(i));
       if (u) {
@@ -409,16 +456,44 @@
         v = op === "+" ? v + r : v - r;
       }
     }
-    const out = sum();
-    ws();
-    return i < src.length || !isFinite(out) ? NaN : r6(out);
+    function expr() {
+      ws();
+      const id = UNIT_RE.test(src.slice(i)) ? null : ident();
+      if (id) {
+        const save = i;
+        i += id.length;
+        ws();
+        if (src[i] === "=") {
+          i++;
+          const v = sum();
+          vars.set(id, v);
+          valid = false;
+          return v;
+        }
+        i = save;
+      }
+      return sum();
+    }
+    let out = NaN;
+    for (; ; ) {
+      const v = expr();
+      ws();
+      if (bad || !isFinite(v)) return NaN;
+      if (src[i] === ";") {
+        i++;
+        out = NaN;
+        ws();
+        if (i >= src.length) return NaN;
+        continue;
+      }
+      if (i < src.length) return NaN;
+      out = valid ? v : NaN;
+      break;
+    }
+    return isFinite(out) ? r6(out) : NaN;
   }
-  function formatLength(v, unit) {
-    const u = unit === "in" ? [25.4, 6, "in"] : unit === "mil" ? [0.0254, 3, "mils"] : [1, 4, "mm"];
-    let t = (v / u[0]).toFixed(u[1]);
-    if (t.includes(".")) t = t.replace(/0+$/, "").replace(/\.$/, "");
-    if (t === "-0") t = "0";
-    return t + " " + u[2];
+  function formatLength(v, unit, scale = "pcb") {
+    return stringFromValue(v, unit === "in" || unit === "mil" ? unit : "mm", scale, true);
   }
 
   // web/domains/pcb/tools/props/pads.ts
@@ -680,6 +755,39 @@
     return /Macintosh|Mac OS X|iPhone|iPad/.test(nav.userAgent || "");
   }
   var IS_MAC = detectMac();
+  var HOTKEY_NAMES = [
+    ...Array.from({ length: 24 }, (_, i) => `F${i + 1}`),
+    "Esc",
+    "Del",
+    "Tab",
+    "Back",
+    "Ins",
+    "Home",
+    "End",
+    "PgUp",
+    "PgDn",
+    "Up",
+    "Down",
+    "Left",
+    "Right",
+    "Return",
+    "Space",
+    ...Array.from({ length: 10 }, (_, i) => `Num Pad ${i}`),
+    "Num Pad +",
+    "Num Pad -",
+    "Num Pad *",
+    "Num Pad /",
+    "Num Pad .",
+    "Num Pad Enter",
+    "Num Pad F1",
+    "Num Pad F2",
+    "Num Pad F3",
+    "Num Pad F4",
+    "",
+    "Click",
+    "DblClick",
+    "Wheel"
+  ];
 
   // web/shared/menufit.ts
   var ARROW = 16;

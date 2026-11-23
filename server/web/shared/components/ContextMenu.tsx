@@ -10,6 +10,7 @@ import { cx } from "../util";
 import { KIcon, MenuArrow } from "./Icon";
 import { menuKey } from "../keys";
 import { menuScroller, menuSize, placeMenu } from "../menufit";
+import { menuKeyIndex } from "../../domains/pcb/editor/kicad-input";
 
 const PANEL = "ctxmenu fixed min-w-[210px] overflow-y-auto bg-panel border border-line rounded-md p-1 shadow-panel text-ink text-sm select-none";
 const ROW = "group/row relative flex items-center gap-2 w-full text-left border-0 py-1 pl-1.5 pr-2 rounded-xs whitespace-nowrap";
@@ -125,6 +126,11 @@ export function ContextMenu() {
       else if (k === "ArrowRight") enter(list[at]);
       else if (k === "ArrowLeft") { if (level.length) { setActive(level); setOpen(level.slice(0, -1)); brighten(undefined); } }
       else if (k === "Enter" || k === " ") { const it = list[at]; if (it && !enter(it) && usable(it)) run(it); }
+      else if (!ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+        // the &-mnemonic of a row (Clarify Selection's 1-9, A, M): the key picks it
+        const i = menuKeyIndex(list.map((it) => (it && usable(it) ? { key: it.mnemonic } : null)), k);
+        if (i >= 0) { const it = list[i]; if (!enter(it)) run(it); }
+      }
     };
     const away = (ev: Event) => {
       if (host.current && ev.target instanceof Node && host.current.contains(ev.target)) return;

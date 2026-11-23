@@ -9,6 +9,8 @@ import type { Units } from "../../../../shared/store";
 import { angleText, messageText } from "../../../../shared/units";
 import { K, kid, kids, num, str, atOf, ptsOf } from "./state";
 import * as VM from "../../canvas/variant-model";
+import { unescapeText } from "../../canvas/text";
+import { ellipseLength } from "../../canvas/sexpr";
 import { root } from "../root";
 import { symbolPins, type SymPin } from "./autoplace";
 import { pinAltFunction } from "./pins";
@@ -41,10 +43,7 @@ const yes = (n: SNode | null | undefined): boolean => !!n && str(n[1]) !== "no";
 const flag = (node: SNode, key: string): boolean => { const k = kid(node, key); return k ? str(k[1] ?? "yes") !== "no" : node.includes(key); };
 
 /** UnescapeString: KiCad's {slash} / {dblquote} … escapes back to their characters. */
-export function unescapeString(s: string): string {
-  const MAP: Record<string, string> = { dblquote: '"', quote: "'", lt: "<", gt: ">", backslash: "\\", slash: "/", bar: "|", comma: ",", colon: ":", space: " ", dollar: "$", tab: "\t", return: "\n", brace: "{" };
-  return s.replace(/\{(\w+)\}/g, (m, k: string) => (k in MAP ? MAP[k] : m));
-}
+export function unescapeString(s: string): string { return unescapeText(s); }
 
 // ---------------------------------------------------------------- text attributes (EDA_TEXT)
 function effects(node: SNode): SNode | null { return kid(node, "effects"); }
@@ -253,6 +252,13 @@ function shapeRows(it: KItem, o: SchMsgOpts): MsgItem[] {
     case "bezier": { const p = pts(); out.push({ title: "Shape", value: "Curve" }, { title: "Length", value: len(bezierLength(p), o) }); break; }
     case "rectangle": { const [, , w, h] = boxOf(n); out.push({ title: "Shape", value: "Rectangle" }, { title: "Width", value: len(Math.abs(w), o) }, { title: "Height", value: len(Math.abs(h), o) }); break; }
     case "polyline": out.push({ title: "Shape", value: "Polygon" }, { title: "Points", value: String(pts().length) }); break;
+    case "ellipse": case "ellipse_arc": {
+      const v = (k: string) => num((kid(n, k) || [])[1], 0);
+      out.push({ title: "Shape", value: it.kind === "ellipse" ? "Ellipse" : "Elliptical Arc" }, { title: "Length", value: len(ellipseLength(n), o) },
+        { title: "Major Radius", value: len(v("major_radius"), o) }, { title: "Minor Radius", value: len(v("minor_radius"), o) }, { title: "Rotation", value: angleText(v("rotation_angle")) });
+      if (it.kind === "ellipse_arc") out.push({ title: "Start Angle", value: angleText(v("start_angle")) }, { title: "End Angle", value: angleText(v("end_angle")) });
+      break;
+    }
     default: break;
   }
   out.push(...strokeRows(n, o));
@@ -327,7 +333,7 @@ export function msgPanelInfo(doc: KDoc, sel: SchMsgSel, o: SchMsgOpts): MsgItem[
     case "label": case "global_label": case "hierarchical_label": case "directive_label": case "netclass_flag": return labelRows(it, o);
     case "text": return textRows(it, o);
     case "text_box": return textBoxRows(it, o);
-    case "rectangle": case "circle": case "arc": case "bezier": return shapeRows(it, o);
+    case "rectangle": case "circle": case "arc": case "bezier": case "ellipse": case "ellipse_arc": return shapeRows(it, o);
     case "sheet": return sheetRows(doc, it, o);
     case "junction": {
       const d = kid(it.node, "diameter"), dia = d && num(d[1], 0) > 0 ? num(d[1]) : (doc as KDoc & { schSettings?: { junctionDiameter?: number } }).schSettings?.junctionDiameter ?? 0.9144;

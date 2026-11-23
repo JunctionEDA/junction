@@ -33,7 +33,7 @@ import { hatchLines } from "./geom-pcb";
 import { ORIENT, fieldColor, hasOpTextVar, intersheetRefsText, letterSubReference, opVars, resolveLib, schDisplay, schFormat, subReference, symVars, symbolInstance, symbolTransform, unitDisplayNames, type OpTextVar, hasNetTextVar, labelVars, type LabelTextVar } from "./geom-sch";
 import { bboxOf, geomBox, geomHit, geomTouchesRect, itemTouchesRect, itemVisible, hitTest, hitTestDetail, layerList, movableItems, padAt, padGeomHit, snap } from "./hit";
 import { applyChange, setAt, setPts } from "./ops";
-import { darkened, mixColor, brightenedItemColor, lockedShadowMargin, footprintBodyBox, drawLockedShadow, DRC_HIGHLIGHTED, HL_FACTOR, HC_EDGE_MIN, viaSpans, umbilicalLines, viaStitchOutline, viaStitchTicks, gridItemGeom, gridItemArea, gridTakesPrecedence, autoSparsePitch, DASH_RATIOS, HIDDEN_TEXT_ALPHA, HL_DIM, MARKER_COLORS, MARKER_CORNERS, MARKER_SCALE, PX_PER_MM_ZOOM1, RATSNEST_COLOR, VIA_NETNAME_COLOR, ZONE_OPACITY, brightened, dashPattern, defaultCreateCanvas, drawDrawingSheet, drawHalo, drawMarkers, drawPad, drawSelectionHalo, SCH_SELECTION_SHADOW, selectedColor, flipCentre, flipX, highlightColor, markerAt, markerPolygon, markerScale, render, busConnectedLabels, busPinTint, setViewTransform, trackNameColor, unflipX, zoomFactor, SEL_STYLE, busJunctions, directiveOnlyAreas, netStyled } from "./render";
+import { darkened, mixColor, brightenedItemColor, lockedShadowMargin, footprintBodyBox, drawLockedShadow, DRC_HIGHLIGHTED, HL_FACTOR, HC_EDGE_MIN, viaSpans, viaFlashesOn, unflashedGeoms, umbilicalLines, viaStitchOutline, viaStitchTicks, gridItemGeom, gridItemArea, gridTakesPrecedence, autoSparsePitch, DASH_RATIOS, HIDDEN_TEXT_ALPHA, HL_DIM, MARKER_COLORS, MARKER_CORNERS, MARKER_SCALE, PX_PER_MM_ZOOM1, RATSNEST_COLOR, VIA_NETNAME_COLOR, ZONE_OPACITY, brightened, dashPattern, defaultCreateCanvas, drawDrawingSheet, drawHalo, drawMarkers, drawPad, drawSelectionHalo, SCH_SELECTION_SHADOW, selectedColor, flipCentre, flipX, highlightColor, markerAt, markerPolygon, markerScale, render, busConnectedLabels, busPinTint, setViewTransform, trackNameColor, unflipX, zoomFactor, SEL_STYLE, busJunctions, directiveOnlyAreas, netStyled } from "./render";
 import { busConnection, busMemberNames, isBusLabel } from "./busname";
 import { boardSetup } from "./board-setup";
 import { PlotRecorder, blackAndWhite, dashRuns, itemsBox, luminance, plotItems, plotRecorder, sheetPlotItems } from "./plot-rec";
@@ -44,10 +44,11 @@ import { schNets } from "./sch-nets";
 import { projectFile } from "./project-file";
 import { arcFrom3, atOf, bezierPts, boxOf, cloneNode, cornersInSequence, effectsOf, fillOf, kid, kids, num, parse, parseAll, pointInPoly, ptsOf, quotedMask, str, strokeOf, uuidOf } from "./sexpr";
 import { DEFAULT_DRAWING_SHEET, PRODUCT_NAME, TB_TOKENS, WS_TOKENS, alphabeticFromIndex, buildDrawingSheet, defaultDrawingSheet, documentDrawingSheet, hitTestDrawingSheet, expandTextVars, incrementLabel, indexFromAlphabetic, parseDrawingSheet, sheetTextPen, sheetTextVars, varResolver } from "./sheet";
-import { IMAGE_CACHE, base64Bytes, imageInfo, shiftTable, tableCellShownText, cellAddr, parseCellAddress } from "./tables-images";
+import { downgradeSchNode, migrateBoardNode, migrateSchNode } from "./legacy";
+import { IMAGE_CACHE, base64Bytes, imageInfo, legacyImageScaleFactor, shiftTable, tableCellShownText, cellAddr, parseCellAddress } from "./tables-images";
 import { SCH_PEN, TEXT_INTERLINE, isUrlText, lineOffsets, parseMarkup, setSchPen, textWidth, unescapeText, urlRunAt, urlRunBox, urlRuns } from "./text";
 import { drawStrokeText, linebreakText, parseStrokeMarkup, strokeAdvance, strokeGlyph, strokeLine, strokeLineWidth, strokeOrigin } from "./stroke-font";
-import { displayNetName, netCode } from "./geom-pcb";
+import { displayNetName, netCode, padLabelShown } from "./geom-pcb";
 import { unitLetter } from "./geom-sch";
 import { GRID_MIN_SPACING, GRID_TICK, MIN_TEXT_PX, allFontData, drawOutlineText, drawTextStroke, faceAvailable, fontChanged, fontData, setFontData, textMode, wantFace } from "./render";
 import { pcbSizes } from "./pcb-sizes";
@@ -115,8 +116,7 @@ export const api = {
   onFontWanted: null, fontChanged, wantFace, faceAvailable, setFontData, fontData, allFontData, loadFontsFor: null, setRenderCacheWriter,
   // outline-font text laid out as KiCad's OUTLINE_FONT places it (outline-text.ts): metrics, layout, box, painter
   faceMetrics, readSfnt, kicadAscDesc, outlineLayout, outlineBoxCorners, drawOutlineText, ensureFontGeom, fieldColor,
-  hopShapes, wireHopShape, hopOver, drawHalo, SCH_SELECTION_SHADOW, HL_DIM, brightened, highlightColor, imageInfo, base64Bytes, IMAGE_CACHE, strokeOf, boxOf, cornersInSequence, shiftTable, tableCellShownText, cellAddr, parseCellAddress, autoPanDirection, autoPanStep, AUTOPAN_TICK_MS,
-  darkened, mixColor, brightenedItemColor, lockedShadowMargin, footprintBodyBox, drawLockedShadow, DRC_HIGHLIGHTED, HL_FACTOR, HC_EDGE_MIN, viaSpans, umbilicalLines, viaStitchOutline, viaStitchTicks, gridItemGeom, gridItemArea, gridTakesPrecedence, autoSparsePitch,
+  hopShapes, wireHopShape, hopOver, drawHalo, SCH_SELECTION_SHADOW, HL_DIM, brightened, highlightColor, imageInfo, base64Bytes, IMAGE_CACHE, strokeOf, boxOf, cornersInSequence, shiftTable, tableCellShownText, cellAddr, parseCellAddress, autoPanDirection, autoPanStep, AUTOPAN_TICK_MS, darkened, mixColor, brightenedItemColor, lockedShadowMargin, footprintBodyBox, drawLockedShadow, DRC_HIGHLIGHTED, HL_FACTOR, HC_EDGE_MIN, viaSpans, viaFlashesOn, unflashedGeoms, umbilicalLines, viaStitchOutline, viaStitchTicks, gridItemGeom, gridItemArea, gridTakesPrecedence, autoSparsePitch, legacyImageScaleFactor, migrateSchNode, migrateBoardNode, downgradeSchNode,
   // the drawing sheet (web/domains/pcb/canvas/sheet.ts): KiCad's built-in (kicad_wks …) description, its interpreter
   // and the text-variable resolution the title block uses; render()/renderSvg() paint what it returns
   DEFAULT_DRAWING_SHEET, parseDrawingSheet, defaultDrawingSheet, buildDrawingSheet, documentDrawingSheet, hitTestDrawingSheet,
@@ -133,7 +133,7 @@ export const api = {
   // KiCad's stroke font (web/domains/pcb/canvas/stroke-font.ts): glyphs, markup, line layout, word wrap and the painter.
   // textMode: undefined = stroke font wherever Path2D exists, canvas fonts otherwise; "stroke" / "native" force one
   textMode: undefined, currentTextMode: textMode, strokeGlyph, strokeAdvance, strokeLine, strokeLineWidth, strokeOrigin, parseStrokeMarkup, linebreakText, drawStrokeText, drawTextStroke,
-  unescapeText, displayNetName, netCode, unitLetter, letterSubReference, subReference, unitDisplayNames, symbolInstance, symVars, GRID_MIN_SPACING, GRID_TICK, MIN_TEXT_PX,
+  unescapeText, displayNetName, netCode, padLabelShown, unitLetter, letterSubReference, subReference, unitDisplayNames, symbolInstance, symVars, GRID_MIN_SPACING, GRID_TICK, MIN_TEXT_PX,
   // the board editor's track / via sizes, netclass resolution and routing layer pair (web/domains/pcb/canvas/pcb-sizes.ts)
   pcbSizes,
   // the Symbol Editor's render mode (web/domains/pcb/canvas/libsym.ts): one library symbol as an editable document

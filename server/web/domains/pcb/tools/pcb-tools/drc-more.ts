@@ -8,7 +8,7 @@ import type { BoardDoc, CopperShape, DesignSettings, DrcMarker, PadInfo, Pt } fr
 import { pointInPoly } from "./hit";
 import { DRC_ITEMS } from "../../canvas/drc-items";
 import { arcPoints, boxesTouch, coreDist, padShape, shapeBBox, shapeGap, shapeOffset } from "./distances";
-import { chainLoops, marker, mm4, netClearance, withKiids } from "./drc";
+import { chainLoops, marker, mm4, mmPair, netClearance, netTieExcluded, ruled, withKiids } from "./drc";
 import { conductors } from "./netlist";
 import { unflashedLayers } from "./drc-flash";
 import type { DruRule, RuleHit } from "./dru";
@@ -80,7 +80,7 @@ export function holeToHoleMarkers(doc: BoardDoc, s: DesignSettings, ruleOf: Rule
     const actual = Math.max(0, coreDist(holeShape(a), holeShape(b)) - a.w / 2 - b.w / 2);
     const hit = ruleOf("hole_to_hole", ri(a), ri(b)); if (hit && hit.severity === "ignore") return;
     const min = hit && hit.min != null ? hit.min : min0, name = hit ? hit.name : "board setup constraints";
-    if (min >= 0 && actual < Math.max(0, min - DRC_EPS)) out.push(withKiids(marker("hole_to_hole", defaultSeverity("hole_to_hole"), ca[0], ca[1], `Drilled hole too close to other hole (${name} min ${mm4(min)}; actual ${mm4(actual)})`, [p.id, q.id]), [holeKiid(doc, p), holeKiid(doc, q)]));
+    if (min >= 0 && actual < Math.max(0, min - DRC_EPS)) { const [tn, ta] = mmPair(min, actual); out.push(ruled(withKiids(marker("hole_to_hole", defaultSeverity("hole_to_hole"), ca[0], ca[1], `Drilled hole too close to other hole (${name} min ${tn}; actual ${ta})`, [p.id, q.id]), [holeKiid(doc, p), holeKiid(doc, q)]), hit && hit.severity)); }
   };
   const reach = Math.max(min0, worstRule, 0.01); const boxes = holes.map(box);   // QueryWorstConstraint( HOLE_TO_HOLE_CONSTRAINT )
   // the via pass (microvias are laser-drilled and only collided with), then the pad pass; one test per pair
@@ -128,6 +128,8 @@ export function holeClearanceMarkers(doc: BoardDoc, s: DesignSettings, ruleOf: R
       else if (hNet && c.net === hNet) continue;
       const hit = ruleOf("hole_clearance", { kind: h.kind, node: h.kind === "pad" ? h.pad!.node : (doc.items.get(h.id) as KItem).node, layer: [...c.layers][0] }, { kind: c.kind, node: c.kind === "pad" ? c.pad.node : c.item.node, layer: [...c.layers][0] });
       if (hit && hit.severity === "ignore") continue;
+      // DRC_ENGINE::IsNetTieExclusion( hole's net, layer, hole centre, copper item ): a net-tie pad of the hole's net there
+      { const hc = holeCentre(h); if ([...c.layers].some((l) => netTieExcluded(conds, hNet || "", l, hc as Pt, c))) continue; }
       const clr = hit && hit.min != null ? hit.min : min0, name = hit ? hit.name : "board setup constraints hole";
       if (c.kind === "pad" && !(clr > 0)) continue;
       const gap = shapeGap(c.shape, shape); if (gap >= clr - DRC_EPS && !(clr === 0 && gap === 0 && coreDist(c.shape, shape) < shapeOffset(c.shape) + shapeOffset(shape) - DRC_EPS)) continue;
@@ -139,7 +141,8 @@ export function holeClearanceMarkers(doc: BoardDoc, s: DesignSettings, ruleOf: R
       }
       const ids = [c.id, h.id]; const key = condKiid(c) + "|" + (c.kind === "pad" ? c.index : "") + "|" + h.uuid; if (seen.has(key)) continue; seen.add(key);
       const [cx, cy] = holeCentre(h);
-      out.push(withKiids(marker("hole_clearance", defaultSeverity("hole_clearance"), cx, cy, clr ? `Hole clearance violation (${name} clearance ${mm4(clr)}; actual ${mm4(gap)})` : `Hole clearance violation (${name} clearance ${mm4(clr)}; actual < 0)`, ids), [condKiid(c), holeKiid(doc, h)]));
+      const [tc, tg] = mmPair(clr, gap);
+      out.push(ruled(withKiids(marker("hole_clearance", defaultSeverity("hole_clearance"), cx, cy, clr ? `Hole clearance violation (${name} clearance ${tc}; actual ${tg})` : `Hole clearance violation (${name} clearance ${mm4(clr)}; actual < 0)`, ids), [condKiid(c), holeKiid(doc, h)]), hit && hit.severity));
     }
   }
   return out;
@@ -186,8 +189,8 @@ export function textDimsMarkers(doc: BoardDoc, s: DesignSettings, ruleOf: RuleOf
       const hit = ruleOf(type, A, null); if (hit && hit.severity === "ignore") return;
       const min = hit ? hit.min : silk ? implicit : null, max = hit ? hit.max : null, name = hit ? hit.name : implicitName;
       const title = type === "text_height" ? "Text height out of range" : "Line width out of range";
-      if (min != null && min > 0 && actual < min - 1e-9) out.push(marker(type, defaultSeverity(type), t.pos[0], t.pos[1], `${title} (${name} min ${what} ${mm4(min)}; actual ${mm4(actual)})`, [t.id]));
-      if (max != null && actual > max + 1e-9) out.push(marker(type, defaultSeverity(type), t.pos[0], t.pos[1], `${title} (${name} max ${what} ${mm4(max)}; actual ${mm4(actual)})`, [t.id]));
+      if (min != null && min > 0 && actual < min - 1e-9) { const [tn, ta] = mmPair(min, actual); out.push(ruled(marker(type, defaultSeverity(type), t.pos[0], t.pos[1], `${title} (${name} min ${what} ${tn}; actual ${ta})`, [t.id]), hit && hit.severity)); }
+      if (max != null && actual > max + 1e-9) { const [tn, ta] = mmPair(max, actual); out.push(ruled(marker(type, defaultSeverity(type), t.pos[0], t.pos[1], `${title} (${name} max ${what} ${tn}; actual ${ta})`, [t.id]), hit && hit.severity)); }
     };
     // an outline (TrueType) font's stroke weight is the glyphs' business; its thickness is not checked here
     if (!ef.face) check("line_width", minT, "board setup constraints silk line width", effectivePenWidth(t.node, (doc as { version?: number }).version || 0), "thickness");
@@ -366,8 +369,8 @@ export function lineWidthMarkers(doc: BoardDoc, s: DesignSettings, ruleOf: RuleO
     else if (/_(poly|curve)$/.test(kind)) { const q = K.ptsOf(g); p0 = q.length ? q[0] : null; }
     else p0 = pt(g, "start") || pt(g, "center") || (K.ptsOf(g)[0] || null);
     const P = p0 ? tf(p0[0], p0[1]) : [0, 0];
-    if (min != null && min > 0 && w < min - 1e-9) out.push(marker("line_width", defaultSeverity("line_width"), P[0], P[1], `Line width out of range (${name} min width ${mm4(min)}; actual ${mm4(w)})`, [id]));
-    if (max != null && w > max + 1e-9) out.push(marker("line_width", defaultSeverity("line_width"), P[0], P[1], `Line width out of range (${name} max width ${mm4(max)}; actual ${mm4(w)})`, [id]));
+    if (min != null && min > 0 && w < min - 1e-9) { const [tn, ta] = mmPair(min, w); out.push(ruled(marker("line_width", defaultSeverity("line_width"), P[0], P[1], `Line width out of range (${name} min width ${tn}; actual ${ta})`, [id]), hit && hit.severity)); }
+    if (max != null && w > max + 1e-9) { const [tn, ta] = mmPair(max, w); out.push(ruled(marker("line_width", defaultSeverity("line_width"), P[0], P[1], `Line width out of range (${name} max width ${tn}; actual ${ta})`, [id]), hit && hit.severity)); }
   };
   const id = (x: number, y: number): Pt => [x, y];
   for (const it of doc.items.values()) {

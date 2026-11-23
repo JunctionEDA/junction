@@ -13,8 +13,10 @@
 //   - the Pin Table's CSV export / import columns (DIALOG_LIB_EDIT_PIN_TABLE).
 // Coordinates are the file's: millimetres, library Y up.
 import { cloneNode, isList, kid, kids, num, parse, str } from "../canvas/sexpr";
+import { GENERATOR, GENERATOR_VERSION, SEXPR_SYMBOL_LIB_FILE_VERSION, minimumFileFormatVersion, usesEscapedStackedPinNotation } from "../canvas/format-version";
 import { serialize } from "../canvas/export";
 import { expandStacked } from "../canvas/stacked-pins";
+import { downgradeSchNode, migrateSchNode } from "../canvas/legacy";
 export { expandStacked };
 
 export type Node = SNode;
@@ -22,7 +24,7 @@ export type Node = SNode;
 // ---------------------------------------------------------------- constants
 /** SEXPR_SYMBOL_LIB_FILE_VERSION of this tree (eeschema/sch_file_versions.h): only for a brand-new library. */
 export const SYMBOL_LIB_FILE_VERSION = 20261106;
-export const NEW_LIBRARY_TEXT = '(kicad_symbol_lib\n\t(version 20261106)\n\t(generator "kicad_symbol_editor")\n\t(generator_version "10.0")\n)\n';
+export const NEW_LIBRARY_TEXT = `(kicad_symbol_lib\n\t(version ${SEXPR_SYMBOL_LIB_FILE_VERSION})\n\t(generator "kicad_symbol_editor")\n\t(generator_version "${GENERATOR_VERSION}")\n)\n`;
 export const MIL = 0.0254;
 /** SYMBOL_EDITOR_SETTINGS defaults (symbol_editor_settings.cpp): pin length 100, name / number size 50 mil, repeat step 100 mil, label delta 1. */
 export const DEFAULTS = { pinLength: 100 * MIL, pinNameSize: 50 * MIL, pinNumSize: 50 * MIL, pinStep: 100 * MIL, labelDelta: 1, lineWidth: 0, textSize: 50 * MIL, gridMils: 50 };
@@ -123,8 +125,9 @@ export function parseLibrary(src: string): SymLib {
   const t = parse(src);
   if (!t || t[0] !== "kicad_symbol_lib") throw new Error("not a symbol library");
   const head: Node = [t[0]]; const symbols = new Map<string, Node>();
-  for (let j = 1; j < t.length; j++) { const c = t[j]; if (isList(c) && c[0] === "symbol") symbols.set(str(c[1]), c); else head.push(c); }
   const v = kid(t, "version");
+  // what the library parser changes while reading an older file (canvas/legacy.ts)
+  for (let j = 1; j < t.length; j++) { const c = t[j]; if (isList(c) && c[0] === "symbol") { migrateSchNode(c, v ? num(v[1]) : 0); symbols.set(str(c[1]), c); } else head.push(c); }
   return { head, version: v ? num(v[1]) : 0, symbols };
 }
 export function emptyLibrary(): SymLib { return parseLibrary(NEW_LIBRARY_TEXT); }
@@ -139,8 +142,23 @@ export function saveOrder(lib: SymLib): string[] {
 }
 /** The whole file, as the desktop writes it: header, symbols by inheritance depth then name, prettified. */
 export function serializeLibrary(lib: SymLib): string {
-  let s = "(" + lib.head.slice(1).reduce((acc: string, c) => acc + " " + serialize(c), String(lib.head[0]));
-  for (const name of saveOrder(lib)) s += " " + serialize(lib.symbols.get(name)!);
+  // SCH_IO_KICAD_SEXPR_LIB_CACHE::formatLibrary: a library read at an older version is written at that version in its
+  // legacy forms, raised only as far as the body needs (the scan, and escaped stacked pin numbers); a new one current.
+  // The header is written afresh (formatLibraryHeader).
+  const vk = kid(lib.head, "version"), was = vk ? num(vk[1], 0) : 0;
+  const loaded = was < 20130000 || was >= SEXPR_SYMBOL_LIB_FILE_VERSION ? 0 : was;
+  const syms = saveOrder(lib).map((name) => lib.symbols.get(name)!);
+  let version = loaded || SEXPR_SYMBOL_LIB_FILE_VERSION;
+  if (loaded) {
+    let need = minimumFileFormatVersion(syms.map((n) => serialize(downgradeSchNode(n, loaded))).join(" "), "symlib").version;
+    const escaped = (n: Node): boolean => isList(n) && ((n[0] === "pin" && (() => { const nn = kid(n, "number"); return !!nn && usesEscapedStackedPinNotation(str(nn[1])); })()) || n.some((c, j) => j > 0 && escaped(c as Node)));
+    if (need < 20260622 && syms.some(escaped)) need = 20260622;
+    if (need > loaded) version = Math.min(need, SEXPR_SYMBOL_LIB_FILE_VERSION);
+  }
+  const STAMP = ["version", "generator", "generator_version"];
+  let s = `(${String(lib.head[0])} (version ${version}) (generator "${GENERATOR.symlib}") (generator_version "${GENERATOR_VERSION}")`;
+  s = lib.head.slice(1).reduce((acc: string, c) => (isList(c) && STAMP.includes(str(c[0])) ? acc : acc + " " + serialize(c)), s);
+  for (const n of syms) s += " " + serialize(downgradeSchNode(n, version));
   return prettify(s + ")");
 }
 

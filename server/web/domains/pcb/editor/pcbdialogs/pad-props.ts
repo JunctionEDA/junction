@@ -89,7 +89,7 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
     build(body) {
       // ---- General
       const general = h("div", { class: "pp-general" });
-      const type = selectField<DlgType>(m.type, [["pth", "Through-hole"], ["smd", "SMD"], ["conn", "Edge Connector"], ["npth", "NPTH, Mechanical"], ["aperture", "SMD Aperture"]], { ro, key: "padType", onChange: (v) => { m.type = v; onType(); } });
+      const type = selectField<DlgType>(m.type, [["pth", "Through-hole"], ["smd", "SMD"], ["conn", "Edge Connector"], ["npth", "NPTH, Mechanical"], ["aperture", "SMD Aperture"], ["copper", "Copper Only"]], { ro, key: "padType", onChange: (v) => { m.type = v; onType(); } });
       const number = textField(m.number, { ro, key: "padNumber" });
       const netNames = PH().boardNetNames(doc).filter(Boolean); if (m.net && !netNames.includes(m.net)) netNames.unshift(m.net);
       const net = selectField<string>(m.net, [["", "<no net>"], ...netNames.map((n): [string, string] => [n, n])], { ro, key: "padNet", onChange: (v) => { m.net = v; } });
@@ -125,44 +125,45 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
         menu.style.minWidth = Math.round(r.width + angles.getBoundingClientRect().width) + "px";
         fitMenu(menu, { below: r, gap: 0 });
       });
-      const offOn = checkField(m.offset, "Offset shape from hole", { ro, key: "offset", onChange: (v) => { m.offset = v; offX.input.disabled = offY.input.disabled = ro || !v; redraw(); } });
-      const offX = lenField(m.ox, { ro: ro || !m.offset, key: "offsetX" }), offY = lenField(m.oy, { ro: ro || !m.offset, key: "offsetY" });
+      // m_offsetShapeOpt: the offset controls are shown only while it is ticked (OnPadShapeSelection)
+      const offOn = checkField(m.offset, "Offset shape from hole", { ro, key: "offset", onChange: (v) => { m.offset = v; offRow.style.display = v ? "" : "none"; redraw(); } });
+      const offX = lenField(m.ox, { ro, key: "offsetX" }), offY = lenField(m.oy, { ro, key: "offsetY" });
       const holeShape = selectField<number>(m.holeOblong ? 1 : 0, [[0, "Round"], [1, "Oblong"]], { ro, key: "holeShape", onChange: (v) => { m.holeOblong = v === 1; holeY.input.disabled = ro || !m.holeOblong || !holed(); redraw(); } });
       const holeX = lenField(m.hx, { ro, key: "holeX" }), holeY = lenField(m.holeOblong ? m.hy : m.hx, { ro: ro || !m.holeOblong, key: "holeY" });
-      const dieOn = checkField(m.dieOn, "Specify pad to die length", { ro, key: "dieOn", onChange: (v) => { m.dieOn = v; die.input.disabled = ro || !v; } });
-      const die = lenField(m.die, { ro: ro || !m.dieOn, key: "dieLength" });
-      // rows whose token is newer than the file's (version) stay read-only: writing them would need a format bump
-      const fileVersion = (doc as unknown as { version?: number }).version || 0;
-      const newer = (v: number): boolean => fileVersion < v;
-      const tooNew = "This file's format version predates this setting; it is kept as stored.";
-      const delayRo = ro || newer(PM().DIE_DELAY_VERSION);
-      const delayOn = checkField(m.dieDelayOn, "Specify pad to die delay", { ro: delayRo, key: "dieDelayOn", onChange: (v) => { m.dieDelayOn = v; delay.disabled = delayRo || !v; } });
-      const delay = h("input", { type: "text", value: f6(m.dieDelay), disabled: delayRo || !m.dieDelayOn, "data-k": "dieDelay", style: "width:110px" });
-      if (delayRo && !ro) delayOn.el.title = delay.title = tooNew;
+      // OnUpdateUI: m_padToDie / m_padToDieDelay shown only while their box is ticked
+      const dieOn = checkField(m.dieOn, "Specify pad to die length", { ro, key: "dieOn", onChange: (v) => { m.dieOn = v; syncDie(); } });
+      const die = lenField(m.die, { ro, key: "dieLength" });
+      const delayOn = checkField(m.dieDelayOn, "Specify pad to die delay", { ro, key: "dieDelayOn", onChange: (v) => { m.dieDelayOn = v; syncDie(); } });
+      const delay = h("input", { type: "text", value: f6(m.dieDelay), disabled: ro, "data-k": "dieDelay", style: "width:110px" });
+      const dieUnit = unitLabel(), delayUnit = unitLabel("ps");
+      const syncDie = (): void => { for (const e of [die.el, dieUnit]) e.style.visibility = m.dieOn ? "" : "hidden"; for (const e of [delay, delayUnit]) e.style.visibility = m.dieDelayOn ? "" : "hidden"; };
       const xy = (a: Field<number>, b: Field<number>): HTMLElement => h("span", { class: "pd-xy" }, a.el, h("span", { class: "unit" }, unitName()), h("label", null, "Y:"), b.el);
+      // m_padstackControls: for through-hole pads only (PadTypeSelected)
+      const padstackRows = h("div", null, form([["Padstack mode:", psModeSel.el], ["Edit layer:", selectField<string>("F.Cu", [["F.Cu", padstack ? "F.Cu" : "All layers"]], { ro: true, key: "editLayer" }).el]], true), h("hr", { class: "pp-hr" }));
+      const offRow = form([["X:", xy(offX, offY), unitLabel()]], true);
+      // m_gbSizerHole / m_staticline71: shown for a pad type with a hole
+      const holeRows = h("div", null, form([["Hole shape:", holeShape.el], ["Hole size X:", xy(holeX, holeY), unitLabel()]], true), h("hr", { class: "pp-hr" }));
       const left = h("div", { class: "pp-col" },
         form([["Pad type:", type.el], ["Pad number:", number.el], ["Net name:", net.el], ["Position X:", xy(px, py), unitLabel()]], true),
         h("hr", { class: "pp-hr" }),
-        form([["Padstack mode:", psModeSel.el], ["Edit layer:", selectField<string>("F.Cu", [["F.Cu", padstack ? "F.Cu" : "All layers"]], { ro: true, key: "editLayer" }).el]], true),
-        h("hr", { class: "pp-hr" }),
+        padstackRows,
         form([["Pad shape:", shape.el]], true), shapeProps,
         form([["Pad size X:", xy(sx, sy), unitLabel()], ["Angle:", h("span", { class: "pp-anglebox" }, angle, angles), unitLabel("deg")]], true),
-        h("div", { class: "pp-row" }, offOn.el), form([["X:", xy(offX, offY), unitLabel()]], true),
+        h("div", { class: "pp-row" }, offOn.el), offRow,
         h("hr", { class: "pp-hr" }),
-        form([["Hole shape:", holeShape.el], ["Hole size X:", xy(holeX, holeY), unitLabel()]], true),
-        h("hr", { class: "pp-hr" }),
-        h("div", { class: "pp-row" }, dieOn.el, die.el, unitLabel()),
-        h("div", { class: "pp-row" }, delayOn.el, delay, unitLabel("ps")));
+        holeRows,
+        h("div", { class: "pp-row" }, dieOn.el, die.el, dieUnit),
+        h("div", { class: "pp-row" }, delayOn.el, delay, delayUnit));
+      offRow.style.display = m.offset ? "" : "none"; syncDie();
       // layers (the middle column)
       const copperSel = h("k-select", { disabled: ro, "data-k": "copperLayers" }) as HTMLSelectElement;
-      const fillCopper = (): void => { copperSel.replaceChildren(...PM().copperChoices(m.type).map((l, i) => h("option", { value: String(i) }, l))); if (m.copper >= copperSel.options.length) m.copper = 0; copperSel.selectedIndex = m.copper; copperSel.disabled = ro || m.type === "aperture"; };
+      const layerName = (l: string): string => { const L = doc.layers.get(l) as { userName?: string } | undefined; return L && L.userName ? L.userName : l; };
+      const fillCopper = (): void => { copperSel.replaceChildren(...PM().copperChoices(m.type, copper, layerName).map((l, i) => h("option", { value: String(i) }, l))); if (m.copper >= copperSel.options.length) m.copper = 0; copperSel.selectedIndex = m.copper; copperSel.disabled = ro || m.type === "aperture"; };
       copperSel.addEventListener("change", () => { m.copper = copperSel.selectedIndex; redraw(); });
       const techChecks = PM().TECH.map(([label, l]) => checkField(!!m.tech[l], label, { ro, key: "layer-" + l, onChange: (v) => { m.tech[l] = v; redraw(); } }));
       const prop = selectField<string>(m.property, PM().PROPS, { ro, key: "fabProperty", onChange: (v) => { m.property = v; } });
       prop.input.title = "Optional property to specify a special purpose or constraint in fabrication files:\nBGA attribute is for pads in BGA footprints\nFiducial local is a fiducial for the parent footprint\nFiducial global is a fiducial for the whole board\nTest Point specifies an electrical test point\nHeatsink specifies a thermal pad\nCastellated specifies a through hole pad on a board edge\nMechanical specifies a through-hole pad that is used for mechanical support";
-      const simRo = ro || newer(PM().SIM_ELECTRICAL_TYPE_VERSION);
-      const sim = selectField<string>(m.simType === "source" || m.simType === "sink" ? m.simType : "", [["", "None"], ["source", "Source"], ["sink", "Sink"]], { ro: simRo, key: "simType", onChange: (v) => { m.simType = v; } });
-      if (simRo && !ro) sim.el.title = tooNew;
+      const sim = selectField<string>(m.simType === "source" || m.simType === "sink" ? m.simType : "", [["", "None"], ["source", "Source"], ["sink", "Sink"]], { ro, key: "simType", onChange: (v) => { m.simType = v; } });
       const middle = h("div", { class: "pp-col" },
         h("div", { class: "pd-box" },
           flipped ? h("div", { class: "pd-info" }, "Parent footprint on board is flipped.\nLayers will be reversed.") : null,
@@ -230,6 +231,10 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
         chamferRows.style.display = m.shape === "chamfer" || m.shape === "mixed" ? "" : "none";
         sy.input.disabled = ro || m.shape === "circle" || m.shape === "custom_circle";
         if (m.shape === "circle") sy.set(sx.get());
+        // m_offsetShapeOpt->Enable( shape != circle ), unticked when disabled; the offsets shown only while ticked
+        offOn.input.disabled = ro || m.shape === "circle";
+        if (m.shape === "circle" && m.offset) { m.offset = false; offOn.set(false); }
+        offRow.style.display = m.offset ? "" : "none";
         knock.input.disabled = ro || !m.shape.startsWith("custom");
         // KiCad's defaults on a shape change: the IPC corner radius, a 20% chamfer on the top-left corner
         const ipc = (): number => { const mn = Math.min(m.w, m.h); return mn > 0 ? Math.min(0.25, mn * 0.25) / mn : 0.25; };
@@ -238,19 +243,30 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
         if ((m.shape === "chamfer" || m.shape === "mixed") && !m.corners.some(Boolean)) { m.corners = [true, false, false, false]; corner.forEach((c, i) => c.set(i === 0)); }
         redraw();
       }
-      function onType(): void {
+      /** OnUpdateUI's enable states for the type. */
+      function typeEnables(): void {
         const conn = m.type !== "npth" && m.type !== "aperture";
         number.input.disabled = ro || !conn; net.input.disabled = ro || !conn;
+        dieOn.input.disabled = ro || !conn; (delayOn.input as HTMLInputElement).disabled = ro || !conn;
         holeShape.input.disabled = ro || !holed(); holeX.input.disabled = ro || !holed(); holeY.input.disabled = ro || !holed() || !m.holeOblong;
-        // KiCad's default technical layers per type (PAD::PTHMask etc.) when the type changes
-        if (m.type !== was.type || type.input.dataset.touched) {
-          type.input.dataset.touched = "1";
-          const set = m.type === "pth" ? ["F.Mask", "B.Mask"] : m.type === "npth" ? ["F.Mask", "B.Mask"] : m.type === "conn" ? ["F.Mask"] : m.type === "aperture" ? ["F.Paste"] : ["F.Paste", "F.Mask"];
-          for (const [, l] of PM().TECH) m.tech[l] = set.includes(l); techChecks.forEach((c, i) => c.set(!!m.tech[PM().TECH[i][1]]));
-          if (m.type === "pth" || m.type === "npth") { if (!(m.hx > 0)) { m.hx = m.hy = Math.max(0.1, Math.min(m.w, m.h) / 2); holeX.set(m.hx); holeY.set(m.hy); } }
-          m.copper = 0;
-        }
-        fillCopper(); redraw();
+        holeRows.style.display = holed() ? "" : "none";
+        padstackRows.style.display = m.type === "pth" ? "" : "none";
+      }
+      /** PadTypeSelected: the new type's default layers, its hole and its connection. */
+      function onType(): void {
+        // updatePadLayersList( std::nullopt ): PAD::PTHMask, SMDMask, ConnSMDMask, UnplatedHoleMask, ApertureMask, { F_Cu }
+        const set = m.type === "pth" || m.type === "npth" ? ["F.Mask", "B.Mask"] : m.type === "conn" ? ["F.Mask"] : m.type === "aperture" ? ["F.Paste"] : m.type === "copper" ? [] : ["F.Paste", "F.Mask"];
+        for (const [, l] of PM().TECH) m.tech[l] = set.includes(l); techChecks.forEach((c, i) => c.set(!!m.tech[PM().TECH[i][1]]));
+        // a through-hole pad keeps the edited pad's unused-layer removal (GetRemoveUnconnected / GetKeepTopBottom)
+        m.copper = m.type === "pth" && was.type === "pth" && was.copper !== 3 ? was.copper : 0;
+        if (!holed()) { m.hx = m.hy = 0; holeX.set(0); holeY.set(0); }
+        else if (!(m.hx > 0)) { m.hx = was.hx; m.hy = was.hy; holeX.set(m.hx); holeY.set(m.holeOblong ? m.hy : m.hx); }   // m_currentPad->GetDrillSize()
+        const conn = m.type !== "npth" && m.type !== "aperture";
+        if (!conn) {
+          m.number = ""; number.set(""); m.net = ""; net.set("");
+          m.dieOn = false; dieOn.set(false); m.dieDelayOn = false; delayOn.set(false); syncDie();
+        } else if (!number.get()) { m.number = was.number; number.set(was.number); m.net = was.net; net.set(was.net); }
+        typeEnables(); fillCopper(); redraw();
       }
       readAll = (): void => {
         m.number = number.get(); m.x = px.get(); m.y = py.get(); m.w = sx.get(); m.h = m.shape === "circle" ? m.w : sy.get();
@@ -276,7 +292,7 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
       body.addEventListener("input", () => { readAll(); redraw(); });
       body.addEventListener("change", () => { readAll(); redraw(); });
       redraw = (): void => drawPreview(cv, m, sketch.get(), copper);
-      onShape(); fillCopper(); onType();
+      onShape(); fillCopper(); typeEnables();
       requestAnimationFrame(() => redraw());
     },
     ok() {
@@ -287,7 +303,7 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
       const commit = (): void => {
         PM().writePad(doc, staged, pad, m, was, (name) => PH().netCodeOf(doc, name));
         const before = K().serialize(item.node); if (K().serialize(staged) === before) return;
-        ctx.commit([K().replaceChange(doc, { ...item, node: staged, geom: [], bbox: null })], `pad ${ref ? ref + " " : ""}${m.number || was.number}`.trim());
+        ctx.commit([K().replaceChange(doc, { ...item, node: staged, geom: [], bbox: null })], "Edit Pad Properties");
         ctx.requestRender();
       };
       if (warnings.length) { messageList("Pad Properties Warnings", warnings); }

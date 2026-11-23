@@ -533,13 +533,14 @@ test("render options: outlinePads / outlineTracks / outlineVias stroke instead o
   const pads = renderWith(doc, { outlinePads: true });
   assert.equal(plain.calls.fill - pads.calls.fill, 6, "six pad shapes no longer filled"); assert.equal(pads.calls.stroke - plain.calls.stroke, 6, "…but stroked");
   const vias = renderWith(doc, { outlineVias: true });
-  assert.equal(plain.calls.fill - vias.calls.fill, 3, "two copper rings and the hole become outlines"); assert.equal(vias.calls.stroke - plain.calls.stroke, 3);
+  // PCB_PAINTER: LAYER_VIA_HOLES is always filled, the via outline mode strokes the rings alone
+  assert.equal(plain.calls.fill - vias.calls.fill, 2, "the two copper rings become outlines, the hole stays filled"); assert.equal(vias.calls.stroke - plain.calls.stroke, 2);
   const tracks = renderWith(doc, { outlineTracks: true });
   assert.equal(tracks.calls.stroke, plain.calls.stroke, "every track still one stroke");
   assert.ok(tracks.calls.arc - plain.calls.arc >= 2 * 4 + 3, "stadium end caps and arc band caps are traced");
   assert.equal(tracks.calls.fill, plain.calls.fill, "tracks were never filled");
   const all = renderWith(doc, { outlinePads: true, outlineTracks: true, outlineVias: true });
-  assert.equal(plain.calls.fill - all.calls.fill, 9);
+  assert.equal(plain.calls.fill - all.calls.fill, 8);
   const sch = K.parseDoc('(kicad_sch (version 20250114) (generator "t") (paper "A4") (junction (at 2 2) (diameter 0) (color 0 0 0 0) (uuid "j")))');
   const sview = { ppm: 2, zoom: 1, panX: 0, panY: 0, x0: 0, y0: 0, dpr: 1 };
   const a = stubCtx(600, 400); K.render(sch, a, sview, {}); const b = stubCtx(600, 400); K.render(sch, b, sview, { outlinePads: true, outlineVias: true, outlineTracks: true, zoneOutline: true, highContrast: true, activeLayer: "F.Cu" });
@@ -962,7 +963,7 @@ test("DRC: clearance, board edge, missing connections, dangling and zero-length 
   const doc = K.parseDoc(DRC_BOARD, "kicad_pcb"); const m = P.drc(doc);
   const by = (code) => m.filter((x) => x.code === code);
   const clr = by("clearance"); assert.equal(clr.length, 1); assert.equal(clr[0].text, "Clearance violation (netclass 'Default' clearance 0.2000 mm; actual 0.1000 mm)");
-  assert.deepEqual(clr[0].ids.sort(), ["s-1", "s-2"]); assert.equal(clr[0].severity, "error"); assert.ok(clr[0].x > 110 && clr[0].x < 115 && near(clr[0].y, 50.175, 1e-3));
+  assert.deepEqual(clr[0].ids.sort(), ["s-1", "s-2"]); assert.equal(clr[0].severity, "error"); assert.deepEqual([clr[0].x, clr[0].y], [110, 50], "SHAPE_SEGMENT::Collide: SEG::NearestPoint( SEG ) on the tested track (its start first among equals)");
   const edge = by("copper_edge_clearance"); assert.equal(edge.length, 1); assert.deepEqual(edge[0].ids, ["edge", "s-3"], "SetItems( edge, item )"); assert.ok(/edge clearance 0\.5000 mm; actual 0\.1750 mm/.test(edge[0].text), "Edge.Cuts lines are measured at zero width");
   assert.equal(by("unconnected_items").length, P.ratsnest(doc).length); assert.ok(by("unconnected_items").every((x) => x.severity === "error" && /Missing connection/.test(x.text)));
   assert.equal(by("zero_length").length, 0, "KiCad has no zero-length track check");

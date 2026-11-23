@@ -406,7 +406,8 @@ test("formatLength shows a length in the frame's units with the unit, trailing z
   assert.equal(H.formatLength(1.27, "mil"), "50 mils");
   assert.equal(H.formatLength(1.27, "in"), "0.05 in");
   assert.equal(H.formatLength(0, "mm"), "0 mm");
-  assert.equal(H.formatLength(-0.00001, "mm"), "0 mm");
+  assert.equal(H.formatLength(-0.00001, "mm"), "-0.00001 mm", "StringFromValue on the board's 1 nm IU");
+  assert.equal(H.formatLength(-0.00001, "mm", "sch"), "0 mm", "the schematic's 100 nm IU rounds it away");
   assert.equal(H.formatLength(0.254, "mm"), "0.254 mm");
   assert.equal(H.formatLength(100, "mm"), "100 mm");
 });

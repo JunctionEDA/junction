@@ -9,21 +9,26 @@ import { dispatch, useApp } from "../store";
 import { cx } from "../util";
 import { menuArrowPad, menuScroller, menuSize, placeMenu } from "../menufit";
 import { Select, type SelectOption } from "./Select";
+import { menuMeta } from "../../domains/pcb/menuspec";
+import { keyName } from "../keys";
 
 const SEL = "ksel h-6 text-sm max-w-[320px]";
 const EDIT = "Edit Pre-defined Sizes...";
 
 /** A size choice: the entries, a "---" rule and "Edit Pre-defined Sizes...", exactly as the wxChoice is filled. */
-function SizeSelect({ id, title, labels, index, onPick }: { id: string; title: string; labels: string[]; index: number; onPick: (v: number | "edit") => void }) {
+function SizeSelect({ id, title, labels, index, custom, onPick }: { id: string; title?: string; labels: string[]; index: number; custom?: boolean; onPick: (v: number | "edit") => void }) {
   const options: SelectOption[] = labels.map((l, i) => ({ value: String(i), label: l }));
   options.push({ value: "sep", label: "---", sep: true }, { value: "edit", label: EDIT });
-  return <Select id={id} className={SEL} title={title} options={options} value={String(Math.min(index, Math.max(0, labels.length - 1)))} blurOnPick
+  // OnUpdateSelectTrackWidth / OnUpdateSelectViaSize: SetSelection( wxNOT_FOUND ) while custom sizes are in use
+  return <Select id={id} className={SEL} title={title} options={options} value={custom ? "\u0001custom" : String(Math.min(index, Math.max(0, labels.length - 1)))} blurOnPick
     onChange={(v) => { if (v === "edit") onPick("edit"); else if (v !== "sep") onPick(Number(v)); }} />;
 }
 export function TrackWidthSelect() {
   const labels = useApp((s) => s.routing.trackLabels);
   const index = useApp((s) => s.routing.trackIndex);
-  return <SizeSelect id="trackWidthSel" title="Select the track width" labels={labels} index={index} onPick={(v) => dispatch({ type: "setTrackWidth", index: v })} />;
+  const custom = useApp((s) => !!s.routing.custom);
+  return <SizeSelect id="trackWidthSel" title="Select the default width for new tracks. Note that this width can be overridden by the board minimum width, or by the width of an existing track if the 'Use Existing Track Width' feature is enabled."
+    labels={labels} index={index} custom={custom} onPick={(v) => dispatch({ type: "setTrackWidth", index: v })} />;
 }
 /**
  * PCB_EDIT_FRAME::UpdateViaStackSelectBox: "Microvia stack: none defined" or "Microvia stack: %s" for each preset,
@@ -40,12 +45,24 @@ export function ViaStackSelect() {
 export function ViaSizeSelect() {
   const labels = useApp((s) => s.routing.viaLabels);
   const index = useApp((s) => s.routing.viaIndex);
-  return <SizeSelect id="viaSizeSel" title="Select the via size" labels={labels} index={index} onPick={(v) => dispatch({ type: "setViaSize", index: v })} />;
+  const custom = useApp((s) => !!s.routing.custom);
+  // m_SelViaSizeBox has no tooltip
+  return <SizeSelect id="viaSizeSel" labels={labels} index={index} custom={custom} onPick={(v) => dispatch({ type: "setViaSize", index: v })} />;
 }
 
 const SWATCH = "inline-block w-3.5 h-3.5 flex-none rounded-xs border border-black/45";
-/** KiCad appends the layer's hotkey to its name in the selector ("F.Cu (PgUp)"). */
-const LAYER_KEYS: Record<string, string> = { "F.Cu": "PgUp", "B.Cu": "PgDn" };
+/**
+ * PCB_LAYER_BOX_SELECTOR::Resync: AddHotkeyName( name, LayerIDToAction( layer )->GetHotKey(), IS_COMMENT ) — the
+ * hotkey of layerTop, layerInner1..30 or layerBottom in brackets after the name, when the action has one.
+ */
+export function layerActionId(layer: string): string | null {
+  if (layer === "F.Cu") return "layerTop"; if (layer === "B.Cu") return "layerBottom";
+  const m = /^In(\d+)\.Cu$/.exec(layer); return m && +m[1] >= 1 && +m[1] <= 30 ? "layerInner" + m[1] : null;
+}
+export function layerLabelWithKey(layer: string, label: string): string {
+  const id = layerActionId(layer), meta = id ? menuMeta("pcb", id) : null, k = meta && meta.key;
+  return k ? `${label} (${keyName(k)})` : label;
+}
 
 /** The active-layer selector: a drop-down of every enabled layer, each with its colour swatch. */
 export function LayerSelect() {
@@ -83,11 +100,11 @@ export function LayerSelect() {
   }, [open]);
   return (
     <>
-      <button type="button" id="layerSel" ref={btn} title="Active layer" data-layer={active}
+      <button type="button" id="layerSel" ref={btn} title="+/- to switch" data-layer={active}
         className="ksel klayer bg-panel border border-line rounded-sm px-1 py-0.5 h-6 text-sm text-ink inline-flex items-center gap-1.5 min-w-[130px] max-w-[190px]"
         onClick={() => setOpen((o) => !o)} onKeyDown={(ev) => { if (ev.key === " " || ev.key === "Enter") ev.stopPropagation(); }}>
         <i className={SWATCH} style={{ background: cur ? cur.color : "transparent" }} />
-        <span className="flex-1 text-left overflow-hidden text-ellipsis whitespace-nowrap">{cur ? cur.label : active}</span>
+        <span className="flex-1 text-left overflow-hidden text-ellipsis whitespace-nowrap">{cur ? layerLabelWithKey(cur.name, cur.label) : active}</span>
         <svg className="w-2 h-2 flex-none text-ink-2" viewBox="0 0 8 8"><path d="M1 2.5h6L4 6z" fill="currentColor" /></svg>
       </button>
       {open ? createPortal(
@@ -97,7 +114,7 @@ export function LayerSelect() {
               className={cx("flex items-center gap-2 w-full bg-transparent border-0 px-2 py-[3px] text-ink text-left whitespace-nowrap hover:bg-accent hover:text-on-accent on:bg-on", l.name === active && "on")}
               onClick={() => { setOpen(false); dispatch({ type: "setActiveLayer", layer: l.name }); }}>
               <i className={SWATCH} style={{ background: l.color }} />
-              <span className="flex-1">{l.label}{LAYER_KEYS[l.name] ? ` (${LAYER_KEYS[l.name]})` : ""}</span>
+              <span className="flex-1">{layerLabelWithKey(l.name, l.label)}</span>
             </button>
           ))}
         </div>, document.body) : null}

@@ -14,7 +14,9 @@ const kids = (n: N, k: string): N[] => n.filter((c): c is N => isList(c) && head
 const num = (v: unknown, d = 0): number => { const x = Number(v); return isFinite(x) ? x : d; };
 const str = (v: unknown): string => (v === undefined || v === null ? "" : String(v));
 
-export interface DrillLine { xSize: number; ySize: number; slot: boolean; plated: boolean; pad: boolean; start: string | null; stop: string | null; qty: number; ids: string[] }
+export interface DrillLine { xSize: number; ySize: number; slot: boolean; plated: boolean; pad: boolean; start: string | null; stop: string | null; qty: number; ids: string[];
+  /** DRILL_SEARCH_HANDLER::SelectItems selects the pads and vias themselves: the pads as "footprintId#padIndex" */
+  padKeys?: string[] }
 
 /** PCB layer order for a copper stack: F.Cu, In1.Cu … InN.Cu, B.Cu. */
 function cuRank(l: string): number { return l === "F.Cu" ? 0 : l === "B.Cu" ? 1e6 : num((/^In(\d+)\.Cu$/.exec(l) || [])[1], -1); }
@@ -32,23 +34,23 @@ export function padCuSpan(layers: string[], boardCopper: string[]): [string, str
 /** The board's drills grouped as KiCad's Drills tab lists them. `items` are the board's top-level items. */
 export function drillLines(items: Iterable<{ id: string; kind: string; node: N }>, boardCopper: string[]): DrillLine[] {
   const out: DrillLine[] = [];
-  const add = (d: Omit<DrillLine, "qty" | "ids">, id: string) => {
-    for (const g of out) if (g.xSize === d.xSize && g.ySize === d.ySize && g.slot === d.slot && g.plated === d.plated && g.pad === d.pad && g.start === d.start && g.stop === d.stop) { g.qty++; if (!g.ids.includes(id)) g.ids.push(id); return; }
-    out.push(Object.assign({ qty: 1, ids: [id] }, d));
+  const add = (d: Omit<DrillLine, "qty" | "ids">, id: string, padKey?: string) => {
+    for (const g of out) if (g.xSize === d.xSize && g.ySize === d.ySize && g.slot === d.slot && g.plated === d.plated && g.pad === d.pad && g.start === d.start && g.stop === d.stop) { g.qty++; if (!g.ids.includes(id)) g.ids.push(id); if (padKey) (g.padKeys || (g.padKeys = [])).push(padKey); return; }
+    out.push(Object.assign({ qty: 1, ids: [id] }, d, padKey ? { padKeys: [padKey] } : {}));
   };
   const list = Array.from(items);
   // pads first, then vias, as KiCad collects them
   for (const it of list) {
     if (it.kind !== "footprint") continue;
-    for (const p of kids(it.node, "pad")) {
-      const dr = kid(p, "drill"); if (!dr) continue;
+    kids(it.node, "pad").forEach((p, padIndex) => {
+      const dr = kid(p, "drill"); if (!dr) return;
       const oval = dr[1] === "oval";
       const vals = dr.slice(oval ? 2 : 1).filter((v) => !isList(v)).map((v) => num(v, NaN)).filter((v) => isFinite(v));
       const xs = vals[0] || 0, ys = oval ? vals[1] || xs : xs;
-      if (xs <= 0 || ys <= 0) continue;
+      if (xs <= 0 || ys <= 0) return;
       const ls = kid(p, "layers"); const span = padCuSpan(ls ? ls.slice(1).map(str) : [], boardCopper);
-      add({ xSize: xs, ySize: ys, slot: oval, plated: str(p[2]) !== "np_thru_hole", pad: true, start: span ? span[0] : null, stop: span ? span[1] : null }, it.id);
-    }
+      add({ xSize: xs, ySize: ys, slot: oval, plated: str(p[2]) !== "np_thru_hole", pad: true, start: span ? span[0] : null, stop: span ? span[1] : null }, it.id, it.id + "#" + padIndex);
+    });
   }
   for (const it of list) {
     if (it.kind !== "via") continue;
@@ -181,3 +183,29 @@ export function rowWindow(count: number, scrollTop: number, viewHeight: number, 
   const end = Math.max(start, Math.min(count, Math.ceil((Math.max(0, scrollTop) + Math.max(0, viewHeight)) / rowH) + overscan));
   return { start, end, before: start * rowH, after: (count - end) * rowH };
 }
+/**
+ * EDA_UNIT_UTILS::UI::MessageTextFromValue( value, true, EDA_DATA_TYPE::AREA ): an area in the user's units with the
+ * short form's precision (mm² "%.3f" trimmed to 2½ digits, mils² "%.0f", in² "%.3f"), scientific when it would show
+ * only zeros, then the unit label with "²".
+ */
+export function areaText(mm2: number, unit: string): string {
+  const [k, fmt, label] = unit === "in" ? [25.4 * 25.4, 3, " in"] : unit === "mil" ? [0.0254 * 0.0254, 0, " mils"] : [1, 3, " mm"];
+  const v = mm2 / (k as number);
+  let t = v.toFixed(fmt as number);
+  if (v !== 0 && !/[1-9]/.test(t)) { const e = v.toExponential(3).replace(/e([+-])(\d)$/, "e$10$2"); t = e; }
+  else if (unit !== "in" && unit !== "mil" && t.length > 4 && t[t.length - 4] === "." && t[t.length - 1] === "0") t = t.slice(0, -1);
+  return t + label + "\u00b2";
+}
+/** ZONE_SEARCH_HANDLER's Layer cell: the zone's layers on this board in LSET::UIOrder, joined by "," (wxJoin). */
+export function zoneLayersCell(layers: string[], boardCopper: string[], uiRank: (l: string) => number, name: (l: string) => string): string {
+  const out = new Set<string>();
+  for (const l of layers) {
+    if (l === "*.Cu" || l === "F&B.Cu") { for (const c of l === "*.Cu" ? boardCopper : ["F.Cu", "B.Cu"]) out.add(c); }
+    else if (l.startsWith("*.")) { out.add("F." + l.slice(2)); out.add("B." + l.slice(2)); }
+    else if (/\.Cu$/.test(l) && boardCopper.length && !boardCopper.includes(l)) continue;   // AllCuMask( GetCopperLayerCount() )
+    else out.add(l);
+  }
+  return Array.from(out).sort((a, b) => uiRank(a) - uiRank(b)).map(name).join(",");
+}
+/** The area of a closed outline (shoelace), mm². */
+export function outlineArea(pts: [number, number][]): number { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); return Math.abs(a) / 2; }

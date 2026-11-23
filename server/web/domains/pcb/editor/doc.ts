@@ -1,5 +1,6 @@
 // editor — GENERATED SOURCE MODULE (split from the former static/app.js; static/dist/editor.js is the esbuild output of web/domains/pcb/editor/index.ts — edit these modules, not the bundle).
 import { watchTutorial } from "./tutorial";
+import { GENERATOR_VERSION, SEXPR_SCHEMATIC_FILE_VERSION } from "../canvas/format-version";
 import { KICAD_LAYERS, SCH_LAYERS, setStatusBar, setToggle, state, store } from "./appstore";
 import { centerOn, closeThread, drawComments, loadComments, renderThreads } from "./comments";
 import { leaveCursorChat, loadChat } from "./chat";
@@ -204,8 +205,9 @@ export function setDocFromText(text: string, then?: WireChange[] | null) {
   else { const b = E.kdoc.bbox, m = 5; E.vb = [b[0] - m, b[1] - m, (b[2] - b[0]) + 2 * m, (b[3] - b[1]) + 2 * m]; }
   base.replaceChildren(); base.setAttribute("viewBox", E.vb.join(" ")); overlay.setAttribute("viewBox", E.vb.join(" "));
   $("#ovRoot").setAttribute("transform", "scale(1)");
-  // FOOTPRINT_EDIT_FRAME (makeFpHolderBoard, the constructor): GetBoard()->SetVisibleAlls(), every layer shown
-  if (!E.layersSeeded) { E.hiddenLayers = new Set(isSch() || E.kdoc.fpEditor ? [] : Array.from(KiCadCanvas.PCB_HIDDEN_DEFAULT)); E.layersSeeded = true; }
+  // BOARD::m_LegacyVisibleLayers is LSET::AllLayersMask() and FOOTPRINT_EDIT_FRAME calls SetVisibleAlls(): pcbnew and the
+  // Footprint Editor open with every layer shown
+  if (!E.layersSeeded) { E.hiddenLayers = new Set(); E.layersSeeded = true; }
   renderLayersFromDoc(); syncItemsFromDoc(); renderModuleTools(); bumpDoc();
   const m = activeModule(); if (m && m.onDocChanged) { try { m.onDocChanged(toolCtx()); } catch (e) { console.warn(e); } }
   canvas.style.display = "block"; requestRender();
@@ -318,17 +320,47 @@ export function noteDroppedChange(change: WireChange) {
 export function setupGridControls() {
   const choices = gridList();   // the board's aux toolbar has KiCad's grid dropdown; the schematic uses the grid button's menu
   E.gridPitch = (E.gridDefault && E.gridDefault()) || choices[0].mm;   // grid.last_size: not always the first of the list
+  E.gridIdx = E.gridDefaultIdx ? E.gridDefaultIdx() : -1;
   store.slice("viewport", { gridChoices: choices.map((c) => ({ ...c })) });
   updateGridStatus();
 }
 
-export function updateGridStatus() { setToggle("toggleGrid", E.gridOn); store.slice("viewport", { gridOn: E.gridOn, gridPitch: E.gridPitch, snapOn: E.snapOn }); }
+export function updateGridStatus() {
+  // GRID::y of the current grid: E.gridPitch is its X (the scalar the tools read), E.gridPitchY its Y
+  const l = gridList(), i = gridIndex(), my = i >= 0 && l[i] && l[i].my ? l[i].my! : 0;
+  E.gridPitchY = my > 0 ? my : E.gridPitch;
+  setToggle("toggleGrid", E.gridOn); store.slice("viewport", { gridOn: E.gridOn, gridPitch: E.gridPitch, gridPitchY: E.gridPitchY, gridIdx: i, snapOn: E.snapOn });
+}
+/**
+ * The grid size the cursor snaps to now, X and Y (GRID_HELPER::GetGridSize): a tool's grid override (square on the
+ * web: the overrides keep one size), else the current grid's X and Y.
+ */
+export function gridSizeNow(): [number, number] {
+  const p = E.gridFor ? E.gridFor() : E.gridPitch;
+  return p === E.gridPitch ? [E.gridPitch, E.gridPitchY > 0 ? E.gridPitchY : E.gridPitch] : [p, p];
+}
 
-export function setGridPitch(v: unknown) { E.gridPitch = Number(v) || E.gridPitch; if (E.gridPicked) E.gridPicked(E.gridPitch); updateGridStatus(); requestRender(); }
+/**
+ * A grid picked by its size; `idx` is its place in the list when the pick names one (a menu row, a toolbar entry),
+ * since two entries may have the same size.  Without one the first entry of that size is taken.
+ */
+export function setGridPitch(v: unknown, idx?: number) {
+  E.gridPitch = Number(v) || E.gridPitch;
+  const l = gridList();
+  E.gridIdx = idx !== undefined && l[idx] && Math.abs(l[idx].mm - E.gridPitch) < 1e-9 ? idx : l.findIndex((g) => Math.abs(g.mm - E.gridPitch) < 1e-9);
+  if (E.gridPicked) E.gridPicked(E.gridPitch, E.gridIdx); updateGridStatus(); requestRender();
+}
 /** COMMON_TOOLS::GridPreset: the grid at a position of the list. */
-export function setGridIndex(i: number) { const l = gridList(); if (!l.length) return; setGridPitch(l[Math.max(0, Math.min(l.length - 1, i))].mm); }
-/** grid.last_size: where the current grid is in the list (-1 when it is not one of them). */
-export function gridIndex(): number { return gridList().findIndex((g) => Math.abs(g.mm - E.gridPitch) < 1e-9); }
+export function setGridIndex(i: number) { const l = gridList(); if (!l.length) return; const k = Math.max(0, Math.min(l.length - 1, i)); setGridPitch(l[k].mm, k); }
+/**
+ * grid.last_size_idx: the current grid's place in the list (COMMON_TOOLS::GridNext / GridPrev step it, GRID_MENU
+ * checks it), -1 when the grid is not one of them.  The size only decides when no place is known.
+ */
+export function gridIndex(): number {
+  const l = gridList(), i = E.gridIdx;
+  if (typeof i === "number" && i >= 0 && i < l.length && Math.abs(l[i].mm - E.gridPitch) < 1e-9) return i;
+  return l.findIndex((g) => Math.abs(g.mm - E.gridPitch) < 1e-9);
+}
 
 /** DRAWING_TOOL::UpdateStatusBar's text for the board's angle snap mode (PCBNEW_SETTINGS m_AngleSnapMode, per viewer). */
 export function boardConstraintMsg(): string {
@@ -343,9 +375,9 @@ export function snapMm(mm: [number, number]): [number, number];
 export function snapMm(mm: number[]): number[];
 export function snapMm(mm: number[]): number[] {
   if (!E.snapOn) return mm;
-  const p = E.gridFor ? E.gridFor() : E.gridPitch;   // E.gridFor: the grid override of the active tool (Preferences > Grids)
-  if (!isSch()) return KiCadCanvas.pcbSizes.state.snapToGrid(mm as [number, number], p);   // the board's grid starts at its grid origin
-  return [KiCadCanvas.snap(mm[0], p), KiCadCanvas.snap(mm[1], p)];
+  const [p, py] = gridSizeNow();   // the grid override of the active tool (Preferences > Grids), else the grid's X and Y
+  if (!isSch()) return KiCadCanvas.pcbSizes.state.snapToGrid(mm as [number, number], p, py);   // the board's grid starts at its grid origin
+  return [KiCadCanvas.snap(mm[0], p), KiCadCanvas.snap(mm[1], py)];
 }
 
 
@@ -654,7 +686,7 @@ export function refreshDocs(): Promise<boolean> {
 /** An empty schematic file (SCH_SCREEN of a new sheet whose file does not exist yet). */
 function emptySchematic(): string {
   const uuid = KiCadCanvas.newUuid();
-  return `(kicad_sch (version 20250114) (generator "kicad-collab-web") (generator_version "9.0") (uuid "${uuid}") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "1"))))\n`;
+  return `(kicad_sch (version ${SEXPR_SCHEMATIC_FILE_VERSION}) (generator "eeschema") (generator_version "${GENERATOR_VERSION}") (uuid "${uuid}") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "1"))))\n`;
 }
 
 /**

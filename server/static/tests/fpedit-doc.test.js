@@ -208,13 +208,17 @@ test("Delete, Save, Undo: the child comes back in its place and without a uuid i
   K.applyChange(d, { id: line.id, kind: "REMOVED", typeName: "PCB_SHAPE", properties: [] }, 1e6);
   const saved = F.serializeFootprintDoc(d); F.markFootprintSaved(d, saved); assert.ok(!saved.includes("(fp_line"));
   K.applyChange(d, { id: line.id, kind: "ADDED", typeName: "PCB_SHAPE", sexpr: before }, 1e6);
-  assert.equal(F.serializeFootprintDoc(d), SAMPLE);
+  // a save writes the stamp afresh (FP_CACHE::Save: generator "pcbnew", this build's generator_version)
+  const gv = /\(generator_version "([^"]*)"\)/.exec(F.serializeFootprintDoc(d))[1];
+  assert.ok(gv !== "9.0" && /^\d+\.\d+$/.test(gv));
+  const restamped = SAMPLE.replace('(generator_version "9.0")', `(generator_version "${gv}")`);
+  assert.equal(F.serializeFootprintDoc(d), restamped);
   // the Reference field (deleted, saved, undone) is written first again
   const ref = d.items.get("11111111-1111-4111-8111-111111111111"); const rs = K.serializeItem(d, ref);
   K.applyChange(d, { id: ref.id, kind: "REMOVED", typeName: "PCB_FIELD", properties: [] }, 1e6);
   F.markFootprintSaved(d, F.serializeFootprintDoc(d));
   K.applyChange(d, { id: ref.id, kind: "ADDED", typeName: "PCB_FIELD", sexpr: rs }, 1e6);
-  assert.equal(F.serializeFootprintDoc(d), SAMPLE);
+  assert.equal(F.serializeFootprintDoc(d), restamped);
 });
 test("edited footprints are written in KiCad's order: drawings by cmp_drawings, pads by cmp_pads", () => {
   const d = K.parseDoc(SAMPLE, "footprint");

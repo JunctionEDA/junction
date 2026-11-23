@@ -64,12 +64,14 @@ export interface MarkupNode { kind: "" | "~" | "_" | "^"; text: string; children
 export function parseStrokeMarkup(s: string): MarkupNode {
   const root: MarkupNode = { kind: "", text: "", children: [] };
   if (s.indexOf("{") < 0) { if (s) root.children.push({ kind: "", text: s, children: [] }); return root; }
-  // find the matching close brace for the group opened at `open` (index of '{'), or -1
+  // find the matching close brace for the group opened at `open` (index of '{'), or -1; inside a group an escape
+  // sequence "{identifier}" is one piece (markup_parser.h anyStringWithinBraces), so `_{a{b}c}` and `~{${VAR}}` hold
   const closeOf = (open: number): number => {
     let depth = 0;
     for (let i = open; i < s.length; i++) {
       const c = s[i];
       if (c === "{" && i > 0 && (s[i - 1] === "~" || s[i - 1] === "_" || s[i - 1] === "^" || i === open)) depth++;
+      else if (c === "{") { const m = /^\{[A-Za-z_][A-Za-z0-9_]*\}/.exec(s.slice(i, i + 256)); if (m) i += m[0].length - 1; }
       else if (c === "}") { depth--; if (depth === 0) return i; }
     }
     return -1;
@@ -258,26 +260,56 @@ export function drawStrokeText(ctx: StrokeCtx, base: number[], t: StrokeTextSpec
   ctx.setTransform(base[0], base[1], base[2], base[3], base[4], base[5]);
 }
 
+/** A markup node's source text again ("~{A_{1}}"). */
+const markupSource = (n: MarkupNode): string => (n.kind ? n.kind + "{" + n.text + n.children.map(markupSource).join("") + "}" : n.text);
 /**
- * FONT::LinebreakText: word-wrap a (possibly multi-line) string to a column.  Words are split at spaces; a
- * line breaks before the word that would pass `colWidth − thickness`, and the spaces at the break are dropped.
- * A single word wider than the column is left whole, as in KiCad.
+ * FONT::wordbreakMarkup (common/font/font.cpp:496-617, 638-649): the words of one line with their advance widths.  A
+ * marked-up run (~{…}, _{…}, ^{…}) is one word whatever spaces it holds; plain text is split after each space
+ * (wxStringTokenizer with wxTOKEN_RET_DELIMS, measured without the trailing space); a run glued to the word before it
+ * (that word does not end in a space) joins that word.
+ */
+function wordbreakMarkup(line: string, sizeX: number, italic?: boolean): [string, number][] {
+  const adv = (t: string): number => (t ? strokeLine(t, italic).advance * sizeX : 0);
+  const runs: [string, number][] = [];
+  for (const c of parseStrokeMarkup(line).children) {
+    if (c.kind) { const w = markupSource(c); runs.push([w, adv(w)]); continue; }
+    let tok = "";
+    const push = (t: string): void => { const chars = t.replace(/\s+$/, ""); runs.push([t, adv(chars || t)]); };
+    for (const ch of c.text) { tok += ch; if (ch === " ") { push(tok); tok = ""; } }
+    if (tok) push(tok);
+  }
+  const words: [string, number][] = [];
+  for (const [run, w] of runs) {
+    if (words.length && !words[words.length - 1][0].endsWith(" ")) { words[words.length - 1][0] += run; words[words.length - 1][1] += w; }
+    else words.push([run, w]);
+  }
+  return words;
+}
+
+/**
+ * FONT::LinebreakText (common/font/font.cpp:619-713): word-wrap a (possibly multi-line) string to a column.  A line
+ * breaks before the word that would pass `colWidth − thickness` when spaces precede it, and the spaces at the break
+ * are dropped; a single word wider than the column is left whole; markup runs are never split.
  */
 export function linebreakText(text: string, colWidth: number, sizeX: number, thickness: number, italic?: boolean): string {
   if (!(colWidth > 0) || !text) return text;
-  const space = (strokeGlyph(32) as StrokeGlyph).adv * sizeX;
+  const spaceWidth = strokeLine(" ", italic).advance * sizeX;
   const out: string[] = [];
   for (const src of text.split("\n")) {
-    let cur = "", width = 0, pending = 0;
-    for (const tok of src.split(/( )/)) {
-      if (tok === "") continue;
-      if (tok === " ") { pending++; continue; }
-      const w = (strokeLine(tok, italic).width + INTER_CHAR) * sizeX;   // the cursor advance of the word
-      if (pending > 0 && width + pending * space + w > colWidth - thickness) { out.push(cur); cur = tok; width = w; }
-      else { cur += " ".repeat(pending) + tok; width += pending * space + w; }
-      pending = 0;
+    let line = "", lineWidth = 0, pending = "", bury = false;
+    for (const [word, wordWidth] of wordbreakMarkup(src, sizeX, italic)) {
+      let pendingWidth = pending.length * spaceWidth;
+      if (lineWidth + pendingWidth + wordWidth > colWidth - thickness && pending.length > 0) {
+        line += "\n"; lineWidth = 0; pending = ""; pendingWidth = 0; bury = true;
+      }
+      if (word === " ") { pending += word; continue; }
+      if (bury) bury = false;
+      else { line += pending; lineWidth += pendingWidth; }
+      if (word.endsWith(" ")) { line += word.slice(0, -1); pending = " "; }
+      else { line += word; pending = ""; }
+      lineWidth += wordWidth;
     }
-    out.push(cur);
+    out.push(line);
   }
   return out.join("\n");
 }

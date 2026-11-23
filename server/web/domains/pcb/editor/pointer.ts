@@ -4,6 +4,7 @@ import { NS } from "./dom";
 import { sendOp } from "./net";
 import { drawSelection, groupExpand, renderProps } from "./selection";
 import { E } from "./state";
+import { store } from "./appstore";
 import { appClipboard, moveOp, publishUndo, redoStack, toolCtx, undoStack, unlockedForEdit } from "./tools";
 import { rulerStrings, snapped45, type RulerUnits } from "./ruler";
 import type { ItemSummary } from "./types";
@@ -12,7 +13,9 @@ import { showPane } from "./panes";
 
 /** Asked first by openSelectionProperties (Table Cell Properties on a cell selection, editor/tablecells.ts). */
 export const propertiesHooks: (() => boolean)[] = [];
-import { dragG, fitBox, isSch, pxPerMm, requestRender, requestRepaint, stage, svgText, worldMm, zoomBy } from "./view";
+import { applyView, dragG, fitBox, isSch, mmW, mmX0, mmY0, pxPerMm, requestRender, requestRepaint, stage, svgText, worldMm, zoomBy, zoomLimits } from "./view";
+import { isPastDragThreshold } from "../tools/drag-threshold";
+import { zoomRegion } from "./kicad-input";
 /** E: KiCad's "Edit properties" for whatever is selected — a field, the app selection, or a tool module's own selection. */
 export function openSelectionProperties() {
   if (!E.kdoc || !window.KDialogs) return false;
@@ -96,23 +99,39 @@ export function measureMove(mm: number[], shift: boolean): void {
 /** Ctrl+C while measuring: the ruler's readout, one value a line (RULER_ITEM::GetDimensionStrings). */
 export function measureCopy(): boolean {
   const m = E.measure; if (!m || !m.set) return false;
-  appClipboard.set(rulerStrings(m.a, m.b, (E.units === "in" || E.units === "mil" ? E.units : "mm") as RulerUnits).join("\n"));
+  const vp = store.get().viewport as { invertX?: boolean; invertY?: boolean }, sch = isSch();   // RULER_ITEM's m_flipX / m_flipY
+  appClipboard.set(rulerStrings(m.a, m.b, (E.units === "in" || E.units === "mil" ? E.units : "mm") as RulerUnits, !sch && !!vp.invertX, !sch && !!vp.invertY).join("\n"));
   return true;
 }
 
 /** Esc while the ruler follows the cursor drops it (the tool stays). */
 export function measureCancel(): boolean { if (!E.measure || !E.measure.set) return false; E.measure = null; requestRepaint(); return true; }
 
-// zoom-area tool: drag a rectangle, the view fits it
+// ZOOM_TOOL::selectRegion: a left (zoom in) or right (zoom out, E.zoomRect.out) drag draws the SELECTION_AREA from the
+// drag origin once the press is past the drag threshold (IsDrag); the release zooms
 export function drawZoomRect(ev: { clientX: number; clientY: number }) {
-  E.zoomRect.a = worldMm({ clientX: E.zoomRect.start[0], clientY: E.zoomRect.start[1] }); E.zoomRect.b = worldMm(ev); requestRepaint();
+  const zr = E.zoomRect;
+  if (!zr.a && !isPastDragThreshold(ev.clientX - zr.start[0], ev.clientY - zr.start[1])) return;
+  zr.a = worldMm({ clientX: zr.start[0], clientY: zr.start[1] }); zr.b = worldMm(ev); requestRepaint();
 }
 
+/**
+ * The release (IsMouseUp): a click or a box without width or height does nothing; a left drag makes the box fill the
+ * view exactly (scale / ratio), a right drag zooms out by the same ratio (scale * ratio), centred on the box.
+ */
 export function finishZoomRect(ev: { clientX: number; clientY: number }) {
-  const a = worldMm({ clientX: E.zoomRect.start[0], clientY: E.zoomRect.start[1] }), b = worldMm(ev); E.zoomRect = null; requestRepaint();
+  const zr = E.zoomRect; E.zoomRect = null; requestRepaint();
+  if (!zr || !zr.a) return;   // never became a drag: no area, nothing happens
+  const a = zr.a as number[], b = worldMm(ev), ppm = pxPerMm();
+  const r = zoomRegion({ x: a[0], y: a[1], w: b[0] - a[0], h: b[1] - a[1] }, { w: stage.clientWidth / ppm, h: stage.clientHeight / ppm }, !!zr.out);
+  if (!r) return;
   const w = Math.abs(b[0] - a[0]), h = Math.abs(b[1] - a[1]);
-  if (w < 0.5 || h < 0.5) { zoomBy(2, ev.clientX, ev.clientY); return; }
-  fitBox([Math.min(a[0], b[0]), Math.min(a[1], b[1]), w, h], 0.9);
+  if (!zr.out) { fitBox([Math.min(a[0], b[0]), Math.min(a[1], b[1]), w, h], 1); return; }
+  // VIEW::SetScale( scale * ratio ) then SetCenter( box centre )
+  const lim = zoomLimits(), sw = stage.clientWidth, sh = stage.clientHeight, ppm1 = sw / mmW();
+  E.zoom = Math.min(lim[1], Math.max(lim[0], E.zoom * r.factor)); E.viewTouched = true;
+  E.panX = sw / 2 - (r.center[0] - mmX0()) * ppm1 * E.zoom; E.panY = sh / 2 - (r.center[1] - mmY0()) * ppm1 * E.zoom;
+  applyView();
 }
 
 export function startGroupDrag(hit: { id: string; fp?: ItemSummary | { id: string; x: number; y: number }; item?: KItem }, mm: [number, number], ev: { pointerId: number }) {

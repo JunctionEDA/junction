@@ -13,7 +13,9 @@ import { wildcardAnchored } from "../symedit/fpfilters";
 import { expandStacked } from "../symedit/model";
 
 /** The chooser's half of the symbol netlist: the distinct pin count and the footprint filters. */
-export interface FpChooserFilters { pins: number; filters: string[] }
+export interface FpChooserFilters { pins: number; filters: string[];
+  /** KiwayMailIn's pinNames (pin number -> shown name): FOOTPRINT_PREVIEW_PANEL::SetPinFunctions writes them onto the pads */
+  pinNames?: Record<string, string> }
 
 type N = SNode;
 const isList = (v: unknown): v is N => Array.isArray(v);
@@ -65,9 +67,11 @@ export function chooserNetlist(lib: N | null, expand = true): string {
 export function netlistFilters(netlist: string): FpChooserFilters | null {
   if (!netlist) return null;
   const [pinLine = "", filterLine = ""] = netlist.split("\r");
-  const numbers = new Set(pinLine ? pinLine.split("\t").map((t) => (t.includes(" ") ? t.slice(0, t.indexOf(" ")) : t)) : []);
-  const pins = numbers.size, filters = filterLine ? filterLine.split(" ").filter(Boolean) : [];
-  return pins || filters.length ? { pins, filters } : null;
+  // pinNames[ pin.BeforeFirst( ' ' ) ] = pin.AfterFirst( ' ' ): a later pin of the same number wins
+  const pinNames: Record<string, string> = {};
+  if (pinLine) for (const t of pinLine.split("\t")) { const sp = t.indexOf(" "); pinNames[sp < 0 ? t : t.slice(0, sp)] = sp < 0 ? "" : t.slice(sp + 1); }
+  const pins = Object.keys(pinNames).length, filters = filterLine ? filterLine.split(" ").filter(Boolean) : [];
+  return pins || filters.length ? { pins, filters, pinNames } : null;
 }
 
 /** The filters of one library symbol (null for none: an empty netlist, so the chooser shows no filter toggles). */
@@ -131,4 +135,27 @@ export function datasheetLink(value: string, vars?: Record<string, string> | nul
   if (/^(https?|ftp|mailto):/i.test(r)) return { kind: "url", url: r };
   if (/^kicad-embed:\/\//i.test(r)) return { kind: "embed", url: r.slice("kicad-embed://".length) };
   return { kind: "other", url: r };
+}
+
+/** The entries of PANEL_SYMBOL_CHOOSER's FOOTPRINT_SELECT_WIDGET (FOOTPRINT_SELECT_WIDGET::UpdateList): "[Default] fp"
+ *  (or "No default footprint", value ""), the symbol's associated footprints (always listed, before the matches), then
+ *  — unless the symbol has no footprint filters and no pins (m_zero_filter) — pcbnew's filterFootprints over every
+ *  footprint in library order: the numbered pad count equal to the pin count (when there are pins) and a filter matching,
+ *  at most `max` of them (aMaxItems: the panel builds the widget with 400). */
+export function footprintSelectEntries(def: string, assocs: string[], pins: number, filters: string[],
+  all: { library?: string; name: string; pads?: number }[], max = 400): { label: string; value: string }[] {
+  const out: { label: string; value: string }[] = [{ label: def ? "[Default] " + def : "No default footprint", value: def }];
+  const always = new Set<string>();
+  for (const a of assocs) if (a && a.includes(":") && !always.has(a)) { always.add(a); out.push({ label: a, value: a }); }
+  if (!filters.length && pins <= 0) return out;
+  let n = 0;
+  for (const fp of all) {
+    if (pins > 0 && fp.pads !== pins) continue;
+    if (filters.length && !matchesFpFilters(fp, filters)) continue;
+    if (max > 0 && n >= max) break;
+    n++;
+    const id = (fp.library || "") + ":" + fp.name;
+    if (!always.has(id)) out.push({ label: id, value: id });
+  }
+  return out;
 }

@@ -7,7 +7,7 @@ import { dPS, shapeGap } from "./distances";
 import type { DruRule, RuleItem } from "./dru";
 import { evalAssertion, evalRuleConstraint, ruleMatches } from "./dru";
 import { viaTypeOf } from "./dru-eval";
-import { marker, mm4 } from "./drc";
+import { marker, mm4, mmPair, ruled } from "./drc";
 import { padsOf } from "./route-geom";
 import { K } from "./state";
 import { layerOf, pt, rotator } from "./util";
@@ -43,21 +43,21 @@ export function sizeMarkers(doc: BoardDoc, s: DesignSettings, rules: DruRule[], 
     if (c.kind === "segment" || c.kind === "arc") {
       const [a, b] = c.anchors; const layer = layerOf(c.item.node); const A: RuleItem = { kind: c.kind, node: c.item.node, item: c.item, layer, shape: c.shape };
       const r = resolve(rules, "track_width", doc, s, A, null, s.minTrackWidth || 0); const f = fails(r, c.width);
-      if (r && f) out.push(marker("track_width", sev(r), (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, `Track width (${r.name} ${f.kind} width ${mm4(f.v)}; actual ${mm4(c.width)})`, [c.id]));
+      if (r && f) out.push(ruled(marker("track_width", sev(r), c.kind === "arc" ? a[0] : (a[0] + b[0]) / 2, c.kind === "arc" ? a[1] : (a[1] + b[1]) / 2, `Track width (${r.name} ${f.kind} width ${mmPair(f.v, c.width)[0]}; actual ${mmPair(f.v, c.width)[1]})`, [c.id]), r.severity));
       if (c.kind === "segment" && rules.length) {
         const L = Math.hypot(b[0] - a[0], b[1] - a[1]); const rl = resolve(rules, "track_segment_length", doc, s, A, null, null); const fl = fails(rl, L);
-        if (rl && fl) out.push(marker("track_segment_length", sev(rl), (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, `Track segment length (${rl.name} ${fl.kind} length ${mm4(fl.v)}; actual ${mm4(L)})`, [c.id]));
+        if (rl && fl) out.push(ruled(marker("track_segment_length", sev(rl), (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, `Track segment length (${rl.name} ${fl.kind} length ${mmPair(fl.v, L)[0]}; actual ${mmPair(fl.v, L)[1]})`, [c.id]), rl.severity));
       }
     } else if (c.kind === "via") {
       const [a] = c.anchors; const A: RuleItem = { kind: "via", node: c.item.node, item: c.item, layer: null, shape: c.shape };
-      if (c.drill >= c.size - 1e-6) { out.push(marker("annular_width", "error", a[0], a[1], `Annular width (drill ${mm4(c.drill)} is not smaller than the via diameter ${mm4(c.size)})`, [c.id])); continue; }
       const rd = resolve(rules, "via_diameter", doc, s, A, null, s.minViaDiameter || 0); const fd = fails(rd, c.size);
-      if (rd && fd) out.push(marker("via_diameter", sev(rd), a[0], a[1], `Via diameter (${rd.name} ${fd.kind} diameter ${mm4(fd.v)}; actual ${mm4(c.size)})`, [c.id]));
+      if (rd && fd) out.push(ruled(marker("via_diameter", sev(rd), a[0], a[1], `Via diameter (${rd.name} ${fd.kind} diameter ${mmPair(fd.v, c.size)[0]}; actual ${mmPair(fd.v, c.size)[1]})`, [c.id]), rd.severity));
       const micro = viaTypeOf(c.item.node) === "micro";
       const rh = resolve(rules, "hole_size", doc, s, A, null, micro ? (s.minMicroViaDrill || 0) : (s.minThroughDrill || 0), micro ? "board setup constraints micro-via" : "board setup constraints"); const fh = fails(rh, c.drill);
-      if (rh && fh) out.push(marker(micro ? "microvia_drill_out_of_range" : "drill_out_of_range", sev(rh), a[0], a[1], `${micro ? "Micro via hole size out of range" : "Hole size out of range"} (${rh.name} ${fh.kind} hole ${mm4(fh.v)}; actual ${mm4(c.drill)})`, [c.id]));
-      const ann = (c.size - c.drill) / 2; const ra = resolve(rules, "annular_width", doc, s, A, null, s.minViaAnnular || 0); const fa = fails(ra, ann);
-      if (ra && fa) out.push(marker("annular_width", sev(ra), a[0], a[1], `Annular width (${ra.name} ${fa.kind} annular width ${mm4(fa.v)}; actual ${mm4(ann)})`, [c.id]));
+      if (rh && fh) out.push(ruled(marker(micro ? "microvia_drill_out_of_range" : "drill_out_of_range", sev(rh), a[0], a[1], `${micro ? "Micro via hole size out of range" : "Hole size out of range"} (${rh.name} ${fh.kind} hole ${mmPair(fh.v, c.drill)[0]}; actual ${mmPair(fh.v, c.drill)[1]})`, [c.id]), rh.severity));
+      // ( ptA - ptB ).EuclideanNorm(): the drill edge and the via edge on one radius
+      const ann = Math.abs(c.size - c.drill) / 2; const ra = resolve(rules, "annular_width", doc, s, A, null, s.minViaAnnular || 0); const fa = fails(ra, ann);
+      if (ra && fa) out.push(ruled(marker("annular_width", sev(ra), a[0], a[1], `Annular width (${ra.name} ${fa.kind} annular width ${mmPair(fa.v, ann)[0]}; actual ${mmPair(fa.v, ann)[1]})`, [c.id]), ra.severity));
     }
   }
   out.push(...padAnnularMarkers(doc, s, rules));
@@ -73,7 +73,7 @@ export function sizeMarkers(doc: BoardDoc, s: DesignSettings, rules: DruRule[], 
       // max is tested against the major axis, min against the minor one; when both fail the min message is reported
       const f = r.min != null && r.min > 0 && minor < r.min - 1e-6 ? { kind: "min", v: r.min, actual: minor }
         : r.max != null && major > r.max + 1e-6 ? { kind: "max", v: r.max, actual: major } : null;
-      if (f) out.push(marker("drill_out_of_range", sev(r), p.x, p.y, `Hole size out of range (${r.name} ${f.kind} hole ${mm4(f.v)}; actual ${mm4(f.actual)})`, [it.id]));
+      if (f) out.push(ruled(marker("drill_out_of_range", sev(r), p.x, p.y, `Hole size out of range (${r.name} ${f.kind} hole ${mmPair(f.v, f.actual)[0]}; actual ${mmPair(f.v, f.actual)[1]})`, [it.id]), r.severity));
     }
   }
   return out;
@@ -170,7 +170,7 @@ export function padAnnularMarkers(doc: BoardDoc, s: DesignSettings, rules: DruRu
       const r = resolve(rules, "annular_width", doc, s, A, null, s.minViaAnnular || 0); if (!r) continue;
       const w = padAnnulus(p, sameNum, r, custom); if (w == null) continue;
       const f = fails(r, w); if (!f) continue;
-      out.push(marker("annular_width", sev(r), p.x, p.y, `Annular width (${r.name} ${f.kind} annular width ${mm4(f.v)}; actual ${mm4(w)})`, [it.id]));
+      out.push(ruled(marker("annular_width", sev(r), p.x, p.y, `Annular width (${r.name} ${f.kind} annular width ${mmPair(f.v, w)[0]}; actual ${mmPair(f.v, w)[1]})`, [it.id]), r.severity));
     }
   }
   return out;
@@ -226,7 +226,7 @@ export function trackAngleMarkers(doc: BoardDoc, s: DesignSettings, rules: DruRu
       const fmin = r.min != null && actual < r.min, fmax = r.max != null && actual > r.max;
       if (!fmin && !fmax) continue;
       const v = fmax ? r.max! : r.min!;   // constraintAngle: the max when both fail; the text names min first
-      out.push(marker("track_angle", sev(r), p0[0], p0[1], `Track angle (${r.name} ${fmin ? "min" : "max"} angle ${deg(v)}; actual ${deg(actual)})`, [a.id, b.id]));
+      out.push(ruled(marker("track_angle", sev(r), p0[0], p0[1], `Track angle (${r.name} ${fmin ? "min" : "max"} angle ${deg(v)}; actual ${deg(actual)})`, [a.id, b.id]), r.severity));
     }
   }
   return out;
@@ -270,7 +270,7 @@ export function disallowMarkers(doc: BoardDoc, s: DesignSettings, rules: DruRule
       const r = rules[i], c = r.constraints.find((k) => k.type === "disallow"); if (!c || !ruleMatches(r, doc, s, it, null)) continue;
       if (r.severity === "ignore") break;
       const flags = c.options || []; if (!flags.some((f) => kinds.includes(f) || (f === "hole" && (it.kind === "via" || (it.kind === "pad" && !!K.kid(it.node, "drill")))))) break;
-      const p = anchorOf(it); out.push(marker("items_not_allowed", r.severity === "warning" ? "warning" : "error", p[0], p[1], `Items not allowed (rule '${r.name}')`, [idOf(it)])); break;
+      const p = anchorOf(it); out.push(ruled(marker("items_not_allowed", "error", p[0], p[1], `Items not allowed (rule '${r.name}')`, [idOf(it)]), r.severity)); break;
     }
   }
   return out;
@@ -283,7 +283,7 @@ export function assertionMarkers(doc: BoardDoc, s: DesignSettings, rules: DruRul
       if (r.severity === "ignore" || !ruleMatches(r, doc, s, it, null)) continue;
       for (const c of r.constraints) {
         if (c.type !== "assertion") continue; const ok = evalAssertion(r, c, doc, s, it); if (ok !== false) continue;
-        const p = anchorOf(it); out.push(marker("assertion_failure", r.severity === "warning" ? "warning" : "error", p[0], p[1], `Assertion failure (rule '${r.name}')`, [idOf(it)]));
+        const p = anchorOf(it); out.push(ruled(marker("assertion_failure", "error", p[0], p[1], `Assertion failure (rule '${r.name}')`, [idOf(it)]), r.severity));
       }
     }
   }

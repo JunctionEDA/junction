@@ -23,15 +23,23 @@ export function Toast() {
     // A dock opening or closing while the bar is up (a plugin panel, the assistant) resizes the canvas: the bar follows it.
     const ro = stage && typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null; if (ro && stage) ro.observe(stage);
     setShow(true);
-    const t = setTimeout(() => setShow(false), toast.ms || 2200);
-    return () => { clearTimeout(t); if (ro) ro.disconnect(); };
+    // ShowMessage stays until it is closed (or replaced); ShowMessageFor goes after its time
+    const t = toast.ms > 0 ? setTimeout(() => setShow(false), toast.ms) : 0;
+    return () => { if (t) clearTimeout(t); if (ro) ro.disconnect(); };
   }, [toast]);
   const close = <button type="button" className="kinfobar-x" aria-label="Close" onClick={() => setShow(false)}><CloseMark /></button>;
   const link = toast && toast.link ? <a href="#" className="kinfobar-link" onClick={(ev) => { ev.preventDefault(); setShow(false); toast.link!.run(); }}>{toast.link.text}</a> : null;
-  if (box) return <div id="toast" role="status" aria-live="polite" className={cx("kinfobar", show && "show")} style={box}><span className="kinfobar-ic" aria-hidden="true"><KIcon name="info" size={16} /></span>{toast ? toast.text : ""}{link}{close}</div>;
+  if (box) return <div id="toast" role="status" aria-live="polite" className={cx("kinfobar", show && "show")} style={box}><span className="kinfobar-ic" aria-hidden="true" data-severity={toast ? toast.severity || "info" : "info"}><InfoBarIcon severity={toast ? toast.severity : undefined} /></span>{toast ? toast.text : ""}{link}{close}</div>;
   // transform-[…] rather than -translate-x-1/2: Tailwind's translate-* utilities emit the separate `translate`
   // property, and app.html's centring for #toast (if ever re-added) uses `transform` — keep the one property.
   return <div id="toast" role="status" aria-live="polite" className={cx("fixed left-1/2 bottom-10 transform-[translateX(-50%)] bg-ink text-paper rounded-sm py-2 px-3.5 opacity-0 transition-opacity duration-200 ease-[ease] pointer-events-none z-100 show:opacity-100", show && "show")}>{toast ? toast.text : ""}</div>;
+}
+
+/** The infobar's icon for its flag: wxICON_INFORMATION, wxICON_WARNING, wxICON_ERROR. */
+export function InfoBarIcon({ severity }: { severity?: "info" | "warning" | "error" }) {
+  if (severity === "warning") return <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 1.5L15 14H1z" style={{ fill: "var(--warn)" }} /><path d="M8 6v4M8 11.6v.4" style={{ stroke: "var(--paper)" }} strokeWidth="1.6" strokeLinecap="round" /></svg>;
+  if (severity === "error") return <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" style={{ fill: "var(--err)" }} /><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" style={{ stroke: "var(--paper)" }} strokeWidth="1.6" strokeLinecap="round" /></svg>;
+  return <KIcon name="info" size={16} />;
 }
 
 const RELEASES = "https://github.com/JunctionEDA/junction/releases";

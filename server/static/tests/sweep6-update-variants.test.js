@@ -36,7 +36,7 @@ const fp = (extra) => `(footprint "Capacitor_SMD:C_0805" (layer "F.Cu") (uuid "f
 const board = (extra) => K.parseDoc(`(kicad_pcb (version 20241229) (generator "pcbnew") (general (thickness 1.6)) (paper "A4") ${LAYERS}\n${fp(extra)})`, "kicad_pcb");
 const netlist = (variants) => ({ components: [{ ref: "C1", value: "47uF", footprint: "Capacitor_SMD:C_0805", libId: "Device:C", paths: ["/s1"], fields: { MPN: "GRM1" }, sheetName: "/", sheetFile: "demo.kicad_sch",
   dnp: false, excludeFromBom: false, excludeFromBoard: false, pins: new Map(), variants }], nets: new Map(), warnings: [] });
-const lines = (plan) => plan.report.filter((r) => r.severity === "action").map((r) => r.text);
+const lines = (plan) => plan.report.filter((r) => r.severity === "action" && r.text).map((r) => r.text);
 
 test("new variants: KiCad's messages, the footprint's (variant …) written as the board writer writes it", () => {
   const doc = board(""), before = K.serialize(doc.items.get("f1").node);

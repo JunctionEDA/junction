@@ -1,4 +1,5 @@
 import type { SchCtx, Pt, SAtom, SheetJob } from "./types";
+import { GENERATOR_VERSION, SEXPR_SCHEMATIC_FILE_VERSION } from "../../canvas/format-version";
 import { root } from "../root";
 import { labelDefaults } from "./dom";
 import { sheetNode, sheetPinNode } from "./nodes";
@@ -44,7 +45,8 @@ export function currentDoc(ctx: SchCtx) {
 }
 export function normSheetFile(file: string) { file = str(file).trim().replace(/\\/g, "/").replace(/^\/+/, ""); if (!file) return ""; if (!/\.kicad_sch$/i.test(file)) file += SHEET_EXT; return file; }
 export function sheetFileFor(name: string) { return normSheetFile(str(name).trim().replace(/[\\/:*?"<>|]+/g, "_")); }
-export function emptySheetDoc() { return `(kicad_sch (version 20250114) (generator "kicad-collab-web") (generator_version "9.0") (uuid "${K.newUuid()}") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "1"))))\n`; }
+/** A new sheet file: written at the root sheet's version, as SCH_IO_KICAD_SEXPR does for a sheet never loaded (0: current). */
+export function emptySheetDoc(version = 0) { return `(kicad_sch (version ${version || SEXPR_SCHEMATIC_FILE_VERSION}) (generator "eeschema") (generator_version "${GENERATOR_VERSION}") (uuid "${K.newUuid()}") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "1"))))\n`; }
 // Reference the project doc for a sheet file, creating it (POST …/docs, then snapshot 0) when there is none.
 export async function ensureSheetDoc(ctx: SchCtx, file: string) {
   file = normSheetFile(file); if (!file) throw new Error("no sheet file name");
@@ -55,7 +57,7 @@ export async function ensureSheetDoc(ctx: SchCtx, file: string) {
   // the server's reply: the new (or existing) document's id and path
   const res = (await ctx.api(`/api/projects/${ctx.project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path: target, docType: "kicad_sch" }) })) as { docId?: string; path?: string; existing?: boolean } | null;
   if (!res || !res.docId) throw new Error("no document id returned");
-  if (!res.existing) await ctx.api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: emptySheetDoc() });
+  if (!res.existing) await ctx.api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: emptySheetDoc(Number((ctx.doc as { version?: number } | null)?.version) || 0) });   // the open sheet's version: the project's
   const entry = { docId: res.docId as string, path: res.path || target, docType: "kicad_sch" };
   if (Array.isArray(ctx.docs) && !ctx.docs.some((d) => d && d.docId === entry.docId)) ctx.docs.push(entry);
   return { file, docId: entry.docId, created: !res.existing };

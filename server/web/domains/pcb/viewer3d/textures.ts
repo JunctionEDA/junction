@@ -28,7 +28,7 @@ export function textureExtent(bbox: [number, number, number, number], maxDim: nu
 export function stencilGeom(g: KGeom, layer: string, itemKind: string): boolean {
   if (g.layer !== layer) return false;
   // pad numbers / net names, holes, zone outlines and their hatch are editor display aids, not artwork
-  if (g.padText || g.hole || g.zoneOutline || g.hiddenText) return false;
+  if (g.padText || g.hole || g.zoneOutline || g.hiddenText || g.indicator) return false;
   if (itemKind === "zone" && !g.zoneFill) return false;
   if ((g.t === "line" || g.t === "poly" || g.t === "circle" || g.t === "arc") && !(typeof g.w === "number" && g.w > 0) && !g.fill) return false;
   return true;

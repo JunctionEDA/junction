@@ -790,7 +790,7 @@ function endingGlyph(style: L.EndingStyle, atEnd: boolean): HTMLCanvasElement {
 interface EndingsBlock { el: HTMLElement; apply(n: SNode): void; reset(): void }
 /** The Start Shape / End Shape columns with Length / Width / Thickness and the help line, over one or more nodes. */
 function endingsBlock(nodes: SNode[], ro: boolean, version: number): EndingsBlock {
-  const off = ro || version < L.LINE_ENDING_VERSION;
+  const off = ro;   // an older sheet is raised to LINE_ENDING_VERSION on save (chooseFileFormatVersion)
   const side = (key: "start_shape" | "end_shape", label: string) => {
     const sts = nodes.map((n) => L.readEndingState(n, key));
     const sty = L.common(sts.map((x) => x.style)), len = L.common(sts.map((x) => x.length)), wid = L.common(sts.map((x) => x.width)), thk = L.common(sts.map((x) => x.thickness));
@@ -818,7 +818,6 @@ function endingsBlock(nodes: SNode[], ro: boolean, version: number): EndingsBloc
   };
   const a = side("start_shape", "Start Shape:"), b = side("end_shape", "End Shape:");
   const el = h("div", { id: "kd-ln-endings", style: "margin-top:10px" }, h("div", { style: "display:flex;gap:20px" }, a.col, b.col), h("p", { class: "kd-note", style: "font-style:italic;margin:8px 0 0" }, L.ENDINGS_HELP));
-  if (version < L.LINE_ENDING_VERSION) el.title = "Line endings need a schematic saved by KiCad 10 or later";
   return { el, apply: (n) => { if (off) return; a.apply(n); b.apply(n); }, reset: () => { a.reset(); b.reset(); } };
 }
 

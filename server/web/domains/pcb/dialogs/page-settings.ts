@@ -40,22 +40,35 @@ export function commitRootPage(page: string): boolean {
 }
 
 /**
- * DIALOG_PAGES_SETTINGS::UpdateDrawingSheetExample: the page as it will be, scaled into the preview, with the real
- * drawing sheet (the chosen .kicad_wks or KiCad's own) and the title block text drawn by the canvas painter.
+ * PAGE_INFO's custom size (PAGE_INFO::s_user_width / s_user_height, mm here): 17000 x 11000 mils until a User page
+ * is saved, then that page's size for the rest of the session.
  */
-function drawPreview(cv: HTMLCanvasElement, p: PageSettings, wks: unknown): void {
+const CUSTOM_SIZE: [number, number] = [431.8, 279.4];
+/** DIALOG_PAGES_SETTINGS::GetPageLayoutInfoFromDialog: the page size (mm) the choices stand for, and its orientation. */
+export function layoutSize(paper: string, portrait: boolean, custom: [number, number]): { w: number; h: number; portrait: boolean } {
+  if (paper === "User") return { w: custom[0], h: custom[1], portrait: !!(custom[0] && custom[1]) && custom[0] < custom[1] };
+  const fmt = PAPER_FORMATS.find((f) => f.type === paper) || PAPER_FORMATS[1];
+  let w = fmt.w, h = fmt.h;
+  if ((portrait && w >= h) || (!portrait && w < h)) [w, h] = [h, w];
+  return { w, h, portrait };
+}
+
+/**
+ * DIALOG_PAGES_SETTINGS::UpdateDrawingSheetExample: the page as it will be, scaled into the preview, filled with the
+ * editor's background colour (GRFilledRect( bgColor )), with the real drawing sheet (the chosen .kicad_wks or KiCad's
+ * own) in the editor's drawing sheet colour and the title block text drawn by the canvas painter.
+ */
+function drawPreview(cv: HTMLCanvasElement, p: PageSettings, wks: unknown, custom: [number, number]): void {
   const c = cv.getContext("2d"); if (!c) return;
-  const fmt = PAPER_FORMATS.find((f) => f.type === p.paper) || PAPER_FORMATS[1];
-  let w = p.paper === "User" ? p.width : fmt.w, hh = p.paper === "User" ? p.height : fmt.h; if (p.portrait && p.paper !== "User") [w, hh] = [hh, w];
+  const L = layoutSize(p.paper, p.portrait, custom), w = L.w, hh = L.h;
   const W = cv.width, H = cv.height, s = Math.min((W - 12) / w, (H - 12) / hh), x0 = Math.round((W - w * s) / 2), y0 = Math.round((H - hh * s) / 2);
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, W, H);
-  // the page: white, with a shadow line as KiCad's preview bitmap has
-  c.fillStyle = "#808080"; c.fillRect(x0 + 2, y0 + 2, w * s, hh * s);
-  c.fillStyle = "#ffffff"; c.fillRect(x0, y0, w * s, hh * s);
+  const K = KiCadCanvas as unknown as { SCH?: { bg?: string }; PCB_BG?: string };
+  c.fillStyle = (isSch() ? K.SCH && K.SCH.bg : K.PCB_BG) || "#ffffff"; c.fillRect(x0, y0, w * s, hh * s);
   const cur = E.kdoc as (KDoc & Record<string, unknown>) | null;
   const tb: Record<string, string> = { title: p.title, date: p.date, rev: p.rev, company: p.company };
   p.comments.forEach((v, i) => { tb["comment" + (i + 1)] = v; });
-  const doc = { ...(cur || {}), type: isSch() ? "sch" : "pcb", items: new Map(), page: [w, hh], paper: p.paper, portrait: p.portrait, titleBlock: tb, drawingSheet: wks || null } as unknown as KDoc;
+  const doc = { ...(cur || {}), type: isSch() ? "sch" : "pcb", items: new Map(), page: [w, hh], paper: p.paper, portrait: L.portrait, titleBlock: tb, drawingSheet: wks || null } as unknown as KDoc;
   const api = KiCadCanvas as unknown as { drawDrawingSheet?(ctx: CanvasRenderingContext2D, doc: KDoc, s: number, minW: number, pageLimits?: boolean): void };
   if (!api.drawDrawingSheet) return;
   c.save(); c.setTransform(s, 0, 0, s, x0, y0);
@@ -74,22 +87,24 @@ export function openPageSettings(): void {
   const wksName0 = drawingSheetName(E.proSettings as string | null, sch), sheets = projectWorksheets();
   let wksName = wksName0;
   const wksDoc = (): unknown => { const ws = resolveWorksheet(wksName, sheets); return ws ? worksheetNow(ws.docId) : null; };
-  let preview: HTMLCanvasElement | null = null; const redraw = () => { if (preview) drawPreview(preview, p, wksDoc()); };
+  // m_customSizeX / Y: the page's size when it is a User page, PAGE_INFO's custom size otherwise
+  const customSz: [number, number] = p.paper === "User" ? [p.width, p.height] : [CUSTOM_SIZE[0], CUSTOM_SIZE[1]];
+  let preview: HTMLCanvasElement | null = null; const redraw = () => { if (preview) drawPreview(preview, p, wksDoc(), customSz); };
   let wF: ReturnType<typeof lenField> | null = null, hF: ReturnType<typeof lenField> | null = null;
   KD().open({ title: "Page Settings", width: 820, cls: "kd-wide", readOnly: ro,
     build(body) {
       const custom = () => p.paper === "User";
-      wF = lenField(p.width, { units, key: "userSizeX", onChange: (v) => { p.width = v; redraw(); } });
-      hF = lenField(p.height, { units, key: "userSizeY", onChange: (v) => { p.height = v; redraw(); } });
+      // GetPageLayoutInfoFromDialog: a User page's orientation follows its custom size (Portrait when narrower than tall)
+      const syncOrient = (): void => { if (!custom()) return; const L = layoutSize("User", false, customSz); if (customSz[0] && customSz[1]) orient.value = L.portrait ? "Portrait" : "Landscape"; };
+      wF = lenField(customSz[0], { units, key: "userSizeX", onChange: (v) => { customSz[0] = v; syncOrient(); redraw(); } });
+      hF = lenField(customSz[1], { units, key: "userSizeY", onChange: (v) => { customSz[1] = v; syncOrient(); redraw(); } });
       const wIn = wF.input as HTMLInputElement, hIn = hF.input as HTMLInputElement; wIn.id = "kd-ps-width"; hIn.id = "kd-ps-height";
       wIn.disabled = hIn.disabled = ro || !custom();
       const orient = select(["Landscape", "Portrait"], p.portrait ? "Portrait" : "Landscape", (v) => { p.portrait = v === "Portrait"; redraw(); }, { id: "kd-ps-orient", disabled: ro || custom() });
-      // a standard paper shows its nominal size in the (disabled) custom fields, as the desktop dialog does
-      const showSize = () => { if (custom()) return; const f = PAPER_FORMATS.find((x) => x.type === p.paper); if (!f) return; p.width = p.portrait ? f.h : f.w; p.height = p.portrait ? f.w : f.h; wF!.set(p.width); hF!.set(p.height); };
-      orient.addEventListener("change", showSize);
+      // OnPaperSizeChoice: only the controls' enabled state changes; the custom fields keep the custom size
       const size = select(PAPER_FORMATS.map((f) => [f.type, f.label] as [string, string]), p.paper, (v) => {
-        p.paper = v; const c = custom(); wIn.disabled = hIn.disabled = ro || !c; orient.disabled = ro || c; if (c) { p.portrait = false; orient.value = "Landscape"; } showSize(); redraw(); }, { id: "kd-ps-size", disabled: ro });
-      showSize();
+        p.paper = v; const c = custom(); wIn.disabled = hIn.disabled = ro || !c; orient.disabled = ro || c; syncOrient(); redraw(); }, { id: "kd-ps-size", disabled: ro });
+      syncOrient();
       const uname = unitName(units);
       // Drawing Sheet: m_textCtrlFilePicker and m_browseButton (small_folder); in the browser the files to pick
       // from are the project's own .kicad_wks documents (OnWksFileSelection), "(KiCad default)" clears it
@@ -123,8 +138,9 @@ export function openPageSettings(): void {
         tb.append(h("label", null, label), ctl);
         if (others.length) tb.append(checkbox("Export to other sheets", false, (on) => { if (on) exportTo.add(k); else exportTo.delete(k); }, { disabled: ro }));
       }
+      // m_TextSheetCount / m_TextSheetNumber: hidden by the generic dialog, shown by the schematic editor's
       const right = h("div", { style: "flex:1;min-width:0" }, h("h3", null, "Title Block"),
-        h("div", { class: "kd-row", style: "justify-content:space-between;margin-bottom:8px;color:var(--ink-2)" }, h("span", null, `Number of sheets: ${doc.sheetCount || 1}`), h("span", null, `Sheet number: ${doc.pageNumber || "1"}`)), tb);
+        sch ? h("div", { class: "kd-row", style: "justify-content:space-between;margin-bottom:8px;color:var(--ink-2)" }, h("span", null, `Number of sheets: ${doc.sheetCount || 1}`), h("span", null, `Sheet number: ${doc.pageNumber || "1"}`)) : null, tb);
       body.append(h("div", { style: "display:flex;gap:22px" }, left, right)); redraw();
       // DIALOG_PAGES_SETTINGS reads the sheet file when it opens: read the project's sheet files again, and draw the
       // preview again whenever one comes in (still loading, or changed by a collaborator while the dialog is up)
@@ -134,20 +150,24 @@ export function openPageSettings(): void {
     ok() {
       if (ro) return;
       if (p.paper === "User" && wF && hF) {
-        p.width = wF.get(); p.height = hF.get();
-        for (const [label, mm, f] of [["Width", p.width, wF], ["Height", p.height, hF]] as const) {
+        customSz[0] = wF.get(); customSz[1] = hF.get();
+        for (const [label, mm, f] of [["Width", customSz[0], wF], ["Height", customSz[1], hF]] as const) {
           const err = pageSizeError(label, mm, sch, units as "mm" | "mil" | "in");
           if (err) { messageBox("Error", err); (f.input as HTMLInputElement).focus(); (f.input as HTMLInputElement).select(); return false; }
         }
+        // SavePageSettings: PAGE_INFO::SetCustomWidthMils / SetCustomHeightMils, then the page's own size
+        CUSTOM_SIZE[0] = customSz[0]; CUSTOM_SIZE[1] = customSz[1];
+        p.width = customSz[0]; p.height = customSz[1]; p.portrait = false;
       }
+      // SavePageSettings: LoadDrawingSheet of the chosen file; one that cannot be read is reported (and KiCad's own is used)
+      if (wksName && !resolveWorksheet(wksName, sheets)) messageBox("Error", `Error loading drawing sheet '${wksName}'.`);
       // the drawing sheet file is the project's (LocalPrjConfigChanged): saved in the .kicad_pro
       if (wksName !== wksName0) {
         const [a, b] = wksKey(sch);
         void saveProject((pro) => { sub(pro, a)[b] = wksName; }, "drawing sheet file").then(() => { if (E.kdoc) { applyDrawingSheet(E.kdoc as KDoc & { drawingSheet?: unknown }); requestRender(); } },
           (e: Error) => toast("The drawing sheet file was not saved: " + e.message, 4000));
       }
-      const changed = commitPageSettings(p);
-      if (changed) toast("Page settings updated");
+      commitPageSettings(p);
       if (others.length && (exportTo.size || exportPaper)) {
         const keys = [...exportTo], withPaper = exportPaper;
         Promise.all(others.map(async (d) => {

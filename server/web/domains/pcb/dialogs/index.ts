@@ -25,7 +25,7 @@ import { installGroups } from "./groups";
 import * as logic from "./logic";
 import { commitPageSettings, openPageSettings } from "./page-settings";
 import { openPreferences } from "./preferences";
-import { GRID_PAGE, applyPcbToolPrefs, applyPrefs, defaultGrid, editorId, fastGrid, gridLabel, prefs, rememberGrid, toggleGridOverrides } from "./prefs";
+import { GRID_PAGE, applyPcbToolPrefs, applyPrefs, defaultGrid, defaultGridIndex, editorId, fastGrid, gridLabel, prefs, rememberGrid, toggleGridOverrides } from "./prefs";
 import { obj, onProjectChanged, projectJson, readDoc, saveProject, submitDocOp } from "./project";
 import { openSchematicSetup, schRenderSettings } from "./schematic-setup";
 import { autoplaceAllSheetPins, openSyncSheetPins } from "./sync-pins";
@@ -120,7 +120,7 @@ export function installDialogs(HANDLERS: Record<string, Handler>): void {
     editPageNumber: needDoc(() => { editPageNumber(); }, true),   // SCH_EDIT_TOOL::EditPageNumber
     assignNetclass: needDoc(assignNetclass, true),   // SCH_EDITOR_CONTROL::AssignNetclass
     // SCH_EDITOR_CONTROL::FindNetInInspector
-    findNetInInspector: (() => { if (!E.kdoc || !isSch()) return; if (!findNetInNavigator(selectionIds())) toast("No connected net selected."); }) as Handler,
+    findNetInInspector: (() => { if (!E.kdoc || !isSch()) return; if (!findNetInNavigator(selectionIds())) toast("No connected net selected.", 8000, undefined, "error"); }) as Handler,
     annotate: needDoc(() => { void openAnnotate(); }, true),
     incrementAnnotations: needDoc(openIncrementAnnotations, true),
     // DIALOG_CHANGE_SYMBOLS: Edit > Change Symbols…, Tools > Update Symbols from Library…, the symbol context menu
@@ -184,7 +184,8 @@ export function installDialogs(HANDLERS: Record<string, Handler>): void {
   });
   onProjectChanged(applyProjectSettings);
   E.gridDefault = () => defaultGrid();
-  E.gridPicked = (mm: number) => rememberGrid(mm);
+  E.gridDefaultIdx = () => defaultGridIndex();
+  E.gridPicked = (mm: number, idx?: number) => rememberGrid(mm, editorId(), idx);
   applyPrefs(true);
   window.addEventListener("kc-pcb-tools", () => applyPcbToolPrefs());   // the board tools load lazily
   setToggle("toggleGridOverrides", prefs().grids[editorId()].overrides.enabled);

@@ -304,25 +304,44 @@
     return /Macintosh|Mac OS X|iPhone|iPad/.test(nav.userAgent || "");
   }
   var IS_MAC = detectMac();
+  var MOD_PREFIXES = [
+    ["RawCtrl+", "rawCtrl"],
+    ["Ctrl+", "ctrl"],
+    ["Cmd+", "ctrl"],
+    ["Alt+", "alt"],
+    ["Option+", "alt"],
+    ["Shift+", "shift"],
+    ["Meta+", "meta"],
+    ["Win+", "super"],
+    ["Super+", "super"],
+    ["AltGr+", "altGr"]
+  ];
   function splitKey(key) {
-    const parts = key.split("+");
-    let k = parts.pop() ?? "";
-    if (k === "" && key.endsWith("+")) {
-      k = "+";
-      parts.pop();
+    const out = { ctrl: false, alt: false, shift: false, rawCtrl: false, meta: false, super: false, altGr: false, key: "" };
+    let k = key;
+    for (; ; ) {
+      const m = MOD_PREFIXES.find(([p]) => k.startsWith(p));
+      if (!m) break;
+      out[m[1]] = true;
+      k = k.slice(m[0].length);
     }
-    return { ctrl: parts.includes("Ctrl") || parts.includes("Cmd"), alt: parts.includes("Alt") || parts.includes("Option"), shift: parts.includes("Shift"), rawCtrl: parts.includes("RawCtrl"), key: k };
+    out.key = k;
+    return out;
   }
+  var KICAD_KEY_NAME = { Enter: "Return", Backspace: "Back", Delete: "Del", Escape: "Esc", Insert: "Ins", PageUp: "PgUp", PageDown: "PgDn" };
+  var kicadKeyName = (k) => KICAD_KEY_NAME[k] || k;
   function keyName(key) {
     if (!key) return "";
     const s = splitKey(key);
-    if (!IS_MAC) return s.rawCtrl ? key.replace("RawCtrl", "Ctrl") : key;
     const mods = [];
-    if (s.rawCtrl) mods.push("Ctrl");
-    if (s.ctrl) mods.push("Cmd");
-    if (s.alt) mods.push("Option");
+    if (IS_MAC && s.rawCtrl) mods.push("Ctrl");
+    if (s.ctrl || !IS_MAC && s.rawCtrl) mods.push(IS_MAC ? "Cmd" : "Ctrl");
+    if (s.alt) mods.push(IS_MAC ? "Option" : "Alt");
     if (s.shift) mods.push("Shift");
-    return [...mods, s.key].join("+");
+    if (s.meta) mods.push("Meta");
+    if (s.super) mods.push("Win");
+    if (s.altGr) mods.push("AltGr");
+    return mods.map((m) => m + "+").join("") + kicadKeyName(s.key);
   }
   var MAC_MENU_KEYS = {
     Del: "\u2326",
@@ -349,6 +368,39 @@
     const s = splitKey(key);
     return (s.rawCtrl ? "\u2303" : "") + (s.alt ? "\u2325" : "") + (s.shift ? "\u21E7" : "") + (s.ctrl ? "\u2318" : "") + (MAC_MENU_KEYS[s.key] || s.key);
   }
+  var HOTKEY_NAMES = [
+    ...Array.from({ length: 24 }, (_, i) => `F${i + 1}`),
+    "Esc",
+    "Del",
+    "Tab",
+    "Back",
+    "Ins",
+    "Home",
+    "End",
+    "PgUp",
+    "PgDn",
+    "Up",
+    "Down",
+    "Left",
+    "Right",
+    "Return",
+    "Space",
+    ...Array.from({ length: 10 }, (_, i) => `Num Pad ${i}`),
+    "Num Pad +",
+    "Num Pad -",
+    "Num Pad *",
+    "Num Pad /",
+    "Num Pad .",
+    "Num Pad Enter",
+    "Num Pad F1",
+    "Num Pad F2",
+    "Num Pad F3",
+    "Num Pad F4",
+    "",
+    "Click",
+    "DblClick",
+    "Wheel"
+  ];
 
   // web/shared/menufit.ts
   var MARGIN = 4;

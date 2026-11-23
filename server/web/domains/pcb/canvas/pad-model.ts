@@ -34,7 +34,8 @@ export function setPadChild(pad: SNode, key: string, text: string | null): void 
 }
 
 // ---------------------------------------------------------------- the dialog's model
-export type DlgType = "pth" | "smd" | "conn" | "npth" | "aperture";
+/** m_padType's entries: Through-hole, SMD, Edge Connector, NPTH Mechanical, SMD Aperture, Copper Only (PAD_ATTRIB::NON_COMPONENT). */
+export type DlgType = "pth" | "smd" | "conn" | "npth" | "aperture" | "copper";
 export type DlgShape = "circle" | "oval" | "rect" | "trapezoid" | "roundrect" | "chamfer" | "mixed" | "custom_circle" | "custom_rect";
 export interface PadModel {
   type: DlgType; number: string; net: string; x: number; y: number; angle: number;
@@ -106,16 +107,30 @@ export function formatPadLayers(set: Set<string>, copper: string[]): string[] {
   return out.concat(Array.from(s).sort((a, b) => layerId(a) - layerId(b) || (a < b ? -1 : 1)));
 }
 
-/** Copper choices of the "Copper layers:" control for a pad type (UpdateLayersDropdown). */
-export function copperChoices(type: DlgType): string[] {
+/**
+ * Copper choices of the "Copper layers:" control for a pad type (UpdateLayersDropdown), with the board's layer names
+ * (`name`, GetLayerName); Copper Only lists every enabled copper layer (`copper`, the CuStack order).
+ */
+export function copperChoices(type: DlgType, copper: string[] = ["F.Cu", "B.Cu"], name: (l: string) => string = (l) => l): string[] {
+  const F = name("F.Cu"), B = name("B.Cu");
   switch (type) {
-    case "pth": return ["All copper layers", "F.Cu, B.Cu and connected layers", "Connected layers only", "None"];
-    case "npth": return ["F.Cu and B.Cu", "F.Cu", "B.Cu", "None"];
-    case "smd": case "conn": return ["F.Cu", "B.Cu"];
+    case "pth": return ["All copper layers", `${F}, ${B} and connected layers`, "Connected layers only", "None"];
+    case "npth": return [`${F} and ${B}`, F, B, "None"];
+    case "smd": case "conn": return [F, B];
+    case "copper": return copper.map(name);
     default: return ["None"];
   }
 }
 const yes = (n: SNode | null): boolean => !!n && str(n[1]) !== "no";
+/**
+ * PADSTACK::DefaultThermalSpokeAngleForShape: 45° for a circle, or a custom pad whose anchor is a circle (the anchor
+ * when (options) does not say), else 90°.  The writer leaves an angle equal to it out.  (A board up to 20211014 read
+ * a custom pad on a circle anchor as 90°: canvas/legacy.ts writes that in on load.)
+ */
+export function defaultSpokeAngle(shape: string, anchor: string): number {
+  const s = shape === "custom" ? (anchor || "circle") : shape;
+  return s === "circle" ? 45 : 90;
+}
 
 /** Read one pad (index) of a footprint item into the dialog's model (front-relative when the footprint is flipped). */
 export function readPad(doc: KDoc, fp: SNode, pad: SNode, netName: string): PadModel {
@@ -126,7 +141,7 @@ export function readPad(doc: KDoc, fp: SNode, pad: SNode, netName: string): PadM
   const layers = flipped ? new Set(Array.from(layers0, flipName)) : layers0;
   const hasCu = Array.from(layers).some((l) => /\.Cu$/.test(l));
   const t = str(pad[2]);
-  const type: DlgType = t === "thru_hole" ? "pth" : t === "np_thru_hole" ? "npth" : t === "connect" ? "conn" : hasCu ? "smd" : "aperture";
+  const type: DlgType = t === "thru_hole" ? "pth" : t === "np_thru_hole" ? "npth" : t === "connect" ? "conn" : t === "non_component" ? "copper" : hasCu ? "smd" : "aperture";
   const sz = kid(pad, "size"); const w = num(sz && sz[1], 1), hh = num(sz && sz[2], w);
   const s = str(pad[3]); const ch = kid(pad, "chamfer"); const cornersOn = ["top_left", "top_right", "bottom_left", "bottom_right"].map((c) => !!ch && ch.includes(c)) as [boolean, boolean, boolean, boolean];
   const rr = num((kid(pad, "roundrect_rratio") || [])[1], 0.25), cr = num((kid(pad, "chamfer_ratio") || [])[1], 0.2);
@@ -142,10 +157,11 @@ export function readPad(doc: KDoc, fp: SNode, pad: SNode, netName: string): PadM
   if (type === "pth") copper = !copperSet.length ? 3 : yes(kid(pad, "remove_unused_layers")) ? (yes(kid(pad, "keep_end_layers")) ? 1 : 2) : 0;
   else if (type === "npth") copper = layers.has("F.Cu") && layers.has("B.Cu") ? 0 : layers.has("F.Cu") ? 1 : layers.has("B.Cu") ? 2 : 3;
   else if (type === "smd" || type === "conn") copper = layers.has("B.Cu") && !layers.has("F.Cu") ? 1 : 0;
+  else if (type === "copper") { const cu = doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"]; const i = cu.findIndex((l) => layers.has(l)); copper = i < 0 ? 0 : i; }
   const tech: Record<string, boolean> = {}; for (const [, l] of TECH) tech[l] = layers.has(l);
   const opt = (key: string): number => { const n = kid(pad, key); return n ? num(n[1], NaN) : NaN; };
   const zc = kid(pad, "zone_connect");
-  const defAngle = s === "circle" || s === "custom" || s === "trapezoid" ? 45 : 90;
+  const defAngle = defaultSpokeAngle(s, anchor);
   const sa = kid(pad, "thermal_bridge_angle");
   return {
     type, number: str(pad[1]), net: netName, x: fx + rx, y: fy + ry, angle: norm180(prot - frot),
@@ -171,6 +187,7 @@ export function modelLayers(m: PadModel, copper: string[]): Set<string> {
   if (m.type === "pth") { if (m.copper !== 3) for (const c of all) out.add(c); }
   else if (m.type === "npth") { if (m.copper === 0 || m.copper === 1) out.add("F.Cu"); if (m.copper === 0 || m.copper === 2) out.add("B.Cu"); }
   else if (m.type === "smd" || m.type === "conn") out.add(m.copper === 1 ? "B.Cu" : "F.Cu");
+  else if (m.type === "copper") out.add(all[m.copper] || "F.Cu");
   for (const [, l] of TECH) if (m.tech[l]) out.add(l);
   return out;
 }
@@ -204,7 +221,7 @@ export function writePad(doc: KDoc, fp: SNode, pad: SNode, m: PadModel, was: Pad
   const copper = doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"];
   const hasConn = m.type !== "npth" && m.type !== "aperture";
   // type and shape (the three atoms after the number)
-  const t = m.type === "pth" ? "thru_hole" : m.type === "npth" ? "np_thru_hole" : m.type === "conn" ? "connect" : "smd";
+  const t = m.type === "pth" ? "thru_hole" : m.type === "npth" ? "np_thru_hole" : m.type === "conn" ? "connect" : m.type === "copper" ? "non_component" : "smd";
   if (m.type !== was.type) pad[2] = t;
   if (fileShape(m.shape) !== str(pad[3])) pad[3] = fileShape(m.shape);
   if (!hasConn && was.number && m.type !== was.type) pad[1] = ""; else if (m.number !== was.number) pad[1] = m.number;
@@ -270,7 +287,7 @@ export function writePad(doc: KDoc, fp: SNode, pad: SNode, m: PadModel, was: Pad
   optional("clearance", m.clearance, was.clearance);
   if (m.zoneConnect !== was.zoneConnect) setPadChild(pad, "zone_connect", m.zoneConnect < 0 ? null : `(zone_connect ${m.zoneConnect})`);
   optional("thermal_bridge_width", m.spoke, was.spoke);
-  const defAngle = m.shape === "circle" || m.shape === "trapezoid" || m.shape === "custom_circle" || m.shape === "custom_rect" ? 45 : 90;
+  const defAngle = defaultSpokeAngle(m.shape === "custom_circle" || m.shape === "custom_rect" ? "custom" : m.shape, m.shape === "custom_rect" ? "rect" : "circle");
   if (!sameNum(m.spokeAngle, was.spokeAngle) || m.shape !== was.shape) setPadChild(pad, "thermal_bridge_angle", sameNum(m.spokeAngle, defAngle) ? null : `(thermal_bridge_angle ${f6(m.spokeAngle)})`);
   optional("thermal_gap", m.gap, was.gap);
   // custom pads: the anchor and the zone knockout live in (options); primitives stay as drawn

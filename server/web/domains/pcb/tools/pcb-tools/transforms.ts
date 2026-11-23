@@ -5,7 +5,7 @@ import type { BoardDoc, Box, PcbChange, Pt } from "./types";
 export type PointFn = (x: number, y: number) => number[];
 import { replacedChange } from "./changes";
 import { flipFootprintNode, flipLayerKid, mirrorShapeX, rotateFootprintNode, toggleMirror } from "./footprint";
-import { K } from "./state";
+import { K, S } from "./state";
 import { clone, corners, isList, norm360, pt, r6, rotator, vadd, xy } from "./util";
 
 // ================================================================ parity pass: the non-tool commands of pcbnew
@@ -17,12 +17,38 @@ export const DRC_EPS = 0.0005;   // ADVANCED_CFG::m_DRCEpsilon: half a micron sh
 export const isFootprintNode = (n: SNode) => n[0] === "footprint";
 
 // ---------------------------------------------------------------- generic item transforms (move / rotate / flip / mirror)
+/**
+ * Boards before FIRST_FP_AFFINE_TRANSFORM (20260616) keep a footprint's zone outlines and points in the board frame
+ * (pcb_io_kicad_sexpr.cpp writes them through the footprint's transform only from that version on).  The footprint
+ * operations below treat them as local, so for such a board they are taken into the footprint's frame first and
+ * put back through its new placement afterwards.
+ */
+let fpFrameDepth = 0;
+export function legacyFootprintFrame<T>(node: SNode, doc: { version?: number } | null | undefined, op: () => T): T {
+  const v = Number(doc && doc.version) || 0;
+  if (fpFrameDepth > 0 || node[0] !== "footprint" || !(v > 0 && v < 20260616)) return op();
+  const each = (fn: PointFn) => {
+    for (const z of K.kids(node, "zone")) for (const poly of [z, ...K.kids(z, "polygon"), ...K.kids(z, "filled_polygon")]) {
+      const p = K.kid(poly, "pts"); if (p) for (const q of p.slice(1)) if (isList(q) && q[0] === "xy") { const [x, y] = fn(K.num(q[1]), K.num(q[2])); q[1] = r6(x); q[2] = r6(y); }
+    }
+    for (const pt of K.kids(node, "point")) { const a = K.kid(pt, "at"); if (a) { const [x, y] = fn(K.num(a[1]), K.num(a[2])); a[1] = r6(x); a[2] = r6(y); } }
+  };
+  const [x0, y0, a0] = K.atOf(node); const toLocal = rotator(-a0);
+  each((x, y) => toLocal(x - x0, y - y0));
+  fpFrameDepth++;
+  try { return op(); }
+  finally {
+    fpFrameDepth--;
+    const [x1, y1, a1] = K.atOf(node); const toBoard = rotator(a1);
+    each((x, y) => { const [bx, by] = toBoard(x, y); return [x1 + bx, y1 + by]; });
+  }
+}
 /** Every absolute (x, y) of a board-level item through fn; angles are untouched.  Footprints move as a whole. */
 export function mapNodePoints(node: SNode, fn: PointFn) {
   const k = node[0];
   const mapKey = (n: SNode, key: string) => { const c = K.kid(n, key); if (!c || c.length < 3) return; const [x, y] = fn(K.num(c[1]), K.num(c[2])); c[1] = r6(x); c[2] = r6(y); };
   const mapPts = (n: SNode) => { const p = K.kid(n, "pts"); if (p) for (const xy of p.slice(1)) if (isList(xy) && xy[0] === "xy") { const [x, y] = fn(K.num(xy[1]), K.num(xy[2])); xy[1] = r6(x); xy[2] = r6(y); } };
-  if (k === "footprint") { const [x, y] = K.atOf(node); const [nx, ny] = fn(x, y); K.setAt(node, r6(nx), r6(ny)); return node; }
+  if (k === "footprint") return legacyFootprintFrame(node, S.doc, () => { const [x, y] = K.atOf(node); const [nx, ny] = fn(x, y); K.setAt(node, r6(nx), r6(ny)); return node; });
   if (k === "table") {   // a table sits where its first cell does: every cell shifts with it
     const cells = K.kid(node, "cells"); const first = cells && K.kids(cells, "table_cell")[0]; const s = first && K.kid(first, "start"); if (!s) return node;
     const [ax, ay] = [K.num(s[1]), K.num(s[2])]; const [nx, ny] = fn(ax, ay); K.shiftTable(node, nx - ax, ny - ay); return node;
@@ -43,7 +69,7 @@ export function setAngleKid(node: SNode, a: number) { const at = K.kid(node, "at
 /** Turn an item by deg (KiCad's positive = counter-clockwise on screen) about (cx, cy). */
 export function rotateNode(node: SNode, cx: number, cy: number, deg: number) {
   const k = node[0]; const R = rotator(deg); const about = (x: number, y: number) => { const [dx, dy] = R(x - cx, y - cy); return [cx + dx, cy + dy]; };
-  if (k === "footprint") { rotateFootprintNode(node, deg); return mapNodePoints(node, about); }
+  if (k === "footprint") return legacyFootprintFrame(node, S.doc, () => { rotateFootprintNode(node, deg); return mapNodePoints(node, about); });
   if (k === "gr_rect" && norm360(deg) % 90 !== 0) {   // PCB_SHAPE::Rotate: a rectangle off the axes becomes a polygon
     const a = pt(node, "start"), b = pt(node, "end"); const [x0, y0, x1, y1] = corners(a!, b!);
     const pts = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => about(x, y));
@@ -123,7 +149,7 @@ export function flipNode(node: SNode, cx: number, doc: BoardDoc, cy?: number, di
     flipNode(node, cx, doc); return rotateNode(node, cx, cy, 180);
   }
   const k = node[0]; const mirror = (x: number, y: number) => [2 * cx - x, y];
-  if (k === "footprint") { flipFootprintNode(node); return mapNodePoints(node, mirror); }
+  if (k === "footprint") return legacyFootprintFrame(node, doc || S.doc, () => { flipFootprintNode(node); return mapNodePoints(node, mirror); });
   mapNodePoints(node, mirror); flipLayerKid(node);
   if (k === "zone") reflectZoneOrientations(node, true);
   if (k === "via") { const ls = K.kid(node, "layers"); if (ls && doc) { const copper = doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"]; const names = ls.slice(1).map(K.str).sort((a, b) => copper.indexOf(a) - copper.indexOf(b)); ls.splice(1, ls.length - 1, ...names); } }
@@ -467,8 +493,10 @@ const trailingInt = (ref: string) => { const m = /(\d+)$/.exec(ref); return m ? 
  * GetBoundingBox( false ) plus the 1 mm component gap; each size's footprints, sorted by reference, are laid out in
  * a block of rows or columns; the blocks are packed with rectpack2D in 0.01 mm units; and the whole lot goes to
  * `target` (the selection box's origin).  Returns each footprint's node at its packed place (only those that moved).
+ * PCB_EDIT_FRAME::OnNetlistChanged calls it as SpreadFootprints( new footprints, { 0, 0 }, true ): `opts.target` (mm)
+ * and `opts.groupBySheet`, which packs each sheet's footprints (their path without the symbol uuid) as a group first.
  */
-export function packNodes(doc: BoardDoc, ids: string[]): Map<string, SNode> {
+export function packNodes(doc: BoardDoc, ids: string[], opts?: { target?: Pt; groupBySheet?: boolean }): Map<string, SNode> {
   const IU = 1e6, GAP = 1 * IU, GROUP_GAP = 1.5 * IU;
   interface Fp { it: KItem; x: number; y: number; w: number; h: number; dx: number; dy: number }
   const fps: Fp[] = [];
@@ -481,44 +509,50 @@ export function packNodes(doc: BoardDoc, ids: string[]): Map<string, SNode> {
   const merge = (b: Box4, x0: number, y0: number, x1: number, y1: number): Box4 => b ? [Math.min(b[0], x0), Math.min(b[1], y0), Math.max(b[2], x1), Math.max(b[3], y1)] : [x0, y0, x1, y1];
   const moveFp = (f: Fp, dx: number, dy: number) => { f.x += dx; f.y += dy; f.dx += dx; f.dy += dy; };
   let target: Box4 = null; for (const f of fps) target = merge(target, f.x, f.y, f.x + f.w, f.y + f.h);   // footprintsBbox.Normalize().GetOrigin()
-  // sizeToFpMap: std::map<VECTOR2I, …> keyed by the size plus the gap, in x-then-y order
-  const bySize = new Map<string, { sx: number; sy: number; fps: Fp[]; box: Box4 }>();
-  for (const f of fps) { const sx = f.w + GAP, sy = f.h + GAP, k = `${sx},${sy}`; if (!bySize.has(k)) bySize.set(k, { sx, sy, fps: [], box: null }); bySize.get(k)!.fps.push(f); }
-  const blocks = Array.from(bySize.values()).sort((a, b) => a.sx - b.sx || a.sy - b.sy);
-  for (const blk of blocks) {
-    const n = blk.fps.length, { sx, sy } = blk;
-    const initialSide = Math.sqrt(sx * sy * n), vertical = sx >= sy; let perLine = n;
-    // "Wrap the line if the ratio is not satisfied" (singleLineRatio 5; integer division)
-    if (vertical) { if (Math.trunc(sy * n / sx) > 5) perLine = Math.trunc(initialSide / sy); }
-    else if (Math.trunc(sx * n / sy) > 5) perLine = Math.trunc(initialSide / sx);
-    let optimal = perLine, rem = n % optimal;
-    if (rem !== 0) for (let i = Math.max(2, perLine - 2); i <= Math.min(n - 2, perLine + 2); i++) { const r = n % i; if (r === 0 || r >= rem) { optimal = i; rem = r; } }
-    blk.fps.sort((a, b) => {   // compareFootprintsbyRef
-      const ra = a.it.ref || "", rb = b.it.ref || "", pa = refDesPrefix(ra), pb = refDesPrefix(rb);
-      return pa !== pb ? (pa < pb ? -1 : 1) : trailingInt(ra) - trailingInt(rb);
-    });
-    blk.fps.forEach((f, i) => {
-      let px = Math.trunc(sx / 2), py = Math.trunc(sy / 2);
-      if (vertical) { px += sx * Math.trunc(i / optimal); py += sy * (i % optimal); } else { px += sx * (i % optimal); py += sy * Math.trunc(i / optimal); }
-      moveFp(f, px - f.x, py - f.y);
-      const g = Math.trunc(GAP / 2); blk.box = merge(blk.box, f.x - g, f.y - g, f.x + f.w + g, f.y + f.h + g);
-    });
+  const tx0 = opts && opts.target ? Math.round(opts.target[0] * IU) : target![0], ty0 = opts && opts.target ? Math.round(opts.target[1] * IU) : target![1];
+  // sheetsMap: std::map keyed by the footprint's path without its last uuid (aGroupBySheet), else one group
+  const bySheet = new Map<string, Fp[]>();
+  for (const f of fps) { const p = opts && opts.groupBySheet ? (() => { const path = K.str((K.kid(f.it.node, "path") || [])[1]); const i = path.lastIndexOf("/"); return i >= 0 ? path.slice(0, i) : path; })() : ""; if (!bySheet.has(p)) bySheet.set(p, []); bySheet.get(p)!.push(f); }
+  const sheets = Array.from(bySheet.entries()).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([, list]) => ({ fps: list, box: null as Box4 }));
+  for (const sh of sheets) {
+    // sizeToFpMap: std::map<VECTOR2I, …> keyed by the size plus the gap, in x-then-y order
+    const bySize = new Map<string, { sx: number; sy: number; fps: Fp[]; box: Box4 }>();
+    for (const f of sh.fps) { const sx = f.w + GAP, sy = f.h + GAP, k = `${sx},${sy}`; if (!bySize.has(k)) bySize.set(k, { sx, sy, fps: [], box: null }); bySize.get(k)!.fps.push(f); }
+    const blocks = Array.from(bySize.values()).sort((a, b) => a.sx - b.sx || a.sy - b.sy);
+    for (const blk of blocks) {
+      const n = blk.fps.length, { sx, sy } = blk;
+      const initialSide = Math.sqrt(sx * sy * n), vertical = sx >= sy; let perLine = n;
+      // "Wrap the line if the ratio is not satisfied" (singleLineRatio 5; integer division)
+      if (vertical) { if (Math.trunc(sy * n / sx) > 5) perLine = Math.trunc(initialSide / sy); }
+      else if (Math.trunc(sx * n / sy) > 5) perLine = Math.trunc(initialSide / sx);
+      let optimal = perLine, rem = n % optimal;
+      if (rem !== 0) for (let i = Math.max(2, perLine - 2); i <= Math.min(n - 2, perLine + 2); i++) { const r = n % i; if (r === 0 || r >= rem) { optimal = i; rem = r; } }
+      blk.fps.sort((a, b) => {   // compareFootprintsbyRef
+        const ra = a.it.ref || "", rb = b.it.ref || "", pa = refDesPrefix(ra), pb = refDesPrefix(rb);
+        return pa !== pb ? (pa < pb ? -1 : 1) : trailingInt(ra) - trailingInt(rb);
+      });
+      blk.fps.forEach((f, i) => {
+        let px = Math.trunc(sx / 2), py = Math.trunc(sy / 2);
+        if (vertical) { px += sx * Math.trunc(i / optimal); py += sy * (i % optimal); } else { px += sx * (i % optimal); py += sy * Math.trunc(i / optimal); }
+        moveFp(f, px - f.x, py - f.y);
+        const g = Math.trunc(GAP / 2); blk.box = merge(blk.box, f.x - g, f.y - g, f.x + f.w + g, f.y + f.h + g);
+      });
+    }
+    // pack the blocks
+    const rects: PackRect[] = blocks.map((b) => ({ x: 0, y: 0, w: Math.trunc((b.box![2] - b.box![0]) / PACK_SCALE), h: Math.trunc((b.box![3] - b.box![1]) / PACK_SCALE) }));
+    let blocksArea = 0; for (const b of blocks) blocksArea += (b.box![2] - b.box![0]) * (b.box![3] - b.box![1]);
+    const side = Math.round(Math.sqrt(blocksArea)); spreadRectangles(rects, side, side);
+    blocks.forEach((b, i) => { const tx = rects[i].x * PACK_SCALE, ty = rects[i].y * PACK_SCALE; for (const f of b.fps) { moveFp(f, tx - b.box![0], ty - b.box![1]); sh.box = merge(sh.box, f.x, f.y, f.x + f.w, f.y + f.h); } });
   }
-  // pack the blocks
-  const rects: PackRect[] = blocks.map((b) => ({ x: 0, y: 0, w: Math.trunc((b.box![2] - b.box![0]) / PACK_SCALE), h: Math.trunc((b.box![3] - b.box![1]) / PACK_SCALE) }));
-  let blocksArea = 0; for (const b of blocks) blocksArea += (b.box![2] - b.box![0]) * (b.box![3] - b.box![1]);
-  const side = Math.round(Math.sqrt(blocksArea)); spreadRectangles(rects, side, side);
-  let sheet: Box4 = null;
-  blocks.forEach((b, i) => { const tx = rects[i].x * PACK_SCALE, ty = rects[i].y * PACK_SCALE; for (const f of b.fps) { moveFp(f, tx - b.box![0], ty - b.box![1]); sheet = merge(sheet, f.x, f.y, f.x + f.w, f.y + f.h); } });
-  // the one sheet group (aGroupBySheet false): its box with the group gap is packed alone, then set down at the target
-  const sb = sheet as unknown as [number, number, number, number];
-  const sr: PackRect[] = [{ x: 0, y: 0, w: Math.trunc((sb[2] - sb[0] + 2 * GROUP_GAP) / PACK_SCALE), h: Math.trunc((sb[3] - sb[1] + 2 * GROUP_GAP) / PACK_SCALE) }];
-  const sside = Math.trunc(Math.sqrt((sb[2] - sb[0]) * (sb[3] - sb[1]))); spreadRectangles(sr, sside, sside);
-  const tx = sr[0].x * PACK_SCALE + target![0], ty = sr[0].y * PACK_SCALE + target![1];
-  for (const f of fps) {
-    moveFp(f, tx - sb[0], ty - sb[1]);
-    if (f.dx || f.dy) out.set(f.it.id, translateNode(clone(f.it.node), f.dx / IU, f.dy / IU));
-  }
+  // the sheet groups: each box with the group gap is packed, then set down at the target
+  const sr: PackRect[] = sheets.map((sh) => { const sb = sh.box!; return { x: 0, y: 0, w: Math.trunc((sb[2] - sb[0] + 2 * GROUP_GAP) / PACK_SCALE), h: Math.trunc((sb[3] - sb[1] + 2 * GROUP_GAP) / PACK_SCALE) }; });
+  let sheetsArea = 0; for (const sh of sheets) sheetsArea += (sh.box![2] - sh.box![0]) * (sh.box![3] - sh.box![1]);
+  const sside = Math.trunc(Math.sqrt(sheetsArea)); spreadRectangles(sr, sside, sside);
+  sheets.forEach((sh, i) => {
+    const sb = sh.box!, tx = sr[i].x * PACK_SCALE + tx0, ty = sr[i].y * PACK_SCALE + ty0;
+    for (const f of sh.fps) moveFp(f, tx - sb[0], ty - sb[1]);
+  });
+  for (const f of fps) if (f.dx || f.dy) out.set(f.it.id, translateNode(clone(f.it.node), f.dx / IU, f.dy / IU));
   return out;
 }
 /** The MODIFIED changes of packNodes (Pack and Move Footprints without the move). */

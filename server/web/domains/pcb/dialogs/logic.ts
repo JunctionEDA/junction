@@ -70,27 +70,56 @@ export interface FindOpts { query: string; matchCase?: boolean; wholeWord?: bool
 export interface FindHit { id: string; kind: string; what: string; field?: string; text: string; replaceable: boolean; x: number; y: number;
   /** a sheet pin hit: its index among the sheet's pins */
   sub?: number }
-const reEsc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-/** EDA_ITEM::Matches: whole word = the whole text; a regular expression; wildcards (* ?) as wxMatchWild; else a substring. */
+/** wxString::Upper: each character upper-cased in place (a character whose upper case is longer is kept), so offsets hold. */
+const upperChars = (s: string): string => Array.from(s).map((c) => { const u = c.toUpperCase(); return u.length === c.length ? u : c; }).join("");
+/** EDA_ITEM::Matches / Replace's isWordChar: wxIsalnum( c ) || c == '_'. */
+const isWordChar = (c: string): boolean => c === "_" || /^[\p{L}\p{N}]$/u.test(c);
+/**
+ * EDA_ITEM::Matches (common/eda_item.cpp:328-401): a regular expression; whole word = an occurrence of the search text
+ * whose neighbours are not word characters ("VCC" finds "VCC rail" and "+VCC", not "VCC1"); else a plain substring
+ * (`*` and `?` are literal: eeschema's Find has no wildcard mode).  Case folds by upper-casing both when not matching case.
+ */
 export function matcher(o: FindOpts): ((text: string) => boolean) | null {
   const q = str(o.query); if (!q) return null;
-  const fl = o.matchCase ? "" : "i";
-  try {
-    if (o.regex) { const re = new RegExp(q, fl); return (t) => re.test(t); }
-    if (o.wholeWord) { const re = new RegExp("^" + reEsc(q) + "$", fl); return (t) => re.test(t); }
-    if (/[*?]/.test(q)) { const re = new RegExp("^" + q.split(/([*?])/).map((p) => (p === "*" ? "[\\s\\S]*" : p === "?" ? "[\\s\\S]" : reEsc(p))).join("") + "$", fl); return (t) => re.test(t); }
-  } catch (e) { return null; }
-  const needle = o.matchCase ? q : q.toLowerCase();
-  return (t) => (o.matchCase ? t : t.toLowerCase()).includes(needle);
+  if (o.regex) { try { const re = new RegExp(q, o.matchCase ? "" : "i"); return (t) => re.test(t); } catch (e) { return null; } }
+  const needle = o.matchCase ? q : upperChars(q);
+  if (o.wholeWord) {
+    return (t0) => {
+      const t = o.matchCase ? t0 : upperChars(t0);
+      let ii = 0;
+      while (ii < t.length) {
+        const at = t.indexOf(needle, ii); if (at < 0) return false;
+        const next = at + needle.length;
+        if ((at === 0 || !isWordChar(t[at - 1])) && (next === t.length || !isWordChar(t[next]))) return true;
+        ii = at + 1;
+      }
+      return false;
+    };
+  }
+  return (t) => (o.matchCase ? t : upperChars(t)).includes(needle);
 }
-/** EDA_ITEM::Replace: every occurrence (the whole text for whole-word and wildcard matches); null when nothing changes. */
+/**
+ * EDA_ITEM::Replace (common/eda_item.cpp:406-490): every occurrence of the search text is replaced (in whole-word mode
+ * only those whose neighbours are not word characters), comparing upper-cased copies when not matching case; a regular
+ * expression replaces each of its matches.  null when nothing is replaced.
+ */
 export function replaceText(text: string, o: FindOpts, replacement: string): string | null {
   const m = matcher(o); if (!m || !m(text)) return null;
-  const q = str(o.query), fl = o.matchCase ? "g" : "gi"; let out: string;
-  if (o.regex) out = text.replace(new RegExp(q, fl), replacement);
-  else if (o.wholeWord || /[*?]/.test(q)) out = replacement;
-  else out = text.replace(new RegExp(reEsc(q), fl), () => replacement);
-  return out === text ? null : out;
+  const q = str(o.query);
+  if (o.regex) { const out = text.replace(new RegExp(q, o.matchCase ? "g" : "gi"), replacement); return out === text ? null : out; }
+  const t = o.matchCase ? text : upperChars(text), needle = o.matchCase ? q : upperChars(q);
+  let result = "", replaced = false, ii = 0;
+  while (ii < t.length) {
+    const at = t.indexOf(needle, ii);
+    if (at < 0) { result += text.slice(ii); break; }
+    if (at > ii) result += text.slice(ii, at);
+    ii = at;
+    const next = at + needle.length;
+    const ok = !o.wholeWord || ((ii === 0 || !isWordChar(t[ii - 1])) && (next === t.length || !isWordChar(t[next])));
+    if (ok) { result += replacement; replaced = true; ii = next; }
+    else { result += text[ii]; ii++; }
+  }
+  return replaced ? result : null;
 }
 function hidden(p: SNode): boolean {
   const h = kid(p, "hide"); if (h) return str(h[1]) !== "no";

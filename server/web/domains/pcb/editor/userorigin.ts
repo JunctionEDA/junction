@@ -14,9 +14,18 @@ export function userOriginOf(pref: OriginPref, origins: { grid?: [number, number
   const pt = pref.origin === "aux" ? origins.aux : pref.origin === "grid" ? origins.grid : null;
   return pt ? [pt[0], pt[1]] : [0, 0];
 }
+/**
+ * The origin preference the open board-type document uses: PCB_BASE_FRAME::GetUserOrigin takes the origin from the
+ * PCB Editor's settings in every frame, PCB_ORIGIN_TRANSFORMS::invertXAxis / invertYAxis the axes from the PCB
+ * Editor's settings in the board editor and from the Footprint Editor's (its own Origins & Axes page) elsewhere.
+ */
+export function originPrefFor(pcb: OriginPref, fp: { invertX: boolean; invertY: boolean } | null | undefined, fpEditor: boolean): OriginPref {
+  return fpEditor ? { origin: pcb.origin, invertX: !!(fp && fp.invertX), invertY: !!(fp && fp.invertY) } : pcb;
+}
 /** Put the user origin and the axis senses into the viewport slice (on a preference change or a moved origin). */
 export function publishUserOrigin(): void {
-  const o = (E.pcbOrigin || { origin: "page", invertX: false, invertY: false }) as OriginPref;
+  const fpEditor = !!((E.kdoc && (E.kdoc as { fpEditor?: boolean }).fpEditor) || E.DOC_TYPE === "footprint");
+  const o = originPrefFor((E.pcbOrigin || { origin: "page", invertX: false, invertY: false }) as OriginPref, E.fpOrigin as { invertX: boolean; invertY: boolean } | undefined, fpEditor);
   const userOrigin = userOriginOf(o, (E.pcbOrigins || {}) as { grid?: [number, number]; aux?: [number, number] });
   const cur = store.get().viewport;
   if (cur.userOrigin && cur.userOrigin[0] === userOrigin[0] && cur.userOrigin[1] === userOrigin[1] && !!cur.invertX === o.invertX && !!cur.invertY === o.invertY) return;

@@ -5,8 +5,8 @@
 // 0.1 mm ComponentOutline pen; a 0.36 mm diamond ComponentPin on pad 1 / A1 and a 0.1 mm ComponentPin flash on
 // every other pad of that side; then %TD*%.  The board outline follows when asked.
 import { arcFrom3, atOf, isList, kid, num, ptsOf, str } from "../canvas/sexpr";
-import { projectGuid, writeGerber } from "./gerber";
-import { type FabContext, VERSION_SUFFIX, modelOf, projectNameOf } from "./index";
+import { projectGuid, sameCoordinatesKey, writeGerber } from "./gerber";
+import { type FabContext, VERSION_SUFFIX, boardUsesAuxOrigin, modelOf, projectNameOf, revisionOf } from "./index";
 import type { BoardModel, Footprint, Node } from "./model";
 import { PlotLog, plotFile } from "./plot";
 import { isoDateTime } from "./plotter";
@@ -161,6 +161,6 @@ export function pnpGerber(ctx: FabContext, o: PnpOptions): { text: string; count
   const board = projectNameOf(ctx);
   const text = writeGerber(prims, { fileFunction: `Component,L${back ? m.copper.length : 1},${back ? "Bot" : "Top"}`, polarity: "Positive" },
     { x2: true, origin: o.useAuxOrigin ? m.settings.auxOrigin : [0, 0], software: `KiCad,Pcbnew,${version(ctx)}`, date, precision: 6, netAttributes: true,
-      project: { name: board, guid: projectGuid(board + ".kicad_pcb"), rev: (ctx.doc.titleBlock && ctx.doc.titleBlock.rev) || "rev?" } });
+      project: { name: board, guid: projectGuid(board + ".kicad_pcb"), rev: revisionOf(ctx) || "rev?" }, sameCoordinates: sameCoordinatesKey(boardUsesAuxOrigin(ctx), m.settings.auxOrigin) });
   return { text, count: list.length };
 }

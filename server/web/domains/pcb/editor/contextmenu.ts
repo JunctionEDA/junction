@@ -14,15 +14,18 @@ import { deleteSelectedField } from "./fieldops";
 import { HANDLERS } from "./actions";
 import { canComment, commentOnItem, commentOnNet, netOfItem, showThread, startThread, threadsOnItem } from "./comments";
 import { APP_TOOLS, state, store } from "./appstore";
-import { enterSheet, rootSchematic, setGridPitch, topLevelSchematics } from "./doc";
+import { enterSheet, gridIndex, rootSchematic, setGridIndex, topLevelSchematics } from "./doc";
 import { FP } from "./fpedit";
 import { ARC_EDIT_MODE_MENU, evaluate, GRID_ORIGIN, menuFor, type MenuCtx, type MenuDef, type Resolved } from "./ctxmenus";
 import { activeModuleTool, applyPickMode, clearAllSelection, selectedAnywhere, hitsAt, markerUnder, interactionBusy, pcbState, pickAt, schState, selectAt, selectionBox, selectionChanged, selectionIds, selectionItems, selectItemId, stage, startFieldMove, startMove, toolCtx, worldMm, zoomBy } from "./gestures";
 import { E } from "./state";
+import { isPastDragThreshold } from "../tools/drag-threshold";
+import { placeCrosshair } from "./crosshair";
+import { rightClickKeepsSelection } from "./kicad-input";
 import { HIT_PX, nearestFootprint, schCands, filterAllows, groupExpand, selectedFields } from "./selection";
 import { activeModule, deleteSelection, moduleTool, runModuleAction, selectAll, setTool } from "./tools";
 import { isSch, kicadZoom, pxPerMm, requestRender } from "./view";
-import { openSelectionProperties } from "./pointer";
+import { measureCopy, openSelectionProperties } from "./pointer";
 /** The table cell selection's view for the menu, filled in by editor/tablecells.ts at install. */
 export const tableMenu: { state(): { n: number; block: boolean; merged: boolean; structure: boolean } | null; pick(mm: Mm): boolean; actions: Record<string, () => boolean> } = { state: () => null, pick: () => false, actions: {} };
 import { toast } from "./util";
@@ -217,6 +220,8 @@ function resolve(act: string, c: MenuCtx): { run?: Run; why?: string; key?: stri
   // the table edit tool: its own actions, and Properties / clipboard / Delete on a cell selection
   const ta = tableMenu.actions[act];
   if (ta && (act.startsWith("ACTIONS::") && !["ACTIONS::copy", "ACTIONS::paste", "ACTIONS::cut", "ACTIONS::doDelete"].includes(act) || c.kinds.some((k) => k === "table_cell"))) return { run: () => { ta(); selectionChanged(); } };
+  // MeasureTool's loop takes ACTIONS::copy while it runs: the ruler's readout
+  if (act === "ACTIONS::copy" && c.tool === "measure" && ed !== "sch") return { run: () => { measureCopy(); } };
   const special = SPECIAL[act];
   if (special) { const r = special(c); return typeof r === "string" ? { why: r } : { run: r }; }
   const mid = ALIAS[ed][sid] || sid, ma = m && m.actions ? m.actions[mid] : undefined;
@@ -245,9 +250,10 @@ function gridRows(c: MenuCtx): CtxItem[] {
   const rows: CtxItem[] = [row(GRID_ORIGIN, false, c), { sep: true }];
   // GRID_MENU::update: every grid of the list in the user units, the current one checked
   const vp = store.get().viewport;
-  for (const g of vp.gridChoices) {
-    rows.push({ label: gridChoiceText(g, vp.units, vp.lastImperial, isSch() ? "sch" : "pcb"), check: true, checked: Math.abs(g.mm - E.gridPitch) < 1e-9, run: runRow(() => setGridPitch(g.mm)) });
-  }
+  const cur = gridIndex();
+  vp.gridChoices.forEach((g, i) => {
+    rows.push({ label: gridChoiceText(g, vp.units, vp.lastImperial, isSch() ? "sch" : "pcb"), check: true, checked: i === cur, run: runRow(() => setGridIndex(i)) });
+  });
   return rows;
 }
 function row(act: string, check: boolean, c: MenuCtx, disabled?: boolean): CtxItem {
@@ -530,16 +536,6 @@ function describeAmong(id: string, ids: string[]): string {
   if (!isSch() && PA && PA.itemDescriptionAmong && E.kdoc) { const t = PA.itemDescriptionAmong(E.kdoc as KDoc, id, ids, E.units); if (t) return t; }
   return describe(id);
 }
-/** KiCad's "Clarify Selection" list: offered when the click could have meant more than one item. */
-function clarifyRows(mm: Mm): CtxItem | null {
-  const ids = candidatesAt(mm, true).slice(0, 12); if (ids.length < 2) return null;
-  const sel = new Set(selectionIds()); const ps = pcbState() as unknown as { padSel?: string | null } | null;
-  return { label: "Clarify Selection", icon: "cursor", sub: ids.map((id): CtxItem => ({
-    label: describeAmong(id, ids), check: true, checked: sel.has(id) || (!!ps && ps.padSel === id) || (!!E.selField && fieldId(E.selField.id, E.selField.name) === id), hover: candidateHover(id),
-    run: runRow(() => { clearAllSelection(false); selectCandidate(id); selectionChanged(); if (anchor) show(anchor.x, anchor.y, anchor.mm, false); }),
-  })) };
-}
-
 /**
  * Alt+click in the select tool (SELECTION_TOOL::setModifiersState: m_skip_heuristics off Windows): every item under
  * the cursor in KiCad's "Clarify Selection" popup (doSelectionMenu) — numbered rows, then Select All.  False when the
@@ -689,14 +685,21 @@ function clarifyPopup(ev: { clientX: number; clientY: number }, ids: string[], t
   const pick = (list: string[]): void => {
     const items = list.filter((id) => !id.includes("#") && !id.includes("@field:"));
     if (mode && items.length === list.length) { for (const id of items) applyPickMode(id, mode); if (then) then(); return; }
-    // schematic "Select All": every listed item joins one selection (pins and fields stay out of a multi-selection)
-    if (isSch() && list.length > 1 && items.length) { clearAllSelection(false); for (const id of items) applyPickMode(id, "add"); if (then) then(); return; }
+    // "Select All": every listed item joins one selection (on a schematic pins and fields stay out of a multi-selection;
+    // on a board the pads join the pad selection, the first one its anchor)
+    if (list.length > 1 && (items.length || !isSch())) {
+      clearAllSelection(false); for (const id of items) applyPickMode(id, "add");
+      const pads = isSch() ? [] : list.filter((id) => id.includes("#") && !id.includes("@field:")), ps = pads.length ? pcbState() as unknown as { padSel?: string | null; padAlso?: { anchor: string; keys: string[] } | null } | null : null;
+      if (ps) { ps.padSel = pads[0]; ps.padAlso = pads.length > 1 ? { anchor: pads[0], keys: pads.slice() } : null; }
+      selectionChanged(); if (then) then(); return;
+    }
     clearAllSelection(false); for (const id of list) selectCandidate(id); selectionChanged(); if (then) then();
   };
-  const items: CtxItem[] = ids.map((id, i): CtxItem => ({ label: i < 9 && !IS_MAC ? `${i + 1}  ${describeAmong(id, ids)}` : describeAmong(id, ids), key: i < 9 ? String(i + 1) : undefined, icon: menuImage(id), hover: hoverOf(id), run: runRow(() => pick([id])) }));
-  items.push({ sep: true }, { label: "Select All", key: "A", run: runRow(() => pick(ids.filter((id) => !id.includes("#")))) });
+  const items: CtxItem[] = ids.map((id, i): CtxItem => ({ label: i < 9 && !IS_MAC ? `${i + 1}  ${describeAmong(id, ids)}` : describeAmong(id, ids), key: i < 9 ? String(i + 1) : undefined, mnemonic: i < 9 ? String(i + 1) : undefined, icon: menuImage(id), hover: hoverOf(id), run: runRow(() => pick([id])) }));
+  // hovering Select All brightens every candidate (TA_CHOICE_MENU_UPDATE on limit + 1); choosing it selects them all, pads included
+  items.push({ sep: true }, { label: "Select All", key: "A", mnemonic: "A", hover: [...new Set(ids.map(hoverOf))].join("\n"), run: runRow(() => pick(ids)) });
   const more = all ? all.filter((id) => !ids.includes(id)) : [];
-  if (more.length) items.push({ label: "Show More Choices...", key: "M", run: runRow(() => clarifyPopup(ev, ids.concat(more), then, null, mode)) });
+  if (more.length) items.push({ label: "Show More Choices...", key: "M", mnemonic: "M", run: runRow(() => clarifyPopup(ev, ids.concat(more), then, null, mode)) });
   E.contextMenuOpen = true; E.hoverId = null; stage.classList.remove("over-sel");
   store.set({ contextMenu: { id: ++menuId, x: ev.clientX, y: ev.clientY, items } });
   requestRender();
@@ -742,6 +745,9 @@ export function startLongPress(ev: PointerEvent): void {
     const ss = schState() as unknown as { drag?: { moved?: boolean } | null; pending?: unknown; pedit?: unknown; wire?: unknown } | null;
     if (isSch() ? (ss && (ss.pedit || ss.wire || (ss.drag && ss.drag.moved))) : (ps && ((ps.drag && ps.drag.moved) || ps.move || ps.pedit))) return;
     if (E.fdrag && E.fdrag.moved) return;
+    // SELECTION_TOOL::onDisambiguationExpire: with two or more items selected and no modifier it is more likely a
+    // paused drag than a long click
+    if (selectedAnywhere().size >= 2 && !mode) return;
     if (candidatesAt(worldMm({ clientX: at.x, clientY: at.y } as PointerEvent), true).length < 2) return;
     // the press becomes the disambiguation: whatever it started (a box, a pending drag) is dropped
     E.boxSel = null; if (g) E.drag = null; if (ps) ps.pending = null; E.fdrag = null; if (E.hooks.cancelPress) E.hooks.cancelPress();
@@ -753,11 +759,11 @@ export function startLongPress(ev: PointerEvent): void {
     openClarifyMenu({ clientX: at.x, clientY: at.y }, mode);
   }, 500);
 }
-export function moveLongPress(ev: PointerEvent): void { if (lpAt && Math.hypot(ev.clientX - lpAt.x, ev.clientY - lpAt.y) > 4) cancelLongPress(); }
+export function moveLongPress(ev: PointerEvent): void { if (lpAt && isPastDragThreshold(ev.clientX - lpAt.x, ev.clientY - lpAt.y)) cancelLongPress(); }
 export function cancelLongPress(): void { if (lpTimer) window.clearTimeout(lpTimer); lpTimer = 0; lpAt = null; }
 
 // ---------------------------------------------------------------- open / close
-function show(x: number, y: number, mm: Mm, clarify: boolean): void {
+function show(x: number, y: number, mm: Mm): void {
   runners = new Map(); anchor = { x, y, mm };
   const c = menuCtx();
   const items = rows(evaluate(menuFor(c, activeModuleTool()), c), c);
@@ -767,7 +773,6 @@ function show(x: number, y: number, mm: Mm, clarify: boolean): void {
     let at = items.length; while (at > 0 && (items[at - 1].sub || items[at - 1].sep)) at--;
     items.splice(at, 0, ...(at > 0 && !items[at - 1].sep ? [{ sep: true } as CtxItem] : []), ...review);
   }
-  if (clarify && !isSch() && (E.tool === "select" || E.tool === "highlight")) { const cl = clarifyRows(mm); if (cl) items.unshift(cl, { sep: true }); }
   E.contextMenuOpen = true; E.hoverId = null; stage.classList.remove("over-sel");
   store.set({ contextMenu: { id: ++menuId, x, y, items } });
   requestRender();
@@ -813,25 +818,20 @@ export function openContextMenu(ev: { clientX: number; clientY: number }): void 
   else if ((E.tool === "select" || E.tool === "highlight") && !interactionBusy()) {
     if (E.selPins.length || E.selField) {
       // SCH_SELECTION_TOOL: a selection of any kind (pins and fields too) changes only when the cursor is outside its
-      // bounding box grown by a grid square and something else is under it; otherwise the menu is for the selection
-      const b = schSubSelectionBox(), g = Math.max(E.gridPitch || 0, 0.5);
-      const outside = !b || mm[0] < b[0] - g || mm[0] > b[2] + g || mm[1] < b[1] - g || mm[1] > b[3] + g;
-      if (outside && pickAt(mm)) selectAt(mm);
+      // bounding box grown by a grid square and something else is under it; otherwise the menu is for the selection.
+      // PCB_SELECTION_TOOL selects under the cursor only with nothing selected (pcb_selection_tool.cpp 514-518)
+      if (!rightClickKeepsSelection(isSch(), 1, schSubSelectionBox(), mm, E.gridPitch || 0) && pickAt(mm)) selectAt(mm);
     } else if (!selectionIds().length && !(pcbState() as unknown as { padSel?: string | null } | null)?.padSel) {
       // PCB_SELECTION_TOOL::selectPoint on a right-click with nothing selected: more than one candidate left after the
       // heuristics opens the stand-alone Clarify Selection popup, and the context menu follows the pick
       const amb = ambiguousAt(mm, true);
-      if (amb.length > 1) { clarifyPopup(ev, amb.slice(0, 100), () => show(ev.clientX, ev.clientY, mm, false), candidatesAt(mm, true)); return; }
+      if (amb.length > 1) { clarifyPopup(ev, amb.slice(0, 100), () => show(ev.clientX, ev.clientY, mm), candidatesAt(mm, true)); return; }
       if (amb.length === 1 && (amb[0].includes("#") || amb[0].includes("@field:"))) { clearAllSelection(false); selectCandidate(amb[0]); selectionChanged(); }
       else if (amb.length || isSch()) selectAt(mm);
     }
-    else {
-      const b = selectionBox(), g = Math.max(E.gridPitch || 0, 0.5);
-      const outside = !b || mm[0] < b[0] - g || mm[0] > b[2] + g || mm[1] < b[1] - g || mm[1] > b[3] + g;
-      if (outside && pickAt(mm)) selectAt(mm);
-    }
+    else if (!rightClickKeepsSelection(isSch(), 1, selectionBox(), mm, E.gridPitch || 0) && pickAt(mm)) selectAt(mm);
   }
-  show(ev.clientX, ev.clientY, mm, true);
+  show(ev.clientX, ev.clientY, mm);
 }
 
 /**
@@ -914,11 +914,14 @@ export function closeContextMenu(): void {
 
 /** The chrome's answer: run a row, brighten the item a row stands for, or (neither) close. */
 export function contextMenuAction(a: Extract<AppAction, { type: "contextMenu" }>): void {
-  if (a.hover !== undefined) { E.hoverId = a.hover; E.hoverPinned = !!a.hover; requestRender(); if (a.run === undefined) return; }
+  if (a.hover !== undefined) { const hs = a.hover ? a.hover.split("\n") : []; E.hoverId = hs[0] || null; E.hoverExtra = hs.slice(1); E.hoverPinned = !!a.hover; requestRender(); if (a.run === undefined) return; }
   const fn = a.run !== undefined ? runners.get(a.run) : undefined;
   const keep = anchor;
-  closeContextMenu(); E.hoverPinned = false;
+  closeContextMenu(); E.hoverPinned = false; E.hoverExtra = [];
   if (!fn) return;
   anchor = keep;                                   // Clarify Selection reopens the menu where it was
+  // ACTION_MENU: evt->SetMousePosition( g_menu_open_position ) — the entry acts where the menu was opened (Paste, Add
+  // Wire Here, Set Grid Origin ...), and TOOL_MANAGER puts the cursor back there (m_menuCursor)
+  if (keep) { E.lastCursorMm = [keep.mm[0], keep.mm[1]]; const c = placeCrosshair(E.lastCursorMm); if (c) store.slice("viewport", { cursor: [c[0]!, c[1]!] }); }
   try { fn(); } catch (e) { console.warn("context menu action failed", e); } finally { if (!E.contextMenuOpen) anchor = null; }
 }

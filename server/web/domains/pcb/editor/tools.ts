@@ -158,7 +158,7 @@ export function commitChanges(changes: KChange[] | null | undefined, label?: str
     // opts.tentative: items that still follow the cursor (a paste, a duplicate) — the redo list is kept aside until
     // the step is placed (amend) or cancelled (amend + discard), when it comes back
     if (opts && opts.tentative) entry.heldRedo = redoStack.slice();
-    undoStack.push(entry); if (undoStack.length > 200) undoStack.shift();
+    undoStack.push(entry);   // DEFAULT_MAX_UNDO_ITEMS 0: the undo list is not trimmed
   }
   redoStack.length = 0; publishUndo();
   if (isSch() && opts && opts.newSheet) publishDocs();   // a new sheet file joined the project
@@ -198,7 +198,7 @@ function moduleTakesUndo(which: string) {
 
 export function undoLast() {
   if (moduleTakesUndo("undo")) return;
-  const e = undoStack.pop(); if (!e) { toast("Nothing to undo"); return; }
+  const e = undoStack.pop(); if (!e) return;   // ACTIONS::undo is disabled (undoCond): its hotkey runs nothing and says nothing
   const redo = e.changes.map((c): KChange => { const it = E.kdoc.items.get(c.id); return c.kind === "REMOVED" ? c : (it ? { id: c.id, kind: c.kind === "ADDED" ? "ADDED" : "MODIFIED", typeName: c.typeName, sexpr: KiCadCanvas.serializeItem(E.kdoc, it) } : c); });
   if (e.inverse.length) { applyChanges(e.inverse); sendOp(e.inverse); }   // a step held only by its hooks (a variant command) sends no empty op
   if (e.undoOthers) e.undoOthers();   // one commit over several sheets (Edit Text and Graphics) undoes them all
@@ -207,7 +207,7 @@ export function undoLast() {
 
 export function redoLast() {
   if (moduleTakesUndo("redo")) return;
-  const e = redoStack.pop(); if (!e) { toast("Nothing to redo"); return; }
+  const e = redoStack.pop(); if (!e) return;   // ACTIONS::redo is disabled (RedoAvailable): its hotkey runs nothing and says nothing
   if (e.changes.length) { applyChanges(e.changes); sendOp(e.changes); }
   if (e.redoOthers) e.redoOthers();
   undoStack.push(e); publishUndo();
@@ -245,7 +245,13 @@ export function hotkeyMatches(ev: { key: string; code?: string; ctrlKey: boolean
 
 export function runModuleHotkey(ev: KeyboardEvent) {
   const m = activeModule(); if (!m || !m.actions) return false;
-  for (const [id, a] of Object.entries(m.actions)) if (a && a.key && hotkeyMatches(ev, a.key)) { if (runModuleAction(id)) return true; }
+  const bound = Object.entries(m.actions).filter(([, a]) => a && a.key && hotkeyMatches(ev, a.key));
+  for (const [id] of bound) if (runModuleAction(id)) return true;
+  // ACTION_MANAGER::RunHotKey: a Shift combination nothing binds runs the unshifted key's action (not for letters)
+  const key = hotkeyKey(ev);
+  if (bound.length || !ev.shiftKey || !key || /^[a-z]$/i.test(key) || (E.hotkeys && E.hotkeys.shiftBound && E.hotkeys.shiftBound(ev))) return false;
+  const plain = { key: ev.key, code: ev.code, ctrlKey: ev.ctrlKey, metaKey: ev.metaKey, shiftKey: false, altKey: ev.altKey };
+  for (const [id, a] of Object.entries(m.actions)) if (a && a.key && hotkeyMatches(plain, a.key)) { if (runModuleAction(id)) return true; }
   return false;
 }
 
@@ -255,6 +261,7 @@ export function moduleTool(id: string) { const m = activeModule(); return m && m
 // ---- tools ----
 export function setTool(t: string) {
   if (t === "follow") { cycleFollow(); return; }
+  if (t === "measure" && isSch()) return;   // only PCB_VIEWER_TOOLS handles ACTIONS::measureTool
   // a viewer may highlight, measure and pan; a drawing or editing tool does not start (KiCad greys it, and so do our bars)
   if (E.viewOnly && moduleTool(t) && t !== "highlight") { toast("View-only access"); if (E.tool !== "select" && moduleTool(E.tool) && E.tool !== "highlight") setTool("select"); return; }
   // KiCad refuses to activate another tool while a wire, a placement or a move is in flight (the module says

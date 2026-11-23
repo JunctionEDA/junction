@@ -15,6 +15,9 @@ import { KICAD_FONT, faceOfFont, facesUsed, setFaceOfFont } from "../../dialogs/
 import { layerDisplayName, netClassOf } from "./appearance";
 import { KC, isSchDoc, kdoc, panelStore, pcbTools, tctx } from "./core";
 import { commitWithOtherUnits } from "../../dialogs/sync-units";
+import { defaultSpokeAngle } from "../../canvas/pad-model";
+/** PADSTACK::DefaultThermalSpokeAngleForShape of a pad node (canvas/pad-model.ts). */
+const spokeDefault = (p: SNode): number => { const o = p.find((c): c is SNode => Array.isArray(c) && c[0] === "options"); const a = o && o.find((c): c is SNode => Array.isArray(c) && c[0] === "anchor"); return defaultSpokeAngle(String(p[3] ?? ""), a ? String(a[1] ?? "") : ""); };
 import * as VM from "../../canvas/variant-model";
 import { currentInstance, netMap } from "../schnets";
 import { fieldValidationError, unescapeString, readEndingState, writeEndingState } from "../../dialogs/sch-items-logic";
@@ -27,6 +30,9 @@ import { expandStacked } from "../../symedit/model";
 import { selectedFields } from "../selection";
 import { fieldNodeOf, fieldProps as schFieldProps, parentFieldRow, replaceField, type FieldProp } from "./field-props";
 import { changeSheetFileProp } from "../../dialogs/sch-symbol-sheet";
+import { currentVariant } from "../variant";
+import { bboxOf } from "../../canvas/hit";
+import { askBox } from "../../dialogs/cvpcb/widgets";
 
 type Raw = string | number | boolean | null;
 interface PropDef {
@@ -59,7 +65,7 @@ interface PropDef {
 
 /** props.js's node editors (static/props.js `helpers`). */
 interface Helpers {
-  evalExpr(text: string, unit: string): number; formatLength(mm: number, unit: string): string;
+  evalExpr(text: string, unit: string): number; formatLength(mm: number, unit: string, scale?: "sch" | "pcb"): string;
   kid(n: SNode, k: string): SNode | null; kids(n: SNode, k: string): SNode[]; num(v: unknown, d?: number): number; str(v: unknown): string;
   setKid(n: SNode, k: string, values: (string | number | SNode)[], before?: string[]): SNode; delKid(n: SNode, k: string): void;
   yes(n: SNode, k: string, def: boolean): boolean; setYesNo(n: SNode, k: string, on: boolean): void;
@@ -106,18 +112,6 @@ const V_JUST: [string, string][] = [["top", "Top"], ["center", "Center"], ["bott
 function xyProp(group: string, name: string, key: string, index: 1 | 2, type: PropType = "coord"): PropDef {
   return { group, name, type, get: (it) => { const k = H().kid(it.node, key); return k ? H().num(k[index]) : null; },
     set: (n, v) => { const k = H().kid(n, key); if (!k) return false; k[index] = r6(v as number); } };
-}
-/** A footprint's FOOTPRINT::GetScaleX / GetScaleY: (transform … (scale x y)), 1 without one. */
-function fpScale(n: SNode): [number, number] { const h = H(); const t = h.kid(n, "transform"), s = t && h.kid(t, "scale"); return s ? [h.num(s[1], 1) || 1, h.num(s[2], 1) || 1] : [1, 1]; }
-function scaleProp(name: string, index: 1 | 2): PropDef {
-  return { group: BASIC, name, type: "number", get: (x) => fpScale(x.node)[index - 1],
-    set: (n, v) => {
-      const h = H(), val = v as number; if (!Number.isFinite(val) || val <= 0) return false;
-      const cur = fpScale(n); const sc: [number, number] = index === 1 ? [val, cur[1]] : [cur[0], val]; if (sc[0] === cur[0] && sc[1] === cur[1]) return false;
-      let t = h.kid(n, "transform");
-      if (!t) { const [x, y, a] = K().atOf(n); const at = h.kid(n, "at"); const i = at ? n.indexOf(at) : 3; if (at) n.splice(i, 1); t = ["transform", ["translate", x, y], ["rotate", a]] as unknown as SNode; n.splice(i, 0, t); }
-      const s = h.kid(t, "scale"); if (s) { s[1] = r6(sc[0]); s[2] = r6(sc[1]); } else t.push(["scale", r6(sc[0]), r6(sc[1])]);
-    } };
 }
 function atProp(name: string, index: 1 | 2): PropDef {
   return { group: BASIC, name, type: "coord", get: (it) => K().atOf(it.node)[index - 1],
@@ -192,7 +186,7 @@ function symbolProps(it: KItem, doc: KDoc): PropDef[] {
   const fieldDefs = fieldProps(it).map((d) => (SYM_MANDATORY.includes(d.name) ? d : Object.assign(d, { key: "field" as const })));
   // with a current variant the fields (but the Reference) and the attributes read and write the symbol instance's
   // variant (SCH_SYMBOL's property getters / setters take Schematic().GetCurrentVariant())
-  const variant = String(E.currentVariant || "");
+  const variant = currentVariant();
   if (variant) {
     const inst = currentInstance(), path = inst && inst.uuidPath.length ? "/" + inst.uuidPath.join("/") : null;
     const ver = (doc as KDoc).version;
@@ -229,7 +223,7 @@ function ownLibOf(doc: KDoc, n: SNode): SNode | null {
   return lib ? lib.get(name) || lib.get(h.str((h.kid(n, "lib_id") || [])[1])) || null : null;
 }
 export function hasPinMaps(doc: KDoc, it: KItem): boolean {
-  if (it.kind !== "symbol" || (Number((doc as KDoc & { version?: number }).version) || 0) < PIN_MAP_VERSION) return false;
+  if (it.kind !== "symbol") return false;   // (pin maps raise an older sheet's version to PIN_MAP_VERSION on save, as KiCad's writer does)
   return associatedFootprints(ownLibOf(doc, it.node)).length > 0;
 }
 const symUnit = (n: SNode): number => { const k = H().kid(n, "unit"); return k ? H().num(k[1], 1) : 1; };
@@ -364,7 +358,8 @@ function schProps(it: KItem, doc: KDoc): PropDef[] {
 }
 
 // ---------------------------------------------------------------- board items
-function layerChoices(doc: KDoc, copperOnly: boolean): [string, string][] { return H().boardLayers(doc, copperOnly).map((l) => [l, layerDisplayName(doc, l)]); }
+// PCB_PROPERTIES_PANEL::updateLists: the layer choices are LSET::Name( layer ), the canonical names ("F.Cu")
+function layerChoices(doc: KDoc, copperOnly: boolean): [string, string][] { return H().boardLayers(doc, copperOnly).map((l) => [l, l]); }
 function lockedProp(): PropDef {
   return { group: BASIC, name: "Locked", type: "bool", get: (it) => { const P = pcbTools(); return P ? P.isLocked(it.node) : false; },
     set: (n, v) => { const P = pcbTools(); if (!P || P.isLocked(n) === !!v) return false; P.setLocked(n, !!v); } };
@@ -386,7 +381,7 @@ function netProps(doc: KDoc): PropDef[] {
     set: (n, v) => { if (H().netNameOf(doc, n) === String(v || "")) return false; setNet(doc, n, String(v || "")); } }];
 }
 // ---------------------------------------------------------------- validators (include/properties/property_validators.h)
-const lenText = (mm: number): string => H().formatLength(mm, String(E.units || "mm"));
+const lenText = (mm: number): string => H().formatLength(mm, String(E.units || "mm"), isSchDoc() ? "sch" : "pcb");
 /** VALIDATION_ERROR_TOO_SMALL / TOO_LARGE::Format */
 const tooSmall = (min: number, unitless?: boolean): string => `Value must be greater than or equal to ${unitless ? trimNum(min, 6) : lenText(min)}`;
 const tooLarge = (max: number, unitless?: boolean): string => `Value must be less than or equal to ${unitless ? trimNum(max, 6) : lenText(max)}`;
@@ -495,9 +490,52 @@ function customPropDefs(it: KItem): PropDef[] {
     set: (n, v) => { setCustomProp(n, key, String(v)); } }));
 }
 
+/** FOOTPRINT::GetScaleX / GetScaleY: the (transform (scale sx sy)) of the footprint, 1 without one. */
+function fpScale(n: SNode): [number, number] { const h = H(), t = h.kid(n, "transform"), sc = t && h.kid(t, "scale"); return sc ? [h.num(sc[1], 1) || 1, h.num(sc[2], 1) || 1] : [1, 1]; }
+/** FOOTPRINT::SetTransformScale (non-positive or non-finite scales are refused): the footprint's children stay in its
+ *  lib frame; an (at …) footprint is written with a (transform …) once its scale is not 1. */
+function setFpScale(n: SNode, sx: number, sy: number): boolean {
+  if (!isFinite(sx) || !isFinite(sy) || sx <= 0 || sy <= 0) return false;
+  const h = H(), t = h.kid(n, "transform");
+  if (t) { const sc = h.kid(t, "scale"); if (sc) { sc[1] = r6(sx); sc[2] = r6(sy); } else t.push(["scale", r6(sx), r6(sy)]); return true; }
+  if (sx === 1 && sy === 1) return false;
+  const [x, y, a] = K().atOf(n), at = h.kid(n, "at"), i = at ? n.indexOf(at) : 3;
+  if (at) n.splice(i, 1);
+  n.splice(i, 0, ["transform", ["translate", x, y], ["rotate", a], ["scale", r6(sx), r6(sy)]]);
+  return true;
+}
+/** PCB_PROPERTIES_PANEL::valueChanged: several footprints rescale about the selection's bounding-box centre. */
+let scaleCenter: [number, number] | null = null;
+/** TRANSFORM_TRS::RescaleAround: the footprint's scale times (aSx, aSy), its position's offset from the fixed point scaled in its own frame. */
+export function rescaleAround(pos: [number, number], rotDeg: number, scale: [number, number], center: [number, number], rx: number, ry: number): { pos: [number, number]; scale: [number, number] } {
+  // RotatePoint( offset, -rot ) then ( rot ) with KiCad's Y-down board axes (padRot)
+  const off: [number, number] = [pos[0] - center[0], pos[1] - center[1]];
+  const [lx, ly] = padRot(off[0], off[1], -rotDeg); const [bx, by] = padRot(lx * rx, ly * ry, rotDeg);
+  return { pos: [center[0] + bx, center[1] + by], scale: [scale[0] * rx, scale[1] * ry] };
+}
+function scaleProp(axis: 0 | 1): PropDef {
+  return { group: BASIC, name: axis ? "Scale Y" : "Scale X", type: "number", get: (x) => fpScale(x.node)[axis],
+    set: (n, v) => {
+      const want = v as number, cur = fpScale(n);
+      if (scaleCenter) {
+        const r = rescaleAround([K().atOf(n)[0], K().atOf(n)[1]], K().atOf(n)[2], cur, scaleCenter, axis ? 1 : want / cur[0], axis ? want / cur[1] : 1);
+        if (!setFpScale(n, r.scale[0], r.scale[1])) return false;
+        H().setFootprintPosition(n, r.pos[0], r.pos[1]); return true;
+      }
+      return setFpScale(n, axis ? cur[0] : want, axis ? want : cur[1]);
+    } };
+}
 function footprintProps(it: KItem, doc: KDoc, single: boolean): PropDef[] {
   const h = H();
   const attr = (name: string, key: string): PropDef => ({ group: "Attributes", name, type: "bool", get: (x) => !!h.footprintAttrs(x.node)[key], set: (n, v) => { h.setFootprintAttrs(n, { [key]: !!v }); } });
+  // PCB_PROPERTIES_PANEL::getItemValue / valueChanged: with a current board variant these four read and write the
+  // variant (GetDNPForVariant …, FOOTPRINT_VARIANT::SetDNP …)
+  const variant = String(E.currentVariant || "");
+  const vattr = (name: string, key: keyof VM.FpFlags): PropDef => (variant && !VM.isDefaultVariant(variant)
+    ? { group: "Attributes", name, type: "bool", get: (x) => VM.footprintFlagsForVariant(x.node, variant)[key],
+      set: (n, v) => { const c = VM.setFootprintVariant(n, variant, { flags: { [key]: !!v } }); n.length = 0; n.push(...c); } }
+    : attr(name, key));
+  const isHolder = !!(doc as { fpEditor?: boolean }).fpEditor;   // isNotFootprintHolder / SetIsHiddenFromLibraryEditors
   // PROPERTY<FOOTPRINT, std::optional<int>>: empty is no override, 0 an override of 0 (the writer prints it)
   const over = (name: string, key: string, before: string[]): PropDef => ({ group: "Overrides", name, type: "length", optional: true, get: (x) => { const k = h.kid(x.node, key); return k ? h.num(k[1]) : null; },
     set: (n, v) => { if (v !== null && v !== undefined) h.setKid(n, key, [r6(v as number)], before); else h.delKid(n, key); } });
@@ -506,24 +544,25 @@ function footprintProps(it: KItem, doc: KDoc, single: boolean): PropDef[] {
     { group: BASIC, name: "Position Y", type: "coord", get: (x) => K().atOf(x.node)[1], set: (n, v) => { h.setFootprintPosition(n, K().atOf(n)[0], v as number); } },
     lockedProp(),
     // FOOTPRINT::SetLayerAndFlip: Flip( GetPosition(), FLIP_DIRECTION::LEFT_RIGHT ), the orientation becomes 180 − θ
-    { group: BASIC, name: "Layer", type: "enum", choices: [["F.Cu", layerDisplayName(doc, "F.Cu")], ["B.Cu", layerDisplayName(doc, "B.Cu")]], get: (x) => h.str((h.kid(x.node, "layer") || [])[1] || "F.Cu"), set: (n, v) => h.setFootprintSide(n, String(v), true) },
+    // (Layer, Orientation, Scale X / Y: SetAvailableFunc( isNotFootprintHolder ), not in the Footprint Editor)
+    ...(isHolder ? [] : [{ group: BASIC, name: "Layer", type: "enum", choices: [["F.Cu", layerDisplayName(doc, "F.Cu")], ["B.Cu", layerDisplayName(doc, "B.Cu")]], get: (x) => h.str((h.kid(x.node, "layer") || [])[1] || "F.Cu"), set: (n, v) => h.setFootprintSide(n, String(v), true) },
     { group: BASIC, name: "Orientation", type: "angle", get: (x) => K().atOf(x.node)[2], set: (n, v) => h.setFootprintRotation(n, v as number) },
     // FOOTPRINT::SetScaleX / SetScaleY (SetTransformScale): the (transform … (scale x y)); a zero, negative or
     // non-finite scale is refused.  The file keeps the children unscaled (the writer unbakes them), so only the
     // transform changes; a footprint still placed by (at …) is written with a (transform …) once it is scaled.
-    scaleProp("Scale X", 1), scaleProp("Scale Y", 2),
+    scaleProp(0), scaleProp(1)] as PropDef[]),
     ...fieldProps(it).map((d) => (FP_MANDATORY.includes(d.name) || privateField(it.node, d.name) ? d : Object.assign(d, { key: "field" as const }))),
     { group: "Footprint Properties", name: "Library Link", type: "text", get: (x) => h.str(x.node[1]) },
     { group: "Footprint Properties", name: "Library Description", type: "text", get: (x) => h.str((h.kid(x.node, "descr") || [])[1]) },
     { group: "Footprint Properties", name: "Keywords", type: "text", get: (x) => h.str((h.kid(x.node, "tags") || [])[1]) },
-    // FOOTPRINT::m_height: (height h) after the keywords, left out at 0; boards before 20261017 cannot store it
-    { group: "Footprint Properties", name: "Height", type: "length", avail: (x) => !!h.kid(x.node, "height") || !(Number((doc as unknown as { version?: unknown }).version) > 0) || Number((doc as unknown as { version?: unknown }).version) >= 20261017,
+    // FOOTPRINT::m_height: (height h) after the keywords, left out at 0; a board before 20261017 is raised to it on save
+    { group: "Footprint Properties", name: "Height", type: "length",
       get: (x) => h.num((h.kid(x.node, "height") || [])[1], 0),
       set: (n, v) => { if (v) h.setKid(n, "height", [r6(v as number)], ["property", "component_classes", "path", "sheetname", "sheetfile", "solder_mask_margin", "solder_paste_margin", "solder_paste_margin_ratio", "clearance", "zone_connect", "attr", "fp_text", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "pad", "embedded_fonts", "model"]); else h.delKid(n, "height"); } },
-    // COMPONENT_CLASS::GetName of the static class: its constituents' names joined by commas
-    { group: "Footprint Properties", name: "Component Class", type: "text", get: (x) => { const c = h.kid(x.node, "component_classes"); return c ? h.kids(c, "class").map((k) => h.str(k[1])).join(",") : ""; } },
+    // GetComponentClassAsString: the static classes' names sorted and joined by "," (COMPONENT_CLASS_MANAGER); not in the library editors
+    ...(isHolder ? [] : [{ group: "Footprint Properties", name: "Component Class", type: "text" as PropType, get: (x: KItem) => h.kids(h.kid(x.node, "component_classes") || [], "class").map((c) => h.str(c[1])).filter(Boolean).sort().join(",") }]),
     { group: "Attributes", name: "Footprint Type", type: "enum", choices: FP_TYPES, get: (x) => String(h.footprintAttrs(x.node).type || ""), set: (n, v) => { h.setFootprintAttrs(n, { type: String(v) }); } },
-    attr("Not in Schematic", "board_only"), attr("Exclude From Position Files", "exclude_from_pos_files"), attr("Exclude From Bill of Materials", "exclude_from_bom"), attr("Exclude From Simulation", "exclude_from_sim"), attr("Do not Populate", "dnp"),
+    attr("Not in Schematic", "board_only"), vattr("Exclude From Position Files", "exclude_from_pos_files"), vattr("Exclude From Bill of Materials", "exclude_from_bom"), vattr("Exclude From Simulation", "exclude_from_sim"), vattr("Do not Populate", "dnp"),
     attr("Exempt From Courtyard Requirement", "allow_missing_courtyard"),
     over("Clearance Override", "clearance", ["zone_connect", "thermal_width", "thermal_gap", "attr", "net_tie_pad_groups", "fp_text", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "pad", "embedded_fonts", "model"]),
     over("Solderpaste Margin Override", "solder_paste_margin", ["solder_paste_margin_ratio", "solder_paste_ratio", "clearance", "zone_connect", "thermal_width", "thermal_gap", "attr", "net_tie_pad_groups", "fp_text", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "pad", "embedded_fonts", "model"]),
@@ -630,8 +669,8 @@ function padDefs(doc: KDoc, idx: number): PropDef[] {
     optKid("Overrides", "Thermal Relief Spoke Width", "thermal_bridge_width", "length", { validate: rangeInt(0.025, Infinity) }),   // RangeIntValidator<minZoneWidth, INT_MAX>
     // PADSTACK::ThermalSpokeAngle: the stored angle, else DefaultThermalSpokeAngleForShape (45° for a circle, else 90°);
     // the writer leaves the default out
-    { group: "Overrides", name: "Thermal Relief Spoke Angle", type: "angle", get: (x) => { const p = pad(x), k = p && h.kid(p, "thermal_bridge_angle"); return k ? h.num(k[1]) : (p && h.str(p[3]) === "circle" ? 45 : 90); },
-      set: (n, v) => { const p = h.padNode(n, idx); if (!p) return false; const def = h.str(p[3]) === "circle" ? 45 : 90; const a = h.deg360(v as number); if (a === def) h.delKid(p, "thermal_bridge_angle"); else h.setKid(p, "thermal_bridge_angle", [r6(a)], after("thermal_bridge_angle")); } },
+    { group: "Overrides", name: "Thermal Relief Spoke Angle", type: "angle", get: (x) => { const p = pad(x), k = p && h.kid(p, "thermal_bridge_angle"); return k ? h.num(k[1]) : (p ? spokeDefault(p) : 90); },
+      set: (n, v) => { const p = h.padNode(n, idx); if (!p) return false; const def = spokeDefault(p); const a = h.deg360(v as number); if (a === def) h.delKid(p, "thermal_bridge_angle"); else h.setKid(p, "thermal_bridge_angle", [r6(a)], after("thermal_bridge_angle")); } },
     optKid("Overrides", "Thermal Relief Gap", "thermal_gap", "length", { validate: positiveInt }),
     ...teardropDefs(doc, (n) => h.padNode(n, idx), false),
   ];
@@ -901,8 +940,7 @@ function zoneProps(it: KItem, doc: KDoc): PropDef[] {
     set: (n, v, x) => { if (writable && !writable(x)) return false; if ((type === "length") && !((v as number) > 0)) return false; Z.setThieving(n, { [key]: type === "bool" ? !!v : type === "enum" ? String(v) : +(v as number) }); } });
   const named = (d: PropDef, name: string): PropDef => Object.assign(d, { name });
   const isHatch = (x: KItem) => Z.thievingOf(x.node).type === "hatch";
-  // copper thieving needs the KiCad 11 board format (20260513): a board in an older format is not offered it, so its
-  // file format version is never raised by a fill mode edit
+  // copper thieving needs the board format 20260513: an older board is raised to it on save (chooseFileFormatVersion)
   const canThieve = thieving || !Z.thievingAllowed || Z.thievingAllowed(doc);
   const modes = canThieve ? FILL_MODES : FILL_MODES.filter((m) => m[0] !== "thieving");
   out.push({ group: FS, name: "Fill Mode", type: "enum", choices: modes, get: (x) => Z.zoneFillMode(x.node), set: (n, v) => { if (Z.zoneFillMode(n) === String(v)) return false; if (String(v) === "thieving" && !canThieve) return false; Z.setZoneFillMode(n, String(v)); } });
@@ -1239,16 +1277,24 @@ function friendly(it: KItem): string {
   return it.kind === "generated" ? "Tuning Pattern" : FRIENDLY[it.kind] || it.kind;
 }
 
+/** printf's "%g": six significant digits, trailing zeros removed, exponent form below 1e-4 and from 1e6. */
+export function fmtG(v: number): string {
+  if (!isFinite(v)) return String(v);
+  if (v === 0) return "0";
+  const e = Math.floor(Math.log10(Math.abs(Number(v.toPrecision(6)))));
+  if (e < -4 || e >= 6) { const [m, x] = v.toExponential(5).split("e"); const xi = Number(x); return m.replace(/\.?0+$/, "") + "e" + (xi < 0 ? "-" : "+") + String(Math.abs(xi)).padStart(2, "0"); }
+  const t = v.toFixed(Math.max(0, 5 - e)); return t.includes(".") ? t.replace(/0+$/, "").replace(/\.$/, "") : t;
+}
 function trimNum(v: number, digits: number): string { let t = v.toFixed(digits); if (t.includes(".")) t = t.replace(/0+$/, "").replace(/\.$/, ""); return t === "-0" ? "0" : t; }
 /** A coordinate row's axis (PROPERTY::SetCoordType ABS_X_COORD / ABS_Y_COORD): "Position X", "Start Y", "End X" … */
 function coordAxis(def: PropDef): "x" | "y" | null { return def.type !== "coord" ? null : / X$/.test(def.name) ? "x" : / Y$/.test(def.name) ? "y" : null; }
 function show(def: PropDef, raw: Raw): string {
   if (raw === null || raw === undefined) return "";
   const ax = coordAxis(def);   // PGPropertyFactory: board coordinates through the frame's ORIGIN_TRANSFORMS
-  if (ax) return H().formatLength(toDisplayAbsAxis(raw as number, ax), String(E.units || "mm"));
+  if (ax) return H().formatLength(toDisplayAbsAxis(raw as number, ax), String(E.units || "mm"), isSchDoc() ? "sch" : "pcb");
   switch (def.type) {
-    case "length": case "coord": return H().formatLength(raw as number, String(E.units || "mm"));
-    case "angle": return trimNum(raw as number, 4) + "°";
+    case "length": case "coord": return lenText(raw as number);
+    case "angle": return fmtG(raw as number) + "°";   // PGPROPERTY_ANGLE::ValueToString: "%g°"
     case "time": return trimNum(raw as number, 4) + " ps";   // PGPROPERTY_TIME in the frame's time unit
     case "number": return trimNum(raw as number, 6);
     case "int": return String(Math.round(raw as number));
@@ -1371,7 +1417,7 @@ export function propGrid(): PropGrid {
     const row: PropRow = { id, name: d.name, type: d.type, value: mixed ? "" : value, mixed, readOnly: ro || !writable, choices: d.choices };
     if (d.key && !ro && items.length === 1) row.keyEditable = true;   // isKeyEditable looks at the front item
     if (d.type === "enum" && d.group === BASIC && d.name === "Net" && !isSchDoc()) row.netSelector = true;   // PG_NET_SELECTOR_EDITOR
-    if (d.suggest) { const u = String(E.units || "mm"); row.suggest = d.suggest().map((mm) => H().formatLength(mm, u)); }
+    if (d.suggest) { const u = String(E.units || "mm"); row.suggest = d.suggest().map((mm) => H().formatLength(mm, u, isSchDoc() ? "sch" : "pcb")); }
     // SCH_PROPERTIES_PANEL / PCB_PROPERTIES_PANEL::createPGProperty: the Footprint and Datasheet properties get
     // PG_FPID_EDITOR and PG_URL_EDITOR (an editor only an editable row opens)
     if (d.group === "Fields" && d.type === "text" && !row.readOnly) { if (d.name === "Footprint") row.browse = "footprint"; else if (d.name === "Datasheet") row.browse = "url"; }
@@ -1403,7 +1449,7 @@ function pinGrid(doc: KDoc): PropGrid | null {
   const T = window.CollabTools.sch && window.CollabTools.sch._ as unknown as { pinProperties?(d: KDoc, r: unknown): { name: string; type: PropType; value: string | number; choices?: [string, string][] }[] | null };
   if (!T || !T.pinProperties) return null;
   const all = (E.selPins as unknown[]).map((p) => T.pinProperties!(doc, p)).filter((r): r is NonNullable<typeof r> => !!r); if (!all.length) return null;
-  const text = (r: { type: PropType; value: string | number }) => (r.type === "length" ? H().formatLength(r.value as number, String(E.units || "mm")) : String(r.value));
+  const text = (r: { type: PropType; value: string | number }) => (r.type === "length" ? lenText(r.value as number) : String(r.value));
   const out: PropRow[] = all[0].filter((r) => all.every((rows) => rows.some((q) => q.name === r.name))).map((r) => {
     const vals = all.map((rows) => text(rows.find((q) => q.name === r.name)!)); const mixed = vals.some((v) => v !== vals[0]);
     return { id: BASIC + "/" + r.name, name: r.name, type: r.type, mixed, readOnly: true, choices: r.choices, value: mixed ? "" : vals[0] };
@@ -1529,6 +1575,25 @@ export function setProp(id: string, text: string): string | null {
   const parsed = parse(head, text); if (typeof parsed === "string") return parsed;
   // PROPERTY_BASE::Validate (a sheet's name, a via's sizes …): one item that cannot take the value refuses the whole edit
   for (let i = 0; i < items.length; i++) { const d = defs[i].get(id); const err = d && d.validate ? d.validate(parsed.v, items[i]) : null; if (err) return err; }
+  // PCB_PROPERTIES_PANEL::valueChanging: a scale must be positive; scaling footprints with pads asks first
+  const isScale = !isSchDoc() && (head.name === "Scale X" || head.name === "Scale Y") && items.some((it) => it.kind === "footprint");
+  if (isScale) {
+    const v = parsed.v as number;
+    if (!isFinite(v) || v <= 0) return "Scale must be a positive number.";
+    const withPads = items.filter((it) => it.kind === "footprint" && H().kids(it.node, "pad").length > 0).length;
+    if (v !== 1 && withPads > 0 && !scaleConfirmed) {
+      void askBox("Scale footprint with pads?", `${withPads} footprint(s) in the selection have pads. Scaling changes the drawn pad positions but not the physical part. Continue?`, ["Yes", "No"], 0, 1)
+        .then((i) => { if (i !== 0) return; scaleConfirmed = true; try { setProp(id, text); } finally { scaleConfirmed = false; } });
+      return null;
+    }
+    const fps = items.filter((it) => it.kind === "footprint");
+    const b = fps.length > 1 ? bboxOf(doc as unknown as Parameters<typeof bboxOf>[0], fps.map((it) => it.id)) : null;
+    scaleCenter = b ? [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] : null;
+  }
+  try { return commitProp(doc, items, defs, id, head, parsed); } finally { scaleCenter = null; }
+}
+let scaleConfirmed = false;
+function commitProp(doc: KDoc, items: KItem[], defs: Map<string, PropDef>[], id: string, head: PropDef, parsed: { v: Raw }): string | null {
   if (head.local) { items.forEach((it, i) => { const d = defs[i].get(id); if (d && d.local) d.local(parsed.v, it); }); panelStore.set({ selVersion: panelStore.get().selVersion + 1 }); return null; }
   const gen = items.length === 1 && items[0].kind === "generated" ? items[0] : null; const P = pcbTools();
   if (gen && P && P.editTuningPattern) {   // PCB_TUNING_PATTERN: the property, then EditStart / Update / EditFinish in one commit

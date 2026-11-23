@@ -711,8 +711,11 @@ export function stepUnit(ctx: SchCtx, dir: number) {
   const { units } = libUnits(ctx.doc, it.node); if (units < 2) { ctx.toast("Symbol has a single unit"); return false; }
   // SetUnitSelection( &sheet, unit ): the unit of the sheet instance on screen; the other sheet paths keep theirs
   const sheet = sheetOf(ctx.doc), cur = unitOn(it.node, sheet.path), next = ((cur - 1 + dir + units) % units) + 1;
+  // SCH_EDIT_FRAME::SelectUnit: the editor asks about a unit already placed elsewhere in the hierarchy
+  const hook = root.CollabEditor && root.CollabEditor.selectUnit;
+  if (hook) return hook(ctx, it, next);
   const node = deep(it.node); setInstanceOn(node, sheet, null, next);
-  ctx.commit([modChange(ctx.doc, it, node)], "unit"); return true;
+  ctx.commit([modChange(ctx.doc, it, node)], "Change Unit"); return true;
 }
 export function cycleBodyStyle(ctx: SchCtx) {
   if (!editable(ctx)) return false;
@@ -722,7 +725,7 @@ export function cycleBodyStyle(ctx: SchCtx) {
   const cur = kid(it.node, "body_style") ? num(kid(it.node, "body_style")![1], 1) : 1;
   const node = deep(it.node); replaceKid(node, ["body_style", (cur % styles) + 1]);
   if (cr) { cr.write(node); return true; }   // the symbol being placed: no commit, it is not in the document yet
-  ctx.commit([modChange(ctx.doc, it, node)], "body style"); return true;
+  ctx.commit([modChange(ctx.doc, it, node)], "Change Body Style"); return true;
 }
 /**
  * GetUnplacedUnitsForSymbol: the units of the symbol's package no symbol holds, over the whole hierarchy (this sheet's

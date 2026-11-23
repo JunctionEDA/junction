@@ -73,6 +73,8 @@ export interface PcbCanvasApi extends ToolsCanvasApi {
   geomHit(g: KGeom, x: number, y: number, tol: number): boolean;
   /** a geometry primitive's box, null for one without extent */
   geomBox(g: KGeom): Box | null;
+  /** PCB_VIA::FlashLayer: whether a via flashes copper on the layer (remove_unused_layers) */
+  viaFlashesOn(doc: KDoc, it: KItem, layer: string): boolean;
   /** the smallest pad under (x, y) */
   padAt(doc: KDoc, x: number, y: number): CanvasPadHit | null;
   /** the geometry of an item (sets item.geom and item.bbox) */
@@ -145,7 +147,7 @@ export type PcbState = {
   client: Pt | null;
   /** the last DRC run's markers */
   markers: DrcMarker[];
-  showRatsnest: boolean; localRatsnest: boolean; hiddenNets: Set<string>; rats: { doc: BoardDoc; lines: RatsnestLine[] } | null; ratsDirty: boolean;
+  showRatsnest: boolean; /** the Appearance panel's ratsnest mode: "all", "visible" (only between visible copper layers), "none" */ ratsnestMode?: string; localRatsnest: boolean; hiddenNets: Set<string>; rats: { doc: BoardDoc; lines: RatsnestLine[] } | null; ratsDirty: boolean;
   settings: DesignSettings | null; settingsSrc: unknown; settingsCache: DesignSettings | null; druSrc?: string | null; highlightNet: string | null;
   /** the nets the canvas highlights (RENDER_SETTINGS::GetHighlightNetCodes), BOARD_INSPECTION_TOOL::m_currentlyHighlighted and m_lastHighlighted, as net keys */
   hlShown: string[]; hlCurrent: string[]; hlLast: string[];
@@ -209,7 +211,7 @@ export type Conductor = { id: string; item: KItem; net: string; netObj: NetRef; 
 /** A conductor before its box is computed. */
 export type ConductorInit = Conductor extends infer C ? C extends unknown ? Omit<C, "bbox"> : never : never;
 /** A ratsnest anchor of a cluster: a point and the conductor it belongs to. */
-export interface Anchor { p: Pt; id: string }
+export interface Anchor { p: Pt; id: string; /** the conductor itself */ c?: Conductor }
 /** An island of touching copper and the nets on it. */
 export interface Cluster { items: Conductor[]; nets: Set<string>; net: string; anchors: Anchor[] }
 /** A net of the netlist: its conductors by kind, its clusters, and the clusters shorting it to another net. */
@@ -235,7 +237,7 @@ export interface DesignSource {
   net_settings?: { classes?: unknown; netclass_assignments?: Record<string, string | string[]>; netclass_patterns?: unknown };
 }
 /** A DRC finding (drc): where, how bad, the message, the items, the rule. */
-export interface DrcMarker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; kiids?: string[]; layer?: string; rule?: string }
+export interface DrcMarker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; /** the net of an unconnected-items marker (the dialog shows it on the items, not in the text) */ net?: string; kiids?: string[]; layer?: string; rule?: string; ruleSeverity?: boolean; /** PCB_MARKER::SetPath's start and end (the error legend) */ path?: [Pt, Pt] }
 
 /** A routing obstacle that is not copper: an NPTH hole, a rule area keeping tracks out, a board edge. */
 export interface WorldItem { id: string | null; kind: string; shape: CopperShape; bbox: Box; layers?: Set<string>; pad?: PadInfo }
@@ -334,6 +336,7 @@ export interface SelectMove {
   mods?: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }; snapAt?: SnapAnchor | null;
   /** the angle snap line the cursor is held to (origin, snapped point), drawn as CONSTRUCTION_GEOM's snap line */
   guide?: [Pt, Pt] | null;
+  /** GRID_HELPER::SetAuxAxes: the drag origin of a move without a reference point */ aux?: Pt | null;
   /** a lone tuning pattern being moved: its generator's id (the move re-tunes it rather than carrying its copper) */
   gen?: string;
   /** Move Individually: commit into the previous step (amend), and what runs when the move ends (placed: a click dropped it; committed: a step was written) */

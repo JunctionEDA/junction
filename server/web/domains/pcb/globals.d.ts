@@ -147,7 +147,12 @@ interface KiCadCanvasApi {
   /** the displayed sheet instance; the symbols are rebuilt with its references and units (true when it changed) */
   setInstancePath(doc: KDoc | null | undefined, path: string | null): boolean;
   /** pixel size, MIME type and PPI of a PNG / JPEG / BMP / GIF header (BITMAP_BASE::updatePPI) */
-  imageInfo(bytes: ArrayLike<number>): { mime: string; w: number; h: number; ppi: number };
+  imageInfo(bytes: ArrayLike<number>): { mime: string; w: number; h: number; ppi: number; legacyPpi: number };
+  legacyImageScaleFactor(sch: boolean, version: number, e: { ppi?: number; legacyPpi?: number } | null | undefined): number;
+  /** canvas/legacy.ts: what the KiCad parsers change while reading an older file, applied in place. */
+  migrateSchNode(node: SNode, version: number): void;
+  downgradeSchNode(node: SNode, version: number): SNode;
+  migrateBoardNode(node: SNode, version: number): void;
   schFormat: { textOffsetRatio: number; labelSizeRatio: number; pinSymbolSize: number; showDnpMarkers: boolean; overbarHeight: number; hopOverChoice: number };
   withSchTheme<T>(id: string, fn: () => T): T;
   ORIENT: unknown;
@@ -181,6 +186,7 @@ interface KiCadCanvasApi {
   cellAddr: typeof import("./canvas/tables-images").cellAddr;
   /** WX_VIEW_CONTROLS auto-panning (web/domains/pcb/canvas/autopan.ts) */
   autoPanStep: typeof import("./canvas/autopan").autoPanStep;
+  autoPanDirection: typeof import("./canvas/autopan").autoPanDirection;
   AUTOPAN_TICK_MS: number;
   /** the board's own settings sections (web/domains/pcb/canvas/board-setup.ts) */
   boardSetup?: { applyBoardSetup(doc: KDoc, change: KChange): boolean };

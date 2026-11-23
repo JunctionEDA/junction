@@ -7,6 +7,7 @@ import { E } from "../state";
 import "../../../../shared/components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
 import { fromDisplayAbsAxis, toDisplayAbsAxis } from "../userorigin";
 import { evalExpr } from "../../tools/props/numeric";
+import { stringFromValue } from "../../../../shared/units";
 import { popupMenu } from "../../dialogs/dom";
 import { bitmapButton, kicadIcon, sortArrow, closeMark } from "../../../../shared/components/kicon-dom";
 
@@ -58,6 +59,7 @@ const CSS = `
 .pd-grid td { padding: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); height: 24px; }
 .pd-grid td.ro, .pd-grid td.txt { padding: 3px 6px; white-space: nowrap; }
 .pd-grid td.ro { color: var(--ink-2); }
+.k-grid-striping .pd-grid tbody tr:nth-child(even):not(.sel) td { background: var(--panel-2); }
 .pd-grid tr.sel td { background: var(--sel); }
 .pd-grid tr.hd td { background: var(--panel-2); font-weight: 600; padding: 3px 6px; }
 .pd-grid td input[type=text], .pd-grid td k-select { border: none !important; border-radius: 0 !important; background: transparent !important; width: 100%; height: 23px; padding: 2px 6px !important; font-family: inherit !important; }
@@ -324,21 +326,21 @@ const UNIT: Record<Units, { name: string; per: number; digits: number }> = { mm:
 export const currentUnits = (): Units => (E.units === "in" || E.units === "mil" ? E.units : "mm") as Units;
 export const unitName = (): string => UNIT[currentUnits()].name;
 const trim = (s: string): string => (s.includes(".") ? s.replace(/0+$/, "").replace(/\.$/, "") : s);
-/** A millimetre length in the editor's units, without the unit name ("0.2", "7.87"). */
-export function fmtLen(mm: number, units: Units = currentUnits()): string { const u = UNIT[units] || UNIT.mm; return trim((mm / u.per).toFixed(u.digits)) || "0"; }
+/** A millimetre length in the editor's units, without the unit name ("0.2", "0.00787402"): StringFromValue in the editor's IU scale. */
+export function fmtLen(mm: number, units: Units = currentUnits()): string { return stringFromValue(mm, UNIT[units] ? units : "mm", E.DOC_TYPE === "kicad_sch" || E.DOC_TYPE === "kicad_sym" ? "sch" : "pcb", false); }
 /** …with the unit name, as KiCad's grids and reports show it ("0.2 mm"). */
 export function fmtLenU(mm: number): string { return fmtLen(mm) + " " + unitName(); }
 /**
  * A typed length in millimetres; NaN when it is no number.  UNIT_BINDER runs NUMERIC_EVALUATOR over the text, so
  * "0.2", "0.2mm", "8 mils", "0.01in", "0.2+0.3" and "1/4" are all lengths; a bare number is in the editor's units.
  */
-export function parseLen(text: string, units: Units = currentUnits()): number {
-  const v = evalExpr(text.replace(/\b(mils?|thou)\b/gi, "mil").replace(/\binch\b/gi, "in"), units);
+export function parseLen(text: string, units: Units = currentUnits(), vars?: Map<string, number>): number {
+  const v = evalExpr(text.replace(/\b(mils?|thou)\b/gi, "mil").replace(/\binch\b/gi, "in"), units, vars);
   return isNaN(v) ? NaN : +v.toFixed(6);
 }
 /** A plain number typed into a UNIT_BINDER without units (an expression is evaluated too). */
 export function parseNum(text: string): number { const v = evalExpr(text, ""); return isNaN(v) ? NaN : v; }
-const isExpr = (text: string): boolean => /[-+*/()]/.test(text.trim().replace(/^[-+]/, "").replace(/e[-+]\d/i, ""));
+const isExpr = (text: string): boolean => /[-+*/()=;]/.test(text.trim().replace(/^[-+]/, "").replace(/e[-+]\d/i, ""));
 /**
  * UNIT_BINDER::onSetFocus / onKillFocus: the formula typed last comes back when the field takes the focus again,
  * and is evaluated when it loses it.
@@ -354,7 +356,7 @@ export interface Field<T> { el: HTMLElement; get(): T; set(v: T): void; input: H
 export function lenField(mm: number, opts?: { ro?: boolean; key?: string; min?: number; allowEmpty?: boolean; units?: Units; onChange?(v: number): void }): Field<number> & { warn: Warning } {
   let cur = mm;
   // `units`: another frame's units than the open editor's (a Preferences page of the schematic editor)
-  const u = (opts && opts.units) || currentUnits(), fmt = (v: number): string => fmtLen(v, u), parse = (t: string): number => parseLen(t, u);
+  const u = (opts && opts.units) || currentUnits(), fmt = (v: number): string => fmtLen(v, u), vars = new Map<string, number>(), parse = (t: string): number => parseLen(t, u, vars);
   const input = h("input", { type: "text", value: opts && opts.allowEmpty && !isFinite(mm) ? "" : fmt(mm), disabled: !!(opts && opts.ro), "data-k": opts && opts.key, "data-units": u });
   // the value is evaluated when the field loses the focus (an expression shows its result); a typed value that is no
   // number puts the last good one back
@@ -517,16 +519,25 @@ export function treeBook(groups: TreeGroup[], start?: string, opts?: { canLeave?
   return { el, show, current: () => cur, built: (l) => built.has(l), rebuild };
 }
 
-/** WX_INFOBAR at the top of a dialog: ShowMessage (stays) and ShowMessageFor (goes after `ms`). */
-export function infoBar(): { el: HTMLElement; show(message: string, ms?: number): void; hide(): void } {
+/** The infobar icons by flag: wxICON_INFORMATION, wxICON_WARNING, wxICON_ERROR. */
+const INFOBAR_ICONS: Record<"info" | "warning" | "error", string> = {
+  info: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6.5" style="fill:var(--blue)"/><path d="M8 7v4.5M8 4.6v.4" style="stroke:var(--paper)" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  warning: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 1.5L15 14H1z" style="fill:var(--warn)"/><path d="M8 6v4M8 11.6v.4" style="stroke:var(--paper)" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  error: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6.5" style="fill:var(--err)"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" style="stroke:var(--paper)" stroke-width="1.6" stroke-linecap="round"/></svg>',
+};
+/**
+ * WX_INFOBAR at the top of a dialog: ShowMessage (stays) and ShowMessageFor (goes after `ms`); the icon follows the
+ * flag, wxICON_INFORMATION when none is given (wxInfoBarGeneric::ShowMessage's default).
+ */
+export function infoBar(): { el: HTMLElement; show(message: string, ms?: number, severity?: "info" | "warning" | "error"): void; hide(): void } {
   const msg = h("span", { class: "msg", "data-k": "infobar-msg" });
   const x = h("button", { class: "x", type: "button", title: "Hide this message." }, closeMark());
-  const el = h("div", { class: "pd-infobar", hidden: true, "data-k": "infobar" }, h("span", { class: "pd-warnicon" }), msg, x);
-  (el.firstChild as HTMLElement).innerHTML = warningIcon().el.innerHTML;
+  const icon = h("span", { class: "pd-warnicon", "data-k": "infobar-icon" });
+  const el = h("div", { class: "pd-infobar", hidden: true, "data-k": "infobar" }, icon, msg, x);
   let timer = 0;
   const hide = (): void => { el.hidden = true; if (timer) clearTimeout(timer); timer = 0; };
   x.addEventListener("click", hide);
-  return { el, hide, show(m, ms) { msg.textContent = m; el.hidden = false; if (timer) clearTimeout(timer); timer = ms ? window.setTimeout(hide, ms) : 0; } };
+  return { el, hide, show(m, ms, severity = "info") { icon.innerHTML = INFOBAR_ICONS[severity]; icon.dataset.severity = severity; msg.textContent = m; el.hidden = false; if (timer) clearTimeout(timer); timer = ms ? window.setTimeout(hide, ms) : 0; } };
 }
 /** PAGED_DIALOG::SetError's focus part: a text control is selected and focused; a grid cell gets the cursor. */
 export function focusError(ctrl: HTMLElement | null | undefined, row?: number, col?: number): void {
@@ -774,15 +785,41 @@ export function listDialog(title: string, headers: string[], items: string[][], 
   return api;
 }
 /** The add / delete buttons KiCad puts under a grid. */
+/** WX_GRID::CommitPendingChanges: an open cell editor writes its text to the row (a text cell commits on "change"). */
+export function commitPendingEdit(g: GridApi): void {
+  const a = typeof document !== "undefined" ? document.activeElement : null;
+  if (a instanceof HTMLElement && g.el.contains(a) && a instanceof HTMLInputElement && a.type === "text") a.blur();
+}
+/**
+ * WX_GRID::OnDeleteRows' selection: the rows to delete (every selected row, else the cursor row) and the row the
+ * cursor goes to, the one above the first deleted row (the first row when that is row 0, none when the grid empties).
+ */
+export function deleteRowsPlan(selected: number[], cursor: number, count: number): { rows: number[]; next: number } {
+  const rows = (selected.length ? selected : cursor >= 0 ? [cursor] : []).filter((i) => i >= 0 && i < count).sort((x, y) => x - y);
+  if (!rows.length) return { rows, next: -1 };
+  const left = count - rows.length;
+  return { rows, next: left <= 0 ? -1 : Math.min(left - 1, Math.max(0, rows[0] - 1)) };
+}
 export function gridButtons(g: GridApi, make: () => Record<string, CellValue>, opts?: { ro?: boolean; canDelete?(row: Record<string, CellValue>, i: number): boolean; onChange?(): void; move?: boolean; addTip?: string; delTip?: string }): HTMLElement {
   const ro = !!(opts && opts.ro);
   const bar = h("div", { class: "pd-gridbar" });
-  bar.append(iconButton("plus", (opts && opts.addTip) || "Add row", () => { const rows = g.rows(); rows.push(make()); g.refresh(); g.select(rows.length - 1); const last = g.el.querySelector("tbody tr:last-child input[type=text]") as HTMLInputElement | null; if (last) { last.focus(); last.select(); } if (opts && opts.onChange) opts.onChange(); }, ro));
+  // OnAddRow: the pending edit is committed first
+  bar.append(iconButton("plus", (opts && opts.addTip) || "Add row", () => { commitPendingEdit(g); const rows = g.rows(); rows.push(make()); g.refresh(); g.select(rows.length - 1); const last = g.el.querySelector("tbody tr:last-child input[type=text]") as HTMLInputElement | null; if (last) { last.focus(); last.select(); } if (opts && opts.onChange) opts.onChange(); }, ro));
   if (opts && opts.move) {
-    const swap = (d: number): void => { const rows = g.rows(), i = g.selected(), j = i + d; if (i < 0 || j < 0 || j >= rows.length) return; [rows[i], rows[j]] = [rows[j], rows[i]]; g.refresh(); g.select(j); if (opts.onChange) opts.onChange(); };
+    // OnMoveRowUp / OnMoveRowDown: commit, then move the cursor row (nothing at either end, where KiCad rings wxBell)
+    const swap = (d: number): void => { commitPendingEdit(g); const rows = g.rows(), i = g.selected(), j = i + d; if (i < 0 || j < 0 || j >= rows.length) return; [rows[i], rows[j]] = [rows[j], rows[i]]; g.refresh(); g.select(j); if (opts.onChange) opts.onChange(); };
     bar.append(iconButton("up", "Move up", () => swap(-1), ro), iconButton("down", "Move down", () => swap(1), ro));
   }
-  bar.append(iconButton("trash", (opts && opts.delTip) || "Delete row", () => { const rows = g.rows(), i = g.selected(); if (i < 0 || i >= rows.length) return; if (opts && opts.canDelete && !opts.canDelete(rows[i], i)) return; rows.splice(i, 1); g.refresh(); g.select(Math.min(i, rows.length - 1)); if (opts && opts.onChange) opts.onChange(); }, ro));
+  // OnDeleteRows: every selected row goes (none when the filter refuses one of them), after the pending edit is committed
+  bar.append(iconButton("trash", (opts && opts.delTip) || "Delete row", () => {
+    const rows = g.rows();
+    const plan = deleteRowsPlan(g.selectedRows(), g.selected(), rows.length);
+    if (!plan.rows.length) return;
+    if (opts && opts.canDelete && plan.rows.some((i) => !opts.canDelete!(rows[i], i))) return;
+    commitPendingEdit(g);
+    for (let k = plan.rows.length - 1; k >= 0; k--) rows.splice(plan.rows[k], 1);
+    g.refresh(); g.select(plan.next); if (opts && opts.onChange) opts.onChange();
+  }, ro));
   return bar;
 }
 

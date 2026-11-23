@@ -5,11 +5,14 @@
 // Pure functions over parsed documents; the dialog (web/domains/pcb/editor/pcbdialogs/update-pcb.ts) loads the sheets,
 // shows the report and commits the staged nodes.  Exposed for the node tests as KiCadCanvas.pcbNetlist.
 import { atOf, kid, kids, num, parse, ptsOf, str } from "./sexpr";
-import { resolveLib } from "./geom-sch";
+import { GENERATOR_VERSION } from "./format-version";
+import { resolveLib, subReference, unitDisplayNames } from "./geom-sch";
 import { expandStacked } from "./stacked-pins";
 import { busConnection, isBusLabel, matchBusMember, type BusAliases, type BusConnection } from "./busname";
-import { expandTextVars } from "./sheet";
-import { footprintVariant, footprintVariantNode, setFootprintVariant, symbolFlags, symbolFlagsForVariant, symbolInstance, symbolVariant, type FpFlags } from "./variant-model";
+import { expandTextVars, hasTextVars } from "./sheet";
+import { unescapeText } from "./text";
+import { footprintVariant, footprintVariantNode, setFootprintVariant, symbolFlags, symbolFlagsForVariant, symbolInstance, symbolVariant, type FpFlags, strNumCmp } from "./variant-model";
+import { boardItemBox } from "./kicad-bbox";
 
 type Pt = [number, number];
 
@@ -37,6 +40,12 @@ export interface NetComponent {
   fields: Record<string, string>;
   sheetName: string; sheetFile: string;
   dnp: boolean; excludeFromBom: boolean; excludeFromBoard: boolean;
+  /** the netlist's exclude_from_sim / exclude_from_pos_files properties (the symbol's flags, the sheet path's for sim) */
+  excludeFromSim?: boolean; excludeFromPosFiles?: boolean;
+  /** the library symbol's "duplicate pin numbers are jumpers", jumper pin groups and footprint filters (ki_fp_filters) */
+  dupPinsAreJumpers?: boolean; jumperPinGroups?: string[][]; fpFilters?: string;
+  /** COMPONENT::GetUnitInfo: each unit's display name and pad numbers (LIB_SYMBOL::GetUnitPinInfo) */
+  unitInfo?: { name: string; pins: string[] }[];
   /** pad number -> net / pin name / electrical type */
   pins: Map<string, NetPin>;
   /** COMPONENT::GetVariants: the symbol instance's design variants that differ from the symbol (as the KiCad
@@ -101,7 +110,7 @@ const propVal = (node: SNode, name: string): string => { const p = prop(node, na
 /** EscapeString( …, CTX_NETNAME ): '/' is spelled {slash}, line breaks are dropped. */
 export function escapeNetName(s: string): string { return s.replace(/\//g, "{slash}").replace(/[\r\n]/g, ""); }
 /** UnescapeString for the report (the names a person reads). */
-export function unescapeNetName(s: string): string { return s.replace(/\{slash\}/g, "/").replace(/\{backslash\}/g, "\\").replace(/\{lt\}/g, "<").replace(/\{gt\}/g, ">").replace(/\{colon\}/g, ":").replace(/\{dquote\}/g, '"').replace(/\{space\}/g, " "); }
+export function unescapeNetName(s: string): string { return unescapeText(s); }
 
 /** Members of a bus vector label "D[0..7]" -> ["D0", … "D7"]; null when the text is no bus. */
 export function busVector(text: string): string[] | null {
@@ -141,7 +150,7 @@ function distSeg(p: Pt, a: Pt, b: Pt): number {
 }
 
 /** A symbol's reference and unit on one sheet instance: its (instances …) entry for that path, else the field. */
-function instanceRef(node: SNode, path: string, project: string | undefined, legacy?: Map<string, { reference: string; unit: number }>): { ref: string; unit: number } {
+export function instanceRef(node: SNode, path: string, project: string | undefined, legacy?: Map<string, { reference: string; unit: number }>): { ref: string; unit: number } {
   const unitN = kid(node, "unit") as SNode | null;
   let ref = propVal(node, "Reference"), unit = unitN ? num(unitN[1], 1) : 1, found = false;
   // a file older than 20221002: the root's (symbol_instances …), by the path below the root
@@ -172,6 +181,30 @@ function unitCount(doc: KDoc, node: SNode): number {
   let n = 1;
   for (const sub of kids(lib, "symbol") as SNode[]) { const m = /_(\d+)_(\d+)$/.exec(str(sub[1])); if (m) n = Math.max(n, Number(m[1])); }
   return n;
+}
+/**
+ * LIB_SYMBOL::GetUnitPinInfo: for each unit (at least one) its display name (the unit_name, else the letter) and the
+ * numbers of its pins and the pins common to all units, of every body style, ordered by position (x, then y down),
+ * stacked pins expanded, each number once.
+ */
+function libUnitPinInfo(lib: SNode, units: number): { name: string; pins: string[] }[] {
+  const names = unitDisplayNames(lib), out: { name: string; pins: string[] }[] = [];
+  const pins: { unit: number; x: number; y: number; number: string }[] = [];
+  for (const sub of kids(lib, "symbol") as SNode[]) {
+    const m = /_(\d+)_(\d+)$/.exec(str(sub[1])); const u = m ? Number(m[1]) : 0;
+    for (const g of kids(sub, "pin") as SNode[]) { const a = atOf(g) as number[]; pins.push({ unit: u, x: a[0] || 0, y: -(a[1] || 0), number: kidStr(g, "number") }); }
+  }
+  for (let u = 1; u <= Math.max(units, 1); u++) {
+    const list = pins.filter((p) => !p.unit || p.unit === u).sort((a, b) => (a.x !== b.x ? a.x - b.x : a.y - b.y));
+    const seen = new Set<string>(), nums: string[] = [];
+    for (const p of list) {
+      const st = expandStacked(p.number);
+      if (st.valid && st.pins.length && p.number.startsWith("[")) { for (const n of st.pins) if (!seen.has(n)) { seen.add(n); nums.push(n); } continue; }
+      if (p.number && !seen.has(p.number)) { seen.add(p.number); nums.push(p.number); }
+    }
+    out.push({ name: names.get(u) ?? unitLetter(u), pins: nums });
+  }
+  return out;
 }
 /** SCH_SYMBOL::SubReference: A, B, … Z, AA, … */
 function unitLetter(unit: number): string { let s = "", u = unit; while (u > 0) { u--; s = String.fromCharCode(65 + (u % 26)) + s; u = Math.floor(u / 26); } return s; }
@@ -298,7 +331,7 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
    * fields, the sheet's variables and the project's.  A token nothing resolves stays as written.
    */
   const netText = (text: string, node: SNode, kind: string, inst: Instance | null, shape?: string): string => {
-    if (text.indexOf("${") < 0) return text;
+    if (!hasTextVars(text)) return text;
     const expand = (t: string, depth: number): string => (depth > 10 ? t : expandTextVars(t, (token: string) => {
       if (kind !== "symbol") {
         if (/^OP(\.([0-9])?([a-zA-Z]*))?$/.test(token) || token === "NET_NAME" || token === "SHORT_NET_NAME" || token === "NET_CLASS") return "";
@@ -309,6 +342,61 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
     }));
     return expand(text, 0);
   };
+  /** SCH_SHEET_PATH::GetDNP / GetExcludedFromBOM / GetExcludedFromSim / GetExcludedFromBoard: any sheet of the path. */
+  const pathFlags = (inst: Instance): { dnp: boolean; bom: boolean; sim: boolean; board: boolean } => {
+    const out = { dnp: false, bom: false, sim: false, board: false };
+    for (let s: Instance | null = inst; s; s = s.parent) if (s.sheetNode) { const f = symbolFlags(s.sheetNode); out.dnp ||= f.dnp; out.bom ||= f.excludedFromBOM; out.sim ||= f.excludedFromSim; out.board ||= f.excludedFromBoard; }
+    return out;
+  };
+  /**
+   * SCH_FIELD::GetShownText( path, resolveTextVars ) of a field of a placed symbol, as NETLIST_EXPORTER_XML::addSymbolFields
+   * reads it: SCH_SYMBOL::ResolveTextVar (its fields, the footprint / symbol / flag tokens), then the sheet's and the
+   * project's variables.  The operating point is "--" (no simulation results).  Pin functions (NET_NAME(…) and the
+   * like) need the finished connectivity and are left as written.
+   */
+  const symText = (text: string, n: SNode, inst: Instance, s: { ref: string; unit: number; units: number; lib: SNode | null; power: boolean; localPower: boolean }): string => {
+    if (text.indexOf("${") < 0) return text;
+    const props = (kids(n, "property") as SNode[]).map((p) => (str(p[1]) === "private" && p.length > 3 && !isList(p[2]) && !isList(p[3]) ? [str(p[2]), str(p[3])] : [str(p[1]), str(p[2])]));
+    const fpText = (): string => { const f = props.find((q) => q[0] === "Footprint"); return f ? f[1] : ""; };
+    const libId = kidStr(n, "lib_id"), colon = libId.indexOf(":");
+    const flags = symbolFlags(n), pf = pathFlags(inst);
+    const resolve = (tok: string, depth: number): string | null => {
+      if (/^OP(:[^.]*)?(.([0-9])?([a-zA-Z]*))?$/.test(tok)) return "--";
+      for (const [name, value] of props) {
+        // "If the field data is just a reference to the field, don't resolve"
+        if (value.replace(/ /g, "").toLowerCase() === ("${" + name + "}").toLowerCase()) return tok;
+        if (name.toLowerCase() !== tok.toLowerCase()) continue;
+        if (name === "Reference") return s.units > 1 ? s.ref + subReference(s.lib, s.unit) : s.ref;
+        return depth < 10 ? expandTextVars(value, (t: string) => resolve(t, depth + 1)) : value;
+      }
+      if (["SIM.DEVICE", "SIM.TYPE", "SIM.PINS", "SIM.PARAMS", "SIM.LIBRARY", "SIM.NAME"].includes(tok)) return "";
+      for (const tn of (inst.sheet.doc as KDoc & { templateFieldNames?: string[] | null }).templateFieldNames || []) if (tok === tn || tok === tn.toUpperCase()) return "";
+      switch (tok) {
+        case "FOOTPRINT_LIBRARY": return fpText().split(":")[0];
+        case "FOOTPRINT_NAME": { const parts = fpText().split(":"); return parts.length > 1 ? parts[1] : ""; }
+        case "UNIT": return subReference(s.lib, s.unit);
+        case "SHORT_REFERENCE": return s.ref;
+        case "SYMBOL_LIBRARY": return colon >= 0 ? libId.slice(0, colon) : "";
+        case "SYMBOL_NAME": return colon >= 0 ? libId.slice(colon + 1) : libId;
+        case "SYMBOL_DESCRIPTION": { const d = props.find((q) => q[0] === "Description"); return d ? d[1] : ""; }
+        case "SYMBOL_KEYWORDS": { const k = s.lib ? (kids(s.lib, "property") as SNode[]).find((q) => str(q[1]) === "ki_keywords") : null; return k ? str(k[2]) : ""; }
+        case "SYMBOL_IS_POWER": return s.power ? "Power Symbol" : "";
+        case "SYMBOL_IS_LOCAL_POWER": return s.localPower ? "Local Power Symbol" : "";
+        case "EXCLUDE_FROM_BOM": return pf.bom || flags.excludedFromBOM ? "Excluded from BOM" : "";
+        case "EXCLUDE_FROM_BOARD": return pf.board || flags.excludedFromBoard ? "Excluded from board" : "";
+        case "EXCLUDE_FROM_SIM": return pf.sim || flags.excludedFromSim ? "Excluded from simulation" : "";
+        case "DNP": return pf.dnp || flags.dnp ? "DNP" : "";
+        default: break;
+      }
+      if (/^(SHORT_NET_NAME|NET_NAME|NET_CLASS|PIN_NAME|PIN_BASE_NAME|PIN_ALT_LIST|REFERENCE|SHORT_REFERENCE|UNIT)\(/.test(tok)) return null;
+      return sheetVar(tok, inst, (t2) => expandTextVars(t2, (t3: string) => resolve(t3, depth + 1)));
+    };
+    return expandTextVars(text, (t: string) => resolve(t, 0));
+  };
+  /** What NETLIST_EXPORTER_XML::addSymbolFields scavenges from each unit of a multi-unit symbol (by reference). */
+  interface UnitFields { unit: number; uuid: string; value: string; footprint: string; datasheet: string; description: string; fields: [string, string][] }
+  const unitFields = new Map<string, UnitFields[]>();
+  const compUnits = new Map<NetComponent, number>();
 
   // ---- connectivity of each instance
   for (const inst of instances) {
@@ -417,18 +505,51 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
         const pins = h.symbolPins(doc, it);
         const units = unitCount(doc, n), unitRef = units > 1 ? ref + unitLetter(unit) : ref;
         let comp: NetComponent | undefined;
-        if (inNetlist && onBoard) {
-          const path = "/" + [...inst.sheetUuids, it.id].join("/");
-          comp = components.get(ref);
-          if (!comp) {
-            const fields: Record<string, string> = {};
-            for (const p of kids(n, "property") as SNode[]) { const name = str(p[1]); if (name !== "Reference" && name !== "Value" && name !== "Footprint") fields[name] = str(p[2]); }
-            comp = { ref, value, footprint: propVal(n, "Footprint"), libId: kidStr(n, "lib_id"), paths: [path], fields, sheetName: inst.human, sheetFile: inst.sheet.file.split("/").pop() || inst.sheet.file,
-              dnp: yes(n, "dnp", false), excludeFromBom: !yes(n, "in_bom", true), excludeFromBoard: false, pins: new Map() };
-            const variants = componentVariants(n, "/" + inst.uuidPath.join("/"), ref, (doc as KDoc).version); if (variants.length) comp.variants = variants;
-            const grp = symGroup.get(it.id); if (grp) comp.group = grp;
-            components.set(ref, comp); compPins.set(ref, []);
-          } else { if (unit === 1) comp.paths.unshift(path); else comp.paths.push(path); if (!comp.footprint) comp.footprint = propVal(n, "Footprint"); }
+        if (inNetlist) {
+          // addSymbolFields: every non-mandatory field that is not private, then Datasheet and Description, all with
+          // their variables resolved; the netlist writes an empty value as "~"
+          const symLib = resolveLib(doc, kidStr(n, "lib_name") || kidStr(n, "lib_id")) || resolveLib(doc, kidStr(n, "lib_id"));
+          const sctx = { ref, unit, units, lib: symLib, power, localPower: !!localPower };
+          const userFields: [string, string][] = [];
+          let datasheet = "", description = "";
+          for (const p of kids(n, "property") as SNode[]) {
+            if (str(p[1]) === "private" && p.length > 3 && !isList(p[2]) && !isList(p[3])) continue;
+            const name = str(p[1]);
+            if (name === "Reference" || name === "Value" || name === "Footprint") continue;
+            if (name === "Datasheet") { datasheet = symText(str(p[2]), n, inst, sctx); continue; }
+            if (name === "Description") { description = symText(str(p[2]), n, inst, sctx); continue; }
+            userFields.push([name, symText(str(p[2]), n, inst, sctx)]);
+          }
+          const rec: UnitFields = { unit, uuid: it.id, value: symText(rawValue, n, inst, sctx), footprint: symText(propVal(n, "Footprint"), n, inst, sctx), datasheet, description, fields: userFields };
+          const lk = ref.toLowerCase(), recs = unitFields.get(lk); if (recs) recs.push(rec); else unitFields.set(lk, [rec]);
+          const pf = pathFlags(inst);
+          if (onBoard && !pf.board) {
+            const path = "/" + [...inst.sheetUuids, it.id].join("/");
+            comp = components.get(ref);
+            if (!comp) {
+              const fields: Record<string, string> = {};
+              for (const [k, v] of userFields) fields[k] = v;
+              fields.Datasheet = datasheet; fields.Description = description;
+              const f = symbolFlags(n);
+              comp = { ref, value: rec.value || "~", footprint: rec.footprint, libId: kidStr(n, "lib_id"), paths: [path], fields, sheetName: inst.human, sheetFile: inst.sheet.file.split("/").pop() || inst.sheet.file,
+                dnp: f.dnp || pf.dnp, excludeFromBom: f.excludedFromBOM || pf.bom, excludeFromBoard: false, excludeFromSim: f.excludedFromSim || pf.sim, excludeFromPosFiles: f.excludedFromPosFiles, pins: new Map() };
+              if (symLib) {
+                // the library symbol's ki_fp_filters (joined by single spaces), jumper flag and jumper pin groups
+                const fl = (kids(symLib, "property") as SNode[]).find((q) => str(q[1]) === "ki_fp_filters");
+                const filters = fl ? str(fl[2]).split(/\s+/).filter(Boolean).join(" ") : "";
+                if (filters) comp.fpFilters = filters;
+                if (yes(symLib, "duplicate_pin_numbers_are_jumpers", false)) comp.dupPinsAreJumpers = true;
+                const jg = kid(symLib, "jumper_pin_groups") as SNode | null;
+                if (jg) { const groups = jg.slice(1).filter(isList).map((g) => (g as SNode).map(str)); if (groups.length) comp.jumperPinGroups = groups; }
+              }
+              const variants = componentVariants(n, "/" + inst.uuidPath.join("/"), ref, (doc as KDoc).version); if (variants.length) comp.variants = variants;
+              const grp = symGroup.get(it.id); if (grp) comp.group = grp;
+              components.set(ref, comp); compPins.set(ref, []); compUnits.set(comp, units);
+              if (symLib) comp.unitInfo = libUnitPinInfo(symLib, units);
+            } else { if (unit === 1) comp.paths.unshift(path); else comp.paths.push(path); }
+            // a placed unit whose library copy differs (a unit-specific edit) gives that unit's slot from its own copy
+            if (symLib && comp.unitInfo && unit >= 1 && unit <= comp.unitInfo.length) { const own = libUnitPinInfo(symLib, units); if (own[unit - 1]) comp.unitInfo[unit - 1] = own[unit - 1]; }
+          }
         }
         const byNumber = new Map<string, number[]>(), pinTerms: { pin: SymPin; t: number }[] = [];
         for (const pin of pins) {
@@ -624,6 +745,24 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
     if (bus && bus.aliases.length) e.aliases = bus.aliases;
     if (bus) for (const m of bus.members) { const mn = groupName(uf.find(m)); if (mn && !e.busMembers.includes(mn)) e.busMembers.push(mn); }
   }
+  // addSymbolFields for a multi-unit symbol: value, footprint, datasheet and description from the lowest unit (then
+  // uuid) with a non-blank text, each other field from the lowest unit holding a non-blank one (a blank one only when
+  // no unit has text)
+  for (const comp of components.values()) {
+    if ((compUnits.get(comp) || 1) < 2) continue;
+    const recs = unitFields.get(comp.ref.toLowerCase()); if (!recs || recs.length < 2) continue;
+    const rank = (a: UnitFields, b: UnitFields): number => a.unit - b.unit || (a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0);
+    const sorted = recs.slice().sort(rank);
+    const first = (get: (r: UnitFields) => string): string => { for (const r of sorted) { const v = get(r); if (v) return v; } return ""; };
+    const fields: Record<string, string> = {}, best = new Map<string, UnitFields>();
+    for (const r of recs) for (const [k, v] of r.fields) {
+      const had = best.get(k);
+      const better = !had || (v === "" ? 1 : 0) - ((fields[k] === "") ? 1 : 0) < 0 || ((v === "") === (fields[k] === "") && rank(r, had) < 0);
+      if (better) { fields[k] = v; best.set(k, r); }
+    }
+    fields.Datasheet = first((r) => r.datasheet); fields.Description = first((r) => r.description);
+    comp.value = first((r) => r.value) || "~"; comp.footprint = first((r) => r.footprint); comp.fields = fields;
+  }
   const instOut: SheetInstance[] = instances.map((i) => ({ index: i.index, human: i.human, file: i.sheet.file, uuidPath: i.uuidPath, sheetName: i.name }));
   return { components: Array.from(components.values()), nets, warnings, netMap, instances: instOut };
 }
@@ -660,8 +799,12 @@ export interface UpdateOptions {
   applyDesignBlockLayouts?: boolean;
   /** the board footprint for a library id, or null when the library is not available (or has no such footprint) */
   footprintFor?(fpid: string): SNode | null | "missing";
-  /** text size / thickness of new fields (the board's Fab-layer defaults) */
-  fieldSize?: number; fieldThickness?: number;
+  /** text size / thickness / italic / keep-upright of new fields (the board's Fab-layer defaults, StyleFromSettings) */
+  fieldSize?: number; fieldSizeV?: number; fieldThickness?: number; fieldItalic?: boolean; fieldUpright?: boolean;
+  /** the real run (dry run off): the past-tense wording and the lines only it prints */
+  applied?: boolean;
+  /** MessageTextFromValue for a length in mm (the zone position of "has no pads connected"); "%.4f mm" by default */
+  formatLength?(mm: number): string;
   newUuid?(): string;
 }
 export type Severity = "action" | "warning" | "error" | "info";
@@ -671,8 +814,10 @@ export interface UpdatePlan {
   /** footprints, tracks, vias and zones to replace: item id -> new node */
   modified: Map<string, SNode>;
   removed: string[];
-  /** new footprint nodes, positioned below the board */
+  /** new footprint nodes (at estimateFootprintInsertionPosition) and new groups */
   added: SNode[];
+  /** the uuids of the footprints among `added` */
+  addedIds: string[];
   warnings: number; errors: number;
 }
 
@@ -687,12 +832,16 @@ function netNameOf(doc: KDoc, node: SNode): string {
   return str(n[1]);
 }
 function usesNetCodes(doc: KDoc): boolean {
+  // formatNetRef: codes in a board kept at a version before 20251028, names from then on.  The items decide for a doc
+  // without a version, and for an older one whose items are already written by name (as netStyle does).
+  const v = Number((doc as KDoc & { version?: number }).version) || 0;
+  if (v >= 20251028) return false;
   for (const it of doc.items.values()) {
     const probe = it.kind === "footprint" ? (kid(it.node, "pad") as SNode | null) : (it.kind === "segment" || it.kind === "via" || it.kind === "arc") ? it.node : null;
     const n = probe && (kid(probe, "net") as SNode | null); if (!n) continue;
     return typeof n[1] === "number";
   }
-  return false;
+  return v > 0;
 }
 function fpRef(node: SNode): string {
   const p = prop(node, "Reference"); if (p) return str(p[2]);
@@ -716,7 +865,7 @@ function fpidsEquivalent(board: string, sch: string): boolean {
   return board === sch;
 }
 function attrFlags(node: SNode): Set<string> { const a = kid(node, "attr") as SNode | null; return new Set(a ? a.slice(1).map(str) : []); }
-const ATTR_ORDER = ["smd", "through_hole", "board_only", "exclude_from_pos_files", "exclude_from_bom", "allow_missing_courtyard", "allow_soldermask_bridges", "dnp"];
+const ATTR_ORDER = ["smd", "through_hole", "board_only", "exclude_from_pos_files", "exclude_from_bom", "exclude_from_sim", "allow_missing_courtyard", "dnp", "allow_soldermask_bridges"];
 function setAttrFlag(node: SNode, flag: string, on: boolean): void {
   const flags = attrFlags(node); if (on) flags.add(flag); else flags.delete(flag);
   const list = [...ATTR_ORDER.filter((f) => flags.has(f)), ...Array.from(flags).filter((f) => !ATTR_ORDER.includes(f))];
@@ -729,9 +878,9 @@ const fpRot = (node: SNode): number => { const a = atOf(node) as number[]; retur
 
 /** A hidden field for a footprint, the way BOARD_NETLIST_UPDATER creates one (on the Fab layer, board text defaults). */
 function newField(fp: SNode, name: string, value: string, o: UpdateOptions): SNode {
-  const size = o.fieldSize || 1, thick = o.fieldThickness || 0.15, rot = fpRot(fp), back = fpSide(fp) === "B.Cu";
+  const size = o.fieldSize || 1, sizeV = o.fieldSizeV || size, thick = o.fieldThickness || 0.15, rot = fpRot(fp), back = fpSide(fp) === "B.Cu";
   const uuid = o.newUuid ? o.newUuid() : "";
-  return parse(`(property ${quote(name)} ${quote(value)} (at 0 0${rot ? " " + rot : ""}) (layer "${back ? "B.Fab" : "F.Fab"}") (hide yes)${uuid ? ` (uuid "${uuid}")` : ""} (effects (font (size ${size} ${size}) (thickness ${thick}))${back ? " (justify mirror)" : ""}))`) as SNode;
+  return parse(`(property ${quote(name)} ${quote(value)} (at 0 0${rot ? " " + rot : ""})${o.fieldUpright ? "" : " (unlocked yes)"} (layer "${back ? "B.Fab" : "F.Fab"}") (hide yes)${uuid ? ` (uuid "${uuid}")` : ""} (effects (font (size ${sizeV} ${size}) (thickness ${thick})${o.fieldItalic ? " (italic yes)" : ""})${back ? " (justify mirror)" : ""}))`) as SNode;
 }
 function insertField(fp: SNode, field: SNode): void {
   let at = -1;
@@ -740,11 +889,32 @@ function insertField(fp: SNode, field: SNode): void {
   fp.splice(at + 1, 0, field);
 }
 
+/** LIB_ID::Parse( aId, true ): the nickname before the first ':' and the item name with the forbidden characters fixed. */
+function parseFpid(s: string): string {
+  const i = s.indexOf(":"), nick = i >= 0 ? s.slice(0, i) : "", item = (i >= 0 ? s.slice(i + 1) : s).replace(/[<>"\\:\t\n\r]/g, "_");
+  return nick ? nick + ":" + item : item;
+}
+/** JUMPER_GROUP_SET as the board and the netlist compare it: each group's non-blank names as a sorted set, empty groups dropped. */
+function jumperGroups(groups: string[][]): string[][] {
+  const out: string[][] = [];
+  for (const g of groups) { const names = Array.from(new Set(g.filter((n) => n !== ""))).sort(codeCmp); if (names.length) out.push(names); }
+  return out;
+}
+function fpJumperGroups(fp: SNode): string[][] { const j = kid(fp, "jumper_pad_groups") as SNode | null; return j ? jumperGroups(j.slice(1).filter(isList).map((g) => (g as SNode).map(str))) : []; }
+function fpUnits(fp: SNode): { name: string; pins: string[] }[] {
+  const u = kid(fp, "units") as SNode | null; if (!u) return [];
+  return (kids(u, "unit") as SNode[]).map((x) => ({ name: kidStr(x, "name"), pins: ((kid(x, "pins") as SNode | null) || ["pins"]).slice(1).map(str) }));
+}
+const FP_AFTER_PATH = ["sheetname", "sheetfile", "units", "solder_mask_margin", "solder_paste_margin", "solder_paste_margin_ratio", "clearance", "zone_connect", "attr", "stackup", "private_layers", "net_tie_pad_groups", "duplicate_pad_numbers_are_jumpers", "jumper_pad_groups", "fp_text", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "fp_curve", "fp_text_box", "pad", "zone", "group", "embedded_fonts", "model"];
+const after = (key: string): string[] => FP_AFTER_PATH.slice(FP_AFTER_PATH.indexOf(key) + 1);
+
 /**
- * What "Update PCB" would do to `doc` for `netlist`: the report (in the dry-run wording of the desktop's
- * dialog) and the staged nodes.  Nothing is modified; the caller commits `modified` / `removed` / `added`.
+ * What "Update PCB" would do to `doc` for `netlist`: the report (in the dry-run wording of the desktop's dialog, or with
+ * `o.applied` the wording and the extra lines of the real run) and the staged nodes.  Nothing is modified; the caller
+ * commits `modified` / `removed` / `added`.  BOARD_NETLIST_UPDATER::UpdateNetlist, step by step.
  */
 export function planUpdate(doc: KDoc, netlist: Netlist, o: UpdateOptions = {}): UpdatePlan {
+  const applied = !!o.applied, T = (dry: string, done: string): string => (applied ? done : dry);
   const report: ReportLine[] = [];
   let warnings = 0, errors = 0;
   const say = (severity: Severity, text: string): void => { report.push({ severity, text }); if (severity === "warning") warnings++; if (severity === "error") errors++; };
@@ -758,6 +928,7 @@ export function planUpdate(doc: KDoc, netlist: Netlist, o: UpdateOptions = {}): 
     if (it.kind === "footprint") { fps.push(it); for (const p of kids(it.node, "pad") as SNode[]) { const n = netNameOf(doc, p); if (n) boardNets.add(n); } }
     else if (it.kind === "segment" || it.kind === "arc" || it.kind === "via" || it.kind === "zone") { const n = netNameOf(doc, it.node); if (n) boardNets.add(n); }
   }
+  for (const name of doc.nets.values()) if (name) boardNets.add(name);
   const addedNets = new Set<string>();
   const oldToNew = new Map<string, string>();
   const netValues = (name: string): (string | number)[] => {
@@ -765,277 +936,517 @@ export function planUpdate(doc: KDoc, netlist: Netlist, o: UpdateOptions = {}): 
     let code = codeOf.get(name); if (code === undefined) { code = ++maxCode; codeOf.set(name, code); }
     return [code, name];
   };
-
-  // ---- match footprints to components
-  const byPath = new Map<string, KItem>(), byRef = new Map<string, KItem[]>();
-  for (const fp of fps) {
-    const path = kidStr(fp.node, "path"); if (path && !byPath.has(path)) byPath.set(path, fp);
-    const ref = fpRef(fp.node); const l = byRef.get(ref); if (l) l.push(fp); else byRef.set(ref, [fp]);
-  }
-  const claimed = new Map<string, NetComponent>();      // footprint id -> component
-  const fpOf = new Map<NetComponent, KItem>();
-  const comps = netlist.components.slice().sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
-  if (!o.relinkByRef) for (const c of comps) for (const p of c.paths) { const fp = byPath.get(p); if (fp && !claimed.has(fp.id)) { claimed.set(fp.id, c); fpOf.set(c, fp); break; } }
-  // by reference: everything when re-linking, otherwise only footprints that carry no (known) symbol link
-  const allPaths = new Set<string>(); for (const c of comps) for (const p of c.paths) allPaths.add(p);
-  for (const c of comps) {
-    if (fpOf.has(c)) continue;
-    for (const fp of byRef.get(c.ref) || []) {
-      if (claimed.has(fp.id)) continue;
-      if (!o.relinkByRef && allPaths.has(kidStr(fp.node, "path"))) continue;
-      claimed.set(fp.id, c); fpOf.set(c, fp); break;
-    }
-  }
+  // DIALOG_UPDATE_PCB: m_netlist->SortByReference() (StrNumCmp, ignoring case)
+  const comps = netlist.components.slice().sort((a, b) => strNumCmp(a.ref.toUpperCase(), b.ref.toUpperCase()));
+  // m_schematicNetNames: the no-connect pad names avoid them
+  const schematicNetNames = new Set<string>(); for (const c of comps) for (const p of c.pins.values()) schematicNetNames.add(p.net);
+  // cacheCopperZoneConnections: the pads each copper zone reaches before the update
+  const zonePads = zoneConnectedPads(doc);
+  /** the footprint node as this update has it so far (modified or the board's) */
+  const current = (fp: KItem): SNode => modified.get(fp.id) || fp.node;
 
   const padsOf = (fp: SNode): SNode[] => kids(fp, "pad") as SNode[];
-  const applyNets = (ref: string, fp: SNode, c: NetComponent): boolean => {
+  /** updateComponentPadConnections; `shown` is the reference the footprint carries at this point of the run */
+  const applyNets = (shown: string, fp: SNode, c: NetComponent, quiet: boolean): boolean => {
+    const out = (sev: Severity, text: string): void => { if (!quiet) say(sev, text); };
     let changed = false;
-    for (const pad of padsOf(fp)) {
+    const padNetnames = new Set<string>();
+    const pads = padsOf(fp).slice().sort((a, b) => codeCmp(kidStr(a, "uuid") || kidStr(a, "tstamp"), kidStr(b, "uuid") || kidStr(b, "tstamp")));
+    for (const pad of pads) {
       const number = str(pad[1]), pin = number ? c.pins.get(number) : undefined, cur = netNameOf(doc, pad);
       const layers = kid(pad, "layers") as SNode | null, onCopper = !layers || layers.slice(1).some((l) => /\.Cu$/.test(str(l)));
+      if (kidStr(pad, "pinfunction") !== (pin ? pin.name : "")) { if (pin && pin.name) setKid(pad, "pinfunction", [pin.name], PAD_AFTER_NET.slice(1)); else delKid(pad, "pinfunction"); changed = true; }
+      if (kidStr(pad, "pintype") !== (pin ? pin.type : "")) { if (pin && pin.type) setKid(pad, "pintype", [pin.type], PAD_AFTER_NET.slice(2)); else delKid(pad, "pintype"); changed = true; }
       if (!pin || !onCopper) {
-        if (cur) { say("action", `Disconnect ${ref} pin ${number}.`); delKid(pad, "net"); delKid(pad, "pinfunction"); delKid(pad, "pintype"); changed = true; }
-        else if (onCopper && number && str(pad[2]) !== "np_thru_hole") say("warning", `No net found for component ${ref} pad ${number} (no pin ${number} in symbol).`);
+        if (cur) { out("action", T(`Disconnect ${shown} pin ${number}.`, `Disconnected ${shown} pin ${number}.`)); delKid(pad, "net"); changed = true; }
+        else if (onCopper && number) out("warning", `No net found for component ${shown} pad ${number} (no pin ${number} in symbol).`);
+        if (kidStr(pad, "pinfunction")) { delKid(pad, "pinfunction"); changed = true; }
         continue;
       }
-      if (cur !== pin.net) {
-        if (!boardNets.has(pin.net) && !addedNets.has(pin.net)) { addedNets.add(pin.net); say("action", `Add net ${unescapeNetName(pin.net)}.`); }
-        if (cur) { oldToNew.set(cur, pin.net); say("action", `Reconnect ${ref} pin ${number} from ${unescapeNetName(cur)} to ${unescapeNetName(pin.net)}.`); }
-        else say("action", `Connect ${ref} pin ${number} to ${unescapeNetName(pin.net)}.`);
-        setKid(pad, "net", netValues(pin.net), PAD_AFTER_NET); changed = true;
+      let netName = pin.net;
+      // IsNoConnectPad: a pad whose pin type names no_connect gets a name of its own within the footprint
+      if (pin.type.includes("no_connect")) {
+        for (let jj = 1; padNetnames.has(netName) || (netName !== pin.net && schematicNetNames.has(netName)); jj++) netName = pin.net + "_" + jj;
+        padNetnames.add(netName);
       }
-      if (kidStr(pad, "pinfunction") !== pin.name) { if (pin.name) setKid(pad, "pinfunction", [pin.name], PAD_AFTER_NET.slice(1)); else delKid(pad, "pinfunction"); changed = true; }
-      if (kidStr(pad, "pintype") !== pin.type) { if (pin.type) setKid(pad, "pintype", [pin.type], PAD_AFTER_NET.slice(2)); else delKid(pad, "pintype"); changed = true; }
+      if (cur !== netName) {
+        if (!boardNets.has(netName) && !addedNets.has(netName)) { addedNets.add(netName); out("action", `Add net ${unescapeNetName(netName)}.`); }
+        if (cur) { oldToNew.set(cur, netName); out("action", T(`Reconnect ${shown} pin ${number} from ${unescapeNetName(cur)} to ${unescapeNetName(netName)}.`, `Reconnected ${shown} pin ${number} from ${unescapeNetName(cur)} to ${unescapeNetName(netName)}.`)); }
+        else out("action", T(`Connect ${shown} pin ${number} to ${unescapeNetName(netName)}.`, `Connected ${shown} pin ${number} to ${unescapeNetName(netName)}.`));
+        setKid(pad, "net", netValues(netName), PAD_AFTER_NET); changed = true;
+      }
     }
     return changed;
   };
-  // BOARD_NETLIST_UPDATER::applyComponentVariants for the component's one footprint (dry-run wording, like the rest
-  // of the report).  `orig` is the footprint as it was before this update: its FOOTPRINT_VARIANTs hold their own
-  // flags.  `isBase` forces the footprint to count as the component's base footprint.
-  const applyVariants = (fp: SNode, c: NetComponent, orig: SNode, isBaseOverride: boolean): boolean => {
-    if (!c.footprint) return false;
-    const ref = c.ref, fpid = str(fp[1]);
-    let changed = false;
-    const isBase = isBaseOverride || fpidsEquivalent(fpid, c.footprint);
-    const baseDnp = attrFlags(fp).has("dnp");
-    let effDnp = baseDnp;
-    if (!isBase && !effDnp) { say("action", `Add ${ref} 'Do not place' fabrication attribute.`); setAttrFlag(fp, "dnp", true); effDnp = true; changed = true; }
-    const excess = new Map<string, string>();      // lower-case name -> the footprint's own spelling
-    for (const v of kids(orig, "variant") as SNode[]) { const n = str(((kid(v, "name") as SNode | null) || [])[1]); if (n) excess.set(n.toLowerCase(), n); }
-    const writes: { name: string; flags: FpFlags; fields: Map<string, string> }[] = [];
-    for (const v of c.variants || []) {
-      const vFpid = v.fields.get("Footprint") || c.footprint;
-      if (!fpidsEquivalent(fpid, vFpid)) continue;   // not this variant's footprint (one footprint per reference)
-      excess.delete(v.name.toLowerCase());
-      const cur = footprintVariant(orig, v.name), flagsNow = (): FpFlags => { const f = attrFlags(fp); return { dnp: f.has("dnp"), exclude_from_bom: f.has("exclude_from_bom"), exclude_from_sim: f.has("exclude_from_sim"), exclude_from_pos_files: f.has("exclude_from_pos_files") }; };
-      let st: { name: string; flags: FpFlags; fields: Map<string, string> } | null = cur ? { name: cur.name, flags: { ...cur.flags }, fields: new Map(cur.fields) } : null;
-      let touched = false;
-      const add = (): { name: string; flags: FpFlags; fields: Map<string, string> } => { if (!st) st = { name: v.name, flags: flagsNow(), fields: new Map() }; touched = true; return st; };
-      const attr = (key: keyof FpFlags, label: string, target: boolean, current: boolean): void => {
-        if (current === target) return;
-        say("action", target ? `Add ${ref} '${label}' attribute to variant ${v.name}.` : `Remove ${ref} '${label}' attribute from variant ${v.name}.`);
-        add().flags[key] = target; changed = true;
-      };
-      const now = flagsNow();
-      attr("dnp", "Do not place", v.dnp ?? baseDnp, cur ? cur.flags.dnp : effDnp);
-      attr("exclude_from_bom", "exclude from BOM", v.excludedFromBOM ?? now.exclude_from_bom, cur ? cur.flags.exclude_from_bom : now.exclude_from_bom);
-      attr("exclude_from_sim", "exclude from simulation", v.excludedFromSim ?? now.exclude_from_sim, cur ? cur.flags.exclude_from_sim : now.exclude_from_sim);
-      attr("exclude_from_pos_files", "exclude from position files", v.excludedFromPosFiles ?? now.exclude_from_pos_files, cur ? cur.flags.exclude_from_pos_files : now.exclude_from_pos_files);
-      if (o.updateFields !== false) {
-        const fpFields = new Map<string, string>();
-        for (const p of kids(fp, "property") as SNode[]) fpFields.set(str(p[1]), str(p[2]));
-        for (const k of [...v.fields.keys()].sort(codeCmp)) {
-          if (k.toLowerCase() === "footprint") continue;
-          const val = v.fields.get(k) as string;
-          const s2 = st as { fields: Map<string, string> } | null;
-          const current = s2 && s2.fields.has(k) ? s2.fields.get(k) as string : (fpFields.get(k) ?? "");
-          fpFields.delete(k);
-          if (current !== val) { say("action", `Change ${ref} field '${k}' to '${val}' on variant ${v.name}.`); add().fields.set(k, val); changed = true; }
+  // BOARD_NETLIST_UPDATER::applyComponentVariants for the component's footprints.  `origs` are the footprints as they
+  // were before this update: their FOOTPRINT_VARIANTs hold their own flags.
+  const applyVariants = (c: NetComponent, list: { node: SNode; orig: SNode; shown: string; forceBase?: boolean }[], baseFpid: string, quiet: boolean): boolean[] => {
+    const res = list.map(() => false);
+    if (!baseFpid) return res;
+    const out = (text: string): void => { if (!quiet) say("action", text); };
+    const multi = list.length > 1;
+    const infos = (c.variants || []).map((v) => { const f = v.fields.get("Footprint"); return { v, fpid: f ? parseFpid(f) : baseFpid }; });
+    list.forEach((entry, idx) => {
+      const fp = entry.node, orig = entry.orig, ref = entry.shown, fpid = str(fp[1]);
+      const tail = multi ? ` (footprint ${fpid})` : "";
+      let changed = false;
+      const isBase = !!entry.forceBase || fpidsEquivalent(fpid, baseFpid);
+      const baseDnp = attrFlags(fp).has("dnp");
+      let effDnp = baseDnp;
+      if (!isBase && !effDnp) { out(T(`Add ${ref} 'Do not place' fabrication attribute.`, `Added ${ref} 'Do not place' fabrication attribute.`)); setAttrFlag(fp, "dnp", true); effDnp = true; changed = true; }
+      const excess = new Map<string, string>();      // lower-case name -> the footprint's own spelling
+      for (const v of kids(orig, "variant") as SNode[]) { const n = str(((kid(v, "name") as SNode | null) || [])[1]); if (n) excess.set(n.toLowerCase(), n); }
+      const writes: { name: string; flags: FpFlags; fields: Map<string, string> }[] = [];
+      for (const { v, fpid: vFpid } of infos) {
+        const associated = fpidsEquivalent(fpid, vFpid);
+        if (!associated && !multi) continue;
+        excess.delete(v.name.toLowerCase());
+        const cur = footprintVariant(orig, v.name), flagsNow = (): FpFlags => { const f = attrFlags(fp); return { dnp: f.has("dnp"), exclude_from_bom: f.has("exclude_from_bom"), exclude_from_sim: f.has("exclude_from_sim"), exclude_from_pos_files: f.has("exclude_from_pos_files") }; };
+        let st: { name: string; flags: FpFlags; fields: Map<string, string> } | null = cur ? { name: cur.name, flags: { ...cur.flags }, fields: new Map(cur.fields) } : null;
+        let touched = false;
+        const add = (): { name: string; flags: FpFlags; fields: Map<string, string> } => { if (!st) st = { name: v.name, flags: flagsNow(), fields: new Map() }; touched = true; return st; };
+        const attr = (key: keyof FpFlags, label: string, target: boolean, currentValue: boolean): void => {
+          if (currentValue === target) return;
+          out(target ? T(`Add ${ref} '${label}' attribute to variant ${v.name}${tail}.`, `Added ${ref} '${label}' attribute to variant ${v.name}${tail}.`) : T(`Remove ${ref} '${label}' attribute from variant ${v.name}${tail}.`, `Removed ${ref} '${label}' attribute from variant ${v.name}${tail}.`));
+          add().flags[key] = target; changed = true;
+        };
+        const now = flagsNow();
+        attr("dnp", "Do not place", associated ? (v.dnp ?? baseDnp) : true, cur ? cur.flags.dnp : effDnp);
+        attr("exclude_from_bom", "exclude from BOM", v.excludedFromBOM ?? now.exclude_from_bom, cur ? cur.flags.exclude_from_bom : now.exclude_from_bom);
+        attr("exclude_from_sim", "exclude from simulation", v.excludedFromSim ?? now.exclude_from_sim, cur ? cur.flags.exclude_from_sim : now.exclude_from_sim);
+        attr("exclude_from_pos_files", "exclude from position files", v.excludedFromPosFiles ?? now.exclude_from_pos_files, cur ? cur.flags.exclude_from_pos_files : now.exclude_from_pos_files);
+        if (o.updateFields !== false) {
+          const fpFields = new Map<string, string>();
+          for (const p of kids(fp, "property") as SNode[]) fpFields.set(str(p[1]), str(p[2]));
+          for (const k of [...v.fields.keys()].sort(codeCmp)) {
+            if (k.toLowerCase() === "footprint") continue;
+            const val = v.fields.get(k) as string;
+            const s2 = st as { fields: Map<string, string> } | null;
+            const currentValue = s2 && s2.fields.has(k) ? s2.fields.get(k) as string : (fpFields.get(k) ?? "");
+            fpFields.delete(k);
+            if (currentValue !== val) { out(T(`Change ${ref} field '${k}' to '${val}' on variant ${v.name}${tail}.`, `Changed ${ref} field '${k}' to '${val}' on variant ${v.name}${tail}.`)); add().fields.set(k, val); changed = true; }
+          }
+          for (const k of [...fpFields.keys()].sort(codeCmp)) {
+            if (k.toLowerCase() === "footprint") continue;
+            const s2 = st as { fields: Map<string, string> } | null;
+            if (cur && s2 && s2.fields.has(k)) { out(T(`Remove ${ref} field '${k}' override on variant ${v.name}${tail}.`, `Removed ${ref} field '${k}' override on variant ${v.name}${tail}.`)); s2.fields.delete(k); touched = true; changed = true; }
+          }
         }
-        for (const k of [...fpFields.keys()].sort(codeCmp)) {
-          if (k.toLowerCase() === "footprint") continue;
-          const s2 = st as { fields: Map<string, string> } | null;
-          if (cur && s2 && s2.fields.has(k)) { say("action", `Remove ${ref} field '${k}' override on variant ${v.name}.`); s2.fields.delete(k); touched = true; changed = true; }
+        if (touched && st) writes.push(st);
+      }
+      for (const w of writes) {
+        const old = footprintVariantNode(fp, w.name); if (old) fp.splice(fp.indexOf(old), 1);
+        const fields: Record<string, string> = {}; for (const [k, v] of w.fields) fields[k] = v;
+        const outNode = setFootprintVariant(fp, w.name, { flags: w.flags, fields });
+        fp.length = 0; fp.push(...outNode);
+      }
+      for (const lowerName of [...excess.keys()].sort((a, b) => codeCmp(excess.get(a) as string, excess.get(b) as string))) {
+        const name = excess.get(lowerName) as string;
+        out(T(`Remove variant ${ref}:${name} no longer associated with footprint ${fpid}.`, `Removed variant ${ref}:${name} no longer associated with footprint ${fpid}.`));
+        const node = footprintVariantNode(fp, name); if (node) fp.splice(fp.indexOf(node), 1);
+        changed = true;
+      }
+      res[idx] = changed;
+    });
+    return res;
+  };
+  /**
+   * updateFootprintParameters.  `quiet`: a footprint the dry run adds (KiCad has no footprint to report on yet).
+   * Returns the changed flag and the reference the footprint carries afterwards (the old one in the dry run).
+   */
+  const applyComponent = (fp: SNode, c: NetComponent, quiet: boolean): { changed: boolean; shown: string } => {
+    const out = (text: string): void => { if (!quiet) say("action", text); };
+    let changed = false;
+    const fpid = str(fp[1]);
+    // firstAssociatedVariant: a footprint that is not the base one takes the values of the first variant naming it
+    let variant: NetVariant | null = null;
+    if (!fpidsEquivalent(fpid, c.footprint)) for (const v of c.variants || []) if (v.fields.has("Footprint") && fpid === v.fields.get("Footprint")) { variant = v; break; }
+    const oldRef = fpRef(fp);
+    let shown = oldRef;
+    if (oldRef !== c.ref) { out(T(`Change ${oldRef} reference designator to ${c.ref}.`, `Changed ${oldRef} reference designator to ${c.ref}.`)); setFpText(fp, "Reference", c.ref); changed = true; if (applied || quiet) shown = c.ref; }
+    if (quiet) shown = c.ref;
+    const value = variant && variant.fields.has("Value") ? variant.fields.get("Value") as string : c.value;
+    const oldVal = fpValue(fp);
+    if (oldVal !== value) { out(T(`Change ${shown} value from ${oldVal} to ${value}.`, `Changed ${shown} value from ${oldVal} to ${value}.`)); setFpText(fp, "Value", value); changed = true; }
+    const path = kidStr(fp, "path"), newPath = c.paths[0] || "";
+    if (path !== newPath) {
+      out(T(`Update ${shown} symbol association from ${path} to ${newPath}.`, `Updated ${shown} symbol association from ${path} to ${newPath}.`));
+      setKid(fp, "path", [newPath], FP_AFTER_PATH); changed = true;
+    }
+    // the fields: the footprint's (but Reference, Value and Component Class) against the symbol's (but Reference, Value,
+    // Footprint and Component Class), the variant's overrides laid over them
+    const fpFields = new Map<string, string>();
+    for (const p of kids(fp, "property") as SNode[]) { const n = str(p[1]); if (n === "Reference" || n === "Value" || n === "Component Class" || n === "ki_fp_filters") continue; fpFields.set(n, str(p[2])); }
+    const compFields = new Map<string, string>(Object.entries(c.fields));
+    if (variant) for (const [k, v] of variant.fields) compFields.set(k, v);
+    for (const k of ["Reference", "Value", "Footprint", "Component Class"]) compFields.delete(k);
+    let same = true, removeOnly = true;
+    for (const [name, v] of compFields) if (!fpFields.has(name) || fpFields.get(name) !== v) { same = false; removeOnly = false; break; }
+    for (const name of fpFields.keys()) if (!compFields.has(name)) { same = false; break; }
+    if (!same) {
+      if (o.updateFields !== false && (!removeOnly || o.removeExtraFields)) {
+        out(T(`Update ${shown} fields.`, `Updated ${shown} fields.`)); changed = true;
+        for (const [name, v] of compFields) {
+          const p = prop(fp, name);
+          if (p) p[2] = v;
+          else if (prop(fp, "Reference")) insertField(fp, newField(fp, name, v, o));   // legacy fp_text footprints carry no fields
         }
       }
-      if (touched && st) writes.push(st);
+      if (o.removeExtraFields) {
+        let warned = false;
+        for (let j = 1; j < fp.length; j++) {
+          const p = fp[j]; if (!isList(p) || p[0] !== "property") continue;
+          const name = str(p[1]); if (MANDATORY.has(name) || name === "ki_fp_filters" || compFields.has(name)) continue;
+          if (!warned) { warned = true; out(T(`Remove ${shown} footprint fields not in symbol.`, `Removed ${shown} footprint fields not in symbol.`)); }
+          fp.splice(j, 1); j--; changed = true;
+        }
+      }
     }
-    for (const w of writes) {
-      const old = footprintVariantNode(fp, w.name); if (old) fp.splice(fp.indexOf(old), 1);
-      const fields: Record<string, string> = {}; for (const [k, v] of w.fields) fields[k] = v;
-      const out = setFootprintVariant(fp, w.name, { flags: w.flags, fields });
-      fp.length = 0; fp.push(...out);
-    }
-    for (const lowerName of [...excess.keys()].sort((a, b) => codeCmp(excess.get(a) as string, excess.get(b) as string))) {
-      const name = excess.get(lowerName) as string;
-      say("action", `Remove variant ${ref}:${name} no longer associated with footprint ${fpid}.`);
-      const node = footprintVariantNode(fp, name); if (node) fp.splice(fp.indexOf(node), 1);
+    if (kidStr(fp, "sheetname") !== c.sheetName) { out(T(`Update ${shown} sheetname to '${c.sheetName}'.`, `Updated ${shown} sheetname to '${c.sheetName}'.`)); if (c.sheetName) setKid(fp, "sheetname", [c.sheetName], after("sheetname")); else delKid(fp, "sheetname"); changed = true; }
+    if (kidStr(fp, "sheetfile") !== c.sheetFile) { out(T(`Update ${shown} sheetfile to '${c.sheetFile}'.`, `Updated ${shown} sheetfile to '${c.sheetFile}'.`)); if (c.sheetFile) setKid(fp, "sheetfile", [c.sheetFile], after("sheetfile")); else delKid(fp, "sheetfile"); changed = true; }
+    const filters = c.fpFilters || "", fl = prop(fp, "ki_fp_filters"), curFilters = fl ? str(fl[2]) : "";
+    if (curFilters !== filters) {
+      out(T(`Update ${shown} footprint filters to '${filters}'.`, `Updated ${shown} footprint filters to '${filters}'.`));
+      if (fl) { if (filters) fl[2] = filters; else fp.splice(fp.indexOf(fl), 1); }
+      else { const pi = idxOf(fp, "path"); fp.splice(pi > 0 ? pi : fp.length, 0, qnode("property", ["ki_fp_filters", filters])); }
       changed = true;
     }
-    return changed;
-  };
-  const applyComponent = (fp: SNode, c: NetComponent, fresh: boolean, isBase = false): boolean => {
-    let changed = false;
-    const orig = clone(fp);
-    const oldRef = fpRef(fp);
-    if (oldRef !== c.ref) { if (!fresh) say("action", `Change ${oldRef} reference designator to ${c.ref}.`); setFpText(fp, "Reference", c.ref); changed = true; }
-    const oldVal = fpValue(fp);
-    if (oldVal !== c.value) { if (!fresh) say("action", `Change ${c.ref} value from ${oldVal} to ${c.value}.`); setFpText(fp, "Value", c.value); changed = true; }
-    const path = kidStr(fp, "path");
-    if (!c.paths.includes(path)) {
-      if (!fresh) say("action", `Update ${c.ref} symbol association from ${path} to ${c.paths[0]}.`);
-      setKid(fp, "path", [c.paths[0]], ["sheetname", "sheetfile", "units", "solder_mask_margin", "solder_paste_margin", "clearance", "zone_connect", "attr", "duplicate_pad_numbers_are_jumpers", "fp_text", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "pad", "embedded_fonts", "model"]); changed = true;
-    }
+    // the fabrication attributes, only with Update Fields (the variant's flag when it sets one)
     if (o.updateFields !== false) {
-      let touched = false;
-      for (const [name, value] of Object.entries(c.fields)) {
-        if (name.startsWith("ki_")) continue;
-        const p = prop(fp, name);
-        if (p) { if (str(p[2]) !== value) { p[2] = value; touched = true; } }
-        else if (prop(fp, "Reference")) { insertField(fp, newField(fp, name, value, o)); touched = true; }   // legacy fp_text footprints carry no fields
+      const attrSync = (flag: string, want: boolean, label: string): void => {
+        if (attrFlags(fp).has(flag) === want) return;
+        out(want ? T(`Add ${shown} ${label}.`, `Added ${shown} ${label}.`) : T(`Remove ${shown} ${label}.`, `Removed ${shown} ${label}.`));
+        setAttrFlag(fp, flag, want); changed = true;
+      };
+      attrSync("exclude_from_bom", variant && variant.excludedFromBOM !== undefined ? variant.excludedFromBOM : c.excludeFromBom, "'exclude from BOM' fabrication attribute");
+      attrSync("exclude_from_sim", variant && variant.excludedFromSim !== undefined ? variant.excludedFromSim : !!c.excludeFromSim, "'exclude from simulation' attribute");
+      attrSync("dnp", variant && variant.dnp !== undefined ? variant.dnp : c.dnp, "'Do not place' fabrication attribute");
+      attrSync("exclude_from_pos_files", variant && variant.excludedFromPosFiles !== undefined ? variant.excludedFromPosFiles : !!c.excludeFromPosFiles, "'exclude from position files' fabrication attribute");
+      const jumpers = !!c.dupPinsAreJumpers, curJ = yes(fp, "duplicate_pad_numbers_are_jumpers", false);
+      if (jumpers !== curJ) {
+        out(jumpers ? T(`Add ${shown} 'duplicate pad numbers are jumpers' attribute.`, `Added ${shown} 'duplicate pad numbers are jumpers' attribute.`) : T(`Remove ${shown} 'duplicate pad numbers are jumpers' attribute.`, `Removed ${shown} 'duplicate pad numbers are jumpers' attribute.`));
+        setKid(fp, "duplicate_pad_numbers_are_jumpers", [jumpers ? "yes" : "no"], after("duplicate_pad_numbers_are_jumpers"), true); changed = true;
       }
-      if (touched) { if (!fresh) say("action", `Update ${c.ref} fields.`); changed = true; }
-    }
-    if (o.removeExtraFields) {
-      let dropped = false;
-      for (let j = fp.length - 1; j > 0; j--) {
-        const p = fp[j]; if (!isList(p) || p[0] !== "property") continue;
-        const name = str(p[1]); if (MANDATORY.has(name) || name === "Footprint" || name.startsWith("ki_") || name in c.fields) continue;
-        fp.splice(j, 1); dropped = true;
+      const want = jumperGroups(c.jumperPinGroups || []);
+      if (JSON.stringify(want) !== JSON.stringify(fpJumperGroups(fp))) {
+        out(T(`Update ${shown} jumper pad groups`, `Updated ${shown} jumper pad groups`));
+        delKid(fp, "jumper_pad_groups");
+        if (want.length) setKid(fp, "jumper_pad_groups", [], after("jumper_pad_groups"), true).push(...want.map((g) => g.map((n) => qnode("x", [n])[1]) as SNode));
+        changed = true;
       }
-      if (dropped) { if (!fresh) say("action", `Remove ${c.ref} footprint fields not in symbol.`); changed = true; }
     }
-    if (kidStr(fp, "sheetname") !== c.sheetName) { if (!fresh) say("action", `Update ${c.ref} sheetname to '${c.sheetName}'.`); setKid(fp, "sheetname", [c.sheetName], ["sheetfile", "units", "attr", "fp_text", "fp_line", "pad", "embedded_fonts", "model"]); changed = true; }
-    if (kidStr(fp, "sheetfile") !== c.sheetFile) { if (!fresh) say("action", `Update ${c.ref} sheetfile to '${c.sheetFile}'.`); setKid(fp, "sheetfile", [c.sheetFile], ["units", "attr", "fp_text", "fp_line", "pad", "embedded_fonts", "model"]); changed = true; }
-    const flags = attrFlags(fp);
-    if (flags.has("exclude_from_bom") !== c.excludeFromBom) { if (!fresh) say("action", `${c.excludeFromBom ? "Add" : "Remove"} ${c.ref} 'exclude from BOM' fabrication attribute.`); setAttrFlag(fp, "exclude_from_bom", c.excludeFromBom); changed = true; }
-    if (flags.has("dnp") !== c.dnp) { if (!fresh) say("action", `${c.dnp ? "Add" : "Remove"} ${c.ref} 'Do not place' fabrication attribute.`); setAttrFlag(fp, "dnp", c.dnp); changed = true; }
-    if (applyNets(c.ref, fp, c)) changed = true;
-    if (applyVariants(fp, c, orig, isBase)) changed = true;
-    return changed;
+    return { changed, shown };
   };
-
-  // ---- new footprints go in a row below the board, like the desktop's "spread out" placement
-  const bb = doc.bbox || [0, 0, 0, 0];
-  let nextX = bb[0], rowY = bb[3] + 10;
-  const place = (fp: SNode): void => {
-    let w = 10, hgt = 10;
-    try {
-      const probe = { id: "probe", kind: "footprint", node: clone(fp), geom: [], bbox: null, movable: false, docType: "pcb" } as unknown as KItem;
-      (KiCadCanvas.buildGeom as (d: KDoc, i: KItem) => void)(doc, probe);
-      if (probe.bbox) { const a = atOf(fp) as number[]; w = probe.bbox[2] - probe.bbox[0]; hgt = probe.bbox[3] - probe.bbox[1]; const dx = a[0] - probe.bbox[0], dy = a[1] - probe.bbox[1]; setKid(fp, "at", [r4(nextX + dx), r4(rowY + dy)], ["descr", "tags", "property"]); }
-      else setKid(fp, "at", [r4(nextX), r4(rowY)], ["descr", "tags", "property"]);
-    } catch (e) { setKid(fp, "at", [r4(nextX), r4(rowY)], ["descr", "tags", "property"]); }
-    nextX += w + 2.54;
-    if (nextX - bb[0] > Math.max(120, bb[2] - bb[0])) { nextX = bb[0]; rowY += hgt + 5; }
+  /** updateComponentUnits: the footprint's (units …) from the netlist's unit info. */
+  const applyUnits = (fp: SNode, c: NetComponent, shown: string, quiet: boolean): boolean => {
+    const want = c.unitInfo || [], cur = fpUnits(fp);
+    if (JSON.stringify(want) === JSON.stringify(cur)) return false;
+    if (!quiet) say("action", T(`Update ${shown} unit metadata.`, `Updated ${shown} unit metadata.`));
+    delKid(fp, "units");
+    if (want.length) setKid(fp, "units", [], after("units"), true).push(...want.map((u) => ["unit", qnode("name", [u.name]), qnode("pins", u.pins)] as SNode));
+    return true;
   };
-
-  const addedFor = new Map<NetComponent, SNode>();
-  for (const c of comps) {
-    const fp = fpOf.get(c);
-    if (!fp) {
-      if (!c.footprint) { say("error", `Cannot add ${c.ref} (no footprint assigned).`); continue; }
-      const lib = o.footprintFor ? o.footprintFor(c.footprint) : null;
-      if (lib === "missing") { say("error", `Cannot add ${c.ref} (footprint '${c.footprint}' not found).`); continue; }
-      if (!lib) { say("error", `Cannot add ${c.ref} (footprint '${c.footprint}': library not available).`); continue; }
-      const node = clone(lib);
-      say("action", `Add ${c.ref} (footprint '${c.footprint}').`);
-      applyComponent(node, c, true); place(node); added.push(node); addedFor.set(c, node);
-      continue;
-    }
-    let node = clone(fp.node), noLibrary = false;
-    const curId = str(node[1]);
-    if (o.replaceFootprints !== false && c.footprint && curId !== c.footprint) {
-      const lib = o.footprintFor ? o.footprintFor(c.footprint) : null;
-      if (!lib) noLibrary = true;   // the web has no library to swap from: the footprint stands as the base (KiCad would have replaced it)
-      if (!lib || lib === "missing") say("error", `Cannot update ${c.ref} (footprint '${c.footprint}' ${lib === "missing" ? "not found" : "not available: no footprint library"}).`);
-      else if (isLocked(node) && !o.overrideLocks) say("warning", `Cannot change ${c.ref} footprint from '${curId}' to '${c.footprint}' (footprint is locked).`);
-      else {
-        say("action", `Change ${c.ref} footprint from '${curId}' to '${c.footprint}'.`);
-        const fresh = clone(lib), a = atOf(node) as number[];
-        const at: (string | number)[] = [a[0], a[1]]; if (a[2]) at.push(a[2]);
-        setKid(fresh, "at", at, ["descr", "tags", "property"], true);
-        setKid(fresh, "uuid", [fp.id], ["at"]);
-        for (const name of ["Reference", "Value"]) { const from = prop(node, name), to = prop(fresh, name); if (from && to) { const keep = to[2]; to.length = 0; to.push(...clone(from)); if (name === "Value" && !c.value) to[2] = keep; } }
-        for (const pad of padsOf(fresh)) { const old = padsOf(node).find((q) => str(q[1]) === str(pad[1])); const n = old && (kid(old, "net") as SNode | null); if (n) { const i = idxOf(pad, "net"); if (i > 0) pad[i] = clone(n); else setKid(pad, "net", n.slice(1) as (string | number)[], PAD_AFTER_NET); } }
-        node = fresh;
-      }
-    }
-    if (applyComponent(node, c, false, noLibrary) || node !== fp.node && JSON.stringify(node) !== JSON.stringify(fp.node)) modified.set(fp.id, node);
-  }
 
   // ---- BOARD_NETLIST_UPDATER::updateFootprintGroup: each footprint goes to the board group of its symbol's group
-  if (o.transferGroups) {
-    interface BGroup { id: string | null; node: SNode; members: string[]; dirty: boolean }
-    const groups = new Map<string, BGroup>();
-    for (const it of doc.items.values()) if (it.kind === "group") { const node = clone(it.node), m = kid(node, "members") as SNode | null; groups.set(kidStr(node, "uuid") || it.id, { id: it.id, node, members: m ? m.slice(1).map(str) : [], dirty: false }); }
-    const nameOf = (g: BGroup): string => (typeof g.node[1] === "string" ? str(g.node[1]) : "");
-    for (const c of comps) {
-      const fp = fpOf.get(c), fresh = addedFor.get(c);
-      const fpId = fp ? fp.id : fresh ? kidStr(fresh, "uuid") : ""; if (!fpId) continue;
-      const want = c.group ? c.group.uuid : "";
-      const cur = Array.from(groups.entries()).find(([, g]) => g.members.includes(fpId));
-      if ((cur ? cur[0] : "") === want) continue;
-      if (cur) { say("action", `Remove ${c.ref} from group '${nameOf(cur[1])}'.`); cur[1].members = cur[1].members.filter((m) => m !== fpId); cur[1].dirty = true; }
-      if (c.group) {
-        say("action", `Add ${c.ref} to group '${c.group.name}'.`);
-        let g = groups.get(want);
-        if (!g) { g = { id: null, node: c.group.name ? ["group", c.group.name, ["uuid", want], ["members"]] : ["group", "", ["uuid", want], ["members"]], members: [], dirty: true }; groups.set(want, g); }
-        g.members.push(fpId); g.dirty = true;
+  interface BGroup { id: string | null; node: SNode; members: string[]; dirty: boolean }
+  const groups = new Map<string, BGroup>();
+  if (o.transferGroups) for (const it of doc.items.values()) if (it.kind === "group") { const node = clone(it.node), m = kid(node, "members") as SNode | null; groups.set(kidStr(node, "uuid") || it.id, { id: it.id, node, members: m ? m.slice(1).map(str) : [], dirty: false }); }
+  const groupName = (g: BGroup): string => (typeof g.node[1] === "string" ? str(g.node[1]) : "");
+  const applyGroup = (fpId: string, c: NetComponent, shown: string): void => {
+    if (!o.transferGroups) return;
+    const want = c.group ? c.group.uuid : "";
+    const cur = Array.from(groups.entries()).find(([, g]) => g.members.includes(fpId));
+    if ((cur ? cur[0] : "") === want) return;
+    if (cur) { say("action", T(`Remove ${shown} from group '${groupName(cur[1])}'.`, `Removed ${shown} from group '${groupName(cur[1])}'.`)); cur[1].members = cur[1].members.filter((m) => m !== fpId); cur[1].dirty = true; }
+    if (c.group) {
+      say("action", T(`Add ${shown} to group '${c.group.name}'.`, `Added ${shown} to group '${c.group.name}'.`));
+      let g = groups.get(want);
+      if (!g) { g = { id: null, node: ["group", c.group.name, ["uuid", want], ["members"]], members: [], dirty: true }; groups.set(want, g); }
+      g.members.push(fpId); g.dirty = true;
+    }
+  };
+
+  // ---- estimateFootprintInsertionPosition: under the board edges (their centre, 10 mm below), the page's centre on an empty board
+  const insertAt = ((): [number, number] => {
+    if (!doc.items.size) { const pg = (doc as KDoc & { page?: number[] }).page || [297, 210]; return [r4(pg[0] / 2), r4(pg[1] / 2)]; }
+    let bb: [number, number, number, number] | null = null;
+    const merge = (b: [number, number, number, number] | null): void => { if (b) bb = bb ? [Math.min(bb[0], b[0]), Math.min(bb[1], b[1]), Math.max(bb[2], b[0] + b[2]), Math.max(bb[3], b[1] + b[3])] : [b[0], b[1], b[0] + b[2], b[1] + b[3]]; };
+    for (const it of doc.items.values()) {
+      if (it.kind === "footprint") { const geom = (it.geom || []).filter((g) => (g as { layer?: string }).layer === "Edge.Cuts" && (g as { t?: string }).t !== "text"); if (geom.length) merge(boardItemBox({ ...it, geom } as KItem, 1e6)); }
+      else if (/^gr_(line|rect|circle|arc|poly|curve)$/.test(it.kind) && kidStr(it.node, "layer") === "Edge.Cuts") merge(boardItemBox(it, 1e6));
+    }
+    const b = bb as [number, number, number, number] | null;
+    if (!b || (b[2] === b[0] && b[3] === b[1])) return [0, 0];
+    return [r4(((b[0] + b[2]) / 2) / 1e6), r4((b[3] + 10e6) / 1e6)];
+  })();
+  /** addNewFootprint: the library footprint (pads on no net) at the insertion position; null after reporting why not */
+  const addNew = (c: NetComponent, fpid: string): SNode | null => {
+    if (!fpid) { say("error", `Cannot add ${c.ref} (no footprint assigned).`); return null; }
+    const lib = o.footprintFor ? o.footprintFor(fpid) : null;
+    if (lib === "missing") { say("error", `Cannot add ${c.ref} (footprint '${fpid}' not found).`); return null; }
+    if (!lib) { say("error", `Cannot add ${c.ref} (footprint '${fpid}': library not available).`); return null; }
+    const node = clone(lib);
+    for (const pad of padsOf(node)) delKid(pad, "net");
+    const a = atOf(node) as number[];
+    setKid(node, "at", a[2] ? [insertAt[0], insertAt[1], a[2]] : [insertAt[0], insertAt[1]], ["descr", "tags", "property"], true);
+    say("action", T(`Add ${c.ref} (footprint '${fpid}').`, `Added ${c.ref} (footprint '${fpid}').`));
+    return node;
+  };
+  /** replaceFootprint: the library footprint exchanged in the old one's place (ExchangeFootprint keeps reference, value, fields and pad nets) */
+  const replace = (fp: KItem, c: NetComponent): SNode | null => {
+    const node = fp.node, curId = str(node[1]), ref = fpRef(node);
+    if (!c.footprint) { say("error", `Cannot update ${c.ref} (no footprint assigned).`); return null; }
+    const lib = o.footprintFor ? o.footprintFor(c.footprint) : null;
+    if (!lib || lib === "missing") { say("error", `Cannot update ${c.ref} (footprint '${c.footprint}' ${lib === "missing" ? "not found" : "not available: no footprint library"}).`); return null; }
+    if (isLocked(node) && !o.overrideLocks) { say("warning", T(`Cannot change ${ref} footprint from '${curId}' to '${c.footprint}' (footprint is locked).`, `Could not change ${ref} footprint from '${curId}' to '${c.footprint}' (footprint is locked).`)); return null; }
+    say("action", T(`Change ${ref} footprint from '${curId}' to '${c.footprint}'.`, `Changed ${ref} footprint from '${curId}' to '${c.footprint}'.`));
+    const fresh = clone(lib), a = atOf(node) as number[];
+    const at: (string | number)[] = [a[0], a[1]]; if (a[2]) at.push(a[2]);
+    setKid(fresh, "at", at, ["descr", "tags", "property"], true);
+    setKid(fresh, "uuid", [fp.id], ["at"]);
+    for (const name of ["Reference", "Value"]) { const from = prop(node, name), to = prop(fresh, name); if (from && to) { to.length = 0; to.push(...clone(from)); } }
+    for (const k of ["path", "sheetname", "sheetfile"]) { const n = kid(node, k) as SNode | null; if (n) setKid(fresh, k, n.slice(1) as (string | number)[], after(k)); }
+    for (const pad of padsOf(fresh)) { const old = padsOf(node).find((q) => str(q[1]) === str(pad[1])); const n = old && (kid(old, "net") as SNode | null); delKid(pad, "net"); if (n) setKid(pad, "net", n.slice(1) as (string | number)[], PAD_AFTER_NET); }
+    return fresh;
+  };
+
+  // ---- the components
+  const usedFootprints = new Set<string>();
+  const baseOf = new Map<NetComponent, string>();          // component -> its base footprint's id (testConnectivity)
+  const addedIds: string[] = [];
+  const nodeOf = new Map<string, SNode>();                  // footprint id -> its working node (existing or added)
+  for (const c of comps) {
+    if (c.excludeFromBoard) continue;
+    const baseFpid = c.footprint ? parseFpid(c.footprint) : "", hasBase = !!baseFpid;
+    say("info", `Processing symbol '${c.ref}:${baseFpid}'.`);
+    if (hasBase && baseFpid.indexOf(":") < 0) say("warning", `Warning: ${c.ref} footprint '${baseFpid}' is missing a library name. Use the full 'Library:Footprint' format to avoid repeated update notifications.`);
+    const matching: KItem[] = [];
+    for (const fp of fps) {
+      const match = o.relinkByRef ? fpRef(fp.node).toLowerCase() === c.ref.toLowerCase() : c.paths.includes(kidStr(fp.node, "path"));
+      if (!match) continue;
+      if (attrFlags(fp.node).has("board_only")) say("warning", `Found a footprint matching ${c.ref}, but the footprint's 'Not in schematic' flag indicates there should be no matching symbol.`);
+      else matching.push(fp);
+    }
+    // the footprints the component expects: its own and each variant's (one footprint each)
+    const expected: string[] = [];
+    const expect = (id: string): void => { if (id && !expected.includes(id)) expected.push(id); };
+    expect(baseFpid);
+    for (const v of c.variants || []) { const f = v.fields.get("Footprint"); if (f) expect(parseFpid(f)); }
+    const isExpected = (id: string): boolean => !!id && (expected.includes(id) || expected.some((e) => fpidsEquivalent(id, e)));
+    const take = (id: string): KItem | null => matching.find((fp) => !usedFootprints.has(fp.id) && fpidsEquivalent(str(fp.node[1]), id)) || null;
+    /** `forceBase`: the footprint stands as the base one because the web had no library to replace it from */
+    interface Slot { id: string; node: SNode; orig: SNode; fresh: boolean; quiet: boolean; item: KItem | null; forceBase?: boolean }
+    const slots: Slot[] = [];
+    let base: Slot | null = null;
+    const slotOf = (fp: KItem, node?: SNode): Slot => ({ id: fp.id, node: node || clone(current(fp)), orig: clone(fp.node), fresh: false, quiet: false, item: fp });
+    if (hasBase) { const t = take(baseFpid); if (t) base = slotOf(t); }
+    else if (matching.length) base = slotOf(matching[0]);
+    if (!base && o.replaceFootprints !== false && matching.length) {
+      const cand = matching.find((fp) => !usedFootprints.has(fp.id) && !isExpected(str(fp.node[1])));
+      if (cand) {
+        // the dry run goes on with the footprint as it is, the real run with the exchanged one
+        const r = replace(cand, c); base = slotOf(cand, applied && r ? r : undefined);
+        if (!r && !(o.footprintFor && o.footprintFor(c.footprint))) base.forceBase = true;
       }
     }
-    for (const g of groups.values()) {
-      if (!g.dirty) continue;
-      if (g.id && g.members.length < 2) { removed.push(g.id); continue; }   // a group of fewer than two items goes
-      if (!g.members.length) continue;
-      const i = g.node.findIndex((x, k) => k > 0 && Array.isArray(x) && x[0] === "members");
-      const m: SNode = ["members", ...g.members]; if (i > 0) g.node[i] = m; else g.node.push(m);
-      if (g.id) modified.set(g.id, g.node); else added.push(g.node);
+    if (!base && o.replaceFootprints === false) {
+      const cand = matching.find((fp) => !usedFootprints.has(fp.id) && !isExpected(str(fp.node[1])));
+      if (cand) base = slotOf(cand);
     }
+    const newSlot = (fpid: string): Slot | null => {
+      const node = addNew(c, fpid); if (!node) return null;
+      const id = kidStr(node, "uuid") || (o.newUuid ? o.newUuid() : "");
+      // the dry run has no footprint to update: nothing more is reported for it
+      return { id, node, orig: clone(node), fresh: true, quiet: !applied, item: null };
+    };
+    if (!base && (hasBase || !expected.length)) base = newSlot(baseFpid);
+    if (base) { slots.push(base); usedFootprints.add(base.id); baseOf.set(c, base.id); }
+    for (const id of expected) {
+      if (fpidsEquivalent(id, baseFpid) || fpidsEquivalent(baseFpid, id)) continue;
+      const t = take(id);
+      const s = t ? slotOf(t) : newSlot(id);
+      if (s) { slots.push(s); usedFootprints.add(s.id); }
+    }
+    const shownOf = new Map<Slot, string>();
+    for (const s of slots) {
+      const r = applyComponent(s.node, c, s.quiet);
+      shownOf.set(s, r.shown);
+      applyGroup(s.id, c, r.shown);
+      applyNets(r.shown, s.node, c, s.quiet);
+      applyUnits(s.node, c, r.shown, s.quiet);
+    }
+    // the dry run has no footprint yet for the ones it adds: applyComponentVariants sees the others only
+    const loud = slots.filter((s) => !s.quiet), still = slots.filter((s) => s.quiet);
+    const entry = (s: Slot): { node: SNode; orig: SNode; shown: string; forceBase?: boolean } => ({ node: s.node, orig: s.orig, shown: shownOf.get(s) as string, forceBase: s.forceBase });
+    if (loud.length) applyVariants(c, loud.map(entry), baseFpid, false);
+    if (still.length) applyVariants(c, still.map(entry), baseFpid, true);
+    for (const s of slots) {
+      nodeOf.set(s.id, s.node);
+      if (s.fresh) { added.push(s.node); addedIds.push(s.id); }
+      else if (s.item && JSON.stringify(s.node) !== JSON.stringify(s.item.node)) modified.set(s.id, s.node);
+    }
+  }
+
+  // ---- updateCopperZoneNets: vias and copper zones on a net the schematic no longer has
+  const netlistNames = schematicNetNames;
+  const padNetNow = (pad: { fp: string; uuid: string; net: string }): string => {
+    const node = nodeOf.get(pad.fp); if (!node) return pad.net;
+    const p = padsOf(node).find((q) => (kidStr(q, "uuid") || kidStr(q, "tstamp")) === pad.uuid);
+    return p ? netNameOf(doc, p) : pad.net;
+  };
+  const setItemNet = (it: KItem, to: string): SNode => {
+    const node = clone(it.node);
+    if (it.kind === "zone") {
+      if (byCode) { const v = netValues(to); setKid(node, "net", [v[0]], ["net_name", "layer", "layers"]); setKid(node, "net_name", [to], ["layer", "layers"]); }
+      else { setKid(node, "net", [to], ["net_name", "layer", "layers"]); if (kid(node, "net_name")) setKid(node, "net_name", [to], ["layer", "layers"]); }
+    } else setKid(node, "net", byCode ? [netValues(to)[0]] : [to], ["uuid", "tstamp"]);
+    return node;
+  };
+  for (const it of doc.items.values()) {
+    if (it.kind !== "via") continue;
+    const cur = netNameOf(doc, it.node); if (netlistNames.has(cur)) continue;
+    const to = oldToNew.get(cur) || "";
+    if (to) { say("action", T(`Reconnect via from ${unescapeNetName(cur)} to ${unescapeNetName(to)}.`, `Reconnected via from ${unescapeNetName(cur)} to ${unescapeNetName(to)}.`)); modified.set(it.id, setItemNet(it, to)); }
+    else say("warning", `Via connected to unknown net (${unescapeNetName(cur)}).`);
+  }
+  const inNetlist = (n: string): boolean => { if (netlistNames.has(n)) return true; for (const x of netlistNames) if (n.startsWith(x)) return true; return false; };
+  for (const it of doc.items.values()) {
+    if (it.kind !== "zone" || !zoneOnCopper(it.node) || kid(it.node, "keepout") || kid(it.node, "rule_area")) continue;
+    const cur = netNameOf(doc, it.node); if (inNetlist(cur)) continue;
+    let to = "";
+    for (const pad of zonePads.get(it.id) || []) { const now = padNetNow(pad); if (now !== cur) { to = now; break; } }
+    if (!to && oldToNew.has(cur)) to = oldToNew.get(cur) as string;
+    const zn = kidStr(it.node, "name");
+    if (to) {
+      say("action", zn ? T(`Reconnect copper zone '${zn}' from ${unescapeNetName(cur)} to ${unescapeNetName(to)}.`, `Reconnected copper zone '${zn}' from ${unescapeNetName(cur)} to ${unescapeNetName(to)}.`)
+        : T(`Reconnect copper zone from ${unescapeNetName(cur)} to ${unescapeNetName(to)}.`, `Reconnected copper zone from ${unescapeNetName(cur)} to ${unescapeNetName(to)}.`));
+      modified.set(it.id, setItemNet(it, to));
+    } else if (zn) say("warning", `Copper zone '${zn}' has no pads connected.`);
+    else {
+      const pts = ptsOf(kid(it.node, "polygon") as SNode || it.node) as Pt[], p0 = pts.length ? pts[0] : [0, 0];
+      const fmt = o.formatLength || ((v: number) => v.toFixed(4) + " mm");
+      say("warning", `Copper zone on ${zoneLayerDescription(doc, it.node)} at (${fmt(p0[0])}, ${fmt(p0[1])}) has no pads connected to net "${cur}".`);
+    }
+  }
+  // copper that sat on a renamed net follows it: BOARD_COMMIT::Push propagates the pads' new nets along the tracks that
+  // touch them; the tracks of a net no pad keeps take the pad's new name
+  const stillPadNets = new Set<string>();
+  for (const fp of fps) { const node = nodeOf.get(fp.id) || current(fp); for (const p of padsOf(node)) { const n = netNameOf(doc, p); if (n) stillPadNets.add(n); } }
+  for (const it of doc.items.values()) {
+    if (it.kind !== "segment" && it.kind !== "arc") continue;
+    const cur = netNameOf(doc, it.node); if (!cur || stillPadNets.has(cur)) continue;
+    const to = oldToNew.get(cur); if (!to) continue;
+    modified.set(it.id, setItemNet(it, to));
+  }
+
+  // ---- group nesting and the staged group nodes
+  for (const g of groups.values()) {
+    if (!g.dirty) continue;
+    if (g.id && g.members.length < 2) { removed.push(g.id); continue; }   // a group of fewer than two items goes
+    if (!g.members.length) continue;
+    const i = g.node.findIndex((x, k) => k > 0 && Array.isArray(x) && x[0] === "members");
+    const m: SNode = ["members", ...g.members]; if (i > 0) g.node[i] = m; else g.node.push(m);
+    if (g.id) modified.set(g.id, g.node); else added.push(g.node);
   }
 
   // ---- footprints with no symbol
+  const byRefComp = new Map<string, NetComponent>(); for (const c of netlist.components) if (!byRefComp.has(c.ref)) byRefComp.set(c.ref, c);
   for (const fp of fps) {
-    if (claimed.has(fp.id)) continue;
+    let matched = false, doDelete = !!o.deleteUnused, stale = false;
+    if (usedFootprints.has(fp.id)) matched = true;
+    else {
+      const path = kidStr(fp.node, "path");
+      const c = o.relinkByRef ? byRefComp.get(fpRef(fp.node)) : (path ? netlist.components.find((x) => x.paths.includes(path)) : undefined);
+      if (c && !c.excludeFromBoard) { if (o.replaceFootprints !== false && c.variants && c.variants.length) { matched = false; stale = true; } else matched = true; }
+    }
+    if (stale) doDelete = true;
+    if (attrFlags(fp.node).has("board_only")) doDelete = false;
     const ref = fpRef(fp.node);
-    if (attrFlags(fp.node).has("board_only")) continue;
-    if (o.deleteUnused) {
-      if (isLocked(fp.node) && !o.overrideLocks) { say("warning", `Cannot remove unused footprint ${ref} (footprint is locked).`); continue; }
-      say("action", `Remove unused footprint ${ref}.`); removed.push(fp.id);
-    } else if (padsOf(fp.node).some((p) => netNameOf(doc, p))) {
-      // KiCad leaves the footprint but its pads no longer belong to any net of the schematic
-      const node = clone(fp.node); let changed = false;
-      for (const pad of padsOf(node)) if (netNameOf(doc, pad)) { say("action", `Disconnect ${ref} pin ${str(pad[1])}.`); delKid(pad, "net"); delKid(pad, "pinfunction"); delKid(pad, "pintype"); changed = true; }
-      if (changed) modified.set(fp.id, node);
+    if (doDelete && !matched && isLocked(fp.node) && !o.overrideLocks) { say("warning", T(`Cannot remove unused footprint ${ref} (footprint is locked).`, `Could not remove unused footprint ${ref} (footprint is locked).`)); doDelete = false; }
+    if (doDelete && !matched) { say("action", T(`Remove unused footprint ${ref}.`, `Removed unused footprint ${ref}.`)); removed.push(fp.id); }
+    else if (!matched && kidStr(fp.node, "path")) {
+      // the footprint stays with its pads on their nets; only its link to a symbol goes
+      const node = clone(current(fp)); delKid(node, "path"); modified.set(fp.id, node); nodeOf.set(fp.id, node);
     }
   }
 
-  // ---- copper that sat on a renamed net follows it (vias and zones are reported, tracks follow silently)
-  const still = new Set<string>(); for (const c of comps) for (const p of c.pins.values()) still.add(p.net);
-  for (const it of doc.items.values()) {
-    if (it.kind !== "segment" && it.kind !== "arc" && it.kind !== "via" && it.kind !== "zone") continue;
-    const cur = netNameOf(doc, it.node); if (!cur || still.has(cur)) continue;
-    const to = oldToNew.get(cur); if (!to) continue;
-    const node = clone(it.node);
-    if (it.kind === "zone") {
-      const zn = kidStr(node, "name");
-      say("action", zn ? `Reconnect copper zone '${zn}' from ${unescapeNetName(cur)} to ${unescapeNetName(to)}.` : `Reconnect copper zone from ${unescapeNetName(cur)} to ${unescapeNetName(to)}.`);
-      if (byCode) { setKid(node, "net", [codeOf.get(to) as number], ["net_name", "layer", "layers"]); setKid(node, "net_name", [to], ["layer", "layers"]); }
-      else { setKid(node, "net", [to], ["net_name", "layer", "layers"]); if (kid(node, "net_name")) setKid(node, "net_name", [to], ["layer", "layers"]); }
-    } else {
-      if (it.kind === "via") say("action", `Reconnect via from ${unescapeNetName(cur)} to ${unescapeNetName(to)}.`);
-      setKid(node, "net", byCode ? [codeOf.get(to) as number] : [to], ["uuid", "tstamp"]);
+  if (applied) {
+    // testConnectivity: every pin of a component has a pad of its number in its footprint
+    for (const c of comps) {
+      const id = baseOf.get(c); if (!id) continue;
+      const node = nodeOf.get(id); if (!node) continue;
+      const fpid = str(node[1]), numbers = new Set(padsOf(node).map((p) => str(p[1])));
+      for (const number of c.pins.keys()) {
+        if (!number) say("error", `Symbol ${c.ref} has pins with no number.  These pins can not be matched to pads in ${fpid}.`);
+        else if (!numbers.has(number)) say("error", `${c.ref} pad ${number} not found in ${fpid}.`);
+      }
     }
-    modified.set(it.id, node);
-  }
-  for (const n of Array.from(boardNets).sort()) if (!still.has(n) && netGone(n)) say("action", `Removed unused net ${unescapeNetName(n)}.`);
-  function netGone(n: string): boolean {
-    for (const fp of fps) { if (removed.includes(fp.id)) continue; const node = modified.get(fp.id) || fp.node; for (const p of kids(node, "pad") as SNode[]) if (netNameOf(doc, p) === n) return false; }
-    return true;
+    // the nets no pad of a remaining footprint uses any more
+    const current2 = new Set<string>();
+    for (const fp of fps) { if (removed.includes(fp.id)) continue; const node = nodeOf.get(fp.id) || current(fp); for (const p of padsOf(node)) { const n = netNameOf(doc, p); if (n) current2.add(n); } }
+    for (const node of added) for (const p of padsOf(node)) { const n = netNameOf(doc, p); if (n) current2.add(n); }
+    for (const n of Array.from(boardNets).sort(codeCmp)) if (!current2.has(n)) say("action", `Removed unused net ${n}.`);
   }
   for (const w of netlist.warnings) say("warning", w);
+  report.push({ severity: "action", text: "" }, { severity: "action", text: "" });
   say("info", `Total warnings: ${warnings}, errors: ${errors}.`);
-  return { report, modified, removed, added, warnings, errors };
+  return { report, modified, removed, added, addedIds, warnings, errors };
+}
+
+/** ZONE::IsOnCopperLayer. */
+function zoneOnCopper(node: SNode): boolean {
+  const l = kid(node, "layer") as SNode | null, ls = kid(node, "layers") as SNode | null;
+  const names = [...(l ? [str(l[1])] : []), ...(ls ? ls.slice(1).map(str) : [])];
+  return names.some((n) => /\.Cu$/.test(n) || n === "*.Cu" || n === "F&B.Cu");
+}
+/** BOARD_ITEM::LayerMaskDescribe for a zone: "all copper layers", the first layer (by layer id) "and others", or the one layer. */
+function zoneLayerDescription(doc: KDoc, node: SNode): string {
+  const l = kid(node, "layer") as SNode | null, ls = kid(node, "layers") as SNode | null;
+  let names = [...(l ? [str(l[1])] : []), ...(ls ? ls.slice(1).map(str) : [])];
+  const boardCopper = (doc.copper || []).slice();
+  const shownName = (n: string): string => { const l = doc.layers && doc.layers.get(n); return l && l.userName ? l.userName : n; };
+  if (names.includes("*.Cu")) names = boardCopper.length ? boardCopper : ["F.Cu", "B.Cu"];
+  else if (names.includes("F&B.Cu")) names = names.filter((n) => n !== "F&B.Cu").concat(["F.Cu", "B.Cu"]);
+  const copper = names.filter((n) => /\.Cu$/.test(n));
+  if (boardCopper.length && copper.length === boardCopper.length) return "all copper layers";
+  // PCB_LAYER_ID order: F.Cu, B.Cu, In1.Cu, In2.Cu …
+  const cuRank = (n: string): number => (n === "F.Cu" ? 0 : n === "B.Cu" ? 1 : 1 + (Number((/^In(\d+)\.Cu$/.exec(n) || [])[1]) || 99));
+  const first = (list: string[]): string => list.slice().sort((a, b) => cuRank(a) - cuRank(b))[0];
+  for (const test of [copper, names]) if (test.length) return shownName(first(test)) + (test.length > 1 ? " and others" : "");
+  return "no layers";
+}
+/**
+ * CONNECTIVITY_DATA::GetConnectedPads( zone ) as cacheCopperZoneConnections takes it before the update: the pads of
+ * the zone's net whose copper lies inside the zone's outline on one of its layers ({ footprint id, pad uuid, net }).
+ */
+function zoneConnectedPads(doc: KDoc): Map<string, { fp: string; uuid: string; net: string }[]> {
+  const out = new Map<string, { fp: string; uuid: string; net: string }[]>();
+  const zones = Array.from(doc.items.values()).filter((it) => it.kind === "zone" && zoneOnCopper(it.node) && !kid(it.node, "keepout") && !kid(it.node, "rule_area"));
+  if (!zones.length) return out;
+  const inside = (p: Pt, poly: Pt[]): boolean => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < ((b[0] - a[0]) * (p[1] - a[1])) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+  for (const z of zones) {
+    const net = netNameOf(doc, z.node); if (!net) continue;
+    const polys = (kids(z.node, "filled_polygon") as SNode[]).map((fp) => ({ layer: kidStr(fp, "layer"), pts: ptsOf(fp) as Pt[] }));
+    const zl = kid(z.node, "layer") as SNode | null, zls = kid(z.node, "layers") as SNode | null;
+    const layers = [...(zl ? [str(zl[1])] : []), ...(zls ? zls.slice(1).map(str) : [])];
+    const list: { fp: string; uuid: string; net: string }[] = [];
+    for (const it of doc.items.values()) {
+      if (it.kind !== "footprint") continue;
+      const a = atOf(it.node) as number[], rot = ((a[2] || 0) * Math.PI) / 180, ca = Math.cos(rot), sa = Math.sin(rot);
+      for (const pad of kids(it.node, "pad") as SNode[]) {
+        if (netNameOf(doc, pad) !== net) continue;
+        const pl = kid(pad, "layers") as SNode | null, padLayers = pl ? pl.slice(1).map(str) : [];
+        const onLayer = (l: string): boolean => padLayers.includes(l) || padLayers.includes("*.Cu") || (padLayers.includes("F&B.Cu") && (l === "F.Cu" || l === "B.Cu"));
+        const pa = atOf(pad) as number[], px = pa[0] || 0, py = pa[1] || 0;
+        // footprint coordinates: rotated clockwise on screen (y down) by the footprint's angle
+        const p: Pt = [a[0] + px * ca + py * sa, a[1] - px * sa + py * ca];
+        const hit = polys.length ? polys.some((fp) => onLayer(fp.layer) && inside(p, fp.pts)) : layers.some(onLayer) && inside(p, ptsOf(kid(z.node, "polygon") as SNode || z.node) as Pt[]);
+        if (hit) list.push({ fp: it.id, uuid: kidStr(pad, "uuid") || kidStr(pad, "tstamp"), net });
+      }
+    }
+    out.set(z.id, list);
+  }
+  return out;
 }
 
 /**
@@ -1108,7 +1519,7 @@ export function schematicParity(doc: KDoc, netlist: Netlist): ParityIssue[] {
 /** A new, empty board as pcbnew creates it for a project that has none (two copper layers, the default layer set). */
 const NEW_BOARD_LAYERS = '(layers (0 "F.Cu" signal) (2 "B.Cu" signal) (9 "F.Adhes" user "F.Adhesive") (11 "B.Adhes" user "B.Adhesive") (13 "F.Paste" user) (15 "B.Paste" user) (5 "F.SilkS" user "F.Silkscreen") (7 "B.SilkS" user "B.Silkscreen") (1 "F.Mask" user) (3 "B.Mask" user) (17 "Dwgs.User" user "User.Drawings") (19 "Cmts.User" user "User.Comments") (21 "Eco1.User" user "User.Eco1") (23 "Eco2.User" user "User.Eco2") (25 "Edge.Cuts" user) (27 "Margin" user) (31 "F.CrtYd" user "F.Courtyard") (29 "B.CrtYd" user "B.Courtyard") (35 "F.Fab" user) (33 "B.Fab" user))';
 export function newBoardText(version: number): string {
-  return `(kicad_pcb (version ${version}) (generator "pcbnew") (generator_version "10.0") (general (thickness 1.6) (legacy_teardrops no)) (paper "A4") ${NEW_BOARD_LAYERS} (setup (pad_to_mask_clearance 0) (allow_soldermask_bridges_in_footprints no)) (net 0 ""))\n`;
+  return `(kicad_pcb (version ${version}) (generator "pcbnew") (generator_version "${GENERATOR_VERSION}") (general (thickness 1.6) (legacy_teardrops no)) (paper "A4") ${NEW_BOARD_LAYERS} (setup (pad_to_mask_clearance 0) (allow_soldermask_bridges_in_footprints no)) (net 0 ""))\n`;
 }
 /** The project's board: <project>.kicad_pcb next to the .kicad_pro (Prj().GetProjectFullName() with the board extension). */
 export function projectBoardPath(docs: { docId: string; path: string; docType: string }[]): { path: string; doc: { docId: string; path: string; docType: string } | null } {
@@ -1118,4 +1529,4 @@ export function projectBoardPath(docs: { docId: string; path: string; docType: s
   return { path: path || (doc ? doc.path : ""), doc };
 }
 
-export const pcbNetlist = { newBoardText, projectBoardPath, buildNetlist, planUpdate, componentVariants, schematicParity, footprintFromLibrary, escapeNetName, unescapeNetName, busVector, netlistOptions };
+export const pcbNetlist = { newBoardText, projectBoardPath, instanceRef, buildNetlist, planUpdate, componentVariants, schematicParity, footprintFromLibrary, escapeNetName, unescapeNetName, busVector, netlistOptions };

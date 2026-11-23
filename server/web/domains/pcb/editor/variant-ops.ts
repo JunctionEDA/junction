@@ -171,7 +171,7 @@ export async function editVariantDescriptionFor(name: string, prompts: VariantPr
 /** Tools > Variants > Edit Variant Description... */
 export async function editVariantDescription(): Promise<void> {
   const choices = variantNamesForUI().slice(1);
-  if (!choices.length) { toast("No design variants to edit.", 10000); return; }
+  if (!choices.length) { toast("No design variants to edit.", 10000, undefined, "error"); return; }
   const name = await listPick("Edit Variant Description", "Select variant to edit description:", "", choices); if (!name) return;
   await editVariantDescriptionFor(name);
 }
@@ -221,7 +221,7 @@ export async function copyVariant(): Promise<void> {
 
 /** onDeleteVariant: the entry above the deleted one is selected (and made current). */
 export async function fieldsTableDeleteVariant(names: string[], index: number, _prompts?: VariantPrompts): Promise<string | null> {
-  if (index <= 0 || index >= names.length) { toast("Cannot delete the default variant.", 10000); return null; }
+  if (index <= 0 || index >= names.length) { toast("Cannot delete the default variant.", 10000, undefined, "error"); return null; }
   const name = names[index];
   await variantCommand("Delete Variant", (n) => VM.renameSymbolVariants(n, name, null), (reg) => { reg.delete(name); }, [name]);
   const sel = index - 1 > 0 ? names[index - 1] : "";
@@ -231,7 +231,7 @@ export async function fieldsTableDeleteVariant(names: string[], index: number, _
 }
 /** onRenameVariant. */
 export async function fieldsTableRenameVariant(names: string[], index: number, prompts: VariantPrompts = editorPrompts): Promise<string | null> {
-  if (index <= 0 || index >= names.length) { toast("Cannot rename the default variant.", 10000); return null; }
+  if (index <= 0 || index >= names.length) { toast("Cannot rename the default variant.", 10000, undefined, "error"); return null; }
   const oldName = names[index];
   await renameVariantNamed(oldName, prompts);
   // the list selects the new name (SetStringSelection), or keeps the old one when nothing happened
@@ -239,19 +239,19 @@ export async function fieldsTableRenameVariant(names: string[], index: number, p
 }
 /** onCopyVariant (no undo step, as in KiCad). */
 export async function fieldsTableCopyVariant(names: string[], index: number, prompts: VariantPrompts = editorPrompts): Promise<string | null> {
-  if (index <= 0 || index >= names.length) { toast("Cannot copy the default variant.", 10000); return null; }
+  if (index <= 0 || index >= names.length) { toast("Cannot copy the default variant.", 10000, undefined, "error"); return null; }
   const src = names[index];
   const typed = await prompts.text("Copy Design Variant", "Enter name for the copied variant:", src + "_copy"); if (typed === null) return null;
   const newName = trimWx(typed);
-  if (!newName) { toast("Variant name cannot be empty.", 10000); return null; }
-  if (names.some((n) => n.toLowerCase() === newName.toLowerCase())) { toast(`Variant '${newName}' already exists.`, 10000); return null; }
+  if (!newName) { toast("Variant name cannot be empty.", 10000, undefined, "error"); return null; }
+  if (names.some((n) => n.toLowerCase() === newName.toLowerCase())) { toast(`Variant '${newName}' already exists.`, 10000, undefined, "error"); return null; }
   if (E.viewOnly) { toast("View-only access"); return null; }
   await copyVariantTo(src, newName, false);
   return newName;
 }
 /** onEditVariantDescription. */
 export async function fieldsTableEditVariantDescription(names: string[], index: number, prompts: VariantPrompts = editorPrompts): Promise<string | null> {
-  if (index <= 0 || index >= names.length) { toast("Cannot edit the default variant description.", 10000); return null; }
+  if (index <= 0 || index >= names.length) { toast("Cannot edit the default variant description.", 10000, undefined, "error"); return null; }
   await editVariantDescriptionFor(names[index], prompts);
   return names[index];
 }

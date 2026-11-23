@@ -15,10 +15,10 @@ export interface ErcReport { sheets?: { path: string; uuid_path: string; violati
 /** Why the last server check did not run, for the dialog's status line ("" when it ran). */
 export let lastFallback = "";
 
-async function post<T>(path: string, body: unknown): Promise<T | null> {
+async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T | null> {
   if (typeof navigator !== "undefined" && navigator.onLine === false) { lastFallback = "offline"; return null; }
   try {
-    const r = await api(path, { method: "POST", body: JSON.stringify(body) }) as { report?: T };
+    const r = await api(path, { method: "POST", body: JSON.stringify(body), ...(signal ? { signal } : {}) }) as { report?: T };
     lastFallback = "";
     return r && r.report ? r.report : null;
   } catch (e) {
@@ -29,8 +29,8 @@ async function post<T>(path: string, body: unknown): Promise<T | null> {
 }
 
 /** KiCad's DRC of the board document `docId`, or null when the server could not run it. */
-export function serverDrc(docId: string, o: { parity: boolean; refill: boolean; allTrackErrors?: boolean }): Promise<DrcReport | null> {
-  return post<DrcReport>(`/api/docs/${encodeURIComponent(docId)}/drc`, { parity: o.parity, refill: o.refill, allTrackErrors: !!o.allTrackErrors });
+export function serverDrc(docId: string, o: { parity: boolean; refill: boolean; allTrackErrors?: boolean; signal?: AbortSignal }): Promise<DrcReport | null> {
+  return post<DrcReport>(`/api/docs/${encodeURIComponent(docId)}/drc`, { parity: o.parity, refill: o.refill, allTrackErrors: !!o.allTrackErrors }, o.signal);
 }
 /** KiCad's ERC of the project's whole hierarchy, asked from schematic `docId`, or null. */
 export function serverErc(docId: string): Promise<ErcReport | null> {

@@ -27,22 +27,27 @@ const OPAMP = K.parse(`(symbol "LM358" (property "Reference" "U" (at 0 0 0) ${FO
   (symbol "LM358_2_2" ${pin(5, "+")} ${pin(6, "-")} ${pin(7, "~")} ${pin(99, "x")})
   (symbol "LM358_3_1" ${pin(4, "V-")} ${pin(8, "V+")}))`);
 const R = K.parse(`(symbol "R" (property "ki_fp_filters" "R_*" (at 0 0 0) (hide yes) ${FONT}) (symbol "R_1_1" ${pin(1, "")} ${pin(2, "")}))`);
+/** the pin count and filters (the pin names are checked on their own) */
+const pf = (f) => (f ? { pins: f.pins, filters: f.filters } : f);
 const STACKED = K.parse(`(symbol "Q" (symbol "Q_0_1" ${pin("[1-3]", "D")} ${pin(4, "G")} ${pin(5, "S")} ${pin(5, "S2")}))`);
 
 test("pins: every unit of body style 1 (and the shared body style 0), distinct numbers", () => {
   assert.deepStrictEqual(F.chooserPinNumbers(OPAMP), ["1", "2", "3", "5", "6", "7", "4", "8"]);
-  assert.deepStrictEqual(F.chooserFilters(OPAMP), { pins: 8, filters: ["SOIC*3.9x4.9mm*P1.27mm*", "DIP*W7.62mm*"] });
+  assert.deepStrictEqual(pf(F.chooserFilters(OPAMP)), { pins: 8, filters: ["SOIC*3.9x4.9mm*P1.27mm*", "DIP*W7.62mm*"] });
 });
 test("pins: a stacked number counts its pins; a repeated number counts once", () => {
   assert.deepStrictEqual(F.chooserPinNumbers(STACKED), ["1", "2", "3", "4", "5", "5"]);
-  assert.deepStrictEqual(F.chooserFilters(STACKED), { pins: 5, filters: [] });
+  assert.deepStrictEqual(pf(F.chooserFilters(STACKED)), { pins: 5, filters: [] });
+  // KiwayMailIn's pinNames: number -> name ("~" is no name), a later pin of the same number wins
+  assert.deepStrictEqual(F.chooserFilters(STACKED).pinNames, { 1: "D", 2: "D", 3: "D", 4: "G", 5: "S2" });
+  assert.deepStrictEqual(F.chooserFilters(OPAMP).pinNames, { 1: "", 2: "-", 3: "+", 5: "+", 6: "-", 7: "", 4: "V-", 8: "V+" });
 });
 test("no symbol, or one with neither pins nor filters: no filters at all", () => {
   assert.strictEqual(F.chooserFilters(null), null);
   assert.strictEqual(F.chooserFilters(K.parse(`(symbol "X" (property "Reference" "X" (at 0 0 0) ${FONT}))`)), null);
 });
 test("a grouped row: filters only when every symbol's agree", () => {
-  assert.deepStrictEqual(F.commonChooserFilters([R, K.parse(K.serialize(R))]), { pins: 2, filters: ["R_*"] });
+  assert.deepStrictEqual(pf(F.commonChooserFilters([R, K.parse(K.serialize(R))])), { pins: 2, filters: ["R_*"] });
   assert.strictEqual(F.commonChooserFilters([R, OPAMP]), null);
   assert.strictEqual(F.commonChooserFilters([R, null]), null);
   assert.strictEqual(F.commonChooserFilters([]), null);
@@ -94,13 +99,13 @@ test("the netlist string: every pin's number and name in order, then the filters
   assert.strictEqual(F.chooserNetlist(OPAMP).split("\r")[0].split("\t")[0], "1 ", "'~' is no name");
   // same pin count and filters, different pin names: KiCad sends no netlist, so no toggles
   const R2 = K.parse(`(symbol "R2" (property "ki_fp_filters" "R_*" (at 0 0 0) (hide yes) ${FONT}) (symbol "R2_1_1" ${pin(1, "A")} ${pin(2, "B")}))`);
-  assert.deepStrictEqual(F.chooserFilters(R2), F.chooserFilters(R));
+  assert.deepStrictEqual(pf(F.chooserFilters(R2)), pf(F.chooserFilters(R)));
   assert.strictEqual(F.commonChooserFilters([R, R2]), null);
   const R3 = K.parse(`(symbol "R3" (property "ki_fp_filters" "R_*" (at 0 0 0) (hide yes) ${FONT}) (symbol "R3_1_1" ${pin(2, "")} ${pin(1, "")}))`);
   assert.strictEqual(F.commonChooserFilters([R, R3]), null, "pin order counts");
 });
 test("SCH_PROPERTIES_PANEL's netlist keeps a stacked number as it is", () => {
-  assert.deepStrictEqual(F.chooserFilters(STACKED, false), { pins: 3, filters: [] }, "[1-3], 4 and 5: three, where the grids count five");
+  assert.deepStrictEqual(pf(F.chooserFilters(STACKED, false)), { pins: 3, filters: [] }, "[1-3], 4 and 5: three, where the grids count five");
   assert.strictEqual(F.chooserNetlist(STACKED, false), "[1-3] D\t4 G\t5 S\t5 S2\r\r");
   assert.deepStrictEqual(F.netlistFilters(""), null);
   assert.deepStrictEqual(F.netlistFilters("\r\r"), null);

@@ -59,7 +59,7 @@ export function primShapes(p: Prim): CopperShape[] {
 export function geomShapes(geoms: KGeom[], layer: string, grow = 0): CopperShape[] {
   const out: Prim[] = [], knock: Prim[] = []; const log = new PlotLog();
   for (const g of geoms) {
-    if (g.hiddenText || g.point || g.zoneOutline || g.zoneHatch || g.pad || g.hole || g.padText) continue;
+    if (g.hiddenText || g.point || g.zoneOutline || g.zoneHatch || g.pad || g.hole || g.padText || g.maskCopy || g.indicator) continue;
     if (g.layer === layer) geomPrims(g, out, knock, log, 0);
     else if (g.maskLayer === layer) geomPrims(g, out, knock, log, grow || (typeof g.maskMargin === "number" ? g.maskMargin as number : 0));
   }

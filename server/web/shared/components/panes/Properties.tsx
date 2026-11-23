@@ -18,6 +18,8 @@ import { comboBox, type KCombo } from "../kcombo";
 import { ContextMenu, Swatch, panels, pickColor, useContextMenu, usePanels, type MenuItem } from "./widgets";
 
 const MIXED = "<...>";
+/** INDETERMINATE_STATE: the text a mixed-value cell editor opens with (pg_editors.cpp), left alone on commit. */
+const INDETERMINATE = "-- mixed values --";
 const CELL = "w-full h-full min-w-0 m-0 px-1 py-0 border-0 outline-none bg-transparent text-ink text-sm font-sans focus:bg-canvas focus:shadow-[inset_0_0_0_1px_var(--color-blue)]";
 
 /** Leave the cell editor: the keyboard goes back to the editor's hotkeys. */
@@ -42,7 +44,7 @@ function moveFrom(el: HTMLElement, nav: Nav): void {
   const box = el.closest("#props"); if (!box) return;
   const cells = Array.from(box.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-prop]"));
   const from = cells.indexOf(el as HTMLInputElement);
-  const to = navTarget(cells.map((c) => ({ readOnly: c.disabled || (c as HTMLInputElement).readOnly })), from, nav);
+  const to = navTarget(cells.map((c) => ({ readOnly: c.disabled || (c as HTMLInputElement).readOnly, disabled: c.disabled })), from, nav);
   const t = cells[to]; if (t && t !== el) { t.focus(); if (t instanceof HTMLInputElement && t.type === "text" && !t.readOnly) t.select(); }
 }
 
@@ -53,7 +55,7 @@ function Editor({ row, onDone }: { row: PropRow; onDone: () => void }) {
   useEffect(() => { setDraft(null); setErr(null); }, [row.value, row.mixed]);
   const commit = (text: string): boolean => {
     const p = panels(); if (!p) return false;
-    if (!row.mixed && text === row.value) { setDraft(null); setErr(null); return true; }
+    if ((!row.mixed && text === row.value) || (row.mixed && text === INDETERMINATE)) { setDraft(null); setErr(null); return true; }
     const e = p.setProp(row.id, text);
     if (e) { setErr(e); return false; }
     setDraft(null); setErr(null); onDone(); return true;
@@ -119,7 +121,7 @@ function Editor({ row, onDone }: { row: PropRow; onDone: () => void }) {
         <KIcon name={browseIcon} size={16} /></button> : null}
       <input type="text" className={cx(CELL, browseIcon && "pr-[20px]", row.readOnly && "text-ink-3", err && "shadow-[inset_0_0_0_1px_var(--color-err)]")} data-prop={row.id} spellCheck={false} autoComplete="off"
         readOnly={row.readOnly} value={shown} placeholder={row.mixed ? MIXED : ""} title={err || (!row.mixed && row.value ? row.value : undefined) /* wxPG_TOOLTIPS: the full value of a truncated cell */}
-        onFocus={(ev) => { if (!row.readOnly) ev.target.select(); }}
+        onFocus={(ev) => { if (row.readOnly) return; if (row.mixed && draft === null) { ev.target.value = INDETERMINATE; setDraft(INDETERMINATE); } ev.target.select(); }}
         onChange={(ev) => { setDraft(ev.target.value); setErr(null); }}
         onBlur={() => { if (settled.current) { settled.current = false; return; } if (draft !== null && !commit(draft)) { setDraft(null); setErr(null); } }}
         onKeyDown={(ev) => {

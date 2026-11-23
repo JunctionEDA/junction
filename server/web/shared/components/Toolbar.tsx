@@ -81,16 +81,17 @@ function subscribeAct(fn: () => void): () => void {
     actWired = true;
     let last = window.CollabApp.getState(), queued = false;
     const later = () => { if (queued) return; queued = true; setTimeout(() => { queued = false; refreshAct(); }, 0); };
-    window.CollabApp.subscribe((s) => { const p = last; last = s; if (s.selection !== p.selection || s.undo !== p.undo || s.document !== p.document || s.tool !== p.tool) later(); });
+    window.CollabApp.subscribe((s) => { const p = last; last = s; if (s.selection !== p.selection || s.undo !== p.undo || s.document !== p.document || s.tool !== p.tool || (s.viewport as { renderOpts?: unknown }).renderOpts !== (p.viewport as { renderOpts?: unknown }).renderOpts) later(); });
     window.addEventListener("pointerup", later, true); window.addEventListener("keyup", later, true);
     later();
   }
   return () => { actSubs.delete(fn); };
 }
-/** Why the action's enable condition greys a schematic toolbar button; null when it may run. */
+/** Why the action's enable condition greys a schematic or board toolbar button (SCH_EDIT_FRAME / PCB_EDIT_FRAME::
+ *  setupUIConditions); null when it may run. */
 function useConditionWhy(a: Avail, id: string): string | null {
   const st = useSyncExternalStore(subscribeAct, () => actSnap);
-  return a.editor === "sch" && st ? conditionWhy(a.editor, id, st) : null;
+  return st && (a.editor === "sch" || (a.editor === "pcb" && st.pcb)) ? conditionWhy(a.editor, id, st) : null;
 }
 
 // ---------------------------------------------------------------- buttons
@@ -220,16 +221,18 @@ function GroupButton({ group, a }: { group: GroupItem; a: Avail }) {
 /** EDA_DRAW_FRAME::UpdateGridSelectBox: GRID_MENU::BuildChoiceList in the user units, "---", "Edit Grids...". */
 function GridSelect() {
   const gridPitch = useApp((s) => s.viewport.gridPitch);
+  const gridIdx = useApp((s) => s.viewport.gridIdx);
   const grids = useApp((s) => s.viewport.gridChoices);
   const units = useApp((s) => s.viewport.units);
   const lastImperial = useApp((s) => s.viewport.lastImperial);
   const sch = useApp((s) => s.document.editor === "sch");
-  const at = grids.findIndex((g) => Math.abs(g.mm - gridPitch) < 1e-9);
+  // grid.last_size_idx: the entry picked (two entries may have one size), else the first of the current size
+  const at = typeof gridIdx === "number" && grids[gridIdx] && Math.abs(grids[gridIdx].mm - gridPitch) < 1e-9 ? gridIdx : grids.findIndex((g) => Math.abs(g.mm - gridPitch) < 1e-9);
   const options: SelectOption[] = grids.map((g, i) => ({ value: String(i), label: gridChoiceText(g, units, lastImperial, sch ? "sch" : "pcb") }));
   options.push({ value: "sep", label: "---", sep: true }, { value: "edit", label: "Edit Grids..." });
   // EDA_DRAW_FRAME::OnSelectGrid: the last entry runs ACTIONS::gridProperties, the others ACTIONS::gridPreset
   return <Select id="gridSel" className={KSEL} title="Grid" options={options} value={at < 0 ? "" : String(at)} blurOnPick
-    onChange={(v) => { if (v === "edit") dispatch({ type: "action", id: "gridProperties" }); else if (v !== "sep" && grids[Number(v)]) dispatch({ type: "setGrid", pitch: grids[Number(v)].mm }); }} />;
+    onChange={(v) => { if (v === "edit") dispatch({ type: "action", id: "gridProperties" }); else if (v !== "sep" && grids[Number(v)]) dispatch({ type: "setGrid", pitch: grids[Number(v)].mm, index: Number(v) }); }} />;
 }
 /** EDA_DRAW_FRAME::UpdateZoomSelectBox / SyncZoomSelectBox: "Zoom Auto", then "Zoom %.2f" for each of the window's zoom
  *  factors; an off-preset zoom shows as its own entry just below Zoom Auto. */

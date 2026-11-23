@@ -37,31 +37,43 @@ export function drawTwoPointAssistant(c: CanvasRenderingContext2D, d: DrawState,
   const o = d.start, e = d.cur, v = vsub(e, o); if (!v[0] && !v[1]) return;
   const strs = t === "gline" ? [dimensionLabel("l", Math.hypot(v[0], v[1])), dimensionLabel("θ", Math.atan2(-v[1], v[0]) * 180 / Math.PI, true)]
     : t === "grect" ? [dimensionLabel("x", Math.abs(v[0])), dimensionLabel("y", Math.abs(v[1]))] : [dimensionLabel("r", Math.hypot(v[0], v[1]))];
-  if (t === "gcircle") { c.save(); c.globalAlpha = 1; c.lineWidth = px; line(c, o, e); c.restore(); }
+  if (t === "gcircle") { c.save(); c.globalAlpha = 1; c.lineWidth = px; c.strokeStyle = AUX_ITEMS_COLOR; line(c, o, e); c.restore(); }   // DRAW_CONTEXT::DrawLine in LAYER_AUX_ITEMS
   textNextToCursor(c, e, vsub(o, e), strs, px, colour);   // DrawTextNextToCursor( end, origin - end )
 }
 /** LAYER_AUX_ITEMS of the board editor's theme: what the drawing assistants write and rule in. */
 export const AUX_ITEMS_COLOR = "#FFFFFF";
-/** KIGFX::PREVIEW::GetConstantGlyphHeight( gal, 0 ): the glyph height in pixels, and the shadow and line pitch factors (HiDPI canvases use the smaller set). */
+/** KIGFX::PREVIEW::GetConstantGlyphHeight( gal, 0 ): the glyph height in pixels, and the stroke, shadow and line pitch factors (HiDPI canvases use the smaller set). */
 export function previewTextDims() {
   const hidpi = typeof devicePixelRatio === "number" && devicePixelRatio > 1;
-  return hidpi ? { height: 11, shadow: 0.10, pitch: 1.7 } : { height: 14, shadow: 0.15, pitch: 1.9 };
+  return hidpi ? { height: 11, stroke: 0.15, shadow: 0.10, pitch: 1.7 } : { height: 14, stroke: 0.2, shadow: 0.15, pitch: 1.9 };
 }
 /**
  * KIGFX::PREVIEW::DrawTextNextToCursor: the lines beside the cursor, on the side away from aTextQuadrant, a constant
- * size on screen, in LAYER_AUX_ITEMS over a drop shadow (GetShadowColor: black under a bright colour); 15 px off the
- * cursor, one line pitch per string, top to bottom.
+ * size on screen, in KiCad's stroke font and LAYER_AUX_ITEMS, drawn twice as the GAL draws the two overlay layers: the
+ * drop shadow (GetShadowColor, the stroke widened by 2 x the shadow width, shifted by 1.2 x the shadow width), then the
+ * text; 15 px off the cursor, one line pitch per string, top to bottom; left / right swapped and the text kept readable
+ * in a flipped view (gal->IsFlippedX()).
  */
 export function textNextToCursor(c: CanvasRenderingContext2D, e: Pt, q: Pt, strs: string[], px: number, colour?: string) {
   void colour;   // the layer colour the callers have: the assistant's text is always LAYER_AUX_ITEMS
+  const stroke = K.drawStrokeText as (ctx: CanvasRenderingContext2D, base: number[], t: Record<string, unknown>, color: string, minPen: number) => void;
+  const m = c.getTransform(), base = [m.a, m.b, m.c, m.d, m.e, m.f], flipped = m.a < 0;
+  const dims = previewTextDims(), size = dims.height * px, pen = size * dims.stroke, pitch = size * dims.pitch, shadowW = size * dims.shadow;
   c.save(); c.globalAlpha = 1; c.setLineDash([]);
-  const dims = previewTextDims(), h = dims.height * px, pitch = h * dims.pitch, shadow = h * dims.shadow;
-  c.font = `${h / 0.7}px sans-serif`; c.textBaseline = "middle";   // the glyph size is the capital height
-  let x = e[0], y = e[1];
-  if (q[1] > 0) y -= pitch * (strs.length + 1);
-  if (q[0] < 0) { c.textAlign = "left"; x += 15 * px - 1.2 * shadow; } else { c.textAlign = "right"; x -= 15 * px - 1.2 * shadow; }
-  c.lineJoin = "round"; c.lineWidth = 2 * shadow; c.strokeStyle = "#000000"; c.fillStyle = AUX_ITEMS_COLOR;
-  strs.forEach((sx: string, i: number) => { c.strokeText(sx, x, y + (i + 1) * pitch); c.fillText(sx, x, y + (i + 1) * pitch); });
+  for (const shadow of [true, false]) {
+    let x = e[0], y = e[1];
+    if (q[1] > 0) y -= pitch * (strs.length + 1);
+    let h: "left" | "right";
+    if (q[0] < 0) { h = flipped ? "right" : "left"; x += 15 * px; } else { h = flipped ? "left" : "right"; x -= 15 * px; }
+    // an int in IU (nm), scaled by 1.2 and truncated again
+    const sx = shadow ? Math.trunc(Math.trunc(shadowW * 1e6) * 1.2) / 1e6 : 0;
+    x += (h === "left") !== flipped ? -sx : sx;
+    const color = shadow ? "#000000" : AUX_ITEMS_COLOR;   // GetShadowColor( white ): black
+    for (const str of strs) {
+      y += pitch;
+      stroke(c, base, { x, y, text: str, size, rot: 0, mirror: flipped, h, v: "center", pen: shadow ? pen + 2 * shadowW : pen, italic: false, dy: 0 }, color, px);
+    }
+  }
   c.restore();
 }
 export function drawStatusPopup(c: CanvasRenderingContext2D, px: number) {

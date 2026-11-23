@@ -5,8 +5,8 @@
 import { type PlotParams, defaultPlotParams } from "../canvas/plot-params";
 import { writeDxf } from "./dxf";
 import { gerberJobFile } from "./gbrjob";
-import { projectGuid, writeGerber } from "./gerber";
-import { type FabContext, VERSION_SUFFIX, setupOf, layerAttrs, layerDisplayName, modelOf, plottableLayers, projectNameOf, protelExtension } from "./index";
+import { projectGuid, sameCoordinatesKey, writeGerber } from "./gerber";
+import { type FabContext, VERSION_SUFFIX, revisionOf, setupOf, layerAttrs, layerDisplayName, modelOf, plottableLayers, projectNameOf, protelExtension } from "./index";
 import { boardPage } from "./pageplot";
 import { PlotLog, type PlotOptions, plotFile } from "./plot";
 import { writePdf } from "./pdf";
@@ -43,8 +43,11 @@ export function outputPath(dir: string, boardDir: string | undefined, name: stri
   return d ? d + "/" + name : name;
 }
 
-/** BuildPlotFileName: <board>-<layer name, dots as underscores>.<ext>. */
-export function plotFileName(board: string, layerName: string, ext: string): string { return `${board}-${layerName.replace(/\./g, "_")}.${ext}`; }
+/** BuildPlotFileName: <board>-<suffix>.<ext>; the suffix is trimmed, the DOS-forbidden characters plus % and . become _, an empty suffix adds nothing. */
+export function plotFileName(board: string, layerName: string, ext: string): string {
+  const suffix = layerName.trim().replace(/[\\/:*?"<>|%.]/g, "_");
+  return suffix ? `${board}-${suffix}.${ext}` : `${board}.${ext}`;
+}
 
 export async function plotBoard(ctx: FabContext, req: BoardPlotRequest): Promise<BoardPlotResult> {
   const p = req.params, m = modelOf(ctx), board = projectNameOf(ctx), log = new PlotLog();
@@ -59,7 +62,7 @@ export async function plotBoard(ctx: FabContext, req: BoardPlotRequest): Promise
   if (p.format === 1) {
     const opt: PlotOptions = { plotReference: p.plotReference !== false, plotValue: p.plotValue !== false, subtractMaskFromSilk: p.subtractMaskFromSilk, commonLayers: req.common,
       hideDnpOnFab: p.hideDnpOnFab, sketchDnpOnFab: p.sketchDnpOnFab, crossoutDnpOnFab: p.crossoutDnpOnFab, sketchPadsOnFab: p.sketchPadsOnFab, plotPadNumbers: p.plotPadNumbers };
-    const rev = (ctx.doc.titleBlock && ctx.doc.titleBlock.rev) || "rev?";
+    const rev = revisionOf(ctx) || "rev?";
     const iso = isoDateTime(date);
     const job: { name: string; layer: string }[] = [];
     let edge = undefined as ReturnType<typeof plotFile> | undefined;
@@ -67,7 +70,7 @@ export async function plotBoard(ctx: FabContext, req: BoardPlotRequest): Promise
       const prims = plotFile(m, layer, opt, log);
       if (layer === "Edge.Cuts") edge = prims;
       const text = writeGerber(prims, layerAttrs(layer, m.copper), { x2: p.useGerberX2, origin: p.useAuxOrigin ? m.settings.auxOrigin : [0, 0], software: `KiCad,Pcbnew,${version}`, date: iso,
-        project: { name: board, guid: projectGuid(board + ".kicad_pcb"), rev }, precision: p.gerberPrecision, netAttributes: p.includeNetlistInfo, disableMacros: p.disableApertMacros });
+        project: { name: board, guid: projectGuid(board + ".kicad_pcb"), rev }, sameCoordinates: sameCoordinatesKey(!!p.useAuxOrigin, m.settings.auxOrigin), precision: p.gerberPrecision, netAttributes: p.includeNetlistInfo, disableMacros: p.disableApertMacros });
       const ext = p.useGerberExtensions ? protelExtension(layer, m.copper) : "gbr";
       const n = plotFileName(board, layerDisplayName(ctx.doc, layer), ext);
       add(n, text, layer); job.push({ name: n, layer });

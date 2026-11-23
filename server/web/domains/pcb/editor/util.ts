@@ -9,8 +9,11 @@ export function setRadio(group: string, id: string): void { const m: Record<stri
 export function esc(t: unknown): string { const d = document.createElement("span"); d.textContent = (t ?? "") as string; return d.innerHTML; }
 
 
-/** The infobar (WX_INFOBAR::ShowMessageFor); `link` is a hyperlink added with WX_INFOBAR::AddLink. */
-export function toast(msg: unknown, ms = 2200, link?: { text: string; run: () => void }): void { store.set({ toast: { id: ++E.toastN, text: String(msg), ms, link } }); }
+/**
+ * The infobar: WX_INFOBAR::ShowMessageFor( msg, ms ), or with `ms` 0 ShowMessage (it stays until it is closed);
+ * `link` is a hyperlink added with WX_INFOBAR::AddLink, `severity` the icon flag (wxICON_INFORMATION / WARNING / ERROR).
+ */
+export function toast(msg: unknown, ms = 2200, link?: { text: string; run: () => void }, severity: "info" | "warning" | "error" = "info"): void { store.set({ toast: { id: ++E.toastN, text: String(msg), ms, link, severity } }); }
 
 export function ago(iso: string): string {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;

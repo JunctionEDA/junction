@@ -7,6 +7,8 @@ require(path.join(__dirname, "..", "kicad-canvas.js"));
 require(path.join(__dirname, "..", "sch-tools.js"));
 const K = globalThis.KiCadCanvas, sch = globalThis.CollabTools.sch, _ = sch._, IU = 1e4;
 const { kid, kids, str, num, atOf, ptsOf } = K;
+// GetMajorMinorVersion(): what every writer puts in (generator_version …) (canvas/format-version.ts GENERATOR_VERSION)
+const GENERATOR_VERSION = /KICAD_BASE_VERSION = "(\d+\.\d+)/.exec(fs.readFileSync(require("./web-path").webPath("canvas/version.ts"), "utf8"))[1];
 
 const SHEET = `(kicad_sch (version 20250114) (generator "eeschema") (generator_version "9.0") (uuid "root-uuid") (paper "A4")
   (lib_symbols
@@ -284,7 +286,8 @@ test("labels rotate through 0/90/180/270 with matching justify", () => {
 test("place symbol (A): node from the library with R?/Value/pins, junctions at pins, selection follows", () => {
   const n = _.symbolNode(doc, "Device:R", [50.8, 25.4], 0, "");
   const props = kids(n, "property").map((p) => [p[1], p[2]]);
-  assert.deepStrictEqual(props, [["Reference", "R?"], ["Value", "R"], ["Footprint", ""], ["Datasheet", "~"], ["Description", "Resistor"]], "ki_* fields are not copied");
+  // the sheet is a 20250114 file: its library copy's Datasheet "~" reads as empty (the parser's "~" rule before 20250318)
+  assert.deepStrictEqual(props, [["Reference", "R?"], ["Value", "R"], ["Footprint", ""], ["Datasheet", ""], ["Description", "Resistor"]], "ki_* fields are not copied");
   assert.deepStrictEqual(atOf(kids(n, "property")[0]), [52.832, 25.4, 90], "field offsets come through the orientation transform");
   assert.deepStrictEqual(kid(kids(n, "property")[2], "hide"), ["hide", "yes"]);
   assert.deepStrictEqual(kids(n, "pin").map((p) => p[1]), ["1", "2"]); assert.ok(kids(n, "pin").every((p) => K.uuidOf(p).length > 10));
@@ -513,7 +516,8 @@ test("directive label: the netclass name from the prompt lands as (netclass_flag
   const n = fragItem(c.changes[0]);
   assert.deepStrictEqual(n.slice(0, 7), ["netclass_flag", "", ["length", 2.54], ["shape", "round"], ["at", 152.4, 139.7, 0], ["fields_autoplaced", "yes"], ["effects", ["font", ["size", 1.27, 1.27]], ["justify", "left", "bottom"]]]);
   assert.strictEqual(n[7][0], "uuid");
-  assert.deepStrictEqual(n[8], ["property", "Netclass", "Power", ["at", 153.0985, 137.16, 0], ["effects", ["font", ["size", 1.27, 1.27]], ["justify", "left", "bottom"]]]);
+  // saveField: (show_name …) and (do_not_autoplace …) always, before the effects
+  assert.deepStrictEqual(n[8], ["property", "Netclass", "Power", ["at", 153.0985, 137.16, 0], ["show_name", "no"], ["do_not_autoplace", "no"], ["effects", ["font", ["size", 1.27, 1.27]], ["justify", "left", "bottom"]]]);
   assert.strictEqual(n.length, 9);
   const it = doc.items.get(c.changes[0].id); assert.ok(it.geom.some((g) => g.t === "text" && g.text === "Power")); assert.ok(it.geom.some((g) => g.t === "circle"));
   assert.strictEqual(sch.state.sel, it.id);
@@ -981,7 +985,7 @@ test("copy: the desktop's clipboard format — (lib_symbols …) then the items,
   const trees = K.parseAll(text); assert.deepStrictEqual(trees.map((t) => t[0]), ["lib_symbols", "symbol", "wire", "label"]);
   assert.strictEqual(K.uuidOf(trees[1]), "s1", "copied items keep their identity on the clipboard (paste renews it)");
   const wrapped = sch.clipboardText(d, [d.items.get("l1")], { wrap: true });
-  assert.ok(/^\(kicad_sch \(version 20250114\) \(generator "kicad-collab-web"\) \(generator_version "9\.0"\)\n\(label "NETA"/.test(wrapped), wrapped);
+  assert.ok(wrapped.startsWith(`(kicad_sch (version 20261106) (generator "eeschema") (generator_version "${GENERATOR_VERSION}")\n(label "NETA"`), wrapped);
   assert.deepStrictEqual(K.parseDoc(wrapped).items.get("l1").kind, "label");
   const parsed = sch.parseClipboard(text); assert.strictEqual(parsed.nodes.length, 3); assert.strictEqual(parsed.libs.length, 1);
   assert.strictEqual(sch.parseClipboard("hello world"), null); assert.strictEqual(sch.parseClipboard(""), null);
@@ -1434,11 +1438,11 @@ test("symbol fields table: every symbol's fields as rows; edits (including a new
   const r2 = symAt(c, 50.8, 50.8); _.setReference(r2.node, "R2"); r2.node.push(["property", "MPN", "ERJ-1", ["at", 50.8, 50.8, 0], ["hide", "yes"], ["effects", ["font", ["size", 1.27, 1.27]]]]); K.buildGeom(d, r2);
   const t = sch.fieldsTableRows(d);
   assert.deepStrictEqual(t.fields, ["Reference", "Value", "Footprint", "Datasheet", "Description", "MPN"]);
-  assert.deepStrictEqual(t.rows.map((r) => r.ref), ["R1", "R2"]); assert.deepStrictEqual(t.rows[1].values, { Reference: "R2", Value: "R", Footprint: "", Datasheet: "~", Description: "Resistor", MPN: "ERJ-1" });
+  assert.deepStrictEqual(t.rows.map((r) => r.ref), ["R1", "R2"]); assert.deepStrictEqual(t.rows[1].values, { Reference: "R2", Value: "R", Footprint: "", Datasheet: "", Description: "Resistor", MPN: "ERJ-1" });
   const changes = sch.fieldsTableChanges(d, [{ id: "s1", values: { Value: "4k7", MPN: "ERJ-2", Reference: "R7" } }, { id: r2.id, values: { Value: "R" } }]);
   assert.strictEqual(changes.length, 1, "only the symbol that changed"); assert.strictEqual(changes[0].kind, "MODIFIED"); assert.strictEqual(changes[0].id, "s1");
   const n = fragItem(changes[0]), props = kids(n, "property");
-  assert.deepStrictEqual(props.map((p) => [p[1], p[2]]), [["Reference", "R7"], ["Value", "4k7"], ["Footprint", ""], ["Datasheet", "~"], ["Description", "Resistor"], ["MPN", "ERJ-2"]]);
+  assert.deepStrictEqual(props.map((p) => [p[1], p[2]]), [["Reference", "R7"], ["Value", "4k7"], ["Footprint", ""], ["Datasheet", ""], ["Description", "Resistor"], ["MPN", "ERJ-2"]]);
   assert.deepStrictEqual(kid(props[5], "hide"), ["hide", "yes"]); assert.ok(n.findIndex((x) => Array.isArray(x) && x[0] === "property") < n.findIndex((x) => Array.isArray(x) && x[0] === "pin"), "fields stay ahead of the pins");
   assert.strictEqual(str(kid(kid(kid(kid(n, "instances"), "project"), "path"), "reference")[1]), "R7", "instance reference follows");
   c.commit(changes, "symbol fields"); assert.strictEqual(d.items.get("s1").ref, "R7");
@@ -1714,7 +1718,8 @@ await testAsync("sheet: two corners, name and file prompts, the file created on 
   assert.deepStrictEqual(JSON.parse(c.apiCalls[0].opts.body), { path: "Power.kicad_sch", docType: "kicad_sch" });
   assert.strictEqual(c.apiCalls[1].path, "/api/docs/doc-2/snapshots?seq=0"); assert.strictEqual(c.apiCalls[1].opts.method, "POST"); assert.strictEqual(c.apiCalls[1].opts.headers["content-type"], "text/plain");
   const snap = K.parse(c.apiCalls[1].opts.body); assert.strictEqual(snap[0], "kicad_sch");
-  assert.deepStrictEqual(kid(snap, "version"), ["version", 20250114]); assert.deepStrictEqual(kid(snap, "generator"), ["generator", "kicad-collab-web"]); assert.deepStrictEqual(kid(snap, "generator_version"), ["generator_version", "9.0"]);
+  // a sheet never loaded takes the project's version (preservableVersion: the root's), KiCad's generator and this build's version
+  assert.deepStrictEqual(kid(snap, "version"), ["version", 20250114]); assert.deepStrictEqual(kid(snap, "generator"), ["generator", "eeschema"]); assert.deepStrictEqual(kid(snap, "generator_version"), ["generator_version", GENERATOR_VERSION]);
   assert.ok(K.uuidOf(snap).length > 10); assert.deepStrictEqual(kid(snap, "paper"), ["paper", "A4"]); assert.deepStrictEqual(kid(snap, "lib_symbols"), ["lib_symbols"]);
   assert.deepStrictEqual(kid(snap, "sheet_instances"), ["sheet_instances", ["path", "/", ["page", "1"]]]); assert.strictEqual(K.parseDoc(c.apiCalls[1].opts.body).items.size, 0);
   assert.ok(c.docs.some((x) => x.docId === "doc-2" && x.path === "Power.kicad_sch"), "the new doc joined ctx.docs");
@@ -1722,8 +1727,8 @@ await testAsync("sheet: two corners, name and file prompts, the file created on 
   const n = fragItem(cm.changes[0]);
   assert.deepStrictEqual(n.slice(0, 10), ["sheet", ["at", 101.6, 88.9], ["size", 25.4, 12.7], ["exclude_from_sim", "no"], ["in_bom", "yes"], ["on_board", "yes"], ["dnp", "no"], ["fields_autoplaced", "yes"], ["stroke", ["width", 0.1524], ["type", "solid"]], ["fill", ["color", 0, 0, 0, 0]]]);
   assert.strictEqual(n[10][0], "uuid");
-  assert.deepStrictEqual(n[11], ["property", "Sheetname", "Power", ["at", 101.6, 88.1884, 0], ["effects", ["font", ["size", 1.27, 1.27]], ["justify", "left", "bottom"]]], "name sits border/2 + 4 IU + 0.5 × text size above");
-  assert.deepStrictEqual(n[12], ["property", "Sheetfile", "Power.kicad_sch", ["at", 101.6, 102.1846, 0], ["effects", ["font", ["size", 1.27, 1.27]], ["justify", "left", "top"]]], "file sits border/2 + 4 IU + 0.4 × text size below");
+  assert.deepStrictEqual(n[11], ["property", "Sheetname", "Power", ["at", 101.6, 88.1884, 0], ["show_name", "no"], ["do_not_autoplace", "no"], ["effects", ["font", ["size", 1.27, 1.27]], ["justify", "left", "bottom"]]], "name sits border/2 + 4 IU + 0.5 × text size above");
+  assert.deepStrictEqual(n[12], ["property", "Sheetfile", "Power.kicad_sch", ["at", 101.6, 102.1846, 0], ["show_name", "no"], ["do_not_autoplace", "no"], ["effects", ["font", ["size", 1.27, 1.27]], ["justify", "left", "top"]]], "file sits border/2 + 4 IU + 0.4 × text size below");
   assert.deepStrictEqual(n[13], ["instances", ["project", "t", ["path", "/root-uuid", ["page", "2"]]]], "the path and project name this sheet's symbols record; page 2 of a 2-sheet project (quoted: a string to KiCad)");
   assert.strictEqual(n.length, 14);
   assert.ok(/\(page "2"\)/.test(cm.changes[0].sexpr) && /\(color 0 0 0 0\)/.test(cm.changes[0].sexpr), cm.changes[0].sexpr);

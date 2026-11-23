@@ -9,7 +9,7 @@ import type { DruRule, RuleItem } from "./dru";
 import { fracture } from "../../fab/poly";
 import { shapeGap } from "./distances";
 import { resolve } from "./drc-rules";
-import { marker, mm4 } from "./drc";
+import { marker, mm4, mmPair, ruled } from "./drc";
 import { copperCtx, layerName, netCopper, type CopperCtx } from "./drc-sliver";
 
 /** ADVANCED_CFG m_DRCEpsilon, m_ExtraClearance and the board's maximum error (mm). */
@@ -160,8 +160,8 @@ export function connectionWidthMarkers(doc: BoardDoc, s: DesignSettings, rules: 
           const r = resolve(rules, "connection_width", doc, s, ruleItem(hit[0], layer), hit[1] ? ruleItem(hit[1], layer) : null, Number(s.minConn) || 0);
           if (!r || r.min == null || Math.abs(r.min - minW) > 1e-9) continue;
           const m = marker("connection_width", r.severity === "warning" || r.severity === "error" ? r.severity : "warning", loc[0], loc[1],
-            `Copper connection too narrow (${r.name} minimum connection width ${mm4(r.min)}; actual ${mm4(dist)}) (${layerName(doc, layer)})`, Array.from(new Set(hit.map((c) => c.id))));
-          m.layer = layer; m.rule = r.name; out.push(m);
+            `Copper connection too narrow (${r.name} minimum connection width ${mmPair(r.min, dist)[0]}; actual ${mmPair(r.min, dist)[1]}) (${layerName(doc, layer)})`, Array.from(new Set(hit.map((c) => c.id))));
+          m.layer = layer; m.rule = r.name; out.push(ruled(m, r.severity));
         }
       }
     }

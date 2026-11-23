@@ -1,5 +1,5 @@
 // kicad-canvas — GENERATED SOURCE MODULE (split from the former static/kicad-canvas.js; static/kicad-canvas.js is now the esbuild output of web/domains/pcb/canvas/index.ts — edit these modules, not the bundle).
-import { strokeAdvance } from "./stroke-font";
+import { ITALIC_TILT, parseStrokeMarkup, strokeAdvance, type MarkupNode } from "./stroke-font";
 import type { TextEffects } from "./types";
 // ---------------------------------------------------------------- text metrics
 // Newstroke advance widths (units of 1/21 of the text size) for ASCII 32..126, read
@@ -32,17 +32,43 @@ export function textWidth(text: string, size: number, thick?: number): number {
   return text.length ? Math.max(0, w - 0.2) * size + 3 * (thick || 0) : 0;
 }
 
-/** Strip KiCad text markup; overbar spans (~{...}) are kept as [start, end) indices of the shown text. */
+/**
+ * Strip KiCad text markup (MARKUP_PARSER, as parseStrokeMarkup reads it); overbar spans (~{...}) are kept as
+ * [start, end) indices of the shown text.  A group that never closes is literal text, braces included.
+ */
 export function parseMarkup(s: string): { text: string; bars: [number, number][] | null } {
   if (s.indexOf("{") < 0) return { text: s, bars: null };
-  let out = "", bars: [number, number][] | null = null; const stack: { kind: string; start: number }[] = [];
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i], d = s[i + 1];
-    if ((c === "~" || c === "_" || c === "^") && d === "{") { stack.push({ kind: c, start: out.length }); i++; continue; }
-    if (c === "}" && stack.length) { const o = stack.pop()!; if (o.kind === "~") (bars = bars || []).push([o.start, out.length]); continue; }
-    out += c;
-  }
+  let out = "", bars: [number, number][] | null = null;
+  const flat = (n: MarkupNode): void => {
+    for (const c of n.children) {
+      if (!c.kind) { out += c.text; continue; }
+      const start = out.length; flat(c);
+      if (c.kind === "~") (bars = bars || []).push([start, out.length]);
+    }
+  };
+  flat(parseStrokeMarkup(s));
   return { text: out, bars };
+}
+
+/**
+ * EDA_TEXT::GetTextBox (common/eda_text.cpp:851-1000) for the stroke font, what TextHitTest and the bounding box use, in
+ * the text's own frame (origin at its anchor, x along the reading direction with a mirrored text's x flipped, y down):
+ * the extents of FONT::StringBoundaryLimits (the line width and the height each grown by 3 x the pen), the height plus
+ * the 0.17 "fudge" for descenders and a sixth more over an overbar, further lines an interline (x line spacing) apart;
+ * placed by the justification with the italic slant (size.y / 8) taken off the width, and moved up by the fudge when
+ * top-aligned, down by it when bottom-aligned.
+ */
+export function strokeTextBox(g: { text?: string; size?: number; sizeX?: number; w?: number; h?: string; v?: string; italic?: boolean; mirror?: boolean; bars?: [number, number][] | null; raw?: string; lineSpacing?: number }): [number, number, number, number] {
+  const size = g.size || 1, sx = g.sizeX && g.sizeX > 0 ? g.sizeX : size, pen = typeof g.w === "number" && g.w > 0 ? g.w : 0;
+  const lines = String(g.text || "").split("\n"); if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+  let w = 0; for (const l of lines) w = Math.max(w, textWidth(l, sx, pen));
+  const ext = size + 3 * pen, fudge = ext * 0.17;
+  const overbar = !!(g.bars && g.bars.length) || /~\{/.test(g.raw || "");
+  const h = ext + fudge + (lines.length - 1) * size * INTERLINE * (g.lineSpacing || 1) + (overbar ? ext / 6 : 0);
+  const io = g.italic ? size * ITALIC_TILT : 0, hj = g.h || "center";
+  const x0 = g.mirror ? (hj === "left" ? -io : hj === "right" ? -w : -(w + io) / 2) : (hj === "left" ? 0 : hj === "right" ? -(w - io) : -(w - io) / 2);
+  const y0 = g.v === "top" ? -fudge : g.v === "bottom" ? -h + fudge : -h / 2;
+  return [x0, y0, x0 + w, y0 + h];
 }
 
 export const INTERLINE = 1.68 * 0.9583;
@@ -53,26 +79,68 @@ export function setSchPen(w: number): void { if (w > 0) SCH_PEN = w; }
              // DEFAULT_LINE_WIDTH_MILS (6 mil)
 export const MIL = 0.0254;
 
-export function textPen(ef: Pick<TextEffects, "sizeX" | "thick" | "bold">, size: number): number {
+/** The file version of the schematic / symbol library whose text is being built (0 when unknown). */
+let schTextVersion = 0;
+export function setSchTextVersion(v: number | null | undefined): void { schTextVersion = Number(v) || 0; }
+/**
+ * EDA_TEXT::MigrateLegacyBoldStrokeWidth (eda_text.cpp), run by the schematic parser for files before 20260826: those
+ * stored a bold stroke text's drawn width, so the width attribute is the stored value / BOLD_STROKE_MULTIPLIER
+ * (at least 2 IU).  Otherwise the stored width.
+ */
+function boldAttrWidth(ef: Pick<TextEffects, "thick" | "bold" | "face">): number {
+  const iu = Math.round(ef.thick * 1e4);
+  if (!(schTextVersion > 0 && schTextVersion < 20260826) || !ef.bold || ef.face || iu <= 1) return ef.thick;
+  return Math.max(2, Math.round(iu / 1.6)) / 1e4;
+}
+
+export function textPen(ef: Pick<TextEffects, "sizeX" | "thick" | "bold" | "face">, size: number): number {
   // EDA_TEXT::GetEffectiveTextPenWidth( default pen ): SCH_PAINTER::getTextThickness passes the schematic's
   // default line width (6 mil), so plain text is drawn with that pen whatever its size; bold text is
   // size/5 (GetPenSizeForBold of the smaller glyph dimension), an explicit thickness is kept (×1.6 when
   // bold, BOLD_STROKE_MULTIPLIER); everything is clamped to a quarter of the size (ClampTextPenSize).
-  const minSize = Math.min(size, ef.sizeX > 0 ? ef.sizeX : size);
-  let pen = ef.thick > 0.001 ? (ef.bold ? ef.thick * 1.6 : ef.thick) : (ef.bold ? minSize / 5 : SCH_PEN);
+  // (a bold stroke-font text's stored thickness is the attribute width ×1.6; older files stored the multiplied pen: boldAttrWidth)
+  const sx = ef.sizeX > 0 ? ef.sizeX : size, minSize = Math.min(size, sx);   // GetPenSizeForBold( GetTextWidth() )
+  const pen = ef.thick > 0.001 ? (ef.bold && !ef.face ? boldAttrWidth(ef) * 1.6 : ef.thick) : (ef.bold ? sx / 5 : SCH_PEN);
   return Math.min(pen, minSize * 0.25);
 }
 
-/** GetEffectiveTextPenWidth() with no default pen — what the label shapes and offsets are computed with (SCH_LABEL_BASE::GetPenWidth): size/8, bold size/5, clamped to size/4. */
-export function layoutPen(ef: Pick<TextEffects, "thick" | "bold">, size: number): number {
-  const pen = ef.thick > 0.001 ? ef.thick : (ef.bold ? size / 5 : size / 8);
-  return Math.min(pen, size * 0.25);
+/**
+ * GetEffectiveTextPenWidth() with no default pen (eda_text.cpp:491-511) — what the label shapes and offsets are computed
+ * with (SCH_LABEL_BASE::GetPenWidth): text width/8, bold width/5, a stored thickness ×1.6 when bold in the stroke font
+ * (of the attribute width, boldAttrWidth, for an older file), clamped to min(width, height)/4 (ClampTextPenSize).
+ */
+export function layoutPen(ef: Pick<TextEffects, "thick" | "bold" | "face"> & { sizeX?: number }, size: number): number {
+  const sx = ef.sizeX && ef.sizeX > 0 ? ef.sizeX : size;
+  const pen = ef.thick > 0.001 ? (ef.bold && !ef.face ? boldAttrWidth(ef) * 1.6 : ef.thick) : (ef.bold ? sx / 5 : sx / 8);
+  return Math.min(pen, Math.min(size, sx) * 0.25);
 }
 
 const UNESCAPE: Record<string, string> = { dblquote: '"', quote: "'", lt: "<", gt: ">", backslash: "\\", slash: "/", bar: "|", comma: ",", colon: ":", space: " ", dollar: "$", tab: "\t", return: "\n", brace: "{" };
-const UNESCAPE_RE = /\{(dblquote|quote|lt|gt|backslash|slash|bar|comma|colon|space|dollar|tab|return|brace)\}/g;
-/** UnescapeString (common/string_utils.cpp): {slash} → /, {colon} → :, … as every GetShownText does before drawing. */
-export function unescapeText(s: string): string { return s && s.indexOf("{") >= 0 ? s.replace(UNESCAPE_RE, (m: string, k: string) => UNESCAPE[k]) : s; }
+/**
+ * UnescapeString (common/string_utils.cpp:399-480), as every GetShownText does before drawing: {slash} → /, {colon} → :,
+ * {dblquote} → ", …; a {…} right after $ ~ ^ or _ stays a brace group (a variable reference or a markup run) with its
+ * inside unescaped, an unknown or unterminated {…} is kept, and braces nest.
+ */
+export function unescapeText(src: string): string {
+  if (!src || src.length <= 2) return src;
+  let out = "", prev = "", ch = "";
+  for (let i = 0; i < src.length; ++i) {
+    prev = ch; ch = src[i];
+    if (ch !== "{") { out += ch; continue; }
+    let token = "", depth = 1, terminated = false;
+    for (i = i + 1; i < src.length; ++i) {
+      ch = src[i];
+      if (ch === "{") depth++; else if (ch === "}") depth--;
+      if (depth <= 0) { terminated = true; break; }
+      token += ch;
+    }
+    if (!terminated) out += "{" + unescapeText(token);
+    else if (prev === "$" || prev === "~" || prev === "^" || prev === "_") out += "{" + unescapeText(token) + "}";
+    else if (Object.prototype.hasOwnProperty.call(UNESCAPE, token)) out += UNESCAPE[token];
+    else out += "{" + unescapeText(token) + "}";
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------- hypertext (MARKUP::url, IsURL)
 /**
@@ -110,4 +178,30 @@ export function urlRunAt(g: { x: number; y: number; rot?: number; mirror?: boole
   const [lx, ly] = textLocal(g, p);
   for (const r of runs) { const b = urlRunBox(g, r.start, r.end); if (lx >= b.x0 && lx <= b.x1 && ly >= b.y0 && ly <= b.y1) return r; }
   return null;
+}
+
+/**
+ * ConvertToNewOverbarNotation (common/string_utils.cpp): the readers' conversion of the old overbar notation (~TEXT~, a
+ * space, '}' or ')' closing it too) to ~{TEXT}, for files before 20210606.
+ */
+export function convertToNewOverbarNotation(old: string): string {
+  if (old === "~") return old;   // the legacy empty-string token
+  let out = "", inOverbar = false;
+  for (let i = 0; i < old.length; i++) {
+    const ch = old[i];
+    if (ch === "~") {
+      const la = old[i + 1];
+      if (la === "~") {
+        if (old[i + 2] === "{") { out += "~~{}"; continue; }   // the following '{' does not start an overbar
+        out += "~"; i++; continue;                              // two tildes: a tilde
+      }
+      if (la === "{") return old;                               // most likely converted already: bail out
+      if (inOverbar) { out += "}"; inOverbar = false; } else { out += "~{"; inOverbar = true; }
+      continue;
+    }
+    if ((ch === " " || ch === "}" || ch === ")") && inOverbar) { out += "}"; inOverbar = false; }
+    out += ch;
+  }
+  if (inOverbar) out += "}";
+  return out;
 }

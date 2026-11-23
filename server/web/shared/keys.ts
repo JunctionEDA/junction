@@ -22,12 +22,28 @@ function detectMac(): boolean {
 /** A Mac (navigator.platform, else navigator.userAgentData, else the user agent). */
 export const IS_MAC = detectMac();
 
-/** A hotkey in KiCad's notation split into its modifiers and its key ("Ctrl++" is Ctrl and "+"). */
-export function splitKey(key: string): { ctrl: boolean; alt: boolean; shift: boolean; rawCtrl: boolean; key: string } {
-  const parts = key.split("+"); let k = parts.pop() ?? "";
-  if (k === "" && key.endsWith("+")) { k = "+"; parts.pop(); }
-  return { ctrl: parts.includes("Ctrl") || parts.includes("Cmd"), alt: parts.includes("Alt") || parts.includes("Option"), shift: parts.includes("Shift"), rawCtrl: parts.includes("RawCtrl"), key: k };
+/** The modifier prefixes KeyCodeFromKeyName strips ("Cmd+" is Ctrl, "Option+" is Alt as the Mac build writes it). */
+const MOD_PREFIXES: [string, "ctrl" | "alt" | "shift" | "rawCtrl" | "meta" | "super" | "altGr"][] = [
+  ["RawCtrl+", "rawCtrl"], ["Ctrl+", "ctrl"], ["Cmd+", "ctrl"], ["Alt+", "alt"], ["Option+", "alt"], ["Shift+", "shift"],
+  ["Meta+", "meta"], ["Win+", "super"], ["Super+", "super"], ["AltGr+", "altGr"],
+];
+/** A hotkey in KiCad's notation split into its modifiers and its key ("Ctrl++" is Ctrl and "+", "Num Pad +" one key). */
+export function splitKey(key: string): { ctrl: boolean; alt: boolean; shift: boolean; rawCtrl: boolean; meta: boolean; super: boolean; altGr: boolean; key: string } {
+  const out = { ctrl: false, alt: false, shift: false, rawCtrl: false, meta: false, super: false, altGr: false, key: "" };
+  let k = key;
+  for (;;) {
+    const m = MOD_PREFIXES.find(([p]) => k.startsWith(p));
+    if (!m) break;
+    out[m[1]] = true; k = k.slice(m[0].length);
+  }
+  out.key = k;
+  return out;
 }
+
+/** hotkeyNameList's names for the keys the web spells otherwise ("Enter" is KiCad's "Return", "Backspace" its "Back"). */
+const KICAD_KEY_NAME: Record<string, string> = { Enter: "Return", Backspace: "Back", Delete: "Del", Escape: "Esc", Insert: "Ins", PageUp: "PgUp", PageDown: "PgDn" };
+/** A key's name as KiCad writes it. */
+export const kicadKeyName = (k: string): string => KICAD_KEY_NAME[k] || k;
 
 /**
  * KeyNameFromKeyCode: the hotkey as text, for tooltips, the hotkey list, labels and messages.  On a Mac
@@ -36,13 +52,16 @@ export function splitKey(key: string): { ctrl: boolean; alt: boolean; shift: boo
 export function keyName(key: string | null | undefined): string {
   if (!key) return "";
   const s = splitKey(key);
-  if (!IS_MAC) return s.rawCtrl ? key.replace("RawCtrl", "Ctrl") : key;
+  // KeyNameFromKeyCode: Ctrl, Alt, Shift, Meta, Win, AltGr, then the key ("Ctrl+Alt+Shift+X")
   const mods: string[] = [];
-  if (s.rawCtrl) mods.push("Ctrl");
-  if (s.ctrl) mods.push("Cmd");
-  if (s.alt) mods.push("Option");
+  if (IS_MAC && s.rawCtrl) mods.push("Ctrl");
+  if (s.ctrl || (!IS_MAC && s.rawCtrl)) mods.push(IS_MAC ? "Cmd" : "Ctrl");
+  if (s.alt) mods.push(IS_MAC ? "Option" : "Alt");
   if (s.shift) mods.push("Shift");
-  return [...mods, s.key].join("+");
+  if (s.meta) mods.push("Meta");
+  if (s.super) mods.push("Win");
+  if (s.altGr) mods.push("AltGr");
+  return mods.map((m) => m + "+").join("") + kicadKeyName(s.key);
 }
 
 /** A modifier key's own name ("Ctrl", "Alt", "Shift" in KiCad's notation): "Cmd" and "Option" on a Mac. */
@@ -102,4 +121,55 @@ export function hotkeyKey(ev: { key: string; code?: string; altKey: boolean; shi
     if (p && (k === "Dead" || k.length !== 1 || k.charCodeAt(0) > 0x7e)) return p[ev.shiftKey ? 1 : 0];
   }
   return k === "Dead" ? null : k;
+}
+
+/**
+ * hotkeyNameList (common/hotkeys_basic.cpp): every key a hotkey can name besides the printable ASCII characters
+ * ('!' to '~'), and the mouse pseudo keys.
+ */
+export const HOTKEY_NAMES: readonly string[] = [
+  ...Array.from({ length: 24 }, (_, i) => `F${i + 1}`),
+  "Esc", "Del", "Tab", "Back", "Ins", "Home", "End", "PgUp", "PgDn", "Up", "Down", "Left", "Right", "Return", "Space",
+  ...Array.from({ length: 10 }, (_, i) => `Num Pad ${i}`), "Num Pad +", "Num Pad -", "Num Pad *", "Num Pad /", "Num Pad .", "Num Pad Enter",
+  "Num Pad F1", "Num Pad F2", "Num Pad F3", "Num Pad F4", "", "Click", "DblClick", "Wheel",
+];
+/** KeyNameFromKeyCode( aKey, &exists ): whether the key of a hotkey has a name (a printable character or a listed key). */
+export function keyNameExists(key: string): boolean {
+  const k = kicadKeyName(splitKey(key).key);
+  if (k.length === 1) return k > " " && k < "\x7f";
+  return k !== "" && HOTKEY_NAMES.includes(k);
+}
+/**
+ * KeyCodeFromKeyName: a hotkey name read from a user.hotkeys file in this notation, modifiers in KiCad's order.
+ * The modifier prefixes are matched as written ("Cmd+" is Ctrl; "Option+" only on a Mac, where it is the Alt
+ * prefix); a key of one printable character is taken as it is, a named key in any case ("pgup" is "PgUp").
+ * "" for an empty name (no hotkey), null when the key has no name (KEY_NON_FOUND).
+ */
+export function parseKeyName(name: string): string | null {
+  let k = name; const m = { ctrl: false, alt: false, shift: false, meta: false, super: false, altGr: false };
+  const prefixes: [string, keyof typeof m][] = [["Ctrl+", "ctrl"], ["Cmd+", "ctrl"], [IS_MAC ? "Option+" : "Alt+", "alt"], ["Shift+", "shift"], ["Meta+", "meta"], ["Win+", "super"], ["Super+", "super"], ["AltGr+", "altGr"]];
+  for (;;) { const p = prefixes.find(([x]) => k.startsWith(x)); if (!p) break; m[p[1]] = true; k = k.slice(p[0].length); }
+  let key: string | undefined;
+  if (k.length === 1 && k > " " && k < "\x7f") key = k;
+  else key = HOTKEY_NAMES.find((n) => n.toLowerCase() === k.toLowerCase());
+  if (key === undefined) return null;
+  if (key === "") return "";   // { "", 0 }: no hotkey
+  return (m.ctrl ? "Ctrl+" : "") + (m.alt ? "Alt+" : "") + (m.shift ? "Shift+" : "") + (m.meta ? "Meta+" : "") + (m.super ? "Win+" : "") + (m.altGr ? "AltGr+" : "") + key;
+}
+
+/** The number pad's keys by KeyboardEvent.code, as hotkeyNameList names them (WXK_NUMPAD0 … WXK_NUMPAD_ENTER). */
+const NUMPAD_CODES: Record<string, string> = {
+  NumpadAdd: "Num Pad +", NumpadSubtract: "Num Pad -", NumpadMultiply: "Num Pad *", NumpadDivide: "Num Pad /", NumpadDecimal: "Num Pad .", NumpadEnter: "Num Pad Enter",
+};
+/**
+ * The number pad key of this event ("Num Pad 5", "Num Pad Enter"), or null for any other key.  With Num Lock off
+ * the pad's arrows and PgUp / PgDn are the plain keys (TOOL_DISPATCHER translateSpecialCode); its digits and
+ * separator then type navigation keys, which are not number pad names either.
+ */
+export function numpadKey(ev: { key: string; code?: string }): string | null {
+  const c = ev.code || ""; if (!c.startsWith("Numpad")) return null;
+  const d = /^Numpad(\d)$/.exec(c);
+  if (d) return /^\d$/.test(ev.key) ? `Num Pad ${d[1]}` : null;
+  if (c === "NumpadDecimal" && ev.key !== "." && ev.key !== ",") return null;
+  return NUMPAD_CODES[c] || null;
 }

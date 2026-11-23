@@ -1,13 +1,14 @@
 // kicad-canvas — GENERATED SOURCE MODULE (split from the former static/kicad-canvas.js; static/kicad-canvas.js is now the esbuild output of web/domains/pcb/canvas/index.ts — edit these modules, not the bundle).
 import { root } from "./env";
-import { PCB_BG, PCB_GRID, PCB_GRID_AXES, PCB_PAGE_LIMITS, PCB_SHEET, SCH, SCH_DEFAULT, SCH_Z, DARK_CACHE, darkened, parseColor, pcbColor, pcbZ, rgba } from "./colors";
+import { PCB_BG, PCB_GRID, PCB_GRID_AXES, PCB_PAGE_LIMITS, PCB_SHEET, SCH, SCH_DEFAULT, SCH_Z, VIA_HOLE, DARK_CACHE, darkened, parseColor, pcbColor, pcbZ, rgba } from "./colors";
 import { atOf, colorOf, effectsOf, flipH, kid, kids, num, pointInPoly, ptsOf, splitLines, str, strokeOf, yesNo } from "./sexpr";
 import { isBusLabel } from "./busname";
 import { ensureFontGeom, ensureSchTheme } from "./geom";
 import { FAKE_ITALIC_SLANT, OUTLINE_EM, cssFamily, faceAvailable, fontChanged as olFontChanged, outlineLayout, type OutlineLayout } from "./outline-text";
-import { displayNetName } from "./geom-pcb";
-import { geomBox } from "./hit";
+import { displayNetName, padLabelShown, printableCharCount } from "./geom-pcb";
+import { geomBox, geomHit } from "./hit";
 import { documentDrawingSheet } from "./sheet";
+import { imageEntry } from "./tables-images";
 import { SCH_PEN, TEXT_INTERLINE, lineOffsets, textWidth, urlRunBox } from "./text";
 import { drawStrokeText, setOverbarHeight, strokeLine, strokeOrigin } from "./stroke-font";
 import { hopShapes, strokeHopShape } from "./hop-over";
@@ -299,6 +300,85 @@ export function viaSpans(pair: string[], cu: string) {
   if (isNaN(a) || isNaN(b) || isNaN(c)) return true;
   return c >= Math.min(a, b) && c <= Math.max(a, b);
 }
+/** Points on a copper shape's outline (and its centre), for the touch tests of unflashedGeoms. */
+function shapeSamples(g: Geom): number[][] {
+  const out: number[][] = [];
+  if (g.t === "circle") { out.push([g.x, g.y]); for (let i = 0; i < 24; i++) { const a = i * Math.PI / 12; out.push([g.x + g.r * Math.cos(a), g.y + g.r * Math.sin(a)]); } }
+  else if (g.t === "pad") {
+    const R = (lx: number, ly: number) => { const a = -(g.rot || 0) * Math.PI / 180, c = Math.cos(a), s = Math.sin(a); return [g.x + lx * c - ly * s, g.y + lx * s + ly * c]; };
+    out.push([g.x, g.y]);
+    if (g.shape === "circle") { const r = Math.max(g.w, g.h) / 2; for (let i = 0; i < 24; i++) { const a = i * Math.PI / 12; out.push([g.x + r * Math.cos(a), g.y + r * Math.sin(a)]); } }
+    else for (let i = 0; i <= 8; i++) { const t = i / 8 - 0.5; out.push(R(t * g.w, -g.h / 2), R(t * g.w, g.h / 2), R(-g.w / 2, t * g.h), R(g.w / 2, t * g.h)); }
+  } else if (g.t === "poly") { for (const p of g.pts) out.push(p as number[]); }
+  else if (g.t === "line") out.push([g.x1, g.y1], [g.x2, g.y2]);
+  return out;
+}
+const UNFLASHED = new WeakMap<object, { key: unknown[]; set: Set<Geom> | null }>();
+/**
+ * PCB_VIA::FlashLayer / PAD::FlashLayer for the layers a padstack drops where nothing connects (remove_unused_layers):
+ * the ring / pad copper geometry tagged unusedLayer that CONNECTIVITY_DATA::IsConnectedOnLayer finds nothing on — no
+ * track or arc of the net ending in it (or under its centre), no other via or pad of the net touching it on that layer
+ * (a pad of the same footprint, or two pads that both flash conditionally, do not count).  Cached while the copper is.
+ */
+export function unflashedGeoms(doc: Doc): Set<Geom> | null {
+  if (doc.type !== "pcb") return null;
+  const key: unknown[] = []; let any = false;
+  for (const it of doc.items.values()) { const k = it.kind; if (k === "segment" || k === "arc" || k === "via" || k === "footprint") { key.push(it.geom); if (it.unusedFlash) any = true; } }
+  if (!any) return null;
+  const hit = UNFLASHED.get(doc);
+  if (hit && hit.key.length === key.length && hit.key.every((k, i) => k === key[i])) return hit.set;
+  type Cu = { it: Item; g: Geom; pad?: number; cond?: boolean };
+  const byLayer = new Map<string, Cu[]>();
+  const add = (layer: string, c: Cu) => { let a = byLayer.get(layer); if (!a) byLayer.set(layer, a = []); a.push(c); };
+  for (const it of doc.items.values()) {
+    if (it.kind === "segment" || it.kind === "arc") { for (const g of it.geom) if (g.track) add(g.layer, { it, g }); }
+    else if (it.kind === "via") { for (const g of it.geom) if (g.via && !g.hole && !g.viaMask && !g.indicator && /\.Cu$/.test(g.layer)) add(g.layer, { it, g }); }
+    else if (it.kind === "footprint") {
+      const cond = new Set<number>(); for (const g of it.geom) if (g.pad && g.unusedLayer && g.padIndex !== undefined) cond.add(g.padIndex);
+      for (const g of it.geom) if (g.pad && !g.hole && !g.indicator && g.t !== "text" && /\.Cu$/.test(g.layer)) add(g.layer, { it, g, pad: g.padIndex, cond: g.padIndex !== undefined && cond.has(g.padIndex) });
+    }
+  }
+  const ends = (g: Geom): number[][] => g.t === "line" ? [[g.x1, g.y1], [g.x2, g.y2]] : g.t === "arc" ? [[g.x + g.r * Math.cos(g.a0), g.y + g.r * Math.sin(g.a0)], [g.x + g.r * Math.cos(g.a1), g.y + g.r * Math.sin(g.a1)]] : [];
+  const inShape = (g: Geom, p: number[]) => geomHit(g.fill || g.t === "pad" ? g : Object.assign({}, g, { fill: g.color || "#000" }) as Geom, p[0], p[1], 1e-6);
+  const set = new Set<Geom>();
+  for (const it of doc.items.values()) {
+    if (!it.unusedFlash) continue;
+    const isPad = it.kind === "footprint";
+    for (const g of it.geom) {
+      if (!g.unusedLayer || g.indicator || g.t === "text") continue;
+      const list = byLayer.get(g.layer) || [];
+      const net = g.net === undefined ? 0 : g.net;
+      // the pad's own shapes on this layer (a custom pad has several), or the via's ring
+      const own = isPad ? it.geom.filter((q) => q.pad && q.padIndex === g.padIndex && q.layer === g.layer && !q.hole && !q.indicator && q.t !== "text") : [g];
+      if (own.length && own[0] !== g) continue;   // the pad's first shape on the layer decides for all of them
+      const centre: number[] = g.t === "circle" || g.t === "pad" ? [g.x, g.y] : shapeSamples(g)[0] || [0, 0];
+      const mine = (p: number[]) => own.some((q) => inShape(q, p));
+      let connected = false;
+      for (const c of list) {
+        if (c.it === it || (c.g.net === undefined ? 0 : c.g.net) !== net) continue;
+        if (c.g.track) {
+          if (ends(c.g).some(mine) || geomHit(c.g, centre[0], centre[1], 0)) { connected = true; break; }
+          continue;
+        }
+        if (isPad && c.cond) continue;   // both pads flash conditionally
+        // a via or pad of the net touching this one on the layer (ItemsTouchOnLayer)
+        if (shapeSamples(c.g).some(mine) || own.some((q) => shapeSamples(q).some((p) => inShape(c.g, p)))) { connected = true; break; }
+      }
+      if (!connected) for (const q of own) set.add(q);
+    }
+  }
+  const out = set.size ? set : null;
+  UNFLASHED.set(doc, { key, set: out });
+  return out;
+}
+/** Whether a via item flashes copper on `layer` (PCB_VIA::FlashLayer), for the clearance outlines: false where it spans no copper there. */
+export function viaFlashesOn(doc: Doc, it: Item, layer: string): boolean {
+  const ring = it.geom.find((g) => g.via && !g.hole && !g.viaMask && !g.indicator && g.layer === layer);
+  if (!ring) return false;
+  const un = unflashedGeoms(doc); return !(un && un.has(ring));
+}
+/** Per frame: the unflashed pad shapes drawn as outlines (a selected pad), and whether a via label shows its net name. */
+const UNFLASHED_OUTLINE = new Set<Geom>(), VIA_NAME_NETS = new Map<Geom, boolean>();
 export const BUCKETS = new Map<number, Geom[]>(), NAME_BUCKETS = new Map<number, Geom[]>(), SEL_BUCKETS = new Map<number, Geom[]>();
    // z → geometry, reused frame to frame (cleared, never reallocated)
 export const ZS: number[] = [];
@@ -373,6 +453,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   const layerColors = isPcb && opts.layerColors && opts.layerColors.size ? opts.layerColors : null;
   const obj = isPcb && opts.objects ? opts.objects : null, objHide = obj && obj.hide && obj.hide.size ? obj.hide : null, objAlpha = obj && obj.opacity ? obj.opacity : null;
   const hcHide = !!opts.inactiveHide;
+  const viaTH = isPcb && !!opts.viaColorForTHPads;
   const hcCu = hcLayer ? (/\.Cu$/.test(hcLayer) ? hcLayer : /^F\./.test(hcLayer) ? "F.Cu" : /^B\./.test(hcLayer) ? "B.Cu" : null) : null;
   // PCB_RENDER_SETTINGS::m_hiContrastFactor = 1 − hicontrast_dimming_factor: an inactive layer's colour is mixed with the
   // background at that factor (Edge.Cuts at 0.3 at least, and still drawn in the Hide mode)
@@ -430,18 +511,20 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
     const style = opts.gridStyle === "lines" || opts.gridStyle === "crosses" ? opts.gridStyle : "dots";
     const minSpacing = (opts.gridMinSpacing! > 0 ? opts.gridMinSpacing! : GRID_MIN_SPACING) * (style === "crosses" ? 2 : 1) / sCss;
     // GAL::updatedGalDisplayOptions: m_gridTick is 10, or 0 with Show major grid off, and AutoSparsePitch then thins by 2
-    const tick = gridTick(opts), pitch = autoSparsePitch(opts.grid!, tick, minSpacing);
+    // GAL::gridLattice: X and Y thin out by the one factor the smaller pitch needs, which keeps the cells' shape
+    const tick = gridTick(opts), gpx = opts.grid!, gpy = opts.gridY! > 0 ? opts.gridY! : gpx, minPitch = Math.min(gpx, gpy);
+    const sparse = autoSparsePitch(minPitch, tick, minSpacing) / minPitch, pitch = gpx * sparse, pitchY = gpy * sparse;
     const go = opts.gridOrigin || [0, 0], gx = go[0], gy = go[1];   // BOARD_DESIGN_SETTINGS::m_GridOrigin: the grid is laid out from it
-    const i0 = Math.floor((vx0 - gx) / pitch), i1 = Math.ceil((vx1 - gx) / pitch), j0 = Math.floor((vy0 - gy) / pitch), j1 = Math.ceil((vy1 - gy) / pitch);
+    const i0 = Math.floor((vx0 - gx) / pitch), i1 = Math.ceil((vx1 - gx) / pitch), j0 = Math.floor((vy0 - gy) / pitchY), j1 = Math.ceil((vy1 - gy) / pitchY);
     const px1 = gridMinorPx(opts, dpr) / s;   // GAL::gridMinorLineWidth
     const isMajor = (n: number): boolean => tick > 0 && n % tick === 0;
     const gridColor = opts.gridColor || (isPcb ? OC.grid || PCB_GRID : SCH.grid);
-    if ((Math.ceil((fx1 - gx) / pitch) - Math.floor((fx0 - gx) / pitch)) * (Math.ceil((fy1 - gy) / pitch) - Math.floor((fy0 - gy) / pitch)) < 400000) {   // the whole view's count, region or not
+    if ((Math.ceil((fx1 - gx) / pitch) - Math.floor((fx0 - gx) / pitch)) * (Math.ceil((fy1 - gy) / pitchY) - Math.floor((fy0 - gy) / pitchY)) < 400000) {   // the whole view's count, region or not
       if (style === "dots") {
         ctx.fillStyle = gridColor; ctx.beginPath();
         for (let i = i0; i <= i1; i++) {
           const wdt = isMajor(i) ? 2 * px1 : px1, x = (i * pitch + gx) - wdt / 2;
-          for (let j = j0; j <= j1; j++) { const hgt = isMajor(j) ? 2 * px1 : px1; ctx.rect(x, (j * pitch + gy) - hgt / 2, wdt, hgt); }
+          for (let j = j0; j <= j1; j++) { const hgt = isMajor(j) ? 2 * px1 : px1; ctx.rect(x, (j * pitchY + gy) - hgt / 2, wdt, hgt); }
         }
         ctx.fill();
       } else if (style === "lines") {
@@ -449,7 +532,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
         for (const major of [false, true]) {
           ctx.lineWidth = major ? 2 * px1 : px1; ctx.beginPath();
           for (let i = i0; i <= i1; i++) if ((isMajor(i)) === major) { ctx.moveTo((i * pitch + gx), vy0); ctx.lineTo((i * pitch + gx), vy1); }
-          for (let j = j0; j <= j1; j++) if ((isMajor(j)) === major) { ctx.moveTo(vx0, (j * pitch + gy)); ctx.lineTo(vx1, (j * pitch + gy)); }
+          for (let j = j0; j <= j1; j++) if ((isMajor(j)) === major) { ctx.moveTo(vx0, (j * pitchY + gy)); ctx.lineTo(vx1, (j * pitchY + gy)); }
           ctx.stroke();
         }
       } else {
@@ -458,7 +541,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
           const wdt = major ? 2 * px1 : px1, len = 2 * wdt; ctx.lineWidth = wdt; ctx.beginPath();
           for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
             if ((isMajor(i) && isMajor(j)) !== major) continue;
-            const x = (i * pitch + gx), y = (j * pitch + gy); ctx.moveTo(x - len, y); ctx.lineTo(x + len, y); ctx.moveTo(x, y - len); ctx.lineTo(x, y + len);
+            const x = (i * pitch + gx), y = (j * pitchY + gy); ctx.moveTo(x - len, y); ctx.lineTo(x + len, y); ctx.moveTo(x, y - len); ctx.lineTo(x, y + len);
           }
           ctx.stroke();
         }
@@ -466,9 +549,10 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
     }
   }
   if (gridClaims.length) ctx.restore();
-  // GAL::DrawGrid draws the axes before it looks at the grid's visibility: one grid line wide, through 0,0
+  // GAL::DrawGrid draws the axes before it looks at the grid's visibility: one minor grid line wide (gridMinorLineWidth,
+  // so Grid thickness widens them too), through 0,0
   if (opts.gridAxes) {
-    const px1 = Math.max(1, dpr) / s;
+    const px1 = gridMinorPx(opts, dpr) / s;
     ctx.strokeStyle = opts.gridAxesColor || (isPcb ? PCB_GRID_AXES : SCH.gridAxes); ctx.lineWidth = px1; ctx.lineCap = "butt"; ctx.beginPath();
     if (vy0 <= 0 && vy1 >= 0) { ctx.moveTo(vx0, 0); ctx.lineTo(vx1, 0); }
     if (vx0 <= 0 && vx1 >= 0) { ctx.moveTo(0, vy0); ctx.lineTo(0, vy1); }
@@ -509,8 +593,11 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
     if (v === undefined) { v = layer === "holes" ? TOP_Z : layer === act ? (actCu ? TOP_Z : 2 * TOP_Z) : actSide && layer && layer.indexOf(actSide) === 0 ? TOP_Z : 0; TOP_CACHE.set(layer, v); }
     return v;
   };
-  const zOf = (g: Geom) => { const z = g.z === undefined ? 0 : g.z; return isPcb ? z + topOf(z >= zHoles0 && z < zHoles0 + 10 ? "holes" : g.layer) : z; };
-  const zHoles = zHoles0 + topOf("holes"), zRats = zHoles + 2, zViaName = zHoles + 1.5;
+  // GAL_LAYER_ORDER: the pad and via net names over every board layer (Dwgs.User the highest), on top with the holes
+  const zNames0 = isPcb ? pcbZ("Dwgs.User") + 20 : Infinity;
+  const zOf = (g: Geom) => { const z = g.z === undefined ? 0 : g.z; return isPcb ? z + topOf((z >= zHoles0 && z < zHoles0 + 10) || z >= zNames0 ? "holes" : g.layer) : z; };
+  // the ratsnest, then the anchors, the via stitching and the locked-item shadow, just over the holes
+  const zHoles = zHoles0 + topOf("holes"), zRats = zHoles + 2, zObj = zHoles + 1.8, zViaName = zNames0 + topOf("holes");
   // the schematic selection: SCH_SELECTION_TOOL::highlight hides a selected item from its own layers and draws it
   // from the selection VIEW_GROUP (LAYER_SELECT_OVERLAY), over every unselected item; so its geometry is bucketed
   // apart and drawn after the rest, its selection shadow first.  "id#pin:N" / "id#field:Name" lift that part alone.
@@ -533,6 +620,14 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   const areaOnly = noDirectives ? directiveOnlyAreas(doc) : null;
   let schTint: Map<Geom, string> | null = null;
   const cullM = 4 * Math.max(1, dpr) / s + 0.1; const cx0 = vx0 - cullM, cx1 = vx1 + cullM, cy0 = vy0 - cullM, cy1 = vy1 + cullM;   // per-geometry cull rect: the view plus 4 px
+  // the copper a padstack does not flash (remove_unused_layers); high contrast takes the hole layers along only for a
+  // copper active layer (PCB_DRAW_PANEL_GAL::SetHighContrastLayer)
+  const unflashed = isPcb ? unflashedGeoms(doc) : null, holesActive = !!hcLayer && /\.Cu$/.test(hcLayer);
+  UNFLASHED_OUTLINE.clear(); VIA_NAME_NETS.clear();
+  const fpEd = !!(doc as { fpEditor?: boolean }).fpEditor;
+  // PAD::ViewGetLOD for the hole layers: some physical layer (copper, F/B Adhes, Paste, SilkS, Mask) shown
+  let physVis = !isPcb;
+  if (isPcb) for (const l of doc.layers.keys()) if ((/\.Cu$/.test(l) || /^[FB]\.(Adhes|Paste|SilkS|Mask)$/.test(l)) && !hidden.has(l)) { physVis = true; break; }
   for (const it of doc.items.values()) {
     if ((ids && !ids.has(it.id)) || (skip && skip.has(it.id))) continue;
     const b = it.bbox; if (b && (b[2] < vx0 || b[0] > vx1 || b[3] < vy0 || b[1] > vy1)) continue;
@@ -548,8 +643,16 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
     const isSel = selPcb ? selPcb.has(it.id) : false;
     const padSel = !isSel && selPadFps && selPadFps.has(it.id) ? it.id + "#" : null;
     const itemTint = itemColors ? itemColors.get(it.id) : null;
-    const isFp = objHide && it.kind === "footprint";
-    if (isFp && objHide.has(it.layer && /^B\./.test(it.layer) ? "fpBack" : "fpFront")) continue;
+    const isFp = it.kind === "footprint";
+    // PCB_SHAPE / PCB_TEXT / PAD / ZONE::ViewGetLOD: each child of a footprint checks LAYER_FOOTPRINTS_FR / _BK for its own
+    // side (a pad on both sides stays while either is shown; a child on no side takes the footprint's)
+    const fpBackHid = !!objHide && isFp && objHide.has("fpBack"), fpFrontHid = !!objHide && isFp && objHide.has("fpFront");
+    const fpSideB = !!it.layer && /^B\./.test(it.layer);
+    // PCB_FIELD::ViewGetLOD: the fields of a selected footprint show whatever the text toggles say
+    const forceFields = isSel && isFp && opts.forceShowFields !== false;
+    // the pad layers a pad does not flash on (remove_unused_layers): "padIndex|layer"
+    let unPad: Set<string> | null = null;
+    if (unflashed && isFp && it.unusedFlash) for (const g of it.geom) if (unflashed.has(g)) (unPad || (unPad = new Set())).add(g.padIndex + "|" + g.layer);
     // an item that only partly shows (a long connector, a zone's hatch, a big footprint when zoomed in) is
     // culled geometry by geometry; the boxes are cached on the geometry records (rebuilt with the item)
     // PCB_VIA::ViewGetLOD: in high contrast a blind / buried / micro via whose drill does not span the active copper
@@ -561,17 +664,71 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
         const bb = g._bb === undefined ? (g._bb = geomBox(g)) : g._bb;
         if (bb && (bb[2] < cx0 || bb[0] > cx1 || bb[3] < cy0 || bb[1] > cy1)) continue;
       }
+      const isField = forceFields && g.field !== undefined && g.t === "text";
+      if ((fpFrontHid || fpBackHid) && !isField) {
+        if (g.padFront !== undefined || g.padBack !== undefined) {
+          const f = !!g.padFront, bk = !!g.padBack;
+          if ((f && !bk && fpFrontHid) || (bk && !f && fpBackHid) || (f && bk && fpFrontHid && fpBackHid)) continue;
+        } else {
+          const back = /^B\./.test(g.layer) ? true : /^F\./.test(g.layer) ? false : fpSideB;
+          if (back ? fpBackHid : fpFrontHid) continue;
+        }
+      }
+      if (g.viaLabel && netNames && g.net! > 0) {
+        // PCB_VIA::ViewGetLOD( LAYER_VIA_NETNAMES ): the via must flash on a visible layer (in high contrast, the active
+        // copper layer, or the mask layer it opens); the layer pair of a blind / buried / micro via shows with the net names off
+        const name = viaNetNames ? displayNetName(doc.nets.get(g.net!)) : "";
+        const showNets = !!name, showLayers = g.viaType !== "through";
+        if ((showNets || showLayers) && !(objHide && objHide.has("vias"))) {
+          let vis = false;
+          for (const q of it.geom) {
+            if (!q.via || q.hole || q.indicator) continue;
+            if (q.viaMask) { if (hcLayer ? q.layer === hcLayer : !hidden.has(q.layer)) { vis = true; break; } continue; }
+            if (unflashed && unflashed.has(q)) continue;
+            if (hcLayer ? q.layer === hcLayer : !hidden.has(q.layer)) { vis = true; break; }
+          }
+          if (vis) { VIA_NAME_NETS.set(g, showNets); bucket(NAME_BUCKETS, zViaName).push(g); if (isHl) hlGeoms!.add(g); }
+        }
+      }
       if (g.padText) {
         // PAD::ViewGetLOD (netname layer): the pad must be flashed on a visible layer (the high-contrast one in
-        // that mode) and its smaller side at least 0.5 mm at zoom 1; pad net names follow the net-names option
-        if (g.padNum ? !padNumbers : !padNetNames) continue;
+        // that mode) and its smaller side at least 0.5 mm at zoom 1; pad numbers and net names each follow their
+        // option, the "x" / "*" of a no-net / no-connect pad shows whatever the net-name mode, laid out on one or two
+        // lines by what shows (PCB_PAINTER::draw( PAD, netname layer ))
+        if (!padLabelShown(g, padNumbers, padNetNames)) continue;
         if ((g as TextGeom).padMin! * sCss < PAD_NETNAME_MM * PX_PER_MM_ZOOM1) continue;   // pad labels are text records with both set
         const pl = (g as TextGeom).padLayers!; let vis = false;
-        if (hcLayer) vis = pl.indexOf(hcLayer) >= 0; else for (let i = 0; i < pl.length; i++) if (!hidden.has(pl[i])) { vis = true; break; }
+        const pi = g.labelPad === undefined ? g.padIndex : g.labelPad;
+        for (let i = 0; i < pl.length; i++) {
+          if (unPad && unPad.has(pi + "|" + pl[i])) continue;
+          if (hcLayer ? pl[i] === hcLayer : !hidden.has(pl[i])) { vis = true; break; }
+        }
         if (!vis) continue;
       } else {
-        if (hidden.has(g.layer) || (zoneOutline && g.zoneFill)) continue;
-        if (hcHide && hcLayer && g.layer !== hcLayer && g.layer !== "holes" && g.layer !== "Edge.Cuts") continue;   // inactive layers: Hide (Edge.Cuts is mixed, not hidden)
+        if (hidden.has(g.layer) || (zoneOutline && g.zoneFill && !g.teardrop)) continue;
+        if (hcHide && hcLayer && g.layer !== hcLayer && !(g.layer === "holes" && holesActive) && g.layer !== "Edge.Cuts") continue;   // inactive layers: Hide (Edge.Cuts is mixed, not hidden)
+        if (g.layer === "holes" && !g.indicator) {
+          // PAD / PCB_VIA::ViewGetLOD for the hole layers: a pad's (and a through via's) hole needs a visible physical
+          // layer, a blind / buried / micro via's one of the layers it crosses; a via hole under 0.25 mm at zoom 1 is not drawn
+          if (g.via) {
+            if (g.viaType && g.viaType !== "through" && g.viaSpan) { if (g.viaSpan.every((l) => hidden.has(l))) continue; }
+            else if (!physVis) continue;
+            if (g.t === "circle" || g.t === "arc") { if (2 * (g as CircleGeom).r * sCss < 0.25 * PX_PER_MM_ZOOM1) continue; }
+          } else if (!physVis) continue;
+        }
+        if (g.viaMask && g.viaSize! * sCss < 0.6 * PX_PER_MM_ZOOM1) continue;   // PCB_VIA::ViewGetLOD: mask openings under 0.6 mm at zoom 1
+      }
+      if (unflashed && unflashed.has(g)) {
+        // PCB_PAINTER: no ring where the via does not flash; a pad's shape is drawn there only when the pad is
+        // net-highlighted, a selected one as an outline
+        if (!g.pad) continue;
+        const sel = isSel || (!!padSel && selPcb!.has(padSel + g.padIndex));
+        const lit = isHl || (!!padHl && subHl(it, g));
+        if (sel && !lit) UNFLASHED_OUTLINE.add(g); else if (!lit) continue;
+      }
+      if (g.indicator && g.via && unflashed && g.layer !== "holes") {   // a post-machining mark goes with its ring
+        const ring = it.geom.find((q) => q.via && !q.hole && !q.indicator && !q.viaMask && q.layer === g.layer);
+        if (ring && unflashed.has(ring)) continue;
       }
       if (noSimMarks && g.simMarker) continue;
       if (sketched && !g.hole && !g.zoneFill && !g.track && !g.via && !g.pad && g.padIndex === undefined && !g.padText && g.t !== "image" && (it.kind === "footprint" || it.kind === "dimension" || /^gr_|^fp_/.test(it.kind))) {
@@ -589,7 +746,10 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
       if (objHide) {
         const oc = objectClass(g);
         if (oc && objHide.has(oc)) continue;
-        if (isFp && g.t === "text" && !g.pad && (objHide.has("fpText") || (g.field === "Reference" && objHide.has("references")) || (g.field === "Value" && objHide.has("values")))) continue;
+        // a footprint text, and a text showing ${REFERENCE} / ${VALUE}, follows the References / Values rows
+        // (PCB_TEXT::ViewGetLOD); the fields of a selected footprint show anyway
+        const role = g.field === "Reference" || g.varRole === "Reference" ? "references" : g.field === "Value" || g.varRole === "Value" ? "values" : null;
+        if (g.t === "text" && !g.pad && !g.padText && !isField && ((isFp && objHide.has("fpText")) || (role && objHide.has(role)))) continue;
       }
       const z = busJct ? SCH_Z.busJunction : zOf(g);
       bucket(lift || (liftParts && liftParts.has(g.pinNo !== undefined ? "pin:" + g.pinNo : g.field ? "field:" + g.field : "")) ? SEL_BUCKETS : BUCKETS, z).push(g);
@@ -600,13 +760,11 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
       if (brightIds && brightIds.has(it.id)) brightGeoms!.add(g);
       if (outsideGeoms && !isSel && !entered!.has(it.id)) outsideGeoms.add(g);
       if (rollId === it.id && g.t === "text" && (!opts.rolloverGeom || opts.rolloverGeom === g)) rollGeoms!.add(g);
-      if (netNames && g.net! > 0) {
-        if (g.track && !sketchTracks) { if (trackNetNames) bucket(NAME_BUCKETS, pcbZ(g.layer) + 3.5 + topOf(g.layer)).push(g); }
-        else if (g.viaLabel) { if (viaNetNames) bucket(NAME_BUCKETS, zViaName).push(g); }
-      }
+      // PCB_PAINTER::draw( PCB_TRACK ) and draw( PCB_SHAPE ) netname layer: a board copper segment shape carries its net name like a track
+      if (netNames && g.net! > 0 && ((g.track && !sketchTracks) || (g.netSeg && !fpEd)) && trackNetNames) bucket(NAME_BUCKETS, pcbZ(g.layer) + 3.5 + topOf(g.layer)).push(g);
       if (zoneFill) {
         if (g.zoneUnfilled) previews!.push(g);
-        else if (g.track || (g.via && !g.hole && (g.viaType !== "through" || g.viaLabel)) || g.npth || (g.pad && !g.hole && g.t !== "text")) obstacles!.push(g);   // a through via cuts every layer once (its label ring stands for it)
+        else if (g.track || (g.via && !g.hole && !g.viaMask && !g.indicator && (g.viaType !== "through" || g.viaLabel)) || g.npth || (g.pad && !g.hole && !g.indicator && g.t !== "text")) obstacles!.push(g);   // a through via cuts every layer once (its label ring stands for it)
       }
     }
     if (it.hiddenGeom && (showHiddenPins || showHiddenText)) for (const g of it.hiddenGeom) {
@@ -620,6 +778,8 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   for (const [z, arr] of BUCKETS) if (arr.length) ZS.push(z);
   for (const [z, arr] of NAME_BUCKETS) if (arr.length && !BUCKETS.has(z)) ZS.push(z);
   if (rats) ZS.push(zRats);
+  const objPass = !!(obj && obj.show);
+  if (objPass && ZS.indexOf(zObj) < 0) ZS.push(zObj);
   if (previews && previews.length) { previews.sort((a, b) => zOf(a) - zOf(b)); for (const g of previews) { const z = zOf(g) - 1.5 - 0.01; if (ZS.indexOf(z) < 0) ZS.push(z); } }
   ZS.sort((a, b) => a - b);
   const minW = Math.max(1, dpr) / s;
@@ -636,7 +796,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   const fillG = (g: Geom) => { const p = rec ? null : pathOf(g); if (p) ctx.fill(p); else { ctx.beginPath(); tracePath(ctx, g); ctx.fill(); } };
   const base = [A, 0, 0, s, E, ty]; const viewRect = [fx0, fy0, fx1, fy1];
   const dirty = () => { curStroke = curFill = null; curWidth = -1; curCap = "round"; curAlpha = -1; };
-  let ratsDone = !rats, previewIdx = 0, ncDone = false;
+  let ratsDone = !rats, previewIdx = 0, ncDone = false, objDone = !objPass;
   // an unfilled zone's preview takes the colour rules of the fills (net highlight darkening, high-contrast mix)
   const previewXf = (pg: Geom): ((c: string) => string) | null => {
     const dark = !!hl && !hlGeoms!.has(pg), lit = !!hl && hlGeoms!.has(pg), dim = !!hcLayer && pg.layer !== hcLayer && !lit && !(selGeoms && selGeoms.has(pg));
@@ -653,25 +813,37 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
     if (lifted && (g.z || 0) < 0 && ((g.noStroke && g.fill) || g.noShadow)) alpha *= 0.5;
     const gSel = !!selGeoms && selGeoms.has(g), gHl = !!hlGeoms && hlGeoms.has(g), gBright = !!brightGeoms && brightGeoms.has(g) && !g.hole;
     // PCB_RENDER_SETTINGS::GetColor: high contrast leaves selected and net-highlighted items alone; an image cannot be mixed, its alpha drops
-    const hcDim = !!hcLayer && g.layer !== hcLayer && g.layer !== "holes" && !g.padText && !gSel && !gHl && !gBright;
+    const hcDim = !!hcLayer && g.layer !== hcLayer && !(g.layer === "holes" && holesActive) && !g.padText && !gSel && !gHl && !gBright;
     if (hcDim && g.t === "image") alpha *= hcF;
     if (g.zoneFill) alpha *= g.teardrop ? trackA : zoneA;   // PCB_RENDER_SETTINGS::GetColor: color.a *= m_zoneOpacity (m_trackOpacity for a teardrop)
     if (g.hiddenText && isPcb) alpha *= HIDDEN_TEXT_ALPHA;
     if (outsideGeoms && outsideGeoms.has(g) && !gSel) alpha *= outsideOp;
-    let color = g.color, fill = g.fill;
-    if (objAlpha && !g.zoneFill) { const oc = g.teardrop ? "tracks" : objectClass(g) || (fill && g.t !== "text" && !g.hole ? "filledShapes" : null); const oa = oc ? objAlpha[oc] : undefined; if (oa !== undefined && oa < 1) alpha *= oa; }
+    let color = g.color, fill = g.fill, wallColor: string | null = null;
+    // the zone opacity is for the fills alone (an outline, its hatch and a rule area stay opaque); a copper graphic
+    // takes the track opacity when it is not filled (PCB_RENDER_SETTINGS::GetColor)
+    if (objAlpha && !g.zoneFill && !g.zoneOutline && !g.zoneHatch && !g.ruleArea) { const oc = g.teardrop ? "tracks" : objectClass(g) || (fill && g.t !== "text" && !g.hole ? "filledShapes" : g.gfxShape && /\.Cu$/.test(g.layer) ? "tracks" : null); const oa = oc ? objAlpha[oc] : undefined; if (oa !== undefined && oa < 1) alpha *= oa; }
     if (layerDraw && !g.hole) { const lc = layerDraw.get(g.layer); if (lc) { const def = pcbColor(g.layer); if (color === def) color = lc; if (fill === def) fill = lc; } }
-    if (netColors && g.net! > 0 && (g.track || g.via || g.pad || g.zoneFill) && !g.hole && copperZ!.indexOf(g.layer) >= 0) { const nc = netColors.get(g.net!); if (nc) { color = nc; if (fill) fill = nc; } }
-    if (tint) { const tc = tint.get(g); if (tc && copperZ!.indexOf(g.layer) >= 0) { color = tc; if (fill) fill = tc; } }
+    // m_UseViaColorForNormalTHPadstacks: a plated through-hole pad's copper in the via-hole colour
+    if (viaTH && g.pad && g.padType === "thru_hole" && !g.hole && !g.indicator && g.t !== "text" && copperZ!.indexOf(g.layer) >= 0) { color = VIA_HOLE; if (fill) fill = VIA_HOLE; }
+    let netCol = false;   // the colour is a net colour (PCB_PAINTER's net-colour branch brightens it when selected)
+    if (netColors && g.net! > 0 && (g.track || g.via || g.pad || g.zoneFill) && !g.hole && copperZ!.indexOf(g.layer) >= 0) { const nc = netColors.get(g.net!); if (nc) { color = nc; if (fill) fill = nc; netCol = true; } }
+    if (tint) { const tc = tint.get(g); if (tc && copperZ!.indexOf(g.layer) >= 0) { color = tc; if (fill) fill = tc; netCol = true; } }
     if (schTint) { const tc = schTint.get(g); if (tc) { color = tc; if (fill && g.t === "circle") fill = tc; } }   // a label on a bus: LAYER_BUS; a junction on one: LAYER_BUS_JUNCTION
     if (gBright) {
       // a brightened item (Clarify Selection hover, the delete tool's target): Brightened(0.5) at alpha 0.8, nothing else applies
       color = brightenedItemColor(color!); if (fill) fill = brightenedItemColor(fill); alpha = 1;
     } else {
       // board selection: the item repainted in its layer's selected colour (PCB_PAINTER::getColor), holes untouched
-      if (gSel && !g.hole) { color = selectedColor(color!); if (fill) fill = selectedColor(fill); }
+      // (m_layerColorsSel keeps the netname layers; the hole layers do take it, but not a plated hole's background);
+      // a net colour is Brightened( m_selectFactor ) instead
+      if (gSel && !g.padText && !(g.hole && color === PCB_BG)) {
+        const sc = (c: string) => netCol ? brightened(c, SELECT_FACTOR) : selectedColor(c);
+        color = sc(color!); if (fill) fill = sc(fill);
+        if (g.wallColor) wallColor = selectedColor(g.wallColor);
+      }
       if (hl) {
-        if (gHl) { color = hlColor(color!); if (fill) fill = isPcb ? hlColor(fill) : highlightFill(g); }
+        // a selected item is never highlight-brightened (PCB_RENDER_SETTINGS::GetColor)
+        if (gHl && !gSel) { color = hlColor(color!); if (fill) fill = isPcb ? hlColor(fill) : highlightFill(g); }
         // the board darkens what the highlight leaves out toward black (m_layerColorsDark, Darkened(1 − 0.5)), opaque;
         // a selected item keeps its selection colour; an image cannot be darkened, so it fades instead (the schematic
         // dims nothing)
@@ -694,7 +866,9 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
       const e = g.entry;
       // PCB_PAINTER: translate to the centre, rotate by -orientation, the opacity as the alpha
       // SCH_PAINTER::draw( SCH_BITMAP ): a selected or brightened image keeps an alpha of at least 0.1
-      const op = g.opacity != null && !isPcb && (lifted || gHl) ? Math.max(g.opacity, 0.1) : g.opacity;
+      // PCB_PAINTER::draw( PCB_REFERENCE_IMAGE ): a selected or brightened image the same, framed in LAYER_ANCHOR
+      const framed = isPcb && (gSel || gBright);
+      const op = g.opacity != null && ((!isPcb && (lifted || gHl)) || framed) ? Math.max(g.opacity, 0.1) : g.opacity;
       const turned = !!g.rot, faded = op != null && op < 1;
       if (turned || faded) ctx.save();
       if (faded) ctx.globalAlpha *= op!;
@@ -710,13 +884,17 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
         ctx.beginPath(); ctx.moveTo(g.x, g.y); ctx.lineTo(g.x + g.w, g.y + g.h); ctx.moveTo(g.x + g.w, g.y); ctx.lineTo(g.x, g.y + g.h); ctx.stroke();
         ctx.setLineDash([]);
       }
+      if (framed) { const a0 = ctx.globalAlpha; ctx.globalAlpha = 1; ctx.setLineDash([]); setStroke(OC.anchors || ANCHOR_COLOR); setWidth(2 * minW); setCap("butt"); const fw = e && e.w > 0 ? e.w * g.pxMm * g.scale : g.w, fh = e && e.h > 0 ? e.h * g.pxMm * g.scale : g.h; ctx.strokeRect(g.x + (g.w - fw) / 2, g.y + (g.h - fh) / 2, fw, fh); ctx.globalAlpha = a0; }
       if (turned || faded) ctx.restore();
       return;
     }
     // LAYER_VIA_HOLEWALLS under the hole; PCB_PAINTER underpaints it filled in the outline mode too
     // (only via holes, which are circles, carry wallR)
-    if (g.wallR && ((g.wallR - (g as CircleGeom).r) * s > 0.35)) { setFill(g.wallColor!); ctx.beginPath(); ctx.arc((g as CircleGeom).x, (g as CircleGeom).y, g.wallR, 0, Math.PI * 2); ctx.fill(); }
-    if ((sketchPads && g.pad) || (sketchVias && g.via)) {   // sketch mode: the shape's outline in a hairline, nothing filled
+    if (g.wallR && ((g.wallR - (g as CircleGeom).r) * s > 0.35)) { setFill(wallColor || g.wallColor!); ctx.beginPath(); ctx.arc((g as CircleGeom).x, (g as CircleGeom).y, g.wallR, 0, Math.PI * 2); ctx.fill(); }
+    // sketch mode: the shape's outline in a hairline, nothing filled — a via hole stays filled, an NPTH hole is outlined
+    // with the pads (PCB_PAINTER: LAYER_VIA_HOLES always fills; pads outline all but LAYER_PAD_PLATEDHOLES); a selected
+    // pad that does not flash on the layer is drawn as its outline
+    if ((sketchVias && g.via && !g.hole && !g.viaMask && !g.indicator) || (sketchPads && ((g.pad && !g.hole && !g.indicator) || g.npth)) || UNFLASHED_OUTLINE.has(g)) {
       if (t === "poly" && g.pts.length < 2) return;
       setStroke(color); setWidth(minW); setCap("butt"); strokeG(g); return;
     }
@@ -740,9 +918,13 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
       if (fill) { setFill(fill); ctx.fillRect(g.x, g.y, g.w, g.h); }
       if (!g.noStroke) {
         setStroke(color); const lw = Math.max(g.wd || 0, minW); setWidth(lw);
-        if (g.dash) ctx.setLineDash(dashPattern(g.dashType, lw));
-        ctx.strokeRect(g.x, g.y, g.w, g.h);
-        if (g.dash) ctx.setLineDash([]);
+        if (g.dash) {
+          // SH_RECT: one SHAPE_SEGMENT per side, each dashed from its own start with round ends (stroke_params.cpp:92-123)
+          setCap("round"); ctx.setLineDash(dashPattern(g.dashType, lw));
+          const x0 = g.x, y0 = g.y, x1 = g.x + g.w, y1 = g.y + g.h;
+          ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); ctx.moveTo(x1, y1); ctx.lineTo(x0, y1); ctx.moveTo(x0, y1); ctx.lineTo(x0, y0); ctx.stroke();
+          ctx.setLineDash([]);
+        } else ctx.strokeRect(g.x, g.y, g.w, g.h);
       }
       return;
     }
@@ -750,16 +932,23 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
     if (fill) { setFill(fill); fillG(g); }
     if (g.noStroke) return;
     if (t === "line" || t === "arc" || (t === "poly" && (g.w > 0 || !fill)) || (t === "circle" && (g.w > 0 || !fill)) || (t === "pad" && !fill)) {
-      setStroke(color); const lw = Math.max(g.w, minW); setWidth(lw); setCap(g.cap || (t === "poly" || t === "line" ? "round" : "butt"));
+      // a dashed stroke: every dash and dot is its own segment with round ends (STROKE_PARAMS::Stroke), whatever the primitive
+      setStroke(color); const lw = Math.max(g.w, minW); setWidth(lw); setCap(g.dash ? "round" : g.cap || (t === "poly" || t === "line" ? "round" : "butt"));
       const hop = hops && t === "poly" ? hops.get(g) : undefined;
       if (hop) { strokeHopShape(ctx, hop, g.dash ? dashPattern(g.dashType, lw) : null); return; }   // the runs dashed, the hop arcs solid
       if (g.dash) ctx.setLineDash(dashPattern(g.dashType, lw));
-      strokeG(g);
+      if (g.dash && t === "poly" && g.dashBreaks) {
+        // each run between two breaks is its own subpath, so the dash pattern starts again there
+        const P = g.pts, n = P.length, br = g.dashBreaks, ends = g.close ? n : n - 1; ctx.beginPath();
+        for (let i = 0; i < ends; i++) { const q = P[(i + 1) % n]; if (i === 0 || br.includes(i)) ctx.moveTo(P[i][0], P[i][1]); ctx.lineTo(q[0], q[1]); }
+        ctx.stroke();
+      } else strokeG(g);
       if (g.dash) ctx.setLineDash([]);
     }
   };
   for (const z of ZS) {
     // overlay passes that sit at this depth
+    if (!objDone && zObj <= z) { ctx.globalAlpha = 1; drawObjectOverlays(ctx, doc, obj!, opts, s, dpr, hidden, [vx0, vy0, vx1, vy1], sCss); objDone = true; dirty(); }
     if (!ratsDone && zRats <= z) { drawRatsnest(ctx, rats!, ratsNets, netColors, s, dpr, viewRect, opts.ratsnestThickness); ratsDone = true; dirty(); }
     if (previews) while (previewIdx < previews.length && zOf(previews[previewIdx]) - 1.5 - 0.01 <= z) { const pg = previews[previewIdx++]; drawZonePreview(ctx, pg, obstacles!, base, W, H, minW, netColors, (pg.teardrop ? trackA : zoneA) / ZONE_OPACITY, previewXf(pg)); dirty(); }
     if (ncPass && ncPass.length && !ncDone && z >= SCH_Z.bus) {
@@ -779,11 +968,11 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
     const names = NAME_BUCKETS.get(z);
     if (names && names.length) {
       for (const g of names) {
-        if (hcLayer && g.layer !== hcLayer) continue;   // PCB_TRACK::ViewGetLOD: no names on dimmed tracks
+        if (!g.viaLabel && hcLayer && g.layer !== hcLayer) continue;   // PCB_TRACK::ViewGetLOD: no names on dimmed tracks (a via label was checked when queued)
         // the netname layers darken with the rest of a net highlight (GetColor's m_layerColorsDark)
         const dark = !!hl && !hlGeoms!.has(g);
         setAlpha(1);
-        if (g.track) drawTrackName(ctx, g, doc, s, sCss, viewRect, base, flip, dark); else drawViaName(ctx, g as ViaRingGeom, doc, s, sCss, base, flip, dark);   // the via rings that carry the label
+        if (!g.viaLabel) drawTrackName(ctx, g, doc, s, sCss, viewRect, base, flip, dark); else drawViaName(ctx, g as ViaRingGeom, doc, s, sCss, base, flip, dark, VIA_NAME_NETS.get(g) !== false);   // the via rings that carry the label
       }
       dirty();
     }
@@ -791,7 +980,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   if (!ratsDone) { drawRatsnest(ctx, rats!, ratsNets, netColors, s, dpr, viewRect, opts.ratsnestThickness); }
   if (previews) while (previewIdx < previews.length) { const pg = previews[previewIdx++]; drawZonePreview(ctx, pg, obstacles!, base, W, H, minW, netColors, (pg.teardrop ? trackA : zoneA) / ZONE_OPACITY, previewXf(pg)); }
   ctx.globalAlpha = 1;
-  if (obj && obj.show) drawObjectOverlays(ctx, doc, obj, opts, s, dpr, hidden, [vx0, vy0, vx1, vy1]);
+  if (!objDone) drawObjectOverlays(ctx, doc, obj!, opts, s, dpr, hidden, [vx0, vy0, vx1, vy1], sCss);
   if (selPcb) drawUmbilicals(ctx, doc, selPcb, s, dpr);
   // the Footprint Editor's footprint sits at the origin: its anchor is the LAYER_ANCHOR cross there
   if ((doc as { fpEditor?: boolean }).fpEditor && !(obj && obj.hide && obj.hide.has("anchors"))) {
@@ -1013,22 +1202,25 @@ export function minLayerAlpha(c: string): string {
 
 /** Which Appearance ▸ Objects row a geometry belongs to (null: governed by its layer alone). */
 export function objectClass(g: Geom): string | null {
-  return g.track ? "tracks" : g.via ? "vias" : g.pad ? "pads" : (g.zoneFill || g.zoneOutline || g.zoneUnfilled) ? "zones" : g.t === "image" ? "images" : (g as { point?: boolean }).point ? "points" : null;
+  return g.track || g.trackMask ? "tracks" : g.via ? "vias" : g.pad ? "pads" : (g.zoneFill || g.zoneOutline || g.zoneUnfilled || g.zoneHatch || g.ruleArea) ? "zones" : g.t === "image" ? "images" : (g as { point?: boolean }).point ? "points" : null;
 }
 
 export const ANCHOR_COLOR = "#FF26E2", LOCKED_SHADOW_COLOR = "rgba(255,38,226,0.5)", BOARD_AREA_COLOR = "rgba(100,100,100,0.35)";
    // LAYER_ANCHOR, LAYER_LOCKED_ITEM_SHADOW (builtin_color_themes.h)
 /** The overlay object layers: the locked-item shadow (under the anchors) and the footprint anchors — PCB_PAINTER::draw(FOOTPRINT, LAYER_ANCHOR): a 5 px cross, 1 px pen. */
-export function drawObjectOverlays(ctx: Ctx2D, doc: Doc, obj: ObjectsOpt, opts: RenderOpts, s: number, dpr: number, hidden: Set<string> | null, vr: number[]): void {
+export function drawObjectOverlays(ctx: Ctx2D, doc: Doc, obj: ObjectsOpt, opts: RenderOpts, s: number, dpr: number, hidden: Set<string> | null, vr: number[], sCss?: number): void {
   const show = obj.show!, hide = obj.hide || new Set<string>();   // called only when obj.show is set
   if (show.has("lockedShadow") && opts.lockedIds && opts.lockedIds.size) drawLockedShadow(ctx, doc, opts.lockedIds, opts, hidden, vr);
   if (show.has("viaStitching")) drawViaStitching(ctx, doc, opts, s, dpr, vr);
-  if (show.has("anchors")) {
+  // FOOTPRINT::ViewGetLOD( LAYER_ANCHOR ): from a view scale of 1.5 (MINIMAL_ZOOM_LEVEL_FOR_VISIBILITY), and only with
+  // the footprint's layer shown
+  if (show.has("anchors") && !(sCss !== undefined && sCss / PX_PER_MM_ZOOM1 < 1.5)) {
     const a = 5 * Math.max(1, dpr) / s;
     ctx.save(); ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineCap = "butt"; ctx.strokeStyle = OC.anchors || ANCHOR_COLOR; ctx.lineWidth = Math.max(1, dpr) / s; ctx.beginPath();
     for (const it of doc.items.values()) {
       if (it.kind !== "footprint" || it.x === undefined) continue;
       if (hide.has(it.layer && /^B\./.test(it.layer) ? "fpBack" : "fpFront")) continue;
+      if (hidden && it.layer && hidden.has(it.layer)) continue;
       // a footprint's anchor: x and y are set together by buildFootprintGeom
       if (it.x < vr[0] - a || it.x > vr[2] + a || it.y! < vr[1] - a || it.y! > vr[3] + a) continue;
       ctx.moveTo(it.x - a, it.y!); ctx.lineTo(it.x + a, it.y!); ctx.moveTo(it.x, it.y! - a); ctx.lineTo(it.x, it.y! + a);
@@ -1274,16 +1466,20 @@ export function drawLockedShadow(ctx: Ctx2D, doc: Doc, ids: Set<string>, opts: R
     const it = doc.items.get(id); if (!it) continue;
     const b = it.bbox; if (b && (b[2] < vr[0] - margin || b[0] > vr[2] + margin || b[3] < vr[1] - margin || b[1] > vr[3] + margin)) continue;
     if (it.kind === "footprint") {
-      if (fpHide && fpHide.has(it.layer && /^B\./.test(it.layer) ? "fpBack" : "fpFront")) continue;
-      const fb = footprintBodyBox(it); if (!fb) continue;
+      // the footprint's own shadow goes with its side; each pad decides for itself (PAD::ViewGetLOD)
+      const fb = fpHide && fpHide.has(it.layer && /^B\./.test(it.layer) ? "fpBack" : "fpFront") ? null : footprintBodyBox(it);
       // DrawRectangle + four DrawSegments of width margin: the box grown by margin / 2 with round corners
-      t.lineWidth = margin; t.beginPath(); t.rect(fb[0], fb[1], fb[2] - fb[0], fb[3] - fb[1]); t.fill(); t.stroke();
+      if (fb) { t.lineWidth = margin; t.beginPath(); t.rect(fb[0], fb[1], fb[2] - fb[0], fb[3] - fb[1]); t.fill(); t.stroke(); }
       // its pads have their own shadow (PAD::ViewGetLayers: a pad of a locked footprint is locked)
-      for (const g of it.geom) if (g.pad && !g.hole && g.t !== "text" && !(hidden && hidden.has(g.layer))) shadowGeom(t, g, margin, base);
+      for (const g of it.geom) {
+        if (!g.pad || g.hole || g.indicator || g.t === "text" || (hidden && hidden.has(g.layer))) continue;
+        if (fpHide && (g.padFront || g.padBack) && ((g.padFront && !g.padBack && fpHide.has("fpFront")) || (g.padBack && !g.padFront && fpHide.has("fpBack")) || (g.padFront && g.padBack && fpHide.has("fpFront") && fpHide.has("fpBack")))) continue;
+        shadowGeom(t, g, margin, base);
+      }
       continue;
     }
     for (const g of it.geom) {
-      if (g.hole || (hidden && hidden.has(g.layer))) continue;
+      if (g.hole || g.viaMask || g.indicator || (hidden && hidden.has(g.layer))) continue;
       if (hc && g.layer !== hc && (g.track || g.t === "text")) continue;   // PCB_TRACK / PCB_TEXT::ViewGetLOD
       shadowGeom(t, g, margin, base);
     }
@@ -1350,7 +1546,31 @@ export function drawMarkers(ctx: Ctx2D, markers: (Marker | null)[], docType: str
     // a selected or brightened board marker takes LAYER_DRC_HIGHLIGHTED (PCB_RENDER_SETTINGS::GetColor)
     // (a brightened schematic marker takes LAYER_BRIGHTENED: SCH_PAINTER::getRenderColor)
     ctx.fillStyle = docType !== "sch" && (m.selected || m.brightened) ? DRC_HIGHLIGHTED : docType === "sch" && m.brightened ? SCH.brightened : colors[m.severity as string] || colors.error; ctx.fill();
+    if (docType !== "sch" && m.selected && Array.isArray(m.path)) drawErrorLegend(ctx, m.path as [number, number][], scale, br, bgc, bb);
   }
+  ctx.restore();
+}
+/**
+ * PCB_MARKER::GetErrorLegendShapes as PCB_PAINTER draws them on LAYER_DRC_HIGHLIGHTED: a collision "X" (2.5 × the marker
+ * scale) when the path starts where it ends, otherwise the path as a hairline with perpendicular stops at both ends,
+ * in the background colour at a third of the marker scale; then the path as a band 10 × the marker scale wide in white
+ * (dark background) or black (light background) at 50 %.
+ */
+function drawErrorLegend(ctx: Ctx2D, path: [number, number][], scale: number, br: number, bg: number, bb: number): void {
+  const [a, b] = path; if (!a || !b) return;
+  const l = (Math.max(br, bg, bb) + Math.min(br, bg, bb)) / 510, halo = l < 0.5 ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)";
+  const seg = (p: number[], q: number[]) => { ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke(); };
+  ctx.save(); ctx.strokeStyle = `rgb(${br},${bg},${bb})`; ctx.lineWidth = scale / 3; ctx.lineCap = "round";
+  if (a[0] === b[0] && a[1] === b[1]) {
+    const len = 2.5 * scale;
+    seg([a[0] - len, a[1] - len], [a[0] + len, a[1] + len]); seg([a[0] - len, a[1] + len], [a[0] + len, a[1] - len]);
+  } else {
+    seg(a, b);
+    const vx = a[0] - b[0], vy = a[1] - b[1], L = Math.hypot(vx, vy), k = (2.5 * scale) / L, px = -vy * k, py = vx * k;   // V.Perpendicular().Resize( 2.5 * scale )
+    seg([a[0] + px, a[1] + py], [a[0] - px, a[1] - py]); seg([b[0] + px, b[1] + py], [b[0] - px, b[1] - py]);
+  }
+  // the shaded area: the path shape at 10 × the marker scale
+  ctx.strokeStyle = halo; ctx.lineWidth = 10 * scale; seg(a, b);
   ctx.restore();
 }
 
@@ -1409,19 +1629,21 @@ export function drawTrackName(ctx: Ctx2D, g: Geom, doc: Doc, s: number, sCss: nu
 }
 
 /** PCB_PAINTER::draw(PCB_VIA) netname layer: the net name (and the layer pair of blind / micro vias) centred on the via. */
-export function drawViaName(ctx: Ctx2D, g: ViaRingGeom, doc: Doc, s: number, sCss: number, base: Mat, flip: boolean, dark?: boolean): void {
+export function drawViaName(ctx: Ctx2D, g: ViaRingGeom, doc: Doc, s: number, sCss: number, base: Mat, flip: boolean, dark?: boolean, showNets?: boolean): void {
   const vc = dark ? darkened(VIA_NETNAME_COLOR, 1 - HL_FACTOR) : VIA_NETNAME_COLOR;
-  const name = displayNetName(doc.nets.get(g.net!)); const showLayers = g.viaType && g.viaType !== "through";
+  const name = showNets === false ? "" : displayNetName(doc.nets.get(g.net!)); const showLayers = g.viaType && g.viaType !== "through";
   if (!name && !showLayers) return;
   if (g.viaSize * sCss < VIA_NETNAME_MM * PX_PER_MM_ZOOM1) return;   // ViewGetLOD: 10 mm at zoom 1
   const size = Math.min(g.viaSize, 10);
-  let tsize = Math.min(1.5 * size / Math.max(name.length, showLayers ? 6 : 3), size) * 0.75;
+  let tsize = Math.min(1.5 * size / Math.max(printableCharCount(name), showLayers ? 6 : 3), size) * 0.75;
   const both = showLayers && !!name; const dy = both ? tsize * 1.3 / 2 : 0;
   if (name) drawLabel(ctx, g.x, g.y + dy, name, tsize, 0, vc, tsize / 10, base, flip);
   if (showLayers) {
+    // the layer numbers as PCB_PAINTER counts them: F.Cu 1, In n.Cu n + 1, B.Cu the copper layer count; the pair at
+    // −0.65 of the text size under the name's +0.65
     const copper = doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"];
-    const idx = (l: string) => { const i = copper.indexOf(l); return i < 0 ? 1 : i + 1; };
-    drawLabel(ctx, g.x, g.y - (both ? dy + tsize * 0.15 : 0), idx(g.viaLayers[0]) + "-" + idx(g.viaLayers[1]), tsize, 0, vc, tsize / 10, base, flip);
+    const idx = (l: string) => { if (l === "F.Cu") return 1; if (l === "B.Cu") return copper.length; const m = /^In(\d+)\.Cu$/.exec(l); return m ? +m[1] + 1 : 1; };
+    drawLabel(ctx, g.x, g.y - (both ? dy : 0), idx(g.viaLayers[0]) + "-" + idx(g.viaLayers[1]), tsize, 0, vc, tsize / 10, base, flip);
   }
 }
 
@@ -1918,6 +2140,17 @@ export function drawDrawingSheet(ctx: Ctx2D, doc: Doc, s: number, minW: number, 
   const ink = isPcb ? OC.drawingSheet || PCB_SHEET : SCH.frame;
   const items = documentDrawingSheet(doc);
   ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineCap = "butt"; ctx.lineJoin = "miter";
+  // DS_DRAW_ITEM_LIST::Print: the bitmaps first, then everything else in the description's order
+  for (const it of items) {
+    if (it.t !== "image") continue;
+    const e = imageEntry("drawing-sheet", it.b64);
+    if (e.loaded && !e.failed && e.img && typeof ctx.drawImage === "function") ctx.drawImage(e.img, it.x, it.y, it.w, it.h);
+  }
+  // DS_PAINTER::draw( DS_DRAW_ITEM_POLYPOLYGONS ): each outline filled in the sheet colour, no stroke
+  for (const it of items) {
+    if (it.t !== "poly") continue;
+    for (const pl of it.polys) { if (pl.length < 3) continue; ctx.beginPath(); ctx.moveTo(pl[0][0], pl[0][1]); for (let i = 1; i < pl.length; i++) ctx.lineTo(pl[i][0], pl[i][1]); ctx.closePath(); ctx.fill(); }
+  }
   let width = -1;
   const setWidth = (w: number) => { const lw = Math.max(w, minW); if (lw !== width) { width = lw; ctx.lineWidth = lw; } };
   ctx.beginPath();
@@ -1935,7 +2168,7 @@ export function drawDrawingSheet(ctx: Ctx2D, doc: Doc, s: number, minW: number, 
   if (open) ctx.stroke();
   for (const it of items) {
     if (it.t !== "text") continue;
-    drawText(ctx, { t: "text", x: it.x, y: it.y, text: it.text, size: it.size, w: it.w, color: it.color || ink,
+    drawText(ctx, { t: "text", x: it.x, y: it.y, text: it.text, size: it.size, sizeX: it.sizeX, w: it.w, color: it.color || ink,
       rot: it.rot, h: it.h, v: it.v, bold: it.bold, italic: it.italic, multiline: it.multiline, minPx: 3 }, s, doc.type, minW, null, null, false, null);
   }
   // DS_PAINTER::DrawBorder (ds_painter.cpp:383-396): the paper outline, last, in the page-limits colour (not plotted)

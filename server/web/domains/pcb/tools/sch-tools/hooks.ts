@@ -1,9 +1,10 @@
 import type { SchCtx, Pt, Mods, PtrEvent } from "./types";
 import { root } from "../root";
+import { isPastDragThreshold } from "../drag-threshold";
 import { editFieldPrompt, showDatasheet } from "./annotate";
 import { autoplaceSelection } from "./autoplace";
 import { cancelCarry, dropCarry, placeCarry, singleClickPlace, startCarry } from "./carry";
-import { CLICK_PX, closePicker, closePrompt, curTool, installDom, openPicker, openPowerPicker, promptClassLabel, promptFor } from "./dom";
+import { closePicker, closePrompt, curTool, installDom, openPicker, openPowerPicker, promptClassLabel, promptFor } from "./dom";
 import { announceModes, beginDrag, cycleLineMode, endDrag, setDragMode } from "./drag";
 import { clearHighlight, highlightClick, highlightNetNow, pickNet, setHighlight } from "./highlight";
 import { pickAny, pickNonSymbol } from "./hit";
@@ -202,7 +203,7 @@ export function onPointerUp(ev: PtrEvent | null | undefined, mm: Pt, ctx: SchCtx
   const d = S.draw; if (!d || !d.press) return;
   const press = d.press; d.press = null;
   if (!ctx || !mm || !ev || ev.clientX === undefined || d.shape !== "sheet" || d.await || d.pts.length !== 1) return;
-  if (Math.hypot(ev.clientX - press[0], ev.clientY! - press[1]) < CLICK_PX) return;   // a click: the second click ends it
+  if (!isPastDragThreshold(ev.clientX - press[0], ev.clientY! - press[1])) return;   // a click: the second click ends it
   drawClick(ctx, "sheet", drawPoint(ctx, mm));
 }
 /**

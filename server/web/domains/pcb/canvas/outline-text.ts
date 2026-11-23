@@ -226,7 +226,7 @@ export interface OutlineBlock {
   all?: string[];
 }
 /** What the layout needs of a text geometry. */
-export interface OutlineTextG { x: number; y: number; text: string; raw?: string; size: number; sizeX?: number; rot?: number; h: string; v: string; mirror?: boolean; bold?: boolean; italic?: boolean; face?: string; olBlock?: OutlineBlock }
+export interface OutlineTextG { x: number; y: number; text: string; raw?: string; size: number; sizeX?: number; lineSpacing?: number; rot?: number; h: string; v: string; mirror?: boolean; bold?: boolean; italic?: boolean; face?: string; olBlock?: OutlineBlock }
 /** One laid-out line in the text's own frame (origin at `ox, oy`, x along the reading direction, y down): its left end on the baseline, and its box. */
 export interface OutlineLayout {
   ox: number; oy: number; rot: number; mirror: boolean; size: number; sizeX: number; em: number; emX: number;
@@ -245,7 +245,7 @@ export function outlineLayout(g: OutlineTextG): OutlineLayout | null {
   const ox = blk ? blk.x : g.x, oy = blk ? blk.y : g.y, rot = g.rot || 0, mirror = !!g.mirror;
   const text = g.text || "", width = m.advance(text) * emX;
   const { asc, desc } = kicadAscDesc(m);
-  const interline = size * OUTLINE_INTERLINE;
+  const interline = size * OUTLINE_INTERLINE * (g.lineSpacing || 1);   // EDA_TEXT::GetInterline × GetLineSpacing
   // the text box (EDA_TEXT::GetTextBox): ascender + descender of the face tall (the first line a sixth more with an
   // overbar), the lines an interline apart, hung from / centred on / stood on the item's position (no 0.17 fudge
   // inside an outline box, but the top / bottom offset by it all the same)

@@ -162,8 +162,8 @@ console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
 
 test("edit points: KiCad's EDIT_POINTS colours (aux-items fill, 0.8-alpha border), inverted on a background too close", () => {
-  assert.deepStrictEqual(_.editPointColors("#000000", "#F5F4EF"), { fill: "rgb(0,0,0)", border: "rgba(179,179,179,0.8)" });
-  assert.deepStrictEqual(_.editPointColors("#000000", "#101010"), { fill: "rgb(255,255,255)", border: "rgba(77,77,77,0.8)" });
+  assert.deepStrictEqual(_.editPointColors("#000000", "#F5F4EF"), { fill: "rgb(0,0,0)", border: "rgba(179,179,179,0.8)", highlight: "rgba(128,128,128,0.8)" });
+  assert.deepStrictEqual(_.editPointColors("#000000", "#101010"), { fill: "rgb(255,255,255)", border: "rgba(77,77,77,0.8)", highlight: "rgba(128,128,128,0.8)" });
 });
 
 test("Schematic Setup > Formatting: label size and text offset ratios, DNP markers and the default line width rebuild the sheet", () => {

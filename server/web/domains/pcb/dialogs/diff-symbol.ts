@@ -47,7 +47,7 @@ export function openDiffSymbol(): void {
   const item = selectedSymbol();
   // RequestSelection( { SCH_SYMBOL_T } ) came back empty
   // m_frame->ShowInfoBarError: the editor's infobar (toast), shown for ShowMessageFor's 8 s
-  if (!item) { toast("Select a symbol to diff against its library equivalent.", 8000); return; }
+  if (!item) { toast("Select a symbol to diff against its library equivalent.", 8000, undefined, "error"); return; }
   void build(E.kdoc, item);
 }
 

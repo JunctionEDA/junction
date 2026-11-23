@@ -6,9 +6,9 @@ import { arcFrom3, atOf, bezierPts, colorOf as itemColorOf, dashOf, effectsOf as
 import { buildImageGeom, buildTableGeom } from "./tables-images";
 import { hatchLines } from "./geom-pcb";
 import { arcEnds, arcTangents, bezierEndings, emitEnding, hasEndings, polyTangents, readEndings, shortenArc, shortenPoly, shortenSegment } from "./line-ending";
-import { MIL, SCH_PEN, layoutPen, parseMarkup, textPen, textWidth, unescapeText } from "./text";
+import { MIL, SCH_PEN, layoutPen, parseMarkup, setSchTextVersion, textPen, textWidth, unescapeText } from "./text";
 import { linebreakText } from "./stroke-font";
-import { expandTextVars, sheetTextVars, varResolver } from "./sheet";
+import { expandTextVars, hasTextVars, sheetTextVars, varResolver } from "./sheet";
 import type { Box, Doc, Geom, GeomSink, Item, Pt, SheetContext, TextEffects, Tf } from "./types";
 /** SCH_SYMBOL::ResolveTextVar: the Sim.* fields a symbol may lack, which resolve to "" rather than staying ${…}. */
 const SIM_VARS = new Set(["SIM.DEVICE", "SIM.TYPE", "SIM.PINS", "SIM.PARAMS", "SIM.LIBRARY", "SIM.NAME"]);
@@ -59,7 +59,7 @@ function directiveFlagText(item: Item, doc: Doc | null | undefined, token: strin
  * label's own fields, then the sheet's and the project's variables.  A token nothing resolves stays as written.
  */
 function labelShownText(item: Item, text: string, doc?: Doc | null, depth = 0): string {
-  if (!text || text.indexOf("${") < 0 || depth > 10) return text;
+  if (!text || !hasTextVars(text) || depth > 10) return text;
   const k = item.kind, n = item.node, directive = k === "directive_label" || k === "netclass_flag";
   let docVar: ((t: string) => unknown) | null = null;
   try {
@@ -100,7 +100,7 @@ const nameShown = (p: SNode): boolean => yesNo(p, "show_name");
 export interface PinSym { literalTilde?: boolean; nameOff: number; hideNames: boolean; hideNums: boolean; maxNameHalf: number; col: (c: string) => string; alpha?: number; showHidden?: boolean; altIcons?: boolean }
 /** ${VAR} in free text: the title-block / sheet / project variables GetShownText resolves; unknown ones stay as written. */
 export function expandDocVars(doc: SheetContext | null | undefined, text: string): string {
-  if (!text || text.indexOf("${") < 0) return text;
+  if (!text || !hasTextVars(text)) return text;
   try { return expandTextVars(text, varResolver(sheetTextVars(doc), { project: (doc && doc.projectVars) || null })); } catch (e) { return text; }
 }
 /** The file version from which a pin name "~" is no longer read as an empty name. */
@@ -209,7 +209,7 @@ export function labelFields(item: Item, n: SNode, color: string, layer: string, 
       // GetShownText: the variables resolved, then "Name: " ahead of the text when the name is shown
       val = labelShownText(item, val, doc);
       if (nameShown(p)) val = fname + ": " + val;
-      textLines(item, px + ox, py + oy, val, ef.size, ef.color || SCH.glabel, pr, just, layer, { z: SCH_Z.intersheet, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, field: str(p[1]), olKind: "field" });
+      textLines(item, px + ox, py + oy, val, ef.size, ef.color || SCH.glabel, pr, just, layer, { z: SCH_Z.intersheet, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing, field: str(p[1]), olKind: "field" });
       continue;
     }
     // SCH_FIELD::GetShownText: the variables resolved (SCH_LABEL_BASE::ResolveTextVar; one nothing resolves is shown as
@@ -220,13 +220,14 @@ export function labelFields(item: Item, n: SNode, color: string, layer: string, 
     const [px0, py0, pr] = atOf(p), px = px0 + ox, py = py0 + oy;
     // a hidden field: kept aside in LAYER_HIDDEN for show_hidden_fields, outside the hit boxes
     const sink: GeomSink = ef.hide ? { geom: [], bbox: null } : item;
-    textLines(sink, px, py, val, ef.size, fieldColor(ef, ef.hide ? SCH.hidden : fColor), pr, ef.just, layer, { z: fz, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, field: str(p[1]), olKind: "field" });
+    textLines(sink, px, py, val, ef.size, fieldColor(ef, ef.hide ? SCH.hidden : fColor), pr, ef.just, layer, { z: fz, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing, field: str(p[1]), olKind: "field" });
     if (ef.hide && sink.geom.length) { for (const g of sink.geom) { g.hiddenText = true; g.noBox = true; } (item.hiddenGeom = item.hiddenGeom || []).push(...sink.geom); }
   }
 }
 
 
 export function buildSchGeom(doc: Doc, item: Item): void {
+  setSchTextVersion(doc && doc.version);
   const n = item.node, k = item.kind;
   if (k === "wire" || k === "bus" || k === "polyline") {
     const p = ptsOf(n); const isBus = k === "bus";
@@ -266,7 +267,7 @@ export function buildSchGeom(doc: Doc, item: Item): void {
   } else if (k === "text") {
     const [x, y, rot] = atOf(n); const ef = effectsOf(n);
     // SCH_TEXT::GetSchematicTextOffset: a fixed 0.25 mm lift; angles are kept upright (KeepUpright)
-    textLines(item, x, y - 0.25, expandDocVars(doc, str(n[1])), ef.size, ef.color || SCH.notes, rot, ef.just, "Notes", { z: SCH_Z.notes, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, olKind: "text", olLift: 0.25 });
+    textLines(item, x, y - 0.25, expandDocVars(doc, str(n[1])), ef.size, ef.color || SCH.notes, rot, ef.just, "Notes", { z: SCH_Z.notes, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing, olKind: "text", olLift: 0.25 });
   } else if (k === "text_box") {
     const [x, y, rot] = atOf(n); const s = kid(n, "size"); const w = s ? num(s[1]) : 10, h = s ? num(s[2]) : 5; const ef = effectsOf(n);
     const x0 = Math.min(x, x + w), y0 = Math.min(y, y + h), x1 = Math.max(x, x + w), y1 = Math.max(y, y + h);
@@ -283,7 +284,7 @@ export function buildSchGeom(doc: Doc, item: Item): void {
     else { tx = j.h === "left" ? x0 + lm : j.h === "right" ? x1 - rm : (x0 + x1) / 2; ty = j.v === "top" ? y0 + tm : j.v === "bottom" ? y1 - bm : (y0 + y1) / 2; }
     // SCH_TEXTBOX::GetShownText: wrapped to the box's inner width (its height when the text runs vertically)
     const col = vert ? (y1 - y0) - tm - bm : (x1 - x0) - lm - rm;
-    textLines(item, tx, ty, linebreakText(unescapeText(expandDocVars(doc, str(n[1]))), col, ef.sizeX, ef.thick, ef.italic), ef.size, ef.color || SCH.notes, rot, [j.h, j.v], "Notes", { z: SCH_Z.notes, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX });
+    textLines(item, tx, ty, linebreakText(unescapeText(expandDocVars(doc, str(n[1]))), col, ef.sizeX, ef.thick, ef.italic), ef.size, ef.color || SCH.notes, rot, [j.h, j.v], "Notes", { z: SCH_Z.notes, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing });
   } else if (k === "rectangle" || k === "circle" || k === "arc" || k === "bezier" || k === "ellipse" || k === "ellipse_arc") {
     shapeGeom(item, n, k, (x: number, y: number) => [x, y], SCH.notes, "Notes", SCH_Z.notes, SCH_Z.shapesBg, widthOf(n, 0) || SCH_PEN);
   } else if (k === "rule_area") {
@@ -310,11 +311,16 @@ export function buildSchGeom(doc: Doc, item: Item): void {
   }
 }
 
-/** ROUNDRECT::TransformToPolygon: the rectangle x0,y0 – x1,y1 with each corner a quarter circle of radius r (at most half the shorter side). */
-export function roundRectPts(x0: number, y0: number, x1: number, y1: number, r: number): Pt[] {
+/**
+ * ROUNDRECT::TransformToPolygon: the rectangle x0,y0 – x1,y1 with each corner a quarter circle of radius r (at most
+ * half the shorter side).  With `maxError` (mm) each corner has as many segments as that error allows (a board's
+ * ARC_HIGH_DEF); without it, eight.
+ */
+export function roundRectPts(x0: number, y0: number, x1: number, y1: number, r: number, maxError?: number): Pt[] {
   const l = Math.min(x0, x1), t = Math.min(y0, y1), rr = Math.max(x0, x1), b = Math.max(y0, y1);
   r = Math.min(r, (rr - l) / 2, (b - t) / 2); if (!(r > 0)) return [[l, t], [rr, t], [rr, b], [l, b]];
-  const out: Pt[] = [], n = 8;
+  const step = maxError && r > maxError ? 2 * Math.acos(1 - maxError / r) : Math.PI / 2;
+  const out: Pt[] = [], n = maxError ? Math.max(1, Math.ceil((Math.PI / 2) / step)) : 8;
   const corner = (cx: number, cy: number, a0: number) => { for (let i = 0; i <= n; i++) { const a = a0 + (Math.PI / 2) * i / n; out.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); } };
   corner(rr - r, t + r, -Math.PI / 2); corner(rr - r, b - r, 0); corner(l + r, b - r, Math.PI / 2); corner(l + r, t + r, Math.PI);
   return out;
@@ -324,15 +330,16 @@ export function roundRectPts(x0: number, y0: number, x1: number, y1: number, r: 
  * both, GetHatchLineWidth() = effective width / 2 wide, 40 of those apart (at most 100 lines across the major
  * axis), clipped to the outline; drawn on the background layer in the fill colour (the stroke colour when none).
  */
-export function hatchGeom(item: GeomSink, outline: Pt[], type: string, w: number, color: string, layer: string, z: number): void {
+export function hatchGeom(item: GeomSink, outline: Pt[], type: string, w: number, color: string, layer: string, z: number, pcb = false): void {
   const slopes = type === "cross_hatch" ? [1, -1] : type === "hatch" ? [-1] : type === "reverse_hatch" ? [1] : null;
   if (!slopes || outline.length < 3) return;
-  const lw = w / 2; let spacing = lw * 40; if (!(spacing > 0)) return;
+  // pcb: EDA_SHAPE's own GetHatchLineWidth() = the effective width, GetHatchLineSpacing() = 10 of those (eda_shape.h:168-169)
+  const lw = pcb ? w : w / 2; let spacing = lw * (pcb ? 10 : 40); if (!(spacing > 0)) return;
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const [x, y] of outline) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
   const major = Math.max(x1 - x0, y1 - y0); if (major / spacing > 100) spacing = major / 100;
   for (const sl of slopes) for (const [ax, ay, bx, by] of hatchLines(outline, sl, spacing, -1))
-    G(item, { t: "line", x1: ax, y1: ay, x2: bx, y2: by, w: lw, color, layer, z, cap: "round", noShadow: true });
+    G(item, { t: "line", x1: ax, y1: ay, x2: bx, y2: by, w: lw, color, layer, z, cap: "round", noShadow: true, ...(pcb ? { hatchLine: true } : {}) });
 }
 
 /** Graphic shape shared by sheet-level notes and library bodies (tf maps node coords to screen). */
@@ -477,11 +484,11 @@ export function buildSheetGeom(item: Item, n: SNode, doc?: Doc | null): void {
     // SCH_FIELD::GetShownText: the value as written ("Name: " ahead of it when the name is shown), its variables
     // resolved against the sheet's own fields (SCH_SHEET::ResolveTextVar) and the document's
     let shown = (nameShown(p) ? name + ": " : "") + val;
-    if (shown.indexOf("${") >= 0) {
-      shown = expandTextVars(shown, (tok) => { const up = tok.toUpperCase(); for (const q of kids(n, "property")) if (q !== p && str(q[1]).toUpperCase() === up) return str(q[2]); return null; });
+    if (hasTextVars(shown)) {
+      shown = expandTextVars(shown, (tok) => { const up = tok.toUpperCase(); for (const q of kids(n, "property")) if (q !== p && str(q[1]).toUpperCase() === up) return str(q[2]); return null; }, 0, { finalize: false });
       shown = expandDocVars(doc, shown);
     }
-    textLines(sink, px, py, shown, ef.size, color, pr, ef.just, "Sheets", { z: name === "Sheetname" ? SCH_Z.sheetName : name === "Sheetfile" ? SCH_Z.sheetFile : SCH_Z.sheetFields, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, field: name, olKind: "field" });
+    textLines(sink, px, py, shown, ef.size, color, pr, ef.just, "Sheets", { z: name === "Sheetname" ? SCH_Z.sheetName : name === "Sheetfile" ? SCH_Z.sheetFile : SCH_Z.sheetFields, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing, field: name, olKind: "field" });
     if (ef.hide && sink.geom.length) { for (const g of sink.geom) { g.hiddenText = true; g.noBox = true; } (item.hiddenGeom = item.hiddenGeom || []).push(...sink.geom); }
   }
   for (const pin of kids(n, "pin")) {
@@ -536,7 +543,7 @@ function symbolTextBox(item: GeomSink, g: SNode, tf: Tf, rot: number, mirror: st
   else { px = j.h === "left" ? x0 + lm : j.h === "right" ? x1 - rm : (x0 + x1) / 2; py = j.v === "top" ? y0 + tm : j.v === "bottom" ? y1 - bm : (y0 + y1) / 2; }
   // SCH_TEXTBOX::GetShownText: wrapped to the box's inner width (its height when the text runs vertically)
   const colW = vert ? (y1 - y0) - tm - bm : (x1 - x0) - lm - rm;
-  textLines(item, px, py, linebreakText(unescapeText(text), colW, ef.sizeX, ef.thick, ef.italic), ef.size, col(ef.color || SCH.outline), vert ? 90 : 0, [j.h, j.v], layer, { z: SCH_Z.device, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX });
+  textLines(item, px, py, linebreakText(unescapeText(text), colW, ef.sizeX, ef.thick, ef.italic), ef.size, col(ef.color || SCH.outline), vert ? 90 : 0, [j.h, j.v], layer, { z: SCH_Z.device, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing });
   if (border > 0) G(item, Object.assign({ t: "rect" as const, x: x0, y: y0, w: x1 - x0, h: y1 - y0, wd: border, color: col(strokeColorOf(g) || SCH.outline), fill: null, layer, z: SCH_Z.device }, dashOf(g)));
 }
 
@@ -624,7 +631,7 @@ export function buildSymbolGeom(doc: Doc, item: Item): void {
       if (qn.toLowerCase() !== low) continue;
       if (qn === "Reference") return fullRef;
       const t = str(q[2]);
-      return t.indexOf("${") >= 0 && depth < 10 ? expandTextVars(t, (k) => resolveTok(k, depth + 1)) : t;
+      return hasTextVars(t) && depth < 10 ? expandTextVars(t, (k) => resolveTok(k, depth + 1)) : t;
     }
     // missing simulation fields read as empty, not unresolved (exact, upper-case token names)
     if (SIM_VARS.has(tok)) return "";
@@ -697,7 +704,7 @@ export function buildSymbolGeom(doc: Doc, item: Item): void {
     try { const v = varResolver(sheetTextVars(doc), { project: (doc && doc.projectVars) || null })(tok); return v === undefined ? null : v; } catch (e) { return null; }
   };
   /** expandLibItemTextVars: a body text, text box or pin name of the library symbol, resolved against this symbol. */
-  const symText = (t: string): string => (t.indexOf("${") >= 0 ? expandTextVars(t, (tok) => resolveTok(tok, 0)) : t);
+  const symText = (t: string): string => (hasTextVars(t) ? expandTextVars(t, (tok) => resolveTok(tok, 0)) : t);
   const take = (g0: string) => { const b = item.bbox; if (!b) return; if (g0 === "pin") pinBox = boxUnion(pinBox, b[0], b[1], b[2], b[3]); else bodyBox = boxUnion(bodyBox, b[0], b[1], b[2], b[3]); };
   if (lib) {
     const pn = kid(lib, "pin_names"); const nameOff = pn && kid(pn, "offset") ? num(kid(pn, "offset")![1]) : 0.508;
@@ -716,7 +723,7 @@ export function buildSymbolGeom(doc: Doc, item: Item): void {
         const nm = kid(g, "name"); if (nm) out[out.indexOf(nm)] = [nm[0], str(an[1]), ...nm.slice(2)] as SNode; else out.push(["name", str(an[1])] as SNode);
       }
       const nn = kid(out, "name");
-      if (nn && str(nn[1]).indexOf("${") >= 0) { if (out === g) out = g.slice() as SNode; out[out.indexOf(nn)] = [nn[0], symText(str(nn[1])), ...nn.slice(2)] as SNode; }
+      if (nn && hasTextVars(str(nn[1]))) { if (out === g) out = g.slice() as SNode; out[out.indexOf(nn)] = [nn[0], symText(str(nn[1])), ...nn.slice(2)] as SNode; }
       return out;
     };
     // SCH_PIN::GetEffectivePadNumber (no footprint pads on the canvas): the pad a pin-to-pad map sends the pin to: the
@@ -768,7 +775,7 @@ export function buildSymbolGeom(doc: Doc, item: Item): void {
           // SCH_PAINTER::draw( SCH_TEXT ) on LAYER_DEVICE: placed on its box like a field, each line keeping its H justification;
           // a hidden one is drawn in LAYER_HIDDEN under show_hidden_fields
           const sink: GeomSink = ef.hide ? { geom: [], bbox: null } : item;
-          const [px, py] = tf(tx, ty); transformedText(sink, Ti, px, py, symText(str(g[1])), ef.size, ef.hide ? ef.color || SCH.hidden : col(ef.color || SCH.outline), tr / 10, ef.just, bodyLayer, { z: SCH_Z.device, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, alpha, olKind: "field", olKeepH: true });
+          const [px, py] = tf(tx, ty); transformedText(sink, Ti, px, py, symText(str(g[1])), ef.size, ef.hide ? ef.color || SCH.hidden : col(ef.color || SCH.outline), tr / 10, ef.just, bodyLayer, { z: SCH_Z.device, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing, alpha, olKind: "field", olKeepH: true });
           if (ef.hide) { for (const hg of sink.geom) { hg.hiddenText = true; hg.noBox = true; } if (sink.geom.length) (item.hiddenGeom = item.hiddenGeom || []).push(...sink.geom); }
           else take("body");
         } else if (gk === "text_box") {
@@ -815,8 +822,8 @@ export function buildSymbolGeom(doc: Doc, item: Item): void {
     // IsNameShown(): "Name: text" on the canvas
     if (nameShown(p)) shown = name + ": " + shown;
     // SCH_SYMBOL::ResolveTextVar: the symbol's fields by name, its own variables, then the sheet's
-    if (shown.indexOf("${") >= 0) shown = expandTextVars(shown, (tok) => resolveTok(tok, 0));
-    const tg = transformedText(sink, Ti, px, py, shown, ef.size, color, pr, ef.just, isRef || isVal ? "Reference & value" : "Fields", { z: isRef ? SCH_Z.ref : isVal ? SCH_Z.value : SCH_Z.fields, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, alpha, field: name, olKind: "field" });
+    if (hasTextVars(shown)) shown = expandTextVars(shown, (tok) => resolveTok(tok, 0));
+    const tg = transformedText(sink, Ti, px, py, shown, ef.size, color, pr, ef.just, isRef || isVal ? "Reference & value" : "Fields", { z: isRef ? SCH_Z.ref : isVal ? SCH_Z.value : SCH_Z.fields, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing, alpha, field: name, olKind: "field" });
     // a local power symbol (IsSymbolLikePowerLocalLabel) marks its Value with drawLocalPowerIcon
     if (isVal && localPower) localPowerIcon(sink, tg, shown, textPen(ef, ef.size), color, name);
     if (ef.hide) { for (const hg of sink.geom) { hg.hiddenText = true; hg.noBox = true; } if (sink.geom.length) (item.hiddenGeom = item.hiddenGeom || []).push(...sink.geom); }

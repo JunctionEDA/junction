@@ -1,5 +1,6 @@
 // pcb-tools/clipboard.ts — the clipboard in KiCad's own format (a kicad_pcb document), paste and duplicate.
 import { canHaveNumber, nextPadNumber, padMemory } from "./pad-tool";
+import { GENERATOR_VERSION } from "../../canvas/format-version";
 import type { BoardDoc, NetRef, PcbChange, PcbCtx, Pt, SAtom } from "./types";
 
 /** A paste-special / duplicate option bag. */
@@ -61,7 +62,7 @@ export function clipboardText(doc: BoardDoc, ids: Iterable<string>, ref?: Pt | n
   const refd = new Map<string, number>(); const take = (n: NetRef) => { const key = NT.key(n); if (key && !refd.has(key)) refd.set(key, n.code > 0 ? n.code : 0); };
   if (!lone) for (const it of items) { if (it!.kind === "footprint") for (const p of K.kids(it!.node, "pad")) take(netOf(p)); else if (K.kid(it!.node, "net")) take(netOf(it!.node)); }
   let next = 1; const used = new Set(refd.values()); for (const [k, v] of refd) if (!v) { while (used.has(next)) next++; refd.set(k, next); used.add(next); }
-  const parts = [`(kicad_pcb (version ${BOARD_VERSION}) (generator "pcbnew") (generator_version "10.0")`, layersText(doc)];
+  const parts = [`(kicad_pcb (version ${BOARD_VERSION}) (generator "pcbnew") (generator_version "${GENERATOR_VERSION}")`, layersText(doc)];
   if (netStyle(doc) === "code" && refd.size) { parts.push('(net 0 "")'); for (const [name, code] of Array.from(refd).sort((a, b) => a[1] - b[1])) parts.push(`(net ${code} ${quote(name)})`); }
   for (const it of items) {
     const node = clone(it!.node); translateNode(node, -ref![0], -ref![1]); setLocked(node, false);

@@ -289,7 +289,7 @@ function readTrack(n: Node, kind: string, nets?: Map<number, string>): Track | n
   return t;
 }
 
-function readVia(n: Node, copper: string[], nets: Map<number, string>): Via {
+function readVia(n: Node, copper: string[], nets: Map<number, string>, fileVersion = 0): Via {
   const [x, y] = atOf(n) as [number, number, number];
   const sz = K(n, "size"), dr = K(n, "drill");
   const type = has(n, "blind") ? "blind" : has(n, "buried") ? "blind" : has(n, "micro") ? "micro" : "through";
@@ -312,9 +312,12 @@ function readVia(n: Node, copper: string[], nets: Map<number, string>): Via {
   }
   const ru = K(n, "remove_unused_layers"), ke = K(n, "keep_end_layers"), zl = K(n, "zone_layer_connections");
   const [tf, tb] = frontBack(K(n, "tenting"));
-  const [cf, cb] = frontBack(K(n, "covering")), [pf, pb] = frontBack(K(n, "plugging"));
+  let [cf, cb] = frontBack(K(n, "covering")), [pf, pb] = frontBack(K(n, "plugging"));
   const opt = (k: Node | null): boolean | null => (k && k.length > 1 && str(k[1]) !== "none" ? str(k[1]) !== "no" : null);
-  return { coverFront: cf, coverBack: cb, plugFront: pf, plugBack: pb, capped: opt(K(n, "capping")), filled: opt(K(n, "filling")), x, y, size, drill: dr ? num(dr[1], 0.4) : 0.4, type, layers, sizes, net: netName(n, nets),
+  let capped = opt(K(n, "capping")), filled = opt(K(n, "filling"));
+  // "Versions before 10.0 had no protection features other than tenting": a board before 20250228 reads them as off
+  if (fileVersion > 0 && fileVersion < 20250228) { cf = cf ?? false; cb = cb ?? false; pf = pf ?? false; pb = pb ?? false; capped = capped ?? false; filled = filled ?? false; }
+  return { coverFront: cf, coverBack: cb, plugFront: pf, plugBack: pb, capped, filled, x, y, size, drill: dr ? num(dr[1], 0.4) : 0.4, type, layers, sizes, net: netName(n, nets),
     removeUnused: ru ? (ru.length < 2 || str(ru[1]) !== "no") : has(n, "remove_unused_layers"), keepEnds: ke ? (ke.length < 2 || str(ke[1]) !== "no") : has(n, "keep_end_layers"),
     zoneLayers: new Set(zl ? zl.slice(1).map(str) : []), tentFront: tf, tentBack: tb };
 }
@@ -344,7 +347,7 @@ export function boardModel(doc: FabDoc, setup: Node | null, variant?: string): B
       // a zone inside a footprint is kept in the footprint's frame
       for (const z of kids(n, "zone") as Node[]) readZone(z, copper, fp.tf, m, doc.nets);
     } else if (item.kind === "segment" || item.kind === "arc") { const t = readTrack(n, item.kind, doc.nets); if (t) { t.id = item.id; m.tracks.push(t); } }
-    else if (item.kind === "via") { const v = readVia(n, copper, doc.nets); v.id = item.id; m.vias.push(v); }
+    else if (item.kind === "via") { const v = readVia(n, copper, doc.nets, Number((doc as FabDoc).version) || 0); v.id = item.id; m.vias.push(v); }
     else if (item.kind === "zone") readZone(n, copper, null, m, doc.nets);
   }
   return m;

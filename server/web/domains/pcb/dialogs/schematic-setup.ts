@@ -167,7 +167,7 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
     build(body) {
       // the infobar: KiCad shows it when the project is missing or read-only
       const bar = infoBar(); body.append(bar.el);
-      if (ro) bar.show("Project is missing or read-only. Settings will not be editable.");
+      if (ro) bar.show("Project is missing or read-only. Settings will not be editable.", 0, "warning");
       tb = KD().treebook(body, [
         { label: "General", pages: [
           { label: "Formatting", build(pg) {

@@ -11,10 +11,11 @@ import { settingsOf } from "./dialogs";
 import { POLY_TOOLS, RULE_AREA_LAYERS, curveGeom, drawWidth } from "./draw-modes";
 import { selectionIds } from "./groups";
 import { drawGroupFrames, enteredGroupIds } from "./group-edit";
-import { netTable, ratsnest } from "./netlist";
+import { netTable, ratsnest, ratsnestLineVisible } from "./netlist";
 import { netOf } from "./nets";
 import { tableGrid } from "./nodes";
 import { drawEditPoints } from "./point-editor";
+import { clearConstruction, constructionBatches, hasActiveConstruction, snapLineState, type CDrawable } from "./construction";
 import { padOnLayer, padsOf } from "./route-geom";
 import { padOutline as drcPadOutline } from "./drc-zones";
 import { PAD_TOOLS, masterPad } from "./pad-tool";
@@ -83,13 +84,17 @@ export function clearanceOutlines(doc: BoardDoc, s: DesignSettings, layer: strin
       if (oh && oh.has("vias")) continue;
       if (!viaOnLayer(n, layer, doc)) continue;
       const clr = clrOf(netOf(n)); if (clr <= 0) continue;
-      const at = K.atOf(n), sz = K.kid(n, "size"), r = (sz ? K.num(sz[1]) : 0.8) / 2;   // flashed on every layer it spans
+      // PCB_PAINTER::draw( PCB_VIA ) clearance: the via's size where it flashes, its drill plus the plating where it does not
+      const at = K.atOf(n), sz = K.kid(n, "size"), dr = K.kid(n, "drill");
+      const r = K.viaFlashesOn(doc as unknown as Parameters<typeof K.viaFlashesOn>[0], it as unknown as Parameters<typeof K.viaFlashesOn>[1], layer) ? (sz ? K.num(sz[1]) : 0.8) / 2 : (dr ? K.num(dr[1]) : 0.4) / 2 + HOLE_PLATING_THICKNESS;
       out.push({ id: it.id, shape: { t: "circle", x: at[0], y: at[1], r: r + clr } });
     } else if (opt.pads && it.kind === "footprint") {
-      if (oh && (oh.has("pads") || oh.has(/^B\./.test(K.str((K.kid(n, "layer") || [])[1])) ? "fpBack" : "fpFront"))) continue;
+      if (oh && oh.has("pads")) continue;
       const fpClr = K.kid(n, "clearance");
       for (const p of padsOf(it)) {
         if (!padOnLayer(p, layer)) continue;
+        // PAD::ViewGetLOD: a pad on one side hides with that side's footprints, one on both only with both hidden
+        if (oh) { const f = p.layers.some((l) => /^F\./.test(l) || l === "*.Cu" || l === "F&B.Cu" || l === "*.Mask"), b = p.layers.some((l) => /^B\./.test(l) || l === "*.Cu" || l === "F&B.Cu" || l === "*.Mask"); if ((f && !b && oh.has("fpFront")) || (b && !f && oh.has("fpBack")) || (f && b && oh.has("fpFront") && oh.has("fpBack"))) continue; }
         const own = K.kid(p.node, "clearance"), clr = own ? K.num(own[1]) : fpClr ? K.num(fpClr[1]) : clrOf(p.net as { code: number; name: string });
         if (!(clr > 0)) continue;
         const npth = p.type === "np_thru_hole";
@@ -144,8 +149,9 @@ export function drawClearanceOutlines(c: CanvasRenderingContext2D, ctx: PcbCtx, 
     c.globalAlpha = entered && !entered.has(o.id) && !sel.has(o.id) ? outsideOp : 1;
     let col = o.npth ? NPTH_COLOR : base;
     const lit = !!hl && (hl.has(o.id) || (o.padIndex !== undefined && hl.has(o.id + "#" + o.padIndex)));
+    // a selected item is never highlight-brightened or darkened (PCB_RENDER_SETTINGS::GetColor)
     if (sel.has(o.id)) col = KC.selectedColor(col);
-    if (hl) col = lit ? KC.highlightColor(col, true) : KC.darkened(col, 1 - KC.HL_FACTOR);
+    else if (hl) col = lit ? KC.highlightColor(col, true) : KC.darkened(col, 1 - KC.HL_FACTOR);
     c.strokeStyle = col; c.beginPath(); traceClearance(c, o.shape); c.stroke();
   }
   c.restore();
@@ -300,9 +306,21 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
   // ratsnest (KiCad's default colour), the whole board or only the lines reaching the selected footprints
   if (S.showRatsnest) {
     const lines = ratsnestLines(doc); const sel = S.localRatsnest ? selectionIds(ctx) : null;
-    c.globalAlpha = 1; c.lineWidth = 1 * px;
+    // RATSNEST_VIEW_ITEM::ViewDraw: the line m_RatsnestThickness pixels wide (0.5 by default)
+    const ro = appGlobal(() => (editorState() as unknown as { renderOpts?: { ratsnestThickness?: number; highContrast?: boolean; inactiveHide?: boolean } }).renderOpts || null, null);
+    c.globalAlpha = 1; c.lineWidth = (ro && ro.ratsnestThickness! > 0 ? ro.ratsnestThickness! : 0.5) * px;
+    // RATSNEST_MODE::VISIBLE: only the lines whose two ends are on a visible copper layer (in high contrast with the
+    // inactive layers hidden, the active one alone)
+    let visCu: ((l: RatsnestLine) => boolean) | null = null;
+    if (S.ratsnestMode === "visible") {
+      const hiddenL = appGlobal(() => editorState()!.hiddenLayers as Set<string> | null, null);
+      const only = ro && ro.highContrast && ro.inactiveHide ? S.layer || "" : null;
+      visCu = (l) => ratsnestLineVisible(l, hiddenL, only);
+    }
     const curved = K.pcbSizes.state.curvedRatsnest;   // RATSNEST_VIEW_ITEM: a Bezier whose two control points sit 10% off the midpoint
     const trace = (l: { a: Pt; b: Pt }) => {
+      // a zero-length connection (items at one point sharing no layer) is a cross, CROSS_SIZE 0.2 mm (drawCross)
+      if (l.a[0] === l.b[0] && l.a[1] === l.b[1]) { const x = l.a[0], y = l.a[1], k = 0.2; c.moveTo(x - k, y - k); c.lineTo(x + k, y + k); c.moveTo(x - k, y + k); c.lineTo(x + k, y - k); return; }
       c.moveTo(l.a[0], l.a[1]);
       if (curved) { const dx = l.b[0] - l.a[0], dy = l.b[1] - l.a[1], mx = l.a[0] + 0.5 * dx - 0.1 * dy, my = l.a[1] + 0.5 * dy + 0.1 * dx; c.bezierCurveTo(mx, my, mx, my, l.b[0], l.b[1]); }
       else c.lineTo(l.b[0], l.b[1]);
@@ -318,7 +336,7 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
     const baseOf = (net: string) => (S.ratsnestColors && S.ratsnestColors.get(net)) || S.ratsnestBase || RATSNEST;
     const byColor = new Map<string, RatsnestLine[]>();
     for (const l of lines) {
-      if (S.hiddenNets.has(l.net)) continue; if (sel && !l.ids.some((id: string) => sel.has(id))) continue; if (moving.size && l.ids.some((id: string) => moving.has(id))) continue;
+      if (S.hiddenNets.has(l.net)) continue; if (visCu && !visCu(l)) continue; if (sel && !l.ids.some((id: string) => sel.has(id))) continue; if (moving.size && l.ids.some((id: string) => moving.has(id))) continue;
       let col = baseOf(l.net), a = alphaOf(col);
       if (dimStatic) { a = a / 2; col = adjustColor(col, 0, a, lightBg); }
       if (hlNets.has(l.net)) col = adjustColor(col, 0.8, a + 0.4, lightBg);
@@ -437,6 +455,7 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
   // a move's magnetic snap (the anchor the cursor was pulled onto): GRID_HELPER's SNAP_INDICATOR
   const cpx = px * (view.dpr || 1);
   if (S.move && S.move.snapAt) drawSnapIndicator(c, S.move.snapAt, S.move.snapAt.t, cpx);
+  drawConstructionGeom(c, cpx);
   // a move held on an angle snap line: CONSTRUCTION_GEOM's snap line, dashed (12 px on, 6 off) in LAYER_ANCHOR, with
   // a 16 px cross and circle on its origin once it is longer than 8 px; nothing under 10 nm
   const gl = S.move && S.move.guide;
@@ -456,6 +475,67 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
     if (hv.snap && !ROUTER_TOOLS.has(S.modTool) && !S.route) drawSnapIndicator(c, [hv.x, hv.y], snapTypeOf(hv.snap as { kind: string; type?: SnapType }), cpx);
   }
   c.globalAlpha = 1;
+}
+
+/** The visible area in board mm (the canvas through the inverse of its transform). */
+function viewportMm(c: CanvasRenderingContext2D): [number, number, number, number] | null {
+  if (!c.canvas || typeof c.getTransform !== "function") return null;
+  const m = c.getTransform().inverse(), W = c.canvas.width, H = c.canvas.height;
+  const P = [[0, 0], [W, 0], [0, H], [W, H]].map(([x, y]) => [m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f]);
+  return [Math.min(...P.map((p) => p[0])), Math.min(...P.map((p) => p[1])), Math.max(...P.map((p) => p[0])), Math.max(...P.map((p) => p[1]))];
+}
+/** KIGEOM::ClipLineToBox / ClipHalfLineToBox: the part of the line through a and b (from a on, for a ray) inside the box. */
+export function clipLineToBox(a: Pt, b: Pt, box: [number, number, number, number], half = false): [Pt, Pt] | null {
+  const d = [b[0] - a[0], b[1] - a[1]]; let t0 = half ? 0 : -Infinity, t1 = Infinity;
+  for (const [p, q] of [[-d[0], a[0] - box[0]], [d[0], box[2] - a[0]], [-d[1], a[1] - box[1]], [d[1], box[3] - a[1]]]) {
+    if (Math.abs(p) < 1e-15) { if (q < 0) return null; continue; }
+    const r = q / p; if (p < 0) t0 = Math.max(t0, r); else t1 = Math.min(t1, r);
+  }
+  if (!(t0 <= t1) || !isFinite(t0) || !isFinite(t1)) return null;
+  return [[a[0] + t0 * d[0], a[1] + t0 * d[1]], [a[0] + t1 * d[0], a[1] + t1 * d[1]]];
+}
+const dashed = (c: CanvasRenderingContext2D, a: Pt, b: Pt, dash: number) => { c.setLineDash([dash, dash / 2]); c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke(); c.setLineDash([]); };
+/**
+ * GRID_HELPER's construction geometry while a tool snaps (CONSTRUCTION_GEOM::ViewDraw, in LAYER_ANCHOR): the accepted
+ * construction items one pixel wide (lines and rays out to the edge of the view, points as a 16 px cross), leaving out
+ * a line that lies along the snap line; then SNAP_MANAGER::UpdateSnapGuides' guides, one per snap direction through
+ * the snap line origin, dashed (8 px), the active one in the highlight colour (anchor colour Brightened( 0.2 );
+ * its LineWidth 5 and the others' 1 are in world units, drawn by the GAL at its one-pixel minimum); and the move's
+ * auxiliary axes (GRID_HELPER m_viewAxis: an ORIGIN_VIEWITEM cross through the drag origin across the whole view,
+ * LAYER_AUX_ITEMS at 40 % alpha).
+ */
+function drawConstructionGeom(c: CanvasRenderingContext2D, cpx: number) {
+  if (!S.move && !S.modTool) { if (hasActiveConstruction()) clearConstruction(); return; }
+  const box = viewportMm(c); if (!box) return;
+  const sl = snapLineState(), snapSeg = S.move && S.move.guide && Math.hypot(S.move.guide[1][0] - S.move.guide[0][0], S.move.guide[1][1] - S.move.guide[0][1]) >= 1e-5 ? S.move.guide : null;
+  const collinear = (a: Pt, b: Pt) => {
+    if (!snapSeg) return false; const [p, q] = snapSeg, L = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+    const off = (r: Pt) => Math.abs((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])) / L;
+    return off(a) <= 1e-6 && off(b) <= 1e-6;
+  };
+  c.save(); c.globalAlpha = 1; c.setLineDash([]); c.strokeStyle = ANCHOR; c.lineCap = "butt";
+  for (const bt of constructionBatches()) for (const ci of bt) for (const e of ci.drawables) {
+    const d: CDrawable = e.d; c.lineWidth = e.w * cpx;
+    if (d.t === "line" || d.t === "half" || d.t === "seg") {
+      const seg = d.t === "seg" ? [d.a, d.b] as [Pt, Pt] : clipLineToBox(d.a, d.b, box, d.t === "half");
+      if (seg && !collinear(seg[0], seg[1])) { c.beginPath(); c.moveTo(seg[0][0], seg[0][1]); c.lineTo(seg[1][0], seg[1][1]); c.stroke(); }
+    } else if (d.t === "circle") { c.beginPath(); c.arc(d.c[0], d.c[1], d.r, 0, Math.PI * 2); c.stroke(); }
+    else if (d.t === "arc") { c.beginPath(); c.arc(d.c[0], d.c[1], d.r, d.a0, d.a1, d.anticlockwise); c.stroke(); }
+    else if (d.t === "pt") { const h = 8 * cpx, p = d.p; c.beginPath(); c.moveTo(p[0] - h, p[1]); c.lineTo(p[0] + h, p[1]); c.moveTo(p[0], p[1] - h); c.lineTo(p[0], p[1] + h); c.stroke(); }
+  }
+  if (S.move && sl.origin && sl.dirs.length) {
+    const o = sl.origin, hi = adjustColor(ANCHOR, 0.2, 1);
+    sl.dirs.forEach((dir, i) => {
+      const seg = clipLineToBox(o, [o[0] + dir[0], o[1] + dir[1]], box); if (!seg) return;
+      c.strokeStyle = sl.active === i ? hi : ANCHOR; c.lineWidth = cpx; dashed(c, seg[0], seg[1], 8 * cpx);
+    });
+  }
+  const aux = S.move && S.move.aux;
+  if (aux) {
+    c.strokeStyle = adjustColor(AUX_ITEMS_COLOR, 0, 0.4); c.lineWidth = cpx; c.beginPath();
+    c.moveTo(box[0], aux[1]); c.lineTo(box[2], aux[1]); c.moveTo(aux[0], box[1]); c.lineTo(aux[0], box[3]); c.stroke();
+  }
+  c.restore();
 }
 
 /** The outline of the master pad at `at`, rotated `angle` degrees: rect / roundrect / trapezoid as a rectangle, the rest as an oval. */

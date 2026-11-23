@@ -12,10 +12,12 @@ import { E } from "../state";
 import { fitBox } from "../view";
 import { layerDisplayName, netClassOf, netCommand } from "./appearance";
 import { KC, currentDocId, isSchDoc, kdoc, pcbTools, tctx } from "./core";
-import { schDocs, sheetDoc, sheetInstances } from "./hierarchy";
+import { schDocs, sheetDoc, sheetInstances, pageOfDoc } from "./hierarchy";
 import { applyHighlight, currentInstance, preferInstance } from "../schnets";
 import { symbolFlagsForVariant } from "../../canvas/variant-model";
-import { drillCells, drillLines, groupLeafIds, groupName, itemFields, libIsPower, permissiveMatcher, refMatchTexts, searchTexts, sortRows, symbolInstanceRef, unitSuffix } from "./search-model";
+import { drillCells, drillLines, groupLeafIds, groupName, itemFields, libIsPower, permissiveMatcher, refMatchTexts, searchTexts, sortRows, symbolInstanceRef, unitSuffix, areaText, outlineArea, zoneLayersCell } from "./search-model";
+import { unescapeString } from "../../dialogs/sch-items-logic";
+import { layerUiRank } from "./appearance";
 
 interface PropsHelpers { formatLength(mm: number, unit: string): string; netNameOf(doc: KDoc, n: SNode): string; yes(n: SNode, k: string, d: boolean): boolean; libUnitCount(doc: KDoc, n: SNode): number }
 const H = (): PropsHelpers => (window.CollabTools.props as unknown as { helpers: PropsHelpers }).helpers;
@@ -49,7 +51,12 @@ export function searchTabs(): SearchTab[] { return isSchDoc() ? SCH_TABS : PCB_T
  *  substring of the query, whichever finds it, case-insensitive. */
 export function matcher(query: string): (cells: string[]) => boolean { return permissiveMatcher(query); }
 const field = (n: SNode, name: string): string => { const K = KC(); const p = K.kids(n, "property").find((q) => K.str(q[1]) === name); return p ? K.str(p[2]) : ""; };
-function polyArea(pts: [number, number][]): number { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); return Math.abs(a) / 2; }
+/** GetShownText( FOR_GUI ): the board's text variables resolved. */
+function shownText(doc: KDoc, t: string): string {
+  if (!t || t.indexOf("${") < 0) return t;
+  const K = KC() as unknown as { expandTextVars(t: string, r: unknown): string; varResolver(v: unknown, o: unknown): unknown; sheetTextVars(d: unknown): unknown };
+  try { return K.expandTextVars(t, K.varResolver(K.sheetTextVars(doc), { project: (doc as { projectVars?: unknown }).projectVars || null })); } catch (e) { return t; }
+}
 
 const DEFAULT_OPTS: SearchOpts = { hidden: false, metadata: false, sortCol: -1, ascending: true };
 function pcbRows(tab: string, doc: KDoc, o: SearchOpts): SearchRow[] {
@@ -62,19 +69,27 @@ function pcbRows(tab: string, doc: KDoc, o: SearchOpts): SearchRow[] {
   } else if (tab === "zones") {
     for (const it of doc.items.values()) { if (it.kind !== "zone") continue; const n = it.node;
       const poly = K.kid(n, "polygon"), pts = poly ? K.ptsOf(poly) : []; const s = K.kid(n, "layer"), m = K.kid(n, "layers");
-      const layers = s ? layerDisplayName(doc, K.str(s[1])) : m ? m.slice(1).map((l) => layerDisplayName(doc, K.str(l))).join(", ") : "";
-      rows.push({ key: it.id, ids: [it.id], cells: [K.str((K.kid(n, "name") || [])[1]), H().netNameOf(doc, n), layers, String(K.num((K.kid(n, "priority") || [])[1], 0)), pts[0] ? len(pts[0][0]) : "", pts[0] ? len(pts[0][1]) : "", (polyArea(pts)).toFixed(4).replace(/\.?0+$/, "") + " mm²"], match: [K.str((K.kid(n, "name") || [])[1])] }); }
+      const copper = (doc as unknown as { copper?: string[] }).copper || [];
+      const layers = zoneLayersCell(s ? [K.str(s[1])] : m ? m.slice(1).map((l) => K.str(l)) : [], copper, layerUiRank, (l) => layerDisplayName(doc, l));
+      // GetIsRuleArea() ? GetOutlineArea() : GetFilledArea()
+      const rule = !!K.kid(n, "keepout");
+      const area = rule ? K.kids(n, "polygon").reduce((a, p) => a + outlineArea(K.ptsOf(p) as [number, number][]), 0)
+        : K.kids(n, "filled_polygon").reduce((a, p) => a + outlineArea(K.ptsOf(p) as [number, number][]), 0);
+      rows.push({ key: it.id, ids: [it.id], cells: [K.str((K.kid(n, "name") || [])[1]), unescapeString(H().netNameOf(doc, n)), layers, String(K.num((K.kid(n, "priority") || [])[1], 0)), pts[0] ? len(pts[0][0]) : "", pts[0] ? len(pts[0][1]) : "", areaText(area, String(E.units || "mm"))], match: [K.str((K.kid(n, "name") || [])[1])] }); }
   } else if (tab === "nets" || tab === "ratsnest") {
     const P = pcbTools(); if (!P) return rows;
-    let names = P.boardNets(doc).map((n) => n.name);
+    // board->GetNetInfo(): the netcode 0 entry ("No Net", no class) and every net; names through UnescapeString
+    let names = P.boardNets(doc).filter((n) => n.code > 0 && n.name).map((n) => n.name);
     if (tab === "ratsnest") { const rat = (window.CollabTools.pcb as unknown as { ratsnest?(d: KDoc): { net: string }[] }).ratsnest; const open = new Set((rat ? rat(doc) : []).map((l) => l.net)); names = names.filter((n) => open.has(n)); }
-    for (const name of names) rows.push({ key: "net:" + name, ids: [], cells: [name, netClassOf(name)] });
+    else rows.push({ key: "net:", ids: [], cells: ["No Net", ""] });
+    for (const name of names) rows.push({ key: "net:" + name, ids: [], cells: [unescapeString(name), netClassOf(name)] });
   } else if (tab === "text") {
     for (const it of doc.items.values()) {
       if (it.kind !== "gr_text" && it.kind !== "gr_text_box" && it.kind !== "dimension") continue; const n = it.node;
       const t = it.kind === "dimension" ? K.kid(n, "gr_text") : n; const at = it.kind === "dimension" ? (t ? K.atOf(t) : [0, 0, 0]) : K.atOf(n);
       const b = it.bbox; const x = K.kid(it.kind === "dimension" && t ? t : n, "at") ? at[0] : b ? (b[0] + b[2]) / 2 : 0, y = K.kid(it.kind === "dimension" && t ? t : n, "at") ? at[1] : b ? (b[1] + b[3]) / 2 : 0;
-      rows.push({ key: it.id, ids: [it.id], cells: [it.kind === "gr_text" ? "Text" : it.kind === "gr_text_box" ? "Textbox" : "Dimension", t ? K.str(t[1]) : "", layerDisplayName(doc, K.str((K.kid(n, "layer") || [])[1])), len(x), len(y)], match: [t ? K.str(t[1]) : ""] });
+      const lyr = K.str((K.kid(n, "layer") || [])[1]), raw = t ? K.str(t[1]) : "";
+      rows.push({ key: it.id, ids: [it.id], cells: [it.kind === "gr_text" ? "Text" : it.kind === "gr_text_box" ? "Textbox" : "Dimension", unescapeString(shownText(doc, raw.replace(/\$\{LAYER\}/g, lyr))), layerDisplayName(doc, K.str((K.kid(n, "layer") || [])[1])), len(x), len(y)], match: [raw] });
     }
   } else if (tab === "groups") {
     // generators (tuning patterns) are internal, not user-facing grouping
@@ -85,9 +100,9 @@ function pcbRows(tab: string, doc: KDoc, o: SearchOpts): SearchRow[] {
     }
   } else if (tab === "drills") {
     const copper = (doc as unknown as { copper?: string[] }).copper || [];
-    // KiCad selects the pads and vias of the row; the web selects the vias and the footprints that hold the pads
+    // DRILL_SEARCH_HANDLER::SelectItems: the row's pads ("footprintId#padIndex") and vias themselves
     for (const d of drillLines(doc.items.values() as Iterable<{ id: string; kind: string; node: unknown[] }>, copper))
-      rows.push({ key: "drill:" + [d.xSize, d.ySize, d.slot, d.plated, d.pad, d.start, d.stop].join("|"), ids: d.ids, cells: drillCells(d, len, (l) => layerDisplayName(doc, l)) });
+      rows.push({ key: "drill:" + [d.xSize, d.ySize, d.slot, d.plated, d.pad, d.start, d.stop].join("|"), ids: d.pad ? (d.padKeys || d.ids) : d.ids, cells: drillCells(d, len, (l) => layerDisplayName(doc, l)) });
   }
   return rows;
 }
@@ -177,8 +192,9 @@ export function search(tab: string, query: string, opts?: SearchOpts): SearchRes
   const sch = isSchDoc();
   try { rows = sch ? schRows(tab, o) : pcbRows(tab, doc, o); } catch (e) { console.warn(e); }
   const m = matcher(query); rows = rows.filter((r) => m(r.match || r.cells));
-  // the board's Nets, Ratsnest and Drills handlers keep their own order until a column is clicked
-  if (o.sortCol >= 0 || sch || (tab !== "nets" && tab !== "ratsnest" && tab !== "drills")) rows = sortRows(rows, o.sortCol, o.ascending);
+  // SEARCH_PANE_TAB::Search ends with SEARCH_PANE_LISTVIEW::Sort: PCB_ / SCH_SEARCH_HANDLER::Sort orders every result,
+  // by the first column (std::max( 0, aCol )) when no column is chosen, ascending with StrNumCmp
+  rows = sortRows(rows, o.sortCol, o.ascending);
   return { tab, rows, total: rows.length };
 }
 
@@ -188,12 +204,16 @@ export function search(tab: string, query: string, opts?: SearchOpts): SearchRes
  */
 function selectAndShow(ids: string[], zoom: SelectionZoom): void {
   const doc = kdoc(); if (!doc) return;
-  if (!ids.length) { const P0 = pcbTools(); if (P0) P0.state.sel.clear(); (tctx() as unknown as { setSelection(ids: string[]): void }).setSelection([]); return; }
+  type PadSel = { padSel?: string | null; padAlso?: { anchor: string; keys: string[] } | null };
+  if (!ids.length) { const P0 = pcbTools(); if (P0) { P0.state.sel.clear(); (P0.state as unknown as PadSel).padSel = null; } (tctx() as unknown as { setSelection(ids: string[]): void }).setSelection([]); return; }
   const ctx = tctx() as unknown as { setSelection(ids: string[]): void };
-  const P = pcbTools(); if (P) P.state.sel.clear();
+  const P = pcbTools(); if (P) { P.state.sel.clear(); (P.state as unknown as PadSel).padSel = null; (P.state as unknown as PadSel).padAlso = null; }
   if (window.CollabTools.sch && isSchDoc()) window.CollabTools.sch.select(null);
-  ctx.setSelection(ids);
-  const b = KC().bboxOf(doc, ids); if (!b) return;
+  // pads picked on their own ("footprintId#padIndex", the pcb module's pad selection), the rest as items
+  const pads = isSchDoc() ? [] : ids.filter((id) => id.includes("#")), items = ids.filter((id) => !pads.includes(id));
+  ctx.setSelection(items);
+  if (pads.length && P) { const st = P.state as unknown as PadSel; st.padSel = pads[0]; st.padAlso = pads.length > 1 ? { anchor: pads[0], keys: pads.slice(1) } : null; }
+  const b = KC().bboxOf(doc, items.concat(pads.map((k) => k.slice(0, k.lastIndexOf("#"))))); if (!b) return;
   const w = Math.max(b[2] - b[0], 1), h = Math.max(b[3] - b[1], 1);
   E.viewTouched = true;
   if (zoom === "zoom") fitBox([b[0], b[1], w, h], isSchDoc() ? 0.25 : 0.35); else if (zoom === "pan") centerOn((b[0] + b[2]) / 2, (b[1] + b[3]) / 2);
@@ -206,8 +226,9 @@ export function searchDispatch(a: PanelAction): boolean {
   if (rows.some((r) => r.key.startsWith("net:"))) {
     // NETS_SEARCH_HANDLER::SelectItems highlights every selected net; ActivateItem opens Board Setup at Net Classes
     if (a.t === "searchActivate") { void openBoardSetup(tctx() as never, "netclasses"); return true; }
-    const names = rows.filter((r) => r.key.startsWith("net:")).map((r) => r.key.slice(4));
-    netCommand("highlight", names, names[0]);
+    // the "No Net" row (netcode 0) lights nothing
+    const names = rows.filter((r) => r.key.startsWith("net:")).map((r) => r.key.slice(4)).filter(Boolean);
+    netCommand("highlight", names, names[0] || "");
     return true;
   }
   // SCH_SEARCH_HANDLER::SelectItems: the selection is cleared; the hits are selected only when they are all on one

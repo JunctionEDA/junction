@@ -22,7 +22,19 @@ const LIBS = ["eeschema/libs/4xxx.kicad_sym", "cli/sym_lib_test/Amplifier_Video.
 for (const rel of LIBS) {
   const f = path.join(QA, rel); if (!fs.existsSync(f)) continue;
   test("round trip is byte-identical: " + rel, () => {
-    const t = fs.readFileSync(f, "utf8"); const out = M.serializeLibrary(M.parseLibrary(t));
+    let t = fs.readFileSync(f, "utf8"); const out = M.serializeLibrary(M.parseLibrary(t));
+    // SCH_IO_KICAD_SEXPR_PARSER before 20250318 reads "~" as an empty field value / pin name / pin number, which the
+    // writer then writes as "": the library a KiCad save writes (canvas/legacy.ts)
+    const v = Number((/\(version (\d+)\)/.exec(t) || [])[1]) || 0;
+    if (v > 0 && v < 20250318) t = t.replace(/\((name|number) "~"/g, '($1 ""').replace(/(\(property "[^"]*") "~"/g, '$1 ""');
+    // formatLibraryHeader writes the header afresh: this build's generator_version (the one a new library carries)
+    const gv = /\(generator_version "[^"]*"\)/.exec(M.NEW_LIBRARY_TEXT)[0];
+    t = t.replace(/\(generator_version "[^"]*"\)/, gv);
+    // a library kept before 20251028 leaves the default (in_pos_files yes) out (SCH_IO_KICAD_SEXPR_LIB_CACHE::SaveSymbol)
+    if (v > 0 && v < 20251028) t = t.replace(/\n\t*\(in_pos_files yes\)/g, "");
+    // a body that needs a newer version than the stamp is saved at that version (formatLibrary), never an older one
+    const vo = Number((/\(version (\d+)\)/.exec(out) || [])[1]) || 0;
+    assert.ok(vo >= v, "the version is never lowered"); t = t.replace(/\(version \d+\)/, "(version " + vo + ")");
     if (out !== t) { let i = 0; while (out[i] === t[i]) i++; assert.fail("differs at " + i + ": " + JSON.stringify(t.slice(i - 40, i + 40)) + " vs " + JSON.stringify(out.slice(i - 40, i + 40))); }
   });
 }

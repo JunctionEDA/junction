@@ -4,6 +4,7 @@ import { buildGeom } from "./geom";
 import { setupOrigins } from "./pcb-sizes";
 import { FP_KINDS, loadFootprintDoc } from "./footprint-doc";
 import { has, isList, kid, kids, num, parse, str, uuidOf } from "./sexpr";
+import { fileVersionOf, migrateBoardNode, migrateLegacyTree } from "./legacy";
 import { KICAD_BASE_VERSION } from "./version";
 import type { Box, Doc, Item, Pt, SAtom } from "./types";
 // ---------------------------------------------------------------- documents
@@ -65,17 +66,21 @@ export function titleBlockOf(node: SNode): Record<string, string> {
 export function parseDoc(text: string, docType?: string): Doc {
   const tree = parse(text);
   if (!tree) throw new Error("not an s-expression document");
-  if (tree[0] === "footprint" || tree[0] === "module" || docType === "footprint") {
+  if (tree[0] === "footprint" || tree[0] === "module" || tree[0] === "kicad_footprint_lib" || docType === "footprint") {
     // a library footprint (.kicad_mod) opened in the Footprint Editor: its children are the items (footprint-doc.ts)
-    if (tree[0] !== "footprint" && tree[0] !== "module") throw new Error("not a footprint");   // (module …): KiCad 5 and older
+    if (tree[0] !== "footprint" && tree[0] !== "module" && tree[0] !== "kicad_footprint_lib") throw new Error("not a footprint");   // (module …): KiCad 5 and older
+    // (kicad_footprint_lib (version …) (generator …) (generator_version …) (footprint …)): KiCad 10.99 footprint files
+    const fp = tree[0] === "kicad_footprint_lib" ? kid(tree, "footprint") : tree; if (!fp) throw new Error("not a footprint");
     const doc = newDoc("pcb"); doc.page = [0, 0];
-    upgradeLegacyArcs(tree);
+    migrateBoardNode(fp, fileVersionOf(tree, true));
+    upgradeLegacyArcs(fp);
     loadFootprintDoc(doc, tree, text, addItem);
     computeBBox(doc);
     return doc;
   }
   const type = tree[0] === "kicad_sch" ? "sch" : tree[0] === "kicad_pcb" ? "pcb" : (docType === "kicad_sch" ? "sch" : "pcb");
   const doc = newDoc(type);
+  migrateLegacyTree(tree, type === "pcb", fileVersionOf(tree, type === "pcb"));
   if (type === "sch") { const ls = kid(tree, "lib_symbols"); if (ls) for (const s of kids(ls, "symbol")) doc.lib.set(str(s[1]), s); }
   for (let j = 1; j < tree.length; j++) {
     const node = tree[j]; if (!isList(node)) continue;

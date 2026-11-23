@@ -5,7 +5,7 @@ import { K } from "./state";
 // ---------------------------------------------------------------- nets
 // Boards from this build reference nets by name — (net "GND") — while older
 // ones carry (net 3 "GND") on pads and (net 3) on tracks; both are understood
-// and new items are written in the document's own style.
+// and new items are written in the form of the document's file version.
 export function netOf(node: SNode | null | undefined): NetRef {
   const n = node && K.kid(node, "net"); if (!n) return { code: 0, name: "" };
   if (typeof n[1] === "number") return { code: n[1], name: n.length > 2 ? K.str(n[2]) : "" };
@@ -13,6 +13,11 @@ export function netOf(node: SNode | null | undefined): NetRef {
 }
 export const NET_STYLE = new WeakMap<KDoc, string>();
 export function netStyle(doc: KDoc) {
+  // PCB_IO_KICAD_SEXPR::formatNetRef: a board kept at a version before 20251028 is written with net codes, a newer one by name
+  // (a pre-20251028 file whose items are already written by name, which KiCad's reader would refuse, keeps that form
+  // rather than getting codes mixed into it)
+  const v = Number((doc as KDoc & { version?: number }).version) || 0;
+  if (v >= 20251028) return "name";
   if (NET_STYLE.has(doc)) return NET_STYLE.get(doc);
   let style: string | null = null;
   for (const it of doc.items.values()) {
@@ -20,7 +25,7 @@ export function netStyle(doc: KDoc) {
     const n = probe && K.kid(probe, "net"); if (!n) continue;
     style = typeof n[1] === "number" ? "code" : "name"; break;
   }
-  if (!style) return "name";   // nothing on a net yet: this build's own form, and not remembered, so the first netted item decides
+  if (!style) return v > 0 ? "code" : "name";   // nothing on a net yet: the version's form, else: this build's own form, and not remembered, so the first netted item decides
   NET_STYLE.set(doc, style); return style;
 }
 export function netNode(doc: KDoc, net: NetRef | null | undefined): SNode { return netStyle(doc) === "name" ? ["net", net && net.name ? net.name : ""] : ["net", net && net.code > 0 ? net.code : 0]; }

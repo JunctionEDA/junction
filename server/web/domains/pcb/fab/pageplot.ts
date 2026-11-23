@@ -182,8 +182,8 @@ export function boardPage(m: BoardModel, r: PagePlotRequest, log: PlotLog): Plot
     sketchDnpOnFab: p.sketchDnpOnFab, crossoutDnpOnFab: p.crossoutDnpOnFab, sketchPadsOnFab: p.sketchPadsOnFab, plotPadNumbers: p.plotPadNumbers,
     widthAdj: p.format === 2 ? p.widthAdjust || 0 : 0 };
   const seq = [r.layer, ...r.common.filter((l) => l !== r.layer)];
-  // PlotBoardLayers plots the sequence bottom up: the layer itself last, on top
-  for (const l of seq.slice().reverse()) {
+  // PlotBoardLayers plots the sequence in order: the layer itself first, each common layer painted over it
+  for (const l of seq) {
     if (!m.doc.layers.has(l) && m.doc.layers.size) continue;
     const prims = plotFile(m, l, opt, log);
     primItems(prims, vp, mono ? "#000000" : r.colors[l] || "#000000", bg || paper, items);

@@ -226,7 +226,7 @@ function unitDisplayName(u: number): string {
 }
 function showDatasheet(): void {
   const info = S.node ? symbolInfo(S.node) : null; const url = info ? info.datasheet.trim() : "";
-  if (!url || url === "~") { toast("No datasheet defined."); return; }
+  if (!url || url === "~") { toast("No datasheet defined.", 8000, undefined, "error"); return; }
   if (/^https?:/i.test(url)) window.open(url, "_blank", "noopener"); else toast("Datasheet: " + url);
 }
 function addToSchematic(): void {

@@ -19,7 +19,8 @@ let passed = 0, failed = 0;
 function test(name, fn) { reset(); try { fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + (e.stack || String(e)).split("\n").slice(0, 6).join("\n       ")); } }
 
 // SIG: a 20 mm run then a 45° leg (34.14 mm); a GND track 0.6 mm above part of it
-const BOARD = `(kicad_pcb (version 20260728) (generator "pcbnew")
+// (a board in the net-code form: before 20251028, where formatNetRef writes (net N) on new copper too)
+const BOARD = `(kicad_pcb (version 20251024) (generator "pcbnew")
   (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (44 "Edge.Cuts" user))
   (net 0 "") (net 1 "SIG") (net 2 "GND")
   (segment (start 10 10) (end 30 10) (width 0.2) (layer "F.Cu") (net 1) (uuid "s1"))

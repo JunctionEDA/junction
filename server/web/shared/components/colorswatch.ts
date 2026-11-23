@@ -17,6 +17,8 @@ export interface SwatchOpts {
   w?: number; h?: number;
   /** a swatch that only shows its colour (COLOR_SWATCH::SetReadOnly) */
   readOnly?: boolean;
+  /** the swatch background the checkerboard is derived from (COLOR_SWATCH::SetSwatchBackground) */
+  background?: RGBA;
   /** open the picker on double-click / middle-click only, as the appearance panels do (SWATCH_EXPAND) */
   doubleClick?: boolean;
   /** pick the colour another way (a caller-provided picker, e.g. outside the editor bundle) */
@@ -24,13 +26,41 @@ export interface SwatchOpts {
 }
 export interface Swatch { el: HTMLSpanElement; get(): RGBA | null; set(c: RGBA | null): void; open(): void; /** wxWindow::Enable */ setDisabled(on: boolean): void }
 
-const CHECKER = "repeating-conic-gradient(#c0c0c0 0 25%, #ffffff 0 50%) 0 0 / 8px 8px";
 const b255 = (x: number): number => Math.max(0, Math.min(255, Math.round(x * 255)));
-/** The CSS background of a swatch: the colour, blended over the checkerboard when it is translucent. */
-export function swatchBackground(c: RGBA | null): string {
-  if (!c) return CHECKER;
+const BLACK: RGBA = { r: 0, g: 0, b: 0, a: 1 }, WHITE: RGBA = { r: 1, g: 1, b: 1, a: 1 };
+/** COLOR4D::GetBrightness (the weighted W3C formula). */
+const brightness = (c: RGBA): number => c.r * 0.299 + c.g * 0.587 + c.b * 0.117;
+const css = (c: RGBA): string => `rgb(${b255(c.r)},${b255(c.g)},${b255(c.b)})`;
+/**
+ * COLOR_SWATCH::MakeBitmap's checkerboard: over a light background (brightness > 0.4) the background and the
+ * background Darkened( 0.15 ); otherwise black and black Brightened( 0.15 ).  The base is the swatch background, or,
+ * for UNSPECIFIED, WHITE / BLACK chosen by the parent window's background.
+ */
+export function checkerboard(base: RGBA): string {
+  let white: RGBA, black: RGBA;
+  if (brightness(base) > 0.4) { white = base; black = { r: white.r * 0.85, g: white.g * 0.85, b: white.b * 0.85, a: 1 }; }
+  else { black = BLACK; white = { r: 0.15, g: 0.15, b: 0.15, a: 1 }; }
+  return `repeating-conic-gradient(${css(black)} 0 25%, ${css(white)} 0 50%) 0 0 / 8px 8px`;
+}
+/**
+ * The CSS background of a swatch: the colour, blended over the checkerboard when it is translucent.  `background` is
+ * the swatch background (COLOR_SWATCH's aBackground, a default COLOR4D is opaque black); `parentBg` is the parent
+ * window's background, used for UNSPECIFIED (m_checkerboardBg).
+ */
+export function swatchBackground(c: RGBA | null, background: RGBA = BLACK, parentBg: RGBA = WHITE): string {
+  if (!c) return checkerboard(brightness(parentBg) > 0.4 ? WHITE : BLACK);
   const rgba = `rgba(${b255(c.r)},${b255(c.g)},${b255(c.b)},${Math.max(0, Math.min(1, c.a))})`;
-  return c.a >= 1 ? rgba : `linear-gradient(${rgba},${rgba}),${CHECKER}`;
+  return c.a >= 1 ? rgba : `linear-gradient(${rgba},${rgba}),${checkerboard(background)}`;
+}
+/** The page's background colour (the parent window's background), white when it cannot be read. */
+function pageBackground(el: HTMLElement): RGBA {
+  try {
+    for (let n: HTMLElement | null = el.parentElement || document.body; n; n = n.parentElement) {
+      const c = parseColor(getComputedStyle(n).backgroundColor);
+      if (c && c.a > 0) return c;
+    }
+  } catch { /* not in a document */ }
+  return WHITE;
 }
 /** "#rrggbb" / "#rrggbbaa" / "rgb(a)(…)" to RGBA (null when it is none of them). */
 export function parseColor(text: string | null | undefined): RGBA | null {
@@ -57,7 +87,7 @@ export function colorSwatch(init: RGBA | null, opts: SwatchOpts = {}): Swatch {
   el.setAttribute("role", "button");
   el.setAttribute("aria-label", opts.title || "Color");
   el.style.cssText = `display:inline-block;flex:none;width:${w}px;height:${hh}px;border:1px solid var(--ink-3);border-radius:2px;vertical-align:middle;box-sizing:border-box;cursor:${opts.readOnly ? "default" : "pointer"}`;
-  const paint = (): void => { el.style.background = swatchBackground(cur); el.title = opts.title || (cur ? colorText(cur) : "Unspecified"); el.dataset.color = cur ? colorText(cur) : ""; };
+  const paint = (): void => { el.style.background = swatchBackground(cur, opts.background, cur ? WHITE : pageBackground(el)); el.title = opts.title || (cur ? colorText(cur) : "Unspecified"); el.dataset.color = cur ? colorText(cur) : ""; };
   let disabled = false;
   const open = (): void => {
     if (opts.readOnly || disabled) return;
@@ -69,8 +99,10 @@ export function colorSwatch(init: RGBA | null, opts: SwatchOpts = {}): Swatch {
   };
   if (opts.doubleClick) {
     el.addEventListener("dblclick", (ev) => { ev.preventDefault(); ev.stopPropagation(); open(); });
-    el.addEventListener("auxclick", (ev) => { if (ev.button === 1) { ev.preventDefault(); open(); } });
   } else el.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); open(); });
+  // wxEVT_MIDDLE_DOWN opens the picker in every mode
+  el.addEventListener("mousedown", (ev) => { if (ev.button === 1) ev.preventDefault(); });
+  el.addEventListener("auxclick", (ev) => { if (ev.button === 1) { ev.preventDefault(); ev.stopPropagation(); open(); } });
   el.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); open(); } });
   paint();
   const setDisabled = (on: boolean): void => { disabled = on; el.style.opacity = on ? "0.4" : ""; el.style.cursor = on || opts.readOnly ? "default" : "pointer"; el.setAttribute("aria-disabled", on ? "true" : "false"); };

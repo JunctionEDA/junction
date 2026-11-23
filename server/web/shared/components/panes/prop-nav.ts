@@ -13,10 +13,15 @@ export function propNavOf(ev: { key: string; shiftKey: boolean; ctrlKey: boolean
 }
 
 /** The cell editor a navigation key lands on, from the one it left. */
-export function navTarget(cells: { readOnly: boolean }[], from: number, nav: PropNav): number {
+export function navTarget(cells: { readOnly: boolean; disabled?: boolean }[], from: number, nav: PropNav): number {
   const n = cells.length; if (!n) return -1;
-  if (nav === "next") return Math.min(n - 1, from + 1);
-  if (nav === "prev") return Math.max(0, from - 1);
+  // wxPG_ACTION_NEXT_PROPERTY / PREV_PROPERTY select the next row, read-only or not; a disabled control cannot take
+  // the focus, so it is passed over (the focus stays put at either end)
+  if (nav === "next" || nav === "prev") {
+    const step = nav === "next" ? 1 : -1;
+    for (let i = from + step; i >= 0 && i < n; i += step) if (!cells[i].disabled) return i;
+    return from < 0 ? 0 : from;
+  }
   const step = nav === "tab" ? 1 : -1;
   for (let k = 1; k <= n; k++) { const i = ((from + step * k) % n + n) % n; if (!cells[i].readOnly) return i; }
   return from;

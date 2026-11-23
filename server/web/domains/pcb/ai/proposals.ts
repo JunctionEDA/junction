@@ -336,7 +336,8 @@ async function planSync(board: any, e: Edit): Promise<SyncPlan> {
   for (const [cur, to] of moved) { const [only] = Array.from(to); if (to.size === 1 && only && only !== cur) renamed[cur] = only; }
   if (Object.keys(renamed).length) for (const it of board.items.values() as Iterable<any>) {
     if (it.kind !== "segment" && it.kind !== "arc" && it.kind !== "via" && it.kind !== "zone") continue;
-    const to = renamed[P.netOf(it.node).name || ""]; if (!to) continue;
+    // a track or via in a board kept before 20251028 says only (net N): its name is the board's (net N "name")
+    const nr = P.netOf(it.node), to = renamed[nr.name || (nr.code > 0 ? String((board.nets as Map<number, string>).get(nr.code) || "") : "")]; if (!to) continue;
     const node = k.cloneNode(it.node); const ref = netOf(to);
     for (const c of node) {
       if (!Array.isArray(c)) continue;

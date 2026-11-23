@@ -12,6 +12,7 @@
 //
 // Everything is plain node editing (no DOM), so the node tests drive it.
 import { flipFootprintNode, rotateFootprintNode, setFootprintAt } from "./footprint";
+import { SEXPR_BOARD_FILE_VERSION } from "../../canvas/format-version";
 import { K } from "./state";
 import { isList, r6, rotator } from "./util";
 
@@ -70,7 +71,7 @@ export function editableCopy(boardFp: SNode, boardVersion?: number): EditableCop
   const a = K.atOf(n)[2]; if (a) rotateFootprintNode(n, -a);
   setScale(n, 1, 1);
   // a .kicad_mod carries its own version stamp: the board's, so the editor reads the children as the board did
-  if (!K.kid(n, "version")) n.splice(2, 0, ["version", boardVersion || 20260728], ["generator", "pcbnew"]);
+  if (!K.kid(n, "version")) n.splice(2, 0, ["version", boardVersion || SEXPR_BOARD_FILE_VERSION], ["generator", "pcbnew"]);
   const refP = K.kids(n, "property").find((p) => str(p[1]) === "Reference");
   return { node: n, uuidMap, link, reference: refP ? str(refP[2]) : "" };
 }

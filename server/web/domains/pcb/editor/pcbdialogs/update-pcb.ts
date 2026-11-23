@@ -6,12 +6,15 @@
 // New footprints come from the footprint library service (GET /api/libs/footprints/{lib}/{name}) when the
 // server has one; without it the report says the footprint cannot be added.
 import { E } from "../state";
+import { SEXPR_BOARD_FILE_VERSION } from "../../canvas/format-version";
 import { state } from "../appstore";
 import type { Netlist, SheetFile, UpdateOptions, UpdatePlan } from "../../canvas/pcb-netlist";
 import { liveDocument, projectDocs, type ProjectDocInfo } from "../projectfile";
 import { NL } from "./canvas";
 import { topLevelSheetsOf } from "../bootpick";
-import { box, checkField, confirmBox, h, openDialog, reportPanel, type Field } from "./ui";
+import { box, checkField, confirmBox, h, messageBox, openDialog, reportPanel, type Field } from "./ui";
+import { store } from "../appstore";
+import { messageText } from "../../../../shared/units";
 
 interface SchModuleInternals { _?: { symbolPins(doc: KDoc, item: KItem): { x: number; y: number; number: string; name: string; type: string; hidden: boolean }[]; isPowerSymbol(doc: KDoc, libId: string): boolean } }
 const SCH_IU = 10000;
@@ -111,19 +114,55 @@ const OPTIONS: { key: keyof UpdateOptions; group: number; label: string; tip?: s
   { key: "overrideLocks", group: 1, label: "Override locks", def: false },
   { key: "updateFields", group: 2, label: "Update footprint fields from symbols", def: true },
   { key: "removeExtraFields", group: 2, label: "Remove footprint fields not found in symbols", def: false }];
-const remembered: Partial<Record<keyof UpdateOptions, boolean>> = {};
+// DIALOG_SHIM::finishDialogSettings: the check boxes are kept between sessions
+const REMEMBER_KEY = "kc.updatePcb.options";
+const remembered: Partial<Record<keyof UpdateOptions, boolean>> = ((): Partial<Record<keyof UpdateOptions, boolean>> => {
+  try { const v = JSON.parse(localStorage.getItem(REMEMBER_KEY) || "{}") as Record<string, unknown>; return v && typeof v === "object" ? v as Partial<Record<keyof UpdateOptions, boolean>> : {}; } catch (e) { return {}; }
+})();
+function remember(key: keyof UpdateOptions, v: boolean): void { remembered[key] = v; try { localStorage.setItem(REMEMBER_KEY, JSON.stringify(remembered)); } catch (e) { /* private window: kept for this session */ } }
+/** BOARD_DESIGN_SETTINGS' Fab-layer text defaults (StyleFromSettings for the fields the update adds). */
+function fabTextStyle(): { size: number; sizeV: number; thick: number; italic: boolean; upright: boolean } {
+  const out = { size: 1, sizeV: 1, thick: 0.15, italic: false, upright: false };
+  try {
+    const pro = JSON.parse((E.proSettings as string | null) || "{}") as { board?: { design_settings?: { defaults?: Record<string, unknown> } } };
+    const d = (pro.board && pro.board.design_settings && pro.board.design_settings.defaults) || {};
+    const n = (k: string, def: number): number => (typeof d[k] === "number" && (d[k] as number) > 0 ? d[k] as number : def);
+    out.size = n("fab_text_size_h", 1); out.sizeV = n("fab_text_size_v", 1); out.thick = n("fab_text_thickness", 0.15);
+    out.italic = d.fab_text_italic === true; out.upright = d.fab_text_upright === true;
+  } catch (e) { /* the defaults */ }
+  return out;
+}
+const UPDATE_ANNOTATE_MSG = "Updating PCB requires a fully annotated schematic.";
+/**
+ * FetchNetlistFromSchematic( netlist, "Updating PCB requires a fully annotated schematic." ): the schematic's
+ * ReadyToNetlist first.  An unannotated schematic is refused with that error; "No" to the duplicate sheet names
+ * question stops silently.  From the schematic editor the Annotate dialog is offered first (ModalAnnotate).
+ */
+async function schematicReady(annotate: boolean): Promise<boolean> {
+  const { readyToNetlist } = await import("../export-netlist");
+  const st = { cancelled: false };
+  if (await readyToNetlist(UPDATE_ANNOTATE_MSG, { annotate, state: st })) return true;
+  if (!st.cancelled) messageBox("Error", UPDATE_ANNOTATE_MSG);
+  return false;
+}
 
 export async function openUpdatePcb(ctx: ToolCtx): Promise<void> {
   const doc = E.kdoc as KDoc | null;
   if (!doc || doc.type !== "pcb") { ctx.toast("Update PCB from Schematic needs a board"); return; }
-  const report = reportPanel("260px");
+  if (!(await schematicReady(false))) return;
+  // m_messagePanel: "Changes to Be Applied", saved as report.txt
+  const report = reportPanel("260px", { fileName: "report.txt" });
+  const reportBox = box("Changes to Be Applied", report.el);
   const fields = new Map<keyof UpdateOptions, Field<boolean>>();
   let netlist: Netlist | null = null, plan: UpdatePlan | null = null, busy = false, okBtn: HTMLButtonElement | null = null;
   // PCB_EDIT_FRAME::OnNetlistChanged selects the new footprints and ~DIALOG_UPDATE_PCB starts the move tool with
   // them (m_runDragCommand): closing the dialog hands them to the cursor for placing
   const newFootprints: string[] = [];
+  const vp = (store.get() as { viewport?: { units?: Parameters<typeof messageText>[1] } }).viewport || {};
   const options = (): UpdateOptions => {
-    const o: UpdateOptions = { newUuid: () => KiCadCanvas.newUuid(), footprintFor: (fpid) => { const v = libCache.get(fpid); return v && v !== "missing" ? NL().footprintFromLibrary(v, fpid, () => KiCadCanvas.newUuid()) : v === undefined ? null : v; } };
+    const st = fabTextStyle();
+    const o: UpdateOptions = { newUuid: () => KiCadCanvas.newUuid(), footprintFor: (fpid) => { const v = libCache.get(fpid); return v && v !== "missing" ? NL().footprintFromLibrary(v, fpid, () => KiCadCanvas.newUuid()) : v === undefined ? null : v; },
+      fieldSize: st.size, fieldSizeV: st.sizeV, fieldThickness: st.thick, fieldItalic: st.italic, fieldUpright: st.upright, formatLength: (mm) => messageText(mm, vp.units || "mm", "pcb") };
     for (const [k, f] of fields) (o as Record<string, unknown>)[k] = f.get();
     return o;
   };
@@ -146,24 +185,38 @@ export async function openUpdatePcb(ctx: ToolCtx): Promise<void> {
     build(body) {
       const groups = [box("Options"), box("Update Footprints"), box("Update Fields")];
       for (const o of OPTIONS) {
-        const f = checkField(remembered[o.key] ?? o.def, o.label, { key: String(o.key), tip: o.tip, ro: !!E.viewOnly, onChange: (v) => { remembered[o.key] = v; void dryRun(); } });
+        const f = checkField(remembered[o.key] ?? o.def, o.label, { key: String(o.key), tip: o.tip, ro: !!E.viewOnly, onChange: (v) => { remember(o.key, v); void dryRun(); } });
         fields.set(o.key, f); groups[o.group].append(f.el);
       }
       // OnOptionChanged: the design block layouts only with the groups transferred
       const tg = fields.get("transferGroups") as Field<boolean>, db = fields.get("applyDesignBlockLayouts") as Field<boolean>;
-      const syncDb = (): void => { if (!tg.get()) { db.set(false); remembered.applyDesignBlockLayouts = false; } db.input.disabled = !!E.viewOnly || !tg.get(); db.el.classList.toggle("disabled", db.input.disabled); };
+      const syncDb = (): void => { if (!tg.get()) { db.set(false); remember("applyDesignBlockLayouts", false); } db.input.disabled = !!E.viewOnly || !tg.get(); db.el.classList.toggle("disabled", db.input.disabled); };
       tg.input.addEventListener("change", syncDb); syncDb();
-      body.append(groups[0], h("div", { class: "pd-cols2" }, groups[1], groups[2]), report.el);
+      body.append(groups[0], h("div", { class: "pd-cols2" }, groups[1], groups[2]), reportBox);
       report.set([{ severity: "info", text: "Reading the schematic…", busy: true }]);
     },
     ok() {
-      if (!plan || E.viewOnly) return false;
+      if (!plan || E.viewOnly || !netlist) return false;
+      // OnUpdateClick: the panel is relabelled and the updater runs again with the dry run off; its report replaces the
+      // dry run's.  PerformUpdate( false ) deactivates the tool and clears the selection first.
+      reportBox.firstElementChild!.textContent = "Changes Applied to PCB";
+      if (E.tool !== "select") void import("../tools").then((T) => T.setTool("select"));
+      (ctx as unknown as { setSelection?(ids: string[]): void }).setSelection?.([]);
+      const P = (window as unknown as { PcbTools?: { applySelection?(c: ToolCtx, ids: string[]): void } }).PcbTools; if (P && P.applySelection) P.applySelection(ctx, []);
+      const real = NL().planUpdate(doc, netlist, { ...options(), applied: true });
+      // OnNetlistChanged: SpreadFootprints( new footprints, { 0, 0 }, true ) before they are handed to Move
+      const fresh = real.added.filter((n) => n[0] === "footprint");
+      const pt = (window as unknown as { PcbTools?: { packNodes?(d: { items: Map<string, KItem> }, ids: string[], o: { target: [number, number]; groupBySheet: boolean }): Map<string, SNode> } }).PcbTools;
+      if (fresh.length && pt && pt.packNodes) {
+        const items = new Map<string, KItem>();
+        for (const n of fresh) { const it = KiCadCanvas.createItem(doc, n); if (it) items.set(it.id, it); }
+        const packed = pt.packNodes({ items }, Array.from(items.keys()), { target: [0, 0], groupBySheet: true });
+        for (const n of fresh) { const id = String(((KiCadCanvas.kid(n, "uuid") as SNode | null) || [])[1]); const p = packed.get(id); if (p) { n.length = 0; n.push(...p); } }
+      }
       const added: string[] = [];
-      const changes = planChanges(doc, plan, added);
-      if (changes.length) { newFootprints.splice(0, newFootprints.length, ...added); ctx.commit(changes, "update PCB from schematic"); ctx.toast(`Update PCB: ${changes.length} item${changes.length === 1 ? "" : "s"} changed`); }
-      const done = plan.report.slice();
-      done.push({ severity: "info", text: changes.length ? "Changes applied to the board." : "No changes to apply." });
-      report.set(done);
+      const changes = planChanges(doc, real, added);
+      if (changes.length) { newFootprints.splice(0, newFootprints.length, ...added); ctx.commit(changes, "Update Netlist"); }
+      report.set(real.report);
       plan = null;
       if (okBtn) okBtn.disabled = true;
       return false;                       // KiCad keeps the dialog open with the report; Close dismisses it
@@ -171,7 +224,12 @@ export async function openUpdatePcb(ctx: ToolCtx): Promise<void> {
     cancel() {
       if (!newFootprints.length || E.viewOnly) return;
       const ids = newFootprints.slice();
-      window.setTimeout(() => { void import("../tools").then((T) => { (ctx as unknown as { setSelection(ids: string[]): void }).setSelection(ids); T.runModuleAction("move"); }); }, 0);
+      // the selection's reference point is (0,0), where the footprints were spread, so they come to the cursor from there
+      window.setTimeout(() => { void import("../tools").then((T) => {
+        const m = CollabTools.pcb as unknown as { moveFromReference?(c: unknown, ids: string[], origin: [number, number]): boolean } | undefined;
+        if (m && m.moveFromReference) m.moveFromReference(T.toolCtx(), ids, [0, 0]);
+        else { (ctx as unknown as { setSelection(ids: string[]): void }).setSelection(ids); T.runModuleAction("move"); }
+      }); }, 0);
     } });
   if (!dlg) return;
   okBtn = dlg.okButton; if (okBtn) okBtn.disabled = true;
@@ -193,6 +251,8 @@ export async function updatePcbFromSchematicEditor(ctx: ToolCtx): Promise<void> 
   const docs = projectDocs(); const target = NL().projectBoardPath(docs);
   const project = state.project as { projectId?: string } | null;
   const run = async (doc: ProjectDocInfo): Promise<void> => {
+    // MAIL_SCH_GET_NETLIST answered by the schematic editor: ReadyToNetlist with its Annotate dialog
+    if (!(await schematicReady(true))) return;
     const tabs = (state as { docs?: ProjectDocInfo[] }).docs || [];
     if (!tabs.some((d) => d.docId === doc.docId)) tabs.push(doc);
     await openDoc(doc);
@@ -212,7 +272,7 @@ export async function updatePcbFromSchematicEditor(ctx: ToolCtx): Promise<void> 
       const res = await api(`/api/projects/${project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path: target.path, docType: "kicad_pcb" }) }) as { docId?: string; path?: string; existing?: boolean };
       if (!res || !res.docId) throw new Error("no document id returned");
       const pt = (window as unknown as { PcbTools?: { BOARD_VERSION?: number } }).PcbTools;   // the version the board tools write
-      if (!res.existing) await api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: NL().newBoardText((pt && pt.BOARD_VERSION) || 20260728) });
+      if (!res.existing) await api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: NL().newBoardText((pt && pt.BOARD_VERSION) || SEXPR_BOARD_FILE_VERSION) });
       const entry: ProjectDocInfo = { docId: res.docId, path: res.path || target.path, docType: "kicad_pcb" };
       const all = (state.project as { docs?: ProjectDocInfo[] } | null)?.docs; if (all && !all.some((d) => d.docId === entry.docId)) all.push(entry);
       await run(entry);

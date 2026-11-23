@@ -451,7 +451,7 @@ export function footprintGeoms(fp: Footprint, layer: string, opt: PlotOptions): 
   if (fp.privateLayers.has(layer)) return [];
   const out: KGeom[] = [];
   for (const g of fp.item.geom) {
-    if (g.pad || g.hole || g.padText || g.zoneOutline || g.zoneFill || g.zoneHatch || g.point) continue;
+    if (g.pad || g.hole || g.padText || g.zoneOutline || g.zoneFill || g.zoneHatch || g.point || g.maskCopy) continue;   // a shape's mask copy: plotted from maskLayer
     if (g.layer !== layer && g.maskLayer !== layer) continue;
     if (g.t === "text") {
       if (g.field === "Reference" && !opt.plotReference) continue;
@@ -573,7 +573,7 @@ export function plotLayer(m: BoardModel, layer: string, opt: PlotOptions, log: P
     const at = out.length, k0 = knock.length;
     for (const g of item.geom) {
       if (g.layer !== layer && g.maskLayer !== layer) continue;
-      if (g.hiddenText || g.point) continue;
+      if (g.hiddenText || g.point || g.maskCopy) continue;
       useGeom(g);
     }
     if (out.length > at || knock.length > k0) {

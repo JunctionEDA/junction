@@ -5,7 +5,40 @@
 // outline fix is not offered and "Merge overlapping graphics into pads" is (GRAPHICS_CLEANER::mergePads: PAD::Recombine
 // on every pad outside a net-tie pad group); OK is "Update Footprint" there.
 import { E } from "../state";
+import { setActiveLayer } from "../doc";
+import { visibleRectNm } from "../view";
+import { focusOnLocation } from "./find";
 import { checkField, form, h, lenField, openDialog, unitLabel } from "./ui";
+
+/** The layers a board item is on (its (layer …), else its (layers …)), in the order the file lists them. */
+function itemLayers(it: KItem): string[] {
+  if (it.layer) return [it.layer];
+  const l = KiCadCanvas.kid(it.node, "layer") as SNode | null; if (l) return [String(l[1])];
+  const ls = KiCadCanvas.kid(it.node, "layers") as SNode | null; return ls ? ls.slice(1).map(String) : [];
+}
+/**
+ * PCB_BASE_FRAME::FocusOnItem( item ): a pad, a via or a marker by its position; any other item by the centre of
+ * the part of its outline that lies in the viewport; then EDA_DRAW_FRAME::FocusOnLocation (the view moves only when
+ * the point is near the edge of the canvas, off it, or under a dialog).
+ */
+export function focusOnBoardItem(id: string): void {
+  const doc = E.kdoc as KDoc | null; const it = doc && doc.items.get(id); if (!it) return;
+  if (it.kind === "via" || it.kind === "pad" || !it.bbox) { const at = KiCadCanvas.atOf(it.node) as number[]; focusOnLocation(at[0], at[1]); return; }
+  let [x0, y0, x1, y1] = it.bbox;
+  const v = visibleRectNm();
+  if (v) {
+    const vx0 = v[0] / E.IU, vy0 = v[1] / E.IU, vx1 = vx0 + v[2] / E.IU, vy1 = vy0 + v[3] / E.IU;
+    const cx0 = Math.max(x0, vx0), cy0 = Math.max(y0, vy0), cx1 = Math.min(x1, vx1), cy1 = Math.min(y1, vy1);
+    if (cx0 <= cx1 && cy0 <= cy1) { x0 = cx0; y0 = cy0; x1 = cx1; y1 = cy1; }   // the clipped outline, when any of it shows
+  }
+  focusOnLocation((x0 + x1) / 2, (y0 + y1) / 2);
+}
+/** DIALOG_CLEANUP_GRAPHICS::OnSelectItem: the item's first layer becomes active unless the active one is among its layers, then FocusOnItem. */
+export function selectCleanupItem(id: string, switchLayer: boolean): void {
+  const doc = E.kdoc as KDoc | null; const it = doc && doc.items.get(id); if (!it) return;
+  if (switchLayer) { const ls = itemLayers(it); if (ls.length && !ls.includes(E.activeLayer)) setActiveLayer(ls[0]); }
+  focusOnBoardItem(id);
+}
 
 interface Opts { mergeRects: boolean; deleteRedundant: boolean; fixBoardOutlines: boolean; tolerance: number }
 interface Plan { items: { text: string; ids: string[] }[]; changes: KChange[] }
@@ -50,7 +83,7 @@ export function openCleanupGraphics(ctx: ToolCtx): void {
     const items = PT().graphicsCleanup(doc, opts(), true).items.concat(padMerges(true).map((m) => ({ text: "Merge overlapping shapes into pad", ids: m.ids })));
     list.replaceChildren(...items.map((it) => {
       const row = h("div", { class: "ln action", tabindex: "0" }, it.text);
-      row.addEventListener("click", () => { for (const r of Array.from(list.children)) r.classList.toggle("sel", r === row); setHl(it.ids); });
+      row.addEventListener("click", () => { for (const r of Array.from(list.children)) r.classList.toggle("sel", r === row); setHl(it.ids); if (it.ids[0]) selectCleanupItem(it.ids[0], true); });
       return row;
     }));
   };
@@ -62,7 +95,8 @@ export function openCleanupGraphics(ctx: ToolCtx): void {
         : h("div", { style: "display:flex;flex-direction:column;gap:2px" }, rects.el, redundant.el, outlines.el,
           h("div", { style: "margin-left:22px" }, form([["Tolerance:", tol.el, unitLabel()]]))),
         h("div", { class: "pd-lbl", style: "margin:10px 0 4px" }, "Changes to be applied:"), list);
-      body.addEventListener("change", (ev) => { if (!list.contains(ev.target as Node)) dryRun(); });
+      // OnCheckBox: only the check boxes rerun the dry run (the tolerance is read when they do)
+      body.addEventListener("change", (ev) => { const t = ev.target as HTMLInputElement; if (!list.contains(t) && t.type === "checkbox") dryRun(); });
       dryRun();
     },
     restored() { dryRun(); },

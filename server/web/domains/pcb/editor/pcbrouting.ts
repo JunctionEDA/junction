@@ -39,7 +39,10 @@ const proDoc = (): ProjectDoc | null => projectDocs().find((d) => d.docType === 
 const isBoard = (): boolean => !!E.kdoc && !isSch() && state.view === "editor";
 const units = (): SizeUnits => (E.units === "in" || E.units === "mil" ? E.units : "mm");
 
-const layerColor = (l: string): string => (KiCadCanvas as unknown as { pcbColor(l: string): string }).pcbColor(l);
+// PCB_LAYER_BOX_SELECTOR::Resync draws the swatches from the active colour settings: the Appearance panel's colour
+// for the layer (its swatch, the user's theme; panels/appearance.ts puts them in renderOpts.layerColors), else the default
+const layerColor = (l: string): string => { const m = (E.renderOpts as { layerColors?: Map<string, string> }).layerColors; return (m && m.get(l)) || (KiCadCanvas as unknown as { pcbColor(l: string): string }).pcbColor(l); };
+let seenColors: unknown = null;
 
 // ---------------------------------------------------------------- store
 function publish(): void {
@@ -50,6 +53,7 @@ function publish(): void {
   const slice: RoutingState = {
     trackLabels: board ? PS().trackWidthLabels(st.sizes, u, lastImperial) : [], trackIndex: st.trackIndex,
     viaLabels: board ? PS().viaSizeLabels(st.sizes, u, lastImperial) : [], viaIndex: st.viaIndex,
+    custom: !!st.useCustomTrackVia,   // OnUpdateSelectTrackWidth / ViaSize: no entry while UseCustomTrackViaSize()
     viaStacks: board ? viaStackNames(E.proSettings) : [], viaStackIndex,
     layers: board ? PS().enabledLayers(E.kdoc, layerColor).map((l) => ({ name: l.name, label: l.label, color: l.color, copper: l.copper })) : [],
     layerPair: [st.layerPair[0], st.layerPair[1]],
@@ -161,7 +165,8 @@ function onStore(): void {
   if (pcb && pcb.state && isBoard()) { const on = !!(pcb.state as { showRatsnest?: boolean }).showRatsnest; if (store.get().toggles.showRatsnest !== on) setToggles({ showRatsnest: on }); }
   if (E.kdoc !== seenDoc) { seenDoc = E.kdoc; seenInputs = ""; onDocument(); }
   const inputs = `${E.units}|${state.view}|${E.DOC_TYPE}|${E.kdoc ? 1 : 0}`;
-  if (inputs !== seenInputs || E.proSettings !== seenPro) { seenInputs = inputs; seenPro = E.proSettings; publish(); }   // the labels follow the units, the stacks the project file
+  const colors = (E.renderOpts as { layerColors?: unknown }).layerColors;   // OnColorSwatchChanged → ReCreateLayerBox
+  if (inputs !== seenInputs || E.proSettings !== seenPro || colors !== seenColors) { seenInputs = inputs; seenPro = E.proSettings; seenColors = colors; publish(); }   // the labels follow the units, the stacks the project file
 }
 
 // ---------------------------------------------------------------- the chrome's intents

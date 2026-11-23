@@ -9,7 +9,7 @@ import { code128, code39 } from "../../canvas/barcode";
 import { barcode2D } from "../../canvas/barcode2d";
 import { PCB_BG, pcbColor } from "../../canvas/colors";
 import { comboBox } from "../../../../shared/components/kcombo";
-import { checkField, coordField, errorMessage, form, h, lenField, numField, openDialog, radioBox, selectField, textField, unitLabel, type Field } from "./ui";
+import { checkField, coordField, form, h, lenField, messageBox, numField, openDialog, radioBox, selectField, textField, unitLabel, type Field } from "./ui";
 
 const isList = Array.isArray;
 const K = (): KiCadCanvasApi => KiCadCanvas;
@@ -131,7 +131,7 @@ export function barcodeDialog(ctx: ToolCtx, node: SNode, item: KItem | null, don
   const x = coordField(v0.x, "x", { ro, key: "posX" }), y = coordField(v0.y, "y", { ro, key: "posY" });
   const w = lenField(v0.w, { ro, key: "sizeX" }), ht = lenField(v0.h, { ro, key: "sizeY" });
   const angle: Field<number> = numField(normAngle(v0.angle), { ro, key: "orientation", digits: 3 });
-  comboBox(angle.input as HTMLInputElement, () => ["0.0", "90.0", "-90.0", "180.0"]);
+  comboBox(angle.input as HTMLInputElement, () => ["0", "90", "-90", "180"]);   // dialog_barcode_properties_base.cpp m_orientationCtrl
   const textSize = lenField(v0.textSize, { ro, key: "textSize" });
   const marginX = lenField(v0.marginX, { ro, key: "marginX" }), marginY = lenField(v0.marginY, { ro, key: "marginY" });
   const kind = radioBox("Code", TYPE_LABELS, v0.type, { ro, key: "code", onChange: () => update() });
@@ -179,9 +179,8 @@ export function barcodeDialog(ctx: ToolCtx, node: SNode, item: KItem | null, don
     ok() {
       if (ro) return true;
       const v = values();
-      if (!(v.w > 0) || !(v.h > 0)) { errorMessage("Size must be greater than 0."); return false; }
       const sym = barcodeSymbol(v);
-      if (v.text && sym.error) { errorMessage(sym.error); return false; }   // wxMessageBox( GetLastError(), "Barcode Error" )
+      if (v.text && sym.error) { messageBox("Barcode Error", sym.error); return false; }   // wxMessageBox( GetLastError(), "Barcode Error" )
       const staged = (K().cloneNode as (n: SNode) => SNode)(node); writeBarcode(staged, v);
       if (done) { done(staged); return true; }
       if (item && K().serialize(staged) !== K().serialize(item.node)) ctx.commit([K().replaceChange(doc, { ...item, node: staged, geom: [], bbox: null })], "Modify Barcode");

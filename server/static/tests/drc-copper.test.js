@@ -228,8 +228,11 @@ test("KiCad 5 boards: (module) loads as a footprint (issue4257 silk over its pad
   assert.ok(m.filter((x) => x.code === "silk_over_copper").length >= 4);
 });
 test("courtyards: ends 0.01 mm apart still close, and a 6 um overlap is legal after the 5 um deflate (issue25101)", () => {
-  const ov = drcOf("issue25101").filter((m) => m.code === "courtyards_overlap").map((m) => m.text);
-  assert.ok(ov.some((t) => /\bC13\b/.test(t) && /\bCG1\b/.test(t)), JSON.stringify(ov));
+  // the message is the bare title (no courtyard_clearance rule); the pair is named by its items
+  const doc = K.parseDoc(read("issue25101", ".kicad_pcb"), "kicad_pcb"), ref = (id) => (doc.items.get(id) || {}).ref;
+  const ov = drcOf("issue25101").filter((m) => m.code === "courtyards_overlap");
+  assert.ok(ov.every((m) => m.text === "Courtyards overlap"));
+  assert.ok(ov.some((m) => m.ids.map(ref).includes("C13") && m.ids.map(ref).includes("CG1")), JSON.stringify(ov.map((m) => m.ids.map(ref))));
   const sq = [[0, 0], [2, 0], [2, 2], [0, 2]]; const d = P.deflatePoly(sq, 0.005);
   assert.deepEqual(d.map((p) => p.map((v) => Math.round(v * 1000) / 1000)), [[0.005, 0.005], [1.995, 0.005], [1.995, 1.995], [0.005, 1.995]]);
 });

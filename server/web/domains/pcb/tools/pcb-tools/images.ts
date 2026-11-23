@@ -19,7 +19,12 @@ export function imageInfo(b: Uint8Array): ImageInfo | null {
     const out = { type: "png", w: be32(16), h: be32(20), ppi: IMAGE_PPI };
     for (let i = 8; i + 8 <= b.length; i += 12 + be32(i)) {
       const t = tag(i + 4);
-      if (t === "pHYs" && i + 17 <= b.length) { if (b[i + 16] === 1) out.ppi = Math.round(be32(i + 8) * 0.0254); break; }   // pixels per metre
+      // BITMAP_BASE::updatePPI: the file's resolution only when it is > 1 — pixels per metre as wx's px/cm (× 2.54), or a unitless number as ppi
+      if (t === "pHYs" && i + 17 <= b.length) {
+        if (b[i + 16] === 1) { const dpcm = be32(i + 8) / 100; if (dpcm > 1) out.ppi = Math.round(dpcm * 2.54); }
+        else if (b[i + 16] === 0) { const d = be32(i + 8); if (d > 1) out.ppi = d; }
+        break;
+      }
       if (t === "IDAT" || t === "IEND") break;
     }
     return out.w && out.h ? out : null;
@@ -31,7 +36,7 @@ export function imageInfo(b: Uint8Array): ImageInfo | null {
       const m = b[i + 1]; if (m === 0xFF) { i++; continue; }
       if (m === 0xD8 || m === 0x01 || (m >= 0xD0 && m <= 0xD7)) { i += 2; continue; }   // standalone markers
       const len = be16(i + 2);
-      if (m === 0xE0 && len >= 16 && tag(i + 4) === "JFIF") { const u = b[i + 11], dx = be16(i + 12); if (dx && u === 1) out.ppi = dx; else if (dx && u === 2) out.ppi = Math.round(dx * 2.54); }
+      if (m === 0xE0 && len >= 14 && tag(i + 4) === "JFIF") { const u = b[i + 11], dx = be16(i + 12); if (dx > 1) out.ppi = u === 2 ? Math.round(dx * 2.54) : dx; }   // density: 1 = dots/inch, 2 = dots/cm
       if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) { out.h = be16(i + 5); out.w = be16(i + 7); break; }   // SOFn
       if (m === 0xDA) break;
       i += 2 + len;

@@ -3,9 +3,12 @@
 // It hides itself after SHOW_TIME_MS; pressing the hotkey again while it shows restarts the timer.
 const SHOW_TIME_MS = 1000;
 let box: HTMLDivElement | null = null, timer: ReturnType<typeof setTimeout> | null = null;
+/** COMMON_SETTINGS input.hotkey_feedback: "Show popup indicator when toggling settings with hotkeys". */
+let feedback = true;
+export function setHotkeyFeedback(on: boolean): void { feedback = on; }
 
 export function hotkeyCyclePopup(title: string, items: string[], selection: number): void {
-  if (typeof document === "undefined") return;
+  if (typeof document === "undefined" || !feedback) return;
   if (!box) {
     box = document.createElement("div");
     box.className = "khotkey-cycle";

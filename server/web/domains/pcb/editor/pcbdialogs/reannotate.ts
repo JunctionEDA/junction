@@ -113,7 +113,8 @@ export function openReannotate(ctx: ToolCtx): void {
       const hd = (t: string): HTMLElement => h("div", { class: "pd-lbl", style: "font-weight:600;margin:6px 0 2px" }, t);
       const row = (...c: (HTMLElement | string)[]): HTMLElement => h("div", { style: "display:flex;align-items:center;gap:8px;margin:3px 0;flex-wrap:wrap" }, ...c);
       const grid4 = h("div", { style: "display:grid;grid-template-columns:auto 1fr auto 1fr;gap:4px 10px;align-items:center" },
-        h("label", null, "Front reference start:"), frontStart, h("label", null, "Back reference start:"), backStart,
+        h("label", { title: "Starting reference designation for front." }, "Front reference start:"), frontStart,
+        h("label", { title: "Blank continues from front or enter a number greater than the highest reference designation on the front." }, "Back reference start:"), backStart,
         h("label", null, "Front prefix:"), frontPrefix, h("label", null, "Back prefix:"), backPrefix,
         h("span"), rmFront.el, h("span"), rmBack.el);
       body.append(hd("Footprint Order"), h("hr", { class: "pd-sep" }), order,

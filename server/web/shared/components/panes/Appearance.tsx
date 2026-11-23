@@ -5,7 +5,7 @@
 // its minimal version lists the layers and the items.  `#layers` keeps its id: pcb-tools.js
 // watches it to know when a document's layer list was rebuilt.
 import { Select } from "../Select";
-import { useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { LayerInfo, LayerMenuCmd, NetClassRow, NetCmd, NetRow } from "../../../domains/pcb/panels-api";
 import { dispatch, useApp, type ItemSummary } from "../../store";
 import { cx } from "../../util";
@@ -14,6 +14,7 @@ import { Collapsible, ContextMenu, Swatch, pdispatch, pickColor, useContextMenu,
 import { IS_MAC, keyName } from "../../keys";
 import { menuMeta } from "../../../domains/pcb/menuspec";
 import { unescapeString } from "../../../domains/pcb/dialogs/sch-items-logic";
+import { rowWindow } from "../../../domains/pcb/editor/panels/search-model";
 
 // A list row (`.layer`): flex, centred, 8px gap, 3px/4px padding, 2px radius; callers add the hover fill.
 const ROW = "layer flex items-center gap-2 py-[3px] px-1 rounded-xs";
@@ -107,6 +108,8 @@ function hotkeyLabel(text: string, action: string): string {
   return k ? `${text} (${keyName(k)}):` : `${text}:`;
 }
 const SWATCH_TIP = "Double click or middle click for color change, right click for menu";
+// rebuildObjects: the Objects rows' swatches say "Left double click"
+const OBJ_SWATCH_TIP = "Left double click or middle click for color change, right click for menu";
 
 function LayersTab() {
   const layers = usePanels((s) => s.appearance.layers);
@@ -152,7 +155,7 @@ function ObjectsTab() {
       {objects.map((o, i) => o.spacer ? <div key={"sp" + i} className="h-2.5" /> : (
         <div key={o.id} className={cx(ROW2, "hover:bg-panel")} data-object={o.id}>
           {/* rebuildObjects: a COLOR_SWATCH where the theme has a colour for the layer, else a spacer of its width */}
-          {o.color ? <span data-object-swatch={o.id} className="flex"><Swatch color={o.color} small title={SWATCH_TIP}
+          {o.color ? <span data-object-swatch={o.id} className="flex"><Swatch color={o.color} small title={OBJ_SWATCH_TIP}
             onPick={() => pickColor({ title: `${o.label} color`, color: o.color!, def: o.defaultColor || null, set: (c) => pdispatch({ t: "objColor", id: o.id, color: c }) })} /></span>
             : <span className="w-3 flex-none" />}
           {o.canHide ? <Eye on={!!o.visible} k={o.id} title={`Show or hide ${o.label.toLowerCase()}`} onChange={(on) => pdispatch({ t: "objVisible", id: o.id, on })} /> : <span className="w-4 flex-none" />}
@@ -171,7 +174,7 @@ function netMenu(n: NetRow, pick: () => void): MenuItem[] {
   const cmd = (c: NetCmd) => () => pdispatch({ t: "netCmd", cmd: c, name: n.name });
   const shown = unescapeString(n.name);   // NET_GRID_TABLE::Rebuild: UnescapeString( net->GetNetname() )
   return [
-    { label: "Set Net Color", run: pick }, { label: "Clear Net Color", run: () => pdispatch({ t: "netColor", name: n.name, color: null }), disabled: !n.color }, "-",
+    { label: "Set Net Color", run: pick }, { label: "Clear Net Color", run: () => pdispatch({ t: "netColor", name: n.name, color: null }) }, "-",
     { label: `Highlight ${shown}`, run: cmd("highlight") }, { label: `Select Tracks and Vias in ${shown}`, run: cmd("select") }, { label: `Unselect Tracks and Vias in ${shown}`, run: cmd("unselect") }, "-",
     { label: "Show All Nets", run: cmd("showAll") }, { label: "Hide All Other Nets", run: cmd("hideOthers") },
   ];
@@ -183,7 +186,7 @@ function classMenu(c: NetClassRow, pick: () => void): MenuItem[] {
     { label: "Set Netclass Color", run: pick },
     // ID_USE_SCHEMATIC_NET_COLOR: the class's schematic colour as its board colour; disabled while it has none
     { label: "Use Color from Schematic", run: () => pdispatch({ t: "classColor", name: c.name, color: c.schColor || null }), disabled: !c.schColor },
-    { label: "Clear Netclass Color", run: () => pdispatch({ t: "classColor", name: c.name, color: null }), disabled: !c.color }, "-"];
+    { label: "Clear Netclass Color", run: () => pdispatch({ t: "classColor", name: c.name, color: null }) }, "-"];
   return [
     ...colors,
     { label: `Highlight Nets in ${c.name}`, run: cmd("highlight") }, { label: `Select Tracks and Vias in ${c.name}`, run: cmd("select") }, { label: `Unselect Tracks and Vias in ${c.name}`, run: cmd("unselect") }, "-",
@@ -195,6 +198,33 @@ function classMenu(c: NetClassRow, pick: () => void): MenuItem[] {
 function HeadButton({ icon, title, k, onClick }: { icon: string; title: string; k: string; onClick: () => void }) {
   return <button type="button" className="tbtn flex-none flex items-center justify-center w-5 h-5 p-0 bg-transparent border border-transparent rounded-xs hover:bg-panel hover:border-line" title={title} data-head-btn={k}
     onClick={onClick}><KIcon name={icon} size={16} /></button>;
+}
+
+/**
+ * NET_GRID_TABLE is a virtual wxGrid: every net has a row and only the rows in view are drawn.  Rows are ROW2's
+ * 20 px; the rows around the visible window are rendered into a spacer of the whole list's height.
+ */
+const NET_ROW_H = 20;
+function VirtualRows<T>({ rows, render, className, empty }: { rows: T[]; render: (r: T) => ReactNode; className: string; empty: ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [top, setTop] = useState(0), [height, setHeight] = useState(400);
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    setHeight(el.clientHeight || 400);
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setHeight(el.clientHeight || 400)); ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const { start: first, end: last } = rowWindow(rows.length, top, height, NET_ROW_H, 10);
+  return (
+    <div ref={ref} className={className} onScroll={(ev) => setTop((ev.target as HTMLDivElement).scrollTop)}>
+      {rows.length ? (
+        <div style={{ height: rows.length * NET_ROW_H, position: "relative" }}>
+          <div style={{ position: "absolute", left: 0, right: 0, top: first * NET_ROW_H }}>{rows.slice(first, last).map(render)}</div>
+        </div>
+      ) : empty}
+    </div>
+  );
 }
 
 function NetsTab() {
@@ -214,15 +244,14 @@ function NetsTab() {
         <div className="flex flex-none items-center px-1.5 pt-1"><span className="flex-auto font-semibold">Nets</span>
           <HeadButton icon="list_nets" title="Show the Net Inspector" k="netInspector" onClick={() => pdispatch({ t: "showNetInspector" })} /></div>
         <div className="flex-none px-1.5 py-1"><input id="netFilter" type="search" placeholder="Filter nets" value={q} onChange={(ev) => setQ(ev.target.value)} className="w-full bg-panel border border-line rounded-xs py-0.5 px-1.5 text-ink text-sm" /></div>
-        <div className="knets flex-[3_1_0] min-h-[60px] overflow-auto border-y border-line">
-          {list.length ? list.slice(0, 600).map((n) => (
+        <VirtualRows className="knets flex-[3_1_0] min-h-[60px] overflow-auto border-y border-line" rows={list}
+          empty={<p className="note px-2">{nets.length ? "No nets match the filter." : "This board has no nets yet."}</p>} render={(n) => (
             <div key={n.name} className={cx(ROW2, "hover:bg-panel")} data-net={n.name} onContextMenu={(ev) => menu.open(ev, netMenu(n, netColor(n)))}>
               <Swatch color={n.color} title="Double click (or middle click) to change color; right click for more actions" onPick={netColor(n)} />
               <Eye on={n.visible} k={n.name} title={(n.visible ? "Click to hide ratsnest for " : "Click to show ratsnest for ") + unescapeString(n.name)} onChange={(on) => pdispatch({ t: "netVisible", name: n.name, on })} />
               <span className="overflow-hidden text-ellipsis">{unescapeString(n.name)}</span>
             </div>
-          )) : <p className="note px-2">{nets.length ? "No nets match the filter." : "This board has no nets yet."}</p>}
-        </div>
+          )} />
         <div className="flex flex-none items-center px-1.5 pt-1.5 pb-0.5"><span className="flex-auto font-semibold">Net Classes</span>
           <HeadButton icon="options_generic" title="Configure net classes" k="netClasses" onClick={() => pdispatch({ t: "boardSetup", page: "netclasses" })} /></div>
         <div className="kclasses flex-[1_1_0] min-h-[44px] overflow-auto">
@@ -255,7 +284,7 @@ function NetsTab() {
   );
 }
 
-const SELECT = "flex-1 min-w-0 text-sm";
+const SELECT = "w-full min-w-0 text-sm";
 // include/dialogs/eda_view_switcher.h: on macOS the physical Control key (WXK_RAW_CONTROL, Cmd+Tab is the system's
 // application switcher) and Option; elsewhere Ctrl and Shift.  APPEARANCE_CONTROLS::rebuildLayerPresetsWidget /
 // rebuildViewportsWidget write the labels with KeyNameFromKeyCode over the form's "Ctrl+Tab" / "Alt+Tab".
@@ -271,22 +300,22 @@ function PresetsAndViewports() {
   const viewports = usePanels((s) => s.appearance.viewports);
   const viewport = usePanels((s) => s.appearance.viewport);
   const user = presets.filter((p) => !builtin.includes(p));
+  const presetMod = keyName(PRESET_SWITCH_KEY + "+X").slice(0, -2), viewportMod = keyName(VIEWPORT_SWITCH_KEY + "+X").slice(0, -2);
   return (
-    // one row (KiCad stacks two labelled combos; in a narrow dock that footer crowded the layer list out): the
-    // labels are short and their tooltips carry KiCad's labels with the switch keys
-    <div className="flex flex-none items-center gap-1.5 px-1.5 py-1 border-t border-line bg-bench">
-      <span className="flex-none text-ink-2" data-label="presets" title={`Presets (${keyName(PRESET_SWITCH_KEY + "+Tab")}, or ${keyName(PRESET_SWITCH_KEY + "+" + PRESET_SWITCH_STEP)} in a browser)`}>Preset</span>
+    // APPEARANCE_CONTROLS: "Presets (%s+Tab):" over the presets combo, then "Viewports (%s+Tab):" over the viewports one
+    <div className="flex flex-col flex-none gap-0.5 px-1.5 py-1 border-t border-line bg-bench">
+      <span className="flex-none text-ink-2" data-label="presets" title={`Or ${keyName(PRESET_SWITCH_KEY + "+" + PRESET_SWITCH_STEP)} in a browser`}>{`Presets (${presetMod}+Tab):`}</span>
       {/* rebuildLayerPresetsWidget: the built-in presets, then "---" and the user's own (both alphabetical), then
           "---", Save, Delete; no preset matching what is shown selects that last separator (count - 3) */}
-      <Select id="presetSel" className={SELECT} title="Layer presets" value={preset && presets.includes(preset) ? preset : "\u0001sep"}
+      <Select id="presetSel" className={SELECT} title={`Save and restore layer visibility combinations.\nUse ${presetMod}+Tab to activate selector.\nSuccessive Tabs while holding ${presetMod} down will cycle through presets in the popup.`} value={preset && presets.includes(preset) ? preset : "\u0001sep"}
         options={[...builtin.map((p) => ({ value: p, label: p })), ...(user.length ? [{ value: "\u0001sepUser", label: "---", sep: true }, ...user.map((p) => ({ value: p, label: p }))] : []),
-          { value: "\u0001sep", label: "---", sep: true }, { value: "\u0001save", label: "Save preset..." }, { value: "\u0001delete", label: "Delete preset...", disabled: !user.length }]}
+          { value: "\u0001sep", label: "---", sep: true }, { value: "\u0001save", label: "Save preset..." }, { value: "\u0001delete", label: "Delete preset..." }]}
         onChange={(v) => { if (v === "\u0001save") pdispatch({ t: "presetSave" }); else if (v === "\u0001delete") pdispatch({ t: "presetDelete" }); else if (v && !v.startsWith("\u0001")) pdispatch({ t: "preset", name: v }); }} />
-      <span className="flex-none text-ink-2 ml-1" data-label="viewports" title={`Viewports (${keyName(VIEWPORT_SWITCH_KEY + "+Tab")})`}>View</span>
+      <span className="flex-none text-ink-2 mt-1" data-label="viewports">{`Viewports (${viewportMod}+Tab):`}</span>
       {/* rebuildViewportsWidget: the saved viewports, "---", Save, Delete; the separator while none is current */}
-      <Select id="viewportSel" className={SELECT} title="Viewports" value={viewport && viewports.includes(viewport) ? viewport : "\u0001sep"}
+      <Select id="viewportSel" className={SELECT} title={`Save and restore view location and zoom.\nUse ${viewportMod}+Tab to activate selector.\nSuccessive Tabs while holding ${viewportMod} down will cycle through viewports in the popup.`} value={viewport && viewports.includes(viewport) ? viewport : "\u0001sep"}
         options={[...viewports.map((p) => ({ value: p, label: p })),
-          { value: "\u0001sep", label: "---", sep: true }, { value: "\u0001save", label: "Save viewport..." }, { value: "\u0001delete", label: "Delete viewport...", disabled: !viewports.length }]}
+          { value: "\u0001sep", label: "---", sep: true }, { value: "\u0001save", label: "Save viewport..." }, { value: "\u0001delete", label: "Delete viewport..." }]}
         onChange={(v) => { if (v === "\u0001save") pdispatch({ t: "viewportSave" }); else if (v === "\u0001delete") pdispatch({ t: "viewportDelete" }); else if (v && !v.startsWith("\u0001")) pdispatch({ t: "viewport", name: v }); }} />
     </div>
   );

@@ -4,6 +4,7 @@
 // The same cache gives the Search pane its other sheets.  Rename / Edit Page Number edit the sheet symbol in
 // the PARENT sheet — where KiCad keeps the Sheetname field and the instance's page — as an ordinary op.
 import type { HierNode, PanelAction } from "../../panels-api";
+import { GENERATOR_VERSION, SEXPR_SCHEMATIC_FILE_VERSION } from "../../canvas/format-version";
 import { store } from "../appstore";
 import { requestRender } from "../view";
 import { enterSheet, findSheetDoc, readSavedSchematic, openDoc, publishDocs, rootSchematic, topLevelSchematics, topLevelSheetsChanged } from "../doc";
@@ -375,12 +376,13 @@ async function newTopLevelSheet(): Promise<void> {
   const project = store.get().project as { projectId?: string; docs?: DocEntryLite[] } | null;
   if (!project || !project.projectId) return;
   const uuid = KC().newUuid();
+  // SCH_IO_KICAD_SEXPR::preservableVersion: a sheet never loaded is written at the project's (the open sheet's) version
   try {
     await loadProject();
     const res = await api(`/api/projects/${project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path, docType: "kicad_sch" }) }) as { docId?: string; path?: string; existing?: boolean };
     if (!res || !res.docId) throw new Error("no document id returned");
     if (!res.existing) await api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" },
-      body: `(kicad_sch (version 20250114) (generator "eeschema") (generator_version "10.99") (uuid "${uuid}") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "${n}"))) (embedded_fonts no))\n` });
+      body: `(kicad_sch (version ${(E.kdoc && E.kdoc.type === "sch" && Number((E.kdoc as { version?: number }).version)) || SEXPR_SCHEMATIC_FILE_VERSION}) (generator "eeschema") (generator_version "${GENERATOR_VERSION}") (uuid "${uuid}") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "${n}"))) (embedded_fonts no))\n` });
     const docEntry: DocEntryLite = { docId: res.docId, path: res.path || path, docType: "kicad_sch" };
     for (const list of [openDocs(), project.docs]) if (Array.isArray(list) && !list.some((d) => d.docId === docEntry.docId)) list.push(docEntry);
     await saveProject((pro) => { topEntries(pro as never).push({ uuid, name, filename: relToPro(docEntry.path) }); }, "new top-level sheet");

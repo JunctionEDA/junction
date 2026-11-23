@@ -247,7 +247,7 @@ export function dispatchAction(a: AppAction) {
       case "setTrackWidth": chooseTrackWidth(a.index); return;
       case "setViaSize": chooseViaSize(a.index); return;
       case "setViaStack": chooseViaStack(a.index); return;
-      case "setGrid": setGridPitch(a.pitch); return;
+      case "setGrid": setGridPitch(a.pitch, a.index); return;
       // EDA_DRAW_FRAME::OnSelectZoom: Zoom Auto is ACTIONS::zoomFitScreen, a preset is ACTIONS::zoomPreset (a KiCad zoom factor)
       case "setZoom": if (a.zoom === "auto") fitView(); else { const cur = kicadZoom(); if (cur > 0 && Number(a.zoom) > 0) zoomBy(Number(a.zoom) / cur); } return;
       case "setVariant": onVariantSelected(a.name); return;

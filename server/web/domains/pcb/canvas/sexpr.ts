@@ -10,24 +10,109 @@ export const QUOTED = new WeakMap<SNode, number>();
 
 export function quotedMask(node: SNode): number { return (QUOTED.get(node) as number) | 0; }
 
+/**
+ * Quoted slots past the 30 the mask holds (an (image … (data "row" …)) has one quoted base64 row per child,
+ * KICAD_FORMAT::FormatStreamData), kept as a set beside the node.
+ */
+export const QUOTED_HI = new WeakMap<SNode, Set<number>>();
+/**
+ * Slots whose bare atom looked like a number but was not one in canonical form ("0603", "1.0", a tstamp
+ * "5E123456"): kept as the text it was (DSNLEXER keeps the token text, the parsers read it with FromUTF8),
+ * and written back bare.
+ */
+export const BARE = new WeakMap<SNode, Set<number>>();
+
+/** Whether slot j of a node was a quoted string in the source text. */
+export function isQuotedSlot(node: SNode, j: number): boolean {
+  if (j < 30) return ((quotedMask(node) >> j) & 1) === 1;
+  const hi = QUOTED_HI.get(node); return !!hi && hi.has(j);
+}
+/** Whether slot j of a node was a bare number-shaped token kept as text. */
+export function isBareSlot(node: SNode, j: number): boolean { const b = BARE.get(node); return !!b && b.has(j); }
+
 /** Deep copy of a node that keeps the quoting marks (JSON round-trips lose them). */
 export function cloneNode<T extends SAtom>(node: T): T;
 export function cloneNode(node: SAtom): SAtom {
   if (!isList(node)) return node;
   const out: SNode = node.map(cloneNode);
   const q = QUOTED.get(node); if (q) QUOTED.set(out, q);
+  const hi = QUOTED_HI.get(node); if (hi) QUOTED_HI.set(out, new Set(hi));
+  const b = BARE.get(node); if (b) BARE.set(out, new Set(b));
   return out;
+}
+
+/**
+ * DSNLEXER: a line whose first non-blank character is '#' is a comment (dsnlexer.cpp:579-603).  When text[i] is
+ * '#' and only blanks precede it on its line, returns the index of the end of that line; else -1.
+ */
+function commentEnd(text: string, i: number): number {
+  if (text.charCodeAt(i) !== 35) return -1;
+  for (let k = i - 1; k >= 0; k--) { const c = text.charCodeAt(k); if (c === 10 || c === 13) break; if (c !== 32 && c !== 9) return -1; }
+  let j = i; while (j < text.length && text.charCodeAt(j) !== 10 && text.charCodeAt(j) !== 13) j++;
+  return j;
+}
+const isHex = (c: string | undefined): boolean => !!c && /^[0-9a-fA-F]$/.test(c);
+const isOct = (c: string | undefined): boolean => !!c && c >= "0" && c <= "7";
+let utf8: TextDecoder | null = null;
+/**
+ * The body of a quoted string starting after its opening quote, decoded as DSNLEXER decodes it (dsnlexer.cpp:660-715):
+ * \" \\ \a \b \f \n \r \t \v, \x with 1-2 hex digits (a bare \x is 'x'), 1-3 octal digits (a goofed escape is a
+ * backslash).  The hex / octal escapes give bytes of the UTF-8 text, so a run of them is decoded as UTF-8.
+ */
+export function readQuoted(text: string, start: number): { s: string; end: number } {
+  let i = start, s = ""; const n = text.length; let bytes: number[] = [];
+  const flush = (): void => {
+    if (!bytes.length) return;
+    if (bytes.every((b) => b < 0x80)) s += String.fromCharCode(...bytes);
+    else { if (!utf8) utf8 = new TextDecoder("utf-8"); s += utf8.decode(new Uint8Array(bytes)); }
+    bytes = [];
+  };
+  while (i < n) {
+    const c = text[i];
+    if (c === "\\") {
+      if (++i >= n) break;
+      const d = text[i++];
+      switch (d) {
+        case '"': case "\\": flush(); s += d; break;
+        case "a": flush(); s += "\x07"; break;
+        case "b": flush(); s += "\x08"; break;
+        case "f": flush(); s += "\x0c"; break;
+        case "n": flush(); s += "\n"; break;
+        case "r": flush(); s += "\r"; break;
+        case "t": flush(); s += "\t"; break;
+        case "v": flush(); s += "\x0b"; break;
+        case "x": {
+          let k = 0; while (k < 2 && isHex(text[i + k])) k++;
+          if (k > 0) bytes.push(parseInt(text.slice(i, i + k), 16)); else { flush(); s += "x"; }
+          i += k; break;
+        }
+        default: {
+          i--;
+          let k = 0; while (k < 3 && isOct(text[i + k])) k++;
+          if (k > 0) bytes.push(parseInt(text.slice(i, i + k), 8) & 0xff); else { flush(); s += "\\"; }
+          i += k; break;
+        }
+      }
+      continue;
+    }
+    flush();
+    if (c === '"') { i++; break; }
+    s += c; i++;
+  }
+  flush();
+  return { s, end: i };
 }
 
 export function parse(text: string): SNode | null {
   let i = 0; const n = text.length;
   const ws = (c: number) => c === 32 || c === 9 || c === 10 || c === 13;
   function list(): SNode {
-    i++; const out: SNode = []; let q = 0;
+    i++; const out: SNode = []; let q = 0; let hi: Set<number> | null = null; let bare: Set<number> | null = null;
     for (;;) {
       while (i < n && ws(text.charCodeAt(i))) i++;
       if (i >= n) break;
       const c = text[i];
+      if (c === "#") { const e = commentEnd(text, i); if (e >= 0) { i = e; continue; } }
       if (c === ")") { i++; break; }
       if (c === "(") out.push(list());
       // Which atoms were quoted is not decoration: KiCad's parsers demand a
@@ -35,30 +120,28 @@ export function parse(text: string): SNode | null {
       // parseGROUP wants T_STRING and throws on a bare symbol) and a bare token
       // where the format says token.  Record the quoted slots so serialize()
       // can reproduce them instead of guessing from the text.
-      else if (c === '"') { const at = out.length; if (at < 30) q |= 1 << at; out.push(quoted()); }
-      else out.push(atom());
+      else if (c === '"') { const at = out.length; if (at < 30) q |= 1 << at; else (hi || (hi = new Set())).add(at); out.push(quoted()); }
+      else { const at = out.length; const a = atom(); if (typeof a === "string" && /^[-+.\d]/.test(a)) (bare || (bare = new Set())).add(at); out.push(a); }
     }
     if (q) QUOTED.set(out, q);
+    if (hi) QUOTED_HI.set(out, hi);
+    if (bare) BARE.set(out, bare);
     return out;
   }
-  function quoted() {
-    i++; let s = "";
-    while (i < n) {
-      const c = text[i];
-      if (c === "\\") { const d = text[i + 1]; s += d === "n" ? "\n" : d === "t" ? "\t" : d; i += 2; continue; }
-      if (c === '"') { i++; break; }
-      s += c; i++;
-    }
-    return s;
-  }
-  function atom() {
+  function quoted() { const r = readQuoted(text, i + 1); i = r.end; return r.s; }
+  function atom(): SAtom {
     const st = i;
     while (i < n) { const c = text.charCodeAt(i); if (ws(c) || c === 40 || c === 41) break; i++; }
     const a = text.slice(st, i);
+    // A number only when the text is the number's own spelling: "0603", "1.0" or a tstamp "5E123456" stay text.
+    // "-0" (older writers) is the number 0.
     const v = Number(a);
-    return a !== "" && !isNaN(v) && /^[-+.\d]/.test(a) ? v : a;
+    return a !== "" && Number.isFinite(v) && /^[-+.\d]/.test(a) && (String(v) === a || a === "-0") ? (v === 0 ? 0 : v) : a;
   }
-  while (i < n && ws(text.charCodeAt(i))) i++;
+  for (;;) {
+    while (i < n && ws(text.charCodeAt(i))) i++;
+    const e = commentEnd(text, i); if (e < 0) break; i = e;
+  }
   return text[i] === "(" ? list() : null;
 }
 
@@ -68,11 +151,13 @@ export function parseAll(text: string): SNode[] {
   let i = 0; const n = text.length;
   while (i < n) {
     while (i < n && /\s/.test(text[i])) i++;
+    { const e = commentEnd(text, i); if (e >= 0) { i = e; continue; } }
     if (i >= n || text[i] !== "(") break;
     let depth = 0, j = i, inStr = false;
     for (; j < n; j++) {
       const c = text[j];
       if (inStr) { if (c === "\\") j++; else if (c === '"') inStr = false; continue; }
+      if (c === "#") { const e = commentEnd(text, j); if (e >= 0) { j = e - 1; continue; } }
       if (c === '"') inStr = true; else if (c === "(") depth++; else if (c === ")") { depth--; if (depth === 0) { j++; break; } }
     }
     const node = parse(text.slice(i, j)); if (node) out.push(node);
@@ -209,6 +294,7 @@ export function fillOf(node: SNode): FillInfo {
   const f = kid(node, "fill"); if (!f) return { type: "none", color: null };
   const t = kid(f, "type"); let type = t ? str(t[1]) : (has(f, "yes") || has(f, "solid") ? "solid" : "none");
   if (type === "yes") type = "solid";
+  if (!t) for (const h of ["hatch", "reverse_hatch", "cross_hatch"]) if (has(f, h)) type = h;   // the board's (fill hatch | reverse_hatch | cross_hatch)
   return { type, color: colorOf(f) };
 }
 
@@ -220,6 +306,7 @@ export function effectsOf(node: SNode): TextEffects {
     if (f) {
       const s = kid(f, "size"); if (s) { r.size = num(s[1], 1.27); r.sizeX = num(s[2], r.size); }   // (size HEIGHT WIDTH): the parser reads "text height" first
       const t = kid(f, "thickness"); if (t) r.thick = num(t[1]);
+      const ls = kid(f, "line_spacing"); if (ls) { const v = num(ls[1], 1); if (v > 0 && v !== 1) r.lineSpacing = v; }
       r.bold = yesNo(f, "bold"); r.italic = yesNo(f, "italic");
       const fc = kid(f, "face"); if (fc && str(fc[1])) r.face = str(fc[1]);   // an outline (TrueType) font by name
       const col = fontColorOf(f); if (col) r.color = col;   // the text colour lives in (font (color …)), not on the item
@@ -300,6 +387,27 @@ export function ellipsePts(g: SNode, invertY?: boolean, segs?: number): { pts: P
     out.push([x, invertY ? -y : y]);
   }
   return { pts: out, closed: !arc };
+}
+
+/**
+ * SHAPE_ELLIPSE::GetLength (libs/kimath/src/geometry/shape_ellipse.cpp:444-469) of an ellipse / elliptical-arc node:
+ * Ramanujan's second approximation of the perimeter for a full ellipse, an adaptive Simpson integral (tolerance 1e-9,
+ * depth 20) over the sweep (sweepRange) for an arc.
+ */
+export function ellipseLength(g: SNode): number {
+  const a = num((kid(g, "major_radius") || [])[1], 0), b = num((kid(g, "minor_radius") || [])[1], 0);
+  if (!/ellipse_arc$/.test(String(g[0]))) { const h = (a - b) / (a + b), h2 = h * h; return a + b > 0 ? Math.PI * (a + b) * (1 + 3 * h2 / (10 + Math.sqrt(4 - 3 * h2))) : 0; }
+  let t0 = num((kid(g, "start_angle") || [])[1], 0) * Math.PI / 180, t1 = num((kid(g, "end_angle") || [])[1], 0) * Math.PI / 180;
+  if (t1 - t0 >= 2 * Math.PI || t1 - t0 <= -2 * Math.PI) t1 = t0 + 2 * Math.PI; else if (t1 < t0) t1 += 2 * Math.PI;
+  const f = (t: number): number => { const s = Math.sin(t), c = Math.cos(t); return Math.sqrt(a * a * s * s + b * b * c * c); };
+  const rec = (x0: number, x1: number, tol: number, whole: number, fa: number, fb: number, fm: number, depth: number): number => {
+    const m = 0.5 * (x0 + x1), lm = 0.5 * (x0 + m), rm = 0.5 * (m + x1), flm = f(lm), frm = f(rm);
+    const left = (m - x0) * (fa + 4 * flm + fm) / 6, right = (x1 - m) * (fm + 4 * frm + fb) / 6, diff = left + right - whole;
+    if (depth <= 0 || Math.abs(diff) < 15 * tol) return left + right + diff / 15;
+    return rec(x0, m, 0.5 * tol, left, fa, fm, flm, depth - 1) + rec(m, x1, 0.5 * tol, right, fm, fb, frm, depth - 1);
+  };
+  const fa = f(t0), fb = f(t1), fm = f(0.5 * (t0 + t1));
+  return rec(t0, t1, 1e-9, (t1 - t0) * (fa + 4 * fm + fb) / 6, fa, fb, fm, 20);
 }
 
 // KiCad's RotatePoint: positive angles turn counter-clockwise on the (Y down) screen

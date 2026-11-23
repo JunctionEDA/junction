@@ -18,7 +18,7 @@ import { SCH, SCH_Z, darkened, parseColor, rgba } from "./colors";
 import { G, boxUnion, textGeom, transformedText } from "./geom";
 import { PIN_TEXT_OFFSET, TARGET_PIN_RADIUS, TILDE_LITERAL_VERSION, buildPinGeom, pinHidden, shapeGeom, type PinSym } from "./geom-sch";
 import { atOf, effectsOf, faceOf, fillOf, has, isList, kid, kids, num, str, strokeColorOf, widthOf } from "./sexpr";
-import { SCH_PEN, textPen } from "./text";
+import { SCH_PEN, setSchTextVersion, textPen } from "./text";
 import { newDoc } from "./doc";
 import type { Doc, GeomSink, Item, Pt } from "./types";
 
@@ -78,8 +78,8 @@ export function libGraphicGeom(item: GeomSink, g: SNode, col: (c: string) => str
     if (gk === "text_box") {
       const s = kid(g, "size"); const w = s ? num(s[1]) : 5, h = s ? Math.abs(num(s[2])) : 2.5;   // saveTextBox writes -height (library Y up)
       const bw = widthOf(g, 0); if (bw >= 0) G(item, { t: "poly", pts: [[px, py], [px + w, py], [px + w, py + h], [px, py + h]], close: true, w: bw || SCH_PEN, color: col(strokeColorOf(g) || SCH.outline), layer: "Symbols", z: SCH_Z.device });
-      transformedText(item, IDENT, px, py, str(g[1]), ef.size, color, r, ef.just, "Symbols", { z: SCH_Z.device, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, defH: "left", defV: "top" });
-    } else transformedText(item, IDENT, px, py, str(g[1]), ef.size, color, r, ef.just, "Symbols", { z: SCH_Z.device, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, olKind: "field" });   // SCH_PAINTER: a symbol's text is drawn centred on its box
+      transformedText(item, IDENT, px, py, str(g[1]), ef.size, color, r, ef.just, "Symbols", { z: SCH_Z.device, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing, defH: "left", defV: "top" });
+    } else transformedText(item, IDENT, px, py, str(g[1]), ef.size, color, r, ef.just, "Symbols", { z: SCH_Z.device, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing, olKind: "field" });   // SCH_PAINTER: a symbol's text is drawn centred on its box
   }
 }
 const ident = (c: string): string => c;
@@ -111,6 +111,7 @@ function pinExtras(item: GeomSink, p: SNode, color: string, showType: boolean): 
  */
 export function parseLibSymbol(sym: SNode, opts?: LibSymbolOpts): Doc {
   opts = opts || {};
+  setSchTextVersion(opts.fileVersion);
   const unit = opts.unit || 1, body = opts.bodyStyle || 1;
   const doc = newDoc("sch"); doc.page = [0, 0];
   // SCH_PAINTER::getRenderColor with m_ShowDisabled / m_ShowGraphicsDisabled: color.Darken( 0.5 ) (each channel halved)
@@ -164,7 +165,7 @@ export function parseLibSymbol(sym: SNode, opts?: LibSymbolOpts): Doc {
     const color = colAll(ef.color || (hide ? SCH.hidden : yes(p, "private") ? SCH.privateNotes : name === "Reference" ? SCH.ref : name === "Value" ? SCH.value : SCH.field));   // SCH_FIELD::GetFieldColor
     const [x, y, r] = atOf(p);
     const sink: GeomSink = { geom: [], bbox: null };
-    transformedText(sink, IDENT, x, -y, shownText, ef.size, color, r, ef.just, isRV ? "Reference & value" : "Fields", { z: name === "Reference" ? SCH_Z.ref : name === "Value" ? SCH_Z.value : SCH_Z.fields, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, field: name, olKind: "field" });
+    transformedText(sink, IDENT, x, -y, shownText, ef.size, color, r, ef.just, isRV ? "Reference & value" : "Fields", { z: name === "Reference" ? SCH_Z.ref : name === "Value" ? SCH_Z.value : SCH_Z.fields, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, lineSpacing: ef.lineSpacing, field: name, olKind: "field" });
     add("f:" + name, { kind: "field", sub: "", j, unit: 0, body: 0, inherited: fieldOwner !== sym, name }, sink, "lib_field");
   }
   let bb = null as number[] | null;

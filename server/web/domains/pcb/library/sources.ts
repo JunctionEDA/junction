@@ -20,6 +20,12 @@ export interface LibItem {
   reference?: string;
   footprint?: string;
   extends?: string;
+  /** Symbols: the Value field (a library symbol's is its name) and each unit's own name (unit_name), when known. */
+  value?: string;
+  unitNames?: (string | undefined)[];
+  /** A "-- Recently Used --" symbol: the unit and the field edits it was picked with (PICKED_SYMBOL Unit / Fields). */
+  unit?: number;
+  fields?: Record<string, string>;
   /** Footprints: pad count. */
   pads?: number;
   /** Which source resolves the item: "official", "project", "placed" or a registered source id. */
@@ -35,6 +41,8 @@ export interface FetchedItem {
   /** A .kicad_mod. */
   footprint?: string;
   fields?: Record<string, string>;
+  /** A derived symbol: its parent's name and description (GenerateAliasInfo's "Derived from"). */
+  parent?: { name: string; description: string } | null;
 }
 
 /** The contract of KiCadLibrary.registerSource. */
@@ -103,6 +111,21 @@ export function officialIndex(kind: LibKind, lib: string): Promise<LibItem[]> {
   return p;
 }
 
+/** The nearest parent of a derived symbol (LIB_SYMBOL::GetParent): its name and description. */
+function parentOf(parents: (string | SNode)[]): { name: string; description: string } | null {
+  if (!parents.length) return null;
+  try { const p = symbolInfo(parents[0]); return { name: p.name, description: p.description }; } catch { return null; }
+}
+/** LIB_SYMBOL::GetUnitDisplayName's names: the (unit_name …) of each Name_<unit>_<body> sub-symbol. */
+export function symbolUnitNames(symbol: SNode): (string | undefined)[] {
+  const out: (string | undefined)[] = [];
+  for (const sub of K().kids(symbol, "symbol")) {
+    const m = /_(\d+)_(\d+)$/.exec(String(sub[1])), un = K().kid(sub, "unit_name");
+    if (m && un && +m[1] > 0) out[+m[1] - 1] = String(un[1]);
+  }
+  return out;
+}
+
 function officialFetch(kind: LibKind, id: string): Promise<FetchedItem> {
   const key = kind + ":" + id;
   let p = fetched.get(key);
@@ -110,7 +133,7 @@ function officialFetch(kind: LibKind, id: string): Promise<FetchedItem> {
     const { lib, name } = parseLibId(id);
     const url = `/api/libs/${seg(kind)}/${encodeURIComponent(lib)}/${encodeURIComponent(name)}`;
     p = kind === "symbol"
-      ? getJson<{ libId: string; symbol: string; parents: string[] }>(url).then((j) => ({ libId: j.libId, symbol: K().serialize(flattenSymbol(j.symbol, j.parents)) }))
+      ? getJson<{ libId: string; symbol: string; parents: string[] }>(url).then((j) => ({ libId: j.libId, symbol: K().serialize(flattenSymbol(j.symbol, j.parents)), parent: parentOf(j.parents || []) }))
       : getJson<{ fpid: string; footprint: string }>(url).then((j) => ({ fpid: j.fpid, footprint: j.footprint }));
     p.catch(() => fetched.delete(key));
     fetched.set(key, p);
@@ -212,7 +235,8 @@ async function projectIndex(kind: LibKind, lib: ProjectLib): Promise<LibItem[]> 
       for (let e = K().kid(root, "extends"); e && depth < 16; e = K().kid(root, "extends"), depth++) { const p = byName.get(String(e[1])); if (!p) break; root = p; }
       const ri = root === s ? info : symbolInfo(root);
       rows.push({ id: `${lib.name}:${info.name}`, name: info.name, description: info.description || ri.description, keywords: info.keywords || ri.keywords, library: lib.name,
-        units: ri.units, power: ri.power || info.power, reference: info.reference || ri.reference, footprint: info.footprint, extends: info.extends, source: "project" });
+        units: ri.units, power: ri.power || info.power, reference: info.reference || ri.reference, footprint: info.footprint, extends: info.extends, value: info.value || info.name,
+        unitNames: symbolUnitNames(root), source: "project" });
     }
   }
   return rows.sort((a, b) => a.name.localeCompare(b.name));
@@ -233,7 +257,7 @@ async function projectFetch(kind: LibKind, id: string, docs: ProjectDoc[]): Prom
     const sym = byName.get(name); if (!sym) continue;
     const parents: SNode[] = [];
     for (let e = K().kid(sym, "extends"); e && parents.length < 16;) { const p = byName.get(String(e[1])); if (!p) break; parents.push(p); e = K().kid(p, "extends"); }
-    return { libId: id, symbol: K().serialize(flattenSymbol(sym, parents)) };
+    return { libId: id, symbol: K().serialize(flattenSymbol(sym, parents)), parent: parentOf(parents) };
   }
   throw new Error(`${lib} has no symbol ${name}`);
 }
@@ -257,7 +281,10 @@ export function onSourcesChanged(fn: () => void): () => void { sourceListeners.a
 
 // ---------------------------------------------------------------- one front door
 
-export interface SourceContext { docs: ProjectDoc[]; doc: KDoc | null }
+export interface SourceContext { docs: ProjectDoc[]; doc: KDoc | null;
+  /** The library symbols the project's other sheets use (SCH_SHEET_LIST::GetSymbols over the hierarchy): lib id -> the
+   *  sheet's flattened copy, for "-- Already Placed --". */
+  otherLibs?: Map<string, SNode> | null }
 
 /** The rows of a library of a built-in source. */
 export function libraryIndex(kind: LibKind, entry: LibraryEntry, ctx: SourceContext): Promise<LibItem[]> {
@@ -266,32 +293,31 @@ export function libraryIndex(kind: LibKind, entry: LibraryEntry, ctx: SourceCont
   return pl ? projectIndex(kind, pl) : Promise.resolve([]);
 }
 
-/** Symbols the sheet already embeds / footprints the board already uses, as chooser rows. */
-export function placedItems(kind: LibKind, doc: KDoc | null): LibItem[] {
-  if (!doc) return [];
-  const out: LibItem[] = [];
-  if (kind === "symbol") {
-    for (const [id, node] of doc.lib) {
-      let info; try { info = symbolInfo(K().resolveLib(doc, id) || node); } catch { continue; }
-      out.push({ id, name: parseLibId(id).name, description: info.description, keywords: info.keywords, library: parseLibId(id).lib, units: info.units, power: info.power,
-        reference: info.reference, footprint: info.footprint, source: "placed" });
-    }
-  } else {
-    const seen = new Set<string>();
-    for (const it of doc.items.values()) {
-      if (it.kind !== "footprint") continue;
-      const id = String(it.node[1] || ""); if (!id || seen.has(id)) continue; seen.add(id);
-      const info = footprintInfo(it.node);
-      out.push({ id, name: info.name, description: info.description, keywords: info.keywords, library: parseLibId(id).lib, pads: info.pads, source: "placed" });
-    }
-  }
-  return out.sort((a, b) => a.id.localeCompare(b.id));
+/**
+ * "-- Already Placed --": SCH_DRAWING_TOOLS::PlaceSymbol lists every library symbol used on any sheet of the hierarchy,
+ * one entry per lib id, sorted by item name (PANEL_SYMBOL_CHOOSER sorts aAlreadyPlaced by GetLibItemName).  The
+ * footprint chooser has no such group (PANEL_FOOTPRINT_CHOOSER adds only "-- Recently Used --").
+ */
+export function placedItems(kind: LibKind, doc: KDoc | null, otherLibs?: Map<string, SNode> | null): LibItem[] {
+  if (kind !== "symbol") return [];
+  const out: LibItem[] = [], seen = new Set<string>();
+  const add = (id: string, node: SNode): void => {
+    if (seen.has(id)) return;
+    let info; try { info = symbolInfo(node); } catch { return; }
+    seen.add(id);
+    out.push({ id, name: parseLibId(id).name, description: info.description, keywords: info.keywords, library: parseLibId(id).lib, units: info.units, power: info.power,
+      reference: info.reference, footprint: info.footprint, value: info.value || info.name, unitNames: symbolUnitNames(node), source: "placed" });
+  };
+  if (doc) for (const [id, node] of doc.lib) add(id, K().resolveLib(doc, id) || node);
+  if (otherLibs) for (const [id, node] of otherLibs) add(id, node);
+  const name = (r: LibItem) => parseLibId(r.id).name;
+  return out.sort((a, b) => (name(a) < name(b) ? -1 : name(a) > name(b) ? 1 : 0));
 }
 
-function placedFetch(kind: LibKind, id: string, doc: KDoc | null): FetchedItem {
+function placedFetch(kind: LibKind, id: string, doc: KDoc | null, otherLibs?: Map<string, SNode> | null): FetchedItem {
   if (!doc) throw new Error("No document is open");
   if (kind === "symbol") {
-    const node = K().resolveLib(doc, id) || doc.lib.get(id);
+    const node = (doc.lib.has(id) ? K().resolveLib(doc, id) || doc.lib.get(id) : null) || (otherLibs && otherLibs.get(id));
     if (!node) throw new Error(`The sheet has no symbol ${id}`);
     const flat = K().cloneNode ? (K().cloneNode as (n: SNode) => SNode)(node) : node;
     for (let i = flat.length - 1; i >= 1; i--) { const c = flat[i]; if (Array.isArray(c) && c[0] === "extends") flat.splice(i, 1); }
@@ -314,7 +340,7 @@ function placedFetch(kind: LibKind, id: string, doc: KDoc | null): FetchedItem {
 export async function fetchItem(kind: LibKind, item: LibItem, ctx: SourceContext): Promise<FetchedItem> {
   if (item.source === "official") return officialFetch(kind, item.id);
   if (item.source === "project") return projectFetch(kind, item.id, ctx.docs);
-  if (item.source === "placed") return placedFetch(kind, item.id, ctx.doc);
+  if (item.source === "placed") return placedFetch(kind, item.id, ctx.doc, ctx.otherLibs);
   const src = registered.get(item.source);
   if (!src) throw new Error(`Unknown library source ${item.source}`);
   const got = await src.fetch({ id: item.id, name: item.name, description: item.description, keywords: item.keywords, library: item.library }, kind);
@@ -322,23 +348,42 @@ export async function fetchItem(kind: LibKind, item: LibItem, ctx: SourceContext
   return got;
 }
 
-// ---------------------------------------------------------------- recently used (per browser)
+// ---------------------------------------------------------------- recently used (per session)
 
-const RECENT_MAX = 12;
-const recentKey = (kind: LibKind) => `kicad-collab:lib-recent:${kind}`;
+/**
+ * "-- Recently Used --": SCH_DRAWING_TOOLS keeps one history for the symbol chooser and one for the power chooser
+ * (each pick goes to the front with its unit and field edits, an older entry of the same lib id goes), the footprint
+ * chooser keeps s_FootprintHistoryList (at most 7: AddFootprintToHistory removes from the end while there are 8).
+ * They live for the session.
+ */
+export type RecentList = "symbol" | "power" | "footprint" | "picker";
+/** s_FootprintHistoryList keeps 7; SYMBOL_CHOOSER_FRAME's s_SymbolHistoryList (the lib id picker's own) keeps 8. */
+const HISTORY_MAX: Partial<Record<RecentList, number>> = { footprint: 7, picker: 8 };
+export interface RecentOpts { power?: boolean; picker?: boolean }
+const recentKey = (list: RecentList) => `kicad-collab:lib-recent:${list}`;
+const listOf = (kind: LibKind, o?: RecentOpts | null): RecentList => (kind === "footprint" ? "footprint" : o && o.picker ? "picker" : o && o.power ? "power" : "symbol");
+function session(): Storage | null { try { return window.sessionStorage; } catch { return null; } }
+const memRecent = new Map<RecentList, LibItem[]>();
 
-export function recentItems(kind: LibKind): LibItem[] {
+export function recentItems(kind: LibKind, o?: RecentOpts | null): LibItem[] {
+  const list = listOf(kind, o);
   try {
-    const raw = JSON.parse(localStorage.getItem(recentKey(kind)) || "[]") as LibItem[];
-    return Array.isArray(raw) ? raw.filter((r) => r && typeof r.id === "string" && typeof r.name === "string" && (r.source === "official" || r.source === "project")) : [];
-  } catch { return []; }
+    const st = session(); const text = st ? st.getItem(recentKey(list)) : null;
+    const raw = (text !== null && text !== undefined ? JSON.parse(text) : memRecent.get(list) || []) as LibItem[];
+    return Array.isArray(raw) ? raw.filter((r) => r && typeof r.id === "string" && typeof r.name === "string" && (r.source === "official" || r.source === "project")).map((r) => Object.assign({}, r)) : [];
+  } catch { return (memRecent.get(list) || []).map((r) => Object.assign({}, r)); }
 }
-export function rememberRecent(kind: LibKind, item: LibItem): void {
+export function rememberRecent(kind: LibKind, item: LibItem, opts?: RecentOpts & { unit?: number; fields?: Record<string, string> | null }): void {
   if (item.source !== "official" && item.source !== "project") return;      // only what can be fetched again later
-  try {
-    const list = recentItems(kind).filter((r) => r.id !== item.id);
-    list.unshift({ id: item.id, name: item.name, description: item.description, keywords: item.keywords, library: item.library, units: item.units, power: item.power,
-      reference: item.reference, footprint: item.footprint, pads: item.pads, source: item.source });
-    localStorage.setItem(recentKey(kind), JSON.stringify(list.slice(0, RECENT_MAX)));
-  } catch { /* storage unavailable */ }
+  const list = listOf(kind, opts);
+  const entry: LibItem = { id: item.id, name: item.name, description: item.description, keywords: item.keywords, library: item.library, units: item.units, power: item.power,
+    reference: item.reference, footprint: item.footprint, value: item.value, unitNames: item.unitNames, extends: item.extends, pads: item.pads, source: item.source };
+  if (kind === "symbol" && list !== "picker") {
+    if (opts && opts.unit && opts.unit > 0) entry.unit = opts.unit;
+    if (opts && opts.fields && Object.keys(opts.fields).length) { entry.fields = Object.assign({}, opts.fields); if (opts.fields.Footprint !== undefined) entry.footprint = opts.fields.Footprint; }
+  }
+  let next = [entry].concat(recentItems(kind, opts).filter((r) => r.id !== item.id));
+  const max = HISTORY_MAX[list]; if (max) next = next.slice(0, max);
+  memRecent.set(list, next);
+  try { const st = session(); if (st) st.setItem(recentKey(list), JSON.stringify(next)); } catch { /* storage unavailable: the page keeps it */ }
 }

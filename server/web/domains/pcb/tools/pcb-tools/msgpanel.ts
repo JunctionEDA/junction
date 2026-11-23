@@ -7,6 +7,7 @@ export interface MsgItem { title: string; value: string }
 /** msgPanelInfo's options: the design settings, the user's units, the route in flight and its router settings, the netlist. */
 export interface MsgPanelOpts { settings?: DesignSettings; units?: string; route?: Route | null; routerSettings?: RouterSettings; nl?: Netlist; net?: string; ellipsize?: (s: string) => string; toDisplay?: (p: Pt) => Pt }
 import { connectedRun } from "./connected";
+import { ellipseLength } from "../../canvas/sexpr";
 import { resolve } from "./drc-rules";
 import type { RuleItem } from "./dru";
 import { copperOf } from "./dialogs";
@@ -154,7 +155,7 @@ function padHit(p: PadInfo, q: Pt) {
   return Math.abs(lx) <= p.w / 2 + 1e-6 && Math.abs(ly) <= p.h / 2 + 1e-6;
 }
 /** EDA_SHAPE::getFriendlyName */
-export const SHAPE_NAMES: Record<string, string> = { line: "Segment", rect: "Rectangle", circle: "Circle", arc: "Arc", poly: "Polygon", curve: "Curve" };
+export const SHAPE_NAMES: Record<string, string> = { line: "Segment", rect: "Rectangle", circle: "Circle", arc: "Arc", poly: "Polygon", curve: "Curve", ellipse: "Ellipse", ellipse_arc: "Elliptical Arc" };
 /** BOARD_CONNECTED_ITEM::GetNetnameMsg */
 export const netnameMsg = (net: NetRef) => (net && net.name ? `[${unescapeName(net.name)}]` : "[<no net>]");
 /**
@@ -221,7 +222,7 @@ export function itemDescription(doc: BoardDoc, id: string, units: string) {
   if (it.kind === "table") { const cc = K.kid(n, "column_count"); return `${cc ? K.num(cc[1]) : 0} column table`; }
   if (it.kind === "target") return "Target";
   if (it.kind === "barcode") { const tx = K.kid(n, "text"); return `Barcode '${tx ? K.str(tx[1]) : ""}' on ${L(layerOf(n))}`; }
-  const m = /^gr_(line|rect|circle|arc|poly|curve)$/.exec(it.kind);
+  const m = /^gr_(line|rect|circle|arc|poly|curve|ellipse|ellipse_arc)$/.exec(it.kind);
   if (m) { const layer = layerOf(n); return /\.Cu$/.test(layer) ? `${SHAPE_NAMES[m[1]]} ${netnameMsg(netOf(n))} on ${L(layer)}` : `${SHAPE_NAMES[m[1]]} on ${L(layer)}`; }
   return "";
 }
@@ -459,7 +460,7 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
       add("Corner Count", count);
       return out;
     }
-    if (it && /^gr_(line|rect|circle|arc|poly|curve)$/.test(it.kind)) {   // PCB_SHAPE::GetMsgPanelInfo (EDA_SHAPE::ShapeGetMsgPanelInfo)
+    if (it && /^gr_(line|rect|circle|arc|poly|curve|ellipse|ellipse_arc)$/.test(it.kind)) {   // PCB_SHAPE::GetMsgPanelInfo (EDA_SHAPE::ShapeGetMsgPanelInfo)
       const n = it.node, kind = it.kind.slice(3); const SHAPE = SHAPE_NAMES;
       add("Type", "Drawing"); if (isLocked(n)) add("Status", "Locked");
       add("Shape", SHAPE[kind]);
@@ -467,6 +468,12 @@ export function msgPanelInfo(doc: BoardDoc, ids: Iterable<string>, opts?: MsgPan
       if (kind === "circle" && c && b) add("Radius", V(Math.hypot(b[0] - c[0], b[1] - c[1])));
       else if (kind === "arc") { const m = pt(n, "mid"); const arc = a && m && b && K.arcFrom3(a, m, b); if (arc) { const L = arcLength(arc); add("Length", V(L)); add("Angle", (L / arc.r * 180 / Math.PI).toFixed(1) + "°"); add("Radius", V(arc.r)); } }
       else if (kind === "curve") { const q = K.bezierPts(K.ptsOf(n)); let L = 0; for (let i = 1; i < q.length; i++) L += Math.hypot(q[i][0] - q[i - 1][0], q[i][1] - q[i - 1][1]); add("Length", V(L)); }
+      else if (kind === "ellipse" || kind === "ellipse_arc") {
+        const deg = (k: string) => `${K.num((K.kid(n, k) || [])[1] ?? 0).toFixed(1)}°`;   // MessageTextFromValue( EDA_ANGLE )
+        add("Length", V(ellipseLength(n))); add("Major Radius", V(K.num((K.kid(n, "major_radius") || [])[1] ?? 0))); add("Minor Radius", V(K.num((K.kid(n, "minor_radius") || [])[1] ?? 0)));
+        add("Rotation", deg("rotation_angle"));
+        if (kind === "ellipse_arc") { add("Start Angle", deg("start_angle")); add("End Angle", deg("end_angle")); }
+      }
       else if (kind === "poly") add("Points", K.ptsOf(n).length);
       else if (kind === "rect" && a && b) { add("Width", V(Math.abs(b[0] - a[0]))); add("Height", V(Math.abs(b[1] - a[1]))); }
       else if (kind === "line" && a && b) { add("Length", V(Math.hypot(b[0] - a[0], b[1] - a[1]))); add("Angle", (Math.atan2(a[1] - b[1], b[0] - a[0]) * 180 / Math.PI).toFixed(1) + "°"); }

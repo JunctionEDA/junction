@@ -109,7 +109,9 @@ export function SearchPane() {
       return;
     }
     if (k === "Enter") { ev.preventDefault(); ev.stopPropagation(); const r = rows[index(focus)]; if (r) activate(r); return; }
-    if (k !== "Escape") ev.stopPropagation();
+    // the list's own scrolling keys stay with it; SEARCH_PANE::OnCharHook hands every other key to the tool
+    // dispatcher, so the editor's hotkeys work while the list has the focus
+    if (k === "Home" || k === "End" || k === "PageUp" || k === "PageDown") ev.stopPropagation();
   };
   const clickHeader = (i: number) => {
     // OnColClicked: the same column flips the order, another one sorts ascending by it; the selection is kept

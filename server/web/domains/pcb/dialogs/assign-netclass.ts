@@ -38,10 +38,10 @@ export function assignNetclass(): void {
   for (const e of netsOfItems(ids)) {
     if (!e) continue;
     const p = netNamePattern(e);
-    if (!p) { toast("All selected nets must be labeled to assign a netclass.", 4000); return; }
+    if (!p) { toast("All selected nets must be labeled to assign a netclass.", 8000, undefined, "error"); return; }
     names.push(p);
   }
-  if (!names.length) { toast("No nets selected.", 4000); return; }
+  if (!names.length) { toast("No nets selected.", 8000, undefined, "error"); return; }
   toolCtx().setSelection([]);
   const pro = projectJson(), classes = (Array.isArray(obj(pro.net_settings).classes) ? obj(pro.net_settings).classes as unknown[] : []).map((c) => String(obj(c as never).name || "")).filter((n) => n && n !== "Default");
   const candidates = allNetNames();

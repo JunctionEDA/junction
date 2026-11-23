@@ -163,7 +163,7 @@ export function footprintFacts(fpid: string, sexpr: string): unknown {
  * `nets` names for its number.  The caller rotates, flips and moves it into place.
  */
 export function footprintNode(fpid: string, sexpr: string, ref: string, value: string, fields: Record<string, string>, nets?: (pad: string) => any[] | null): any {
-  const k = K(); const src = k.parse(sexpr);
+  const k = K(); const src = k.footprintDoc ? k.footprintDoc.unwrapFootprintLib(k.parse(sexpr)) : k.parse(sexpr);   // a 10.99 file: (kicad_footprint_lib … (footprint …))
   if (!src || (src[0] !== "footprint" && src[0] !== "module")) throw new ToolError(`footprint ${fpid}: the library file could not be read.`);
   const out: any[] = ["footprint", fpid]; const uuid = () => ["uuid", k.newUuid()]; let placed = false;
   const place = () => { if (!placed) { out.push(uuid(), ["at", 0, 0]); placed = true; } };

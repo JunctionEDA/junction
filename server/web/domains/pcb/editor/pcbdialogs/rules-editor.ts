@@ -76,31 +76,22 @@ export function rulesEditor(text: string, opts: { ro?: boolean; onShowMatching?(
     caretLine: () => ta.value.slice(0, ta.selectionStart).split("\n").length };
 }
 
-export interface RuleError { line: number; col: number; message: string }
-/** The rules' problems with where they are (DRC_RULES_PARSER's PARSE_ERROR line and offset). */
-export function ruleErrors(text: string, compile?: (t: string) => { errors: string[] } | null): RuleError[] {
-  let depth = 0, line = 1, col = 0, inStr = false, any = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i]; col++;
-    if (c === "\n") { line++; col = 0; if (!inStr) continue; }
-    if (inStr) { if (c === "\\") i++; else if (c === '"') inStr = false; continue; }
-    if (c === "#") { while (i + 1 < text.length && text[i + 1] !== "\n") i++; continue; }
-    if (c === '"') inStr = true;
-    else if (c === "(") { depth++; any = true; }
-    else if (c === ")") { depth--; if (depth < 0) return [{ line, col, message: "Unexpected ')'." }]; }
-  }
-  if (inStr) return [{ line, col, message: "Unterminated string." }];
-  if (depth) return [{ line, col, message: `Expecting ')'.` }];
-  if (any && !/^\s*(#[^\n]*\n\s*)*\(version\s+\d+\)/.test(text)) return [{ line: 1, col: 1, message: "Missing '(version <number>)' header." }];
+export interface RuleError { line: number; col: number; message: string; severity?: "error" | "warning" | "info"; rest?: string }
+/** What a rules compile reports: DRC_RULES_PARSER's messages (pcb-tools parseDru). */
+export interface RuleMessage { severity: "error" | "warning" | "info"; text: string; rest?: string; line?: number; col?: number }
+/**
+ * PANEL_SETUP_RULES::OnCompile's report: DRC_RULES_PARSER's every message in order (an error with its line and byte
+ * offset, a deprecation warning, "No errors found."), as the parser words them.
+ */
+export function ruleReport(text: string, compile?: (t: string) => { errors: string[]; messages?: RuleMessage[] } | null): RuleError[] {
   const res = compile ? compile(text) : null;
-  const out: RuleError[] = [];
-  for (const e of res ? res.errors : []) {
-    const m = /^rule '([^']*)'/.exec(e);
-    let ln = 1, cl = 1;
-    if (m) { const at = text.search(new RegExp("\\(rule\\s+\"?" + m[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\"?[\\s)]")); if (at >= 0) { ln = text.slice(0, at).split("\n").length; cl = at - text.lastIndexOf("\n", at - 1); } }
-    out.push({ line: ln, col: cl, message: e.replace(/^rule '/, "Rule '") });
-  }
-  return out;
+  if (!res) return [];
+  if (res.messages) return res.messages.map((m) => ({ line: m.line || 0, col: m.col || 0, message: m.text, severity: m.severity, ...(m.rest ? { rest: m.rest } : {}) }));
+  return res.errors.map((e) => ({ line: 1, col: 1, message: e, severity: "error" as const }));
+}
+/** The rules' errors with where they are (DRC_RULES_PARSER's messages of error severity). */
+export function ruleErrors(text: string, compile?: (t: string) => { errors: string[]; messages?: RuleMessage[] } | null): RuleError[] {
+  return ruleReport(text, compile).filter((e) => e.severity === "error");
 }
 /** The name of the top-level (rule …) block that holds `line` (1-based); null when the line is outside every rule. */
 export function ruleAtLine(text: string, line: number): string | null {

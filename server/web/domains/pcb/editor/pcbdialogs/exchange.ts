@@ -101,8 +101,15 @@ function showExchangeDialog(ctx: ToolCtx, doc: KDoc, current: KItem | null, upda
     return h("label", { class: "pd-lbl", style: "display:flex;align-items:center;gap:6px;white-space:nowrap" }, r, label);
   };
   // the library chooser (FRAME_FOOTPRINT_CHOOSER) for the new id or the specified id
+  // ViewAndSelectFootprint: the chooser opens on m_newID's footprint, and with a current footprint it gets the
+  // MAIL_SYMBOL_NETLIST of its unique pad numbers and its footprint filters
+  const chooserFilters = (): { pins: number; filters: string[] } | null => {
+    if (!current) return null;
+    const pads = new Set<string>(); for (const c of current.node) if (Array.isArray(c) && c[0] === "pad" && String(c[1] ?? "") !== "") pads.add(String(c[1]));
+    return { pins: pads.size, filters: fieldText(current.node, "ki_fp_filters").split(/\s+/).filter(Boolean) };
+  };
   const browse = (target: HTMLInputElement, m?: Mode): void => {
-    void KiCadLibrary.openChooser("footprint", { title: "Choose Footprint" }).then((chosen) => {
+    void KiCadLibrary.openChooser("footprint", { preselect: newID.value.trim(), fpFilters: chooserFilters() }).then((chosen) => {
       if (!chosen) return;
       target.value = chosen.fpid || chosen.item.id;
       if (m) setMode(m);

@@ -1,5 +1,6 @@
 // pcb-tools/state.ts — the module state S, the canvas API K and the constants every section shares.
 import type { PcbCanvasApi, PcbCtx, PcbState } from "./types";
+import { SEXPR_BOARD_FILE_VERSION } from "../../canvas/format-version";
 import { root } from "../root";
 import { ensureDom } from "./dom";
 
@@ -29,7 +30,7 @@ export const SNAP_MM = 0.5, HIT_MM = 0.2, DBL_MS = 400;
 // The desktop applier only parses kicad_pcb documents (a bare item takes the
 // legacy-format branches), so every fragment travels wrapped.  The version is
 // the one boards from this build carry — it must never exceed the desktop's.
-export const BOARD_VERSION = 20260728;
+export const BOARD_VERSION = SEXPR_BOARD_FILE_VERSION;
 
 export const S = {
   layer: "F.Cu", gfxLayer: "F.Cu",   // graphics, text and dimensions are drawn on the active layer, as DRAWING_TOOL does

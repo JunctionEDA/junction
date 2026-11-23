@@ -13,8 +13,9 @@ import { EXTRA_TOOLS, TOOL_MAP } from "../../domains/pcb/tables";
 import { fmtCoord, gridMessageText, toDisplayAbs, toDisplayRel, unitsMsg } from "../units";
 import { cx } from "../util";
 
-// One field of the bar: a vertically centred cell with a 1px rule on its left (KiCad's status panes).
-const cell = "sbcell flex items-center px-2.5 border-l border-line whitespace-nowrap";
+// One field of the bar: a vertically centred cell with a 1px rule on its left (KiCad's status panes).  The text keeps
+// its spaces: KiCad's formats put two between fields ("X %s  Y %s", "dx %s  dy %s  dist %s").
+const cell = "sbcell flex items-center px-2.5 border-l border-line whitespace-pre";
 
 /** The name KiCad shows for the active tool (the action's friendly name; the selection tool reads "Select item(s)"). */
 function toolName(editor: Editor | null, tool: string, moduleLabel: string | undefined): string {
@@ -85,7 +86,7 @@ export function StatusBar() {
           <span className={cx(cell, "min-w-[calc(42ch+20px)] max-[1180px]:hidden")} id="sbDelta">{delta}</span>
           {/* EDA_DRAW_FRAME::DisplayGridMsg ("grid %s", GRID::UserUnitsMessageText) and DisplayUnitsMsg: plain text; the
               units change from the left toolbar or Ctrl+U */}
-          <span className={cx(cell, "min-w-[calc(16ch+20px)]")} id="sbGrid">grid {gridMessageText(vp.gridPitch, vp.gridPitch, u, sch ? "sch" : "pcb")}</span>
+          <span className={cx(cell, "min-w-[calc(16ch+20px)]")} id="sbGrid">grid {gridMessageText(vp.gridPitch, vp.gridPitchY && vp.gridPitchY > 0 ? vp.gridPitchY : vp.gridPitch, u, sch ? "sch" : "pcb")}</span>
           <span className={cell} id="sbUnits">{unitsMsg(u)}</span>
           <span className={cx(cell, "font-sans min-w-0 overflow-hidden text-ellipsis max-[640px]:hidden")} id="sbTool">{toolName(editor, tool, moduleTools.find((t) => t.id === tool)?.label)}</span>
           {constraint ? <span className={cx(cell, "font-sans min-w-0 overflow-hidden text-ellipsis max-[1024px]:hidden")} id="sbMode">{constraint}</span> : null}

@@ -10,6 +10,7 @@
 import { expandStacked } from "../canvas/stacked-pins";
 import type { Netlist, NetEntry, SheetInstance } from "../canvas/pcb-netlist";
 import { prettify } from "../canvas/prettify";
+import { unescapeText } from "../canvas/text";
 import { strNumCmp as strNumCmpCase } from "../canvas/variant-model";
 import { symbolFlags, symbolFlagsForVariant, symbolVariant, type SymFlags } from "../canvas/variant-model";
 
@@ -32,12 +33,8 @@ export function iso8601Local(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-/** UnescapeString: {slash} {backslash} {lt} {gt} {colon} {dquote} {space} {tab} {return} {brace} back to characters. */
-export function unescapeString(s: string): string {
-  if (s.indexOf("{") < 0) return s;
-  const map: Record<string, string> = { slash: "/", backslash: "\\", lt: "<", gt: ">", colon: ":", dquote: '"', quote: "'", space: " ", tab: "\t", return: "\n", brace: "{", comma: "," };
-  return s.replace(/\{(slash|backslash|lt|gt|colon|dquote|quote|space|tab|return|brace|comma)\}/g, (_m, k: string) => map[k]);
-}
+/** UnescapeString (common/string_utils.cpp:399-480): the escapes back to characters, brace groups kept. */
+export function unescapeString(s: string): string { return unescapeText(s); }
 
 /** ExpandStackedPinNotation: "[1-3,5]" → 1, 2, 3, 5 (a prefix may lead the numbers: "[A1-A4]"); `valid` false when
  *  the brackets or a range are malformed (the text is then kept whole). */

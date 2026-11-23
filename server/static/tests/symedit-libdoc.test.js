@@ -53,7 +53,11 @@ const withPin = (doc, name, n) => { const s = M.node(doc.symbolText(name)); M.ad
   A.connect(); B.connect(); await flush(); await Promise.all([A.whenLoaded(), B.whenLoaded()]);
   await test("both clients load the file; nothing is modified", () => {
     assert.ok(A.loaded && B.loaded && A.canEdit && B.canEdit);
-    assert.strictEqual(A.fileText(), FILE); assert.strictEqual(B.fileText(), FILE);
+    // what a save writes: the file, with the header written afresh (formatLibraryHeader: this build's generator_version)
+    // (and, the file being older than 20250318, "~" values as the parser reads them: empty; canvas/legacy.ts)
+    const saved = FILE.replace(/\(generator_version "[^"]*"\)/, /\(generator_version "[^"]*"\)/.exec(M.NEW_LIBRARY_TEXT)[0])
+      .replace(/\((name|number) "~"/g, '($1 ""').replace(/(\(property "[^"]*") "~"/g, '$1 ""');
+    assert.strictEqual(A.fileText(), saved); assert.strictEqual(B.fileText(), saved);
     assert.ok(!A.isModified && !B.isModified);
   });
   const savedR = A.symbolText("R");

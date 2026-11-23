@@ -14,7 +14,7 @@ import * as L from "./change-symbols-logic";
 import { allSheets, libCache, libSymbol, type Sheet } from "./change-symbols";
 import { officialIndex, officialLibraries } from "../library/sources";
 
-interface LibApi { openChooser(kind: "symbol", opts?: { title?: string; filter?: string; browser?: boolean }): Promise<{ libId?: string } | null> }
+interface LibApi { openChooser(kind: "symbol", opts?: { title?: string; filter?: string; browser?: boolean; picker?: boolean; preselect?: string }): Promise<{ libId?: string } | null> }
 const libApi = (): LibApi | null => (window as unknown as { KiCadLibrary?: LibApi }).KiCadLibrary || null;
 
 export interface LibIdRow { refs: string; cur: string; next: string; orphan: boolean; items: { sheet: Sheet; item: KItem }[] }
@@ -93,8 +93,8 @@ export async function openEditSymbolsLibId(): Promise<void> {
         inputs[i] = inp;
         const browse = bitmapButton("small_library", "Browse library", async () => {
           const lib = libApi(); if (!lib) return;
-          const cur = (r.next || r.cur).split(":").pop() || "";
-          const got = await lib.openChooser("symbol", { title: "Choose Symbol", filter: cur });
+          // SYMBOL_CHOOSER_FRAME on the row's current lib id
+          const got = await lib.openChooser("symbol", { picker: true, preselect: (r.next || r.cur).trim() });
           if (!got || !got.libId) return;
           if (!validLibId(got.libId)) { await messageBox("Invalid symbol library identifier"); return; }
           r.next = got.libId; inp.value = got.libId;

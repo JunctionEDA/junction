@@ -506,18 +506,40 @@ function pcbPickerMenu(): CondMenu {
   m.item("PCB_ACTIONS::magneticSnapAllLayers", (c) => !c.snapAllLayers, 1).item("PCB_ACTIONS::magneticSnapActiveLayer", (c) => !!c.snapAllLayers, 1).sep(1);
   return standardSubMenus(m);
 }
+/** BOARD_EDITOR_CONTROL::Init's menu, which the Place Footprint tool shows: Cancel, "Get and Place Footprint" while
+ *  nothing is selected (no footprint on the cursor), Zoom and Grid. */
+function pcbPlaceFootprintMenu(): CondMenu {
+  const m = new CondMenu();
+  m.item("ACTIONS::cancelInteractive", always, 1).sep(1);
+  m.item("PCB_ACTIONS::getAndPlace", empty, 1000).sep(1000);
+  return standardSubMenus(m);
+}
 /** The base menu of a tool that defines none of its own: Cancel, Zoom, Grid (SCH_TOOL_BASE::Init, PCB_TOOL_BASE). */
 function basicToolMenu(): CondMenu { const m = new CondMenu(); m.item("ACTIONS::cancelInteractive", always, 1).sep(1); return standardSubMenus(m); }
+/** PCB_VIEWER_TOOLS::Init (the measure tool): Cancel, Copy (the ruler's readout; greyed like the frame's ACTIONS::copy,
+ *  ENABLE( cond.HasItems() )), then Zoom and Grid. */
+function measureToolMenu(): CondMenu {
+  const m = new CondMenu();
+  m.item("ACTIONS::cancelInteractive", always, 1).sep(1);
+  m.sep(always, 2).itemEnabled("ACTIONS::copy", notEmpty, always, 3).sep(always, 3);
+  return standardSubMenus(m);
+}
 
-const MENUS = { schSelection: schSelectionMenu(), schWire: schWireToolMenu(), schDrawing: schDrawingToolMenu(), pcbSelection: pcbSelectionMenu(), pcbRouter: pcbRouterMenu(), pcbDrawing: pcbDrawingToolMenu(), pcbPicker: pcbPickerMenu(), basic: basicToolMenu() };
+const MENUS = { schSelection: schSelectionMenu(), schWire: schWireToolMenu(), schDrawing: schDrawingToolMenu(), pcbSelection: pcbSelectionMenu(), pcbRouter: pcbRouterMenu(), pcbDrawing: pcbDrawingToolMenu(), pcbPicker: pcbPickerMenu(), pcbPlaceFootprint: pcbPlaceFootprintMenu(), basic: basicToolMenu(), measure: measureToolMenu() };
 
+/** The board tools that run PCB_PICKER_TOOL (ACTIONS::pickerTool, PCB_ACTIONS::selectPoint/ItemInteractively). */
+export const PCB_PICKER_TOOLS = new Set(["pickpoint", "pickitem", "gridorigin", "drillorigin", "delete"]);
 /** The menu KiCad would show for the active tool: the tool's own while it runs, the selection tool's otherwise. */
 export function menuFor(c: MenuCtx, moduleTool: boolean): MenuDef {
   if (c.tool === "select" || c.tool === "highlight") return c.editor === "sch" ? MENUS.schSelection : MENUS.pcbSelection;
-  if (!moduleTool) return MENUS.basic;                       // pan, zoom-to-selection, measure, comment: Cancel + Zoom + Grid
+  if (c.tool === "placeFootprint" && c.editor !== "sch") return MENUS.pcbPlaceFootprint;   // editor/library.ts PLACE_FOOTPRINT_TOOL
+  if (c.tool === "measure" && c.editor !== "sch") return MENUS.measure;
+  if (!moduleTool) return MENUS.basic;                       // pan, zoom-to-selection, comment: Cancel + Zoom + Grid
   if (c.editor === "sch") return [...SCH_WIRE_TOOLS, "lines"].includes(c.tool) ? MENUS.schWire : c.tool === "delete" ? MENUS.basic : MENUS.schDrawing;
-  if (c.tool === "pickpoint" || c.tool === "pickitem") return MENUS.pcbPicker;
-  return c.tool === "route" || c.tool === "routediff" ? MENUS.pcbRouter : c.tool === "delete" || c.tool === "drag" ? MENUS.basic : MENUS.pcbDrawing;
+  // PCB_PICKER_TOOL runs the point / item picks, Grid Origin (PCB_CONTROL::GridPlaceOrigin), Drill Origin
+  // (BOARD_EDITOR_CONTROL::DrillOrigin) and Interactive Delete (PCB_CONTROL::InteractiveDelete): its own menu
+  if (PCB_PICKER_TOOLS.has(c.tool)) return MENUS.pcbPicker;
+  return c.tool === "route" || c.tool === "routediff" ? MENUS.pcbRouter : c.tool === "drag" ? MENUS.basic : MENUS.pcbDrawing;
 }
 
 /** One evaluated entry: CONDITIONAL_MENU::Evaluate's output before labels and availability are attached. */

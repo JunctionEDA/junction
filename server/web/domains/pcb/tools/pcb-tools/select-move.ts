@@ -1,5 +1,6 @@
 // pcb-tools/select-move.ts — the select tool's move (EDIT_TOOL::doMoveSelection) and the stage's pointer handlers.
 import { applyAxisLock, axisLockKey, keyboardCursorKey, newAxisLock } from "../axis-lock";
+import { isPastDragThreshold } from "../drag-threshold";
 import type { BoardDoc, Obstacle, PadInfo, PcbChange, PcbCtx, PendingDrag, Pt, SelectMove } from "./types";
 
 /** Where the obstacles a component drag hit were first met. */
@@ -16,6 +17,7 @@ import { assembleLine, dragCorner45, rp } from "./dragger";
 import { netClearance } from "./drc";
 import { routableItems } from "./edit-commands";
 import { angleSnapDirections, beginSelectDrag, bestDragOrigin, snapCursor } from "./grid-helper";
+import { clearConstruction, snapLineClear } from "./construction";
 import { MOVE_SNAP_MSG, angleSnapMode, displayConstraintsMsg } from "./draw-modes";
 import { finishMoveIndividually } from "./ref-move";
 import { applySelection, expandGroups, selectionIds, topParentOf } from "./groups";
@@ -91,7 +93,8 @@ export function selectMoveTo(ctx: PcbCtx, mm: Pt, mods?: SelectMove["mods"]) {
   // then the grid; Shift: grid only, Ctrl: no grid) less the drag origin
   // configureAngleSnap: in the 45 and 90 modes the cursor also holds to lines through the drag origin
   const dirs = angleSnapDirections(angleSnapMode());
-  const sn = snapCursor(ctx, [mm[0], mm[1]], m.skip || new Set(m.orig.keys()), mods || m.mods, dirs.length ? { origin: m.start, dirs } : null); m.snapAt = sn.anchor;
+  // (SetAuxAxes( true, dragOrigin ) when the move has no reference point: the drag origin's x / y beat a farther grid line)
+  const sn = snapCursor(ctx, [mm[0], mm[1]], m.skip || new Set(m.orig.keys()), mods || m.mods, { origin: m.start, dirs, aux: m.aux || null }); m.snapAt = sn.anchor;
   const guide = sn.guide || null; if (!sameGuide(m.guide, guide)) { m.guide = guide; ctx.requestRender(); }
   if (S.moveSeq && S.popup) S.popup.at = [mm[0], mm[1]];   // Move Individually's popup stays by the cursor
   // an arrow key locks the move to its axis, for the mouse too, until the opposite key (tools/axis-lock.ts)
@@ -156,6 +159,8 @@ export function beginCarryMove(ctx: PcbCtx, opts?: { placing?: string[]; ids?: s
   // cursor where D was pressed, so the footprint moves by whole grid steps and never jumps on the first motion.
   const at = opts.origin ? opts.origin.slice() : opts.placing && !opts.restore ? cursorPoint(ctx) : opts.sticky === false || (opts.drag && free.length === 1 && doc.items.get(free[0]!)?.kind === "footprint") ? snapCursor(ctx, mouse, new Set(free), {}).p : bestDragOrigin(doc, free, mouse, ctx.gridPitch, { filter: ctx.selFilter, mmPerPx: 1 / Math.max(1e-6, ctx.pxPerMm || 4) });
   const m: SelectMove = { ids: free, start: at.slice(), orig: new Map(), ends: [], last: [0, 0], moved: false, sticky: opts.sticky !== false, placing: opts.placing || null, restore: opts.restore || null, hover: !!opts.hover };
+  if (!opts.origin && !opts.placing) m.aux = at.slice();   // doMoveSelection: no reference point, so SetAuxAxes( true, dragOrigin )
+  snapLineClear(); clearConstruction();   // a new move's grid helper: no snap line or construction geometry yet
   for (const id of free) m.orig.set(id, clone(doc.items.get(id)!.node));
   const gen = !opts.placing && !opts.drag ? selectedTuningPattern(ctx, free) : null;
   if (gen) {   // doMoveSelection with one PCB_GENERATOR: genStartEdit, then each step moves its origin and end and re-tunes
@@ -280,8 +285,8 @@ export function onStagePointerMove(ev: PointerEvent) {
   if (S.pedit) { ev.stopImmediatePropagation(); editHandleMove(ctx, ctx.worldMm(ev), ev); return; }
   if (S.pending) {
     const pd = S.pending;
-    // the drag starts past KiCad's drag threshold in screen pixels (gestures.ts DRAG_THRESHOLD_PX)
-    if (Math.hypot(ev.clientX! - pd.client[0], ev.clientY! - pd.client[1]) <= DRAG_PX) return;
+    // the drag starts past KiCad's drag threshold in screen pixels (TOOL_DISPATCHER::IsPastDragThreshold)
+    if (!isPastDragThreshold(ev.clientX! - pd.client[0], ev.clientY! - pd.client[1])) return;
     S.pending = null; startPendingDrag(ctx, pd);
   }
   if (S.drag && S.drag.bySelect) { dragMove(ctx, ctx.worldMm(ev)); ctx.requestRender(); }
@@ -291,7 +296,7 @@ export function onStagePointerUp(ev?: PointerEvent | null) {
   const ctx = lastCtx; const pd = S.pending; S.pending = null; if (!ctx) return;
   // IsClick on an item of a multi-selection (the press only armed a drag): selectPoint clears the selection and
   // selects what was clicked (its top-level group with it)
-  if (pd && !pd.app && pd.item && ev && ev.type === "pointerup" && ctx.doc && S.sel.size > 1 && Math.hypot(ev.clientX - pd.client[0], ev.clientY - pd.client[1]) <= DRAG_PX) {
+  if (pd && !pd.app && pd.item && ev && ev.type === "pointerup" && ctx.doc && S.sel.size > 1 && !isPastDragThreshold(ev.clientX - pd.client[0], ev.clientY - pd.client[1])) {
     const pick = topParentOf(ctx.doc, pd.item.id) ? Array.from(expandGroups(ctx.doc, [pd.item.id])) : [pd.item.id];
     S.sel = new Set(pick); if (ctx.setSelection) ctx.setSelection([]); ctx.requestRender();
   }

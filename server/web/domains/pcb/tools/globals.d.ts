@@ -46,10 +46,14 @@ interface ToolsRoot {
     pinExactAt?(mm: [number, number]): boolean;
     /** dialogs/sync-units.ts toggleAttribute: SetAttribute over the items and the other units of multi-unit parts. */
     toggleAttribute?(ctx: unknown, items: KItem[], isOn: (node: SNode) => boolean, set: (node: SNode, on: boolean) => SNode): boolean;
+    /** dialogs/sync-units.ts selectUnit: SCH_EDIT_FRAME::SelectUnit over the hierarchy (the "Unit Already Placed" question). */
+    selectUnit?(ctx: unknown, item: KItem, unit: number): boolean;
     tool?: string; DOC_TYPE?: string; kdoc?: KDoc | null; zoom?: number; selected?: { id: string; x: number; y: number; rot?: number } | null;
     selection?: Set<string> | null; hiddenLayers?: Set<string> | null; overrideLocks?: boolean; units?: string;
     /** the editor's own footprint drag (a group drag carries every footprint) */
     drag?: { moved?: boolean; group?: { fp: { id: string } }[] | null; fp?: { id: string } | null } | null;
+    /** editor/crossprobe.ts: a net highlighted (or cleared, no names) by the user goes to the other editor */
+    hooks?: { netHighlighted?(names: string[]): void };
   };
   /** web/domains/pcb/editor: the chrome's store (the board tools read the view and whether a context menu is up). */
   CollabApp?: { getState(): { view?: string; contextMenu?: unknown } };

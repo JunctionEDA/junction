@@ -6,7 +6,7 @@
 // custom rules give (PCB_EDIT_FRAME::SetTrackSegmentWidth with aUseDesignRules).  Plain node editing.
 import type { BoardDoc, DesignSettings, PcbChange } from "./types";
 import { K, S } from "./state";
-import { netclassOf, netclassName } from "./drc";
+import { netclassOf, netInNetclass } from "./drc";
 import { netName, viaTypeOf } from "./dru-eval";
 import { evalRuleConstraint } from "./dru";
 import { pinnedOpt, routedRuleItem } from "./rule-resolver";
@@ -68,7 +68,7 @@ export function passesTrackFilter(doc: BoardDoc, it: KItem, f: GlobalTracksFilte
   const n = it.node;
   if (f.selection && !f.selection.has(it.id)) return false;
   if (f.net != null && netName(doc, n) !== f.net) return false;
-  if (f.netclass != null && netclassName(s, netName(doc, n)) !== f.netclass) return false;
+  if (f.netclass != null && !netInNetclass(s, netName(doc, n), f.netclass)) return false;
   if (f.layer != null && layerOf(n) !== f.layer) return false;
   if (it.kind === "via") { if (f.viaDiameter != null && !near(kidNum(n, "size"), f.viaDiameter)) return false; }
   else if (f.trackWidth != null && !near(kidNum(n, "width"), f.trackWidth)) return false;
@@ -88,7 +88,7 @@ export function processTrackItem(doc: BoardDoc, it: KItem, n: SNode, job: Global
       else did = setViaSize(n, v.via.diameter, v.via.drill) || did;
     }
     if (isVia && v.annular != null) { const before = K.serialize(n); setAnnularMode(n, v.annular, parse); did = did || K.serialize(n) !== before; }
-    if (isVia && v.protection != null) { const before = K.serialize(n); setProtectionPreset(n, v.protection, parse); did = did || K.serialize(n) !== before; }
+    if (isVia && v.protection != null) { const before = K.serialize(n); setProtectionPreset(n, v.protection, parse, Number(doc && doc.version) || 0); did = did || K.serialize(n) !== before; }
     if (!isVia && v.layer) { const l = K.kid(n, "layer"); if (l && K.str(l[1]) !== v.layer) { l[1] = v.layer; did = true; } }
   } else if (isVia) {
     did = setViaSize(n, ruleSize(doc, s, n, "via_diameter", micro ? nc.microvia_diameter : nc.via_diameter), ruleSize(doc, s, n, "hole_size", micro ? nc.microvia_drill : nc.via_drill));

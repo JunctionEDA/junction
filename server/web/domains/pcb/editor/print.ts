@@ -30,8 +30,10 @@ interface LayerRow { key: string; name: string; color: string }
 interface PcbPrint { color: boolean; frame: boolean; background: boolean; drill: number; mirror: boolean; perLayer: boolean; edges: boolean; scale: number; custom: number; layers: string[] | null }
 interface SchPrint { frame: boolean; color: boolean; background: boolean; otherTheme: boolean; theme: string }
 const PCB_KEY = "kicad.print.board", SCH_KEY = "kicad.print.schematic";
-const PCB_DEFAULTS: PcbPrint = { color: true, frame: true, background: false, drill: 1, mirror: false, perLayer: false, edges: true, scale: 0, custom: 1, layers: null };
-const SCH_DEFAULTS: SchPrint = { frame: true, color: true, background: true, otherTheme: false, theme: "default" };
+// APP_SETTINGS_BASE's printing.*: monochrome true, title_block false, background false, scale 1.0 (1:1), mirror false,
+// drill_marks 1 (small), pagination ALL_LAYERS, edge_cuts_on_all_pages true, use_theme false
+const PCB_DEFAULTS: PcbPrint = { color: false, frame: false, background: false, drill: 1, mirror: false, perLayer: false, edges: true, scale: 1, custom: 1, layers: null };
+const SCH_DEFAULTS: SchPrint = { frame: false, color: false, background: false, otherTheme: false, theme: "default" };
 const SHEET_COLOR = "#C872AB";
 const FP_EDITOR_PAGE: [number, number] = [297, 210];   // PAGE_INFO( A4 ), landscape, mm
 
@@ -75,9 +77,21 @@ async function pcbPrint(): Promise<void> {
   const radio = (v: number, label: string): HTMLInputElement => { const r = h("input", { type: "radio", name: "pr-scale", checked: P.scale === v, "data-k": "scale-" + v }); r.dataset.v = String(v); return r; };
   const r1 = radio(1, "1:1"), rFit = radio(0, "Fit to page"), rCustom = radio(2, "Custom:");
   const custom = numField(P.custom, { key: "custom", digits: 3 });
+  // onSetCustomScale: typing a value selects the Custom radio button
+  custom.input.addEventListener("input", () => { rCustom.checked = true; });
+  /** DIALOG_PRINT_GENERIC::getScaleValue: the custom scale as typed, with its warnings; setScaleValue puts a changed value back. */
+  const scaleValue = (): number => {
+    if (r1.checked) return 1;
+    if (!rCustom.checked) return 0;
+    const r = customScale(custom.input.value);
+    if (r.message) messageBox("Information", r.message);
+    if (r.scale === 1 && r.message) r1.checked = true;   // setScaleValue( 1.0 )
+    else if (r.message) { custom.input.value = r.scale.toFixed(6); }
+    return r.scale;
+  };
   const sync = (): void => { bg.input.disabled = mode.get() === 1; edges.input.disabled = !perLayer.get(); edges.el.classList.toggle("disabled", !perLayer.get()); };
-  const read = (): PcbPrint => ({ color: mode.get() === 0, frame: frame.get(), background: bg.get(), drill: drill.get(), mirror: mirror.get(), perLayer: perLayer.get(), edges: edges.get(),
-    scale: r1.checked ? 1 : rCustom.checked ? 2 : 0, custom: Math.max(0.01, Math.min(100, custom.get() || 1)), layers: layers.filter((l) => checks.get(l)!.checked) });
+  const read = (): PcbPrint => { const sv = scaleValue(); return { color: mode.get() === 0, frame: frame.get(), background: bg.get(), drill: drill.get(), mirror: mirror.get(), perLayer: perLayer.get(), edges: edges.get(),
+    scale: r1.checked ? 1 : rCustom.checked ? 2 : 0, custom: rCustom.checked ? sv : Math.max(0.01, Math.min(100, custom.get() || 1)), layers: layers.filter((l) => checks.get(l)!.checked) }; };
 
   const pages = async (o: PcbPrint): Promise<PlotPage[] | null> => {
     savePrefs(PCB_KEY, o);
@@ -114,6 +128,19 @@ async function pcbPrint(): Promise<void> {
           h("div", { class: "pd-box" }, h("div", { class: "hd" }, "Scale"), r(r1, "1:1"), r(rFit, "Fit to page"), h("div", { class: "pd-row" }, r(rCustom, "Custom:"), custom.el)))));
       sync();
     } } as unknown as Parameters<NonNullable<typeof KDialogs>["open"]>[0]);
+}
+
+/**
+ * DIALOG_PRINT_GENERIC::getScaleValue on the custom scale text: wxString::ToDouble (the whole text a number, else
+ * 1.0 and "not a number", which also selects 1:1), then clamped to MIN_SCALE 0.01 .. MAX_SCALE 100 with a warning.
+ */
+export function customScale(text: string): { scale: number; message: string } {
+  const t = text.trim();
+  if (!/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(t)) return { scale: 1, message: "Warning: custom scale is not a number." };
+  const v = Number(t);
+  if (v > 100) return { scale: 100, message: `Warning: custom scale is too large.\nIt will be clamped to ${(100).toFixed(6)}.` };
+  if (v < 0.01) return { scale: 0.01, message: `Warning: custom scale is too small.\nIt will be clamped to ${(0.01).toFixed(6)}.` };
+  return { scale: v, message: "" };
 }
 
 /** The Footprint Editor's board as the plotter reads a board: the footprint (the file the editor holds, at the

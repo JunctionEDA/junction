@@ -269,9 +269,9 @@ test("Place Next Symbol Unit: KiCad's messages, units counted over the hierarchy
 test("images: png, jpeg, bmp and gif are accepted; the size follows the file's resolution; KiCad's error text", () => {
   assert.ok(/\.bmp/.test(_.IMAGE_ACCEPT) && /\.gif/.test(_.IMAGE_ACCEPT) && /\.jpeg/.test(_.IMAGE_ACCEPT) && /\.png/.test(_.IMAGE_ACCEPT));
   const bmp = new Uint8Array(54); bmp[0] = 0x42; bmp[1] = 0x4D; new DataView(bmp.buffer).setInt32(18, 200, true); new DataView(bmp.buffer).setInt32(22, -100, true); new DataView(bmp.buffer).setInt32(38, 3780, true);
-  assert.deepStrictEqual(K.imageInfo(bmp), { mime: "image/bmp", w: 200, h: 100, ppi: 94 }, "3780 px/m -> 37 px/cm -> 94 PPI (wx reports whole px/cm)");
+  assert.deepStrictEqual(K.imageInfo(bmp), { mime: "image/bmp", w: 200, h: 100, ppi: 94, legacyPpi: 94 }, "3780 px/m -> 37 px/cm -> 94 PPI (wx reports whole px/cm)");
   const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x40, 0x01, 0xF0, 0x00]);
-  assert.deepStrictEqual(K.imageInfo(gif), { mime: "image/gif", w: 320, h: 240, ppi: 300 });
+  assert.deepStrictEqual(K.imageInfo(gif), { mime: "image/gif", w: 320, h: 240, ppi: 300, legacyPpi: 300 });
   const { ctx } = fresh();
   sch.setImagePicker((c, done) => done({ name: "pic.bmp", bytes: bmp }));
   sch.onActivate("image", ctx);

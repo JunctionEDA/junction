@@ -3,13 +3,15 @@
 export const EDIT_POINT_PX = 8;                                  // EDIT_POINT::POINT_SIZE
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
 export const EDIT_BORDER_PX = IS_MAC ? 3 : 2;                  // EDIT_POINT::BORDER_SIZE (3 on macOS)
+export const EDIT_HOVER_PX = IS_MAC ? 6 : 5;                   // EDIT_POINT::HOVER_SIZE (6 on macOS)
 export function editPointColors(aux: string, bg: string) {
   let d = parseRgb(aux) || [0, 0, 0]; const b = parseRgb(bg);
   if (b && (d[0] - b[0]) ** 2 + (d[1] - b[1]) ** 2 + (d[2] - b[2]) ** 2 < 0.5) d = [1 - d[0], 1 - d[1], 1 - d[2]];   // COLOR4D::Distance < 0.5: Invert
   const br = d[0] * 0.299 + d[1] * 0.587 + d[2] * 0.117;
   const shade = (f: number, dark: boolean) => "rgba(" + d.map((v) => Math.round(255 * (dark ? v * (1 - f) : v + (1 - v) * f))).join(",") + ",0.8)";
   const [bf, dark] = br > 0.5 ? [0.7, true] : br > 0.2 ? [0.4, false] : [0.7, false];
-  return { fill: "rgb(" + d.map((v) => Math.round(255 * v)).join(",") + ")", border: shade(bf as number, dark as boolean) };
+  const hf = br > 0.5 ? 0.5 : br > 0.2 ? 0.3 : 0.5;   // highlightColor: Darkened( 0.5 ) / Brightened( 0.3 ) / Brightened( 0.5 )
+  return { fill: "rgb(" + d.map((v) => Math.round(255 * v)).join(",") + ")", border: shade(bf as number, dark as boolean), highlight: shade(hf, dark as boolean) };
 }
 function parseRgb(c: string): number[] | null {
   if (!c) return null;

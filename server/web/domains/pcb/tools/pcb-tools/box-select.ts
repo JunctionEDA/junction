@@ -144,7 +144,7 @@ export function padInArea(fp: KItem, index: number, area: SelArea, hidden?: Set<
   return area.contained ? geoms.every((g) => geomInArea(g, area)) : geoms.some((g) => geomInArea(g, area));
 }
 /** GetPosition() as CollectMultiple's sort reads it. */
-function positionOf(doc: BoardDoc, id: string): Pt {
+export function positionOf(doc: BoardDoc, id: string): Pt {
   const h = id.indexOf("#"), f = id.indexOf("@field:");
   const it = doc.items.get(h > 0 ? id.slice(0, h) : f > 0 ? id.slice(0, f) : id); if (!it) return [0, 0];
   if (f > 0) { const fb = (K.fieldBoxes(it, null) as unknown as { name: string; geom: GeomPrim }[]).find((q) => q.name === id.slice(f + 7)); if (fb) return [fb.geom.x, fb.geom.y]; }

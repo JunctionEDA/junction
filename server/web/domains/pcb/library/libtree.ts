@@ -5,7 +5,7 @@
 //   sort         LIB_TREE_NODE::Compare: pinned libraries first, then with "Sort by Best Match" exact matches, then
 //                the higher score; otherwise (and for ties) the name
 //   recent       LIB_TREE::updateRecentSearchMenu: up to RECENT_SEARCHES_MAX searches per tree, newest first
-import { searchScore } from "./core";
+import { compileLibSearch, libSearchTerms, scoreTerms } from "./core";
 
 export type SortMode = "best" | "alpha";
 export const RECENT_SEARCHES_MAX = 10;
@@ -14,14 +14,17 @@ export interface TreeItem { name: string; desc?: string; keywords?: string; pins
 
 /** The item's score for the filter text; 0 leaves it out, 1 for an empty filter. */
 export function treeScore(item: TreeItem, query: string): { score: number; exact: boolean } {
-  const terms = query.trim().split(/\s+/).filter(Boolean);
-  if (!terms.length) return { score: 1, exact: false };
+  // EDA_COMBINED_MATCHER::ScoreTerms over the item's SEARCH_TERMs, as the choosers score (library/core.ts)
+  const matchers = compileLibSearch(query);
+  if (!matchers.length) return { score: 1, exact: false };
+  const terms = libSearchTerms({ name: item.name, description: item.desc, keywords: item.keywords, library: item.lib });
   let score = 1, exact = false;
-  for (const t of terms) {
-    let s = searchScore({ name: item.name, description: item.desc, keywords: item.keywords, library: item.lib }, t);
-    if (/^\d+$/.test(t) && item.pins !== undefined && Number(t) === item.pins) s += 1;   // a number matches the pin count too
+  for (const m of matchers) {
+    const r = scoreTerms(m, terms);
+    let s = r.score;
+    if (/^\d+$/.test(m.pattern) && item.pins !== undefined && Number(m.pattern) === item.pins) s += 1;   // a number matches the pin count too
     if (!s) return { score: 0, exact: false };
-    if (item.name.toLowerCase() === t.toLowerCase() || (item.lib + ":" + item.name).toLowerCase() === t.toLowerCase()) exact = true;
+    exact = exact || r.exact;
     score += s;
   }
   return { score, exact };

@@ -90,14 +90,16 @@ const inverseOf = (doc: KDoc, ch: KChange[]): KChange[] => ch.map((c) => { const
 let refreshing = 0;
 export async function refreshOtherRefs(): Promise<void> {
   type Unit = { ref: string; lib: string; value: string; unit: number };
-  const S = (window as unknown as { CollabTools?: { sch?: { state: { otherRefs?: Set<string>; otherUnits?: Unit[] } } } }).CollabTools?.sch; if (!S || !E.kdoc || E.kdoc.type !== "sch") return;
-  const mine = ++refreshing, set = new Set<string>(), units: Unit[] = [];
+  const S = (window as unknown as { CollabTools?: { sch?: { state: { otherRefs?: Set<string>; otherUnits?: Unit[]; otherLibs?: Map<string, SNode> } } } }).CollabTools?.sch; if (!S || !E.kdoc || E.kdoc.type !== "sch") return;
+  const mine = ++refreshing, set = new Set<string>(), units: Unit[] = [], libs = new Map<string, SNode>();
   for (const d of projectDocs().filter((x) => x.docType === "kicad_sch" && x.docId !== appState.docId)) {
     try {
       const doc = await readDoc(d.docId, "kicad_sch");
       for (const r of usedRefs(doc)) set.add(r);
       // which unit of which symbol holds each reference: a unit pasted or placed here may join that package
       for (const it of doc.items.values()) {
+        // SCH_DRAWING_TOOLS::PlaceSymbol's "-- Already Placed --" lists the library symbols of every sheet
+        if (it.kind === "symbol") { const id = String(((it.node as SNode[]).find((c) => Array.isArray(c) && c[0] === "lib_id") as SNode[] | undefined || [])[1] || ""); if (id && !libs.has(id)) { const l = KiCadCanvas.resolveLib(doc, id); if (l) libs.set(id, l); } }
         if (it.kind !== "symbol" || !it.ref || /\?$/.test(it.ref)) continue;
         const n = it.node as SNode[], kidOf = (k: string) => n.find((c) => Array.isArray(c) && c[0] === k) as SNode[] | undefined;
         const v = n.find((c) => Array.isArray(c) && c[0] === "property" && c[1] === "Value") as SNode[] | undefined, u = kidOf("unit");
@@ -106,7 +108,7 @@ export async function refreshOtherRefs(): Promise<void> {
     } catch (e) { /* unreadable sheet: its references stay unknown */ }
     if (mine !== refreshing) return;   // a newer refresh (another sheet opened) supersedes this one
   }
-  S.state.otherRefs = set; S.state.otherUnits = units;
+  S.state.otherRefs = set; S.state.otherUnits = units; S.state.otherLibs = libs;
 }
 
 let api: DlgApi | null = null;   // the dialog this module opened last (KDialogs keeps one dialog at a time)

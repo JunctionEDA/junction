@@ -150,6 +150,9 @@ export function refImageDialog(ctx: ToolCtx, item: KItem, sch = false): boolean 
   const g = (item.geom || []).find((x) => (x as { t?: string }).t === "image") as { entry?: ImageEntry } | undefined;
   const entry = (g && g.entry) || null;
   const v0 = refImageValues(node0, entry);
+  // an older file's stored scale is what the parser rescales on load: show KiCad's, store the file's
+  const legacyK = (K().legacyImageScaleFactor ? K().legacyImageScaleFactor(sch, Number(doc.version) || 0, entry) : 1) || 1;
+  v0.scale *= legacyK;
   const fields: Record<string, Field<string | number | boolean>> = {};
   const reg = <T extends string | number | boolean>(k: string, f: Field<T>): Field<T> => { fields[k] = f as unknown as Field<string | number | boolean>; return f; };
   // the working image (PANEL_IMAGE_EDITOR::m_workingImage): pixels on a canvas once the bitmap has decoded
@@ -174,7 +177,7 @@ export function refImageDialog(ctx: ToolCtx, item: KItem, sch = false): boolean 
       data = b64;
     }
     return { ...v0, x: Number(gv("x")), y: Number(gv("y")), rotation: Number(gv("rotation")), opacity: opacityIn ? Math.min(1, Math.max(0, opacityIn.get() || 0)) : v0.opacity,
-      layer: String(gv("layer")), locked: !!gv("locked"), scale: Number(gv("scale")), data };   // TransferToImage reads the Scale text
+      layer: String(gv("layer")), locked: !!gv("locked"), scale: Number(gv("scale")) / legacyK, data };   // TransferToImage reads the Scale text
   };
   let api: { close(): void } | null = null;
   api = openDialog({ title: sch ? "Image Properties" : "Reference Image Properties", width: sch ? 600 : 680, readOnly: ro,

@@ -16,6 +16,8 @@ export interface TextEffects {
   face?: string;
   /** (effects (font (color r g b a))): EDA_TEXT::GetTextColor as css, absent when COLOR4D::UNSPECIFIED (alpha 0) */
   color?: string;
+  /** (effects (font (line_spacing n))): EDA_TEXT::GetLineSpacing, absent when 1 */
+  lineSpacing?: number;
 }
 
 /** A centre / radius / start and end angle arc through three points (arcFrom3). */
@@ -55,6 +57,22 @@ export type GeomFlags = {
   track?: boolean; via?: boolean; hole?: boolean; npth?: boolean; point?: boolean;
   /** a via's ring: its size, type, layer pair, and whether it carries the net label; a via hole's plating ring (circles only) */
   viaSize?: number; viaType?: string; viaLayers?: string[]; viaLabel?: boolean; wallR?: number; wallColor?: string;
+  /** a via's solder mask opening; the copper layers a via's hole crosses */
+  viaMask?: boolean; viaSpan?: string[];
+  /** a via ring / pad copper shape on a layer its padstack drops where nothing connects (FlashLayer, remove_unused_layers) */
+  unusedLayer?: boolean;
+  /** a backdrill or post-machining indicator (dashed circle) */
+  indicator?: boolean;
+  /** a pad copper shape or hole: the pad is on a front / back layer (LAYER_FOOTPRINTS_FR / BK decide it) */
+  padFront?: boolean; padBack?: boolean;
+  /** a shape's solder mask opening (a copy on the mask layer), a PCB_SHAPE's geometry, a copper graphic segment with a net */
+  maskCopy?: boolean; gfxShape?: boolean; netSeg?: boolean;
+  /** a hatch line of a shape's hatched fill */
+  hatchLine?: boolean;
+  /** a footprint text whose raw text is ${REFERENCE} / ${VALUE} */
+  varRole?: string;
+  /** a rule area's outline */
+  ruleArea?: boolean; /** a track's solder mask opening */ trackMask?: boolean;
   /** a primitive of a footprint pad, its index among the footprint's pads, number, type and net name */
   pad?: boolean; padIndex?: number; padNumber?: string; padType?: string; netName?: string;
   /** a board graphic that also opens the solder mask, and its margin (plotting) */
@@ -63,6 +81,10 @@ export type GeomFlags = {
   noBox?: boolean;
   /** a pad label, and which one: the net name or the number */
   padText?: boolean; padNet?: boolean; padNum?: boolean;
+  /** pad labels: the two-line layout (number and net), whether the pad has both, whether its net label is the "x" / "*" mark */
+  padPair?: boolean; padBoth?: boolean; padMark?: boolean;
+  /** a pad label: the index of its pad among the footprint's pads */
+  labelPad?: number;
   /** the points of a polygon (PolyGeom; optional on the others, which some readers probe for) */
   pts?: Pt[];
   zoneFill?: boolean; zoneOutline?: boolean; teardrop?: boolean; zoneUnfilled?: boolean; zoneClearance?: number; zoneHatch?: boolean;
@@ -89,7 +111,11 @@ export type GeomFlags = {
 };
 
 export type LineGeom = GeomFlags & { t: "line"; x1: number; y1: number; x2: number; y2: number };
-export type PolyGeom = GeomFlags & { t: "poly"; pts: Pt[]; close?: boolean };
+/**
+ * dashBreaks: the vertices where a dashed outline restarts its pattern (STROKE_PARAMS::Stroke strokes the SHAPE_SEGMENTs and
+ * SHAPE_ARCs of EDA_SHAPE::MakeEffectiveShapes one by one); without it the pattern runs on across the vertices (a line chain).
+ */
+export type PolyGeom = GeomFlags & { t: "poly"; pts: Pt[]; close?: boolean; dashBreaks?: number[] };
 export type RectGeom = GeomFlags & { t: "rect"; x: number; y: number; h: number; wd?: number; rot?: number };
 export type CircleGeom = GeomFlags & { t: "circle"; x: number; y: number; r: number };
 export type ArcGeom = GeomFlags & { t: "arc"; x: number; y: number; r: number; a0: number; a1: number; anticlockwise: boolean };
@@ -98,6 +124,8 @@ export type PadGeom = GeomFlags & { t: "pad"; x: number; y: number; h: number; r
 export type TextGeom = GeomFlags & {
   t: "text"; x: number; y: number; text: string; bars?: [number, number][] | null; size: number; rot: number; h: string; v: string;
   sizeX?: number; bold?: boolean; italic?: boolean; mirror?: boolean; face?: string;
+  /** EDA_TEXT::GetLineSpacing: the interline of a multi-line text is multiplied by it (1 when absent) */
+  lineSpacing?: number;
   /** the marked-up source: the stroke painter lays out ~{} _{} ^{} itself */
   raw?: string;
   multiline?: boolean; knockout?: boolean | number[]; layoutW?: number;
@@ -119,7 +147,7 @@ export type ImageGeom = GeomFlags & { t: "image"; x: number; y: number; h: numbe
   entry: ImageEntry; pxMm: number; scale: number; opacity?: number };
 
 /** A decoded image (tables-images imageEntry): its data URL, pixel size and PPI, and the bitmap once it loads. */
-export interface ImageEntry { key: string; id: string; url: string; mime: string; w: number; h: number; ppi: number; img: HTMLImageElement | null; loaded: boolean; failed: boolean }
+export interface ImageEntry { key: string; id: string; url: string; mime: string; w: number; h: number; ppi: number; legacyPpi?: number; img: HTMLImageElement | null; loaded: boolean; failed: boolean }
 
 /** One primitive of an item's geometry. */
 export type Geom = LineGeom | PolyGeom | RectGeom | CircleGeom | ArcGeom | PadGeom | TextGeom | ImageGeom;
@@ -138,12 +166,14 @@ export interface Item extends Omit<KItem, "geom" | "hiddenGeom" | "bbox"> {
   /** a board outline item (Edge.Cuts) */
   edge?: boolean;
   unit?: number; page?: string; net?: number; scale?: number; viaType?: string;
+  /** a via or plated pad with copper layers it may leave out where nothing connects (geoms tagged unusedLayer) */
+  unusedFlash?: boolean;
 }
 
 /** The drawing-sheet context the title block resolves (sheet.ts sheetTextVars). */
 export interface SheetContext {
   page: Pt; paper?: string; portrait?: boolean; titleBlock?: Record<string, string>; pageNumber?: string; sheetCount?: number;
-  fileName?: string; filePath?: string; fileRoot?: string; sheetName?: string; sheetPath?: string; projectName?: string;
+  fileName?: string; filePath?: string; fileRoot?: string; sheetName?: string; sheetPath?: string; projectName?: string; vcsHash?: string; vcsShortHash?: string;
   projectVars?: Record<string, string> | null; kicadVersion?: string; sheetLayer?: string; sheetVars?: Record<string, string> | null;
   isFirstPage?: boolean;
   /** the displayed sheet instance's path ("/<root uuid>/<sheet uuid>…"): the symbols show that instance's reference and unit */
@@ -244,8 +274,10 @@ export interface RatsLine { net: number; name?: string; a: number[] | null; b: n
 export interface ObjectsOpt { hide?: Set<string>; show?: Set<string>; opacity?: Record<string, number> }
 /** render()'s options (see its comment for each). */
 export interface RenderOpts {
-  hidden?: Set<string>; grid?: number; gridStyle?: string; gridMinSpacing?: number; gridLineWidth?: number; gridShowMajor?: boolean; gridOrigin?: number[] | null; gridColor?: string;
+  hidden?: Set<string>; grid?: number; /** the grid's Y pitch (grid is X); grid when absent */ gridY?: number; gridStyle?: string; gridMinSpacing?: number; gridLineWidth?: number; gridShowMajor?: boolean; gridOrigin?: number[] | null; gridColor?: string;
   gridAxes?: boolean; gridAxesColor?: string; frame?: boolean;
+  /** pcbnew: m_ForceShowFieldsWhenFPSelected (on unless false); m_UseViaColorForNormalTHPadstacks */
+  forceShowFields?: boolean; viaColorForTHPads?: boolean;
   /** board: the grid items (PCB_GRID_ITEM, Appearance ▸ Grids, LAYER_SUBGRIDS); false hides them; their colour */
   subgrids?: boolean; gridItemColor?: string;
   selected?: Set<string> | null; highlight?: Set<string> | null; lockedIds?: Set<string> | null;

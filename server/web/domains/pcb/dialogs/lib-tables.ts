@@ -520,12 +520,23 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
 /** The values the path substitutions grid shows for the server's library folders (populateEnvironReadOnlyTable). */
 export function serverEnvValues(refs: { symbol?: string; footprint?: string }): Record<string, string> {
   const proj = appState.project;
-  return {
+  const out: Record<string, string> = {
     KIPRJMOD: proj ? `${proj.name} (this project's files)` : "",
     KICAD10_SYMBOL_DIR: `gitlab.com/kicad/libraries/kicad-symbols${refs.symbol ? " @ " + refs.symbol : ""}`,
     KICAD10_FOOTPRINT_DIR: `gitlab.com/kicad/libraries/kicad-footprints${refs.footprint ? " @ " + refs.footprint : ""}`,
     KICAD10_3DMODEL_DIR: "gitlab.com/kicad/libraries/kicad-packages3D",
   };
+  // the variables the user added in Configure Paths (the server's own take precedence, as external ones do in KiCad)
+  for (const v of userEnvVars()) if (!(v.name in out)) out[v.name] = v.path;
+  return out;
+}
+/** The user's Configure Paths variables, as Preferences stores them (prefs.ts "kui.prefs" envVars). */
+export function userEnvVars(): { name: string; path: string }[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem("kui.prefs") || "null") as { envVars?: unknown } | null;
+    const list = raw && Array.isArray(raw.envVars) ? raw.envVars as { name?: unknown; path?: unknown }[] : [];
+    return list.filter((v) => v && typeof v.name === "string" && typeof v.path === "string" && v.name).map((v) => ({ name: v.name as string, path: v.path as string }));
+  } catch { return []; }
 }
 
 /**

@@ -10,8 +10,8 @@
 //   report        <board>-drl.rpt: the copper stackup and the tools of each file (GenDrillReportFile)
 import { type Hole, boardHoles, drillFiles } from "./drill";
 import { writeDxf } from "./dxf";
-import { projectGuid, writeGerber } from "./gerber";
-import { type FabContext, VERSION_SUFFIX, layerDisplayName, modelOf, projectNameOf } from "./index";
+import { projectGuid, sameCoordinatesKey, writeGerber } from "./gerber";
+import { type FabContext, VERSION_SUFFIX, layerDisplayName, revisionOf, modelOf, projectNameOf } from "./index";
 import type { BoardModel } from "./model";
 import { primItems } from "./pageplot";
 import { primPolys } from "./poly";
@@ -99,7 +99,7 @@ function gerberDrill(s: Span, m: BoardModel, ctx: FabContext, req: DrillJobReque
   }
   const board = projectNameOf(ctx);
   return writeGerber(prims, { fileFunction: fileFunction(s, m), polarity: "Positive" }, { x2: true, origin: req.useAuxOrigin ? m.settings.auxOrigin : [0, 0], software: `KiCad,Pcbnew,${version(ctx)}`, date,
-    project: { name: board, guid: projectGuid(board + ".kicad_pcb"), rev: (ctx.doc.titleBlock && ctx.doc.titleBlock.rev) || "rev?" }, precision: req.gerberPrecision, netAttributes: true });
+    project: { name: board, guid: projectGuid(board + ".kicad_pcb"), rev: revisionOf(ctx) || "rev?" }, sameCoordinates: sameCoordinatesKey(!!req.useAuxOrigin, m.settings.auxOrigin), precision: req.gerberPrecision, netAttributes: true });
 }
 
 // ---------------------------------------------------------------- IPC-4761 via protection files
@@ -147,7 +147,7 @@ function protectionFile(holes: Hole[], f: Feature, m: BoardModel, ctx: FabContex
   }
   const board = projectNameOf(ctx);
   return writeGerber(prims, { fileFunction: "", polarity: "Positive", fileFunctionLine: `%TF,FileFunction,Other,${d.func}*%` }, { x2: true, origin: req.useAuxOrigin ? m.settings.auxOrigin : [0, 0], software: `KiCad,Pcbnew,${version(ctx)}`, date,
-    project: { name: board, guid: projectGuid(board + ".kicad_pcb"), rev: (ctx.doc.titleBlock && ctx.doc.titleBlock.rev) || "rev?" }, precision: req.gerberPrecision, netAttributes: true });
+    project: { name: board, guid: projectGuid(board + ".kicad_pcb"), rev: revisionOf(ctx) || "rev?" }, sameCoordinates: sameCoordinatesKey(!!req.useAuxOrigin, m.settings.auxOrigin), precision: req.gerberPrecision, netAttributes: true });
 }
 
 // ---------------------------------------------------------------- the drill map
@@ -299,7 +299,7 @@ export function drillJob(ctx: FabContext, req: DrillJobRequest): DrillJobResult 
           else if (it.k === "circle") prims.push({ k: "arc", cx: it.x, cy: it.y, r: it.r, a0: 0, a1: 2 * Math.PI, acw: false, w: it.w || 0.1 } as Prim);
         }
         data = writeGerber(prims, { fileFunction: `Drillmap`, polarity: "Positive" }, { x2: true, origin: [0, 0], software: `KiCad,Pcbnew,${version(ctx)}`, date, precision: req.gerberPrecision,
-          project: { name: board, guid: projectGuid(board + ".kicad_pcb"), rev: (ctx.doc.titleBlock && ctx.doc.titleBlock.rev) || "rev?" } });
+          project: { name: board, guid: projectGuid(board + ".kicad_pcb"), rev: revisionOf(ctx) || "rev?" } });
       } else if (req.mapFormat === 3) data = writeDxf([{ name: "0", color: "#000000", page }], { polygonMode: false });
       else if (req.mapFormat === 5) data = writeSvg(page, { precision: 4, creator: "PCBNEW", fileName: n, date: ctx.date || new Date() });
       else if (req.mapFormat === 2) data = writePs({ pages: [page], creator: "PCBNEW", date: ctx.date || new Date() }, { scaleX: 1, scaleY: 1, fileName: n, date: ctx.date || new Date() });

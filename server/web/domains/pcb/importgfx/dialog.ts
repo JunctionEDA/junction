@@ -59,11 +59,12 @@ function load(name: string, text: string, dxfUnit: number, lineWidth: number): I
 }
 
 /** File > Import > Graphics... in the schematic (sch) or board (pcb) editor. */
-export function openImportGraphics(editor: Editor): void {
+/** `dropped`: DIALOG_IMPORT_GRAPHICS::SetFilenameOverride, the file dropped on the canvas (PCB_ACTIONS::ddImportGraphics). */
+export function openImportGraphics(editor: Editor, dropped?: { name: string; text: string }): void {
   const ctx = toolCtx(); const doc = ctx.doc as KDoc | null;
   if (!doc || ctx.viewOnly) return;
   const st = remembered[editor];
-  let file = lastFile, xScale = Number(st.scale) > 0 ? Number(st.scale) : 1, yScale = xScale, sourceSize: V = [0, 0];
+  let file = dropped || lastFile, xScale = Number(st.scale) > 0 ? Number(st.scale) : 1, yScale = xScale, sourceSize: V = [0, 0];
   const fileInput = h("input", { type: "text", "data-k": "file", style: "flex:1;min-width:300px" }) as HTMLInputElement;
   fileInput.value = file ? file.name : "";
   const picker = h("input", { type: "file", accept: ".svg,.dxf,.SVG,.DXF", style: "display:none", "data-k": "file-picker" }) as HTMLInputElement;

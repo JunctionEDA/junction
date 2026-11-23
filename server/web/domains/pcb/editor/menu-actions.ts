@@ -11,7 +11,7 @@
 import { matchProperties, matchPropertiesSettings } from "./match-properties";
 import { leaveSheet } from "./schnets";
 import type { ActionHandler } from "./types";
-import { cursorClick, cursorStep, panStep } from "./crosshair";
+import { cursorClick, cursorStep, panStep, refreshCrosshair, placeCrosshair } from "./crosshair";
 import { gridIndex, gridList, navigateDocs, rootSchematic, setActiveLayer, setGridIndex } from "./doc";
 import { HANDLERS, toggleRenderOpt } from "./actions";
 import { setToggle, state, store } from "./appstore";
@@ -28,9 +28,15 @@ import { E } from "./state";
 import { KICAD_BASE_VERSION } from "../canvas/version";
 import { PRODUCT_VERSION } from "../generated/product-version";
 import { openExportNetlist } from "./export-netlist";
-import { startMove } from "./gestures";
+import { selectedAnywhere, startMove } from "./gestures";
+import { openContextMenu } from "./contextmenu";
+import { hotkeyCyclePopup } from "./hotkey-popup";
+import { overlayHooks } from "./overlays";
+import { messageText } from "../../../shared/units";
+import type { Units } from "../../../shared/store";
 import { schKey } from "./tools";
 import { esc, toast } from "./util";
+import type { PcbEnableFacts } from "../tables";
 import { applyView, fitBox, flipMmX, isSch, mmW, mmX0, mmY0, requestRender, stage, world, zoomBy, zoomStep } from "./view";
 import { fitMargin } from "./zoomlist";
 import { currentDoc, download, fileStem } from "./download";
@@ -73,13 +79,37 @@ async function drawingToClipboard(): Promise<void> {
 
 interface LayerRow { key: string; name: string; color: string }
 // ---------------------------------------------------------------- view
-/** The cursor's position in stage pixels (zoom-at-cursor and centre-on-cursor work from it). */
-function cursorPx(): [number, number] {
-  const r = world.getBoundingClientRect(), s = stage.getBoundingClientRect(); const mm = E.lastCursorMm as number[];
+/** A design point's position in stage pixels. */
+function mmPx(mm: number[]): [number, number] {
+  const r = world.getBoundingClientRect(), s = stage.getBoundingClientRect();
   return [r.left - s.left + ((flipMmX(mm[0]) - mmX0()) / mmW()) * r.width, r.top - s.top + ((mm[1] - mmY0()) / mmW()) * r.width];
 }
-function zoomAtCursor(zoomIn: boolean): void { const [x, y] = cursorPx(); zoomStep(zoomIn, x, y); }   // doZoomInOut( dir, aCenterOnCursor ); the browser cannot warp the mouse, so the cursor point stays put
-function centreOnCursor(): void { const [x, y] = cursorPx(); E.viewTouched = true; E.panX += stage.clientWidth / 2 - x; E.panY += stage.clientHeight / 2 - y; applyView(); }
+/**
+ * Zoom In / Out at Cursor (F1 / F2): doZoomInOut( dir, aCenterOnCursor = true ) -> doZoomToPreset: SetScale( scale,
+ * GetCursorPosition() ) — about the crosshair (the snapped or forced cursor), then with "Center and warp cursor on
+ * zoom" CenterOnCursor.  The browser cannot warp the mouse: the crosshair is put at the centre instead, as the wheel
+ * zoom does (gestures.ts zoomAtPointer).
+ */
+function zoomAtCursor(zoomIn: boolean): void {
+  const at = cursorPosition(), [x, y] = mmPx(at); zoomStep(zoomIn, x, y);
+  if (E.wheel && E.wheel.centerOnZoom) centerOnCursor(at);
+}
+/** VIEW_CONTROLS::GetCursorPosition: the crosshair's (snapped or forced) position. */
+function cursorPosition(): number[] { const c = store.get().viewport.cursor as number[] | undefined; return c && c.length === 2 ? c.slice() : (E.lastCursorMm as number[]).slice(); }
+/**
+ * WX_VIEW_CONTROLS::CenterOnCursor (View > Center on Cursor, F4, and the zooms above): the view is centred on
+ * GetCursorPosition() and the pointer warped to the centre, so the cursor stays on that design point.  The browser
+ * cannot warp the mouse: the crosshair is put at the centre, and wheel notches with the pointer where it was zoom
+ * about the centre (E.wheelWarp) until the pointer moves.
+ */
+function centerOnCursor(at: number[] = cursorPosition()): void {
+  const sw = stage.clientWidth, sh = stage.clientHeight, [x, y] = mmPx(at);
+  if (Math.abs(x - sw / 2) < 0.5 && Math.abs(y - sh / 2) < 0.5) return;   // GetMousePosition( false ) != screenCenter
+  E.viewTouched = true; E.panX += sw / 2 - x; E.panY += sh / 2 - y; applyView();
+  E.wheelWarp = E.lastClient ? [E.lastClient[0], E.lastClient[1]] : null;
+  E.lastCursorMm = at.slice(); const p = placeCrosshair(at); if (p) store.slice("viewport", { cursor: [p[0]!, p[1]!] });
+}
+function centreOnCursor(): void { centerOnCursor(); }
 /** Ids of everything selected: the app's selection, a selected field's owner and the tool module's own pick. */
 export function selectedIds(): string[] {
   const ids = new Set<string>(E.selection as Set<string>);
@@ -93,14 +123,74 @@ function zoomFitSelection(): void {
   if (!E.kdoc) return;
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const id of selectedIds()) { const b = (E.kdoc.items.get(id) as Item | undefined)?.bbox; if (b) { x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]); x1 = Math.max(x1, b[2]); y1 = Math.max(y1, b[3]); } }
-  if (x0 === Infinity) { toast("Nothing selected"); return; }
+  if (x0 === Infinity) return;   // COMMON_TOOLS::doZoomFit: an empty selection does nothing
   E.viewTouched = true; fitBox([x0, y0, Math.max(x1 - x0, 1e-3), Math.max(y1 - y0, 1e-3)], fitMargin(stage.clientHeight, false));
 }
 
-/** COMMON_TOOLS::GridNext / GridPrev (N, Shift+N): the next or previous grid of the list, wrapping round. */
+/**
+ * COMMON_TOOLS::GridNext / GridPrev (N, Shift+N): the next or previous grid of the list, wrapping round.  Both end in
+ * OnGridChanged( true ), which posts GridChangedByKeyEvent; eeschema's SCH_EDITOR_CONTROL::GridFeedback answers it
+ * with the "Grid" HOTKEY_CYCLE_POPUP of every grid (GRID::UserUnitsMessageText), pcbnew with nothing.
+ */
 function stepGrid(dir: number): void {
-  const n = gridList().length; if (!n) return;
-  const i = gridIndex(); setGridIndex(i < 0 ? 0 : (i + dir + n) % n);
+  const list = gridList(), n = list.length; if (!n) return;
+  const i = gridIndex(), next = i < 0 ? 0 : (i + dir + n) % n; setGridIndex(next);
+  if (isSch()) { const u = (E.units === "in" || E.units === "mil" ? E.units : "mm") as Units; hotkeyCyclePopup("Grid", list.map((g) => messageText(g.mm, u, "sch")), next); }
+}
+
+/**
+ * ACTIONS::showContextMenu (COMMON_TOOLS::CursorControl with CURSOR_RIGHT_CLICK): a right click at the cursor, so the
+ * active tool's menu opens there as it would for the mouse button.
+ */
+function showContextMenu(): void {
+  if (!E.kdoc || !E.lastCursorMm) return;
+  const [x, y] = mmPx(cursorPosition()), s = stage.getBoundingClientRect();
+  openContextMenu({ clientX: s.left + x, clientY: s.top + y });
+}
+
+/**
+ * COMMON_TOOLS::ToggleBoundingBoxes: RENDER_SETTINGS::SetDrawBoundingBoxes, a debugging aid.  SCH_PAINTER::
+ * drawItemBoundingBox strokes each item's box (a symbol's body box) 3 mils wide, red when selected and dark grey
+ * otherwise; PCB_PAINTER strokes each item's box 1 px wide, a footprint magenta with its bounding hull in cyan, anything
+ * else grey (0.4), and every selected one red.
+ */
+function toggleBoundingBoxes(): void {
+  const on = !E.renderOpts.drawBoundingBoxes; E.renderOpts.drawBoundingBoxes = on; setToggle("toggleBoundingBoxes", on);
+  store.slice("viewport", { renderOpts: Object.assign({}, E.renderOpts) }); requestRender();
+}
+overlayHooks.push((ctx) => {
+  if (!E.kdoc || !E.renderOpts || !E.renderOpts.drawBoundingBoxes) return;
+  const m = ctx.getTransform(), px = 1 / Math.max(1e-9, Math.hypot(m.a, m.b)), sch = isSch(), sel = selectedAnywhere();
+  const sm = sch && W.CollabTools && W.CollabTools.sch && W.CollabTools.sch._ ? W.CollabTools.sch._ as { bodyBox?: (d: unknown, it: unknown) => number[] | null } : null;
+  const geomBox = (KiCadCanvas as unknown as { geomBox?: (g: unknown) => number[] | null }).geomBox;
+  ctx.save(); ctx.setLineDash([]);
+  for (const it of (E.kdoc.items as Map<string, { id: string; kind: string; bbox: number[] | null; geom: { t?: string; padText?: boolean; padNum?: boolean; noBox?: boolean }[] }>).values()) {
+    let b = it.bbox;
+    if (sch && it.kind === "symbol" && sm && sm.bodyBox) { try { b = sm.bodyBox(E.kdoc, it) || b; } catch { /* keep the item box */ } }
+    if (!b) continue;
+    const on = sel.has(it.id), fp = !sch && it.kind === "footprint";
+    ctx.strokeStyle = on ? "rgb(255,51,51)" : sch ? "rgb(51,51,51)" : fp ? "rgb(255,0,255)" : "rgb(102,102,102)";
+    ctx.lineWidth = sch ? 3 * 0.0254 : px;
+    ctx.strokeRect(b[0], b[1], b[2] - b[0], b[3] - b[1]);
+    if (fp && geomBox) {
+      // FOOTPRINT::GetBoundingHull: the convex hull of what the footprint draws, texts aside
+      const pts: number[][] = [];
+      for (const g of it.geom) { if (g.padText || g.padNum || g.noBox || g.t === "text") continue; const q = geomBox(g); if (q) pts.push([q[0], q[1]], [q[2], q[1]], [q[2], q[3]], [q[0], q[3]]); }
+      const hull = convexHull(pts); if (hull.length < 3) continue;
+      ctx.strokeStyle = on ? "rgb(255,51,51)" : "rgb(0,255,255)";
+      ctx.beginPath(); ctx.moveTo(hull[0][0], hull[0][1]); for (const p of hull.slice(1)) ctx.lineTo(p[0], p[1]); ctx.closePath(); ctx.stroke();
+    }
+  }
+  ctx.restore();
+});
+/** Andrew's monotone chain. */
+function convexHull(pts: number[][]): number[][] {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]); if (p.length < 3) return p;
+  const cross = (o: number[], a: number[], b: number[]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo: number[][] = [], hi: number[][] = [];
+  for (const q of p) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (hi.length >= 2 && cross(hi[hi.length - 2], hi[hi.length - 1], q) <= 0) hi.pop(); hi.push(q); }
+  return lo.slice(0, -1).concat(hi.slice(0, -1));
 }
 
 const UNIT_ACTION: Record<string, string> = { mm: "millimetersUnits", in: "inchesUnits", mil: "milsUnits" };
@@ -145,10 +235,11 @@ export const MENU_HANDLERS: Record<string, ActionHandler> = {
   panUp: () => panStep(0, 1), panDown: () => panStep(0, -1), panLeft: () => panStep(1, 0), panRight: () => panStep(-1, 0),
   cursorUp: () => cursorStep(0, -1, 1), cursorDown: () => cursorStep(0, 1, 1), cursorLeft: () => cursorStep(-1, 0, 1), cursorRight: () => cursorStep(1, 0, 1),
   cursorUpFast: () => cursorStep(0, -1, 10), cursorDownFast: () => cursorStep(0, 1, 10), cursorLeftFast: () => cursorStep(-1, 0, 10), cursorRightFast: () => cursorStep(1, 0, 10),
-  // Enter / the Double-click action: the mouse button at the cursor (COMMON_TOOLS::CursorControl).  End is
-  // ACTIONS::finishInteractive first, which the tools take themselves (a wire, a shape, a route): when none is in
-  // progress KiCad's tools ignore it, so the key does nothing here either.
+  // Enter / the Double-click action: the mouse button at the cursor (COMMON_TOOLS::CursorControl).  End is both
+  // ACTIONS::finishInteractive, which a tool that is drawing takes itself (a wire, a shape, a route), and
+  // ACTIONS::cursorDblClick, which hotkeys.ts orderedOwners tries first: a double click at the cursor
   cursorClick: () => cursorClick(1), cursorDblClick: () => cursorClick(2), finishInteractive: () => {},
+  showContextMenu, toggleBoundingBoxes,
   // MATCH_PROPERTIES_TOOL (match-properties.ts): the source is the one selected item; Ctrl+, only inside the tool
   matchProperties: () => { matchProperties(); }, matchPropertiesSettings: () => { matchPropertiesSettings(); },
   // COMMON_CONTROL::ShowHelp / GetInvolved / ReportBug: the online manual of this editor (help_name), Getting Started,
@@ -160,9 +251,9 @@ export const MENU_HANDLERS: Record<string, ActionHandler> = {
   gridNext: () => stepGrid(1), gridPrev: () => stepGrid(-1),
   millimetersUnits: () => setUnits("mm"), inchesUnits: () => setUnits("in"), milsUnits: () => setUnits("mil"), toggleUnits,
   resetLocalCoords,
-  // the menu entry is a checkbox: a second click goes back to the small crosshairs
   toggleCursor: () => toggleAlwaysShowCursor(),
-  cursorFullCrosshairs: () => (E.crosshairMode === "full" ? setCrosshair("small", "cursorSmallCrosshairs") : setCrosshair("full", "cursorFullCrosshairs")),
+  // COMMON_TOOLS::CursorFullCrosshairs always sets FULLSCREEN_CROSS (Small and 45° are their own actions)
+  cursorFullCrosshairs: () => setCrosshair("full", "cursorFullCrosshairs"),
   // eeschema's Show Hidden Fields and pcbnew's Show Hidden Text are separate settings
   toggleHiddenFields: () => toggleRenderOpt("showHiddenFields", "toggleHiddenFields"),
   showHiddenText: () => toggleRenderOpt("showHiddenText", "showHiddenText"),
@@ -184,6 +275,8 @@ export const MENU_HANDLERS: Record<string, ActionHandler> = {
   layerAlphaInc: () => { if (!isSch()) layerAlphaStep(1); }, layerAlphaDec: () => { if (!isSch()) layerAlphaStep(-1); },
   navigatePrevious: () => stepSheet(-1), navigateNext: () => stepSheet(1), leaveSheet,
   layerNext: () => stepLayer(1), layerPrev: () => stepLayer(-1), layerTop: () => copperLayer("F.Cu"), layerBottom: () => copperLayer("B.Cu"),
+  // PCB_CONTROL::LayerSwitch for PCB_ACTIONS::layerInner1..30: the inner layer when the board has it
+  ...Object.fromEntries(Array.from({ length: 30 }, (_, i): [string, ActionHandler] => ["layerInner" + (i + 1), () => copperLayer(`In${i + 1}.Cu`)])),
   listHotKeys: () => openHotkeyList(), about: () => openAbout(),
   importFPAssignments: () => { void importFPAssignments(); },
   languageEnglish: () => {},
@@ -270,7 +363,7 @@ export function actionState(): ActionState {
   if (sch) for (const d of schDocs()) { const sd = sheetDoc(d.docId); if (sd) for (const it of sd.items.values()) if (it.kind === "symbol") { symbols++; if (String(it.lib || "").includes(":")) named++; } }
   const u = store.get().undo;
   return { selCount: keys.length, selKinds: Array.from(new Set(items.map((it) => it.kind))), itemCount: doc ? doc.items.size : 0, idle: !busy, drawingWire: busy === "Press <ESC> to cancel drawing.",
-    undo: u.undo, redo: u.redo, legacyLibIds: symbols > 0 && named === 0, checks };
+    undo: u.undo, redo: u.redo, legacyLibIds: symbols > 0 && named === 0, checks, pcb: sch ? null : pcbEnableFacts() };
 }
 /** Everything selected, pads included: the item ids of selectedIds() plus the board's picked pads as
  *  "footprintId#padIndex" (PCB_PAD_T in KiCad's selection).  Also window.CollabEditor.hooks.selectionKeys(). */
@@ -280,3 +373,27 @@ export function selectionKeys(): string[] {
   return [...ids, ...pads.filter((k) => !ids.includes(k))];
 }
 E.hooks.selectionKeys = selectionKeys;
+/**
+ * What PCB_EDIT_FRAME::setupUIConditions' enable conditions read (tables.ts pcbEnableWhy), carried in actionState().pcb;
+ * null outside the board editor.
+ */
+export function pcbEnableFacts(): PcbEnableFacts | null {
+  const doc = E.kdoc as KDoc | null; if (!doc || isSch() || (doc as { fpEditor?: boolean }).fpEditor) return null;
+  const P = W.CollabTools && W.CollabTools.pcb; const S = P && P.state ? P.state as Record<string, unknown> : {};
+  const keys = selectionKeys(); const kinds: string[] = []; let hasLocked = false, hasUnlocked = false, haveNet = false;
+  const h = (W.CollabTools.props as { helpers?: { netNameOf?(d: KDoc, n: SNode): string } } | undefined)?.helpers;
+  for (const k of keys) {
+    if (k.includes("#")) { kinds.push("pad"); const fp = doc.items.get(k.slice(0, k.lastIndexOf("#"))); if (fp) { let lk = false; try { lk = !!(P && P.isLocked && P.isLocked(fp.node)); } catch (e) { lk = false; } if (lk) hasLocked = true; else hasUnlocked = true; } continue; }
+    const it = doc.items.get(k); if (!it) continue;
+    kinds.push(it.kind);
+    let lk = false; try { lk = !!(P && P.isLocked && P.isLocked(it.node)); } catch (e) { lk = false; }
+    if (lk) hasLocked = true; else hasUnlocked = true;
+    if (!haveNet && it.kind !== "footprint" && h && h.netNameOf) { try { if (h.netNameOf(doc, it.node)) haveNet = true; } catch (e) { /* not connected */ } }
+  }
+  const ro = E.renderOpts as { objects?: { hide?: Set<string>; opacity?: Record<string, number> } };
+  const zonesEnabled = !(ro.objects && ro.objects.hide && ro.objects.hide.has("zones")) && !(ro.objects && ro.objects.opacity && ro.objects.opacity.zones !== undefined && ro.objects.opacity.zones <= 0);
+  const busy = !!(S.route || S.draw || S.drag || S.move || S.modTool || S.pedit);
+  const hl = S.hlCurrent as string[] | undefined;
+  return { kinds, hasLocked, hasUnlocked, haveNet, boardHasItems: doc.items.size > 0, idleNoTool: !busy && store.get().tool.current === "select",
+    netHighlightSet: !!(hl && hl.length) || !!S.highlightNet, zonesEnabled, drawingOrRouting: !!(S.route || S.draw) };
+}

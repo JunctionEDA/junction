@@ -12,8 +12,9 @@
 //       the Place Symbols tool until a click drops it.  Options `keep` / `allUnits` behave like the
 //       dialog's "Place repeated copies" / "Place all units".
 //   KiCadLibrary.placeFootprint({ fpid: "Lib:Name", footprint: "(footprint \"Name\" …)", fields? }): Promise<void>
-//       `footprint` is .kicad_mod text.  A board footprint with fresh uuids and reference "REF**"
-//       rides on the cursor (R rotates, F flips, Esc cancels) and lands on the active side.
+//       `footprint` is .kicad_mod text.  A board footprint with fresh uuids and reference "REF**", on the
+//       front side at orientation 0, rides on the cursor with the Place Footprint tool (R rotates, F flips,
+//       Esc or Undo drops it); a click places it and the tool stays on until Esc with nothing carried.
 //   KiCadLibrary.registerSource({ id, label, kinds: ["symbol", "footprint"],
 //                                 search(query, kind): Promise<Array<{ id, name, description?, keywords?, library? }>>,
 //                                 fetch(item, kind): Promise<{ libId | fpid, symbol | footprint, fields? }> }): void
@@ -33,12 +34,15 @@
 // afterPlace() once a carried symbol is dropped; the board has no place tool of its own, so the
 // footprint carry lives here and placeFootprint / the two browsers are published as module actions.
 import { openSymbolViewer } from "../symview/frame";
+import { SEXPR_BOARD_FILE_VERSION } from "../canvas/format-version";
 import { setCursorOverride } from "./cursors";
 import { state } from "./appstore";
 import { snapMm } from "./doc";
+import { clearSelection, drawSelection, renderProps } from "./selection";
 import { E } from "./state";
 import { setTool, toolCtx } from "./tools";
 import { toast } from "./util";
+import { defaultGrid, prefs } from "../dialogs/prefs";
 import { isSch, mmW, mmX0, mmY0, stage, worldMm } from "./view";
 import { chooserOpen, closeChooser, openChooser } from "../library/chooser";
 import type { ChooserOptions, Chosen } from "../library/chooser";
@@ -70,7 +74,9 @@ const appState = (): AppStateLike => state as unknown as AppStateLike;
 // every document of the project (its .kicad_sym / .pretty libraries and fp-lib-table among them): appState().docs keeps
 // only the schematics and boards the editor opens (bootpick.ts editorDocs)
 const docsNow = (): { docId: string; path: string; docType: string }[] => { const s = appState(); return (s.project && s.project.docs) || s.docs || []; };
-const sourceCtx = (): SourceContext => ({ docs: docsNow(), doc: (E.kdoc as KDoc | null) || null });
+// the other sheets' library symbols (dialogs/annotate.ts refreshOtherRefs) for "-- Already Placed --"
+const sourceCtx = (): SourceContext => ({ docs: docsNow(), doc: (E.kdoc as KDoc | null) || null,
+  otherLibs: isSch() && window.CollabTools && window.CollabTools.sch ? ((window.CollabTools.sch.state as { otherLibs?: Map<string, SNode> | null }).otherLibs || null) : null });
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 const cursorMm = (): Pt => { const c = (E.lastCursorMm as Pt) || [0, 0]; const s = snapMm([c[0], c[1]]) as Pt; return [s[0], s[1]]; };
 
@@ -208,15 +214,28 @@ function afterPlace(_ctx: ToolCtx, item: KItem | null): void {
 
 interface FootprintCarry { node: SNode; ghost: KDoc; canvas: HTMLCanvasElement; raf: number; drawn: string; doc: KDoc; pos: Pt; resolve(): void }
 let fpCarry: FootprintCarry | null = null;
+/** BOARD_EDITOR_CONTROL::PlaceFootprint as a tool: it stays active after a placement (a click with no footprint on
+ *  the cursor opens the chooser again) until Escape with nothing carried, another tool, or another document. */
+interface FootprintTool { doc: KDoc; raf: number }
+let fpTool: FootprintTool | null = null;
+export const PLACE_FOOTPRINT_TOOL = "placeFootprint";
 
 const pcbHelpers = (): PcbHelpers | null => (window as unknown as { PcbTools?: PcbHelpers }).PcbTools || null;
+/** PCBNEW_SETTINGS m_RotationAngle (degrees) and m_FlipDirection, as the board tools keep them. */
+const pcbPrefs = (): { rotationAngle?: number; flipDirection?: "tb" | "lr" } => ((window as unknown as { PcbTools?: { state?: { rotationAngle?: number; flipDirection?: "tb" | "lr" } } }).PcbTools || {}).state || {};
+const rotationStep = (): number => { const a = pcbPrefs().rotationAngle; return typeof a === "number" && a > 0 ? a : 90; };
+/** FOOTPRINT::Flip( aCentre, aFlipDirection ): left / right mirrors in X; top / bottom is that, turned by 180 degrees. */
+function flipCarried(P: PcbHelpers, node: SNode): void {
+  P.flipFootprintNode(node);
+  if (pcbPrefs().flipDirection !== "lr") P.rotateFootprintNode(node, 180);
+}
 
 /** The carried footprint as its own little board about the origin: the view is shifted instead of the item. */
 function ghostBoard(node: SNode, main: KDoc): KDoc {
   const copy = (K().cloneNode as (n: SNode) => SNode)(node);
   const [, , rot] = K().atOf(copy);
   K().setAt(copy, 0, 0, rot);
-  const ver = (main as KDoc & { version?: number }).version || 20260206;
+  const ver = (main as KDoc & { version?: number }).version || SEXPR_BOARD_FILE_VERSION;
   return K().parseDoc(`(kicad_pcb (version ${ver}) (generator "pcbnew") ${K().serialize(copy)})`);
 }
 
@@ -237,44 +256,75 @@ function drawFootprintCarry(): void {
   g.restore();
 }
 
+/** The carry ends (placed, or dropped by Escape / Undo); the tool itself stays. */
 function endFootprintCarry(): void {
   const c = fpCarry; if (!c) return; fpCarry = null;
   cancelAnimationFrame(c.raf); c.canvas.remove();
-  window.removeEventListener("pointermove", onCarryMove, true); window.removeEventListener("pointerdown", onCarryDown, true); window.removeEventListener("keydown", onCarryKey, true);
-  setCursorOverride(null);
   c.resolve();
 }
+/** The tool watches for its end: another tool, a schematic, another board. */
+function watchFootprintTool(): void {
+  const t = fpTool; if (!t) return;
+  if (E.tool !== PLACE_FOOTPRINT_TOOL || E.kdoc !== t.doc || isSch()) { endFootprintTool(false); return; }
+  t.raf = requestAnimationFrame(watchFootprintTool);
+}
+function startFootprintTool(doc: KDoc): void {
+  if (fpTool && fpTool.doc === doc && E.tool === PLACE_FOOTPRINT_TOOL) return;
+  endFootprintTool(false);
+  // the switch runs the editor's own tool change first (a drag put back, the selection cleared: ACTIONS::selectionClear)
+  if (E.tool !== PLACE_FOOTPRINT_TOOL) setTool(PLACE_FOOTPRINT_TOOL);
+  fpTool = { doc, raf: 0 };
+  window.addEventListener("pointermove", onCarryMove, true); window.addEventListener("pointerdown", onCarryDown, true); window.addEventListener("keydown", onCarryKey, true);
+  setCursorOverride("PENCIL");   // KICURSOR::PENCIL for the whole tool
+  watchFootprintTool();
+}
+function endFootprintTool(toSelect: boolean): void {
+  endFootprintCarry();
+  const t = fpTool; if (!t) return; fpTool = null;
+  cancelAnimationFrame(t.raf);
+  window.removeEventListener("pointermove", onCarryMove, true); window.removeEventListener("pointerdown", onCarryDown, true); window.removeEventListener("keydown", onCarryKey, true);
+  setCursorOverride(null);
+  if (toSelect && E.tool === PLACE_FOOTPRINT_TOOL) setTool("select");
+}
 const onStage = (ev: Event): boolean => ev.target instanceof Node && stage.contains(ev.target) && !(ev.target instanceof Element && ev.target.closest("input, select, k-select, textarea, button, .kd-overlay"));
+/** GetCursorPosition( !evt->DisableGridSnapping() ): Ctrl places off the grid. */
+const toolPos = (ev: MouseEvent): Pt => { const w = worldMm(ev) as Pt; const p = ev.ctrlKey ? w : snapMm(w) as Pt; return [p[0], p[1]]; };
 function onCarryMove(ev: PointerEvent): void {
   const c = fpCarry; if (!c || !onStage(ev)) return;
-  const p = snapMm(worldMm(ev)) as Pt; c.pos = [p[0], p[1]];
+  c.pos = toolPos(ev);
 }
 function onCarryDown(ev: PointerEvent): void {
-  const c = fpCarry; if (!c || ev.button !== 0 || !onStage(ev)) return;
+  if (!fpTool || ev.button !== 0 || !onStage(ev) || chooserOpen()) return;
   ev.stopImmediatePropagation(); ev.preventDefault();
-  const p = snapMm(worldMm(ev)) as Pt; c.pos = [p[0], p[1]];
+  const c = fpCarry;
+  if (!c) { void chooseAndPlace("footprint").catch((e) => toast(message(e), 4000)); return; }   // SelectFootprintFromLibrary
+  c.pos = toolPos(ev);
   const ctx = ctxNow(), P = pcbHelpers();
   const [, , rot] = K().atOf(c.node);
   K().setAt(c.node, +c.pos[0].toFixed(6), +c.pos[1].toFixed(6), rot);
   const node = c.node; endFootprintCarry();
   if (!ctx.doc || !P || ctx.viewOnly) return;
-  const change = P.addedChange(ctx.doc, node);
-  ctx.commit([change], "place footprint");
-  ctx.setSelected({ id: change.id });
+  // ACTIONS::selectionClear, then commit.Push( _( "Place Footprint" ) ); fp = nullptr and the tool runs on
+  clearSelection(); drawSelection(); renderProps();
+  ctx.commit([P.addedChange(ctx.doc, node)], "Place Footprint");
   ctx.requestRender();
 }
 function onCarryKey(ev: KeyboardEvent): void {
-  const c = fpCarry; if (!c) return;
+  if (!fpTool || chooserOpen()) return;
   const t = ev.target as HTMLElement | null; if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.tagName === "K-SELECT")) return;
-  const P = pcbHelpers(); let took = true;
-  if (ev.key === "Escape") endFootprintCarry();
-  else if ((ev.key === "r" || ev.key === "R") && !ev.ctrlKey && !ev.metaKey && P) { P.rotateFootprintNode(c.node, ev.shiftKey ? -90 : 90); c.ghost = ghostBoard(c.node, c.doc); c.drawn = ""; }
-  else if ((ev.key === "f" || ev.key === "F") && !ev.ctrlKey && !ev.metaKey && P) { P.flipFootprintNode(c.node); c.ghost = ghostBoard(c.node, c.doc); c.drawn = ""; }
+  if (t && t.closest && t.closest(".kd-overlay")) return;
+  const c = fpCarry, P = pcbHelpers(); let took = true;
+  const mod = ev.ctrlKey || ev.metaKey;
+  // IsCancelInteractive() || ( fp && IsAction( &ACTIONS::undo ) ): the carry is dropped; with none, Escape leaves the tool
+  if (ev.key === "Escape") { if (c) endFootprintCarry(); else endFootprintTool(true); }
+  else if (c && mod && !ev.shiftKey && (ev.key === "z" || ev.key === "Z")) endFootprintCarry();
+  else if (c && (ev.key === "r" || ev.key === "R") && !mod && P) { P.rotateFootprintNode(c.node, ev.shiftKey ? -rotationStep() : rotationStep()); c.ghost = ghostBoard(c.node, c.doc); c.drawn = ""; }
+  else if (c && (ev.key === "f" || ev.key === "F") && !mod && P) { flipCarried(P, c.node); c.ghost = ghostBoard(c.node, c.doc); c.drawn = ""; }
   else took = false;
   if (took) { ev.stopImmediatePropagation(); ev.preventDefault(); }
 }
 
-/** Carry a library footprint on the cursor; the click places it on the active side. */
+/** Carry a library footprint on the cursor (the Place Footprint tool, which stays on after the click places it). */
 export function placeFootprint(req: PlaceFootprintRequest): Promise<void> {
   const ctx = ctxNow(), P = pcbHelpers();
   if (!ctx.doc || isSch() || !P) return Promise.reject(new Error("Open a board to place a footprint"));
@@ -282,24 +332,39 @@ export function placeFootprint(req: PlaceFootprintRequest): Promise<void> {
   if (!req || typeof req.fpid !== "string" || !req.fpid) return Promise.reject(new Error('placeFootprint needs fpid "Library:Name"'));
   if (typeof req.footprint !== "string" || !req.footprint.trim()) return Promise.reject(new Error("placeFootprint needs the footprint's .kicad_mod text"));
   endFootprintCarry();
+  startFootprintTool(ctx.doc);
   const pos = cursorMm();
   const node = core.footprintInstance({ fpid: req.fpid, footprint: req.footprint, at: pos, fields: req.fields });
-  if (/^B\./.test(String(ctx.activeLayer || ""))) P.flipFootprintNode(node);          // the active side
-  if (E.tool !== "select") setTool("select");
+  // "Put it on FRONT layer" (a library built from a board may hold it flipped), then SetOrientation( ANGLE_0 )
+  const layer = K().kid(node, "layer");
+  if (layer && /^B\./.test(String(layer[1]))) flipCarried(P, node);
+  const a0 = K().atOf(node)[2]; if (a0) P.rotateFootprintNode(node, -a0);
   const canvas = document.createElement("canvas");
   canvas.className = "klib-carry"; canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:5";
-  stage.appendChild(canvas); setCursorOverride("MOVING");   // PlaceFootprint: MOVING while a footprint rides the cursor
+  stage.appendChild(canvas);
   return new Promise<void>((resolve) => {
     fpCarry = { node, ghost: ghostBoard(node, ctx.doc!), canvas, raf: 0, drawn: "", doc: ctx.doc!, pos, resolve };
-    window.addEventListener("pointermove", onCarryMove, true); window.addEventListener("pointerdown", onCarryDown, true); window.addEventListener("keydown", onCarryKey, true);
     drawFootprintCarry();
   });
 }
 
 // ---------------------------------------------------------------- the dialogs
 
+/** The schematic module's preview settings: m_AutoplaceFields.enable (autoplace in SYMBOL_PREVIEW_WIDGET) and its helper. */
+function schPreviewAutoplace(): ((doc: KDoc, item: KItem) => SNode | null) | null {
+  const sch = window.CollabTools && window.CollabTools.sch; if (!sch) return null;
+  const ap = (sch.state as { autoplace?: { enable?: boolean } }).autoplace;
+  if (ap && ap.enable === false) return null;
+  const h = sch._ as unknown as Partial<SchHelpers>;
+  return h.autoplaceNode ? (doc, item) => h.autoplaceNode!(doc, item) : null;
+}
+/** The grid (mm) behind the footprint previews: FOOTPRINT_PREVIEW_PANEL takes the board editor's grid settings (shown
+ *  when the grid is, at its current size); 0 for none. */
+function previewGrid(): number { if (!E.gridOn) return 0; try { return defaultGrid("pcb"); } catch { return 0; } }
 function chooser(kind: LibKind, opts?: ChooserOptions): Promise<Chosen | null> {
-  return openChooser(kind, sourceCtx(), Object.assign({ viewOnly: !!E.viewOnly }, opts || {}));
+  // eeschema m_Appearance.footprint_preview: the symbol chooser's footprint panes come and go with it
+  const showFootprints = prefs().schEditing.footprintPreview !== false;
+  return openChooser(kind, sourceCtx(), Object.assign({ viewOnly: !!E.viewOnly, showFootprints, autoplace: schPreviewAutoplace(), grid: previewGrid() }, opts || {}));
 }
 
 /** The dialog, then the chosen item on the cursor. */
@@ -308,10 +373,14 @@ export async function chooseAndPlace(kind: LibKind, opts?: ChooserOptions): Prom
   if (!E.kdoc) { toast("Open a document first"); return; }
   if (E.viewOnly && !(opts && opts.browser)) { toast(kind === "symbol" ? "This sheet is read-only" : "This board is read-only"); return; }
   if ((kind === "symbol") !== isSch()) { toast(kind === "symbol" ? "Symbols are placed on a schematic sheet" : "Footprints are placed on a board"); return; }
+  // PlaceFootprint is a tool: it is on while the chooser asks, and stays on when the chooser is cancelled
+  if (kind === "footprint" && !(opts && opts.browser)) startFootprintTool(E.kdoc as KDoc);
   const chosen = await chooser(kind, opts);
   if (!chosen) return;
   try {
-    rememberRecent(kind, chosen.item);
+    // SCH_DRAWING_TOOLS::PlaceSymbol: the pick joins its own history (symbols or power symbols) with its unit and field edits;
+    // the footprint chooser records its own picks (FOOTPRINT_CHOOSER_FRAME)
+    if (kind === "symbol") rememberRecent(kind, chosen.item, { power: !!(opts && opts.power), unit: chosen.unit, fields: chosen.fieldEdits || null });
     if (kind === "symbol") await placeSymbol({ libId: chosen.libId || chosen.item.id, symbol: chosen.symbol || "", fields: chosen.fields, unit: chosen.unit, bodyStyle: chosen.bodyStyle, keep: chosen.keep, allUnits: chosen.allUnits });
     else void placeFootprint({ fpid: chosen.fpid || chosen.item.id, footprint: chosen.footprint || "", fields: chosen.fields }).catch((e) => toast(message(e), 3500));
   } catch (e) { toast(message(e), 4000); }

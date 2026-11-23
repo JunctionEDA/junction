@@ -14,6 +14,8 @@ import { lsGet, lsSet } from "./router-settings";
 import { K, S, lastCtx } from "./state";
 import { clone, pt, r6, samePt, vadd, vmul, vsub } from "./util";
 import { isTuningPattern } from "./tuning-patterns";
+import { EDIT_BORDER_PX, EDIT_HOVER_PX, EDIT_POINT_PX, editPointColors } from "../edit-point-style";
+import { AUX_ITEMS_COLOR } from "./assistants";
 import { genCancelEdit, genFinishEdit, genStartEdit, genUpdateEdit, selectedTuningPattern, tuningEditNode, tuningEditPoints } from "./tuning-edit";
 import type { GenEdit } from "./tuning-edit";
 
@@ -306,9 +308,18 @@ export function peSingleId(ctx?: PcbCtx) {
 /** The handle of the single selected editable item within `tol` mm of (x, y), or null. */
 export function editHandleAt(doc: BoardDoc, x: number, y: number, tol: number) {
   const id = peSingleId(); const it = id ? doc.items.get(id) : null; if (!it || isLocked(it.node)) return null;
-  let best: EditPoint | null = null, bd = tol;
-  for (const h of editPoints(it)) { const d = Math.max(Math.abs(h.p[0] - x), Math.abs(h.p[1] - y)); if (d <= bd) { bd = d; best = h; } }
+  const best = findEditHandle(editPoints(it), x, y, tol);
   return best ? { it, h: best } : null;
+}
+/** An edge line's handle (EDIT_LINE, at the edge's middle): a polygon's "m<i>", a rectangle's "e<i>". */
+const isEditLine = (key: string) => /^[em]\d+$/.test(key);
+/**
+ * EDIT_POINTS::FindPoint (edit_points.cpp 33-70): the first point whose POINT_SIZE square holds the cursor
+ * (EDIT_POINT::WithinPoint, strictly inside on each axis), and only then the first edge line.
+ */
+export function findEditHandle(pts: EditPoint[], x: number, y: number, size: number): EditPoint | null {
+  const within = (h: EditPoint) => Math.abs(h.p[0] - x) < size && Math.abs(h.p[1] - y) < size;
+  return pts.find((h) => !isEditLine(h.key) && within(h)) || pts.find((h) => isEditLine(h.key) && within(h)) || null;
 }
 /**
  * PCB_POINT_EDITOR::addCorner: a corner on the zone / polygon side nearest the cursor (holes included; at the side's
@@ -422,7 +433,7 @@ export function movePointChanges(doc: BoardDoc, id: string, key: string, to: Pt)
   const node = editPointNode(it.node, it.kind, key, to, to, null);
   return K.serialize(node) === K.serialize(it.node) ? [] : [replacedChange(it, node)];
 }
-export const handleTol = () => 6 * (S.mmPerPx || 0.05);   // a few screen pixels around the 8 px handle
+export const handleTol = () => EDIT_POINT_PX * (S.mmPerPx || 0.05);   // EDIT_POINT::POINT_SIZE, in mm at this zoom
 export function onHandlePointerDown(ev: PointerEvent) {
   const ctx = lastCtx; if (!ctx || !isBoardLikeDoc() || ev.button !== 0 || ev.shiftKey || ev.ctrlKey || ev.metaKey || ev.altKey || appTool() !== "select") return;
   if (S.route || S.draw || S.drag || S.move || S.pedit || ctx.viewOnly) return;
@@ -456,13 +467,17 @@ export function drawEditPoints(c: CanvasRenderingContext2D, ctx: PcbCtx, px: num
   if (S.route || S.draw || S.drag || S.move || S.modTool) return;
   const id = peSingleId(ctx); const ge = S.genEdit as GenEdit | null | undefined;
   const it = id ? (ge && ge.id === id && ge.fin && ge.fin.items.get(id)) || ctx.doc.items.get(id) : null; if (!it || isLocked(it.node)) return; const hs = editPoints(it); if (!hs.length) return;
-  const cur = ctx.cursor || null; const size = 4 * px;   // POINT_SIZE 8 px
+  const cur = ctx.cursor || null; const size = EDIT_POINT_PX / 2 * px;   // POINT_SIZE / 2
+  // EDIT_POINTS::ViewDraw: LAYER_AUX_ITEMS (inverted when too close to the background), its border and highlight shades;
+  // the hovered or active point stroked HOVER_SIZE in the highlight shade; an edge line's centre handle never shows a
+  // state (m_lineStateVisible is off in the plain point editor)
+  const { fill, border, highlight } = editPointColors(AUX_ITEMS_COLOR, K.PCB_BG || "#001023");
   const hotKey = S.pedit ? S.pedit.key : (cur ? ((editHandleAt(ctx.doc, cur[0], cur[1], handleTol()) || {}).h || {}).key : null);
   c.save(); c.globalAlpha = 1; c.setLineDash([]);
-  for (const h of hs) if (h.lines) { c.lineWidth = 0.5 * px; c.strokeStyle = "rgba(77,77,77,0.8)"; for (const q of h.lines) line(c, h.p, q); }   // EDIT_POINTS' indicator lines
+  for (const h of hs) if (h.lines) { c.lineWidth = EDIT_BORDER_PX / 4 * px; c.strokeStyle = border; for (const q of h.lines) line(c, h.p, q); }   // EDIT_POINTS' indicator lines
   for (const h of hs) {
-    const on = h.key === hotKey;
-    c.lineWidth = (on ? 5 : 2) * px; c.strokeStyle = on ? "rgba(128,128,128,0.8)" : "rgba(77,77,77,0.8)"; c.fillStyle = "#FFFFFF";   // LAYER_AUX_ITEMS, border Darkened(0.7) / hover Darkened(0.5)
+    const on = h.key === hotKey && !isEditLine(h.key);
+    c.lineWidth = (on ? EDIT_HOVER_PX : EDIT_BORDER_PX) * px; c.strokeStyle = on ? highlight : border; c.fillStyle = fill;
     c.beginPath(); if (h.circle) c.arc(h.p[0], h.p[1], size, 0, Math.PI * 2); else c.rect(h.p[0] - size, h.p[1] - size, 2 * size, 2 * size);
     c.fill(); c.stroke();
   }
