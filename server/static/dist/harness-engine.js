@@ -64505,9 +64505,9 @@ var init_kselect = __esm({
   }
 });
 
-// node_modules/opentype.js/dist/opentype.js
+// ../../../junction/server/node_modules/opentype.js/dist/opentype.js
 var require_opentype = __commonJS({
-  "node_modules/opentype.js/dist/opentype.js"(exports2, module2) {
+  "../../../junction/server/node_modules/opentype.js/dist/opentype.js"(exports2, module2) {
     (function(global, factory) {
       typeof exports2 === "object" && typeof module2 !== "undefined" ? factory(exports2) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global = global || self, factory(global.opentype = {}));
     })(exports2, (function(exports3) {
@@ -127710,7 +127710,22 @@ Link '${target2}' to this file?`)) return null;
       }
     }
     const danglingPin = (t) => dangling.some((d) => d.what === "pin" && d.item === t.item && same(d.p, t.p));
-    for (const g2 of subgraphs) {
+    const absorbed = [], byNet = /* @__PURE__ */ new Map();
+    for (const sg of subgraphs) {
+      if (!sg.net) {
+        absorbed.push(sg);
+        continue;
+      }
+      let m = byNet.get(sg.net);
+      if (!m) {
+        m = { terms: [], nc: null, net: sg.net };
+        byNet.set(sg.net, m);
+        absorbed.push(m);
+      }
+      m.terms.push(...sg.terms);
+      if (!m.nc && sg.nc) m.nc = sg.nc;
+    }
+    for (const g2 of absorbed) {
       const pins2 = g2.terms.filter((t) => isPinTerm(t) && !(t.pin.hidden && !!t.key));
       const hasDriver = g2.terms.some((t) => driverPriority(t) > 0);
       if (!hasDriver) {
@@ -143704,7 +143719,7 @@ function drillFiles(m, baseName3, opt, ext = "drl") {
   return out2;
 }
 
-// node_modules/clipper2-ts/dist/Core.js
+// ../../../junction/server/node_modules/clipper2-ts/dist/Core.js
 var ClipType;
 (function(ClipType2) {
   ClipType2[ClipType2["NoClip"] = 0] = "NoClip";
@@ -144363,7 +144378,7 @@ var RectDUtils = {
 var InvalidRect64 = Object.freeze(Rect64Utils.createInvalid());
 var InvalidRectD = Object.freeze(RectDUtils.createInvalid());
 
-// node_modules/clipper2-ts/dist/Engine.js
+// ../../../junction/server/node_modules/clipper2-ts/dist/Engine.js
 var B02 = BigInt(0);
 var B22 = BigInt(2);
 var B42 = BigInt(4);
@@ -147228,7 +147243,7 @@ var Clipper = {
   }
 };
 
-// node_modules/clipper2-ts/dist/Offset.js
+// ../../../junction/server/node_modules/clipper2-ts/dist/Offset.js
 var JoinType;
 (function(JoinType2) {
   JoinType2[JoinType2["Miter"] = 0] = "Miter";
@@ -147844,7 +147859,7 @@ var ClipperOffset = class _ClipperOffset {
   }
 };
 
-// node_modules/clipper2-ts/dist/Clipper.js
+// ../../../junction/server/node_modules/clipper2-ts/dist/Clipper.js
 var B23 = BigInt(2);
 function intersectD(subject, clip2, fillRule, precision = 2) {
   return booleanOpD(ClipType.Intersection, subject, clip2, fillRule, precision);
@@ -154471,7 +154486,7 @@ function statAreas(m, o) {
   return { hasOutline, boardArea, frontCopper: total(front), backCopper: total(back), frontCourtyard: total(union2(fc)), backCourtyard: total(union2(bc2)) };
 }
 
-// node_modules/three/src/extras/lib/earcut.js
+// ../../../junction/server/node_modules/three/src/extras/lib/earcut.js
 function earcut(data, holeIndices, dim = 2) {
   const hasHoles = holeIndices && holeIndices.length;
   const outerLen = hasHoles ? holeIndices[0] * dim : data.length;
@@ -154892,7 +154907,7 @@ function signedArea2(data, start, end, dim) {
   return sum;
 }
 
-// node_modules/three/src/extras/Earcut.js
+// ../../../junction/server/node_modules/three/src/extras/Earcut.js
 var Earcut = class {
   /**
    * Triangulates the given shape definition by returning an array of triangles.

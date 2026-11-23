@@ -8126,7 +8126,22 @@ Link '${target}' to this file?`)) return null;
       }
     }
     const danglingPin = (t) => dangling.some((d) => d.what === "pin" && d.item === t.item && same(d.p, t.p));
-    for (const g of subgraphs) {
+    const absorbed = [], byNet = /* @__PURE__ */ new Map();
+    for (const sg of subgraphs) {
+      if (!sg.net) {
+        absorbed.push(sg);
+        continue;
+      }
+      let m = byNet.get(sg.net);
+      if (!m) {
+        m = { terms: [], nc: null, net: sg.net };
+        byNet.set(sg.net, m);
+        absorbed.push(m);
+      }
+      m.terms.push(...sg.terms);
+      if (!m.nc && sg.nc) m.nc = sg.nc;
+    }
+    for (const g of absorbed) {
       const pins = g.terms.filter((t) => isPinTerm(t) && !(t.pin.hidden && !!t.key));
       const hasDriver = g.terms.some((t) => driverPriority(t) > 0);
       if (!hasDriver) {

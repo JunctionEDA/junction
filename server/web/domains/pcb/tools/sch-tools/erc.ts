@@ -231,7 +231,17 @@ export function ercCheck(doc: KDoc, opts?: ErcOpts | null) {
     }
   }
   const danglingPin = (t: ErcTerm): boolean => dangling.some((d) => d.what === "pin" && d.item === t.item && same(d.p, t.p));
-  for (const g of subgraphs) {
+  // RunERC skips absorbed subgraphs: the subgraphs of one sheet that share a driver name (a label, a power symbol)
+  // were absorbed into one (CONNECTION_SUBGRAPH::Absorb takes their items and their no-connect flag), so a power
+  // symbol wired only to a PWR_FLAG is checked together with the parts on the same supply elsewhere on the sheet
+  const absorbed: ErcSubgraph[] = [], byNet = new Map<ErcNet, ErcSubgraph>();
+  for (const sg of subgraphs) {
+    if (!sg.net) { absorbed.push(sg); continue; }
+    let m = byNet.get(sg.net);
+    if (!m) { m = { terms: [], nc: null, net: sg.net }; byNet.set(sg.net, m); absorbed.push(m); }
+    m.terms.push(...sg.terms); if (!m.nc && sg.nc) m.nc = sg.nc;
+  }
+  for (const g of absorbed) {
     // a hidden power input joins its net by name (CONNECTION_GRAPH's invisible power pins): it is not one of the pins that touch here
     const pins = g.terms.filter((t): t is PinTerm => isPinTerm(t) && !(t.pin.hidden && !!t.key));
     const hasDriver = g.terms.some((t) => driverPriority(t) > 0);
