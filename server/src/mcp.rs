@@ -39,7 +39,12 @@ const GUIDE: &str = include_str!("../web/domains/pcb/mcp/guide.md");
 /// The tools of the other domains, each from its own folder (web/domains/<id>/mcp/tools.json, the same
 /// shape as the electronics list).  They all run in the headless editor, which has the same folders'
 /// code (web/domains/pcb/mcp/host.ts takes each domain's tool table).
-const DOMAIN_TOOLS: &[(&str, &str)] = &[("mechanical", include_str!("../web/domains/mechanical/mcp/tools.json"))];
+const DOMAIN_TOOLS: &[(&str, &str)] = &[
+    ("mechanical", include_str!("../web/domains/mechanical/mcp/tools.json")),
+    ("assembly", include_str!("../web/domains/assembly/mcp/tools.json")),
+];
+/// The domains whose tools are Mechanical CAD's (`cad_*`): shown only to a person who has it turned on.
+const CAD_DOMAINS: &[&str] = &["mechanical", "assembly"];
 
 const PROTOCOL_VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const DEFAULT_PROTOCOL: &str = "2025-06-18";
@@ -57,7 +62,13 @@ Before drawing or rearranging a schematic, laying out or routing a board, or rev
 /// Added to the instructions for a person who has Mechanical CAD turned on (`users.cad_enabled`), who is also
 /// the only one shown the `cad_*` tools.
 const CAD_INSTRUCTIONS: &str = " \
-A project can also hold mechanical parts: a part studio (a .jpart document, listed by get_project) is a list of features (sketches, extrudes, and so on) that the modelling kernel builds in order into solid bodies. Read one with cad_get_features, learn the feature types and their parameters with cad_feature_types, change it with cad_edit_features (which rebuilds and reports each feature's errors), measure with cad_get_bodies and look at it with cad_render_view. Lengths are millimetres, Z is up.";
+A project can also hold mechanical designs, worked on with the cad_ tools (lengths are millimetres, angles degrees, Z is up; they run on the server, so nothing has to be open in a browser). \
+A part studio (a .jpart document, listed by get_project) is a list of features (sketch, extrude, fillet, hole and about 170 more) that the modelling kernel builds in order into solid bodies; an assembly (.jasm) places those bodies as instances and ties them with mates. \
+Read cad_reference topic \"guide\" once before modelling (it has a whole part in one call), and topic \"mates\" before the first mate. \
+Look cheaply first: cad_describe says what is there in a few lines, cad_get_features gives the tree and one feature in full, cad_feature_types searches the feature types and gives one type's parameters with an example. \
+Change a part studio with cad_edit_features (several edits in one call; dry_run to try, atomic to refuse a call that would break a feature; every result says what each feature reports) and an assembly with cad_edit_assembly (insert parts, standard hardware from cad_search_models, mates; every result has the solve report). \
+Refer to a face or an edge by a pick instead of guessing its name ({ kind: \"face\", body, pick: \"top\" }); cad_find_geometry lists the candidates. \
+Check your work: cad_measure, cad_check (interference, clearance, thin walls), and cad_render_view to see it (views puts several in one picture, highlight shows a face, section cuts it open). cad_export writes STEP, STL, 3MF or DXF. undo_changes takes back a cad_ change by its change_id.";
 
 // ------------------------------------------------------------------ the catalog
 
@@ -123,6 +134,20 @@ fn def_for(t: &Tool, cad: bool) -> Value {
 
 fn annotations(title: &str, write: bool, destructive: bool) -> Value {
     json!({ "title": title, "readOnlyHint": !write, "destructiveHint": write && destructive, "idempotentHint": !write, "openWorldHint": false })
+}
+
+/// The annotations of a domain's tool: its tools.json may say `idempotent` (a write that is safe to repeat, a
+/// read that leaves a file behind) and `open_world` (it asks services outside this server).
+fn domain_annotations(title: &str, t: &Value) -> Value {
+    let write = t["write"].as_bool().unwrap_or(false);
+    let mut a = annotations(title, write, t["destructive"].as_bool().unwrap_or(false));
+    if let Some(v) = t["idempotent"].as_bool() {
+        a["idempotentHint"] = json!(v);
+    }
+    if let Some(v) = t["open_world"].as_bool() {
+        a["openWorldHint"] = json!(v);
+    }
+    a
 }
 
 fn build_catalog() -> Vec<Tool> {
@@ -233,11 +258,11 @@ fn build_catalog() -> Vec<Tool> {
             let project = t["input_schema"]["properties"].get("project").is_some();
             out.push(Tool {
                 def: json!({ "name": name, "title": title, "description": t["description"], "inputSchema": t["input_schema"],
-                             "annotations": annotations(&title, write, t["destructive"].as_bool().unwrap_or(false)) }),
+                             "annotations": domain_annotations(&title, &t) }),
                 write,
                 host: true,
                 project,
-                cad: *domain == "mechanical",
+                cad: CAD_DOMAINS.contains(domain),
             });
         }
     }
@@ -290,19 +315,33 @@ const PROMPTS: &[(&str, &str, &str, &str)] = &[
      "Design this on Junction, in the project {project} (create it if it does not exist): {description}. Read get_design_guide first and work in its stages: requirements, parts with their datasheets, the schematic block by block, the board (update from schematic, outline, placement), rules and routing, then the checks and a short report of what to look at before ordering."),
 ];
 
-fn prompts_list() -> Value {
-    json!({ "prompts": PROMPTS.iter().map(|(name, title, description, text)| {
-        let mut args = vec![json!({ "name": "project", "description": "The project's name", "required": true })];
-        if text.contains("{description}") {
-            args.push(json!({ "name": "description", "description": "What to build", "required": true }));
-        }
-        json!({ "name": name, "title": title, "description": description, "arguments": args })
-    }).collect::<Vec<_>>() })
+/// The prompts of Mechanical CAD: listed to a person who has it turned on.
+const CAD_PROMPTS: &[(&str, &str, &str, &str)] = &[
+    ("design_part", "Design a mechanical part", "Model a part (a bracket, an enclosure, a knob) in a part studio from a description, and check it.",
+     "Design this mechanical part on Junction, in the project {project} (create it if it does not exist): {description}. Read cad_reference topic \"guide\" first. Make a part studio with cad_create_part_studio, then build the part with cad_edit_features in a few calls: the base solid first, then cuts and holes, then fillets and chamfers last. Use variables for the dimensions that matter and refer to faces by a pick, not by a guessed name. After each call read the result: fix a failed feature before adding more. When it is built, give the part a name and a material (set_part), check it with cad_check (thickness too if it is to be printed or moulded), look at it with cad_render_view (views: iso, top, front, right in one picture), and tell me its size, mass and anything I should decide."),
+    ("design_bracket", "Design a bracket", "An L-bracket or mounting plate with holes, from the loads and fasteners you describe.",
+     "Design a bracket on Junction, in the project {project} (create it if it does not exist): {description}. Read cad_reference topic \"guide\" first. Sketch the profile on the front plane and extrude it to the width (or sketch the plate on top and add the upright), drill the mounting holes with the hole feature at sketch points (clearance holes for the screws named, counterbored when the heads must sit flush), then fillet the inside corner and break the outer edges. Keep the wall at least 3 mm unless told otherwise, and holes at least one and a half diameters from an edge. Give it a material, then report its size and mass with a four-view picture."),
+    ("make_assembly", "Make an assembly from parts", "Put the parts of a project together with mates and standard fasteners, and check that nothing collides.",
+     "Make an assembly on Junction in the project {project}: {description}. Read cad_reference topic \"mates\" first, and cad_describe each part studio so you know the parts. Create the assembly with cad_create_assembly, insert the base part fixed, then each other part with one mate per joint (fastened for what is bolted down, revolute for a hinge, slider for a slide), picking connectors by description (the hole of a given diameter, the top face). Add the screws, nuts and washers as standard parts (cad_search_models, then insert with standard). After each call read the solve report: fix a conflicting mate before adding more. Finish with cad_check (interference), cad_get_bom, a picture (and an exploded one), and tell me the freedoms that are left and whether they are the ones intended."),
+];
+
+fn prompt_json(p: &(&str, &str, &str, &str)) -> Value {
+    let (name, title, description, text) = p;
+    let mut args = vec![json!({ "name": "project", "description": "The project's name", "required": true })];
+    if text.contains("{description}") {
+        args.push(json!({ "name": "description", "description": "What to build", "required": true }));
+    }
+    json!({ "name": name, "title": title, "description": description, "arguments": args })
+}
+
+/// `cad`: the caller has Mechanical CAD on, and is offered its prompts too.
+fn prompts_list(cad: bool) -> Value {
+    json!({ "prompts": PROMPTS.iter().chain(CAD_PROMPTS.iter().filter(|_| cad)).map(prompt_json).collect::<Vec<_>>() })
 }
 
 fn prompt_get(params: &Value) -> Result<Value, (i64, String)> {
     let name = params["name"].as_str().unwrap_or("");
-    let Some((_, _, description, text)) = PROMPTS.iter().find(|p| p.0 == name) else {
+    let Some((_, _, description, text)) = PROMPTS.iter().chain(CAD_PROMPTS.iter()).find(|p| p.0 == name) else {
         return Err((-32602, format!("unknown prompt {name}")));
     };
     let arg = |k: &str| params["arguments"][k].as_str().unwrap_or("").trim().to_string();
@@ -311,6 +350,93 @@ fn prompt_get(params: &Value) -> Result<Value, (i64, String)> {
         .replace("{project}", if project.is_empty() { "(ask me which project)" } else { &project })
         .replace("{description}", &arg("description"));
     Ok(json!({ "description": description, "messages": [{ "role": "user", "content": { "type": "text", "text": text } }] }))
+}
+
+// ------------------------------------------------------------------ resources
+
+/// The pages of the Mechanical CAD reference (web/domains/mechanical/mcp/reference.ts): uri, topic, title, description.
+const CAD_RESOURCES: &[(&str, &str, &str, &str)] = &[
+    ("junction://cad/guide", "guide", "How to model in Junction", "The workflow of the cad_ tools, a whole part in one call, and the rules that save time. Read it before modelling."),
+    ("junction://cad/sketch", "sketch", "Sketch shapes and constraints", "The shapes a sketch is drawn with, entity ids, constraints and dimensions."),
+    ("junction://cad/references", "references", "Naming and picking geometry", "How faces, edges and vertices are named, and picking them by description."),
+    ("junction://cad/variables", "variables", "Variables, parts and materials", "Variables and expressions, part names, materials and their densities."),
+    ("junction://cad/mates", "mates", "Assemblies and mates", "Inserting parts, connectors, every mate type with its parameters, and a hinge in one call."),
+    ("junction://cad/features", "features", "The feature catalogue", "Every feature type of a part studio, one line each, by family."),
+];
+
+/// What resources/list shows: the electronics design guide for everybody, the CAD pages with Mechanical CAD on.
+fn resources(cad: bool) -> Vec<Value> {
+    let mut out = vec![json!({ "uri": "junction://guide/electronics", "name": "electronics-guide", "title": "Designing electronics in Junction",
+        "description": "How to draw a schematic, lay out and route a board, and review a design (what get_design_guide returns, whole).", "mimeType": "text/markdown" })];
+    if cad {
+        out.extend(CAD_RESOURCES.iter().map(|(uri, topic, title, description)| json!({ "uri": uri, "name": format!("cad-{topic}"), "title": title, "description": description, "mimeType": "text/markdown" })));
+    }
+    out
+}
+
+fn export_mime(name: &str) -> &'static str {
+    match name.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+        "step" | "stp" => "model/step",
+        "stl" => "model/stl",
+        "3mf" => "model/3mf",
+        "obj" => "model/obj",
+        "glb" => "model/gltf-binary",
+        "dxf" => "image/vnd.dxf",
+        "svg" => "image/svg+xml",
+        "zip" => "application/zip",
+        "csv" => "text/csv",
+        _ => "application/octet-stream",
+    }
+}
+
+/// The largest export handed over inside a resources/read answer; a larger one is fetched by its link.
+const MAX_RESOURCE_BYTES: usize = 12 * 1024 * 1024;
+
+async fn resource_read(state: &AppState, caller: &Caller, uri: &str) -> Result<Value, (i64, String)> {
+    let text = |body: String| Ok(json!({ "contents": [{ "uri": uri, "mimeType": "text/markdown", "text": body }] }));
+    if uri == "junction://guide/electronics" {
+        return text(GUIDE.to_string());
+    }
+    if let Some((_, topic, _, _)) = CAD_RESOURCES.iter().find(|r| r.0 == uri) {
+        if !cad_on(state, caller).await {
+            return Err((-32002, CAD_OFF.to_string()));
+        }
+        // the pages are the tool host's own (one text for the tool and the resource)
+        let request = json!({
+            "base": own_address(), "token": internal_token(state, caller), "agent": if caller.client.is_empty() { "AI assistant" } else { caller.client.as_str() },
+            "canWrite": false, "user": { "id": caller.user.id, "login": caller.user.login, "name": caller.user.login },
+            "tool": "cad_reference", "project": Value::Null, "args": { "topic": topic },
+        });
+        let reply = hosts().call(caller.user.id, request, Duration::from_secs(60)).await.map_err(|e| (-32603, e.to_string()))?;
+        return match reply["result"].as_str() {
+            Some(body) if reply["ok"] == true => text(body.to_string()),
+            _ => Err((-32603, reply["error"].as_str().unwrap_or("The page could not be read.").to_string())),
+        };
+    }
+    if let Some(id) = uri.strip_prefix("junction://exports/").and_then(|s| Uuid::parse_str(s).ok()) {
+        let gone = || (-32002, "There is no such export: exports are kept for two weeks, and only the newest few of a project. Run the export again.".to_string());
+        let row = sqlx::query("SELECT project_id, name, bytes FROM project_exports WHERE id = $1").bind(id).fetch_optional(&state.pool).await
+            .map_err(|e| { tracing::error!("mcp: reading an export: {e}"); (-32603, "The export could not be read.".to_string()) })?
+            .ok_or_else(gone)?;
+        // a member of the export's project, as the download link asks
+        let role = persist::effective_role(&state.pool, caller.user.id, row.get("project_id")).await.map_err(|_| gone())?;
+        if role.is_none() {
+            return Err(gone());
+        }
+        let name: String = row.get("name");
+        let bytes: Vec<u8> = row.get("bytes");
+        if bytes.len() > MAX_RESOURCE_BYTES {
+            return Err((-32603, format!("{name} is {} MB, too large to hand over here. Give the person the download link from the tool's result.", bytes.len() / 1024 / 1024)));
+        }
+        let mime = export_mime(&name);
+        let textual = matches!(mime, "model/step" | "image/vnd.dxf" | "image/svg+xml" | "model/obj" | "text/csv");
+        return Ok(match (textual, String::from_utf8(bytes)) {
+            (true, Ok(body)) => json!({ "contents": [{ "uri": uri, "name": name, "mimeType": mime, "text": body }] }),
+            (_, Ok(body)) => json!({ "contents": [{ "uri": uri, "name": name, "mimeType": mime, "blob": base64::engine::general_purpose::STANDARD.encode(body.as_bytes()) }] }),
+            (_, Err(e)) => json!({ "contents": [{ "uri": uri, "name": name, "mimeType": mime, "blob": base64::engine::general_purpose::STANDARD.encode(e.as_bytes()) }] }),
+        });
+    }
+    Err((-32002, format!("There is no resource {uri}. resources/list shows them.")))
 }
 
 // ------------------------------------------------------------------ HTTP
@@ -433,7 +559,7 @@ async fn handle(state: &AppState, caller: &Arc<Caller>, site: &str, message: Val
             let version = if PROTOCOL_VERSIONS.contains(&asked) { asked } else { DEFAULT_PROTOCOL };
             Ok(json!({
                 "protocolVersion": version,
-                "capabilities": { "tools": { "listChanged": false }, "prompts": { "listChanged": false } },
+                "capabilities": { "tools": { "listChanged": false }, "prompts": { "listChanged": false }, "resources": { "subscribe": false, "listChanged": false } },
                 "serverInfo": { "name": "junction", "title": "Junction", "version": env!("CARGO_PKG_VERSION"),
                     "websiteUrl": site,
                     "icons": [
@@ -465,8 +591,21 @@ async fn handle(state: &AppState, caller: &Arc<Caller>, site: &str, message: Val
                 }),
             }
         }
-        "prompts/list" => Ok(prompts_list()),
-        "prompts/get" => prompt_get(&params),
+        "prompts/list" => Ok(prompts_list(cad_on(state, caller).await)),
+        "prompts/get" => {
+            let name = params["name"].as_str().unwrap_or("");
+            if CAD_PROMPTS.iter().any(|p| p.0 == name) && !cad_on(state, caller).await {
+                Err((-32602, CAD_OFF.to_string()))
+            } else {
+                prompt_get(&params)
+            }
+        }
+        "resources/list" => Ok(json!({ "resources": resources(cad_on(state, caller).await) })),
+        "resources/templates/list" => Ok(json!({ "resourceTemplates": [{
+            "uriTemplate": "junction://exports/{id}", "name": "export", "title": "An exported file",
+            "description": "A file a tool made for a project (cad_export, export_fab), by the id in the tool's result. Kept for two weeks.",
+        }] })),
+        "resources/read" => resource_read(state, caller, params["uri"].as_str().unwrap_or("")).await,
         "logging/setLevel" => Ok(json!({})),
         _ => Err((-32601, format!("method {method} is not supported"))),
     };
@@ -633,7 +772,7 @@ async fn get_project(state: &AppState, site: &str, p: &ProjectCtx, cad: bool) ->
         "members": members.iter().map(|m| json!({ "login": m.login, "role": m.role })).collect::<Vec<_>>(),
         "scripts": script_list(state, p).await,
         "note": if cad {
-            "Schematic sheets and the board are what the document parameter of the electronics tools takes; a part studio is what the cad_ tools take."
+            "Schematic sheets and the board are what the document parameter of the electronics tools takes; a part studio or an assembly is what the cad_ tools take."
         } else {
             "Schematic sheets and the board are what the document parameter of the other tools takes."
         },
@@ -866,7 +1005,7 @@ async fn call_tool(state: &AppState, caller: &Caller, site: &str, tool: &Tool, n
         }
         args["__site"] = json!(site);
     }
-    if name == "export_fab" {
+    if name == "export_fab" || name == "cad_export" {
         args["__site"] = json!(site);
     }
 
@@ -954,6 +1093,20 @@ async fn call_tool(state: &AppState, caller: &Caller, site: &str, tool: &Tool, n
     // a picture the tool drew itself (a shaded view of a part)
     if let Some(png) = reply["png"].as_str() {
         return Ok(json!([{ "type": "image", "data": png, "mimeType": "image/png" }, text_content(&result)]));
+    }
+    // files the tool made, as links to resources the client can read (an export)
+    if let Some(links) = reply["links"].as_array().filter(|l| !l.is_empty()) {
+        let mut content = vec![text_content(&result)];
+        for l in links.iter().take(8) {
+            if let (Some(uri), Some(name)) = (l["uri"].as_str(), l["name"].as_str()) {
+                let mut link = json!({ "type": "resource_link", "uri": uri, "name": name });
+                if let Some(m) = l["mimeType"].as_str() {
+                    link["mimeType"] = json!(m);
+                }
+                content.push(link);
+            }
+        }
+        return Ok(Value::Array(content));
     }
     if let Some(svg) = reply["svg"].as_str() {
         let svg = svg.to_string();
@@ -1145,6 +1298,11 @@ mod tests {
             assert_eq!(t.cad, t.def["name"].as_str().unwrap().starts_with("cad_"), "{}", t.def["name"]);
         }
         assert!(!INSTRUCTIONS.contains("cad_") && CAD_INSTRUCTIONS.contains("cad_get_features"));
+        // the assembly's tools are Mechanical CAD's too, and every cad tool the instructions name exists
+        assert!(on.iter().any(|n| n == "cad_edit_assembly") && on.iter().any(|n| n == "cad_render_view"), "{on:?}");
+        for word in CAD_INSTRUCTIONS.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).filter(|w| w.starts_with("cad_") && w.len() > 4) {
+            assert!(on.iter().any(|n| n == word), "the instructions name {word}, which is not a tool");
+        }
         // the document argument speaks of several PCBs only to a person with CAD on (the project shell comes with it)
         let doc_desc = |cad: bool| listed(true, cad).find(|t| t.def["name"] == "get_component").map(|t| def_for(t, cad)).unwrap()["inputSchema"]["properties"]["document"]["description"].as_str().unwrap().to_string();
         assert_eq!(doc_desc(false), DOCUMENT_DESC);
@@ -1189,5 +1347,32 @@ mod tests {
         let p = prompt_get(&json!({ "name": "review_design", "arguments": { "project": "amp" } })).unwrap();
         assert!(p["messages"][0]["content"]["text"].as_str().unwrap().contains("project amp"));
         assert!(prompt_get(&json!({ "name": "nope" })).is_err());
+    }
+
+    #[test]
+    fn cad_prompts_and_resources_follow_the_setting() {
+        let names = |cad: bool| prompts_list(cad)["prompts"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert!(names(true).contains(&"design_bracket".to_string()) && names(true).contains(&"make_assembly".to_string()));
+        assert!(!names(false).iter().any(|n| CAD_PROMPTS.iter().any(|p| p.0 == n)), "CAD prompts are not offered with CAD off");
+        assert_eq!(names(false), PROMPTS.iter().map(|p| p.0.to_string()).collect::<Vec<_>>());
+        let p = prompt_get(&json!({ "name": "design_bracket", "arguments": { "project": "rig", "description": "an L bracket for two M5 screws" } })).unwrap();
+        let text = p["messages"][0]["content"]["text"].as_str().unwrap();
+        assert!(text.contains("project rig") && text.contains("two M5 screws") && text.contains("cad_reference"));
+        let uris = |cad: bool| resources(cad).iter().map(|r| r["uri"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert!(uris(true).contains(&"junction://cad/guide".to_string()) && uris(true).contains(&"junction://cad/features".to_string()));
+        assert_eq!(uris(false), vec!["junction://guide/electronics".to_string()]);
+        assert_eq!(export_mime("Hinged box.step"), "model/step");
+        assert_eq!(export_mime("plate.DXF"), "image/vnd.dxf");
+        assert_eq!(export_mime("thing"), "application/octet-stream");
+    }
+
+    #[test]
+    fn domain_tools_say_what_they_do() {
+        let find = |name: &str| catalog().iter().find(|t| t.def["name"] == name).unwrap_or_else(|| panic!("{name} is missing"));
+        assert_eq!(find("cad_edit_assembly").def["annotations"]["destructiveHint"], true);
+        assert_eq!(find("cad_get_assembly").def["annotations"]["readOnlyHint"], true);
+        assert_eq!(find("cad_export").def["annotations"]["idempotentHint"], false, "an export leaves a file behind each time");
+        assert_eq!(find("cad_search_models").def["annotations"]["openWorldHint"], true);
+        assert!(find("cad_search_models").cad && !find("cad_search_models").project);
     }
 }

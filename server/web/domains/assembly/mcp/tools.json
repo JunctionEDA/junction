@@ -1,0 +1,119 @@
+[
+  {
+    "name": "cad_create_assembly",
+    "title": "Create an assembly",
+    "write": true,
+    "description": "Add a new, empty assembly (a .jasm document) to a project: the place where bodies of part studios are put together as instances and tied with mates. Returns its path, which is what the document parameter of the other cad_ tools takes. Use it only when the person asks for an assembly. A name that is taken is refused, so calling it twice with a name does not make two.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name, as listed by list_projects." },
+        "name": { "type": "string", "description": "The assembly's name, for example \"Hinged box\". \"Assembly N\" when omitted." }
+      },
+      "required": ["project"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_get_assembly",
+    "title": "Read an assembly",
+    "write": false,
+    "description": "An assembly as it stands: its instances (id, name, the part studio and body each comes from, where its origin is in millimetres and how it is turned, whether it is fixed, hidden or suppressed, and how many freedoms its mates leave it), its mates (id, name, type, the two connectors, parameters, the state after solving: ok, conflict or error with the reason, and the mate's values in degrees or millimetres), and the solve report: whether every mate holds, the freedoms the whole assembly is left, and hints (nothing fixed, a part that can still move). compact: true leaves out sources' bodies and mate parameters. Call it before changing an assembly.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name, as listed by list_projects." },
+        "document": { "type": "string", "description": "Which assembly: its path as listed by get_project (for example \"Hinge.jasm\"). May be left out when the project has only one." },
+        "compact": { "type": "boolean", "description": "Leave out what is rarely needed (bodies, mate parameters)." },
+        "fields": { "type": "array", "items": { "type": "string" }, "description": "Keep only these keys of each instance and mate (name always stays), for example [\"position\", \"freedoms\", \"state\", \"values\"]." }
+      },
+      "required": ["project"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_edit_assembly",
+    "title": "Edit an assembly",
+    "write": true,
+    "destructive": true,
+    "description": "Change an assembly: insert parts, move and fix them, add, change and delete mates, set a mate's angle or distance. The edits are applied in order as one change, the mates solved after each, through the same collaboration pipeline as a person's own edits (everyone who has the assembly open sees the parts move). If any edit is invalid nothing is applied and each problem is listed. The result is the assembly as it then stands with the solve report (each mate's state, the freedoms left) and a change_id that undo_changes takes. dry_run: nothing is placed and the result is how it would stand. Each edit is one of: { op: \"insert\", part: <a part studio's path>, body?, name?, at?: [x, y, z], rotate?: { axis: \"x\" | \"y\" | \"z\" | [x, y, z], angle }, fixed?, ref? } (a part keeps the place its part studio gave it unless at is given; without body every solid of the studio is inserted; ref names the instance for later edits in the same call as \"$ref\"), or with assembly: <an assembly's path>, standard: \"M5x20 socket head\" (standard hardware the server draws: screws, nuts, washers, bearings), or model: { provider, id, title } from cad_search_models in place of part; { op: \"fix\", instance, fixed? }; { op: \"move\", instance, to?: [x, y, z], by?: [dx, dy, dz], rotate?: { axis, angle, about? } }; { op: \"mate\", type, a, b, name?, params?, ref? } with type one of fastened, revolute, slider, planar, cylindrical, pin-slot, ball, parallel, tangent, and a and b connectors { instance, face | edge | vertex: <name or pick>, flip? } (b is moved onto a; two flat faces are made to meet); { op: \"set_mate\", mate, a?, b?, params?, type?, name? }; { op: \"drive\", mate, value, key? } (set a revolute's angle in degrees or a slider's distance in mm; stored); { op: \"copy\", instance, count?, step: [dx, dy, dz] }; { op: \"rename\", instance | mate, name }; { op: \"suppress\", instance | mate, suppressed? }; { op: \"hide\", instance, hidden? }; { op: \"delete\", instance | mate }. Read cad_reference topic \"mates\" once before the first mate: it says what each connector gives, the parameters of each mate type, and has a hinge in one call. Millimetres and degrees. Only make changes the person asked for.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name, as listed by list_projects." },
+        "document": { "type": "string", "description": "Which assembly: its path as listed by get_project. May be left out when the project has only one." },
+        "edits": {
+          "type": "array",
+          "minItems": 1,
+          "description": "The edits, applied in order as one change.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "op": { "type": "string", "enum": ["insert", "move", "fix", "rename", "suppress", "hide", "delete", "copy", "mate", "set_mate", "drive"] },
+              "part": { "type": "string", "description": "insert: a part studio of the project, by path or name." },
+              "body": { "type": "string", "description": "insert: which body of the part studio (id, part name, or the feature that made it); every solid when omitted." },
+              "assembly": { "type": "string", "description": "insert: another assembly of the project, placed as one rigid instance." },
+              "standard": { "type": "string", "description": "insert: a standard part in words, for example \"M4x12 socket head\", \"M4 hex nut\", \"608 bearing\"." },
+              "model": { "type": "object", "description": "insert: a result's model from cad_search_models, { provider, id, title }." },
+              "instance": { "type": "string", "description": "The instance to change: its name, its id, or \"$ref\" of an insert earlier in this call." },
+              "mate": { "type": "string", "description": "The mate to change: its name, its id, or \"$ref\" of a mate earlier in this call." },
+              "name": { "type": "string" },
+              "ref": { "type": "string", "description": "insert, mate, copy: a name for the new instance or mate inside this call." },
+              "at": { "type": "array", "items": { "type": "number" }, "description": "insert: where the instance's origin goes, [x, y, z] in millimetres." },
+              "to": { "type": "array", "items": { "type": "number" }, "description": "move: where the instance's origin goes, [x, y, z] in millimetres." },
+              "by": { "type": "array", "items": { "type": "number" }, "description": "move: a displacement, [dx, dy, dz] in millimetres." },
+              "rotate": { "type": "object", "description": "insert, move: { axis: \"x\" | \"y\" | \"z\" | [x, y, z], angle: degrees, about?: [x, y, z] }." },
+              "step": { "type": "array", "items": { "type": "number" }, "description": "copy: from one copy to the next, [dx, dy, dz] in millimetres." },
+              "count": { "type": "number", "description": "copy: how many copies; 1 when omitted." },
+              "fixed": { "type": "boolean" },
+              "suppressed": { "type": "boolean" },
+              "hidden": { "type": "boolean" },
+              "type": { "type": "string", "description": "mate, set_mate: fastened, revolute, slider, planar, cylindrical, pin-slot, ball, parallel or tangent." },
+              "a": { "type": "object", "description": "mate: the connector that stays, { instance, face | edge | vertex: <name or pick>, flip? }." },
+              "b": { "type": "object", "description": "mate: the connector that is brought onto a, same form." },
+              "params": { "type": "object", "description": "mate: offset (mm), rotation (degrees), reorient (quarter turns), limits with <value>Min / <value>Max, as cad_reference topic \"mates\" lists per type." },
+              "value": { "type": "number", "description": "drive: the angle in degrees or the distance in millimetres." },
+              "key": { "type": "string", "description": "drive: which value of the mate (angle, distance, …) when it has several." }
+            },
+            "required": ["op"]
+          }
+        },
+        "dry_run": { "type": "boolean", "description": "Plan and solve without changing the assembly." }
+      },
+      "required": ["project", "edits"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_search_models",
+    "title": "Find hardware and suppliers' models",
+    "write": false,
+    "open_world": true,
+    "description": "Search for 3D models to place in an assembly: standard hardware the server draws from the standard's dimensions (\"M5x20 socket head\", \"M4 hex nut\", \"M3 washer\", \"608 bearing\") and parts of the suppliers this server is set up for, by part number. Each result has a title, the supplier and part number, its size in millimetres, whether it can be placed, and a model to hand to cad_edit_assembly { op: \"insert\", model }. Nothing is added to the project by searching.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "description": "A standard size in words, or a supplier's part number." },
+        "limit": { "type": "number", "description": "How many results to list, 10 when omitted (30 at most)." }
+      },
+      "required": ["query"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_get_bom",
+    "title": "Bill of materials of an assembly",
+    "write": false,
+    "description": "The bill of materials of an assembly: one line per distinct part with its quantity (how many unsuppressed instances place it), the part studio it comes from, its material, and for a part placed from a supplier the supplier's name, part number and page. format \"csv\" returns the table as CSV text instead.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name, as listed by list_projects." },
+        "document": { "type": "string", "description": "Which assembly: its path as listed by get_project. May be left out when the project has only one." },
+        "format": { "type": "string", "enum": ["json", "csv"], "description": "json when omitted." }
+      },
+      "required": ["project"],
+      "additionalProperties": false
+    }
+  }
+]

@@ -122,7 +122,7 @@ test("edits are checked against the registry and nothing is planned when one is 
   assert.equal(p.problems.length, 8);
   assert.match(p.problems[0], /edit 1 \(set\): depth must be at least 0.001/);
   assert.match(p.problems[1], /operation must be one of new, add, remove/);
-  assert.match(p.problems[2], /unknown feature type "lathe"\. The types are: /);
+  assert.match(p.problems[2], /unknown feature type "lathe"\. cad_feature_types lists them/);
   assert.match(p.problems[3], /there is no feature "No such"\. The features are: Sketch 1, Extrude 1/);
   assert.match(p.problems[4], /profile\.sketch must be the id of a sketch feature/);
   assert.match(p.problems[5], /radius r above zero/);

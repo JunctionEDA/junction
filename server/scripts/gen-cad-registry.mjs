@@ -7,6 +7,7 @@
 //   web/domains/mechanical/generated/page.ts     features, tools, panels   (the page bundle)
 //   web/domains/mechanical/generated/worker.ts   features, services        (the worker bundle)
 //   web/domains/assembly/generated/page.ts       mate types, tools, panels
+//   web/domains/assembly/generated/mates.ts      mate types               (the AI tools' host)
 //
 // which are not committed (.gitignore): `npm run check`, `npm run build` and the tests run this first.
 // A file whose name starts with "_" or ends in ".test.ts" is skipped.
@@ -48,6 +49,10 @@ write(path.join(mech, "generated", "worker.ts"), [
 write(path.join(asm, "generated", "page.ts"), [
   { name: "MATES", type: "MateDefinition", from: "../core/mate", dir: path.join(asm, "mates"), rel: "../mates" },
   { name: "TOOLS", type: "AssemblyToolDefinition", from: "../core/tool", dir: path.join(asm, "tools"), rel: "../tools" },
+]);
+// the mate types alone, for what runs without a page (the AI tools' host, assembly/mcp/host.ts)
+write(path.join(asm, "generated", "mates.ts"), [
+  { name: "MATES", type: "MateDefinition", from: "../core/mate", dir: path.join(asm, "mates"), rel: "../mates" },
 ]);
 
 // The sketch constraint solver (FreeCAD's PlaneGCS, npm @salusoft89/planegcs, LGPL-2.1-or-later) is a .wasm of

@@ -1,12 +1,48 @@
 [
   {
+    "name": "cad_reference",
+    "title": "How to model here",
+    "write": false,
+    "description": "Short pages on working with Junction's mechanical CAD. topic \"guide\": the workflow and a whole part in one call (read it once before modelling). \"sketch\": sketch shapes, entity ids, constraints and dimensions. \"references\": how faces and edges are named, and picking them by description (\"the top face\", \"the hole nearest this point\"). \"variables\": variables, expressions, part names and materials. \"mates\": assemblies, mate types and connectors. \"features\": every feature type, one line each. Each page is a few hundred words; ask for the one you need.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "topic": { "type": "string", "enum": ["guide", "sketch", "references", "variables", "mates", "features"], "description": "Which page." }
+      },
+      "required": ["topic"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "cad_feature_types",
     "title": "Part studio feature types",
     "write": false,
-    "description": "The kinds of feature a part studio can hold (sketch, extrude and whatever else this server has), read from the modeller's own feature registry: for each its type name, the default parameters of a new one, and every parameter with what it stores, its unit and its limits. Also how a sketch stores its geometry and the shorthand shapes cad_edit_features accepts. Read this once before adding or editing features.",
+    "description": "The kinds of feature a part studio can hold, read from the modeller's own registry (about 170: sketch, extrude, revolve, fillet, hole, shell, patterns, and families of ready-made features such as gears, threads, fasteners, enclosures, sheet metal). Asked in steps so it stays small. No arguments: the families with the type names in each, and the everyday types one line each. query: search by words (\"gear\", \"thread insert\", \"hinge\"). family: the types of one family. type: ONE type in full: its default parameters, every parameter with what it stores, its unit and limits, and an example edit that adds it. Read a type in full before the first time you use it. Lengths are millimetres, angles degrees.",
     "input_schema": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "query": { "type": "string", "description": "Words to search type names, titles and descriptions for." },
+        "family": { "type": "string", "description": "A family as the no-argument call lists them, for example \"modify\", \"Gears\", \"sheetmetal\"." },
+        "type": { "type": "string", "description": "One type name (for example \"extrude\"): its full parameters and an example." },
+        "detail": { "type": "string", "enum": ["full"], "description": "\"full\" gives every listed type's parameters (large: use with query or family; alone it is the whole registry)." },
+        "limit": { "type": "number", "description": "How many types to list, 60 when omitted." },
+        "offset": { "type": "number", "description": "Skip this many (next_offset of the page before)." }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_describe",
+    "title": "Describe a part studio or assembly",
+    "write": false,
+    "description": "What is in a part studio or an assembly, in a few lines of text: each body or instance with its size, where it stands, its volume and mass, how many faces it has and its holes by diameter and direction; then a part studio's features in build order with the numbers that matter (and any that failed, with why), or an assembly's mates and the freedoms left. The cheapest way to see what is there: use it before cad_get_features or a picture. Millimetres and grams.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name, as listed by list_projects." },
+        "document": { "type": "string", "description": "The part studio or assembly: its path as listed by get_project (\"Bracket.jpart\", \"Hinge.jasm\"). May be left out when the project has only one." }
+      },
+      "required": ["project"],
       "additionalProperties": false
     }
   },
@@ -14,13 +50,19 @@
     "name": "cad_get_features",
     "title": "Read a part studio",
     "write": false,
-    "description": "The feature tree of a part studio, in build order: each feature's index, id, name, type, parameters, whether it is suppressed, and its state after a rebuild by the modelling kernel (ok, warning, error with the reason, suppressed or rolled-back). Also where the rollback bar is, and the bodies the features make with their volume, surface area, centre of mass and bounding box in millimetres. A sketch's geometry is summarised as counts unless entities is true. Call this before changing a part studio and whenever you need to know whether it builds.",
+    "description": "The feature tree of a part studio, in build order: each feature's index, id, name, type, parameters, whether it is suppressed, and its state after a rebuild by the modelling kernel (ok, warning, error with the reason and a hint, suppressed or rolled-back). Also where the rollback bar is, the variables with their values, and the bodies the features make with their volume, mass, centre of mass and bounding box (millimetres, grams). feature: one feature in full instead (a sketch with every entity and constraint, how many closed regions it has and whether it is fully defined; what uses the feature). compact: true leaves parameters out (a tree of over 40 features is compact unless you page it with offset and limit). A sketch's geometry is summarised as counts unless entities is true. Call this before changing a part studio and whenever you need to know whether it builds.",
     "input_schema": {
       "type": "object",
       "properties": {
         "project": { "type": "string", "description": "Project id or exact name, as listed by list_projects." },
         "document": { "type": "string", "description": "Which part studio: its path as listed by get_project (for example \"Bracket.jpart\"). May be left out when the project has only one." },
-        "entities": { "type": "boolean", "description": "Include every sketch's points and curves in full instead of a count." }
+        "feature": { "type": "string", "description": "Only this feature, in full: its id or exact name." },
+        "compact": { "type": "boolean", "description": "Leave the parameters out: index, id, name, type and status only." },
+        "fields": { "type": "array", "items": { "type": "string" }, "description": "Keep only these keys of each feature (name always stays), for example [\"status\", \"message\"]." },
+        "entities": { "type": "boolean", "description": "Include every sketch's points and curves in full instead of a count." },
+        "bodies": { "type": "boolean", "description": "false leaves the bodies out." },
+        "offset": { "type": "number", "description": "Skip this many features." },
+        "limit": { "type": "number", "description": "List at most this many features." }
       },
       "required": ["project"],
       "additionalProperties": false
@@ -30,14 +72,35 @@
     "name": "cad_get_bodies",
     "title": "Measure the bodies",
     "write": false,
-    "description": "The solid bodies of a part studio as the kernel built them: volume (mm3), surface area (mm2), centre of mass, bounding box, and how many faces and edges each has. With names: true also the stable name of every face and edge, which is what a feature's reference ({ kind, body, name }) and a sketch on a face take. Use it to check a dimension or a volume after an edit.",
+    "description": "The solid bodies of a part studio as the kernel built them: volume (mm3), surface area (mm2), centre of mass, bounding box, material and mass (grams, when the part has a material), and how many faces and edges each has. With names: true also the stable name of every face and edge, which is what a feature's reference ({ kind, body, name }) and a sketch on a face take; cad_find_geometry is the better way to find one face or edge. Use it to check a dimension, a volume or a mass after an edit.",
     "input_schema": {
       "type": "object",
       "properties": {
         "project": { "type": "string", "description": "Project id or exact name, as listed by list_projects." },
         "document": { "type": "string", "description": "Which part studio: its path as listed by get_project. May be left out when the project has only one." },
-        "body": { "type": "string", "description": "Only this body: its id or name." },
+        "body": { "type": "string", "description": "Only this body: its id, its part name, or the name of the feature that made it." },
         "names": { "type": "boolean", "description": "List the names of the faces and edges." }
+      },
+      "required": ["project"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_find_geometry",
+    "title": "Find faces, edges and vertices",
+    "write": false,
+    "description": "Find faces, edges or vertices of a part studio's bodies, or of an assembly's instances as placed, by description, and get the reference to use in a feature, a mate or a highlight. Each match says what it is: a flat face with its normal and area, a cylinder or hole with its axis and radius, a straight edge with its direction and length, a circle with its radius, and where it is (millimetres). pick narrows it: \"top\", \"bottom\", \"front\", \"back\", \"left\", \"right\" (the outermost flat face on that side; top is +Z, front is -Y, right is +X), \"largest\", or conditions { side, normal, type: \"plane\" | \"cylinder\" | \"line\" | \"circle\" | \"arc\", hole: true, radius, diameter, length, min_area, parallel_to: \"x\" | \"y\" | \"z\", of_face: <face name or pick> (the edges round a face), nearest: [x, y, z] }. Without pick every face (or edge) is listed, largest first. The same pick can be written directly where a reference goes ({ kind, body, pick }), so call this when you need to see the candidates.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name, as listed by list_projects." },
+        "document": { "type": "string", "description": "The part studio or assembly: its path as listed by get_project. May be left out when the project has only one." },
+        "kind": { "type": "string", "enum": ["face", "edge", "vertex"], "description": "What to find; face when omitted." },
+        "body": { "type": "string", "description": "Part studio: only this body (id, part name, or the feature that made it). Every body when omitted." },
+        "instance": { "type": "string", "description": "Assembly: only this instance (name or id). Every instance when omitted." },
+        "pick": { "description": "A word or an object of conditions, as described above. Every match is listed (a side or nearest gives the best one first)." },
+        "limit": { "type": "number", "description": "How many matches to list, 40 when omitted (200 at most)." },
+        "offset": { "type": "number", "description": "Skip this many matches." }
       },
       "required": ["project"],
       "additionalProperties": false
@@ -48,7 +111,7 @@
     "title": "Edit a part studio",
     "write": true,
     "destructive": true,
-    "description": "Change the feature tree of a part studio: add, set parameters, rename, delete, suppress, reorder, or move the rollback bar. The edits are checked against the feature registry and applied together as one change through the same collaboration pipeline as a person's own edits, so everyone who has the part studio open sees it rebuild at once. If any edit is invalid nothing is applied and each problem is listed. Afterwards the model is rebuilt and the result says what every feature reports (a feature that fails says why) and what bodies exist, with a change_id that undo_changes takes to revert the whole call. With dry_run nothing is applied and the result is the part studio as it would be. Each edit is one of: { op: \"add\", type, name?, params?, ref?, after? | before? | index? } (a new feature at the rollback bar unless placed; ref names it so later edits in the same call can use \"$ref\" wherever a feature id goes, for example an extrude's profile; an extrude, revolve or sweep also takes flat faces of a body as its profile, { sketch: null, faces: [{ kind: \"face\", body, name }] } with names from cad_get_bodies, each face going along its own normal: out of the solid for new and add, into it for remove and intersect); for a sketch also plane (\"top\", \"front\", \"right\" or a face reference) and shapes (rectangle, circle, polygon, line, ellipse, regular_polygon, spline, bezier, text: see cad_feature_types); { op: \"set\", feature, params } (each key given replaces that parameter; for a sketch shapes replaces its geometry and entities: { id: entity | null } changes single points and curves); { op: \"rename\", feature, name }; { op: \"delete\", feature }; { op: \"suppress\", feature, suppressed }; { op: \"move\", feature, index | before | after }; { op: \"rollback\", before: feature | null }. feature is a feature's id or exact name. Example, a 40 x 20 x 10 block with a hole: [{ op: \"add\", type: \"sketch\", ref: \"s\", plane: \"top\", shapes: [{ type: \"rectangle\", x1: 0, y1: 0, x2: 40, y2: 20 }, { type: \"circle\", cx: 10, cy: 10, r: 3 }] }, { op: \"add\", type: \"extrude\", params: { profile: \"$s\", depth: 10 } }]. Only make changes the person asked for.",
+    "description": "Change a part studio: add, set parameters, rename, delete, suppress, reorder features, move the rollback bar, set variables, name parts and give them materials. The edits are checked against the feature registry and applied together as one change through the same collaboration pipeline as a person's own edits, so everyone who has the part studio open sees it rebuild at once. If any edit is invalid nothing is applied and each problem is listed. Afterwards the model is rebuilt and the result says what every feature reports (a feature that fails says why, with a hint) and what bodies exist, with a change_id that undo_changes takes to revert the whole call. dry_run: nothing is applied and the result is the part studio as it would be, with would_fail listing features that would newly fail. atomic: true applies nothing if any feature would newly fail to build. Each edit is one of: { op: \"add\", type, name?, params?, ref?, after? | before? | index? } (a new feature at the rollback bar unless placed; ref names it so later edits in the same call can use \"$ref\" wherever a feature or body goes); for a sketch also plane (\"top\", \"front\", \"right\", a face reference or pick, or a plane feature's name), shapes (rectangle, center_rectangle, rounded_rectangle, circle, slot, polygon, polyline, regular_polygon, line, arc, ellipse, spline, bezier, text, point), define: true (constrain and dimension the shapes so the sketch is fully defined) and constraints; { op: \"set\", feature, params } (each key given replaces that parameter; for a sketch shapes replaces its geometry and entities: { id: entity | null } changes single points and curves); { op: \"rename\", feature, name }; { op: \"delete\", feature }; { op: \"suppress\", feature, suppressed }; { op: \"move\", feature, index | before | after }; { op: \"rollback\", before: feature | null }; { op: \"set_variable\", name, value } and { op: \"delete_variable\", name }; { op: \"set_part\", body, name?, material?, color?, description? }. feature is a feature's id or exact name. A number parameter may be an expression string that uses variables (\"width / 2\"). A reference to a face, edge or vertex is { kind, body, name }, or a pick resolved against the model as built at that edit: { kind: \"face\", body: \"$box\", pick: \"top\" }, { kind: \"edge\", body, pick: { of_face: \"top\", all: true } } (cad_reference topics \"references\" and \"sketch\"). Example, a 40 x 20 x 10 block with a pocket in its top: [{ op: \"add\", type: \"sketch\", ref: \"s\", plane: \"top\", shapes: [{ type: \"rectangle\", x1: 0, y1: 0, x2: 40, y2: 20 }] }, { op: \"add\", type: \"extrude\", ref: \"b\", params: { profile: \"$s\", depth: 10 } }, { op: \"add\", type: \"sketch\", ref: \"p\", plane: { kind: \"face\", body: \"$b\", pick: \"top\" }, shapes: [{ type: \"circle\", cx: 20, cy: 10, r: 4 }] }, { op: \"add\", type: \"extrude\", params: { profile: \"$p\", operation: \"remove\", depth: 5, flip: true } }]. Millimetres and degrees. Only make changes the person asked for.",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -61,42 +124,139 @@
           "items": {
             "type": "object",
             "properties": {
-              "op": { "type": "string", "enum": ["add", "set", "rename", "delete", "suppress", "move", "rollback"] },
+              "op": { "type": "string", "enum": ["add", "set", "rename", "delete", "suppress", "move", "rollback", "set_variable", "delete_variable", "set_part"] },
               "type": { "type": "string", "description": "add: the feature type, from cad_feature_types." },
               "feature": { "type": "string", "description": "The feature to change: its id, its exact name, or \"$ref\" of an add earlier in this call." },
-              "name": { "type": "string" },
+              "name": { "type": "string", "description": "add, rename: the feature's name. set_variable, delete_variable: the variable. set_part: the part's new name." },
               "ref": { "type": "string", "description": "add: a name for the new feature inside this call." },
-              "params": { "type": "object", "description": "Parameters by key, as cad_feature_types describes them." },
-              "plane": { "description": "Sketch: \"top\", \"front\", \"right\", or { kind: \"face\", ref: { kind: \"face\", body, name } }." },
-              "shapes": { "type": "array", "description": "Sketch: the geometry as shapes; replaces what the sketch held.", "items": { "type": "object" } },
+              "params": { "type": "object", "description": "Parameters by key, as cad_feature_types { type } describes them." },
+              "plane": { "description": "Sketch: \"top\", \"front\", \"right\", { kind: \"face\", body, name }, { kind: \"face\", body, pick }, or a plane feature's name." },
+              "shapes": { "type": "array", "description": "Sketch: the geometry as shapes (millimetres in the sketch plane); replaces what the sketch held.", "items": { "type": "object" } },
+              "define": { "type": "boolean", "description": "Sketch, with shapes: add the constraints and dimensions that hold the shapes as drawn." },
+              "constraints": { "type": "array", "description": "Sketch: constraints and dimensions to add, [{ type, refs, value?, axis? }] (cad_reference topic \"sketch\").", "items": { "type": "object" } },
               "entities": { "type": "object", "description": "Sketch, with set: single entities by id to add or replace; null removes one." },
               "suppressed": { "type": "boolean" },
               "index": { "type": "number", "description": "add, move: the position in the tree, 0 is the top." },
               "before": { "description": "add, move: put it above this feature. rollback: the feature the bar goes above, or null for the end." },
-              "after": { "type": "string", "description": "add, move: put it below this feature." }
+              "after": { "type": "string", "description": "add, move: put it below this feature." },
+              "value": { "description": "set_variable: a number (millimetres or degrees) or an expression string (\"40 mm + 2 * wall\")." },
+              "rename": { "type": "string", "description": "set_variable: a new name for the variable, carried into every expression that uses it." },
+              "body": { "type": "string", "description": "set_part: the body (its id, part name, or the feature that made it)." },
+              "material": { "description": "set_part: a material by id or name (steel, aluminium, abs, pla, …; cad_reference topic \"variables\" lists them), or null for none." },
+              "color": { "description": "set_part: \"#rrggbb\", or null for the default." },
+              "description": { "type": "string", "description": "set_part: a line about the part, for the parts list and the bill of materials." }
             },
             "required": ["op"]
           }
         },
-        "dry_run": { "type": "boolean", "description": "Check the edits and rebuild without changing anything." }
+        "dry_run": { "type": "boolean", "description": "Check the edits and rebuild without changing anything." },
+        "atomic": { "type": "boolean", "description": "Apply nothing if any feature would newly fail to build." },
+        "report": { "type": "string", "enum": ["full"], "description": "\"full\" lists every feature of a long tree in the result, not only those touched or failing." }
       },
       "required": ["project", "edits"],
       "additionalProperties": false
     }
   },
   {
-    "name": "cad_render_view",
-    "title": "Render a part",
+    "name": "cad_measure",
+    "title": "Measure",
     "write": false,
-    "description": "A shaded picture of the bodies of a part studio as they are right now, from a standard direction: iso (from the front right, above), top, bottom, front, back, left or right. Orthographic and framed on the bodies, with their edges drawn and an axis triad in the corner (X red, Y green, Z blue; Z is up). Use it to see whether a feature did what you meant after an edit.",
+    "description": "Measure a part studio or an assembly. With nothing but the document: every body's (or instance's) volume, mass and centre of mass, and the total with its overall bounding box. items: up to 12 faces, edges or vertices, each { kind, body | instance, name } or { kind, body | instance, pick }: what each is (area, length, radius, position), and for exactly two what they say together: the shortest distance and where, centre to centre, the angle between them, the distance between parallel faces or axes. between: [a, b], two bodies or instances by name: the smallest gap between them and where it is (0 when they touch or overlap). Millimetres, degrees, grams; in an assembly positions are in assembly space as placed.",
     "input_schema": {
       "type": "object",
       "properties": {
         "project": { "type": "string", "description": "Project id or exact name, as listed by list_projects." },
-        "document": { "type": "string", "description": "Which part studio: its path as listed by get_project. May be left out when the project has only one." },
-        "view": { "type": "string", "enum": ["iso", "top", "bottom", "front", "back", "left", "right"], "description": "Where to look from; iso when omitted." },
-        "width_px": { "type": "number", "description": "Width of the picture in pixels, 300 to 1600; 900 when omitted." },
+        "document": { "type": "string", "description": "The part studio or assembly: its path as listed by get_project. May be left out when the project has only one." },
+        "items": { "type": "array", "maxItems": 12, "description": "Faces, edges or vertices to measure: references or picks.", "items": { "type": "object" } },
+        "between": { "type": "array", "minItems": 2, "maxItems": 2, "description": "Two bodies (part studio) or instances (assembly), by name or id: the clearance between them.", "items": { "type": "string" } }
+      },
+      "required": ["project"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_check",
+    "title": "Check a part studio or assembly",
+    "write": false,
+    "description": "Run checks on a part studio or an assembly and list what is wrong in plain sentences (findings; ok is true when there are none). checks, any of: \"validity\" (features that failed, with the reason and a hint; in an assembly also mates that conflict or lost their geometry), \"interference\" (which bodies or instances overlap and by how many mm3, exact), \"clearance\" (the smallest gaps between neighbours, nearest first; with min_clearance, the pairs closer than that are findings), \"thickness\" (each part's thinnest wall, estimated by sampling; with min_wall, thinner ones are findings). Validity and interference when checks is left out. Millimetres.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name, as listed by list_projects." },
+        "document": { "type": "string", "description": "The part studio or assembly: its path as listed by get_project. May be left out when the project has only one." },
+        "checks": { "type": "array", "items": { "type": "string", "enum": ["validity", "interference", "clearance", "thickness"] }, "description": "Which checks to run." },
+        "min_clearance": { "type": "number", "description": "clearance: gaps under this many millimetres are findings." },
+        "min_wall": { "type": "number", "description": "thickness: walls under this many millimetres are findings." }
+      },
+      "required": ["project"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_render_view",
+    "title": "Render a part or assembly",
+    "write": false,
+    "description": "A shaded picture of a part studio's bodies or an assembly's instances as they are right now. view: iso (from the front right, above), top, bottom, front, back, left, right, iso_back, iso_left, iso_below, or a direction to look along as [x, y, z]. views: up to 6 of them in ONE picture, side by side (for example [\"iso\", \"top\", \"front\", \"right\"]): cheaper than several calls. section: cut it open, { plane: \"top\" | \"front\" | \"right\", offset?, flip? } through the middle (what lies on the side the plane's normal points to is removed, the cut is drawn dark, and without a view the picture looks at the cut). zoom_to: frame the picture on these bodies or instances. highlight: faces and edges to draw in orange, as references or picks ([{ kind: \"face\", body, pick: \"top\" }]): the way to check which face a name or a pick means. bodies / instances: draw only these. An assembly also takes explode (0 to 3: pull the instances apart from the centre) and drive ({ mate, values: [...] }: one cell per value of a mate's angle or distance, to see a motion; nothing is stored). Orthographic, framed on what is drawn, with edges and an axis triad in the corner (X red, Y green, Z blue; Z is up). Use it to see whether a feature did what you meant.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name, as listed by list_projects." },
+        "document": { "type": "string", "description": "The part studio or assembly: its path as listed by get_project. May be left out when the project has only one." },
+        "view": { "description": "Where to look from: a view name, or [x, y, z]; iso when omitted." },
+        "views": { "type": "array", "maxItems": 6, "description": "Several views in one picture, in rows, left to right.", "items": {} },
+        "section": { "description": "\"top\", \"front\" or \"right\", or { plane, offset?, flip? }, or { normal: [x, y, z], point: [x, y, z] }." },
+        "zoom_to": { "description": "A body or instance (name or id), or a list of them, to frame the picture on." },
+        "highlight": { "type": "array", "maxItems": 40, "description": "Faces and edges to draw in orange: references or picks.", "items": { "type": "object" } },
+        "bodies": { "type": "array", "items": { "type": "string" }, "description": "Part studio: draw only these bodies." },
+        "instances": { "type": "array", "items": { "type": "string" }, "description": "Assembly: draw only these instances." },
+        "explode": { "type": "number", "description": "Assembly: 0 to 3, how far the instances are pulled apart from the centre; nothing is stored." },
+        "drive": { "type": "object", "description": "Assembly: { mate, values: [..up to 6..], key? }: a cell per value (degrees or mm) of that mate; nothing is stored." },
+        "width_px": { "type": "number", "description": "Width of the picture in pixels, 300 to 1600 (2000 for several cells); 900 when omitted, 1200 for several cells." },
         "edges": { "type": "boolean", "description": "false leaves the edge lines out." }
+      },
+      "required": ["project"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_export",
+    "title": "Export a model file",
+    "write": false,
+    "idempotent": false,
+    "description": "Write a part studio's bodies or a whole assembly (every instance where it stands) as a file: step (exact, named parts with colours; AP214 or AP242), brep, stl, 3mf, obj or glb (meshes; resolution coarse, medium or fine), or dxf / svg (the flat outline of one face, or a sketch, of a part studio). The file is stored with the project for two weeks and returned as a download link for the person and as an MCP resource (junction://exports/<id>) the client can read; a small dxf or svg is also returned as text. bodies / instances limits it to some parts. Millimetres unless unit says otherwise.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name, as listed by list_projects." },
+        "document": { "type": "string", "description": "The part studio or assembly: its path as listed by get_project. May be left out when the project has only one." },
+        "format": { "type": "string", "enum": ["step", "brep", "stl", "3mf", "obj", "glb", "dxf", "svg"], "description": "step when omitted." },
+        "bodies": { "type": "array", "items": { "type": "string" }, "description": "Part studio: only these bodies (ids, part names or the features that made them)." },
+        "instances": { "type": "array", "items": { "type": "string" }, "description": "Assembly: only these instances." },
+        "face": { "description": "dxf, svg: the flat face to outline, { kind: \"face\", body, name } or a pick such as \"top\" or { body, pick }." },
+        "sketch": { "type": "string", "description": "dxf, svg: the sketch to draw instead of a face, by name or id." },
+        "unit": { "type": "string", "enum": ["mm", "cm", "m", "in"], "description": "The file's length unit; mm when omitted." },
+        "schema": { "type": "string", "enum": ["AP214", "AP242"], "description": "step: the application protocol; AP214 when omitted." },
+        "resolution": { "type": "string", "enum": ["coarse", "medium", "fine"], "description": "Meshes: how finely curves are faceted; medium when omitted." },
+        "name": { "type": "string", "description": "The file's name without extension; the document's name when omitted." },
+        "inline": { "type": "boolean", "description": "false leaves a small dxf or svg's text out of the result." }
+      },
+      "required": ["project"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "cad_import",
+    "title": "Import a STEP file",
+    "write": true,
+    "description": "Bring a STEP file into the project as a new part studio whose first feature imports its solids as bodies (exact geometry: later features can cut, fillet and sketch on them, and an assembly can place them). file: the path of a .step or .stp file already in the project (get_project lists them; a person can drop one on the project's Home tab). content: the text of a STEP file instead (up to 8 MB), which is stored in models/. split \"one\" makes the whole file one body (a supplier's part that is several solids). Returns the part studio's path and its bodies.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name, as listed by list_projects." },
+        "file": { "type": "string", "description": "A STEP file of the project, by its path." },
+        "content": { "type": "string", "description": "The text of a STEP file (starts with ISO-10303-21;)." },
+        "name": { "type": "string", "description": "The new part studio's name; the file's name when omitted." },
+        "split": { "type": "string", "enum": ["solids", "one"], "description": "solids (each solid a body) when omitted; one for a single body." }
       },
       "required": ["project"],
       "additionalProperties": false
@@ -106,7 +266,7 @@
     "name": "cad_create_part_studio",
     "title": "Create a part studio",
     "write": true,
-    "description": "Add a new, empty part studio (a .jpart document) to a project, for a mechanical part designed from sketches and features. Returns its path, which is what the document parameter of the other cad_ tools takes. Use it only when the person asks for a new part.",
+    "description": "Add a new, empty part studio (a .jpart document) to a project, for a mechanical part designed from sketches and features. Returns its path, which is what the document parameter of the other cad_ tools takes. Use it only when the person asks for a new part. A name that is taken is refused, so calling it twice with a name does not make two.",
     "input_schema": {
       "type": "object",
       "properties": {

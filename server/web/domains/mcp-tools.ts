@@ -6,6 +6,7 @@
 // domain's tools, add its table here and its tools.json there.  The electronics tools predate this list and are
 // the host's own.
 import type { McpDomainTools } from "../platform/mcp/host";
+import { ASSEMBLY_TOOLS } from "./assembly/mcp/host";
 import { MECHANICAL_TOOLS } from "./mechanical/mcp/host";
 
-export const DOMAIN_TOOLS: readonly McpDomainTools[] = [MECHANICAL_TOOLS];
+export const DOMAIN_TOOLS: readonly McpDomainTools[] = [MECHANICAL_TOOLS, ASSEMBLY_TOOLS];

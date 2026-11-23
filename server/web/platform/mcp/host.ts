@@ -12,6 +12,7 @@
 //   record   for a change: { docId, title, edits, undo } — the server stores it, and hands `undo` back to the
 //            domain's `undo` when the person's assistant calls undo_changes or redo_changes
 //   swap     from `undo`: the record that takes this undo back (what redo_changes is handed)
+//   links    files the call made that the client can read as resources: [{ uri, name, mimeType }]
 // A failure a model can act on is thrown as an McpToolError; anything else is reported as an internal failure.
 
 export interface McpDocEntry { docId: string; path: string; docType: string }
@@ -32,7 +33,11 @@ export interface McpRequest {
 }
 
 export interface McpChangeRecord { docId: string; title: string; edits: string[]; undo: { domain: string; [key: string]: unknown } }
-export interface McpReply { result: unknown; record?: McpChangeRecord; swap?: unknown; png?: string }
+export interface McpReply {
+  result: unknown; record?: McpChangeRecord; swap?: unknown; png?: string;
+  /** files the client can fetch as MCP resources (an export): the server lists each as a resource link beside the result */
+  links?: { uri: string; name: string; mimeType?: string }[];
+}
 
 /** A failure whose message is for the model: what was wrong with the call and what to do instead. */
 export class McpToolError extends Error {

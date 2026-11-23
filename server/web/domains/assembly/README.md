@@ -114,6 +114,20 @@ exploded views. Right edge: a rail of buttons for the panels.
 - Two people can edit one assembly at once; an assembly open in one window follows a part studio or a board
   edited in another, live.
 
+## For an AI assistant (`mcp/`)
+
+The assembly's tools on the MCP endpoint are `cad_create_assembly`, `cad_get_assembly`, `cad_edit_assembly`,
+`cad_search_models` and `cad_get_bom` (`mcp/tools.json`, `mcp/host.ts`); the mechanical domain's looking,
+measuring, checking and exporting tools take an assembly too, through the scene `mcp/host.ts` registers (the
+instances where the mates put them). They run headless in the server's tool host: `mcp/model.ts` plans a list of
+edits into item changes with `document/edits.ts`, solves after each with `model/problem.ts` and the solver, and
+writes the solved placements and mate values, as the editor's gestures do. Connectors are picked by description
+on the instance where it stands (`{ instance, face: "top" }`, `{ instance, face: { hole: true, diameter: 3 } }`)
+and stored as the names the editor stores. The mate types come from `generated/mates.ts` (the same files as the
+page's list, without the toolbar's). See "The MCP tools" in the mechanical CONTRACT.md for the rules, and
+`scripts/cad-mcp-e2e.mjs` for a mechanism built with them. Not there yet: explicit connectors, named positions
+and groups as edits; board and model-file instances are listed but not built.
+
 ## For tools and panels (interference, bill of materials, …)
 
 A tool is a file under `tools/` (`defineAssemblyTool`, `core/tool.ts`); its `run(assembly)` gets the

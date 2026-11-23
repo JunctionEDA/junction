@@ -547,9 +547,13 @@ How it is built:
 | `list_checkpoints`, `create_checkpoint` | named versions |
 | `get_geometry` | every part with its pins' positions and nets, and the wires or outline: what scripts plan from |
 | `get_design_guide` | the drawing, layout, routing and review standards and the Python API, for the model to read |
-| `cad_feature_types`, `cad_get_features`, `cad_get_bodies`, `cad_edit_features`, `cad_render_view`, `cad_create_part_studio` | part studios (`web/domains/mechanical/mcp`); listed only to a person who has Mechanical CAD on, and refused by name to anybody else |
+| `cad_reference`, `cad_feature_types`, `cad_describe`, `cad_get_features`, `cad_get_bodies`, `cad_find_geometry`, `cad_edit_features`, `cad_measure`, `cad_check`, `cad_render_view`, `cad_export`, `cad_import`, `cad_create_part_studio` | part studios (`web/domains/mechanical/mcp`): the feature catalogue in steps, reading, editing with picks and variables, measuring, checking, pictures, STEP/STL/3MF/DXF out and STEP in. Listed only to a person who has Mechanical CAD on, and refused by name to anybody else |
+| `cad_create_assembly`, `cad_get_assembly`, `cad_edit_assembly`, `cad_search_models`, `cad_get_bom` | assemblies (`web/domains/assembly/mcp`): instances, mates and the solve report, standard hardware and suppliers' models, the bill of materials; the looking, checking and exporting tools above take an assembly too. The same setting |
 
-Prompts `review_design`, `tidy_schematic` and `design_board` appear as slash commands in clients that show them.
+Prompts `review_design`, `tidy_schematic` and `design_board` appear as slash commands in clients that show them; with
+Mechanical CAD on also `design_part`, `design_bracket` and `make_assembly`. Resources: `junction://guide/electronics`,
+with Mechanical CAD on `junction://cad/guide` and the other reference pages, and `junction://exports/{id}` for a file a
+tool exported. The tools are described for contributors in `web/domains/mechanical/CONTRACT.md` ("The MCP tools").
 
 | Variable | |
 |---|---|

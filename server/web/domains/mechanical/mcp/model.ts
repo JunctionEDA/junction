@@ -3,14 +3,25 @@
 // them (document/edits.ts), validated against the registry first.
 //
 // Pure: no kernel, no network.  mcp/host.ts opens the document, commits what this plans and asks the kernel
-// what the result is; the node test (static/tests/cad-history.test.js) drives this file directly.
+// what the result is; the node tests (static/tests/cad-mcp.test.js, cad-mcp-tools.test.js) drive this file
+// directly.  The catalogue is catalog.ts, the sketch shapes and constraints sketch.ts, picking geometry by
+// description select.ts.
 import { applyChanges, invertChange, newId, type ItemChange, type ItemDoc, type Json, type JsonObject } from "../../../shared/itemdoc/itemdoc";
-import type { FeatureDefinition, ParamField } from "../core/feature";
+import type { FeatureDefinition } from "../core/feature";
+import { isGeomRef } from "../core/geometry";
 import { profileFaces } from "../features/_profile";
+import { isColor, setBodyLook } from "../document/appearance-items";
 import * as edits from "../document/edits";
 import { featuresOf, nextName, orderAt, rollbackIndex, studioOf, type FeatureItem } from "../document/format";
-import type { FeatureReport } from "../kernel/protocol";
-import { emptySketch, type SketchData, type SketchEntity } from "../sketch/format";
+import { assignMaterial, materialOf, materialsOf } from "../document/mass-materials";
+import { partNamesOf, updatePart } from "../document/part-items";
+import { EXPR_KEY, addVariable, deleteVariable, evaluate, isPlainNumber, lookupOf, nameProblem, setVariable, usersOf, variableValues, variablesOf } from "../document/variables";
+import type { BodyMesh, FeatureReport } from "../kernel/protocol";
+import { emptySketch, type SketchConstraint, type SketchData, type SketchEntity } from "../sketch/format";
+import type { SketchSolver } from "../sketch/solver/solve";
+import { NAMES_NOTE, UNITS_NOTE, fieldDoc, similarTypes, typeDoc } from "./catalog";
+import { PickError, pickGeometry, type GeoKind } from "./select";
+import { EXTRA_SHAPES, SHAPE_TYPES, defineShapes, extraShape, sketchReport, userConstraints, type ShapeIds, type SketchReport } from "./sketch";
 
 type Defs = readonly FeatureDefinition[];
 const isObject = (v: unknown): v is JsonObject => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -18,45 +29,9 @@ const num = (v: unknown): v is number => typeof v === "number" && Number.isFinit
 
 // ---------------------------------------------------------------- the feature types
 
-function fieldDoc(f: ParamField): JsonObject {
-  const out: JsonObject = { key: f.key, label: f.label, kind: f.kind };
-  if (f.hint) out.hint = f.hint;
-  switch (f.kind) {
-    case "number": out.stores = "a number" + (f.unit === "deg" ? " (degrees)" : f.unit === "none" ? "" : " (millimetres)"); if (f.min !== undefined) out.min = f.min; if (f.max !== undefined) out.max = f.max; break;
-    case "boolean": out.stores = "true or false"; break;
-    case "text": out.stores = "a string"; break;
-    case "enum": out.stores = "one of the options"; out.options = f.options.map((o) => o.value); break;
-    case "profile":
-      out.stores = "{ sketch: <id of an earlier sketch feature>, regions: null (all closed regions) or [region ids] }; the sketch's name, id or $ref alone is accepted too";
-      if (f.faces) out.stores += ". Flat faces of bodies can be the profile too, alone or beside a sketch: { sketch: null, faces: [{ kind: \"face\", body, name }] } (names from cad_get_bodies); each face is used with its holes, along its own normal (out of the solid for new and add, into it for remove and intersect). A single face reference, or a list of them, is accepted too";
-      break;
-    case "plane": out.stores = "{ kind: \"plane\", plane: \"top\" | \"front\" | \"right\" } or { kind: \"face\", ref: { kind: \"face\", body, name } }; \"top\", \"front\" or \"right\" alone is accepted too"; break;
-    case "refs": {
-      const forms = f.of.length ? [`{ kind: ${f.of.map((k) => `"${k}"`).join(" | ")}, body, name } (names from cad_get_bodies)`] : [];
-      if (f.planes) forms.push(`{ kind: "plane", plane: "top" | "front" | "right" }`);
-      if (f.datums && f.datums.length) forms.push(`{ kind: "datum", feature: <id of a ${f.datums.join(" / ")} feature> }`);
-      if (f.sketch) forms.push(`{ kind: "sketch", feature: <sketch id>, entity: <curve or point id> }`);
-      out.stores = (f.single ? "one of " : "a list of ") + forms.join(" or ");
-      break;
-    }
-    case "bodies": out.stores = "a list of body ids; empty means every body"; break;
-  }
-  return out;
-}
-
-const SKETCH_NOTE = "A sketch stores solved 2D geometry in its plane (x, y in millimetres; top is the XY plane, front is XZ, right is YZ): params.sketch.entities is a map of points { type: \"point\", x, y } and curves that name points by id: { type: \"line\", a, b }, { type: \"circle\", center, r }, { type: \"arc\", center, start, end } (counter-clockwise), { type: \"ellipse\", center, major, minor } (major: a point at the end of the major axis; minor: the other radius), { type: \"ellipticalArc\", center, major, minor, start, end }, { type: \"spline\", points: [ids], closed? } (through the points), { type: \"bspline\", poles: [ids], degree } (control points; degree = poles - 1 is a Bezier curve), { type: \"conic\", start, apex, end, rho }, { type: \"text\", a, b, text, bold?, italic? } (baseline start a; b above it by the height of a capital). Curves that share a point id are joined; a closed loop of lines and arcs, or a circle, is a region an extrude can use, and a loop inside another is a hole. In cad_edit_features give `shapes` instead of writing entities by hand: { type: \"rectangle\", x1, y1, x2, y2 }, { type: \"circle\", cx, cy, r }, { type: \"polygon\", points: [[x, y], ...] } (closed), { type: \"line\", x1, y1, x2, y2 }, { type: \"ellipse\", cx, cy, rx, ry, angle? }, { type: \"regular_polygon\", cx, cy, r, sides, circumscribed? }, { type: \"spline\", points: [[x, y], ...], closed? }, { type: \"bezier\", points: [[x, y], ...] }, { type: \"text\", x, y, height, text, bold?, italic? } (closed letters are regions).";
-
-/** Every registered feature type with its defaults and the parameters its dialog has. */
+/** Every registered feature type in full (the catalogue with `detail: "full"`); catalog.ts answers in steps. */
 export function featureTypes(defs: Defs): Json {
-  return {
-    feature_types: defs.map((d) => {
-      const out: JsonObject = { type: d.type, title: d.title, defaults: d.defaults(), parameters: d.schema.map(fieldDoc) };
-      if (d.type === "sketch") out.note = SKETCH_NOTE;
-      return out;
-    }),
-    units: "Lengths are millimetres and angles degrees. Z is up.",
-    names: "A body's id is the id of the feature that made it. Faces, edges and vertices have stable names (cad_get_bodies with names: true lists them); a feature refers to them as { kind, body, name }.",
-  };
+  return { feature_types: defs.map(typeDoc), units: UNITS_NOTE, names: NAMES_NOTE };
 }
 
 // ---------------------------------------------------------------- reading the tree
@@ -64,44 +39,80 @@ export function featureTypes(defs: Defs): Json {
 function sketchSummary(data: SketchData | undefined): JsonObject {
   const count: { [k: string]: number } = {};
   for (const e of Object.values((data && data.entities) || {})) count[e.type] = (count[e.type] || 0) + 1;
-  return { points: count.point || 0, lines: count.line || 0, circles: count.circle || 0, arcs: count.arc || 0 };
+  const out: JsonObject = { points: count.point || 0, lines: count.line || 0, circles: count.circle || 0, arcs: count.arc || 0 };
+  const other = Object.keys(count).filter((k) => !["point", "line", "circle", "arc"].includes(k)).reduce((n, k) => n + count[k], 0);
+  if (other) out.other_curves = other;
+  const constraints = Object.keys((data && data.constraints) || {}).length;
+  if (constraints) out.constraints = constraints;
+  return out;
 }
 
-export interface TreeOptions { entities?: boolean }
+export interface TreeOptions {
+  /** every sketch's points and curves in full instead of a count */
+  entities?: boolean;
+  /** leave the parameters out: index, id, name, type and status only */
+  compact?: boolean;
+  /** only this feature (its id), in full */
+  only?: string;
+  offset?: number; limit?: number;
+}
+
+/** The variables of a part studio with their values. */
+export function variablesJson(doc: ItemDoc): JsonObject[] {
+  const vars = variablesOf(doc), vv = variableValues(vars);
+  return vars.map((v) => {
+    const o: JsonObject = { name: v.name, expr: v.expr };
+    if (vv.values.has(v.name) && !vv.errors.has(v.id)) o.value = vv.values.get(v.name) as number; else o.error = vv.errors.get(v.id) || "It has no value.";
+    const users = usersOf(doc, v.name).length;
+    if (users) o.used_by = users;
+    return o;
+  });
+}
 
 /** The feature tree as an assistant reads it.  `reports` are the kernel's, when the model was rebuilt. */
 export function treeOf(doc: ItemDoc, reports: readonly FeatureReport[] | null, o: TreeOptions = {}): JsonObject {
   const features = featuresOf(doc), rollback = rollbackIndex(doc, features);
   const by = new Map((reports || []).map((r) => [r.id, r]));
-  return {
+  const rows = features.map((f, i) => {
+    const r = by.get(f.id);
+    const out: JsonObject = { index: i, id: f.id, name: f.name, type: f.featureType };
+    if (f.suppressed) out.suppressed = true;
+    if (r) { out.status = r.status; if (r.message) out.message = r.message; } else if (i >= rollback) out.status = "rolled-back";
+    if (o.compact && o.only !== f.id) return out;
+    if (f.featureType === "sketch" && !o.entities && o.only !== f.id) {
+      const { sketch, ...rest } = f.params as { sketch?: SketchData };
+      out.params = { ...rest, sketch: sketchSummary(sketch) };
+    } else out.params = f.params;
+    return out;
+  });
+  let list = o.only ? rows.filter((r) => r.id === o.only) : rows;
+  const total = list.length;
+  const offset = Math.max(0, Math.round(o.offset || 0));
+  if (o.offset || o.limit) list = list.slice(offset, offset + Math.max(1, Math.round(o.limit || total)));
+  const out: JsonObject = {
     units: studioOf(doc).units,
     rollback_before: rollback < features.length ? features[rollback].name : null,
-    features: features.map((f, i) => {
-      const r = by.get(f.id);
-      const out: JsonObject = { index: i, id: f.id, name: f.name, type: f.featureType };
-      if (f.suppressed) out.suppressed = true;
-      if (r) { out.status = r.status; if (r.message) out.message = r.message; } else if (i >= rollback) out.status = "rolled-back";
-      if (f.featureType === "sketch" && !o.entities) {
-        const { sketch, ...rest } = f.params as { sketch?: SketchData };
-        out.params = { ...rest, sketch: sketchSummary(sketch) };
-      } else out.params = f.params;
-      return out;
-    }),
+    features: list,
   };
+  if (!o.only && list.length < total) { out.feature_count = total; if (offset + list.length < total) out.next_offset = offset + list.length; }
+  const vars = variablesJson(doc);
+  if (vars.length) out.variables = vars;
+  return out;
 }
 
 // ---------------------------------------------------------------- sketch shapes
 
 /** Entities for the shapes an assistant gives, with short ids in sequence (p1, l1, c1): they appear in face names. */
-export function shapesToEntities(shapes: unknown, into: { [id: string]: SketchEntity } = {}): { entities: { [id: string]: SketchEntity }; problems: string[] } {
-  const out: { [id: string]: SketchEntity } = {}, problems: string[] = [];
+export function shapesToEntities(shapes: unknown, into: { [id: string]: SketchEntity } = {}): { entities: { [id: string]: SketchEntity }; problems: string[]; shapes: ShapeIds[] } {
+  const out: { [id: string]: SketchEntity } = {}, problems: string[] = [], made: ShapeIds[] = [];
   const counters: { [prefix: string]: number } = {};
   const id = (prefix: string): string => { for (;;) { const n = (counters[prefix] = (counters[prefix] || 0) + 1); const i = prefix + n; if (!(i in into) && !(i in out)) return i; } };
   const point = (x: number, y: number): string => { const i = id("p"); out[i] = { type: "point", x, y }; return i; };
-  if (!Array.isArray(shapes)) return { entities: out, problems: ["shapes must be a list"] };
+  if (!Array.isArray(shapes)) return { entities: out, problems: ["shapes must be a list"], shapes: made };
   shapes.forEach((s, n) => {
     const where = `shape ${n + 1}`;
     if (!isObject(s) || typeof s.type !== "string") { problems.push(`${where} needs a type`); return; }
+    const before = new Set(Object.keys(out));
     if (s.type === "rectangle") {
       if (![s.x1, s.y1, s.x2, s.y2].every(num)) { problems.push(`${where}: a rectangle needs x1, y1, x2, y2`); return; }
       const [x1, y1, x2, y2] = [s.x1, s.y1, s.x2, s.y2] as number[];
@@ -126,12 +137,12 @@ export function shapesToEntities(shapes: unknown, into: { [id: string]: SketchEn
       const cx = s.cx as number, cy = s.cy as number;
       out[id("e")] = { type: "ellipse", center: point(cx, cy), major: point(cx + big * Math.cos(t), cy + big * Math.sin(t)), minor: small };
     } else if (s.type === "regular_polygon") {
-      const n = Math.round(Number(s.sides));
-      if (![s.cx, s.cy, s.r].every(num) || !((s.r as number) > 0) || !(n >= 3 && n <= 64)) { problems.push(`${where}: a regular_polygon needs cx, cy, r above zero and sides from 3 to 64 (circumscribed: true puts its sides on the circle)`); return; }
-      const R = s.circumscribed ? (s.r as number) / Math.cos(Math.PI / n) : (s.r as number), a0 = s.circumscribed ? Math.PI / n : 0;
+      const sides = Math.round(Number(s.sides));
+      if (![s.cx, s.cy, s.r].every(num) || !((s.r as number) > 0) || !(sides >= 3 && sides <= 64)) { problems.push(`${where}: a regular_polygon needs cx, cy, r above zero and sides from 3 to 64 (circumscribed: true puts its sides on the circle)`); return; }
+      const R = s.circumscribed ? (s.r as number) / Math.cos(Math.PI / sides) : (s.r as number), a0 = s.circumscribed ? Math.PI / sides : 0;
       const ids: string[] = [];
-      for (let i = 0; i < n; i++) ids.push(point((s.cx as number) + R * Math.cos(a0 + (2 * Math.PI * i) / n), (s.cy as number) + R * Math.sin(a0 + (2 * Math.PI * i) / n)));
-      for (let i = 0; i < n; i++) out[id("l")] = { type: "line", a: ids[i], b: ids[(i + 1) % n] };
+      for (let i = 0; i < sides; i++) ids.push(point((s.cx as number) + R * Math.cos(a0 + (2 * Math.PI * i) / sides), (s.cy as number) + R * Math.sin(a0 + (2 * Math.PI * i) / sides)));
+      for (let i = 0; i < sides; i++) out[id("l")] = { type: "line", a: ids[i], b: ids[(i + 1) % sides] };
     } else if (s.type === "spline" || s.type === "bezier") {
       const pts = s.points, min = s.type === "bezier" ? 3 : 2;
       if (!Array.isArray(pts) || pts.length < min || !pts.every((p) => Array.isArray(p) && p.length === 2 && num(p[0]) && num(p[1]))) { problems.push(`${where}: a ${s.type} needs points: [[x, y], ...] with at least ${min}`); return; }
@@ -141,9 +152,14 @@ export function shapesToEntities(shapes: unknown, into: { [id: string]: SketchEn
     } else if (s.type === "text") {
       if (![s.x, s.y, s.height].every(num) || !((s.height as number) > 0) || typeof s.text !== "string" || !s.text.trim()) { problems.push(`${where}: text needs x, y (the start of its baseline), height (of a capital, mm) and text`); return; }
       out[id("t")] = { type: "text", a: point(s.x as number, s.y as number), b: point(s.x as number, (s.y as number) + (s.height as number)), text: s.text, ...(s.bold ? { bold: true } : {}), ...(s.italic ? { italic: true } : {}) };
-    } else problems.push(`${where}: unknown shape type "${s.type}" (rectangle, circle, polygon, line, ellipse, regular_polygon, spline, bezier, text)`);
+    } else if (!extraShape(s, where, id, out, problems)) { problems.push(`${where}: unknown shape type "${s.type}" (${SHAPE_TYPES.join(", ")})`); return; }
+    const added = Object.keys(out).filter((k) => !before.has(k));
+    if (!added.length) return;
+    // construction geometry is drawn and can be constrained to, but encloses no region
+    if (s.construction === true) for (const k of added) if (out[k].type !== "point") out[k] = { ...out[k], construction: true } as SketchEntity;
+    made.push({ shape: n + 1, type: s.type, points: added.filter((k) => out[k].type === "point"), curves: added.filter((k) => out[k].type !== "point") });
   });
-  return { entities: out, problems };
+  return { entities: out, problems, shapes: made };
 }
 
 function checkEntities(entities: unknown): string[] {
@@ -179,6 +195,24 @@ export interface Plan {
   problems: string[];
   /** the document as it will be */
   after: ItemDoc;
+  /** how each sketch that was drawn or changed stands (regions, freedoms), by the sketch's name */
+  sketches: { [name: string]: SketchReport & { shapes?: string[] } };
+  /** the features the edits added or changed, by id */
+  touched: string[];
+}
+
+/** A body as the edits may name it: by id, by its part name, or by the feature that made it. */
+export interface KnownBody { id: string; name: string; createdBy: string; mesh?: BodyMesh }
+
+export interface PlanOptions {
+  /** `$ref` names of features added by edits planned before these (a batch planned in stages) */
+  refs?: Map<string, string>;
+  /** how many edits came before these, for the numbering of problems */
+  offset?: number;
+  /** the sketch solver, when it is running: constraints are checked and freedoms counted */
+  solver?: SketchSolver | null;
+  /** the bodies of the model as built, so that parts can be named and bodies given by name */
+  bodies?: readonly KnownBody[];
 }
 
 const copyDoc = (doc: ItemDoc): ItemDoc => ({ ...doc, head: { ...doc.head }, items: new Map(doc.items) });
@@ -209,8 +243,8 @@ function validate(def: FeatureDefinition, params: JsonObject, features: FeatureI
       else if (selfIndex >= 0 && at >= selfIndex) problems.push(`${f.key}: the sketch "${features[at].name}" comes after this feature in the tree; a feature can only use what is above it`);
       if (isObject(v) && v.regions !== null && v.regions !== undefined && !(Array.isArray(v.regions) && v.regions.every((r) => typeof r === "string"))) problems.push(`${f.key}.regions must be null or a list of region ids`);
     } else if (f.kind === "plane") {
-      const ok = isObject(v) && ((v.kind === "plane" && ["top", "front", "right"].includes(v.plane as string)) || (v.kind === "face" && isObject(v.ref) && typeof v.ref.name === "string"));
-      if (!ok) problems.push(`${f.key} must be "top", "front", "right" or { kind: "face", ref: { kind: "face", body, name } }`);
+      const ok = isObject(v) && ((v.kind === "plane" && ["top", "front", "right"].includes(v.plane as string)) || (v.kind === "face" && isObject(v.ref) && typeof v.ref.name === "string") || (v.kind === "datum" && typeof v.feature === "string"));
+      if (!ok) problems.push(`${f.key} must be "top", "front", "right", a face ({ kind: "face", body, name } or a pick), or { kind: "datum", feature: <a plane feature> }`);
     } else if (f.kind === "refs") {
       const list = f.single ? [v] : v;
       // besides faces, edges and vertices, a field may take a default plane, reference geometry or a sketch curve
@@ -220,6 +254,14 @@ function validate(def: FeatureDefinition, params: JsonObject, features: FeatureI
         || (!!f.sketch && r.kind === "sketch" && typeof r.feature === "string" && typeof r.entity === "string"));
       if (!Array.isArray(list) || !list.every(ok)) problems.push(`${f.key} must be ${f.single ? "a reference" : "a list of references"}: ${fieldDoc(f).stores}`);
     } else if (f.kind === "bodies") { if (!Array.isArray(v) || !v.every((b) => typeof b === "string")) problems.push(`${f.key} must be a list of body ids`); }
+    else if (f.kind === "features") {
+      if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) problems.push(`${f.key} must be a list of feature ids or names`);
+      else for (const id of v as string[]) {
+        const at = features.findIndex((x) => x.id === id);
+        if (at < 0) problems.push(`${f.key}: there is no feature "${id}". The features are: ${features.map((x) => x.name).join(", ") || "(none)"}`);
+        else if (selfIndex >= 0 && at >= selfIndex) problems.push(`${f.key}: "${features[at].name}" comes after this feature in the tree; a feature can only use what is above it`);
+      }
+    }
   }
   if (def.type === "sketch") {
     const sk = params.sketch;
@@ -228,20 +270,29 @@ function validate(def: FeatureDefinition, params: JsonObject, features: FeatureI
   return problems;
 }
 
+/** The ops of cad_edit_features, for the message of an unknown one. */
+export const EDIT_OPS = ["add", "set", "rename", "delete", "suppress", "move", "rollback", "set_variable", "delete_variable", "set_part"];
+
 /**
  * Turn a list of edits into item changes.  Each edit sees the document as the ones before it left it; if any is
  * wrong nothing is planned and every problem is listed.  The edits:
- *   { op: "add", type, name?, params?, ref?, after? | before? | index? }      sketch: plane?, shapes?
- *   { op: "set", feature, params? }                                            sketch: plane?, shapes?, entities?
+ *   { op: "add", type, name?, params?, ref?, after? | before? | index? }      sketch: plane?, shapes?, define?, constraints?
+ *   { op: "set", feature, params? }                                            sketch: plane?, shapes?, entities?, define?, constraints?
  *   { op: "rename", feature, name } · { op: "delete", feature } · { op: "suppress", feature, suppressed }
  *   { op: "move", feature, index? | before? | after? } · { op: "rollback", before: feature | null }
- * `feature` is an id, an exact name, or "$ref" of an add earlier in the list.
+ *   { op: "set_variable", name, value, rename? } · { op: "delete_variable", name }
+ *   { op: "set_part", body, name?, material?, color?, description? }
+ * `feature` is an id, an exact name, or "$ref" of an add earlier in the list.  A number parameter given as a
+ * string is an expression kept with the feature ("width / 2").  References written as picks must have been
+ * resolved first (`planStaged`).
  */
-export function planEdits(doc: ItemDoc, defs: Defs, list: unknown): Plan {
+export function planEdits(doc: ItemDoc, defs: Defs, list: unknown, o: PlanOptions = {}): Plan {
   const work = copyDoc(doc);
   const changes: ItemChange[] = [], inverse: ItemChange[] = [], done: string[] = [], problems: string[] = [];
-  const refs = new Map<string, string>();
-  const empty = (): Plan => ({ changes: [], inverse: [], done: [], problems, after: doc });
+  const refs = o.refs || new Map<string, string>();
+  const sketches: Plan["sketches"] = {};
+  const touched = new Set<string>();
+  const empty = (): Plan => ({ changes: [], inverse: [], done: [], problems, after: doc, sketches: {}, touched: [] });
   if (!Array.isArray(list) || !list.length) { problems.push("edits must be a list with at least one edit"); return empty(); }
 
   const take = (cs: ItemChange[]): void => {
@@ -250,33 +301,58 @@ export function planEdits(doc: ItemDoc, defs: Defs, list: unknown): Plan {
   const subst = (v: Json | undefined): Json | undefined => {
     if (typeof v === "string" && v.startsWith("$") && refs.has(v.slice(1))) return refs.get(v.slice(1))!;
     if (Array.isArray(v)) return v.map((x) => subst(x) as Json);
-    if (isObject(v)) { const o: JsonObject = {}; for (const [k, x] of Object.entries(v)) o[k] = subst(x); return o; }
+    if (isObject(v)) { const out: JsonObject = {}; for (const [k, x] of Object.entries(v)) out[k] = subst(x); return out; }
     return v;
   };
 
   list.forEach((raw, n) => {
     const e = raw as JsonObject;
-    const where = `edit ${n + 1}` + (isObject(e) && typeof e.op === "string" ? ` (${e.op})` : "");
+    const where = `edit ${n + 1 + (o.offset || 0)}` + (isObject(e) && typeof e.op === "string" ? ` (${e.op})` : "");
     const bad = (m: string): void => { problems.push(`${where}: ${m}`); };
-    if (!isObject(e) || typeof e.op !== "string") { bad("needs an op"); return; }
+    if (!isObject(e) || typeof e.op !== "string") { bad(`needs an op (${EDIT_OPS.join(", ")})`); return; }
     const features = featuresOf(work);
+    const byKey = (key: string): FeatureItem | undefined => {
+      const k = key.startsWith("$") && refs.has(key.slice(1)) ? refs.get(key.slice(1))! : key;
+      return features.find((f) => f.id === k) || features.find((f) => f.name === k) || features.find((f) => f.name.toLowerCase() === k.toLowerCase());
+    };
     const find = (key: unknown, what = "feature"): FeatureItem | null => {
       if (typeof key !== "string" || !key) { bad(`${what} is required: a feature's id or name`); return null; }
-      const k = key.startsWith("$") && refs.has(key.slice(1)) ? refs.get(key.slice(1))! : key;
-      const hit = features.find((f) => f.id === k) || features.find((f) => f.name === k) || features.find((f) => f.name.toLowerCase() === k.toLowerCase());
+      const hit = byKey(key);
       if (!hit) bad(`there is no feature "${key}". The features are: ${features.map((f) => f.name).join(", ") || "(none)"}`);
       return hit || null;
     };
+    const lookup = () => lookupOf(variableValues(variablesOf(work)));
+    /** the ids of the bodies a word names: a body's id or part name, or the feature that made it */
+    const bodyIds = (key: string): string[] => {
+      const known = o.bodies || [], names = partNamesOf(work), low = key.toLowerCase();
+      const k = key.startsWith("$") && refs.has(key.slice(1)) ? refs.get(key.slice(1))! : key;
+      const direct = known.filter((b) => b.id === k);
+      if (direct.length) return [direct[0].id];
+      const named = known.filter((b) => (names[b.id] || b.name).toLowerCase() === low || b.name.toLowerCase() === low);
+      if (named.length) return named.map((b) => b.id);
+      const f = byKey(key);
+      if (f) { const made = known.filter((b) => b.createdBy === f.id); return made.length ? made.map((b) => b.id) : [f.id]; }
+      return [k];
+    };
     /** params as given, with the shorthands a model may use made into what the document stores */
-    const normal = (def: FeatureDefinition, base: JsonObject, given: JsonObject): JsonObject | null => {
+    const normal = (def: FeatureDefinition, base: JsonObject, given: JsonObject, name: string): JsonObject | null => {
       const params: JsonObject = { ...base, ...(subst(isObject(given.params) ? given.params : {}) as JsonObject) };
+      const exprs: { [k: string]: string } = { ...(isObject(base[EXPR_KEY]) ? (base[EXPR_KEY] as { [k: string]: string }) : {}) };
+      let failed = false;
       for (const f of def.schema) {
+        const asked = isObject(given.params) && f.key in given.params;
         if (f.kind === "plane") {
-          if (given.plane !== undefined && !(isObject(given.params) && f.key in given.params)) params[f.key] = subst(given.plane as Json);
+          if (given.plane !== undefined && !asked) params[f.key] = subst(given.plane as Json);
           const pv = params[f.key];
-          if (typeof pv === "string") params[f.key] = { kind: "plane", plane: pv.toLowerCase() };
+          if (typeof pv === "string") { const hit = ["top", "front", "right"].includes(pv.toLowerCase()) ? null : byKey(pv); params[f.key] = hit ? { kind: "datum", feature: hit.id } : { kind: "plane", plane: pv.toLowerCase() }; }
+          else if (isGeomRef(pv) && pv.kind === "face") params[f.key] = { kind: "face", ref: pv };
         }
         const v = params[f.key];
+        if (f.kind === "number" && typeof v === "string" && asked) {
+          // a number typed as text: a plain number is stored as one, anything else as the expression it is
+          if (isPlainNumber(v)) { params[f.key] = Number(v); delete exprs[f.key]; }
+          else { try { params[f.key] = evaluate(v, lookup()); exprs[f.key] = v.trim(); } catch (err) { bad(`${f.key}: "${v}" has no value: ${err instanceof Error ? err.message : String(err)}. Variables are set with { op: "set_variable", name, value }`); failed = true; } }
+        } else if (f.kind === "number" && asked) delete exprs[f.key];
         // a face reference alone, or a list of them, is a profile of faces
         const asFaces = f.kind === "profile" && f.faces ? (Array.isArray(v) ? v : isObject(v) && v.kind === "face" ? [v] : null) : null;
         if (asFaces) params[f.key] = { sketch: null, regions: null, faces: asFaces };
@@ -285,17 +361,48 @@ export function planEdits(doc: ItemDoc, defs: Defs, list: unknown): Plan {
           const hit = features.find((x) => x.id === key) || features.find((x) => x.name === key) || features.find((x) => x.name.toLowerCase() === key.toLowerCase());
           params[f.key] = { sketch: hit ? hit.id : key, regions: isObject(v) && Array.isArray(v.regions) ? v.regions : null, ...(isObject(v) && v.faces !== undefined && v.faces !== null ? { faces: v.faces } : {}) };
         }
+        if (f.kind === "features" && asked) { const l = typeof v === "string" ? [v] : v; if (Array.isArray(l)) params[f.key] = l.map((x): Json => (typeof x === "string" ? (byKey(x) || { id: x }).id : x)); }
+        if (f.kind === "bodies" && asked) { const l = typeof v === "string" ? [v] : v; if (Array.isArray(l)) params[f.key] = l.flatMap((x): Json[] => (typeof x === "string" ? bodyIds(x) : [x])); }
+        if (f.kind === "refs" && f.single && Array.isArray(v) && v.length === 1 && asked) params[f.key] = v[0];
+        if (f.kind === "refs" && !f.single && isObject(v) && asked) params[f.key] = [v];
       }
+      if (failed) return null;
+      if (Object.keys(exprs).length) params[EXPR_KEY] = exprs; else delete params[EXPR_KEY];
       if (def.type === "sketch") {
         const was = isObject(params.sketch) ? (params.sketch as SketchData) : emptySketch();
         let entities: { [id: string]: SketchEntity } = { ...(isObject(was.entities) ? was.entities : {}) };
+        let constraints: { [id: string]: SketchConstraint } = { ...(isObject(was.constraints) ? was.constraints : {}) };
+        let ids: ShapeIds[] = [];
         if (given.shapes !== undefined) {
           const made = shapesToEntities(given.shapes);
           if (made.problems.length) { made.problems.forEach(bad); return null; }
-          entities = made.entities;                       // shapes replace what the sketch held
+          entities = made.entities; ids = made.shapes;   // shapes replace what the sketch held, and what was said about it
+          constraints = {};
         }
         if (isObject(given.entities)) for (const [id, ent] of Object.entries(given.entities)) { if (ent === null) delete entities[id]; else entities[id] = ent as SketchEntity; }
-        params.sketch = { version: was.version || 1, entities, constraints: isObject(was.constraints) ? was.constraints : {} };
+        const entityIssues = checkEntities(entities);
+        if (entityIssues.length) { entityIssues.forEach(bad); return null; }
+        let data: SketchData = { version: was.version || 1, entities, constraints };
+        const constrained = given.define === true || given.constraints !== undefined;
+        if (given.define === true) {
+          if (!ids.length) { bad("define: true constrains the shapes drawn in the same edit; give shapes too"); return null; }
+          data = { ...data, constraints: { ...data.constraints, ...defineShapes(data, ids) } };
+        }
+        if (given.constraints !== undefined) {
+          const issues: string[] = [];
+          const more = userConstraints(data, given.constraints, (t) => evaluate(t, lookup()), issues);
+          if (issues.length) { issues.forEach(bad); return null; }
+          data = { ...data, constraints: { ...data.constraints, ...more } };
+        }
+        if (given.shapes !== undefined || constrained || isObject(given.entities)) {
+          const r = sketchReport(data, constrained ? o.solver : null);
+          if (constrained && o.solver && !r.ok) { bad(`the sketch's constraints cannot all hold${r.report.conflicting ? ` (${r.report.conflicting.join(", ")} conflict)` : ""}. Nothing was changed: give fewer constraints, or values that agree with the shapes`); return null; }
+          if (r.solved) data = r.solved;
+          // each shape's entity ids, in a line: "rectangle: p1 p2 p3 p4 | l1 l2 l3 l4"
+          sketches[name] = ids.length ? { ...r.report, shapes: ids.map((s) => `${s.type}: ${s.points.join(" ")}${s.curves.length ? " | " + s.curves.join(" ") : ""}`) } : r.report;
+          if (r.report.regions === 0 && Object.values(data.entities).some((x) => x.type !== "point")) sketches[name].note = "The sketch encloses no region: an extrude of it will fail. Close the outline (lines that share end points, or a rectangle, circle or polygon).";
+        }
+        params.sketch = data;
       }
       return params;
     };
@@ -310,16 +417,21 @@ export function planEdits(doc: ItemDoc, defs: Defs, list: unknown): Plan {
     switch (e.op) {
       case "add": {
         const def = defs.find((d) => d.type === e.type);
-        if (!def) { bad(`unknown feature type "${String(e.type)}". The types are: ${defs.map((d) => d.type).join(", ")}`); return; }
-        const params = normal(def, def.defaults(), e); if (!params) return;
+        if (!def) {
+          const near = similarTypes(defs, String(e.type || ""));
+          bad(`unknown feature type "${String(e.type)}".${near.length ? ` Did you mean: ${near.join(", ")}?` : ""} cad_feature_types lists them (${defs.length}; search with query)`);
+          return;
+        }
         let at = place(); if (at === null) return;
         if (at < 0) at = rollbackIndex(work, features);
+        const name = typeof e.name === "string" && e.name.trim() ? e.name.trim() : nextName(features, def.title);
+        const params = normal(def, def.defaults(), e, name); if (!params) return;
         const issues = validate(def, params, features, at);
         if (issues.length) { issues.forEach(bad); return; }
-        const name = typeof e.name === "string" && e.name.trim() ? e.name.trim() : nextName(features, def.title);
         const feature: FeatureItem = { id: newId(), type: "feature", featureType: def.type, name, order: orderAt(features, at), params };
         take([{ id: feature.id, kind: "ADDED", typeName: "feature", item: feature }]);
         if (typeof e.ref === "string" && e.ref) refs.set(e.ref.replace(/^\$/, ""), feature.id);
+        touched.add(feature.id);
         done.push(`added ${def.title.toLowerCase()} "${name}" (${feature.id})`);
         return;
       }
@@ -327,13 +439,15 @@ export function planEdits(doc: ItemDoc, defs: Defs, list: unknown): Plan {
         const f = find(e.feature); if (!f) return;
         const def = defs.find((d) => d.type === f.featureType);
         if (!def) { bad(`"${f.name}" is of a type this server does not know (${f.featureType})`); return; }
-        const params = normal(def, f.params, e); if (!params) return;
+        if (isObject(e.params)) { const unknown = Object.keys(e.params).filter((k) => !k.startsWith("$") && k !== "sketch" && !def.schema.some((s) => s.key === k) && !(k in f.params)); if (unknown.length) { bad(`"${f.name}" (${def.type}) has no parameter ${unknown.map((k) => `"${k}"`).join(", ")}. Its parameters are: ${def.schema.map((s) => s.key).join(", ")}`); return; } }
+        const params = normal(def, f.params, e, f.name); if (!params) return;
         const issues = validate(def, params, features, features.findIndex((x) => x.id === f.id));
         if (issues.length) { issues.forEach(bad); return; }
         const cs = edits.setParams(work, f.id, params);
         if (!cs.length) { done.push(`"${f.name}" already has those parameters`); return; }
         const paths = cs.flatMap((c) => (c.kind === "MODIFIED" ? c.props.map((p) => p.path.slice(1, 4).join(".")) : []));
         take(cs);
+        touched.add(f.id);
         done.push(`set ${Array.from(new Set(paths)).slice(0, 8).join(", ")} of "${f.name}"`);
         return;
       }
@@ -353,14 +467,14 @@ export function planEdits(doc: ItemDoc, defs: Defs, list: unknown): Plan {
       case "suppress": {
         const f = find(e.feature); if (!f) return;
         const on = e.suppressed !== false;
-        take(edits.suppressFeature(work, f.id, on)); done.push(`${on ? "suppressed" : "unsuppressed"} "${f.name}"`);
+        take(edits.suppressFeature(work, f.id, on)); touched.add(f.id); done.push(`${on ? "suppressed" : "unsuppressed"} "${f.name}"`);
         return;
       }
       case "move": {
         const f = find(e.feature); if (!f) return;
         const at = place(f.id); if (at === null) return;
         if (at < 0) { bad("say where: index, before or after"); return; }
-        take(edits.moveFeature(work, f.id, at)); done.push(`moved "${f.name}" to position ${at}`);
+        take(edits.moveFeature(work, f.id, at)); touched.add(f.id); done.push(`moved "${f.name}" to position ${at}`);
         return;
       }
       case "rollback": {
@@ -369,11 +483,165 @@ export function planEdits(doc: ItemDoc, defs: Defs, list: unknown): Plan {
         take(edits.setRollback(work, f.id)); done.push(`moved the rollback bar above "${f.name}"`);
         return;
       }
-      default: bad(`unknown op "${e.op}" (add, set, rename, delete, suppress, move, rollback)`);
+      case "set_variable": {
+        if (typeof e.name !== "string" || !e.name.trim()) { bad("name is required"); return; }
+        const name = e.name.trim().replace(/^#/, ""), vars = variablesOf(work);
+        const expr = num(e.value) ? String(e.value) : typeof e.value === "string" ? e.value.trim() : "";
+        const has = vars.find((v) => v.name === name);
+        if (!has) {
+          const why = nameProblem(name, vars.map((v) => v.name));
+          if (why) { bad(why); return; }
+          if (!expr) { bad("value is required: a number (millimetres or degrees) or an expression (\"40 mm + 2 * wall\")"); return; }
+        }
+        const rename = typeof e.rename === "string" && e.rename.trim() ? e.rename.trim() : undefined;
+        if (rename && rename !== name) { const why = nameProblem(rename, vars.filter((v) => v.name !== name).map((v) => v.name)); if (why) { bad(why); return; } }
+        if (expr) {
+          // the expression must have a value with the variables as they will be
+          const others = vars.filter((v) => v.name !== name);
+          const vv = variableValues([...others, { id: "~new", type: "variable", name, expr, order: "~" }]);
+          if (vv.errors.has("~new")) { bad(`"${expr}" has no value: ${vv.errors.get("~new")}`); return; }
+        }
+        if (has) {
+          const cs = setVariable(work, has.id, { ...(expr ? { expr } : {}), ...(rename ? { name: rename } : {}) });
+          if (!cs.length) { done.push(`variable "${name}" already has that value`); return; }
+          for (const c of cs) if (c.typeName === "feature") touched.add(c.id);
+          take(cs); done.push(`set variable "${rename || name}"${expr ? ` to ${expr}` : ""}`);
+        } else { take(addVariable(work, name, expr).changes); done.push(`added variable "${name}" = ${expr}`); }
+        return;
+      }
+      case "delete_variable": {
+        const name = typeof e.name === "string" ? e.name.trim().replace(/^#/, "") : "";
+        const v = variablesOf(work).find((x) => x.name === name);
+        if (!v) { bad(`there is no variable "${name}". The variables are: ${variablesOf(work).map((x) => x.name).join(", ") || "(none)"}`); return; }
+        const users = usersOf(work, name).length;
+        take(deleteVariable(work, v.id)); done.push(`deleted variable "${name}"` + (users ? ` (${users} feature${users === 1 ? "" : "s"} used it and keep the number they had)` : ""));
+        return;
+      }
+      case "set_part": {
+        if (typeof e.body !== "string" || !e.body) { bad("body is required: a body's id, its part name, or the feature that made it"); return; }
+        const known = o.bodies || [];
+        const ids = bodyIds(e.body).filter((id) => !known.length || known.some((b) => b.id === id));
+        if (!ids.length) { bad(`there is no body "${e.body}". The bodies are: ${known.map((b) => `${partNamesOf(work)[b.id] || b.name} (${b.id})`).join(", ") || "(none)"}`); return; }
+        const said: string[] = [];
+        if (e.name !== undefined || e.description !== undefined) {
+          if (e.name !== undefined && (typeof e.name !== "string" || ids.length > 1)) { bad(ids.length > 1 ? `"${e.body}" names ${ids.length} bodies; name them one at a time by id` : "name must be a string"); return; }
+          for (const id of ids) take(updatePart(work, id, { ...(typeof e.name === "string" ? { name: e.name, fallback: known.find((b) => b.id === id)?.name || "" } : {}), ...(typeof e.description === "string" ? { description: e.description } : {}) }));
+          if (typeof e.name === "string") said.push(`named "${e.name.trim()}"`);
+          if (typeof e.description === "string") said.push("described");
+        }
+        if (e.material !== undefined) {
+          const lib = materialsOf(work).library;
+          const key = e.material === null ? null : String(e.material).trim().toLowerCase();
+          const id = key === null ? null : Object.keys(lib).find((k) => k === key || lib[k].name.toLowerCase() === key);
+          if (id === undefined) { bad(`there is no material "${String(e.material)}". The materials are: ${Object.keys(lib).map((k) => `${k} (${lib[k].density} g/cm3)`).join(", ")}; null takes the material away`); return; }
+          take(assignMaterial(work, ids, id)); said.push(id ? `made of ${lib[id].name}` : "given no material");
+        }
+        if (e.color !== undefined) {
+          if (e.color !== null && !isColor(e.color)) { bad("color is \"#rrggbb\", or null for the default"); return; }
+          take(setBodyLook(work, ids, { color: e.color as string | null })); said.push(e.color ? `coloured ${e.color}` : "given the default colour");
+        }
+        if (!said.length) { bad("give name, material, color or description"); return; }
+        done.push(`part ${ids.join(", ")}: ${said.join(", ")}`);
+        return;
+      }
+      default: bad(`unknown op "${e.op}" (${EDIT_OPS.join(", ")})`);
     }
   });
   if (problems.length) return empty();
-  return { changes, inverse, done, problems, after: work };
+  return { changes, inverse, done, problems, after: work, sketches, touched: Array.from(touched) };
+}
+
+// ---------------------------------------------------------------- picks: references by description
+
+const hasPick = (v: unknown): boolean => {
+  if (Array.isArray(v)) return v.some(hasPick);
+  if (!isObject(v)) return false;
+  if (v.pick !== undefined && (v.kind === "face" || v.kind === "edge" || v.kind === "vertex")) return true;
+  return Object.values(v).some(hasPick);
+};
+/** Whether an edit can only be planned against the model as built (it picks geometry, or names a part). */
+export const needsModel = (e: unknown): boolean => isObject(e) && (e.op === "set_part" || hasPick(e));
+
+/** The body a reference names among the built ones; throws a PickError that lists them. */
+export function findBody(bodies: readonly KnownBody[], key: unknown, features: readonly FeatureItem[], refs: ReadonlyMap<string, string>, names: { [id: string]: string } = {}): KnownBody {
+  const listed = () => bodies.map((b) => `${names[b.id] || b.name} (made by ${features.find((f) => f.id === b.createdBy)?.name || b.createdBy})`).join(", ") || "(none: nothing has been built yet)";
+  if (key === undefined || key === null || key === "") {
+    if (bodies.length === 1) return bodies[0];
+    throw new PickError(`Say which body: ${listed()}.`);
+  }
+  if (typeof key !== "string") throw new PickError("body is a body's id, its part name, or the name of the feature that made it.");
+  const k = key.startsWith("$") && refs.has(key.slice(1)) ? refs.get(key.slice(1))! : key, low = k.toLowerCase();
+  const f = features.find((x) => x.id === k) || features.find((x) => x.name.toLowerCase() === low);
+  const hit = bodies.find((b) => b.id === k) || bodies.find((b) => (names[b.id] || "").toLowerCase() === low) || bodies.find((b) => b.name.toLowerCase() === low)
+    || (f ? bodies.find((b) => b.createdBy === f.id) || bodies.find((b) => b.id.startsWith(f.id)) : undefined);
+  if (!hit) throw new PickError(`There is no body "${key}"${f ? ` (the feature "${f.name}" made none: it may have failed, or changed a body another feature made)` : ""}. The bodies are: ${listed()}.`);
+  return hit;
+}
+
+/** An edit with every pick turned into the name it finds on the bodies as built.  Throws a PickError. */
+export function resolvePicks(edit: Json, bodies: readonly KnownBody[], features: readonly FeatureItem[], refs: ReadonlyMap<string, string>, names: { [id: string]: string } = {}): Json {
+  const one = (v: JsonObject): JsonObject[] => {
+    const body = findBody(bodies, v.body, features, refs, names);
+    if (!body.mesh) throw new PickError(`The body "${body.name}" has no geometry to pick from.`);
+    const found = pickGeometry(body.mesh, v.kind as GeoKind, v.pick);
+    return found.map((g) => ({ kind: v.kind, body: body.id, name: g.name }));
+  };
+  const walk = (v: Json): Json => {
+    if (Array.isArray(v)) return v.flatMap((x) => (isObject(x) && x.pick !== undefined && (x.kind === "face" || x.kind === "edge" || x.kind === "vertex") ? (one(x) as Json[]) : [walk(x)]));
+    if (!isObject(v)) return v;
+    if (v.pick !== undefined && (v.kind === "face" || v.kind === "edge" || v.kind === "vertex")) {
+      const found = one(v);
+      if (found.length !== 1) throw new PickError(`${JSON.stringify(v.pick)} finds ${found.length} ${v.kind}s, and one is wanted here. Leave "all" out, or narrow it (nearest: [x, y, z]).`);
+      return found[0];
+    }
+    const out: JsonObject = {};
+    for (const [k, x] of Object.entries(v)) out[k] = walk(x as Json);
+    return out;
+  };
+  return walk(edit);
+}
+
+/**
+ * Plan a batch whose edits may pick geometry of the model: the edits before a pick are planned, the document as
+ * it would then be is built (`build`), the pick is resolved on those bodies, and planning goes on.  So one call
+ * can extrude a block and sketch on its top face.  Nothing is changed: the result is one Plan for the whole
+ * batch, or the problems.
+ */
+export async function planStaged(doc: ItemDoc, defs: Defs, list: unknown, o: PlanOptions, build: (doc: ItemDoc) => Promise<{ bodies: KnownBody[]; failed: { name: string; message: string }[] }>): Promise<Plan> {
+  if (!Array.isArray(list) || !list.length || !list.some(needsModel)) return planEdits(doc, defs, list, o);
+  const refs = o.refs || new Map<string, string>();
+  const total: Plan = { changes: [], inverse: [], done: [], problems: [], after: doc, sketches: {}, touched: [] };
+  const fail = (problems: string[]): Plan => ({ changes: [], inverse: [], done: [], problems, after: doc, sketches: {}, touched: [] });
+  let work = doc, at = 0;
+  const run = (edits: unknown[], bodies?: readonly KnownBody[]): string[] | null => {
+    if (!edits.length) return null;
+    const p = planEdits(work, defs, edits, { ...o, refs, offset: at, bodies: bodies || o.bodies });
+    if (p.problems.length) return p.problems;
+    total.changes.push(...p.changes); total.inverse.unshift(...p.inverse); total.done.push(...p.done);
+    Object.assign(total.sketches, p.sketches); total.touched.push(...p.touched);
+    work = p.after; at += edits.length;
+    return null;
+  };
+  let pending: unknown[] = [];
+  for (const e of list) {
+    if (!needsModel(e)) { pending.push(e); continue; }
+    const bad = run(pending); pending = [];
+    if (bad) return fail(bad);
+    const built = await build(work);
+    let resolved: Json;
+    try { resolved = resolvePicks(e as Json, built.bodies, featuresOf(work), refs, partNamesOf(work)); }
+    catch (err) {
+      if (!(err instanceof PickError)) throw err;
+      const why = built.failed.length ? ` (${built.failed.map((f) => `"${f.name}" failed: ${f.message}`).join("; ")})` : "";
+      return fail([`edit ${at + 1} (${String((e as JsonObject).op)}): ${err.message}${why}`]);
+    }
+    const bad2 = run([resolved], built.bodies);
+    if (bad2) return fail(bad2);
+  }
+  const bad = run(pending);
+  if (bad) return fail(bad);
+  total.after = work; total.touched = Array.from(new Set(total.touched));
+  return total;
 }
 
 /** What undoes `changes` on `doc` as it is now, and the document afterwards. */
@@ -382,3 +650,6 @@ export function applyRecorded(doc: ItemDoc, changes: readonly ItemChange[]): { a
   for (const c of changes) { const inv = invertChange(work, c); if (applyChanges(work, [c]).size) { applied.push(c); if (inv) inverse.unshift(inv); } }
   return { applied, inverse };
 }
+
+export { materialOf };
+export { EXTRA_SHAPES };

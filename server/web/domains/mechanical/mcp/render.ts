@@ -12,7 +12,7 @@ import { cross, dot, normalize, sub, type Vec3 } from "../core/geometry";
 
 declare function require(name: string): any;   // eslint-disable-line @typescript-eslint/no-explicit-any
 
-export type ViewName = "iso" | "top" | "bottom" | "front" | "back" | "left" | "right";
+export type ViewName = "iso" | "top" | "bottom" | "front" | "back" | "left" | "right" | "iso_back" | "iso_left" | "iso_below";
 /** `dir` is the way the camera looks, `up` what is up on the picture. */
 export const VIEWS: Record<ViewName, { dir: Vec3; up: Vec3 }> = {
   iso: { dir: [-1, 1, -1], up: [0, 0, 1] },       // from the front right, above (the viewport's Iso)
@@ -22,6 +22,9 @@ export const VIEWS: Record<ViewName, { dir: Vec3; up: Vec3 }> = {
   back: { dir: [0, -1, 0], up: [0, 0, 1] },
   right: { dir: [-1, 0, 0], up: [0, 0, 1] },
   left: { dir: [1, 0, 0], up: [0, 0, 1] },
+  iso_back: { dir: [1, -1, -1], up: [0, 0, 1] },    // from the back left, above
+  iso_left: { dir: [1, 1, -1], up: [0, 0, 1] },     // from the front left, above
+  iso_below: { dir: [-1, 1, 1], up: [0, 0, 1] },    // from the front right, below
 };
 
 export interface RenderOptions {
@@ -33,6 +36,32 @@ export interface RenderOptions {
   /** one colour per mesh, 0xRRGGBB; the default palette otherwise */
   colors?: number[];
   background?: number;
+  /** where each mesh stands: the rows of a 3 x 4 matrix (an assembly's instances); null or absent is "as it is" */
+  transforms?: (readonly number[] | null | undefined)[];
+  /** a section: everything on the side the normal points to is cut away, and what the cut opens is drawn dark */
+  section?: { point: Vec3; normal: Vec3 };
+  /** frame the picture on this box (xmin, ymin, zmin, xmax, ymax, zmax) instead of on everything */
+  frame?: readonly number[];
+  /** faces and edges to draw in the highlight colour: `mesh` is the index in the list */
+  highlight?: { mesh: number; kind: "face" | "edge"; name: string }[];
+  /** false leaves the axis triad out */
+  triad?: boolean;
+}
+
+const HIGHLIGHT = 0xf08a24;
+
+/** A mesh carried by a placement: positions and normals in the space of the picture. */
+function placedMesh(m: BodyMesh, t: readonly number[] | null | undefined): BodyMesh {
+  if (!t || t.length !== 12 || (t[0] === 1 && t[5] === 1 && t[10] === 1 && !t[3] && !t[7] && !t[11] && !t[1] && !t[2] && !t[4] && !t[6] && !t[8] && !t[9])) return m;
+  const move = (src: Float32Array, w: number): Float32Array => {
+    const out = new Float32Array(src.length);
+    for (let i = 0; i + 2 < src.length; i += 3) {
+      const x = src[i], y = src[i + 1], z = src[i + 2];
+      out[i] = t[0] * x + t[1] * y + t[2] * z + w * t[3]; out[i + 1] = t[4] * x + t[5] * y + t[6] * z + w * t[7]; out[i + 2] = t[8] * x + t[9] * y + t[10] * z + w * t[11];
+    }
+    return out;
+  };
+  return { ...m, positions: move(m.positions, 1), normals: m.normals && m.normals.length === m.positions.length ? move(m.normals, 0) : m.normals, edges: { ...m.edges, positions: move(m.edges.positions, 1) } };
 }
 
 export interface Picture { width: number; height: number; rgba: Uint8Array }
@@ -40,7 +69,18 @@ export interface Picture { width: number; height: number; rgba: Uint8Array }
 const PALETTE = [0x9db4cf, 0xd3b58f, 0xa7c9a1, 0xcfa3b8, 0xb0a8d6, 0xc9c48f];
 
 /** Draw the meshes.  The picture is framed on them with a margin; with nothing to draw it is the background. */
-export function renderMeshes(meshes: readonly BodyMesh[], o: RenderOptions = {}): Picture {
+export function renderMeshes(given: readonly BodyMesh[], o: RenderOptions = {}): Picture {
+  const meshes = given.map((m, i) => placedMesh(m, o.transforms ? o.transforms[i] : null));
+  const cut = o.section ? { p: o.section.point, n: normalize(o.section.normal) } : null;
+  const cutAt = (p: Vec3): number => (cut ? dot(sub(p, cut.p), cut.n) : -1);
+  const litFaces = new Map<number, Set<number>>(), litEdges = new Map<number, Set<number>>();
+  for (const h of o.highlight || []) {
+    const m = meshes[h.mesh]; if (!m) continue;
+    const at = (h.kind === "face" ? m.faces.names : m.edges.names).indexOf(h.name); if (at < 0) continue;
+    const into = h.kind === "face" ? litFaces : litEdges;
+    if (!into.has(h.mesh)) into.set(h.mesh, new Set());
+    into.get(h.mesh)!.add(at);
+  }
   const W = Math.max(64, Math.min(2000, Math.round(o.width || 900))), H = Math.max(64, Math.min(2000, Math.round(o.height || 700)));
   const S = 2, w = W * S, h = H * S;
   const view = o.direction ? { dir: o.direction, up: Math.abs(normalize(o.direction)[2]) > 0.99 ? ([0, 1, 0] as Vec3) : ([0, 0, 1] as Vec3) } : VIEWS[o.view || "iso"] || VIEWS.iso;
@@ -51,13 +91,15 @@ export function renderMeshes(meshes: readonly BodyMesh[], o: RenderOptions = {})
 
   // the extent of everything on the picture plane
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-  for (const m of meshes) {
-    for (let i = 0; i < m.positions.length; i += 3) {
-      const p: Vec3 = [m.positions[i], m.positions[i + 1], m.positions[i + 2]];
-      const x = dot(p, right), y = dot(p, up), z = dot(p, d);
-      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (z < z0) z0 = z; if (z > z1) z1 = z;
-    }
-  }
+  const grow = (p: Vec3): void => {
+    const x = dot(p, right), y = dot(p, up), z = dot(p, d);
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (z < z0) z0 = z; if (z > z1) z1 = z;
+  };
+  const f = o.frame && o.frame.length === 6 && o.frame.every((v) => Number.isFinite(v)) ? o.frame : null;
+  if (f) for (let c = 0; c < 8; c++) grow([c & 1 ? f[3] : f[0], c & 2 ? f[4] : f[1], c & 4 ? f[5] : f[2]]);
+  else for (const m of meshes) for (let i = 0; i < m.positions.length; i += 3) { const p: Vec3 = [m.positions[i], m.positions[i + 1], m.positions[i + 2]]; if (cutAt(p) <= 1e-9) grow(p); }
+  // the depth of everything, whatever the picture is framed on (the edges' bias is a part of it)
+  for (const m of meshes) for (let i = 0; i < m.positions.length; i += 3) { const z = m.positions[i] * d[0] + m.positions[i + 1] * d[1] + m.positions[i + 2] * d[2]; if (z < z0) z0 = z; if (z > z1) z1 = z; }
   const any = Number.isFinite(x0);
   if (!any) { x0 = y0 = z0 = -10; x1 = y1 = z1 = 10; }
   const margin = 0.08;
@@ -79,9 +121,18 @@ export function renderMeshes(meshes: readonly BodyMesh[], o: RenderOptions = {})
     const br = base >> 16, bgc = (base >> 8) & 255, bb = base & 255;
     const P = m.positions, I = m.indices, N = m.normals;
     const smooth = !!N && N.length === P.length;
+    // which triangles are of a highlighted face
+    const lit = litFaces.get(mi);
+    const hot = lit ? new Uint8Array(I.length / 3) : null;
+    if (lit && hot) for (const fi of lit) for (let t = m.faces.start[fi]; t < m.faces.start[fi] + m.faces.count[fi]; t += 3) hot[t / 3] = 1;
     for (let t = 0; t + 2 < I.length; t += 3) {
       const a: Vec3 = [P[I[t] * 3], P[I[t] * 3 + 1], P[I[t] * 3 + 2]], b: Vec3 = [P[I[t + 1] * 3], P[I[t + 1] * 3 + 1], P[I[t + 1] * 3 + 2]], c: Vec3 = [P[I[t + 2] * 3], P[I[t + 2] * 3 + 1], P[I[t + 2] * 3 + 2]];
       const n = normalize(cross(sub(b, a), sub(c, a)));
+      const da = cutAt(a), db = cutAt(b), dc = cutAt(c);
+      if (cut && da > 0 && db > 0 && dc > 0) continue;
+      // seen from behind through a section: the inside of the solid, drawn as the cut
+      const inside = !!cut && dot(n, d) > 1e-9;
+      const tr = hot && hot[t / 3] ? HIGHLIGHT >> 16 : br, tg = hot && hot[t / 3] ? (HIGHLIGHT >> 8) & 255 : bgc, tb = hot && hot[t / 3] ? HIGHLIGHT & 255 : bb;
       // the light at each corner, from the surface's own normal there: a cylinder shades round
       const la = smooth ? lightOf([N[I[t] * 3], N[I[t] * 3 + 1], N[I[t] * 3 + 2]]) : lightOf(n);
       const lb = smooth ? lightOf([N[I[t + 1] * 3], N[I[t + 1] * 3 + 1], N[I[t + 1] * 3 + 2]]) : la;
@@ -96,10 +147,12 @@ export function renderMeshes(meshes: readonly BodyMesh[], o: RenderOptions = {})
           const sx = x + 0.5, sy = y + 0.5;
           const w0 = ((bx - sx) * (cy2 - sy) - (cx2 - sx) * (by - sy)) / area, w1 = ((cx2 - sx) * (ay - sy) - (ax - sx) * (cy2 - sy)) / area, w2 = 1 - w0 - w1;
           if (w0 < -1e-6 || w1 < -1e-6 || w2 < -1e-6) continue;
+          if (cut && w0 * da + w1 * db + w2 * dc > 0) continue;
           const z = w0 * az + w1 * bz + w2 * cz, i = y * w + x;
           if (z < depth[i]) {
-            const lit = w0 * la + w1 * lb + w2 * lc;
-            depth[i] = z; color[i * 3] = Math.min(255, Math.round(br * lit)); color[i * 3 + 1] = Math.min(255, Math.round(bgc * lit)); color[i * 3 + 2] = Math.min(255, Math.round(bb * lit));
+            // a little darker with distance, so that a floor reads as below its rim in a view from straight above
+            const shade = (inside ? 0.42 : w0 * la + w1 * lb + w2 * lc) * (1 - 0.2 * Math.min(1, Math.max(0, (z - z0) / zr)));
+            depth[i] = z; color[i * 3] = Math.min(255, Math.round(tr * shade)); color[i * 3 + 1] = Math.min(255, Math.round(tg * shade)); color[i * 3 + 2] = Math.min(255, Math.round(tb * shade));
           }
         }
       }
@@ -113,6 +166,7 @@ export function renderMeshes(meshes: readonly BodyMesh[], o: RenderOptions = {})
     const bias = zr * 0.004;
     for (let s = 0; s <= steps; s++) {
       const t = s / steps, x = ax + (bx - ax) * t, y = ay + (by - ay) * t, z = az + (bz - az) * t;
+      if (cut && tested && cutAt([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]) > 1e-6) continue;
       for (let oy = 0; oy < thick; oy++) for (let ox = 0; ox < thick; ox++) {
         const xi = Math.round(x) + ox, yi = Math.round(y) + oy;
         if (xi < 0 || yi < 0 || xi >= w || yi >= h) continue;
@@ -128,8 +182,13 @@ export function renderMeshes(meshes: readonly BodyMesh[], o: RenderOptions = {})
       for (let i = 0; i + 5 < E.length; i += 6) line([E[i], E[i + 1], E[i + 2]], [E[i + 3], E[i + 4], E[i + 5]], 0x1f2933, true, S);
     }
   }
+  // highlighted edges, over everything: thick, and seen through the part so that a hidden one is still found
+  for (const [mi, set] of litEdges) {
+    const m = meshes[mi], E = m.edges.positions;
+    for (const ei of set) for (let i = m.edges.start[ei]; i + 1 < m.edges.start[ei] + m.edges.count[ei]; i += 2) line([E[i * 3], E[i * 3 + 1], E[i * 3 + 2]], [E[i * 3 + 3], E[i * 3 + 4], E[i * 3 + 5]], HIGHLIGHT, false, S * 2 + 1);
+  }
   // the axis triad, bottom left: X red, Y green, Z blue, as the viewport draws them
-  {
+  if (o.triad !== false) {
     const len = Math.min(w, h) * 0.07 * span;
     const ox = (x0 + x1) / 2 - (w / 2 - w * 0.07) * span, oy = (y0 + y1) / 2 - (h / 2 - h * 0.09) * span;
     const origin: Vec3 = [right[0] * ox + up[0] * oy, right[1] * ox + up[1] * oy, right[2] * ox + up[2] * oy];
@@ -145,6 +204,25 @@ export function renderMeshes(meshes: readonly BodyMesh[], o: RenderOptions = {})
     const o4 = (y * W + x) * 4, n = S * S;
     rgba[o4] = r / n; rgba[o4 + 1] = g / n; rgba[o4 + 2] = b / n; rgba[o4 + 3] = 255;
   }
+  return { width: W, height: H, rgba };
+}
+
+/**
+ * Several views of the same thing in one picture, side by side in rows (left to right, top to bottom), each framed
+ * on its own.  `width` is the whole picture's; the cells share it.  `each` gives a cell options of its own (the
+ * placements of one step of a motion).
+ */
+export function renderSheet(meshes: readonly BodyMesh[], views: readonly (ViewName | Vec3)[], o: RenderOptions = {}, each?: (i: number) => RenderOptions): Picture {
+  const n = Math.max(1, views.length), cols = n <= 3 ? n : n === 4 ? 2 : 3, rows = Math.ceil(n / cols);
+  const W = Math.max(64, Math.min(2000, Math.round(o.width || 1200))), gap = 4;
+  const cw = Math.floor((W - gap * (cols - 1)) / cols), ch = Math.round(cw * 0.8);
+  const H = rows * ch + gap * (rows - 1);
+  const rgba = new Uint8Array(W * H * 4).fill(255);
+  views.forEach((v, i) => {
+    const pic = renderMeshes(meshes, { ...o, ...(each ? each(i) : {}), width: cw, height: ch, ...(typeof v === "string" ? { view: v, direction: undefined } : { direction: v }) });
+    const ox = (i % cols) * (cw + gap), oy = Math.floor(i / cols) * (ch + gap);
+    for (let y = 0; y < pic.height; y++) rgba.set(pic.rgba.subarray(y * pic.width * 4, (y + 1) * pic.width * 4), ((oy + y) * W + ox) * 4);
+  });
   return { width: W, height: H, rgba };
 }
 

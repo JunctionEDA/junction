@@ -314,11 +314,10 @@ new JSON item document kind is one line there and gets history, branches, mergin
 - **AI tools** (`platform/mcp/host.ts`): a domain's `mcp/host.ts` exports an `McpDomainTools` table and
   `mcp/tools.json` lists the tools; add the table to `domains/mcp-tools.ts` and the JSON to `DOMAIN_TOOLS` in
   `server/src/mcp.rs`. They run in the same Node host as the electronics tools (`npm run build:mcp`). The part
-  studio's are `cad_feature_types` (from the feature registry), `cad_get_features`, `cad_get_bodies`,
-  `cad_edit_features`, `cad_render_view`, `cad_create_part_studio`; edits are planned and validated in
-  `mcp/model.ts` against each feature's `schema`, so a new feature type is editable by an assistant with no
-  further work as long as its parameters are described by its schema. They are listed only to a person who has
-  Mechanical CAD on (see "Mechanical CAD is a setting").
+  studio's and the assembly's are the `cad_` tools: see "The MCP tools (`mcp/`)" below. Edits are planned and
+  validated in `mcp/model.ts` against each feature's `schema`, so a new feature type is editable by an assistant
+  with no further work as long as its parameters are described by its schema. They are listed only to a person
+  who has Mechanical CAD on (see "Mechanical CAD is a setting").
 - **Interface state of a tool or panel**: `studio.setUi({ myKey: value })` keeps it in `getState().ui` and
   redraws the toolbar, so a tool's `active` can read it (the History button does).
 
@@ -1467,6 +1466,106 @@ what a tool is handed. In short:
   docked panels (`assembly.showPanel`; the table at the bottom), and mark the instances that clash
   (`scene.setMarked`). Parts and boards are checked exactly; the parts inside a sub-assembly are not yet.
 
+## The MCP tools (`mcp/`, `../assembly/mcp/`)
+
+What an AI assistant connected to the MCP endpoint (`server/src/mcp.rs`) has for mechanical design. The aim: a
+model that has never seen Junction designs a multi-part mechanism from the tool descriptions alone, cheaply in
+tokens, and sees what it made. `scripts/cad-mcp-e2e.mjs` is the proof: a hinged box with a lid, a pin and two
+screws, made, checked, rendered and exported by MCP calls only.
+
+**Where they run.** Headless, in the Node tool host the server starts per person (`server/src/mcp_host.rs`,
+bundle `static/dist/mcp-host.js`, embedded in the server binary: rebuild the server after `npm run build:mcp`).
+Nothing has to be open in a browser. A document is joined over the collaboration socket as the person
+(`OpenDoc`: an `ItemDocSession`), so an edit is committed, journalled and shown to everybody in the document like
+a person's; the model is built by the same `RegenEngine` on the same OpenCascade build as the page's worker
+(`OpenStudio.regen`), one kernel for every document the process has open; sketches are solved by the same
+PlaneGCS build. What the host needs: `node` on the server's PATH (`KC_NODE`) and the kernel's
+`occ-kernel.wasm` (beside the Python runtime, or `KC_OCC_WASM`). Board instances and model-file instances of an
+assembly are not built by the host (they are listed, and left out of pictures and checks with a note).
+
+| Tool | |
+|---|---|
+| `cad_reference` | short pages: `guide` (the workflow, a part in one call), `sketch`, `references` (names and picks), `variables` (also parts and materials), `mates`, `features` (every type, a line each) |
+| `cad_feature_types` | the feature catalogue in steps: families and the everyday types; `query` / `family` to search; `type` for one type's parameters and an example edit |
+| `cad_describe` | a part studio or an assembly in a few lines of text: sizes, positions, holes by diameter, features, mates, freedoms |
+| `cad_get_features` | the tree with each feature's state (and a hint when it failed), the variables, the bodies; `feature` for one in full (a sketch's entities, regions, definedness); `compact`, `fields`, `offset`, `limit` |
+| `cad_get_bodies` | volume, area, centre of mass, box, material and mass; `names` for face and edge names |
+| `cad_find_geometry` | faces, edges, vertices by description, with what each is and the reference to use; works on an assembly's instances as placed |
+| `cad_edit_features` | add, set, rename, delete, suppress, move, rollback, `set_variable`, `delete_variable`, `set_part`; one change, all or nothing; `dry_run`, `atomic`; sketch `shapes`, `define`, `constraints`; references as picks |
+| `cad_measure` | volume, mass, centre of mass, overall box; faces and edges (and two together: distance, angle); the clearance between two parts |
+| `cad_check` | `validity`, `interference` (exact, mm3), `clearance`, `thickness` (the thinnest wall, sampled) as findings |
+| `cad_render_view` | a shaded picture: named views or a direction, `views` (several in one picture), `section`, `zoom_to`, `highlight`, an assembly's `explode` and `drive` (a motion as cells) |
+| `cad_export` | STEP, BREP, STL, 3MF, OBJ, GLB of a part studio or a whole assembly; DXF or SVG of a flat face or a sketch; a download link and an MCP resource |
+| `cad_import` | a STEP file (already in the project, or its text) as a new part studio |
+| `cad_create_part_studio`, `cad_create_assembly` | new documents |
+| `cad_get_assembly` | instances with placements and freedoms, mates with state and values, the solve report |
+| `cad_edit_assembly` | insert (a part studio's bodies, another assembly, `standard` hardware, a supplier's `model`), move, fix, copy, rename, suppress, hide, delete, `mate`, `set_mate`, `drive`; solved after each edit; `dry_run` |
+| `cad_search_models` | the server's supplier search (`server/src/models3d`): standard parts and suppliers' models |
+| `cad_get_bom` | the assembly's bill of materials (also CSV) |
+
+`undo_changes` / `redo_changes` take back any `cad_` change by its `change_id` (the record carries the inverse
+item changes and the domain, `mechanical` or `assembly`).
+
+The files:
+
+```
+mcp/tools.json     the tools as the server lists them (name, title, description, input_schema; write, destructive,
+                   idempotent, open_world become the MCP annotations)
+mcp/host.ts        the tools; OpenDoc / OpenStudio; scenes (below); the kernel's services called headless
+mcp/model.ts       pure: the tree as JSON, planEdits (edits → item changes, validated), planStaged (picks), variables, parts
+mcp/catalog.ts     pure: the catalogue in steps, one type's doc and example, similar names for a mistyped type
+mcp/sketch.ts      pure: the extra shapes, define (constraints that hold shapes as drawn), constraints by hand, the sketch report
+mcp/select.ts      pure: what a face or an edge is, from the tessellation; picks ("top", { hole, diameter, nearest })
+mcp/describe.ts    pure: a part and a feature in words; the thinnest wall
+mcp/render.ts      the software renderer: views, a sheet of views, section, highlight, placements; the PNG writer
+mcp/reference.ts   the pages of cad_reference (and of the junction://cad/… resources); addReference for other domains
+mcp/api.ts         what another domain's tools import (the assembly's): OpenDoc, scenes, studioOf, …; select.ts,
+                   being pure, is imported directly by the assembly's pure planner
+```
+
+Rules the tools keep, and a new tool should:
+
+- **Small answers.** A list is compact first and detailed on request (`cad_feature_types` → `type`,
+  `cad_get_features` → `feature`); an edit answers with a line per feature, not its parameters; long lists page
+  (`offset`, `limit`, `next_offset`) and take `fields` (the keys to keep of each row, `pickFields`). `static/tests/cad-mcp-tools.test.js` holds the sizes down.
+- **Errors say what to do next.** An unknown name lists the names there are (or the similar ones); a failed
+  feature carries a hint (`hintFor`); a pick that finds nothing says what the body has. An error a model can act
+  on is an `McpToolError`; "Nothing was changed." starts every refused edit.
+- **All or nothing.** `planEdits` plans on a copy; any problem and no change is made. `atomic` extends that to
+  features that would newly fail in the kernel; `dry_run` reports the model as it would be.
+- **Units in every description**: millimetres, degrees, grams, mm3. Z is up.
+- **References by description.** A reference may be `{ kind, body, pick }` wherever `{ kind, body, name }` goes.
+  `planStaged` plans the edits before a pick, builds the planned document, resolves the pick on those bodies
+  (`select.ts pickGeometry`) and stores the NAME, so the feature then survives rebuilds like one a person
+  clicked, and one call can extrude a block and sketch on its top face. A pick is a word (`top`, `bottom`,
+  `front`, `back`, `left`, `right`, `largest`, `all`) or conditions (`side`, `normal`, `type`, `hole`, `radius`,
+  `diameter`, `length`, `min_area`, `parallel_to`, `of_face`, `nearest`, `all`). An edge with the same face on
+  both sides (a cylinder's seam) is never picked. In an assembly a pick is evaluated in assembly space, on the
+  instance where it stands.
+- **Scenes.** The tools that look at "what is there" (`cad_render_view`, `cad_describe`, `cad_check`,
+  `cad_measure`, `cad_find_geometry`, `cad_export`) work on a `Scene`: parts with a mesh, the kernel's shape and
+  a placement. A kind of document registers how its scene is made (`addSceneKind`); the part studio's is its
+  bodies, the assembly's its instances as solved. A new kind of document that registers one gets those six tools.
+- **Sketches** are written solved: shapes give exact coordinates; `define: true` adds the constraints and
+  dimensions that hold them (`defineShapes`), `constraints` are checked by the solver and a conflict refuses the
+  edit; the answer says how many regions a sketch has and whether it is fully defined.
+
+The server side (`server/src/mcp.rs`): the `instructions` gain a CAD paragraph, the prompts `design_part`,
+`design_bracket` and `make_assembly`, and the resources `junction://cad/guide`, `…/sketch`, `…/references`,
+`…/variables`, `…/mates`, `…/features` (answered by the host's `cad_reference`, so there is one text) for a
+person who has Mechanical CAD on, and nothing of them for anybody else; `junction://exports/{id}` reads a file a
+tool exported (a member of its project, as the download link asks). A tool's reply may carry `links`, which
+become `resource_link` content.
+
+Tests: `static/tests/cad-mcp.test.js` and `cad-mcp-tools.test.js` (the pure parts against the real kernel and
+solver: catalogue, shapes and constraints, picks, staged batches, variables, parts, describing, the picture, an
+assembly planned, mated, driven and refused), the server's `mcp::tests`, and against a running server
+`scripts/cad-history-mcp.mjs` and `scripts/cad-mcp-e2e.mjs`.
+
+Not done: explicit mate connectors, named positions and groups have no edit op; board and model-file instances
+are not built headless; `thickness` is an estimate; a supplier's model fetched for an insert stays in the
+project as a part studio when the rest of that call is refused.
+
 ## Running and testing
 
 ```sh
@@ -1957,7 +2056,9 @@ What is particular to them:
   was reordered or a folder made), a part studio or an assembly.
 - **Merging** keeps the journal's rule that a delete beats a modify: a conflict "removed here, changed there"
   resolved for the changed side keeps the item only on the side that still has it. Arrays merge as one value.
-- **The assistant's picture** (`cad_render_view`) is a software render: flat shading, no sketches or planes.
+- **The assistant's picture** (`cad_render_view`) is a software render: orthographic, smooth shading from the
+  mesh's normals, edges, a section that discards what is cut away (the cut is not capped: the inside is drawn
+  dark), no sketches or planes, no perspective, no text in the picture.
 - **Bundles:** `mechanical.js` and `assembly.js` each bundle three.js and React, loaded on demand. Sharing them
   with `viewer3d.js` and `ui.js` is not done.
 - **What people miss in browser CAD.** A person's keys, the marking menu, flick and the timeline are kept per

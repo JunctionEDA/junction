@@ -91,9 +91,10 @@ try {
   });
 
   // ---------------------------------------------------------------- the feature registry
+  // the list is short (a line a type); one type's parameters are asked for by its name
   const types = await tool('cad_feature_types', {});
-  const extrude = types.data.feature_types.find((f) => f.type === 'extrude');
-  check('the feature types and their parameters come from the registry', !!extrude && extrude.parameters.some((p) => p.key === 'depth' && p.kind === 'number') && types.data.feature_types.some((f) => f.type === 'sketch'),
+  const extrude = (await tool('cad_feature_types', { type: 'extrude' })).data.feature_types[0];
+  check('the feature types and their parameters come from the registry', !!extrude && extrude.parameters.some((p) => p.key === 'depth' && p.kind === 'number') && types.data.feature_types.some((f) => f.type === 'sketch') && types.data.feature_types.some((f) => f.type === 'extrude'),
     types.data.feature_types.map((f) => f.type).join(' '));
 
   const empty = await tool('cad_get_features', { project, document: 'Bracket.jpart' });
